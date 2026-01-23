@@ -223,8 +223,49 @@ Minor Issues:
 - Use `mypy` for Python type checking
 - Use `jq` to validate JSON syntax
 
+## Git Hooks for Continuous Validation
+
+Install git hooks to prevent broken plugins from being committed or pushed:
+
+```bash
+# Install all hooks (pre-commit, pre-push, post-commit)
+python scripts/setup-hooks.py
+```
+
+Or install manually:
+
+```bash
+# Pre-commit hook - validates staged changes
+cp scripts/pre-commit-hook.py .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+
+# Pre-push hook - blocks pushing broken plugins (CRITICAL!)
+cp scripts/pre-push-hook.py .git/hooks/pre-push
+chmod +x .git/hooks/pre-push
+```
+
+### Pre-Push Hook Behavior
+
+The pre-push hook (`scripts/pre-push-hook.py`) runs comprehensive validation before every `git push`:
+
+| Issue Severity | Action | Bypass |
+|----------------|--------|--------|
+| CRITICAL | Push blocked | `git push --no-verify` (NOT RECOMMENDED) |
+| MAJOR | Push blocked | `git push --no-verify` (NOT RECOMMENDED) |
+| MINOR | Warning only | Push allowed |
+
+**What it validates:**
+- marketplace.json structure and required fields
+- Each plugin's manifest (plugin.json) - name, version, semver format
+- Hook configurations (hooks.json) - valid events, script paths
+- Version consistency between plugins and marketplace
+- External validators from claude-plugins-validation (if available)
+
+**Reference file:** See `references/pre-push-hook.py` for the full implementation.
+
 ## Notes
 
 - This agent should be used proactively before releasing or updating plugins
 - Run validation in CI/CD pipelines
 - Keep validation scripts updated with latest Claude Code specifications
+- **ALWAYS install the pre-push hook** to prevent broken plugins from reaching GitHub

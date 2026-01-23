@@ -232,6 +232,7 @@ For detailed specifications, read:
 | Skill Structure | [references/skill-validation.md](references/skill-validation.md) |
 | MCP Servers | [references/mcp-validation.md](references/mcp-validation.md) |
 | Marketplaces | [references/marketplace-validation.md](references/marketplace-validation.md) |
+| **Pre-Push Hook** | [references/pre-push-hook.py](references/pre-push-hook.py) |
 
 ---
 
@@ -267,6 +268,18 @@ For detailed specifications, read:
 2. Check frontmatter has name and description
 3. Ensure skill is referenced in plugin.json
 
+### Python Validation Scripts Issues
+
+See **[references/troubleshooting-python-scripts.md](references/troubleshooting-python-scripts.md)** for common issues with:
+- Bash arithmetic exit codes
+- Unused variable warnings (Pyright/ruff)
+- Missing Python dependencies
+- Git hook execution problems
+- JSON parsing errors
+- Path resolution issues
+- Subprocess timeouts
+- Version string parsing
+
 ### Marketplace Plugin Install Fails
 
 1. Validate marketplace.json: `uv run python scripts/validate_marketplace.py .`
@@ -294,15 +307,37 @@ Add validation to your CI pipeline:
     fi
 ```
 
-### Pre-commit Hook
+### Git Hooks Installation
 
-Create `.git/hooks/pre-commit`:
+Install all git hooks (pre-commit, pre-push, post-commit) at once:
 
 ```bash
-#!/bin/bash
-uv run python /path/to/validate_plugin.py . --json
-exit $?
+python scripts/setup-hooks.py
 ```
+
+Or install manually:
+
+```bash
+# Pre-commit hook - validates staged changes
+cp scripts/pre-commit-hook.py .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+
+# Pre-push hook - BLOCKS pushing broken plugins (CRITICAL!)
+cp scripts/pre-push-hook.py .git/hooks/pre-push
+chmod +x .git/hooks/pre-push
+```
+
+### Pre-Push Hook Behavior
+
+The pre-push hook (`references/pre-push-hook.py`) runs comprehensive validation before every `git push`:
+
+| Severity | Action | Example Issues |
+|----------|--------|----------------|
+| CRITICAL | **Push blocked** | Missing plugin.json, invalid JSON syntax |
+| MAJOR | **Push blocked** | Invalid semver, missing required fields |
+| MINOR | Warning only | Missing description, unknown hook event |
+
+**To bypass (NOT RECOMMENDED)**: `git push --no-verify`
 
 ### VS Code Integration
 
