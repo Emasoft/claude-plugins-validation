@@ -12,6 +12,11 @@ All notable changes to the Claude Plugins Validation plugin will be documented i
 
 - Add marketplace installation notice to README
 - **skill:** Document CRITICAL source schema error for local plugins
+- Update CHANGELOG.md
+
+### Features
+
+- **validation:** Bump version to 1.1.0
 
 ### Miscellaneous Tasks
 
