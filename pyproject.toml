@@ -1,0 +1,24 @@
+[project]
+name = "claude-plugins-validation"
+version = "1.0.0"
+description = "Comprehensive validation suite for Claude Code plugins, marketplaces, hooks, skills, and MCP servers"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "mypy>=1.19.1",
+    "pyyaml>=6.0.3",
+    "ruff>=0.14.14",
+    "types-pyyaml>=6.0.12",
+]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]  # Allow longer lines
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true

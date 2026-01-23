@@ -1,0 +1,26 @@
+{
+  "name": "claude-plugins-validation",
+  "version": "1.0.0",
+  "description": "Comprehensive validation suite for Claude Code plugins, marketplaces, hooks, skills, and MCP servers. Provides validators, an expert agent, and detailed skill documentation for thorough plugin quality assurance.",
+  "author": {
+    "name": "Emasoft",
+    "email": "713559+Emasoft@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/Emasoft/claude-plugins-validation",
+  "repository": "https://github.com/Emasoft/claude-plugins-validation",
+  "license": "MIT",
+  "keywords": [
+    "validation",
+    "plugins",
+    "marketplace",
+    "hooks",
+    "skills",
+    "mcp",
+    "quality-assurance",
+    "linting"
+  ],
+  "agents": [
+    "./agents/plugin-validator.md"
+  ],
+  "skills": "./skills/"
+}
