@@ -2,6 +2,16 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [Unreleased]
+
+### Features
+
+- Add multi-language linter and dependency verification
+
+### Miscellaneous Tasks
+
+- Update CHANGELOG.md
+
 ## [1.1.0] - 2026-01-23
 
 ### Bug Fixes
