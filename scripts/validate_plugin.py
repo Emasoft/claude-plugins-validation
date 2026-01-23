@@ -141,9 +141,8 @@ def validate_manifest(
             msg = "plugin.json correctly absent (marketplace-only, strict=false)"
             report.passed(msg, ".claude-plugin/plugin.json")
             return None
-        else:
-            report.critical("plugin.json not found", ".claude-plugin/plugin.json")
-            return None
+        report.critical("plugin.json not found", ".claude-plugin/plugin.json")
+        return None
 
     if marketplace_only:
         report.major(
@@ -496,6 +495,7 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
                 ruff_args,
                 capture_output=True,
                 text=True,
+                timeout=60,
             )
             if result.returncode == 0:
                 report.passed(f"Ruff check passed for {len(py_files)} Python files")
@@ -518,6 +518,7 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
                 mypy_args,
                 capture_output=True,
                 text=True,
+                timeout=60,
             )
             if result.returncode == 0:
                 report.passed(f"Mypy check passed for {len(py_files)} Python files")
@@ -547,6 +548,7 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
                 ["shellcheck", str(sh_file)],
                 capture_output=True,
                 text=True,
+                timeout=30,
             )
             if result.returncode == 0:
                 report.passed(f"Shellcheck passed: {sh_file.name}")

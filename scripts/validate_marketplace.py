@@ -512,8 +512,8 @@ def validate_plugin_source(
                         file_path=json_path,
                         suggestion=(
                             f"Claude Code requires local path for local plugins. "
-                            f"Change source from {{\"type\": \"git\", \"repository\": \"...\"}} "
-                            f"to \"./{plugin_name}\" (string path)"
+                            f'Change source from {{"type": "git", "repository": "..."}} '
+                            f'to "./{plugin_name}" (string path)'
                         ),
                     )
                 )

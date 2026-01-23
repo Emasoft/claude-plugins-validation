@@ -137,9 +137,9 @@ def validate_hooks_config(plugin_dir: Path) -> list[tuple[str, str]]:
     hooks = data.get("hooks", {})
     valid_events = [
         "PreToolUse", "PostToolUse", "PostToolUseFailure",
-        "Notification", "Stop", "SubagentStop",
+        "Notification", "Stop", "SubagentStop", "SubagentStart",
         "UserPromptSubmit", "PermissionRequest",
-        "SessionStart", "SessionEnd", "PreCompact"
+        "SessionStart", "SessionEnd", "PreCompact", "Setup"
     ]
 
     for event_name, event_hooks in hooks.items():
@@ -324,11 +324,10 @@ def main() -> int:
         print()
         print("To bypass (NOT RECOMMENDED): git push --no-verify")
         return 1
-    else:
-        print(f"{GREEN}{'=' * 60}{NC}")
-        print(f"{GREEN}VALIDATION PASSED - Push allowed{NC}")
-        print(f"{GREEN}{'=' * 60}{NC}")
-        return 0
+    print(f"{GREEN}{'=' * 60}{NC}")
+    print(f"{GREEN}VALIDATION PASSED - Push allowed{NC}")
+    print(f"{GREEN}{'=' * 60}{NC}")
+    return 0
 
 
 if __name__ == "__main__":

@@ -63,6 +63,73 @@ You are an expert Claude Code plugin validator. Your role is to thoroughly exami
    - Verify each plugin subfolder has its own README.md
    - Check for placeholder content that needs to be replaced before publishing
 
+7. **Dependency Verification (All Languages)**
+
+   Scan for ALL languages present in the plugin and verify their dependencies:
+
+   **Python (.py)**
+   - Scan import statements: `import X`, `from X import Y`
+   - Check for: `pyproject.toml`, `requirements.txt`, `setup.py`, `Pipfile`
+   - Verify auto-install via `uv pip install` or `pip install -r requirements.txt`
+
+   **JavaScript/TypeScript (.js, .ts, .mjs, .cjs)**
+   - Scan for: `require('X')`, `import X from 'Y'`
+   - Check for: `package.json` with `dependencies`/`devDependencies`
+   - Verify auto-install via `npm install`, `bun install`, or `pnpm install`
+
+   **Rust (.rs)**
+   - Scan for: `use crate::`, `extern crate`
+   - Check for: `Cargo.toml` with `[dependencies]`
+   - Verify auto-install via `cargo build`
+
+   **Go (.go)**
+   - Scan for: `import "X"`
+   - Check for: `go.mod` with module dependencies
+   - Verify auto-install via `go mod download`
+
+   **Shell/Bash (.sh)**
+   - Scan for: external commands, `which X`, `command -v X`
+   - Check for: system binaries or documented prerequisites
+   - Verify prerequisites are listed in README
+
+   **PowerShell (.ps1, .psm1, .psd1)**
+   - Scan for: `Import-Module`, `#Requires -Modules`, `Install-Module`
+   - Check for: module manifest (.psd1) with `RequiredModules`
+   - Verify auto-install via `Install-Module -Name X -Scope CurrentUser`
+
+   **Ruby (.rb)**
+   - Scan for: `require 'X'`, `gem 'X'`
+   - Check for: `Gemfile` with dependencies
+   - Verify auto-install via `bundle install`
+
+   **Generic requirements:**
+   - Test that ALL scripts can execute without missing dependency errors
+   - Verify plugin supports auto-installation of dependencies
+   - Flag missing dependencies as CRITICAL if they block execution
+   - Check for setup hooks (SessionStart, Setup) that install dependencies
+
+8. **Linter Detection and Installation**
+
+   Before running validation, ensure all required linters are installed for detected languages:
+
+   | Language | Linters Required | Install Command |
+   |----------|------------------|-----------------|
+   | Python | ruff, mypy | `uv pip install ruff mypy` or `pip install ruff mypy` |
+   | JavaScript | eslint | `npm install -g eslint` or `bun install -g eslint` |
+   | TypeScript | eslint, typescript | `npm install -g eslint typescript` |
+   | Rust | clippy, rustfmt | `rustup component add clippy rustfmt` |
+   | Go | staticcheck, golangci-lint | `go install honnef.co/go/tools/cmd/staticcheck@latest` |
+   | Shell/Bash | shellcheck | `brew install shellcheck` or `uv pip install shellcheck-py` |
+   | PowerShell | PSScriptAnalyzer | `Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force` |
+   | Ruby | rubocop | `gem install rubocop` |
+
+   **Auto-installation behavior:**
+   - Detect all languages present in the plugin by file extension
+   - Check if required linters are available in PATH
+   - Install missing linters automatically before validation
+   - Report installed linters to the user
+   - Flag linter installation failures as warnings (validation can proceed with reduced coverage)
+
 ## Validation Scripts
 
 Use these scripts from the plugin's scripts/ directory:
@@ -95,23 +162,183 @@ When asked to validate a plugin:
    - Determine if validating a plugin, marketplace, or specific component
    - Locate the root directory
 
-2. **Run comprehensive validation**
+2. **Detect languages and install required linters**
+
+   First, detect which languages are present in the plugin:
+   ```bash
+   # Count files by language
+   echo "Python: $(find . -name '*.py' 2>/dev/null | wc -l)"
+   echo "JavaScript: $(find . -name '*.js' -o -name '*.mjs' -o -name '*.cjs' 2>/dev/null | wc -l)"
+   echo "TypeScript: $(find . -name '*.ts' -o -name '*.tsx' 2>/dev/null | wc -l)"
+   echo "Rust: $(find . -name '*.rs' 2>/dev/null | wc -l)"
+   echo "Go: $(find . -name '*.go' 2>/dev/null | wc -l)"
+   echo "Shell: $(find . -name '*.sh' 2>/dev/null | wc -l)"
+   echo "PowerShell: $(find . -name '*.ps1' -o -name '*.psm1' -o -name '*.psd1' 2>/dev/null | wc -l)"
+   echo "Ruby: $(find . -name '*.rb' 2>/dev/null | wc -l)"
+   ```
+
+   Then check and install linters for each detected language:
+
+   **Python linters (if .py files found):**
+   ```bash
+   # Check if ruff is installed
+   command -v ruff >/dev/null 2>&1 || {
+       echo "Installing ruff..."
+       uv pip install ruff || pip install ruff
+   }
+
+   # Check if mypy is installed
+   command -v mypy >/dev/null 2>&1 || {
+       echo "Installing mypy..."
+       uv pip install mypy || pip install mypy
+   }
+   ```
+
+   **JavaScript/TypeScript linters (if .js/.ts files found):**
+   ```bash
+   # Check if eslint is installed
+   command -v eslint >/dev/null 2>&1 || {
+       echo "Installing eslint..."
+       npm install -g eslint || bun install -g eslint
+   }
+
+   # For TypeScript, also check typescript
+   command -v tsc >/dev/null 2>&1 || {
+       echo "Installing typescript..."
+       npm install -g typescript || bun install -g typescript
+   }
+   ```
+
+   **Rust linters (if .rs files found):**
+   ```bash
+   # Check if clippy is installed (comes with rustup)
+   rustup component list | grep -q "clippy.*installed" || {
+       echo "Installing clippy..."
+       rustup component add clippy
+   }
+
+   # Check if rustfmt is installed
+   rustup component list | grep -q "rustfmt.*installed" || {
+       echo "Installing rustfmt..."
+       rustup component add rustfmt
+   }
+   ```
+
+   **Go linters (if .go files found):**
+   ```bash
+   # Check if staticcheck is installed
+   command -v staticcheck >/dev/null 2>&1 || {
+       echo "Installing staticcheck..."
+       go install honnef.co/go/tools/cmd/staticcheck@latest
+   }
+
+   # Check if golangci-lint is installed
+   command -v golangci-lint >/dev/null 2>&1 || {
+       echo "Installing golangci-lint..."
+       brew install golangci-lint || go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+   }
+   ```
+
+   **Shell linters (if .sh files found):**
+   ```bash
+   # Check if shellcheck is installed
+   command -v shellcheck >/dev/null 2>&1 || {
+       echo "Installing shellcheck..."
+       brew install shellcheck || apt-get install -y shellcheck || uv pip install shellcheck-py
+   }
+   ```
+
+   **PowerShell linters (if .ps1/.psm1/.psd1 files found):**
+   ```bash
+   # Check if PSScriptAnalyzer is installed (requires pwsh)
+   command -v pwsh >/dev/null 2>&1 && {
+       pwsh -Command "Get-Module -ListAvailable PSScriptAnalyzer" >/dev/null 2>&1 || {
+           echo "Installing PSScriptAnalyzer..."
+           pwsh -Command "Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force -AllowClobber"
+       }
+   } || {
+       echo "WARNING: PowerShell (pwsh) not installed. Install with: brew install powershell"
+   }
+   ```
+
+   **Ruby linters (if .rb files found):**
+   ```bash
+   # Check if rubocop is installed
+   command -v rubocop >/dev/null 2>&1 || {
+       echo "Installing rubocop..."
+       gem install rubocop
+   }
+   ```
+
+3. **Run comprehensive validation**
    ```bash
    cd /path/to/claude-plugins-validation
    uv run python scripts/validate_plugin.py /path/to/target --verbose
    ```
 
-3. **Analyze results**
+4. **Analyze results**
    - Group issues by severity (critical, major, minor)
    - Identify root causes vs symptoms
    - Determine fix order (critical first)
 
-4. **Provide remediation guidance**
+4. **Detect languages and verify dependencies**
+   ```bash
+   # Detect all languages present
+   find . -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.rs" \
+          -o -name "*.go" -o -name "*.sh" -o -name "*.rb" 2>/dev/null | head -20
+
+   # Check for dependency declaration files
+   ls -la requirements.txt pyproject.toml package.json Cargo.toml \
+          go.mod Gemfile Pipfile 2>/dev/null
+
+   # Python: scan imports
+   grep -rh "^import \|^from " --include="*.py" . 2>/dev/null | sort -u
+
+   # JavaScript/TypeScript: scan requires/imports
+   grep -rh "require('\|import .* from" --include="*.js" --include="*.ts" . 2>/dev/null | head -20
+
+   # Rust: check Cargo.toml dependencies
+   cat Cargo.toml 2>/dev/null | grep -A50 "\[dependencies\]"
+
+   # Shell: identify external commands
+   grep -rh "which \|command -v " --include="*.sh" . 2>/dev/null
+   ```
+
+5. **Test auto-installation capability for each language**
+
+   **Python:**
+   ```bash
+   python3 -m venv /tmp/test-plugin-deps && source /tmp/test-plugin-deps/bin/activate
+   pip install -r requirements.txt && python3 scripts/validate_plugin.py --help
+   ```
+
+   **JavaScript/TypeScript:**
+   ```bash
+   npm install && node scripts/main.js --help  # or: bun install
+   ```
+
+   **Rust:**
+   ```bash
+   cargo build --release && ./target/release/binary --help
+   ```
+
+   **Go:**
+   ```bash
+   go mod download && go build && ./binary --help
+   ```
+
+   **Verify setup hooks exist for auto-installation:**
+   ```bash
+   # Check hooks.json for SessionStart or Setup hooks that install deps
+   jq '.hooks.SessionStart, .hooks.Setup' hooks/hooks.json
+   ```
+
+6. **Provide remediation guidance**
    - Give specific file paths and line numbers
    - Show exact changes needed
    - Explain why each fix is necessary
 
-5. **Verify fixes**
+7. **Verify fixes**
    - Re-run validation after changes
    - Confirm all issues resolved
 
@@ -151,6 +378,78 @@ When asked to validate a plugin:
 | Absolute path | Use `${CLAUDE_PLUGIN_ROOT}/path` |
 | Invalid transport | Use "stdio", "http", or "sse" |
 | Deprecated sse | Migrate to "http" transport |
+
+### Dependency Issues (All Languages)
+
+**Python:**
+| Issue | Fix |
+|-------|-----|
+| ModuleNotFoundError | Add to requirements.txt or pyproject.toml |
+| No dependency file | Create `requirements.txt` or `pyproject.toml` |
+| Undeclared import | Add to `[project.dependencies]` |
+| Auto-install fails | Add setup script: `uv pip install -r requirements.txt` |
+
+**JavaScript/TypeScript:**
+| Issue | Fix |
+|-------|-----|
+| Cannot find module | Add to package.json dependencies |
+| No package.json | Run `npm init` or `bun init` |
+| ERR_MODULE_NOT_FOUND | Run `npm install` or `bun install` |
+| Auto-install fails | Add setup hook: `npm install --prefix ${CLAUDE_PLUGIN_ROOT}` |
+
+**Rust:**
+| Issue | Fix |
+|-------|-----|
+| unresolved import | Add crate to Cargo.toml `[dependencies]` |
+| No Cargo.toml | Run `cargo init` |
+| Build fails | Run `cargo build` to download deps |
+| Auto-install fails | Add setup hook: `cargo build --manifest-path ...` |
+
+**Go:**
+| Issue | Fix |
+|-------|-----|
+| cannot find package | Add to go.mod or run `go get` |
+| No go.mod | Run `go mod init` |
+| Auto-install fails | Add setup hook: `go mod download` |
+
+**Shell/Bash:**
+| Issue | Fix |
+|-------|-----|
+| command not found | Document in README prerequisites section |
+| Missing binary | Add check: `command -v X || { echo "Install X"; exit 1; }` |
+| Auto-install fails | Add setup hook to install via package manager |
+
+**PowerShell:**
+| Issue | Fix |
+|-------|-----|
+| Module not found | Add to manifest RequiredModules or use `Install-Module` |
+| No module manifest | Create .psd1 file with `New-ModuleManifest` |
+| pwsh not installed | Install PowerShell: `brew install powershell` (macOS) |
+| Auto-install fails | Add `#Requires -Modules ModuleName` or setup hook |
+
+**General:**
+| Issue | Fix |
+|-------|-----|
+| No setup hook | Add SessionStart or Setup hook for auto-install |
+| Mixed languages | Create setup script handling all language deps |
+
+### Linter Issues
+
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| ruff: command not found | Python linter missing | `uv pip install ruff` or `pip install ruff` |
+| mypy: command not found | Python type checker missing | `uv pip install mypy` or `pip install mypy` |
+| eslint: command not found | JS/TS linter missing | `npm install -g eslint` or `bun install -g eslint` |
+| tsc: command not found | TypeScript compiler missing | `npm install -g typescript` |
+| clippy: not installed | Rust linter missing | `rustup component add clippy` |
+| rustfmt: not installed | Rust formatter missing | `rustup component add rustfmt` |
+| shellcheck: command not found | Shell linter missing | `brew install shellcheck` or `uv pip install shellcheck-py` |
+| staticcheck: command not found | Go linter missing | `go install honnef.co/go/tools/cmd/staticcheck@latest` |
+| PSScriptAnalyzer not found | PowerShell linter missing | `pwsh -c "Install-Module PSScriptAnalyzer -Scope CurrentUser -Force"` |
+| pwsh: command not found | PowerShell not installed | `brew install powershell` (macOS) or install from Microsoft |
+| rubocop: command not found | Ruby linter missing | `gem install rubocop` |
+| Linter returns non-zero | Code has lint errors | Fix reported issues or configure linter rules |
+| Linter timeout | Large codebase or slow system | Increase timeout or run linter manually |
 
 ### GitHub Deployment Issues
 

@@ -22,5 +22,7 @@
   "agents": [
     "./agents/plugin-validator.md"
   ],
-  "skills": "./skills/"
+  "skills": [
+    "./skills/plugin-validation-skill"
+  ]
 }

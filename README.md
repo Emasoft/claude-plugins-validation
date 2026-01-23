@@ -160,10 +160,40 @@ claude-plugins-validation/
 - Python 3.10+
 - uv (Python package manager)
 
-Optional for full linting:
-- ruff (Python linting)
-- mypy (Python type checking)
-- shellcheck (Bash script linting)
+### Multi-Language Linter Support
+
+The plugin-validator agent automatically detects all languages used in a plugin and installs required linters:
+
+| Language | File Extensions | Linters | Install Command |
+|----------|-----------------|---------|-----------------|
+| Python | `.py` | ruff, mypy | `uv pip install ruff mypy` |
+| JavaScript | `.js`, `.mjs`, `.cjs` | eslint | `npm install -g eslint` |
+| TypeScript | `.ts`, `.tsx` | eslint, typescript | `npm install -g eslint typescript` |
+| Rust | `.rs` | clippy, rustfmt | `rustup component add clippy rustfmt` |
+| Go | `.go` | staticcheck, golangci-lint | `go install honnef.co/go/tools/cmd/staticcheck@latest` |
+| Shell/Bash | `.sh`, `.bash` | shellcheck | `brew install shellcheck` or `uv pip install shellcheck-py` |
+| PowerShell | `.ps1`, `.psm1`, `.psd1` | PSScriptAnalyzer | `pwsh -Command "Install-Module PSScriptAnalyzer -Scope CurrentUser"` |
+| Ruby | `.rb` | rubocop | `gem install rubocop` |
+
+The agent will:
+1. Scan the plugin for all file extensions
+2. Detect which languages are present
+3. Check if required linters are installed
+4. Auto-install missing linters before validation
+
+### Multi-Language Dependency Verification
+
+The agent verifies dependencies for all languages found in the plugin:
+
+| Language | Dependency Files | Verification |
+|----------|------------------|--------------|
+| Python | `requirements.txt`, `pyproject.toml`, `setup.py`, `Pipfile` | Scans imports, checks declarations |
+| JavaScript/TypeScript | `package.json` | Scans require/import, checks dependencies |
+| Rust | `Cargo.toml` | Scans use statements, checks dependencies |
+| Go | `go.mod` | Scans imports, checks module requirements |
+| Shell/Bash | Shebang lines, `source` statements | Checks command availability |
+| PowerShell | `.psd1` manifests, `#Requires` statements | Checks module availability |
+| Ruby | `Gemfile` | Scans require statements, checks gems |
 
 ## Contributing
 

@@ -1,0 +1,6 @@
+# Dependencies for claude-plugins-validation
+# Install with: pip install -r requirements.txt
+#           or: uv pip install -r requirements.txt
+
+# YAML parsing for agent/skill frontmatter
+pyyaml>=6.0
