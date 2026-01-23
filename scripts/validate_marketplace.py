@@ -121,6 +121,29 @@ NAME_PATTERN = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 # Version pattern (semver-like)
 VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?(\+[a-zA-Z0-9.]+)?$")
 
+# Required README sections for GitHub deployment
+# These patterns match common section header formats (# Section, ## Section, ### Section)
+REQUIRED_README_SECTIONS = {
+    "installation": re.compile(r"^#{1,3}\s*installation", re.IGNORECASE | re.MULTILINE),
+    "update": re.compile(r"^#{1,3}\s*(update|updating)", re.IGNORECASE | re.MULTILINE),
+    "uninstall": re.compile(r"^#{1,3}\s*(uninstall|remove|removal)", re.IGNORECASE | re.MULTILINE),
+    "troubleshooting": re.compile(r"^#{1,3}\s*troubleshooting", re.IGNORECASE | re.MULTILINE),
+}
+
+# Required installation sub-steps (should be present in Installation section)
+REQUIRED_INSTALLATION_STEPS = {
+    "add_marketplace": re.compile(
+        r"(marketplace\s+add|add\s+.*marketplace|claude\s+plugin\s+marketplace\s+add)",
+        re.IGNORECASE,
+    ),
+    "install_plugin": re.compile(
+        r"(plugin\s+install|install\s+.*plugin|claude\s+plugin\s+install)",
+        re.IGNORECASE,
+    ),
+    "verify": re.compile(r"(verify|check|confirm|list)", re.IGNORECASE),
+    "restart": re.compile(r"(restart|reload|relaunch)", re.IGNORECASE),
+}
+
 
 # =============================================================================
 # Validation Functions
@@ -142,12 +165,17 @@ def validate_marketplace_file(
     results: list[ValidationResult] = []
 
     # Determine the marketplace.json location
+    # Can be at root (marketplace.json) or in .claude-plugin/ subdirectory
     if marketplace_path.is_file():
         json_path = marketplace_path
         marketplace_dir = marketplace_path.parent
     else:
+        # Try root first
         json_path = marketplace_path / "marketplace.json"
         marketplace_dir = marketplace_path
+        # If not found, try .claude-plugin/ subdirectory
+        if not json_path.exists():
+            json_path = marketplace_path / ".claude-plugin" / "marketplace.json"
 
     # Check file exists
     if not json_path.exists():
@@ -401,14 +429,17 @@ def validate_plugin_source(
     if not isinstance(source, dict):
         # Source can also be a string shorthand
         if isinstance(source, str):
-            if source not in VALID_SOURCE_TYPES:
+            # Accept relative paths (./path or ../path) as local source
+            if source.startswith("./") or source.startswith("../"):
+                pass  # Valid local path shorthand
+            elif source not in VALID_SOURCE_TYPES:
                 results.append(
                     ValidationResult(
                         level="major",
                         category="plugin",
                         message=f"Plugin '{plugin_id}' has invalid source type: {source}",
                         file_path=json_path,
-                        suggestion=f"Valid source types: {', '.join(sorted(VALID_SOURCE_TYPES))}",
+                        suggestion=f"Valid source types: {', '.join(sorted(VALID_SOURCE_TYPES))} or relative path (./path)",
                     )
                 )
         else:
@@ -669,6 +700,170 @@ def validate_plugins_array(
     return plugin_names, results
 
 
+def validate_github_deployment(
+    marketplace_dir: Path,
+    plugins: list[dict[str, Any]],
+) -> list[ValidationResult]:
+    """
+    Validate GitHub deployment structure for a marketplace.
+
+    Checks:
+    - Main README.md exists at marketplace root
+    - README.md has required sections (Installation, Update, Uninstall, Troubleshooting)
+    - Installation section has all required steps
+    - Each plugin subfolder has its own README.md
+
+    Args:
+        marketplace_dir: Path to marketplace directory
+        plugins: List of plugin entries from marketplace.json
+
+    Returns:
+        List of validation results
+    """
+    results: list[ValidationResult] = []
+
+    # Check main README.md exists
+    readme_path = marketplace_dir / "README.md"
+    if not readme_path.exists():
+        # Also check lowercase
+        readme_path = marketplace_dir / "readme.md"
+
+    if not readme_path.exists():
+        results.append(
+            ValidationResult(
+                level="major",
+                category="deployment",
+                message="Missing README.md at marketplace root",
+                file_path=str(marketplace_dir),
+                suggestion="Create a README.md with installation instructions for users",
+            )
+        )
+    else:
+        # Validate README content
+        results.extend(validate_readme_content(readme_path))
+
+    # Check each plugin subfolder has README.md
+    for plugin in plugins:
+        source = plugin.get("source")
+        plugin_name = plugin.get("name", "unknown")
+
+        # Determine plugin path
+        plugin_path: Path | None = None
+        if isinstance(source, str) and source.startswith("./"):
+            plugin_path = marketplace_dir / source[2:]
+        elif isinstance(source, str) and not source.startswith(("http", "git@")):
+            plugin_path = marketplace_dir / source
+        elif "path" in plugin:
+            path_val = plugin["path"]
+            if isinstance(path_val, str):
+                if path_val.startswith("./"):
+                    plugin_path = marketplace_dir / path_val[2:]
+                elif not path_val.startswith("/"):
+                    plugin_path = marketplace_dir / path_val
+
+        if plugin_path and plugin_path.exists() and plugin_path.is_dir():
+            plugin_readme = plugin_path / "README.md"
+            if not plugin_readme.exists():
+                plugin_readme = plugin_path / "readme.md"
+
+            if not plugin_readme.exists():
+                results.append(
+                    ValidationResult(
+                        level="minor",
+                        category="deployment",
+                        message=f"Plugin '{plugin_name}' subfolder missing README.md",
+                        file_path=str(plugin_path),
+                        suggestion="Add README.md to plugin subfolder describing the plugin",
+                    )
+                )
+
+    return results
+
+
+def validate_readme_content(readme_path: Path) -> list[ValidationResult]:
+    """
+    Validate README.md has required sections for marketplace deployment.
+
+    Args:
+        readme_path: Path to README.md file
+
+    Returns:
+        List of validation results
+    """
+    results: list[ValidationResult] = []
+
+    try:
+        content = readme_path.read_text(encoding="utf-8")
+    except Exception as e:
+        results.append(
+            ValidationResult(
+                level="major",
+                category="deployment",
+                message=f"Could not read README.md: {e}",
+                file_path=str(readme_path),
+            )
+        )
+        return results
+
+    # Check for required sections
+    missing_sections: list[str] = []
+    for section_name, pattern in REQUIRED_README_SECTIONS.items():
+        if not pattern.search(content):
+            missing_sections.append(section_name)
+
+    if missing_sections:
+        results.append(
+            ValidationResult(
+                level="major",
+                category="deployment",
+                message=f"README.md missing required sections: {', '.join(missing_sections)}",
+                file_path=str(readme_path),
+                suggestion="Add sections: ## Installation, ## Update, ## Uninstall, ## Troubleshooting",
+            )
+        )
+
+    # Check installation section has required steps
+    if "installation" not in missing_sections:
+        missing_steps: list[str] = []
+        for step_name, pattern in REQUIRED_INSTALLATION_STEPS.items():
+            if not pattern.search(content):
+                missing_steps.append(step_name.replace("_", " "))
+
+        if missing_steps:
+            results.append(
+                ValidationResult(
+                    level="minor",
+                    category="deployment",
+                    message=f"README.md Installation section may be incomplete. Missing: {', '.join(missing_steps)}",
+                    file_path=str(readme_path),
+                    suggestion="Include steps for: add marketplace, install plugin, verify installation, restart Claude Code",
+                )
+            )
+
+    # Check for placeholder content
+    placeholder_patterns = [
+        r"\[TODO\]",
+        r"\[INSERT",
+        r"<your-",
+        r"PLACEHOLDER",
+        r"TBD",
+    ]
+    for placeholder_pattern in placeholder_patterns:
+        if re.search(placeholder_pattern, content, re.IGNORECASE):
+            results.append(
+                ValidationResult(
+                    level="minor",
+                    category="deployment",
+                    message="README.md contains placeholder content",
+                    file_path=str(readme_path),
+                    suggestion="Replace all placeholders with actual content before publishing",
+                )
+            )
+            break
+
+    return results
+
+
 def validate_marketplace(marketplace_path: Path) -> ValidationReport:
     """
     Validate a complete marketplace configuration.
@@ -717,6 +912,13 @@ def validate_marketplace(marketplace_path: Path) -> ValidationReport:
         )
         report.plugins_found = plugin_names
         report.results.extend(plugin_results)
+
+        # Validate GitHub deployment structure
+        if isinstance(plugins, list):
+            deployment_results = validate_github_deployment(
+                marketplace_dir, plugins
+            )
+            report.results.extend(deployment_results)
 
     # Validate optional fields
     if "description" in data and not isinstance(data["description"], str):

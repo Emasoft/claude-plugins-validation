@@ -36,11 +36,11 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 import yaml
+from validate_hook import validate_hooks as validate_hook_file
+from validate_mcp import validate_plugin_mcp
 
 # Import component validators
 from validate_skill import validate_skill as validate_skill_dir
-from validate_hook import validate_hooks as validate_hook_file
-from validate_mcp import validate_plugin_mcp
 
 # Validation result levels
 Level = Literal["CRITICAL", "MAJOR", "MINOR", "INFO", "PASSED"]

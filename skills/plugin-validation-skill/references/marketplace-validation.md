@@ -9,8 +9,9 @@ Complete reference for Claude Code plugin marketplace configuration and validati
 - [3. Plugin Entry Configuration](#3-plugin-entry-configuration)
 - [4. Source Types](#4-source-types)
 - [5. Local Development Marketplace](#5-local-development-marketplace)
-- [6. Common Marketplace Errors](#6-common-marketplace-errors)
-- [7. Validation Checklist](#7-validation-checklist)
+- [6. GitHub Deployment Validation](#6-github-deployment-validation)
+- [7. Common Marketplace Errors](#7-common-marketplace-errors)
+- [8. Validation Checklist](#8-validation-checklist)
 
 ---
 
@@ -326,7 +327,148 @@ claude --plugin-dir ./my-plugin
 
 ---
 
-## 6. Common Marketplace Errors
+## 6. GitHub Deployment Validation
+
+When deploying a marketplace to GitHub for public use, additional requirements ensure users can successfully install and use your plugins.
+
+### Required Directory Structure
+
+```
+my-marketplace/
+├── .claude-plugin/
+│   └── marketplace.json   # Marketplace configuration
+├── plugin-a/              # Plugin subfolder
+│   ├── .claude-plugin/
+│   │   └── plugin.json
+│   └── README.md          # Plugin-specific documentation
+├── plugin-b/
+│   ├── .claude-plugin/
+│   │   └── plugin.json
+│   └── README.md
+└── README.md              # Main marketplace README
+```
+
+### Main README.md Requirements
+
+The main README.md at marketplace root MUST contain these sections:
+
+#### Required Sections
+
+| Section | Description |
+|---------|-------------|
+| Installation | How to add and install plugins |
+| Update | How to update to latest version |
+| Uninstall | How to remove the plugin |
+| Troubleshooting | Common issues and solutions |
+
+#### Installation Section Must Include
+
+The Installation section should cover these 4 steps:
+
+1. **Add Marketplace** - Command to add the marketplace
+   ```bash
+   claude plugin marketplace add https://github.com/user/my-marketplace
+   ```
+
+2. **Install Plugin** - Command to install a plugin
+   ```bash
+   claude plugin install plugin-name@my-marketplace
+   ```
+
+3. **Verify Installation** - How to confirm it worked
+   ```bash
+   claude plugin list
+   ```
+
+4. **Restart Claude Code** - Reminder to restart
+   > Restart Claude Code for the plugin to take effect
+
+#### Example README.md Template
+
+```markdown
+# My Plugin Marketplace
+
+Description of the marketplace.
+
+## Installation
+
+### Step 1: Add this Marketplace
+
+\`\`\`bash
+claude plugin marketplace add https://github.com/user/my-marketplace
+\`\`\`
+
+### Step 2: Install a Plugin
+
+\`\`\`bash
+claude plugin install my-plugin@my-marketplace
+\`\`\`
+
+### Step 3: Verify Installation
+
+\`\`\`bash
+claude plugin list
+\`\`\`
+
+### Step 4: Restart Claude Code
+
+Restart Claude Code to activate the plugin.
+
+## Update to Latest Version
+
+\`\`\`bash
+claude plugin install my-plugin@my-marketplace --force
+\`\`\`
+
+## Uninstall
+
+\`\`\`bash
+claude plugin uninstall my-plugin
+\`\`\`
+
+## Troubleshooting
+
+### Plugin not loading
+1. Verify installation: \`claude plugin list\`
+2. Check for errors: \`claude --debug\`
+3. Reinstall: \`claude plugin install my-plugin@my-marketplace --force\`
+
+### Marketplace not found
+Ensure you added the marketplace first:
+\`\`\`bash
+claude plugin marketplace add https://github.com/user/my-marketplace
+\`\`\`
+```
+
+### Plugin Subfolder README.md
+
+Each plugin subfolder should have its own README.md containing:
+
+- Plugin name and description
+- What the plugin does
+- Usage instructions
+- Configuration options (if any)
+- Examples
+
+### Validation Checks
+
+The validator checks:
+
+1. **Main README.md exists** - At marketplace root
+2. **Required sections present** - Installation, Update, Uninstall, Troubleshooting
+3. **Installation completeness** - Contains all 4 steps
+4. **Plugin READMEs** - Each plugin subfolder has README.md
+5. **No placeholder content** - No [TODO], [INSERT], etc.
+
+### Validation Command
+
+```bash
+uv run python scripts/validate_marketplace.py /path/to/marketplace --verbose
+```
+
+---
+
+## 7. Common Marketplace Errors
 
 ### Error: Missing marketplace.json
 
@@ -443,7 +585,7 @@ my-plugin/
 
 ---
 
-## 7. Validation Checklist
+## 8. Validation Checklist
 
 ### Pre-publish Marketplace Checklist
 
@@ -458,6 +600,20 @@ my-plugin/
 - [ ] Local paths resolve correctly
 - [ ] Each plugin has valid source configuration
 - [ ] Referenced plugins have plugin.json
+
+### GitHub Deployment Checklist
+
+- [ ] Main README.md exists at marketplace root
+- [ ] README.md has Installation section
+- [ ] Installation has add marketplace step
+- [ ] Installation has install plugin step
+- [ ] Installation has verify step
+- [ ] Installation has restart reminder
+- [ ] README.md has Update section
+- [ ] README.md has Uninstall section
+- [ ] README.md has Troubleshooting section
+- [ ] Each plugin subfolder has README.md
+- [ ] No placeholder content ([TODO], [INSERT], etc.)
 
 ### Validation Command
 

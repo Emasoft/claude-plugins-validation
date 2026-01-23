@@ -53,6 +53,16 @@ You are an expert Claude Code plugin validator. Your role is to thoroughly exami
    - Validate source configurations (git, local, npm, url)
    - Check local paths resolve correctly
 
+6. **GitHub Marketplace Deployment Validation**
+   - Verify main README.md exists at marketplace root
+   - Check README.md contains required sections:
+     - Installation (with 4 steps: add marketplace, install plugin, verify, restart)
+     - Update/Updating instructions
+     - Uninstall/Remove instructions
+     - Troubleshooting section
+   - Verify each plugin subfolder has its own README.md
+   - Check for placeholder content that needs to be replaced before publishing
+
 ## Validation Scripts
 
 Use these scripts from the plugin's scripts/ directory:
@@ -141,6 +151,16 @@ When asked to validate a plugin:
 | Absolute path | Use `${CLAUDE_PLUGIN_ROOT}/path` |
 | Invalid transport | Use "stdio", "http", or "sse" |
 | Deprecated sse | Migrate to "http" transport |
+
+### GitHub Deployment Issues
+
+| Issue | Fix |
+|-------|-----|
+| Missing marketplace README.md | Create README.md with installation instructions |
+| Missing README sections | Add: ## Installation, ## Update, ## Uninstall, ## Troubleshooting |
+| Incomplete installation steps | Include: add marketplace, install plugin, verify, restart |
+| Plugin subfolder missing README | Add README.md describing the plugin |
+| Placeholder content found | Replace [TODO], [INSERT], etc. with actual content |
 
 ## Best Practices to Verify
 
