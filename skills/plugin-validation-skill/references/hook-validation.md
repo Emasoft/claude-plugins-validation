@@ -66,11 +66,11 @@ There are **13 valid hook events**:
 | Notification | Yes | When notifications sent |
 | Stop | No | When agent attempts to stop |
 | SubagentStop | No | When subagent attempts to stop |
+| SubagentStart | No | When subagent starts |
 | SessionStart | Yes | At session start |
 | SessionEnd | No | At session end |
 | PreCompact | Yes | Before conversation compaction |
-| Shutdown | No | At Claude Code shutdown |
-| ToolError | Yes | When tool execution errors |
+| Setup | Yes | During initial setup |
 
 ### Events Without Matchers
 
@@ -78,8 +78,8 @@ These events fire globally and don't support tool-specific matchers:
 - UserPromptSubmit
 - Stop
 - SubagentStop
+- SubagentStart
 - SessionEnd
-- Shutdown
 
 ### Example for Each Event
 
