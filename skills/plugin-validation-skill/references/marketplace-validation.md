@@ -10,8 +10,9 @@ Complete reference for Claude Code plugin marketplace configuration and validati
 - [4. Source Types](#4-source-types)
 - [5. Local Development Marketplace](#5-local-development-marketplace)
 - [6. GitHub Deployment Validation](#6-github-deployment-validation)
-- [7. Common Marketplace Errors](#7-common-marketplace-errors)
-- [8. Validation Checklist](#8-validation-checklist)
+- [7. Git Submodule Validation](#7-git-submodule-validation)
+- [8. Common Marketplace Errors](#8-common-marketplace-errors)
+- [9. Validation Checklist](#9-validation-checklist)
 
 ---
 
@@ -468,7 +469,147 @@ uv run python scripts/validate_marketplace.py /path/to/marketplace --verbose
 
 ---
 
-## 7. Common Marketplace Errors
+## 7. Git Submodule Validation
+
+For proper marketplace development and version control, all plugins should be managed as git submodules of the marketplace repository. This enables independent plugin development while maintaining a unified marketplace.
+
+### Why Use Submodules?
+
+| Benefit | Description |
+|---------|-------------|
+| Version Independence | Each plugin has its own version history |
+| Separate Development | Plugins can be developed in isolation |
+| Clean Updates | Update plugins without touching marketplace code |
+| Proper Attribution | Each plugin maintains its own commit history |
+| Easy Distribution | Submodules auto-fetch on clone with --recursive |
+
+### Required Structure
+
+```
+my-marketplace/               # Main marketplace git repo
+├── .git/                     # Marketplace git directory
+├── .gitmodules              # Submodule configuration
+├── .claude-plugin/
+│   └── marketplace.json
+├── plugin-a/                 # Git submodule -> plugin-a repo
+│   └── .git                  # Points to submodule git dir
+├── plugin-b/                 # Git submodule -> plugin-b repo
+│   └── .git
+└── README.md
+```
+
+### .gitmodules File Format
+
+```ini
+[submodule "plugin-a"]
+    path = plugin-a
+    url = https://github.com/user/plugin-a.git
+
+[submodule "plugin-b"]
+    path = plugin-b
+    url = https://github.com/user/plugin-b.git
+```
+
+### Setting Up Submodules
+
+1. **Create plugin repository first**:
+   ```bash
+   # Create and push plugin to its own repo
+   cd plugin-a
+   git init
+   git add .
+   git commit -m "Initial commit"
+   gh repo create user/plugin-a --push --source .
+   ```
+
+2. **Add as submodule to marketplace**:
+   ```bash
+   cd my-marketplace
+   git submodule add https://github.com/user/plugin-a.git plugin-a
+   git commit -m "Add plugin-a as submodule"
+   ```
+
+3. **Update marketplace.json to use git source**:
+   ```json
+   {
+     "name": "plugin-a",
+     "source": {
+       "type": "git",
+       "repository": "https://github.com/user/plugin-a"
+     }
+   }
+   ```
+
+### Converting Existing Plugin to Submodule
+
+If a plugin exists as a regular directory:
+
+```bash
+# 1. Remove from git (keep files)
+git rm -r --cached plugin-a
+
+# 2. Move to temp location
+mv plugin-a /tmp/plugin-a-backup
+
+# 3. Create plugin repo and push
+cd /tmp/plugin-a-backup
+git init
+git add .
+git commit -m "Initial commit"
+gh repo create user/plugin-a --push --source .
+
+# 4. Return to marketplace and add as submodule
+cd /path/to/marketplace
+git submodule add https://github.com/user/plugin-a.git plugin-a
+git commit -m "Convert plugin-a to submodule"
+```
+
+### Validation Checks
+
+The validator checks:
+
+1. **Git repository** - Marketplace must be a git repo
+2. **.gitmodules exists** - Required if plugin directories exist
+3. **Each plugin is a submodule** - Plugin directories must be in .gitmodules
+4. **URLs match** - Submodule URL should match source.repository in marketplace.json
+5. **Submodules initialized** - Submodules should be initialized (not empty)
+
+### Validation Command
+
+```bash
+uv run python scripts/validate_marketplace.py /path/to/marketplace --verbose
+```
+
+Example output:
+```
+[INFO] [submodule] Found 2 plugin(s) configured as git submodules
+    Location: /path/to/marketplace/.gitmodules
+```
+
+### Common Submodule Issues
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| Plugin not a submodule | Directory added directly | Convert to submodule |
+| Submodule not initialized | Cloned without --recursive | `git submodule update --init` |
+| URL mismatch | Different URL in .gitmodules vs marketplace.json | Update to match |
+| Empty plugin directory | Submodule not pulled | `git submodule update --init --recursive` |
+
+### Cloning Marketplace with Submodules
+
+Users must clone with `--recursive` to get plugin content:
+
+```bash
+# Correct way to clone
+git clone --recursive https://github.com/user/marketplace.git
+
+# Or if already cloned, initialize submodules
+git submodule update --init --recursive
+```
+
+---
+
+## 8. Common Marketplace Errors
 
 ### Error: Missing marketplace.json
 
@@ -585,7 +726,7 @@ my-plugin/
 
 ---
 
-## 8. Validation Checklist
+## 9. Validation Checklist
 
 ### Pre-publish Marketplace Checklist
 
@@ -614,6 +755,15 @@ my-plugin/
 - [ ] README.md has Troubleshooting section
 - [ ] Each plugin subfolder has README.md
 - [ ] No placeholder content ([TODO], [INSERT], etc.)
+
+### Git Submodules Checklist
+
+- [ ] Marketplace is a git repository
+- [ ] .gitmodules file exists
+- [ ] Each plugin directory is a git submodule
+- [ ] Submodule URLs match source.repository in marketplace.json
+- [ ] Submodules are initialized (not empty)
+- [ ] README mentions `--recursive` for cloning
 
 ### Validation Command
 

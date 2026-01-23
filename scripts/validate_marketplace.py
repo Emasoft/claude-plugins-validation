@@ -18,8 +18,10 @@ Exit Codes:
 from __future__ import annotations
 
 import argparse
+import configparser
 import json
 import re
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -340,16 +342,12 @@ def validate_plugin_entry(
     # Validate source configuration
     source = plugin.get("source")
     if source is not None:
-        results.extend(
-            validate_plugin_source(plugin, plugin_id, marketplace_dir, json_path)
-        )
+        results.extend(validate_plugin_source(plugin, plugin_id, marketplace_dir, json_path))
 
     # Validate local path if present
     local_path = plugin.get("path")
     if local_path is not None:
-        results.extend(
-            validate_local_path(local_path, plugin_id, marketplace_dir, json_path)
-        )
+        results.extend(validate_local_path(local_path, plugin_id, marketplace_dir, json_path))
 
     # Validate repository URL if present
     repository = plugin.get("repository")
@@ -864,6 +862,200 @@ def validate_readme_content(readme_path: Path) -> list[ValidationResult]:
     return results
 
 
+def validate_git_submodules(
+    marketplace_dir: Path,
+    plugins: list[dict[str, Any]],
+) -> list[ValidationResult]:
+    """
+    Validate that all plugins are git submodules.
+
+    For GitHub marketplace deployment, all plugins should be developed as git
+    submodules of the main marketplace repository. This enables:
+    - Independent version control for each plugin
+    - Proper versioning and tagging
+    - Clean separation of concerns
+
+    Args:
+        marketplace_dir: Path to marketplace directory
+        plugins: List of plugin entries from marketplace.json
+
+    Returns:
+        List of validation results
+    """
+    results: list[ValidationResult] = []
+
+    # Check if this is a git repository
+    git_dir = marketplace_dir / ".git"
+    if not git_dir.exists():
+        results.append(
+            ValidationResult(
+                level="info",
+                category="submodule",
+                message="Marketplace is not a git repository, skipping submodule validation",
+                file_path=str(marketplace_dir),
+            )
+        )
+        return results
+
+    # Check if .gitmodules file exists
+    gitmodules_path = marketplace_dir / ".gitmodules"
+    if not gitmodules_path.exists():
+        # Only warn if there are plugins that should be submodules
+        plugin_dirs_exist = False
+        for plugin in plugins:
+            plugin_name = plugin.get("name", "")
+            plugin_path = marketplace_dir / plugin_name
+            if plugin_path.exists() and plugin_path.is_dir():
+                plugin_dirs_exist = True
+                break
+
+        if plugin_dirs_exist:
+            results.append(
+                ValidationResult(
+                    level="major",
+                    category="submodule",
+                    message="Missing .gitmodules file - plugins should be git submodules",
+                    file_path=str(marketplace_dir),
+                    suggestion="Use 'git submodule add <repo-url> <plugin-name>' to add plugins as submodules",
+                )
+            )
+        return results
+
+    # Parse .gitmodules file
+    gitmodules_config = configparser.ConfigParser()
+    try:
+        gitmodules_config.read(str(gitmodules_path))
+    except Exception as e:
+        results.append(
+            ValidationResult(
+                level="major",
+                category="submodule",
+                message=f"Could not parse .gitmodules file: {e}",
+                file_path=str(gitmodules_path),
+            )
+        )
+        return results
+
+    # Build a map of submodule paths to URLs
+    submodules: dict[str, str] = {}
+    for section in gitmodules_config.sections():
+        if section.startswith('submodule "'):
+            path = gitmodules_config.get(section, "path", fallback=None)
+            url = gitmodules_config.get(section, "url", fallback=None)
+            if path and url:
+                submodules[path] = url
+
+    # Check each plugin
+    for plugin in plugins:
+        plugin_name = plugin.get("name", "unknown")
+        plugin_path = marketplace_dir / plugin_name
+        source = plugin.get("source", {})
+
+        # Get the expected repository URL from plugin source
+        expected_repo: str | None = None
+        if isinstance(source, dict):
+            source_type = source.get("type")
+            if source_type == "git":
+                expected_repo = source.get("repository")
+        elif isinstance(source, str) and (source.startswith("http") or source.startswith("git@")):
+            expected_repo = source
+
+        # Check if plugin directory exists
+        if not plugin_path.exists():
+            # Plugin is defined with git source but directory doesn't exist locally
+            # This is acceptable for pure git-based marketplaces
+            if expected_repo:
+                results.append(
+                    ValidationResult(
+                        level="info",
+                        category="submodule",
+                        message=f"Plugin '{plugin_name}' has git source but no local directory (acceptable for remote-only)",
+                        file_path=str(plugin_path),
+                    )
+                )
+            continue
+
+        # Check if plugin is a submodule
+        if plugin_name not in submodules and plugin_name not in [p.split("/")[-1] for p in submodules]:
+            # Check if it's in a subdirectory
+            found = False
+            for submod_path in submodules:
+                if submod_path.endswith(f"/{plugin_name}") or submod_path == plugin_name:
+                    found = True
+                    break
+
+            if not found:
+                results.append(
+                    ValidationResult(
+                        level="major",
+                        category="submodule",
+                        message=f"Plugin '{plugin_name}' directory exists but is not a git submodule",
+                        file_path=str(plugin_path),
+                        suggestion=f"Convert to submodule: 'git rm -r {plugin_name} && git submodule add <repo-url> {plugin_name}'",
+                    )
+                )
+                continue
+
+        # Verify submodule URL matches plugin source
+        submod_url = submodules.get(plugin_name)
+        if submod_url and expected_repo:
+            # Normalize URLs for comparison (remove .git suffix, normalize case)
+            norm_submod = submod_url.rstrip("/").removesuffix(".git").lower()
+            norm_expected = expected_repo.rstrip("/").removesuffix(".git").lower()
+
+            if norm_submod != norm_expected:
+                results.append(
+                    ValidationResult(
+                        level="minor",
+                        category="submodule",
+                        message=f"Plugin '{plugin_name}' submodule URL differs from source repository",
+                        file_path=str(gitmodules_path),
+                        suggestion=f"Submodule: {submod_url}, Source: {expected_repo}",
+                    )
+                )
+
+        # Check submodule is initialized (has content)
+        submod_git = plugin_path / ".git"
+        if not submod_git.exists():
+            # For submodules, .git is a file pointing to the git directory
+            # Check if it's an uninitialized submodule
+            try:
+                result = subprocess.run(
+                    ["git", "submodule", "status", plugin_name],
+                    cwd=str(marketplace_dir),
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                if result.stdout.startswith("-"):
+                    results.append(
+                        ValidationResult(
+                            level="minor",
+                            category="submodule",
+                            message=f"Plugin '{plugin_name}' submodule is not initialized",
+                            file_path=str(plugin_path),
+                            suggestion="Run 'git submodule update --init --recursive' to initialize",
+                        )
+                    )
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                pass  # Git command failed, skip this check
+
+    # Info message if all checks passed
+    if not any(r.level in ("critical", "major") for r in results):
+        submod_count = len([p for p in plugins if p.get("name") in submodules])
+        if submod_count > 0:
+            results.append(
+                ValidationResult(
+                    level="info",
+                    category="submodule",
+                    message=f"Found {submod_count} plugin(s) configured as git submodules",
+                    file_path=str(gitmodules_path),
+                )
+            )
+
+    return results
+
+
 def validate_marketplace(marketplace_path: Path) -> ValidationReport:
     """
     Validate a complete marketplace configuration.
@@ -907,18 +1099,18 @@ def validate_marketplace(marketplace_path: Path) -> ValidationReport:
     # Validate plugins
     plugins = data.get("plugins")
     if plugins is not None:
-        plugin_names, plugin_results = validate_plugins_array(
-            plugins, marketplace_dir, json_path
-        )
+        plugin_names, plugin_results = validate_plugins_array(plugins, marketplace_dir, json_path)
         report.plugins_found = plugin_names
         report.results.extend(plugin_results)
 
         # Validate GitHub deployment structure
         if isinstance(plugins, list):
-            deployment_results = validate_github_deployment(
-                marketplace_dir, plugins
-            )
+            deployment_results = validate_github_deployment(marketplace_dir, plugins)
             report.results.extend(deployment_results)
+
+            # Validate git submodules
+            submodule_results = validate_git_submodules(marketplace_dir, plugins)
+            report.results.extend(submodule_results)
 
     # Validate optional fields
     if "description" in data and not isinstance(data["description"], str):
