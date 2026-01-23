@@ -2,7 +2,7 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
-## [Unreleased]
+## [1.1.0] - 2026-01-23
 
 ### Bug Fixes
 
