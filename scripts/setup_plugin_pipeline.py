@@ -46,16 +46,14 @@ USAGE:
 """
 
 import argparse
+import configparser
 import json
 import os
-import shutil
 import stat
-import subprocess
 import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any
 
 # ANSI Colors
 RED = "\033[0;31m"
@@ -69,23 +67,26 @@ NC = "\033[0m"
 
 class ProjectType(Enum):
     """Type of project being configured."""
-    MARKETPLACE = "marketplace"      # Contains multiple plugins
-    PLUGIN = "plugin"                # Single plugin
+
+    MARKETPLACE = "marketplace"  # Contains multiple plugins
+    PLUGIN = "plugin"  # Single plugin
     PLUGIN_IN_MARKETPLACE = "plugin_in_marketplace"  # Plugin as submodule
     UNKNOWN = "unknown"
 
 
 class IssueLevel(Enum):
     """Severity level of pipeline issues."""
+
     CRITICAL = "critical"  # Pipeline won't work
-    MAJOR = "major"        # Some features broken
-    MINOR = "minor"        # Warnings only
-    INFO = "info"          # Informational
+    MAJOR = "major"  # Some features broken
+    MINOR = "minor"  # Warnings only
+    INFO = "info"  # Informational
 
 
 @dataclass
 class PipelineIssue:
     """Represents an issue with the pipeline setup."""
+
     level: IssueLevel
     component: str
     message: str
@@ -96,6 +97,7 @@ class PipelineIssue:
 @dataclass
 class PipelineStatus:
     """Status of the pipeline validation."""
+
     project_type: ProjectType
     project_path: Path
     issues: list[PipelineIssue] = field(default_factory=list)
@@ -106,10 +108,7 @@ class PipelineStatus:
     @property
     def is_valid(self) -> bool:
         """Check if pipeline has no critical or major issues."""
-        return not any(
-            issue.level in (IssueLevel.CRITICAL, IssueLevel.MAJOR)
-            for issue in self.issues
-        )
+        return not any(issue.level in (IssueLevel.CRITICAL, IssueLevel.MAJOR) for issue in self.issues)
 
     @property
     def critical_count(self) -> int:
@@ -558,7 +557,7 @@ filter_commits = false
 tag_pattern = "v[0-9].*"
 '''
 
-GITHUB_WORKFLOW = '''name: Plugin Validation
+GITHUB_WORKFLOW = """name: Plugin Validation
 
 on:
   push:
@@ -603,9 +602,9 @@ jobs:
       - name: Lint Python files
         run: |
           ruff check . --select=E,F,W --ignore=E501 || true
-'''
+"""
 
-GITIGNORE_ADDITIONS = '''
+GITIGNORE_ADDITIONS = """
 # Python
 __pycache__/
 *.py[cod]
@@ -639,23 +638,22 @@ logs/
 docs_dev/
 scripts_dev/
 tests_dev/
-'''
+"""
 
 
 # =============================================================================
 # PIPELINE SETUP CLASS
 # =============================================================================
 
+
 class PipelineSetup:
     """Handles pipeline setup and validation for Claude Code plugins."""
 
-    def __init__(self, project_path: Path, dry_run: bool = False):
+    def __init__(self, project_path: Path, dry_run: bool = False, verbose: bool = False):
         self.project_path = project_path.resolve()
         self.dry_run = dry_run
-        self.status = PipelineStatus(
-            project_type=ProjectType.UNKNOWN,
-            project_path=self.project_path
-        )
+        self.verbose = verbose
+        self.status = PipelineStatus(project_type=ProjectType.UNKNOWN, project_path=self.project_path)
 
     def detect_project_type(self) -> ProjectType:
         """Detect what type of project this is."""
@@ -686,39 +684,47 @@ class PipelineSetup:
         if not gitmodules.exists():
             return
 
-        import configparser
-        config = configparser.ConfigParser()
-        config.read(gitmodules)
+        try:
+            config = configparser.ConfigParser()
+            config.read(gitmodules)
 
-        for section in config.sections():
-            if section.startswith("submodule "):
-                name = section.replace("submodule ", "").strip('"')
-                path = config.get(section, "path", fallback=name)
-                if (self.project_path / path).exists():
-                    self.status.submodules.append(path)
+            for section in config.sections():
+                if section.startswith("submodule "):
+                    name = section.replace("submodule ", "").strip('"')
+                    path = config.get(section, "path", fallback=name)
+                    if (self.project_path / path).exists():
+                        self.status.submodules.append(path)
+        except (configparser.Error, OSError) as e:
+            # If we can't parse .gitmodules, just skip submodule detection
+            if self.verbose:
+                print(f"{YELLOW}Warning: Could not parse .gitmodules: {e}{NC}")
 
     def validate(self) -> PipelineStatus:
         """Validate the current pipeline setup."""
         self.detect_project_type()
 
         if self.status.project_type == ProjectType.UNKNOWN:
-            self.status.issues.append(PipelineIssue(
-                level=IssueLevel.CRITICAL,
-                component="project",
-                message="Not a valid plugin or marketplace (missing .claude-plugin/plugin.json or marketplace.json)",
-                fix_available=False
-            ))
+            self.status.issues.append(
+                PipelineIssue(
+                    level=IssueLevel.CRITICAL,
+                    component="project",
+                    message="Not a valid plugin or marketplace (missing .claude-plugin/plugin.json or marketplace.json)",
+                    fix_available=False,
+                )
+            )
             return self.status
 
         # Check git repository
         if not (self.project_path / ".git").exists():
-            self.status.issues.append(PipelineIssue(
-                level=IssueLevel.CRITICAL,
-                component="git",
-                message="Not a git repository",
-                fix_available=True,
-                fix_description="Initialize git repository"
-            ))
+            self.status.issues.append(
+                PipelineIssue(
+                    level=IssueLevel.CRITICAL,
+                    component="git",
+                    message="Not a git repository",
+                    fix_available=True,
+                    fix_description="Initialize git repository",
+                )
+            )
 
         # Check hooks
         self._validate_hooks()
@@ -738,12 +744,21 @@ class PipelineSetup:
 
         if git_path.is_file():
             # Submodule - read the gitdir from the file
-            content = git_path.read_text().strip()
-            if content.startswith("gitdir: "):
-                git_dir = Path(content[8:])
-                if not git_dir.is_absolute():
-                    git_dir = self.project_path / git_dir
-                return git_dir.resolve() / "hooks"
+            try:
+                content = git_path.read_text().strip()
+                if content.startswith("gitdir: "):
+                    git_dir = Path(content[8:])
+                    if not git_dir.is_absolute():
+                        git_dir = self.project_path / git_dir
+                    return git_dir.resolve() / "hooks"
+                else:
+                    # Invalid .git file format - fall back to regular path
+                    if self.verbose:
+                        print(f"{YELLOW}Warning: .git file has unexpected format{NC}")
+            except (OSError, UnicodeDecodeError) as e:
+                # If we can't read .git file, fall back to regular path
+                if self.verbose:
+                    print(f"{YELLOW}Warning: Could not read .git file: {e}{NC}")
 
         return git_path / "hooks"
 
@@ -761,34 +776,40 @@ class PipelineSetup:
         # Check for problematic post-commit hook
         post_commit = hooks_dir / "post-commit"
         if post_commit.exists():
-            self.status.issues.append(PipelineIssue(
-                level=IssueLevel.MAJOR,
-                component="hooks",
-                message="post-commit hook exists (causes rebase conflicts)",
-                fix_available=True,
-                fix_description="Remove post-commit hook, use post-rewrite instead"
-            ))
+            self.status.issues.append(
+                PipelineIssue(
+                    level=IssueLevel.MAJOR,
+                    component="hooks",
+                    message="post-commit hook exists (causes rebase conflicts)",
+                    fix_available=True,
+                    fix_description="Remove post-commit hook, use post-rewrite instead",
+                )
+            )
 
         for hook_name, description in required_hooks.items():
             hook_path = hooks_dir / hook_name
             self.status.hooks_installed[hook_name] = hook_path.exists()
 
             if not hook_path.exists():
-                self.status.issues.append(PipelineIssue(
-                    level=IssueLevel.MAJOR,
-                    component="hooks",
-                    message=f"Missing {hook_name} hook ({description})",
-                    fix_available=True,
-                    fix_description=f"Install {hook_name} hook"
-                ))
+                self.status.issues.append(
+                    PipelineIssue(
+                        level=IssueLevel.MAJOR,
+                        component="hooks",
+                        message=f"Missing {hook_name} hook ({description})",
+                        fix_available=True,
+                        fix_description=f"Install {hook_name} hook",
+                    )
+                )
             elif not os.access(hook_path, os.X_OK):
-                self.status.issues.append(PipelineIssue(
-                    level=IssueLevel.MAJOR,
-                    component="hooks",
-                    message=f"{hook_name} hook is not executable",
-                    fix_available=True,
-                    fix_description=f"Make {hook_name} hook executable"
-                ))
+                self.status.issues.append(
+                    PipelineIssue(
+                        level=IssueLevel.MAJOR,
+                        component="hooks",
+                        message=f"{hook_name} hook is not executable",
+                        fix_available=True,
+                        fix_description=f"Make {hook_name} hook executable",
+                    )
+                )
 
     def _validate_config_files(self) -> None:
         """Validate configuration files exist."""
@@ -802,69 +823,83 @@ class PipelineSetup:
             self.status.config_files[filename] = file_path.exists()
 
             if not file_path.exists():
-                self.status.issues.append(PipelineIssue(
-                    level=level,
-                    component="config",
-                    message=f"Missing {filename} ({description})",
-                    fix_available=True,
-                    fix_description=f"Create {filename}"
-                ))
+                self.status.issues.append(
+                    PipelineIssue(
+                        level=level,
+                        component="config",
+                        message=f"Missing {filename} ({description})",
+                        fix_available=True,
+                        fix_description=f"Create {filename}",
+                    )
+                )
 
         # Check for GitHub workflow
         workflow_dir = self.project_path / ".github" / "workflows"
         has_validation_workflow = False
         if workflow_dir.exists():
             for wf in workflow_dir.glob("*.yml"):
-                content = wf.read_text()
-                if "validate" in content.lower() or "plugin" in content.lower():
-                    has_validation_workflow = True
-                    break
+                try:
+                    content = wf.read_text()
+                    if "validate" in content.lower() or "plugin" in content.lower():
+                        has_validation_workflow = True
+                        break
+                except (OSError, UnicodeDecodeError) as e:
+                    if self.verbose:
+                        print(f"{YELLOW}Warning: Could not read {wf.name}: {e}{NC}")
 
         self.status.config_files["github_workflow"] = has_validation_workflow
         if not has_validation_workflow:
-            self.status.issues.append(PipelineIssue(
-                level=IssueLevel.MINOR,
-                component="ci",
-                message="No GitHub Actions validation workflow found",
-                fix_available=True,
-                fix_description="Create .github/workflows/validate.yml"
-            ))
+            self.status.issues.append(
+                PipelineIssue(
+                    level=IssueLevel.MINOR,
+                    component="ci",
+                    message="No GitHub Actions validation workflow found",
+                    fix_available=True,
+                    fix_description="Create .github/workflows/validate.yml",
+                )
+            )
 
     def _validate_submodule_hooks(self) -> None:
         """Validate hooks in submodules."""
         for submodule in self.status.submodules:
-            submodule_path = self.project_path / submodule
+            # Hooks for submodules are stored in .git/modules/<submodule>/hooks/
             hooks_dir = self.project_path / ".git" / "modules" / submodule / "hooks"
 
             if not hooks_dir.exists():
-                self.status.issues.append(PipelineIssue(
-                    level=IssueLevel.MINOR,
-                    component="submodules",
-                    message=f"Submodule {submodule} hooks directory not found",
-                    fix_available=False
-                ))
+                self.status.issues.append(
+                    PipelineIssue(
+                        level=IssueLevel.MINOR,
+                        component="submodules",
+                        message=f"Submodule {submodule} hooks directory not found",
+                        fix_available=False,
+                    )
+                )
                 continue
 
             # Check for problematic post-commit
             if (hooks_dir / "post-commit").exists():
-                self.status.issues.append(PipelineIssue(
-                    level=IssueLevel.MAJOR,
-                    component="submodules",
-                    message=f"Submodule {submodule} has post-commit hook (causes rebase conflicts)",
-                    fix_available=True,
-                    fix_description=f"Remove post-commit, install post-rewrite for {submodule}"
-                ))
+                self.status.issues.append(
+                    PipelineIssue(
+                        level=IssueLevel.MAJOR,
+                        component="submodules",
+                        message=f"Submodule {submodule} has post-commit hook (causes rebase conflicts)",
+                        fix_available=True,
+                        fix_description=f"Remove post-commit, install post-rewrite for {submodule}",
+                    )
+                )
 
             # Check for required hooks
             for hook in ["post-rewrite", "post-merge"]:
                 if not (hooks_dir / hook).exists():
-                    self.status.issues.append(PipelineIssue(
-                        level=IssueLevel.MINOR,
-                        component="submodules",
-                        message=f"Submodule {submodule} missing {hook} hook",
-                        fix_available=True,
-                        fix_description=f"Install {hook} hook for {submodule}"
-                    ))
+                    self.status.issues.append(
+                        PipelineIssue(
+                            level=IssueLevel.MINOR,
+                            component="submodules",
+                            message=f"Submodule {submodule} missing {hook} hook",
+                            fix_available=True,
+                            fix_description=f"Install {hook} hook for {submodule}",
+                        )
+                    )
 
     def fix(self) -> int:
         """Fix all fixable issues."""
@@ -917,10 +952,21 @@ class PipelineSetup:
                 if self.dry_run:
                     print(f"{YELLOW}Would install:{NC} {name} hook")
                 else:
-                    hook_path.write_text(content)
-                    hook_path.chmod(hook_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-                    print(f"{GREEN}✓{NC} Installed {name} hook")
-                fixed += 1
+                    try:
+                        hook_path.write_text(content)
+                        hook_path.chmod(hook_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+                        print(f"{GREEN}✓{NC} Installed {name} hook")
+                        fixed += 1
+                    except PermissionError as e:
+                        print(f"{RED}✘{NC} Failed to install {name} hook: {e}")
+                        self.status.issues.append(
+                            PipelineIssue(
+                                level=IssueLevel.CRITICAL,
+                                component="hooks",
+                                message=f"Permission denied installing {name} hook: {e}",
+                                fix_available=False,
+                            )
+                        )
 
         return fixed
 
@@ -958,16 +1004,22 @@ class PipelineSetup:
                 print(f"{GREEN}✓{NC} Created .gitignore")
             fixed += 1
         else:
-            # Check if it needs additions
-            content = gitignore.read_text()
-            if "__pycache__" not in content:
-                if self.dry_run:
-                    print(f"{YELLOW}Would update:{NC} .gitignore")
-                else:
-                    with open(gitignore, "a") as f:
-                        f.write("\n" + GITIGNORE_ADDITIONS)
-                    print(f"{GREEN}✓{NC} Updated .gitignore")
-                fixed += 1
+            # Check if it needs additions - check for all expected patterns
+            try:
+                content = gitignore.read_text()
+                # Check for multiple markers to avoid duplicating content
+                needs_update = not all(marker in content for marker in ["__pycache__", ".mypy_cache", "docs_dev/"])
+                if needs_update:
+                    if self.dry_run:
+                        print(f"{YELLOW}Would update:{NC} .gitignore")
+                    else:
+                        with open(gitignore, "a") as f:
+                            f.write("\n" + GITIGNORE_ADDITIONS)
+                        print(f"{GREEN}✓{NC} Updated .gitignore")
+                    fixed += 1
+            except (OSError, UnicodeDecodeError) as e:
+                if self.verbose:
+                    print(f"{YELLOW}Warning: Could not read .gitignore: {e}{NC}")
 
         # GitHub workflow
         workflow_dir = self.project_path / ".github" / "workflows"
@@ -998,9 +1050,12 @@ class PipelineSetup:
                 if self.dry_run:
                     print(f"{YELLOW}Would remove:{NC} {submodule}/post-commit")
                 else:
-                    post_commit.unlink()
-                    print(f"{GREEN}✓{NC} Removed {submodule}/post-commit hook")
-                fixed += 1
+                    try:
+                        post_commit.unlink()
+                        print(f"{GREEN}✓{NC} Removed {submodule}/post-commit hook")
+                        fixed += 1
+                    except PermissionError as e:
+                        print(f"{RED}✘{NC} Failed to remove {submodule}/post-commit: {e}")
 
             # Install post-rewrite and post-merge
             for name, content in [("post-rewrite", POST_REWRITE_HOOK), ("post-merge", POST_MERGE_HOOK)]:
@@ -1009,10 +1064,13 @@ class PipelineSetup:
                     if self.dry_run:
                         print(f"{YELLOW}Would install:{NC} {submodule}/{name}")
                     else:
-                        hook_path.write_text(content)
-                        hook_path.chmod(hook_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-                        print(f"{GREEN}✓{NC} Installed {submodule}/{name} hook")
-                    fixed += 1
+                        try:
+                            hook_path.write_text(content)
+                            hook_path.chmod(hook_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+                            print(f"{GREEN}✓{NC} Installed {submodule}/{name} hook")
+                            fixed += 1
+                        except PermissionError as e:
+                            print(f"{RED}✘{NC} Failed to install {submodule}/{name}: {e}")
 
         return fixed
 
@@ -1020,6 +1078,7 @@ class PipelineSetup:
 # =============================================================================
 # CLI
 # =============================================================================
+
 
 def print_status(status: PipelineStatus) -> None:
     """Print pipeline status in a formatted way."""
@@ -1051,13 +1110,15 @@ def print_status(status: PipelineStatus) -> None:
             else:
                 icon = f"{BLUE}ℹ{NC}"
 
-            fix_note = f" (fixable)" if issue.fix_available else ""
+            fix_note = " (fixable)" if issue.fix_available else ""
             print(f"  {icon} [{issue.component}] {issue.message}{fix_note}")
 
     print()
-    print(f"Summary: {RED}{status.critical_count} critical{NC}, "
-          f"{YELLOW}{status.major_count} major{NC}, "
-          f"{BLUE}{status.minor_count} minor{NC}")
+    print(
+        f"Summary: {RED}{status.critical_count} critical{NC}, "
+        f"{YELLOW}{status.major_count} major{NC}, "
+        f"{BLUE}{status.minor_count} minor{NC}"
+    )
 
     if status.is_valid:
         print(f"\n{GREEN}Pipeline is valid{NC}")
@@ -1076,51 +1137,26 @@ Examples:
   %(prog)s /path/to/project --validate   # Validate only
   %(prog)s /path/to/project --fix        # Fix all issues
   %(prog)s /path/to/project --dry-run    # Show what would be done
-        """
+        """,
     )
 
-    parser.add_argument(
-        "path",
-        nargs="?",
-        default=".",
-        help="Path to project (default: current directory)"
-    )
+    parser.add_argument("path", nargs="?", default=".", help="Path to project (default: current directory)")
 
     parser.add_argument(
-        "--type",
-        choices=["marketplace", "plugin"],
-        help="Force project type (auto-detected by default)"
+        "--type", choices=["marketplace", "plugin"], help="Force project type (auto-detected by default)"
     )
 
-    parser.add_argument(
-        "--validate", "-v",
-        action="store_true",
-        help="Validate pipeline only (don't fix)"
-    )
+    parser.add_argument("--validate", "-v", action="store_true", help="Validate pipeline only (don't fix)")
 
-    parser.add_argument(
-        "--fix", "-f",
-        action="store_true",
-        help="Fix all fixable issues"
-    )
+    parser.add_argument("--fix", "-f", action="store_true", help="Fix all fixable issues")
 
-    parser.add_argument(
-        "--dry-run", "-n",
-        action="store_true",
-        help="Show what would be done without making changes"
-    )
+    parser.add_argument("--dry-run", "-n", action="store_true", help="Show what would be done without making changes")
 
-    parser.add_argument(
-        "--quiet", "-q",
-        action="store_true",
-        help="Minimal output (for CI)"
-    )
+    parser.add_argument("--quiet", "-q", action="store_true", help="Minimal output (for CI)")
 
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Output as JSON"
-    )
+    parser.add_argument("--verbose", action="store_true", help="Show detailed output including warnings")
+
+    parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     args = parser.parse_args()
 
@@ -1130,7 +1166,7 @@ Examples:
         print(f"{RED}Error: Path does not exist: {project_path}{NC}")
         return 1
 
-    setup = PipelineSetup(project_path, dry_run=args.dry_run)
+    setup = PipelineSetup(project_path, dry_run=args.dry_run, verbose=args.verbose)
 
     # Validate
     status = setup.validate()
@@ -1149,15 +1185,11 @@ Examples:
                     "level": i.level.value,
                     "component": i.component,
                     "message": i.message,
-                    "fix_available": i.fix_available
+                    "fix_available": i.fix_available,
                 }
                 for i in status.issues
             ],
-            "summary": {
-                "critical": status.critical_count,
-                "major": status.major_count,
-                "minor": status.minor_count
-            }
+            "summary": {"critical": status.critical_count, "major": status.major_count, "minor": status.minor_count},
         }
         print(json.dumps(output, indent=2))
         return 0 if status.is_valid else 1
@@ -1185,10 +1217,7 @@ Examples:
                 print(f"\n{GREEN}Fixed {fixed} issue(s){NC}")
 
                 # Re-validate
-                setup.status = PipelineStatus(
-                    project_type=ProjectType.UNKNOWN,
-                    project_path=project_path
-                )
+                setup.status = PipelineStatus(project_type=ProjectType.UNKNOWN, project_path=project_path)
                 status = setup.validate()
 
                 if status.is_valid and not status.issues:

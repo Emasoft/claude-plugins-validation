@@ -324,7 +324,7 @@ When asked to validate a plugin:
    - Identify root causes vs symptoms
    - Determine fix order (critical first)
 
-4. **Detect languages and verify dependencies**
+5. **Detect languages and verify dependencies**
    ```bash
    # Detect all languages present
    find . -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.rs" \
@@ -347,7 +347,7 @@ When asked to validate a plugin:
    grep -rh "which \|command -v " --include="*.sh" . 2>/dev/null
    ```
 
-5. **Test auto-installation capability for each language**
+6. **Test auto-installation capability for each language**
 
    **Python:**
    ```bash
@@ -376,16 +376,16 @@ When asked to validate a plugin:
    jq '.hooks.SessionStart, .hooks.Setup' hooks/hooks.json
    ```
 
-6. **Provide remediation guidance**
+7. **Provide remediation guidance**
    - Give specific file paths and line numbers
    - Show exact changes needed
    - Explain why each fix is necessary
 
-7. **Verify fixes**
+8. **Verify fixes**
    - Re-run validation after changes
    - Confirm all issues resolved
 
-8. **Validate and setup development pipeline**
+9. **Validate and setup development pipeline**
 
    After plugin validation passes, ensure the development pipeline is properly configured:
 
@@ -415,12 +415,10 @@ When asked to validate a plugin:
    ```
 
    Exit codes:
-   - 0: All checks passed
-   - 1: Critical issues found
-   - 2: Major issues found
-   - 3: Minor issues only
+   - 0: Pipeline is valid (may have minor issues)
+   - 1: Pipeline has critical or major issues requiring fixes
 
-9. **Verify changelog generation**
+10. **Verify changelog generation**
 
    Test that the changelog pipeline works:
    ```bash
