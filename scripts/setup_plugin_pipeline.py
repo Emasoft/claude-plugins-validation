@@ -1169,10 +1169,12 @@ Examples:
         print(f"{CYAN}{'=' * 60}{NC}")
         print_status(status)
 
-    # Fix if requested
-    if args.fix and not args.validate:
-        if status.is_valid and not args.dry_run:
-            print(f"{GREEN}No fixes needed - pipeline is valid{NC}")
+    # Fix if requested (works with or without --validate)
+    if args.fix:
+        # Check if there are any fixable issues (including minor ones)
+        fixable_issues = [i for i in status.issues if i.fix_available]
+        if not fixable_issues and not args.dry_run:
+            print(f"{GREEN}No fixes needed - all issues require manual intervention{NC}")
         else:
             print(f"\n{BOLD}Fixing issues...{NC}")
             fixed = setup.fix()
@@ -1189,8 +1191,10 @@ Examples:
                 )
                 status = setup.validate()
 
-                if status.is_valid:
-                    print(f"{GREEN}Pipeline is now valid{NC}")
+                if status.is_valid and not status.issues:
+                    print(f"{GREEN}Pipeline is now fully configured{NC}")
+                elif status.is_valid:
+                    print(f"{GREEN}Pipeline is valid (some minor issues remain){NC}")
                 else:
                     print(f"{YELLOW}Some issues remain - manual intervention needed{NC}")
 
