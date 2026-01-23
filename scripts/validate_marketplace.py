@@ -417,7 +417,7 @@ def validate_plugin_entry(
 def validate_plugin_source(
     plugin: dict[str, Any],
     plugin_id: str,
-    _marketplace_dir: Path,  # Reserved for future source path validation
+    marketplace_dir: Path,
     json_path: str,
 ) -> list[ValidationResult]:
     """Validate the source configuration for a plugin."""
@@ -429,7 +429,18 @@ def validate_plugin_source(
         if isinstance(source, str):
             # Accept relative paths (./path or ../path) as local source
             if source.startswith("./") or source.startswith("../"):
-                pass  # Valid local path shorthand
+                # Validate that the local path exists
+                resolved = marketplace_dir / source.lstrip("./")
+                if not resolved.exists():
+                    results.append(
+                        ValidationResult(
+                            level="major",
+                            category="plugin",
+                            message=f"Plugin '{plugin_id}' source path does not exist: {resolved}",
+                            file_path=json_path,
+                            suggestion="Ensure the plugin directory exists at the specified path",
+                        )
+                    )
             elif source not in VALID_SOURCE_TYPES:
                 results.append(
                     ValidationResult(
@@ -451,7 +462,7 @@ def validate_plugin_source(
             )
         return results
 
-    # Validate source type
+    # Source is a dict - validate source type
     source_type = source.get("type")
     if source_type is None:
         results.append(
@@ -484,6 +495,26 @@ def validate_plugin_source(
                         category="plugin",
                         message=f"Plugin '{plugin_id}' with source type '{source_type}' requires '{field_name}'",
                         file_path=json_path,
+                    )
+                )
+
+        # CRITICAL: Check if using git source type but plugin exists locally
+        # Claude Code's schema requires local path strings for local marketplace installations
+        if source_type == "git":
+            plugin_name = plugin.get("name", plugin_id)
+            local_plugin_path = marketplace_dir / plugin_name
+            if local_plugin_path.exists() and local_plugin_path.is_dir():
+                results.append(
+                    ValidationResult(
+                        level="critical",
+                        category="plugin",
+                        message=f"Plugin '{plugin_id}' uses source type 'git' but exists as local directory",
+                        file_path=json_path,
+                        suggestion=(
+                            f"Claude Code requires local path for local plugins. "
+                            f"Change source from {{\"type\": \"git\", \"repository\": \"...\"}} "
+                            f"to \"./{plugin_name}\" (string path)"
+                        ),
                     )
                 )
 
