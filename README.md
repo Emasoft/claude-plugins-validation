@@ -1,5 +1,8 @@
 # Claude Plugins Validation
 
+> **Installation:** This plugin is distributed via the [Emasoft Plugins Marketplace](https://github.com/Emasoft/emasoft-plugins).
+> See [Installation](#installation) below for instructions.
+
 Comprehensive validation suite for Claude Code plugins, marketplaces, hooks, skills, and MCP servers.
 
 ## Overview
@@ -12,17 +15,24 @@ This plugin provides:
 
 ## Installation
 
-### Via Claude Code CLI
+### Install from Emasoft Marketplace (Recommended)
 
 ```bash
-# Add this marketplace (if published)
-claude plugin marketplace add https://github.com/Emasoft/claude-plugins-validation
+# Step 1: Add the Emasoft marketplace
+claude plugin marketplace add https://github.com/Emasoft/emasoft-plugins
 
-# Install the plugin
-claude plugin install claude-plugins-validation@marketplace-name
+# Step 2: Install this plugin
+claude plugin install claude-plugins-validation@emasoft-plugins
+
+# Step 3: Verify installation
+claude plugin list
+
+# Step 4: Restart Claude Code
 ```
 
-### Local Development
+For detailed installation instructions, troubleshooting, and updates, see the **[Emasoft Plugins Marketplace README](https://github.com/Emasoft/emasoft-plugins#readme)**.
+
+### Local Development (for contributors)
 
 ```bash
 # Use directly without installation
