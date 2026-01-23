@@ -47,6 +47,16 @@ Use this skill when:
 
 ## Quick Start
 
+### Pre-Release Checklist
+
+Before publishing any plugin, use the **[Master Validation Checklist](references/validation-checklist.md)** which covers:
+- Plugin manifest and structure checks
+- Hook configuration validation
+- Skill frontmatter requirements
+- MCP server configuration
+- Marketplace configuration (including CRITICAL git submodules check)
+- Script and code quality
+
 ### Validate an Entire Plugin
 
 ```bash
@@ -216,6 +226,7 @@ For detailed specifications, read:
 
 | Topic | Reference File |
 |-------|----------------|
+| **Master Checklist** | [references/validation-checklist.md](references/validation-checklist.md) |
 | Plugin Structure | [references/plugin-structure.md](references/plugin-structure.md) |
 | Hook Configuration | [references/hook-validation.md](references/hook-validation.md) |
 | Skill Structure | [references/skill-validation.md](references/skill-validation.md) |
