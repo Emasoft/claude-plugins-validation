@@ -112,6 +112,40 @@ You are an expert Claude Code plugin validator. Your role is to thoroughly exami
 
    Before running validation, ensure all required linters are installed for detected languages:
 
+9. **Development Pipeline Setup and Validation**
+
+   Ensure the project has a proper CI/CD pipeline for plugin development:
+
+   **Pipeline Components to Verify:**
+   - Git hooks installed (pre-commit, pre-push, post-rewrite, post-merge)
+   - CHANGELOG generation via git-cliff
+   - GitHub Actions workflow for CI
+   - Proper .gitignore configuration
+   - cliff.toml for changelog customization
+   - LICENSE file present
+
+   **Use the Pipeline Setup Script:**
+   ```bash
+   # Validate existing pipeline
+   uv run python scripts/setup_plugin_pipeline.py /path/to/project --validate
+
+   # Validate and auto-fix issues
+   uv run python scripts/setup_plugin_pipeline.py /path/to/project --validate --fix
+
+   # Dry-run to see what would change
+   uv run python scripts/setup_plugin_pipeline.py /path/to/project --validate --fix --dry-run
+
+   # JSON output for CI integration
+   uv run python scripts/setup_plugin_pipeline.py /path/to/project --validate --json
+   ```
+
+   **Pipeline Status Checks:**
+   - Project type detection (marketplace, plugin, plugin_in_marketplace)
+   - Git repository initialization
+   - Submodule handling for nested plugins
+   - Hook architecture validation (v2 rebase-safe)
+   - Configuration file presence and validity
+
    | Language | Linters Required | Install Command |
    |----------|------------------|-----------------|
    | Python | ruff, mypy | `uv pip install ruff mypy` or `pip install ruff mypy` |
@@ -143,6 +177,15 @@ uv run python scripts/validate_skill.py /path/to/skill
 uv run python scripts/validate_hook.py /path/to/hooks.json
 uv run python scripts/validate_mcp.py /path/to/plugin
 uv run python scripts/validate_marketplace.py /path/to/marketplace
+
+# Validate and setup development pipeline (RECOMMENDED for new projects)
+uv run python scripts/setup_plugin_pipeline.py /path/to/project --validate --fix
+
+# Generate changelog manually
+python3 scripts/generate-changelog.py [--all] [--commit]
+
+# Install git hooks (v2 rebase-safe architecture)
+python3 scripts/setup-hooks.py
 ```
 
 ## Exit Code Interpretation
@@ -342,6 +385,55 @@ When asked to validate a plugin:
    - Re-run validation after changes
    - Confirm all issues resolved
 
+8. **Validate and setup development pipeline**
+
+   After plugin validation passes, ensure the development pipeline is properly configured:
+
+   ```bash
+   # Check pipeline status
+   cd /path/to/claude-plugins-validation
+   uv run python scripts/setup_plugin_pipeline.py /path/to/target --validate
+   ```
+
+   If pipeline issues are found:
+   ```bash
+   # Auto-fix all fixable issues
+   uv run python scripts/setup_plugin_pipeline.py /path/to/target --validate --fix
+   ```
+
+   **Pipeline components installed by --fix:**
+   - Rebase-safe git hooks (v2 architecture)
+   - cliff.toml for changelog generation
+   - .gitignore additions for build artifacts
+   - GitHub Actions workflow (.github/workflows/validate.yml)
+   - LICENSE file (MIT by default)
+
+   **For CI/CD integration:**
+   ```bash
+   # JSON output for automation
+   uv run python scripts/setup_plugin_pipeline.py /path/to/target --validate --json
+   ```
+
+   Exit codes:
+   - 0: All checks passed
+   - 1: Critical issues found
+   - 2: Major issues found
+   - 3: Minor issues only
+
+9. **Verify changelog generation**
+
+   Test that the changelog pipeline works:
+   ```bash
+   # Check git-cliff is installed
+   command -v git-cliff || echo "Install: brew install git-cliff"
+
+   # Test generation
+   python3 scripts/generate-changelog.py
+
+   # For marketplaces with submodules
+   python3 scripts/generate-changelog.py --all
+   ```
+
 ## Common Issues and Fixes
 
 ### Plugin Manifest Issues
@@ -461,6 +553,30 @@ When asked to validate a plugin:
 | Plugin subfolder missing README | Add README.md describing the plugin |
 | Placeholder content found | Replace [TODO], [INSERT], etc. with actual content |
 
+### Pipeline Issues
+
+| Issue | Fix |
+|-------|-----|
+| CHANGELOG conflicts during rebase | Use v2 hooks: `python3 scripts/setup-hooks.py` |
+| post-commit hook causing issues | Remove it: `rm .git/hooks/post-commit` and use post-rewrite instead |
+| git-cliff not installed | Install: `brew install git-cliff` (macOS) or `cargo install git-cliff` |
+| Missing cliff.toml | Run: `uv run python scripts/setup_plugin_pipeline.py . --fix` |
+| Hooks not firing | Check executable bit: `chmod +x .git/hooks/*` |
+| Submodule hooks missing | Run: `python3 scripts/setup-hooks.py` (handles submodules) |
+| Pipeline validation fails | Run: `uv run python scripts/setup_plugin_pipeline.py . --validate --verbose` |
+| Missing GitHub Actions workflow | Run: `uv run python scripts/setup_plugin_pipeline.py . --fix` |
+| .gitignore incomplete | Run: `uv run python scripts/setup_plugin_pipeline.py . --fix` |
+| No LICENSE file | Add LICENSE file or run pipeline fix |
+
+### Rebase/Merge Workflow Issues
+
+| Issue | Fix |
+|-------|-----|
+| CHANGELOG.md conflict during rebase | 1. `git checkout --ours CHANGELOG.md` 2. `git add CHANGELOG.md` 3. `git rebase --continue` 4. Regenerate after: `python3 scripts/generate-changelog.py` |
+| Pre-commit runs during rebase | Upgrade hooks: `python3 scripts/setup-hooks.py` (v2 skips during rebase) |
+| post-rewrite hook not firing | Check if hook exists: `ls -la .git/hooks/post-rewrite` |
+| Changelog not updating after rebase | Manually run: `python3 scripts/generate-changelog.py` |
+
 ## Best Practices to Verify
 
 1. **Naming Conventions**
@@ -522,25 +638,84 @@ Minor Issues:
 - Use `mypy` for Python type checking
 - Use `jq` to validate JSON syntax
 
-## Git Hooks for Continuous Validation
+## Git Hooks for Continuous Validation (v2 Rebase-Safe Architecture)
 
-Install git hooks to prevent broken plugins from being committed or pushed:
+The git hook system uses a **rebase-safe architecture** that prevents CHANGELOG.md conflicts during interactive rebases, cherry-picks, and merges.
+
+### Why Rebase-Safe?
+
+**Problem with old architecture:**
+The old post-commit hook fired on EVERY commit during rebase, regenerating CHANGELOG.md mid-rebase and causing merge conflicts.
+
+**Solution (v2 architecture):**
+- **Removed**: post-commit hook (was problematic)
+- **Added**: post-rewrite hook (fires ONCE after rebase/amend completes)
+- **Added**: post-merge hook (fires ONCE after merge completes)
+- **Updated**: pre-commit hook now detects and skips during rebase operations
+
+### Hook Summary
+
+| Hook | When It Fires | Purpose |
+|------|---------------|---------|
+| `pre-commit` | Before each commit | Lint, validate, version sync (SKIPS during rebase) |
+| `pre-push` | Before pushing | Full validation, blocks broken plugins |
+| `post-rewrite` | After rebase/amend completes | Regenerate CHANGELOG.md (fires ONCE) |
+| `post-merge` | After merge completes | Regenerate CHANGELOG.md |
+
+### Installation
+
+**Option 1: Use the pipeline setup script (RECOMMENDED)**
 
 ```bash
-# Install all hooks (pre-commit, pre-push, post-commit)
-python scripts/setup-hooks.py
+# Install everything including hooks
+uv run python scripts/setup_plugin_pipeline.py /path/to/project --validate --fix
+
+# Or use the dedicated hook installer
+python3 scripts/setup-hooks.py
 ```
 
-Or install manually:
+**Option 2: Manual installation**
 
 ```bash
-# Pre-commit hook - validates staged changes
+# Pre-commit hook - validates staged changes (skips during rebase)
 cp scripts/pre-commit-hook.py .git/hooks/pre-commit
 chmod +x .git/hooks/pre-commit
 
 # Pre-push hook - blocks pushing broken plugins (CRITICAL!)
 cp scripts/pre-push-hook.py .git/hooks/pre-push
 chmod +x .git/hooks/pre-push
+
+# Post-rewrite hook - regenerates changelog after rebase/amend
+# (auto-created by setup-hooks.py)
+
+# Post-merge hook - regenerates changelog after merge
+# (auto-created by setup-hooks.py)
+```
+
+### Rebase Detection
+
+The pre-commit hook automatically detects rebase/cherry-pick/merge operations by checking for:
+- `.git/rebase-merge/` (interactive rebase)
+- `.git/rebase-apply/` (non-interactive rebase, git am)
+- `.git/CHERRY_PICK_HEAD` (cherry-pick in progress)
+- `.git/MERGE_HEAD` (merge in progress)
+- `.git/BISECT_LOG` (bisect in progress)
+
+When any of these are detected, pre-commit validation is SKIPPED to prevent conflicts.
+
+### Manual Changelog Generation
+
+Since automatic post-commit changelog generation was removed, use:
+
+```bash
+# Generate for current repo only
+python3 scripts/generate-changelog.py
+
+# Generate for repo and all submodules
+python3 scripts/generate-changelog.py --all
+
+# Generate and commit changes
+python3 scripts/generate-changelog.py --all --commit
 ```
 
 ### Pre-Push Hook Behavior
@@ -562,9 +737,21 @@ The pre-push hook (`scripts/pre-push-hook.py`) runs comprehensive validation bef
 
 **Reference file:** See `references/pre-push-hook.py` for the full implementation.
 
+### Submodule Hook Handling
+
+For projects with submodules (plugins inside marketplace), hooks are installed in:
+- Main repo: `.git/hooks/`
+- Submodules: `.git/modules/<submodule>/hooks/`
+
+The setup script handles both automatically.
+
 ## Notes
 
 - This agent should be used proactively before releasing or updating plugins
 - Run validation in CI/CD pipelines
 - Keep validation scripts updated with latest Claude Code specifications
 - **ALWAYS install the pre-push hook** to prevent broken plugins from reaching GitHub
+- **Use v2 rebase-safe hook architecture** to prevent CHANGELOG.md conflicts during rebases
+- **Run `setup_plugin_pipeline.py --validate --fix`** when setting up any new plugin project
+- Manual changelog generation: `python3 scripts/generate-changelog.py --all --commit`
+- For existing projects with old hooks, upgrade with: `python3 scripts/setup-hooks.py`
