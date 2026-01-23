@@ -569,15 +569,15 @@ def validate_command_hook(
 
     report.passed(f"Command: {command[:60]}...")
 
-    # Validate timeout if present
+    # Validate timeout if present (Claude Code uses milliseconds)
     if "timeout" in hook:
         timeout = hook["timeout"]
         if not isinstance(timeout, (int, float)):
             report.major(f"'timeout' must be a number, got {type(timeout).__name__}")
         elif timeout <= 0:
             report.major("'timeout' must be positive")
-        elif timeout > 300:
-            report.minor(f"Long timeout ({timeout}s) may cause delays")
+        elif timeout > 300000:  # 5 minutes in milliseconds
+            report.minor(f"Long timeout ({timeout}ms / {timeout/1000:.0f}s) may cause delays")
 
     # Check for environment variable usage
     if "CLAUDE_ENV_FILE" in command:
