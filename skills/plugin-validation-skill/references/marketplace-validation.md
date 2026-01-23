@@ -724,6 +724,59 @@ my-plugin/
 }
 ```
 
+### CRITICAL: Invalid Source Schema for Local Plugins
+
+**Symptom:** When adding a local marketplace, you get:
+```
+✘ Failed to add marketplace: Invalid schema: plugins.0.source: Invalid input
+```
+
+**Cause:** Using `source: { "type": "git", "repository": "..." }` for plugins that exist as local directories in the marketplace.
+
+**Wrong (local marketplace with local plugin subdirectories):**
+```json
+{
+  "plugins": [
+    {
+      "name": "my-plugin",
+      "source": {
+        "type": "git",
+        "repository": "https://github.com/user/my-plugin"
+      },
+      "repository": "https://github.com/user/my-plugin"
+    }
+  ]
+}
+```
+
+**Correct (for local marketplace with plugin subdirectories):**
+```json
+{
+  "plugins": [
+    {
+      "name": "my-plugin",
+      "source": "./my-plugin",
+      "repository": "https://github.com/user/my-plugin"
+    }
+  ]
+}
+```
+
+**Key points:**
+- For **local marketplaces** where plugins are subdirectories (or git submodules), use **string path** for `source`
+- The `source` field is for **where Claude Code finds the plugin** - use local paths for local directories
+- The `repository` field (at plugin level) is for **reference only** - the remote URL for documentation/updates
+- Claude Code's schema validation is strict: `source: { type: "git", ... }` is NOT valid when the plugin exists locally
+
+**When to use each format:**
+
+| Scenario | source Format | Example |
+|----------|---------------|---------|
+| Plugin as local subdirectory | String path | `"./my-plugin"` |
+| Plugin as git submodule | String path | `"./my-plugin"` |
+| Plugin cloned from remote | Object with type: git | `{"type": "git", "repository": "..."}` |
+| Plugin from npm | Object with type: npm | `{"type": "npm", "package": "..."}` |
+
 ---
 
 ## 9. Validation Checklist
@@ -740,6 +793,7 @@ my-plugin/
 - [ ] Plugin names are kebab-case
 - [ ] Local paths resolve correctly
 - [ ] Each plugin has valid source configuration
+- [ ] **CRITICAL**: Local plugins use string path source (`"./plugin-name"`), not git object
 - [ ] Referenced plugins have plugin.json
 
 ### GitHub Deployment Checklist

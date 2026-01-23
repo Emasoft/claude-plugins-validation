@@ -4,6 +4,10 @@ All notable changes to the Claude Plugins Validation plugin will be documented i
 
 ## [Unreleased]
 
+### Bug Fixes
+
+- **validate_marketplace:** Detect git source type with local plugins
+
 ### Documentation
 
 - Add marketplace installation notice to README
