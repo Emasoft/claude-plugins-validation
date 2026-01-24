@@ -156,6 +156,146 @@ The lint order is strictly defined. **Formatting MUST be LAST** to avoid false p
 | Go | gofmt, go vet | Yes | (built-in with Go) |
 | Rust | cargo fmt, clippy | Yes | `rustup component add clippy rustfmt` |
 
+## AUTO-DETECTION AND AUTO-INSTALLATION BEHAVIOR
+
+### Language Detection Process
+
+The pre-push hook automatically detects languages by scanning file extensions:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│              Language Detection (Automatic)                  │
+├─────────────────────────────────────────────────────────────┤
+│  .py              → Python                                   │
+│  .js/.ts/.jsx/.tsx → JavaScript/TypeScript                   │
+│  .sh/.bash        → Shell/Bash                               │
+│  .go              → Go                                       │
+│  .rs              → Rust                                     │
+├─────────────────────────────────────────────────────────────┤
+│  Excluded dirs: .venv, venv, __pycache__, .git,             │
+│                 node_modules, .mypy_cache, .ruff_cache,      │
+│                 build, dist, .tox                            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Auto-Installation Matrix (DETAILED)
+
+| Language | Tool | Auto-Install? | Method | Fallback |
+|----------|------|---------------|--------|----------|
+| **Python** | ruff | ✅ YES | uv → pip → pip3 | Blocks push |
+| **Python** | mypy | ✅ YES | uv → pip → pip3 | Skips typecheck, warns |
+| **JavaScript** | eslint | ✅ YES | bun → npm → pnpm | Skips JS lint, warns |
+| **Shell** | shellcheck | ✅ YES | brew (macOS) → apt (Linux) | Skips shell lint, warns |
+| **Go** | gofmt | ❌ NO | (built-in with Go) | Skips go lint, warns |
+| **Go** | go vet | ❌ NO | (built-in with Go) | Skips go lint, warns |
+| **Rust** | rustfmt | ✅ YES | rustup component add | Skips format if no cargo |
+| **Rust** | clippy | ✅ YES | rustup component add | Skips lint if no cargo |
+
+### Verification Checklist: Auto-Detection
+
+```
+□ A.1 Check language detection output in pre-push log:
+      Look for: "Detected languages: python, javascript, shell"
+
+□ A.2 Verify file counts match expectations:
+      Look for: "[PYTHON] (7 files)", "[JAVASCRIPT] (3 files)"
+
+□ A.3 If language missing, check excluded directories:
+      Common issue: Files in node_modules/ or .venv/ are correctly ignored
+
+□ A.4 Test detection manually:
+      python3 -c "from setup_plugin_pipeline import detect_languages; print(detect_languages(Path('.')))"
+```
+
+### Verification Checklist: Auto-Installation
+
+```
+□ B.1 For Python (ruff + mypy auto-install):
+      □ Check if ruff exists: which ruff
+      □ If missing, hook shows: "Installing ruff..."
+      □ Then shows: "✔ ruff installed via [uv|pip|pip3]"
+      □ If all fail: "✘ Could not install ruff" → push blocked
+      □ Check if mypy exists: which mypy
+      □ If missing, hook shows: "Installing mypy..."
+      □ Then shows: "✔ mypy installed via [uv|pip|pip3]"
+      □ If mypy fails: "⚠ Could not install mypy, type checking will be skipped"
+      □ mypy failure does NOT block push (optional)
+
+□ B.2 For JavaScript (eslint auto-install):
+      □ Check local: ls node_modules/.bin/eslint
+      □ Check global: which eslint
+      □ Check for package.json (required for auto-install)
+      □ If missing + package.json exists: hook attempts install via bun/npm/pnpm
+      □ If no package.json: "⚠ eslint not available, skipping"
+
+□ B.3 For Shell (shellcheck auto-install):
+      □ Check: which shellcheck
+      □ If missing on macOS: hook tries "brew install shellcheck"
+      □ If missing on Linux: hook tries "sudo apt-get install -y shellcheck"
+      □ If install succeeds: "✔ shellcheck installed via [brew|apt]"
+      □ If install fails: "⚠ shellcheck not installed" → skipped, not blocked
+
+□ B.4 For Go (NO auto-install - requires Go SDK):
+      □ Check: which gofmt
+      □ If missing: "⚠ Go tools not installed (install Go from: https://go.dev/dl/)"
+      □ Go linting skipped, not blocked
+
+□ B.5 For Rust (rustfmt + clippy auto-install via rustup):
+      □ Check: which cargo
+      □ If cargo exists but rustfmt missing: hook runs "rustup component add rustfmt"
+      □ If cargo exists but clippy missing: hook runs "rustup component add clippy"
+      □ If cargo missing: "⚠ Rust/Cargo not installed (install from: https://rustup.rs/)"
+      □ Rust linting skipped if no cargo, not blocked
+```
+
+### Verification Checklist: Lint Execution
+
+```
+□ C.1 Python lint order verification:
+      □ [1/4] ruff check --fix appears FIRST
+      □ [2/4] mypy appears SECOND
+      □ [3/4] ruff check (verify) appears THIRD
+      □ [4/4] ruff format appears LAST (only if all above pass)
+
+□ C.2 JavaScript lint verification:
+      □ eslint --fix runs (if config exists)
+      □ Check for .eslintrc, .eslintrc.js, eslint.config.js
+
+□ C.3 Shell lint verification:
+      □ shellcheck -x runs on each .sh file
+      □ Issues reported but don't auto-fix
+
+□ C.4 Go lint verification:
+      □ gofmt -w runs (auto-fixes formatting)
+      □ go vet runs (reports issues)
+
+□ C.5 Rust lint verification:
+      □ cargo fmt runs (auto-fixes formatting)
+      □ cargo clippy runs (reports issues)
+```
+
+### Verification Checklist: Auto-Fix Loop
+
+```
+□ D.1 Check iteration counter:
+      Look for: "--- Iteration 1/5 ---"
+
+□ D.2 Verify file modification detection:
+      If files changed: "Files modified by auto-fix, committing..."
+
+□ D.3 Verify auto-commit:
+      Commit message: "chore: Auto-fix lint/format issues (iteration N)"
+
+□ D.4 Check loop restart:
+      After commit: "Restarting validation cycle..."
+
+□ D.5 Final outcome must be one of:
+      □ "✔ VALIDATION PASSED - Push allowed"
+      □ "✘ LINT ISSUES CANNOT BE AUTO-FIXED - Push blocked"
+      □ "✘ VALIDATION FAILED - Push blocked"
+      □ "✘ MAX ITERATIONS REACHED (5) - Push blocked"
+```
+
 ## Loop Exit Conditions
 
 | Condition | Exit Code | Result |

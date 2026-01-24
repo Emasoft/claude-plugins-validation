@@ -394,6 +394,25 @@ def detect_languages(repo_root: Path) -> dict[str, list[Path]]:
     return languages
 
 
+def install_python_tool(tool: str) -> bool:
+    """Try to install a Python tool via uv, pip, or pip3.
+
+    Returns:
+        True if installation succeeded, False otherwise.
+    """
+    for installer, cmd in [
+        ("uv", ["uv", "pip", "install", tool]),
+        ("pip", ["pip", "install", tool]),
+        ("pip3", ["pip3", "install", tool]),
+    ]:
+        if shutil.which(installer.split()[0]):
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if result.returncode == 0:
+                print(f"{GREEN}  ✔ {tool} installed via {installer}{NC}")
+                return True
+    return False
+
+
 def ensure_linter_installed(language: str, repo_root: Path) -> bool:
     """Ensure the linter for a language is installed. Auto-install if possible.
 
@@ -401,37 +420,21 @@ def ensure_linter_installed(language: str, repo_root: Path) -> bool:
         True if linter is available, False if cannot be installed.
     """
     if language == "python":
-        if shutil.which("ruff"):
-            return True
-        # Try to install ruff
-        print(f"{YELLOW}  Installing ruff...{NC}")
-        # Try uv first, then pip
-        if shutil.which("uv"):
-            result = subprocess.run(
-                ["uv", "pip", "install", "ruff"],
-                capture_output=True, text=True, timeout=120
-            )
-            if result.returncode == 0:
-                print(f"{GREEN}  ✔ ruff installed via uv{NC}")
-                return True
-        if shutil.which("pip"):
-            result = subprocess.run(
-                ["pip", "install", "ruff"],
-                capture_output=True, text=True, timeout=120
-            )
-            if result.returncode == 0:
-                print(f"{GREEN}  ✔ ruff installed via pip{NC}")
-                return True
-        if shutil.which("pip3"):
-            result = subprocess.run(
-                ["pip3", "install", "ruff"],
-                capture_output=True, text=True, timeout=120
-            )
-            if result.returncode == 0:
-                print(f"{GREEN}  ✔ ruff installed via pip3{NC}")
-                return True
-        print(f"{RED}  ✘ Could not install ruff{NC}")
-        return False
+        # Check and install ruff
+        if not shutil.which("ruff"):
+            print(f"{YELLOW}  Installing ruff...{NC}")
+            if not install_python_tool("ruff"):
+                print(f"{RED}  ✘ Could not install ruff{NC}")
+                return False
+
+        # Check and install mypy (for type checking)
+        if not shutil.which("mypy"):
+            print(f"{YELLOW}  Installing mypy...{NC}")
+            if not install_python_tool("mypy"):
+                print(f"{YELLOW}  ⚠ Could not install mypy, type checking will be skipped{NC}")
+                # Don't return False - mypy is optional, ruff is required
+
+        return True
 
     elif language == "javascript":
         # Check for eslint in node_modules or globally
@@ -459,19 +462,53 @@ def ensure_linter_installed(language: str, repo_root: Path) -> bool:
     elif language == "shell":
         if shutil.which("shellcheck"):
             return True
+        # Try to auto-install shellcheck
+        print(f"{YELLOW}  Installing shellcheck...{NC}")
+        # macOS: brew
+        if shutil.which("brew"):
+            result = subprocess.run(
+                ["brew", "install", "shellcheck"],
+                capture_output=True, text=True, timeout=180
+            )
+            if result.returncode == 0:
+                print(f"{GREEN}  ✔ shellcheck installed via brew{NC}")
+                return True
+        # Linux: apt
+        if shutil.which("apt-get"):
+            result = subprocess.run(
+                ["sudo", "apt-get", "install", "-y", "shellcheck"],
+                capture_output=True, text=True, timeout=180
+            )
+            if result.returncode == 0:
+                print(f"{GREEN}  ✔ shellcheck installed via apt{NC}")
+                return True
         print(f"{YELLOW}  ⚠ shellcheck not installed (install via: brew install shellcheck){NC}")
         return False
 
     elif language == "go":
         if shutil.which("gofmt"):
             return True
-        print(f"{YELLOW}  ⚠ Go tools not installed{NC}")
+        # gofmt comes with Go installation, can't auto-install separately
+        print(f"{YELLOW}  ⚠ Go tools not installed (install Go from: https://go.dev/dl/){NC}")
         return False
 
     elif language == "rust":
         if shutil.which("cargo"):
+            # Check for rustfmt and clippy components
+            if not shutil.which("rustfmt"):
+                print(f"{YELLOW}  Installing rustfmt...{NC}")
+                subprocess.run(
+                    ["rustup", "component", "add", "rustfmt"],
+                    capture_output=True, text=True, timeout=120
+                )
+            if not shutil.which("cargo-clippy"):
+                print(f"{YELLOW}  Installing clippy...{NC}")
+                subprocess.run(
+                    ["rustup", "component", "add", "clippy"],
+                    capture_output=True, text=True, timeout=120
+                )
             return True
-        print(f"{YELLOW}  ⚠ Rust/Cargo not installed{NC}")
+        print(f"{YELLOW}  ⚠ Rust/Cargo not installed (install from: https://rustup.rs/){NC}")
         return False
 
     return False
