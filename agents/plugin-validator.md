@@ -149,12 +149,15 @@ The lint order is strictly defined. **Formatting MUST be LAST** to avoid false p
 
 | Language | Linter | Auto-Fix | Install Command |
 |----------|--------|----------|-----------------|
-| Python | ruff, mypy | Yes | `uv pip install ruff mypy` |
-| JavaScript | eslint | Yes | `npm install -g eslint` |
-| TypeScript | eslint, tsc | Yes | `npm install -g eslint typescript` |
+| Python | ruff, mypy | Yes | `uv tool install --python 3.12 ruff && uv tool install --python 3.12 mypy` |
+| JavaScript | eslint | Yes | `bun add -g eslint` or `npm install -g eslint` |
+| TypeScript | eslint, tsc | Yes | `bun add -g eslint typescript` |
 | Shell/Bash | shellcheck | No | `brew install shellcheck` |
 | Go | gofmt, go vet | Yes | (built-in with Go) |
 | Rust | cargo fmt, clippy | Yes | `rustup component add clippy rustfmt` |
+| Markdown | markdownlint-cli | Yes | `bun x markdownlint-cli` or `npx markdownlint-cli` |
+| JSON | prettier, json.load | Yes | `bun x prettier` or `npx prettier` |
+| YAML | yamllint | No | `uv tool install --python 3.12 yamllint` |
 
 ## AUTO-DETECTION AND AUTO-INSTALLATION BEHAVIOR
 
@@ -171,6 +174,9 @@ The pre-push hook automatically detects languages by scanning file extensions:
 │  .sh/.bash        → Shell/Bash                               │
 │  .go              → Go                                       │
 │  .rs              → Rust                                     │
+│  .md/.mdx         → Markdown                                 │
+│  .json            → JSON                                     │
+│  .yml/.yaml       → YAML                                     │
 ├─────────────────────────────────────────────────────────────┤
 │  Excluded dirs: .venv, venv, __pycache__, .git,             │
 │                 node_modules, .mypy_cache, .ruff_cache,      │
@@ -182,14 +188,18 @@ The pre-push hook automatically detects languages by scanning file extensions:
 
 | Language | Tool | Auto-Install? | Method | Fallback |
 |----------|------|---------------|--------|----------|
-| **Python** | ruff | ✅ YES | uv → pip → pip3 | Blocks push |
-| **Python** | mypy | ✅ YES | uv → pip → pip3 | Skips typecheck, warns |
+| **Python** | ruff | ✅ YES | uv tool --python 3.12 → pipx → pip --user | Blocks push |
+| **Python** | mypy | ✅ YES | uv tool --python 3.12 → pipx → pip --user | Skips typecheck, warns |
 | **JavaScript** | eslint | ✅ YES | bun → npm → pnpm | Skips JS lint, warns |
-| **Shell** | shellcheck | ✅ YES | brew (macOS) → apt (Linux) | Skips shell lint, warns |
+| **Shell** | shellcheck | ✅ YES | brew (macOS) → apt (Linux) → scoop (Win) | Skips shell lint, warns |
 | **Go** | gofmt | ❌ NO | (built-in with Go) | Skips go lint, warns |
 | **Go** | go vet | ❌ NO | (built-in with Go) | Skips go lint, warns |
 | **Rust** | rustfmt | ✅ YES | rustup component add | Skips format if no cargo |
 | **Rust** | clippy | ✅ YES | rustup component add | Skips lint if no cargo |
+| **Markdown** | markdownlint | ✅ YES | bun x / npx (no install needed) | Skips md lint, warns |
+| **JSON** | json.load | ✅ BUILT-IN | Python stdlib | Always available |
+| **JSON** | prettier | ✅ YES | bun x / npx (no install needed) | Skips formatting |
+| **YAML** | yamllint | ✅ YES | uv tool --python 3.12 → pipx → pip --user | Skips yaml lint, warns |
 
 ### Verification Checklist: Auto-Detection
 
@@ -213,11 +223,11 @@ The pre-push hook automatically detects languages by scanning file extensions:
 □ B.1 For Python (ruff + mypy auto-install):
       □ Check if ruff exists: which ruff
       □ If missing, hook shows: "Installing ruff..."
-      □ Then shows: "✔ ruff installed via [uv|pip|pip3]"
+      □ Then shows: "✔ ruff installed via uv tool (Python 3.12)" or pipx/pip --user
       □ If all fail: "✘ Could not install ruff" → push blocked
       □ Check if mypy exists: which mypy
       □ If missing, hook shows: "Installing mypy..."
-      □ Then shows: "✔ mypy installed via [uv|pip|pip3]"
+      □ Then shows: "✔ mypy installed via uv tool (Python 3.12)" or pipx/pip --user
       □ If mypy fails: "⚠ Could not install mypy, type checking will be skipped"
       □ mypy failure does NOT block push (optional)
 
@@ -230,9 +240,10 @@ The pre-push hook automatically detects languages by scanning file extensions:
 
 □ B.3 For Shell (shellcheck auto-install):
       □ Check: which shellcheck
-      □ If missing on macOS: hook tries "brew install shellcheck"
-      □ If missing on Linux: hook tries "sudo apt-get install -y shellcheck"
-      □ If install succeeds: "✔ shellcheck installed via [brew|apt]"
+      □ If missing on macOS: hook tries "brew install shellcheck" or "port install shellcheck"
+      □ If missing on Linux: hook tries apt/dnf/yum/pacman/zypper/apk in order
+      □ If missing on Windows: hook tries "scoop install shellcheck" or choco/winget
+      □ If install succeeds: "✔ shellcheck installed via [pkg_manager]"
       □ If install fails: "⚠ shellcheck not installed" → skipped, not blocked
 
 □ B.4 For Go (NO auto-install - requires Go SDK):
@@ -246,6 +257,27 @@ The pre-push hook automatically detects languages by scanning file extensions:
       □ If cargo exists but clippy missing: hook runs "rustup component add clippy"
       □ If cargo missing: "⚠ Rust/Cargo not installed (install from: https://rustup.rs/)"
       □ Rust linting skipped if no cargo, not blocked
+
+□ B.6 For Markdown (markdownlint-cli via bun x / npx):
+      □ Check: which bun OR which npx (runners, no global install needed)
+      □ Check global fallback: which markdownlint
+      □ If bun/npx available: uses "bun x markdownlint-cli" or "npx markdownlint-cli"
+      □ If neither + markdownlint missing: "⚠ markdownlint not available" → skipped, not blocked
+      □ Markdown linting skipped if no runner, not blocked
+
+□ B.7 For JSON (Python json + optional prettier):
+      □ Validation: Always available via Python json.load()
+      □ Formatting: Check bun/npx/prettier
+      □ If bun/npx available: uses "bun x prettier" or "npx prettier"
+      □ If no formatter: "Using Python json module for JSON validation"
+      □ JSON validation never fails to install (built-in)
+
+□ B.8 For YAML (yamllint auto-install):
+      □ Check: which yamllint
+      □ If missing: hook tries "uv tool install --python 3.12 yamllint"
+      □ If uv fails: tries pipx, then pip --user
+      □ If all fail: "⚠ Could not install yamllint" → skipped, not blocked
+      □ Fallback message: "Install via: uv tool install --python 3.12 yamllint"
 ```
 
 ### Verification Checklist: Lint Execution
@@ -272,6 +304,21 @@ The pre-push hook automatically detects languages by scanning file extensions:
 □ C.5 Rust lint verification:
       □ cargo fmt runs (auto-fixes formatting)
       □ cargo clippy runs (reports issues)
+
+□ C.6 Markdown lint verification:
+      □ markdownlint --fix runs (auto-fixes formatting issues)
+      □ markdownlint runs again to verify (reports remaining issues)
+      □ Check for .markdownlint.json, .markdownlint.yaml config (optional)
+
+□ C.7 JSON lint verification:
+      □ Python json.load() validates syntax (always runs)
+      □ prettier --write --parser json runs (if prettier available)
+      □ Invalid JSON shows: "filename.json: Expecting..." error
+
+□ C.8 YAML lint verification:
+      □ yamllint -d relaxed --format parsable runs
+      □ Errors ([error]) block push, warnings ([warning]) don't
+      □ Check for .yamllint.yaml config (optional)
 ```
 
 ### Verification Checklist: Auto-Fix Loop
@@ -388,7 +435,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ruff mypy pyyaml
+          pip install ruff mypy pyyaml types-PyYAML
 
       - name: Find validator
         id: find-validator
@@ -405,6 +452,16 @@ jobs:
         if: steps.find-validator.outputs.validator != ''
         run: |
           python ${{ steps.find-validator.outputs.validator }} . --verbose
+          exit_code=$?
+          # Exit codes: 0=pass, 1=critical, 2=major, 3=minor (warnings only)
+          # Allow exit code 3 (minor issues) to pass CI
+          if [ $exit_code -eq 0 ] || [ $exit_code -eq 3 ]; then
+            echo "✓ Validation passed (exit code: $exit_code)"
+            exit 0
+          else
+            echo "✘ Validation failed (exit code: $exit_code)"
+            exit $exit_code
+          fi
 
       - name: Lint Python files
         run: |
@@ -485,12 +542,17 @@ Use this checklist to verify all pipeline components:
 ## Phase 6: Linter Configuration
 
 ```
-□ 6.1 Python: ruff available (uv pip install ruff)
-□ 6.2 Python: mypy available (uv pip install mypy)
+□ 6.1 Python: ruff available (uv tool install ruff)
+□ 6.2 Python: mypy available (uv tool install mypy)
 □ 6.3 Shell: shellcheck available (brew install shellcheck)
-□ 6.4 Run lint check: ruff check . --select=E,F,W
-□ 6.5 Run type check: mypy --ignore-missing-imports .
-□ 6.6 Run format check: ruff format --check .
+□ 6.4 Markdown: markdownlint available (bun x markdownlint-cli or npx)
+□ 6.5 JSON: prettier available (bun x prettier or npx) - optional, json.load always works
+□ 6.6 YAML: yamllint available (uv tool install yamllint)
+□ 6.7 Run lint check: ruff check . --select=E,F,W
+□ 6.8 Run type check: mypy --ignore-missing-imports .
+□ 6.9 Run format check: ruff format --check .
+□ 6.10 Run markdown check: bun x markdownlint-cli "**/*.md"
+□ 6.11 Run yaml check: yamllint -d relaxed .
 ```
 
 ## Phase 7: GitHub CI Verification

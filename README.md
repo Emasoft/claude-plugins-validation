@@ -166,12 +166,12 @@ The plugin-validator agent automatically detects all languages used in a plugin 
 
 | Language | File Extensions | Linters | Install Command |
 |----------|-----------------|---------|-----------------|
-| Python | `.py` | ruff, mypy | `uv pip install ruff mypy` |
+| Python | `.py` | ruff, mypy | `uv tool install --python 3.12 ruff && uv tool install --python 3.12 mypy` |
 | JavaScript | `.js`, `.mjs`, `.cjs` | eslint | `npm install -g eslint` |
 | TypeScript | `.ts`, `.tsx` | eslint, typescript | `npm install -g eslint typescript` |
 | Rust | `.rs` | clippy, rustfmt | `rustup component add clippy rustfmt` |
 | Go | `.go` | staticcheck, golangci-lint | `go install honnef.co/go/tools/cmd/staticcheck@latest` |
-| Shell/Bash | `.sh`, `.bash` | shellcheck | `brew install shellcheck` or `uv pip install shellcheck-py` |
+| Shell/Bash | `.sh`, `.bash` | shellcheck | `brew install shellcheck` or `uv tool install --python 3.12 shellcheck-py` |
 | PowerShell | `.ps1`, `.psm1`, `.psd1` | PSScriptAnalyzer | `pwsh -Command "Install-Module PSScriptAnalyzer -Scope CurrentUser"` |
 | Ruby | `.rb` | rubocop | `gem install rubocop` |
 

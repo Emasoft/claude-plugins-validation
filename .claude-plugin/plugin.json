@@ -1,6 +1,6 @@
 {
   "name": "claude-plugins-validation",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Comprehensive validation suite for Claude Code plugins, marketplaces, hooks, skills, and MCP servers. Provides validators, an expert agent, and detailed skill documentation for thorough plugin quality assurance.",
   "author": {
     "name": "Emasoft",

@@ -52,4 +52,4 @@ jobs:
 
       - name: Lint Python files
         run: |
-          ruff check . --select=E,F,W --ignore=E501 || true
+          ruff check . --select=E,F,W --ignore=E501

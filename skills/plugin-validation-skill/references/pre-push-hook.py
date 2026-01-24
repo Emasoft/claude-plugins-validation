@@ -42,13 +42,13 @@ def run_command(cmd: list[str], cwd: Path | None = None, timeout: int = 120) -> 
 def validate_json(file_path: Path) -> tuple[bool, str]:
     """Validate JSON file syntax."""
     try:
-        with open(file_path) as f:
+        with open(file_path, encoding="utf-8") as f:
             json.load(f)
         return True, ""
     except json.JSONDecodeError as e:
         return False, f"Invalid JSON: {e}"
-    except FileNotFoundError:
-        return False, "File not found"
+    except OSError as e:
+        return False, f"File error: {e}"
 
 
 def validate_semver(version: str) -> bool:
@@ -82,7 +82,7 @@ def validate_plugin_manifest(plugin_dir: Path) -> list[tuple[str, str]]:
         issues.append(("CRITICAL", f"Invalid plugin.json in {plugin_dir.name}: {error}"))
         return issues
 
-    with open(plugin_json) as f:
+    with open(plugin_json, encoding="utf-8") as f:
         data = json.load(f)
 
     # Check required fields
@@ -125,7 +125,7 @@ def validate_hooks_config(plugin_dir: Path) -> list[tuple[str, str]]:
         issues.append(("CRITICAL", f"Invalid hooks.json in {plugin_dir.name}: {error}"))
         return issues
 
-    with open(hooks_json) as f:
+    with open(hooks_json, encoding="utf-8") as f:
         data = json.load(f)
 
     hooks = data.get("hooks", {})
@@ -180,7 +180,7 @@ def validate_marketplace(repo_root: Path) -> list[tuple[str, str]]:
         issues.append(("CRITICAL", f"Invalid marketplace.json: {error}"))
         return issues
 
-    with open(marketplace_json) as f:
+    with open(marketplace_json, encoding="utf-8") as f:
         data = json.load(f)
 
     if not data.get("name"):
@@ -209,7 +209,7 @@ def check_version_consistency(repo_root: Path) -> list[tuple[str, str]]:
     if not marketplace_json.exists():
         return issues
 
-    with open(marketplace_json) as f:
+    with open(marketplace_json, encoding="utf-8") as f:
         marketplace = json.load(f)
 
     marketplace_plugins = {p["name"]: p.get("version") for p in marketplace.get("plugins", [])}
@@ -217,7 +217,7 @@ def check_version_consistency(repo_root: Path) -> list[tuple[str, str]]:
     for plugin_dir in find_plugins(repo_root):
         plugin_json = plugin_dir / ".claude-plugin" / "plugin.json"
         if plugin_json.exists():
-            with open(plugin_json) as f:
+            with open(plugin_json, encoding="utf-8") as f:
                 plugin = json.load(f)
             name = plugin.get("name")
             version = plugin.get("version")
@@ -255,7 +255,7 @@ def run_external_validator(repo_root: Path) -> list[tuple[str, str]]:
 def main() -> int:
     """Main pre-push validation."""
     # Get repo root
-    result = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    result = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=30)
     repo_root = Path(result.stdout.strip())
 
     print(f"{BOLD}{'=' * 60}{NC}")
