@@ -819,7 +819,7 @@ def main() -> int:
         print(f"{BLUE}[1] Linting and formatting...{NC}")
         lint_passed, files_changed = run_linting(repo_root)
 
-        # Step 2: If files changed, commit the fixes
+        # Step 2: If files changed, commit the fixes and restart
         if files_changed:
             print(f"{YELLOW}[2] Files modified by auto-fix, committing...{NC}")
             if not commit_auto_fixes(repo_root, iteration):
@@ -831,11 +831,21 @@ def main() -> int:
             print()
             continue
 
-        # Step 3: Run plugin validation
+        # Step 3: Check if there are unfixable lint issues
+        # (lint failed but nothing was changed = can't be auto-fixed)
+        if not lint_passed:
+            print()
+            print(f"{BOLD}{'=' * 60}{NC}")
+            print(f"{RED}✘ LINT ISSUES CANNOT BE AUTO-FIXED - Push blocked{NC}")
+            print(f"{RED}  Run 'ruff check .' to see remaining issues{NC}")
+            print(f"{BOLD}{'=' * 60}{NC}")
+            return 1
+
+        # Step 4: Run plugin validation
         print(f"{BLUE}[2] Running plugin validation...{NC}")
         issues = run_validation_cycle(repo_root, validator)
 
-        # Step 4: Check results
+        # Step 5: Check validation results
         if not issues:
             # All good!
             print()
@@ -846,18 +856,12 @@ def main() -> int:
             print(f"{BOLD}{'=' * 60}{NC}")
             return 0
 
-        # Issues found - check if they might be fixable
-        if not lint_passed:
-            # Linting issues remain, try another iteration
-            print(f"{YELLOW}[!] Lint issues detected, attempting auto-fix...{NC}")
-            print()
-            continue
-
-        # Validation failed with no lint issues to fix
+        # Validation failed - these are non-lint issues (schema, structure, etc.)
         print()
         print(f"{BOLD}{'=' * 60}{NC}")
         print(f"{RED}✘ VALIDATION FAILED - Push blocked{NC}")
-        print(f"{RED}  Unfixable issues in: {', '.join(issues)}{NC}")
+        print(f"{RED}  Issues in: {', '.join(issues)}{NC}")
+        print(f"{RED}  (Not fixable by linting - manual fix required){NC}")
         print(f"{BOLD}{'=' * 60}{NC}")
         return 1
 
