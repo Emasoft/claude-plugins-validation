@@ -345,58 +345,357 @@ def has_uncommitted_changes(repo_root: Path) -> bool:
     return len(lines) > 0
 
 
-def run_linting(repo_root: Path) -> tuple[bool, bool]:
-    """Run ruff check with auto-fix and ruff format.
+def detect_languages(repo_root: Path) -> dict[str, list[Path]]:
+    """Detect which programming languages are present in the repo.
 
     Returns:
-        (success, files_changed): Whether linting passed and if any files were modified.
+        Dictionary mapping language name to list of files.
+    """
+    # Directories to exclude from scanning
+    exclude_dirs = {".venv", "venv", "__pycache__", ".git", "node_modules",
+                    ".mypy_cache", ".ruff_cache", "build", "dist", ".tox"}
+
+    def should_include(path: Path) -> bool:
+        return not any(part in exclude_dirs for part in path.parts)
+
+    languages: dict[str, list[Path]] = {}
+
+    # Python
+    py_files = [f for f in repo_root.glob("**/*.py") if should_include(f)]
+    if py_files:
+        languages["python"] = py_files
+
+    # JavaScript/TypeScript
+    js_files = [f for f in repo_root.glob("**/*.js") if should_include(f)]
+    ts_files = [f for f in repo_root.glob("**/*.ts") if should_include(f)]
+    jsx_files = [f for f in repo_root.glob("**/*.jsx") if should_include(f)]
+    tsx_files = [f for f in repo_root.glob("**/*.tsx") if should_include(f)]
+    all_js = js_files + ts_files + jsx_files + tsx_files
+    if all_js:
+        languages["javascript"] = all_js
+
+    # Shell/Bash
+    sh_files = [f for f in repo_root.glob("**/*.sh") if should_include(f)]
+    bash_files = [f for f in repo_root.glob("**/*.bash") if should_include(f)]
+    all_shell = sh_files + bash_files
+    if all_shell:
+        languages["shell"] = all_shell
+
+    # Go
+    go_files = [f for f in repo_root.glob("**/*.go") if should_include(f)]
+    if go_files:
+        languages["go"] = go_files
+
+    # Rust
+    rs_files = [f for f in repo_root.glob("**/*.rs") if should_include(f)]
+    if rs_files:
+        languages["rust"] = rs_files
+
+    return languages
+
+
+def ensure_linter_installed(language: str, repo_root: Path) -> bool:
+    """Ensure the linter for a language is installed. Auto-install if possible.
+
+    Returns:
+        True if linter is available, False if cannot be installed.
+    """
+    if language == "python":
+        if shutil.which("ruff"):
+            return True
+        # Try to install ruff
+        print(f"{YELLOW}  Installing ruff...{NC}")
+        # Try uv first, then pip
+        if shutil.which("uv"):
+            result = subprocess.run(
+                ["uv", "pip", "install", "ruff"],
+                capture_output=True, text=True, timeout=120
+            )
+            if result.returncode == 0:
+                print(f"{GREEN}  ✔ ruff installed via uv{NC}")
+                return True
+        if shutil.which("pip"):
+            result = subprocess.run(
+                ["pip", "install", "ruff"],
+                capture_output=True, text=True, timeout=120
+            )
+            if result.returncode == 0:
+                print(f"{GREEN}  ✔ ruff installed via pip{NC}")
+                return True
+        if shutil.which("pip3"):
+            result = subprocess.run(
+                ["pip3", "install", "ruff"],
+                capture_output=True, text=True, timeout=120
+            )
+            if result.returncode == 0:
+                print(f"{GREEN}  ✔ ruff installed via pip3{NC}")
+                return True
+        print(f"{RED}  ✘ Could not install ruff{NC}")
+        return False
+
+    elif language == "javascript":
+        # Check for eslint in node_modules or globally
+        local_eslint = repo_root / "node_modules" / ".bin" / "eslint"
+        if local_eslint.exists() or shutil.which("eslint"):
+            return True
+        # Check for package.json to install eslint
+        package_json = repo_root / "package.json"
+        if package_json.exists():
+            print(f"{YELLOW}  Installing eslint...{NC}")
+            # Try bun, then npm, then pnpm
+            for pkg_mgr in ["bun", "npm", "pnpm"]:
+                if shutil.which(pkg_mgr):
+                    result = subprocess.run(
+                        [pkg_mgr, "install", "eslint", "--save-dev"],
+                        cwd=repo_root,
+                        capture_output=True, text=True, timeout=120
+                    )
+                    if result.returncode == 0:
+                        print(f"{GREEN}  ✔ eslint installed via {pkg_mgr}{NC}")
+                        return True
+        print(f"{YELLOW}  ⚠ eslint not available, skipping JS/TS linting{NC}")
+        return False
+
+    elif language == "shell":
+        if shutil.which("shellcheck"):
+            return True
+        print(f"{YELLOW}  ⚠ shellcheck not installed (install via: brew install shellcheck){NC}")
+        return False
+
+    elif language == "go":
+        if shutil.which("gofmt"):
+            return True
+        print(f"{YELLOW}  ⚠ Go tools not installed{NC}")
+        return False
+
+    elif language == "rust":
+        if shutil.which("cargo"):
+            return True
+        print(f"{YELLOW}  ⚠ Rust/Cargo not installed{NC}")
+        return False
+
+    return False
+
+
+def lint_python(repo_root: Path) -> tuple[bool, bool]:
+    """Lint Python files with ruff.
+
+    Returns:
+        (success, files_changed)
     """
     files_changed = False
 
-    # Check if ruff is available
-    if not shutil.which("ruff"):
-        print(f"{YELLOW}  ⚠ ruff not found, skipping auto-fix{NC}")
-        return True, False
-
-    # Find Python files to lint
-    py_files = list(repo_root.glob("**/*.py"))
-    # Exclude common non-source directories
-    py_files = [f for f in py_files if not any(
-        part in f.parts for part in [".venv", "venv", "__pycache__", ".git", "node_modules"]
-    )]
-
-    if not py_files:
-        return True, False
-
     # Run ruff check with auto-fix
-    print(f"{BLUE}  Running ruff check --fix...{NC}")
-    result = subprocess.run(
+    print(f"{BLUE}    ruff check --fix...{NC}")
+    subprocess.run(
         ["ruff", "check", "--fix", "--select=E,F,W,I", str(repo_root)],
         capture_output=True, text=True, timeout=120
     )
 
-    # Check if files were modified by ruff check
     if has_uncommitted_changes(repo_root):
         files_changed = True
 
     # Run ruff format
-    print(f"{BLUE}  Running ruff format...{NC}")
-    result = subprocess.run(
+    print(f"{BLUE}    ruff format...{NC}")
+    subprocess.run(
         ["ruff", "format", str(repo_root)],
         capture_output=True, text=True, timeout=120
     )
 
-    # Check again if files were modified
     if has_uncommitted_changes(repo_root):
         files_changed = True
 
-    # Run final check (no fix) to see if issues remain
+    # Final check
     result = subprocess.run(
         ["ruff", "check", "--select=E,F,W", str(repo_root)],
         capture_output=True, text=True, timeout=120
     )
 
     return result.returncode == 0, files_changed
+
+
+def lint_javascript(repo_root: Path) -> tuple[bool, bool]:
+    """Lint JavaScript/TypeScript files with eslint.
+
+    Returns:
+        (success, files_changed)
+    """
+    files_changed = False
+
+    # Find eslint
+    local_eslint = repo_root / "node_modules" / ".bin" / "eslint"
+    eslint_cmd = str(local_eslint) if local_eslint.exists() else "eslint"
+
+    # Check if eslint config exists
+    config_files = [".eslintrc", ".eslintrc.js", ".eslintrc.json", ".eslintrc.yml", "eslint.config.js"]
+    has_config = any((repo_root / cfg).exists() for cfg in config_files)
+
+    if not has_config:
+        print(f"{YELLOW}    No eslint config found, skipping{NC}")
+        return True, False
+
+    # Run eslint with --fix
+    print(f"{BLUE}    eslint --fix...{NC}")
+    result = subprocess.run(
+        [eslint_cmd, "--fix", "."],
+        cwd=repo_root,
+        capture_output=True, text=True, timeout=120
+    )
+
+    if has_uncommitted_changes(repo_root):
+        files_changed = True
+
+    # Final check
+    result = subprocess.run(
+        [eslint_cmd, "."],
+        cwd=repo_root,
+        capture_output=True, text=True, timeout=120
+    )
+
+    return result.returncode == 0, files_changed
+
+
+def lint_shell(repo_root: Path, files: list[Path]) -> tuple[bool, bool]:
+    """Lint shell scripts with shellcheck.
+
+    Returns:
+        (success, files_changed) - shellcheck doesn't auto-fix, so files_changed is always False
+    """
+    print(f"{BLUE}    shellcheck...{NC}")
+
+    all_passed = True
+    for f in files:
+        result = subprocess.run(
+            ["shellcheck", "-x", str(f)],
+            capture_output=True, text=True, timeout=60
+        )
+        if result.returncode != 0:
+            all_passed = False
+            print(f"{YELLOW}      {f.name}: issues found{NC}")
+
+    return all_passed, False
+
+
+def lint_go(repo_root: Path) -> tuple[bool, bool]:
+    """Lint Go files with gofmt and go vet.
+
+    Returns:
+        (success, files_changed)
+    """
+    files_changed = False
+
+    # Run gofmt -w (auto-fix)
+    print(f"{BLUE}    gofmt -w...{NC}")
+    subprocess.run(
+        ["gofmt", "-w", "."],
+        cwd=repo_root,
+        capture_output=True, text=True, timeout=120
+    )
+
+    if has_uncommitted_changes(repo_root):
+        files_changed = True
+
+    # Run go vet
+    print(f"{BLUE}    go vet...{NC}")
+    result = subprocess.run(
+        ["go", "vet", "./..."],
+        cwd=repo_root,
+        capture_output=True, text=True, timeout=120
+    )
+
+    return result.returncode == 0, files_changed
+
+
+def lint_rust(repo_root: Path) -> tuple[bool, bool]:
+    """Lint Rust files with cargo fmt and cargo clippy.
+
+    Returns:
+        (success, files_changed)
+    """
+    files_changed = False
+
+    # Check for Cargo.toml
+    if not (repo_root / "Cargo.toml").exists():
+        return True, False
+
+    # Run cargo fmt
+    print(f"{BLUE}    cargo fmt...{NC}")
+    subprocess.run(
+        ["cargo", "fmt"],
+        cwd=repo_root,
+        capture_output=True, text=True, timeout=120
+    )
+
+    if has_uncommitted_changes(repo_root):
+        files_changed = True
+
+    # Run cargo clippy with auto-fix (if available)
+    print(f"{BLUE}    cargo clippy --fix...{NC}")
+    result = subprocess.run(
+        ["cargo", "clippy", "--fix", "--allow-dirty", "--allow-staged"],
+        cwd=repo_root,
+        capture_output=True, text=True, timeout=180
+    )
+
+    if has_uncommitted_changes(repo_root):
+        files_changed = True
+
+    # Final check
+    result = subprocess.run(
+        ["cargo", "clippy"],
+        cwd=repo_root,
+        capture_output=True, text=True, timeout=120
+    )
+
+    return result.returncode == 0, files_changed
+
+
+def run_linting(repo_root: Path) -> tuple[bool, bool]:
+    """Detect languages and run appropriate linters with auto-fix.
+
+    Returns:
+        (success, files_changed): Whether all linting passed and if any files were modified.
+    """
+    files_changed = False
+    all_passed = True
+
+    # Detect languages present
+    languages = detect_languages(repo_root)
+
+    if not languages:
+        print(f"{YELLOW}  No source files found to lint{NC}")
+        return True, False
+
+    print(f"{BLUE}  Detected languages: {', '.join(languages.keys())}{NC}")
+
+    # Lint each detected language
+    for lang, files in languages.items():
+        print(f"{BLUE}  [{lang.upper()}] ({len(files)} files){NC}")
+
+        # Ensure linter is installed
+        if not ensure_linter_installed(lang, repo_root):
+            continue
+
+        # Run language-specific linter
+        if lang == "python":
+            passed, changed = lint_python(repo_root)
+        elif lang == "javascript":
+            passed, changed = lint_javascript(repo_root)
+        elif lang == "shell":
+            passed, changed = lint_shell(repo_root, files)
+        elif lang == "go":
+            passed, changed = lint_go(repo_root)
+        elif lang == "rust":
+            passed, changed = lint_rust(repo_root)
+        else:
+            continue
+
+        if not passed:
+            all_passed = False
+        if changed:
+            files_changed = True
+
+    return all_passed, files_changed
 
 
 def commit_auto_fixes(repo_root: Path, iteration: int) -> bool:
