@@ -449,8 +449,7 @@ def validate_plugin_source(
                         message=f"Plugin '{plugin_id}' has invalid source type: {source}",
                         file_path=json_path,
                         suggestion=(
-                            f"Valid source types: {', '.join(sorted(VALID_SOURCE_TYPES))} "
-                            "or relative path (./path)"
+                            f"Valid source types: {', '.join(sorted(VALID_SOURCE_TYPES))} or relative path (./path)"
                         ),
                     )
                 )
@@ -866,14 +865,10 @@ def validate_readme_content(readme_path: Path) -> list[ValidationResult]:
                 ValidationResult(
                     level="minor",
                     category="deployment",
-                    message=(
-                        f"README.md Installation section may be incomplete. "
-                        f"Missing: {', '.join(missing_steps)}"
-                    ),
+                    message=(f"README.md Installation section may be incomplete. Missing: {', '.join(missing_steps)}"),
                     file_path=str(readme_path),
                     suggestion=(
-                        "Include steps for: add marketplace, install plugin, "
-                        "verify installation, restart Claude Code"
+                        "Include steps for: add marketplace, install plugin, verify installation, restart Claude Code"
                     ),
                 )
             )
@@ -1010,8 +1005,7 @@ def validate_git_submodules(
                         level="info",
                         category="submodule",
                         message=(
-                            f"Plugin '{plugin_name}' has git source but no local directory "
-                            "(acceptable for remote-only)"
+                            f"Plugin '{plugin_name}' has git source but no local directory (acceptable for remote-only)"
                         ),
                         file_path=str(plugin_path),
                     )

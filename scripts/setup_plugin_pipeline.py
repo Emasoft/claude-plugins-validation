@@ -1210,8 +1210,7 @@ class PipelineSetup:
                     level=IssueLevel.CRITICAL,
                     component="project",
                     message=(
-                        "Not a valid plugin or marketplace "
-                        "(missing .claude-plugin/plugin.json or marketplace.json)"
+                        "Not a valid plugin or marketplace (missing .claude-plugin/plugin.json or marketplace.json)"
                     ),
                     fix_available=False,
                 )
