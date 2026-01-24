@@ -448,7 +448,10 @@ def validate_plugin_source(
                         category="plugin",
                         message=f"Plugin '{plugin_id}' has invalid source type: {source}",
                         file_path=json_path,
-                        suggestion=f"Valid source types: {', '.join(sorted(VALID_SOURCE_TYPES))} or relative path (./path)",
+                        suggestion=(
+                            f"Valid source types: {', '.join(sorted(VALID_SOURCE_TYPES))} "
+                            "or relative path (./path)"
+                        ),
                     )
                 )
         else:
@@ -863,9 +866,15 @@ def validate_readme_content(readme_path: Path) -> list[ValidationResult]:
                 ValidationResult(
                     level="minor",
                     category="deployment",
-                    message=f"README.md Installation section may be incomplete. Missing: {', '.join(missing_steps)}",
+                    message=(
+                        f"README.md Installation section may be incomplete. "
+                        f"Missing: {', '.join(missing_steps)}"
+                    ),
                     file_path=str(readme_path),
-                    suggestion="Include steps for: add marketplace, install plugin, verify installation, restart Claude Code",
+                    suggestion=(
+                        "Include steps for: add marketplace, install plugin, "
+                        "verify installation, restart Claude Code"
+                    ),
                 )
             )
 
@@ -1000,7 +1009,10 @@ def validate_git_submodules(
                     ValidationResult(
                         level="info",
                         category="submodule",
-                        message=f"Plugin '{plugin_name}' has git source but no local directory (acceptable for remote-only)",
+                        message=(
+                            f"Plugin '{plugin_name}' has git source but no local directory "
+                            "(acceptable for remote-only)"
+                        ),
                         file_path=str(plugin_path),
                     )
                 )
@@ -1022,7 +1034,10 @@ def validate_git_submodules(
                         category="submodule",
                         message=f"Plugin '{plugin_name}' directory exists but is not a git submodule",
                         file_path=str(plugin_path),
-                        suggestion=f"Convert to submodule: 'git rm -r {plugin_name} && git submodule add <repo-url> {plugin_name}'",
+                        suggestion=(
+                            f"Convert to submodule: 'git rm -r {plugin_name} && "
+                            f"git submodule add <repo-url> {plugin_name}'"
+                        ),
                     )
                 )
                 continue
