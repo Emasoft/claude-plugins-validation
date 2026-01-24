@@ -49,18 +49,20 @@ import argparse
 import configparser
 import json
 import os
+
+# ANSI Colors - Enable Windows support
+import platform as _platform
 import stat
 import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-# ANSI Colors - Enable Windows support
-import platform as _platform
 if _platform.system() == "Windows":
     # Enable ANSI escape sequences on Windows 10+
     try:
         import ctypes
+
         kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
         kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
     except (AttributeError, OSError):
