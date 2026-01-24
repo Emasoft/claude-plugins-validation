@@ -55,7 +55,17 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-# ANSI Colors
+# ANSI Colors - Enable Windows support
+import platform as _platform
+if _platform.system() == "Windows":
+    # Enable ANSI escape sequences on Windows 10+
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+    except (AttributeError, OSError):
+        pass  # Not Windows or older Windows without ANSI support
+
 RED = "\033[0;31m"
 GREEN = "\033[0;32m"
 YELLOW = "\033[1;33m"
@@ -462,34 +472,66 @@ def ensure_linter_installed(language: str, repo_root: Path) -> bool:
     elif language == "shell":
         if shutil.which("shellcheck"):
             return True
-        # Try to auto-install shellcheck
+        # Try to auto-install shellcheck (cross-platform)
         print(f"{YELLOW}  Installing shellcheck...{NC}")
-        # macOS: brew
-        if shutil.which("brew"):
-            result = subprocess.run(
-                ["brew", "install", "shellcheck"],
-                capture_output=True, text=True, timeout=180
-            )
-            if result.returncode == 0:
-                print(f"{GREEN}  ✔ shellcheck installed via brew{NC}")
-                return True
-        # Linux: apt
-        if shutil.which("apt-get"):
-            result = subprocess.run(
-                ["sudo", "apt-get", "install", "-y", "shellcheck"],
-                capture_output=True, text=True, timeout=180
-            )
-            if result.returncode == 0:
-                print(f"{GREEN}  ✔ shellcheck installed via apt{NC}")
-                return True
-        print(f"{YELLOW}  ⚠ shellcheck not installed (install via: brew install shellcheck){NC}")
+        import platform
+        os_type = platform.system().lower()
+
+        # Define package managers by platform and priority
+        pkg_managers = []
+        if os_type == "darwin":  # macOS
+            pkg_managers = [
+                ("brew", ["brew", "install", "shellcheck"]),
+                ("port", ["sudo", "port", "install", "shellcheck"]),
+            ]
+        elif os_type == "linux":
+            pkg_managers = [
+                ("apt-get", ["sudo", "apt-get", "install", "-y", "shellcheck"]),
+                ("dnf", ["sudo", "dnf", "install", "-y", "ShellCheck"]),
+                ("yum", ["sudo", "yum", "install", "-y", "ShellCheck"]),
+                ("pacman", ["sudo", "pacman", "-S", "--noconfirm", "shellcheck"]),
+                ("zypper", ["sudo", "zypper", "install", "-y", "ShellCheck"]),
+                ("apk", ["sudo", "apk", "add", "shellcheck"]),
+                ("brew", ["brew", "install", "shellcheck"]),  # Linuxbrew
+            ]
+        elif os_type == "windows":
+            pkg_managers = [
+                ("scoop", ["scoop", "install", "shellcheck"]),
+                ("choco", ["choco", "install", "shellcheck", "-y"]),
+                ("winget", ["winget", "install", "--id", "koalaman.shellcheck", "-e"]),
+            ]
+
+        for pkg_mgr, cmd in pkg_managers:
+            if shutil.which(pkg_mgr):
+                try:
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+                    if result.returncode == 0:
+                        print(f"{GREEN}  ✔ shellcheck installed via {pkg_mgr}{NC}")
+                        return True
+                except subprocess.TimeoutExpired:
+                    continue
+
+        # Provide platform-specific install instructions
+        install_hint = {
+            "darwin": "brew install shellcheck",
+            "linux": "apt install shellcheck  # or dnf/pacman/zypper",
+            "windows": "scoop install shellcheck  # or choco/winget",
+        }.get(os_type, "see https://github.com/koalaman/shellcheck#installing")
+        print(f"{YELLOW}  ⚠ shellcheck not installed (install via: {install_hint}){NC}")
         return False
 
     elif language == "go":
         if shutil.which("gofmt"):
             return True
         # gofmt comes with Go installation, can't auto-install separately
-        print(f"{YELLOW}  ⚠ Go tools not installed (install Go from: https://go.dev/dl/){NC}")
+        import platform
+        os_type = platform.system().lower()
+        install_hint = {
+            "darwin": "brew install go  # or download from go.dev/dl",
+            "linux": "apt install golang  # or dnf/pacman, or download from go.dev/dl",
+            "windows": "scoop install go  # or choco install golang, or download from go.dev/dl",
+        }.get(os_type, "https://go.dev/dl/")
+        print(f"{YELLOW}  ⚠ Go tools not installed (install via: {install_hint}){NC}")
         return False
 
     elif language == "rust":
@@ -508,7 +550,15 @@ def ensure_linter_installed(language: str, repo_root: Path) -> bool:
                     capture_output=True, text=True, timeout=120
                 )
             return True
-        print(f"{YELLOW}  ⚠ Rust/Cargo not installed (install from: https://rustup.rs/){NC}")
+        # Rust/Cargo not found
+        import platform
+        os_type = platform.system().lower()
+        install_hint = {
+            "darwin": "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh",
+            "linux": "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh",
+            "windows": "Download rustup-init.exe from https://rustup.rs/",
+        }.get(os_type, "https://rustup.rs/")
+        print(f"{YELLOW}  ⚠ Rust/Cargo not installed (install via: {install_hint}){NC}")
         return False
 
     return False
