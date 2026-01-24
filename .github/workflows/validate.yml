@@ -1,0 +1,45 @@
+name: Plugin Validation
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff mypy pyyaml
+
+      - name: Find validator
+        id: find-validator
+        run: |
+          if [ -f "scripts/validate_plugin.py" ]; then
+            echo "validator=scripts/validate_plugin.py" >> $GITHUB_OUTPUT
+          elif [ -f "claude-plugins-validation/scripts/validate_plugin.py" ]; then
+            echo "validator=claude-plugins-validation/scripts/validate_plugin.py" >> $GITHUB_OUTPUT
+          else
+            echo "validator=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Validate plugin(s)
+        if: steps.find-validator.outputs.validator != ''
+        run: |
+          python ${{ steps.find-validator.outputs.validator }} . --verbose
+
+      - name: Lint Python files
+        run: |
+          ruff check . --select=E,F,W --ignore=E501 || true

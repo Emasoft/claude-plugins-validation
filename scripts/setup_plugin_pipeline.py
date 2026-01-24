@@ -207,10 +207,10 @@ def validate_json_files(files: list[str]) -> tuple[bool, list[str]]:
 def check_sensitive_data(diff: str) -> list[str]:
     """Check for potential sensitive data in diff."""
     patterns = [
-        (r"password\\s*[:=]\\s*[\\'\\""].+[\\'\\""]", "password"),
-        (r"api[_-]?key\\s*[:=]\\s*[\\'\\""].+[\\'\\""]", "API key"),
-        (r"secret\\s*[:=]\\s*[\\'\\""].+[\\'\\""]", "secret"),
-        (r"token\\s*[:=]\\s*[\\'\\""][a-zA-Z0-9]{20,}[\\'\\""]", "token"),
+        (r'password\\s*[:=]\\s*[\\'\\"].+[\\'\\"]', "password"),
+        (r'api[_-]?key\\s*[:=]\\s*[\\'\\"].+[\\'\\"]', "API key"),
+        (r'secret\\s*[:=]\\s*[\\'\\"].+[\\'\\"]', "secret"),
+        (r'token\\s*[:=]\\s*[\\'\\"][a-zA-Z0-9]{20,}[\\'\\"]', "token"),
     ]
     warnings = []
     for line in diff.split("\\n"):
@@ -480,13 +480,15 @@ def ensure_linter_installed(language: str, repo_root: Path) -> bool:
 def lint_python(repo_root: Path) -> tuple[bool, bool]:
     """Lint Python files with ruff.
 
+    Order: 1) lint+fix, 2) typecheck, 3) verify lint, 4) format (last)
+
     Returns:
         (success, files_changed)
     """
     files_changed = False
 
-    # Run ruff check with auto-fix
-    print(f"{BLUE}    ruff check --fix...{NC}")
+    # Step 1: Run ruff check with auto-fix
+    print(f"{BLUE}    [1/4] ruff check --fix...{NC}")
     subprocess.run(
         ["ruff", "check", "--fix", "--select=E,F,W,I", str(repo_root)],
         capture_output=True, text=True, timeout=120
@@ -495,8 +497,35 @@ def lint_python(repo_root: Path) -> tuple[bool, bool]:
     if has_uncommitted_changes(repo_root):
         files_changed = True
 
-    # Run ruff format
-    print(f"{BLUE}    ruff format...{NC}")
+    # Step 2: Run type checker (mypy) if available
+    if shutil.which("mypy"):
+        print(f"{BLUE}    [2/4] mypy...{NC}")
+        result = subprocess.run(
+            ["mypy", "--ignore-missing-imports", str(repo_root)],
+            capture_output=True, text=True, timeout=180
+        )
+        if result.returncode != 0:
+            print(f"{RED}    Type errors found:{NC}")
+            for line in result.stdout.strip().split("\\n")[:10]:
+                print(f"      {line}")
+            return False, files_changed
+    else:
+        print(f"{YELLOW}    [2/4] mypy not installed, skipping typecheck{NC}")
+
+    # Step 3: Verify lint check passes (no remaining unfixable issues)
+    print(f"{BLUE}    [3/4] ruff check (verify)...{NC}")
+    result = subprocess.run(
+        ["ruff", "check", "--select=E,F,W", str(repo_root)],
+        capture_output=True, text=True, timeout=120
+    )
+
+    if result.returncode != 0:
+        # Lint issues remain that can't be auto-fixed
+        print(f"{RED}    Unfixable lint issues remain{NC}")
+        return False, files_changed
+
+    # Step 4: Format ONLY if all above passed (formatting is last)
+    print(f"{BLUE}    [4/4] ruff format...{NC}")
     subprocess.run(
         ["ruff", "format", str(repo_root)],
         capture_output=True, text=True, timeout=120
@@ -505,13 +534,7 @@ def lint_python(repo_root: Path) -> tuple[bool, bool]:
     if has_uncommitted_changes(repo_root):
         files_changed = True
 
-    # Final check
-    result = subprocess.run(
-        ["ruff", "check", "--select=E,F,W", str(repo_root)],
-        capture_output=True, text=True, timeout=120
-    )
-
-    return result.returncode == 0, files_changed
+    return True, files_changed
 
 
 def lint_javascript(repo_root: Path) -> tuple[bool, bool]:
