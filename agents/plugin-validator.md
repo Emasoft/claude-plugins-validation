@@ -656,7 +656,7 @@ The old post-commit hook fired on EVERY commit during rebase, regenerating CHANG
 | Hook | When It Fires | Purpose |
 |------|---------------|---------|
 | `pre-commit` | Before each commit | Lint, validate, version sync (SKIPS during rebase) |
-| `pre-push` | Before pushing | Full validation, blocks broken plugins |
+| `pre-push` | Before pushing | **Auto-fix loop**: lint → fix → commit → re-validate (max 5 iterations) |
 | `post-rewrite` | After rebase/amend completes | Regenerate CHANGELOG.md (fires ONCE) |
 | `post-merge` | After merge completes | Regenerate CHANGELOG.md |
 
@@ -716,24 +716,52 @@ python3 scripts/generate-changelog.py --all
 python3 scripts/generate-changelog.py --all --commit
 ```
 
-### Pre-Push Hook Behavior
+### Pre-Push Hook Behavior (CI/CD Loop)
 
-The pre-push hook (`scripts/pre-push-hook.py`) runs comprehensive validation before every `git push`:
+The pre-push hook implements a **CI/CD auto-fix loop** that automatically fixes linting/formatting issues before pushing:
 
-| Issue Severity | Action | Bypass |
-|----------------|--------|--------|
-| CRITICAL | Push blocked | `git push --no-verify` (NOT RECOMMENDED) |
-| MAJOR | Push blocked | `git push --no-verify` (NOT RECOMMENDED) |
-| MINOR | Warning only | Push allowed |
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Pre-Push Auto-Fix Loop                    │
+├─────────────────────────────────────────────────────────────┤
+│  1. Run linting (ruff check --fix) and formatting (ruff     │
+│     format)                                                  │
+│  2. Check if files were modified                            │
+│  3. If modified → commit fixes → restart loop               │
+│  4. Run plugin validation                                   │
+│  5. If clean → push allowed                                 │
+│  6. If issues remain → continue loop (max 5 iterations)     │
+│  7. If unfixable issues → push blocked                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Loop Behavior:**
+
+| Condition | Action | Result |
+|-----------|--------|--------|
+| Fixable lint issues | Auto-fix, auto-commit, restart loop | Continues |
+| Files modified by fix | Commit "chore: Auto-fix lint/format issues" | Loop restarts |
+| All validations pass | Push allowed | Success |
+| Unfixable issues remain | Push blocked | Failure |
+| Max 5 iterations reached | Push blocked | Manual fix required |
+
+**Bypass:** `git push --no-verify` (NOT RECOMMENDED - may push broken code)
 
 **What it validates:**
+- Linting: ruff check with E, F, W, I rules (auto-fixable)
+- Formatting: ruff format (auto-fixable)
 - marketplace.json structure and required fields
 - Each plugin's manifest (plugin.json) - name, version, semver format
 - Hook configurations (hooks.json) - valid events, script paths
 - Version consistency between plugins and marketplace
 - External validators from claude-plugins-validation (if available)
 
-**Reference file:** See `references/pre-push-hook.py` for the full implementation.
+**Auto-Fix Commits:**
+When the loop auto-fixes issues, it creates commits with message:
+```
+chore: Auto-fix lint/format issues (iteration N)
+```
+These commits use `--no-verify` to avoid triggering pre-commit hooks again.
 
 ### Submodule Hook Handling
 

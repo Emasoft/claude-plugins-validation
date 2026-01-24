@@ -280,11 +280,19 @@ if __name__ == "__main__":
 '''
 
 PRE_PUSH_HOOK = '''#!/usr/bin/env python3
-"""pre-push hook: Full validation before pushing.
+"""pre-push hook: Full validation before pushing with auto-fix loop.
 
-Blocks push if plugin validation fails.
+Implements a CI/CD loop that:
+1. Runs linting/formatting with auto-fix (ruff)
+2. Checks if files were modified
+3. If modified, commits the fixes
+4. Re-runs validation
+5. Loops until clean or max iterations reached
+
+Blocks push only if unfixable issues remain after all auto-fix attempts.
 """
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -295,6 +303,8 @@ YELLOW = "\\033[1;33m"
 BLUE = "\\033[0;34m"
 BOLD = "\\033[1m"
 NC = "\\033[0m"
+
+MAX_FIX_ITERATIONS = 5
 
 
 def get_repo_root() -> Path:
@@ -323,6 +333,120 @@ def find_validator() -> Path | None:
     return None
 
 
+def has_uncommitted_changes(repo_root: Path) -> bool:
+    """Check if there are uncommitted changes in tracked files."""
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=repo_root,
+        capture_output=True, text=True, timeout=30
+    )
+    # Filter for modified/added files (not untracked)
+    lines = [l for l in result.stdout.strip().split("\\n") if l and not l.startswith("??")]
+    return len(lines) > 0
+
+
+def run_linting(repo_root: Path) -> tuple[bool, bool]:
+    """Run ruff check with auto-fix and ruff format.
+
+    Returns:
+        (success, files_changed): Whether linting passed and if any files were modified.
+    """
+    files_changed = False
+
+    # Check if ruff is available
+    if not shutil.which("ruff"):
+        print(f"{YELLOW}  ⚠ ruff not found, skipping auto-fix{NC}")
+        return True, False
+
+    # Find Python files to lint
+    py_files = list(repo_root.glob("**/*.py"))
+    # Exclude common non-source directories
+    py_files = [f for f in py_files if not any(
+        part in f.parts for part in [".venv", "venv", "__pycache__", ".git", "node_modules"]
+    )]
+
+    if not py_files:
+        return True, False
+
+    # Run ruff check with auto-fix
+    print(f"{BLUE}  Running ruff check --fix...{NC}")
+    result = subprocess.run(
+        ["ruff", "check", "--fix", "--select=E,F,W,I", str(repo_root)],
+        capture_output=True, text=True, timeout=120
+    )
+
+    # Check if files were modified by ruff check
+    if has_uncommitted_changes(repo_root):
+        files_changed = True
+
+    # Run ruff format
+    print(f"{BLUE}  Running ruff format...{NC}")
+    result = subprocess.run(
+        ["ruff", "format", str(repo_root)],
+        capture_output=True, text=True, timeout=120
+    )
+
+    # Check again if files were modified
+    if has_uncommitted_changes(repo_root):
+        files_changed = True
+
+    # Run final check (no fix) to see if issues remain
+    result = subprocess.run(
+        ["ruff", "check", "--select=E,F,W", str(repo_root)],
+        capture_output=True, text=True, timeout=120
+    )
+
+    return result.returncode == 0, files_changed
+
+
+def commit_auto_fixes(repo_root: Path, iteration: int) -> bool:
+    """Stage and commit auto-fixed files.
+
+    Returns:
+        True if commit was successful, False otherwise.
+    """
+    print(f"{BLUE}  Staging auto-fixed files...{NC}")
+
+    # Stage all modified tracked files (not untracked)
+    result = subprocess.run(
+        ["git", "add", "-u"],
+        cwd=repo_root,
+        capture_output=True, text=True, timeout=30
+    )
+
+    if result.returncode != 0:
+        print(f"{RED}  ✘ Failed to stage files: {result.stderr}{NC}")
+        return False
+
+    # Check if there's anything to commit
+    result = subprocess.run(
+        ["git", "diff", "--cached", "--quiet"],
+        cwd=repo_root,
+        capture_output=True, timeout=30
+    )
+
+    if result.returncode == 0:
+        # Nothing to commit
+        return True
+
+    # Commit the auto-fixes
+    commit_msg = f"chore: Auto-fix lint/format issues (iteration {iteration})"
+    print(f"{BLUE}  Committing: {commit_msg}{NC}")
+
+    result = subprocess.run(
+        ["git", "commit", "-m", commit_msg, "--no-verify"],
+        cwd=repo_root,
+        capture_output=True, text=True, timeout=30
+    )
+
+    if result.returncode != 0:
+        print(f"{RED}  ✘ Failed to commit: {result.stderr}{NC}")
+        return False
+
+    print(f"{GREEN}  ✔ Auto-fix commit created{NC}")
+    return True
+
+
 def validate_plugin(plugin_path: Path, validator: Path) -> bool:
     """Validate a single plugin."""
     result = subprocess.run(
@@ -332,28 +456,17 @@ def validate_plugin(plugin_path: Path, validator: Path) -> bool:
     return result.returncode == 0
 
 
-def main() -> int:
-    print(f"{BOLD}{'=' * 60}{NC}")
-    print(f"{BOLD}Pre-Push Validation{NC}")
-    print(f"{BOLD}{'=' * 60}{NC}")
-    print()
-
-    repo_root = get_repo_root()
-    validator = find_validator()
-
-    if not validator:
-        print(f"{YELLOW}⚠ Validator not found, skipping validation{NC}")
-        return 0
+def run_validation_cycle(repo_root: Path, validator: Path) -> list[str]:
+    """Run full validation and return list of plugins with issues."""
+    issues = []
 
     # Detect project type
     marketplace_json = repo_root / ".claude-plugin" / "marketplace.json"
     plugin_json = repo_root / ".claude-plugin" / "plugin.json"
 
-    issues = []
-
     if marketplace_json.exists():
         # Marketplace - validate all plugins
-        print(f"{BLUE}Validating marketplace...{NC}")
+        print(f"{BLUE}  Validating marketplace plugins...{NC}")
         import json
         with open(marketplace_json) as f:
             data = json.load(f)
@@ -363,7 +476,7 @@ def main() -> int:
             source = plugin.get("source", f"./{name}")
             plugin_path = repo_root / source.lstrip("./")
 
-            print(f"{BLUE}  Validating {name}...{NC}", end=" ", flush=True)
+            print(f"{BLUE}    {name}...{NC}", end=" ", flush=True)
             if plugin_path.exists():
                 if validate_plugin(plugin_path, validator):
                     print(f"{GREEN}✔{NC}")
@@ -375,25 +488,87 @@ def main() -> int:
 
     elif plugin_json.exists():
         # Single plugin
-        print(f"{BLUE}Validating plugin...{NC}", end=" ", flush=True)
+        print(f"{BLUE}  Validating plugin...{NC}", end=" ", flush=True)
         if validate_plugin(repo_root, validator):
             print(f"{GREEN}✔{NC}")
         else:
             print(f"{RED}✘{NC}")
             issues.append("plugin")
 
-    print()
-    print(f"{BOLD}{'=' * 60}{NC}")
+    return issues
 
-    if issues:
-        print(f"{RED}VALIDATION FAILED - Push blocked{NC}")
-        print(f"{RED}Fix issues in: {', '.join(issues)}{NC}")
+
+def main() -> int:
+    print(f"{BOLD}{'=' * 60}{NC}")
+    print(f"{BOLD}Pre-Push Validation (with auto-fix loop){NC}")
+    print(f"{BOLD}{'=' * 60}{NC}")
+    print()
+
+    repo_root = get_repo_root()
+    validator = find_validator()
+
+    if not validator:
+        print(f"{YELLOW}⚠ Validator not found, skipping validation{NC}")
+        return 0
+
+    iteration = 0
+    while iteration < MAX_FIX_ITERATIONS:
+        iteration += 1
+        print(f"{BOLD}--- Iteration {iteration}/{MAX_FIX_ITERATIONS} ---{NC}")
+
+        # Step 1: Run linting with auto-fix
+        print(f"{BLUE}[1] Linting and formatting...{NC}")
+        lint_passed, files_changed = run_linting(repo_root)
+
+        # Step 2: If files changed, commit the fixes
+        if files_changed:
+            print(f"{YELLOW}[2] Files modified by auto-fix, committing...{NC}")
+            if not commit_auto_fixes(repo_root, iteration):
+                print(f"{RED}✘ Failed to commit auto-fixes{NC}")
+                return 1
+
+            # Restart the loop to re-validate after commit
+            print(f"{BLUE}[3] Restarting validation cycle...{NC}")
+            print()
+            continue
+
+        # Step 3: Run plugin validation
+        print(f"{BLUE}[2] Running plugin validation...{NC}")
+        issues = run_validation_cycle(repo_root, validator)
+
+        # Step 4: Check results
+        if not issues:
+            # All good!
+            print()
+            print(f"{BOLD}{'=' * 60}{NC}")
+            print(f"{GREEN}✔ VALIDATION PASSED - Push allowed{NC}")
+            if iteration > 1:
+                print(f"{GREEN}  (Auto-fixed in {iteration - 1} iteration(s)){NC}")
+            print(f"{BOLD}{'=' * 60}{NC}")
+            return 0
+
+        # Issues found - check if they might be fixable
+        if not lint_passed:
+            # Linting issues remain, try another iteration
+            print(f"{YELLOW}[!] Lint issues detected, attempting auto-fix...{NC}")
+            print()
+            continue
+
+        # Validation failed with no lint issues to fix
+        print()
+        print(f"{BOLD}{'=' * 60}{NC}")
+        print(f"{RED}✘ VALIDATION FAILED - Push blocked{NC}")
+        print(f"{RED}  Unfixable issues in: {', '.join(issues)}{NC}")
         print(f"{BOLD}{'=' * 60}{NC}")
         return 1
 
-    print(f"{GREEN}VALIDATION PASSED - Push allowed{NC}")
+    # Max iterations reached
+    print()
     print(f"{BOLD}{'=' * 60}{NC}")
-    return 0
+    print(f"{RED}✘ MAX ITERATIONS REACHED ({MAX_FIX_ITERATIONS}) - Push blocked{NC}")
+    print(f"{RED}  Manual intervention required{NC}")
+    print(f"{BOLD}{'=' * 60}{NC}")
+    return 1
 
 
 if __name__ == "__main__":
