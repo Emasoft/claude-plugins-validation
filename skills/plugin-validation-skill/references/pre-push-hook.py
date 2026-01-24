@@ -114,7 +114,7 @@ def validate_plugin_manifest(plugin_dir: Path) -> list[tuple[str, str]]:
 
 def validate_hooks_config(plugin_dir: Path) -> list[tuple[str, str]]:
     """Validate hooks configuration."""
-    issues = []
+    issues: list[tuple[str, str]] = []
     hooks_json = plugin_dir / "hooks" / "hooks.json"
 
     if not hooks_json.exists():
@@ -203,7 +203,7 @@ def validate_marketplace(repo_root: Path) -> list[tuple[str, str]]:
 
 def check_version_consistency(repo_root: Path) -> list[tuple[str, str]]:
     """Check that plugin versions match marketplace.json."""
-    issues = []
+    issues: list[tuple[str, str]] = []
     marketplace_json = repo_root / ".claude-plugin" / "marketplace.json"
 
     if not marketplace_json.exists():
@@ -232,7 +232,7 @@ def check_version_consistency(repo_root: Path) -> list[tuple[str, str]]:
 
 def run_external_validator(repo_root: Path) -> list[tuple[str, str]]:
     """Run external validation scripts if available."""
-    issues = []
+    issues: list[tuple[str, str]] = []
     validator = repo_root / "claude-plugins-validation" / "scripts" / "validate_marketplace.py"
 
     if not validator.exists():
