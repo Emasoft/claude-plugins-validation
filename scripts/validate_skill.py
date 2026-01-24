@@ -90,21 +90,15 @@ class ValidationReport:
         """Add an info message."""
         self.add("INFO", message, file)
 
-    def minor(
-        self, message: str, file: str | None = None, line: int | None = None
-    ) -> None:
+    def minor(self, message: str, file: str | None = None, line: int | None = None) -> None:
         """Add a minor issue."""
         self.add("MINOR", message, file, line)
 
-    def major(
-        self, message: str, file: str | None = None, line: int | None = None
-    ) -> None:
+    def major(self, message: str, file: str | None = None, line: int | None = None) -> None:
         """Add a major issue."""
         self.add("MAJOR", message, file, line)
 
-    def critical(
-        self, message: str, file: str | None = None, line: int | None = None
-    ) -> None:
+    def critical(self, message: str, file: str | None = None, line: int | None = None) -> None:
         """Add a critical issue."""
         self.add("CRITICAL", message, file, line)
 
@@ -170,9 +164,7 @@ def parse_frontmatter(content: str) -> tuple[dict[str, Any] | None, str, int]:
         return None, content, 0
 
 
-def validate_frontmatter(
-    skill_path: Path, content: str, report: ValidationReport
-) -> dict[str, Any] | None:
+def validate_frontmatter(skill_path: Path, content: str, report: ValidationReport) -> dict[str, Any] | None:
     """Validate YAML frontmatter structure and content."""
     # Check frontmatter exists
     if not content.startswith("---"):
@@ -206,9 +198,7 @@ def validate_frontmatter(
     return frontmatter
 
 
-def validate_name_field(
-    frontmatter: dict[str, Any], skill_dir_name: str, report: ValidationReport
-) -> None:
+def validate_name_field(frontmatter: dict[str, Any], skill_dir_name: str, report: ValidationReport) -> None:
     """Validate the 'name' frontmatter field."""
     if "name" not in frontmatter:
         report.info(
@@ -224,9 +214,7 @@ def validate_name_field(
     # Validate name format per docs:
     # "Lowercase letters, numbers, and hyphens only (max 64 characters)"
     if not isinstance(name, str):
-        report.critical(
-            f"'name' must be a string, got {type(name).__name__}", "SKILL.md"
-        )
+        report.critical(f"'name' must be a string, got {type(name).__name__}", "SKILL.md")
         return
 
     if len(name) > 64:
@@ -252,9 +240,7 @@ def validate_name_field(
         )
 
 
-def validate_description_field(
-    frontmatter: dict[str, Any], body: str, report: ValidationReport
-) -> None:
+def validate_description_field(frontmatter: dict[str, Any], body: str, report: ValidationReport) -> None:
     """Validate the 'description' frontmatter field."""
     if "description" not in frontmatter:
         # Check if body has content that could serve as description
@@ -293,9 +279,7 @@ def validate_description_field(
     report.passed("'description' field present", "SKILL.md")
 
 
-def validate_context_field(
-    frontmatter: dict[str, Any], report: ValidationReport
-) -> None:
+def validate_context_field(frontmatter: dict[str, Any], report: ValidationReport) -> None:
     """Validate the 'context' frontmatter field."""
     if "context" not in frontmatter:
         return
@@ -311,8 +295,7 @@ def validate_context_field(
 
     if context not in VALID_CONTEXT_VALUES:
         report.critical(
-            f"Invalid 'context' value: '{context}'. "
-            f"Valid values: {VALID_CONTEXT_VALUES}",
+            f"Invalid 'context' value: '{context}'. Valid values: {VALID_CONTEXT_VALUES}",
             "SKILL.md",
         )
         return
@@ -326,8 +309,7 @@ def validate_agent_field(frontmatter: dict[str, Any], report: ValidationReport) 
         # Agent is only relevant if context: fork is set
         if frontmatter.get("context") == "fork":
             report.info(
-                "'agent' not specified with context: fork "
-                "(defaults to general-purpose)",
+                "'agent' not specified with context: fork (defaults to general-purpose)",
                 "SKILL.md",
             )
         return
@@ -354,8 +336,7 @@ def validate_agent_field(frontmatter: dict[str, Any], report: ValidationReport) 
     else:
         # Could be a custom agent from .claude/agents/
         report.info(
-            f"'agent' value '{agent}' is not a built-in type "
-            "(may be custom from .claude/agents/)",
+            f"'agent' value '{agent}' is not a built-in type (may be custom from .claude/agents/)",
             "SKILL.md",
         )
 
@@ -373,8 +354,7 @@ def validate_boolean_field(
 
     if not isinstance(value, bool):
         report.critical(
-            f"'{field_name}' must be a boolean (true/false), "
-            f"got {type(value).__name__}",
+            f"'{field_name}' must be a boolean (true/false), got {type(value).__name__}",
             "SKILL.md",
         )
         return
@@ -382,9 +362,7 @@ def validate_boolean_field(
     report.passed(f"'{field_name}' field valid: {value}", "SKILL.md")
 
 
-def validate_allowed_tools_field(
-    frontmatter: dict[str, Any], report: ValidationReport
-) -> None:
+def validate_allowed_tools_field(frontmatter: dict[str, Any], report: ValidationReport) -> None:
     """Validate the 'allowed-tools' frontmatter field."""
     if "allowed-tools" not in frontmatter:
         return
@@ -427,9 +405,7 @@ def validate_model_field(frontmatter: dict[str, Any], report: ValidationReport) 
     report.passed(f"'model' field present: {model}", "SKILL.md")
 
 
-def validate_argument_hint_field(
-    frontmatter: dict[str, Any], report: ValidationReport
-) -> None:
+def validate_argument_hint_field(frontmatter: dict[str, Any], report: ValidationReport) -> None:
     """Validate the 'argument-hint' frontmatter field."""
     if "argument-hint" not in frontmatter:
         return
@@ -488,8 +464,7 @@ def validate_skill_content(content: str, report: ValidationReport) -> None:
     if re.search(r"^\d+\.", body, re.MULTILINE) or "```bash" in body.lower():
         if "$ARGUMENTS" not in content:
             report.info(
-                "Task-oriented skill without $ARGUMENTS placeholder "
-                "(arguments will be appended automatically)",
+                "Task-oriented skill without $ARGUMENTS placeholder (arguments will be appended automatically)",
                 "SKILL.md",
             )
 
@@ -681,19 +656,14 @@ def print_json(report: ValidationReport) -> None:
             "info": sum(1 for r in report.results if r.level == "INFO"),
             "passed": sum(1 for r in report.results if r.level == "PASSED"),
         },
-        "results": [
-            {"level": r.level, "message": r.message, "file": r.file, "line": r.line}
-            for r in report.results
-        ],
+        "results": [{"level": r.level, "message": r.message, "file": r.file, "line": r.line} for r in report.results],
     }
     print(json.dumps(output, indent=2))
 
 
 def main() -> int:
     """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Validate a Claude Code skill directory"
-    )
+    parser = argparse.ArgumentParser(description="Validate a Claude Code skill directory")
     parser.add_argument("skill_path", help="Path to the skill directory")
     parser.add_argument(
         "--verbose",

@@ -80,21 +80,15 @@ class ValidationReport:
         """Add an info message."""
         self.add("INFO", message, file)
 
-    def minor(
-        self, message: str, file: str | None = None, line: int | None = None
-    ) -> None:
+    def minor(self, message: str, file: str | None = None, line: int | None = None) -> None:
         """Add a minor issue."""
         self.add("MINOR", message, file, line)
 
-    def major(
-        self, message: str, file: str | None = None, line: int | None = None
-    ) -> None:
+    def major(self, message: str, file: str | None = None, line: int | None = None) -> None:
         """Add a major issue."""
         self.add("MAJOR", message, file, line)
 
-    def critical(
-        self, message: str, file: str | None = None, line: int | None = None
-    ) -> None:
+    def critical(self, message: str, file: str | None = None, line: int | None = None) -> None:
         """Add a critical issue."""
         self.add("CRITICAL", message, file, line)
 
@@ -155,9 +149,7 @@ def validate_manifest(
     try:
         manifest = json.loads(manifest_path.read_text())
     except json.JSONDecodeError as e:
-        report.critical(
-            f"Invalid JSON in plugin.json: {e}", ".claude-plugin/plugin.json"
-        )
+        report.critical(f"Invalid JSON in plugin.json: {e}", ".claude-plugin/plugin.json")
         return None
 
     report.passed("plugin.json is valid JSON", ".claude-plugin/plugin.json")
@@ -189,18 +181,14 @@ def validate_manifest(
     if "name" in manifest:
         name = manifest["name"]
         if name != name.lower():
-            report.major(
-                f"Plugin name must be lowercase: {name}", ".claude-plugin/plugin.json"
-            )
+            report.major(f"Plugin name must be lowercase: {name}", ".claude-plugin/plugin.json")
         if " " in name:
             report.major(
                 f"Plugin name cannot contain spaces: {name}",
                 ".claude-plugin/plugin.json",
             )
         if not re.match(r"^[a-z][a-z0-9-]*$", name):
-            report.major(
-                f"Plugin name must be kebab-case: {name}", ".claude-plugin/plugin.json"
-            )
+            report.major(f"Plugin name must be kebab-case: {name}", ".claude-plugin/plugin.json")
 
     # Version validation
     if "version" in manifest:
@@ -265,9 +253,7 @@ def validate_manifest(
     return cast(dict[str, Any], manifest)
 
 
-def validate_structure(
-    plugin_root: Path, report: ValidationReport, marketplace_only: bool = False
-) -> None:
+def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_only: bool = False) -> None:
     """Validate plugin directory structure.
 
     Args:
@@ -290,9 +276,7 @@ def validate_structure(
     for component in ["commands", "agents", "skills", "hooks", "schemas", "bin"]:
         wrong_path = plugin_root / ".claude-plugin" / component
         if wrong_path.exists():
-            report.critical(
-                f"{component}/ must be at plugin root, not in .claude-plugin/"
-            )
+            report.critical(f"{component}/ must be at plugin root, not in .claude-plugin/")
 
     # Common directories
     common_dirs = {
@@ -368,8 +352,7 @@ def validate_command_file(cmd_path: Path, report: ValidationReport) -> None:
         expected_name = cmd_path.stem
         if frontmatter["name"] != expected_name:
             report.major(
-                f"Command name '{frontmatter['name']}' doesn't match "
-                f"filename '{expected_name}'",
+                f"Command name '{frontmatter['name']}' doesn't match filename '{expected_name}'",
                 rel_path,
             )
 
@@ -538,9 +521,7 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
                 f"scripts/{sh_file.name}",
             )
         else:
-            report.passed(
-                f"Shell script executable: {sh_file.name}", f"scripts/{sh_file.name}"
-            )
+            report.passed(f"Shell script executable: {sh_file.name}", f"scripts/{sh_file.name}")
 
         # Shellcheck
         try:
@@ -553,9 +534,7 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
             if result.returncode == 0:
                 report.passed(f"Shellcheck passed: {sh_file.name}")
             else:
-                report.minor(
-                    f"Shellcheck issues in {sh_file.name}", f"scripts/{sh_file.name}"
-                )
+                report.minor(f"Shellcheck issues in {sh_file.name}", f"scripts/{sh_file.name}")
         except FileNotFoundError:
             report.info("shellcheck not available, skipping shell lint")
 
@@ -651,15 +630,9 @@ def print_results(report: ValidationReport, verbose: bool = False) -> None:
     if report.exit_code == 0:
         print(f"{colors['PASSED']}✓ All checks passed{colors['RESET']}")
     elif report.exit_code == 1:
-        print(
-            f"{colors['CRITICAL']}✗ CRITICAL issues found - "
-            f"plugin will not work{colors['RESET']}"
-        )
+        print(f"{colors['CRITICAL']}✗ CRITICAL issues found - plugin will not work{colors['RESET']}")
     elif report.exit_code == 2:
-        print(
-            f"{colors['MAJOR']}✗ MAJOR issues found - "
-            f"significant problems{colors['RESET']}"
-        )
+        print(f"{colors['MAJOR']}✗ MAJOR issues found - significant problems{colors['RESET']}")
     else:
         print(f"{colors['MINOR']}! MINOR issues found - may affect UX{colors['RESET']}")
 
@@ -677,10 +650,7 @@ def print_json(report: ValidationReport) -> None:
             "info": sum(1 for r in report.results if r.level == "INFO"),
             "passed": sum(1 for r in report.results if r.level == "PASSED"),
         },
-        "results": [
-            {"level": r.level, "message": r.message, "file": r.file, "line": r.line}
-            for r in report.results
-        ],
+        "results": [{"level": r.level, "message": r.message, "file": r.file, "line": r.line} for r in report.results],
     }
     print(json.dumps(output, indent=2))
 
@@ -700,9 +670,7 @@ def main() -> int:
         action="store_true",
         help="Skip plugin.json requirement (for strict=false marketplace distribution)",
     )
-    parser.add_argument(
-        "path", nargs="?", help="Plugin root path (default: parent of scripts/)"
-    )
+    parser.add_argument("path", nargs="?", help="Plugin root path (default: parent of scripts/)")
     args = parser.parse_args()
 
     # Determine plugin root

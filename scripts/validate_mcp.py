@@ -72,21 +72,15 @@ class ValidationReport:
         """Add an info message."""
         self.add("INFO", message, file)
 
-    def minor(
-        self, message: str, file: str | None = None, line: int | None = None
-    ) -> None:
+    def minor(self, message: str, file: str | None = None, line: int | None = None) -> None:
         """Add a minor issue."""
         self.add("MINOR", message, file, line)
 
-    def major(
-        self, message: str, file: str | None = None, line: int | None = None
-    ) -> None:
+    def major(self, message: str, file: str | None = None, line: int | None = None) -> None:
         """Add a major issue."""
         self.add("MAJOR", message, file, line)
 
-    def critical(
-        self, message: str, file: str | None = None, line: int | None = None
-    ) -> None:
+    def critical(self, message: str, file: str | None = None, line: int | None = None) -> None:
         """Add a critical issue."""
         self.add("CRITICAL", message, file, line)
 
@@ -175,22 +169,14 @@ def validate_env_var_syntax(value: str, report: ValidationReport, context: str) 
 
             # Warn about required env vars without defaults (excluding plugin vars)
             if default is None and var_name not in PLUGIN_ENV_VARS:
-                report.info(
-                    f"Env var ${{{var_name}}} has no default value in {context} - "
-                    f"config will fail if not set"
-                )
+                report.info(f"Env var ${{{var_name}}} has no default value in {context} - config will fail if not set")
 
 
-def validate_path_value(
-    value: str, report: ValidationReport, context: str, plugin_root: Path | None = None
-) -> None:
+def validate_path_value(value: str, report: ValidationReport, context: str, plugin_root: Path | None = None) -> None:
     """Validate a path value in MCP configuration."""
     # Check for absolute paths (without env var substitution)
     if is_absolute_path(value):
-        report.major(
-            f"Absolute path found in {context}: {value} - "
-            "use ${{CLAUDE_PLUGIN_ROOT}} for portability"
-        )
+        report.major(f"Absolute path found in {context}: {value} - use ${{{{CLAUDE_PLUGIN_ROOT}}}} for portability")
         return
 
     # Check if path uses CLAUDE_PLUGIN_ROOT for plugin-relative paths
@@ -198,9 +184,7 @@ def validate_path_value(
         # Could be a relative path or command name
         # Check if it looks like a file path
         if "/" in value or "\\" in value:
-            report.minor(
-                f"Path in {context} should use ${{CLAUDE_PLUGIN_ROOT}}: {value}"
-            )
+            report.minor(f"Path in {context} should use ${{CLAUDE_PLUGIN_ROOT}}: {value}")
 
     # Validate env var syntax in path
     validate_env_var_syntax(value, report, context)
@@ -213,10 +197,7 @@ def validate_path_value(
         # Only check if it looks like a file (has extension) not a dir
         if "." in resolved_path.name or resolved_path.suffix:
             if not resolved_path.exists():
-                report.info(
-                    f"Referenced file may not exist: {value} "
-                    f"(resolved: {resolved_path})"
-                )
+                report.info(f"Referenced file may not exist: {value} (resolved: {resolved_path})")
 
 
 def validate_mcp_server(
@@ -263,29 +244,19 @@ def validate_mcp_server(
                 resolved_path = Path(resolved)
                 if resolved_path.exists():
                     if not os.access(resolved_path, os.X_OK):
-                        report.major(
-                            f"Server {server_name} command not executable: {resolved}"
-                        )
+                        report.major(f"Server {server_name} command not executable: {resolved}")
                     else:
                         report.passed(f"Server {server_name} command is executable")
             elif shutil.which(command):
                 report.passed(f"Server {server_name} command '{command}' found in PATH")
             elif command == "npx":
-                report.passed(
-                    f"Server {server_name} uses npx (will resolve at runtime)"
-                )
+                report.passed(f"Server {server_name} uses npx (will resolve at runtime)")
             else:
-                report.info(
-                    f"Server {server_name} command '{command}' not found "
-                    "(may be resolved at runtime)"
-                )
+                report.info(f"Server {server_name} command '{command}' not found (may be resolved at runtime)")
 
         # Warn about SSE deprecation
         if "url" in config and transport == "stdio":
-            report.info(
-                f"Server {server_name} has 'url' but transport is stdio - "
-                "url will be ignored"
-            )
+            report.info(f"Server {server_name} has 'url' but transport is stdio - url will be ignored")
 
     elif transport in ("http", "sse"):
         # HTTP/SSE servers require 'url'
@@ -301,17 +272,11 @@ def validate_mcp_server(
 
         # SSE is deprecated
         if transport == "sse":
-            report.minor(
-                f"Server {server_name} uses deprecated 'sse' transport - "
-                "consider migrating to 'http'"
-            )
+            report.minor(f"Server {server_name} uses deprecated 'sse' transport - consider migrating to 'http'")
 
         # Warn if command is set for http/sse
         if "command" in config:
-            report.info(
-                f"Server {server_name} has 'command' but transport is {transport} - "
-                "command will be ignored"
-            )
+            report.info(f"Server {server_name} has 'command' but transport is {transport} - command will be ignored")
 
     # Validate args array
     if "args" in config:
@@ -326,9 +291,7 @@ def validate_mcp_server(
                     validate_env_var_syntax(arg, report, f"{ctx}:args[{i}]")
                     # Check for paths in args
                     if "/" in arg or "\\" in arg:
-                        validate_path_value(
-                            arg, report, f"{ctx}:args[{i}]", plugin_root
-                        )
+                        validate_path_value(arg, report, f"{ctx}:args[{i}]", plugin_root)
 
     # Validate env object
     if "env" in config:
@@ -360,9 +323,7 @@ def validate_mcp_server(
         else:
             for key, value in headers.items():
                 if not isinstance(value, str):
-                    report.major(
-                        f"Server {server_name} headers[{key}] must be a string"
-                    )
+                    report.major(f"Server {server_name} headers[{key}] must be a string")
                 else:
                     validate_env_var_syntax(value, report, f"{ctx}:headers[{key}]")
 
@@ -442,10 +403,7 @@ def validate_mcp_config(
 
         # Validate server name format
         if not re.match(r"^[a-zA-Z][a-zA-Z0-9_-]*$", server_name):
-            report.minor(
-                f"Server name '{server_name}' should be alphanumeric with "
-                "hyphens/underscores"
-            )
+            report.minor(f"Server name '{server_name}' should be alphanumeric with hyphens/underscores")
 
         if not isinstance(server_config, dict):
             report.critical(f"Server '{server_name}' config must be an object")
@@ -456,9 +414,7 @@ def validate_mcp_config(
     return report
 
 
-def validate_plugin_mcp(
-    plugin_root: Path, report: ValidationReport | None = None
-) -> ValidationReport:
+def validate_plugin_mcp(plugin_root: Path, report: ValidationReport | None = None) -> ValidationReport:
     """Validate all MCP configurations in a plugin.
 
     Checks both .mcp.json and inline mcpServers in plugin.json.
@@ -504,10 +460,7 @@ def validate_plugin_mcp(
 
                 elif isinstance(mcp_servers, dict):
                     # Inline definition
-                    report.info(
-                        f"Found inline mcpServers in plugin.json "
-                        f"({len(mcp_servers)} server(s))"
-                    )
+                    report.info(f"Found inline mcpServers in plugin.json ({len(mcp_servers)} server(s))")
                     for server_name, server_config in mcp_servers.items():
                         if isinstance(server_config, dict):
                             validate_mcp_server(
@@ -579,9 +532,7 @@ def print_results(report: ValidationReport, verbose: bool = False) -> None:
     if report.exit_code == 0:
         print(f"{colors['PASSED']}✓ All MCP checks passed{colors['RESET']}")
     else:
-        status_color = colors[
-            ["PASSED", "CRITICAL", "MAJOR", "MINOR"][report.exit_code]
-        ]
+        status_color = colors[["PASSED", "CRITICAL", "MAJOR", "MINOR"][report.exit_code]]
         print(f"{status_color}✗ Issues found{colors['RESET']}")
 
     print()

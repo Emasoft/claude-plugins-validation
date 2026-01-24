@@ -31,13 +31,7 @@ NC = "\033[0m"
 def run_command(cmd: list[str], cwd: Path | None = None, timeout: int = 120) -> tuple[int, str, str]:
     """Run a command and return exit code, stdout, stderr."""
     try:
-        result = subprocess.run(
-            cmd,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
+        result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
         return result.returncode, result.stdout, result.stderr
     except subprocess.TimeoutExpired:
         return 1, "", "Command timed out"
@@ -136,10 +130,19 @@ def validate_hooks_config(plugin_dir: Path) -> list[tuple[str, str]]:
 
     hooks = data.get("hooks", {})
     valid_events = [
-        "PreToolUse", "PostToolUse", "PostToolUseFailure",
-        "Notification", "Stop", "SubagentStop", "SubagentStart",
-        "UserPromptSubmit", "PermissionRequest",
-        "SessionStart", "SessionEnd", "PreCompact", "Setup"
+        "PreToolUse",
+        "PostToolUse",
+        "PostToolUseFailure",
+        "Notification",
+        "Stop",
+        "SubagentStop",
+        "SubagentStart",
+        "UserPromptSubmit",
+        "PermissionRequest",
+        "SessionStart",
+        "SessionEnd",
+        "PreCompact",
+        "Setup",
     ]
 
     for event_name, event_hooks in hooks.items():
@@ -236,9 +239,7 @@ def run_external_validator(repo_root: Path) -> list[tuple[str, str]]:
         return issues
 
     _, stdout, stderr = run_command(
-        ["uv", "run", "python", str(validator), str(repo_root)],
-        cwd=repo_root / "claude-plugins-validation",
-        timeout=60
+        ["uv", "run", "python", str(validator), str(repo_root)], cwd=repo_root / "claude-plugins-validation", timeout=60
     )
 
     output = stdout + stderr
@@ -254,11 +255,7 @@ def run_external_validator(repo_root: Path) -> list[tuple[str, str]]:
 def main() -> int:
     """Main pre-push validation."""
     # Get repo root
-    result = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True
-    )
+    result = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
     repo_root = Path(result.stdout.strip())
 
     print(f"{BOLD}{'=' * 60}{NC}")
