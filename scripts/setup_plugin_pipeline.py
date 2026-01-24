@@ -772,7 +772,7 @@ def commit_auto_fixes(repo_root: Path, iteration: int) -> bool:
 def validate_plugin(plugin_path: Path, validator: Path) -> bool:
     """Validate a single plugin."""
     result = subprocess.run(
-        ["python3", str(validator), str(plugin_path), "--quiet"],
+        ["python3", str(validator), str(plugin_path)],
         capture_output=True, timeout=120
     )
     return result.returncode == 0
