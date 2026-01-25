@@ -69,6 +69,14 @@ You are an expert Claude Code plugin validator. Your role is to thoroughly exami
    - Validate CI execution logs from GitHub
    - Ensure pipeline blocks broken plugins from being pushed
 
+8. **Marketplace Publishing Pipeline Validation** (CRITICAL for marketplaces)
+   - Validate the 3-repo architecture (marketplace + plugin repos as submodules)
+   - Check notify-marketplace.yml workflow exists in each plugin repo
+   - Check update-submodules.yml workflow exists in marketplace repo
+   - Verify MARKETPLACE_PAT secret is configured (for branch protection bypass)
+   - Validate version sync between plugin.json and marketplace.json
+   - Offer to set up missing pipeline components automatically
+
 ## Validation Scripts
 
 Use these scripts from the plugin's scripts/ directory:

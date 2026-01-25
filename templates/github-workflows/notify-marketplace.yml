@@ -1,10 +1,26 @@
 # Notify marketplace repo when this plugin is updated
 # Place this in each plugin repo: .github/workflows/notify-marketplace.yml
 #
-# Requirements:
-#   - Create a PAT (Personal Access Token) with 'repo' scope
-#   - Add it as a secret named MARKETPLACE_PAT in the plugin repo
-#   - Update MARKETPLACE_OWNER and MARKETPLACE_REPO below
+# SETUP INSTRUCTIONS:
+# 1. Create a Personal Access Token (PAT):
+#    - Go to GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
+#    - Click "Generate new token (classic)"
+#    - Give it a descriptive name like "Plugin Marketplace Notification"
+#    - Select scope: 'repo' (Full control of private repositories)
+#    - Click "Generate token" and COPY the token (you won't see it again!)
+#
+# 2. Add the PAT as a secret to THIS plugin repository:
+#    - Go to your plugin repo → Settings → Secrets and variables → Actions
+#    - Click "New repository secret"
+#    - Name: MARKETPLACE_PAT
+#    - Value: paste the PAT you copied in step 1
+#    - Click "Add secret"
+#
+# 3. Update the MARKETPLACE_OWNER and MARKETPLACE_REPO variables below:
+#    - MARKETPLACE_OWNER: Your GitHub username or org that owns the marketplace repo
+#    - MARKETPLACE_REPO: The name of your marketplace repository
+#
+# IMPORTANT: Do NOT use GITHUB_TOKEN - it lacks permissions to trigger workflows in other repos!
 
 name: Notify Marketplace
 
@@ -20,9 +36,12 @@ on:
       - 'scripts/**'
 
 env:
-  # Update these to match your marketplace repo
-  MARKETPLACE_OWNER: 'YOUR_GITHUB_USERNAME'
-  MARKETPLACE_REPO: 'YOUR_MARKETPLACE_REPO_NAME'
+  # ⚠️ REQUIRED: Update these values to point to your marketplace repository
+  # Example: If your marketplace is at https://github.com/johndoe/my-claude-plugins
+  #   MARKETPLACE_OWNER: 'johndoe'
+  #   MARKETPLACE_REPO: 'my-claude-plugins'
+  MARKETPLACE_OWNER: 'YOUR_GITHUB_USERNAME'  # Replace with your GitHub username or organization
+  MARKETPLACE_REPO: 'YOUR_MARKETPLACE_REPO_NAME'  # Replace with your marketplace repo name
 
 jobs:
   notify:

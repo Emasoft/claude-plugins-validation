@@ -4,7 +4,22 @@
 # Setup:
 #   1. Add this workflow to your marketplace repo
 #   2. Add notify-marketplace.yml to each plugin repo
-#   3. Create a PAT with 'repo' scope and add as MARKETPLACE_PAT secret in plugin repos
+#   3. Create a PAT with 'repo' scope and add as MARKETPLACE_PAT secret in:
+#      - Plugin repos (for triggering this workflow)
+#      - Marketplace repo (for bypassing branch protection on push)
+#
+# IMPORTANT: Why MARKETPLACE_PAT is required
+# -----------------------------------------
+# This workflow uses MARKETPLACE_PAT instead of GITHUB_TOKEN because:
+# 1. GITHUB_TOKEN cannot bypass branch protection rules (required reviews, status checks)
+# 2. A Personal Access Token (PAT) with 'repo' scope can bypass protection when:
+#    - The PAT owner is a repository admin
+#    - Branch protection settings allow admins to bypass
+# 3. Both checkout AND push must use the same PAT for authentication consistency
+#
+# Without MARKETPLACE_PAT:
+# - Workflow will fail if main/master branch has protection rules
+# - You'll see errors like "required status checks" or "required reviews"
 
 name: Update Submodules
 
@@ -34,7 +49,9 @@ jobs:
         with:
           submodules: true
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # CRITICAL: Use MARKETPLACE_PAT to bypass branch protection on push
+          # This PAT must belong to a repo admin and branch protection must allow admin bypass
+          token: ${{ secrets.MARKETPLACE_PAT }}
 
       - name: Show trigger info
         run: |
@@ -69,12 +86,24 @@ jobs:
           echo "Current submodule status:"
           git submodule status
 
-      - name: Set up Python
+      - name: Set up Python (if sync script exists)
+        id: setup-python
+        run: |
+          if [ -f "scripts/sync_marketplace_versions.py" ]; then
+            echo "sync_script_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "sync_script_exists=false" >> $GITHUB_OUTPUT
+          fi
+        continue-on-error: true
+
+      - name: Install Python
+        if: steps.setup-python.outputs.sync_script_exists == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Sync marketplace.json versions
+        if: steps.setup-python.outputs.sync_script_exists == 'true'
         run: |
           python scripts/sync_marketplace_versions.py
 
@@ -105,6 +134,9 @@ jobs:
             git commit -m "chore: sync submodules and marketplace.json"
           fi
 
+          # Push using MARKETPLACE_PAT to bypass branch protection
+          # The token was already configured during checkout, so this push will use it
+          # This allows bypassing required reviews, status checks, etc. (if admin bypass is enabled)
           git push
 
       - name: Summary
