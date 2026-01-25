@@ -250,6 +250,21 @@ def validate_manifest(
                             ".claude-plugin/plugin.json",
                         )
 
+    # Check for duplicate hooks.json - the standard hooks/hooks.json is auto-loaded
+    # so specifying it in manifest.hooks causes a duplicate load error
+    if "hooks" in manifest:
+        hooks_value = manifest["hooks"]
+        if isinstance(hooks_value, str):
+            # Normalize the path to check if it points to the auto-loaded file
+            normalized = hooks_value.replace("\\", "/").lstrip("./")
+            if normalized == "hooks/hooks.json":
+                report.major(
+                    "manifest.hooks points to 'hooks/hooks.json' which is auto-loaded by "
+                    "Claude Code. This causes a duplicate load error. Remove the 'hooks' "
+                    "field from plugin.json to fix.",
+                    ".claude-plugin/plugin.json",
+                )
+
     return cast(dict[str, Any], manifest)
 
 
