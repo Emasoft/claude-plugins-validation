@@ -132,6 +132,22 @@ REQUIRED_README_SECTIONS = {
     "troubleshooting": re.compile(r"^#{1,3}\s*troubleshooting", re.IGNORECASE | re.MULTILINE),
 }
 
+# Required troubleshooting topics that should be documented
+REQUIRED_TROUBLESHOOTING_TOPICS = {
+    "hook_path_not_found": re.compile(
+        r"(hook.*path.*not\s*found|can't\s*open\s*file.*hook|hook.*no\s*such\s*file)",
+        re.IGNORECASE,
+    ),
+    "version_after_update": re.compile(
+        r"(old\s*version.*after\s*update|version.*still.*showing|stale.*version)",
+        re.IGNORECASE,
+    ),
+    "restart_required": re.compile(
+        r"(restart.*claude\s*code|reload.*required|restart.*after.*update)",
+        re.IGNORECASE,
+    ),
+}
+
 # Required installation sub-steps (should be present in Installation section)
 REQUIRED_INSTALLATION_STEPS = {
     "add_marketplace": re.compile(
@@ -893,6 +909,27 @@ def validate_readme_content(readme_path: Path) -> list[ValidationResult]:
                 )
             )
             break
+
+    # Check troubleshooting section has required topics
+    if "troubleshooting" not in missing_sections:
+        missing_topics: list[str] = []
+        for topic_name, pattern in REQUIRED_TROUBLESHOOTING_TOPICS.items():
+            if not pattern.search(content):
+                missing_topics.append(topic_name.replace("_", " "))
+
+        if missing_topics:
+            results.append(
+                ValidationResult(
+                    level="minor",
+                    category="deployment",
+                    message=f"README.md Troubleshooting section missing important topics: {', '.join(missing_topics)}",
+                    file_path=str(readme_path),
+                    suggestion=(
+                        "Document common issues: hook path not found after update, "
+                        "old version after update, restart required after install/update"
+                    ),
+                )
+            )
 
     return results
 
