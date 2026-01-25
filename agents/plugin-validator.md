@@ -987,6 +987,359 @@ When asked to validate a plugin:
 
 ---
 
+# MARKETPLACE PUBLISHING PIPELINE VALIDATION
+
+This section covers the complete 3-repo architecture for marketplace publishing. This pipeline enables automatic updates when plugin repos are pushed.
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        MARKETPLACE PUBLISHING PIPELINE                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐     │
+│  │   PLUGIN REPO A  │     │   PLUGIN REPO B  │     │   PLUGIN REPO N  │     │
+│  │   (GitHub)       │     │   (GitHub)       │     │   (GitHub)       │     │
+│  ├──────────────────┤     ├──────────────────┤     ├──────────────────┤     │
+│  │ .claude-plugin/  │     │ .claude-plugin/  │     │ .claude-plugin/  │     │
+│  │   plugin.json    │     │   plugin.json    │     │   plugin.json    │     │
+│  │ .github/workflows│     │ .github/workflows│     │ .github/workflows│     │
+│  │   notify-        │     │   notify-        │     │   notify-        │     │
+│  │   marketplace.yml│     │   marketplace.yml│     │   marketplace.yml│     │
+│  └────────┬─────────┘     └────────┬─────────┘     └────────┬─────────┘     │
+│           │                        │                        │               │
+│           │ push triggers          │ push triggers          │ push triggers │
+│           │ repository_dispatch    │ repository_dispatch    │               │
+│           ▼                        ▼                        ▼               │
+│  ┌──────────────────────────────────────────────────────────────────────┐   │
+│  │                      MARKETPLACE REPO (GitHub)                        │   │
+│  ├──────────────────────────────────────────────────────────────────────┤   │
+│  │  .claude-plugin/                                                      │   │
+│  │    └── marketplace.json  ◄── versions synced from plugins            │   │
+│  │                                                                       │   │
+│  │  .gitmodules             ◄── defines plugin submodules               │   │
+│  │                                                                       │   │
+│  │  .github/workflows/                                                   │   │
+│  │    ├── validate.yml      ◄── CI: validates marketplace structure     │   │
+│  │    └── update-           ◄── Triggered by plugin pushes              │   │
+│  │        submodules.yml         (repository_dispatch)                  │   │
+│  │                                                                       │   │
+│  │  scripts/                                                             │   │
+│  │    └── sync_marketplace_ ◄── Syncs plugin.json → marketplace.json   │   │
+│  │        versions.py                                                    │   │
+│  │                                                                       │   │
+│  │  plugin-a/               ◄── git submodule (points to Plugin Repo A) │   │
+│  │  plugin-b/               ◄── git submodule (points to Plugin Repo B) │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+│  ┌──────────────────────────────────────────────────────────────────────┐   │
+│  │                          UPDATE FLOW                                  │   │
+│  ├──────────────────────────────────────────────────────────────────────┤   │
+│  │  1. Developer pushes to Plugin Repo                                  │   │
+│  │  2. notify-marketplace.yml triggers in Plugin Repo                   │   │
+│  │  3. Sends repository_dispatch to Marketplace Repo                    │   │
+│  │  4. update-submodules.yml receives dispatch                          │   │
+│  │  5. Updates git submodule to latest commit                           │   │
+│  │  6. Runs sync_marketplace_versions.py                                │   │
+│  │  7. Commits and pushes updated marketplace.json                      │   │
+│  │  8. Claude Code users get updated plugins on next sync               │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Pipeline Validation Commands
+
+```bash
+# Validate entire pipeline for a marketplace
+uv run python scripts/validate_marketplace_pipeline.py /path/to/marketplace --verbose
+
+# Check just the marketplace structure
+uv run python scripts/validate_marketplace.py /path/to/marketplace
+
+# Validate a specific plugin within the marketplace
+uv run python scripts/validate_plugin.py /path/to/marketplace/plugin-name --verbose
+
+# Setup missing pipeline components automatically
+uv run python scripts/setup_marketplace_automation.py /path/to/marketplace --setup-all
+```
+
+## Pipeline Validation Checklist
+
+### 1. Marketplace Repository Checks
+
+```
+□ 1.1 .claude-plugin/marketplace.json exists and is valid JSON
+□ 1.2 marketplace.json has required fields: name, plugins
+□ 1.3 .gitmodules exists and defines all plugin submodules
+□ 1.4 .github/workflows/validate.yml exists (marketplace validation)
+□ 1.5 .github/workflows/update-submodules.yml exists (auto-update)
+□ 1.6 scripts/sync_marketplace_versions.py exists
+□ 1.7 MARKETPLACE_PAT secret is configured (check via gh secret list)
+□ 1.8 All submodules are initialized and accessible
+□ 1.9 Version numbers in marketplace.json match plugin.json for each plugin
+```
+
+### 2. Plugin Repository Checks (for each plugin)
+
+```
+□ 2.1 .github/workflows/notify-marketplace.yml exists
+□ 2.2 notify-marketplace.yml has push trigger on main/master
+□ 2.3 notify-marketplace.yml uses repository_dispatch
+□ 2.4 MARKETPLACE_PAT secret is configured in plugin repo
+□ 2.5 Plugin has valid .claude-plugin/plugin.json
+□ 2.6 Plugin passes standard validation (via validate_plugin.py)
+```
+
+### 3. Secrets Configuration (CRITICAL)
+
+**Why MARKETPLACE_PAT is required:**
+- `GITHUB_TOKEN` cannot trigger workflows in other repos (security limitation)
+- `GITHUB_TOKEN` cannot bypass branch protection rules
+- The PAT must have `repo` and `workflow` scopes
+
+**Setup instructions:**
+1. Create a Personal Access Token at https://github.com/settings/tokens
+2. Select scopes: `repo` (full control) and `workflow`
+3. Add as secret in EACH plugin repo: Settings → Secrets → Actions → New secret
+4. Name: `MARKETPLACE_PAT`, Value: your token
+5. Also add in marketplace repo for update-submodules.yml
+
+### 4. GitHub Actions Verification
+
+Check workflow execution status:
+
+```bash
+# Check marketplace workflows
+gh run list --repo OWNER/marketplace-repo --limit 5
+
+# Check plugin workflows
+gh run list --repo OWNER/plugin-repo --limit 5
+
+# View specific run details
+gh run view RUN_ID --repo OWNER/REPO --log-failed
+```
+
+## Pipeline Setup for New Projects
+
+### Option 1: Automatic Setup (Recommended)
+
+```bash
+# For a new marketplace with existing plugin repos
+uv run python scripts/setup_marketplace_automation.py /path/to/marketplace \
+  --plugins "plugin-a,plugin-b,plugin-c" \
+  --setup-all
+```
+
+### Option 2: Manual Setup
+
+1. **In Marketplace Repo:**
+
+```bash
+# Create workflows directory
+mkdir -p .github/workflows
+
+# Copy templates
+cp templates/github-workflows/validate-marketplace.yml .github/workflows/validate.yml
+cp templates/github-workflows/update-submodules.yml .github/workflows/
+
+# Create sync script
+mkdir -p scripts
+cp templates/scripts/sync_marketplace_versions.py scripts/
+
+# Add plugins as submodules
+git submodule add https://github.com/OWNER/plugin-a.git plugin-a
+git submodule add https://github.com/OWNER/plugin-b.git plugin-b
+
+# Create marketplace.json
+cat > .claude-plugin/marketplace.json << 'EOF'
+{
+  "name": "my-marketplace",
+  "description": "My plugin marketplace",
+  "plugins": [
+    {"name": "plugin-a", "version": "1.0.0"},
+    {"name": "plugin-b", "version": "1.0.0"}
+  ]
+}
+EOF
+```
+
+2. **In Each Plugin Repo:**
+
+```bash
+mkdir -p .github/workflows
+cp templates/github-workflows/notify-marketplace.yml .github/workflows/
+
+# Edit notify-marketplace.yml to set correct marketplace repo
+# Change MARKETPLACE_REPO value to your marketplace repo
+```
+
+3. **Configure Secrets:**
+
+```bash
+# Add PAT to each plugin repo
+gh secret set MARKETPLACE_PAT --repo OWNER/plugin-a
+
+# Add PAT to marketplace repo
+gh secret set MARKETPLACE_PAT --repo OWNER/marketplace-repo
+```
+
+## Pipeline Troubleshooting
+
+### Issue: "notify-marketplace.yml not triggering"
+
+**Symptoms:**
+- Plugin push succeeds but marketplace doesn't update
+- No workflow run in marketplace repo
+
+**Causes & Solutions:**
+1. **Missing MARKETPLACE_PAT secret** - Add it to the plugin repo
+2. **Wrong marketplace repo name** - Check `MARKETPLACE_REPO` in notify-marketplace.yml
+3. **PAT lacks workflow scope** - Regenerate with `repo` and `workflow` scopes
+4. **Repository is private** - Ensure PAT has access to private repos
+
+### Issue: "update-submodules.yml failing to push"
+
+**Symptoms:**
+- Workflow runs but fails at "Commit and push" step
+- Error: "Permission denied" or "protected branch"
+
+**Causes & Solutions:**
+1. **Branch protection blocking push** - Use MARKETPLACE_PAT (not GITHUB_TOKEN)
+2. **PAT expired** - Regenerate and update secret
+3. **PAT lacks repo scope** - Regenerate with full `repo` scope
+
+### Issue: "Submodule not updating to latest"
+
+**Symptoms:**
+- Submodule still points to old commit
+- marketplace.json version not updated
+
+**Causes & Solutions:**
+1. **Wrong branch in submodule** - Check .gitmodules for correct branch
+2. **Submodule not initialized** - Run `git submodule update --init --recursive`
+3. **sync_marketplace_versions.py error** - Check script logs
+
+### Issue: "Version mismatch between plugin.json and marketplace.json"
+
+**Symptoms:**
+- Validation fails with version mismatch warning
+- Marketplace shows old version
+
+**Causes & Solutions:**
+1. **sync script not running** - Check update-submodules.yml calls sync script
+2. **Wrong path in sync script** - Verify plugin paths match actual directories
+3. **JSON parse error** - Check both files are valid JSON
+
+## Pipeline Scoring System
+
+When validating the full pipeline, scores are assigned based on:
+
+| Category | Weight | Description |
+|----------|--------|-------------|
+| Marketplace Structure | 25 | Core marketplace.json and .gitmodules |
+| Submodule Health | 20 | Git submodules properly configured |
+| Marketplace Workflows | 20 | GitHub Actions in marketplace repo |
+| Plugin Workflows | 15 | notify-marketplace.yml in each plugin |
+| Sync Scripts | 10 | Version syncing automation |
+| Documentation | 10 | README with architecture diagram |
+
+**Grade Calculation:**
+- **A (90-100)**: Pipeline fully operational
+- **B (80-89)**: Minor gaps, mostly functional
+- **C (70-79)**: Some automation missing
+- **D (60-69)**: Manual updates required
+- **F (<60)**: Pipeline broken or not configured
+
+## Examples
+
+### Example 1: Validate Existing Marketplace Pipeline
+
+```bash
+# Clone the marketplace
+git clone --recursive https://github.com/OWNER/my-marketplace.git
+cd my-marketplace
+
+# Run pipeline validation
+uv run python claude-plugins-validation/scripts/validate_marketplace_pipeline.py . --verbose
+
+# Output:
+# ============================================================
+# Marketplace Pipeline Validation Report
+# ============================================================
+#
+# Marketplace Structure:     ✓ PASSED (25/25 points)
+# Submodule Health:          ✓ PASSED (20/20 points)
+# Marketplace Workflows:     ✓ PASSED (20/20 points)
+# Plugin Workflows:          ⚠ MINOR (12/15 points)
+# Sync Scripts:              ✓ PASSED (10/10 points)
+# Documentation:             ✓ PASSED (10/10 points)
+#
+# Total Score: 97/100 (Grade: A)
+#
+# Issues Found:
+# - [MINOR] plugin-c: Missing notify-marketplace.yml workflow
+```
+
+### Example 2: Setup Pipeline for New Marketplace
+
+```bash
+# User asks: "Set up the publishing pipeline for my marketplace"
+
+# Step 1: Validate current state
+uv run python scripts/validate_marketplace_pipeline.py /path/to/marketplace --verbose
+
+# Step 2: Offer to fix missing components
+uv run python scripts/setup_marketplace_automation.py /path/to/marketplace --setup-all
+
+# Step 3: Verify all components are in place
+uv run python scripts/validate_marketplace_pipeline.py /path/to/marketplace --verbose
+
+# Step 4: Test the pipeline
+# (Make a small change to a plugin and push)
+cd /path/to/marketplace/plugin-a
+echo "# Test" >> README.md
+git add README.md && git commit -m "test: Pipeline test" && git push
+
+# Step 5: Verify marketplace updated
+gh run list --repo OWNER/marketplace --limit 3
+```
+
+### Example 3: Add New Plugin to Existing Marketplace
+
+```bash
+# Step 1: Add plugin as submodule
+cd /path/to/marketplace
+git submodule add https://github.com/OWNER/new-plugin.git new-plugin
+
+# Step 2: Update marketplace.json
+python -c "
+import json
+with open('.claude-plugin/marketplace.json') as f:
+    data = json.load(f)
+data['plugins'].append({'name': 'new-plugin', 'version': '1.0.0'})
+with open('.claude-plugin/marketplace.json', 'w') as f:
+    json.dump(data, f, indent=2)
+"
+
+# Step 3: Setup notify-marketplace.yml in new plugin repo
+mkdir -p new-plugin/.github/workflows
+cp templates/github-workflows/notify-marketplace.yml new-plugin/.github/workflows/
+
+# Step 4: Add MARKETPLACE_PAT secret to new plugin repo
+gh secret set MARKETPLACE_PAT --repo OWNER/new-plugin
+
+# Step 5: Commit and push marketplace changes
+git add .gitmodules new-plugin .claude-plugin/marketplace.json
+git commit -m "feat: Add new-plugin to marketplace"
+git push
+
+# Step 6: Validate pipeline
+uv run python scripts/validate_marketplace_pipeline.py . --verbose
+```
+
+---
+
 # NOTES
 
 - This agent should be used proactively before releasing or updating plugins

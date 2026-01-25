@@ -232,6 +232,7 @@ For detailed specifications, read:
 | Skill Structure | [references/skill-validation.md](references/skill-validation.md) |
 | MCP Servers | [references/mcp-validation.md](references/mcp-validation.md) |
 | Marketplaces | [references/marketplace-validation.md](references/marketplace-validation.md) |
+| **Pipeline Validation** | [references/pipeline-validation.md](references/pipeline-validation.md) |
 | **Pre-Push Hook** | [references/pre-push-hook.py](references/pre-push-hook.py) |
 
 ---
