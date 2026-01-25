@@ -20,10 +20,7 @@ Tests the 13 documentation validation rules:
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
-
-import pytest
 
 # Import will fail until module is created
 from validate_documentation import (

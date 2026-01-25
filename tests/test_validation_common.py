@@ -13,14 +13,12 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
-
 # Add scripts directory to path for imports
 scripts_dir = Path(__file__).parent.parent / "scripts"
 if str(scripts_dir) not in sys.path:
     sys.path.insert(0, str(scripts_dir))
 
-from validation_common import (
+from validation_common import (  # noqa: E402
     EXIT_CRITICAL,
     EXIT_MAJOR,
     EXIT_MINOR,
