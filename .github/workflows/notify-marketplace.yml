@@ -16,7 +16,7 @@ on:
 
 env:
   MARKETPLACE_OWNER: 'Emasoft'
-  MARKETPLACE_REPO: 'emasoft-plugins-marketplace'
+  MARKETPLACE_REPO: 'emasoft-plugins'
 
 jobs:
   notify:
