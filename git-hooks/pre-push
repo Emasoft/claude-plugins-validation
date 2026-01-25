@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+# pre-push hook for claude-plugins-validation
+# Performs full validation before allowing push
+#
+# Exit codes from validate_plugin.py:
+#   0 - All checks passed
+#   1 - CRITICAL issues found (blocks push)
+#   2 - MAJOR issues found (warns but allows push)
+#   3 - MINOR issues found (allows push)
+
+set -euo pipefail
+
+# Colors for output
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Get the root directory of the git repository
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+echo -e "${BLUE}========================================${NC}"
+echo -e "${BLUE}  Pre-push Full Plugin Validation${NC}"
+echo -e "${BLUE}========================================${NC}"
+echo ""
+
+# Check what's being pushed
+REMOTE="$1"
+URL="$2"
+
+echo -e "${BLUE}Pushing to:${NC} $REMOTE ($URL)"
+echo ""
+
+# Get list of commits being pushed
+while read -r LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
+    if [ "$LOCAL_SHA" = "0000000000000000000000000000000000000000" ]; then
+        # Branch deletion, skip validation
+        echo -e "${GREEN}Branch deletion detected. No validation needed.${NC}"
+        continue
+    fi
+
+    # Check if plugin files changed in the commits being pushed
+    if [ "$REMOTE_SHA" = "0000000000000000000000000000000000000000" ]; then
+        # New branch, check all files
+        CHANGED_FILES=$(git diff --name-only "$LOCAL_SHA" HEAD~10 2>/dev/null || git ls-tree -r --name-only "$LOCAL_SHA")
+    else
+        # Existing branch, check changed files
+        CHANGED_FILES=$(git diff --name-only "$REMOTE_SHA..$LOCAL_SHA" 2>/dev/null || true)
+    fi
+
+    PLUGIN_FILES_CHANGED=false
+    while IFS= read -r file; do
+        case "$file" in
+            .claude-plugin/*|agents/*|commands/*|skills/*|hooks/*|scripts/*.py|scripts/*.sh|*.mcp.json)
+                PLUGIN_FILES_CHANGED=true
+                ;;
+        esac
+    done <<< "$CHANGED_FILES"
+
+    if [ "$PLUGIN_FILES_CHANGED" = false ]; then
+        echo -e "${GREEN}No plugin files changed. Skipping full validation.${NC}"
+        exit 0
+    fi
+done
+
+echo -e "${BLUE}Running full plugin validation...${NC}"
+echo ""
+
+# Run the plugin validator with verbose output
+cd "$REPO_ROOT"
+
+# Use uv if available, otherwise fall back to python
+if command -v uv &> /dev/null; then
+    PYTHON_CMD="uv run python"
+else
+    PYTHON_CMD="python3"
+fi
+
+# Run validation and capture exit code
+set +e
+$PYTHON_CMD scripts/validate_plugin.py . --verbose 2>&1
+VALIDATION_EXIT_CODE=$?
+set -e
+
+echo ""
+echo -e "${BLUE}----------------------------------------${NC}"
+
+# Check for marketplace.json updates if plugin files changed
+MARKETPLACE_JSON="$REPO_ROOT/marketplace.json"
+if [ -f "$MARKETPLACE_JSON" ]; then
+    echo -e "${BLUE}Checking marketplace.json consistency...${NC}"
+
+    # Read version from plugin.json if it exists
+    PLUGIN_JSON="$REPO_ROOT/.claude-plugin/plugin.json"
+    if [ -f "$PLUGIN_JSON" ]; then
+        PLUGIN_VERSION=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$PLUGIN_JSON" | head -1 | cut -d'"' -f4)
+        MARKETPLACE_VERSION=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$MARKETPLACE_JSON" | head -1 | cut -d'"' -f4)
+
+        if [ -n "$PLUGIN_VERSION" ] && [ -n "$MARKETPLACE_VERSION" ]; then
+            if [ "$PLUGIN_VERSION" != "$MARKETPLACE_VERSION" ]; then
+                echo -e "${YELLOW}WARNING: Version mismatch!${NC}"
+                echo -e "  plugin.json version: $PLUGIN_VERSION"
+                echo -e "  marketplace.json version: $MARKETPLACE_VERSION"
+                echo -e "${YELLOW}Consider updating marketplace.json to match.${NC}"
+            else
+                echo -e "${GREEN}Version consistency: OK ($PLUGIN_VERSION)${NC}"
+            fi
+        fi
+    fi
+fi
+
+echo ""
+
+# Handle exit codes
+case $VALIDATION_EXIT_CODE in
+    0)
+        echo -e "${GREEN}========================================${NC}"
+        echo -e "${GREEN}  PASSED: All validation checks passed${NC}"
+        echo -e "${GREEN}  Push allowed.${NC}"
+        echo -e "${GREEN}========================================${NC}"
+        exit 0
+        ;;
+    1)
+        echo -e "${RED}========================================${NC}"
+        echo -e "${RED}  BLOCKED: CRITICAL issues found${NC}"
+        echo -e "${RED}  Fix critical issues before pushing.${NC}"
+        echo -e "${RED}========================================${NC}"
+        exit 1
+        ;;
+    2)
+        echo -e "${YELLOW}========================================${NC}"
+        echo -e "${YELLOW}  WARNING: MAJOR issues found${NC}"
+        echo -e "${YELLOW}  Push allowed, but please fix soon.${NC}"
+        echo -e "${YELLOW}========================================${NC}"
+        exit 0
+        ;;
+    3)
+        echo -e "${GREEN}========================================${NC}"
+        echo -e "${GREEN}  PASSED: Only minor issues found${NC}"
+        echo -e "${GREEN}  Push allowed.${NC}"
+        echo -e "${GREEN}========================================${NC}"
+        exit 0
+        ;;
+    *)
+        echo -e "${RED}========================================${NC}"
+        echo -e "${RED}  ERROR: Validation failed (exit $VALIDATION_EXIT_CODE)${NC}"
+        echo -e "${RED}  Please check the validation script.${NC}"
+        echo -e "${RED}========================================${NC}"
+        exit 1
+        ;;
+esac

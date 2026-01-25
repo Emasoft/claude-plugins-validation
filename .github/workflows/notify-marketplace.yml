@@ -1,0 +1,51 @@
+# Notify marketplace repo when this plugin is updated
+# This workflow triggers the marketplace to update its submodule for this plugin
+
+name: Notify Marketplace
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - '.claude-plugin/plugin.json'
+      - 'hooks/**'
+      - 'commands/**'
+      - 'agents/**'
+      - 'skills/**'
+      - 'scripts/**'
+
+env:
+  MARKETPLACE_OWNER: 'Emasoft'
+  MARKETPLACE_REPO: 'emasoft-plugins-marketplace'
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get plugin info
+        id: plugin
+        run: |
+          echo "name=${{ github.event.repository.name }}" >> $GITHUB_OUTPUT
+          echo "ref=${{ github.sha }}" >> $GITHUB_OUTPUT
+
+      - name: Trigger marketplace update
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          token: ${{ secrets.MARKETPLACE_PAT }}
+          repository: ${{ env.MARKETPLACE_OWNER }}/${{ env.MARKETPLACE_REPO }}
+          event-type: plugin-updated
+          client-payload: |
+            {
+              "plugin": "${{ steps.plugin.outputs.name }}",
+              "ref": "${{ steps.plugin.outputs.ref }}",
+              "triggered_by": "${{ github.actor }}"
+            }
+
+      - name: Summary
+        run: |
+          echo "## Marketplace Notification" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Triggered update in ${{ env.MARKETPLACE_OWNER }}/${{ env.MARKETPLACE_REPO }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Plugin: ${{ steps.plugin.outputs.name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit: ${{ steps.plugin.outputs.ref }}" >> $GITHUB_STEP_SUMMARY

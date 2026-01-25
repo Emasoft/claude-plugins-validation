@@ -1,0 +1,57 @@
+# Notify marketplace repo when this plugin is updated
+# Place this in each plugin repo: .github/workflows/notify-marketplace.yml
+#
+# Requirements:
+#   - Create a PAT (Personal Access Token) with 'repo' scope
+#   - Add it as a secret named MARKETPLACE_PAT in the plugin repo
+#   - Update MARKETPLACE_OWNER and MARKETPLACE_REPO below
+
+name: Notify Marketplace
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - '.claude-plugin/plugin.json'
+      - 'hooks/**'
+      - 'commands/**'
+      - 'agents/**'
+      - 'skills/**'
+      - 'scripts/**'
+
+env:
+  # Update these to match your marketplace repo
+  MARKETPLACE_OWNER: 'YOUR_GITHUB_USERNAME'
+  MARKETPLACE_REPO: 'YOUR_MARKETPLACE_REPO_NAME'
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get plugin info
+        id: plugin
+        run: |
+          echo "name=${{ github.event.repository.name }}" >> $GITHUB_OUTPUT
+          echo "ref=${{ github.sha }}" >> $GITHUB_OUTPUT
+
+      - name: Trigger marketplace update
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          token: ${{ secrets.MARKETPLACE_PAT }}
+          repository: ${{ env.MARKETPLACE_OWNER }}/${{ env.MARKETPLACE_REPO }}
+          event-type: plugin-updated
+          client-payload: |
+            {
+              "plugin": "${{ steps.plugin.outputs.name }}",
+              "ref": "${{ steps.plugin.outputs.ref }}",
+              "triggered_by": "${{ github.actor }}"
+            }
+
+      - name: Summary
+        run: |
+          echo "## Marketplace Notification" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Triggered update in ${{ env.MARKETPLACE_OWNER }}/${{ env.MARKETPLACE_REPO }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Plugin: ${{ steps.plugin.outputs.name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit: ${{ steps.plugin.outputs.ref }}" >> $GITHUB_STEP_SUMMARY

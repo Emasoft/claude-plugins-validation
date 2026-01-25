@@ -1,0 +1,122 @@
+# Auto-update marketplace submodules when plugins are pushed
+# This workflow is triggered by repository_dispatch from plugin repos
+#
+# Setup:
+#   1. Add this workflow to your marketplace repo
+#   2. Add notify-marketplace.yml to each plugin repo
+#   3. Create a PAT with 'repo' scope and add as MARKETPLACE_PAT secret in plugin repos
+
+name: Update Submodules
+
+on:
+  # Triggered by plugin repos when they push updates
+  repository_dispatch:
+    types: [plugin-updated]
+
+  # Manual trigger for testing or recovery
+  workflow_dispatch:
+    inputs:
+      plugin:
+        description: 'Specific plugin to update (leave empty for all)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  update-submodules:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout marketplace
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Show trigger info
+        run: |
+          echo "Triggered by: ${{ github.event_name }}"
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            echo "Plugin: ${{ github.event.client_payload.plugin }}"
+            echo "Ref: ${{ github.event.client_payload.ref }}"
+            echo "Actor: ${{ github.event.client_payload.triggered_by }}"
+          fi
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Update submodules
+        run: |
+          PLUGIN="${{ github.event.client_payload.plugin || inputs.plugin }}"
+
+          if [ -n "$PLUGIN" ] && [ -d "$PLUGIN" ]; then
+            echo "Updating specific plugin: $PLUGIN"
+            cd "$PLUGIN"
+            git fetch origin
+            git checkout origin/HEAD --detach 2>/dev/null || git checkout origin/main --detach 2>/dev/null || git checkout origin/master --detach
+            cd ..
+          else
+            echo "Updating all submodules..."
+            git submodule update --remote --merge
+          fi
+
+          echo ""
+          echo "Current submodule status:"
+          git submodule status
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Sync marketplace.json versions
+        run: |
+          python scripts/sync_marketplace_versions.py
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet && git diff --staged --quiet; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "No changes detected"
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "Changes detected:"
+            git diff --stat
+          fi
+
+      - name: Commit and push
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          git add .
+
+          # Build commit message
+          PLUGIN="${{ github.event.client_payload.plugin || inputs.plugin || 'all' }}"
+
+          if [ "$PLUGIN" != "all" ] && [ -d "$PLUGIN" ]; then
+            NEW_VERSION=$(cat "$PLUGIN/.claude-plugin/plugin.json" 2>/dev/null | python -c "import sys,json; print(json.load(sys.stdin).get('version','unknown'))" 2>/dev/null || echo "unknown")
+            git commit -m "chore: update $PLUGIN to $NEW_VERSION"
+          else
+            git commit -m "chore: sync submodules and marketplace.json"
+          fi
+
+          git push
+
+      - name: Summary
+        run: |
+          echo "## Submodule Update Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            echo "**Plugin:** ${{ github.event.client_payload.plugin }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Submodule Status" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          git submodule status >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

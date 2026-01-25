@@ -1,21 +1,26 @@
-# Python-generated files
+# Python
 __pycache__/
-*.py[oc]
+*.py[cod]
+*$py.class
+*.so
+.Python
 build/
+develop-eggs/
 dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
 wheels/
-*.egg-info
+*.egg-info/
+.installed.cfg
+*.egg
 
 # Virtual environments
-.venv
-
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
 .venv/
 venv/
 ENV/
@@ -25,126 +30,41 @@ ENV/
 .vscode/
 *.swp
 *.swo
+*~
 
-# OS
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+
+# macOS
 .DS_Store
-Thumbs.db
-
-# Build artifacts
-dist/
-build/
-*.egg-info/
+.AppleDouble
+.LSOverride
+._*
 
 # Logs
 *.log
 logs/
 
-# Dev folders
-docs_dev/
-scripts_dev/
-tests_dev/
+# Local settings
+.env
+.env.local
+*.local.json
 
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-.venv/
-venv/
-ENV/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Build artifacts
-dist/
-build/
-*.egg-info/
-
-# Logs
-*.log
-logs/
-
-# Dev folders
-docs_dev/
-scripts_dev/
-tests_dev/
-
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-.venv/
-venv/
-ENV/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Build artifacts
-dist/
-build/
-*.egg-info/
-
-# Logs
-*.log
-logs/
-
-# Dev folders
-docs_dev/
-scripts_dev/
-tests_dev/
-
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-.venv/
-venv/
-ENV/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Build artifacts
-dist/
-build/
-*.egg-info/
-
-# Logs
-*.log
-logs/
-
-# Dev folders
-docs_dev/
-scripts_dev/
-tests_dev/
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak

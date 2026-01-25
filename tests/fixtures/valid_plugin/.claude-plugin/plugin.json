@@ -1,0 +1,14 @@
+{
+  "name": "valid-test-plugin",
+  "version": "1.0.0",
+  "description": "A valid test plugin for validation testing",
+  "author": {
+    "name": "Test Author",
+    "email": "test@example.com"
+  },
+  "license": "MIT",
+  "agents": [
+    "./agents/test-agent.md"
+  ],
+  "skills": "./skills/"
+}

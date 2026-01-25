@@ -39,6 +39,50 @@ For detailed installation instructions, troubleshooting, and updates, see the **
 claude --plugin-dir /path/to/claude-plugins-validation
 ```
 
+## Update to Latest Version
+
+### If Installed from Marketplace
+
+```bash
+# Reinstall with --force to get the latest version
+claude plugin install claude-plugins-validation@marketplace-name --force
+```
+
+### If Using --plugin-dir (Local Development)
+
+```bash
+# Navigate to the plugin directory and pull latest changes
+cd /path/to/claude-plugins-validation
+git pull origin main
+```
+
+**Important**: After updating the plugin, you MUST restart Claude Code for changes to take effect. There is no hot-reload capability for plugins.
+
+## Uninstall
+
+### Remove Installed Plugin
+
+```bash
+# Uninstall the plugin
+claude plugin uninstall claude-plugins-validation
+```
+
+### Remove Marketplace (Optional)
+
+If you no longer need the marketplace that provided this plugin:
+
+```bash
+# List marketplaces to find the exact name
+claude plugin marketplace list
+
+# Remove the marketplace
+claude plugin marketplace remove marketplace-name
+```
+
+### Remove Local Development Setup
+
+If using `--plugin-dir`, simply stop using the flag when launching Claude Code. No files are copied or modified in your system.
+
 ## Usage
 
 ### Validate a Plugin
@@ -194,6 +238,58 @@ The agent verifies dependencies for all languages found in the plugin:
 | Shell/Bash | Shebang lines, `source` statements | Checks command availability |
 | PowerShell | `.psd1` manifests, `#Requires` statements | Checks module availability |
 | Ruby | `Gemfile` | Scans require statements, checks gems |
+
+## Troubleshooting
+
+### Plugin Not Loading
+
+If the plugin does not load when starting Claude Code:
+
+1. **Verify installation**: Run `claude plugin list` to see installed plugins
+2. **Check the manifest**: Ensure `.claude-plugin/plugin.json` exists and is valid JSON
+3. **Run validation**: `uv run python scripts/validate_plugin.py /path/to/plugin --verbose`
+4. **Enable debug mode**: Launch Claude with `claude --debug` to see plugin loading details
+5. **Check for conflicts**: Ensure no other plugin has the same name
+
+### Validation Scripts Not Running
+
+If validation scripts fail to execute:
+
+1. **Ensure uv is installed**: Run `uv --version` to verify installation
+2. **Verify Python version**: Requires Python 3.10 or higher. Check with `python3 --version`
+3. **Check file permissions**: Scripts must be executable. Run `chmod +x scripts/*.py`
+4. **Initialize environment**: Run `uv sync` in the plugin directory to install dependencies
+
+### Import Errors
+
+If you see `ModuleNotFoundError` or import errors:
+
+```bash
+# Install dependencies
+cd /path/to/claude-plugins-validation
+uv sync
+
+# Activate the virtual environment
+source .venv/bin/activate
+
+# Verify installation
+uv run python -c "import pathlib; print('OK')"
+```
+
+### Validation Fails but Plugin Works
+
+Exit code 3 (minor issues) means the plugin will function but does not follow all best practices:
+
+- **Warnings vs Errors**: Minor issues are recommendations, not blockers
+- **Best practices**: Missing README.md, optional fields not set, documentation gaps
+- **Fix or ignore**: Address warnings when time permits, but they will not prevent plugin usage
+
+If validation returns exit code 1 (critical) or 2 (major) but the plugin appears to work:
+
+1. The issue may only manifest in specific scenarios
+2. Some features may be silently broken
+3. Future Claude Code updates may enforce stricter validation
+4. Recommend fixing issues to ensure long-term compatibility
 
 ## Contributing
 

@@ -283,10 +283,10 @@ my-skill/
 ### Linking from SKILL.md
 
 ```markdown
-## Configuration
+## Hooks
 
-For detailed configuration options, see:
-[Configuration Reference](references/configuration.md)
+For detailed hook configuration, see:
+[Hook Validation](references/hook-validation.md)
 ```
 
 ### Reference File Format
@@ -316,15 +316,15 @@ Include TOCs in SKILL.md for quick navigation:
 
 For detailed information, see these references:
 
-**[Configuration Reference](references/configuration.md)**
-- 1.1 Basic configuration options
-- 1.2 Environment-specific settings
-- 1.3 Security configurations
+**[Plugin Structure Reference](plugin-structure.md)**
+- 1.1 Plugin directory layout
+- 1.2 Component placement rules
+- 1.3 Manifest configuration
 
-**[Troubleshooting Guide](references/troubleshooting.md)**
-- 2.1 Common connection errors
-- 2.2 Performance issues
-- 2.3 Migration failures
+**[Hook Validation Reference](hook-validation.md)**
+- 2.1 Valid hook event types
+- 2.2 Matcher patterns
+- 2.3 Script requirements
 ```
 
 ---
