@@ -839,18 +839,25 @@ def validate_resource_references(skill_path: Path, body: str, report: Validation
 
     # Check markdown links to local files
     local_refs = re.findall(r"\[([^\]]+)\]\(([^)]+)\)", body)
+    checked_files: set[str] = set()  # Track files we've already validated
     for _, link_target in local_refs:
         if link_target.startswith(("http://", "https://", "mailto:", "#", "{")):
             continue
-        ref_path = skill_path / link_target
+        # Handle anchor links (e.g., "references/file.md#section-name")
+        file_path = link_target.split("#")[0] if "#" in link_target else link_target
+        # Skip if we've already checked this file
+        if file_path in checked_files:
+            continue
+        checked_files.add(file_path)
+        ref_path = skill_path / file_path
         if not ref_path.exists():
             report.major(
-                f"Referenced file not found: {link_target}",
+                f"Referenced file not found: {file_path}",
                 "SKILL.md",
                 category="Resource References",
             )
         else:
-            report.passed(f"Referenced file exists: {link_target}", "SKILL.md", category="Resource References")
+            report.passed(f"Referenced file exists: {file_path}", "SKILL.md", category="Resource References")
 
 
 def validate_directory_structure(skill_path: Path, report: ValidationReport) -> None:
