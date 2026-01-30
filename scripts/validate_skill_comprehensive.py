@@ -857,6 +857,24 @@ def validate_resource_references(skill_path: Path, body: str, report: Validation
         if file_path in checked_files:
             continue
         checked_files.add(file_path)
+
+        # Check for parent directory traversal (../) which breaks portability
+        if "../" in file_path:
+            report.major(
+                f"Reference uses parent traversal '../': {file_path} - skill should be self-contained",
+                "SKILL.md",
+                category="Resource References",
+            )
+            # Still check if file exists for completeness
+            ref_path = skill_path / file_path
+            if ref_path.exists():
+                report.info(
+                    f"External file exists but skill not portable: {file_path}",
+                    "SKILL.md",
+                    category="Resource References",
+                )
+            continue
+
         ref_path = skill_path / file_path
         if not ref_path.exists():
             report.major(
