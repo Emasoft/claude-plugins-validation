@@ -1,7 +1,7 @@
 {
   "name": "claude-plugins-validation",
-  "version": "1.0.1",
-  "description": "Comprehensive validation suite for Claude Code plugins, marketplaces, hooks, skills, and MCP servers. Provides validators, an expert agent, and detailed skill documentation for thorough plugin quality assurance.",
+  "version": "1.1.0",
+  "description": "Comprehensive validation suite for Claude Code plugins, marketplaces, hooks, skills, and MCP servers. Includes 168+ validation rules from AgentSkills OpenSpec, Nixtla Quality Standards, and Meta-Skill frameworks. Provides validators, expert agents, and detailed skill documentation for thorough plugin quality assurance.",
   "author": {
     "name": "Emasoft",
     "email": "713559+Emasoft@users.noreply.github.com"
@@ -17,10 +17,14 @@
     "skills",
     "mcp",
     "quality-assurance",
-    "linting"
+    "linting",
+    "agentskills",
+    "openspec",
+    "nixtla"
   ],
   "agents": [
-    "./agents/plugin-validator.md"
+    "./agents/plugin-validator.md",
+    "./agents/skill-validation-agent.md"
   ],
   "skills": "./skills/"
 }
