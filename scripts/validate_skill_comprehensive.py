@@ -759,7 +759,10 @@ def validate_required_sections(body: str, report: ValidationReport, strict_mode:
         return
 
     for section in REQUIRED_SECTIONS:
-        if section not in body:
+        # Use regex to match exact section headers at start of line
+        # This prevents false positives like "### Research Output Files" matching "## Output"
+        section_pattern = rf"(?m)^{re.escape(section)}\s*$"
+        if not re.search(section_pattern, body):
             report.major(
                 f"Required section missing: '{section}' (Nixtla strict mode)",
                 "SKILL.md",
