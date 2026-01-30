@@ -771,11 +771,16 @@ def validate_required_sections(body: str, report: ValidationReport, strict_mode:
         else:
             report.passed(f"Required section present: {section}", "SKILL.md", category="Required Sections")
 
-    # Instructions must have numbered list
-    if "## Instructions" in body:
-        instructions_start = body.find("## Instructions")
-        instructions_end = body.find("##", instructions_start + 1)
-        if instructions_end == -1:
+    # Instructions must have numbered list (only if ## Instructions section actually exists)
+    # Use regex to match exact section header, not substring like "## Instructions vs System Prompts"
+    instructions_match = re.search(r"(?m)^## Instructions\s*$", body)
+    if instructions_match:
+        instructions_start = instructions_match.start()
+        # Find next ## header (any level 2 header)
+        next_section = re.search(r"(?m)^## ", body[instructions_match.end():])
+        if next_section:
+            instructions_end = instructions_match.end() + next_section.start()
+        else:
             instructions_end = len(body)
         instructions = body[instructions_start:instructions_end]
 
