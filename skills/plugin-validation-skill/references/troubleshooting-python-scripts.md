@@ -1,5 +1,22 @@
 # Troubleshooting Python Scripts for Plugin Validation
 
+## Table of Contents
+
+1. [Bash Arithmetic Exit Codes](#1-bash-arithmetic-exit-codes-verified)
+2. [Unused Variable Warnings - Pyright/ruff](#2-unused-variable-warnings---pyrightruff-verified)
+3. [Missing Python Dependencies - ModuleNotFoundError](#3-missing-python-dependencies---modulenotfounderror-verified)
+4. [Git Hook Not Running](#4-git-hook-not-running-verified)
+5. [Plugin JSON Missing Required Fields](#5-plugin-json-missing-required-fields-verified)
+6. [Ruff Linting - Unused Variable Error](#6-ruff-linting---unused-variable-error-verified)
+7. [Marketplace Plugin Source Format](#7-marketplace-plugin-source-format-verified)
+8. [Version Consistency Between Plugins and Marketplace](#8-version-consistency-between-plugins-and-marketplace-verified)
+9. [Git Tag Already Exists Error](#9-git-tag-already-exists-error-verified)
+10. [subprocess.run Output Truncation](#10-subprocessrun-output-truncation-verified)
+11. [Best Practices Summary](#best-practices-summary-all-verified)
+12. [Quick Diagnostic Commands](#quick-diagnostic-commands)
+
+---
+
 ## Verified Issues and Working Solutions
 
 This document contains issues encountered during development and their **verified working solutions**.

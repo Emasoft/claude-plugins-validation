@@ -1,6 +1,7 @@
 ---
 name: plugin-validation-skill
-description: Comprehensive validation skill for Claude Code plugins, marketplaces, hooks, skills, and MCP servers. Use this skill when examining, debugging, or validating any Claude Code plugin component.
+description: |
+  Validate Claude Code plugins, hooks, skills, MCP. Use when checking plugin quality. Trigger with /cpv-validate-plugin.
 tags:
   - validation
   - plugins
@@ -14,7 +15,89 @@ user-invocable: true
 
 # Plugin Validation Skill
 
-This skill teaches how to validate Claude Code plugins and all their components. Use this skill whenever you need to examine, debug, or ensure quality of plugin structures.
+Validates Claude Code plugins and all their components for quality and compliance.
+
+## Overview
+
+This skill provides comprehensive validation for Claude Code plugin components:
+- Plugin manifest (`plugin.json`) structure and fields
+- Hook configurations (`hooks.json`) and script validation
+- Skill frontmatter and content quality (84+ rules)
+- MCP server configurations (`.mcp.json`)
+- Marketplace configurations and git submodules
+- Agent definitions and system prompts
+
+## Prerequisites
+
+- Python 3.12+ with `pyyaml` installed
+- `uv` package manager for running validation scripts
+- Plugin directory with valid structure (`.claude-plugin/plugin.json`)
+
+## Instructions
+
+1. Navigate to the claude-plugins-validation directory
+2. Run the validator: `uv run python scripts/validate_plugin.py /path/to/plugin`
+3. Review output by severity (CRITICAL > MAJOR > MINOR)
+4. Fix issues in priority order
+5. Re-run validation until exit code 0
+
+### Validation Checklist
+
+Copy this checklist and track your progress:
+
+- [ ] Navigate to the claude-plugins-validation directory
+- [ ] Run the main validator: `uv run python scripts/validate_plugin.py /path/to/plugin`
+- [ ] Fix all CRITICAL issues first (plugin won't work)
+- [ ] Fix MAJOR issues next (features may fail)
+- [ ] Address MINOR issues for polish
+- [ ] Re-run validation until exit code 0
+
+## Output
+
+The validators return:
+- **Exit Code**: 0 (pass), 1 (critical), 2 (major), 3 (minor)
+- **Summary**: Issue counts by severity level
+- **Details**: Each issue with file location and fix suggestion
+- **Grade**: A-F letter grade for skill validation
+
+## Error Handling
+
+If validation fails:
+1. Check the exit code to determine severity
+2. Review CRITICAL issues first (plugin won't work)
+3. Address MAJOR issues next (features may fail)
+4. Fix MINOR issues for polish (warnings)
+5. See [Troubleshooting](#troubleshooting) for common fixes
+
+## Examples
+
+### Example 1: Validate a Plugin
+
+```bash
+cd /path/to/claude-plugins-validation
+uv run python scripts/validate_plugin.py /path/to/my-plugin --verbose
+```
+
+### Example 2: Validate a Skill Only
+
+```bash
+uv run python scripts/validate_skill_comprehensive.py /path/to/skill-dir --strict
+```
+
+### Example 3: CI/CD Integration
+
+```bash
+uv run python scripts/validate_plugin.py ./my-plugin --json > validation-results.json
+```
+
+## Resources
+
+- [Validation Checklist](references/validation-checklist.md) - Master checklist for pre-release
+- [Plugin Structure](references/plugin-structure.md) - Required plugin directory layout
+- [Hook Validation](references/hook-validation.md) - Hook configuration reference
+- [Troubleshooting](references/troubleshooting-python-scripts.md) - Common issues and fixes
+
+---
 
 ## Table of Contents
 
@@ -24,9 +107,8 @@ This skill teaches how to validate Claude Code plugins and all their components.
 4. [Component Reference](#component-reference)
 5. [Troubleshooting](#troubleshooting)
 6. [Integration Tips](#integration-tips)
-7. [Official Documentation Sources](#official-documentation-sources)
-8. [How to Use Official Documentation](#how-to-use-official-documentation)
-9. [Related Tools](#related-tools)
+7. [Official Documentation](#official-documentation)
+8. [Related Tools](#related-tools)
 
 ---
 
@@ -354,133 +436,9 @@ Add to `.vscode/tasks.json`:
 
 ---
 
-## Official Documentation Sources
+## Official Documentation
 
-**IMPORTANT**: For the most up-to-date specifications, fetch and read these official documentation URLs. Specifications change frequently, so always consult the latest versions before validating plugins.
-
-### Claude Code Fundamentals
-
-| Topic | Official URL |
-|-------|--------------|
-| Latest Changes | https://code.claude.com/docs/en/changelog.md |
-| How Claude Code Works | https://code.claude.com/docs/en/how-claude-code-works.md |
-| Extend Claude Code | https://code.claude.com/docs/en/features-overview.md |
-
-### Settings & CLI
-
-| Topic | Official URL |
-|-------|--------------|
-| Claude Code Settings | https://code.claude.com/docs/en/settings.md |
-| CLI Reference | https://code.claude.com/docs/en/cli-reference.md |
-
-### Marketplaces
-
-| Topic | Official URL |
-|-------|--------------|
-| Discover Plugins | https://code.claude.com/docs/en/discover-plugins.md |
-| Create Marketplaces | https://code.claude.com/docs/en/plugin-marketplaces.md |
-
-### Plugins
-
-| Topic | Official URL |
-|-------|--------------|
-| Create Plugins | https://code.claude.com/docs/en/plugins.md |
-| Plugins Reference | https://code.claude.com/docs/en/plugins-reference.md |
-
-### Custom Agents
-
-| Topic | Official URL |
-|-------|--------------|
-| Create Subagents | https://code.claude.com/docs/en/sub-agents.md |
-
-### Hooks
-
-| Topic | Official URL |
-|-------|--------------|
-| Hooks Guide | https://code.claude.com/docs/en/hooks-guide.md |
-| Hooks Reference | https://code.claude.com/docs/en/hooks.md |
-
-### Skills
-
-| Topic | Official URL |
-|-------|--------------|
-| Extend with Skills | https://code.claude.com/docs/en/skills.md |
-
-### Other Extensions
-
-| Topic | Official URL |
-|-------|--------------|
-| Output Styles | https://code.claude.com/docs/en/output-styles.md |
-| Status Line Config | https://code.claude.com/docs/en/statusline.md |
-| GitHub Actions | https://code.claude.com/docs/en/github-actions.md |
-
-### MCP (Model Context Protocol)
-
-| Topic | Official URL |
-|-------|--------------|
-| MCP Spec Changelog | https://modelcontextprotocol.io/specification/2025-11-25/changelog.md |
-| Connect via MCP | https://code.claude.com/docs/en/mcp.md |
-| MCP Server Overview | https://modelcontextprotocol.io/specification/2025-11-25/server/index.md |
-| MCP Specification | https://modelcontextprotocol.io/specification/2025-11-25/index.md |
-| MCP Schema Reference | https://modelcontextprotocol.io/specification/2025-11-25/schema.md |
-| Build MCP Client | https://modelcontextprotocol.io/docs/develop/build-client.md |
-| Build MCP Server | https://modelcontextprotocol.io/docs/develop/build-server.md |
-| MCP Architecture | https://modelcontextprotocol.io/docs/learn/architecture.md |
-| MCP Client Concepts | https://modelcontextprotocol.io/docs/learn/client-concepts.md |
-| MCP Server Concepts | https://modelcontextprotocol.io/docs/learn/server-concepts.md |
-| MCP SDKs | https://modelcontextprotocol.io/docs/sdk.md |
-| MCP Inspector | https://modelcontextprotocol.io/docs/tools/inspector.md |
-
-### MCP Detailed Specifications
-
-| Topic | Official URL |
-|-------|--------------|
-| Architecture | https://modelcontextprotocol.io/specification/2025-11-25/architecture/index.md |
-| Authorization | https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization.md |
-| Basic Overview | https://modelcontextprotocol.io/specification/2025-11-25/basic/index.md |
-| Security Best Practices | https://modelcontextprotocol.io/specification/2025-11-25/basic/security_best_practices.md |
-| Transports | https://modelcontextprotocol.io/specification/2025-11-25/basic/transports.md |
-| Tasks | https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/tasks.md |
-| Roots | https://modelcontextprotocol.io/specification/2025-11-25/client/roots.md |
-| Prompts | https://modelcontextprotocol.io/specification/2025-11-25/server/prompts.md |
-| Resources | https://modelcontextprotocol.io/specification/2025-11-25/server/resources.md |
-| Tools | https://modelcontextprotocol.io/specification/2025-11-25/server/tools.md |
-| Sampling | https://modelcontextprotocol.io/specification/2025-11-25/client/sampling.md |
-| Completion | https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/completion.md |
-| Logging | https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/logging.md |
-| Pagination | https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/pagination.md |
-| Versioning | https://modelcontextprotocol.io/specification/versioning.md |
-
-### Troubleshooting
-
-| Topic | Official URL |
-|-------|--------------|
-| Troubleshooting | https://code.claude.com/docs/en/troubleshooting.md |
-
----
-
-## How to Use Official Documentation
-
-When validating plugins, always verify against the latest specifications:
-
-1. **Before validation**: Fetch the relevant spec URL to confirm current requirements
-2. **When errors occur**: Check the official docs for updated field names or structures
-3. **For MCP servers**: The MCP spec version (currently 2025-11-25) defines transport types and fields
-4. **For hooks**: Check hooks.md for the current list of valid event types
-
-### Example: Fetching Latest Hook Events
-
-```bash
-# Fetch the hooks reference to verify valid event types
-curl -s https://code.claude.com/docs/en/hooks.md | grep -A 20 "## Hook Events"
-```
-
-### Example: Checking MCP Transport Types
-
-```bash
-# Fetch MCP transports spec for current transport types
-curl -s https://modelcontextprotocol.io/specification/2025-11-25/basic/transports.md
-```
+For the complete list of official documentation URLs (Claude Code, MCP, Hooks, Skills, etc.), see **[references/official-docs-urls.md](references/official-docs-urls.md)**.
 
 ---
 

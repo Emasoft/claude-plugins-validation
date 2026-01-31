@@ -39,8 +39,8 @@ import yaml
 from validate_hook import validate_hooks as validate_hook_file
 from validate_mcp import validate_plugin_mcp
 
-# Import component validators
-from validate_skill import validate_skill as validate_skill_dir
+# Import comprehensive skill validator (84+ rules from AgentSkills OpenSpec, Nixtla, Meta-Skills)
+from validate_skill_comprehensive import validate_skill as validate_skill_comprehensive
 
 # Validation result levels
 Level = Literal["CRITICAL", "MAJOR", "MINOR", "INFO", "PASSED"]
@@ -571,14 +571,20 @@ def validate_skills(plugin_root: Path, report: ValidationReport) -> None:
 
     report.info(f"Found {len(skill_dirs)} skill(s) to validate")
 
-    # Validate each skill
+    # Validate each skill using comprehensive validator (84+ rules)
     for skill_dir in sorted(skill_dirs):
         skill_name = skill_dir.name
-        skill_report = validate_skill_dir(skill_dir)
+        # Use comprehensive validator with all checks enabled
+        skill_report = validate_skill_comprehensive(
+            skill_dir,
+            strict_mode=True,  # Enable Nixtla strict mode
+            strict_openspec=False,  # Don't require OpenSpec 6-field whitelist for plugins
+            validate_pillars_flag=skill_name.startswith(("lang-", "convert-")),  # Auto-enable for lang-*/convert-*
+        )
 
-        # Transfer results to main report
+        # Transfer results to main report with skill path prefix
         for result in skill_report.results:
-            file_path = f"skills/{skill_name}/{result.file}" if result.file else None
+            file_path = f"skills/{skill_name}/{result.file}" if result.file else f"skills/{skill_name}"
             report.add(result.level, result.message, file_path, result.line)
 
 

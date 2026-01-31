@@ -32,17 +32,6 @@ from validate_command import validate_command
 from validate_hook import validate_hooks
 from validate_mcp import validate_plugin_mcp
 from validate_plugin import (
-    check_component_count,
-    check_description_length,
-    check_license_file,
-    check_readme_size,
-    check_required_files,
-    check_version_consistency,
-    validate_manifest,
-    validate_scripts,
-    validate_structure,
-)
-from validate_plugin import (
     validate_agents as plugin_validate_agents,
 )
 from validate_plugin import (
@@ -50,6 +39,13 @@ from validate_plugin import (
 )
 from validate_plugin import (
     validate_hooks as plugin_validate_hooks,
+)
+from validate_plugin import (
+    validate_license,
+    validate_manifest,
+    validate_readme,
+    validate_scripts,
+    validate_structure,
 )
 from validate_plugin import (
     validate_mcp as plugin_validate_mcp,
@@ -419,23 +415,19 @@ def run_all_validators(plugin_path: Path) -> dict[str, ValidationReport]:
 
     # Run plugin validator (main manifest and structure)
     # Uses multiple functions from validate_plugin.py
+    # Note: validate_plugin uses its own ValidationReport class with compatible interface
     try:
         plugin_report = ValidationReport()
-        manifest = validate_manifest(plugin_path, plugin_report)
-        validate_structure(plugin_path, plugin_report)
-        plugin_validate_commands(plugin_path, plugin_report)
-        plugin_validate_agents(plugin_path, plugin_report)
-        plugin_validate_hooks(plugin_path, plugin_report)
-        plugin_validate_mcp(plugin_path, plugin_report)
-        validate_scripts(plugin_path, plugin_report)
-        plugin_validate_skills(plugin_path, plugin_report)
-        check_readme_size(plugin_path, plugin_report)
-        if manifest and "description" in manifest:
-            check_description_length(manifest["description"], plugin_report, ".claude-plugin/plugin.json")
-        check_component_count(plugin_path, plugin_report)
-        check_license_file(plugin_path, manifest, plugin_report)
-        check_version_consistency(plugin_path, manifest, plugin_report)
-        check_required_files(plugin_path, plugin_report)
+        _ = validate_manifest(plugin_path, plugin_report)  # type: ignore[arg-type]
+        validate_structure(plugin_path, plugin_report)  # type: ignore[arg-type]
+        plugin_validate_commands(plugin_path, plugin_report)  # type: ignore[arg-type]
+        plugin_validate_agents(plugin_path, plugin_report)  # type: ignore[arg-type]
+        plugin_validate_hooks(plugin_path, plugin_report)  # type: ignore[arg-type]
+        plugin_validate_mcp(plugin_path, plugin_report)  # type: ignore[arg-type]
+        validate_scripts(plugin_path, plugin_report)  # type: ignore[arg-type]
+        plugin_validate_skills(plugin_path, plugin_report)  # type: ignore[arg-type]
+        validate_readme(plugin_path, plugin_report)  # type: ignore[arg-type]
+        validate_license(plugin_path, plugin_report)  # type: ignore[arg-type]
         reports["plugin"] = plugin_report
     except Exception as e:
         error_report = ValidationReport()
@@ -452,22 +444,24 @@ def run_all_validators(plugin_path: Path) -> dict[str, ValidationReport]:
         reports["security"] = error_report
 
     # Run hook validator if hooks.json exists (detailed hook validation)
+    # Note: validate_hooks returns its own ValidationReport with compatible interface
     hooks_path = plugin_path / "hooks" / "hooks.json"
     if hooks_path.exists():
         try:
             hook_report = validate_hooks(hooks_path, plugin_path)
-            reports["hooks"] = hook_report
+            reports["hooks"] = hook_report  # type: ignore[assignment]
         except Exception as e:
             error_report = ValidationReport()
             error_report.critical(f"Hook validation failed: {e}")
             reports["hooks"] = error_report
 
     # Run MCP validator if .mcp.json exists
+    # Note: validate_plugin_mcp returns its own ValidationReport with compatible interface
     mcp_path = plugin_path / ".mcp.json"
     if mcp_path.exists():
         try:
             mcp_report = validate_plugin_mcp(plugin_path)
-            reports["mcp"] = mcp_report
+            reports["mcp"] = mcp_report  # type: ignore[assignment]
         except Exception as e:
             error_report = ValidationReport()
             error_report.critical(f"MCP validation failed: {e}")
@@ -486,6 +480,7 @@ def run_all_validators(plugin_path: Path) -> dict[str, ValidationReport]:
         reports["agents"] = agent_report
 
     # Run detailed skill validator for each skill directory
+    # Note: validate_skill returns its own ValidationReport with compatible interface
     skills_dir = plugin_path / "skills"
     if skills_dir.exists():
         skill_report = ValidationReport()
@@ -493,7 +488,7 @@ def run_all_validators(plugin_path: Path) -> dict[str, ValidationReport]:
             if skill_dir.is_dir() and not skill_dir.name.startswith("."):
                 try:
                     skill_single_report = validate_skill(skill_dir)
-                    skill_report.merge(skill_single_report)
+                    skill_report.merge(skill_single_report)  # type: ignore[arg-type]
                 except Exception as e:
                     skill_report.critical(f"Skill validation failed for {skill_dir.name}: {e}")
         reports["skills"] = skill_report

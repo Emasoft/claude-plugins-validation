@@ -1,11 +1,9 @@
 ---
 name: skill-validation-skill
 description: |
-  Comprehensive skill validation using 168+ validation rules from AgentSkills OpenSpec,
-  Nixtla Quality Standards, and Meta-Skill frameworks. Use when validating SKILL.md files,
-  checking frontmatter quality, verifying token budgets, or auditing 8+1 Pillars coverage
-  for lang-*/convert-* skills. Trigger with /validate-skill or when reviewing skill quality.
-allowed-tools: Read, Bash, Glob, Grep
+  Validate skills using 84+ rules from AgentSkills OpenSpec, Nixtla, and Meta-Skill frameworks.
+  Use when validating SKILL.md files or auditing skill quality. Trigger with /cpv-validate-skill.
+allowed-tools: Read, Bash(uv:*), Bash(python:*), Glob, Grep
 user-invocable: false
 ---
 
@@ -140,6 +138,21 @@ uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --json
 | **MINOR** | May affect UX/quality | Create enhancement issue |
 | **INFO** | Suggestions | Optional improvement |
 | **PASSED** | Check passed | No action needed |
+
+### Validation Checklist
+
+Copy this checklist and track your progress:
+
+- [ ] Run basic validation: `uv run python scripts/validate_skill_comprehensive.py path/to/skill/`
+- [ ] Fix all CRITICAL issues (Grade F blockers)
+- [ ] Fix all MAJOR issues (Grade D issues)
+- [ ] Run strict mode: add `--strict` flag
+- [ ] Address required sections (Overview, Prerequisites, etc.)
+- [ ] For lang-*/convert-* skills: run with `--pillars` flag
+- [ ] Verify 8+1 Pillars coverage (50%+ recommended)
+- [ ] Run with `--verbose` to review all checks
+- [ ] Achieve Grade B or higher before deployment
+- [ ] Document any intentionally skipped checks
 
 ## Error Handling
 

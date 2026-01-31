@@ -45,23 +45,38 @@ from validation_common import (
 )
 
 # Known frontmatter fields per official docs (agent-specific)
+# Based on: https://code.claude.com/docs/en/sub-agents.md
 KNOWN_FRONTMATTER_FIELDS = {
-    "name",
-    "description",
-    "tools",
-    "model",
-    "color",
-    "capabilities",
-    # Claude Code-specific fields
-    "context",
-    "agent",
-    "user-invocable",
-    "system-prompt",
-    "skills",  # List of skills the agent can use
+    # Required fields
+    "name",  # Unique identifier using lowercase letters and hyphens
+    "description",  # When Claude should delegate to this subagent
+    # Optional fields
+    "tools",  # Tools the subagent can use (inherits all if omitted)
+    "disallowedTools",  # Tools to deny, removed from inherited or specified list
+    "model",  # Model: sonnet, opus, haiku, or inherit (defaults to inherit)
+    "permissionMode",  # Permission mode: default, acceptEdits, dontAsk, bypassPermissions, plan
+    "skills",  # Skills to preload into the subagent's context at startup
+    "hooks",  # Lifecycle hooks scoped to this subagent
+    "color",  # UI background color for the agent
+    "capabilities",  # Agent capabilities list
+    # Claude Code-specific fields (legacy/extended)
+    "context",  # Context mode (fork)
+    "agent",  # Specialized agent type
+    "user-invocable",  # Whether users can invoke directly
+    "system-prompt",  # Custom system prompt (alternative to body)
 }
 
 # Valid values for the 'context' field
 VALID_CONTEXT_VALUES = {"fork"}
+
+# Valid values for the 'permissionMode' field
+VALID_PERMISSION_MODES = {
+    "default",  # Standard permission checking with prompts
+    "acceptEdits",  # Auto-accept file edits
+    "dontAsk",  # Auto-deny permission prompts (explicitly allowed tools still work)
+    "bypassPermissions",  # Skip all permission checks (use with caution!)
+    "plan",  # Plan mode (read-only exploration)
+}
 
 # Valid values for the 'agent' field (specialized agent types)
 VALID_AGENT_VALUES = {
@@ -244,6 +259,15 @@ def validate_description_field(frontmatter: dict[str, Any], filename: str, repor
     if not has_action_hint:
         report.info(
             "Description should indicate WHEN to invoke the agent (e.g., 'Use when...')",
+            filename,
+        )
+
+    # Check for proactive delegation hint (best practice from sub-agents docs)
+    if "proactively" in desc.lower() or "use proactively" in desc.lower():
+        report.passed("Description includes proactive delegation hint", filename)
+    else:
+        report.info(
+            "Consider adding 'use proactively' to encourage Claude to delegate automatically",
             filename,
         )
 
@@ -507,6 +531,174 @@ def validate_skills_field(frontmatter: dict[str, Any], filename: str, report: Ag
     report.passed(f"'skills' field valid: {valid_skills}", filename)
 
 
+def validate_permission_mode_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
+    """Validate the 'permissionMode' frontmatter field.
+
+    Valid values per sub-agents docs:
+    - default: Standard permission checking with prompts
+    - acceptEdits: Auto-accept file edits
+    - dontAsk: Auto-deny permission prompts (explicitly allowed tools still work)
+    - bypassPermissions: Skip all permission checks (use with caution!)
+    - plan: Plan mode (read-only exploration)
+    """
+    if "permissionMode" not in frontmatter:
+        # permissionMode is optional - defaults to 'default'
+        return
+
+    mode = frontmatter["permissionMode"]
+
+    if not isinstance(mode, str):
+        report.major(f"'permissionMode' must be a string, got {type(mode).__name__}", filename)
+        return
+
+    if mode not in VALID_PERMISSION_MODES:
+        report.major(
+            f"Invalid 'permissionMode' value: '{mode}'. Valid values: {sorted(VALID_PERMISSION_MODES)}",
+            filename,
+        )
+        return
+
+    # Warn about dangerous permission modes
+    if mode == "bypassPermissions":
+        report.minor(
+            "'permissionMode: bypassPermissions' skips ALL permission checks - use with caution!",
+            filename,
+        )
+
+    report.passed(f"'permissionMode' field valid: {mode}", filename)
+
+
+def validate_disallowed_tools_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
+    """Validate the 'disallowedTools' frontmatter field.
+
+    Tools to deny, removed from inherited or specified tools list.
+    Must be a comma-separated string or list of tool names.
+    """
+    if "disallowedTools" not in frontmatter:
+        # disallowedTools is optional
+        return
+
+    tools = frontmatter["disallowedTools"]
+
+    # Can be string (comma-separated) or list
+    if isinstance(tools, str):
+        tool_list = [t.strip() for t in tools.split(",") if t.strip()]
+    elif isinstance(tools, list):
+        tool_list = [str(t).strip() for t in tools if str(t).strip()]
+    else:
+        report.major(
+            f"'disallowedTools' must be string or list, got {type(tools).__name__}",
+            filename,
+        )
+        return
+
+    if not tool_list:
+        report.minor("'disallowedTools' field is empty - consider removing", filename)
+        return
+
+    # Validate each tool name
+    invalid_tools = []
+    for tool in tool_list:
+        base_tool = tool.split("(")[0].strip()
+        if base_tool not in VALID_TOOLS and not base_tool.startswith("mcp__"):
+            invalid_tools.append(tool)
+
+    if invalid_tools:
+        report.info(
+            f"Unknown tools in disallowedTools (may be custom): {', '.join(invalid_tools)}",
+            filename,
+        )
+
+    report.passed(f"'disallowedTools' field valid: {len(tool_list)} tool(s)", filename)
+
+
+def validate_hooks_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
+    """Validate the 'hooks' frontmatter field.
+
+    Hooks scoped to this subagent. Valid event types for agents:
+    - PreToolUse: Before the subagent uses a tool (supports matcher)
+    - PostToolUse: After the subagent uses a tool (supports matcher)
+    - Stop: When the subagent finishes (no matcher)
+    """
+    if "hooks" not in frontmatter:
+        # hooks is optional
+        return
+
+    hooks = frontmatter["hooks"]
+
+    if not isinstance(hooks, dict):
+        report.major(f"'hooks' must be an object, got {type(hooks).__name__}", filename)
+        return
+
+    valid_agent_hook_events = {"PreToolUse", "PostToolUse", "Stop"}
+
+    for event_name, event_config in hooks.items():
+        if event_name not in valid_agent_hook_events:
+            report.major(
+                f"Invalid hook event for agent: '{event_name}'. Valid events: {sorted(valid_agent_hook_events)}",
+                filename,
+            )
+            continue
+
+        if not isinstance(event_config, list):
+            report.major(
+                f"Hook event '{event_name}' must be an array of matcher blocks",
+                filename,
+            )
+            continue
+
+        for i, matcher_block in enumerate(event_config):
+            if not isinstance(matcher_block, dict):
+                report.major(
+                    f"Hook '{event_name}[{i}]' must be an object",
+                    filename,
+                )
+                continue
+
+            # Check for required 'hooks' array in matcher block
+            if "hooks" not in matcher_block:
+                report.major(
+                    f"Hook '{event_name}[{i}]' missing required 'hooks' array",
+                    filename,
+                )
+                continue
+
+            inner_hooks = matcher_block["hooks"]
+            if not isinstance(inner_hooks, list):
+                report.major(
+                    f"Hook '{event_name}[{i}].hooks' must be an array",
+                    filename,
+                )
+                continue
+
+            # Validate each hook in the array
+            for j, hook in enumerate(inner_hooks):
+                if not isinstance(hook, dict):
+                    report.major(
+                        f"Hook '{event_name}[{i}].hooks[{j}]' must be an object",
+                        filename,
+                    )
+                    continue
+
+                # Check for required 'type' field
+                if "type" not in hook:
+                    report.major(
+                        f"Hook '{event_name}[{i}].hooks[{j}]' missing required 'type' field",
+                        filename,
+                    )
+                    continue
+
+                hook_type = hook["type"]
+                if hook_type not in {"command", "prompt"}:
+                    report.major(
+                        f"Invalid hook type '{hook_type}' in '{event_name}[{i}].hooks[{j}]'. "
+                        "Valid types: command, prompt",
+                        filename,
+                    )
+
+    report.passed("'hooks' field structure valid", filename)
+
+
 def validate_task_tool_prohibition(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
     """Validate that subagents (context: fork) do not have Task tool.
 
@@ -739,6 +931,11 @@ def validate_agent(agent_path: Path) -> AgentValidationReport:
         validate_user_invocable_field(frontmatter, filename, report)
         validate_system_prompt_field(frontmatter, filename, report)
         validate_skills_field(frontmatter, filename, report)
+
+        # Validate sub-agent specific fields (from sub-agents.md spec)
+        validate_permission_mode_field(frontmatter, filename, report)
+        validate_disallowed_tools_field(frontmatter, filename, report)
+        validate_hooks_field(frontmatter, filename, report)
 
         # Cross-field validations
         validate_task_tool_prohibition(frontmatter, filename, report)
