@@ -4,14 +4,23 @@ description: |
   Validate Claude Code hook configurations (hooks.json). Checks event names, matchers,
   command/prompt hooks, script references, and lints referenced scripts. Use when
   debugging hook issues or auditing hook configurations.
-allowed-tools: Read, Bash, Glob, Grep
-argument-hint: "<hooks_json_path> [--plugin-root <path>] [--verbose] [--json]"
+allowed-tools: Read, Bash, Glob, Grep, Task, AskUserQuestion
+argument-hint: "<hooks_path_or_plugin_name> [--plugin-root <path>] [--verbose] [--json]"
+agent: plugin-validator
 user-invocable: true
 ---
 
 # /cpv-validate-hooks Command
 
 Validates a Claude Code hooks.json configuration file.
+
+## Privacy Check (REQUIRED)
+
+Before running validation, ensure private path detection is configured:
+
+1. **Auto-detect username**: `python3 -c "import getpass; print(getpass.getuser())"`
+2. **If auto-detection fails**, ask the user for their system username
+3. **Pass to script**: `CLAUDE_PRIVATE_USERNAMES="username" uv run python scripts/...`
 
 ## Usage
 
@@ -23,7 +32,26 @@ Validates a Claude Code hooks.json configuration file.
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `hooks_json_path` | Yes | Path to the hooks.json file |
+| `hooks_path_or_plugin_name` | Yes | Path to hooks.json file OR plugin name for auto-discovery |
+
+### Auto-Discovery
+
+If you provide just a name (e.g., `my-plugin`), the agent will search for hooks in:
+1. Plugin's hooks folder (`./my-plugin/hooks/hooks.json`)
+2. Current hooks folder (`./hooks/hooks.json`)
+3. Project settings (`./.claude/settings.json`)
+4. OUTPUT_SKILLS plugins (`./OUTPUT_SKILLS/my-plugin/hooks/hooks.json`)
+
+If multiple matches are found, you'll be asked to choose.
+
+### Typo Tolerance
+
+Names are normalized before searching:
+- Converted to lowercase: `My-Plugin` → `my-plugin`
+- Underscores become hyphens: `my_plugin` → `my-plugin`
+
+If no exact match is found, fuzzy matching is used (e.g., `valdiate-hooks` → `validate-hooks`).
+**Fuzzy matches always require your confirmation before proceeding.**
 
 ## Options
 

@@ -5,14 +5,23 @@ description: |
   Checks .mcp.json files and inline mcpServers definitions. Validates transport types,
   required fields, paths, environment variables, and security. Use when configuring
   MCP servers or debugging connection issues.
-allowed-tools: Read, Bash, Glob, Grep
-argument-hint: "<path> [--verbose] [--json]"
+allowed-tools: Read, Bash, Glob, Grep, Task, AskUserQuestion
+argument-hint: "<path_or_plugin_name> [--verbose] [--json]"
+agent: plugin-validator
 user-invocable: true
 ---
 
 # /cpv-validate-mcp Command
 
 Validates MCP server configurations in Claude Code plugins.
+
+## Privacy Check (REQUIRED)
+
+Before running validation, ensure private path detection is configured:
+
+1. **Auto-detect username**: `python3 -c "import getpass; print(getpass.getuser())"`
+2. **If auto-detection fails**, ask the user for their system username
+3. **Pass to script**: `CLAUDE_PRIVATE_USERNAMES="username" uv run python scripts/...`
 
 ## Usage
 
@@ -24,7 +33,25 @@ Validates MCP server configurations in Claude Code plugins.
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `path` | Yes | Path to .mcp.json file or plugin directory |
+| `path_or_plugin_name` | Yes | Path to .mcp.json file, plugin directory, OR just the plugin name for auto-discovery |
+
+### Auto-Discovery
+
+If you provide just a name (e.g., `my-plugin`), the agent will search for MCP config in:
+1. Plugin directory (`./my-plugin/.mcp.json`)
+2. Current directory (`./.mcp.json`)
+3. OUTPUT_SKILLS plugins (`./OUTPUT_SKILLS/my-plugin/.mcp.json`)
+
+If multiple matches are found, you'll be asked to choose.
+
+### Typo Tolerance
+
+Names are normalized before searching:
+- Converted to lowercase: `My-Plugin` → `my-plugin`
+- Underscores become hyphens: `my_plugin` → `my-plugin`
+
+If no exact match is found, fuzzy matching is used (e.g., `valdiate-mcp` → `validate-mcp`).
+**Fuzzy matches always require your confirmation before proceeding.**
 
 ## Options
 

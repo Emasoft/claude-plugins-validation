@@ -4,14 +4,23 @@ description: |
   Validate Claude Code agent definition files (.md). Checks YAML frontmatter, required
   fields, name format, description quality, tool lists, and model specifications. Use
   when creating or auditing agent definitions.
-allowed-tools: Read, Bash, Glob, Grep
-argument-hint: "<agent_path> [--verbose] [--json]"
+allowed-tools: Read, Bash, Glob, Grep, Task, AskUserQuestion
+argument-hint: "<agent_path_or_name> [--verbose] [--json]"
+agent: plugin-validator
 user-invocable: true
 ---
 
 # /cpv-validate-agents Command
 
 Validates Claude Code agent definition files (markdown with YAML frontmatter).
+
+## Privacy Check (REQUIRED)
+
+Before running validation, ensure private path detection is configured:
+
+1. **Auto-detect username**: `python3 -c "import getpass; print(getpass.getuser())"`
+2. **If auto-detection fails**, ask the user for their system username
+3. **Pass to script**: `CLAUDE_PRIVATE_USERNAMES="username" uv run python scripts/...`
 
 ## Usage
 
@@ -23,7 +32,25 @@ Validates Claude Code agent definition files (markdown with YAML frontmatter).
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `agent_path` | Yes | Path to agent .md file or directory containing agents |
+| `agent_path_or_name` | Yes | Path to agent .md file, directory, OR just the agent name for auto-discovery |
+
+### Auto-Discovery
+
+If you provide just a name (e.g., `my-agent`), the agent will search for it in:
+1. Agents folder (`./agents/my-agent.md`)
+2. Current directory (`./my-agent.md` if has agent frontmatter)
+3. OUTPUT_SKILLS plugins (`./OUTPUT_SKILLS/**/agents/my-agent.md`)
+
+If multiple matches are found, you'll be asked to choose.
+
+### Typo Tolerance
+
+Names are normalized before searching:
+- Converted to lowercase: `My-Agent` → `my-agent`
+- Underscores become hyphens: `my_agent` → `my-agent`
+
+If no exact match is found, fuzzy matching is used (e.g., `plugn-validator` → `plugin-validator`).
+**Fuzzy matches always require your confirmation before proceeding.**
 
 ## Options
 

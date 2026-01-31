@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import configparser
 import json
+import os
 import re
 import subprocess
 import sys
@@ -561,8 +562,22 @@ def validate_local_path(
 
     # Resolve the path
     if local_path.startswith("/"):
-        # Absolute path
+        # Absolute path - this is a CRITICAL issue for published marketplaces
+        # as it exposes local filesystem structure and may contain usernames
         resolved = Path(local_path)
+        results.append(
+            ValidationResult(
+                level="critical",
+                category="plugin",
+                message=f"Plugin '{plugin_id}' uses absolute path: {local_path}",
+                file_path=json_path,
+                suggestion=(
+                    "Absolute paths expose local filesystem structure and may contain usernames. "
+                    "Use relative paths (starting with ./) for local plugin references. "
+                    f"Example: './{Path(local_path).name}' instead of '{local_path}'"
+                ),
+            )
+        )
     else:
         # Relative to marketplace directory
         resolved = marketplace_dir / local_path
@@ -1133,6 +1148,273 @@ def validate_git_submodules(
     return results
 
 
+def validate_marketplace_private_info(
+    marketplace_dir: Path,
+    plugins: list[dict[str, Any]],
+) -> list[ValidationResult]:
+    """
+    Scan marketplace and all plugin subfolders for private information.
+
+    Checks for:
+    - Current user's home path (CRITICAL) - auto-detected from system
+    - Generic home directory paths (MAJOR) - e.g., /Users/anyname/
+    - Hardcoded absolute paths (MAJOR)
+
+    This prevents accidental leaking of private home folder paths when
+    publishing the marketplace to GitHub.
+
+    Args:
+        marketplace_dir: Path to marketplace directory
+        plugins: List of plugin entries from marketplace.json
+
+    Returns:
+        List of validation results
+    """
+    results: list[ValidationResult] = []
+
+    # Import the shared scanning functions
+    try:
+        from validation_common import (
+            ABSOLUTE_PATH_PATTERNS,
+            ALLOWED_DOC_PATH_PREFIXES,
+            EXAMPLE_USERNAMES,
+            PRIVATE_INFO_SKIP_DIRS,
+            PRIVATE_USERNAMES,
+            SCANNABLE_EXTENSIONS,
+            build_private_path_patterns,
+        )
+    except ImportError:
+        # Fallback if validation_common is not available
+        results.append(
+            ValidationResult(
+                level="info",
+                category="private-info",
+                message="Could not import validation_common, skipping private info scan",
+                file_path=str(marketplace_dir),
+            )
+        )
+        return results
+
+    # Build patterns for private usernames
+    private_patterns = build_private_path_patterns(PRIVATE_USERNAMES)
+    # Store in local scope for nested function
+    example_usernames = EXAMPLE_USERNAMES
+    absolute_patterns = ABSOLUTE_PATH_PATTERNS
+    allowed_prefixes = ALLOWED_DOC_PATH_PREFIXES
+
+    def scan_file(filepath: Path, rel_path: str) -> None:
+        """Scan a single file for private info and absolute paths."""
+        try:
+            content = filepath.read_text(errors="ignore")
+        except Exception:
+            return
+
+        # Check for private username patterns (CRITICAL)
+        for pattern, desc in private_patterns:
+            for match in pattern.finditer(content):
+                matched_text = match.group(0)
+                line_num = content[: match.start()].count("\n") + 1
+                results.append(
+                    ValidationResult(
+                        level="critical",
+                        category="private-info",
+                        message=f"Private path leaked: {desc} - '{matched_text}' "
+                        "(use relative path or ${CLAUDE_PLUGIN_ROOT})",
+                        file_path=rel_path,
+                        line_number=line_num,
+                    )
+                )
+
+        # Check for ANY absolute paths (MAJOR) - stricter check
+        for pattern, desc in absolute_patterns:
+            for match in pattern.finditer(content):
+                matched_text = match.group(1) if match.lastindex else match.group(0)
+
+                # Skip if this looks like a regex pattern
+                if any(c in matched_text for c in r"[]\^$.*+?{}|()"):
+                    continue
+
+                # Skip allowed documentation paths
+                if any(matched_text.startswith(prefix) for prefix in allowed_prefixes):
+                    continue
+
+                # Skip environment variable references
+                if "${" in matched_text or matched_text.startswith("$"):
+                    continue
+
+                # Extract username if it's a home path
+                username_match = re.search(r"/(?:Users|home)/([^/\s]+)/", matched_text)
+                if username_match:
+                    extracted_username = username_match.group(1).lower()
+                    # Skip example usernames in documentation
+                    if extracted_username in example_usernames:
+                        continue
+
+                line_num = content[: match.start()].count("\n") + 1
+                results.append(
+                    ValidationResult(
+                        level="major",
+                        category="private-info",
+                        message=f"Absolute path found: '{matched_text[:60]}...' "
+                        "(use relative path, ${CLAUDE_PLUGIN_ROOT}, or ${HOME})",
+                        file_path=rel_path,
+                        line_number=line_num,
+                    )
+                )
+
+    def scan_directory(root_dir: Path, base_rel: str = "") -> int:
+        """Recursively scan a directory for private info."""
+        files_scanned = 0
+        for dirpath, dirnames, filenames in os.walk(root_dir):
+            # Skip excluded directories
+            dirnames[:] = [d for d in dirnames if d not in PRIVATE_INFO_SKIP_DIRS]
+
+            for filename in filenames:
+                filepath = Path(dirpath) / filename
+                if filepath.suffix.lower() not in SCANNABLE_EXTENSIONS:
+                    continue
+
+                rel_dir = Path(dirpath).relative_to(root_dir)
+                rel_path = f"{base_rel}/{rel_dir}/{filename}" if base_rel else f"{rel_dir}/{filename}"
+                rel_path = rel_path.replace("./", "").lstrip("/")
+
+                scan_file(filepath, rel_path)
+                files_scanned += 1
+        return files_scanned
+
+    total_files = 0
+
+    # Scan marketplace root files (marketplace.json, README, etc.)
+    total_files += scan_directory(marketplace_dir, "")
+
+    # Scan each plugin subfolder
+    for plugin in plugins:
+        source = plugin.get("source")
+        plugin_name = plugin.get("name", "unknown")
+
+        # Determine plugin path
+        plugin_path: Path | None = None
+        if isinstance(source, str) and source.startswith("./"):
+            plugin_path = marketplace_dir / source[2:]
+        elif isinstance(source, str) and not source.startswith(("http", "git@")):
+            plugin_path = marketplace_dir / source
+
+        if plugin_path and plugin_path.exists() and plugin_path.is_dir():
+            total_files += scan_directory(plugin_path, plugin_name)
+
+    # Summary
+    critical_count = sum(1 for r in results if r.level == "critical")
+    major_count = sum(1 for r in results if r.level == "major")
+
+    if critical_count == 0 and major_count == 0:
+        results.append(
+            ValidationResult(
+                level="info",
+                category="private-info",
+                message=f"No private info found in marketplace ({total_files} files scanned)",
+                file_path=str(marketplace_dir),
+            )
+        )
+
+    return results
+
+
+def validate_github_source_required(
+    plugins: list[dict[str, Any]],
+    json_path: str,
+) -> list[ValidationResult]:
+    """
+    Validate that plugins have GitHub repository URLs for publishing.
+
+    For a marketplace to be publishable to GitHub and installable by users,
+    each plugin should have a 'repository' field pointing to its GitHub repo.
+    The 'source' field can be a local relative path (for submodules) but
+    'repository' should always be the canonical GitHub URL.
+
+    Args:
+        plugins: List of plugin entries from marketplace.json
+        json_path: Path to marketplace.json for error messages
+
+    Returns:
+        List of validation results
+    """
+    results: list[ValidationResult] = []
+
+    for plugin in plugins:
+        plugin_name = plugin.get("name", "unknown")
+        repository = plugin.get("repository")
+        source = plugin.get("source")
+
+        # Check if repository field exists
+        if not repository:
+            results.append(
+                ValidationResult(
+                    level="major",
+                    category="github-source",
+                    message=f"Plugin '{plugin_name}' missing 'repository' field - "
+                    "required for GitHub marketplace publishing",
+                    file_path=json_path,
+                    suggestion=f'Add: "repository": "https://github.com/OWNER/{plugin_name}"',
+                )
+            )
+            continue
+
+        # Check repository is a valid GitHub URL
+        if not isinstance(repository, str):
+            results.append(
+                ValidationResult(
+                    level="major",
+                    category="github-source",
+                    message=f"Plugin '{plugin_name}' repository must be a string URL",
+                    file_path=json_path,
+                )
+            )
+            continue
+
+        # Validate it looks like a GitHub URL
+        if not (
+            repository.startswith("https://github.com/")
+            or repository.startswith("git@github.com:")
+            or "/" in repository
+        ):  # Allow shorthand owner/repo
+            results.append(
+                ValidationResult(
+                    level="minor",
+                    category="github-source",
+                    message=f"Plugin '{plugin_name}' repository doesn't look like a GitHub URL: {repository}",
+                    file_path=json_path,
+                    suggestion="Use format: https://github.com/OWNER/REPO",
+                )
+            )
+
+        # Warn if source is NOT a relative path (local submodule)
+        # For published marketplaces using submodules, source should be ./plugin-name
+        if isinstance(source, str) and not source.startswith("./"):
+            if source.startswith(("http", "git@")):
+                # Remote source - this is OK but submodule is preferred
+                results.append(
+                    ValidationResult(
+                        level="info",
+                        category="github-source",
+                        message=f"Plugin '{plugin_name}' uses remote source instead of local submodule",
+                        file_path=json_path,
+                        suggestion="Consider using git submodules with source: './{plugin_name}'",
+                    )
+                )
+
+    if not any(r.level in ("critical", "major") for r in results):
+        results.append(
+            ValidationResult(
+                level="info",
+                category="github-source",
+                message=f"All {len(plugins)} plugins have valid repository URLs",
+                file_path=json_path,
+            )
+        )
+
+    return results
+
+
 def validate_marketplace(marketplace_path: Path) -> ValidationReport:
     """
     Validate a complete marketplace configuration.
@@ -1188,6 +1470,14 @@ def validate_marketplace(marketplace_path: Path) -> ValidationReport:
             # Validate git submodules
             submodule_results = validate_git_submodules(marketplace_dir, plugins)
             report.results.extend(submodule_results)
+
+            # Validate GitHub repository URLs for publishing
+            github_source_results = validate_github_source_required(plugins, json_path)
+            report.results.extend(github_source_results)
+
+            # Scan for private info leaks (usernames, home paths)
+            private_info_results = validate_marketplace_private_info(marketplace_dir, plugins)
+            report.results.extend(private_info_results)
 
     # Validate optional fields
     if "description" in data and not isinstance(data["description"], str):

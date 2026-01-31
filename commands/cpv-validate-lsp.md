@@ -4,14 +4,23 @@ description: |
   Validate LSP (Language Server Protocol) server configurations in Claude Code.
   Checks language server definitions, initialization options, and workspace settings.
   Use when configuring LSP servers for code intelligence features.
-allowed-tools: Read, Bash, Glob, Grep
-argument-hint: "<path> [--verbose] [--json]"
+allowed-tools: Read, Bash, Glob, Grep, Task, AskUserQuestion
+argument-hint: "<path_or_plugin_name> [--verbose] [--json]"
+agent: plugin-validator
 user-invocable: true
 ---
 
 # /cpv-validate-lsp Command
 
 Validates LSP (Language Server Protocol) server configurations.
+
+## Privacy Check (REQUIRED)
+
+Before running validation, ensure private path detection is configured:
+
+1. **Auto-detect username**: `python3 -c "import getpass; print(getpass.getuser())"`
+2. **If auto-detection fails**, ask the user for their system username
+3. **Pass to script**: `CLAUDE_PRIVATE_USERNAMES="username" uv run python scripts/...`
 
 ## Usage
 
@@ -23,7 +32,25 @@ Validates LSP (Language Server Protocol) server configurations.
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `path` | Yes | Path to LSP config file or plugin directory |
+| `path_or_plugin_name` | Yes | Path to LSP config file, plugin directory, OR just the plugin name for auto-discovery |
+
+### Auto-Discovery
+
+If you provide just a name (e.g., `my-plugin`), the agent will search for LSP config in:
+1. Plugin directory (`./my-plugin/`)
+2. VS Code settings (`./.vscode/settings.json`)
+3. OUTPUT_SKILLS plugins (`./OUTPUT_SKILLS/my-plugin/`)
+
+If multiple matches are found, you'll be asked to choose.
+
+### Typo Tolerance
+
+Names are normalized before searching:
+- Converted to lowercase: `My-Plugin` → `my-plugin`
+- Underscores become hyphens: `my_plugin` → `my-plugin`
+
+If no exact match is found, fuzzy matching is used (e.g., `valdiate-lsp` → `validate-lsp`).
+**Fuzzy matches always require your confirmation before proceeding.**
 
 ## Options
 

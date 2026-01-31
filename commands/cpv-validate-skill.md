@@ -5,14 +5,23 @@ description: |
   Nixtla Quality Standards, and Meta-Skill frameworks. Use when checking skill quality,
   auditing SKILL.md files, or preparing skills for deployment. Returns letter grade (A-F)
   and detailed issue report.
-allowed-tools: Read, Bash, Glob, Grep
-argument-hint: "<skill_path> [--strict] [--openspec] [--pillars] [--verbose]"
+allowed-tools: Read, Bash, Glob, Grep, Task, AskUserQuestion
+argument-hint: "<skill_path_or_name> [--strict] [--openspec] [--pillars] [--verbose]"
+agent: plugin-validator
 user-invocable: true
 ---
 
 # /cpv-validate-skill Command
 
 Validates a skill directory using the comprehensive skill validator (84+ rules).
+
+## Privacy Check (REQUIRED)
+
+Before running validation, ensure private path detection is configured:
+
+1. **Auto-detect username**: `python3 -c "import getpass; print(getpass.getuser())"`
+2. **If auto-detection fails**, ask the user for their system username
+3. **Pass to script**: `CLAUDE_PRIVATE_USERNAMES="username" uv run python scripts/...`
 
 ## Usage
 
@@ -24,7 +33,25 @@ Validates a skill directory using the comprehensive skill validator (84+ rules).
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `skill_path` | Yes | Path to the skill directory to validate |
+| `skill_path_or_name` | Yes | Path to the skill directory OR just the skill name for auto-discovery |
+
+### Auto-Discovery
+
+If you provide just a name (e.g., `my-skill`), the agent will search for it in:
+1. Skills folder (`./skills/my-skill/`)
+2. Current directory if it contains SKILL.md
+3. OUTPUT_SKILLS plugins (`./OUTPUT_SKILLS/**/skills/my-skill/`)
+
+If multiple matches are found, you'll be asked to choose.
+
+### Typo Tolerance
+
+Names are normalized before searching:
+- Converted to lowercase: `My-Skill` → `my-skill`
+- Underscores become hyphens: `my_skill` → `my-skill`
+
+If no exact match is found, fuzzy matching is used (e.g., `valdiate-skill` → `validate-skill`).
+**Fuzzy matches always require your confirmation before proceeding.**
 
 ## Options
 

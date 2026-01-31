@@ -4,14 +4,32 @@ description: |
   Comprehensive validation for Claude Code plugins. Validates manifest, hooks, agents,
   skills (84+ rules), MCP servers, scripts, and directory structure. Use when auditing
   plugin quality, preparing for marketplace publishing, or CI/CD integration.
-allowed-tools: Read, Bash, Glob, Grep
-argument-hint: "<plugin_path> [--verbose] [--json] [--marketplace-only]"
+allowed-tools: Read, Bash, Glob, Grep, Task, AskUserQuestion
+argument-hint: "<plugin_path_or_name> [--verbose] [--json]"
+agent: plugin-validator
 user-invocable: true
 ---
 
 # /cpv-validate-plugin Command
 
 Validates a complete Claude Code plugin directory with all components.
+
+## Privacy Check (REQUIRED)
+
+Before running validation, you MUST check for private path detection:
+
+1. **Auto-detect username**:
+   ```bash
+   python3 -c "import getpass; print(getpass.getuser())"
+   ```
+
+2. **If auto-detection fails**, use `AskUserQuestion` to ask the user:
+   > "To detect accidental private path leaks, what is your system username? (Found in /Users/**name**/ or /home/**name**/)"
+
+3. **Pass username to validation script** via environment variable:
+   ```bash
+   CLAUDE_PRIVATE_USERNAMES="username" uv run python scripts/validate_plugin.py ...
+   ```
 
 ## Usage
 
@@ -23,7 +41,27 @@ Validates a complete Claude Code plugin directory with all components.
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `plugin_path` | Yes | Path to the plugin directory to validate |
+| `plugin_path_or_name` | Yes | Path to the plugin directory OR just the plugin name for auto-discovery |
+
+### Auto-Discovery
+
+If you provide just a name (e.g., `my-plugin`), the agent will search for it in:
+1. Current directory (`./my-plugin/`)
+2. OUTPUT_SKILLS folder (`./OUTPUT_SKILLS/my-plugin/`)
+3. Local plugins (`./.claude/plugins/my-plugin/`)
+4. Global plugins (`~/.claude/plugins/my-plugin/`)
+5. Plugin cache (`~/.claude/plugins/cache/*/my-plugin/`)
+
+If multiple matches are found, you'll be asked to choose.
+
+### Typo Tolerance
+
+Names are normalized before searching:
+- Converted to lowercase: `My-Plugin` → `my-plugin`
+- Underscores become hyphens: `my_plugin` → `my-plugin`
+
+If no exact match is found, fuzzy matching is used (e.g., `cpt-validate` → `cpv-validate`).
+**Fuzzy matches always require your confirmation before proceeding.**
 
 ## Options
 
@@ -31,7 +69,6 @@ Validates a complete Claude Code plugin directory with all components.
 |--------|-------------|
 | `--verbose` | Show all checks including passed |
 | `--json` | Output results as JSON |
-| `--marketplace-only` | Skip plugin.json requirement (for strict=false distribution) |
 
 ## What Gets Validated
 
@@ -100,12 +137,6 @@ Validates a complete Claude Code plugin directory with all components.
 /cpv-validate-plugin ./my-plugin/ --json
 ```
 
-### Marketplace-Only Plugin
-
-```
-/cpv-validate-plugin ./my-plugin/ --marketplace-only
-```
-
 ## Output
 
 Returns summary with:
@@ -130,7 +161,9 @@ uv run python scripts/validate_plugin.py "$PLUGIN_PATH" $OPTIONS
 
 ## Related Commands
 
+- `/cpv-validate-marketplace` - Marketplace validation
 - `/cpv-validate-skill` - Single skill validation
 - `/cpv-validate-hooks` - Hook-only validation
 - `/cpv-validate-agents` - Agent-only validation
 - `/cpv-validate-mcp` - MCP server validation
+- `/cpv-validate-lsp` - LSP server validation

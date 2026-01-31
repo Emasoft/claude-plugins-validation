@@ -42,7 +42,6 @@ from pathlib import Path
 
 from validation_common import ValidationReport
 
-
 # =============================================================================
 # Documentation Validation Report
 # =============================================================================
@@ -821,9 +820,7 @@ def main() -> int:
     Returns:
         Exit code (0=ok, 1=critical, 2=major, 3=minor)
     """
-    parser = argparse.ArgumentParser(
-        description="Validate documentation files in a Claude Code plugin"
-    )
+    parser = argparse.ArgumentParser(description="Validate documentation files in a Claude Code plugin")
     parser.add_argument("plugin_path", help="Path to the plugin directory")
     parser.add_argument(
         "--verbose",

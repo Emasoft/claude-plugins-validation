@@ -35,6 +35,25 @@ This skill provides comprehensive validation for Claude Code plugin components:
 
 ## Instructions
 
+### Step 0: Privacy Check (IMPORTANT)
+
+Before validating, ensure private path detection is configured. The validator auto-detects your system username to prevent accidental leaks of private home paths in published plugins.
+
+**If auto-detection fails**, provide your username via environment variable:
+
+```bash
+# Set your username for private path detection
+export CLAUDE_PRIVATE_USERNAMES="your_username"
+```
+
+Or pass it inline when running the validator:
+
+```bash
+CLAUDE_PRIVATE_USERNAMES="your_username" uv run python scripts/validate_plugin.py /path/to/plugin
+```
+
+### Step 1-5: Validation
+
 1. Navigate to the claude-plugins-validation directory
 2. Run the validator: `uv run python scripts/validate_plugin.py /path/to/plugin`
 3. Review output by severity (CRITICAL > MAJOR > MINOR)

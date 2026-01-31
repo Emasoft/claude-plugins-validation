@@ -607,6 +607,37 @@ def validate_license(plugin_root: Path, report: ValidationReport) -> None:
     report.minor("No LICENSE file found")
 
 
+def validate_no_local_paths(plugin_root: Path, report: ValidationReport) -> None:
+    """Validate that plugin files don't contain hardcoded local or absolute paths.
+
+    Uses the stricter absolute path validation from validation_common.py.
+
+    In plugins, ALL paths should be:
+    - Relative to plugin root (e.g., ./scripts/foo.py)
+    - Using ${CLAUDE_PLUGIN_ROOT} for runtime resolution
+    - Using ${HOME} or ~ for user home directory
+
+    Checks for:
+    - Current user's home path (CRITICAL) - auto-detected from system
+    - Any absolute home directory paths (MAJOR)
+
+    Excludes:
+    - Cache directories (.mypy_cache, .ruff_cache, __pycache__)
+    - Development folders (docs_dev/, scripts_dev/, etc.)
+    - .git/ directory
+    - Allowed system paths (/tmp/, /dev/, /proc/, /sys/)
+    - Generic example usernames in documentation
+    """
+    # Import the stricter absolute path validation from validation_common
+    from validation_common import validate_no_absolute_paths
+
+    # Use the strict absolute path validator which checks for:
+    # - Current user's username (auto-detected) - CRITICAL
+    # - ANY absolute paths that don't use env vars - MAJOR
+    # We pass our local report since both have compatible interfaces
+    validate_no_absolute_paths(plugin_root, report)  # type: ignore[arg-type]
+
+
 def print_results(report: ValidationReport, verbose: bool = False) -> None:
     """Print validation results in human-readable format."""
     colors = {
@@ -718,6 +749,7 @@ def main() -> int:
     validate_skills(plugin_root, report)
     validate_readme(plugin_root, report)
     validate_license(plugin_root, report)
+    validate_no_local_paths(plugin_root, report)
 
     # Output
     if args.json:

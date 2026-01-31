@@ -4,67 +4,34 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
-*.egg
+.eggs/
+dist/
+build/
 
-# Virtual environments
-.venv/
-venv/
-ENV/
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Linting
+.ruff_cache/
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-*~
 
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-.nox/
-coverage.xml
-*.cover
-.hypothesis/
-
-# Type checking
-.mypy_cache/
-.dmypy.json
-dmypy.json
-.pytype/
-
-# macOS
+# OS
 .DS_Store
-.AppleDouble
-.LSOverride
-._*
+Thumbs.db
 
-# Logs
-*.log
-logs/
+# Dev folders (not tracked)
+docs_dev/
+scripts_dev/
+tests_dev/
 
-# Local settings
-.env
-.env.local
-*.local.json
-
-# Temporary files
-tmp/
-temp/
-*.tmp
-*.bak
+# Rust
+target/
+Cargo.lock

@@ -14,8 +14,10 @@ All individual validators should import from this module to ensure consistency.
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Literal
 
 # =============================================================================
@@ -223,12 +225,69 @@ SECRET_PATTERNS = [
     (re.compile(r"api[_-]?key['\"]?\s*[:=]\s*['\"](?!\$[\{A-Z_])[^'\"]{20,}['\"]", re.I), "Generic API Key"),
 ]
 
+# Generic example usernames that are acceptable in documentation
+EXAMPLE_USERNAMES = {
+    "username",
+    "user",
+    "dev",
+    "developer",
+    "runner",
+    "admin",
+    "root",
+    "yourname",
+    "your-name",
+    "your_name",
+    "yourusername",
+    "your-username",
+    "example",
+    "test",
+    "demo",
+    "sample",
+    "foo",
+    "bar",
+    "john",
+    "jane",
+    "me",
+    "you",
+    "name",
+    "xxx",
+    "myuser",
+    "myname",
+    "your",
+    "my",
+    "[^/\\s]+",  # Regex pattern in code
+}
+
 # Patterns for hardcoded user paths (should use ${CLAUDE_PLUGIN_ROOT} instead)
+# Note: These are generic patterns that may produce false positives for example paths
 USER_PATH_PATTERNS = [
     re.compile(r"/Users/[^/\s]+/"),
     re.compile(r"C:\\Users\\[^\\\s]+\\"),
     re.compile(r"/home/[^/\s]+/"),
 ]
+
+# Patterns for ANY absolute path (stricter check for plugins)
+# Plugins should use relative paths or ${CLAUDE_PLUGIN_ROOT} / ${HOME}
+# Only check for home directory paths which are the problematic ones
+ABSOLUTE_PATH_PATTERNS = [
+    # macOS/Linux home directory paths - these are problematic
+    (re.compile(r'(?<![#!])(/(?:Users|home)/[^/\s"\'`>\]})]+/[^\s"\'`>\]})]+)'), "home directory path"),
+    # Windows home directory paths
+    (re.compile(r'(?<!\$\{)(?<!\$)([A-Z]:[\\\/]Users[\\\/][^\s"\'`>\]})]+)', re.IGNORECASE), "Windows home path"),
+]
+
+# Allowed absolute path prefixes in documentation examples
+ALLOWED_DOC_PATH_PREFIXES = {
+    "/tmp/",
+    "/var/tmp/",
+    "/dev/",
+    "/proc/",
+    "/sys/",
+    "/etc/",
+    "/usr/bin/",
+    "/usr/local/",
+    "/opt/",
+}
 
 # Files that should never be in a plugin
 DANGEROUS_FILES = {
@@ -242,6 +301,155 @@ DANGEROUS_FILES = {
     "private.key",
     "id_rsa",
     "id_ed25519",
+}
+
+# =============================================================================
+# Private Information Detection Patterns
+# =============================================================================
+
+
+# Private usernames to detect - automatically detected from system
+# These should never appear in published code
+def _get_private_usernames() -> set[str]:
+    """Auto-detect private usernames from the current system.
+
+    Detection sources (in order):
+    1. CLAUDE_PRIVATE_USERNAMES env var (comma-separated, set by agent)
+    2. getpass.getuser() - current login name
+    3. Path.home().name - home directory name
+    4. USER, USERNAME, LOGNAME env vars
+    """
+    usernames: set[str] = set()
+
+    # First check if explicitly provided via env var (from agent)
+    explicit = os.environ.get("CLAUDE_PRIVATE_USERNAMES", "").strip()
+    if explicit:
+        for u in explicit.split(","):
+            u = u.strip().lower()
+            if u and u not in EXAMPLE_USERNAMES:
+                usernames.add(u)
+
+    # Get current user's login name
+    try:
+        import getpass
+
+        username = getpass.getuser().lower()
+        if username and username not in EXAMPLE_USERNAMES:
+            usernames.add(username)
+    except Exception:
+        pass
+
+    # Get username from home directory path
+    try:
+        home = Path.home()
+        if home.name and home.name.lower() not in EXAMPLE_USERNAMES:
+            usernames.add(home.name.lower())
+    except Exception:
+        pass
+
+    # Also check environment variables
+    for var in ("USER", "USERNAME", "LOGNAME"):
+        val = os.environ.get(var, "").strip().lower()
+        if val and val not in EXAMPLE_USERNAMES:
+            usernames.add(val)
+
+    return usernames
+
+
+# Auto-detect at import time
+PRIVATE_USERNAMES: set[str] = _get_private_usernames()
+
+
+# Patterns for detecting private paths with actual usernames
+# More specific than USER_PATH_PATTERNS - these flag as CRITICAL
+def build_private_path_patterns(usernames: set[str]) -> list[tuple[re.Pattern[str], str]]:
+    """Build regex patterns for detecting private usernames in paths.
+
+    Args:
+        usernames: Set of private usernames to detect
+
+    Returns:
+        List of (pattern, description) tuples
+    """
+    patterns: list[tuple[re.Pattern[str], str]] = []
+    for username in usernames:
+        # Case-insensitive match for username in paths
+        escaped = re.escape(username)
+        patterns.extend(
+            [
+                (
+                    re.compile(rf"/Users/{escaped}(/|$)", re.IGNORECASE),
+                    f"macOS private path with username '{username}'",
+                ),
+                (re.compile(rf"/home/{escaped}(/|$)", re.IGNORECASE), f"Linux private path with username '{username}'"),
+                (
+                    re.compile(rf"C:\\Users\\{escaped}(\\|$)", re.IGNORECASE),
+                    f"Windows private path with username '{username}'",
+                ),
+                (
+                    re.compile(rf"C:/Users/{escaped}(/|$)", re.IGNORECASE),
+                    f"Windows private path with username '{username}'",
+                ),
+                # Also catch username alone in suspicious contexts
+                (re.compile(rf"(?<=/){escaped}(?=/)", re.IGNORECASE), f"username '{username}' in path"),
+            ]
+        )
+    return patterns
+
+
+# Pre-built patterns for default usernames
+PRIVATE_PATH_PATTERNS = build_private_path_patterns(PRIVATE_USERNAMES)
+
+# File extensions to check for private info
+SCANNABLE_EXTENSIONS = {
+    ".json",
+    ".yml",
+    ".yaml",
+    ".md",
+    ".py",
+    ".sh",
+    ".txt",
+    ".toml",
+    ".js",
+    ".ts",
+    ".jsx",
+    ".tsx",
+    ".html",
+    ".css",
+    ".xml",
+    ".ini",
+    ".cfg",
+    ".conf",
+    ".env",
+    ".gitignore",
+    ".gitmodules",
+}
+
+# Directories to skip when scanning for private info
+PRIVATE_INFO_SKIP_DIRS = {
+    ".git",
+    ".mypy_cache",
+    ".ruff_cache",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "node_modules",
+    ".pytest_cache",
+    ".tox",
+    "dist",
+    "build",
+    "target",
+    ".eggs",
+    "*.egg-info",
+    # Also skip dev folders that aren't published
+    "docs_dev",
+    "scripts_dev",
+    "tests_dev",
+    "examples_dev",
+    "samples_dev",
+    "downloads_dev",
+    "libs_dev",
+    "builds_dev",
 }
 
 # =============================================================================
@@ -996,3 +1204,275 @@ def normalize_level(level: str) -> Level:
         return upper  # type: ignore
     # Default to INFO for unknown levels
     return "INFO"
+
+
+# =============================================================================
+# Private Information Scanning Functions
+# =============================================================================
+
+
+def scan_file_for_private_info(
+    filepath: Path,
+    report: ValidationReport,
+    rel_path: str,
+    additional_usernames: set[str] | None = None,
+) -> int:
+    """Scan a single file for private information (usernames, home paths).
+
+    Args:
+        filepath: Absolute path to the file
+        report: ValidationReport to add results to
+        rel_path: Relative path for error messages
+        additional_usernames: Extra usernames to check beyond defaults
+
+    Returns:
+        Number of issues found
+    """
+    issues_found = 0
+
+    # Build patterns including any additional usernames
+    patterns = list(PRIVATE_PATH_PATTERNS)
+    if additional_usernames:
+        patterns.extend(build_private_path_patterns(additional_usernames))
+
+    try:
+        content = filepath.read_text(errors="ignore")
+    except Exception:
+        return 0
+
+    for pattern, desc in patterns:
+        for match in pattern.finditer(content):
+            matched_text = match.group(0)
+            line_num = content[: match.start()].count("\n") + 1
+            issues_found += 1
+            report.critical(
+                f"Private info leaked: {desc} - found '{matched_text}' "
+                "(replace with relative path or ${CLAUDE_PLUGIN_ROOT})",
+                rel_path,
+                line_num,
+            )
+
+    # Also check for generic home path patterns (MAJOR, not CRITICAL)
+    # But only if no specific username was found
+    if issues_found == 0:
+        for pattern in USER_PATH_PATTERNS:
+            for match in pattern.finditer(content):
+                matched_text = match.group(0)
+
+                # Skip if this looks like a regex pattern (contains metacharacters)
+                if any(c in matched_text for c in r"[]\^$.*+?{}|()"):
+                    continue
+
+                # Extract the username from the path
+                username_match = re.search(r"/Users/([^/\s]+)/", matched_text)
+                if not username_match:
+                    username_match = re.search(r"/home/([^/\s]+)/", matched_text)
+                if not username_match:
+                    username_match = re.search(r"\\Users\\([^\\\s]+)\\", matched_text)
+
+                if username_match:
+                    extracted_username = username_match.group(1).lower()
+                    # Skip if it's a generic example username
+                    if extracted_username in EXAMPLE_USERNAMES:
+                        continue
+
+                line_num = content[: match.start()].count("\n") + 1
+                issues_found += 1
+                report.major(
+                    f"Hardcoded user path found: '{matched_text}...' (use relative paths or ${{CLAUDE_PLUGIN_ROOT}})",
+                    rel_path,
+                    line_num,
+                )
+
+    return issues_found
+
+
+def scan_directory_for_private_info(
+    root_path: Path,
+    report: ValidationReport,
+    additional_usernames: set[str] | None = None,
+    skip_dirs: set[str] | None = None,
+) -> tuple[int, int]:
+    """Scan a directory tree for private information.
+
+    Args:
+        root_path: Root directory to scan
+        report: ValidationReport to add results to
+        additional_usernames: Extra usernames to check beyond defaults
+        skip_dirs: Additional directories to skip
+
+    Returns:
+        Tuple of (files_checked, issues_found)
+    """
+    files_checked = 0
+    total_issues = 0
+
+    # Combine skip dirs
+    dirs_to_skip = set(PRIVATE_INFO_SKIP_DIRS)
+    if skip_dirs:
+        dirs_to_skip.update(skip_dirs)
+
+    for dirpath, dirnames, filenames in os.walk(root_path):
+        # Skip excluded directories
+        dirnames[:] = [d for d in dirnames if d not in dirs_to_skip]
+
+        rel_dir = Path(dirpath).relative_to(root_path)
+
+        for filename in filenames:
+            filepath = Path(dirpath) / filename
+
+            # Check only relevant file types
+            if filepath.suffix.lower() not in SCANNABLE_EXTENSIONS:
+                continue
+
+            files_checked += 1
+            rel_path = str(rel_dir / filename) if str(rel_dir) != "." else filename
+
+            issues = scan_file_for_private_info(filepath, report, rel_path, additional_usernames)
+            total_issues += issues
+
+    return files_checked, total_issues
+
+
+def validate_no_private_info(
+    root_path: Path,
+    report: ValidationReport,
+    additional_usernames: set[str] | None = None,
+) -> None:
+    """Validate that a directory contains no private information.
+
+    This is the main entry point for private info scanning.
+    Checks for:
+    - Private usernames in paths (CRITICAL)
+    - Generic home directory paths (MAJOR)
+    - Hardcoded absolute paths (MAJOR)
+
+    Args:
+        root_path: Root directory to scan
+        report: ValidationReport to add results to
+        additional_usernames: Extra usernames to check beyond PRIVATE_USERNAMES
+    """
+    files_checked, issues_found = scan_directory_for_private_info(root_path, report, additional_usernames)
+
+    if issues_found == 0:
+        report.passed(f"No private info found ({files_checked} files checked)")
+    else:
+        report.info(f"Found {issues_found} private info issue(s) in {files_checked} files")
+
+
+def scan_file_for_absolute_paths(
+    filepath: Path,
+    report: ValidationReport,
+    rel_path: str,
+) -> int:
+    """Scan a file for ANY absolute paths (stricter plugin validation).
+
+    In plugins, ALL paths should be relative to ${CLAUDE_PLUGIN_ROOT} or use
+    environment variables like ${HOME}. Absolute paths break portability.
+
+    Args:
+        filepath: Absolute path to the file
+        report: ValidationReport to add results to
+        rel_path: Relative path for error messages
+
+    Returns:
+        Number of issues found
+    """
+    issues_found = 0
+
+    try:
+        content = filepath.read_text(errors="ignore")
+    except Exception:
+        return 0
+
+    # First check for private usernames (CRITICAL)
+    private_patterns = build_private_path_patterns(PRIVATE_USERNAMES)
+    for pattern, desc in private_patterns:
+        for match in pattern.finditer(content):
+            matched_text = match.group(0)
+            line_num = content[: match.start()].count("\n") + 1
+            issues_found += 1
+            report.critical(
+                f"Private path leaked: {desc} - '{matched_text}' (use relative path or ${{CLAUDE_PLUGIN_ROOT}})",
+                rel_path,
+                line_num,
+            )
+
+    # Then check for ALL absolute paths (MAJOR)
+    for pattern, desc in ABSOLUTE_PATH_PATTERNS:
+        for match in pattern.finditer(content):
+            matched_text = match.group(1) if match.lastindex else match.group(0)
+
+            # Skip if this looks like a regex pattern
+            if any(c in matched_text for c in r"[]\^$.*+?{}|()"):
+                continue
+
+            # Skip allowed documentation paths
+            if any(matched_text.startswith(prefix) for prefix in ALLOWED_DOC_PATH_PREFIXES):
+                continue
+
+            # Skip if it's an environment variable reference
+            if "${" in matched_text or matched_text.startswith("$"):
+                continue
+
+            # Extract username if it's a home path
+            username_match = re.search(r"/(?:Users|home)/([^/\s]+)/", matched_text)
+            if username_match:
+                extracted_username = username_match.group(1).lower()
+                # Skip example usernames in documentation
+                if extracted_username in EXAMPLE_USERNAMES:
+                    continue
+
+            line_num = content[: match.start()].count("\n") + 1
+            issues_found += 1
+            report.major(
+                f"Absolute path found: '{matched_text[:60]}...' - "
+                "use relative path, ${CLAUDE_PLUGIN_ROOT}, or ${HOME}",
+                rel_path,
+                line_num,
+            )
+
+    return issues_found
+
+
+def validate_no_absolute_paths(
+    root_path: Path,
+    report: ValidationReport,
+) -> None:
+    """Validate that a plugin contains no absolute paths.
+
+    This is a STRICT check for plugins. All paths should be:
+    - Relative to plugin root (e.g., ./scripts/foo.py)
+    - Using ${CLAUDE_PLUGIN_ROOT} for runtime resolution
+    - Using ${HOME} or ~ for user home directory
+
+    Args:
+        root_path: Root directory to scan
+        report: ValidationReport to add results to
+    """
+    files_checked = 0
+    total_issues = 0
+
+    for dirpath, dirnames, filenames in os.walk(root_path):
+        # Skip excluded directories
+        dirnames[:] = [d for d in dirnames if d not in PRIVATE_INFO_SKIP_DIRS]
+
+        rel_dir = Path(dirpath).relative_to(root_path)
+
+        for filename in filenames:
+            filepath = Path(dirpath) / filename
+
+            # Check only relevant file types
+            if filepath.suffix.lower() not in SCANNABLE_EXTENSIONS:
+                continue
+
+            files_checked += 1
+            rel_path = str(rel_dir / filename) if str(rel_dir) != "." else filename
+
+            issues = scan_file_for_absolute_paths(filepath, report, rel_path)
+            total_issues += issues
+
+    if total_issues == 0:
+        report.passed(f"No absolute paths found ({files_checked} files checked)")
+    else:
+        report.info(f"Found {total_issues} absolute path(s) in {files_checked} files")
