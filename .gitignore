@@ -27,10 +27,10 @@ dmypy.json
 .DS_Store
 Thumbs.db
 
-# Dev folders (not tracked)
-docs_dev/
-scripts_dev/
-tests_dev/
+# Dev folders (NEVER PUBLISH - development artifacts only)
+# Wildcard pattern catches all: docs_dev, scripts_dev, tests_dev, samples_dev,
+# examples_dev, downloads_dev, libs_dev, builds_dev, etc.
+*_dev/
 
 # Rust
 target/
