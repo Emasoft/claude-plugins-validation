@@ -1170,8 +1170,20 @@ def validate_required_sections(body: str, report: ValidationReport, strict_mode:
             )
 
 
-def validate_path_formats(body: str, report: ValidationReport) -> None:
-    """Validate path formats (no absolute paths, forward slashes only)."""
+def validate_path_formats(
+    body: str, report: ValidationReport, skip_platform_checks: list[str] | None = None
+) -> None:
+    """Validate path formats (no absolute paths, forward slashes only).
+
+    Args:
+        body: The SKILL.md body content
+        report: ValidationReport to add results to
+        skip_platform_checks: List of platforms to skip checks for (e.g., ['windows'])
+    """
+    skip_windows = skip_platform_checks is not None and (
+        "windows" in skip_platform_checks or len(skip_platform_checks) == 0
+    )
+
     lines = body.split("\n")
     for i, line in enumerate(lines, 1):
         # Check for absolute paths
@@ -1184,6 +1196,10 @@ def validate_path_formats(body: str, report: ValidationReport) -> None:
                     category="Path Format",
                 )
 
+        # Skip Windows path checks if requested
+        if skip_windows:
+            continue
+
         # Check for backslashes (Windows-style paths - Anthropic docs require forward slashes)
         if "\\scripts\\" in line or "\\references\\" in line:
             report.major(
@@ -1195,7 +1211,19 @@ def validate_path_formats(body: str, report: ValidationReport) -> None:
         # Generic Windows backslash detection (any backslash followed by letter)
         elif RE_WINDOWS_PATH.search(line):
             # Skip if it's in a code block or escape sequence context
-            if not line.strip().startswith(("```", "`", "#", "//")):
+            # Also skip shell line continuations (backslash at end of line)
+            # Also skip common escape sequences (\n, \t, \r, etc.)
+            stripped = line.rstrip()
+            is_shell_continuation = stripped.endswith(" \\") or stripped.endswith("\t\\")
+            # Check for escape sequences: \n, \t, \r, \\, \", \', \0, \x, \u
+            has_escape_sequences = any(
+                esc in line for esc in ["\\n", "\\t", "\\r", "\\\\", '\\"', "\\'", "\\0", "\\x", "\\u"]
+            )
+            if (
+                not line.strip().startswith(("```", "`", "#", "//"))
+                and not is_shell_continuation
+                and not has_escape_sequences
+            ):
                 report.minor(
                     f"Line {i}: possible Windows-style path (backslash) - use forward slashes for portability",
                     "SKILL.md",
@@ -1693,7 +1721,7 @@ def validate_reference_files(skill_path: Path, report: ValidationReport) -> None
                 # Check for presence of a table of contents
                 # Common TOC indicators: "## Contents", "## Table of Contents", "## TOC", numbered list at top
                 has_toc = bool(
-                    re.search(r"(?im)^##\s*(contents|table\s+of\s+contents|toc|index)\s*$", content)
+                    re.search(r"(?im)^##\s*(contents|table\s+of\s+contents|toc|index)(\s|$)", content)
                     or re.search(r"(?m)^-\s*\[.*\]\(#", content[:2000])  # Markdown anchor links
                     or re.search(r"(?m)^1\.\s+\[.*\]\(#", content[:2000])  # Numbered TOC
                 )
@@ -1854,6 +1882,7 @@ def validate_skill(
     strict_mode: bool = False,
     strict_openspec: bool = False,
     validate_pillars_flag: bool = False,
+    skip_platform_checks: list[str] | None = None,
 ) -> ValidationReport:
     """Validate a complete skill directory.
 
@@ -1862,6 +1891,7 @@ def validate_skill(
         strict_mode: Enable Nixtla strict mode validation
         strict_openspec: Enable AgentSkills OpenSpec strict validation
         validate_pillars_flag: Enable 8+1 Pillars validation
+        skip_platform_checks: List of platforms to skip checks for (e.g., ['windows'])
 
     Returns:
         ValidationReport with all results
@@ -1919,7 +1949,7 @@ def validate_skill(
     validate_required_sections(body, report, strict_mode)
 
     # Validate path formats
-    validate_path_formats(body, report)
+    validate_path_formats(body, report, skip_platform_checks)
 
     # Validate MCP tool references (Anthropic docs: use qualified format)
     validate_mcp_tool_references(body, report)

@@ -10,11 +10,18 @@ Usage:
     uv run python scripts/validate_plugin.py --verbose
     uv run python scripts/validate_plugin.py --json
     uv run python scripts/validate_plugin.py --marketplace-only
+    uv run python scripts/validate_plugin.py --skip-platform-checks windows
 
 Flags:
     --marketplace-only: Skip plugin.json requirement for marketplace-only
                         distribution (strict=false). When using strict=false,
                         plugin.json should NOT exist (causes CLI issues).
+
+    --skip-platform-checks: Skip platform-specific checks.
+                        Valid platforms: windows, macos, linux
+                        Use without args to skip all platform checks.
+                        Example: --skip-platform-checks windows
+                        Example: --skip-platform-checks (skips all)
 
 Exit codes:
     0 - All checks passed (or only INFO/PASSED)
@@ -554,8 +561,16 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
             report.info("shellcheck not available, skipping shell lint")
 
 
-def validate_skills(plugin_root: Path, report: ValidationReport) -> None:
-    """Validate all skills in the plugin's skills/ directory."""
+def validate_skills(
+    plugin_root: Path, report: ValidationReport, skip_platform_checks: list[str] | None = None
+) -> None:
+    """Validate all skills in the plugin's skills/ directory.
+
+    Args:
+        plugin_root: Path to plugin root directory
+        report: ValidationReport to add results to
+        skip_platform_checks: List of platforms to skip checks for (e.g., ['windows'])
+    """
     skills_dir = plugin_root / "skills"
 
     if not skills_dir.is_dir():
@@ -580,6 +595,7 @@ def validate_skills(plugin_root: Path, report: ValidationReport) -> None:
             strict_mode=True,  # Enable Nixtla strict mode
             strict_openspec=False,  # Don't require OpenSpec 6-field whitelist for plugins
             validate_pillars_flag=skill_name.startswith(("lang-", "convert-")),  # Auto-enable for lang-*/convert-*
+            skip_platform_checks=skip_platform_checks,
         )
 
         # Transfer results to main report with skill path prefix
@@ -722,6 +738,13 @@ def main() -> int:
         action="store_true",
         help="Skip plugin.json requirement (for strict=false marketplace distribution)",
     )
+    parser.add_argument(
+        "--skip-platform-checks",
+        nargs="*",
+        metavar="PLATFORM",
+        help="Skip platform-specific checks (e.g., --skip-platform-checks windows). "
+             "Valid platforms: windows, macos, linux. Use without args to skip all.",
+    )
     parser.add_argument("path", nargs="?", help="Plugin root path (default: parent of scripts/)")
     args = parser.parse_args()
 
@@ -738,6 +761,7 @@ def main() -> int:
     # Run validation
     report = ValidationReport()
     marketplace_only = args.marketplace_only
+    skip_platform_checks = args.skip_platform_checks
 
     validate_manifest(plugin_root, report, marketplace_only)
     validate_structure(plugin_root, report, marketplace_only)
@@ -746,7 +770,7 @@ def main() -> int:
     validate_hooks(plugin_root, report)
     validate_mcp(plugin_root, report)
     validate_scripts(plugin_root, report)
-    validate_skills(plugin_root, report)
+    validate_skills(plugin_root, report, skip_platform_checks)
     validate_readme(plugin_root, report)
     validate_license(plugin_root, report)
     validate_no_local_paths(plugin_root, report)

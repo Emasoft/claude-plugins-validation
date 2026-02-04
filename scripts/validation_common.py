@@ -13,9 +13,11 @@ All individual validators should import from this module to ensure consistency.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import re
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal
@@ -451,6 +453,161 @@ PRIVATE_INFO_SKIP_DIRS = {
     "libs_dev",
     "builds_dev",
 }
+
+
+# =============================================================================
+# Gitignore Support
+# =============================================================================
+
+
+def get_gitignored_files(root_path: Path) -> set[str]:
+    """Get set of files/directories that are gitignored.
+
+    Uses git check-ignore to accurately determine what's ignored,
+    falling back to parsing .gitignore directly if git is not available.
+
+    Args:
+        root_path: Root directory to check for .gitignore
+
+    Returns:
+        Set of relative paths that are gitignored
+    """
+    ignored: set[str] = set()
+
+    # Try using git check-ignore for accuracy (respects .gitignore hierarchy)
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--ignored", "--exclude-standard", "--others", "--directory"],
+            cwd=root_path,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.strip().split("\n"):
+                if line:
+                    ignored.add(line.rstrip("/"))
+            return ignored
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+
+    # Fallback: Parse .gitignore directly
+    gitignore_path = root_path / ".gitignore"
+    if gitignore_path.exists():
+        try:
+            patterns = parse_gitignore(gitignore_path)
+            # Scan directory and match patterns
+            for dirpath, dirnames, filenames in os.walk(root_path):
+                rel_dir = Path(dirpath).relative_to(root_path)
+                for name in dirnames + filenames:
+                    rel_path = str(rel_dir / name) if str(rel_dir) != "." else name
+                    if is_path_gitignored(rel_path, patterns):
+                        ignored.add(rel_path)
+        except Exception:
+            pass
+
+    return ignored
+
+
+def parse_gitignore(gitignore_path: Path) -> list[str]:
+    """Parse a .gitignore file and return list of patterns.
+
+    Args:
+        gitignore_path: Path to .gitignore file
+
+    Returns:
+        List of gitignore patterns (comments and empty lines stripped)
+    """
+    patterns: list[str] = []
+    try:
+        with open(gitignore_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                # Skip empty lines and comments
+                if not line or line.startswith("#"):
+                    continue
+                patterns.append(line)
+    except (OSError, UnicodeDecodeError):
+        pass
+    return patterns
+
+
+def is_path_gitignored(rel_path: str, patterns: list[str]) -> bool:
+    """Check if a relative path matches any gitignore pattern.
+
+    Args:
+        rel_path: Relative path to check
+        patterns: List of gitignore patterns
+
+    Returns:
+        True if path matches any pattern
+    """
+    # Normalize path separators
+    rel_path = rel_path.replace("\\", "/")
+    path_parts = rel_path.split("/")
+
+    for pattern in patterns:
+        # Handle negation (!) - not fully implemented, just skip
+        if pattern.startswith("!"):
+            continue
+
+        # Handle directory-only patterns (ending with /)
+        is_dir_pattern = pattern.endswith("/")
+        if is_dir_pattern:
+            pattern = pattern[:-1]
+
+        # Handle patterns starting with /
+        is_anchored = pattern.startswith("/")
+        if is_anchored:
+            pattern = pattern[1:]
+
+        # Convert gitignore pattern to fnmatch pattern
+        # Handle ** for directory matching
+        if "**" in pattern:
+            # Simplified: treat ** as matching any path
+            pattern = pattern.replace("**/", "*/").replace("/**", "/*")
+
+        # Check if pattern matches any component or the full path
+        if is_anchored:
+            # Anchored patterns only match from root
+            if fnmatch.fnmatch(rel_path, pattern):
+                return True
+        else:
+            # Non-anchored patterns can match any component
+            if fnmatch.fnmatch(rel_path, pattern):
+                return True
+            # Also check if any path component matches
+            for part in path_parts:
+                if fnmatch.fnmatch(part, pattern):
+                    return True
+
+    return False
+
+
+def get_skip_dirs_with_gitignore(root_path: Path, additional_skip: set[str] | None = None) -> set[str]:
+    """Get combined set of directories to skip (built-in + gitignored).
+
+    Args:
+        root_path: Root directory to check for .gitignore
+        additional_skip: Additional directories to skip
+
+    Returns:
+        Combined set of directory names to skip
+    """
+    dirs_to_skip = set(PRIVATE_INFO_SKIP_DIRS)
+    if additional_skip:
+        dirs_to_skip.update(additional_skip)
+
+    # Add gitignored directories
+    gitignored = get_gitignored_files(root_path)
+    for path in gitignored:
+        # Add both the full path and just the directory name
+        dirs_to_skip.add(path)
+        if "/" in path:
+            dirs_to_skip.add(path.split("/")[-1])
+
+    return dirs_to_skip
+
 
 # =============================================================================
 # Validation Name Patterns
@@ -1292,6 +1449,7 @@ def scan_directory_for_private_info(
     report: ValidationReport,
     additional_usernames: set[str] | None = None,
     skip_dirs: set[str] | None = None,
+    respect_gitignore: bool = True,
 ) -> tuple[int, int]:
     """Scan a directory tree for private information.
 
@@ -1300,6 +1458,7 @@ def scan_directory_for_private_info(
         report: ValidationReport to add results to
         additional_usernames: Extra usernames to check beyond defaults
         skip_dirs: Additional directories to skip
+        respect_gitignore: If True, skip files/dirs listed in .gitignore
 
     Returns:
         Tuple of (files_checked, issues_found)
@@ -1307,10 +1466,15 @@ def scan_directory_for_private_info(
     files_checked = 0
     total_issues = 0
 
-    # Combine skip dirs
-    dirs_to_skip = set(PRIVATE_INFO_SKIP_DIRS)
-    if skip_dirs:
-        dirs_to_skip.update(skip_dirs)
+    # Combine skip dirs (includes gitignored dirs if respect_gitignore=True)
+    if respect_gitignore:
+        dirs_to_skip = get_skip_dirs_with_gitignore(root_path, skip_dirs)
+        gitignore_patterns = parse_gitignore(root_path / ".gitignore") if (root_path / ".gitignore").exists() else []
+    else:
+        dirs_to_skip = set(PRIVATE_INFO_SKIP_DIRS)
+        if skip_dirs:
+            dirs_to_skip.update(skip_dirs)
+        gitignore_patterns = []
 
     for dirpath, dirnames, filenames in os.walk(root_path):
         # Skip excluded directories
@@ -1320,13 +1484,17 @@ def scan_directory_for_private_info(
 
         for filename in filenames:
             filepath = Path(dirpath) / filename
+            rel_path = str(rel_dir / filename) if str(rel_dir) != "." else filename
+
+            # Skip gitignored files
+            if respect_gitignore and gitignore_patterns and is_path_gitignored(rel_path, gitignore_patterns):
+                continue
 
             # Check only relevant file types
             if filepath.suffix.lower() not in SCANNABLE_EXTENSIONS:
                 continue
 
             files_checked += 1
-            rel_path = str(rel_dir / filename) if str(rel_dir) != "." else filename
 
             issues = scan_file_for_private_info(filepath, report, rel_path, additional_usernames)
             total_issues += issues
@@ -1438,6 +1606,8 @@ def scan_file_for_absolute_paths(
 def validate_no_absolute_paths(
     root_path: Path,
     report: ValidationReport,
+    skip_dirs: set[str] | None = None,
+    respect_gitignore: bool = True,
 ) -> None:
     """Validate that a plugin contains no absolute paths.
 
@@ -1449,25 +1619,41 @@ def validate_no_absolute_paths(
     Args:
         root_path: Root directory to scan
         report: ValidationReport to add results to
+        skip_dirs: Additional directories to skip
+        respect_gitignore: If True, skip files/dirs listed in .gitignore
     """
     files_checked = 0
     total_issues = 0
 
+    # Combine skip dirs (includes gitignored dirs if respect_gitignore=True)
+    if respect_gitignore:
+        dirs_to_skip = get_skip_dirs_with_gitignore(root_path, skip_dirs)
+        gitignore_patterns = parse_gitignore(root_path / ".gitignore") if (root_path / ".gitignore").exists() else []
+    else:
+        dirs_to_skip = set(PRIVATE_INFO_SKIP_DIRS)
+        if skip_dirs:
+            dirs_to_skip.update(skip_dirs)
+        gitignore_patterns = []
+
     for dirpath, dirnames, filenames in os.walk(root_path):
-        # Skip excluded directories
-        dirnames[:] = [d for d in dirnames if d not in PRIVATE_INFO_SKIP_DIRS]
+        # Skip excluded directories (including gitignored)
+        dirnames[:] = [d for d in dirnames if d not in dirs_to_skip]
 
         rel_dir = Path(dirpath).relative_to(root_path)
 
         for filename in filenames:
             filepath = Path(dirpath) / filename
+            rel_path = str(rel_dir / filename) if str(rel_dir) != "." else filename
+
+            # Skip gitignored files
+            if respect_gitignore and gitignore_patterns and is_path_gitignored(rel_path, gitignore_patterns):
+                continue
 
             # Check only relevant file types
             if filepath.suffix.lower() not in SCANNABLE_EXTENSIONS:
                 continue
 
             files_checked += 1
-            rel_path = str(rel_dir / filename) if str(rel_dir) != "." else filename
 
             issues = scan_file_for_absolute_paths(filepath, report, rel_path)
             total_issues += issues
