@@ -206,7 +206,7 @@ def validate_manifest(
                 ".claude-plugin/plugin.json",
             )
 
-    # Check for unknown fields
+    # Check for unknown fields — Claude Code rejects unrecognized keys
     known_fields = {
         "name",
         "version",
@@ -226,8 +226,20 @@ def validate_manifest(
     }
     for key in manifest.keys():
         if key not in known_fields:
-            report.info(
-                f"Unknown manifest field '{key}' (may be ignored by CLI)",
+            report.major(
+                f"Unrecognized manifest field '{key}' — Claude Code rejects unknown keys "
+                f"and plugin installation will fail. Remove this field.",
+                ".claude-plugin/plugin.json",
+            )
+
+    # Validate repository field type — Claude Code requires a string URL, not an object
+    if "repository" in manifest:
+        repo_val = manifest["repository"]
+        if not isinstance(repo_val, str):
+            report.major(
+                f"Field 'repository' must be a string URL (e.g. "
+                f"\"https://github.com/user/repo\"), not {type(repo_val).__name__}. "
+                f"Claude Code rejects object format like {{\"type\":\"git\",\"url\":\"...\"}}.",
                 ".claude-plugin/plugin.json",
             )
 
