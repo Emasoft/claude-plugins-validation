@@ -1284,8 +1284,22 @@ def validate_marketplace_private_info(
 
     total_files = 0
 
-    # Scan marketplace root files (marketplace.json, README, etc.)
-    total_files += scan_directory(marketplace_dir, "")
+    # Scan marketplace infrastructure dirs only (NOT the full root).
+    # Plugin subdirs are scanned individually below.
+    # Using scan_directory on the full marketplace_dir would recurse into
+    # the entire workspace (166K+ files) when the marketplace is at repo root.
+    MARKETPLACE_INFRA_DIRS = {".claude-plugin", ".github", "scripts"}
+    for infra_dir_name in MARKETPLACE_INFRA_DIRS:
+        infra_dir = marketplace_dir / infra_dir_name
+        if infra_dir.is_dir():
+            total_files += scan_directory(infra_dir, infra_dir_name)
+    # Also scan known marketplace root files (README, LICENSE, CHANGELOG)
+    MARKETPLACE_ROOT_FILES = {"README.md", "LICENSE", "CHANGELOG.md"}
+    for root_file_name in MARKETPLACE_ROOT_FILES:
+        root_file = marketplace_dir / root_file_name
+        if root_file.is_file() and root_file.suffix.lower() in SCANNABLE_EXTENSIONS:
+            scan_file(root_file, root_file_name)
+            total_files += 1
 
     # Scan each plugin subfolder
     for plugin in plugins:
