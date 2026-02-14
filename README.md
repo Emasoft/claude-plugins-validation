@@ -15,17 +15,19 @@ This plugin provides:
 
 ## Installation (Production)
 
-Install from the Emasoft marketplace. Use `--scope local` to install only for the current project directory, or `--scope global` for all projects.
+Install from the Emasoft marketplace. Use `--scope user` to make this plugin available globally to all Claude Code instances.
 
 ```bash
 # Add Emasoft marketplace (first time only)
 claude plugin marketplace add emasoft-plugins --url https://github.com/Emasoft/emasoft-plugins
 
-# Install plugin (--scope local = this project only, recommended)
-claude plugin install claude-plugins-validation@emasoft-plugins --scope local
+# Install plugin (--scope user = available globally to all Claude Code instances, recommended)
+claude plugin install claude-plugins-validation@emasoft-plugins --scope user
 
 # RESTART Claude Code after installing (required!)
 ```
+
+Utility plugins are installed once with `--scope user` and become available to all Claude Code instances.
 
 This is a utility plugin — it provides validation commands and skills. No `--agent` flag needed; just start Claude Code normally and the validation commands will be available.
 
