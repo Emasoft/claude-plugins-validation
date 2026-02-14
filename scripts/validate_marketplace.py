@@ -89,7 +89,7 @@ class ValidationReport:
 # =============================================================================
 
 # Valid source types for plugins in a marketplace
-VALID_SOURCE_TYPES = {"git", "local", "npm", "url"}
+VALID_SOURCE_TYPES = {"github", "url", "npm"}
 
 # Required fields in marketplace.json
 REQUIRED_MARKETPLACE_FIELDS = {"name", "plugins"}
@@ -112,10 +112,9 @@ OPTIONAL_PLUGIN_FIELDS = {
 
 # Source-specific required fields
 SOURCE_REQUIRED_FIELDS = {
-    "git": {"repository"},
-    "local": {"path"},
-    "npm": {"package"},
+    "github": {"repo"},
     "url": {"url"},
+    "npm": {"package"},
 }
 
 # Name validation pattern (kebab-case)
@@ -481,16 +480,16 @@ def validate_plugin_source(
             )
         return results
 
-    # Source is a dict - validate source type
-    source_type = source.get("type")
+    # Source is a dict - validate source type (Anthropic schema uses "source" key inside the object)
+    source_type = source.get("source")
     if source_type is None:
         results.append(
             ValidationResult(
                 level="major",
                 category="plugin",
-                message=f"Plugin '{plugin_id}' source missing 'type' field",
+                message=f"Plugin '{plugin_id}' source missing 'source' field",
                 file_path=json_path,
-                suggestion=f"Add type: {', '.join(sorted(VALID_SOURCE_TYPES))}",
+                suggestion=f"Add source: {', '.join(sorted(VALID_SOURCE_TYPES))}",
             )
         )
     elif source_type not in VALID_SOURCE_TYPES:
@@ -517,22 +516,22 @@ def validate_plugin_source(
                     )
                 )
 
-        # CRITICAL: Check if using git source type but plugin exists locally
-        # Claude Code's schema requires local path strings for local marketplace installations
-        if source_type == "git":
+        # Check if using remote source type but plugin exists locally as submodule
+        if source_type in ("github", "url"):
             plugin_name = plugin.get("name", plugin_id)
             local_plugin_path = marketplace_dir / plugin_name
-            if local_plugin_path.exists() and local_plugin_path.is_dir():
+            # Only warn if it exists as a git submodule (has .git file), not just a directory
+            git_marker = local_plugin_path / ".git"
+            if local_plugin_path.exists() and local_plugin_path.is_dir() and git_marker.exists():
                 results.append(
                     ValidationResult(
-                        level="critical",
+                        level="major",
                         category="plugin",
-                        message=f"Plugin '{plugin_id}' uses source type 'git' but exists as local directory",
+                        message=f"Plugin '{plugin_id}' uses remote source but exists as local submodule",
                         file_path=json_path,
                         suggestion=(
-                            f"Claude Code requires local path for local plugins. "
-                            f'Change source from {{"type": "git", "repository": "..."}} '
-                            f'to "./{plugin_name}" (string path)'
+                            f"Remove the local submodule checkout at './{plugin_name}' "
+                            f"or change source to a relative path string"
                         ),
                     )
                 )
@@ -993,7 +992,7 @@ def validate_git_submodules(
         for plugin in plugins:
             plugin_name = plugin.get("name", "")
             source = plugin.get("source", {})
-            is_url_source = isinstance(source, dict) and source.get("type") == "git"
+            is_url_source = isinstance(source, dict) and source.get("source") in ("github", "url")
             if not is_url_source:
                 all_url_based = False
             plugin_path = marketplace_dir / plugin_name
@@ -1060,9 +1059,11 @@ def validate_git_submodules(
         # Get the expected repository URL from plugin source
         expected_repo: str | None = None
         if isinstance(source, dict):
-            source_type = source.get("type")
-            if source_type == "git":
-                expected_repo = source.get("repository")
+            source_type = source.get("source")
+            if source_type == "github":
+                expected_repo = f"https://github.com/{source.get('repo', '')}"
+            elif source_type == "url":
+                expected_repo = source.get("url")
         elif isinstance(source, str) and (source.startswith("http") or source.startswith("git@")):
             expected_repo = source
 
