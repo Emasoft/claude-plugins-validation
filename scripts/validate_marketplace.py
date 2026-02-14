@@ -106,6 +106,9 @@ OPTIONAL_PLUGIN_FIELDS = {
     "repository",
     "author",
     "tags",
+    "keywords",
+    "license",
+    "category",
     "dependencies",
     "enabled",
 }
@@ -1449,6 +1452,102 @@ def validate_github_source_required(
     return results
 
 
+# Regex to find inline Python blocks inside YAML: `python3 -c "..."`  or `python -c "..."`
+# Captures the Python code string passed to -c.
+_YAML_INLINE_PYTHON_RE = re.compile(
+    r'python3?\s+-c\s+"([^"]*(?:"[^"]*"[^"]*)*)"',
+    re.DOTALL,
+)
+
+# Dangerous pattern: dict["key"] or dict['key'] inside an f-string.
+# In YAML inline Python the shell strips the inner quotes, causing NameError.
+# Matches: {expr["key"]}, {expr['key']}, {expr.method()["key"]} etc.
+_FSTRING_DICT_BRACKET_RE = re.compile(
+    r"""\{[^}]*\[["'][^"']+["']\][^}]*\}""",
+)
+
+
+def validate_workflow_inline_python(
+    marketplace_dir: Path,
+) -> list[ValidationResult]:
+    """
+    Scan GitHub Actions workflow files for dangerous inline Python patterns.
+
+    When a YAML workflow uses `python3 -c "..."` (double-quoted shell string),
+    dict bracket access like source["repo"] inside f-strings will fail at
+    runtime because the shell strips the inner double quotes before Python
+    sees the code. Python then interprets the bare word as an undefined
+    variable name, causing NameError.
+
+    This validator catches that pattern and reports it as a major issue.
+
+    Args:
+        marketplace_dir: Path to marketplace (or plugin) directory
+
+    Returns:
+        List of validation results
+    """
+    results: list[ValidationResult] = []
+
+    # Find all YAML workflow files
+    workflows_dir = marketplace_dir / ".github" / "workflows"
+    if not workflows_dir.is_dir():
+        return results
+
+    yaml_files = list(workflows_dir.glob("*.yml")) + list(workflows_dir.glob("*.yaml"))
+    if not yaml_files:
+        return results
+
+    for yaml_path in yaml_files:
+        try:
+            content = yaml_path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+
+        rel_path = str(yaml_path.relative_to(marketplace_dir))
+
+        # Find all inline Python blocks
+        for match in _YAML_INLINE_PYTHON_RE.finditer(content):
+            python_code = match.group(1)
+            block_start_offset = match.start()
+
+            # Search for f-strings with dict bracket access
+            for bad_match in _FSTRING_DICT_BRACKET_RE.finditer(python_code):
+                # Calculate line number in the YAML file
+                abs_offset = block_start_offset + bad_match.start()
+                line_num = content[:abs_offset].count("\n") + 1
+                snippet = bad_match.group(0)
+
+                results.append(
+                    ValidationResult(
+                        level="major",
+                        category="workflow",
+                        message=(
+                            f"Inline Python uses dict bracket access in f-string: {snippet} "
+                            "-- shell quoting will strip inner quotes causing NameError at runtime"
+                        ),
+                        file_path=rel_path,
+                        line_number=line_num,
+                        suggestion=(
+                            "Extract dict value into a local variable before using it in an f-string. "
+                            "Example: val = mydict.get('key', ''); print(f'value: {val}')"
+                        ),
+                    )
+                )
+
+    if not results:
+        results.append(
+            ValidationResult(
+                level="info",
+                category="workflow",
+                message=f"No dangerous inline Python patterns found in {len(yaml_files)} workflow file(s)",
+                file_path=str(workflows_dir),
+            )
+        )
+
+    return results
+
+
 def validate_marketplace(marketplace_path: Path) -> ValidationReport:
     """
     Validate a complete marketplace configuration.
@@ -1512,6 +1611,11 @@ def validate_marketplace(marketplace_path: Path) -> ValidationReport:
             # Scan for private info leaks (usernames, home paths)
             private_info_results = validate_marketplace_private_info(marketplace_dir, plugins)
             report.results.extend(private_info_results)
+
+            # Scan GitHub Actions workflows for dangerous inline Python patterns
+            # (dict bracket access in f-strings inside shell-quoted python3 -c blocks)
+            workflow_results = validate_workflow_inline_python(marketplace_dir)
+            report.results.extend(workflow_results)
 
     # Validate optional fields
     if "description" in data and not isinstance(data["description"], str):

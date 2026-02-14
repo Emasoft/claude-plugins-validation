@@ -45,10 +45,10 @@ from typing import Any, Literal, cast
 import yaml
 from validate_hook import validate_hooks as validate_hook_file
 from validate_mcp import validate_plugin_mcp
-from validation_common import resolve_tool_command
 
 # Import comprehensive skill validator (84+ rules from AgentSkills OpenSpec, Nixtla, Meta-Skills)
 from validate_skill_comprehensive import validate_skill as validate_skill_comprehensive
+from validation_common import resolve_tool_command
 
 # Validation result levels
 Level = Literal["CRITICAL", "MAJOR", "MINOR", "INFO", "PASSED"]
@@ -239,8 +239,8 @@ def validate_manifest(
         if not isinstance(repo_val, str):
             report.major(
                 f"Field 'repository' must be a string URL (e.g. "
-                f"\"https://github.com/user/repo\"), not {type(repo_val).__name__}. "
-                f"Claude Code rejects object format like {{\"type\":\"git\",\"url\":\"...\"}}.",
+                f'"https://github.com/user/repo"), not {type(repo_val).__name__}. '
+                f'Claude Code rejects object format like {{"type":"git","url":"..."}}.',
                 ".claude-plugin/plugin.json",
             )
 
@@ -577,9 +577,7 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
             report.minor("shellcheck not available locally or via bunx/npx, skipping shell lint")
 
 
-def validate_skills(
-    plugin_root: Path, report: ValidationReport, skip_platform_checks: list[str] | None = None
-) -> None:
+def validate_skills(plugin_root: Path, report: ValidationReport, skip_platform_checks: list[str] | None = None) -> None:
     """Validate all skills in the plugin's skills/ directory.
 
     Args:
@@ -668,6 +666,72 @@ def validate_no_local_paths(plugin_root: Path, report: ValidationReport) -> None
     # - ANY absolute paths that don't use env vars - MAJOR
     # We pass our local report since both have compatible interfaces
     validate_no_absolute_paths(plugin_root, report)  # type: ignore[arg-type]
+
+
+# Regex to find inline Python blocks inside YAML: `python3 -c "..."`  or `python -c "..."`
+# Captures the Python code string passed to -c.
+_YAML_INLINE_PYTHON_RE = re.compile(
+    r'python3?\s+-c\s+"([^"]*(?:"[^"]*"[^"]*)*)"',
+    re.DOTALL,
+)
+
+# Dangerous pattern: dict["key"] or dict['key'] inside an f-string.
+# In YAML inline Python the shell strips the inner quotes, causing NameError.
+# Matches: {expr["key"]}, {expr['key']}, {expr.method()["key"]} etc.
+_FSTRING_DICT_BRACKET_RE = re.compile(
+    r"""\{[^}]*\[["'][^"']+["']\][^}]*\}""",
+)
+
+
+def validate_workflow_inline_python(plugin_root: Path, report: ValidationReport) -> None:
+    """Scan GitHub Actions workflow files for dangerous inline Python patterns.
+
+    When a YAML workflow uses ``python3 -c "..."`` (double-quoted shell string),
+    dict bracket access like source["repo"] inside f-strings will fail at
+    runtime because the shell strips the inner double quotes before Python
+    sees the code.  Python then interprets the bare word as an undefined
+    variable name, causing NameError.
+
+    This validator catches that pattern and reports it as MAJOR.
+    """
+    workflows_dir = plugin_root / ".github" / "workflows"
+    if not workflows_dir.is_dir():
+        return
+
+    yaml_files = list(workflows_dir.glob("*.yml")) + list(workflows_dir.glob("*.yaml"))
+    if not yaml_files:
+        return
+
+    found_any = False
+    for yaml_path in yaml_files:
+        try:
+            content = yaml_path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+
+        rel_path = str(yaml_path.relative_to(plugin_root))
+
+        # Find all inline Python blocks
+        for match in _YAML_INLINE_PYTHON_RE.finditer(content):
+            python_code = match.group(1)
+            block_start_offset = match.start()
+
+            # Search for f-strings with dict bracket access
+            for bad_match in _FSTRING_DICT_BRACKET_RE.finditer(python_code):
+                abs_offset = block_start_offset + bad_match.start()
+                line_num = content[:abs_offset].count("\n") + 1
+                snippet = bad_match.group(0)
+                found_any = True
+                report.major(
+                    f"Inline Python uses dict bracket access in f-string: {snippet} "
+                    "-- shell quoting will strip inner quotes causing NameError. "
+                    "Extract value into a local variable first.",
+                    rel_path,
+                    line_num,
+                )
+
+    if not found_any and yaml_files:
+        report.passed(f"No inline Python quoting issues in {len(yaml_files)} workflow file(s)")
 
 
 def print_results(report: ValidationReport, verbose: bool = False) -> None:
@@ -759,7 +823,7 @@ def main() -> int:
         nargs="*",
         metavar="PLATFORM",
         help="Skip platform-specific checks (e.g., --skip-platform-checks windows). "
-             "Valid platforms: windows, macos, linux. Use without args to skip all.",
+        "Valid platforms: windows, macos, linux. Use without args to skip all.",
     )
     parser.add_argument("path", nargs="?", help="Plugin root path (default: parent of scripts/)")
     args = parser.parse_args()
@@ -790,6 +854,7 @@ def main() -> int:
     validate_readme(plugin_root, report)
     validate_license(plugin_root, report)
     validate_no_local_paths(plugin_root, report)
+    validate_workflow_inline_python(plugin_root, report)
 
     # Output
     if args.json:
