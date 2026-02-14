@@ -17,10 +17,44 @@ import fnmatch
 import json
 import os
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal
+
+# =============================================================================
+# Tool Resolution: local install → remote runner fallback
+# =============================================================================
+
+# Maps tool name to ordered list of remote runner commands to try
+_TOOL_RUNNERS: dict[str, list[list[str]]] = {
+    "ruff": [["uvx", "ruff"]],
+    "mypy": [["uvx", "mypy"]],
+    "shellcheck": [["bunx", "shellcheck"], ["npx", "shellcheck"]],
+    "eslint": [["bunx", "eslint"], ["npx", "eslint"]],
+}
+
+
+def resolve_tool_command(tool_name: str) -> list[str] | None:
+    """Resolve a linting tool to its executable command prefix.
+
+    Checks local installation first, then falls back to remote
+    execution via uvx (Python tools) or bunx/npx (JS/system tools).
+
+    Returns:
+        Command prefix as list (e.g. ["uvx", "ruff"]) or None if
+        the tool is unavailable both locally and via remote runners.
+    """
+    # Prefer local installation
+    if shutil.which(tool_name):
+        return [tool_name]
+    # Try remote runners in order
+    for runner_cmd in _TOOL_RUNNERS.get(tool_name, []):
+        if shutil.which(runner_cmd[0]):
+            return runner_cmd
+    return None
+
 
 # =============================================================================
 # Type Definitions

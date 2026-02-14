@@ -45,6 +45,7 @@ from typing import Any, Literal, cast
 import yaml
 from validate_hook import validate_hooks as validate_hook_file
 from validate_mcp import validate_plugin_mcp
+from validation_common import resolve_tool_command
 
 # Import comprehensive skill validator (84+ rules from AgentSkills OpenSpec, Nixtla, Meta-Skills)
 from validate_skill_comprehensive import validate_skill as validate_skill_comprehensive
@@ -501,8 +502,9 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
     py_files = list(scripts_dir.glob("*.py"))
     if py_files:
         # Ruff check - exclude E501 (line length) as it's configurable per project
-        try:
-            ruff_args = ["ruff", "check", "--select", "E,F,W", "--ignore", "E501"]
+        ruff_cmd = resolve_tool_command("ruff")
+        if ruff_cmd:
+            ruff_args = ruff_cmd + ["check", "--select", "E,F,W", "--ignore", "E501"]
             # If pyproject.toml exists in plugin root, use it for config
             pyproject = plugin_root / "pyproject.toml"
             if pyproject.exists():
@@ -520,12 +522,13 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
                 for line in result.stdout.strip().split("\n"):
                     if line:
                         report.major(f"Ruff: {line}")
-        except FileNotFoundError:
-            report.info("ruff not available, skipping Python lint check")
+        else:
+            report.minor("ruff not available locally or via uvx, skipping Python lint check")
 
         # Mypy check
-        try:
-            mypy_args = ["mypy", "--ignore-missing-imports"]
+        mypy_cmd = resolve_tool_command("mypy")
+        if mypy_cmd:
+            mypy_args = mypy_cmd + ["--ignore-missing-imports"]
             # If pyproject.toml exists in plugin root, use it for config
             pyproject = plugin_root / "pyproject.toml"
             if pyproject.exists():
@@ -543,8 +546,8 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
                 for line in result.stdout.strip().split("\n"):
                     if line and not line.startswith("Success"):
                         report.minor(f"Mypy: {line}")
-        except FileNotFoundError:
-            report.info("mypy not available, skipping type check")
+        else:
+            report.minor("mypy not available locally or via uvx, skipping type check")
 
     # Shell scripts
     sh_files = list(scripts_dir.glob("*.sh"))
@@ -558,9 +561,10 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
             report.passed(f"Shell script executable: {sh_file.name}", f"scripts/{sh_file.name}")
 
         # Shellcheck
-        try:
+        shellcheck_cmd = resolve_tool_command("shellcheck")
+        if shellcheck_cmd:
             result = subprocess.run(
-                ["shellcheck", str(sh_file)],
+                shellcheck_cmd + [str(sh_file)],
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -569,8 +573,8 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
                 report.passed(f"Shellcheck passed: {sh_file.name}")
             else:
                 report.minor(f"Shellcheck issues in {sh_file.name}", f"scripts/{sh_file.name}")
-        except FileNotFoundError:
-            report.info("shellcheck not available, skipping shell lint")
+        else:
+            report.minor("shellcheck not available locally or via bunx/npx, skipping shell lint")
 
 
 def validate_skills(

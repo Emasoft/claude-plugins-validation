@@ -25,12 +25,13 @@ import argparse
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, cast
+
+from validation_common import resolve_tool_command
 
 # Validation result levels
 Level = Literal["CRITICAL", "MAJOR", "MINOR", "INFO", "PASSED"]
@@ -332,13 +333,14 @@ def extract_script_path(command: str, plugin_root: Path | None) -> Path | None:
 
 def lint_bash_script(script_path: Path, report: ValidationReport) -> None:
     """Lint a bash script using shellcheck."""
-    if not shutil.which("shellcheck"):
-        report.info(f"shellcheck not found, skipping lint for {script_path.name}")
+    shellcheck_cmd = resolve_tool_command("shellcheck")
+    if not shellcheck_cmd:
+        report.minor(f"shellcheck not available locally or via bunx/npx, skipping lint for {script_path.name}")
         return
 
     try:
         result = subprocess.run(
-            ["shellcheck", "-f", "json", str(script_path)],
+            shellcheck_cmd + ["-f", "json", str(script_path)],
             capture_output=True,
             text=True,
             timeout=30,
@@ -381,10 +383,11 @@ def lint_bash_script(script_path: Path, report: ValidationReport) -> None:
 def lint_python_script(script_path: Path, report: ValidationReport) -> None:
     """Lint a Python script using ruff and mypy."""
     # Ruff check
-    if shutil.which("ruff"):
+    ruff_cmd = resolve_tool_command("ruff")
+    if ruff_cmd:
         try:
             result = subprocess.run(
-                ["ruff", "check", "--output-format=json", str(script_path)],
+                ruff_cmd + ["check", "--output-format=json", str(script_path)],
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -415,14 +418,14 @@ def lint_python_script(script_path: Path, report: ValidationReport) -> None:
         except Exception as e:
             report.minor(f"ruff error: {e}")
     else:
-        report.info(f"ruff not found, skipping lint for {script_path.name}")
+        report.minor(f"ruff not available locally or via uvx, skipping lint for {script_path.name}")
 
     # Mypy check
-    if shutil.which("mypy"):
+    mypy_cmd = resolve_tool_command("mypy")
+    if mypy_cmd:
         try:
             result = subprocess.run(
-                [
-                    "mypy",
+                mypy_cmd + [
                     "--ignore-missing-imports",
                     "--no-error-summary",
                     str(script_path),
@@ -454,18 +457,19 @@ def lint_python_script(script_path: Path, report: ValidationReport) -> None:
         except Exception as e:
             report.minor(f"mypy error: {e}")
     else:
-        report.info(f"mypy not found, skipping type check for {script_path.name}")
+        report.minor(f"mypy not available locally or via uvx, skipping type check for {script_path.name}")
 
 
 def lint_js_script(script_path: Path, report: ValidationReport) -> None:
     """Lint a JavaScript/TypeScript script using eslint."""
-    if not shutil.which("eslint"):
-        report.info(f"eslint not found, skipping lint for {script_path.name}")
+    eslint_cmd = resolve_tool_command("eslint")
+    if not eslint_cmd:
+        report.minor(f"eslint not available locally or via bunx/npx, skipping lint for {script_path.name}")
         return
 
     try:
         result = subprocess.run(
-            ["eslint", "--format=json", str(script_path)],
+            eslint_cmd + ["--format=json", str(script_path)],
             capture_output=True,
             text=True,
             timeout=30,
