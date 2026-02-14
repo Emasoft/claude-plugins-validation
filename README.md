@@ -13,75 +13,29 @@ This plugin provides:
 - **Expert Agent**: `plugin-validator` agent for interactive validation
 - **Documentation Skill**: `plugin-validation-skill` with detailed reference guides
 
-## Installation
+## Installation (Production)
 
-### Install from Emasoft Marketplace (Recommended)
-
-```bash
-# Step 1: Add the Emasoft marketplace
-claude plugin marketplace add https://github.com/Emasoft/emasoft-plugins
-
-# Step 2: Install this plugin
-claude plugin install claude-plugins-validation@emasoft-plugins
-
-# Step 3: Verify installation
-claude plugin list
-
-# Step 4: Restart Claude Code
-```
-
-For detailed installation instructions, troubleshooting, and updates, see the **[Emasoft Plugins Marketplace README](https://github.com/Emasoft/emasoft-plugins#readme)**.
-
-### Local Development (for contributors)
+Install from the Emasoft marketplace. Use `--scope local` to install only for the current project directory, or `--scope global` for all projects.
 
 ```bash
-# Use directly without installation
-claude --plugin-dir /path/to/claude-plugins-validation
+# Add Emasoft marketplace (first time only)
+claude plugin marketplace add emasoft-plugins --url https://github.com/Emasoft/emasoft-plugins
+
+# Install plugin (--scope local = this project only, recommended)
+claude plugin install claude-plugins-validation@emasoft-plugins --scope local
+
+# RESTART Claude Code after installing (required!)
 ```
 
-## Update to Latest Version
+This is a utility plugin — it provides validation commands and skills. No `--agent` flag needed; just start Claude Code normally and the validation commands will be available.
 
-### If Installed from Marketplace
+## Development Only (--plugin-dir)
+
+`--plugin-dir` loads a plugin directly from a local directory without marketplace installation. Use only during plugin development.
 
 ```bash
-# Reinstall with --force to get the latest version
-claude plugin install claude-plugins-validation@marketplace-name --force
+claude --plugin-dir ./OUTPUT_SKILLS/claude-plugins-validation
 ```
-
-### If Using --plugin-dir (Local Development)
-
-```bash
-# Navigate to the plugin directory and pull latest changes
-cd /path/to/claude-plugins-validation
-git pull origin main
-```
-
-**Important**: After updating the plugin, you MUST restart Claude Code for changes to take effect. There is no hot-reload capability for plugins.
-
-## Uninstall
-
-### Remove Installed Plugin
-
-```bash
-# Uninstall the plugin
-claude plugin uninstall claude-plugins-validation
-```
-
-### Remove Marketplace (Optional)
-
-If you no longer need the marketplace that provided this plugin:
-
-```bash
-# List marketplaces to find the exact name
-claude plugin marketplace list
-
-# Remove the marketplace
-claude plugin marketplace remove marketplace-name
-```
-
-### Remove Local Development Setup
-
-If using `--plugin-dir`, simply stop using the flag when launching Claude Code. No files are copied or modified in your system.
 
 ## Usage
 
