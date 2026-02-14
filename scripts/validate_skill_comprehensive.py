@@ -1185,7 +1185,18 @@ def validate_path_formats(
     )
 
     lines = body.split("\n")
+    in_code_block = False
     for i, line in enumerate(lines, 1):
+        # Track fenced code blocks (``` or ~~~)
+        stripped_line = line.strip()
+        if stripped_line.startswith("```") or stripped_line.startswith("~~~"):
+            in_code_block = not in_code_block
+            continue
+
+        # Skip all path checks inside fenced code blocks
+        if in_code_block:
+            continue
+
         # Check for absolute paths
         for pattern, desc in ABSOLUTE_PATH_PATTERNS:
             if pattern.search(line):
@@ -1210,17 +1221,15 @@ def validate_path_formats(
             )
         # Generic Windows backslash detection (any backslash followed by letter)
         elif RE_WINDOWS_PATH.search(line):
-            # Skip if it's in a code block or escape sequence context
-            # Also skip shell line continuations (backslash at end of line)
-            # Also skip common escape sequences (\n, \t, \r, etc.)
+            # Skip shell line continuations (backslash at end of line)
+            # Skip common escape sequences (\n, \t, \r, etc.)
             stripped = line.rstrip()
             is_shell_continuation = stripped.endswith(" \\") or stripped.endswith("\t\\")
-            # Check for escape sequences: \n, \t, \r, \\, \", \', \0, \x, \u
             has_escape_sequences = any(
                 esc in line for esc in ["\\n", "\\t", "\\r", "\\\\", '\\"', "\\'", "\\0", "\\x", "\\u"]
             )
             if (
-                not line.strip().startswith(("```", "`", "#", "//"))
+                not stripped_line.startswith(("```", "`", "#", "//"))
                 and not is_shell_continuation
                 and not has_escape_sequences
             ):
