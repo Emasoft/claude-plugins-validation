@@ -987,23 +987,42 @@ def validate_git_submodules(
     # Check if .gitmodules file exists
     gitmodules_path = marketplace_dir / ".gitmodules"
     if not gitmodules_path.exists():
-        # Only warn if there are plugins that should be submodules
-        plugin_dirs_exist = False
+        # Check if all plugins use URL-based git sources (no submodules needed)
+        all_url_based = True
+        has_local_dirs = False
         for plugin in plugins:
             plugin_name = plugin.get("name", "")
+            source = plugin.get("source", {})
+            is_url_source = isinstance(source, dict) and source.get("type") == "git"
+            if not is_url_source:
+                all_url_based = False
             plugin_path = marketplace_dir / plugin_name
             if plugin_path.exists() and plugin_path.is_dir():
-                plugin_dirs_exist = True
-                break
+                has_local_dirs = True
 
-        if plugin_dirs_exist:
+        if all_url_based:
+            # All plugins use URL-based git sources, submodules are not needed
+            results.append(
+                ValidationResult(
+                    level="info",
+                    category="submodule",
+                    message="All plugins use URL-based git sources, no submodules required",
+                    file_path=str(marketplace_dir),
+                )
+            )
+        elif has_local_dirs:
+            # Some plugins have local directories but no .gitmodules - likely misconfigured
             results.append(
                 ValidationResult(
                     level="major",
                     category="submodule",
-                    message="Missing .gitmodules file - plugins should be git submodules",
+                    message="Missing .gitmodules file - local plugin directories exist but are not git submodules",
                     file_path=str(marketplace_dir),
-                    suggestion="Use 'git submodule add <repo-url> <plugin-name>' to add plugins as submodules",
+                    suggestion=(
+                        "Either convert local directories to git submodules with "
+                        "'git submodule add <repo-url> <plugin-name>', "
+                        "or switch all plugins to URL-based sources in marketplace.json"
+                    ),
                 )
             )
         return results
