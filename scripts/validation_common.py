@@ -17,43 +17,38 @@ import fnmatch
 import json
 import os
 import re
-import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal
 
 # =============================================================================
-# Tool Resolution: local install → remote runner fallback
+# Tool Resolution: local install → remote runner fallback (via smart_exec)
 # =============================================================================
-
-# Maps tool name to ordered list of remote runner commands to try
-_TOOL_RUNNERS: dict[str, list[list[str]]] = {
-    "ruff": [["uvx", "ruff"]],
-    "mypy": [["uvx", "mypy"]],
-    "shellcheck": [["bunx", "shellcheck"], ["npx", "shellcheck"]],
-    "eslint": [["bunx", "eslint"], ["npx", "eslint"]],
-}
-
 
 def resolve_tool_command(tool_name: str) -> list[str] | None:
     """Resolve a linting tool to its executable command prefix.
 
-    Checks local installation first, then falls back to remote
-    execution via uvx (Python tools) or bunx/npx (JS/system tools).
+    Uses smart_exec's tool database and executor detection to find
+    the best way to run the tool: local install first, then remote
+    execution via uvx, bunx, npx, pnpm dlx, yarn dlx, deno, docker, etc.
+
+    Supports 25+ tools across Python, Node, Deno, native, and PowerShell
+    ecosystems. See smart_exec.py for the full TOOL_DB and PRIORITY tables.
 
     Returns:
-        Command prefix as list (e.g. ["uvx", "ruff"]) or None if
-        the tool is unavailable both locally and via remote runners.
+        Command prefix as list (e.g. ["uvx", "ruff@latest"]) or None if
+        no suitable executor is available on this system.
     """
-    # Prefer local installation
-    if shutil.which(tool_name):
-        return [tool_name]
-    # Try remote runners in order
-    for runner_cmd in _TOOL_RUNNERS.get(tool_name, []):
-        if shutil.which(runner_cmd[0]):
-            return runner_cmd
-    return None
+    from smart_exec import choose_best, detect_executors, resolve_tool
+
+    spec = resolve_tool(tool_name)
+    executors = detect_executors()
+    try:
+        argv, _executor = choose_best(spec, [], executors)
+        return argv
+    except RuntimeError:
+        return None
 
 
 # =============================================================================
