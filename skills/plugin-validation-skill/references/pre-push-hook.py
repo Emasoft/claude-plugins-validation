@@ -233,13 +233,13 @@ def check_version_consistency(repo_root: Path) -> list[tuple[str, str]]:
 def run_external_validator(repo_root: Path) -> list[tuple[str, str]]:
     """Run external validation scripts if available."""
     issues: list[tuple[str, str]] = []
-    validator = repo_root / "claude-plugins-validation" / "scripts" / "validate_marketplace.py"
+    validator = repo_root / "OUTPUT_SKILLS" / "claude-plugins-validation" / "scripts" / "validate_marketplace.py"
 
     if not validator.exists():
         return issues
 
     _, stdout, stderr = run_command(
-        ["uv", "run", "python", str(validator), str(repo_root)], cwd=repo_root / "claude-plugins-validation", timeout=60
+        ["uv", "run", "python", str(validator), str(repo_root)], cwd=repo_root / "OUTPUT_SKILLS" / "claude-plugins-validation", timeout=60
     )
 
     output = stdout + stderr

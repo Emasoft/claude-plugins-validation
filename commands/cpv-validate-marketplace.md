@@ -2,7 +2,7 @@
 name: cpv-validate-marketplace
 description: |
   Validate Claude Code marketplace configurations (marketplace.json). Checks plugin entries,
-  git submodules, version consistency, GitHub deployment structure, and private path leaks.
+  version consistency, GitHub deployment structure, and private path leaks.
   Use when publishing marketplaces or auditing marketplace configurations.
 allowed-tools: Read, Bash, Glob, Grep, Task, AskUserQuestion
 argument-hint: "<marketplace_path_or_name> [--verbose] [--json]"
@@ -71,15 +71,14 @@ If no exact match is found, fuzzy matching is used (e.g., `cpt-validate` → `cp
 - Source paths resolve correctly
 - Version consistency with plugin.json
 
-### 3. Git Submodules
-- Validates .gitmodules matches plugin entries
-- Checks submodule paths exist
-- Verifies submodule URLs are valid
+### 3. Plugin Sources
+- Validates source format (URL-based git sources)
+- Checks repository URLs are accessible
+- Verifies source configuration structure
 
 ### 4. GitHub Deployment Structure
 - Validates GitHub Actions workflows
-- Checks notify-marketplace.yml in plugin repos
-- Checks update-submodules.yml in marketplace
+- Checks deployment configuration in plugin repos
 
 ### 5. Private Path Detection (CRITICAL)
 - Scans all plugin content for private usernames
@@ -129,8 +128,14 @@ Returns summary with:
 
 ## Execution
 
+When running from the CPV plugin directory:
 ```bash
 CLAUDE_PRIVATE_USERNAMES="$USERNAME" uv run python scripts/validate_marketplace.py "$MARKETPLACE_PATH" $OPTIONS
+```
+
+When running from another plugin's directory (no pyproject.toml):
+```bash
+CLAUDE_PRIVATE_USERNAMES="$USERNAME" uv run --with pyyaml python scripts/validate_marketplace.py "$MARKETPLACE_PATH" $OPTIONS
 ```
 
 ## Related Commands

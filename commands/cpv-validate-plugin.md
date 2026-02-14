@@ -155,8 +155,14 @@ Returns summary with:
 
 ## Execution
 
+When running from the CPV plugin directory (has pyproject.toml with pyyaml):
 ```bash
 uv run python scripts/validate_plugin.py "$PLUGIN_PATH" $OPTIONS
+```
+
+When running from another plugin's directory (no pyproject.toml), use `--with` to provide pyyaml:
+```bash
+uv run --with pyyaml python scripts/validate_plugin.py . $OPTIONS
 ```
 
 ## Related Commands
