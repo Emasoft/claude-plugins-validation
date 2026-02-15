@@ -5,8 +5,10 @@
 # Exit codes from validate_plugin.py:
 #   0 - All checks passed
 #   1 - CRITICAL issues found (blocks push)
-#   2 - MAJOR issues found (warns but allows push)
-#   3 - MINOR issues found (allows push)
+#   2 - MAJOR issues found (blocks push)
+#   3 - MINOR issues found (blocks push)
+#
+# Strict mode (default): ALL non-zero exit codes block push.
 
 set -euo pipefail
 
@@ -124,23 +126,23 @@ case $VALIDATION_EXIT_CODE in
     1)
         echo -e "${RED}========================================${NC}"
         echo -e "${RED}  BLOCKED: CRITICAL issues found${NC}"
-        echo -e "${RED}  Fix critical issues before pushing.${NC}"
+        echo -e "${RED}  Fix ALL issues before pushing.${NC}"
         echo -e "${RED}========================================${NC}"
         exit 1
         ;;
     2)
-        echo -e "${YELLOW}========================================${NC}"
-        echo -e "${YELLOW}  WARNING: MAJOR issues found${NC}"
-        echo -e "${YELLOW}  Push allowed, but please fix soon.${NC}"
-        echo -e "${YELLOW}========================================${NC}"
-        exit 0
+        echo -e "${RED}========================================${NC}"
+        echo -e "${RED}  BLOCKED: MAJOR issues found${NC}"
+        echo -e "${RED}  Fix ALL issues before pushing.${NC}"
+        echo -e "${RED}========================================${NC}"
+        exit 1
         ;;
     3)
-        echo -e "${GREEN}========================================${NC}"
-        echo -e "${GREEN}  PASSED: Only minor issues found${NC}"
-        echo -e "${GREEN}  Push allowed.${NC}"
-        echo -e "${GREEN}========================================${NC}"
-        exit 0
+        echo -e "${YELLOW}========================================${NC}"
+        echo -e "${YELLOW}  BLOCKED: MINOR issues found${NC}"
+        echo -e "${YELLOW}  Fix ALL issues before pushing.${NC}"
+        echo -e "${YELLOW}========================================${NC}"
+        exit 1
         ;;
     *)
         echo -e "${RED}========================================${NC}"

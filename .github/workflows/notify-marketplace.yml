@@ -1,5 +1,26 @@
 # Notify marketplace repo when this plugin is updated
-# This workflow triggers the marketplace to update its submodule for this plugin
+# Place this in each plugin repo: .github/workflows/notify-marketplace.yml
+#
+# SETUP INSTRUCTIONS:
+# 1. Create a Personal Access Token (PAT):
+#    - Go to GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
+#    - Click "Generate new token (classic)"
+#    - Give it a descriptive name like "Plugin Marketplace Notification"
+#    - Select scope: 'repo' (Full control of private repositories)
+#    - Click "Generate token" and COPY the token (you won't see it again!)
+#
+# 2. Add the PAT as a secret to THIS plugin repository:
+#    - Go to your plugin repo → Settings → Secrets and variables → Actions
+#    - Click "New repository secret"
+#    - Name: MARKETPLACE_PAT
+#    - Value: paste the PAT you copied in step 1
+#    - Click "Add secret"
+#
+# 3. Update the MARKETPLACE_OWNER and MARKETPLACE_REPO variables below:
+#    - MARKETPLACE_OWNER: Your GitHub username or org that owns the marketplace repo
+#    - MARKETPLACE_REPO: The name of your marketplace repository
+#
+# IMPORTANT: Do NOT use GITHUB_TOKEN - it lacks permissions to trigger workflows in other repos!
 
 name: Notify Marketplace
 
@@ -15,6 +36,10 @@ on:
       - 'scripts/**'
 
 env:
+  # ⚠️ REQUIRED: Update these values to point to your marketplace repository
+  # Example: If your marketplace is at https://github.com/johndoe/my-claude-plugins
+  #   MARKETPLACE_OWNER: 'johndoe'
+  #   MARKETPLACE_REPO: 'my-claude-plugins'
   MARKETPLACE_OWNER: 'Emasoft'
   MARKETPLACE_REPO: 'emasoft-plugins'
 

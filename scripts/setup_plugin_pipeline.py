@@ -1645,10 +1645,10 @@ jobs:
         run: |
           python ${{ steps.find-validator.outputs.validator }} . --verbose
           exit_code=$?
-          # Exit codes: 0=pass, 1=critical, 2=major, 3=minor (warnings only)
-          # Allow exit code 3 (minor issues) to pass CI
-          if [ $exit_code -eq 0 ] || [ $exit_code -eq 3 ]; then
-            echo "✓ Validation passed (exit code: $exit_code)"
+          # Exit codes: 0=pass, 1=critical, 2=major, 3=minor
+          # Strict mode: ALL non-zero exit codes block the pipeline
+          if [ $exit_code -eq 0 ]; then
+            echo "✓ Validation passed"
             exit 0
           else
             echo "✘ Validation failed (exit code: $exit_code)"
