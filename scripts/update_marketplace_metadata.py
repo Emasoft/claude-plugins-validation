@@ -10,18 +10,17 @@ Exit codes:
     1 - Error (missing files, invalid JSON, etc.)
 """
 
+from __future__ import annotations
+
 import argparse
 import hashlib
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-
-def get_plugin_root() -> Path:
-    """Get the plugin root directory (parent of scripts/)."""
-    return Path(__file__).resolve().parent.parent
+from validation_common import get_plugin_root
 
 
 def calculate_file_checksum(file_path: Path) -> str:
@@ -41,7 +40,7 @@ def calculate_file_checksum(file_path: Path) -> str:
     return sha256_hash.hexdigest()
 
 
-def calculate_directory_checksum(dir_path: Path, exclude_patterns: Optional[list[str]] = None) -> str:
+def calculate_directory_checksum(dir_path: Path, exclude_patterns: list[str] | None = None) -> str:
     """
     Calculate combined checksum of all files in a directory.
 
@@ -80,7 +79,7 @@ def calculate_directory_checksum(dir_path: Path, exclude_patterns: Optional[list
     return sha256_hash.hexdigest()
 
 
-def get_plugin_version(plugin_root: Path) -> Optional[str]:
+def get_plugin_version(plugin_root: Path) -> str | None:
     """
     Get version from plugin.json.
 
@@ -98,13 +97,13 @@ def get_plugin_version(plugin_root: Path) -> Optional[str]:
     try:
         with open(plugin_json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        version: Optional[str] = data.get("version")
+        version: str | None = data.get("version")
         return version
     except Exception:
         return None
 
 
-def get_plugin_name(plugin_root: Path) -> Optional[str]:
+def get_plugin_name(plugin_root: Path) -> str | None:
     """
     Get name from plugin.json.
 
@@ -122,13 +121,13 @@ def get_plugin_name(plugin_root: Path) -> Optional[str]:
     try:
         with open(plugin_json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        name: Optional[str] = data.get("name")
+        name: str | None = data.get("name")
         return name
     except Exception:
         return None
 
 
-def load_marketplace_json(marketplace_path: Path) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+def load_marketplace_json(marketplace_path: Path) -> tuple[dict[str, Any] | None, str | None]:
     """
     Load existing marketplace.json.
 
@@ -197,7 +196,7 @@ def create_marketplace_entry(plugin_root: Path) -> dict[str, Any]:
 
 
 def update_marketplace_json(
-    plugin_root: Path, marketplace_path: Optional[Path] = None, force: bool = False, verbose: bool = False
+    plugin_root: Path, marketplace_path: Path | None = None, force: bool = False, verbose: bool = False
 ) -> tuple[bool, str, bool]:
     """
     Update marketplace.json with current plugin metadata.

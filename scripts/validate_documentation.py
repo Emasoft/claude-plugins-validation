@@ -829,6 +829,7 @@ def main() -> int:
         help="Show all results including passed checks",
     )
     parser.add_argument("--json", action="store_true", help="Output as JSON")
+    parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
     args = parser.parse_args()
 
     plugin_path = Path(args.plugin_path)
@@ -844,6 +845,8 @@ def main() -> int:
     else:
         print_results(report, args.verbose)
 
+    if args.strict:
+        return report.exit_code_strict()
     return report.exit_code
 
 

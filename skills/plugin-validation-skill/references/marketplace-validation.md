@@ -72,6 +72,9 @@ my-marketplace/
 ```json
 {
   "name": "my-marketplace",
+  "owner": {
+    "name": "My Organization"
+  },
   "plugins": []
 }
 ```
@@ -79,13 +82,22 @@ my-marketplace/
 | Field | Type | Description |
 |-------|------|-------------|
 | name | string | Unique marketplace identifier |
+| owner | object | Marketplace owner information |
+| owner.name | string | Owner name (required within owner) |
 | plugins | array | List of plugin entries |
+
+> **Note:** The following marketplace names are reserved and must not be used: `official`, `anthropic`, `claude`, `test`, `example`, `demo`.
 
 ### Optional Fields
 
 ```json
 {
   "name": "my-marketplace",
+  "owner": {
+    "name": "My Organization",
+    "url": "https://example.com",
+    "email": "contact@example.com"
+  },
   "version": "1.0.0",
   "description": "My plugin marketplace",
   "plugins": []
@@ -94,14 +106,38 @@ my-marketplace/
 
 | Field | Type | Description |
 |-------|------|-------------|
-| version | string | Marketplace version (semver) |
+| owner.url | string | Owner website URL (optional within owner) |
+| owner.email | string | Owner contact email (optional within owner) |
+| version | string | Marketplace version (semver X.Y.Z) |
 | description | string | Human-readable description |
+
+### Version Format
+
+All `version` fields (marketplace and plugin) must follow strict semver format: `X.Y.Z` where X, Y, and Z are non-negative integers (e.g. `"1.0.0"`, `"2.3.14"`). Version strings like `"1.0"`, `"v1.0.0"`, or `"latest"` are not valid.
+
+### Reserved Marketplace Names
+
+The following marketplace names are reserved and will be rejected by the validator:
+
+| Reserved Name | Reason |
+|---------------|--------|
+| `official` | Reserved for Anthropic official marketplace |
+| `anthropic` | Reserved for Anthropic brand |
+| `claude` | Reserved for Anthropic brand |
+| `test` | Reserved to prevent accidental use in production |
+| `example` | Reserved to prevent accidental use in production |
+| `demo` | Reserved to prevent accidental use in production |
 
 ### Complete Example
 
 ```json
 {
   "name": "dev-tools-marketplace",
+  "owner": {
+    "name": "Acme Corp",
+    "url": "https://acme.example.com",
+    "email": "plugins@acme.example.com"
+  },
   "version": "1.0.0",
   "description": "Development tools and utilities for Claude Code",
   "plugins": [
@@ -134,17 +170,21 @@ my-marketplace/
 | Field | Type | Description |
 |-------|------|-------------|
 | name | string | Plugin identifier (kebab-case) |
+| source | object/string | How to obtain the plugin (required) |
 
 ### Optional Plugin Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| version | string | Plugin version (semver) |
+| version | string | Plugin version (semver X.Y.Z) |
 | description | string | What the plugin does |
-| source | object/string | How to obtain the plugin |
 | path | string | Local path to plugin |
 | repository | string | Source repository URL |
-| author | string/object | Plugin author |
+| homepage | string | Plugin homepage URL |
+| license | string | License identifier (e.g. "MIT") |
+| keywords | array | Array of keyword strings for discovery |
+| author | string/object | Plugin author (string or object with "name" field) |
+| icon | string | URL to plugin icon image |
 | tags | array | Categorization tags |
 | dependencies | array | Required plugins |
 | enabled | boolean | Default enabled state |
@@ -153,7 +193,8 @@ my-marketplace/
 
 ```json
 {
-  "name": "my-plugin"
+  "name": "my-plugin",
+  "source": "./my-plugin"
 }
 ```
 
@@ -169,10 +210,14 @@ my-marketplace/
     "repository": "https://github.com/user/my-plugin",
     "branch": "main"
   },
+  "homepage": "https://example.com/my-plugin",
+  "license": "MIT",
+  "keywords": ["utility", "automation", "formatting"],
   "author": {
     "name": "Developer",
     "email": "dev@example.com"
   },
+  "icon": "https://example.com/my-plugin/icon.png",
   "tags": ["utility", "automation"],
   "dependencies": ["base-plugin"],
   "enabled": true
@@ -203,6 +248,9 @@ Clone from Git repository:
 | repository | Yes | Git clone URL |
 | branch | No | Branch to clone (default: main) |
 | tag | No | Specific tag to clone |
+| sha | No | Full 40-character commit SHA (short SHAs are not accepted) |
+
+> **SHA Validation:** When providing a `sha` or `commit` field, it must be exactly 40 hexadecimal characters (the full SHA-1 hash). Short SHAs (e.g. 7 or 12 characters) are rejected by the validator.
 
 ### local Source
 
@@ -251,6 +299,37 @@ Install from npm registry:
 | type | Yes | `"npm"` |
 | package | Yes | npm package name |
 | version | No | Specific version or range |
+
+### pip Source
+
+Install from PyPI or a custom Python package index:
+
+```json
+{
+  "name": "my-plugin",
+  "source": {
+    "type": "pip",
+    "package": "claude-plugin-mypackage"
+  }
+}
+```
+
+```json
+{
+  "name": "my-plugin",
+  "source": {
+    "type": "pip",
+    "package": "claude-plugin-mypackage",
+    "index-url": "https://pypi.example.com/simple/"
+  }
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| type | Yes | `"pip"` |
+| package | Yes | PyPI package name |
+| index-url | No | Custom PyPI index URL (defaults to https://pypi.org) |
 
 ### url Source
 
@@ -611,6 +690,85 @@ git submodule update --init --recursive
 
 ## 8. Common Marketplace Errors
 
+### Error: Reserved Marketplace Name
+
+**Wrong:**
+```json
+{
+  "name": "official",
+  "plugins": []
+}
+```
+
+**Fix:** Choose a unique marketplace name that is not in the reserved list (`official`, `anthropic`, `claude`, `test`, `example`, `demo`).
+
+### Error: Missing owner Field
+
+**Wrong:**
+```json
+{
+  "name": "my-marketplace",
+  "plugins": []
+}
+```
+
+**Correct:**
+```json
+{
+  "name": "my-marketplace",
+  "owner": {
+    "name": "My Organization"
+  },
+  "plugins": []
+}
+```
+
+### Error: Plugin Missing source Field
+
+**Wrong:**
+```json
+{
+  "plugins": [
+    {"name": "plugin-a", "version": "1.0.0"}
+  ]
+}
+```
+
+**Correct:**
+```json
+{
+  "plugins": [
+    {"name": "plugin-a", "version": "1.0.0", "source": "./plugin-a"}
+  ]
+}
+```
+
+### Error: Short SHA in git source
+
+**Wrong:**
+```json
+{
+  "source": {
+    "type": "git",
+    "repository": "https://github.com/user/repo",
+    "sha": "a1b2c3d"
+  }
+}
+```
+
+**Correct:**
+```json
+{
+  "source": {
+    "type": "git",
+    "repository": "https://github.com/user/repo",
+    "sha": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+  }
+}
+```
+
+The `sha` field must be exactly 40 hexadecimal characters (full SHA-1 hash).
+
 ### Error: Missing marketplace.json
 
 **Symptom:** Can't add marketplace
@@ -705,7 +863,7 @@ my-plugin/
 {"source": {"type": "svn"}}
 ```
 
-**Valid types:** git, local, npm, url
+**Valid types:** git, local, npm, pip, url
 
 ### Error: Git Source Missing Repository
 
@@ -776,6 +934,7 @@ my-plugin/
 | Plugin as git submodule | String path | `"./my-plugin"` |
 | Plugin cloned from remote | Object with type: git | `{"type": "git", "repository": "..."}` |
 | Plugin from npm | Object with type: npm | `{"type": "npm", "package": "..."}` |
+| Plugin from PyPI | Object with type: pip | `{"type": "pip", "package": "claude-plugin-x"}` |
 
 ---
 
@@ -786,14 +945,19 @@ my-plugin/
 - [ ] marketplace.json exists at root
 - [ ] marketplace.json is valid JSON
 - [ ] Required `name` field present
+- [ ] Marketplace name is not a reserved name (`official`, `anthropic`, `claude`, `test`, `example`, `demo`)
+- [ ] Required `owner` field present with at minimum `owner.name`
 - [ ] Required `plugins` field is array
 - [ ] Marketplace name is kebab-case
-- [ ] Version follows semver (if present)
+- [ ] Version follows semver X.Y.Z format (if present)
 - [ ] Each plugin has unique `name`
 - [ ] Plugin names are kebab-case
+- [ ] Each plugin has a `source` field (required)
 - [ ] Local paths resolve correctly
 - [ ] Each plugin has valid source configuration
 - [ ] **CRITICAL**: Local plugins use string path source (`"./plugin-name"`), not git object
+- [ ] SHA/commit fields are exactly 40 hex characters (no short SHAs)
+- [ ] Plugin version fields follow semver X.Y.Z format (if present)
 - [ ] Referenced plugins have plugin.json
 
 ### GitHub Deployment Checklist

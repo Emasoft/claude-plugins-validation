@@ -10,13 +10,16 @@ Exit codes:
     1 - Version mismatch detected or error reading files
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+
+from validation_common import get_plugin_root
 
 
 @dataclass
@@ -35,12 +38,7 @@ class VersionLocation:
             return str(self.file_path)
 
 
-def get_plugin_root() -> Path:
-    """Get the plugin root directory (parent of scripts/)."""
-    return Path(__file__).resolve().parent.parent
-
-
-def extract_version_from_plugin_json(plugin_root: Path) -> Optional[VersionLocation]:
+def extract_version_from_plugin_json(plugin_root: Path) -> VersionLocation | None:
     """
     Extract version from plugin.json.
 
@@ -68,7 +66,7 @@ def extract_version_from_plugin_json(plugin_root: Path) -> Optional[VersionLocat
     return None
 
 
-def extract_version_from_pyproject(plugin_root: Path) -> Optional[VersionLocation]:
+def extract_version_from_pyproject(plugin_root: Path) -> VersionLocation | None:
     """
     Extract version from pyproject.toml.
 
@@ -96,7 +94,7 @@ def extract_version_from_pyproject(plugin_root: Path) -> Optional[VersionLocatio
     return None
 
 
-def extract_version_from_changelog(plugin_root: Path) -> Optional[VersionLocation]:
+def extract_version_from_changelog(plugin_root: Path) -> VersionLocation | None:
     """
     Extract latest version from CHANGELOG.md.
 

@@ -175,7 +175,7 @@ def validate_frontmatter_exists(content: str, report: CommandValidationReport, f
     # Check for unknown fields
     for key in frontmatter.keys():
         if key not in KNOWN_FRONTMATTER_FIELDS:
-            report.info(
+            report.warning(
                 f"Unknown frontmatter field '{key}' (may be ignored by CLI)",
                 filename,
             )
@@ -653,6 +653,7 @@ def main() -> int:
         help="Show all results including passed checks",
     )
     parser.add_argument("--json", action="store_true", help="Output as JSON")
+    parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
     args = parser.parse_args()
 
     path = Path(args.path)
@@ -698,7 +699,9 @@ def main() -> int:
         for report in reports:
             print_results(report, args.verbose)
 
-    # Return worst exit code
+    # Return worst exit code — in strict mode NIT issues also block
+    if args.strict:
+        return max(r.exit_code_strict() for r in reports)
     return max(r.exit_code for r in reports)
 
 

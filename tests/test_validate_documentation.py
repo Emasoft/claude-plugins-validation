@@ -392,6 +392,7 @@ class TestCLI:
     def test_main_returns_exit_code(self, tmp_path: Path, monkeypatch):
         """main() should return appropriate exit code."""
         import sys
+
         from validate_documentation import main
 
         readme = tmp_path / "README.md"
@@ -404,4 +405,5 @@ class TestCLI:
 
 
 if __name__ == "__main__":
+    import pytest
     pytest.main([__file__, "-v"])

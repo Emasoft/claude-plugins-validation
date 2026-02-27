@@ -177,6 +177,9 @@ uv run python scripts/setup_plugin_pipeline.py /path/to/project --validate --fix
 | 1 | Critical | Must fix - plugin won't work |
 | 2 | Major | Should fix - features may fail |
 | 3 | Minor | Warnings only |
+| 4 | NIT | Blocks only with `--strict` flag |
+
+> **WARNING** severity never blocks validation (exit code 0). Warnings are always reported for security advisories and best practices.
 
 ## CI/CD Auto-Fix Loop
 

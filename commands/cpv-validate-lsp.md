@@ -56,6 +56,7 @@ If no exact match is found, fuzzy matching is used (e.g., `valdiate-lsp` → `va
 
 | Option | Description |
 |--------|-------------|
+| `--strict` | Treat NIT issues as blocking (exit 4) |
 | `--verbose` | Show all checks including passed |
 | `--json` | Output results as JSON |
 
@@ -147,6 +148,17 @@ Currently validated:
 | 1 | CRITICAL issues |
 | 2 | MAJOR issues |
 | 3 | MINOR issues |
+| 4 | NIT issues found (only in --strict mode) |
+
+## Severity Levels
+
+| Severity | Behavior |
+|----------|----------|
+| CRITICAL | Always blocks (exit 1) |
+| MAJOR | Always blocks (exit 2) |
+| MINOR | Always blocks (exit 3) |
+| NIT | Blocks only in `--strict` mode (exit 4) |
+| WARNING | Never blocks, always reported (security advisories, best practices) |
 
 ## Execution
 

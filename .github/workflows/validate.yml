@@ -2,9 +2,9 @@ name: Plugin Validation
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
-    branches: [main, master]
+    branches: [main]
 
 jobs:
   validate:
@@ -14,15 +14,14 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
       - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+        run: uv python install 3.12
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install ruff mypy pyyaml types-PyYAML
+        run: uv sync
 
       - name: Find validator
         id: find-validator
@@ -39,7 +38,7 @@ jobs:
         if: steps.find-validator.outputs.validator != ''
         run: |
           set +e  # Don't exit on error - we need to capture exit code
-          python ${{ steps.find-validator.outputs.validator }} . --verbose
+          uv run python ${{ steps.find-validator.outputs.validator }} . --verbose
           exit_code=$?
           set -e  # Re-enable exit on error
           # Exit codes: 0=pass, 1=critical, 2=major, 3=minor
@@ -56,4 +55,4 @@ jobs:
         run: |
           # Run ruff check but don't fail CI - just report issues
           # The validate_plugin.py already checks lint via mypy
-          ruff check . --select=E,F,W --ignore=E501 || echo "⚠ Lint issues found (non-blocking)"
+          uv run ruff check scripts/ --select=E,F,W --ignore=E501 || echo "⚠ Lint issues found (non-blocking)"

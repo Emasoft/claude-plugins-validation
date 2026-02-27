@@ -25,7 +25,17 @@ jobs:
         run: uv sync
 
       - name: Run full plugin validation
-        run: uv run python scripts/validate_plugin.py . --verbose > validation-report.txt 2>&1 || true
+        run: |
+          set +e
+          uv run python scripts/validate_plugin.py . --verbose > validation-report.txt 2>&1
+          exit_code=$?
+          set -e
+          cat validation-report.txt
+          # Fail release on critical (1) or major (2) issues
+          if [ $exit_code -le 2 ] && [ $exit_code -ge 1 ]; then
+            echo "::error::Validation failed with exit code $exit_code (critical/major issues found)"
+            exit $exit_code
+          fi
 
       - name: Run tests
         run: uv run pytest tests/ -v

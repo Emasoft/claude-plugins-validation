@@ -819,3 +819,641 @@ Output: processed.txt
         # Should detect patterns
         assert any("checklist" in r.message.lower() for r in report.results)
         assert any("package dependencies" in r.message.lower() or "pip" in r.message.lower() for r in report.results)
+
+
+# =============================================================================
+# Additional Tests for Uncovered Lines (Phase 3)
+# =============================================================================
+
+
+class TestReportNitAndWarning:
+    """Tests for ValidationReport nit() and warning() methods (lines 373, 379)."""
+
+    def test_nit_adds_result(self):
+        """nit() should add a NIT-level result to the report."""
+        report = ValidationReport(skill_path="test")
+        report.nit("This is a nit issue", "SKILL.md", line=10, category="Style")
+        assert len(report.results) == 1
+        assert report.results[0].level == "NIT"
+        assert report.results[0].message == "This is a nit issue"
+        assert report.results[0].line == 10
+
+
+class TestExitCodeProperty:
+    """Tests for ValidationReport exit_code property (lines 405-411)."""
+
+    def test_exit_code_critical(self):
+        """exit_code should return EXIT_CRITICAL when critical issues exist."""
+        report = ValidationReport(skill_path="test")
+        report.critical("A critical issue")
+        assert report.exit_code == 1  # EXIT_CRITICAL
+
+    def test_exit_code_major_no_critical(self):
+        """exit_code should return EXIT_MAJOR when major issues exist but no critical."""
+        report = ValidationReport(skill_path="test")
+        report.major("A major issue")
+        assert report.exit_code == 2  # EXIT_MAJOR
+
+    def test_exit_code_minor_only(self):
+        """exit_code should return EXIT_MINOR when only minor issues exist."""
+        report = ValidationReport(skill_path="test")
+        report.minor("A minor issue")
+        assert report.exit_code == 3  # EXIT_MINOR
+
+    def test_exit_code_ok(self):
+        """exit_code should return EXIT_OK when no issues exist."""
+        report = ValidationReport(skill_path="test")
+        report.passed("All good")
+        assert report.exit_code == 0  # EXIT_OK
+
+
+class TestCalculateGrade:
+    """Tests for calculate_grade method (lines 424, 428)."""
+
+    def test_grade_c_for_score_70(self):
+        """Score of 70 should yield grade C."""
+        report = ValidationReport(skill_path="test")
+        report.overall_score = 72.0
+        report.calculate_grade()
+        assert report.grade == "C"
+
+    def test_grade_f_for_score_below_60(self):
+        """Score below 60 should yield grade F."""
+        report = ValidationReport(skill_path="test")
+        report.overall_score = 45.0
+        report.calculate_grade()
+        assert report.grade == "F"
+
+
+class TestFindSkillMdFallback:
+    """Tests for find_skill_md returning None (line 472)."""
+
+    def test_no_skill_md_returns_none(self, tmp_path):
+        """find_skill_md should return None when no SKILL.md or skill.md exists."""
+        from validate_skill_comprehensive import find_skill_md
+
+        skill_dir = tmp_path / "empty-skill"
+        skill_dir.mkdir()
+        result = find_skill_md(skill_dir)
+        assert result is None
+
+
+class TestParseFrontmatterEdgeCases:
+    """Tests for parse_frontmatter edge cases (lines 449, 453, 458, 462-463)."""
+
+    def test_no_frontmatter_returns_none(self):
+        """Content without --- prefix should return None frontmatter."""
+        from validate_skill_comprehensive import parse_frontmatter
+
+        fm, body, line = parse_frontmatter("# No frontmatter here\nJust content")
+        assert fm is None
+        assert "No frontmatter" in body
+        assert line == 0
+
+    def test_malformed_yaml_returns_none(self):
+        """Invalid YAML in frontmatter should return None."""
+        from validate_skill_comprehensive import parse_frontmatter
+
+        content = "---\n: invalid: [yaml: broken\n---\nBody"
+        fm, body, line = parse_frontmatter(content)
+        assert fm is None
+
+    def test_empty_frontmatter_returns_empty_dict(self):
+        """Empty frontmatter (just ---\\n---) should return empty dict."""
+        from validate_skill_comprehensive import parse_frontmatter
+
+        content = "---\n\n---\nBody content"
+        fm, body, line = parse_frontmatter(content)
+        assert fm == {}
+
+
+class TestDescriptionFieldCoverage:
+    """Tests for validate_description_field uncovered branches (lines 652-664, 668-673, 677, 688, 694, 720, 728)."""
+
+    def test_no_description_no_body_is_major(self):
+        """Missing description with empty body should be a major issue."""
+        from validate_skill_comprehensive import validate_description_field
+
+        report = ValidationReport(skill_path="test")
+        frontmatter = {}
+        validate_description_field(frontmatter, "", report)
+        assert report.has_major
+        assert any("No 'description' field and no body content" in r.message for r in report.results)
+
+    def test_non_string_description_rejected(self):
+        """Non-string description should be rejected as major."""
+        from validate_skill_comprehensive import validate_description_field
+
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"description": 42}
+        validate_description_field(frontmatter, "body", report)
+        assert report.has_major
+        assert any("must be a string" in r.message for r in report.results)
+
+    def test_strict_mode_first_person_rejected(self):
+        """First person in description should be rejected in strict mode."""
+        from validate_skill_comprehensive import validate_description_field
+
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"description": "I can help you process files. Use when you need file processing."}
+        validate_description_field(frontmatter, "body content here", report, strict_mode=True)
+        assert any("first person" in r.message.lower() for r in report.results)
+
+    def test_strict_mode_second_person_rejected(self):
+        """Second person in description should be rejected in strict mode."""
+        from validate_skill_comprehensive import validate_description_field
+
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"description": "You can process files easily. Use when doing file tasks."}
+        validate_description_field(frontmatter, "body content here", report, strict_mode=True)
+        assert any("second person" in r.message.lower() for r in report.results)
+
+
+class TestContextFieldValidation:
+    """Tests for validate_context_field (lines 1049-1054, 1057-1062)."""
+
+    def test_non_string_context_is_critical(self):
+        """Non-string context value should be a critical issue."""
+        from validate_skill_comprehensive import validate_context_field
+
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"context": 123}
+        validate_context_field(frontmatter, report)
+        assert any("must be a string" in r.message for r in report.results)
+
+    def test_invalid_context_value_is_critical(self):
+        """Invalid context value string should be a critical issue."""
+        from validate_skill_comprehensive import validate_context_field
+
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"context": "invalid-value"}
+        validate_context_field(frontmatter, report)
+        assert any("Invalid 'context' value" in r.message for r in report.results)
+
+
+class TestAgentFieldValidation:
+    """Tests for validate_agent_field (lines 1071, 1081-1086, 1089, 1096)."""
+
+    def test_agent_without_context_fork_warned(self):
+        """agent field without context:fork should get a major warning."""
+        from validate_skill_comprehensive import validate_agent_field
+
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"agent": "test-engineer"}
+        validate_agent_field(frontmatter, report)
+        assert any("no effect without" in r.message for r in report.results)
+
+    def test_agent_with_fork_builtin_type_passes(self):
+        """Built-in agent type with context:fork should pass."""
+        from validate_skill_comprehensive import validate_agent_field
+
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"agent": "test-engineer", "context": "fork"}
+        validate_agent_field(frontmatter, report)
+        assert any("built-in" in r.message for r in report.results)
+
+    def test_non_string_agent_is_critical(self):
+        """Non-string agent value should be a critical issue."""
+        from validate_skill_comprehensive import validate_agent_field
+
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"agent": 42, "context": "fork"}
+        validate_agent_field(frontmatter, report)
+        assert any("must be a string" in r.message for r in report.results)
+
+    def test_agent_missing_with_fork_context_info(self):
+        """Missing agent with context:fork should generate info message."""
+        from validate_skill_comprehensive import validate_agent_field
+
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"context": "fork"}
+        validate_agent_field(frontmatter, report)
+        assert any("not specified with context: fork" in r.message for r in report.results)
+
+
+class TestBooleanFieldValidation:
+    """Tests for validate_boolean_field (lines 1114-1124)."""
+
+    def test_non_boolean_value_is_critical(self):
+        """Non-boolean value for boolean field should be critical."""
+        from validate_skill_comprehensive import validate_boolean_field
+
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"user-invocable": "yes"}
+        validate_boolean_field(frontmatter, "user-invocable", report)
+        assert any("must be a boolean" in r.message for r in report.results)
+
+    def test_valid_boolean_passes(self):
+        """Valid boolean value should pass."""
+        from validate_skill_comprehensive import validate_boolean_field
+
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"user-invocable": True}
+        validate_boolean_field(frontmatter, "user-invocable", report)
+        assert any("'user-invocable' field valid" in r.message for r in report.results)
+
+
+class TestFieldWhitelistDeprecated:
+    """Tests for validate_field_whitelist with deprecated fields (line 1137)."""
+
+    def test_deprecated_field_flagged_as_minor(self):
+        """Deprecated field 'when_to_use' should generate minor issue."""
+        from validate_skill_comprehensive import validate_field_whitelist
+
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"name": "test", "when_to_use": "always"}
+        validate_field_whitelist(frontmatter, report)
+        assert any("Deprecated field" in r.message for r in report.results)
+
+
+class TestTokenBudgetBranches:
+    """Tests for validate_token_budget edge cases (lines 1164, 1170, 1181, 1187)."""
+
+    def test_excessive_line_count_is_major(self):
+        """Content exceeding MAX_SKILL_LINES_ERROR should be major."""
+        from validate_skill_comprehensive import validate_token_budget
+
+        report = ValidationReport(skill_path="test")
+        content = "---\nname: test\n---\n" + ("line\n" * 850)
+        body = "line\n" * 850
+        validate_token_budget(content, body, report)
+        assert any("lines" in r.message and r.level == "MAJOR" for r in report.results)
+
+    def test_excessive_word_count_is_major(self):
+        """Content exceeding MAX_WORD_COUNT_ERROR should be major."""
+        from validate_skill_comprehensive import validate_token_budget
+
+        report = ValidationReport(skill_path="test")
+        body = " ".join(["word"] * 5500)
+        content = "---\nname: test\n---\n" + body
+        validate_token_budget(content, body, report)
+        assert any("words" in r.message and r.level == "MAJOR" for r in report.results)
+
+
+class TestRequiredSectionsStrictMode:
+    """Tests for validate_required_sections in strict mode (lines 1210, 1216-1227)."""
+
+    def test_strict_mode_missing_sections_flagged(self):
+        """Missing required sections in strict mode should be flagged as major."""
+        from validate_skill_comprehensive import validate_required_sections
+
+        report = ValidationReport(skill_path="test")
+        body = "# My Skill\n\nJust some content without required sections.\n"
+        validate_required_sections(body, report, strict_mode=True)
+        assert report.has_major
+        assert any("Required section missing" in r.message for r in report.results)
+
+    def test_strict_mode_instructions_without_numbered_list(self):
+        """Instructions section without numbered steps in strict mode should be flagged."""
+        from validate_skill_comprehensive import validate_required_sections
+
+        report = ValidationReport(skill_path="test")
+        body = (
+            "## Overview\nStuff\n"
+            "## Prerequisites\nStuff\n"
+            "## Instructions\nDo something but no numbered list.\n"
+            "## Output\nStuff\n"
+            "## Error Handling\nStuff\n"
+            "## Examples\nStuff\n"
+            "## Resources\nStuff\n"
+        )
+        validate_required_sections(body, report, strict_mode=True)
+        assert any("numbered step-by-step" in r.message for r in report.results)
+
+
+class TestPathFormatsBackslash:
+    """Tests for validate_path_formats Windows backslash detection (lines 1271, 1275, 1285-1295)."""
+
+    def test_backslash_scripts_path_detected(self):
+        """Backslash in scripts path should be flagged."""
+        from validate_skill_comprehensive import validate_path_formats
+
+        report = ValidationReport(skill_path="test")
+        body = "Run the script at \\scripts\\setup.py to configure.\n"
+        validate_path_formats(body, report)
+        assert any("backslash" in r.message.lower() for r in report.results)
+
+    def test_skip_windows_checks_when_requested(self):
+        """Windows path checks should be skipped when skip_platform_checks includes windows."""
+        from validate_skill_comprehensive import validate_path_formats
+
+        report = ValidationReport(skill_path="test")
+        body = "Run \\scripts\\setup.py to configure.\n"
+        validate_path_formats(body, report, skip_platform_checks=["windows"])
+        assert not any("backslash" in r.message.lower() for r in report.results)
+
+
+class TestResourceReferencesValidation:
+    """Tests for validate_resource_references (lines 1581-1603, 1609-1643)."""
+
+    def test_basedir_scripts_reference_found(self, tmp_path):
+        """Existing {baseDir}/scripts/ references should pass."""
+        from validate_skill_comprehensive import validate_resource_references
+
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        scripts_dir = skill_dir / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "setup.sh").write_text("#!/bin/bash\necho hello")
+
+        report = ValidationReport(skill_path=str(skill_dir))
+        body = "Run {baseDir}/scripts/setup.sh to install."
+        validate_resource_references(skill_dir, body, report)
+        assert any("Script exists" in r.message for r in report.results)
+
+    def test_basedir_scripts_reference_missing(self, tmp_path):
+        """Missing {baseDir}/scripts/ references should be flagged as major."""
+        from validate_skill_comprehensive import validate_resource_references
+
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+
+        report = ValidationReport(skill_path=str(skill_dir))
+        body = "Run {baseDir}/scripts/nonexistent.sh to install."
+        validate_resource_references(skill_dir, body, report)
+        assert any("Referenced script not found" in r.message for r in report.results)
+
+    def test_basedir_references_reference_found(self, tmp_path):
+        """Existing {baseDir}/references/ references should pass."""
+        from validate_skill_comprehensive import validate_resource_references
+
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        refs_dir = skill_dir / "references"
+        refs_dir.mkdir()
+        (refs_dir / "api-guide.md").write_text("# API Guide\n")
+
+        report = ValidationReport(skill_path=str(skill_dir))
+        body = "See {baseDir}/references/api-guide.md for details."
+        validate_resource_references(skill_dir, body, report)
+        assert any("Reference exists" in r.message for r in report.results)
+
+    def test_markdown_local_link_missing_file(self, tmp_path):
+        """Markdown links to missing local files should be flagged as major."""
+        from validate_skill_comprehensive import validate_resource_references
+
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+
+        report = ValidationReport(skill_path=str(skill_dir))
+        body = "See [the guide](docs/guide.md) for more info."
+        validate_resource_references(skill_dir, body, report)
+        assert any("Referenced file not found" in r.message for r in report.results)
+
+    def test_markdown_local_link_existing_file(self, tmp_path):
+        """Markdown links to existing local files should pass."""
+        from validate_skill_comprehensive import validate_resource_references
+
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        docs_dir = skill_dir / "docs"
+        docs_dir.mkdir()
+        (docs_dir / "guide.md").write_text("# Guide\n")
+
+        report = ValidationReport(skill_path=str(skill_dir))
+        body = "See [the guide](docs/guide.md) for more info."
+        validate_resource_references(skill_dir, body, report)
+        assert any("Referenced file exists" in r.message for r in report.results)
+
+
+class TestReferenceFilesValidation:
+    """Tests for validate_reference_files (lines 1764-1811)."""
+
+    def test_nested_references_directory_with_md_flagged(self, tmp_path):
+        """Nested references directory with .md files should be flagged as major."""
+        from validate_skill_comprehensive import validate_reference_files
+
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        refs_dir = skill_dir / "references"
+        refs_dir.mkdir()
+        nested_dir = refs_dir / "nested"
+        nested_dir.mkdir()
+        (nested_dir / "deep.md").write_text("# Nested\n")
+
+        report = ValidationReport(skill_path=str(skill_dir))
+        validate_reference_files(skill_dir, report)
+        assert any("Nested references directory" in r.message for r in report.results)
+
+    def test_long_reference_file_without_toc_flagged(self, tmp_path):
+        """Reference file >100 lines without TOC should be flagged."""
+        from validate_skill_comprehensive import validate_reference_files
+
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        refs_dir = skill_dir / "references"
+        refs_dir.mkdir()
+        long_content = "# Long Reference\n\n" + ("Content line.\n" * 150)
+        (refs_dir / "big-reference.md").write_text(long_content)
+
+        report = ValidationReport(skill_path=str(skill_dir))
+        validate_reference_files(skill_dir, report)
+        assert any("no table of contents" in r.message for r in report.results)
+
+    def test_long_reference_file_with_toc_passes(self, tmp_path):
+        """Reference file >100 lines with TOC should pass."""
+        from validate_skill_comprehensive import validate_reference_files
+
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        refs_dir = skill_dir / "references"
+        refs_dir.mkdir()
+        long_content = "# Long Reference\n\n## Table of Contents\n\n- [Section 1](#section-1)\n\n" + ("Content line.\n" * 150)
+        (refs_dir / "big-reference.md").write_text(long_content)
+
+        report = ValidationReport(skill_path=str(skill_dir))
+        validate_reference_files(skill_dir, report)
+        assert any("has TOC" in r.message for r in report.results)
+
+
+class TestPillarsValidation:
+    """Tests for validate_pillars for lang-* skills (lines 1825-1913)."""
+
+    def test_pillars_skipped_for_non_lang_skill(self, tmp_path):
+        """Pillars validation should be skipped for non-lang skills."""
+        from validate_skill_comprehensive import validate_pillars
+
+        skill_dir = tmp_path / "my-tool"
+        skill_dir.mkdir()
+
+        report = ValidationReport(skill_path=str(skill_dir))
+        validate_pillars(skill_dir, "Some body content", report)
+        assert any("Pillars validation skipped" in r.message for r in report.results)
+
+    def test_pillars_coverage_for_lang_skill(self, tmp_path):
+        """lang-python skill should be scored on all 8 pillars."""
+        from validate_skill_comprehensive import validate_pillars
+
+        skill_dir = tmp_path / "lang-python"
+        skill_dir.mkdir()
+
+        body = """
+## Module
+import os, export module, package management, namespace support, require stuff
+
+## Error
+Result types, Exception handling, Error classes, try/except blocks, catch errors
+
+## Concurrency
+async/await patterns, thread management, channel communication, spawn tasks, mutex locking
+
+## Metaprogramming
+decorator patterns, @ syntax, derive macros, annotation processing
+
+## Zero/Default
+None handling, Option types, default values, undefined checks
+
+## Serialization
+JSON parsing, serde usage, marshal/unmarshal, encode/decode
+
+## Build
+pip install, npm scripts, package.json, deps management, go mod
+
+## Testing
+pytest tests, describe blocks, assert statements, expect results, mock objects
+"""
+        report = ValidationReport(skill_path=str(skill_dir))
+        validate_pillars(skill_dir, body, report)
+        assert len(report.pillar_scores) == 8
+        assert any("Pillars coverage" in r.message for r in report.results)
+
+
+class TestCalculateOverallScore:
+    """Tests for calculate_overall_score edge cases (lines 1930-1932)."""
+
+    def test_zero_checks_gives_grade_f(self):
+        """Report with no checks should get score 0 and grade F."""
+        from validate_skill_comprehensive import calculate_overall_score
+
+        report = ValidationReport(skill_path="test")
+        calculate_overall_score(report)
+        assert report.overall_score == 0.0
+        assert report.grade == "F"
+
+
+class TestValidateSkillMainFunction:
+    """Tests for validate_skill main function edge cases (lines 1971-1976, 1980, 1985)."""
+
+    def test_nonexistent_skill_path(self, tmp_path):
+        """Non-existent skill path should produce critical error."""
+        non_existent = tmp_path / "no-such-skill"
+        report = validate_skill(non_existent)
+        assert report.has_critical
+        assert any("does not exist" in r.message for r in report.results)
+
+    def test_skill_path_is_file_not_directory(self, tmp_path):
+        """Skill path that is a file (not directory) should produce critical error."""
+        file_path = tmp_path / "not-a-dir.txt"
+        file_path.write_text("not a directory")
+        report = validate_skill(file_path)
+        assert report.has_critical
+        assert any("not a directory" in r.message for r in report.results)
+
+    def test_skill_dir_without_skill_md(self, tmp_path):
+        """Skill directory without SKILL.md should produce critical error."""
+        skill_dir = tmp_path / "empty-skill"
+        skill_dir.mkdir()
+        report = validate_skill(skill_dir)
+        assert report.has_critical
+
+    def test_validate_skill_with_pillars_flag(self, tmp_path):
+        """validate_skill with validate_pillars_flag should run pillar validation."""
+        skill_dir = tmp_path / "lang-rust"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("""---
+name: lang-rust
+description: A Rust programming language skill. Use when writing Rust code.
+---
+# Rust Language Skill
+
+## Module
+import, export, module, use, require, package management, namespace
+
+## Error
+Result, Exception, Error handling, try, catch, unwrap, panic recovery
+
+## Concurrency
+async, await, thread, channel, spawn tasks, mutex locking
+
+## Build
+Cargo build, deps management
+
+## Testing
+test macros, assert statements, expect results
+""")
+        report = validate_skill(skill_dir, validate_pillars_flag=True)
+        assert len(report.pillar_scores) > 0
+
+
+class TestPackageDependencyManagers:
+    """Tests for validate_package_dependencies with various managers (lines 1560-1567)."""
+
+    def test_yarn_add_detected(self):
+        """yarn add commands should be detected."""
+        from validate_skill_comprehensive import validate_package_dependencies
+
+        report = ValidationReport(skill_path="test")
+        body = "Install with: yarn add express"
+        validate_package_dependencies(body, report)
+        assert any("package dependencies" in r.message for r in report.results)
+        assert any("yarn" in r.message for r in report.results)
+
+    def test_cargo_add_detected(self):
+        """cargo add commands should be detected."""
+        from validate_skill_comprehensive import validate_package_dependencies
+
+        report = ValidationReport(skill_path="test")
+        body = "Install with: cargo add serde"
+        validate_package_dependencies(body, report)
+        assert any("package dependencies" in r.message for r in report.results)
+        assert any("cargo" in r.message for r in report.results)
+
+    def test_brew_install_detected(self):
+        """brew install commands should be detected."""
+        from validate_skill_comprehensive import validate_package_dependencies
+
+        report = ValidationReport(skill_path="test")
+        body = "Install with: brew install ffmpeg"
+        validate_package_dependencies(body, report)
+        assert any("package dependencies" in r.message for r in report.results)
+        assert any("brew" in r.message for r in report.results)
+
+
+class TestAllowedToolsEdgeCases:
+    """Tests for validate_allowed_tools_field edge cases (lines 790-795, 798-799, 806, 814, 822)."""
+
+    def test_invalid_type_rejected(self):
+        """Non-string non-list allowed-tools should be rejected."""
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"allowed-tools": 42}
+        validate_allowed_tools_field(frontmatter, report)
+        assert report.has_major
+        assert any("must be string or list" in r.message for r in report.results)
+
+    def test_empty_tools_flagged(self):
+        """Empty allowed-tools string should be flagged as minor."""
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"allowed-tools": ""}
+        validate_allowed_tools_field(frontmatter, report)
+        assert any("empty" in r.message.lower() for r in report.results)
+
+    def test_many_tools_warns_overpermission(self):
+        """More than 6 tools should generate over-permissioning warning."""
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"allowed-tools": "Read, Write, Edit, Bash, Grep, Glob, WebFetch, WebSearch"}
+        validate_allowed_tools_field(frontmatter, report)
+        assert any("Many tools" in r.message for r in report.results)
+
+    def test_strict_mode_unscoped_bash_rejected(self):
+        """Unscoped Bash in strict mode should be rejected."""
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"allowed-tools": ["Bash", "Read"]}
+        validate_allowed_tools_field(frontmatter, report, strict_mode=True)
+        assert any("Unscoped 'Bash' forbidden" in r.message for r in report.results)
+
+    def test_yaml_array_in_strict_mode_rejected(self):
+        """YAML array format in strict mode should be rejected."""
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"allowed-tools": ["Read", "Write"]}
+        validate_allowed_tools_field(frontmatter, report, strict_mode=True)
+        assert any("comma-separated string" in r.message for r in report.results)

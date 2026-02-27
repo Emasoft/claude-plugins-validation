@@ -22,16 +22,35 @@ from validation_common import (  # noqa: E402
     EXIT_CRITICAL,
     EXIT_MAJOR,
     EXIT_MINOR,
+    EXIT_NIT,
     EXIT_OK,
     SEVERITY_L1,
-    SEVERITY_L10,
+    SEVERITY_L2,
+    SEVERITY_L3,
     SEVERITY_L5,
     SEVERITY_L8,
+    SEVERITY_L10,
+    FixableIssue,
+    ValidationContext,
     ValidationReport,
     ValidationResult,
+    build_private_path_patterns,
     calculate_letter_grade,
+    check_utf8_encoding,
+    colorize,
+    format_result,
+    is_path_gitignored,
+    is_valid_kebab_case,
     level_to_severity,
+    normalize_level,
+    parse_gitignore,
+    print_report_summary,
+    print_results_by_level,
+    scan_file_for_absolute_paths,
+    scan_file_for_private_info,
     severity_to_level,
+    validate_no_absolute_paths,
+    validate_no_private_info,
 )
 
 
@@ -355,17 +374,19 @@ class TestSeverityConversion:
         assert severity_to_level(6) == "MINOR"
 
     def test_severity_to_level_info(self):
-        """Severity L1-L3 should map to INFO."""
+        """Severity L1 maps to INFO, L2 to WARNING, L3 to NIT."""
         assert severity_to_level(SEVERITY_L1) == "INFO"
-        assert severity_to_level(2) == "INFO"
-        assert severity_to_level(3) == "INFO"
+        assert severity_to_level(2) == "WARNING"
+        assert severity_to_level(3) == "NIT"
 
     def test_level_to_severity(self):
         """Level should map to appropriate severity."""
         assert level_to_severity("CRITICAL") == SEVERITY_L10
         assert level_to_severity("MAJOR") == SEVERITY_L8
         assert level_to_severity("MINOR") == SEVERITY_L5
-        assert level_to_severity("INFO") == 2
+        assert level_to_severity("NIT") == SEVERITY_L3
+        assert level_to_severity("WARNING") == SEVERITY_L2
+        assert level_to_severity("INFO") == SEVERITY_L1
         assert level_to_severity("PASSED") == SEVERITY_L1
 
 
@@ -474,3 +495,644 @@ class TestErrorAccumulation:
         structure_errors = report.get_errors_by_phase("structure")
         assert len(structure_errors) == 2
         assert all(e.phase == "structure" for e in structure_errors)
+
+
+# =============================================================================
+# Additional tests targeting uncovered lines
+# =============================================================================
+
+
+class TestFixableIssue:
+    """Tests for FixableIssue dataclass and its apply method."""
+
+    def test_apply_calls_fix_func_with_file_and_line(self):
+        """FixableIssue.apply should call fix_func with file and line from result."""
+        call_log = []
+
+        def mock_fix(file_path: str, line: int | None) -> bool:
+            call_log.append((file_path, line))
+            return True
+
+        result = ValidationResult(level="MINOR", message="Fixable issue", file="test.py", line=42)
+        fixable = FixableIssue(result=result, fix_func=mock_fix, fix_description="Fix the thing")
+
+        success = fixable.apply()
+        assert success is True
+        assert call_log == [("test.py", 42)]
+
+    def test_apply_returns_false_when_no_file(self):
+        """FixableIssue.apply should return False if result has no file."""
+        def mock_fix(file_path: str, line: int | None) -> bool:
+            return True
+
+        result = ValidationResult(level="MINOR", message="No file issue", file=None)
+        fixable = FixableIssue(result=result, fix_func=mock_fix, fix_description="Cannot fix without file")
+
+        success = fixable.apply()
+        assert success is False
+
+    def test_apply_returns_false_when_fix_func_fails(self):
+        """FixableIssue.apply should return False when fix_func returns False."""
+        def failing_fix(file_path: str, line: int | None) -> bool:
+            return False
+
+        result = ValidationResult(level="MAJOR", message="Unfixable", file="broken.py", line=10)
+        fixable = FixableIssue(result=result, fix_func=failing_fix, fix_description="Cannot fix")
+
+        success = fixable.apply()
+        assert success is False
+
+
+class TestValidationReportFixables:
+    """Tests for ValidationReport fixable issue methods."""
+
+    def test_add_fixable_registers_issue_and_result(self):
+        """add_fixable should add both a result and a FixableIssue."""
+        report = ValidationReport()
+
+        def dummy_fix(file_path: str, line: int | None) -> bool:
+            return True
+
+        report.add_fixable(
+            level="MINOR",
+            message="Can be fixed",
+            fix_func=dummy_fix,
+            fix_description="Apply auto-fix",
+            file="src/module.py",
+            line=15,
+            phase="structure",
+        )
+
+        assert len(report.results) == 1
+        assert report.results[0].fixable is True
+        assert report.results[0].fix_id == "fix_0"
+        assert report.results[0].level == "MINOR"
+        assert report.results[0].file == "src/module.py"
+        assert len(report.fixable_issues) == 1
+        assert report.fixable_issues[0].fix_description == "Apply auto-fix"
+
+    def test_apply_fixes_applies_and_updates_results(self):
+        """apply_fixes should apply each fix and mark successful ones as PASSED."""
+        report = ValidationReport()
+
+        def good_fix(file_path: str, line: int | None) -> bool:
+            return True
+
+        def bad_fix(file_path: str, line: int | None) -> bool:
+            return False
+
+        report.add_fixable("MINOR", "Fix me", good_fix, "Auto-fix 1", file="a.py", line=1)
+        report.add_fixable("MAJOR", "Also fix", bad_fix, "Auto-fix 2", file="b.py", line=2)
+
+        stats = report.apply_fixes()
+        assert stats["applied"] == 1
+        assert stats["failed"] == 1
+        assert stats["skipped"] == 0
+
+        # The successfully fixed result should be updated
+        assert report.results[0].level == "PASSED"
+        assert report.results[0].message.startswith("[FIXED]")
+        # The failed one should remain unchanged
+        assert report.results[1].level == "MAJOR"
+
+    def test_apply_fixes_dry_run_skips_all(self):
+        """apply_fixes with dry_run=True should skip all fixes without applying."""
+        report = ValidationReport()
+
+        def good_fix(file_path: str, line: int | None) -> bool:
+            return True
+
+        report.add_fixable("MINOR", "Fix me", good_fix, "desc", file="a.py")
+
+        stats = report.apply_fixes(dry_run=True)
+        assert stats["applied"] == 0
+        assert stats["failed"] == 0
+        assert stats["skipped"] == 1
+        # Result should remain unchanged
+        assert report.results[0].level == "MINOR"
+
+    def test_apply_fixes_handles_exception_in_fix_func(self):
+        """apply_fixes should count as failed when fix_func raises exception."""
+        report = ValidationReport()
+
+        def exploding_fix(file_path: str, line: int | None) -> bool:
+            raise RuntimeError("boom")
+
+        report.add_fixable("MINOR", "Explodes", exploding_fix, "Risky fix", file="c.py")
+
+        stats = report.apply_fixes()
+        assert stats["applied"] == 0
+        assert stats["failed"] == 1
+
+
+class TestValidationReportPartialValidation:
+    """Tests for ValidationReport partial validation support methods."""
+
+    def test_add_and_get_valid_items(self):
+        """add_valid_item and get_valid_items should track valid items."""
+        report = ValidationReport()
+        report.add_valid_item({"name": "plugin-a"})
+        report.add_valid_item({"name": "plugin-b"})
+
+        valid = report.get_valid_items()
+        assert len(valid) == 2
+        assert valid[0]["name"] == "plugin-a"
+        assert valid[1]["name"] == "plugin-b"
+
+    def test_add_and_get_failed_items(self):
+        """add_failed_item and get_failed_items should track failed items."""
+        report = ValidationReport()
+        report.add_failed_item({"name": "bad-plugin"})
+
+        failed = report.get_failed_items()
+        assert len(failed) == 1
+        assert failed[0]["name"] == "bad-plugin"
+
+    def test_to_dict_includes_item_counts(self):
+        """to_dict should include valid_items_count and failed_items_count."""
+        report = ValidationReport()
+        report.add_valid_item("item1")
+        report.add_valid_item("item2")
+        report.add_failed_item("item3")
+
+        d = report.to_dict()
+        assert d["valid_items_count"] == 2
+        assert d["failed_items_count"] == 1
+        assert d["fixable_count"] == 0
+
+
+class TestValidationReportNitAndWarning:
+    """Tests for NIT and WARNING level features."""
+
+    def test_has_nit_property(self):
+        """has_nit should detect NIT-level issues."""
+        report = ValidationReport()
+        assert not report.has_nit
+        report.nit("Nit pick")
+        assert report.has_nit
+
+    def test_nit_deducts_one_point(self):
+        """Each NIT should deduct 1 point from score."""
+        report = ValidationReport()
+        report.nit("Nit 1")
+        assert report.score == 99
+        report.nit("Nit 2")
+        assert report.score == 98
+
+    def test_exit_code_strict_returns_nit_exit(self):
+        """exit_code_strict should return EXIT_NIT when only NITs present."""
+        report = ValidationReport()
+        report.nit("A nit issue")
+        assert report.exit_code == EXIT_OK  # Normal mode: NITs don't block
+        assert report.exit_code_strict() == EXIT_NIT  # Strict mode: NITs block
+
+    def test_exit_code_strict_returns_higher_severity_first(self):
+        """exit_code_strict should return MAJOR exit code when MAJOR issues exist alongside NITs."""
+        report = ValidationReport()
+        report.nit("A nit")
+        report.major("A major")
+        assert report.exit_code_strict() == EXIT_MAJOR
+
+    def test_warning_method_adds_warning_level(self):
+        """warning() convenience method should add WARNING level result."""
+        report = ValidationReport()
+        report.warning("Security advisory", file="setup.py", line=5)
+        assert len(report.results) == 1
+        assert report.results[0].level == "WARNING"
+        assert report.results[0].file == "setup.py"
+        assert report.results[0].line == 5
+
+
+class TestValidationContext:
+    """Tests for ValidationContext error accumulation pattern."""
+
+    def test_set_phase_and_check_passing(self):
+        """check() with True condition should add PASSED result with context name prefix."""
+        ctx = ValidationContext(name="test-ctx")
+        ctx.set_phase("structure")
+        result = ctx.check(True, "MAJOR", "File exists", file="plugin.json")
+        assert result is True
+
+        report = ctx.finalize()
+        assert len(report.results) == 1
+        assert report.results[0].level == "PASSED"
+        assert "[test-ctx]" in report.results[0].message
+
+    def test_check_failing_adds_error(self):
+        """check() with False condition should add error at specified level."""
+        ctx = ValidationContext(name="test-ctx")
+        ctx.set_phase("semantic")
+        result = ctx.check(False, "MAJOR", "Missing description", file="plugin.json")
+        assert result is False
+
+        report = ctx.finalize()
+        assert len(report.results) == 1
+        assert report.results[0].level == "MAJOR"
+        assert report.results[0].phase == "semantic"
+        assert "[test-ctx]" in report.results[0].message
+
+    def test_require_delegates_to_check_with_critical(self):
+        """require() should delegate to check with CRITICAL level."""
+        ctx = ValidationContext(name="req-ctx")
+        result = ctx.require(False, "Plugin manifest missing")
+        assert result is False
+        report = ctx.finalize()
+        assert report.results[0].level == "CRITICAL"
+        assert "[req-ctx]" in report.results[0].message
+
+    def test_validate_item_tracks_valid_and_failed(self):
+        """validate_item should track items and add errors for failures."""
+        ctx = ValidationContext(name="item-ctx")
+        ctx.set_phase("items")
+
+        good_result = ctx.validate_item("good-item", lambda x: True, "good-item")
+        bad_result = ctx.validate_item("bad-item", lambda x: False, "bad-item")
+
+        assert good_result is True
+        assert bad_result is False
+
+        report = ctx.finalize()
+        assert len(report.get_valid_items()) == 1
+        assert len(report.get_failed_items()) == 1
+        # Failed item should produce a MAJOR error
+        errors = report.get_all_errors()
+        assert len(errors) == 1
+        assert errors[0].level == "MAJOR"
+
+    def test_validate_item_handles_exception(self):
+        """validate_item should catch exceptions and add CRITICAL error."""
+        ctx = ValidationContext(name="exc-ctx")
+
+        def exploding_validator(item):
+            raise ValueError("bad item format")
+
+        result = ctx.validate_item("item", exploding_validator, "exploding-item")
+        assert result is False
+
+        report = ctx.finalize()
+        assert len(report.get_failed_items()) == 1
+        errors = report.get_all_errors()
+        assert len(errors) == 1
+        assert errors[0].level == "CRITICAL"
+        assert "bad item format" in errors[0].message
+
+    def test_add_error_adds_without_condition(self):
+        """add_error should add error directly without condition check."""
+        ctx = ValidationContext(name="direct-ctx")
+        ctx.set_phase("security")
+        ctx.add_error("MINOR", "Optional improvement", file="hook.sh", line=10)
+
+        report = ctx.finalize()
+        assert len(report.results) == 1
+        assert report.results[0].level == "MINOR"
+        assert report.results[0].phase == "security"
+        assert "[direct-ctx]" in report.results[0].message
+
+    def test_has_errors_and_error_count(self):
+        """has_errors and error_count should reflect accumulated errors."""
+        ctx = ValidationContext(name="count-ctx")
+        assert not ctx.has_errors
+        assert ctx.error_count == 0
+
+        ctx.check(False, "MINOR", "Issue 1")
+        ctx.check(False, "MAJOR", "Issue 2")
+        ctx.check(True, "MINOR", "This passes")
+
+        assert ctx.has_errors
+        assert ctx.error_count == 2
+
+    def test_add_fixable_through_context(self):
+        """add_fixable should register fixable issue through context."""
+        ctx = ValidationContext(name="fix-ctx")
+        ctx.set_phase("format")
+
+        def dummy_fix(file_path: str, line: int | None) -> bool:
+            return True
+
+        ctx.add_fixable("MINOR", "Trailing whitespace", dummy_fix, "Remove trailing whitespace", file="README.md", line=5)
+
+        report = ctx.finalize()
+        assert len(report.fixable_issues) == 1
+        assert report.fixable_issues[0].fix_description == "Remove trailing whitespace"
+        assert report.results[0].fixable is True
+        assert "[fix-ctx]" in report.results[0].message
+
+
+class TestIsValidKebabCase:
+    """Tests for kebab-case name validation."""
+
+    def test_valid_kebab_case_names(self):
+        """Valid kebab-case names should return True."""
+        assert is_valid_kebab_case("my-plugin") is True
+        assert is_valid_kebab_case("a") is True
+        assert is_valid_kebab_case("plugin123") is True
+        assert is_valid_kebab_case("my-cool-plugin") is True
+        assert is_valid_kebab_case("a1-b2-c3") is True
+
+    def test_invalid_kebab_case_names(self):
+        """Invalid kebab-case names should return False."""
+        assert is_valid_kebab_case("My-Plugin") is False  # uppercase
+        assert is_valid_kebab_case("my_plugin") is False  # underscore
+        assert is_valid_kebab_case("-leading") is False  # leading hyphen
+        assert is_valid_kebab_case("trailing-") is False  # trailing hyphen
+        assert is_valid_kebab_case("") is False  # empty
+        assert is_valid_kebab_case("123start") is False  # starts with digit
+
+
+class TestColorizeAndFormat:
+    """Tests for colorize and format_result functions."""
+
+    def test_colorize_applies_known_level_color(self):
+        """colorize should wrap text with ANSI color for known levels."""
+        result = colorize("Error!", "CRITICAL")
+        assert "\033[91m" in result  # Red
+        assert "Error!" in result
+        assert "\033[0m" in result  # Reset
+
+    def test_colorize_unknown_level_no_color(self):
+        """colorize should not add color prefix for unknown levels."""
+        result = colorize("text", "UNKNOWN")
+        assert result == "text\033[0m"
+
+    def test_format_result_with_file_and_line(self):
+        """format_result should include file:line location."""
+        vr = ValidationResult(level="MAJOR", message="Issue found", file="plugin.json", line=42)
+        formatted = format_result(vr)
+        assert "MAJOR" in formatted
+        assert "Issue found" in formatted
+        assert "plugin.json:42" in formatted
+
+    def test_format_result_without_file(self):
+        """format_result should not include location when no file given."""
+        vr = ValidationResult(level="INFO", message="General info")
+        formatted = format_result(vr)
+        assert "INFO" in formatted
+        assert "General info" in formatted
+
+
+class TestPrintFunctions:
+    """Tests for print_report_summary and print_results_by_level."""
+
+    def test_print_report_summary_outputs_to_stdout(self, capsys):
+        """print_report_summary should print score, grade, and counts."""
+        report = ValidationReport()
+        report.passed("All good")
+        report.minor("Small issue")
+        print_report_summary(report, title="Test Report")
+
+        captured = capsys.readouterr()
+        assert "Test Report" in captured.out
+        assert "97/100" in captured.out
+        assert "A+" in captured.out
+        assert "MINOR:    1" in captured.out
+
+    def test_print_results_by_level_shows_errors(self, capsys):
+        """print_results_by_level should display error-level results."""
+        report = ValidationReport()
+        report.critical("Critical thing")
+        report.major("Major thing")
+        report.minor("Minor thing")
+        report.nit("Nit thing")
+        report.warning("Warning thing")
+        report.info("Info thing")
+        report.passed("Passed thing")
+
+        print_results_by_level(report, verbose=True)
+
+        captured = capsys.readouterr()
+        assert "CRITICAL ISSUES" in captured.out
+        assert "MAJOR ISSUES" in captured.out
+        assert "MINOR ISSUES" in captured.out
+        assert "NIT ISSUES" in captured.out
+        assert "WARNINGS" in captured.out
+        assert "INFO" in captured.out
+        assert "PASSED" in captured.out
+
+
+class TestCheckUtf8Encoding:
+    """Tests for UTF-8 encoding validation."""
+
+    def test_valid_utf8_returns_true(self):
+        """Valid UTF-8 content should return True."""
+        report = ValidationReport()
+        content = "Hello, world!".encode("utf-8")
+        assert check_utf8_encoding(content, report, "test.txt") is True
+        assert len(report.results) == 0
+
+    def test_utf8_bom_returns_false(self):
+        """Content with UTF-8 BOM should return False and add MAJOR error."""
+        report = ValidationReport()
+        content = b"\xef\xbb\xbfHello"
+        assert check_utf8_encoding(content, report, "bom.txt") is False
+        assert report.has_major
+        assert "BOM" in report.results[0].message
+
+    def test_invalid_utf8_returns_false(self):
+        """Non-UTF-8 content should return False and add MAJOR error."""
+        report = ValidationReport()
+        content = b"\xff\xfe\x00\x00"  # Invalid UTF-8 bytes
+        assert check_utf8_encoding(content, report, "bad.txt") is False
+        assert report.has_major
+        assert "not valid UTF-8" in report.results[0].message
+
+
+class TestNormalizeLevel:
+    """Tests for normalize_level function."""
+
+    def test_normalize_known_levels(self):
+        """Known levels in any case should normalize to uppercase."""
+        assert normalize_level("critical") == "CRITICAL"
+        assert normalize_level("Major") == "MAJOR"
+        assert normalize_level("minor") == "MINOR"
+        assert normalize_level("NIT") == "NIT"
+        assert normalize_level("warning") == "WARNING"
+        assert normalize_level("info") == "INFO"
+        assert normalize_level("passed") == "PASSED"
+
+    def test_normalize_unknown_level_defaults_to_info(self):
+        """Unknown level strings should default to INFO."""
+        assert normalize_level("SEVERE") == "INFO"
+        assert normalize_level("") == "INFO"
+        assert normalize_level("debug") == "INFO"
+
+
+class TestGitignoreParsing:
+    """Tests for parse_gitignore and is_path_gitignored."""
+
+    def test_parse_gitignore_reads_patterns(self, tmp_path):
+        """parse_gitignore should read non-empty, non-comment lines from .gitignore."""
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text("# comment\n\nnode_modules/\n*.pyc\nbuild/\n")
+        patterns = parse_gitignore(gitignore)
+        assert patterns == ["node_modules/", "*.pyc", "build/"]
+
+    def test_parse_gitignore_nonexistent_returns_empty(self, tmp_path):
+        """parse_gitignore should return empty list for non-existent file."""
+        patterns = parse_gitignore(tmp_path / "nonexistent")
+        assert patterns == []
+
+    def test_is_path_gitignored_matches_pattern(self):
+        """is_path_gitignored should match files against gitignore patterns."""
+        patterns = ["*.pyc", "node_modules/", "build/"]
+        assert is_path_gitignored("foo.pyc", patterns) is True
+        assert is_path_gitignored("src/bar.pyc", patterns) is True
+        assert is_path_gitignored("node_modules", patterns) is True
+        assert is_path_gitignored("src/main.py", patterns) is False
+
+    def test_is_path_gitignored_anchored_pattern(self):
+        """Anchored patterns (starting with /) should match from root only."""
+        patterns = ["/dist"]
+        assert is_path_gitignored("dist", patterns) is True
+        assert is_path_gitignored("sub/dist", patterns) is False
+
+    def test_is_path_gitignored_negation_pattern_skipped(self):
+        """Negation patterns (starting with !) should be skipped."""
+        patterns = ["*.log", "!important.log"]
+        # important.log still matches *.log because negation is not fully implemented
+        assert is_path_gitignored("debug.log", patterns) is True
+
+    def test_is_path_gitignored_doublestar_pattern(self):
+        """Double-star patterns should match across nested directories."""
+        patterns = ["**/test"]
+        # After ** simplification, **/test becomes */test which matches sub/test
+        assert is_path_gitignored("sub/test", patterns) is True
+        # Plain 'test' without directory prefix does not match */test
+        assert is_path_gitignored("test", patterns) is False
+
+
+class TestBuildPrivatePathPatterns:
+    """Tests for build_private_path_patterns function."""
+
+    def test_builds_patterns_for_usernames(self):
+        """build_private_path_patterns should create regex patterns for each username."""
+        patterns = build_private_path_patterns({"alice"})
+        # Should have patterns for macOS, Linux, Windows (backslash), Windows (forward slash), and in-path
+        assert len(patterns) >= 4
+        # Verify macOS pattern matches
+        matched = any(p.search("/Users/alice/Documents") for p, _ in patterns)
+        assert matched is True
+        # Verify Linux pattern matches
+        matched = any(p.search("/home/alice/code") for p, _ in patterns)
+        assert matched is True
+
+    def test_empty_usernames_returns_empty(self):
+        """build_private_path_patterns with empty set should return empty list."""
+        patterns = build_private_path_patterns(set())
+        assert patterns == []
+
+
+class TestScanFileForPrivateInfo:
+    """Tests for scan_file_for_private_info function."""
+
+    def test_detects_private_username_in_file(self, tmp_path):
+        """scan_file_for_private_info should detect known private paths."""
+        test_file = tmp_path / "config.json"
+        # Use a username that is NOT in EXAMPLE_USERNAMES
+        test_file.write_text('{"path": "/Users/secretperson123/Documents/project"}')
+
+        report = ValidationReport()
+        count = scan_file_for_private_info(
+            test_file,
+            report,
+            "config.json",
+            additional_usernames={"secretperson123"},
+        )
+        assert count >= 1
+        assert report.has_critical or report.has_major
+
+    def test_clean_file_returns_zero(self, tmp_path):
+        """scan_file_for_private_info should return 0 for clean files."""
+        test_file = tmp_path / "clean.py"
+        test_file.write_text('print("hello world")\ndata = {"key": "value"}\n')
+
+        report = ValidationReport()
+        count = scan_file_for_private_info(test_file, report, "clean.py")
+        assert count == 0
+
+    def test_unreadable_file_returns_zero(self, tmp_path):
+        """scan_file_for_private_info should return 0 for non-existent file paths."""
+        report = ValidationReport()
+        count = scan_file_for_private_info(tmp_path / "nonexistent.py", report, "nonexistent.py")
+        assert count == 0
+
+
+class TestScanFileForAbsolutePaths:
+    """Tests for scan_file_for_absolute_paths function."""
+
+    def test_detects_absolute_home_path(self, tmp_path):
+        """scan_file_for_absolute_paths should detect absolute home directory paths."""
+        test_file = tmp_path / "script.py"
+        # Content without regex metacharacters in the matched portion
+        test_file.write_text('DATA_DIR = "/Users/realperson999/Documents/data"\n')
+
+        report = ValidationReport()
+        count = scan_file_for_absolute_paths(test_file, report, "script.py")
+        # The pattern should match as a home directory absolute path
+        assert count >= 1
+
+    def test_clean_file_no_issues(self, tmp_path):
+        """scan_file_for_absolute_paths should find no issues in a clean file."""
+        test_file = tmp_path / "clean.sh"
+        test_file.write_text('#!/usr/bin/env bash\necho "hello"\npath="${CLAUDE_PLUGIN_ROOT}/scripts"\n')
+
+        report = ValidationReport()
+        count = scan_file_for_absolute_paths(test_file, report, "clean.sh")
+        assert count == 0
+
+    def test_skips_env_var_references(self, tmp_path):
+        """scan_file_for_absolute_paths should skip paths that use env var references."""
+        test_file = tmp_path / "setup.sh"
+        test_file.write_text('CONFIG="${HOME}/.config/app"\nROOT="${CLAUDE_PLUGIN_ROOT}/data"\n')
+
+        report = ValidationReport()
+        count = scan_file_for_absolute_paths(test_file, report, "setup.sh")
+        assert count == 0
+
+
+class TestValidateNoPrivateInfo:
+    """Tests for validate_no_private_info directory scanning."""
+
+    def test_clean_directory_passes(self, tmp_path):
+        """validate_no_private_info should pass for a clean directory."""
+        (tmp_path / "plugin.json").write_text('{"name": "test"}')
+        (tmp_path / "README.md").write_text("# Test Plugin\n")
+
+        report = ValidationReport()
+        validate_no_private_info(tmp_path, report)
+        # Should have a PASSED result and no errors
+        passed_results = [r for r in report.results if r.level == "PASSED"]
+        assert len(passed_results) >= 1
+
+    def test_directory_with_private_info_fails(self, tmp_path):
+        """validate_no_private_info should detect private info in directory."""
+        (tmp_path / "config.json").write_text('{"cache": "/Users/secretagent007/cache"}')
+
+        report = ValidationReport()
+        validate_no_private_info(tmp_path, report, additional_usernames={"secretagent007"})
+        errors = report.get_all_errors()
+        assert len(errors) >= 1
+
+
+class TestValidateNoAbsolutePaths:
+    """Tests for validate_no_absolute_paths directory scanning."""
+
+    def test_clean_directory_passes(self, tmp_path):
+        """validate_no_absolute_paths should pass for a directory with no absolute paths."""
+        (tmp_path / "plugin.json").write_text('{"name": "clean-plugin"}')
+        (tmp_path / "setup.sh").write_text('echo "${CLAUDE_PLUGIN_ROOT}"\n')
+
+        report = ValidationReport()
+        validate_no_absolute_paths(tmp_path, report, respect_gitignore=False)
+
+        passed_results = [r for r in report.results if r.level == "PASSED"]
+        assert len(passed_results) >= 1
+
+    def test_directory_with_absolute_paths_fails(self, tmp_path):
+        """validate_no_absolute_paths should detect absolute paths."""
+        (tmp_path / "config.json").write_text('{"bin": "/Users/hackerman99/bin/tool"}')
+
+        report = ValidationReport()
+        validate_no_absolute_paths(tmp_path, report, respect_gitignore=False)
+
+        errors = report.get_all_errors()
+        assert len(errors) >= 1

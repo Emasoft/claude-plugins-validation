@@ -8,6 +8,9 @@ __pycache__/
 .eggs/
 dist/
 build/
+.coverage
+.venv/
+.pytest_cache/
 
 # Type checking
 .mypy_cache/
@@ -26,6 +29,10 @@ dmypy.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Environment
+.env
+.env.*
 
 # Dev folders (NEVER PUBLISH - development artifacts only)
 # Wildcard pattern catches all: docs_dev, scripts_dev, tests_dev, samples_dev,

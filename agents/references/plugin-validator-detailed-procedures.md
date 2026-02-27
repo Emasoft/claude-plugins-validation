@@ -102,7 +102,7 @@ The pre-push hook automatically detects languages by:
 
 □ C.8 YAML lint verification:
       □ yamllint -d relaxed --format parsable runs
-      □ Errors ([error]) block push, warnings ([warning]) don't
+      □ Errors ([ERROR]) block push, warnings ([WARNING]) don't
 ```
 
 ### Verification Checklist: Auto-Fix Loop
@@ -190,7 +190,7 @@ jobs:
 ### Phase 2: Plugin Structure Validation
 ```
 □ 2.1 Run validator: uv run python scripts/validate_plugin.py . --verbose
-□ 2.2 Verify exit code 0 (or 3 for minor-only)
+□ 2.2 Verify exit code 0 (or 3 for MINOR-only)
 □ 2.3 Check for CRITICAL issues (must fix)
 □ 2.4 Check for MAJOR issues (should fix)
 □ 2.5 Review MINOR warnings
@@ -206,7 +206,7 @@ jobs:
 
 ### Phase 4: Git Hooks Installation
 ```
-□ 4.1 Run: python scripts/setup-hooks.py
+□ 4.1 Run: bash scripts/setup_git_hooks.sh
 □ 4.2 Verify .git/hooks/pre-commit exists and is executable
 □ 4.3 Verify .git/hooks/pre-push exists and is executable
 □ 4.4 For submodules: check .git/modules/*/hooks/
@@ -297,7 +297,7 @@ uv run python scripts/setup_plugin_pipeline.py . --fix
 **Issue: "CI passes but local push blocked"**
 ```bash
 # Update CI workflow to match local validator
-cp scripts/github-workflow-template.yml .github/workflows/validate.yml
+cp templates/github-workflows/validate-marketplace.yml .github/workflows/validate.yml
 ```
 
 ---

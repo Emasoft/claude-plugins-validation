@@ -22,6 +22,8 @@ Exit codes:
     1 - Error
 """
 
+from __future__ import annotations
+
 import argparse
 import shutil
 import sys

@@ -2,7 +2,7 @@
 name: cpv-validate-plugin
 description: |
   Comprehensive validation for Claude Code plugins. Validates manifest, hooks, agents,
-  skills (84+ rules), MCP servers, scripts, and directory structure. Use when auditing
+  skills (190+ rules), MCP servers, scripts, and directory structure. Use when auditing
   plugin quality, preparing for marketplace publishing, or CI/CD integration.
 allowed-tools: Read, Bash, Glob, Grep, Task, AskUserQuestion
 argument-hint: "<plugin_path_or_name> [--verbose] [--json]"
@@ -67,6 +67,7 @@ If no exact match is found, fuzzy matching is used (e.g., `cpt-validate` → `cp
 
 | Option | Description |
 |--------|-------------|
+| `--strict` | Treat NIT issues as blocking (exit 4) |
 | `--verbose` | Show all checks including passed |
 | `--json` | Output results as JSON |
 
@@ -88,7 +89,7 @@ If no exact match is found, fuzzy matching is used (e.g., `cpt-validate` → `cp
 - Script linting (shellcheck, ruff, mypy)
 
 ### 3. Skills (All skills in `skills/` directory)
-- Uses comprehensive validator (84+ rules)
+- Uses comprehensive validator (190+ rules)
 - Nixtla strict mode enabled
 - Auto-enables 8+1 Pillars for lang-*/convert-* skills
 - Validates frontmatter, structure, content quality
@@ -140,8 +141,8 @@ If no exact match is found, fuzzy matching is used (e.g., `cpt-validate` → `cp
 ## Output
 
 Returns summary with:
-- **Exit Code**: 0 (pass), 1 (critical), 2 (major), 3 (minor)
-- **Counts**: Issues by severity level
+- **Exit Code**: 0 (pass), 1 (CRITICAL), 2 (MAJOR), 3 (MINOR), 4 (NIT, --strict only)
+- **Counts**: Issues by severity level (CRITICAL, MAJOR, MINOR, NIT, WARNING)
 - **Details**: All validation results with file locations
 
 ## Exit Codes
@@ -152,6 +153,17 @@ Returns summary with:
 | 1 | CRITICAL issues (plugin won't work) |
 | 2 | MAJOR issues (significant problems) |
 | 3 | MINOR issues (may affect UX) |
+| 4 | NIT issues found (only in --strict mode) |
+
+## Severity Levels
+
+| Severity | Behavior |
+|----------|----------|
+| CRITICAL | Always blocks (exit 1) |
+| MAJOR | Always blocks (exit 2) |
+| MINOR | Always blocks (exit 3) |
+| NIT | Blocks only in `--strict` mode (exit 4) |
+| WARNING | Never blocks, always reported (security advisories, best practices) |
 
 ## Execution
 

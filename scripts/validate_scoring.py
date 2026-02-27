@@ -418,16 +418,16 @@ def run_all_validators(plugin_path: Path) -> dict[str, ValidationReport]:
     # Note: validate_plugin uses its own ValidationReport class with compatible interface
     try:
         plugin_report = ValidationReport()
-        _ = validate_manifest(plugin_path, plugin_report)  # type: ignore[arg-type]
-        validate_structure(plugin_path, plugin_report)  # type: ignore[arg-type]
-        plugin_validate_commands(plugin_path, plugin_report)  # type: ignore[arg-type]
-        plugin_validate_agents(plugin_path, plugin_report)  # type: ignore[arg-type]
-        plugin_validate_hooks(plugin_path, plugin_report)  # type: ignore[arg-type]
-        plugin_validate_mcp(plugin_path, plugin_report)  # type: ignore[arg-type]
-        validate_scripts(plugin_path, plugin_report)  # type: ignore[arg-type]
-        plugin_validate_skills(plugin_path, plugin_report)  # type: ignore[arg-type]
-        validate_readme(plugin_path, plugin_report)  # type: ignore[arg-type]
-        validate_license(plugin_path, plugin_report)  # type: ignore[arg-type]
+        _ = validate_manifest(plugin_path, plugin_report)
+        validate_structure(plugin_path, plugin_report)
+        plugin_validate_commands(plugin_path, plugin_report)
+        plugin_validate_agents(plugin_path, plugin_report)
+        plugin_validate_hooks(plugin_path, plugin_report)
+        plugin_validate_mcp(plugin_path, plugin_report)
+        validate_scripts(plugin_path, plugin_report)
+        plugin_validate_skills(plugin_path, plugin_report)
+        validate_readme(plugin_path, plugin_report)
+        validate_license(plugin_path, plugin_report)
         reports["plugin"] = plugin_report
     except Exception as e:
         error_report = ValidationReport()
@@ -449,7 +449,7 @@ def run_all_validators(plugin_path: Path) -> dict[str, ValidationReport]:
     if hooks_path.exists():
         try:
             hook_report = validate_hooks(hooks_path, plugin_path)
-            reports["hooks"] = hook_report  # type: ignore[assignment]
+            reports["hooks"] = hook_report
         except Exception as e:
             error_report = ValidationReport()
             error_report.critical(f"Hook validation failed: {e}")
@@ -461,7 +461,7 @@ def run_all_validators(plugin_path: Path) -> dict[str, ValidationReport]:
     if mcp_path.exists():
         try:
             mcp_report = validate_plugin_mcp(plugin_path)
-            reports["mcp"] = mcp_report  # type: ignore[assignment]
+            reports["mcp"] = mcp_report
         except Exception as e:
             error_report = ValidationReport()
             error_report.critical(f"MCP validation failed: {e}")
@@ -488,7 +488,7 @@ def run_all_validators(plugin_path: Path) -> dict[str, ValidationReport]:
             if skill_dir.is_dir() and not skill_dir.name.startswith("."):
                 try:
                     skill_single_report = validate_skill(skill_dir)
-                    skill_report.merge(skill_single_report)  # type: ignore[arg-type]
+                    skill_report.merge(skill_single_report)
                 except Exception as e:
                     skill_report.critical(f"Skill validation failed for {skill_dir.name}: {e}")
         reports["skills"] = skill_report
@@ -744,6 +744,7 @@ Rating scale (0-10 per category):
         action="store_true",
         help="Output results as JSON instead of formatted text",
     )
+    parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
 
     args = parser.parse_args()
 

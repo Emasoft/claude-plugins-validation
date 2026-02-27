@@ -1,7 +1,7 @@
 ---
 name: cpv-validate-skill
 description: |
-  Validate skill directories using 84+ validation rules from AgentSkills OpenSpec,
+  Validate skill directories using 190+ validation rules from AgentSkills OpenSpec,
   Nixtla Quality Standards, and Meta-Skill frameworks. Use when checking skill quality,
   auditing SKILL.md files, or preparing skills for deployment. Returns letter grade (A-F)
   and detailed issue report.
@@ -13,7 +13,7 @@ user-invocable: true
 
 # /cpv-validate-skill Command
 
-Validates a skill directory using the comprehensive skill validator (84+ rules).
+Validates a skill directory using the comprehensive skill validator (190+ rules).
 
 ## Privacy Check (REQUIRED)
 
@@ -74,7 +74,7 @@ The comprehensive validator checks:
 - metadata, compatibility, license fields
 
 ### Token Budget (4 rules)
-- SKILL.md line count (warning at 500, error at 800+)
+- SKILL.md line count (WARNING at 500, ERROR at 800+)
 - Body word count thresholds
 - Frontmatter size limits
 
@@ -134,7 +134,7 @@ The comprehensive validator checks:
 
 Returns:
 - **Grade**: A-F letter grade with percentage score
-- **Summary**: Count of issues by severity (CRITICAL, MAJOR, MINOR)
+- **Summary**: Count of issues by severity (CRITICAL, MAJOR, MINOR, NIT, WARNING)
 - **Pillars Coverage**: 8+1 Pillars scores (if `--pillars`)
 - **Details**: Categorized list of issues and passed checks
 
@@ -156,6 +156,17 @@ Returns:
 | 1 | CRITICAL issues (Grade F) |
 | 2 | MAJOR issues (Grade D) |
 | 3 | MINOR issues (Grade C) |
+| 4 | NIT issues found (only in --strict mode) |
+
+## Severity Levels
+
+| Severity | Behavior |
+|----------|----------|
+| CRITICAL | Always blocks (exit 1) |
+| MAJOR | Always blocks (exit 2) |
+| MINOR | Always blocks (exit 3) |
+| NIT | Blocks only in `--strict` mode (exit 4) |
+| WARNING | Never blocks, always reported (security advisories, best practices) |
 
 ## Execution
 

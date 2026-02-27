@@ -26,6 +26,7 @@ from typing import Any, Callable, Literal
 # Tool Resolution: local install → remote runner fallback (via smart_exec)
 # =============================================================================
 
+
 def resolve_tool_command(tool_name: str) -> list[str] | None:
     """Resolve a linting tool to its executable command prefix.
 
@@ -56,16 +57,23 @@ def resolve_tool_command(tool_name: str) -> list[str] | None:
 # =============================================================================
 
 # Validation result severity levels (uppercase for consistency)
-Level = Literal["CRITICAL", "MAJOR", "MINOR", "INFO", "PASSED"]
+# Hierarchy: CRITICAL > MAJOR > MINOR > NIT > WARNING > INFO > PASSED
+# - CRITICAL/MAJOR/MINOR: always block validation (non-zero exit code)
+# - NIT: blocks only in --strict mode
+# - WARNING: never blocks, always reported (security advisories, best practices)
+# - INFO: informational only, shown in verbose mode
+# - PASSED: check passed, shown in verbose mode
+Level = Literal["CRITICAL", "MAJOR", "MINOR", "NIT", "WARNING", "INFO", "PASSED"]
 
 # =============================================================================
 # Exit Codes
 # =============================================================================
 
-EXIT_OK = 0  # All checks passed (or only INFO/PASSED)
+EXIT_OK = 0  # All checks passed (or only WARNING/INFO/PASSED)
 EXIT_CRITICAL = 1  # CRITICAL issues found
 EXIT_MAJOR = 2  # MAJOR issues found
 EXIT_MINOR = 3  # MINOR issues found
+EXIT_NIT = 4  # NIT issues found (only in --strict mode)
 
 # =============================================================================
 # Severity Level Constants (L1-L10 Alternative System)
@@ -84,20 +92,6 @@ SEVERITY_L8 = 8  # High severity, confidence > 0.95
 SEVERITY_L9 = 9  # High severity, confidence > 0.95
 SEVERITY_L10 = 10  # Critical severity, confidence > 0.99
 
-# Severity ranges for categorization
-SEVERITY_LOW = (SEVERITY_L1, SEVERITY_L2, SEVERITY_L3)  # confidence > 0.7
-SEVERITY_MEDIUM = (SEVERITY_L4, SEVERITY_L5, SEVERITY_L6)  # confidence > 0.85
-SEVERITY_HIGH = (SEVERITY_L7, SEVERITY_L8, SEVERITY_L9)  # confidence > 0.95
-SEVERITY_CRITICAL = (SEVERITY_L10,)  # confidence > 0.99
-
-# Confidence thresholds for each severity range
-CONFIDENCE_THRESHOLDS = {
-    "LOW": 0.7,
-    "MEDIUM": 0.85,
-    "HIGH": 0.95,
-    "CRITICAL": 0.99,
-}
-
 
 def severity_to_level(severity: int) -> Level:
     """Convert L1-L10 severity to standard Level.
@@ -106,7 +100,7 @@ def severity_to_level(severity: int) -> Level:
         severity: Numeric severity (1-10)
 
     Returns:
-        Corresponding Level (CRITICAL, MAJOR, MINOR, INFO)
+        Corresponding Level (CRITICAL, MAJOR, MINOR, NIT, WARNING, INFO)
     """
     if severity >= SEVERITY_L10:
         return "CRITICAL"
@@ -114,6 +108,10 @@ def severity_to_level(severity: int) -> Level:
         return "MAJOR"
     elif severity >= SEVERITY_L4:
         return "MINOR"
+    elif severity == SEVERITY_L3:
+        return "NIT"
+    elif severity == SEVERITY_L2:
+        return "WARNING"
     else:
         return "INFO"
 
@@ -131,29 +129,13 @@ def level_to_severity(level: Level) -> int:
         "CRITICAL": SEVERITY_L10,
         "MAJOR": SEVERITY_L8,
         "MINOR": SEVERITY_L5,
-        "INFO": SEVERITY_L2,
+        "NIT": SEVERITY_L3,
+        "WARNING": SEVERITY_L2,
+        "INFO": SEVERITY_L1,
         "PASSED": SEVERITY_L1,
     }
     return mapping.get(level, SEVERITY_L1)
 
-
-# =============================================================================
-# Multi-Layer Validation Phase Constants
-# =============================================================================
-
-# Validation phases for multi-layer validation
-PHASE_STRUCTURE = "structure"  # File/directory structure checks
-PHASE_SEMANTIC = "semantic"  # Content and meaning validation
-PHASE_SECURITY = "security"  # Security-related checks
-PHASE_CROSS_REF = "cross-reference"  # Cross-file reference validation
-
-# All phases in execution order
-VALIDATION_PHASES = [
-    PHASE_STRUCTURE,
-    PHASE_SEMANTIC,
-    PHASE_SECURITY,
-    PHASE_CROSS_REF,
-]
 
 # =============================================================================
 # Hook Event Types
@@ -169,34 +151,30 @@ VALID_HOOK_EVENTS = {
     "Notification",
     "Stop",
     "SubagentStop",
+    "SubagentStart",
     "SessionStart",
     "SessionEnd",
     "PreCompact",
-    "PreToolResponse",  # Less common but valid
-}
-
-# Events that require a matcher pattern (tool-specific events)
-EVENTS_REQUIRING_MATCHER = {
-    "PreToolUse",
-    "PostToolUse",
-    "PostToolUseFailure",
-    "PermissionRequest",
-    "Notification",
-    "SessionStart",
-    "PreCompact",
-}
-
-# Events that do not support matchers (global events)
-EVENTS_NO_MATCHER = {
-    "UserPromptSubmit",
-    "Stop",
-    "SubagentStop",
-    "SessionEnd",
+    "Setup",
+    "TeammateIdle",
+    "TaskCompleted",
+    "ConfigChange",
+    "WorktreeCreate",
+    "WorktreeRemove",
 }
 
 # =============================================================================
 # Common Constants
 # =============================================================================
+
+# Valid context values for agents and skills (only "fork" is documented)
+VALID_CONTEXT_VALUES = {"fork"}
+
+# Built-in agent types provided by Claude Code
+BUILTIN_AGENT_TYPES = {"Explore", "Plan", "general-purpose"}
+
+# Semantic version pattern for marketplace version fields
+SEMVER_PATTERN = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?(\+[a-zA-Z0-9.]+)?$")
 
 # Valid tool names for Claude Code agents
 VALID_TOOLS = {
@@ -210,20 +188,30 @@ VALID_TOOLS = {
     "WebSearch",
     "Task",
     "NotebookEdit",
-    "AskFollowupQuestion",
-    "AttemptCompletion",
-    "ListFiles",
-    "SearchFiles",
-    "ListCodeDefinitionNames",
-    "Browser",
-    "MCP",
-    "Computer",
-    "TextEditor",
-    "UrlScreenshot",
+    "Skill",
+    "AskUserQuestion",
+    "EnterPlanMode",
+    "ExitPlanMode",
+    "EnterWorktree",
+    "TaskCreate",
+    "TaskUpdate",
+    "TaskList",
+    "TaskGet",
+    "TaskStop",
+    "ToolSearch",
 }
 
 # Valid model values for agents
 VALID_MODELS = {"haiku", "sonnet", "opus", "inherit"}
+
+# Environment variables provided by Claude Code at plugin load time
+# Plugins must use these instead of hardcoded absolute paths
+VALID_PLUGIN_ENV_VARS = {
+    "CLAUDE_PLUGIN_ROOT",  # Plugin's root directory (all plugin hooks)
+    "CLAUDE_PROJECT_DIR",  # Project root directory (all hooks)
+    "CLAUDE_ENV_FILE",  # SessionStart/Setup only — write export statements to persist env vars
+    "CLAUDE_CODE_REMOTE",  # Set to "true" in remote web environments; not set in local CLI
+}
 
 # Directories to skip when scanning (cache dirs, hidden dirs, etc.)
 SKIP_DIRS = {
@@ -250,10 +238,22 @@ SECRET_PATTERNS = [
     (re.compile(r"AKIA[0-9A-Z]{16}"), "AWS Access Key"),
     (re.compile(r"-----BEGIN (RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----"), "Private Key"),
     (re.compile(r"ghp_[a-zA-Z0-9]{36}"), "GitHub Personal Access Token"),
-    (re.compile(r"sk-[a-zA-Z0-9]{48}"), "OpenAI API Key"),
+    (re.compile(r"sk-[a-zA-Z0-9]{20,}"), "API Key (sk-... format)"),
     (re.compile(r"xox[baprs]-[0-9a-zA-Z-]+"), "Slack Token"),
+    (re.compile(r"github_pat_[a-zA-Z0-9_]{22,}"), "GitHub Fine-Grained Personal Access Token"),
+    (re.compile(r"AIza[0-9A-Za-z\-_]{35}"), "Google API Key"),
+    (re.compile(r"sk_live_[a-zA-Z0-9]{24,}"), "Stripe Secret Key"),
+    (re.compile(r"pk_live_[a-zA-Z0-9]{24,}"), "Stripe Publishable Key"),
+    (re.compile(r"sk-ant-[a-zA-Z0-9\-_]{80,}"), "Anthropic API Key"),
+    (re.compile(r"npm_[a-zA-Z0-9]{36}"), "npm Access Token"),
+    (re.compile(r"://[^:\s]+:[^@\s]+@[^\s]+"), "Database Connection String with Credentials"),
+    (re.compile(r"SG\.[a-zA-Z0-9\-_]{22}\.[a-zA-Z0-9\-_]{43}"), "SendGrid API Key"),
     # Generic API key pattern excludes environment variable placeholders (${VAR} or $VAR)
     (re.compile(r"api[_-]?key['\"]?\s*[:=]\s*['\"](?!\$[\{A-Z_])[^'\"]{20,}['\"]", re.I), "Generic API Key"),
+    # JWT tokens (base64url-encoded header.payload, signature optional)
+    (re.compile(r"eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}"), "JWT Token"),
+    # AWS Secret Access Key (40-char base64 string)
+    (re.compile(r"aws_secret_access_key\s*[:=]\s*['\"]?[A-Za-z0-9/+=]{40}", re.I), "AWS Secret Access Key"),
 ]
 
 # Generic example usernames that are acceptable in documentation
@@ -299,25 +299,35 @@ USER_PATH_PATTERNS = [
 
 # Patterns for ANY absolute path (stricter check for plugins)
 # Plugins should use relative paths or ${CLAUDE_PLUGIN_ROOT} / ${HOME}
-# Only check for home directory paths which are the problematic ones
 ABSOLUTE_PATH_PATTERNS = [
-    # macOS/Linux home directory paths - these are problematic
+    # macOS/Linux home directory paths — CRITICAL portability issue
     (re.compile(r'(?<![#!])(/(?:Users|home)/[^/\s"\'`>\]})]+/[^\s"\'`>\]})]+)'), "home directory path"),
     # Windows home directory paths
     (re.compile(r'(?<!\$\{)(?<!\$)([A-Z]:[\\\/]Users[\\\/][^\s"\'`>\]})]+)', re.IGNORECASE), "Windows home path"),
+    # Unix system paths — non-portable, use env vars or relative paths instead
+    # The (?<![#!]) lookbehind skips shebangs like #!/usr/bin/env or #!/bin/bash
+    (
+        re.compile(
+            r"(?<![#!])"
+            r"(?<!\$\{CLAUDE_PLUGIN_ROOT\})(?<!\$\{CLAUDE_PROJECT_DIR\})(?<![\w$\{])"
+            r'(/(?:usr|opt|etc|var|bin|sbin|lib|root)/[^\s"\'`>\]})]+)'
+        ),
+        "system absolute path",
+    ),
 ]
 
 # Allowed absolute path prefixes in documentation examples
+# These are skipped in doc files (.md, .txt, .html) to reduce false positives
 ALLOWED_DOC_PATH_PREFIXES = {
     "/tmp/",
     "/var/tmp/",
     "/dev/",
     "/proc/",
     "/sys/",
-    "/etc/",
-    "/usr/bin/",
-    "/usr/local/",
-    "/opt/",
+    "/etc/",  # Common in config examples
+    "/usr/bin/",  # Common in shebang/doc examples
+    "/usr/local/",  # Common in installation examples
+    "/opt/",  # Common in deployment examples
 }
 
 # Files that should never be in a plugin
@@ -326,12 +336,31 @@ DANGEROUS_FILES = {
     ".env.local",
     ".env.development",
     ".env.production",
+    ".env.staging",
+    ".env.test",
     "credentials.json",
     "secrets.json",
     "config.secret.json",
     "private.key",
     "id_rsa",
     "id_ed25519",
+    "id_dsa",
+    "id_ecdsa",
+    ".npmrc",
+    ".pypirc",
+    ".netrc",
+    "token.json",
+    "auth.json",
+    "service-account.json",
+    "service_account_key.json",
+    ".htpasswd",
+    "kubeconfig",
+    ".docker/config.json",
+    "cert.pem",
+    "key.pem",
+    "server.pem",
+    "client.pem",
+    "ca.pem",
 }
 
 # =============================================================================
@@ -763,6 +792,14 @@ class ValidationReport:
         """Add an info message."""
         self.add("INFO", message, file)
 
+    def warning(self, message: str, file: str | None = None, line: int | None = None) -> None:
+        """Add a warning — always reported, never blocks validation (even in --strict)."""
+        self.add("WARNING", message, file, line)
+
+    def nit(self, message: str, file: str | None = None, line: int | None = None) -> None:
+        """Add a nit — blocks validation only in --strict mode."""
+        self.add("NIT", message, file, line)
+
     def minor(self, message: str, file: str | None = None, line: int | None = None) -> None:
         """Add a minor issue."""
         self.add("MINOR", message, file, line)
@@ -791,14 +828,41 @@ class ValidationReport:
         return any(r.level == "MINOR" for r in self.results)
 
     @property
+    def has_nit(self) -> bool:
+        """Check if any NIT issues exist."""
+        return any(r.level == "NIT" for r in self.results)
+
+    @property
+    def has_warning(self) -> bool:
+        """Check if any WARNING issues exist."""
+        return any(r.level == "WARNING" for r in self.results)
+
+    @property
     def exit_code(self) -> int:
-        """Get appropriate exit code based on highest severity issue."""
+        """Get appropriate exit code based on highest severity issue.
+
+        NIT and WARNING never affect exit code here.
+        NIT blocking is handled by --strict flag in each validator's main().
+        WARNING never blocks validation.
+        """
         if self.has_critical:
             return EXIT_CRITICAL
         if self.has_major:
             return EXIT_MAJOR
         if self.has_minor:
             return EXIT_MINOR
+        return EXIT_OK
+
+    def exit_code_strict(self) -> int:
+        """Get exit code for --strict mode (NIT issues also block).
+
+        WARNING still does not block even in strict mode.
+        """
+        code = self.exit_code
+        if code != EXIT_OK:
+            return code
+        if self.has_nit:
+            return EXIT_NIT
         return EXIT_OK
 
     @property
@@ -810,7 +874,8 @@ class ValidationReport:
         - Deduct 25 for each CRITICAL
         - Deduct 10 for each MAJOR
         - Deduct 3 for each MINOR
-        - INFO and PASSED don't affect score
+        - Deduct 1 for each NIT
+        - WARNING, INFO, and PASSED don't affect score
         """
         score = 100
         for r in self.results:
@@ -820,11 +885,13 @@ class ValidationReport:
                 score -= 10
             elif r.level == "MINOR":
                 score -= 3
+            elif r.level == "NIT":
+                score -= 1
         return max(0, score)
 
     def count_by_level(self) -> dict[str, int]:
         """Get count of results by level."""
-        counts: dict[str, int] = {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "INFO": 0, "PASSED": 0}
+        counts: dict[str, int] = {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0, "INFO": 0, "PASSED": 0}
         for r in self.results:
             counts[r.level] = counts.get(r.level, 0) + 1
         return counts
@@ -1194,6 +1261,15 @@ class ValidationContext:
 # =============================================================================
 
 
+def get_plugin_root() -> Path:
+    """Get the plugin root directory (parent of scripts/).
+
+    Returns:
+        Path to the plugin root, assuming this module lives in scripts/.
+    """
+    return Path(__file__).resolve().parent.parent
+
+
 def calculate_letter_grade(score: int) -> str:
     """Convert numeric score (0-100) to letter grade.
 
@@ -1249,6 +1325,8 @@ COLORS = {
     "MAJOR": "\033[93m",  # Yellow
     "MAJOR_DARK": "\033[33m",  # Dark Yellow
     "MINOR": "\033[94m",  # Blue
+    "NIT": "\033[96m",  # Cyan — blocks only in --strict
+    "WARNING": "\033[95m",  # Magenta — never blocks, always reported
     "INFO": "\033[90m",  # Gray
     "PASSED": "\033[92m",  # Green
     "RESET": "\033[0m",  # Reset
@@ -1293,6 +1371,8 @@ def print_report_summary(report: ValidationReport, title: str = "Validation Repo
     print(f"\n{COLORS['CRITICAL']}CRITICAL: {counts['CRITICAL']}{COLORS['RESET']}")
     print(f"{COLORS['MAJOR']}MAJOR:    {counts['MAJOR']}{COLORS['RESET']}")
     print(f"{COLORS['MINOR']}MINOR:    {counts['MINOR']}{COLORS['RESET']}")
+    print(f"{COLORS['NIT']}NIT:      {counts.get('NIT', 0)}{COLORS['RESET']}")
+    print(f"{COLORS['WARNING']}WARNING:  {counts.get('WARNING', 0)}{COLORS['RESET']}")
     print(f"{COLORS['INFO']}INFO:     {counts['INFO']}{COLORS['RESET']}")
     print(f"{COLORS['PASSED']}PASSED:   {counts['PASSED']}{COLORS['RESET']}")
 
@@ -1321,6 +1401,8 @@ def print_results_by_level(report: ValidationReport, verbose: bool = False) -> N
         "CRITICAL": [],
         "MAJOR": [],
         "MINOR": [],
+        "NIT": [],
+        "WARNING": [],
         "INFO": [],
         "PASSED": [],
     }
@@ -1328,13 +1410,25 @@ def print_results_by_level(report: ValidationReport, verbose: bool = False) -> N
     for result in report.results:
         by_level[result.level].append(result)
 
-    # Print each level
+    # Always print blocking levels (CRITICAL, MAJOR, MINOR)
     for level in ["CRITICAL", "MAJOR", "MINOR"]:
         results = by_level[level]
         if results:
             print(f"\n{COLORS[level]}--- {level} ISSUES ({len(results)}) ---{COLORS['RESET']}")
             for result in results:
                 print(f"  {format_result(result)}")
+
+    # Always print NIT (blocks in --strict mode)
+    if by_level["NIT"]:
+        print(f"\n{COLORS['NIT']}--- NIT ISSUES ({len(by_level['NIT'])}) [blocks in --strict] ---{COLORS['RESET']}")
+        for result in by_level["NIT"]:
+            print(f"  {format_result(result)}")
+
+    # Always print WARNING (never blocks, but always visible)
+    if by_level["WARNING"]:
+        print(f"\n{COLORS['WARNING']}--- WARNINGS ({len(by_level['WARNING'])}) [non-blocking] ---{COLORS['RESET']}")
+        for result in by_level["WARNING"]:
+            print(f"  {format_result(result)}")
 
     # Only print INFO and PASSED in verbose mode
     if verbose:
@@ -1386,7 +1480,7 @@ def normalize_level(level: str) -> Level:
         Normalized Level literal
     """
     upper = level.upper()
-    if upper in ("CRITICAL", "MAJOR", "MINOR", "INFO", "PASSED"):
+    if upper in ("CRITICAL", "MAJOR", "MINOR", "NIT", "WARNING", "INFO", "PASSED"):
         return upper  # type: ignore
     # Default to INFO for unknown levels
     return "INFO"
@@ -1595,6 +1689,10 @@ def scan_file_for_absolute_paths(
                 line_num,
             )
 
+    # Determine if this is a documentation file (more lenient) or code file (strict)
+    doc_extensions = {".md", ".txt", ".html", ".rst", ".adoc"}
+    is_doc_file = filepath.suffix.lower() in doc_extensions
+
     # Then check for ALL absolute paths (MAJOR)
     for pattern, desc in ABSOLUTE_PATH_PATTERNS:
         for match in pattern.finditer(content):
@@ -1604,8 +1702,8 @@ def scan_file_for_absolute_paths(
             if any(c in matched_text for c in r"[]\^$.*+?{}|()"):
                 continue
 
-            # Skip allowed documentation paths
-            if any(matched_text.startswith(prefix) for prefix in ALLOWED_DOC_PATH_PREFIXES):
+            # Skip allowed documentation paths — only in doc files, not in code/scripts
+            if is_doc_file and any(matched_text.startswith(prefix) for prefix in ALLOWED_DOC_PATH_PREFIXES):
                 continue
 
             # Skip if it's an environment variable reference
@@ -1622,9 +1720,11 @@ def scan_file_for_absolute_paths(
 
             line_num = content[: match.start()].count("\n") + 1
             issues_found += 1
-            report.major(
+            # Use MINOR for system paths in scripts (may be intentional), MAJOR for home paths
+            severity = "minor" if desc == "system absolute path" and not is_doc_file else "major"
+            getattr(report, severity)(
                 f"Absolute path found: '{matched_text[:60]}...' - "
-                "use relative path, ${CLAUDE_PLUGIN_ROOT}, or ${HOME}",
+                "use relative path, ${CLAUDE_PLUGIN_ROOT}, or ${CLAUDE_PROJECT_DIR}",
                 rel_path,
                 line_num,
             )

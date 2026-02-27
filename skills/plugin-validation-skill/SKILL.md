@@ -11,6 +11,7 @@ tags:
   - mcp
   - quality-assurance
 user-invocable: true
+allowed-tools: Read, Bash(uv:*), Bash(python:*), Glob, Grep, Write, Task
 ---
 
 # Plugin Validation Skill
@@ -22,7 +23,7 @@ Validates Claude Code plugins and all their components for quality and complianc
 This skill provides comprehensive validation for Claude Code plugin components:
 - Plugin manifest (`plugin.json`) structure and fields
 - Hook configurations (`hooks.json`) and script validation
-- Skill frontmatter and content quality (84+ rules)
+- Skill frontmatter and content quality (190+ rules)
 - MCP server configurations (`.mcp.json`)
 - Marketplace configurations and git submodules
 - Agent definitions and system prompts
@@ -74,7 +75,7 @@ Copy this checklist and track your progress:
 ## Output
 
 The validators return:
-- **Exit Code**: 0 (pass), 1 (critical), 2 (major), 3 (minor)
+- **Exit Code**: 0 (pass), 1 (CRITICAL), 2 (MAJOR), 3 (MINOR), 4 (NIT, --strict only). WARNING never blocks.
 - **Summary**: Issue counts by severity level
 - **Details**: Each issue with file location and fix suggestion
 - **Grade**: A-F letter grade for skill validation
@@ -189,6 +190,9 @@ uv run python scripts/validate_marketplace.py /path/to/marketplace
 | 1 | Critical | Plugin broken - must fix |
 | 2 | Major | Features may fail - should fix |
 | 3 | Minor | Warnings only - recommended |
+| 4 | Nit | Style issues - only with --strict |
+
+> **Note**: WARNING severity never blocks (exit code 0). NITs only block with `--strict`.
 
 ---
 
@@ -411,23 +415,15 @@ Add validation to your CI pipeline:
 
 ### Git Hooks Installation
 
-Install all git hooks (pre-commit, pre-push, post-commit) at once:
+Install the pre-push hook to block pushing broken plugins:
 
 ```bash
-python scripts/setup-hooks.py
-```
-
-Or install manually:
-
-```bash
-# Pre-commit hook - validates staged changes
-cp scripts/pre-commit-hook.py .git/hooks/pre-commit
-chmod +x .git/hooks/pre-commit
-
 # Pre-push hook - BLOCKS pushing broken plugins (CRITICAL!)
-cp scripts/pre-push-hook.py .git/hooks/pre-push
+cp skills/plugin-validation-skill/references/pre-push-hook.py .git/hooks/pre-push
 chmod +x .git/hooks/pre-push
 ```
+
+> **Note**: Pre-commit hooks should be configured manually for your project's needs.
 
 ### Pre-Push Hook Behavior
 

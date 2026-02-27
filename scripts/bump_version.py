@@ -10,20 +10,18 @@ Exit codes:
     1 - Error (invalid version, file not found, etc.)
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import re
 import sys
 from pathlib import Path
-from typing import Optional
+
+from validation_common import get_plugin_root
 
 
-def get_plugin_root() -> Path:
-    """Get the plugin root directory (parent of scripts/)."""
-    return Path(__file__).resolve().parent.parent
-
-
-def parse_semver(version: str) -> Optional[tuple[int, int, int]]:
+def parse_semver(version: str) -> tuple[int, int, int] | None:
     """
     Parse a semantic version string into (major, minor, patch) tuple.
 
@@ -44,7 +42,7 @@ def format_semver(major: int, minor: int, patch: int) -> str:
     return f"{major}.{minor}.{patch}"
 
 
-def bump_version(current: str, bump_type: str) -> Optional[str]:
+def bump_version(current: str, bump_type: str) -> str | None:
     """
     Bump the version according to the specified type.
 
@@ -194,7 +192,7 @@ def update_python_version_variables(plugin_root: Path, new_version: str) -> list
     return results
 
 
-def get_current_version(plugin_root: Path) -> Optional[str]:
+def get_current_version(plugin_root: Path) -> str | None:
     """
     Get the current version from plugin.json.
 

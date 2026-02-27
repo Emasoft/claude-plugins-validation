@@ -1,7 +1,7 @@
 ---
 name: skill-validation-skill
 description: |
-  Validate skills using 84+ rules from AgentSkills OpenSpec, Nixtla, and Meta-Skill frameworks.
+  Validate skills using 190+ rules from AgentSkills OpenSpec, Nixtla, and Meta-Skill frameworks.
   Use when validating SKILL.md files or auditing skill quality. Trigger with /cpv-validate-skill.
 allowed-tools: Read, Bash(uv:*), Bash(python:*), Glob, Grep
 user-invocable: false
@@ -9,7 +9,7 @@ user-invocable: false
 
 # Skill Validation Skill
 
-Validates skill directories using a comprehensive set of 168+ validation rules extracted from:
+Validates skill directories using a comprehensive set of 190+ validation rules extracted from:
 - **AgentSkills OpenSpec** (skills-ref library) - 44 rules
 - **Nixtla Quality Standards** (strict mode) - 52 rules
 - **Meta-Skill Validation** (8+1 Pillars, checklists) - 47 rules
@@ -19,7 +19,7 @@ Validates skill directories using a comprehensive set of 168+ validation rules e
 
 | Resource | Purpose |
 |----------|---------|
-| [references/validation-rules.md](references/validation-rules.md) | Complete list of 168+ validation rules |
+| [references/validation-rules.md](references/validation-rules.md) | Complete list of 190+ validation rules |
 | [references/frontmatter-schema.md](references/frontmatter-schema.md) | Frontmatter field requirements and validation |
 | [references/pillars-coverage.md](references/pillars-coverage.md) | 8+1 Pillars validation for language skills |
 | [references/scoring-system.md](references/scoring-system.md) | Multi-scale scoring (0-3) and letter grading (A-F) |
@@ -128,6 +128,9 @@ uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --json
 | 1 | CRITICAL issues found (Grade F) |
 | 2 | MAJOR issues found (Grade D) |
 | 3 | MINOR issues found (Grade C) |
+| 4 | NIT issues found (--strict mode only) |
+
+> **Note**: WARNING severity never blocks validation and always results in exit code 0.
 
 ### Severity Levels
 
@@ -136,6 +139,8 @@ uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --json
 | **CRITICAL** | Skill will not work | Must fix before use |
 | **MAJOR** | Significant problems | Create bug issue |
 | **MINOR** | May affect UX/quality | Create enhancement issue |
+| **NIT** | Stylistic or pedantic issues | Fix in --strict mode only |
+| **WARNING** | Non-blocking advisory notice | Review recommended, never blocks |
 | **INFO** | Suggestions | Optional improvement |
 | **PASSED** | Check passed | No action needed |
 
@@ -267,7 +272,7 @@ $ uv run python scripts/validate_skill_comprehensive.py ./skills/my-skill/ --jso
 
 ### Reference Documents (in this skill)
 
-- [Validation Rules](references/validation-rules.md) - Complete 168+ rules reference
+- [Validation Rules](references/validation-rules.md) - Complete 190+ rules reference
 - [Frontmatter Schema](references/frontmatter-schema.md) - Field requirements
 - [Pillars Coverage](references/pillars-coverage.md) - 8+1 Pillars validation guide
 - [Scoring System](references/scoring-system.md) - Grading and scoring details

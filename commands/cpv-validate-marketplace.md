@@ -56,6 +56,7 @@ If no exact match is found, fuzzy matching is used (e.g., `cpt-validate` → `cp
 
 | Option | Description |
 |--------|-------------|
+| `--strict` | Treat NIT issues as blocking (exit 4) |
 | `--verbose` | Show all checks including passed |
 | `--json` | Output results as JSON |
 
@@ -112,8 +113,8 @@ If no exact match is found, fuzzy matching is used (e.g., `cpt-validate` → `cp
 ## Output
 
 Returns summary with:
-- **Exit Code**: 0 (pass), 1 (critical), 2 (major), 3 (minor)
-- **Counts**: Issues by severity level
+- **Exit Code**: 0 (pass), 1 (CRITICAL), 2 (MAJOR), 3 (MINOR), 4 (NIT, --strict only)
+- **Counts**: Issues by severity level (CRITICAL, MAJOR, MINOR, NIT, WARNING)
 - **Plugins Found**: List of plugins in marketplace
 - **Details**: All validation results with file locations
 
@@ -125,6 +126,17 @@ Returns summary with:
 | 1 | CRITICAL issues (marketplace won't work or contains private info) |
 | 2 | MAJOR issues (significant problems) |
 | 3 | MINOR issues (may affect UX) |
+| 4 | NIT issues found (only in --strict mode) |
+
+## Severity Levels
+
+| Severity | Behavior |
+|----------|----------|
+| CRITICAL | Always blocks (exit 1) |
+| MAJOR | Always blocks (exit 2) |
+| MINOR | Always blocks (exit 3) |
+| NIT | Blocks only in `--strict` mode (exit 4) |
+| WARNING | Never blocks, always reported (security advisories, best practices) |
 
 ## Execution
 

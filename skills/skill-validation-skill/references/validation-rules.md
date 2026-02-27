@@ -1,6 +1,6 @@
 # Complete Skill Validation Rules Reference
 
-This document contains all 168+ validation rules extracted from multiple validation frameworks.
+This document contains all 190+ validation rules extracted from multiple validation frameworks.
 
 ## Table of Contents
 

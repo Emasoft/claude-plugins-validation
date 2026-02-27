@@ -31,7 +31,7 @@ Each validation check receives a score from 0-3:
 |-------|----------------|
 | 0 | CRITICAL or MAJOR |
 | 1 | MAJOR or MINOR |
-| 2 | MINOR or INFO |
+| 2 | MINOR, NIT, or WARNING |
 | 3 | PASSED |
 
 ---
@@ -141,6 +141,32 @@ Each validation check receives a score from 0-3:
 
 **Exit Code**: 3
 
+### NIT
+
+**Definition**: Stylistic or pedantic issues that only matter under strict quality review.
+
+**Causes**:
+- Inconsistent formatting or whitespace
+- Non-preferred naming conventions
+- Stylistic deviations from best practices
+
+**Action**: Fix when running in --strict mode. Ignored in normal mode.
+
+**Exit Code**: 4 (--strict mode only, otherwise 0)
+
+### WARNING
+
+**Definition**: Non-blocking advisory notices that highlight potential concerns.
+
+**Causes**:
+- Deprecated patterns still functional
+- Approaching threshold limits (e.g., line count nearing budget)
+- Compatibility notes for future spec changes
+
+**Action**: Review recommended. WARNING never blocks validation.
+
+**Exit Code**: 0 (never blocks)
+
 ### INFO
 
 **Definition**: Suggestions and informational notes.
@@ -241,10 +267,13 @@ Grade: A
 
 | Code | Meaning | Grade Range |
 |------|---------|-------------|
-| **0** | All checks passed | A, B |
+| **0** | All checks passed (including WARNING) | A, B |
 | **1** | CRITICAL issues found | F |
 | **2** | MAJOR issues found | D, F |
 | **3** | MINOR issues found | C |
+| **4** | NIT issues found (--strict mode only) | B, C |
+
+> **Note**: WARNING severity never produces a non-zero exit code. WARNING results always map to exit code 0.
 
 ### Exit Code Priority
 
@@ -252,7 +281,9 @@ If multiple severity levels are present:
 1. CRITICAL → Exit 1
 2. MAJOR → Exit 2
 3. MINOR → Exit 3
-4. All PASSED → Exit 0
+4. NIT → Exit 4 (--strict mode only; ignored in normal mode)
+5. WARNING → Exit 0 (never blocks)
+6. All PASSED → Exit 0
 
 ---
 
@@ -333,6 +364,6 @@ Details:
 |--------|--------|
 | **Criterion Scale** | 0 (missing) to 3 (excellent) |
 | **Letter Grades** | A (90+), B (80-89), C (70-79), D (60-69), F (<60) |
-| **Severities** | CRITICAL, MAJOR, MINOR, INFO, PASSED |
-| **Exit Codes** | 0 (pass), 1 (critical), 2 (major), 3 (minor) |
+| **Severities** | CRITICAL, MAJOR, MINOR, NIT, WARNING, INFO, PASSED |
+| **Exit Codes** | 0 (pass/warning), 1 (CRITICAL), 2 (MAJOR), 3 (MINOR), 4 (NIT, strict only) |
 | **Calculation** | Weighted average: CRIT=0, MAJ=1, MIN=2, PASS=3 |

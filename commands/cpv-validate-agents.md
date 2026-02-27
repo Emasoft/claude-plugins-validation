@@ -56,6 +56,7 @@ If no exact match is found, fuzzy matching is used (e.g., `plugn-validator` → 
 
 | Option | Description |
 |--------|-------------|
+| `--strict` | Treat NIT issues as blocking (exit 4) |
 | `--verbose` | Show all checks including passed |
 | `--json` | Output results as JSON |
 
@@ -158,6 +159,8 @@ Summary:
   CRITICAL: 0
   MAJOR:    0
   MINOR:    2
+  NIT:      0
+  WARNING:  0
 
 Details:
   [MINOR] Description lacks "use when" phrase
@@ -175,6 +178,17 @@ Details:
 | 1 | CRITICAL issues (agent will not work) |
 | 2 | MAJOR issues (significant problems) |
 | 3 | MINOR issues (may affect UX) |
+| 4 | NIT issues found (only in --strict mode) |
+
+## Severity Levels
+
+| Severity | Behavior |
+|----------|----------|
+| CRITICAL | Always blocks (exit 1) |
+| MAJOR | Always blocks (exit 2) |
+| MINOR | Always blocks (exit 3) |
+| NIT | Blocks only in `--strict` mode (exit 4) |
+| WARNING | Never blocks, always reported (security advisories, best practices) |
 
 ## Execution
 

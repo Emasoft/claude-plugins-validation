@@ -24,10 +24,11 @@ Flags:
                         Example: --skip-platform-checks (skips all)
 
 Exit codes:
-    0 - All checks passed (or only INFO/PASSED)
+    0 - All checks passed (or only INFO/PASSED/WARNING/NIT)
     1 - CRITICAL issues found
     2 - MAJOR issues found
     3 - MINOR issues found
+    4 - NIT issues found (--strict mode only)
 """
 
 from __future__ import annotations
@@ -38,89 +39,17 @@ import os
 import re
 import subprocess
 import sys
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 import yaml
 from validate_hook import validate_hooks as validate_hook_file
 from validate_mcp import validate_plugin_mcp
+from validate_rules import validate_rules_directory
 
-# Import comprehensive skill validator (84+ rules from AgentSkills OpenSpec, Nixtla, Meta-Skills)
+# Import comprehensive skill validator (190+ rules from AgentSkills OpenSpec, Nixtla, Meta-Skills)
 from validate_skill_comprehensive import validate_skill as validate_skill_comprehensive
-from validation_common import resolve_tool_command
-
-# Validation result levels
-Level = Literal["CRITICAL", "MAJOR", "MINOR", "INFO", "PASSED"]
-
-
-@dataclass
-class ValidationResult:
-    """Single validation result."""
-
-    level: Level
-    message: str
-    file: str | None = None
-    line: int | None = None
-
-
-@dataclass
-class ValidationReport:
-    """Complete validation report."""
-
-    results: list[ValidationResult] = field(default_factory=list)
-
-    def add(
-        self,
-        level: Level,
-        message: str,
-        file: str | None = None,
-        line: int | None = None,
-    ) -> None:
-        """Add a validation result."""
-        self.results.append(ValidationResult(level, message, file, line))
-
-    def passed(self, message: str, file: str | None = None) -> None:
-        """Add a passed check."""
-        self.add("PASSED", message, file)
-
-    def info(self, message: str, file: str | None = None) -> None:
-        """Add an info message."""
-        self.add("INFO", message, file)
-
-    def minor(self, message: str, file: str | None = None, line: int | None = None) -> None:
-        """Add a minor issue."""
-        self.add("MINOR", message, file, line)
-
-    def major(self, message: str, file: str | None = None, line: int | None = None) -> None:
-        """Add a major issue."""
-        self.add("MAJOR", message, file, line)
-
-    def critical(self, message: str, file: str | None = None, line: int | None = None) -> None:
-        """Add a critical issue."""
-        self.add("CRITICAL", message, file, line)
-
-    @property
-    def has_critical(self) -> bool:
-        return any(r.level == "CRITICAL" for r in self.results)
-
-    @property
-    def has_major(self) -> bool:
-        return any(r.level == "MAJOR" for r in self.results)
-
-    @property
-    def has_minor(self) -> bool:
-        return any(r.level == "MINOR" for r in self.results)
-
-    @property
-    def exit_code(self) -> int:
-        if self.has_critical:
-            return 1
-        if self.has_major:
-            return 2
-        if self.has_minor:
-            return 3
-        return 0
+from validation_common import ValidationReport, resolve_tool_command
 
 
 def validate_manifest(
@@ -207,7 +136,8 @@ def validate_manifest(
                 ".claude-plugin/plugin.json",
             )
 
-    # Check for unknown fields — Claude Code rejects unrecognized keys
+    # Check for unknown fields — warn but don't block, as custom fields
+    # may be consumed by plugin scripts or external tooling
     known_fields = {
         "name",
         "version",
@@ -227,9 +157,9 @@ def validate_manifest(
     }
     for key in manifest.keys():
         if key not in known_fields:
-            report.major(
-                f"Unrecognized manifest field '{key}' — Claude Code rejects unknown keys "
-                f"and plugin installation will fail. Remove this field.",
+            report.warning(
+                f"Unknown manifest field '{key}' — not part of the Claude Code plugin spec. "
+                f"If used by plugin scripts, consider documenting it.",
                 ".claude-plugin/plugin.json",
             )
 
@@ -243,6 +173,50 @@ def validate_manifest(
                 f'Claude Code rejects object format like {{"type":"git","url":"..."}}.',
                 ".claude-plugin/plugin.json",
             )
+
+    # Validate author field structure
+    if "author" in manifest:
+        author = manifest["author"]
+        if isinstance(author, str):
+            report.passed("Author is a string (acceptable)", ".claude-plugin/plugin.json")
+        elif isinstance(author, dict):
+            if "name" not in author:
+                report.major(
+                    "'author' object missing required 'name' field",
+                    ".claude-plugin/plugin.json",
+                )
+            elif not isinstance(author["name"], str):
+                report.major(
+                    "'author.name' must be a string",
+                    ".claude-plugin/plugin.json",
+                )
+            else:
+                report.passed("Author object has valid 'name' field", ".claude-plugin/plugin.json")
+        else:
+            report.major(
+                f"'author' must be a string or object, got {type(author).__name__}",
+                ".claude-plugin/plugin.json",
+            )
+
+    # Validate keywords field
+    if "keywords" in manifest:
+        kw = manifest["keywords"]
+        if not isinstance(kw, list):
+            report.major("'keywords' must be an array", ".claude-plugin/plugin.json")
+        elif not all(isinstance(k, str) for k in kw):
+            report.major("'keywords' must contain only strings", ".claude-plugin/plugin.json")
+        else:
+            report.passed(f"Keywords: {len(kw)} keyword(s)", ".claude-plugin/plugin.json")
+
+    # Validate homepage and license field types
+    for string_field in ("homepage", "license"):
+        if string_field in manifest:
+            val = manifest[string_field]
+            if not isinstance(val, str):
+                report.major(
+                    f"'{string_field}' must be a string, got {type(val).__name__}",
+                    ".claude-plugin/plugin.json",
+                )
 
     # Validate component path fields start with ./
     path_fields = [
@@ -269,6 +243,18 @@ def validate_manifest(
                             f"Field '{key}[{i}]' path must start with './': {path}",
                             ".claude-plugin/plugin.json",
                         )
+            elif isinstance(value, dict):
+                # Inline configuration object - valid for hooks, mcpServers, lspServers
+                if key in ("hooks", "mcpServers", "lspServers"):
+                    report.passed(
+                        f"Field '{key}' uses inline configuration object",
+                        ".claude-plugin/plugin.json",
+                    )
+                else:
+                    report.major(
+                        f"Field '{key}' must be a string path or array, not an object",
+                        ".claude-plugin/plugin.json",
+                    )
 
     # Check for duplicate hooks.json - the standard hooks/hooks.json is auto-loaded
     # so specifying it in manifest.hooks causes a duplicate load error
@@ -331,6 +317,50 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
                 report.info(f"Optional directory {d}/ not found")
             else:
                 report.minor(f"Directory {d}/ not found")
+
+    # Check for non-standard directories — warn but don't block, since users
+    # may add folders like libs/, modules/, resources/ needed by scripts
+    known_dirs = {
+        ".claude-plugin",
+        ".git",
+        ".github",
+        ".gitignore",
+        "commands",
+        "agents",
+        "skills",
+        "hooks",
+        "scripts",
+        "docs",
+        "rules",
+        "schemas",
+        "bin",
+        "templates",
+        "tests",
+        # Common non-standard but legitimate dirs
+        "lib",
+        "libs",
+        "modules",
+        "resources",
+        "assets",
+        "data",
+        "config",
+        "configs",
+        "examples",
+        "samples",
+        "references",
+    }
+    # Also skip hidden dirs and _dev dirs
+    for item in plugin_root.iterdir():
+        if not item.is_dir():
+            continue
+        dirname = item.name
+        if dirname.startswith(".") or dirname.endswith("_dev"):
+            continue
+        if dirname.lower() not in known_dirs:
+            report.warning(
+                f"Non-standard directory '{dirname}/' — not part of the plugin spec. "
+                f"If needed by plugin scripts, consider documenting its purpose in README."
+            )
 
 
 def validate_commands(plugin_root: Path, report: ValidationReport) -> None:
@@ -519,9 +549,27 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
             if result.returncode == 0:
                 report.passed(f"Ruff check passed for {len(py_files)} Python files")
             else:
-                for line in result.stdout.strip().split("\n"):
-                    if line:
-                        report.major(f"Ruff: {line}")
+                # Aggregate ruff errors per-file to avoid inflating MAJOR count
+                # Ruff output format: "path/to/file.py:line:col: CODE message"
+                errors_by_file: dict[str, int] = {}
+                for ruff_line in result.stdout.strip().split("\n"):
+                    if ruff_line and ":" in ruff_line:
+                        # Extract file path (first colon-separated field)
+                        file_part = ruff_line.split(":")[0].strip()
+                        if file_part:
+                            errors_by_file[file_part] = errors_by_file.get(file_part, 0) + 1
+                total_errors = sum(errors_by_file.values())
+                for file_path_str, count in sorted(errors_by_file.items()):
+                    # Report ONE MAJOR per file, with total error count for that file
+                    rel = file_path_str
+                    try:
+                        rel = str(Path(file_path_str).relative_to(plugin_root))
+                    except ValueError:
+                        pass
+                    report.major(f"Ruff: {count} error(s) in {rel}", rel)
+                if not errors_by_file and result.stdout.strip():
+                    # Fallback: ruff output did not match expected format
+                    report.major(f"Ruff: {total_errors} error(s) across script files")
         else:
             report.minor("ruff not available locally or via uvx, skipping Python lint check")
 
@@ -577,6 +625,249 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
             report.minor("shellcheck not available locally or via bunx/npx, skipping shell lint")
 
 
+# =============================================================================
+# Cross-Platform Compatibility Validation
+# =============================================================================
+
+# Script extensions and their platform availability
+# Each entry: extension -> (language_name, available_platforms, notes)
+SCRIPT_PLATFORM_MAP: dict[str, tuple[str, set[str], str]] = {
+    ".sh": ("Bash/Shell", {"macos", "linux"}, "Not natively available on Windows"),
+    ".bash": ("Bash", {"macos", "linux"}, "Not natively available on Windows"),
+    ".zsh": ("Zsh", {"macos"}, "Not standard on Linux or Windows"),
+    ".fish": ("Fish shell", set(), "Requires separate installation on all platforms"),
+    ".ps1": ("PowerShell", {"windows"}, "Requires pwsh installation on macOS/Linux"),
+    ".bat": ("Windows Batch", {"windows"}, "Not available on macOS or Linux"),
+    ".cmd": ("Windows Batch", {"windows"}, "Not available on macOS or Linux"),
+    ".nix": ("Nix", {"linux"}, "Not standard on macOS or Windows"),
+}
+
+# Cross-platform script languages (available everywhere with standard install)
+CROSSPLATFORM_EXTENSIONS = {
+    ".py",  # Python — widely available
+    ".js",  # Node.js — widely available
+    ".ts",  # TypeScript (via tsx/ts-node) — widely available
+    ".mjs",  # ES module JavaScript
+    ".cjs",  # CommonJS JavaScript
+    ".rb",  # Ruby — often pre-installed on macOS
+}
+
+# Compiled binary extensions by platform
+BINARY_PLATFORM_SUFFIXES: dict[str, str] = {
+    # macOS
+    "-darwin-arm64": "macOS ARM64 (Apple Silicon)",
+    "-darwin-amd64": "macOS x86_64 (Intel)",
+    "-darwin-x86_64": "macOS x86_64 (Intel)",
+    "-darwin-universal": "macOS Universal",
+    "-macos-arm64": "macOS ARM64 (Apple Silicon)",
+    "-macos-amd64": "macOS x86_64 (Intel)",
+    "-macos-x86_64": "macOS x86_64 (Intel)",
+    # Linux
+    "-linux-arm64": "Linux ARM64",
+    "-linux-amd64": "Linux x86_64",
+    "-linux-x86_64": "Linux x86_64",
+    # Windows
+    "-windows-arm64.exe": "Windows ARM64",
+    "-windows-amd64.exe": "Windows x86_64",
+    "-windows-x86_64.exe": "Windows x86_64",
+}
+
+# Minimum recommended platform set for compiled binaries
+RECOMMENDED_PLATFORMS = {
+    "macOS ARM64 (Apple Silicon)",
+    "macOS x86_64 (Intel)",
+    "Linux x86_64",
+}
+
+
+def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None:
+    """Validate cross-platform compatibility of plugin scripts and binaries.
+
+    Checks:
+    1. Scripts using platform-specific languages get warnings
+    2. Compiled source code without binaries or build script = MAJOR error
+    3. Compiled binaries should cover all major platforms
+    """
+    # Collect all files across the entire plugin tree
+    platform_specific_scripts: dict[str, list[str]] = {}  # ext -> [relative paths]
+    compiled_source_files: dict[str, list[str]] = {}  # lang -> [relative paths]
+    all_files: list[str] = []
+
+    # Compiled language source extensions and their build system markers
+    compiled_languages: dict[str, tuple[str, list[str]]] = {
+        ".rs": ("Rust", ["Cargo.toml", "Cargo.lock"]),
+        ".go": ("Go", ["go.mod", "go.sum"]),
+        ".c": ("C", ["Makefile", "CMakeLists.txt", "meson.build"]),
+        ".cpp": ("C++", ["Makefile", "CMakeLists.txt", "meson.build"]),
+        ".cc": ("C++", ["Makefile", "CMakeLists.txt", "meson.build"]),
+        ".cxx": ("C++", ["Makefile", "CMakeLists.txt", "meson.build"]),
+        ".swift": ("Swift", ["Package.swift"]),
+        ".zig": ("Zig", ["build.zig"]),
+    }
+
+    skip_dirs = {
+        "__pycache__",
+        "node_modules",
+        ".venv",
+        "venv",
+        "dist",
+        "build",
+        "target",
+        ".eggs",
+    }
+
+    for dirpath, dirnames, filenames in os.walk(plugin_root):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in skip_dirs]
+        rel_dir = Path(dirpath).relative_to(plugin_root)
+
+        for filename in filenames:
+            ext = Path(filename).suffix.lower()
+            rel_path = str(rel_dir / filename) if str(rel_dir) != "." else filename
+            all_files.append(rel_path)
+
+            if ext in SCRIPT_PLATFORM_MAP:
+                platform_specific_scripts.setdefault(ext, []).append(rel_path)
+
+            if ext in compiled_languages:
+                lang_name = compiled_languages[ext][0]
+                compiled_source_files.setdefault(lang_name, []).append(rel_path)
+
+    # --- 1. Report platform-specific interpreted scripts ---
+    if platform_specific_scripts:
+        for ext, paths in platform_specific_scripts.items():
+            lang_name, platforms, note = SCRIPT_PLATFORM_MAP[ext]
+            if platforms:
+                platforms_str = ", ".join(sorted(platforms))
+                report.warning(
+                    f"Found {len(paths)} {lang_name} script(s) ({ext}) — "
+                    f"only natively available on {platforms_str}. {note}. "
+                    f"Consider providing cross-platform alternatives or documenting requirements.",
+                )
+            else:
+                report.warning(
+                    f"Found {len(paths)} {lang_name} script(s) ({ext}) — {note}. "
+                    f"Consider providing cross-platform alternatives.",
+                )
+    else:
+        has_scripts = any(
+            any(f.endswith(ext) for ext in CROSSPLATFORM_EXTENSIONS)
+            for _, _, files in os.walk(plugin_root)
+            for f in files
+        )
+        if has_scripts:
+            report.passed("All scripts use cross-platform languages")
+
+    # --- 2. Check compiled source code has binaries or build script ---
+    if compiled_source_files:
+        bin_dir = plugin_root / "bin"
+        has_bin = bin_dir.is_dir() and any(bin_dir.iterdir())
+
+        for lang_name, source_paths in compiled_source_files.items():
+            # Find expected build system files for this language
+            expected_build_files: set[str] = set()
+            for ext, (ln, build_markers) in compiled_languages.items():
+                if ln == lang_name:
+                    expected_build_files.update(build_markers)
+
+            # Check if build system files exist at plugin root
+            has_build_system = any((plugin_root / bf).exists() for bf in expected_build_files)
+
+            # Check for a generic build/install script
+            has_build_script = any(
+                (plugin_root / s).exists()
+                for s in [
+                    "build.sh",
+                    "install.sh",
+                    "setup.sh",
+                    "compile.sh",
+                    "build.py",
+                    "install.py",
+                    "setup.py",
+                    "Makefile",
+                    "justfile",
+                    "Taskfile.yml",
+                ]
+            )
+
+            if has_bin:
+                report.info(f"Found {len(source_paths)} {lang_name} source file(s) with compiled binaries in bin/")
+            elif has_build_system or has_build_script:
+                report.warning(
+                    f"Found {len(source_paths)} {lang_name} source file(s) "
+                    f"with build system but no pre-compiled binaries in bin/. "
+                    f"Users will need to compile before use."
+                )
+            else:
+                report.major(
+                    f"Found {len(source_paths)} {lang_name} source file(s) "
+                    f"but no compiled binaries in bin/ and no build script "
+                    f"(build.sh, install.sh, Makefile, etc.). "
+                    f"Provide pre-compiled binaries or a build/install script."
+                )
+
+    # --- 3. Check compiled binaries platform coverage ---
+    bin_dir = plugin_root / "bin"
+    if not bin_dir.is_dir():
+        return
+
+    binary_files: list[str] = []
+    detected_platforms: set[str] = set()
+    base_names: set[str] = set()
+
+    for item in bin_dir.rglob("*"):
+        if not item.is_file():
+            continue
+        name = item.name
+        rel_path = str(item.relative_to(plugin_root))
+
+        for suffix, platform_name in BINARY_PLATFORM_SUFFIXES.items():
+            if suffix in name.lower():
+                binary_files.append(rel_path)
+                detected_platforms.add(platform_name)
+                base = name[: name.lower().index(suffix.split("-")[0] + "-")]
+                if base.endswith("-"):
+                    base = base[:-1]
+                base_names.add(base)
+                break
+        else:
+            if not item.suffix and os.access(item, os.X_OK):
+                binary_files.append(rel_path)
+                base_names.add(name)
+            elif item.suffix == ".exe":
+                binary_files.append(rel_path)
+                detected_platforms.add("Windows")
+                base_names.add(item.stem)
+            elif item.suffix in {".dylib", ".so"}:
+                binary_files.append(rel_path)
+                if item.suffix == ".dylib":
+                    detected_platforms.add("macOS")
+                else:
+                    detected_platforms.add("Linux")
+
+    if not binary_files:
+        return
+
+    report.info(f"Found {len(binary_files)} compiled binary file(s) in bin/ for {len(base_names)} tool(s)")
+
+    if detected_platforms:
+        missing = RECOMMENDED_PLATFORMS - detected_platforms
+        if missing:
+            missing_str = ", ".join(sorted(missing))
+            report.warning(
+                f"Compiled binaries missing for: {missing_str}. "
+                f"Detected platforms: {', '.join(sorted(detected_platforms))}. "
+                f"Consider providing binaries for all major platforms."
+            )
+        else:
+            report.passed(f"Compiled binaries cover recommended platforms: {', '.join(sorted(detected_platforms))}")
+    else:
+        report.warning(
+            f"Found {len(binary_files)} binary file(s) without platform identifiers "
+            f"in filename. Use naming convention like 'tool-darwin-arm64', "
+            f"'tool-linux-amd64', 'tool-windows-amd64.exe' for multi-platform support."
+        )
+
+
 def validate_skills(plugin_root: Path, report: ValidationReport, skip_platform_checks: list[str] | None = None) -> None:
     """Validate all skills in the plugin's skills/ directory.
 
@@ -600,7 +891,7 @@ def validate_skills(plugin_root: Path, report: ValidationReport, skip_platform_c
 
     report.info(f"Found {len(skill_dirs)} skill(s) to validate")
 
-    # Validate each skill using comprehensive validator (84+ rules)
+    # Validate each skill using comprehensive validator (190+ rules)
     for skill_dir in sorted(skill_dirs):
         skill_name = skill_dir.name
         # Use comprehensive validator with all checks enabled
@@ -637,6 +928,26 @@ def validate_license(plugin_root: Path, report: ValidationReport) -> None:
     report.minor("No LICENSE file found")
 
 
+def validate_rules(plugin_root: Path, report: ValidationReport) -> None:
+    """Validate rule files in the plugin's rules/ directory.
+
+    Rules are plain markdown files loaded alongside CLAUDE.md into model context.
+    Checks: UTF-8 encoding, optional frontmatter (paths field), token budget.
+    """
+    rules_dir = plugin_root / "rules"
+
+    if not rules_dir.is_dir():
+        report.info("No rules/ directory found")
+        return
+
+    # Use the dedicated rules validator
+    rules_report = validate_rules_directory(rules_dir, plugin_root=plugin_root)
+
+    # Transfer results to main report
+    for result in rules_report.results:
+        report.add(result.level, result.message, result.file, result.line)
+
+
 def validate_no_local_paths(plugin_root: Path, report: ValidationReport) -> None:
     """Validate that plugin files don't contain hardcoded local or absolute paths.
 
@@ -666,6 +977,90 @@ def validate_no_local_paths(plugin_root: Path, report: ValidationReport) -> None
     # - ANY absolute paths that don't use env vars - MAJOR
     # We pass our local report since both have compatible interfaces
     validate_no_absolute_paths(plugin_root, report)  # type: ignore[arg-type]
+
+
+# =============================================================================
+# .gitignore Validation
+# =============================================================================
+
+# Patterns that a well-formed plugin .gitignore should include
+# Each tuple: (pattern_to_search_for, description, severity)
+# We check if the gitignore content covers these categories
+EXPECTED_GITIGNORE_CATEGORIES: list[tuple[list[str], str, str]] = [
+    # Cache/build artifacts
+    (["__pycache__", "*.pyc"], "Python cache files (__pycache__ or *.pyc)", "warning"),
+    (["node_modules"], "Node modules (node_modules/)", "warning"),
+    ([".mypy_cache", ".ruff_cache", ".pytest_cache"], "Linter/type checker caches", "warning"),
+    (["dist", "build", "*.egg-info"], "Build artifacts (dist/, build/, *.egg-info)", "warning"),
+    # Temp/editor files
+    ([".DS_Store", "Thumbs.db"], "OS metadata files (.DS_Store, Thumbs.db)", "warning"),
+    (["*.swp", "*.swo", "*~", ".idea", ".vscode"], "Editor temp files", "warning"),
+    # Environment/secrets
+    ([".env", "*.env"], "Environment files (.env)", "major"),
+    # Virtual environments
+    ([".venv", "venv"], "Virtual environment directories", "warning"),
+]
+
+
+def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
+    """Validate that the plugin has a .gitignore with essential patterns.
+
+    Checks that cache files, build artifacts, temp files, secrets,
+    and virtual environments are properly ignored.
+    """
+    gitignore_path = plugin_root / ".gitignore"
+
+    if not gitignore_path.exists():
+        report.major(
+            "No .gitignore file found — cache files, build artifacts, "
+            "and secrets may be accidentally included in the plugin"
+        )
+        return
+
+    try:
+        content = gitignore_path.read_text(encoding="utf-8")
+    except Exception as e:
+        report.minor(f"Could not read .gitignore: {e}")
+        return
+
+    # Strip comments and empty lines for pattern matching
+    lines = [line.strip() for line in content.splitlines() if line.strip() and not line.strip().startswith("#")]
+    missing_categories: list[tuple[str, str]] = []
+
+    for patterns, description, severity in EXPECTED_GITIGNORE_CATEGORIES:
+        # Check if ANY of the patterns in this category appear in the gitignore
+        found = any(any(p.lower() in line.lower() for line in lines) for p in patterns)
+        if not found:
+            missing_categories.append((description, severity))
+
+    if not missing_categories:
+        report.passed(".gitignore covers all expected categories")
+    else:
+        for description, severity in missing_categories:
+            getattr(report, severity)(f".gitignore missing coverage for: {description}")
+
+    # Check for common anti-patterns in .gitignore
+    # Ignoring the entire plugin source is almost certainly wrong
+    if "*.py" in lines or "*.js" in lines or "*.ts" in lines:
+        report.major(
+            ".gitignore ignores all source files (*.py, *.js, or *.ts) — "
+            "this will exclude plugin code from distribution"
+        )
+
+    # Check that non-plugin artifacts that may exist are ignored
+    # Look for actual artifacts in the tree that should be gitignored
+    artifact_patterns = {
+        "*.pyc": "Compiled Python files",
+        ".DS_Store": "macOS metadata",
+        "Thumbs.db": "Windows metadata",
+    }
+    for pattern_glob, desc in artifact_patterns.items():
+        matches = list(plugin_root.rglob(pattern_glob))
+        if matches:
+            # Check if they're gitignored
+            sample = matches[0].relative_to(plugin_root)
+            if not any(pattern_glob.replace("*", "") in line for line in lines):
+                report.warning(f"Found {len(matches)} {desc} file(s) (e.g. {sample}) that may not be gitignored")
 
 
 # Regex to find inline Python blocks inside YAML: `python3 -c "..."`  or `python -c "..."`
@@ -740,12 +1135,14 @@ def print_results(report: ValidationReport, verbose: bool = False) -> None:
         "CRITICAL": "\033[91m",
         "MAJOR": "\033[93m",
         "MINOR": "\033[94m",
+        "NIT": "\033[96m",
+        "WARNING": "\033[95m",
         "INFO": "\033[90m",
         "PASSED": "\033[92m",
         "RESET": "\033[0m",
     }
 
-    counts = {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "INFO": 0, "PASSED": 0}
+    counts = {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0, "INFO": 0, "PASSED": 0}
     for r in report.results:
         counts[r.level] += 1
 
@@ -757,6 +1154,8 @@ def print_results(report: ValidationReport, verbose: bool = False) -> None:
     print(f"  {colors['CRITICAL']}CRITICAL: {counts['CRITICAL']}{colors['RESET']}")
     print(f"  {colors['MAJOR']}MAJOR:    {counts['MAJOR']}{colors['RESET']}")
     print(f"  {colors['MINOR']}MINOR:    {counts['MINOR']}{colors['RESET']}")
+    print(f"  {colors['NIT']}NIT:      {counts['NIT']}{colors['RESET']}")
+    print(f"  {colors['WARNING']}WARNING:  {counts['WARNING']}{colors['RESET']}")
     if verbose:
         print(f"  {colors['INFO']}INFO:     {counts['INFO']}{colors['RESET']}")
         print(f"  {colors['PASSED']}PASSED:   {counts['PASSED']}{colors['RESET']}")
@@ -795,6 +1194,8 @@ def print_json(report: ValidationReport) -> None:
             "critical": sum(1 for r in report.results if r.level == "CRITICAL"),
             "major": sum(1 for r in report.results if r.level == "MAJOR"),
             "minor": sum(1 for r in report.results if r.level == "MINOR"),
+            "nit": sum(1 for r in report.results if r.level == "NIT"),
+            "warning": sum(1 for r in report.results if r.level == "WARNING"),
             "info": sum(1 for r in report.results if r.level == "INFO"),
             "passed": sum(1 for r in report.results if r.level == "PASSED"),
         },
@@ -825,6 +1226,7 @@ def main() -> int:
         help="Skip platform-specific checks (e.g., --skip-platform-checks windows). "
         "Valid platforms: windows, macos, linux. Use without args to skip all.",
     )
+    parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
     parser.add_argument("path", nargs="?", help="Plugin root path (default: parent of scripts/)")
     args = parser.parse_args()
 
@@ -851,9 +1253,12 @@ def main() -> int:
     validate_mcp(plugin_root, report)
     validate_scripts(plugin_root, report)
     validate_skills(plugin_root, report, skip_platform_checks)
+    validate_rules(plugin_root, report)
     validate_readme(plugin_root, report)
     validate_license(plugin_root, report)
     validate_no_local_paths(plugin_root, report)
+    validate_gitignore(plugin_root, report)
+    validate_cross_platform(plugin_root, report)
     validate_workflow_inline_python(plugin_root, report)
 
     # Output
@@ -862,6 +1267,8 @@ def main() -> int:
     else:
         print_results(report, args.verbose)
 
+    if args.strict:
+        return report.exit_code_strict()
     return report.exit_code
 
 

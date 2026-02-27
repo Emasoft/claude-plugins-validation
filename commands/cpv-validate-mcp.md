@@ -57,6 +57,7 @@ If no exact match is found, fuzzy matching is used (e.g., `valdiate-mcp` → `va
 
 | Option | Description |
 |--------|-------------|
+| `--strict` | Treat NIT issues as blocking (exit 4) |
 | `--verbose` | Show all checks including passed |
 | `--json` | Output results as JSON |
 
@@ -143,6 +144,8 @@ Summary:
   CRITICAL: 0
   MAJOR:    1
   MINOR:    1
+  NIT:      0
+  WARNING:  0
 
 Details:
   [MAJOR] Server 'my-server' has hardcoded credential in headers[Authorization] - use environment variables
@@ -207,6 +210,17 @@ Details:
 | 1 | CRITICAL issues (MCP will not work) |
 | 2 | MAJOR issues (significant problems) |
 | 3 | MINOR issues (may affect behavior) |
+| 4 | NIT issues found (only in --strict mode) |
+
+## Severity Levels
+
+| Severity | Behavior |
+|----------|----------|
+| CRITICAL | Always blocks (exit 1) |
+| MAJOR | Always blocks (exit 2) |
+| MINOR | Always blocks (exit 3) |
+| NIT | Blocks only in `--strict` mode (exit 4) |
+| WARNING | Never blocks, always reported (security advisories, best practices) |
 
 ## Execution
 

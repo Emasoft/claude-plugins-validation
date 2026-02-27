@@ -10,9 +10,11 @@ Master checklist for validating all Claude Code plugin components. Use this chec
 - [4. Skill Validation Checklist](#4-skill-validation-checklist)
 - [5. MCP Server Checklist](#5-mcp-server-checklist)
 - [6. Marketplace Checklist](#6-marketplace-checklist)
-- [7. Script and Code Quality Checklist](#7-script-and-code-quality-checklist)
-- [8. Pre-Release Final Checklist](#8-pre-release-final-checklist)
-- [9. Validation Commands](#9-validation-commands)
+- [7. Agent Checklist](#7-agent-checklist)
+- [8. LSP Server Checklist](#8-lsp-server-checklist)
+- [9. Script and Code Quality Checklist](#9-script-and-code-quality-checklist)
+- [10. Pre-Release Final Checklist](#10-pre-release-final-checklist)
+- [11. Validation Commands](#11-validation-commands)
 
 ---
 
@@ -33,6 +35,11 @@ Master checklist for validating all Claude Code plugin components. Use this chec
 - [ ] `repository` is valid URL
 - [ ] `license` is valid SPDX identifier
 - [ ] `keywords` is array of strings
+- [ ] `author` field (if present) is a string or object with required "name"
+- [ ] `keywords` field (if present) is an array of strings
+- [ ] `homepage` field (if present) is a non-empty string
+- [ ] `license` field (if present) is a non-empty string
+- [ ] Inline `hooks`, `mcpServers`, `lspServers` objects (if present) have valid config
 
 ### Manifest Rules
 
@@ -88,7 +95,7 @@ jq . .claude-plugin/plugin.json && echo "✓ Valid JSON"
 
 ### Event Types
 
-Only these 13 event types are valid:
+Only these 18 event types are valid:
 
 - [ ] `PreToolUse` (supports matcher)
 - [ ] `PostToolUse` (supports matcher)
@@ -103,6 +110,12 @@ Only these 13 event types are valid:
 - [ ] `SessionEnd` (NO matcher)
 - [ ] `PreCompact` (supports matcher)
 - [ ] `Setup` (supports matcher)
+- [ ] `TeammateIdle` (NO matcher)
+- [ ] `TaskCompleted` (NO matcher)
+- [ ] `ConfigChange` (NO matcher)
+- [ ] `WorktreeCreate` (NO matcher)
+- [ ] `WorktreeRemove` (NO matcher)
+- [ ] All events are from the valid set of 18 events (including TeammateIdle, TaskCompleted, ConfigChange, WorktreeCreate, WorktreeRemove)
 
 ### Matcher Configuration
 
@@ -117,6 +130,13 @@ Only these 13 event types are valid:
 - [ ] Command paths use `${CLAUDE_PLUGIN_ROOT}`
 - [ ] Prompt hooks have `prompt` field
 - [ ] Optional `timeout` is reasonable (default: 60)
+- [ ] Hook type is "command", "prompt", or "agent" (agent is new)
+- [ ] COMMAND_ONLY_EVENTS (Setup, PreCompact, Notification) use type "command" only
+- [ ] Timeout values are in seconds (not milliseconds) — warn if >1000
+- [ ] Command hooks: "statusMessage" field (if present) is a string
+- [ ] Prompt/Agent hooks: "model" field (if present) is a non-empty string
+- [ ] Agent hooks have required "prompt" field
+- [ ] Async field only present on command hooks
 
 ### Hook Scripts
 
@@ -223,6 +243,9 @@ skills-ref validate /path/to/skill
 - [ ] `type` field is `"sse"`
 - [ ] `url` field present (required for sse)
 - [ ] Consider migrating to http transport
+- [ ] Transport type is "stdio", "http", or "sse" (sse shows deprecation warning)
+- [ ] OAuth config (if present) has required "serverUrl" field
+- [ ] Timeout (if present) is a positive number in seconds
 
 ### Environment Variables
 
@@ -259,6 +282,11 @@ uv run python scripts/validate_mcp.py /path/to/plugin
 - [ ] Name is kebab-case
 - [ ] `version` follows semver (if present)
 - [ ] `description` explains the marketplace (if present)
+- [ ] "owner" field present with required "name" sub-field
+- [ ] Each plugin has a "source" field (now required)
+- [ ] "pip" source type (if used) has "package" field
+- [ ] Marketplace name is not reserved (official, anthropic, claude, test, example, demo)
+- [ ] SHA/commit values are 40 hex characters
 
 ### Plugin Entries
 
@@ -340,7 +368,30 @@ uv run python scripts/validate_marketplace.py /path/to/marketplace --verbose
 
 ---
 
-## 7. Script and Code Quality Checklist
+## 7. Agent Checklist
+
+### Agent Frontmatter
+
+- [ ] Agent frontmatter has valid `allowedTools` (from expanded valid tools list)
+- [ ] `maxTurns` (if present) is a positive integer
+- [ ] `memory` (if present) has valid scope: user, project, or local
+- [ ] `isolation` (if present) is "worktree"
+- [ ] `background` (if present) is boolean
+
+---
+
+## 8. LSP Server Checklist
+
+### LSP Configuration
+
+- [ ] `extensionToLanguage` mapping present (critical field)
+- [ ] Transport (if present) is "stdio" or "pipe"
+- [ ] Numeric fields (startupTimeout, shutdownTimeout, maxRestarts) are numbers
+- [ ] `restartOnCrash` (if present) is boolean
+
+---
+
+## 9. Script and Code Quality Checklist
 
 ### Python Scripts
 
@@ -375,7 +426,7 @@ chmod +x scripts/*.sh
 
 ---
 
-## 8. Pre-Release Final Checklist
+## 10. Pre-Release Final Checklist
 
 ### Documentation
 
@@ -409,7 +460,7 @@ uv run python scripts/validate_plugin.py /path/to/plugin --verbose
 
 ---
 
-## 9. Validation Commands
+## 11. Validation Commands
 
 ### Quick Reference
 

@@ -7,6 +7,7 @@ Complete reference for MCP (Model Context Protocol) server configuration in Clau
 - [1. MCP Configuration Locations](#1-mcp-configuration-locations)
 - [2. Server Definition Fields](#2-server-definition-fields)
 - [3. Transport Types](#3-transport-types)
+- [3a. OAuth Support](#3a-oauth-support)
 - [4. Environment Variables](#4-environment-variables)
 - [5. Path Handling](#5-path-handling)
 - [6. Complete Configuration Examples](#6-complete-configuration-examples)
@@ -82,10 +83,13 @@ Point to external MCP config file:
 | args | array | No | Command-line arguments |
 | env | object | No | Environment variables for server |
 | cwd | string | No | Working directory |
-| type | string | No | Transport type (default: "stdio") |
-| url | string | Yes (http/sse) | Server URL for HTTP transport |
+| transport | string | No | Transport type (default: "stdio"); valid values: "stdio", "http", "sse" |
+| url | string | Yes (http/sse) | Server URL for HTTP/SSE transport |
+| oauth | object | No | OAuth configuration (see OAuth Support section) |
 | headers | object | No | HTTP headers for authentication |
-| timeout | number | No | Connection timeout in seconds |
+| timeout | number | No | Connection timeout in seconds (must be positive; values >1000 suggest ms confusion — Claude Code uses seconds) |
+
+> **Note:** The field was historically named `type` in some early examples. The canonical field name is `transport`.
 
 ### Minimal stdio Server
 
@@ -125,7 +129,7 @@ Point to external MCP config file:
 {
   "mcpServers": {
     "remote-server": {
-      "type": "http",
+      "transport": "http",
       "url": "https://api.example.com/mcp",
       "headers": {
         "Authorization": "Bearer ${API_TOKEN}"
@@ -139,9 +143,9 @@ Point to external MCP config file:
 
 ## 3. Transport Types
 
-### stdio (Default)
+### stdio (Recommended, Most Common)
 
-Standard input/output communication with local process.
+Standard input/output communication with a local process. This is the default when `transport` is omitted.
 
 | Required | Optional |
 |----------|----------|
@@ -156,18 +160,18 @@ Standard input/output communication with local process.
 }
 ```
 
-### http
+### http (Preferred for Remote Servers)
 
-HTTP protocol for remote servers.
+Streamable HTTP transport (also referred to as "streamable-http") for remote servers. This is the preferred transport for any server not running as a local subprocess.
 
 | Required | Optional |
 |----------|----------|
-| url | headers, timeout |
+| url | headers, oauth, timeout |
 
 ```json
 {
   "remote-server": {
-    "type": "http",
+    "transport": "http",
     "url": "https://api.example.com/mcp",
     "headers": {
       "X-API-Key": "${API_KEY}"
@@ -176,26 +180,65 @@ HTTP protocol for remote servers.
 }
 ```
 
-### sse (Server-Sent Events)
+### sse (Server-Sent Events) — DEPRECATED
 
-**DEPRECATED** - Use http instead.
+**DEPRECATED** — `sse` transport still works but Claude Code will emit a deprecation warning recommending migration to `"http"` (streamable-http). New plugins must not use `sse`; existing plugins should migrate.
 
 ```json
 {
   "legacy-server": {
-    "type": "sse",
+    "transport": "sse",
     "url": "https://api.example.com/sse"
   }
 }
 ```
 
+> **Warning:** Using `"transport": "sse"` triggers: _"SSE transport is deprecated. Please migrate to streamable HTTP transport."_
+
 ### Transport Selection
 
-| Use Case | Transport |
-|----------|-----------|
-| Local executable | stdio |
-| Remote API | http |
-| Legacy systems | sse (deprecated) |
+| Use Case | Recommended Transport |
+|----------|-----------------------|
+| Local executable | `stdio` (default) |
+| Remote API / hosted server | `http` (streamable-http) |
+| Legacy systems (pre-existing only) | `sse` (deprecated — migrate to `http`) |
+
+---
+
+## 3a. OAuth Support
+
+The `oauth` field configures OAuth 2.0 authentication for remote (`http` or `sse`) servers. It is an object with the following fields:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| serverUrl | string | **Yes** | The OAuth authorization server URL |
+| clientId | string | No | The OAuth client ID |
+| scopes | array of strings | No | Requested OAuth scopes |
+
+### OAuth Example
+
+```json
+{
+  "mcpServers": {
+    "secure-api": {
+      "transport": "http",
+      "url": "https://api.example.com/mcp",
+      "oauth": {
+        "serverUrl": "https://auth.example.com",
+        "clientId": "my-client-id",
+        "scopes": ["read", "write"]
+      }
+    }
+  }
+}
+```
+
+### OAuth Validation Rules
+
+- `oauth` is only valid on `http` or `sse` transport servers (not `stdio`).
+- `serverUrl` is required when the `oauth` object is present.
+- `clientId` and `scopes` are optional but recommended for explicit auth flows.
+- `scopes` must be an array of strings (not a single string).
 
 ---
 
@@ -344,7 +387,7 @@ For npm-based MCP servers:
       "args": ["--config", "${CLAUDE_PLUGIN_ROOT}/config.json"]
     },
     "remote-api": {
-      "type": "http",
+      "transport": "http",
       "url": "https://api.example.com/mcp",
       "headers": {
         "Authorization": "Bearer ${API_TOKEN}"
@@ -466,7 +509,7 @@ For npm-based MCP servers:
 ```json
 {
   "remote-server": {
-    "type": "http",
+    "transport": "http",
     "headers": {"Authorization": "Bearer token"}
   }
 }
@@ -476,7 +519,7 @@ For npm-based MCP servers:
 ```json
 {
   "remote-server": {
-    "type": "http",
+    "transport": "http",
     "url": "https://api.example.com/mcp",
     "headers": {"Authorization": "Bearer token"}
   }
@@ -505,13 +548,16 @@ For npm-based MCP servers:
 - [ ] Each server has unique name
 - [ ] stdio servers have `command` field
 - [ ] http/sse servers have `url` field
+- [ ] `transport` field value is one of: `"stdio"`, `"http"`, `"sse"` (no other values)
 - [ ] All paths use `${CLAUDE_PLUGIN_ROOT}`
 - [ ] No absolute paths
 - [ ] Required env vars have defaults or are documented
 - [ ] Env var syntax is `${VAR}` or `${VAR:-default}`
 - [ ] Server executables exist and are executable
 - [ ] Server implements MCP protocol correctly
-- [ ] sse transport migrated to http if possible
+- [ ] sse transport migrated to http if possible (sse is deprecated)
+- [ ] If `oauth` is present: `serverUrl` field is set, `scopes` (if present) is an array of strings
+- [ ] If `timeout` is present: it is a positive number; values >1000 likely indicate ms confusion (Claude Code uses seconds)
 
 ### Validation Command
 

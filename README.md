@@ -48,6 +48,16 @@ cd /path/to/claude-plugins-validation
 uv run python scripts/validate_plugin.py /path/to/your-plugin --verbose
 ```
 
+### Strict Mode
+
+Use `--strict` to treat NIT-level issues as blocking (exit code 4):
+
+```bash
+uv run python scripts/validate_plugin.py /path/to/your-plugin --strict
+```
+
+In strict mode, nitpick issues that would normally be informational cause a non-zero exit code. This is useful for CI pipelines that enforce best practices.
+
 ### Validate Specific Components
 
 ```bash
@@ -83,9 +93,24 @@ All validation scripts return consistent exit codes:
 | Code | Meaning | Description |
 |------|---------|-------------|
 | 0 | Passed | All checks passed |
-| 1 | Critical | Plugin unusable - must fix |
-| 2 | Major | Some features may fail - should fix |
-| 3 | Minor | Warnings only - recommended to fix |
+| 1 | Critical | Plugin unusable — must fix |
+| 2 | Major | Some features may fail — should fix |
+| 3 | Minor | Minor issues — recommended to fix |
+| 4 | NIT | Nitpick issues found — only returned in `--strict` mode |
+
+### Severity Levels
+
+Validation results use the following severity levels:
+
+| Level | Blocks Validation | Description |
+|-------|-------------------|-------------|
+| CRITICAL | Always | Plugin is unusable |
+| MAJOR | Always | Significant problems, some features may fail |
+| MINOR | Always | Small issues, recommended to fix |
+| NIT | Only in `--strict` | Style or best-practice nitpicks |
+| WARNING | Never | Informational warnings, never block validation |
+| INFO | Never | Informational notes |
+| PASSED | Never | Check passed successfully |
 
 ## Validation Coverage
 
@@ -101,7 +126,7 @@ All validation scripts return consistent exit codes:
 ### Hook Validation (`validate_hook.py`)
 
 - JSON structure
-- Valid event types (13 supported)
+- Valid event types (18 supported)
 - Matcher syntax
 - Script paths and executability
 - Hook type configuration
@@ -134,30 +159,122 @@ All validation scripts return consistent exit codes:
 ```
 claude-plugins-validation/
 ├── .claude-plugin/
-│   └── plugin.json           # Plugin manifest
+│   └── plugin.json                  # Plugin manifest
+├── .github/workflows/
+│   ├── ci.yml                       # CI pipeline
+│   ├── notify-marketplace.yml       # Marketplace notification
+│   ├── release.yml                  # Release automation
+│   └── validate.yml                 # Validation workflow
 ├── agents/
-│   └── plugin-validator.md   # Expert validation agent
-├── skills/
-│   └── plugin-validation-skill/
-│       ├── SKILL.md          # Main skill file
-│       └── references/       # Detailed reference docs
-│           ├── plugin-structure.md
-│           ├── hook-validation.md
-│           ├── skill-validation.md
-│           ├── mcp-validation.md
-│           └── marketplace-validation.md
+│   ├── plugin-validator.md          # Expert validation agent
+│   ├── skill-validation-agent.md    # Skill validation agent
+│   └── references/
+│       ├── plugin-validator-detailed-procedures.md
+│       └── skill-semantic-validation.md
+├── commands/
+│   ├── cpv-validate-agents.md       # Agent validation command
+│   ├── cpv-validate-hooks.md        # Hook validation command
+│   ├── cpv-validate-lsp.md          # LSP validation command
+│   ├── cpv-validate-marketplace.md  # Marketplace validation command
+│   ├── cpv-validate-mcp.md          # MCP validation command
+│   ├── cpv-validate-plugin.md       # Plugin validation command
+│   └── cpv-validate-skill.md        # Skill validation command
+├── git-hooks/
+│   ├── pre-commit                   # Pre-commit hook
+│   └── pre-push                     # Pre-push hook
 ├── scripts/
-│   ├── validate_plugin.py    # Main plugin validator
-│   ├── validate_skill.py     # Skill validator
-│   ├── validate_hook.py      # Hook validator
-│   ├── validate_mcp.py       # MCP server validator
-│   └── validate_marketplace.py # Marketplace validator
-└── README.md
+│   ├── validation_common.py         # Shared validation utilities
+│   ├── validate_plugin.py           # Main plugin validator
+│   ├── validate_skill.py            # Skill validator
+│   ├── validate_skill_comprehensive.py  # Comprehensive skill validator
+│   ├── validate_hook.py             # Hook validator
+│   ├── validate_mcp.py              # MCP server validator
+│   ├── validate_marketplace.py      # Marketplace validator
+│   ├── validate_marketplace_pipeline.py # Pipeline validator
+│   ├── validate_agent.py            # Agent validator
+│   ├── validate_command.py          # Command validator
+│   ├── validate_documentation.py    # Documentation validator
+│   ├── validate_encoding.py         # Encoding validator
+│   ├── validate_enterprise.py       # Enterprise compliance validator
+│   ├── validate_lsp.py              # LSP validator
+│   ├── validate_rules.py            # Rules validator
+│   ├── validate_scoring.py          # Scoring validator
+│   ├── validate_security.py         # Security validator
+│   ├── validate_xref.py             # Cross-reference validator
+│   ├── smart_exec.py                # Smart script executor
+│   ├── bump_version.py              # Version bumping utility
+│   ├── check_version_consistency.py # Version consistency checker
+│   ├── setup_git_hooks.sh           # Git hooks setup script
+│   ├── setup_marketplace_automation.py
+│   ├── setup_plugin_pipeline.py
+│   └── update_marketplace_metadata.py
+├── skills/
+│   ├── plugin-validation-skill/
+│   │   ├── SKILL.md                 # Main skill file
+│   │   ├── README.md
+│   │   └── references/              # Detailed reference docs
+│   │       ├── plugin-structure.md
+│   │       ├── hook-validation.md
+│   │       ├── skill-validation.md
+│   │       ├── mcp-validation.md
+│   │       ├── marketplace-validation.md
+│   │       ├── pipeline-validation.md
+│   │       ├── validation-checklist.md
+│   │       ├── validation-procedures.md
+│   │       ├── official-docs-urls.md
+│   │       ├── troubleshooting-python-scripts.md
+│   │       └── pre-push-hook.py
+│   └── skill-validation-skill/
+│       ├── SKILL.md                 # Skill validation skill
+│       └── references/
+│           ├── frontmatter-schema.md
+│           ├── pillars-coverage.md
+│           ├── scoring-system.md
+│           └── validation-rules.md
+├── templates/
+│   ├── README-marketplace.md
+│   ├── github-workflows/
+│   │   ├── notify-marketplace.yml
+│   │   ├── update-submodules.yml
+│   │   └── validate-marketplace.yml
+│   └── scripts/
+│       └── sync_marketplace_versions.py
+├── tests/
+│   ├── conftest.py
+│   ├── test_validate_agent.py
+│   ├── test_validate_command.py
+│   ├── test_validate_documentation.py
+│   ├── test_validate_encoding.py
+│   ├── test_validate_enterprise.py
+│   ├── test_validate_hook.py
+│   ├── test_validate_lsp.py
+│   ├── test_validate_marketplace.py
+│   ├── test_validate_marketplace_pipeline.py
+│   ├── test_validate_mcp.py
+│   ├── test_validate_plugin.py
+│   ├── test_validate_rules.py
+│   ├── test_validate_scoring.py
+│   ├── test_validate_security.py
+│   ├── test_validate_skill.py
+│   ├── test_validate_skill_comprehensive.py
+│   ├── test_validate_xref.py
+│   ├── test_validation_common.py
+│   └── fixtures/                    # Test fixtures
+│       ├── valid_plugin/
+│       └── invalid_plugin/
+├── CHANGELOG.md
+├── LICENSE
+├── README.md
+├── cliff.toml
+├── pyproject.toml
+├── pytest.ini
+├── requirements.txt
+└── uv.lock
 ```
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.12+
 - uv (Python package manager)
 
 ### Multi-Language Linter Support
@@ -212,7 +329,7 @@ If the plugin does not load when starting Claude Code:
 If validation scripts fail to execute:
 
 1. **Ensure uv is installed**: Run `uv --version` to verify installation
-2. **Verify Python version**: Requires Python 3.10 or higher. Check with `python3 --version`
+2. **Verify Python version**: Requires Python 3.12 or higher. Check with `python3 --version`
 3. **Check file permissions**: Scripts must be executable. Run `chmod +x scripts/*.py`
 4. **Initialize environment**: Run `uv sync` in the plugin directory to install dependencies
 
