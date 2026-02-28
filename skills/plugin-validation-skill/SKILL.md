@@ -88,12 +88,11 @@ The validators return:
 
 ## Error Handling
 
-If validation fails:
-1. Check the exit code to determine severity
-2. Review CRITICAL issues first (plugin won't work)
-3. Address MAJOR issues next (features may fail)
-4. Fix MINOR issues for polish (warnings)
-5. See [Troubleshooting](#troubleshooting) for common fixes
+- **Non-zero exit code from validator**: Report the severity level and list all failing checks. Do NOT proceed with publishing until MAJOR/CRITICAL are resolved.
+- **Missing dependencies** (ruff, mypy, shellcheck): Install with `uv pip install ruff mypy` or `brew install shellcheck`. Report which tools are missing.
+- **Permission errors**: Ensure scripts are executable (`chmod +x scripts/*.py`).
+- **Invalid JSON/YAML**: Show the parse error with file path and line number. Fix syntax before re-validating.
+- **Timeout on large plugins**: Increase subprocess timeout or validate components individually.
 
 ## Examples
 
@@ -119,33 +118,39 @@ uv run python scripts/validate_plugin.py ./my-plugin --json > validation-results
 ## Resources
 
 - [Validation Checklist](references/validation-checklist.md) - Master checklist for pre-release
-  - 1. Plugin Manifest Checklist
-  - 2. Plugin Structure Checklist
-  - 3. Hook Configuration Checklist
-  - 4. Skill Validation Checklist
-  - 5. MCP Server Checklist
-  - 6. Marketplace Checklist
-  - 7. Agent Checklist
-  - 8. LSP Server Checklist
-  - 9. Script and Code Quality Checklist
-  - 10. Pre-Release Final Checklist
-  - 11. Validation Commands
+> **validation-checklist.md** — Table of Contents:
+> - 1. Plugin Manifest Checklist
+> - 2. Plugin Structure Checklist
+> - 3. Hook Configuration Checklist
+> - 4. Skill Validation Checklist
+> - 5. MCP Server Checklist
+> - 6. Marketplace Checklist
+> - 7. Agent Checklist
+> - 8. LSP Server Checklist
+> - 9. Script and Code Quality Checklist
+> - 10. Pre-Release Final Checklist
+> - 11. Validation Commands
+> - Related References
 - [Plugin Structure](references/plugin-structure.md) - Required plugin directory layout
-  - 1. Directory Structure
-  - 2. Plugin Manifest (plugin.json)
-  - 3. Component Placement Rules
-  - 4. Path Variables
-  - 5. Common Structure Errors
-  - 6. Validation Checklist
+> **plugin-structure.md** — Table of Contents:
+> - 1. Directory Structure
+> - 2. Plugin Manifest (plugin.json)
+> - 3. Component Placement Rules
+> - 4. Path Variables
+> - 5. Common Structure Errors
+> - 6. Validation Checklist
+> - Related References
 - [Hook Validation](references/hook-validation.md) - Hook configuration reference
-  - 1. Hook Configuration File
-  - 2. Valid Hook Events
-  - 3. Matcher Syntax
-  - 4. Hook Types
-  - 5. Hook Input/Output Format
-  - 6. Script Requirements
-  - 7. Common Hook Errors
-  - 8. Validation Checklist
+> **hook-validation.md** — Table of Contents:
+> - 1. Hook Configuration File
+> - 2. Valid Hook Events
+> - 3. Matcher Syntax
+> - 4. Hook Types
+> - 5. Hook Input/Output Format
+> - 6. Script Requirements
+> - 7. Common Hook Errors
+> - 8. Validation Checklist
+> - Related References
 - [Troubleshooting](references/troubleshooting-python-scripts.md) - Common issues and fixes
   - 1. Bash Arithmetic Exit Codes
   - 2. Unused Variable Warnings - Pyright/ruff
@@ -194,7 +199,7 @@ Use this skill when:
 
 ### Pre-Release Checklist
 
-Before publishing any plugin, use the **[Master Validation Checklist](references/validation-checklist.md)** which covers:
+Before publishing any plugin, use the **Master Validation Checklist** (see Resources section above) which covers:
 - Plugin manifest and structure checks
 - Hook configuration validation
 - Skill frontmatter requirements
@@ -255,13 +260,7 @@ This plugin includes five validation scripts:
 - MCP servers (calls validate_mcp.py)
 - Script linting (ruff for Python, shellcheck for bash)
 
-**Reference**: See [references/plugin-structure.md](references/plugin-structure.md) for:
-  - 1. Directory Structure
-  - 2. Plugin Manifest (plugin.json)
-  - 3. Component Placement Rules
-  - 4. Path Variables
-  - 5. Common Structure Errors
-  - 6. Validation Checklist
+**Reference**: [references/plugin-structure.md](references/plugin-structure.md)
 
 ### 2. validate_hook.py - Hook Configuration Validator
 
@@ -274,15 +273,7 @@ This plugin includes five validation scripts:
 - Script paths and executability
 - Hook type configuration (command vs prompt)
 
-**Reference**: See [references/hook-validation.md](references/hook-validation.md) for:
-  - 1. Hook Configuration File
-  - 2. Valid Hook Events
-  - 3. Matcher Syntax
-  - 4. Hook Types
-  - 5. Hook Input/Output Format
-  - 6. Script Requirements
-  - 7. Common Hook Errors
-  - 8. Validation Checklist
+**Reference**: see `hook-validation.md` in Resources above
 
 ### 3. validate_skill.py - Skill Structure Validator
 
@@ -295,15 +286,17 @@ This plugin includes five validation scripts:
 - Optional fields validation
 - references/ directory
 
-**Reference**: See [references/skill-validation.md](references/skill-validation.md) for:
-  - 1. Skill Directory Structure
-  - 2. SKILL.md File Format
-  - 3. Frontmatter Fields
-  - 4. Claude Code Specific Fields
-  - 5. Content Best Practices
-  - 6. References Directory
-  - 7. Common Skill Errors
-  - 8. Validation Checklist
+**Reference**: [references/skill-validation.md](references/skill-validation.md)
+> **skill-validation.md** — Table of Contents:
+> - 1. Skill Directory Structure
+> - 2. SKILL.md File Format
+> - 3. Frontmatter Fields
+> - 4. Claude Code Specific Fields
+> - 5. Content Best Practices
+> - 6. References Directory
+> - 7. Common Skill Errors
+> - 8. Validation Checklist
+> - Related References
 
 ### 4. validate_mcp.py - MCP Server Validator
 
@@ -317,16 +310,18 @@ This plugin includes five validation scripts:
 - Environment variable syntax
 - Path portability
 
-**Reference**: See [references/mcp-validation.md](references/mcp-validation.md) for:
-  - 1. MCP Configuration Locations
-  - 2. Server Definition Fields
-  - 3. Transport Types
-  - 3a. OAuth Support
-  - 4. Environment Variables
-  - 5. Path Handling
-  - 6. Complete Configuration Examples
-  - 7. Common MCP Errors
-  - 8. Validation Checklist
+**Reference**: [references/mcp-validation.md](references/mcp-validation.md)
+> **mcp-validation.md** — Table of Contents:
+> - 1. MCP Configuration Locations
+> - 2. Server Definition Fields
+> - 3. Transport Types
+> - 3a. OAuth Support
+> - 4. Environment Variables
+> - 5. Path Handling
+> - 6. Complete Configuration Examples
+> - 7. Common MCP Errors
+> - 8. Validation Checklist
+> - Related References
 
 ### 5. validate_marketplace.py - Marketplace Validator
 
@@ -339,16 +334,18 @@ This plugin includes five validation scripts:
 - Source type configurations
 - Local path resolution
 
-**Reference**: See [references/marketplace-validation.md](references/marketplace-validation.md) for:
-  - 1. Marketplace Overview
-  - 2. marketplace.json Structure
-  - 3. Plugin Entry Configuration
-  - 4. Source Types
-  - 5. Local Development Marketplace
-  - 6. GitHub Deployment Validation
-  - 7. Git Submodule Validation
-  - 8. Common Marketplace Errors
-  - 9. Validation Checklist
+**Reference**: [references/marketplace-validation.md](references/marketplace-validation.md)
+> **marketplace-validation.md** — Table of Contents:
+> - 1. Marketplace Overview
+> - 2. marketplace.json Structure
+> - 3. Plugin Entry Configuration
+> - 4. Source Types
+> - 5. Local Development Marketplace
+> - 6. GitHub Deployment Validation
+> - 7. Git Submodule Validation
+> - 8. Common Marketplace Errors
+> - 9. Validation Checklist
+> - Related References
 
 ---
 
@@ -388,104 +385,7 @@ my-plugin/
 
 5. **Agent file format**: The `agents` field in plugin.json must be an array of .md file paths
 
-### Reference Documents
-
-For detailed specifications, read:
-
-### [Master Checklist](references/validation-checklist.md)
-Contents:
-  - 1. Plugin Manifest Checklist
-  - 2. Plugin Structure Checklist
-  - 3. Hook Configuration Checklist
-  - 4. Skill Validation Checklist
-  - 5. MCP Server Checklist
-  - 6. Marketplace Checklist
-  - 7. Agent Checklist
-  - 8. LSP Server Checklist
-  - 9. Script and Code Quality Checklist
-  - 10. Pre-Release Final Checklist
-  - 11. Validation Commands
-
-### [Plugin Structure](references/plugin-structure.md)
-Contents:
-  - 1. Directory Structure
-  - 2. Plugin Manifest (plugin.json)
-  - 3. Component Placement Rules
-  - 4. Path Variables
-  - 5. Common Structure Errors
-  - 6. Validation Checklist
-
-### [Hook Configuration](references/hook-validation.md)
-Contents:
-  - 1. Hook Configuration File
-  - 2. Valid Hook Events
-  - 3. Matcher Syntax
-  - 4. Hook Types
-  - 5. Hook Input/Output Format
-  - 6. Script Requirements
-  - 7. Common Hook Errors
-  - 8. Validation Checklist
-
-### [Skill Structure](references/skill-validation.md)
-Contents:
-  - 1. Skill Directory Structure
-  - 2. SKILL.md File Format
-  - 3. Frontmatter Fields
-  - 4. Claude Code Specific Fields
-  - 5. Content Best Practices
-  - 6. References Directory
-  - 7. Common Skill Errors
-  - 8. Validation Checklist
-
-### [MCP Servers](references/mcp-validation.md)
-Contents:
-  - 1. MCP Configuration Locations
-  - 2. Server Definition Fields
-  - 3. Transport Types
-  - 3a. OAuth Support
-  - 4. Environment Variables
-  - 5. Path Handling
-  - 6. Complete Configuration Examples
-  - 7. Common MCP Errors
-  - 8. Validation Checklist
-
-### [Marketplaces](references/marketplace-validation.md)
-Contents:
-  - 1. Marketplace Overview
-  - 2. marketplace.json Structure
-  - 3. Plugin Entry Configuration
-  - 4. Source Types
-  - 5. Local Development Marketplace
-  - 6. GitHub Deployment Validation
-  - 7. Git Submodule Validation
-  - 8. Common Marketplace Errors
-  - 9. Validation Checklist
-
-### [Pipeline Validation](references/pipeline-validation.md)
-Contents:
-  - 1. Architecture Overview
-    - 1.1 3-Repo Architecture
-    - 1.2 Update Flow
-  - 2. Required Components
-    - 2.1 Marketplace Repository Requirements
-    - 2.2 Plugin Repository Requirements
-    - 2.3 Secrets Configuration
-  - 3. Validation Commands
-    - 3.1 Full Pipeline Validation
-    - 3.2 Component-Level Validation
-  - 4. Auto-Setup
-    - 4.1 Automatic Setup Script
-    - 4.2 Manual Setup Steps
-  - 5. Troubleshooting
-    - 5.1 notify-marketplace.yml Issues
-    - 5.2 update-submodules.yml Issues
-    - 5.3 Version Sync Issues
-  - 6. Scoring System
-    - 6.1 Category Weights
-    - 6.2 Grade Calculation
-
-### [Pre-Push Hook](references/pre-push-hook.py)
-Python script for git pre-push validation hook.
+For detailed specifications, see the [Resources](#resources) section above.
 
 ---
 
@@ -523,19 +423,7 @@ Python script for git pre-push validation hook.
 
 ### Python Validation Scripts Issues
 
-See **[references/troubleshooting-python-scripts.md](references/troubleshooting-python-scripts.md)** for:
-  - 1. Bash Arithmetic Exit Codes
-  - 2. Unused Variable Warnings - Pyright/ruff
-  - 3. Missing Python Dependencies - ModuleNotFoundError
-  - 4. Git Hook Not Running
-  - 5. Plugin JSON Missing Required Fields
-  - 6. Ruff Linting - Unused Variable Error
-  - 7. Marketplace Plugin Source Format
-  - 8. Version Consistency Between Plugins and Marketplace
-  - 9. Git Tag Already Exists Error
-  - 10. subprocess.run Output Truncation
-  - 11. Best Practices Summary
-  - 12. Quick Diagnostic Commands
+See the **Troubleshooting** reference in the Resources section above for common Python script issues and fixes.
 
 ### Marketplace Plugin Install Fails
 
@@ -604,26 +492,4 @@ Add to `.vscode/tasks.json`:
 
 ## Official Documentation
 
-For the complete list of official documentation URLs (Claude Code, MCP, Hooks, Skills, etc.), see **[references/official-docs-urls.md](references/official-docs-urls.md)**:
-  - 1. Claude Code Fundamentals
-  - 2. Settings & CLI
-  - 3. Marketplaces
-  - 4. Plugins
-  - 5. Custom Agents
-  - 6. Hooks
-  - 7. Skills
-  - 8. Other Extensions
-  - 9. MCP (Model Context Protocol)
-  - 10. MCP Detailed Specifications
-  - 11. Troubleshooting
-  - 12. How to Use Official Documentation
-
----
-
-## Related Tools
-
-- **shellcheck** - Bash script linting (https://www.shellcheck.net/)
-- **ruff** - Python linting and formatting (https://docs.astral.sh/ruff/)
-- **mypy** - Python type checking (https://mypy.readthedocs.io/)
-- **jq** - JSON validation and querying (https://stedolan.github.io/jq/)
-- **skills-ref** - OpenSpec Agent Skills validator (https://github.com/agentskills/agentskills)
+For official documentation URLs (Claude Code, MCP, Hooks, Skills, etc.), see `references/official-docs-urls.md`.

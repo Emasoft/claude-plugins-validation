@@ -39,6 +39,9 @@ Thumbs.db
 # examples_dev, downloads_dev, libs_dev, builds_dev, etc.
 *_dev/
 
+# Node
+node_modules/
+
 # Rust
 target/
 Cargo.lock

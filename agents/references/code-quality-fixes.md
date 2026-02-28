@@ -160,7 +160,7 @@ Exit codes: `0` = OK, `1` = CRITICAL, `2` = MAJOR, `3` = MINOR, `4` = NIT (stric
 
 **Severity:** CRITICAL
 
-**Root cause:** Shell scripts (`.sh`, `.bash`, `.zsh`, `.ksh`) contain Windows-style `\r\n` line endings. This causes `/bin/bash: bad interpreter` or `\r: command not found` errors because the shell interprets `\r` as part of the command.
+**Root cause:** Shell scripts (`.sh`, `.bash`, `.zsh`, `.ksh`) contain Windows-style `\r\n` line endings. This causes `bad interpreter` or `\r: command not found` errors because the shell interprets `\r` as part of the command.
 
 **Fix steps:**
 1. Convert to LF:
@@ -441,10 +441,10 @@ iconv -f UTF-32BE -t UTF-8 <path> > <path>.tmp && mv <path>.tmp <path>
 **Root cause:** The file contains an absolute path that includes the current system user's actual username (auto-detected from `getpass.getuser()`, `Path.home()`, or environment variables `USER`, `USERNAME`, `LOGNAME`). This leaks personal information and makes the plugin non-portable.
 
 Detected OS patterns:
-- macOS: `/Users/<your-username>/...`
-- Linux: `/home/<your-username>/...`
-- Windows: `C:\Users\<your-username>\...` or `C:/Users/<your-username>/...`
-- Username appearing between slashes in any path context
+- macOS: home directory paths like `~/<your-username>/...`
+- Linux: home directory paths like `~/<your-username>/...`
+- Windows: `%USERPROFILE%\...` or paths starting with a drive letter + `\Users\`
+- Username appearing between path separators in any path context
 
 **Fix steps:**
 1. Replace with relative path:

@@ -1,15 +1,15 @@
 ---
 name: setup-github-marketplace
-description: |
-  Set up a GitHub marketplace for Claude Code plugins with automated CI/CD.
-  Use when creating a new plugin marketplace or linking plugins to one.
+description: >
+  Use when creating a plugin marketplace or linking plugins to one.
+  Trigger with "set up marketplace" or "create plugin marketplace".
 tags:
   - marketplace
   - github
   - ci-cd
   - automation
   - setup
-allowed-tools: Read, Bash, Write, Edit, Glob, Grep, AskUserQuestion
+allowed-tools: Read, Bash(git:*,gh:*,python:*,uv:*), Write, Edit, Glob, Grep, AskUserQuestion
 agent: plugin-validator
 context: fork
 user-invocable: false
@@ -60,6 +60,58 @@ graph LR
 - GitHub account with repo creation permission
 - **MARKETPLACE_PAT** token with `repo` + `workflow` scopes
 - At least one plugin repo to link (optional)
+
+## Instructions
+
+1. **Create marketplace repo** -- Run `gh repo create` with the marketplace name, clone it, and initialize the directory structure (`.claude-plugin/`, `.github/workflows/`, `scripts/`).
+2. **Initialize structure** -- Write `marketplace.json` with name, version, owner, and an empty plugins array. Generate the initial README.
+3. **Configure CI/CD** -- Install `sync-plugins.yml` and `validate-marketplace.yml` workflows, plus the sync/generate/hooks Python scripts. Set `MARKETPLACE_PAT` secret on the marketplace repo.
+4. **Link plugins** -- For each plugin repo: fetch `plugin.json` via `gh api`, add an entry to `marketplace.json`, install `notify-marketplace.yml` on the plugin repo, and set `MARKETPLACE_PAT` secret.
+5. **Verify and push** -- Run `validate_marketplace.py --verbose`, trigger a test notification from one plugin, confirm the marketplace CI picks it up, and push all changes.
+
+## Output
+
+- **Marketplace repository** with `.claude-plugin/marketplace.json` containing all linked plugin entries.
+- **CI/CD workflows**: `sync-plugins.yml` (marketplace-side sync on dispatch) and `validate-marketplace.yml` (schema and plugin validation on push/PR).
+- **Sync scripts**: `sync_marketplace_versions.py`, `generate-readme.py`, `setup-hooks.py` in `scripts/`.
+- **Auto-generated README.md** with a plugin table, Mermaid architecture diagram, and install instructions.
+- **Notification workflow** (`notify-marketplace.yml`) installed on each linked plugin repo.
+
+## Error Handling
+
+| Error | Cause | Resolution |
+|-------|-------|------------|
+| `MARKETPLACE_PAT` missing or invalid | Token not set or lacks `repo`+`workflow` scopes | Re-create PAT with correct scopes, set via `gh secret set MARKETPLACE_PAT --body <token> --repo owner/repo` |
+| `plugin.json` not found via API | Plugin repo missing `.claude-plugin/plugin.json` | Ensure the plugin has a valid `plugin.json` at `.claude-plugin/plugin.json` and the repo is public or PAT has access |
+| Workflow dispatch not received | `notify-marketplace.yml` not installed or PAT cannot trigger dispatch | Re-install the notification workflow on the plugin repo and verify PAT scopes |
+| `gh auth` failure | CLI not authenticated | Run `gh auth login` and verify with `gh auth status` |
+| `validate_marketplace.py` fails | Malformed `marketplace.json` or unreachable plugin repos | Check JSON syntax, verify all plugin repos exist, and confirm API access |
+
+## Examples
+
+**Create a new marketplace with two plugins:**
+
+```
+set up marketplace my-claude-plugins --plugin svg-tools --plugin code-formatter
+```
+
+Expected: creates `my-claude-plugins` repo, links both plugins, installs CI/CD, generates README.
+
+**Add a plugin to an existing marketplace:**
+
+```
+link plugin test-runner to marketplace my-claude-plugins
+```
+
+Expected: fetches `test-runner` metadata, adds entry to `marketplace.json`, installs notification workflow.
+
+**Migrate plugins between marketplaces:**
+
+```
+move plugins svg-tools code-formatter from old-plugins to new-plugins
+```
+
+Expected: copies entries to target, repoints notification workflows, removes from source, validates both.
 
 ## Arguments
 

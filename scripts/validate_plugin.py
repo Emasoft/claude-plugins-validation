@@ -974,6 +974,7 @@ def validate_no_local_paths(plugin_root: Path, report: ValidationReport) -> None
     - .git/ directory
     - Allowed system paths (/tmp/, /dev/, /proc/, /sys/)
     - Generic example usernames in documentation
+    - Test directories (tests/) — contain intentional test fixture paths
     """
     # Import the stricter absolute path validation from cpv_validation_common
     from cpv_validation_common import validate_no_absolute_paths
@@ -982,7 +983,7 @@ def validate_no_local_paths(plugin_root: Path, report: ValidationReport) -> None
     # - Current user's username (auto-detected) - CRITICAL
     # - ANY absolute paths that don't use env vars - MAJOR
     # We pass our local report since both have compatible interfaces
-    validate_no_absolute_paths(plugin_root, report)  # type: ignore[arg-type]
+    validate_no_absolute_paths(plugin_root, report, skip_dirs={"tests"})  # type: ignore[arg-type]
 
 
 # =============================================================================
