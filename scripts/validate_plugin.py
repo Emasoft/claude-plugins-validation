@@ -683,6 +683,24 @@ RECOMMENDED_PLATFORMS = {
 }
 
 
+def _is_python_venv(dirpath: Path) -> bool:
+    """Detect Python virtual environments by structural markers, not name.
+
+    A directory is a venv if it contains pyvenv.cfg (created by python -m venv
+    and virtualenv). This catches venvs regardless of name (.venv, .windows_venv,
+    .virtualenv, my_env, etc.).
+    """
+    # pyvenv.cfg is the canonical marker — always created by venv/virtualenv
+    if (dirpath / "pyvenv.cfg").is_file():
+        return True
+    # Fallback: bin/activate (Unix) or Scripts/activate.bat (Windows)
+    if (dirpath / "bin" / "activate").is_file():
+        return True
+    if (dirpath / "Scripts" / "activate.bat").is_file():
+        return True
+    return False
+
+
 def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None:
     """Validate cross-platform compatibility of plugin scripts and binaries.
 
@@ -708,11 +726,10 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
         ".zig": ("Zig", ["build.zig"]),
     }
 
+    # Directories to always skip (build artifacts, caches)
     skip_dirs = {
         "__pycache__",
         "node_modules",
-        ".venv",
-        "venv",
         "dist",
         "build",
         "target",
@@ -720,7 +737,13 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
     }
 
     for dirpath, dirnames, filenames in os.walk(plugin_root):
-        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in skip_dirs]
+        # Filter out known skip dirs, hidden dirs, and structurally-detected venvs
+        dirnames[:] = [
+            d for d in dirnames
+            if not d.startswith(".")
+            and d not in skip_dirs
+            and not _is_python_venv(Path(dirpath) / d)
+        ]
         rel_dir = Path(dirpath).relative_to(plugin_root)
 
         for filename in filenames:
@@ -811,11 +834,18 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
 
     # --- 3. Check compiled binaries platform coverage ---
     # Search for bin/ directories recursively (e.g., rust/tool/bin/, bin/)
-    # Exclude virtual environments and other non-project directories
-    all_bin_dirs = [
-        d for d in plugin_root.rglob("bin")
-        if d.is_dir() and not any(part in skip_dirs or part.startswith(".") for part in d.relative_to(plugin_root).parts[:-1])
-    ]
+    # Exclude venvs (by structure), skip_dirs, and hidden dirs
+    all_bin_dirs = []
+    for d in plugin_root.rglob("bin"):
+        if not d.is_dir():
+            continue
+        rel_parts = d.relative_to(plugin_root).parts[:-1]  # parents only
+        # Skip if any ancestor is a skip_dir, hidden, or a venv
+        if any(part in skip_dirs or part.startswith(".") for part in rel_parts):
+            continue
+        if any(_is_python_venv(plugin_root / Path(*rel_parts[:i + 1])) for i in range(len(rel_parts))):
+            continue
+        all_bin_dirs.append(d)
     if not all_bin_dirs:
         return
 
@@ -1057,6 +1087,18 @@ def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
             ".gitignore ignores all source files (*.py, *.js, or *.ts) — "
             "this will exclude plugin code from distribution"
         )
+
+    # Scan for actual venv directories by structure (any name, not just .venv/venv)
+    for item in plugin_root.iterdir():
+        if item.is_dir() and _is_python_venv(item):
+            dirname = item.name
+            # Check if this specific directory is covered by .gitignore
+            covered = any(dirname.lower() in line.lower() for line in lines)
+            if not covered:
+                report.major(
+                    f"Virtual environment '{dirname}/' detected (contains pyvenv.cfg) "
+                    f"but not covered by .gitignore. Add '{dirname}/' to .gitignore."
+                )
 
     # Check that non-plugin artifacts that may exist are ignored
     # Look for actual artifacts in the tree that should be gitignored
