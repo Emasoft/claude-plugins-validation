@@ -6,7 +6,7 @@ These functions ensure that when a SKILL.md links to a .md reference file that h
 Table of Contents, the SKILL.md embeds at least some of those TOC headings inline so
 agents can see what content is available before navigating.
 
-Coverage: 12 tests covering all major code paths including false positive prevention.
+Coverage: 15 tests covering all major code paths including list-item ambiguity handling.
 """
 
 from __future__ import annotations
@@ -366,60 +366,41 @@ my-skill --verbose
         # No results at all — no .md links to check
         assert len(report.results) == 0
 
-    def test_validate_toc_embedding_outside_references_dir_skipped(self, tmp_path: Path):
-        """Links to .md files outside references/ are not validated (false positive fix)."""
-        # Create a reference file inside references/ (legitimate)
+    def test_validate_toc_embedding_list_item_with_toc_not_embedded(self, tmp_path: Path):
+        """Link in list item to file with TOC but no embedding produces WARNING (ambiguous)."""
         ref_dir = tmp_path / "references"
         ref_dir.mkdir()
 
-        main_ref = ref_dir / "main-guide.md"
-        main_ref.write_text("""\
-# Main Guide
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Details](#details)
-
-## Overview
-
-Overview content...
-
-## Details
-
-Details content...
-""")
-
-        # Create a file OUTSIDE references/ that has a TOC —
-        # this simulates a cross-reference from an embedded TOC entry
-        outside_file = tmp_path / "19-config-settings.md"
-        outside_file.write_text("""\
-# Config Settings
+        ref_file = ref_dir / "config-guide.md"
+        ref_file.write_text("""\
+# Config Guide
 
 ## Table of Contents
 
 - [Basic Config](#basic-config)
 - [Advanced Config](#advanced-config)
+- [Troubleshooting](#troubleshooting)
 
 ## Basic Config
 
-Basic config content...
+Config content...
 
 ## Advanced Config
 
-Advanced config content...
+Advanced content...
+
+## Troubleshooting
+
+Troubleshooting content...
 """)
 
-        # SKILL.md links to both: references/main-guide.md (legitimate) and
-        # ./19-config-settings.md (outside references/ — should be skipped).
-        # The outside link might come from embedding a reference TOC verbatim.
+        # Link is in a list item — could be an embedded TOC title or a reference
         skill_content = """\
 # My Skill
 
-Reference: [Main Guide](references/main-guide.md)
-  - [Config Settings](./19-config-settings.md)
+## Resources
 
-The Overview and Details sections are important.
+  - [Config Guide](references/config-guide.md)
 
 ## Usage
 
@@ -431,17 +412,148 @@ Use the skill like this...
         report = ValidationReport()
         validate_toc_embedding(skill_content, skill_path, tmp_path, report)
 
-        # Only main-guide.md (in references/) should be checked.
-        # 19-config-settings.md (outside references/) must be skipped.
+        # Should get WARNING (not MINOR) because the link is ambiguous —
+        # it's in a list item and could be a TOC title or a reference
+        warning_results = [r for r in report.results if r.level == "WARNING"]
         minor_results = [r for r in report.results if r.level == "MINOR"]
-        for r in minor_results:
-            assert "19-config-settings.md" not in r.message, (
-                f"False positive: link to 19-config-settings.md outside references/ "
-                f"was treated as a reference: {r.message}"
-            )
+        assert len(warning_results) == 1, f"Expected 1 WARNING, got {len(warning_results)}"
+        assert len(minor_results) == 0, "Should be WARNING not MINOR for list items"
+        assert "config-guide.md" in warning_results[0].message
+        assert "ambiguity" in warning_results[0].message.lower()
 
-    def test_validate_toc_embedding_indented_references_still_checked(self, tmp_path: Path):
-        """Indented links to files in references/ are still validated (not skipped by indent)."""
+    def test_validate_toc_embedding_list_item_with_toc_embedded(self, tmp_path: Path):
+        """Link in list item to file with TOC and TOC IS embedded produces PASSED."""
+        ref_dir = tmp_path / "references"
+        ref_dir.mkdir()
+
+        ref_file = ref_dir / "api-ref.md"
+        ref_file.write_text("""\
+# API Reference
+
+## Table of Contents
+
+- [Endpoints](#endpoints)
+- [Authentication](#authentication)
+
+## Endpoints
+
+Endpoints...
+
+## Authentication
+
+Auth...
+""")
+
+        # Link in list item but TOC entries are embedded right after
+        skill_content = """\
+# My Skill
+
+## Resources
+
+- [API Reference](references/api-ref.md)
+  - Endpoints
+  - Authentication
+
+## Usage
+
+Use the skill...
+"""
+        skill_path = tmp_path / "SKILL.md"
+        skill_path.write_text(skill_content)
+
+        report = ValidationReport()
+        validate_toc_embedding(skill_content, skill_path, tmp_path, report)
+
+        # Should PASS — TOC is embedded even though link is in a list
+        passed_results = [r for r in report.results if r.level == "PASSED"]
+        warning_results = [r for r in report.results if r.level == "WARNING"]
+        assert len(passed_results) == 1
+        assert len(warning_results) == 0
+
+    def test_validate_toc_embedding_list_item_file_no_toc_not_exempt(self, tmp_path: Path):
+        """Link in list item to non-exempt file without TOC produces NIT."""
+        ref_dir = tmp_path / "references"
+        ref_dir.mkdir()
+
+        # File exists but has no TOC section
+        ref_file = ref_dir / "quick-notes.md"
+        ref_file.write_text("""\
+# Quick Notes
+
+## Introduction
+
+Some notes without a proper TOC section.
+
+## Details
+
+More details...
+""")
+
+        skill_content = """\
+# My Skill
+
+## See Also
+
+- [Quick Notes](references/quick-notes.md)
+
+## Usage
+
+Use the skill...
+"""
+        skill_path = tmp_path / "SKILL.md"
+        skill_path.write_text(skill_content)
+
+        report = ValidationReport()
+        validate_toc_embedding(skill_content, skill_path, tmp_path, report)
+
+        # Should get NIT about the file missing its TOC (not about embedding)
+        nit_results = [r for r in report.results if r.level == "NIT"]
+        minor_results = [r for r in report.results if r.level == "MINOR"]
+        assert len(nit_results) == 1
+        assert "quick-notes.md" in nit_results[0].message
+        assert "Table of Contents" in nit_results[0].message
+        assert len(minor_results) == 0
+
+    def test_validate_toc_embedding_list_item_exempt_file_no_toc(self, tmp_path: Path):
+        """Link in list item to exempt file (e.g. agent .md) without TOC produces no error."""
+        # Create an agent file (exempt from TOC requirement)
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+
+        agent_file = agents_dir / "my-agent.md"
+        agent_file.write_text("""\
+# My Agent
+
+Agent definition without a TOC.
+
+## Tools
+
+Uses Read, Write, Bash.
+""")
+
+        skill_content = """\
+# My Skill
+
+## Related
+
+- [My Agent](agents/my-agent.md)
+
+## Usage
+
+Use the skill...
+"""
+        skill_path = tmp_path / "SKILL.md"
+        skill_path.write_text(skill_content)
+
+        report = ValidationReport()
+        validate_toc_embedding(skill_content, skill_path, tmp_path, report)
+
+        # No NIT — agent files are exempt from TOC requirement
+        nit_results = [r for r in report.results if r.level == "NIT"]
+        assert len(nit_results) == 0
+
+    def test_validate_toc_embedding_non_list_still_minor(self, tmp_path: Path):
+        """Non-list standalone reference without TOC embedding is still MINOR."""
         ref_dir = tmp_path / "references"
         ref_dir.mkdir()
 
@@ -468,14 +580,11 @@ Auth...
 Limits...
 """)
 
-        # Link is in an indented bullet list — but it points to references/,
-        # so it IS a legitimate reference and should be validated
+        # Non-list standalone reference (paragraph context)
         skill_content = """\
 # My Skill
 
-## Resources
-
-  - [API Reference](references/api-ref.md)
+See the [API Reference](references/api-ref.md) for API details.
 
 ## Usage
 
@@ -487,8 +596,7 @@ Use the skill...
         report = ValidationReport()
         validate_toc_embedding(skill_content, skill_path, tmp_path, report)
 
-        # Should get MINOR — even though the link is indented, it points to
-        # a file inside references/ so it's a real reference
+        # Should get MINOR — clear standalone reference, not ambiguous
         minor_results = [r for r in report.results if r.level == "MINOR"]
         assert len(minor_results) == 1
         assert "api-ref.md" in minor_results[0].message

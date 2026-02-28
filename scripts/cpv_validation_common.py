@@ -1845,6 +1845,29 @@ def extract_toc_headings(md_content: str) -> list[str]:
     return headings
 
 
+# Files exempt from the TOC requirement — these file types serve
+# structural roles and do not need a Table of Contents section.
+_TOC_EXEMPT_NAMES = {"SKILL.md", "CLAUDE.md"}
+_TOC_EXEMPT_DIRS = {"agents", "commands", "rules"}
+
+# Regex to detect list items (bulleted or numbered)
+_LIST_ITEM_RE = re.compile(r"\s*(?:[-*+]|\d+\.)\s")
+
+
+def _is_toc_exempt(file_path: Path) -> bool:
+    """Check if a file is exempt from the TOC requirement.
+
+    Exempt: SKILL.md, CLAUDE.md, agent files under agents/,
+    command files under commands/, rule files under rules/.
+    """
+    if file_path.name in _TOC_EXEMPT_NAMES:
+        return True
+    for part in file_path.parts:
+        if part in _TOC_EXEMPT_DIRS:
+            return True
+    return False
+
+
 def validate_toc_embedding(
     md_content: str,
     md_file_path: Path,
@@ -1853,9 +1876,23 @@ def validate_toc_embedding(
 ) -> None:
     """Validate that .md files embed TOCs from referenced .md files.
 
-    When a markdown file links to another .md file (especially in references/),
-    the link should include the referenced file's Table of Contents inline,
-    so agents can see what content is available before navigating.
+    When a markdown file links to another .md file, the link should include
+    the referenced file's Table of Contents inline, so agents can see what
+    content is available before navigating.
+
+    Links can appear anywhere — in paragraphs, headings, or list items.
+    Referenced files can be anywhere inside the plugin directory.
+
+    When a link appears inside a list item (bullet or numbered), it may be
+    an embedded TOC entry rather than a standalone reference. In that case:
+    - If the target has a TOC and the TOC IS embedded after the link: PASSED
+    - If the target has a TOC but no TOC copy follows: WARNING (ambiguous)
+    - If the target has no TOC and is not exempt: NIT (file should have TOC)
+
+    When a link is NOT in a list item (clear standalone reference):
+    - If the target has a TOC and the TOC IS embedded: PASSED
+    - If the target has a TOC but not embedded: MINOR (should embed it)
+    - If the target has no TOC: skip (separate validation handles it)
 
     Args:
         md_content: The content of the markdown file being validated
@@ -1868,81 +1905,91 @@ def validate_toc_embedding(
     refs_checked = 0
     refs_with_toc = 0
 
-    # Determine the references/ directory for this file — only links
-    # pointing INTO this directory are actual skill/agent references.
-    # Links to files outside references/ (e.g. ./19-config-settings.md
-    # from an embedded TOC) are cross-references within reference content
-    # and must not be validated for TOC embedding.
-    refs_dir = md_file_path.parent / "references"
-
     for link_match in _MD_LINK_RE.finditer(md_content):
         link_target = link_match.group(2)
 
         # Resolve the referenced file path
         ref_path = base_dir / link_target
         if not ref_path.is_file():
-            # Also try resolving from the md file's parent directory
             ref_path = md_file_path.parent / link_target
             if not ref_path.is_file():
                 continue
 
-        # Only validate .md reference files (skip .py, etc.)
+        # Only validate .md files
         if ref_path.suffix.lower() != ".md":
             continue
 
-        # Only validate links to files inside the references/ subdirectory.
-        # This filters out cross-references from embedded TOC entries (like
-        # ./19-config.md or ../other.md) which are NOT the skill's own
-        # reference files and should not be checked for TOC embedding.
-        try:
-            ref_path.resolve().relative_to(refs_dir.resolve())
-        except ValueError:
-            continue
+        # Determine if this link is inside a list item (bullet/numbered)
+        link_start = link_match.start()
+        link_line_num = md_content[:link_start].count("\n")
+        line_text = lines[link_line_num] if link_line_num < len(lines) else ""
+        is_list_item = bool(_LIST_ITEM_RE.match(line_text))
 
-        refs_checked += 1
-
-        # Extract TOC headings from the referenced file
+        # Read the referenced file and extract its TOC
         try:
             ref_content = ref_path.read_text()
         except Exception:
             continue
 
         toc_headings = extract_toc_headings(ref_content)
+
         if not toc_headings:
-            # Referenced file has no TOC — skip (separate validation handles that)
+            # Target file has no TOC
+            if is_list_item and not _is_toc_exempt(ref_path):
+                # The link is in a list item pointing to a file without a TOC.
+                # We can't require TOC embedding, but the file itself should
+                # have a TOC for progressive discovery.
+                report.nit(
+                    f"Referenced file '{ref_path.name}' (linked from a list in "
+                    f"{rel_file}) has no Table of Contents section. All .md "
+                    f"reference files should include a TOC for progressive "
+                    f"discovery.",
+                    rel_file,
+                )
+            # For non-list links or exempt files: skip (no TOC to embed)
             continue
 
-        # Find the line number of this link in the source file
-        link_start = link_match.start()
-        link_line_num = md_content[:link_start].count("\n")
+        refs_checked += 1
 
-        # Check if any TOC entries appear within ~50 lines after the link
-        # Look for at least 2 TOC headings embedded near the link
+        # Check if TOC headings appear within ~50 lines after the link
         search_start = max(0, link_line_num)
         search_end = min(len(lines), link_line_num + 50)
         nearby_text = "\n".join(lines[search_start:search_end])
 
-        # Count how many TOC headings appear in the nearby text
         embedded_count = sum(
             1 for heading in toc_headings
             if heading.lower() in nearby_text.lower()
         )
 
-        # Require at least 2 TOC headings embedded (or all if file has fewer)
         min_required = min(2, len(toc_headings))
         if embedded_count >= min_required:
             refs_with_toc += 1
+        elif is_list_item:
+            # Ambiguous: link in a list item could be a TOC title that
+            # happens to link to a .md file, or a genuine reference.
+            # Report as WARNING since we cannot tell which it is.
+            report.warning(
+                f"Link to '{ref_path.name}' in a list entry of {rel_file} "
+                f"points to a file with a TOC ({len(toc_headings)} sections) "
+                f"but the TOC is not embedded after the link. If this is a "
+                f"reference, embed the TOC so agents know what it contains. "
+                f"If this is an embedded TOC title, avoid using markdown "
+                f"links in TOC entries to prevent this ambiguity.",
+                rel_file,
+            )
         else:
+            # Clear standalone reference — TOC must be embedded
             report.minor(
-                f"Reference to '{ref_path.name}' in {rel_file} does not include "
-                f"the file's Table of Contents ({len(toc_headings)} sections). "
-                f"Embed the TOC inline so agents can see what content is available "
-                f"before navigating to it.",
+                f"Reference to '{ref_path.name}' in {rel_file} does not "
+                f"include the file's Table of Contents ({len(toc_headings)} "
+                f"sections). Embed the TOC inline so agents can see what "
+                f"content is available before navigating to it.",
                 rel_file,
             )
 
     if refs_checked > 0 and refs_with_toc == refs_checked:
         report.passed(
-            f"All {refs_checked} referenced .md files have TOC embedded in {rel_file}",
+            f"All {refs_checked} referenced .md files have TOC embedded "
+            f"in {rel_file}",
             rel_file,
         )
