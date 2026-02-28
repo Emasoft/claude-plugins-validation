@@ -759,8 +759,9 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
 
     # --- 2. Check compiled source code has binaries or build script ---
     if compiled_source_files:
-        bin_dir = plugin_root / "bin"
-        has_bin = bin_dir.is_dir() and any(bin_dir.iterdir())
+        # Search for bin/ directories recursively, not just at plugin root
+        bin_dirs = list(plugin_root.rglob("bin"))
+        has_bin = any(d.is_dir() and any(d.iterdir()) for d in bin_dirs)
 
         for lang_name, source_paths in compiled_source_files.items():
             # Find expected build system files for this language
@@ -806,48 +807,50 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
                 )
 
     # --- 3. Check compiled binaries platform coverage ---
-    bin_dir = plugin_root / "bin"
-    if not bin_dir.is_dir():
+    # Search for bin/ directories recursively (e.g., rust/tool/bin/, bin/)
+    all_bin_dirs = [d for d in plugin_root.rglob("bin") if d.is_dir()]
+    if not all_bin_dirs:
         return
 
     binary_files: list[str] = []
     detected_platforms: set[str] = set()
     base_names: set[str] = set()
 
-    for item in bin_dir.rglob("*"):
-        if not item.is_file():
-            continue
-        name = item.name
-        rel_path = str(item.relative_to(plugin_root))
+    for bin_dir in all_bin_dirs:
+        for item in bin_dir.rglob("*"):
+            if not item.is_file():
+                continue
+            name = item.name
+            rel_path = str(item.relative_to(plugin_root))
 
-        for suffix, platform_name in BINARY_PLATFORM_SUFFIXES.items():
-            if suffix in name.lower():
-                binary_files.append(rel_path)
-                detected_platforms.add(platform_name)
-                base = name[: name.lower().index(suffix.split("-")[0] + "-")]
-                if base.endswith("-"):
-                    base = base[:-1]
-                base_names.add(base)
-                break
-        else:
-            if not item.suffix and os.access(item, os.X_OK):
-                binary_files.append(rel_path)
-                base_names.add(name)
-            elif item.suffix == ".exe":
-                binary_files.append(rel_path)
-                detected_platforms.add("Windows")
-                base_names.add(item.stem)
-            elif item.suffix in {".dylib", ".so"}:
-                binary_files.append(rel_path)
-                if item.suffix == ".dylib":
-                    detected_platforms.add("macOS")
-                else:
-                    detected_platforms.add("Linux")
+            for suffix, platform_name in BINARY_PLATFORM_SUFFIXES.items():
+                if suffix in name.lower():
+                    binary_files.append(rel_path)
+                    detected_platforms.add(platform_name)
+                    base = name[: name.lower().index(suffix.split("-")[0] + "-")]
+                    if base.endswith("-"):
+                        base = base[:-1]
+                    base_names.add(base)
+                    break
+            else:
+                if not item.suffix and os.access(item, os.X_OK):
+                    binary_files.append(rel_path)
+                    base_names.add(name)
+                elif item.suffix == ".exe":
+                    binary_files.append(rel_path)
+                    detected_platforms.add("Windows")
+                    base_names.add(item.stem)
+                elif item.suffix in {".dylib", ".so"}:
+                    binary_files.append(rel_path)
+                    if item.suffix == ".dylib":
+                        detected_platforms.add("macOS")
+                    else:
+                        detected_platforms.add("Linux")
 
     if not binary_files:
         return
 
-    report.info(f"Found {len(binary_files)} compiled binary file(s) in bin/ for {len(base_names)} tool(s)")
+    report.info(f"Found {len(binary_files)} compiled binary file(s) for {len(base_names)} tool(s)")
 
     if detected_platforms:
         missing = RECOMMENDED_PLATFORMS - detected_platforms

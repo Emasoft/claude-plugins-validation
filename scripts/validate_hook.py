@@ -524,21 +524,17 @@ def validate_command_hook(
                 f"Verify the package is trusted and consider pinning a version."
             )
 
-    # Validate timeout if present (Claude Code uses seconds)
+    # Validate timeout if present (Claude Code hooks use milliseconds)
     if "timeout" in hook:
         timeout = hook["timeout"]
         if not isinstance(timeout, (int, float)):
             report.major(f"'timeout' must be a number, got {type(timeout).__name__}")
         elif timeout <= 0:
             report.major("'timeout' must be positive")
-        elif timeout > 1000:
-            # User likely confused seconds with milliseconds
-            report.major(
-                f"Command hook timeout is {timeout} — did you mean seconds? "
-                f"Values over 1000 suggest milliseconds were used instead of seconds."
-            )
-        elif timeout > 600:  # 10 minutes in seconds
-            report.minor(f"Long timeout ({timeout}s) may cause delays")
+        elif timeout > 600000:  # 10 minutes in milliseconds
+            report.warning(f"Command hook timeout is {timeout}ms ({timeout / 1000:.0f}s) — unusually long")
+        elif timeout < 100:
+            report.warning(f"Command hook timeout is {timeout}ms — very short, may cause premature timeouts")
 
     # Check for environment variable usage
     if "CLAUDE_ENV_FILE" in command:
@@ -598,21 +594,17 @@ def validate_prompt_hook(
         if not isinstance(hook["model"], str) or not hook["model"].strip():
             report.major("Prompt hook 'model' must be a non-empty string")
 
-    # Validate timeout if present (Claude Code uses seconds)
+    # Validate timeout if present (Claude Code hooks use milliseconds)
     if "timeout" in hook:
         timeout = hook["timeout"]
         if not isinstance(timeout, (int, float)):
             report.major(f"'timeout' must be a number, got {type(timeout).__name__}")
         elif timeout <= 0:
             report.major("'timeout' must be positive")
-        elif timeout > 1000:
-            # User likely confused seconds with milliseconds
-            report.major(
-                f"Prompt hook timeout is {timeout} — did you mean seconds? "
-                f"Values over 1000 suggest milliseconds were used instead of seconds."
-            )
-        elif timeout > 600:  # 10 minutes in seconds
-            report.minor(f"Long timeout ({timeout}s) may cause delays")
+        elif timeout > 600000:  # 10 minutes in milliseconds
+            report.warning(f"Prompt hook timeout is {timeout}ms ({timeout / 1000:.0f}s) — unusually long")
+        elif timeout < 100:
+            report.warning(f"Prompt hook timeout is {timeout}ms — very short, may cause premature timeouts")
 
     return True
 

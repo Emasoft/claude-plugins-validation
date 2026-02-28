@@ -294,14 +294,18 @@ def test_validate_command_hook_timeout_validations(tmp_path: Path):
     r2 = ValidationReport()
     validate_command_hook({"type": "command", "command": "echo ok", "timeout": -5}, "PreToolUse", tmp_path, r2)
     assert any("'timeout' must be positive" in r.message for r in r2.results if r.level == "MAJOR")
-    # Very large timeout (ms confusion)
+    # 5000ms = 5 seconds, perfectly normal — should NOT trigger any warning
     r3 = ValidationReport()
     validate_command_hook({"type": "command", "command": "echo ok", "timeout": 5000}, "PreToolUse", tmp_path, r3)
-    assert any("did you mean seconds" in r.message.lower() for r in r3.results if r.level == "MAJOR")
-    # Long but valid timeout
+    assert not any(r.level in ("MAJOR", "MINOR") for r in r3.results if "timeout" in r.message.lower())
+    # Very large timeout (>10 min) should trigger warning
     r4 = ValidationReport()
-    validate_command_hook({"type": "command", "command": "echo ok", "timeout": 700}, "PreToolUse", tmp_path, r4)
-    assert any("Long timeout" in r.message for r in r4.results if r.level == "MINOR")
+    validate_command_hook({"type": "command", "command": "echo ok", "timeout": 700000}, "PreToolUse", tmp_path, r4)
+    assert any("unusually long" in r.message for r in r4.results if r.level == "WARNING")
+    # Very short timeout (<100ms) should trigger warning
+    r4b = ValidationReport()
+    validate_command_hook({"type": "command", "command": "echo ok", "timeout": 50}, "PreToolUse", tmp_path, r4b)
+    assert any("very short" in r.message for r in r4b.results if r.level == "WARNING")
 
 
 def test_validate_command_hook_env_file_wrong_event(tmp_path: Path):
@@ -383,12 +387,14 @@ def test_validate_prompt_hook_timeout_and_model():
     r5 = ValidationReport()
     validate_prompt_hook({"type": "prompt", "prompt": "ok", "timeout": -1}, "Stop", r5)
     assert any("'timeout' must be positive" in r.message for r in r5.results if r.level == "MAJOR")
+    # 2000ms = 2 seconds, perfectly normal — should NOT trigger any warning
     r6 = ValidationReport()
     validate_prompt_hook({"type": "prompt", "prompt": "ok", "timeout": 2000}, "Stop", r6)
-    assert any("did you mean seconds" in r.message.lower() for r in r6.results if r.level == "MAJOR")
+    assert not any(r.level in ("MAJOR", "MINOR") for r in r6.results if "timeout" in r.message.lower())
+    # 800ms is perfectly normal — should NOT trigger anything
     r7 = ValidationReport()
     validate_prompt_hook({"type": "prompt", "prompt": "ok", "timeout": 800}, "Stop", r7)
-    assert any("Long timeout" in r.message for r in r7.results if r.level == "MINOR")
+    assert not any(r.level in ("MAJOR", "MINOR", "WARNING") for r in r7.results if "timeout" in r.message.lower())
 
 
 def test_validate_matcher_block_not_dict():
