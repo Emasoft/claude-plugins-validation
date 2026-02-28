@@ -50,6 +50,10 @@ from validate_rules import validate_rules_directory
 # Import comprehensive skill validator (190+ rules from AgentSkills OpenSpec, Nixtla, Meta-Skills)
 from validate_skill_comprehensive import validate_skill as validate_skill_comprehensive
 from cpv_validation_common import ValidationReport, resolve_tool_command, validate_toc_embedding
+from gitignore_filter import GitignoreFilter
+
+# Module-level gitignore filter — initialized in main(), used by scan functions
+_gi: GitignoreFilter | None = None
 
 
 def validate_manifest(
@@ -736,14 +740,16 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
         ".eggs",
     }
 
-    for dirpath, dirnames, filenames in os.walk(plugin_root):
-        # Filter out known skip dirs, hidden dirs, and structurally-detected venvs
-        dirnames[:] = [
-            d for d in dirnames
-            if not d.startswith(".")
-            and d not in skip_dirs
-            and not _is_python_venv(Path(dirpath) / d)
-        ]
+    # Use gitignore-aware walk to skip ignored files and directories
+    for dirpath, dirnames, filenames in (_gi.walk(plugin_root, skip_dirs=skip_dirs) if _gi else os.walk(plugin_root)):
+        if not _gi:
+            # Fallback filtering when gitignore filter not initialized
+            dirnames[:] = [
+                d for d in dirnames
+                if not d.startswith(".")
+                and d not in skip_dirs
+                and not _is_python_venv(Path(dirpath) / d)
+            ]
         rel_dir = Path(dirpath).relative_to(plugin_root)
 
         for filename in filenames:
@@ -777,7 +783,7 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
     else:
         has_scripts = any(
             any(f.endswith(ext) for ext in CROSSPLATFORM_EXTENSIONS)
-            for _, _, files in os.walk(plugin_root)
+            for _, _, files in (_gi.walk(plugin_root, skip_dirs=skip_dirs) if _gi else os.walk(plugin_root))
             for f in files
         )
         if has_scripts:
@@ -785,8 +791,8 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
 
     # --- 2. Check compiled source code has binaries or build script ---
     if compiled_source_files:
-        # Search for bin/ directories recursively, not just at plugin root
-        bin_dirs = list(plugin_root.rglob("bin"))
+        # Search for bin/ directories recursively, skip gitignored paths
+        bin_dirs = list(_gi.rglob("bin") if _gi else plugin_root.rglob("bin"))
         has_bin = any(d.is_dir() and any(d.iterdir()) for d in bin_dirs)
 
         for lang_name, source_paths in compiled_source_files.items():
@@ -833,16 +839,13 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
                 )
 
     # --- 3. Check compiled binaries platform coverage ---
-    # Search for bin/ directories recursively (e.g., rust/tool/bin/, bin/)
-    # Exclude venvs (by structure), skip_dirs, and hidden dirs
+    # Search for bin/ directories recursively, skip gitignored paths
     all_bin_dirs = []
-    for d in plugin_root.rglob("bin"):
+    for d in (_gi.rglob("bin") if _gi else plugin_root.rglob("bin")):
         if not d.is_dir():
             continue
-        rel_parts = d.relative_to(plugin_root).parts[:-1]  # parents only
-        # Skip if any ancestor is a skip_dir, hidden, or a venv
-        if any(part in skip_dirs or part.startswith(".") for part in rel_parts):
-            continue
+        # Also skip venvs detected structurally
+        rel_parts = d.relative_to(plugin_root).parts[:-1]
         if any(_is_python_venv(plugin_root / Path(*rel_parts[:i + 1])) for i in range(len(rel_parts))):
             continue
         all_bin_dirs.append(d)
@@ -1108,17 +1111,14 @@ def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
         "Thumbs.db": "Windows metadata",
     }
     for pattern_glob, desc in artifact_patterns.items():
-        matches = list(plugin_root.rglob(pattern_glob))
+        # Use gitignore-aware rglob — only find artifacts NOT covered by .gitignore
+        if _gi:
+            matches = [p for p in _gi.rglob(pattern_glob)]
+        else:
+            matches = list(plugin_root.rglob(pattern_glob))
         if matches:
-            # Check if they're gitignored — also check parent dir patterns
             sample = matches[0].relative_to(plugin_root)
-            # .pyc files are covered by either *.pyc or __pycache__/ in .gitignore
-            covered = any(pattern_glob.replace("*", "") in line for line in lines)
-            if not covered and pattern_glob == "*.pyc":
-                # __pycache__/ in .gitignore also covers .pyc files
-                covered = any("__pycache__" in line for line in lines)
-            if not covered:
-                report.warning(f"Found {len(matches)} {desc} file(s) (e.g. {sample}) that may not be gitignored")
+            report.warning(f"Found {len(matches)} {desc} file(s) (e.g. {sample}) that are not gitignored")
 
 
 # Regex to find inline Python blocks inside YAML: `python3 -c "..."`  or `python -c "..."`
@@ -1309,6 +1309,10 @@ def main() -> int:
         if version_dirs and (version_dirs[0] / ".claude-plugin").is_dir():
             plugin_root = version_dirs[0]
             print(f"Auto-resolved to latest version: {plugin_root.name}", file=sys.stderr)
+
+    # Initialize gitignore filter — all scan functions use this to skip ignored files
+    global _gi  # noqa: PLW0603
+    _gi = GitignoreFilter(plugin_root)
 
     # Run validation
     report = ValidationReport()
