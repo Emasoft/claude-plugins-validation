@@ -12,6 +12,7 @@ Tests the agent validation functions:
 
 Coverage: 10 tests covering 7 functions with realistic agent content.
 """
+
 from __future__ import annotations
 
 import sys
@@ -117,6 +118,7 @@ class TestParseFrontmatter:
         # end_line should be > 0 since frontmatter occupies several lines
         assert end_line > 0
 
+
 class TestValidateFrontmatterExists:
     """Tests for validate_frontmatter_exists function."""
 
@@ -166,6 +168,7 @@ class TestValidateNameField:
 
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
         assert any("lowercase" in m for m in major_msgs)
+
 
 class TestValidateToolsField:
     """Tests for validate_tools_field function."""
@@ -328,14 +331,20 @@ class TestValidateDescriptionField:
     def test_angle_brackets_in_description_reports_major(self):
         """validate_description_field reports MAJOR when description has < or > characters."""
         report = AgentValidationReport()
-        validate_description_field({"description": "Use when <user> asks for help doing something complex"}, "agent.md", report)
+        validate_description_field(
+            {"description": "Use when <user> asks for help doing something complex"}, "agent.md", report
+        )
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
         assert any("angle brackets" in m for m in major_msgs)
 
     def test_proactive_description_gets_passed(self):
         """validate_description_field records PASSED when description has 'proactively' hint."""
         report = AgentValidationReport()
-        validate_description_field({"description": "Use proactively when the user needs code review, specialized in Python"}, "agent.md", report)
+        validate_description_field(
+            {"description": "Use proactively when the user needs code review, specialized in Python"},
+            "agent.md",
+            report,
+        )
         passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
         assert any("proactive" in m for m in passed_msgs)
 
@@ -468,14 +477,18 @@ class TestValidateSystemPromptField:
     def test_placeholder_in_prompt_reports_major(self):
         """validate_system_prompt_field reports MAJOR when prompt contains TODO placeholder."""
         report = AgentValidationReport()
-        validate_system_prompt_field({"system-prompt": "You are an agent. TODO: add more details about role."}, "agent.md", report)
+        validate_system_prompt_field(
+            {"system-prompt": "You are an agent. TODO: add more details about role."}, "agent.md", report
+        )
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
         assert any("placeholder" in m for m in major_msgs)
 
     def test_valid_system_prompt_passes(self):
         """validate_system_prompt_field records PASSED for a clean prompt without placeholders."""
         report = AgentValidationReport()
-        validate_system_prompt_field({"system-prompt": "You are a specialized code reviewer for Python projects."}, "agent.md", report)
+        validate_system_prompt_field(
+            {"system-prompt": "You are a specialized code reviewer for Python projects."}, "agent.md", report
+        )
         passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
         assert any("'system-prompt' field valid" in m for m in passed_msgs)
 
@@ -661,9 +674,7 @@ class TestValidateHooksField:
             "PreToolUse": [
                 {
                     "matcher": "Bash",
-                    "hooks": [
-                        {"type": "command", "command": "echo pre-check"}
-                    ],
+                    "hooks": [{"type": "command", "command": "echo pre-check"}],
                 }
             ]
         }
@@ -674,11 +685,7 @@ class TestValidateHooksField:
     def test_invalid_hook_event_reports_major(self):
         """validate_hooks_field reports MAJOR for an unknown hook event name."""
         report = AgentValidationReport()
-        hooks = {
-            "InvalidEvent": [
-                {"hooks": [{"type": "command", "command": "echo test"}]}
-            ]
-        }
+        hooks = {"InvalidEvent": [{"hooks": [{"type": "command", "command": "echo test"}]}]}
         validate_hooks_field({"hooks": hooks}, "agent.md", report)
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
         assert any("Invalid hook event" in m for m in major_msgs)
@@ -705,11 +712,7 @@ class TestValidateHooksField:
     def test_invalid_hook_type_reports_major(self):
         """validate_hooks_field reports MAJOR for a hook with unrecognized type value."""
         report = AgentValidationReport()
-        hooks = {
-            "PostToolUse": [
-                {"hooks": [{"type": "webhook", "url": "https://example.com"}]}
-            ]
-        }
+        hooks = {"PostToolUse": [{"hooks": [{"type": "webhook", "url": "https://example.com"}]}]}
         validate_hooks_field({"hooks": hooks}, "agent.md", report)
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
         assert any("Invalid hook type" in m for m in major_msgs)
@@ -768,7 +771,10 @@ class TestValidateBodyContent:
 
     def test_body_with_sections_records_passed(self):
         """validate_body_content records PASSED for recognized sections like Capabilities and Workflow."""
-        content = "---\nname: good-body\n---\n\nYou are a code reviewer.\n\n## Capabilities\n\n- Review code\n\n## Workflow\n\n1. Read\n2. Review\n\n" + ("Extra content here. " * 10)
+        content = (
+            "---\nname: good-body\n---\n\nYou are a code reviewer.\n\n## Capabilities\n\n- Review code\n\n## Workflow\n\n1. Read\n2. Review\n\n"
+            + ("Extra content here. " * 10)
+        )
         report = AgentValidationReport()
         validate_body_content(content, "good-body.md", report)
         passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
@@ -814,7 +820,10 @@ class TestValidateAgentFileEdgeCases:
     def test_non_md_extension_reports_major(self, tmp_path):
         """validate_agent reports MAJOR for a file with .txt extension instead of .md."""
         f = tmp_path / "agent.txt"
-        f.write_text("---\nname: test-agent\ndescription: Valid agent for testing purposes\n---\nYou are a test agent.\n", encoding="utf-8")
+        f.write_text(
+            "---\nname: test-agent\ndescription: Valid agent for testing purposes\n---\nYou are a test agent.\n",
+            encoding="utf-8",
+        )
         report = validate_agent(f)
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
         assert any(".md extension" in m for m in major_msgs)
@@ -870,6 +879,7 @@ class TestPrintResultsAndJson:
     def test_print_json_produces_valid_json(self, capsys):
         """print_json outputs valid JSON containing agent_path, exit_code, score, and results."""
         import json
+
         report = AgentValidationReport(agent_path="/tmp/json-test.md")
         report.passed("all good", "json-test.md")
         report.major("a problem", "json-test.md")

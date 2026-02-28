@@ -11,6 +11,7 @@ Tests the core plugin validation functions:
 
 Coverage: 10 tests covering 8 code paths across 4 functions plus edge cases.
 """
+
 from __future__ import annotations
 
 import json
@@ -22,6 +23,7 @@ scripts_dir = Path(__file__).parent.parent / "scripts"
 if str(scripts_dir) not in sys.path:
     sys.path.insert(0, str(scripts_dir))
 
+from cpv_validation_common import ValidationReport  # noqa: E402
 from validate_plugin import (  # noqa: E402
     print_json,
     print_results,
@@ -38,7 +40,6 @@ from validate_plugin import (  # noqa: E402
     validate_structure,
     validate_workflow_inline_python,
 )
-from cpv_validation_common import ValidationReport  # noqa: E402
 
 
 class TestValidateManifest:
@@ -616,7 +617,9 @@ venv/
         """validate_gitignore reports MAJOR when *.py is gitignored (lines 1044-1048)."""
         plugin_dir = tmp_path / "srcign"
         plugin_dir.mkdir()
-        (plugin_dir / ".gitignore").write_text("*.py\n__pycache__\nnode_modules\n.mypy_cache\ndist\n.DS_Store\n*.swp\n.env\n.venv\n")
+        (plugin_dir / ".gitignore").write_text(
+            "*.py\n__pycache__\nnode_modules\n.mypy_cache\ndist\n.DS_Store\n*.swp\n.env\n.venv\n"
+        )
         report = ValidationReport()
         validate_gitignore(plugin_dir, report)
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
@@ -641,7 +644,7 @@ class TestValidateWorkflowInlinePython:
         wf_dir = plugin_dir / ".github" / "workflows"
         wf_dir.mkdir(parents=True)
         # Construct a workflow YAML with dangerous inline Python
-        wf_content = 'name: test\non: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: python3 -c "source = dict(); print(f\'{source[\"repo\"]}\')"'
+        wf_content = 'name: test\non: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: python3 -c "source = dict(); print(f\'{source["repo"]}\')"'
         (wf_dir / "ci.yml").write_text(wf_content)
         report = ValidationReport()
         validate_workflow_inline_python(plugin_dir, report)
@@ -654,7 +657,9 @@ class TestValidateWorkflowInlinePython:
         plugin_dir.mkdir()
         wf_dir = plugin_dir / ".github" / "workflows"
         wf_dir.mkdir(parents=True)
-        wf_content = "name: test\non: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hello\n"
+        wf_content = (
+            "name: test\non: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hello\n"
+        )
         (wf_dir / "ci.yml").write_text(wf_content)
         report = ValidationReport()
         validate_workflow_inline_python(plugin_dir, report)

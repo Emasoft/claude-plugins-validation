@@ -11,6 +11,7 @@ Tests the security validation module covering:
 Coverage: 10 tests covering all major code paths with realistic data.
 No mocking -- all tests use real files in tmp_path.
 """
+
 from __future__ import annotations
 
 import json
@@ -22,6 +23,7 @@ scripts_dir = Path(__file__).parent.parent / "scripts"
 if str(scripts_dir) not in sys.path:
     sys.path.insert(0, str(scripts_dir))
 
+from cpv_validation_common import ValidationReport  # noqa: E402
 from validate_security import (  # noqa: E402
     check_dangerous_files,
     check_script_permissions,
@@ -35,7 +37,6 @@ from validate_security import (  # noqa: E402
     should_skip_directory,
     validate_security,
 )
-from cpv_validation_common import ValidationReport  # noqa: E402
 
 
 class TestScanForInjection:
@@ -56,7 +57,7 @@ class TestScanForInjection:
 
     def test_detects_eval_patterns(self, tmp_path):
         """scan_for_injection should flag eval() and exec() calls as critical injection risks."""
-        content = 'user_input = input()\nresult = eval(user_input)\nexec(user_input)\n'
+        content = "user_input = input()\nresult = eval(user_input)\nexec(user_input)\n"
         report = ValidationReport()
         count = scan_for_injection(content, "plugin/dangerous.py", report)
         assert count >= 2, f"Expected at least 2 eval/exec issues, got {count}"
@@ -79,7 +80,9 @@ class TestScanForPathTraversal:
 
     def test_detects_directory_traversal_and_absolute_paths(self, tmp_path):
         """scan_for_path_traversal should flag ../ sequences and absolute system paths."""
-        content = 'config_path = "../../etc/passwd"\ndata_dir = "/usr/local/secret"\nwin_path = "C:\\Windows\\System32"\n'
+        content = (
+            'config_path = "../../etc/passwd"\ndata_dir = "/usr/local/secret"\nwin_path = "C:\\Windows\\System32"\n'
+        )
         report = ValidationReport()
         count = scan_for_path_traversal(content, "plugin/loader.py", report)
         # Should detect: ../, /usr/local, C:\\ patterns
@@ -135,7 +138,7 @@ class TestScanAllFiles:
 
         # Create a text file with an injection pattern
         py_file = plugin_dir / "helper.py"
-        py_file.write_text('data = eval(user_input)\n')
+        py_file.write_text("data = eval(user_input)\n")
 
         # Create a binary file that should be skipped
         img_file = plugin_dir / "icon.png"
@@ -168,7 +171,9 @@ class TestValidateSecurity:
         )
         manifest_dir = plugin_dir / ".claude-plugin"
         manifest_dir.mkdir()
-        (manifest_dir / "plugin.json").write_text(json.dumps({"name": "safe-plugin", "version": "1.0.0", "description": "A safe plugin"}, indent=2))
+        (manifest_dir / "plugin.json").write_text(
+            json.dumps({"name": "safe-plugin", "version": "1.0.0", "description": "A safe plugin"}, indent=2)
+        )
 
         report = validate_security(plugin_dir)
 
@@ -256,7 +261,9 @@ class TestScanForInjectionUncoveredPaths:
         scan_for_injection(content, "plugin/docs/api.md", report)
         # These lines look like markdown tables, not real pipe-to-shell
         pipe_issues = [r for r in report.results if "Pipe to" in r.message]
-        assert len(pipe_issues) == 0, f"Markdown table lines should not be flagged as pipe-to-shell: {[r.message for r in pipe_issues]}"
+        assert len(pipe_issues) == 0, (
+            f"Markdown table lines should not be flagged as pipe-to-shell: {[r.message for r in pipe_issues]}"
+        )
 
     def test_detects_unsafe_variable_expansion(self):
         """scan_for_injection should flag unquoted variable expansion as MAJOR issue."""
@@ -299,7 +306,7 @@ class TestScanForPathTraversalSkips:
     def test_skips_shebang_lines(self):
         """scan_for_path_traversal should skip shebang lines that legitimately reference system paths."""
         # Covers line 311: stripped.startswith("#!") -> continue
-        content = '#!/usr/bin/env python3\nimport safe_module\n'
+        content = "#!/usr/bin/env python3\nimport safe_module\n"
         report = ValidationReport()
         count = scan_for_path_traversal(content, "plugin/run.py", report)
         assert count == 0, f"Shebang lines should be skipped, got {count} issues"
@@ -443,6 +450,7 @@ class TestMainCLI:
         # Covers lines 570-611: main() parser, --json branch, exit code
         plugin_dir = tmp_path / "cli-plugin"
         plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
         (plugin_dir / "handler.py").write_text('"""Safe handler."""\n\ndef run():\n    return True\n')
 
         monkeypatch.setattr("sys.argv", ["validate_security", str(plugin_dir), "--json"])
@@ -458,6 +466,7 @@ class TestMainCLI:
         # Covers lines 609-611: strict mode exit code path
         plugin_dir = tmp_path / "strict-plugin"
         plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
         # Create a file with a real secret to trigger CRITICAL
         (plugin_dir / "config.py").write_text('AWS_KEY = "AKIAIOSFODNN7EXAMPLE"\n')
 
@@ -472,6 +481,7 @@ class TestMainCLI:
         # Covers lines 605-607: non-json branch with verbose flag
         plugin_dir = tmp_path / "verbose-plugin"
         plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
         (plugin_dir / "app.py").write_text('"""Safe app."""\nprint("hello")\n')
 
         monkeypatch.setattr("sys.argv", ["validate_security", str(plugin_dir), "--verbose"])

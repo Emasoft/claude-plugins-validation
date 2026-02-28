@@ -1853,6 +1853,21 @@ Examples:
     # Resolve to absolute path so relative_to() works correctly
     marketplace_path = args.marketplace_path.resolve()
 
+    # Verify path exists and contains marketplace content
+    if not marketplace_path.exists():
+        print(f"Error: {marketplace_path} does not exist", file=sys.stderr)
+        return 1
+    if marketplace_path.is_dir() and not (marketplace_path / "marketplace.json").exists():
+        print(
+            f"Error: No marketplace.json found at {marketplace_path}\n"
+            f"Expected a marketplace directory with marketplace.json.",
+            file=sys.stderr,
+        )
+        return 1
+    if marketplace_path.is_file() and marketplace_path.name != "marketplace.json":
+        print(f"Error: {marketplace_path} is not a marketplace.json file", file=sys.stderr)
+        return 1
+
     # Run validation
     report = validate_marketplace(marketplace_path)
 

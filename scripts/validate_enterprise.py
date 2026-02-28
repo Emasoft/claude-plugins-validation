@@ -909,6 +909,18 @@ Exit codes:
         print(f"Error: {plugin_path} does not exist", file=sys.stderr)
         return EXIT_CRITICAL
 
+    if not plugin_path.is_dir():
+        print(f"Error: {plugin_path} is not a directory", file=sys.stderr)
+        return EXIT_CRITICAL
+
+    # Verify this is a plugin directory
+    if not (plugin_path / ".claude-plugin").is_dir():
+        print(
+            f"Error: No Claude Code plugin found at {plugin_path}\nExpected a .claude-plugin/ directory.",
+            file=sys.stderr,
+        )
+        return EXIT_CRITICAL
+
     report = validate_enterprise_compliance(plugin_path, strict=args.strict)
 
     if args.json:

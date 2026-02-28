@@ -57,8 +57,8 @@ class TestMarketplaceValidationResult:
 
     def test_inherits_from_base(self):
         """MarketplaceValidationResult must inherit from cpv_validation_common.ValidationResult."""
-        from validate_marketplace import MarketplaceValidationResult
         from cpv_validation_common import ValidationResult as BaseValidationResult
+        from validate_marketplace import MarketplaceValidationResult
 
         assert issubclass(MarketplaceValidationResult, BaseValidationResult)
 
@@ -83,8 +83,8 @@ class TestMarketplaceValidationReport:
 
     def test_inherits_from_base(self):
         """MarketplaceValidationReport must inherit from cpv_validation_common.ValidationReport."""
-        from validate_marketplace import MarketplaceValidationReport
         from cpv_validation_common import ValidationReport as BaseValidationReport
+        from validate_marketplace import MarketplaceValidationReport
 
         assert issubclass(MarketplaceValidationReport, BaseValidationReport)
 
@@ -273,10 +273,7 @@ class TestMainJsonOutput:
             report = validate_marketplace(Path(tmpdir))
             # Build JSON output dict the same way main() does
             output = {
-                "results": [
-                    {"level": r.level, "message": r.message}
-                    for r in report.results
-                ],
+                "results": [{"level": r.level, "message": r.message} for r in report.results],
                 "summary": {
                     "CRITICAL": sum(1 for r in report.results if r.level == "CRITICAL"),
                     "MAJOR": sum(1 for r in report.results if r.level == "MAJOR"),
@@ -361,7 +358,7 @@ class TestValidateMarketplaceFileEdgeCases:
         from validate_marketplace import validate_marketplace_file
 
         mp = tmp_path / "marketplace.json"
-        mp.write_text('[1, 2, 3]')
+        mp.write_text("[1, 2, 3]")
         data, results = validate_marketplace_file(mp)
         assert data is None
         assert any(r.level == "CRITICAL" and "must be a JSON object" in r.message for r in results)
@@ -429,7 +426,9 @@ class TestValidatePluginEntryFields:
 
         plugin = {"name": "my-plugin", "source": "github", "custom_field_xyz": True}
         results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
-        assert any(r.level == "INFO" and "unknown field" in r.message and "custom_field_xyz" in r.message for r in results)
+        assert any(
+            r.level == "INFO" and "unknown field" in r.message and "custom_field_xyz" in r.message for r in results
+        )
 
     def test_non_list_tags_produce_minor(self, tmp_path):
         """Non-list tags must produce MINOR (lines 438-448)."""
@@ -795,15 +794,12 @@ class TestValidateWorkflowInlinePython:
         wf_dir.mkdir(parents=True)
         wf_file = wf_dir / "ci.yml"
         wf_file.write_text(
-            'jobs:\n  build:\n    steps:\n      - run: python3 -c "val = source[\\"repo\\"]; print(f\\"{val[\\\"key\\\"]}\\")"'
-            '\n'
+            'jobs:\n  build:\n    steps:\n      - run: python3 -c "val = source[\\"repo\\"]; print(f\\"{val[\\"key\\"]}\\")"'
+            "\n"
         )
         # The regex specifically looks for python3 -c "..." with {expr["key"]} inside
         # Let's create a more precise example:
-        wf_file.write_text(
-            'steps:\n  - run: |\n      python3 -c "x = {data[\\"key\\"]}"'
-            '\n'
-        )
+        wf_file.write_text('steps:\n  - run: |\n      python3 -c "x = {data[\\"key\\"]}"\n')
         results = validate_workflow_inline_python(tmp_path)
         # Either it detects the pattern (MAJOR) or produces INFO (no dangerous patterns)
         # The actual detection depends on regex matching the shell-quoted python
@@ -816,7 +812,9 @@ class TestValidateWorkflowInlinePython:
         wf_dir = tmp_path / ".github" / "workflows"
         wf_dir.mkdir(parents=True)
         wf_file = wf_dir / "ci.yml"
-        wf_file.write_text("name: CI\non: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hello\n")
+        wf_file.write_text(
+            "name: CI\non: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hello\n"
+        )
         results = validate_workflow_inline_python(tmp_path)
         assert any(r.level == "INFO" and "No dangerous inline Python" in r.message for r in results)
 
@@ -838,18 +836,22 @@ class TestValidateMarketplaceIntegration:
 
         # Create marketplace.json
         mp = tmp_path / "marketplace.json"
-        mp.write_text(json.dumps({
-            "name": "test-marketplace",
-            "owner": {"name": "test-owner"},
-            "plugins": [
+        mp.write_text(
+            json.dumps(
                 {
-                    "name": "my-plugin",
-                    "source": "./my-plugin",
-                    "repository": "https://github.com/owner/my-plugin",
-                    "version": "1.0.0",
+                    "name": "test-marketplace",
+                    "owner": {"name": "test-owner"},
+                    "plugins": [
+                        {
+                            "name": "my-plugin",
+                            "source": "./my-plugin",
+                            "repository": "https://github.com/owner/my-plugin",
+                            "version": "1.0.0",
+                        }
+                    ],
                 }
-            ],
-        }))
+            )
+        )
 
         # Create README.md
         readme = tmp_path / "README.md"

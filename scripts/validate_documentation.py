@@ -838,6 +838,18 @@ def main() -> int:
         print(f"Error: {plugin_path} does not exist", file=sys.stderr)
         return 1
 
+    if not plugin_path.is_dir():
+        print(f"Error: {plugin_path} is not a directory", file=sys.stderr)
+        return 1
+
+    # Verify this is a plugin directory
+    if not (plugin_path / ".claude-plugin").is_dir():
+        print(
+            f"Error: No Claude Code plugin found at {plugin_path}\nExpected a .claude-plugin/ directory.",
+            file=sys.stderr,
+        )
+        return 1
+
     report = validate_documentation(plugin_path)
 
     if args.json:

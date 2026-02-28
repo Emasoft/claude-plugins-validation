@@ -5,6 +5,7 @@ Coverage: 10 tests covering validate_frontmatter, validate_name_field,
 validate_skill_content, validate_directory_structure, validate_skill (main),
 plus edge cases for missing SKILL.md, invalid frontmatter, and oversized content.
 """
+
 from __future__ import annotations
 
 import stat
@@ -16,6 +17,7 @@ scripts_dir = Path(__file__).parent.parent / "scripts"
 if str(scripts_dir) not in sys.path:
     sys.path.insert(0, str(scripts_dir))
 
+from cpv_validation_common import ValidationReport  # noqa: E402
 from validate_skill import (  # noqa: E402
     MAX_SKILL_LINES,
     SkillValidationReport,
@@ -37,7 +39,6 @@ from validate_skill import (  # noqa: E402
     validate_skill_content,
     validate_supporting_files,
 )
-from cpv_validation_common import ValidationReport  # noqa: E402
 
 
 def _make_report() -> ValidationReport:
@@ -77,6 +78,7 @@ model: sonnet
         assert report.has_critical
         assert any("Malformed YAML frontmatter" in r.message for r in report.results)
 
+
 class TestValidateNameField:
     """Tests for validate_name_field format and content rules."""
 
@@ -97,6 +99,7 @@ class TestValidateNameField:
         assert report.has_major
         msgs = [r.message for r in report.results if r.level == "MAJOR"]
         assert any("lowercase" in m for m in msgs)
+
 
 class TestValidateSkillContent:
     """Tests for validate_skill_content body validation."""
@@ -599,9 +602,7 @@ class TestValidateSupportingFiles:
         """Anchor links (#section) should be skipped (lines 447-448)."""
         skill_dir = tmp_path / "anchor-skill"
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text(
-            "---\nname: anchor-skill\n---\n# Skill\n\nSee [section](#usage) below.\n"
-        )
+        (skill_dir / "SKILL.md").write_text("---\nname: anchor-skill\n---\n# Skill\n\nSee [section](#usage) below.\n")
         report = _make_report()
         validate_supporting_files(skill_dir, report)
         assert not report.has_major
@@ -637,7 +638,9 @@ class TestPrintResults:
         """print_results in non-verbose mode should hide PASSED and INFO (lines 551-554)."""
         skill_dir = tmp_path / "print-skill"
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text("---\nname: print-skill\ndescription: A test skill for print output\n---\n# Content\nReal body.\n")
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: print-skill\ndescription: A test skill for print output\n---\n# Content\nReal body.\n"
+        )
         report = validate_skill(skill_dir)
         skill_report = SkillValidationReport(skill_path=str(skill_dir))
         skill_report.results = report.results
@@ -652,7 +655,9 @@ class TestPrintResults:
         """print_results in verbose mode should show PASSED and INFO (lines 544-546)."""
         skill_dir = tmp_path / "verbose-skill"
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text("---\nname: verbose-skill\ndescription: A test skill for verbose output\n---\n# Content\nReal body.\n")
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: verbose-skill\ndescription: A test skill for verbose output\n---\n# Content\nReal body.\n"
+        )
         report = validate_skill(skill_dir)
         skill_report = SkillValidationReport(skill_path=str(skill_dir))
         skill_report.results = report.results
@@ -697,9 +702,12 @@ class TestPrintJson:
     def test_print_json_output_structure(self, capsys, tmp_path):
         """print_json should output valid JSON with correct structure (lines 584-596)."""
         import json as json_mod
+
         skill_dir = tmp_path / "json-skill"
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text("---\nname: json-skill\ndescription: A skill to test JSON output\n---\n# JSON Skill\nContent.\n")
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: json-skill\ndescription: A skill to test JSON output\n---\n# JSON Skill\nContent.\n"
+        )
         report = validate_skill(skill_dir)
         skill_report = SkillValidationReport(skill_path=str(skill_dir))
         skill_report.results = report.results
@@ -722,6 +730,7 @@ class TestMainEntryPoint:
     def test_main_with_nonexistent_path(self, monkeypatch, capsys):
         """main() with a nonexistent path should print error and return 1 (lines 615-617)."""
         from validate_skill import main
+
         monkeypatch.setattr("sys.argv", ["validate_skill.py", "/nonexistent/path/to/skill"])
         result = main()
         assert result == 1
@@ -731,11 +740,15 @@ class TestMainEntryPoint:
     def test_main_with_valid_skill_json_output(self, monkeypatch, capsys, tmp_path):
         """main() with --json flag should produce JSON output (lines 621-622)."""
         from validate_skill import main
+
         skill_dir = tmp_path / "main-json-skill"
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text("---\nname: main-json-skill\ndescription: Testing main with JSON output flag\n---\n# Skill\nBody content here.\n")
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: main-json-skill\ndescription: Testing main with JSON output flag\n---\n# Skill\nBody content here.\n"
+        )
         monkeypatch.setattr("sys.argv", ["validate_skill.py", str(skill_dir), "--json"])
         import json as json_mod
+
         result = main()
         captured = capsys.readouterr()
         output = json_mod.loads(captured.out)
@@ -745,9 +758,12 @@ class TestMainEntryPoint:
     def test_main_with_verbose_flag(self, monkeypatch, capsys, tmp_path):
         """main() with --verbose should show PASSED results (lines 623-624)."""
         from validate_skill import main
+
         skill_dir = tmp_path / "main-verbose-skill"
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text("---\nname: main-verbose-skill\ndescription: Testing main verbose flag output\n---\n# Skill\nBody.\n")
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: main-verbose-skill\ndescription: Testing main verbose flag output\n---\n# Skill\nBody.\n"
+        )
         monkeypatch.setattr("sys.argv", ["validate_skill.py", str(skill_dir), "--verbose"])
         main()
         captured = capsys.readouterr()
@@ -756,9 +772,12 @@ class TestMainEntryPoint:
     def test_main_strict_mode_with_nit(self, monkeypatch, capsys, tmp_path):
         """main() with --strict should use exit_code_strict (lines 626-627)."""
         from validate_skill import main
+
         skill_dir = tmp_path / "strict-skill"
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text("---\nname: strict-skill\ndescription: Testing strict mode with nit issues\n---\n# Skill\nBody content.\n")
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: strict-skill\ndescription: Testing strict mode with nit issues\n---\n# Skill\nBody content.\n"
+        )
         monkeypatch.setattr("sys.argv", ["validate_skill.py", str(skill_dir), "--strict"])
         result = main()
         # Should return integer exit code

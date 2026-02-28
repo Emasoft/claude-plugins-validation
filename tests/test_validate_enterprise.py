@@ -118,7 +118,9 @@ class TestValidateAgentCompliance:
     def test_compliant_agent(self, tmp_path):
         """validate_agent_compliance returns compliant result for agent with name and description."""
         agent_file = tmp_path / "my-agent.md"
-        agent_file.write_text("---\nname: my-agent\ndescription: A test agent\n---\n\n# Agent instructions\n", encoding="utf-8")
+        agent_file.write_text(
+            "---\nname: my-agent\ndescription: A test agent\n---\n\n# Agent instructions\n", encoding="utf-8"
+        )
         report = EnterpriseComplianceReport()
         result = validate_agent_compliance(agent_file, report)
         assert result.is_compliant is True
@@ -145,10 +147,15 @@ class TestValidateEnterpriseCompliance:
         plugin_dir.mkdir()
         skills_dir = plugin_dir / "skills" / "my-skill"
         skills_dir.mkdir(parents=True)
-        (skills_dir / "SKILL.md").write_text("---\nname: my-skill\ndescription: Skill desc\nauthor: Author\nlicense: MIT\n---\n\n# Body\n", encoding="utf-8")
+        (skills_dir / "SKILL.md").write_text(
+            "---\nname: my-skill\ndescription: Skill desc\nauthor: Author\nlicense: MIT\n---\n\n# Body\n",
+            encoding="utf-8",
+        )
         agents_dir = plugin_dir / "agents"
         agents_dir.mkdir()
-        (agents_dir / "my-agent.md").write_text("---\nname: my-agent\ndescription: Agent desc\n---\n\n# Agent\n", encoding="utf-8")
+        (agents_dir / "my-agent.md").write_text(
+            "---\nname: my-agent\ndescription: Agent desc\n---\n\n# Agent\n", encoding="utf-8"
+        )
         report = validate_enterprise_compliance(plugin_dir)
         assert report.total_skills == 1
         assert report.compliant_skills == 1
@@ -683,6 +690,7 @@ class TestMainEntryPoint:
 
         plugin_dir = tmp_path / "cli-plugin"
         plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
         skills_dir = plugin_dir / "skills" / "cs"
         skills_dir.mkdir(parents=True)
         (skills_dir / "SKILL.md").write_text(
@@ -702,6 +710,7 @@ class TestMainEntryPoint:
 
         plugin_dir = tmp_path / "sv-plugin"
         plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
         monkeypatch.setattr("sys.argv", ["validate_enterprise", str(plugin_dir), "--strict", "--verbose"])
         main()
         captured = capsys.readouterr().out

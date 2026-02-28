@@ -18,6 +18,7 @@ scripts_dir = Path(__file__).parent.parent / "scripts"
 if str(scripts_dir) not in sys.path:
     sys.path.insert(0, str(scripts_dir))
 
+from cpv_validation_common import ValidationReport
 from validate_hook import (
     HookValidationReport,
     extract_script_path,
@@ -34,13 +35,14 @@ from validate_hook import (
     validate_single_hook,
     validate_top_level_structure,
 )
-from cpv_validation_common import ValidationReport
 
 
 def test_validate_json_structure_valid_file(tmp_path: Path):
     """A well-formed JSON hooks file should be parsed and returned as a dict with a PASSED result."""
     hooks_file = tmp_path / "hooks.json"
-    hooks_data = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "echo hello"}]}]}}
+    hooks_data = {
+        "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "echo hello"}]}]}
+    }
     hooks_file.write_text(json.dumps(hooks_data))
     report = ValidationReport()
     result = validate_json_structure(hooks_file, report)
@@ -138,7 +140,9 @@ def test_validate_hooks_invalid_event_name(tmp_path: Path):
     hooks_file.write_text(json.dumps(hooks_data))
     report = validate_hooks(hooks_file)
     assert report.has_critical
-    assert any("Unknown hook event" in r.message and "OnBanana" in r.message for r in report.results if r.level == "CRITICAL")
+    assert any(
+        "Unknown hook event" in r.message and "OnBanana" in r.message for r in report.results if r.level == "CRITICAL"
+    )
 
 
 def test_validate_hooks_missing_hooks_key_and_matcher_array(tmp_path: Path):
@@ -160,13 +164,17 @@ def test_edge_cases_unknown_fields_and_absolute_path(tmp_path: Path):
     # Unknown fields
     hooks_data = {
         "hooks": {
-            "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "echo ok", "customField": "x"}]}]
+            "PreToolUse": [
+                {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo ok", "customField": "x"}]}
+            ]
         }
     }
     f = tmp_path / "hooks.json"
     f.write_text(json.dumps(hooks_data))
     r1 = validate_hooks(f, plugin_root=tmp_path)
-    assert any("Unknown hook field" in r.message and "customField" in r.message for r in r1.results if r.level == "WARNING")
+    assert any(
+        "Unknown hook field" in r.message and "customField" in r.message for r in r1.results if r.level == "WARNING"
+    )
     # Absolute path
     r2 = ValidationReport()
     validate_command_hook({"type": "command", "command": "/usr/local/bin/mytool --check"}, "PreToolUse", tmp_path, r2)
@@ -280,8 +288,12 @@ def test_validate_script_not_executable(tmp_path: Path):
 def test_validate_command_hook_package_executor_warning(tmp_path: Path):
     """Using npx/bunx/uvx to run a remote package should produce a WARNING about trust."""
     report = ValidationReport()
-    validate_command_hook({"type": "command", "command": "npx --yes prettier --check ."}, "PreToolUse", tmp_path, report)
-    assert any("remote package" in r.message and "prettier" in r.message for r in report.results if r.level == "WARNING")
+    validate_command_hook(
+        {"type": "command", "command": "npx --yes prettier --check ."}, "PreToolUse", tmp_path, report
+    )
+    assert any(
+        "remote package" in r.message and "prettier" in r.message for r in report.results if r.level == "WARNING"
+    )
 
 
 def test_validate_command_hook_timeout_validations(tmp_path: Path):
@@ -347,7 +359,9 @@ def test_validate_single_hook_async_on_non_command(tmp_path: Path):
     """Setting async:true on a prompt hook should produce MAJOR about async only on command hooks."""
     report = HookValidationReport()
     validate_single_hook({"type": "prompt", "prompt": "Review this", "async": True}, "Stop", tmp_path, report)
-    assert any("'async: true' is only supported on type 'command'" in r.message for r in report.results if r.level == "MAJOR")
+    assert any(
+        "'async: true' is only supported on type 'command'" in r.message for r in report.results if r.level == "MAJOR"
+    )
 
 
 def test_validate_single_hook_status_message_and_once(tmp_path: Path):
@@ -439,7 +453,9 @@ def test_validate_event_hooks_empty_list():
 
 def test_print_results_and_print_json(tmp_path: Path, capsys):
     """print_results outputs human-readable format; print_json outputs valid JSON with all expected keys."""
-    hooks_data = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "echo test"}]}]}}
+    hooks_data = {
+        "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "echo test"}]}]}
+    }
     hooks_file = tmp_path / "hooks.json"
     hooks_file.write_text(json.dumps(hooks_data))
     report = validate_hooks(hooks_file, plugin_root=tmp_path)
@@ -466,7 +482,11 @@ def test_print_results_exit_code_messages(tmp_path: Path, capsys):
     """print_results shows correct status lines for exit_code 0, 1, 2, and 3."""
     # Exit code 0 (all passed)
     f0 = tmp_path / "ok.json"
-    f0.write_text(json.dumps({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "echo ok"}]}]}}))
+    f0.write_text(
+        json.dumps(
+            {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "echo ok"}]}]}}
+        )
+    )
     r0 = validate_hooks(f0, plugin_root=tmp_path)
     print_results(r0)
     out0 = capsys.readouterr().out

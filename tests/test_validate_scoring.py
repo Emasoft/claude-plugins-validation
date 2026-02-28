@@ -20,6 +20,7 @@ scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
 if str(scripts_dir) not in sys.path:
     sys.path.insert(0, str(scripts_dir))
 
+from cpv_validation_common import ValidationReport, ValidationResult
 from validate_scoring import (
     CategoryScore,
     QualityScoreReport,
@@ -28,7 +29,6 @@ from validate_scoring import (
     compute_quality_score,
     generate_recommendations,
 )
-from cpv_validation_common import ValidationReport, ValidationResult
 
 
 class TestCalculateCategoryScore:
@@ -107,8 +107,18 @@ class TestGenerateRecommendations:
     def test_critical_recommendations_first(self):
         """generate_recommendations places CRITICAL recommendations at the top."""
         scores = {
-            "security": CategoryScore(name="security", score=4.0, threshold=8, passed=False, issues_critical=2, issues_major=0, issues_minor=0),
-            "documentation": CategoryScore(name="documentation", score=3.0, threshold=5, passed=False, issues_critical=0, issues_major=1, issues_minor=0),
+            "security": CategoryScore(
+                name="security", score=4.0, threshold=8, passed=False, issues_critical=2, issues_major=0, issues_minor=0
+            ),
+            "documentation": CategoryScore(
+                name="documentation",
+                score=3.0,
+                threshold=5,
+                passed=False,
+                issues_critical=0,
+                issues_major=1,
+                issues_minor=0,
+            ),
         }
         recs = generate_recommendations(scores)
         assert len(recs) >= 2
@@ -118,8 +128,18 @@ class TestGenerateRecommendations:
     def test_no_recommendations_for_perfect_scores(self):
         """generate_recommendations returns empty list when all categories pass with no issues."""
         scores = {
-            "security": CategoryScore(name="security", score=10.0, threshold=8, passed=True, issues_critical=0, issues_major=0, issues_minor=0),
-            "documentation": CategoryScore(name="documentation", score=9.0, threshold=5, passed=True, issues_critical=0, issues_major=0, issues_minor=0),
+            "security": CategoryScore(
+                name="security", score=10.0, threshold=8, passed=True, issues_critical=0, issues_major=0, issues_minor=0
+            ),
+            "documentation": CategoryScore(
+                name="documentation",
+                score=9.0,
+                threshold=5,
+                passed=True,
+                issues_critical=0,
+                issues_major=0,
+                issues_minor=0,
+            ),
         }
         recs = generate_recommendations(scores)
         assert len(recs) == 0
@@ -141,7 +161,10 @@ class TestComputeQualityScore:
             "author": {"name": "Tester", "email": "test@example.com"},
         }
         (claude_plugin / "plugin.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-        (plugin_dir / "README.md").write_text("# Test Plugin\n\nA test plugin for validation.\n\n## Installation\n\nRun `claude plugin install`\n\n## Usage\n\nUse it.\n", encoding="utf-8")
+        (plugin_dir / "README.md").write_text(
+            "# Test Plugin\n\nA test plugin for validation.\n\n## Installation\n\nRun `claude plugin install`\n\n## Usage\n\nUse it.\n",
+            encoding="utf-8",
+        )
         report = compute_quality_score(plugin_dir)
         assert isinstance(report, QualityScoreReport)
         assert 0.0 <= report.overall_score <= 100.0
@@ -170,12 +193,16 @@ class TestCategoryScoreDataclass:
 
     def test_fair_rating_for_score_between_5_and_7(self):
         """CategoryScore.__post_init__ assigns 'Fair' rating when score is 5 <= s < 7."""
-        cat = CategoryScore(name="documentation", score=5.5, threshold=5, passed=True, issues_critical=0, issues_major=1, issues_minor=0)
+        cat = CategoryScore(
+            name="documentation", score=5.5, threshold=5, passed=True, issues_critical=0, issues_major=1, issues_minor=0
+        )
         assert cat.rating == "Fair"
 
     def test_poor_rating_for_score_below_5(self):
         """CategoryScore.__post_init__ assigns 'Poor' rating when score < 5."""
-        cat = CategoryScore(name="security", score=3.0, threshold=8, passed=False, issues_critical=2, issues_major=0, issues_minor=0)
+        cat = CategoryScore(
+            name="security", score=3.0, threshold=8, passed=False, issues_critical=2, issues_major=0, issues_minor=0
+        )
         assert cat.rating == "Poor"
 
     def test_to_dict_returns_complete_structure(self):
@@ -216,7 +243,9 @@ class TestQualityScoreReportSerialization:
         report.critical_failures = ["[security] Secret found"]
         report.recommendations = ["Fix secrets"]
         # Add a category score
-        cat = CategoryScore(name="security", score=7.0, threshold=8, passed=False, issues_critical=1, issues_major=0, issues_minor=0)
+        cat = CategoryScore(
+            name="security", score=7.0, threshold=8, passed=False, issues_critical=1, issues_major=0, issues_minor=0
+        )
         report.category_scores["security"] = cat
         # Add a validator report
         vr = ValidationReport()
@@ -277,7 +306,15 @@ class TestGenerateRecommendationsAdditional:
     def test_recommended_tier_for_passed_category_with_major_issues(self):
         """generate_recommendations emits [RECOMMENDED] for categories that pass threshold but have major issues."""
         scores = {
-            "documentation": CategoryScore(name="documentation", score=8.0, threshold=5, passed=True, issues_critical=0, issues_major=2, issues_minor=0),
+            "documentation": CategoryScore(
+                name="documentation",
+                score=8.0,
+                threshold=5,
+                passed=True,
+                issues_critical=0,
+                issues_major=2,
+                issues_minor=0,
+            ),
         }
         recs = generate_recommendations(scores)
         assert len(recs) == 1
@@ -287,7 +324,15 @@ class TestGenerateRecommendationsAdditional:
     def test_optional_tier_for_passed_category_with_only_minor_issues(self):
         """generate_recommendations emits [OPTIONAL] for categories that pass with minor issues only."""
         scores = {
-            "maintainability": CategoryScore(name="maintainability", score=9.0, threshold=6, passed=True, issues_critical=0, issues_major=0, issues_minor=3),
+            "maintainability": CategoryScore(
+                name="maintainability",
+                score=9.0,
+                threshold=6,
+                passed=True,
+                issues_critical=0,
+                issues_major=0,
+                issues_minor=3,
+            ),
         }
         recs = generate_recommendations(scores)
         assert len(recs) == 1
@@ -464,7 +509,11 @@ class TestComputeQualityScoreAdditional:
         # resulting in one of the three statuses. We verify the status assignment logic is reachable.
         assert report.status in ("PASS", "CONDITIONAL_PASS", "FAIL")
         # Also verify the score-to-status relationship is internally consistent
-        if report.overall_score >= 80 and all(c.passed for c in report.category_scores.values()) and len(report.critical_failures) == 0:
+        if (
+            report.overall_score >= 80
+            and all(c.passed for c in report.category_scores.values())
+            and len(report.critical_failures) == 0
+        ):
             assert report.status == "PASS"
         elif len(report.critical_failures) > 0 or report.overall_score < 60:
             assert report.status == "FAIL"
@@ -482,9 +531,36 @@ class TestPrintQualityReport:
         report.letter_grade = "C"
         report.status = "CONDITIONAL_PASS"
         report.category_scores = {
-            "security": CategoryScore(name="security", score=9.0, threshold=8, passed=True, issues_critical=0, issues_major=0, issues_minor=0, issues_passed=4),
-            "schema_compliance": CategoryScore(name="schema_compliance", score=6.0, threshold=8, passed=False, issues_critical=0, issues_major=2, issues_minor=1, issues_passed=3),
-            "documentation": CategoryScore(name="documentation", score=3.0, threshold=5, passed=False, issues_critical=0, issues_major=1, issues_minor=0, issues_passed=1),
+            "security": CategoryScore(
+                name="security",
+                score=9.0,
+                threshold=8,
+                passed=True,
+                issues_critical=0,
+                issues_major=0,
+                issues_minor=0,
+                issues_passed=4,
+            ),
+            "schema_compliance": CategoryScore(
+                name="schema_compliance",
+                score=6.0,
+                threshold=8,
+                passed=False,
+                issues_critical=0,
+                issues_major=2,
+                issues_minor=1,
+                issues_passed=3,
+            ),
+            "documentation": CategoryScore(
+                name="documentation",
+                score=3.0,
+                threshold=5,
+                passed=False,
+                issues_critical=0,
+                issues_major=1,
+                issues_minor=0,
+                issues_passed=1,
+            ),
         }
         report.critical_failures = ["[schema_compliance] Manifest missing required field"]
         report.recommendations = [

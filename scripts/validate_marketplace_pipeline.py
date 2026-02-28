@@ -1504,6 +1504,15 @@ Exit Codes:
         print(f"Error: Path is not a directory: {marketplace_path}", file=sys.stderr)
         return EXIT_MINOR
 
+    # Verify content type — marketplace directory must contain marketplace.json
+    if not (marketplace_path / "marketplace.json").exists():
+        print(
+            f"Error: No marketplace.json found at {marketplace_path}\n"
+            f"Expected a marketplace directory with marketplace.json.",
+            file=sys.stderr,
+        )
+        return EXIT_MINOR
+
     # Run validation
     report = validate_marketplace_pipeline(marketplace_path, _verbose=args.verbose)
 

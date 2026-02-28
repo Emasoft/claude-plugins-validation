@@ -166,7 +166,9 @@ class TestValidateMarketplacePipeline:
             gitmodules="# empty\n",
             workflows={"update-submodules.yml": workflow_content},
         )
-        (mp / "README.md").write_text("# Test Marketplace\n\n## Installation\n\nclaude plugin marketplace add test\n", encoding="utf-8")
+        (mp / "README.md").write_text(
+            "# Test Marketplace\n\n## Installation\n\nclaude plugin marketplace add test\n", encoding="utf-8"
+        )
         report = validate_marketplace_pipeline(mp)
         assert isinstance(report, PipelineValidationReport)
         assert 0.0 <= report.total_score <= 100.0
@@ -378,9 +380,7 @@ class TestParseGitmodules:
         # Write content with NUL byte to make configparser fail, but with the
         # path/url lines immediately after the [submodule] header so the regex
         # pattern (which expects path=... right after header) can match them.
-        gitmodules_path.write_bytes(
-            b'\x00[submodule "beta"]\npath = beta\nurl = https://github.com/org/beta.git\n'
-        )
+        gitmodules_path.write_bytes(b'\x00[submodule "beta"]\npath = beta\nurl = https://github.com/org/beta.git\n')
         result = parse_gitmodules(gitmodules_path)
         # The regex fallback should find the submodule
         assert "beta" in result
@@ -394,7 +394,9 @@ class TestLoadYamlFile:
     def test_valid_yaml_loads_correctly(self, tmp_path):
         """load_yaml_file returns parsed dict for valid YAML content."""
         yaml_file = tmp_path / "test.yml"
-        yaml_file.write_text("name: test\non:\n  push:\njobs:\n  build:\n    runs-on: ubuntu-latest\n", encoding="utf-8")
+        yaml_file.write_text(
+            "name: test\non:\n  push:\njobs:\n  build:\n    runs-on: ubuntu-latest\n", encoding="utf-8"
+        )
         result = load_yaml_file(yaml_file)
         assert result is not None
         assert result["name"] == "test"
@@ -578,7 +580,9 @@ class TestMainCLI:
         """main() returns an exit code and prints report for a valid marketplace directory."""
         mp = tmp_path / "marketplace"
         mp.mkdir()
-        (mp / "marketplace.json").write_text(json.dumps({"name": "cli-test", "version": "1.0.0", "plugins": []}), encoding="utf-8")
+        (mp / "marketplace.json").write_text(
+            json.dumps({"name": "cli-test", "version": "1.0.0", "plugins": []}), encoding="utf-8"
+        )
         (mp / ".gitmodules").write_text("# empty\n", encoding="utf-8")
         with patch("sys.argv", ["validate_marketplace_pipeline.py", str(mp)]):
             exit_code = main()
@@ -589,7 +593,9 @@ class TestMainCLI:
         """main() with --json flag outputs valid JSON to stdout."""
         mp = tmp_path / "marketplace"
         mp.mkdir()
-        (mp / "marketplace.json").write_text(json.dumps({"name": "json-test", "version": "1.0.0", "plugins": []}), encoding="utf-8")
+        (mp / "marketplace.json").write_text(
+            json.dumps({"name": "json-test", "version": "1.0.0", "plugins": []}), encoding="utf-8"
+        )
         (mp / ".gitmodules").write_text("# empty\n", encoding="utf-8")
         with patch("sys.argv", ["validate_marketplace_pipeline.py", str(mp), "--json"]):
             main()

@@ -760,6 +760,14 @@ Rating scale (0-10 per category):
         print(f"Error: Plugin path is not a directory: {plugin_path}", file=sys.stderr)
         return EXIT_CRITICAL
 
+    # Verify this is a plugin directory
+    if not (plugin_path / ".claude-plugin").is_dir():
+        print(
+            f"Error: No Claude Code plugin found at {plugin_path}\nExpected a .claude-plugin/ directory.",
+            file=sys.stderr,
+        )
+        return EXIT_CRITICAL
+
     # Compute quality score
     report = compute_quality_score(plugin_path)
 

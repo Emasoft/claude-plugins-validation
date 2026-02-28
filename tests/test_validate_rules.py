@@ -18,6 +18,7 @@ scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
 if str(scripts_dir) not in sys.path:
     sys.path.insert(0, str(scripts_dir))
 
+from cpv_validation_common import ValidationReport
 from validate_rules import (
     _classify_char,
     _validate_frontmatter,
@@ -25,7 +26,6 @@ from validate_rules import (
     validate_rule_file,
     validate_rules_directory,
 )
-from cpv_validation_common import ValidationReport
 
 
 class TestClassifyChar:
@@ -41,6 +41,7 @@ class TestClassifyChar:
         """_classify_char returns 'cjk' for CJK unified ideographs (Chinese/Japanese kanji)."""
         assert _classify_char("\u4e00") == "cjk"  # first CJK unified ideograph
         assert _classify_char("\u6f22") == "cjk"  # kanji for 'han'
+
 
 class TestEstimateTokens:
     """Tests for estimate_tokens function."""

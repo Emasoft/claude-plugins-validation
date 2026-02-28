@@ -65,9 +65,7 @@ class TestValidateAgentTaskRefs:
         """When an agent file references a non-existent agent via subagent_type, a MAJOR issue is reported."""
         agents_dir = tmp_path / "agents"
         agents_dir.mkdir()
-        (agents_dir / "caller.md").write_text(
-            '---\nname: caller\n---\n# Caller\n\nsubagent_type: "ghost-agent"\n'
-        )
+        (agents_dir / "caller.md").write_text('---\nname: caller\n---\n# Caller\n\nsubagent_type: "ghost-agent"\n')
 
         report = CrossReferenceValidationReport()
         available_agents = {"caller"}
@@ -84,9 +82,7 @@ class TestValidateSubagentTypeMatching:
     def test_subagent_type_without_matching_file_reports_major(self, tmp_path: Path):
         """When a markdown file references a subagent_type with no matching agents/NAME.md, a MAJOR issue is reported."""
         # Create a markdown file in plugin root that references a non-existent agent
-        (tmp_path / "README.md").write_text(
-            '# Plugin\n\nConfigure with subagent_type = "missing-bot"\n'
-        )
+        (tmp_path / "README.md").write_text('# Plugin\n\nConfigure with subagent_type = "missing-bot"\n')
 
         report = CrossReferenceValidationReport()
         available_agents: set[str] = set()
@@ -101,9 +97,7 @@ class TestValidateSubagentTypeMatching:
         agents_dir = tmp_path / "agents"
         agents_dir.mkdir()
         (agents_dir / "real-agent.md").write_text("---\nname: real-agent\n---\n# Agent\n")
-        (tmp_path / "docs.md").write_text(
-            '# Docs\n\nUse subagent_type: "real-agent" for delegation.\n'
-        )
+        (tmp_path / "docs.md").write_text('# Docs\n\nUse subagent_type: "real-agent" for delegation.\n')
 
         report = CrossReferenceValidationReport()
         available_agents = {"real-agent"}
@@ -123,9 +117,7 @@ class TestValidateCommandAgentRefs:
         (agents_dir / "worker.md").write_text("---\nname: worker\n---\n# Worker\n")
         commands_dir = tmp_path / "commands"
         commands_dir.mkdir()
-        (commands_dir / "deploy.md").write_text(
-            '---\nname: deploy\n---\n# Deploy\n\nsubagent_type: "worker"\n'
-        )
+        (commands_dir / "deploy.md").write_text('---\nname: deploy\n---\n# Deploy\n\nsubagent_type: "worker"\n')
 
         report = CrossReferenceValidationReport()
         available_agents = {"worker"}
@@ -152,6 +144,7 @@ class TestValidateCommandAgentRefs:
         critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
         assert any("nonexistent-agent" in m and "BREAKING" in m for m in critical_msgs)
 
+
 class TestValidateHookScriptRefs:
     """Tests for Rule 6: Hook script references in hooks.json must exist."""
 
@@ -165,11 +158,7 @@ class TestValidateHookScriptRefs:
         script_file = scripts_subdir / "lint.py"
         script_file.write_text("#!/usr/bin/env python3\nprint('lint')\n")
         # Create hooks.json with a reference to the script
-        hooks_config = {
-            "PreToolUse": [
-                {"command": "${CLAUDE_PLUGIN_ROOT}/scripts/lint.py"}
-            ]
-        }
+        hooks_config = {"PreToolUse": [{"command": "${CLAUDE_PLUGIN_ROOT}/scripts/lint.py"}]}
         (hooks_dir / "hooks.json").write_text(json.dumps(hooks_config))
 
         report = CrossReferenceValidationReport()
@@ -183,11 +172,7 @@ class TestValidateHookScriptRefs:
         """When hooks.json references a script path that does not exist, a CRITICAL issue is reported."""
         hooks_dir = tmp_path / "hooks"
         hooks_dir.mkdir()
-        hooks_config = {
-            "PostToolUse": [
-                {"command": "${CLAUDE_PLUGIN_ROOT}/scripts/missing-script.sh"}
-            ]
-        }
+        hooks_config = {"PostToolUse": [{"command": "${CLAUDE_PLUGIN_ROOT}/scripts/missing-script.sh"}]}
         (hooks_dir / "hooks.json").write_text(json.dumps(hooks_config))
 
         report = CrossReferenceValidationReport()
@@ -209,23 +194,23 @@ class TestValidateCrossReferences:
         # .claude-plugin/plugin.json
         cp_dir = plugin / ".claude-plugin"
         cp_dir.mkdir()
-        (cp_dir / "plugin.json").write_text(json.dumps({
-            "name": "my-plugin",
-            "version": "1.0.0",
-            "description": "Test plugin",
-        }))
+        (cp_dir / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "name": "my-plugin",
+                    "version": "1.0.0",
+                    "description": "Test plugin",
+                }
+            )
+        )
         # agents/
         agents_dir = plugin / "agents"
         agents_dir.mkdir()
-        (agents_dir / "builder.md").write_text(
-            '---\nname: builder\n---\n# Builder\n\nsubagent_type: "builder"\n'
-        )
+        (agents_dir / "builder.md").write_text('---\nname: builder\n---\n# Builder\n\nsubagent_type: "builder"\n')
         # commands/
         commands_dir = plugin / "commands"
         commands_dir.mkdir()
-        (commands_dir / "build.md").write_text(
-            '---\nname: build\n---\n# Build\n\nsubagent_type: "builder"\n'
-        )
+        (commands_dir / "build.md").write_text('---\nname: build\n---\n# Build\n\nsubagent_type: "builder"\n')
         # README
         (plugin / "README.md").write_text("# my-plugin\n\nVersion: 1.0.0\n")
 
@@ -505,10 +490,14 @@ class TestValidateHookScriptRefsExtended:
         custom_hooks_dir.mkdir()
         hooks_config = {"PreToolUse": [{"command": "${CLAUDE_PLUGIN_ROOT}/scripts/check.py"}]}
         (custom_hooks_dir / "my-hooks.json").write_text(json.dumps(hooks_config))
-        (cp_dir / "plugin.json").write_text(json.dumps({
-            "name": "test",
-            "hooks": "./custom/my-hooks.json",
-        }))
+        (cp_dir / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "name": "test",
+                    "hooks": "./custom/my-hooks.json",
+                }
+            )
+        )
         # Script does NOT exist, so we expect a CRITICAL
         report = CrossReferenceValidationReport()
         validate_hook_script_refs(tmp_path, report)

@@ -593,6 +593,17 @@ Exit Codes:
     # Resolve to absolute path so relative_to() works correctly
     plugin_path = args.plugin_path.resolve()
 
+    # Verify this is a plugin directory
+    if not plugin_path.is_dir():
+        print(f"Error: {plugin_path} is not a directory", file=sys.stderr)
+        return 1
+    if not (plugin_path / ".claude-plugin").is_dir():
+        print(
+            f"Error: No Claude Code plugin found at {plugin_path}\nExpected a .claude-plugin/ directory.",
+            file=sys.stderr,
+        )
+        return 1
+
     # Run validation
     report = validate_encoding(plugin_path)
 

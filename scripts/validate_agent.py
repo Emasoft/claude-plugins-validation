@@ -1146,6 +1146,14 @@ def main() -> int:
         print(f"Error: {path} does not exist", file=sys.stderr)
         return 1
 
+    # Verify content type — must be .md file or directory containing .md files
+    if path.is_file() and path.suffix != ".md":
+        print(f"Error: {path} is not a Markdown (.md) agent file", file=sys.stderr)
+        return 1
+    if path.is_dir() and not list(path.glob("*.md")):
+        print(f"Error: No agent definition files (.md) found in {path}", file=sys.stderr)
+        return 1
+
     # Handle directory vs file
     if path.is_dir():
         reports = validate_agents_directory(path)

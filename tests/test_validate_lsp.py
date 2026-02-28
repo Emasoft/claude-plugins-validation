@@ -10,6 +10,7 @@ Tests the LSP server configuration validator covering:
 
 Coverage: 10 tests, all executing real validation logic with no mocking.
 """
+
 from __future__ import annotations
 
 import json
@@ -21,6 +22,7 @@ scripts_dir = Path(__file__).parent.parent / "scripts"
 if str(scripts_dir) not in sys.path:
     sys.path.insert(0, str(scripts_dir))
 
+from cpv_validation_common import ValidationReport  # noqa: E402
 from validate_lsp import (  # noqa: E402
     validate_env_var_syntax,
     validate_lsp_config,
@@ -28,11 +30,11 @@ from validate_lsp import (  # noqa: E402
     validate_path_value,
     validate_plugin_lsp,
 )
-from cpv_validation_common import ValidationReport  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _messages(report: ValidationReport) -> list[str]:
     """Return all result messages from a report."""
@@ -53,6 +55,7 @@ def _has_message_containing(report: ValidationReport, fragment: str) -> bool:
 # Tests for validate_env_var_syntax
 # ---------------------------------------------------------------------------
 
+
 class TestValidateEnvVarSyntax:
     """Tests for environment variable syntax validation."""
 
@@ -72,6 +75,7 @@ class TestValidateEnvVarSyntax:
 # ---------------------------------------------------------------------------
 # Tests for validate_path_value
 # ---------------------------------------------------------------------------
+
 
 class TestValidatePathValue:
     """Tests for path value validation in LSP configs."""
@@ -100,6 +104,7 @@ class TestValidatePathValue:
 # ---------------------------------------------------------------------------
 # Tests for validate_lsp_server
 # ---------------------------------------------------------------------------
+
 
 class TestValidateLspServer:
     """Tests for single LSP server configuration validation."""
@@ -161,6 +166,7 @@ class TestValidateLspServer:
 # Tests for validate_lsp_config
 # ---------------------------------------------------------------------------
 
+
 class TestValidateLspConfig:
     """Tests for LSP configuration file validation."""
 
@@ -198,6 +204,7 @@ class TestValidateLspConfig:
 # ---------------------------------------------------------------------------
 # Tests for validate_plugin_lsp
 # ---------------------------------------------------------------------------
+
 
 class TestValidatePluginLsp:
     """Tests for plugin-level LSP validation (multi-file discovery)."""
@@ -276,6 +283,7 @@ class TestValidateLspServerExtended:
     def test_command_known_runtime_passes(self, monkeypatch):
         """A command using a known runtime (npx/node/python/python3) passes (covers line 166)."""
         import shutil as _shutil
+
         # Ensure shutil.which returns None so the runtime fallback branch is reached
         monkeypatch.setattr(_shutil, "which", lambda cmd: None)
         report = ValidationReport()
@@ -466,9 +474,12 @@ class TestValidateLspConfigExtended:
     def test_relative_path_computation_with_plugin_root(self, tmp_path):
         """Config path outside plugin_root still works with fallback relative path (covers lines 319-320)."""
         import tempfile
+
         with tempfile.TemporaryDirectory() as other_dir:
             config_file = Path(other_dir) / "lsp-config.json"
-            config_file.write_text(json.dumps({"languageServers": {"x": {"command": "x", "extensionToLanguage": {".x": "x"}}}}))
+            config_file.write_text(
+                json.dumps({"languageServers": {"x": {"command": "x", "extensionToLanguage": {".x": "x"}}}})
+            )
             # plugin_root is tmp_path but config is in other_dir - relative_to raises ValueError
             report = validate_lsp_config(config_file, plugin_root=tmp_path)
             # Should still validate successfully (uses filename as rel_path fallback)
@@ -507,14 +518,18 @@ class TestValidateLspConfigExtended:
     def test_lsp_servers_key_alias_works(self, tmp_path):
         """The 'lspServers' key alias should be recognized as a valid servers key."""
         config_file = tmp_path / "lsp-config.json"
-        config_file.write_text(json.dumps({
-            "lspServers": {
-                "gopls": {
-                    "command": "gopls",
-                    "extensionToLanguage": {".go": "go"},
-                },
-            },
-        }))
+        config_file.write_text(
+            json.dumps(
+                {
+                    "lspServers": {
+                        "gopls": {
+                            "command": "gopls",
+                            "extensionToLanguage": {".go": "go"},
+                        },
+                    },
+                }
+            )
+        )
         report = validate_lsp_config(config_file, plugin_root=tmp_path)
         assert _has_message_containing(report, "1 LSP server")
 
@@ -629,6 +644,7 @@ class TestMainFunction:
 
     def test_main_with_directory(self, tmp_path, monkeypatch):
         """main() with a plugin directory runs validate_plugin_lsp (covers line 491)."""
+        (tmp_path / ".claude-plugin").mkdir()
         monkeypatch.setattr(sys, "argv", ["validate_lsp.py", str(tmp_path)])
         exit_code = main()
         assert exit_code == 0
@@ -654,6 +670,7 @@ class TestMainFunction:
 
     def test_main_no_path_uses_cwd(self, tmp_path, monkeypatch):
         """main() with no path argument uses current working directory (covers lines 480-481)."""
+        (tmp_path / ".claude-plugin").mkdir()
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr(sys, "argv", ["validate_lsp.py"])
         exit_code = main()

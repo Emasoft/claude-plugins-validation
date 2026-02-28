@@ -9,6 +9,7 @@ plus edge cases for malformed input.
 
 Coverage: 10 tests covering all major code paths with real file I/O via tmp_path.
 """
+
 from __future__ import annotations
 
 import json
@@ -20,6 +21,7 @@ scripts_dir = Path(__file__).parent.parent / "scripts"
 if str(scripts_dir) not in sys.path:
     sys.path.insert(0, str(scripts_dir))
 
+from cpv_validation_common import ValidationReport
 from validate_mcp import (
     extract_env_vars,
     validate_env_var_syntax,
@@ -28,7 +30,6 @@ from validate_mcp import (
     validate_path_value,
     validate_plugin_mcp,
 )
-from cpv_validation_common import ValidationReport
 
 
 class TestValidateEnvVarSyntax:
@@ -200,9 +201,7 @@ class TestValidatePathValuePluginRoot:
     def test_plugin_root_path_resolved_file_missing_produces_info(self, tmp_path):
         """Path using CLAUDE_PLUGIN_ROOT that resolves to missing file should produce INFO."""
         report = ValidationReport()
-        validate_path_value(
-            "${CLAUDE_PLUGIN_ROOT}/lib/server.js", report, "test-ctx", plugin_root=tmp_path
-        )
+        validate_path_value("${CLAUDE_PLUGIN_ROOT}/lib/server.js", report, "test-ctx", plugin_root=tmp_path)
         infos = [r for r in report.results if r.level == "INFO"]
         assert any("may not exist" in i.message for i in infos)
 
@@ -211,9 +210,7 @@ class TestValidatePathValuePluginRoot:
         (tmp_path / "lib").mkdir()
         (tmp_path / "lib" / "server.js").write_text("console.log('hi');")
         report = ValidationReport()
-        validate_path_value(
-            "${CLAUDE_PLUGIN_ROOT}/lib/server.js", report, "test-ctx", plugin_root=tmp_path
-        )
+        validate_path_value("${CLAUDE_PLUGIN_ROOT}/lib/server.js", report, "test-ctx", plugin_root=tmp_path)
         infos = [r for r in report.results if r.level == "INFO"]
         assert not any("may not exist" in i.message for i in infos)
 
@@ -493,9 +490,7 @@ class TestValidateMcpConfigAdvanced:
     def test_invalid_server_name_format_produces_minor(self, tmp_path):
         """Server name starting with number should produce MINOR."""
         mcp_file = tmp_path / ".mcp.json"
-        mcp_file.write_text(json.dumps({
-            "mcpServers": {"123bad": {"type": "stdio", "command": "node"}}
-        }))
+        mcp_file.write_text(json.dumps({"mcpServers": {"123bad": {"type": "stdio", "command": "node"}}}))
         report = validate_mcp_config(mcp_file)
         minors = [r for r in report.results if r.level == "MINOR"]
         assert any("should be alphanumeric" in m.message for m in minors)
@@ -503,9 +498,7 @@ class TestValidateMcpConfigAdvanced:
     def test_server_config_not_dict_produces_critical(self, tmp_path):
         """Server config that is not a dict should produce CRITICAL and skip validation."""
         mcp_file = tmp_path / ".mcp.json"
-        mcp_file.write_text(json.dumps({
-            "mcpServers": {"bad-server": "not-a-dict"}
-        }))
+        mcp_file.write_text(json.dumps({"mcpServers": {"bad-server": "not-a-dict"}}))
         report = validate_mcp_config(mcp_file)
         criticals = [r for r in report.results if r.level == "CRITICAL"]
         assert any("config must be an object" in c.message for c in criticals)
@@ -517,9 +510,7 @@ class TestValidatePluginMcpAdvanced:
     def test_plugin_with_mcp_json_file_validates(self, tmp_path):
         """Plugin root with .mcp.json file should validate it."""
         mcp_file = tmp_path / ".mcp.json"
-        mcp_file.write_text(json.dumps({
-            "mcpServers": {"srv": {"type": "stdio", "command": "node"}}
-        }))
+        mcp_file.write_text(json.dumps({"mcpServers": {"srv": {"type": "stdio", "command": "node"}}}))
         report = validate_plugin_mcp(tmp_path)
         passed = [r for r in report.results if r.level == "PASSED"]
         assert len(passed) >= 1
@@ -530,9 +521,7 @@ class TestValidatePluginMcpAdvanced:
         claude_dir.mkdir()
         ext_config = tmp_path / "configs" / "mcp.json"
         ext_config.parent.mkdir()
-        ext_config.write_text(json.dumps({
-            "mcpServers": {"ext-srv": {"type": "stdio", "command": "node"}}
-        }))
+        ext_config.write_text(json.dumps({"mcpServers": {"ext-srv": {"type": "stdio", "command": "node"}}}))
         manifest = {"name": "test", "mcpServers": "./configs/mcp.json"}
         (claude_dir / "plugin.json").write_text(json.dumps(manifest))
         report = validate_plugin_mcp(tmp_path)
@@ -544,9 +533,7 @@ class TestValidatePluginMcpAdvanced:
         claude_dir = tmp_path / ".claude-plugin"
         claude_dir.mkdir()
         ext_config = tmp_path / "mcp-config.json"
-        ext_config.write_text(json.dumps({
-            "mcpServers": {"ext-srv": {"type": "stdio", "command": "node"}}
-        }))
+        ext_config.write_text(json.dumps({"mcpServers": {"ext-srv": {"type": "stdio", "command": "node"}}}))
         manifest = {"name": "test", "mcpServers": "mcp-config.json"}
         (claude_dir / "plugin.json").write_text(json.dumps(manifest))
         report = validate_plugin_mcp(tmp_path)
@@ -639,15 +626,16 @@ class TestMainFunction:
     def test_main_with_valid_mcp_json_file(self, tmp_path, monkeypatch):
         """main() with a valid .mcp.json file path should return 0."""
         mcp_file = tmp_path / ".mcp.json"
-        mcp_file.write_text(json.dumps({
-            "mcpServers": {"srv": {"type": "stdio", "command": "node", "args": ["server.js"]}}
-        }))
+        mcp_file.write_text(
+            json.dumps({"mcpServers": {"srv": {"type": "stdio", "command": "node", "args": ["server.js"]}}})
+        )
         monkeypatch.setattr("sys.argv", ["validate_mcp", str(mcp_file)])
         result = main()
         assert result == 0
 
     def test_main_with_directory_path(self, tmp_path, monkeypatch):
         """main() with a plugin directory should validate it and return 0."""
+        (tmp_path / ".claude-plugin").mkdir()
         monkeypatch.setattr("sys.argv", ["validate_mcp", str(tmp_path)])
         result = main()
         assert result == 0
@@ -661,9 +649,7 @@ class TestMainFunction:
     def test_main_json_output_mode(self, tmp_path, monkeypatch, capsys):
         """main() with --json flag should output valid JSON."""
         mcp_file = tmp_path / ".mcp.json"
-        mcp_file.write_text(json.dumps({
-            "mcpServers": {"srv": {"type": "stdio", "command": "node"}}
-        }))
+        mcp_file.write_text(json.dumps({"mcpServers": {"srv": {"type": "stdio", "command": "node"}}}))
         monkeypatch.setattr("sys.argv", ["validate_mcp", "--json", str(mcp_file)])
         result = main()
         out = capsys.readouterr().out
@@ -676,9 +662,7 @@ class TestMainFunction:
     def test_main_strict_mode(self, tmp_path, monkeypatch, capsys):
         """main() with --strict flag should use exit_code_strict."""
         mcp_file = tmp_path / ".mcp.json"
-        mcp_file.write_text(json.dumps({
-            "mcpServers": {"srv": {"type": "stdio", "command": "node"}}
-        }))
+        mcp_file.write_text(json.dumps({"mcpServers": {"srv": {"type": "stdio", "command": "node"}}}))
         monkeypatch.setattr("sys.argv", ["validate_mcp", "--strict", str(mcp_file)])
         result = main()
         assert result == 0
@@ -705,8 +689,7 @@ class TestV170Fixes:
         (claude_dir / "plugin.json").write_text(json.dumps(manifest))
         report = validate_plugin_mcp(tmp_path)
         deprecation_results = [
-            r for r in report.results
-            if "deprecated" in r.message.lower() and "sse" in r.message.lower()
+            r for r in report.results if "deprecated" in r.message.lower() and "sse" in r.message.lower()
         ]
         assert len(deprecation_results) == 1, (
             f"Expected exactly 1 SSE deprecation warning, got {len(deprecation_results)}: "

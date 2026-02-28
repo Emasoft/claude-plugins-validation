@@ -16,6 +16,7 @@ Validation rules tested:
 7. Metadata field type validation
 8. Scripts directory shebang validation
 """
+
 from __future__ import annotations
 
 import stat
@@ -1258,7 +1259,9 @@ class TestReferenceFilesValidation:
         skill_dir.mkdir()
         refs_dir = skill_dir / "references"
         refs_dir.mkdir()
-        long_content = "# Long Reference\n\n## Table of Contents\n\n- [Section 1](#section-1)\n\n" + ("Content line.\n" * 150)
+        long_content = "# Long Reference\n\n## Table of Contents\n\n- [Section 1](#section-1)\n\n" + (
+            "Content line.\n" * 150
+        )
         (refs_dir / "big-reference.md").write_text(long_content)
 
         report = ValidationReport(skill_path=str(skill_dir))

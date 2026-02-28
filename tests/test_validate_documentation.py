@@ -395,6 +395,7 @@ class TestCLI:
 
         from validate_documentation import main
 
+        (tmp_path / ".claude-plugin").mkdir()
         readme = tmp_path / "README.md"
         readme.write_text("# Plugin\n\nDescription.\n\n## Installation\n\n## Usage")
         (tmp_path / "CHANGELOG.md").write_text("# Changelog")
@@ -406,4 +407,5 @@ class TestCLI:
 
 if __name__ == "__main__":
     import pytest
+
     pytest.main([__file__, "-v"])

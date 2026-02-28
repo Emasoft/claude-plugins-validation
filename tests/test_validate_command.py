@@ -8,6 +8,7 @@ Covers five target functions with exactly 10 tests:
 - validate_tool_pattern (2 tests): known built-in tool and malformed MCP tool
 - validate_command (2 tests): full valid file end-to-end and nonexistent file
 """
+
 from __future__ import annotations
 
 import sys
@@ -236,11 +237,16 @@ class TestValidateFrontmatterExistsEdgeCases:
 
     def test_unknown_frontmatter_field_reports_warning(self):
         """A frontmatter field not in the known set should produce a WARNING (line 178)."""
-        content = "---\nname: test-cmd\ndescription: A valid description here\ncustom-field: something\n---\nBody text here."
+        content = (
+            "---\nname: test-cmd\ndescription: A valid description here\ncustom-field: something\n---\nBody text here."
+        )
         report = CommandValidationReport()
         result = validate_frontmatter_exists(content, report, "unknown-field.md")
         assert result is not None
-        assert any(r.level == "WARNING" and "Unknown frontmatter field" in r.message and "custom-field" in r.message for r in report.results)
+        assert any(
+            r.level == "WARNING" and "Unknown frontmatter field" in r.message and "custom-field" in r.message
+            for r in report.results
+        )
 
 
 class TestValidateNameFieldEdgeCases:
@@ -450,7 +456,9 @@ class TestValidateBodyContent:
         """A body with no instruction keywords should produce INFO (line 439)."""
         # Use text that avoids ALL instruction keywords: you, will, should, must, when, if, task, do, perform, execute
         # Also avoid "do" appearing as substring (like in "dolor")
-        content = "---\nname: test\n---\n" + ("The cat sat on the mat. Apples are green. Bananas are yellow. Cars travel fast on the highway. " * 4)
+        content = "---\nname: test\n---\n" + (
+            "The cat sat on the mat. Apples are green. Bananas are yellow. Cars travel fast on the highway. " * 4
+        )
         report = CommandValidationReport()
         validate_body_content(content, "no-keywords.md", report)
         assert any(r.level == "INFO" and "clear instructions" in r.message for r in report.results)
@@ -492,7 +500,10 @@ class TestValidateCommandExtended:
     def test_non_md_extension_reports_major(self, tmp_path):
         """A command file with wrong extension should produce MAJOR (line 499)."""
         cmd_file = tmp_path / "command.txt"
-        cmd_file.write_text("---\nname: test\ndescription: A valid test description\n---\nYou should do something when the user asks. This body is long enough to pass the minimum content check for the validator.", encoding="utf-8")
+        cmd_file.write_text(
+            "---\nname: test\ndescription: A valid test description\n---\nYou should do something when the user asks. This body is long enough to pass the minimum content check for the validator.",
+            encoding="utf-8",
+        )
         report = validate_command(cmd_file)
         assert any(r.level == "MAJOR" and ".md extension" in r.message for r in report.results)
 
@@ -572,6 +583,7 @@ class TestPrintResultsAndJson:
     def test_print_json_outputs_valid_json(self, capsys):
         """print_json should output valid JSON with command_path, exit_code, score, counts, results (lines 624-637)."""
         import json as json_mod
+
         report = CommandValidationReport(command_path="/tmp/json-test.md")
         report.passed("All good", "json-test.md")
         report.major("A problem", "json-test.md")

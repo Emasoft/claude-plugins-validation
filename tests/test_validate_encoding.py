@@ -483,6 +483,7 @@ class TestMainCLI:
         """CLI main with a clean plugin directory should exit with code 0."""
         plugin_dir = tmp_path / "cli-plugin"
         plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
         (plugin_dir / "main.py").write_bytes(b"print('ok')\n")
         monkeypatch.setattr("sys.argv", ["validate_encoding", str(plugin_dir)])
         exit_code = main()
@@ -492,6 +493,7 @@ class TestMainCLI:
         """CLI main with --json flag should output valid JSON containing encoding_stats."""
         plugin_dir = tmp_path / "json-plugin"
         plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
         (plugin_dir / "app.py").write_bytes(b"import sys\n")
         monkeypatch.setattr("sys.argv", ["validate_encoding", "--json", str(plugin_dir)])
         exit_code = main()
@@ -505,6 +507,7 @@ class TestMainCLI:
         """CLI main with --strict and a file with CRLF endings should exit with non-zero code."""
         plugin_dir = tmp_path / "strict-plugin"
         plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
         # CRLF on .py file produces MINOR issue
         (plugin_dir / "bad.py").write_bytes(b"print('hi')\r\nimport os\r\n")
         monkeypatch.setattr("sys.argv", ["validate_encoding", "--strict", str(plugin_dir)])

@@ -555,6 +555,20 @@ def main() -> int:
         print(f"Error: {path} does not exist", file=sys.stderr)
         return 1
 
+    # Verify content type — must be .mcp.json file or directory containing one
+    if path.is_file() and not path.name.endswith(".mcp.json"):
+        print(f"Error: {path} is not an MCP config file (expected .mcp.json)", file=sys.stderr)
+        return 1
+    if path.is_dir():
+        has_mcp = (path / ".mcp.json").exists() or (path / ".claude-plugin").is_dir()
+        if not has_mcp:
+            print(
+                f"Error: No MCP configuration found at {path}\n"
+                f"Expected .mcp.json file or a plugin directory with .claude-plugin/.",
+                file=sys.stderr,
+            )
+            return 1
+
     # Determine if it's a file or directory
     if path.is_file():
         report = validate_mcp_config(path, path.parent)

@@ -425,6 +425,11 @@ def main() -> int:
         print(f"Error: {path} is not a directory", file=sys.stderr)
         return 1
 
+    # Verify content type — rules directory must contain .md rule files
+    if not list(rules_dir.glob("*.md")):
+        print(f"Error: No rule files (.md) found in {rules_dir}", file=sys.stderr)
+        return 1
+
     report = validate_rules_directory(rules_dir, plugin_root=plugin_root)
 
     if args.json:
