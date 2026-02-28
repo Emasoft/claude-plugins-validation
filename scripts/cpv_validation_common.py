@@ -1868,16 +1868,15 @@ def validate_toc_embedding(
     refs_checked = 0
     refs_with_toc = 0
 
+    # Determine the references/ directory for this file — only links
+    # pointing INTO this directory are actual skill/agent references.
+    # Links to files outside references/ (e.g. ./19-config-settings.md
+    # from an embedded TOC) are cross-references within reference content
+    # and must not be validated for TOC embedding.
+    refs_dir = md_file_path.parent / "references"
+
     for link_match in _MD_LINK_RE.finditer(md_content):
         link_target = link_match.group(2)
-
-        # Skip links on indented lines — these are embedded TOC entries,
-        # not standalone references that need their own TOC validation
-        link_start = link_match.start()
-        line_start = md_content.rfind("\n", 0, link_start) + 1
-        line_prefix = md_content[line_start:link_start]
-        if re.match(r"\s+[-*]", line_prefix):
-            continue
 
         # Resolve the referenced file path
         ref_path = base_dir / link_target
@@ -1889,6 +1888,15 @@ def validate_toc_embedding(
 
         # Only validate .md reference files (skip .py, etc.)
         if ref_path.suffix.lower() != ".md":
+            continue
+
+        # Only validate links to files inside the references/ subdirectory.
+        # This filters out cross-references from embedded TOC entries (like
+        # ./19-config.md or ../other.md) which are NOT the skill's own
+        # reference files and should not be checked for TOC embedding.
+        try:
+            ref_path.resolve().relative_to(refs_dir.resolve())
+        except ValueError:
             continue
 
         refs_checked += 1

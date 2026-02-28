@@ -366,9 +366,9 @@ my-skill --verbose
         # No results at all — no .md links to check
         assert len(report.results) == 0
 
-    def test_validate_toc_embedding_indented_links_skipped(self, tmp_path: Path):
-        """Links in indented TOC entries are not treated as references (false positive fix)."""
-        # Create two reference files that exist and have TOCs
+    def test_validate_toc_embedding_outside_references_dir_skipped(self, tmp_path: Path):
+        """Links to .md files outside references/ are not validated (false positive fix)."""
+        # Create a reference file inside references/ (legitimate)
         ref_dir = tmp_path / "references"
         ref_dir.mkdir()
 
@@ -389,9 +389,11 @@ Overview content...
 
 Details content...
 """)
-        # This file is linked FROM the embedded TOC entries (indented bullets)
-        sub_ref = ref_dir / "19-config-settings.md"
-        sub_ref.write_text("""\
+
+        # Create a file OUTSIDE references/ that has a TOC —
+        # this simulates a cross-reference from an embedded TOC entry
+        outside_file = tmp_path / "19-config-settings.md"
+        outside_file.write_text("""\
 # Config Settings
 
 ## Table of Contents
@@ -408,15 +410,14 @@ Basic config content...
 Advanced config content...
 """)
 
-        # SKILL.md has a reference link (non-indented) to main-guide.md
-        # and the embedded TOC below it contains indented links to 19-config-settings.md
-        # The indented links should NOT be validated as references
+        # SKILL.md links to both: references/main-guide.md (legitimate) and
+        # ./19-config-settings.md (outside references/ — should be skipped).
+        # The outside link might come from embedding a reference TOC verbatim.
         skill_content = """\
 # My Skill
 
 Reference: [Main Guide](references/main-guide.md)
-  - [Overview](./references/19-config-settings.md)
-  - [Details](./references/19-config-settings.md#advanced)
+  - [Config Settings](./19-config-settings.md)
 
 The Overview and Details sections are important.
 
@@ -430,17 +431,17 @@ Use the skill like this...
         report = ValidationReport()
         validate_toc_embedding(skill_content, skill_path, tmp_path, report)
 
-        # Should only check main-guide.md (non-indented), NOT 19-config-settings.md
-        # The indented links are embedded TOC entries and must be skipped
+        # Only main-guide.md (in references/) should be checked.
+        # 19-config-settings.md (outside references/) must be skipped.
         minor_results = [r for r in report.results if r.level == "MINOR"]
         for r in minor_results:
             assert "19-config-settings.md" not in r.message, (
-                f"False positive: indented TOC link to 19-config-settings.md "
+                f"False positive: link to 19-config-settings.md outside references/ "
                 f"was treated as a reference: {r.message}"
             )
 
-    def test_validate_toc_embedding_non_indented_still_checked(self, tmp_path: Path):
-        """Non-indented links are still validated even when indented ones are skipped."""
+    def test_validate_toc_embedding_indented_references_still_checked(self, tmp_path: Path):
+        """Indented links to files in references/ are still validated (not skipped by indent)."""
         ref_dir = tmp_path / "references"
         ref_dir.mkdir()
 
@@ -467,11 +468,14 @@ Auth...
 Limits...
 """)
 
-        # Non-indented link should still be validated
+        # Link is in an indented bullet list — but it points to references/,
+        # so it IS a legitimate reference and should be validated
         skill_content = """\
 # My Skill
 
-See the [API Reference](references/api-ref.md) for API details.
+## Resources
+
+  - [API Reference](references/api-ref.md)
 
 ## Usage
 
@@ -483,7 +487,8 @@ Use the skill...
         report = ValidationReport()
         validate_toc_embedding(skill_content, skill_path, tmp_path, report)
 
-        # Should get MINOR since TOC headings are not embedded for the non-indented link
+        # Should get MINOR — even though the link is indented, it points to
+        # a file inside references/ so it's a real reference
         minor_results = [r for r in report.results if r.level == "MINOR"]
         assert len(minor_results) == 1
         assert "api-ref.md" in minor_results[0].message
