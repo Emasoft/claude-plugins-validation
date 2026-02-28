@@ -811,7 +811,11 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
 
     # --- 3. Check compiled binaries platform coverage ---
     # Search for bin/ directories recursively (e.g., rust/tool/bin/, bin/)
-    all_bin_dirs = [d for d in plugin_root.rglob("bin") if d.is_dir()]
+    # Exclude virtual environments and other non-project directories
+    all_bin_dirs = [
+        d for d in plugin_root.rglob("bin")
+        if d.is_dir() and not any(part in skip_dirs or part.startswith(".") for part in d.relative_to(plugin_root).parts[:-1])
+    ]
     if not all_bin_dirs:
         return
 
