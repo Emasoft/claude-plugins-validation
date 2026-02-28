@@ -474,11 +474,11 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    # Determine path
+    # Determine path — always resolve to absolute so relative_to() works
     if args.path:
-        path = Path(args.path)
+        path = Path(args.path).resolve()
     else:
-        path = Path.cwd()
+        path = Path.cwd().resolve()
 
     if not path.exists():
         print(f"Error: {path} does not exist", file=sys.stderr)

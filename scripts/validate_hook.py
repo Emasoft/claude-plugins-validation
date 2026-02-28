@@ -939,8 +939,8 @@ def main() -> int:
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
     args = parser.parse_args()
 
-    hook_path = Path(args.hook_path)
-    plugin_root = Path(args.plugin_root) if args.plugin_root else None
+    hook_path = Path(args.hook_path).resolve()
+    plugin_root = Path(args.plugin_root).resolve() if args.plugin_root else None
 
     if not hook_path.exists():
         print(f"Error: {hook_path} does not exist", file=sys.stderr)

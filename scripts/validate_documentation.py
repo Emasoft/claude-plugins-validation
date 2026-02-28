@@ -832,7 +832,7 @@ def main() -> int:
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
     args = parser.parse_args()
 
-    plugin_path = Path(args.plugin_path)
+    plugin_path = Path(args.plugin_path).resolve()
 
     if not plugin_path.exists():
         print(f"Error: {plugin_path} does not exist", file=sys.stderr)

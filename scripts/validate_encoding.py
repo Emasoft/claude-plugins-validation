@@ -590,17 +590,20 @@ Exit Codes:
 
     args = parser.parse_args()
 
+    # Resolve to absolute path so relative_to() works correctly
+    plugin_path = args.plugin_path.resolve()
+
     # Run validation
-    report = validate_encoding(args.plugin_path)
+    report = validate_encoding(plugin_path)
 
     # Output results
     if args.json:
         output = report.to_dict()
-        output["plugin_path"] = str(args.plugin_path)
+        output["plugin_path"] = str(plugin_path)
         print(json.dumps(output, indent=2))
     else:
         print_results_by_level(report, verbose=args.verbose)
-        print_report_summary(report, title=f"Encoding Validation: {args.plugin_path.name}")
+        print_report_summary(report, title=f"Encoding Validation: {plugin_path.name}")
 
     if args.strict:
         return report.exit_code_strict()

@@ -409,7 +409,7 @@ def main() -> int:
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
     args = parser.parse_args()
 
-    path = Path(args.path)
+    path = Path(args.path).resolve()
     if not path.exists():
         print(f"Error: {path} does not exist", file=sys.stderr)
         return 1

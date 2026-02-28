@@ -717,8 +717,11 @@ Exit codes:
 
     args = parser.parse_args()
 
+    # Resolve to absolute path so relative_to() works correctly
+    plugin_path = Path(args.plugin_path).resolve()
+
     # Run validation
-    report = validate_cross_references(args.plugin_path)
+    report = validate_cross_references(plugin_path)
 
     # Output results
     if args.json:

@@ -612,7 +612,7 @@ def main() -> int:
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
     args = parser.parse_args()
 
-    skill_path = Path(args.skill_path)
+    skill_path = Path(args.skill_path).resolve()
 
     if not skill_path.exists():
         print(f"Error: {skill_path} does not exist", file=sys.stderr)

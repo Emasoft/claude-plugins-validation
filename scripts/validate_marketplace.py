@@ -1850,8 +1850,11 @@ Examples:
 
     args = parser.parse_args()
 
+    # Resolve to absolute path so relative_to() works correctly
+    marketplace_path = args.marketplace_path.resolve()
+
     # Run validation
-    report = validate_marketplace(args.marketplace_path)
+    report = validate_marketplace(marketplace_path)
 
     # Output results
     if args.json:

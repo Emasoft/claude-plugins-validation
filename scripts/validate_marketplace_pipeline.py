@@ -1492,17 +1492,20 @@ Exit Codes:
 
     args = parser.parse_args()
 
+    # Resolve to absolute path so relative_to() works correctly
+    marketplace_path = args.marketplace_path.resolve()
+
     # Validate path exists
-    if not args.marketplace_path.exists():
-        print(f"Error: Path does not exist: {args.marketplace_path}", file=sys.stderr)
+    if not marketplace_path.exists():
+        print(f"Error: Path does not exist: {marketplace_path}", file=sys.stderr)
         return EXIT_MINOR
 
-    if not args.marketplace_path.is_dir():
-        print(f"Error: Path is not a directory: {args.marketplace_path}", file=sys.stderr)
+    if not marketplace_path.is_dir():
+        print(f"Error: Path is not a directory: {marketplace_path}", file=sys.stderr)
         return EXIT_MINOR
 
     # Run validation
-    report = validate_marketplace_pipeline(args.marketplace_path, _verbose=args.verbose)
+    report = validate_marketplace_pipeline(marketplace_path, _verbose=args.verbose)
 
     # Output results
     if args.json:
