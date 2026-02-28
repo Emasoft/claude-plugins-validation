@@ -1009,7 +1009,7 @@ EXPECTED_GITIGNORE_CATEGORIES: list[tuple[list[str], str, str]] = [
     # Environment/secrets
     ([".env", "*.env"], "Environment files (.env)", "major"),
     # Virtual environments
-    ([".venv", "venv"], "Virtual environment directories", "warning"),
+    ([".venv", "venv"], "Virtual environment directories", "major"),
 ]
 
 
