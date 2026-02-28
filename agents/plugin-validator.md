@@ -227,6 +227,12 @@ The pre-push hook implements an automated loop that fixes linting/formatting iss
 
 For verification checklists, GitHub CI commands, complete validation phases, and troubleshooting, see:
 **[references/plugin-validator-detailed-procedures.md](references/plugin-validator-detailed-procedures.md)**
+  - 1. Auto-Detection and Auto-Installation
+  - 2. Verification Checklists
+  - 3. GitHub CI Verification
+  - 4. Complete Validation Checklist
+  - 5. Troubleshooting Guide
+  - 6. Advanced Examples
 
 ## Examples
 

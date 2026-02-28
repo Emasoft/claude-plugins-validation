@@ -17,12 +17,54 @@ Validates skill directories using a comprehensive set of 190+ validation rules e
 
 ## Quick Navigation
 
-| Resource | Purpose |
-|----------|---------|
-| [references/validation-rules.md](references/validation-rules.md) | Complete list of 190+ validation rules |
-| [references/frontmatter-schema.md](references/frontmatter-schema.md) | Frontmatter field requirements and validation |
-| [references/pillars-coverage.md](references/pillars-coverage.md) | 8+1 Pillars validation for language skills |
-| [references/scoring-system.md](references/scoring-system.md) | Multi-scale scoring (0-3) and letter grading (A-F) |
+#### [Validation Rules](references/validation-rules.md)
+Complete list of 190+ validation rules
+**Contents:**
+- 1. Structure Validation Rules (8 rules)
+- 2. Frontmatter Validation Rules (25 rules)
+- 3. Name Field Validation Rules (12 rules)
+- 4. Description Quality Rules (15 rules)
+- 5. Token Budget Rules (8 rules)
+- 6. Required Sections Rules (9 rules)
+- 7. Path Format Rules (6 rules)
+- 8. Resource Reference Rules (8 rules)
+- 9. Allowed-Tools Rules (10 rules)
+- 10. 8+1 Pillars Rules (18 rules)
+- 11. Progressive Disclosure Rules (12 rules)
+- 12. Content Quality Rules (15 rules)
+- 13. Agent-Specific Rules (22 rules)
+
+#### [Frontmatter Schema](references/frontmatter-schema.md)
+Frontmatter field requirements and validation
+**Contents:**
+- 1. Required Fields
+- 2. Optional Fields (Claude Code)
+- 3. Enterprise Fields
+- 4. Field Validation Details
+- 5. Field Whitelist Modes
+- 6. Examples
+
+#### [Pillars Coverage](references/pillars-coverage.md)
+8+1 Pillars validation for language skills
+**Contents:**
+- 1. When to Apply Pillars Validation
+- 2. The 8 Core Pillars
+- 3. The 9th Pillar (REPL/Workflow)
+- 4. Scoring System
+- 5. Coverage Thresholds
+- 6. Gap Mitigation Strategies
+- 7. Example Evaluation
+
+#### [Scoring System](references/scoring-system.md)
+Multi-scale scoring (0-3) and letter grading (A-F)
+**Contents:**
+- 1. Multi-Scale Criterion Scoring (0-3)
+- 2. Letter Grade System (A-F)
+- 3. Severity Levels
+- 4. Category Weighting
+- 5. Overall Score Calculation
+- 6. Exit Codes
+- 7. Interpreting Results
 
 ## Overview
 
@@ -273,9 +315,45 @@ $ uv run python scripts/validate_skill_comprehensive.py ./skills/my-skill/ --jso
 ### Reference Documents (in this skill)
 
 - [Validation Rules](references/validation-rules.md) - Complete 190+ rules reference
+  - 1. Structure Validation Rules (8 rules)
+  - 2. Frontmatter Validation Rules (25 rules)
+  - 3. Name Field Validation Rules (12 rules)
+  - 4. Description Quality Rules (15 rules)
+  - 5. Token Budget Rules (8 rules)
+  - 6. Required Sections Rules (9 rules)
+  - 7. Path Format Rules (6 rules)
+  - 8. Resource Reference Rules (8 rules)
+  - 9. Allowed-Tools Rules (10 rules)
+  - 10. 8+1 Pillars Rules (18 rules)
+  - 11. Progressive Disclosure Rules (12 rules)
+  - 12. Content Quality Rules (15 rules)
+  - 13. Agent-Specific Rules (22 rules)
+
 - [Frontmatter Schema](references/frontmatter-schema.md) - Field requirements
+  - 1. Required Fields
+  - 2. Optional Fields (Claude Code)
+  - 3. Enterprise Fields
+  - 4. Field Validation Details
+  - 5. Field Whitelist Modes
+  - 6. Examples
+
 - [Pillars Coverage](references/pillars-coverage.md) - 8+1 Pillars validation guide
+  - 1. When to Apply Pillars Validation
+  - 2. The 8 Core Pillars
+  - 3. The 9th Pillar (REPL/Workflow)
+  - 4. Scoring System
+  - 5. Coverage Thresholds
+  - 6. Gap Mitigation Strategies
+  - 7. Example Evaluation
+
 - [Scoring System](references/scoring-system.md) - Grading and scoring details
+  - 1. Multi-Scale Criterion Scoring (0-3)
+  - 2. Letter Grade System (A-F)
+  - 3. Severity Levels
+  - 4. Category Weighting
+  - 5. Overall Score Calculation
+  - 6. Exit Codes
+  - 7. Interpreting Results
 
 ### Related Skills
 
