@@ -67,6 +67,9 @@ Copy this checklist and track your progress:
 
 - [ ] Navigate to the claude-plugins-validation directory
 - [ ] Run the main validator: `uv run python scripts/validate_plugin.py /path/to/plugin`
+- [ ] Save the full validation report to a timestamped `.md` file in `docs_dev/` (e.g., `docs_dev/validate_<plugin-name>_<date>.md`)
+- [ ] Present the summary table and issue list to the user
+- [ ] Always show the saved report file path at the end of the output
 - [ ] Fix all CRITICAL issues first (plugin won't work)
 - [ ] Fix MAJOR issues next (features may fail)
 - [ ] Address MINOR issues for polish
@@ -79,6 +82,9 @@ The validators return:
 - **Summary**: Issue counts by severity level
 - **Details**: Each issue with file location and fix suggestion
 - **Grade**: A-F letter grade for skill validation
+- **Report File**: Full output saved to `docs_dev/validate_<plugin-name>_<date>.md`
+
+**IMPORTANT**: Always save the full validation output to a timestamped `.md` file in `docs_dev/` and display the report file path to the user at the end of the validation output.
 
 ## Error Handling
 

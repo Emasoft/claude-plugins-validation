@@ -144,6 +144,9 @@ Returns summary with:
 - **Exit Code**: 0 (pass), 1 (CRITICAL), 2 (MAJOR), 3 (MINOR), 4 (NIT, --strict only)
 - **Counts**: Issues by severity level (CRITICAL, MAJOR, MINOR, NIT, WARNING)
 - **Details**: All validation results with file locations
+- **Report File**: Full output saved to `docs_dev/validate_<plugin-name>_<date>.md`
+
+**IMPORTANT**: Always save the full validation output to a timestamped `.md` file in `docs_dev/` and display the report file path at the end of the output.
 
 ## Exit Codes
 

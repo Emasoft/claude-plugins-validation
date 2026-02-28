@@ -153,6 +153,20 @@ This prevents accidental leaking of private home directory paths in published pl
 5. **Marketplace Validation** - Check `marketplace.json` structure, plugin entries, source configurations
 6. **CI/CD Pipeline Validation** - Verify git hooks, GitHub Actions workflows, CI execution logs
 
+## Report Output (MANDATORY)
+
+After every validation run, you MUST:
+
+1. **Save the full validation output** to a timestamped `.md` file:
+   ```
+   docs_dev/validate_<plugin-name>_<YYYYMMDD>.md
+   ```
+2. **Display the report file path** prominently at the end of your response:
+   ```
+   Report saved to: docs_dev/validate_<plugin-name>_<date>.md
+   ```
+3. **Never omit the report path** — the user needs it to review or share the results
+
 ## Validation Scripts
 
 ```bash
