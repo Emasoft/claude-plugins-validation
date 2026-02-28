@@ -2,6 +2,13 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [1.7.2] - 2026-02-28
+
+### Bug Fixes
+
+- **Crash fix:** Running validator with a relative path (`.`) from a non-plugin directory no longer crashes with `ValueError: ... is not in the subpath`. All paths are now resolved to absolute paths early in `main()`.
+- **Early exit for missing plugins:** When no `.claude-plugin/` directory is found at the given path, the validator now exits with a clear error message instead of proceeding and crashing in `validate_cross_platform`.
+
 ## [1.7.1] - 2026-02-28
 
 ### New Features

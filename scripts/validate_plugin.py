@@ -1287,11 +1287,11 @@ def main() -> int:
     parser.add_argument("path", nargs="?", help="Plugin root path (default: parent of scripts/)")
     args = parser.parse_args()
 
-    # Determine plugin root
+    # Determine plugin root — always resolve to absolute path so relative_to() works
     if args.path:
-        plugin_root = Path(args.path)
+        plugin_root = Path(args.path).resolve()
     else:
-        plugin_root = Path(__file__).parent.parent
+        plugin_root = Path(__file__).resolve().parent.parent
 
     if not plugin_root.is_dir():
         print(f"Error: {plugin_root} is not a directory", file=sys.stderr)
@@ -1308,6 +1308,15 @@ def main() -> int:
         if version_dirs and (version_dirs[0] / ".claude-plugin").is_dir():
             plugin_root = version_dirs[0]
             print(f"Auto-resolved to latest version: {plugin_root.name}", file=sys.stderr)
+        elif not args.marketplace_only:
+            # No .claude-plugin/ found and no version subdirs — not a plugin directory
+            print(
+                f"Error: No Claude Code plugin found at {plugin_root}\n"
+                f"Expected a .claude-plugin/ directory. "
+                f"Make sure you are running this from the plugin root directory.",
+                file=sys.stderr,
+            )
+            return 1
 
     # Initialize gitignore filter — all scan functions use this to skip ignored files
     global _gi  # noqa: PLW0603
