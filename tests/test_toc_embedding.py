@@ -6,7 +6,7 @@ These functions ensure that when a SKILL.md links to a .md reference file that h
 Table of Contents, the SKILL.md embeds at least some of those TOC headings inline so
 agents can see what content is available before navigating.
 
-Coverage: 10 tests covering all major code paths.
+Coverage: 12 tests covering all major code paths including false positive prevention.
 """
 
 from __future__ import annotations
@@ -365,3 +365,125 @@ my-skill --verbose
 
         # No results at all — no .md links to check
         assert len(report.results) == 0
+
+    def test_validate_toc_embedding_indented_links_skipped(self, tmp_path: Path):
+        """Links in indented TOC entries are not treated as references (false positive fix)."""
+        # Create two reference files that exist and have TOCs
+        ref_dir = tmp_path / "references"
+        ref_dir.mkdir()
+
+        main_ref = ref_dir / "main-guide.md"
+        main_ref.write_text("""\
+# Main Guide
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Details](#details)
+
+## Overview
+
+Overview content...
+
+## Details
+
+Details content...
+""")
+        # This file is linked FROM the embedded TOC entries (indented bullets)
+        sub_ref = ref_dir / "19-config-settings.md"
+        sub_ref.write_text("""\
+# Config Settings
+
+## Table of Contents
+
+- [Basic Config](#basic-config)
+- [Advanced Config](#advanced-config)
+
+## Basic Config
+
+Basic config content...
+
+## Advanced Config
+
+Advanced config content...
+""")
+
+        # SKILL.md has a reference link (non-indented) to main-guide.md
+        # and the embedded TOC below it contains indented links to 19-config-settings.md
+        # The indented links should NOT be validated as references
+        skill_content = """\
+# My Skill
+
+Reference: [Main Guide](references/main-guide.md)
+  - [Overview](./references/19-config-settings.md)
+  - [Details](./references/19-config-settings.md#advanced)
+
+The Overview and Details sections are important.
+
+## Usage
+
+Use the skill like this...
+"""
+        skill_path = tmp_path / "SKILL.md"
+        skill_path.write_text(skill_content)
+
+        report = ValidationReport()
+        validate_toc_embedding(skill_content, skill_path, tmp_path, report)
+
+        # Should only check main-guide.md (non-indented), NOT 19-config-settings.md
+        # The indented links are embedded TOC entries and must be skipped
+        minor_results = [r for r in report.results if r.level == "MINOR"]
+        for r in minor_results:
+            assert "19-config-settings.md" not in r.message, (
+                f"False positive: indented TOC link to 19-config-settings.md "
+                f"was treated as a reference: {r.message}"
+            )
+
+    def test_validate_toc_embedding_non_indented_still_checked(self, tmp_path: Path):
+        """Non-indented links are still validated even when indented ones are skipped."""
+        ref_dir = tmp_path / "references"
+        ref_dir.mkdir()
+
+        ref_file = ref_dir / "api-ref.md"
+        ref_file.write_text("""\
+# API Reference
+
+## Table of Contents
+
+- [Endpoints](#endpoints)
+- [Authentication](#authentication)
+- [Rate Limits](#rate-limits)
+
+## Endpoints
+
+Endpoints...
+
+## Authentication
+
+Auth...
+
+## Rate Limits
+
+Limits...
+""")
+
+        # Non-indented link should still be validated
+        skill_content = """\
+# My Skill
+
+See the [API Reference](references/api-ref.md) for API details.
+
+## Usage
+
+Use the skill...
+"""
+        skill_path = tmp_path / "SKILL.md"
+        skill_path.write_text(skill_content)
+
+        report = ValidationReport()
+        validate_toc_embedding(skill_content, skill_path, tmp_path, report)
+
+        # Should get MINOR since TOC headings are not embedded for the non-indented link
+        minor_results = [r for r in report.results if r.level == "MINOR"]
+        assert len(minor_results) == 1
+        assert "api-ref.md" in minor_results[0].message

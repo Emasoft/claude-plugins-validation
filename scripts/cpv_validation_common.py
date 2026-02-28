@@ -1871,6 +1871,14 @@ def validate_toc_embedding(
     for link_match in _MD_LINK_RE.finditer(md_content):
         link_target = link_match.group(2)
 
+        # Skip links on indented lines — these are embedded TOC entries,
+        # not standalone references that need their own TOC validation
+        link_start = link_match.start()
+        line_start = md_content.rfind("\n", 0, link_start) + 1
+        line_prefix = md_content[line_start:link_start]
+        if re.match(r"\s+[-*]", line_prefix):
+            continue
+
         # Resolve the referenced file path
         ref_path = base_dir / link_target
         if not ref_path.is_file():
