@@ -1240,6 +1240,18 @@ def main() -> int:
         print(f"Error: {plugin_root} is not a directory", file=sys.stderr)
         return 1
 
+    # Auto-resolve plugin cache directories that contain version subdirectories
+    # e.g. ~/.claude/plugins/cache/marketplace/plugin-name/{1.0.0, 1.1.7}
+    if not (plugin_root / ".claude-plugin").is_dir():
+        version_dirs = sorted(
+            [d for d in plugin_root.iterdir() if d.is_dir() and re.match(r"\d+\.\d+", d.name)],
+            key=lambda d: d.name,
+            reverse=True,
+        )
+        if version_dirs and (version_dirs[0] / ".claude-plugin").is_dir():
+            plugin_root = version_dirs[0]
+            print(f"Auto-resolved to latest version: {plugin_root.name}", file=sys.stderr)
+
     # Run validation
     report = ValidationReport()
     marketplace_only = args.marketplace_only

@@ -1778,6 +1778,11 @@ def validate_no_absolute_paths(
             if respect_gitignore and gitignore_patterns and is_path_gitignored(rel_path, gitignore_patterns):
                 continue
 
+            # Skip CPV's own validation infrastructure files — they contain path
+            # patterns and allowlists as data constants, not actual hardcoded paths
+            if filename == "validation_common.py":
+                continue
+
             # Check only relevant file types
             if filepath.suffix.lower() not in SCANNABLE_EXTENSIONS:
                 continue
