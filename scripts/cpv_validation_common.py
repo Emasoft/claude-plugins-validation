@@ -1796,3 +1796,137 @@ def validate_no_absolute_paths(
         report.passed(f"No absolute paths found ({files_checked} files checked)")
     else:
         report.info(f"Found {total_issues} absolute path(s) in {files_checked} files")
+
+
+# =============================================================================
+# TOC Embedding Validation — ensures .md files embed TOCs from referenced files
+# =============================================================================
+
+# Regex to extract TOC entries from a reference file's "## Table of Contents" section
+_TOC_SECTION_RE = re.compile(
+    r"(?im)^##\s*(table\s+of\s+contents|contents|toc|index)\s*\n(.*?)(?=\n##\s|\Z)",
+    re.DOTALL,
+)
+
+# Regex to extract individual TOC heading titles (strip numbering, links, bullets)
+_TOC_ENTRY_RE = re.compile(
+    r"(?m)^[\s]*[-*]?\s*(?:\d+\.?\s*)?(?:\[([^\]]+)\]\([^)]*\)|(.+))"
+)
+
+# Regex to find markdown links pointing to .md files in references/
+_MD_LINK_RE = re.compile(
+    r"\[([^\]]+)\]\(((?:references/)?[^\s)]+\.md)\)"
+)
+
+
+def extract_toc_headings(md_content: str) -> list[str]:
+    """Extract TOC heading titles from a markdown file's Table of Contents section.
+
+    Returns a list of heading title strings (stripped of numbering/links/bullets).
+    Returns empty list if no TOC section is found.
+    """
+    m = _TOC_SECTION_RE.search(md_content)
+    if not m:
+        return []
+
+    toc_block = m.group(2)
+    headings: list[str] = []
+
+    for entry_match in _TOC_ENTRY_RE.finditer(toc_block):
+        # Group 1 = link text [Title](#anchor), Group 2 = plain text
+        title = (entry_match.group(1) or entry_match.group(2) or "").strip()
+        if not title or title.startswith("---"):
+            continue
+        # Strip leading numbering like "1. " or "3a. "
+        title_clean = re.sub(r"^\d+[a-z]?\.\s*", "", title).strip()
+        if title_clean:
+            headings.append(title_clean)
+
+    return headings
+
+
+def validate_toc_embedding(
+    md_content: str,
+    md_file_path: Path,
+    base_dir: Path,
+    report: ValidationReport,
+) -> None:
+    """Validate that .md files embed TOCs from referenced .md files.
+
+    When a markdown file links to another .md file (especially in references/),
+    the link should include the referenced file's Table of Contents inline,
+    so agents can see what content is available before navigating.
+
+    Args:
+        md_content: The content of the markdown file being validated
+        md_file_path: Path to the markdown file being validated
+        base_dir: Base directory for resolving relative references
+        report: ValidationReport to add results to
+    """
+    lines = md_content.split("\n")
+    rel_file = md_file_path.name
+    refs_checked = 0
+    refs_with_toc = 0
+
+    for link_match in _MD_LINK_RE.finditer(md_content):
+        link_target = link_match.group(2)
+
+        # Resolve the referenced file path
+        ref_path = base_dir / link_target
+        if not ref_path.is_file():
+            # Also try resolving from the md file's parent directory
+            ref_path = md_file_path.parent / link_target
+            if not ref_path.is_file():
+                continue
+
+        # Only validate .md reference files (skip .py, etc.)
+        if ref_path.suffix.lower() != ".md":
+            continue
+
+        refs_checked += 1
+
+        # Extract TOC headings from the referenced file
+        try:
+            ref_content = ref_path.read_text()
+        except Exception:
+            continue
+
+        toc_headings = extract_toc_headings(ref_content)
+        if not toc_headings:
+            # Referenced file has no TOC — skip (separate validation handles that)
+            continue
+
+        # Find the line number of this link in the source file
+        link_start = link_match.start()
+        link_line_num = md_content[:link_start].count("\n")
+
+        # Check if any TOC entries appear within ~50 lines after the link
+        # Look for at least 2 TOC headings embedded near the link
+        search_start = max(0, link_line_num)
+        search_end = min(len(lines), link_line_num + 50)
+        nearby_text = "\n".join(lines[search_start:search_end])
+
+        # Count how many TOC headings appear in the nearby text
+        embedded_count = sum(
+            1 for heading in toc_headings
+            if heading.lower() in nearby_text.lower()
+        )
+
+        # Require at least 2 TOC headings embedded (or all if file has fewer)
+        min_required = min(2, len(toc_headings))
+        if embedded_count >= min_required:
+            refs_with_toc += 1
+        else:
+            report.minor(
+                f"Reference to '{ref_path.name}' in {rel_file} does not include "
+                f"the file's Table of Contents ({len(toc_headings)} sections). "
+                f"Embed the TOC inline so agents can see what content is available "
+                f"before navigating to it.",
+                rel_file,
+            )
+
+    if refs_checked > 0 and refs_with_toc == refs_checked:
+        report.passed(
+            f"All {refs_checked} referenced .md files have TOC embedded in {rel_file}",
+            rel_file,
+        )

@@ -152,6 +152,7 @@ This prevents accidental leaking of private home directory paths in published pl
 4. **MCP Server Validation** - Validate `.mcp.json`, transport types, environment variables
 5. **Marketplace Validation** - Check `marketplace.json` structure, plugin entries, source configurations
 6. **CI/CD Pipeline Validation** - Verify git hooks, GitHub Actions workflows, CI execution logs
+7. **Issue remediation** - When validation detects issues, consult the appropriate fix guide in references/ and offer to apply the fixes automatically
 
 ## Report Output (MANDATORY)
 
@@ -233,6 +234,98 @@ For verification checklists, GitHub CI commands, complete validation phases, and
   - 4. Complete Validation Checklist
   - 5. Troubleshooting Guide
   - 6. Advanced Examples
+
+## Issue Remediation Guides
+
+When validation finds issues, consult the relevant fix guide below and offer to apply the fixes automatically. Each guide contains every validation error with its exact error message, severity, root cause, and step-by-step fix instructions.
+
+### [Plugin Structure Fixes](references/plugin-structure-fixes.md)
+Fixes for all `validate_plugin.py` issues (manifest, directory structure, agents, paths, versions, scripts):
+  - 1. Plugin Manifest Issues
+  - 2. Directory Structure Issues
+  - 3. Command File Issues
+  - 4. Agent File Issues
+  - 5. Hook Configuration Issues
+  - 6. MCP Server Issues
+  - 7. Script Quality Issues
+  - 8. Cross-Platform Compatibility Issues
+  - 9. Skill Validation Issues
+  - 10. README and LICENSE Issues
+  - 11. Rules Validation Issues
+  - 12. Path and Private Info Issues
+  - 13. .gitignore Issues
+  - 14. Workflow Inline Python Issues
+
+### [Hook Configuration Fixes](references/hook-fixes.md)
+Fixes for all `validate_hook.py` issues (JSON structure, events, matchers, timeouts, scripts):
+  - 1. hooks.json Structure Issues
+  - 2. Event Type Issues
+  - 3. Matcher Issues
+  - 4. Hook Type Issues
+  - 5. Command Hook Issues
+  - 6. Prompt Hook Issues
+  - 7. Agent Hook Issues
+  - 8. Timeout Issues
+  - 9. Script Path Issues
+  - 10. Script Linting Issues
+  - 11. Field Validation Issues
+  - 12. Informational Notices
+
+### [Skill Validation Fixes](references/skill-fixes.md)
+Fixes for all `validate_skill*.py` issues (SKILL.md, frontmatter, names, descriptions, sections):
+  - 1. Structure Issues
+  - 2. Frontmatter Issues
+  - 3. Name Field Issues
+  - 4. Description Quality Issues
+  - 5. Token Budget and Progressive Disclosure
+  - 6. Required Sections (Strict Mode)
+  - 7. Reference File Issues
+  - 8. TOC Embedding Issues
+  - 9. Allowed-Tools Issues
+  - 10. Content Quality Issues
+  - 11. 8+1 Pillars Issues
+  - 12. OpenSpec Mode Issues
+
+### [MCP Server Fixes](references/mcp-fixes.md)
+Fixes for all `validate_mcp.py` issues (configuration, transports, environment variables, paths):
+  - 1. Configuration File Issues
+  - 2. Server Definition Issues
+  - 3. Transport Type Issues
+  - 4. stdio Transport Issues
+  - 5. HTTP/SSE Transport Issues
+  - 6. Environment Variable Issues
+  - 7. Path Issues
+  - 8. Args / Env / Cwd Field Issues
+  - 9. Headers Issues
+  - 10. Timeout Issues
+  - 11. OAuth Issues
+  - 12. Plugin Manifest Issues
+
+### [Marketplace Fixes](references/marketplace-fixes.md)
+Fixes for all `validate_marketplace*.py` issues (structure, plugins, submodules, pipeline):
+  - 1. marketplace.json Structure Issues
+  - 2. Plugin Entry Issues
+  - 3. Source Type Issues
+  - 4. Git Submodule Issues
+  - 5. Pipeline Workflow Issues
+  - 6. Version Sync Issues
+  - 7. Secret Configuration Issues
+  - 8. GitHub Deployment Issues
+
+### [Code Quality Fixes](references/code-quality-fixes.md)
+Fixes for encoding, security, and quality issues (encoding, secrets, paths, gitignore):
+  - 1. Encoding Issues
+  - 2. Line Ending Issues
+  - 3. BOM Issues
+  - 4. Secret Detection Issues
+  - 5. Private Path Issues
+  - 6. Absolute Path Issues
+  - 7. Injection Detection Issues
+  - 8. Path Traversal Issues
+  - 9. Dangerous File Issues
+  - 10. Script Permission Issues
+  - 11. Plugin Path Validation Issues
+  - 12. File Access Issues
 
 ## Examples
 

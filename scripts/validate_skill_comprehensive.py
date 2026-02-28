@@ -50,6 +50,7 @@ from cpv_validation_common import (
     EXIT_OK,
     VALID_CONTEXT_VALUES,
     Level,
+    validate_toc_embedding,
 )
 from cpv_validation_common import (
     ValidationReport as BaseValidationReport,
@@ -2045,6 +2046,10 @@ def validate_skill(
 
     # Validate reference files (TOC and nesting depth - Anthropic docs)
     validate_reference_files(skill_path, report)
+
+    # Validate TOC embedding — SKILL.md must embed TOCs from referenced .md files
+    if skill_md is not None:
+        validate_toc_embedding(content, skill_md, skill_path, report)
 
     # Validate 8+1 Pillars (optional)
     if validate_pillars_flag:

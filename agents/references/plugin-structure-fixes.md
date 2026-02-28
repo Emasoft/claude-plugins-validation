@@ -1,0 +1,1176 @@
+# Plugin Structure — Validation Issues and Fixes
+
+Comprehensive remediation guide for all issues detected by `validate_plugin.py`.
+Every entry includes the **exact error message** (for automated matching), severity,
+root cause, and step-by-step fix instructions.
+
+## Table of Contents
+
+- [1. Plugin Manifest Issues](#1-plugin-manifest-issues)
+- [2. Directory Structure Issues](#2-directory-structure-issues)
+- [3. Command File Issues](#3-command-file-issues)
+- [4. Agent File Issues](#4-agent-file-issues)
+- [5. Hook Configuration Issues](#5-hook-configuration-issues)
+- [6. MCP Server Issues](#6-mcp-server-issues)
+- [7. Script Quality Issues](#7-script-quality-issues)
+- [8. Cross-Platform Compatibility Issues](#8-cross-platform-compatibility-issues)
+- [9. Skill Validation Issues](#9-skill-validation-issues)
+- [10. README and LICENSE Issues](#10-readme-and-license-issues)
+- [11. Rules Validation Issues](#11-rules-validation-issues)
+- [12. Path and Private Info Issues](#12-path-and-private-info-issues)
+- [13. .gitignore Issues](#13-gitignore-issues)
+- [14. Workflow Inline Python Issues](#14-workflow-inline-python-issues)
+
+---
+
+## 1. Plugin Manifest Issues
+
+### CRITICAL: plugin.json not found
+
+**Error message**: `plugin.json not found`
+**Severity**: CRITICAL
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: The plugin directory is missing the required manifest file. Without it, Claude Code cannot identify or load the plugin.
+**Fix**:
+1. Create the `.claude-plugin/` directory at the plugin root:
+   ```bash
+   mkdir -p .claude-plugin
+   ```
+2. Create `plugin.json` inside it with the required `name` field plus recommended fields:
+   ```json
+   {
+     "name": "my-plugin",
+     "version": "1.0.0",
+     "description": "What this plugin does"
+   }
+   ```
+3. Re-run validation.
+
+### CRITICAL: Invalid JSON in plugin.json
+
+**Error message**: `Invalid JSON in plugin.json: <parse error details>`
+**Severity**: CRITICAL
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: The plugin.json file contains malformed JSON (missing commas, trailing commas, unquoted keys, etc.).
+**Fix**:
+1. Open `.claude-plugin/plugin.json` in an editor with JSON validation (e.g., VS Code).
+2. Fix the syntax error reported in the message. Common issues:
+   - Trailing commas after the last property
+   - Missing quotes around keys or string values
+   - Unescaped special characters in strings
+3. Validate with `python -c "import json; json.load(open('.claude-plugin/plugin.json'))"`.
+4. Re-run validation.
+
+### CRITICAL: Missing required field 'name' in plugin.json
+
+**Error message**: `Missing required field 'name' in plugin.json`
+**Severity**: CRITICAL
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: The `name` field is the only strictly required field per Anthropic docs. Without it, the plugin cannot be identified.
+**Fix**:
+1. Add the `name` field to your `plugin.json`:
+   ```json
+   {
+     "name": "my-plugin-name"
+   }
+   ```
+2. The name must be lowercase, kebab-case, no spaces, matching `^[a-z][a-z0-9-]*$`.
+3. Re-run validation.
+
+### MAJOR: plugin.json EXISTS but should NOT for marketplace-only (strict=false)
+
+**Error message**: `plugin.json EXISTS but should NOT for marketplace-only (strict=false). Remove .claude-plugin/plugin.json to fix CLI uninstall issues.`
+**Severity**: MAJOR
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: When using `strict=false` (marketplace-only distribution), the plugin.json must not exist because it causes CLI uninstall issues.
+**Fix**:
+1. Delete the `.claude-plugin/plugin.json` file.
+2. Ensure your marketplace.json at the repository root handles plugin metadata instead.
+3. Re-run validation with `--marketplace-only` flag.
+
+### MINOR: Missing recommended field in plugin.json
+
+**Error message**: `Missing recommended field '<field>' in plugin.json`
+**Severity**: MINOR
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: The `version` and/or `description` fields are recommended but missing. While not strictly required, they improve discoverability and version tracking.
+**Fix**:
+1. Add the missing field(s) to your `plugin.json`:
+   ```json
+   {
+     "name": "my-plugin",
+     "version": "1.0.0",
+     "description": "A concise description of what this plugin does"
+   }
+   ```
+2. Version must follow semver format (e.g., `1.0.0`, `2.3.1`).
+
+### MAJOR: Plugin name must be lowercase
+
+**Error message**: `Plugin name must be lowercase: <name>`
+**Severity**: MAJOR
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: Plugin names must be fully lowercase. Mixed or uppercase names will fail resolution.
+**Fix**:
+1. Change the `name` field to all lowercase:
+   ```json
+   { "name": "my-plugin" }
+   ```
+   Not: `{ "name": "My-Plugin" }` or `{ "name": "MY_PLUGIN" }`
+
+### MAJOR: Plugin name cannot contain spaces
+
+**Error message**: `Plugin name cannot contain spaces: <name>`
+**Severity**: MAJOR
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: Spaces in plugin names break CLI commands and path resolution.
+**Fix**:
+1. Replace spaces with hyphens:
+   ```json
+   { "name": "my-cool-plugin" }
+   ```
+   Not: `{ "name": "my cool plugin" }`
+
+### MAJOR: Plugin name must be kebab-case
+
+**Error message**: `Plugin name must be kebab-case: <name>`
+**Severity**: MAJOR
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: Plugin names must match the regex `^[a-z][a-z0-9-]*$` — start with a letter, lowercase alphanumeric and hyphens only.
+**Fix**:
+1. Rename to kebab-case format:
+   ```json
+   { "name": "my-plugin-v2" }
+   ```
+   Not: `{ "name": "my_plugin" }` or `{ "name": "123-plugin" }` or `{ "name": "my.plugin" }`
+
+### MAJOR: Version must be semver format
+
+**Error message**: `Version must be semver format: <version>`
+**Severity**: MAJOR
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: The version string does not match semver pattern `MAJOR.MINOR.PATCH`.
+**Fix**:
+1. Use a valid semver string:
+   ```json
+   { "version": "1.0.0" }
+   ```
+   Not: `{ "version": "v1.0" }` or `{ "version": "1.0" }` or `{ "version": "latest" }`
+2. Pre-release suffixes are allowed: `1.0.0-beta.1`, `2.0.0-rc.1`.
+
+### WARNING: Unknown manifest field
+
+**Error message**: `Unknown manifest field '<key>' — not part of the Claude Code plugin spec. If used by plugin scripts, consider documenting it.`
+**Severity**: WARNING
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: A field in plugin.json is not part of the known Claude Code plugin spec. This is not blocking — custom fields are allowed — but should be documented.
+**Fix**:
+1. If the field is needed by your plugin scripts, add a comment in README.md explaining its purpose.
+2. If it is a typo, correct it. Known fields are: `name`, `version`, `description`, `author`, `homepage`, `repository`, `license`, `keywords`, `commands`, `agents`, `skills`, `hooks`, `mcpServers`, `outputStyles`, `lspServers`.
+3. If it is truly unused, remove it.
+
+### MAJOR: Field 'repository' must be a string URL
+
+**Error message**: `Field 'repository' must be a string URL (e.g. "https://github.com/user/repo"), not <type>. Claude Code rejects object format like {"type":"git","url":"..."}.`
+**Severity**: MAJOR
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: Claude Code requires `repository` to be a plain string URL, not an npm-style object.
+**Fix**:
+1. Change from object to string:
+   ```json
+   {
+     "repository": "https://github.com/user/repo"
+   }
+   ```
+   Not:
+   ```json
+   {
+     "repository": { "type": "git", "url": "https://github.com/user/repo.git" }
+   }
+   ```
+
+### MAJOR: 'author' object missing required 'name' field
+
+**Error message**: `'author' object missing required 'name' field`
+**Severity**: MAJOR
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: When `author` is an object, it must include a `name` field.
+**Fix**:
+1. Add `name` to the author object:
+   ```json
+   { "author": { "name": "Your Name", "email": "you@example.com" } }
+   ```
+2. Or use a simple string instead:
+   ```json
+   { "author": "Your Name <you@example.com>" }
+   ```
+
+### MAJOR: 'author.name' must be a string
+
+**Error message**: `'author.name' must be a string`
+**Severity**: MAJOR
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: The `name` field inside the `author` object is not a string type.
+**Fix**:
+1. Ensure `author.name` is a string:
+   ```json
+   { "author": { "name": "Your Name" } }
+   ```
+
+### MAJOR: 'author' must be a string or object
+
+**Error message**: `'author' must be a string or object, got <type>`
+**Severity**: MAJOR
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: The `author` field is an unexpected type (e.g., array, number, boolean).
+**Fix**:
+1. Use either string or object format:
+   ```json
+   { "author": "Your Name" }
+   ```
+   or:
+   ```json
+   { "author": { "name": "Your Name" } }
+   ```
+
+### MAJOR: 'keywords' must be an array
+
+**Error message**: `'keywords' must be an array`
+**Severity**: MAJOR
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: The `keywords` field is not an array (e.g., it might be a string).
+**Fix**:
+1. Use an array of strings:
+   ```json
+   { "keywords": ["linting", "code-quality", "python"] }
+   ```
+   Not: `{ "keywords": "linting, code-quality" }`
+
+### MAJOR: 'keywords' must contain only strings
+
+**Error message**: `'keywords' must contain only strings`
+**Severity**: MAJOR
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: One or more items in the `keywords` array is not a string.
+**Fix**:
+1. Ensure every element is a string:
+   ```json
+   { "keywords": ["linting", "formatting", "python"] }
+   ```
+   Not: `{ "keywords": ["linting", 42, true] }`
+
+### MAJOR: String field must be a string
+
+**Error message**: `'<field>' must be a string, got <type>`
+**Severity**: MAJOR
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: The `homepage` or `license` field is not a string type.
+**Fix**:
+1. Use a plain string:
+   ```json
+   {
+     "homepage": "https://example.com",
+     "license": "MIT"
+   }
+   ```
+
+### MAJOR: Component path must start with './'
+
+**Error message**: `Field '<key>' path must start with './': <value>`
+**Severity**: MAJOR
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: Path fields (`commands`, `agents`, `skills`, `hooks`, `mcpServers`, `outputStyles`, `lspServers`) must use relative paths starting with `./`.
+**Fix**:
+1. Prefix the path with `./`:
+   ```json
+   {
+     "commands": "./commands",
+     "skills": "./skills"
+   }
+   ```
+   Not: `{ "commands": "commands" }` or `{ "commands": "/absolute/path" }`
+
+### MAJOR: Array element path must start with './'
+
+**Error message**: `Field '<key>[<index>]' path must start with './': <path>`
+**Severity**: MAJOR
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: An element in a path array field does not start with `./`.
+**Fix**:
+1. Prefix each array element path with `./`:
+   ```json
+   { "skills": ["./skills/skill-a", "./skills/skill-b"] }
+   ```
+
+### MAJOR: Field must be a string path or array, not an object
+
+**Error message**: `Field '<key>' must be a string path or array, not an object`
+**Severity**: MAJOR
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: A component field (like `commands`, `agents`, `skills`, `outputStyles`) uses an inline object, but only `hooks`, `mcpServers`, and `lspServers` support inline object configuration.
+**Fix**:
+1. Use a string path or array of paths instead:
+   ```json
+   { "commands": "./commands" }
+   ```
+2. Only `hooks`, `mcpServers`, and `lspServers` may use inline objects.
+
+### MAJOR: manifest.hooks points to auto-loaded hooks/hooks.json
+
+**Error message**: `manifest.hooks points to 'hooks/hooks.json' which is auto-loaded by Claude Code. This causes a duplicate load error. Remove the 'hooks' field from plugin.json to fix.`
+**Severity**: MAJOR
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: `hooks/hooks.json` is automatically loaded by Claude Code. Specifying it again in the manifest causes a duplicate load conflict.
+**Fix**:
+1. Remove the `hooks` field entirely from `plugin.json`:
+   ```json
+   {
+     "name": "my-plugin",
+     "version": "1.0.0"
+   }
+   ```
+2. The file `hooks/hooks.json` will be auto-discovered by Claude Code.
+
+---
+
+## 2. Directory Structure Issues
+
+### CRITICAL: .claude-plugin directory not found
+
+**Error message**: `.claude-plugin directory not found`
+**Severity**: CRITICAL
+**Root cause**: The `.claude-plugin/` directory is the primary marker that identifies a directory as a Claude Code plugin. Without it (in non-marketplace mode), the plugin cannot function.
+**Fix**:
+1. Create the directory at the plugin root:
+   ```bash
+   mkdir -p .claude-plugin
+   ```
+2. Add `plugin.json` inside it (see Section 1).
+
+### CRITICAL: Component must be at plugin root, not in .claude-plugin/
+
+**Error message**: `<component>/ must be at plugin root, not in .claude-plugin/`
+**Severity**: CRITICAL
+**Root cause**: Directories like `commands/`, `agents/`, `skills/`, `hooks/`, `schemas/`, `bin/` were placed inside `.claude-plugin/` instead of at the plugin root. Claude Code looks for them at the root level.
+**Fix**:
+1. Move the directory to the plugin root:
+   ```bash
+   mv .claude-plugin/commands ./commands
+   mv .claude-plugin/skills ./skills
+   ```
+2. The correct structure is:
+   ```
+   my-plugin/
+   ├── .claude-plugin/
+   │   └── plugin.json
+   ├── commands/
+   ├── agents/
+   ├── skills/
+   ├── hooks/
+   └── ...
+   ```
+
+### INFO: Optional directory not found
+
+**Error message**: `Optional directory <dir>/ not found`
+**Severity**: INFO
+**Root cause**: An optional directory (`commands/`, `agents/`, `skills/`, `hooks/`, `scripts/`, `docs/`) is missing. This is purely informational — not all plugins need all directories.
+**Fix**: No action required. Create the directory only if your plugin needs the corresponding feature.
+
+### WARNING: Non-standard directory found
+
+**Error message**: `Non-standard directory '<dirname>/' — not part of the plugin spec. If needed by plugin scripts, consider documenting its purpose in README.`
+**Severity**: WARNING
+**Root cause**: A directory at the plugin root is not part of the standard plugin directory set and is not a known common directory (like `lib/`, `resources/`, `assets/`, etc.).
+**Fix**:
+1. If the directory is needed by your plugin, document its purpose in README.md.
+2. If it is a leftover or artifact, remove it.
+3. Known standard directories: `.claude-plugin`, `commands`, `agents`, `skills`, `hooks`, `scripts`, `docs`, `rules`, `schemas`, `bin`, `templates`, `tests`, `lib`, `libs`, `modules`, `resources`, `assets`, `data`, `config`, `configs`, `examples`, `samples`, `references`.
+
+---
+
+## 3. Command File Issues
+
+### CRITICAL: No frontmatter in command file
+
+**Error message**: `No frontmatter in command file`
+**Severity**: CRITICAL
+**File**: `commands/<filename>.md`
+**Root cause**: Command files must start with YAML frontmatter delimited by `---`. The file does not begin with `---`.
+**Fix**:
+1. Add YAML frontmatter to the top of the command file:
+   ```markdown
+   ---
+   name: my-command
+   description: What this command does
+   ---
+
+   # Command instructions here
+   ```
+
+### CRITICAL: Malformed frontmatter (missing closing ---)
+
+**Error message**: `Malformed frontmatter (missing closing ---)`
+**Severity**: CRITICAL
+**File**: `commands/<filename>.md`
+**Root cause**: The frontmatter block opens with `---` but never closes with a second `---`.
+**Fix**:
+1. Add the closing `---` delimiter:
+   ```markdown
+   ---
+   name: my-command
+   description: What this command does
+   ---
+   ```
+
+### CRITICAL: Invalid YAML frontmatter
+
+**Error message**: `Invalid YAML frontmatter: <yaml error>`
+**Severity**: CRITICAL
+**File**: `commands/<filename>.md`
+**Root cause**: The YAML between the `---` delimiters has syntax errors.
+**Fix**:
+1. Fix the YAML syntax. Common issues:
+   - Missing space after colon: `name:value` should be `name: value`
+   - Unquoted special characters: use quotes around values with `:`, `#`, `[`, `{`
+   - Incorrect indentation (YAML uses spaces, not tabs)
+2. Validate with: `python -c "import yaml; yaml.safe_load(open('commands/my-command.md').read().split('---')[1])"`
+
+### CRITICAL: Empty frontmatter
+
+**Error message**: `Empty frontmatter`
+**Severity**: CRITICAL
+**File**: `commands/<filename>.md`
+**Root cause**: The frontmatter section exists but contains no fields.
+**Fix**:
+1. Add at least the `name` field:
+   ```markdown
+   ---
+   name: my-command
+   description: What this command does
+   ---
+   ```
+
+### CRITICAL: Missing 'name' in frontmatter (command)
+
+**Error message**: `Missing 'name' in frontmatter`
+**Severity**: CRITICAL
+**File**: `commands/<filename>.md`
+**Root cause**: The command file's frontmatter is missing the required `name` field.
+**Fix**:
+1. Add the `name` field. It should match the filename (without extension):
+   ```markdown
+   ---
+   name: my-command
+   ---
+   ```
+   For a file named `my-command.md`, the name should be `my-command`.
+
+### MAJOR: Command name doesn't match filename
+
+**Error message**: `Command name '<name>' doesn't match filename '<expected>'`
+**Severity**: MAJOR
+**File**: `commands/<filename>.md`
+**Root cause**: The `name` in frontmatter does not match the filename stem. Claude Code uses filenames for command resolution, so a mismatch causes confusion.
+**Fix**:
+1. Either rename the file to match the name, or change the name to match the file:
+   - File `deploy-app.md` → `name: deploy-app`
+   - Or rename file to match the name in frontmatter.
+
+### MAJOR: Missing 'description' in frontmatter (command)
+
+**Error message**: `Missing 'description' in frontmatter`
+**Severity**: MAJOR
+**File**: `commands/<filename>.md`
+**Root cause**: The command file is missing a `description` field. Descriptions are shown in help text and command listings.
+**Fix**:
+1. Add a description:
+   ```markdown
+   ---
+   name: my-command
+   description: Deploys the application to the staging environment
+   ---
+   ```
+
+---
+
+## 4. Agent File Issues
+
+### CRITICAL: No frontmatter in agent file
+
+**Error message**: `No frontmatter in agent file`
+**Severity**: CRITICAL
+**File**: `agents/<filename>.md`
+**Root cause**: Agent files must start with YAML frontmatter delimited by `---`.
+**Fix**:
+1. Add YAML frontmatter to the top of the agent file:
+   ```markdown
+   ---
+   name: my-agent
+   description: What this agent does
+   ---
+
+   # Agent instructions here
+   ```
+
+### CRITICAL: Malformed frontmatter (missing closing ---) (agent)
+
+**Error message**: `Malformed frontmatter (missing closing ---)`
+**Severity**: CRITICAL
+**File**: `agents/<filename>.md`
+**Root cause**: The frontmatter block opens with `---` but has no closing `---`.
+**Fix**: Same as the command file fix — add the closing `---` delimiter.
+
+### CRITICAL: Invalid YAML frontmatter (agent)
+
+**Error message**: `Invalid YAML frontmatter: <yaml error>`
+**Severity**: CRITICAL
+**File**: `agents/<filename>.md`
+**Root cause**: YAML syntax errors in the agent frontmatter.
+**Fix**: Same as the command file fix — correct the YAML syntax.
+
+### CRITICAL: Empty frontmatter (agent)
+
+**Error message**: `Empty frontmatter`
+**Severity**: CRITICAL
+**File**: `agents/<filename>.md`
+**Root cause**: The agent frontmatter section is empty.
+**Fix**: Add at least the `name` field to the frontmatter.
+
+### CRITICAL: Missing 'name' in frontmatter (agent)
+
+**Error message**: `Missing 'name' in frontmatter`
+**Severity**: CRITICAL
+**File**: `agents/<filename>.md`
+**Root cause**: The agent file's frontmatter is missing the required `name` field.
+**Fix**:
+1. Add the `name` field:
+   ```markdown
+   ---
+   name: my-agent
+   description: An agent that handles code review
+   ---
+   ```
+
+### MAJOR: Missing 'description' in frontmatter (agent)
+
+**Error message**: `Missing 'description' in frontmatter`
+**Severity**: MAJOR
+**File**: `agents/<filename>.md`
+**Root cause**: The agent file is missing a `description` field. Descriptions help users understand the agent's purpose.
+**Fix**:
+1. Add a description:
+   ```markdown
+   ---
+   name: my-agent
+   description: Handles automated code review and linting suggestions
+   ---
+   ```
+
+---
+
+## 5. Hook Configuration Issues
+
+Hook validation is delegated to `validate_hook.py`. All results from the hook validator are transferred into the main report with paths prefixed by `hooks/`. Refer to the hook validator's own documentation for the full list of hook-specific errors. Common issues include:
+
+- Invalid JSON in `hooks/hooks.json`
+- Invalid hook event names
+- Missing `command` field in hook entries
+- Commands referencing non-existent scripts
+- Invalid `timeout` values
+- Invalid `pattern` regex in hook matchers
+
+**Fix**: Consult the hook validation output for specific errors. Ensure `hooks/hooks.json` follows the Claude Code hook specification.
+
+---
+
+## 6. MCP Server Issues
+
+MCP validation is delegated to `validate_mcp.py`. All results are transferred directly into the main report. Common issues include:
+
+- Invalid MCP server configuration format
+- Missing required fields in server entries
+- Non-existent server command paths
+- Invalid transport configuration
+
+**Fix**: Consult the MCP validation output for specific errors. Ensure your MCP server configuration matches the Claude Code MCP spec.
+
+---
+
+## 7. Script Quality Issues
+
+### MAJOR: Ruff lint errors in Python scripts
+
+**Error message**: `Ruff: <count> error(s) in <file>`
+**Severity**: MAJOR
+**File**: `scripts/<filename>.py`
+**Root cause**: Python scripts in `scripts/` have lint errors detected by ruff (E/F/W categories, excluding E501 line length).
+**Fix**:
+1. Run ruff to see the specific errors:
+   ```bash
+   uv run ruff check --select E,F,W --ignore E501 scripts/
+   ```
+2. Auto-fix what ruff can handle:
+   ```bash
+   uv run ruff check --select E,F,W --ignore E501 --fix scripts/
+   ```
+3. Manually fix remaining issues.
+
+### MINOR: ruff not available
+
+**Error message**: `ruff not available locally or via uvx, skipping Python lint check`
+**Severity**: MINOR
+**Root cause**: The ruff linter is not installed in the environment.
+**Fix**:
+1. Install ruff:
+   ```bash
+   uv tool install ruff
+   # or
+   pip install ruff
+   ```
+
+### MINOR: Mypy type check issues
+
+**Error message**: `Mypy: <error line>`
+**Severity**: MINOR
+**Root cause**: Python scripts have type errors detected by mypy.
+**Fix**:
+1. Run mypy directly to see all errors:
+   ```bash
+   uv run mypy --ignore-missing-imports scripts/*.py
+   ```
+2. Add type annotations and fix type mismatches as reported.
+
+### MINOR: mypy not available
+
+**Error message**: `mypy not available locally or via uvx, skipping type check`
+**Severity**: MINOR
+**Root cause**: The mypy type checker is not installed in the environment.
+**Fix**:
+1. Install mypy:
+   ```bash
+   uv tool install mypy
+   # or
+   pip install mypy
+   ```
+
+### MAJOR: Shell script not executable
+
+**Error message**: `Shell script not executable: <filename>`
+**Severity**: MAJOR
+**File**: `scripts/<filename>.sh`
+**Root cause**: A `.sh` file in `scripts/` does not have the executable permission bit set.
+**Fix**:
+1. Set the executable bit:
+   ```bash
+   chmod +x scripts/<filename>.sh
+   ```
+2. Make sure the file has a proper shebang line:
+   ```bash
+   #!/usr/bin/env bash
+   ```
+
+### MINOR: Shellcheck issues
+
+**Error message**: `Shellcheck issues in <filename>`
+**Severity**: MINOR
+**File**: `scripts/<filename>.sh`
+**Root cause**: Shell scripts have lint warnings from shellcheck.
+**Fix**:
+1. Run shellcheck directly:
+   ```bash
+   shellcheck scripts/<filename>.sh
+   ```
+2. Fix the reported issues (quoting, variable expansion, deprecated syntax, etc.).
+3. For intentional patterns, add inline directives: `# shellcheck disable=SC2086`
+
+### MINOR: shellcheck not available
+
+**Error message**: `shellcheck not available locally or via bunx/npx, skipping shell lint`
+**Severity**: MINOR
+**Root cause**: shellcheck is not installed.
+**Fix**:
+1. Install shellcheck:
+   ```bash
+   brew install shellcheck   # macOS
+   apt install shellcheck    # Ubuntu/Debian
+   ```
+
+---
+
+## 8. Cross-Platform Compatibility Issues
+
+### WARNING: Platform-specific scripts found (with known platforms)
+
+**Error message**: `Found <count> <language> script(s) (<ext>) — only natively available on <platforms>. <note>. Consider providing cross-platform alternatives or documenting requirements.`
+**Severity**: WARNING
+**Root cause**: Scripts using platform-specific languages (`.sh`/`.bash` for macOS/Linux, `.ps1` for Windows, `.zsh` for macOS only, `.bat`/`.cmd` for Windows only, `.nix` for Linux) were found.
+**Fix**:
+1. Provide cross-platform alternatives (Python `.py`, Node.js `.js`/`.ts`).
+2. Or document the platform requirements in README.md.
+3. Or provide equivalent scripts for each platform (e.g., `install.sh` + `install.ps1`).
+
+### WARNING: Platform-specific scripts found (no known platforms)
+
+**Error message**: `Found <count> <language> script(s) (<ext>) — <note>. Consider providing cross-platform alternatives.`
+**Severity**: WARNING
+**Root cause**: Scripts using a language that requires separate installation on all platforms (e.g., `.fish` Fish shell) were found.
+**Fix**: Same as above — provide cross-platform alternatives or document requirements.
+
+### MAJOR: Compiled source without binaries or build script
+
+**Error message**: `Found <count> <language> source file(s) but no compiled binaries in bin/ and no build script (build.sh, install.sh, Makefile, etc.). Provide pre-compiled binaries or a build/install script.`
+**Severity**: MAJOR
+**Root cause**: The plugin contains compiled language source code (Rust, Go, C, C++, Swift, Zig) but no pre-compiled binaries in `bin/` and no build script to compile them.
+**Fix**:
+1. Add pre-compiled binaries for major platforms to `bin/`:
+   ```
+   bin/
+   ├── my-tool-darwin-arm64
+   ├── my-tool-darwin-amd64
+   ├── my-tool-linux-amd64
+   └── my-tool-windows-amd64.exe
+   ```
+2. Or provide a build/install script at the plugin root:
+   - `build.sh`, `install.sh`, `setup.sh`, `compile.sh`
+   - `build.py`, `install.py`, `setup.py`
+   - `Makefile`, `justfile`, `Taskfile.yml`
+
+### WARNING: Compiled source with build system but no binaries
+
+**Error message**: `Found <count> <language> source file(s) with build system but no pre-compiled binaries in bin/. Users will need to compile before use.`
+**Severity**: WARNING
+**Root cause**: Source files have a build system (e.g., `Cargo.toml`, `go.mod`, `CMakeLists.txt`) but no pre-compiled binaries.
+**Fix**:
+1. Pre-compile binaries for major platforms and include them in `bin/`.
+2. Or document the build instructions clearly in README.md.
+
+### WARNING: Compiled binaries missing platform coverage
+
+**Error message**: `Compiled binaries missing for: <platforms>. Detected platforms: <detected>. Consider providing binaries for all major platforms.`
+**Severity**: WARNING
+**Root cause**: The `bin/` directory has compiled binaries but does not cover all recommended platforms: macOS ARM64 (Apple Silicon), macOS x86_64 (Intel), and Linux x86_64.
+**Fix**:
+1. Cross-compile and add binaries for missing platforms:
+   ```
+   bin/
+   ├── my-tool-darwin-arm64      # macOS Apple Silicon
+   ├── my-tool-darwin-amd64      # macOS Intel
+   └── my-tool-linux-amd64       # Linux x86_64
+   ```
+2. Use CI/CD to automate cross-compilation (GitHub Actions, etc.).
+
+### WARNING: Binaries without platform identifiers
+
+**Error message**: `Found <count> binary file(s) without platform identifiers in filename. Use naming convention like 'tool-darwin-arm64', 'tool-linux-amd64', 'tool-windows-amd64.exe' for multi-platform support.`
+**Severity**: WARNING
+**Root cause**: Binary files in `bin/` do not follow the platform naming convention, making it unclear which platforms they support.
+**Fix**:
+1. Rename binaries to include platform/arch suffixes:
+   ```
+   my-tool-darwin-arm64
+   my-tool-darwin-amd64
+   my-tool-linux-amd64
+   my-tool-linux-arm64
+   my-tool-windows-amd64.exe
+   ```
+2. Supported suffix patterns: `-darwin-arm64`, `-darwin-amd64`, `-linux-amd64`, `-linux-arm64`, `-windows-amd64.exe`, etc.
+
+---
+
+## 9. Skill Validation Issues
+
+Skill validation is delegated to `validate_skill_comprehensive.py` which implements 190+ rules from the AgentSkills OpenSpec, Nixtla, and Meta-Skills specifications. All results are transferred to the main report with paths prefixed by `skills/<skill-name>/`.
+
+Common issues include:
+- Missing `SKILL.md` file
+- Invalid YAML frontmatter in skill files
+- Missing required metadata fields
+- Platform-specific scripts without alternatives
+- Invalid tool definitions
+
+**Fix**: Consult the skill validation output for specific errors. Each skill directory should contain at minimum a `SKILL.md` file with proper frontmatter. Refer to the skill-semantic-validation reference for comprehensive details.
+
+---
+
+## 10. README and LICENSE Issues
+
+### MINOR: README.md not found
+
+**Error message**: `README.md not found`
+**Severity**: MINOR
+**Root cause**: No README.md file at the plugin root. While not strictly required, a README helps users understand and configure the plugin.
+**Fix**:
+1. Create a `README.md` at the plugin root with:
+   - Plugin name and description
+   - Installation instructions
+   - Configuration options
+   - Usage examples
+
+### MINOR: No LICENSE file found
+
+**Error message**: `No LICENSE file found`
+**Severity**: MINOR
+**Root cause**: No `LICENSE`, `LICENSE.md`, or `LICENSE.txt` file at the plugin root.
+**Fix**:
+1. Add a LICENSE file. Common choices:
+   - `LICENSE` with MIT license text
+   - `LICENSE.md` with Apache 2.0 text
+2. Use GitHub's license picker or:
+   ```bash
+   curl -sL https://choosealicense.com/licenses/mit/ | grep -A999 'BEGIN LICENSE' > LICENSE
+   ```
+
+---
+
+## 11. Rules Validation Issues
+
+Rules validation is delegated to `validate_rules.py`. All results are transferred to the main report. Common issues include:
+
+- Rule files not valid UTF-8
+- Rule files with UTF-8 BOM
+- Invalid YAML frontmatter in rule files
+- Rules exceeding recommended token budget
+- Invalid `paths` field in rule frontmatter
+
+**Fix**: Ensure rule files are plain markdown with UTF-8 encoding (no BOM). If using frontmatter, ensure the YAML is valid.
+
+---
+
+## 12. Path and Private Info Issues
+
+### CRITICAL: Private info leaked (specific username)
+
+**Error message**: `Private info leaked: <description> - found '<matched_text>' (replace with relative path or ${CLAUDE_PLUGIN_ROOT})`
+**Severity**: CRITICAL
+**File**: Various
+**Root cause**: A file contains a hardcoded path with a known private username (from the system's current user or known private usernames list). This leaks personal information.
+**Fix**:
+1. Replace the absolute path with a relative path or environment variable:
+   ```
+   # WRONG:
+   /Users/johndoe/projects/my-plugin/scripts/run.sh
+
+   # RIGHT (relative):
+   ./scripts/run.sh
+
+   # RIGHT (env var):
+   ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh
+   ```
+2. Search and replace all instances: `grep -rn "/Users/<username>" .`
+
+### CRITICAL: Private path leaked (absolute path with username)
+
+**Error message**: `Private path leaked: <description> - '<matched_text>' (use relative path or ${CLAUDE_PLUGIN_ROOT})`
+**Severity**: CRITICAL
+**File**: Various
+**Root cause**: Same as above — detected by the stricter `validate_no_absolute_paths` scan.
+**Fix**: Same as above — replace with relative paths or `${CLAUDE_PLUGIN_ROOT}`.
+
+### MAJOR: Hardcoded user path found
+
+**Error message**: `Hardcoded user path found: '<matched_text>...' (use relative paths or ${CLAUDE_PLUGIN_ROOT})`
+**Severity**: MAJOR
+**File**: Various
+**Root cause**: A file contains a path like `/Users/<name>/...` or `/home/<name>/...` with a non-example username. Even if it is not the current user's name, it still breaks portability.
+**Fix**:
+1. Replace with relative paths or environment variables:
+   ```
+   # WRONG:
+   /home/deploy/app/config.json
+
+   # RIGHT:
+   ./config.json
+   # or
+   ${CLAUDE_PLUGIN_ROOT}/config.json
+   # or
+   ${HOME}/.config/my-plugin/config.json
+   ```
+
+### MAJOR: Absolute path found (home directory in documentation)
+
+**Error message**: `Absolute path found: '<path>...' - use relative path, ${CLAUDE_PLUGIN_ROOT}, or ${CLAUDE_PROJECT_DIR}`
+**Severity**: MAJOR
+**File**: Various (documentation files)
+**Root cause**: A documentation file contains an absolute home directory path that is not a generic example.
+**Fix**:
+1. Replace with environment variable references or generic examples:
+   ```markdown
+   <!-- WRONG -->
+   Edit `/Users/john/projects/plugin/config.json`
+
+   <!-- RIGHT -->
+   Edit `${CLAUDE_PLUGIN_ROOT}/config.json`
+   <!-- or use a generic example -->
+   Edit `/Users/<your-username>/projects/plugin/config.json`
+   ```
+
+### MINOR: Absolute path found (system path in code)
+
+**Error message**: `Absolute path found: '<path>...' - use relative path, ${CLAUDE_PLUGIN_ROOT}, or ${CLAUDE_PROJECT_DIR}`
+**Severity**: MINOR
+**File**: Various (code/script files)
+**Root cause**: A script or code file contains a system absolute path (e.g., `/usr/local/bin/...`). In scripts, some system paths may be intentional.
+**Fix**:
+1. If intentional (e.g., referencing a system tool), this may be acceptable — consider adding a comment explaining why.
+2. If not intentional, replace with a relative path or `which <tool>` lookup.
+
+---
+
+## 13. .gitignore Issues
+
+### MAJOR: No .gitignore file found
+
+**Error message**: `No .gitignore file found — cache files, build artifacts, and secrets may be accidentally included in the plugin`
+**Severity**: MAJOR
+**Root cause**: The plugin has no `.gitignore` file, so cached files, build artifacts, environment secrets, and editor temp files could be committed to the repository.
+**Fix**:
+1. Create a `.gitignore` at the plugin root:
+   ```gitignore
+   # Python
+   __pycache__/
+   *.pyc
+   .mypy_cache/
+   .ruff_cache/
+   .pytest_cache/
+   dist/
+   build/
+   *.egg-info/
+
+   # Node
+   node_modules/
+
+   # OS
+   .DS_Store
+   Thumbs.db
+
+   # Editor
+   *.swp
+   *.swo
+   *~
+   .idea/
+   .vscode/
+
+   # Secrets
+   .env
+   *.env
+
+   # Virtual environments
+   .venv/
+   venv/
+   ```
+
+### MINOR: Could not read .gitignore
+
+**Error message**: `Could not read .gitignore: <error>`
+**Severity**: MINOR
+**Root cause**: The `.gitignore` file exists but could not be read (encoding issue or permission error).
+**Fix**:
+1. Ensure the file is saved as UTF-8.
+2. Check file permissions: `chmod 644 .gitignore`.
+
+### WARNING: .gitignore missing coverage for Python cache files
+
+**Error message**: `.gitignore missing coverage for: Python cache files (__pycache__ or *.pyc)`
+**Severity**: WARNING
+**Root cause**: The `.gitignore` does not include patterns for Python cache files.
+**Fix**:
+1. Add to `.gitignore`:
+   ```gitignore
+   __pycache__/
+   *.pyc
+   ```
+
+### WARNING: .gitignore missing coverage for Node modules
+
+**Error message**: `.gitignore missing coverage for: Node modules (node_modules/)`
+**Severity**: WARNING
+**Root cause**: The `.gitignore` does not include the `node_modules/` pattern.
+**Fix**:
+1. Add to `.gitignore`:
+   ```gitignore
+   node_modules/
+   ```
+
+### WARNING: .gitignore missing coverage for linter/type checker caches
+
+**Error message**: `.gitignore missing coverage for: Linter/type checker caches`
+**Severity**: WARNING
+**Root cause**: The `.gitignore` does not cover `.mypy_cache`, `.ruff_cache`, or `.pytest_cache`.
+**Fix**:
+1. Add to `.gitignore`:
+   ```gitignore
+   .mypy_cache/
+   .ruff_cache/
+   .pytest_cache/
+   ```
+
+### WARNING: .gitignore missing coverage for build artifacts
+
+**Error message**: `.gitignore missing coverage for: Build artifacts (dist/, build/, *.egg-info)`
+**Severity**: WARNING
+**Root cause**: The `.gitignore` does not cover build output directories.
+**Fix**:
+1. Add to `.gitignore`:
+   ```gitignore
+   dist/
+   build/
+   *.egg-info/
+   ```
+
+### WARNING: .gitignore missing coverage for OS metadata files
+
+**Error message**: `.gitignore missing coverage for: OS metadata files (.DS_Store, Thumbs.db)`
+**Severity**: WARNING
+**Root cause**: The `.gitignore` does not cover OS-generated metadata files.
+**Fix**:
+1. Add to `.gitignore`:
+   ```gitignore
+   .DS_Store
+   Thumbs.db
+   ```
+
+### WARNING: .gitignore missing coverage for editor temp files
+
+**Error message**: `.gitignore missing coverage for: Editor temp files`
+**Severity**: WARNING
+**Root cause**: The `.gitignore` does not cover editor swap/temp files (`.swp`, `.swo`, `*~`, `.idea/`, `.vscode/`).
+**Fix**:
+1. Add to `.gitignore`:
+   ```gitignore
+   *.swp
+   *.swo
+   *~
+   .idea/
+   .vscode/
+   ```
+
+### MAJOR: .gitignore missing coverage for environment files
+
+**Error message**: `.gitignore missing coverage for: Environment files (.env)`
+**Severity**: MAJOR
+**Root cause**: The `.gitignore` does not cover `.env` files, which often contain secrets and API keys.
+**Fix**:
+1. Add to `.gitignore`:
+   ```gitignore
+   .env
+   *.env
+   ```
+2. If any `.env` files were already committed, remove them from tracking:
+   ```bash
+   git rm --cached .env
+   ```
+
+### WARNING: .gitignore missing coverage for virtual environments
+
+**Error message**: `.gitignore missing coverage for: Virtual environment directories`
+**Severity**: WARNING
+**Root cause**: The `.gitignore` does not cover `.venv/` or `venv/` directories.
+**Fix**:
+1. Add to `.gitignore`:
+   ```gitignore
+   .venv/
+   venv/
+   ```
+
+### MAJOR: .gitignore ignores all source files
+
+**Error message**: `.gitignore ignores all source files (*.py, *.js, or *.ts) — this will exclude plugin code from distribution`
+**Severity**: MAJOR
+**Root cause**: The `.gitignore` contains `*.py`, `*.js`, or `*.ts` as a blanket pattern, which would exclude all plugin source code from the repository.
+**Fix**:
+1. Remove the blanket exclusion patterns from `.gitignore`.
+2. If you need to ignore specific generated files, use targeted patterns:
+   ```gitignore
+   # WRONG - excludes ALL Python files:
+   *.py
+
+   # RIGHT - excludes only specific generated files:
+   generated_output.py
+   dist/**/*.py
+   ```
+
+### WARNING: Found artifact files that may not be gitignored
+
+**Error message**: `Found <count> <description> file(s) (e.g. <sample>) that may not be gitignored`
+**Severity**: WARNING
+**Root cause**: Artifact files (`.pyc`, `.DS_Store`, `Thumbs.db`) exist in the plugin tree and may not be covered by `.gitignore`.
+**Fix**:
+1. Add the appropriate pattern to `.gitignore` (see specific patterns above).
+2. Remove any already-tracked artifacts:
+   ```bash
+   git rm --cached -r __pycache__/
+   git rm --cached .DS_Store
+   ```
+
+---
+
+## 14. Workflow Inline Python Issues
+
+### MAJOR: Inline Python uses dict bracket access in f-string
+
+**Error message**: `Inline Python uses dict bracket access in f-string: <snippet> -- shell quoting will strip inner quotes causing NameError. Extract value into a local variable first.`
+**Severity**: MAJOR
+**File**: `.github/workflows/<filename>.yml`
+**Root cause**: A GitHub Actions workflow uses `python3 -c "..."` with double-quoted shell strings that contain f-string dictionary access like `{data["key"]}`. The shell strips the inner quotes before Python sees the code, causing `NameError` at runtime.
+**Fix**:
+1. Extract dictionary values into local variables before the f-string:
+   ```yaml
+   # WRONG:
+   - run: python3 -c "import json; data=json.load(open('config.json')); print(f'Repo: {data[\"repo\"]}')"
+
+   # RIGHT:
+   - run: |
+       python3 -c "
+       import json
+       data = json.load(open('config.json'))
+       repo = data['repo']
+       print(f'Repo: {repo}')
+       "
+   ```
+2. Or use a multiline `run:` block with a heredoc or separate script file:
+   ```yaml
+   - run: python3 scripts/my_step.py
+   ```
+
+---
+
+## Appendix: Severity Levels Reference
+
+| Level | Exit Code | Meaning |
+|-------|-----------|---------|
+| CRITICAL | 1 | Plugin will not work — must fix before use |
+| MAJOR | 2 | Significant problems — will cause issues in many scenarios |
+| MINOR | 3 | May affect UX — recommended to fix |
+| NIT | 4 (strict only) | Style/polish issue — nice to fix |
+| WARNING | 0 | Non-blocking advisory — consider addressing |
+| INFO | 0 | Informational — no action needed |
+| PASSED | 0 | Check passed successfully |
+
+## Appendix: Encoding Validation (from cpv_validation_common)
+
+These errors can appear for any text file scanned across the plugin:
+
+### MAJOR: File has UTF-8 BOM
+
+**Error message**: `File has UTF-8 BOM (should be UTF-8 without BOM)`
+**Severity**: MAJOR
+**Root cause**: The file starts with a UTF-8 Byte Order Mark (`EF BB BF`). Many tools do not handle BOM correctly.
+**Fix**:
+1. Re-save the file as UTF-8 without BOM. In VS Code: click the encoding in the status bar, choose "Save with Encoding" > "UTF-8".
+2. Or strip the BOM programmatically:
+   ```bash
+   sed -i '1s/^\xEF\xBB\xBF//' <file>
+   ```
+
+### MAJOR: File is not valid UTF-8
+
+**Error message**: `File is not valid UTF-8: <decode error>`
+**Severity**: MAJOR
+**Root cause**: The file is encoded in a non-UTF-8 encoding (e.g., Latin-1, Windows-1252).
+**Fix**:
+1. Convert to UTF-8:
+   ```bash
+   iconv -f WINDOWS-1252 -t UTF-8 <file> > <file>.tmp && mv <file>.tmp <file>
+   ```
+2. Or re-save as UTF-8 from your editor.

@@ -49,7 +49,7 @@ from validate_rules import validate_rules_directory
 
 # Import comprehensive skill validator (190+ rules from AgentSkills OpenSpec, Nixtla, Meta-Skills)
 from validate_skill_comprehensive import validate_skill as validate_skill_comprehensive
-from cpv_validation_common import ValidationReport, resolve_tool_command
+from cpv_validation_common import ValidationReport, resolve_tool_command, validate_toc_embedding
 
 
 def validate_manifest(
@@ -478,6 +478,9 @@ def validate_agent_file(agent_path: Path, report: ValidationReport) -> None:
 
     if "description" not in frontmatter:
         report.major("Missing 'description' in frontmatter", rel_path)
+
+    # Validate TOC embedding — agent files must embed TOCs from referenced .md files
+    validate_toc_embedding(content, agent_path, agent_path.parent, report)
 
 
 def validate_hooks(plugin_root: Path, report: ValidationReport) -> None:

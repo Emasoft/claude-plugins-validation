@@ -1,0 +1,1344 @@
+# Skill Validation — Issues and Fixes
+
+Comprehensive remediation guide for all issues detected by `validate_skill.py` and `validate_skill_comprehensive.py`.
+
+## Table of Contents
+
+- [1. Structure Issues](#1-structure-issues)
+- [2. Frontmatter Issues](#2-frontmatter-issues)
+- [3. Name Field Issues](#3-name-field-issues)
+- [4. Description Quality Issues](#4-description-quality-issues)
+- [5. Token Budget and Progressive Disclosure](#5-token-budget-and-progressive-disclosure)
+- [6. Required Sections (Strict Mode)](#6-required-sections-strict-mode)
+- [7. Reference File Issues](#7-reference-file-issues)
+- [8. TOC Embedding Issues](#8-toc-embedding-issues)
+- [9. Allowed-Tools Issues](#9-allowed-tools-issues)
+- [10. Content Quality Issues](#10-content-quality-issues)
+- [11. 8+1 Pillars Issues](#11-81-pillars-issues)
+- [12. OpenSpec Mode Issues](#12-openspec-mode-issues)
+
+---
+
+## 1. Structure Issues
+
+### CRITICAL: Skill path does not exist
+
+**Error message**: `Skill path does not exist: {path}`
+**Severity**: CRITICAL
+**Source**: `validate_skill_comprehensive.py` — `validate_skill()`
+**Root cause**: The supplied path does not exist on the filesystem.
+**Fix**:
+1. Verify the path you passed to the validator actually exists
+2. Check for typos in the directory name
+3. Ensure you are passing the skill directory, not the SKILL.md file itself
+
+### CRITICAL: Skill path is not a directory
+
+**Error message**: `Skill path is not a directory: {path}`
+**Severity**: CRITICAL
+**Source**: Both scripts — `validate_skill()`
+**Root cause**: The path exists but it is a file, not a directory. Skills must be directories containing a SKILL.md file.
+**Fix**:
+1. Pass the parent directory that contains the SKILL.md, not the file itself
+2. Example: `validate_skill.py my-skill/` not `validate_skill.py my-skill/SKILL.md`
+
+### CRITICAL: SKILL.md not found
+
+**Error message**: `SKILL.md not found (required)`
+**Severity**: CRITICAL
+**Source**: Both scripts — `validate_skill_md_exists()`
+**Root cause**: The directory does not contain a SKILL.md file (case-sensitive).
+**Fix**:
+1. Create a `SKILL.md` file in the skill directory root
+2. At minimum, the file should contain a description of what the skill does
+3. Example minimal SKILL.md:
+```markdown
+---
+name: my-skill
+description: "Use when the user asks to do X. Performs Y by Z."
+---
+
+# My Skill
+
+Instructions for Claude when this skill is invoked.
+```
+
+### MINOR: SKILL.md should be uppercase
+
+**Error message**: `SKILL.md should be uppercase (found 'skill.md')`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_skill_md_exists()`
+**Root cause**: The file is named `skill.md` (lowercase) instead of `SKILL.md` (uppercase).
+**Fix**:
+1. Rename `skill.md` to `SKILL.md`:
+```bash
+mv skill.md SKILL.md
+```
+
+---
+
+## 2. Frontmatter Issues
+
+### INFO: No YAML frontmatter found
+
+**Error message**: `No YAML frontmatter found (optional but recommended)`
+**Severity**: INFO
+**Source**: Both scripts — `validate_frontmatter()` / `validate_frontmatter_structure()`
+**Root cause**: The SKILL.md file does not start with `---` frontmatter delimiters.
+**Fix**:
+1. Add YAML frontmatter at the very beginning of SKILL.md:
+```markdown
+---
+name: my-skill
+description: "Use when the user needs to ..."
+---
+```
+
+### CRITICAL: Malformed YAML frontmatter
+
+**Error message**: `Malformed YAML frontmatter (missing closing --- or invalid YAML)`
+**Severity**: CRITICAL
+**Source**: Both scripts — `validate_frontmatter()` / `validate_frontmatter_structure()`
+**Root cause**: The file starts with `---` but the YAML block is malformed (missing closing `---`, invalid YAML syntax, or unclosed quotes).
+**Fix**:
+1. Ensure the frontmatter has both opening and closing `---` delimiters
+2. Validate the YAML with an online YAML linter
+3. Common issues:
+   - Missing closing `---`
+   - Unquoted colons in values (use quotes: `description: "Use when: X"`)
+   - Tab characters instead of spaces
+   - Incorrect indentation for nested fields
+
+### WARNING: Unknown frontmatter field
+
+**Error message**: `Unknown frontmatter field '{key}' (may be ignored by CLI)`
+**Severity**: WARNING
+**Source**: `validate_skill.py` — `validate_frontmatter()` / `validate_skill_comprehensive.py` — `validate_field_whitelist()`
+**Root cause**: A field in the frontmatter is not recognized by the Claude Code CLI.
+**Fix**:
+1. Remove unrecognized fields, or verify they are intentional
+2. Known fields for Claude Code: `name`, `description`, `argument-hint`, `disable-model-invocation`, `user-invocable`, `allowed-tools`, `model`, `context`, `agent`, `hooks`
+3. Additional enterprise/OpenSpec fields: `license`, `metadata`, `compatibility`, `version`, `author`, `mode`, `tags`
+
+### MINOR: Deprecated field
+
+**Error message**: `Deprecated field '{key}' (may be ignored by CLI)`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_field_whitelist()`
+**Root cause**: A deprecated field (e.g., `when_to_use`) is present in the frontmatter.
+**Fix**:
+1. Replace deprecated fields with their modern equivalents
+2. `when_to_use` -> include in the `description` field as a "Use when ..." phrase
+
+### CRITICAL: Frontmatter exceeds character limit (error threshold)
+
+**Error message**: `Frontmatter exceeds 15000 characters ({chars} chars)`
+**Severity**: CRITICAL
+**Source**: `validate_skill_comprehensive.py` — `validate_frontmatter_structure()`
+**Root cause**: The YAML frontmatter is excessively large (>15,000 characters), consuming too many tokens.
+**Fix**:
+1. Move large content from frontmatter into the body of the SKILL.md
+2. Keep frontmatter lean: only fields the CLI needs (name, description, allowed-tools, etc.)
+3. Move long descriptions or instructions into the markdown body
+
+### MINOR: Frontmatter exceeds character warning threshold
+
+**Error message**: `Frontmatter exceeds 12000 characters ({chars} chars)`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_frontmatter_structure()`
+**Root cause**: The YAML frontmatter is large (>12,000 characters).
+**Fix**:
+1. Same as above but less urgent. Consider trimming frontmatter content
+
+### CRITICAL: Boolean field type mismatch
+
+**Error message**: `'{field_name}' must be a boolean (true/false), got {type}`
+**Severity**: CRITICAL
+**Source**: Both scripts — `validate_boolean_field()`
+**Root cause**: A boolean field (`user-invocable` or `disable-model-invocation`) has a non-boolean value.
+**Fix**:
+1. Use YAML booleans without quotes:
+```yaml
+user-invocable: true
+disable-model-invocation: false
+```
+2. Do NOT use strings like `"true"`, `"false"`, `"yes"`, `"no"`
+
+---
+
+## 3. Name Field Issues
+
+### INFO: No 'name' field (will use directory name)
+
+**Error message**: `No 'name' field (will use directory name: {dir_name})`
+**Severity**: INFO
+**Source**: Both scripts — `validate_name_field()`
+**Root cause**: The `name` field is missing. The CLI will use the directory name instead.
+**Fix**: (Optional) Add an explicit `name` field:
+```yaml
+name: my-skill-name
+```
+
+### CRITICAL: Missing required field: 'name' (OpenSpec strict)
+
+**Error message**: `Missing required field: 'name'`
+**Severity**: CRITICAL
+**Source**: `validate_skill_comprehensive.py` — `validate_name_field()` (when `--openspec` flag is used)
+**Root cause**: In OpenSpec strict mode, the `name` field is required.
+**Fix**: Add the `name` field to frontmatter.
+
+### CRITICAL: Name must be a string
+
+**Error message**: `'name' must be a string, got {type}`
+**Severity**: CRITICAL
+**Source**: Both scripts — `validate_name_field()`
+**Root cause**: The `name` value is a number, boolean, or other non-string type.
+**Fix**: Ensure name is a quoted string:
+```yaml
+name: "my-skill"
+```
+
+### MAJOR: Skill name exceeds 64 characters
+
+**Error message**: `Skill name exceeds 64 characters ({len} chars): {name}`
+**Severity**: MAJOR
+**Source**: Both scripts — `validate_name_field()`
+**Root cause**: Skill names have a maximum length of 64 characters per the official spec.
+**Fix**: Shorten the skill name while keeping it descriptive.
+
+### MAJOR: Skill name must be lowercase
+
+**Error message**: `Skill name must be lowercase: {name}`
+**Severity**: MAJOR
+**Source**: Both scripts — `validate_name_field()`
+**Root cause**: Skill names must use only lowercase characters.
+**Fix**: Convert to lowercase:
+```yaml
+# Wrong
+name: My-Skill
+# Correct
+name: my-skill
+```
+
+### MAJOR: Skill name invalid characters
+
+**Error message**: `Skill name must use only lowercase letters, numbers, hyphens: {name}` (basic) or `Skill name must use only letters, numbers, hyphens: {name}` (comprehensive)
+**Severity**: MAJOR
+**Source**: Both scripts — `validate_name_field()`
+**Root cause**: Skill name contains invalid characters (underscores, spaces, special characters).
+**Fix**: Use only `a-z`, `0-9`, and `-`:
+```yaml
+# Wrong
+name: my_skill
+name: "my skill"
+# Correct
+name: my-skill
+```
+
+### MAJOR: Skill name cannot start or end with a hyphen
+
+**Error message**: `Skill name cannot start or end with a hyphen`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_name_field()`
+**Root cause**: Name begins or ends with `-`.
+**Fix**: Remove leading/trailing hyphens:
+```yaml
+# Wrong
+name: -my-skill-
+# Correct
+name: my-skill
+```
+
+### MAJOR: Skill name cannot contain consecutive hyphens
+
+**Error message**: `Skill name cannot contain consecutive hyphens`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_name_field()`
+**Root cause**: Name contains `--`.
+**Fix**: Replace double hyphens with single:
+```yaml
+# Wrong
+name: my--skill
+# Correct
+name: my-skill
+```
+
+### MAJOR: Skill name contains reserved word
+
+**Error message**: `Skill name contains reserved word: {name}`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_name_field()`
+**Root cause**: Skill name contains "anthropic" or "claude".
+**Fix**: Rename the skill to avoid reserved words.
+
+### CRITICAL: Skill name contains XML tags
+
+**Error message**: `Skill name contains XML tags (forbidden): {name}`
+**Severity**: CRITICAL
+**Source**: `validate_skill_comprehensive.py` — `validate_name_field()`
+**Root cause**: The name field contains HTML/XML tags like `<b>` or `<custom>`.
+**Fix**: Remove all XML/HTML tags from the name field.
+
+### MINOR: Skill name uses vague/generic words
+
+**Error message**: `Skill name uses vague/generic word(s): {words} - consider more specific naming`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_name_field()`
+**Root cause**: Name contains generic words like `helper`, `util`, `tool`, `data`, `file`, `misc`, `general`, `common`, `shared`, `base`, `core`.
+**Fix**: Use domain-specific naming:
+```yaml
+# Wrong
+name: pdf-helper
+# Correct
+name: processing-pdfs
+```
+
+### INFO: Consider gerund naming pattern
+
+**Error message**: `Consider gerund naming pattern (verb + -ing) for skill: {name}`
+**Severity**: INFO
+**Source**: `validate_skill_comprehensive.py` — `validate_name_field()`
+**Root cause**: Anthropic docs recommend verb + -ing format for skill names.
+**Fix**: (Optional) Rename using gerund pattern:
+```yaml
+# Before
+name: pdf-converter
+# After
+name: converting-pdfs
+```
+
+### INFO: Skill name differs from directory name
+
+**Error message**: `Skill name '{name}' differs from directory name '{dir_name}'`
+**Severity**: INFO (MAJOR in OpenSpec strict mode)
+**Source**: Both scripts — `validate_name_field()`
+**Root cause**: The `name` field value does not match the directory name.
+**Fix**: Either rename the directory or update the `name` field to match:
+```bash
+# Option 1: Rename directory
+mv old-name/ my-skill/
+# Option 2: Update frontmatter
+name: old-name
+```
+
+---
+
+## 4. Description Quality Issues
+
+### INFO: No 'description' field (body content fallback)
+
+**Error message**: `No 'description' field (will use first paragraph of content)`
+**Severity**: INFO
+**Source**: Both scripts — `validate_description_field()`
+**Root cause**: No explicit `description` in frontmatter; Claude will use the first paragraph of the body.
+**Fix**: Add an explicit description for better discoverability:
+```yaml
+description: "Use when the user asks to analyze CSV files. Reads, validates, and summarizes tabular data."
+```
+
+### MAJOR: No description and no body content
+
+**Error message**: `No 'description' field and no body content for fallback`
+**Severity**: MAJOR
+**Source**: Both scripts — `validate_description_field()`
+**Root cause**: Neither frontmatter description nor body content exists.
+**Fix**: Add a `description` field AND body content to the SKILL.md.
+
+### MAJOR: Description must be a string
+
+**Error message**: `'description' must be a string, got {type}`
+**Severity**: MAJOR
+**Source**: Both scripts — `validate_description_field()`
+**Root cause**: The description value is not a string (e.g., a list or number).
+**Fix**: Use a quoted string:
+```yaml
+description: "Analyzes CSV files and generates summary reports."
+```
+
+### MAJOR: Description contains XML tags
+
+**Error message**: `Description contains XML tags (forbidden) - use plain text`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_description_field()`
+**Root cause**: Description contains HTML/XML tags.
+**Fix**: Remove all XML/HTML tags and use plain text only.
+
+### MINOR: Description is very short
+
+**Error message**: `Description is very short (may not help Claude decide when to use)` (basic, <10 chars) or `Description is very short (< 20 chars)` (comprehensive, <20 chars)
+**Severity**: MINOR
+**Source**: Both scripts — `validate_description_field()`
+**Root cause**: The description is too short to be useful for Claude's skill selection.
+**Fix**: Write a more detailed description that explains when and how to use the skill.
+
+### MINOR: Description is long
+
+**Error message**: `Description is long ({len} chars), consider shortening` (basic, >500) or `Description is long ({len} chars), consider shortening to < 200` (comprehensive, >200)
+**Severity**: MINOR
+**Source**: Both scripts — `validate_description_field()`
+**Root cause**: The description exceeds recommended length.
+**Fix**: Move detailed instructions to the body content; keep description concise.
+
+### MAJOR: Description exceeds maximum length
+
+**Error message**: `Description exceeds 1024 characters ({len} chars)`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_description_field()`
+**Root cause**: Description exceeds the 1024-character hard limit.
+**Fix**: Drastically shorten the description. Move content to body.
+
+### MAJOR: Description must include 'Use when' phrase (strict mode)
+
+**Error message**: `Description must include 'Use when ...' phrase (Nixtla strict mode)`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_description_field()` (with `--strict`)
+**Root cause**: In strict mode, the description must explicitly state when the skill should be triggered.
+**Fix**:
+```yaml
+description: "Use when the user asks to refactor Python code. Applies PEP 8 formatting and type hints."
+```
+
+### MINOR: Description should include 'Trigger with' phrase (strict mode)
+
+**Error message**: `Description should include 'Trigger with ...' phrase (Nixtla strict mode)`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_description_field()` (with `--strict`)
+**Root cause**: In strict mode, the description should tell users how to invoke the skill.
+**Fix**:
+```yaml
+description: "Use when analyzing data. Trigger with /analyze-data <filepath>."
+```
+
+### MAJOR: Description uses first person (strict mode)
+
+**Error message**: `Description must NOT use first person (I can / I will)`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_description_field()` (with `--strict`)
+**Root cause**: Description contains "I can", "I will", "I am", or "I help".
+**Fix**: Rewrite in third person or imperative:
+```yaml
+# Wrong
+description: "I can convert images to PDF format."
+# Correct
+description: "Use when converting images to PDF format. Supports JPEG, PNG, and TIFF."
+```
+
+### MAJOR: Description uses second person (strict mode)
+
+**Error message**: `Description must NOT use second person (You can / You should)`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_description_field()` (with `--strict`)
+**Root cause**: Description contains "You can", "You should", "You will", or "You need".
+**Fix**: Rewrite without addressing the user:
+```yaml
+# Wrong
+description: "You can use this to convert images."
+# Correct
+description: "Converts images to PDF format when requested."
+```
+
+### INFO: Description should include 'Use when' phrase (non-strict)
+
+**Error message**: `Description should include 'Use when ...' phrase for better discoverability`
+**Severity**: INFO
+**Source**: `validate_skill_comprehensive.py` — `validate_description_field()` (without `--strict`)
+**Root cause**: The description lacks a "Use when" trigger phrase.
+**Fix**: Same as the strict-mode version but optional.
+
+---
+
+## 5. Token Budget and Progressive Disclosure
+
+### MAJOR: SKILL.md exceeds error line threshold
+
+**Error message**: `SKILL.md has {lines} lines (max 800). Must use progressive disclosure.`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_token_budget()`
+**Root cause**: The SKILL.md file exceeds 800 lines, consuming too many context tokens.
+**Fix**:
+1. Move detailed content into reference files under `references/`
+2. Keep SKILL.md as a concise overview with links to detailed files
+3. Example restructuring:
+```
+my-skill/
+  SKILL.md              (< 500 lines: overview + core instructions)
+  references/
+    api-reference.md    (detailed API docs)
+    examples.md         (code examples)
+    troubleshooting.md  (error handling guide)
+```
+
+### MINOR: SKILL.md exceeds warning line threshold
+
+**Error message**: `SKILL.md has {lines} lines (recommended: under 500). Consider moving detailed content to supporting files.`
+**Severity**: MINOR
+**Source**: Both scripts — `validate_skill_content()` / `validate_token_budget()`
+**Root cause**: The SKILL.md file exceeds 500 lines.
+**Fix**: Same as above, but less urgent.
+
+### MAJOR: Content exceeds error word count
+
+**Error message**: `Content exceeds 5000 words ({count})`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_token_budget()`
+**Root cause**: The body content has more than 5000 words.
+**Fix**: Move verbose content to reference files and link from SKILL.md.
+
+### MINOR: Content is lengthy
+
+**Error message**: `Content is lengthy ({count} words)`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_token_budget()`
+**Root cause**: The body content exceeds 3500 words.
+**Fix**: Consider splitting content across reference files.
+
+### MAJOR: SKILL.md has no content after frontmatter
+
+**Error message**: `SKILL.md has no content after frontmatter`
+**Severity**: MAJOR
+**Source**: `validate_skill.py` — `validate_skill_content()`
+**Root cause**: The file only has frontmatter with no body content.
+**Fix**: Add instructional content after the closing `---`:
+```markdown
+---
+name: my-skill
+description: "..."
+---
+
+# My Skill
+
+Step-by-step instructions for Claude when this skill is invoked.
+
+1. First, do X
+2. Then, do Y
+3. Finally, verify Z
+```
+
+### INFO: Task-oriented skill without $ARGUMENTS placeholder
+
+**Error message**: `Task-oriented skill without $ARGUMENTS placeholder (arguments will be appended automatically)`
+**Severity**: INFO
+**Source**: `validate_skill.py` — `validate_skill_content()`
+**Root cause**: The skill has numbered steps or bash code blocks but does not reference `$ARGUMENTS`.
+**Fix**: (Optional) Add `$ARGUMENTS` where user input should be substituted:
+```markdown
+1. Read the file specified by the user: $ARGUMENTS
+2. Analyze its contents
+```
+
+---
+
+## 6. Required Sections (Strict Mode)
+
+These issues only appear when using the `--strict` flag (Nixtla strict mode).
+
+### MAJOR: Required section missing
+
+**Error message**: `Required section missing: '{section}' (Nixtla strict mode)`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_required_sections()` (with `--strict`)
+**Root cause**: A required section header is missing from the body content.
+**Required sections**:
+- `## Overview`
+- `## Prerequisites`
+- `## Instructions`
+- `## Output`
+- `## Error Handling`
+- `## Examples`
+- `## Resources`
+
+**Fix**: Add each missing section:
+```markdown
+## Overview
+Brief description of what this skill does.
+
+## Prerequisites
+- Python 3.10+
+- Required packages: pandas, numpy
+
+## Instructions
+1. Step one
+2. Step two
+
+## Output
+Description of what the skill produces.
+
+## Error Handling
+What to do when things go wrong.
+
+## Examples
+Concrete input/output examples.
+
+## Resources
+Links to documentation, references.
+```
+
+### MAJOR: Instructions section lacks numbered steps
+
+**Error message**: `'## Instructions' must include numbered step-by-step list`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_required_sections()` (with `--strict`)
+**Root cause**: The `## Instructions` section exists but does not contain a numbered list (1. 2. 3. ...).
+**Fix**: Add numbered steps inside the Instructions section:
+```markdown
+## Instructions
+1. Read the input file
+2. Parse the data structure
+3. Apply transformations
+4. Write the output file
+5. Verify the result
+```
+
+---
+
+## 7. Reference File Issues
+
+### MAJOR: Referenced file not found
+
+**Error message**: `Referenced file not found: {path}` or `Referenced script not found: '{baseDir}/scripts/{path}'`
+**Severity**: MAJOR
+**Source**: Both scripts — `validate_supporting_files()` / `validate_resource_references()`
+**Root cause**: A markdown link in SKILL.md points to a local file that does not exist.
+**Fix**:
+1. Create the missing file at the referenced path
+2. Or fix the link to point to the correct file
+3. Verify paths are relative to the skill directory root
+
+### MAJOR: Reference uses parent traversal
+
+**Error message**: `Reference uses parent traversal '../': {path} - skill should be self-contained`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_resource_references()`
+**Root cause**: A local link uses `../` to reference files outside the skill directory.
+**Fix**: Copy the referenced file into the skill directory (e.g., into `references/`) and update the link:
+```markdown
+# Wrong
+[Config](../../shared/config.md)
+# Correct
+[Config](references/config.md)
+```
+
+### MAJOR: Nested references directory
+
+**Error message**: `Nested references directory found: references/{name}/ - references should be one level deep`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_reference_files()`
+**Root cause**: The `references/` directory contains nested subdirectories with .md files.
+**Fix**: Flatten the reference files into a single level:
+```
+# Wrong
+references/
+  category/
+    file.md
+
+# Correct
+references/
+  category-file.md
+```
+
+### INFO: Subdirectory in references
+
+**Error message**: `Subdirectory in references: references/{name}/ (OK if for assets)`
+**Severity**: INFO
+**Source**: `validate_skill_comprehensive.py` — `validate_reference_files()`
+**Root cause**: A subdirectory exists in references/ but does not contain .md files (e.g., an images folder).
+**Fix**: No action needed if the subdirectory is for non-markdown assets.
+
+### MINOR: Reference file lacks table of contents
+
+**Error message**: `Reference file has {lines} lines but no table of contents (Anthropic docs: files > 100 lines should have TOC)`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_reference_files()`
+**Root cause**: A reference .md file exceeds 100 lines but has no TOC section.
+**Fix**: Add a table of contents near the top of the reference file:
+```markdown
+## Table of Contents
+- [Section 1](#section-1)
+- [Section 2](#section-2)
+- [Section 3](#section-3)
+```
+
+### MINOR: Could not read reference file
+
+**Error message**: `Could not read reference file: references/{filename}`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_reference_files()`
+**Root cause**: The file exists but could not be read (permissions, encoding issues).
+**Fix**: Check file permissions and encoding. Ensure it is UTF-8 readable text.
+
+---
+
+## 8. TOC Embedding Issues
+
+### MINOR: Reference file TOC not embedded in SKILL.md
+
+**Error message**: `Reference to {filename} does not include the file's Table of Contents`
+**Severity**: MINOR
+**Root cause**: When SKILL.md links to a reference file, agents cannot see what content is available without navigating to it. This slows down skill execution because the agent must open each reference file to discover its structure.
+**Fix**:
+1. Open the referenced file and copy its Table of Contents section
+2. In the SKILL.md, add the TOC entries as indented bullets right after the link:
+```markdown
+- [Reference Title](references/filename.md) - Brief description
+  - 1. First Section Title
+  - 2. Second Section Title
+  - 3. Third Section Title
+```
+3. This applies to EVERY .md file reference, not just in SKILL.md -- agent files must do the same
+
+**Full example**:
+
+Suppose you have `references/api-reference.md` with:
+```markdown
+## Table of Contents
+- [Authentication](#authentication)
+- [Endpoints](#endpoints)
+- [Error Codes](#error-codes)
+- [Rate Limits](#rate-limits)
+```
+
+In SKILL.md, instead of:
+```markdown
+See [API Reference](references/api-reference.md) for details.
+```
+
+Write:
+```markdown
+See [API Reference](references/api-reference.md) for full API documentation:
+  - Authentication
+  - Endpoints
+  - Error Codes
+  - Rate Limits
+```
+
+This gives the agent immediate visibility into what each reference file contains, enabling it to decide which file to open based on the current task without trial-and-error navigation.
+
+---
+
+## 9. Allowed-Tools Issues
+
+### MAJOR: allowed-tools wrong type
+
+**Error message**: `'allowed-tools' must be string or list, got {type}`
+**Severity**: MAJOR
+**Source**: Both scripts — `validate_allowed_tools_field()`
+**Root cause**: The `allowed-tools` value is neither a string nor a list.
+**Fix**: Use either format:
+```yaml
+# String (comma-separated)
+allowed-tools: "Read, Write, Edit, Bash"
+# List
+allowed-tools:
+  - Read
+  - Write
+  - Edit
+  - Bash
+```
+
+### MINOR: allowed-tools is empty
+
+**Error message**: `'allowed-tools' is empty`
+**Severity**: MINOR
+**Source**: Both scripts — `validate_allowed_tools_field()`
+**Root cause**: The field is present but contains no tools.
+**Fix**: Either remove the field or add the tools the skill needs.
+
+### MAJOR: allowed-tools must be CSV string (strict mode)
+
+**Error message**: `'allowed-tools' must be comma-separated string (CSV), not YAML array`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_allowed_tools_field()` (with `--strict`)
+**Root cause**: In Nixtla strict mode, only CSV string format is accepted, not YAML arrays.
+**Fix**:
+```yaml
+# Wrong (in strict mode)
+allowed-tools:
+  - Read
+  - Write
+# Correct
+allowed-tools: "Read, Write"
+```
+
+### INFO: Unknown tool name
+
+**Error message**: `Unknown tool '{name}' (may be valid if custom MCP tool)`
+**Severity**: INFO
+**Source**: `validate_skill_comprehensive.py` — `validate_allowed_tools_field()`
+**Root cause**: A tool name is not in the known list of Claude Code built-in tools or MCP tools.
+**Fix**: Verify the tool name is correct. Known tools: `Read`, `Write`, `Edit`, `Bash`, `Grep`, `Glob`, `WebFetch`, `WebSearch`, `Task`, `NotebookEdit`, `Skill`, `AskUserQuestion`, `EnterPlanMode`, `ExitPlanMode`, `EnterWorktree`, `TaskCreate`, `TaskUpdate`, `TaskList`, `TaskGet`, `TaskStop`, `ToolSearch`. MCP tools must start with `mcp__`.
+
+### MAJOR: Unscoped Bash forbidden (strict mode)
+
+**Error message**: `Unscoped 'Bash' forbidden in strict mode - use scoped Bash(git:*) or Bash(npm:*)`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_allowed_tools_field()` (with `--strict`)
+**Root cause**: In strict mode, bare `Bash` is too permissive.
+**Fix**: Use scoped Bash:
+```yaml
+allowed-tools: "Bash(git:*), Bash(npm:*), Read, Write"
+```
+
+### MINOR: Many tools permitted
+
+**Error message**: `Many tools permitted ({count}) - consider limiting`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_allowed_tools_field()`
+**Root cause**: More than 6 tools are listed in allowed-tools.
+**Fix**: Limit tools to only what the skill actually needs. Over-permissioning increases attack surface.
+
+---
+
+## 10. Content Quality Issues
+
+### MAJOR: Absolute/OS-specific path detected
+
+**Error message**: `Line {n}: contains absolute/OS-specific path ({desc}) - use '{baseDir}/...'`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_path_formats()`
+**Root cause**: A line outside code blocks contains `/home/user/`, `/Users/user/`, or `C:\Users\`.
+**Fix**: Replace with `{baseDir}` placeholder:
+```markdown
+# Wrong
+Read the config at /Users/john/myproject/config.yaml
+# Correct
+Read the config at {baseDir}/config.yaml
+```
+
+### MAJOR: Backslashes in path
+
+**Error message**: `Line {n}: uses backslashes in path - use forward slashes`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_path_formats()`
+**Root cause**: Path uses Windows-style backslashes (`\scripts\`, `\references\`).
+**Fix**: Replace backslashes with forward slashes:
+```markdown
+# Wrong
+{baseDir}\scripts\setup.sh
+# Correct
+{baseDir}/scripts/setup.sh
+```
+
+### MINOR: Possible Windows-style path
+
+**Error message**: `Line {n}: possible Windows-style path (backslash) - use forward slashes for portability`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_path_formats()`
+**Root cause**: A backslash followed by a letter was detected outside code blocks, shell continuations, and escape sequences.
+**Fix**: Review the line. If it is a path, convert to forward slashes.
+
+### MINOR: MCP tool reference may need qualification
+
+**Error message**: `Line {n}: MCP tool reference may need qualification (ServerName:tool_name): '{tool_name}'`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_mcp_tool_references()`
+**Root cause**: An MCP tool is referenced without the `ServerName:` prefix (e.g., "use the read_file tool" instead of "use the serena:read_file tool").
+**Fix**: Add the server name prefix:
+```markdown
+# Wrong
+Use the read_file tool to open the file.
+# Correct
+Use the serena:read_file tool to open the file.
+```
+
+### MINOR: Time-sensitive information detected
+
+**Error message**: `Line {n}: Time-sensitive information may become stale: '{text}'`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_time_sensitive_info()`
+**Root cause**: The content references dates, versions, or temporal phrases like "before January 2025" or "since v3.0".
+**Fix**: Remove or generalize time-sensitive references:
+```markdown
+# Wrong
+This feature was added after March 2024 in v2.1.
+# Correct
+This feature requires version 2.1 or later.
+```
+
+### MINOR: No checklist pattern found (strict mode)
+
+**Error message**: `No checklist pattern found (best practice: use [ ] / [x] for complex workflows)`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_content_patterns()` (with `--strict`)
+**Root cause**: The skill has no checkbox patterns (`- [ ]` or `- [x]`).
+**Fix**: Add a checklist for multi-step workflows:
+```markdown
+## Checklist
+Copy this checklist and track your progress:
+- [ ] Step 1: Read input
+- [ ] Step 2: Validate data
+- [ ] Step 3: Transform
+- [ ] Step 4: Write output
+```
+
+### MINOR: No clear input/output examples found (strict mode)
+
+**Error message**: `No clear input/output examples found (best practice: include concrete examples)`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_content_patterns()` (with `--strict`)
+**Root cause**: No code blocks or input/output patterns were found.
+**Fix**: Add concrete examples:
+````markdown
+## Examples
+
+Input:
+```json
+{"name": "John", "age": 30}
+```
+
+Output:
+```
+Name: John, Age: 30
+```
+````
+
+### MINOR: Workflow mentioned but few numbered steps
+
+**Error message**: `Workflow mentioned but few numbered steps found (best practice: use 1. 2. 3. format)`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_content_patterns()` (with `--strict`)
+**Root cause**: The word "workflow" or "step" appears but there are fewer than 3 numbered steps.
+**Fix**: Add numbered workflow steps.
+
+### MINOR: Checklist missing 'Copy this checklist' phrase
+
+**Error message**: `Checklist found but missing 'Copy this checklist and track your progress' phrase (best practice for complex workflows)`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_content_patterns()`
+**Root cause**: A checklist exists and the workflow has 3+ steps, but the "Copy this checklist" preamble is missing.
+**Fix**: Add the phrase before the checklist:
+```markdown
+Copy this checklist and track your progress:
+- [ ] Step 1
+- [ ] Step 2
+```
+
+### INFO: String substitution patterns detected
+
+**Error messages**:
+- `Skill uses $ARGUMENTS variable ({n} occurrence(s))`
+- `Skill uses indexed arguments: $ARGUMENTS[{indices}]`
+- `Skill uses shorthand arguments: ${indices}`
+- `Skill uses ${CLAUDE_SESSION_ID} ({n} occurrence(s))`
+
+**Severity**: INFO
+**Source**: `validate_skill_comprehensive.py` — `validate_string_substitutions()`
+**Root cause**: These are informational messages about detected substitution patterns.
+**Fix**: No fix needed. These confirm that string substitutions are being used correctly.
+
+### INFO: Dynamic context injection detected
+
+**Error message**: `Skill uses dynamic context injection (! syntax): {n} occurrence(s)`
+**Severity**: INFO
+**Source**: `validate_skill_comprehensive.py` — `validate_dynamic_context()`
+**Root cause**: Informational message about detected `!`command`` syntax.
+**Fix**: No fix needed. Confirms dynamic context is used.
+
+### INFO: Ultrathink keyword detected
+
+**Error message**: `Skill contains 'ultrathink' keyword (enables extended thinking)`
+**Severity**: INFO
+**Source**: `validate_skill_comprehensive.py` — `validate_dynamic_context()`
+**Root cause**: The skill explicitly uses the "ultrathink" keyword.
+**Fix**: No fix needed. This enables extended thinking mode.
+
+---
+
+## 11. 8+1 Pillars Issues
+
+These issues only appear when using the `--pillars` flag. They apply exclusively to `lang-*` and `convert-*` skills.
+
+### INFO: 8+1 Pillars validation skipped
+
+**Error message**: `8+1 Pillars validation skipped (only for lang-* and convert-* skills)`
+**Severity**: INFO
+**Source**: `validate_skill_comprehensive.py` — `validate_pillars()`
+**Root cause**: The skill name does not start with `lang-` or `convert-`.
+**Fix**: No fix needed unless the skill is a language-specific skill. Rename accordingly.
+
+### MINOR: Pillar has minimal coverage
+
+**Error message**: `Pillar '{name}' has minimal coverage`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_pillars()`
+**Root cause**: A pillar topic (Module, Error, Concurrency, Metaprogramming, Zero/Default, Serialization, Build, Testing, or Dev Workflow/REPL) has fewer than 2 keyword occurrences and no dedicated section.
+**Fix**: Add content covering the missing pillar. Each language skill should address all 8 pillars:
+1. **Module** — import/export, package management
+2. **Error** — error handling patterns (Result, try/catch, etc.)
+3. **Concurrency** — async/await, threads, channels
+4. **Metaprogramming** — macros, decorators, annotations
+5. **Zero/Default** — null handling (Option, Maybe, None)
+6. **Serialization** — JSON, encoding, parsing
+7. **Build** — build tools, dependency management
+8. **Testing** — test frameworks, assertions
+
+For REPL-centric languages (Clojure, Elixir, Haskell, etc.), also add:
+9. **Dev Workflow/REPL** — interactive development, hot reload
+
+### INFO: Pillar has partial coverage
+
+**Error message**: `Pillar '{name}' has partial coverage`
+**Severity**: INFO
+**Source**: `validate_skill_comprehensive.py` — `validate_pillars()`
+**Root cause**: A pillar topic has 2-4 keyword occurrences but no dedicated section.
+**Fix**: Add more content or a dedicated section for the pillar.
+
+### MAJOR: Pillars coverage is incomplete
+
+**Error message**: `Pillars coverage is incomplete ({score}/{max})`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_pillars()`
+**Root cause**: Overall pillar coverage is below 50%.
+**Fix**: Add significant content for multiple missing pillars.
+
+### MINOR: Pillars coverage needs improvement
+
+**Error message**: `Pillars coverage needs improvement ({score}/{max})`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_pillars()`
+**Root cause**: Overall pillar coverage is between 50% and 75%.
+**Fix**: Improve coverage for partially covered pillars.
+
+---
+
+## 12. OpenSpec Mode Issues
+
+These issues only appear when using the `--openspec` flag.
+
+### MAJOR: Unexpected field in frontmatter (OpenSpec)
+
+**Error message**: `Unexpected field '{key}' in frontmatter. OpenSpec allows: {fields}`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_field_whitelist()` (with `--openspec`)
+**Root cause**: A frontmatter field is not in the OpenSpec allowed list.
+**Allowed OpenSpec fields**: `name`, `description`, `license`, `allowed-tools`, `metadata`, `compatibility`
+**Fix**: Remove non-OpenSpec fields or switch to non-OpenSpec mode.
+
+### MAJOR: Directory name must match skill name (OpenSpec)
+
+**Error message**: `Directory name '{dir}' must match skill name '{name}'`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_name_field()` (with `--openspec`)
+**Root cause**: In OpenSpec strict mode, the directory name must exactly match the `name` field.
+**Fix**: Rename the directory to match the name field or vice versa.
+
+### MAJOR: metadata must be a key-value mapping
+
+**Error message**: `'metadata' must be a key-value mapping (dict), got {type}`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_metadata_field()`
+**Root cause**: The `metadata` field is not a dictionary.
+**Fix**:
+```yaml
+metadata:
+  author: "Your Name"
+  version: "1.0.0"
+  category: "development"
+```
+
+### MAJOR: metadata key must be string
+
+**Error message**: `'metadata' key must be string, got {type}: {key}`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_metadata_field()`
+**Root cause**: A metadata key is not a string (e.g., a number used as key).
+**Fix**: Ensure all metadata keys are strings.
+
+### MINOR: metadata value should be string
+
+**Error message**: `'metadata.{key}' value should be string for OpenSpec compliance, got {type}`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_metadata_field()`
+**Root cause**: A metadata value is not a string (e.g., a number or boolean).
+**Fix**: Convert all values to strings:
+```yaml
+metadata:
+  version: "1.0.0"
+  priority: "high"
+```
+
+### MAJOR: compatibility must be a string
+
+**Error message**: `'compatibility' must be a string, got {type}`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_compatibility_field()`
+**Root cause**: The `compatibility` field is not a string.
+**Fix**:
+```yaml
+compatibility: "Claude Code 1.0+"
+```
+
+### MAJOR: compatibility exceeds length limit
+
+**Error message**: `'compatibility' exceeds 500 characters ({len} chars)`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_compatibility_field()`
+**Root cause**: The compatibility string is too long.
+**Fix**: Shorten to under 500 characters.
+
+### MAJOR: license must be a string
+
+**Error message**: `'license' must be a string, got {type}`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_license_field()`
+**Root cause**: The `license` field is not a string.
+**Fix**:
+```yaml
+license: "MIT"
+```
+
+### MINOR: license field is empty
+
+**Error message**: `'license' field is empty`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_license_field()`
+**Root cause**: The license field is present but empty.
+**Fix**: Set a license identifier:
+```yaml
+license: "MIT"
+```
+
+---
+
+## Additional Frontmatter Field Issues
+
+### CRITICAL: context must be a string
+
+**Error message**: `'context' must be a string, got {type}`
+**Severity**: CRITICAL
+**Source**: Both scripts — `validate_context_field()`
+**Root cause**: The `context` field has a non-string value.
+**Fix**:
+```yaml
+context: "fork"
+```
+
+### CRITICAL: Invalid context value
+
+**Error message**: `Invalid 'context' value: '{value}'. Valid values: {values}`
+**Severity**: CRITICAL
+**Source**: Both scripts — `validate_context_field()`
+**Root cause**: The context value is not one of the valid options.
+**Valid values**: `fork`, `inline`, `none` (may vary by CLI version)
+**Fix**: Use a valid context value:
+```yaml
+context: fork
+```
+
+### CRITICAL: agent must be a string
+
+**Error message**: `'agent' must be a string, got {type}`
+**Severity**: CRITICAL
+**Source**: Both scripts — `validate_agent_field()`
+**Root cause**: The `agent` field has a non-string value.
+**Fix**:
+```yaml
+agent: "code"
+```
+
+### MAJOR: agent has no effect without context: fork
+
+**Error message**: `'agent' field has no effect without 'context: fork'`
+**Severity**: MAJOR
+**Source**: Both scripts — `validate_agent_field()`
+**Root cause**: The `agent` field is set but `context` is not `fork`.
+**Fix**: Either add `context: fork` or remove the `agent` field:
+```yaml
+context: fork
+agent: code
+```
+
+### INFO: agent not specified with context: fork
+
+**Error message**: `'agent' not specified with context: fork (defaults to general-purpose)`
+**Severity**: INFO
+**Source**: Both scripts — `validate_agent_field()`
+**Root cause**: `context: fork` is set but no specific agent type is chosen.
+**Fix**: (Optional) Add an agent type:
+```yaml
+context: fork
+agent: code
+```
+
+### INFO: Custom agent type
+
+**Error message**: `'agent' value '{agent}' is not a built-in type (may be custom from .claude/agents/)`
+**Severity**: INFO
+**Source**: Both scripts — `validate_agent_field()`
+**Root cause**: The agent value is not one of the built-in types.
+**Fix**: Verify the custom agent exists in `.claude/agents/`.
+
+### MAJOR: model must be a string
+
+**Error message**: `'model' must be a string, got {type}`
+**Severity**: MAJOR
+**Source**: Both scripts — `validate_model_field()`
+**Root cause**: The `model` field has a non-string value.
+**Fix**:
+```yaml
+model: "sonnet"
+```
+
+### MAJOR: Invalid model value
+
+**Error message**: `Invalid 'model' value: '{model}'. Valid values: {values}`
+**Severity**: MAJOR
+**Source**: `validate_skill_comprehensive.py` — `validate_model_field()`
+**Root cause**: The model value is not one of `sonnet`, `opus`, `haiku`, `inherit`.
+**Fix**: Use a valid model value:
+```yaml
+model: sonnet
+```
+
+### MINOR: model: haiku less reliable
+
+**Error message**: `'model: haiku' specified - haiku is less reliable for complex tasks. Consider using 'sonnet' or 'inherit' for better accuracy.`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_model_field()`
+**Root cause**: Haiku may produce lower quality results for complex skills.
+**Fix**: Consider upgrading to `sonnet` or `inherit`:
+```yaml
+model: sonnet
+```
+
+### MAJOR: argument-hint must be a string
+
+**Error message**: `'argument-hint' must be a string, got {type}`
+**Severity**: MAJOR
+**Source**: Both scripts — `validate_argument_hint_field()`
+**Root cause**: The `argument-hint` field has a non-string value.
+**Fix**:
+```yaml
+argument-hint: "<file-path>"
+```
+
+### MINOR: argument-hint field is empty
+
+**Error message**: `'argument-hint' field is empty`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_argument_hint_field()`
+**Root cause**: The hint field is present but empty.
+**Fix**: Provide a meaningful hint:
+```yaml
+argument-hint: "<file-path> [--format json]"
+```
+
+### MAJOR: hooks must be object or string
+
+**Error message**: `'hooks' must be an object, got {type}` (basic) or `'hooks' must be a string (path) or dict (inline config), got {type}` (comprehensive)
+**Severity**: MAJOR
+**Source**: Both scripts — `validate_hooks_field()`
+**Root cause**: The `hooks` field is not a valid type.
+**Fix**: Use either inline config or a path:
+```yaml
+# Inline config
+hooks:
+  PreToolUse:
+    - command: "my-hook.sh"
+# Path to config
+hooks: "hooks.json"
+```
+
+### MINOR: hooks field is empty string
+
+**Error message**: `'hooks' field is empty string`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_hooks_field()`
+**Root cause**: The hooks field is `""`.
+**Fix**: Either remove the field or provide a valid hooks configuration.
+
+### MINOR: Unknown hook event
+
+**Error message**: `Unknown hook event '{name}'. Valid events: PreToolUse, PostToolUse, Stop, etc.`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_hooks_field()`
+**Root cause**: A hook event name is not recognized.
+**Valid events**: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `UserPromptSubmit`, `Notification`, `Stop`, `SubagentStart`, `SubagentStop`, `Setup`, `SessionStart`, `SessionEnd`, `PreCompact`, `TeammateIdle`, `TaskCompleted`, `ConfigChange`, `WorktreeCreate`, `WorktreeRemove`
+**Fix**: Use a valid hook event name.
+
+---
+
+## Scripts Directory Issues
+
+### MAJOR: Script not executable
+
+**Error message**: `Script not executable: scripts/{name}`
+**Severity**: MAJOR
+**Source**: Both scripts — `validate_directory_structure()` / `validate_scripts_directory()`
+**Root cause**: A `.sh`, `.py`, or `.bash` file in `scripts/` lacks the executable permission bit.
+**Fix**:
+```bash
+chmod +x scripts/my-script.sh
+```
+
+### MINOR: Script lacks shebang line
+
+**Error message**: `Script lacks shebang line (e.g., #!/usr/bin/env python3): scripts/{name}`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_scripts_directory()`
+**Root cause**: The script file does not start with `#!`.
+**Fix**: Add a shebang as the first line:
+```python
+#!/usr/bin/env python3
+```
+```bash
+#!/usr/bin/env bash
+```
+
+### MINOR: Python script has non-Python shebang
+
+**Error message**: `Python script has non-Python shebang: {shebang}`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_scripts_directory()`
+**Root cause**: A `.py` file has a shebang that does not contain "python".
+**Fix**: Use a Python shebang:
+```python
+#!/usr/bin/env python3
+```
+
+### MINOR: Shell script has non-shell shebang
+
+**Error message**: `Shell script has non-shell shebang: {shebang}`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_scripts_directory()`
+**Root cause**: A `.sh` or `.bash` file has a shebang that does not contain "sh" or "bash".
+**Fix**: Use a shell shebang:
+```bash
+#!/usr/bin/env bash
+```
+
+### MINOR: Python script lacks module docstring
+
+**Error message**: `Python script lacks module docstring: scripts/{name} (best practice: add '''Description of what script does''')`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_scripts_directory()`
+**Root cause**: A Python script has no triple-quoted docstring in the first 500 characters.
+**Fix**: Add a module docstring after the shebang:
+```python
+#!/usr/bin/env python3
+"""
+Generate summary reports from CSV data.
+
+Reads input CSV, applies transformations, and outputs
+a formatted summary report.
+"""
+```
+
+### MINOR: Could not read script
+
+**Error message**: `Could not read script: scripts/{name}`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_scripts_directory()`
+**Root cause**: File exists but could not be read.
+**Fix**: Check file permissions and encoding.
+
+---
+
+## Package Dependencies
+
+### INFO: Package managers referenced
+
+**Error message**: `Package managers referenced: {managers}`
+**Severity**: INFO
+**Source**: `validate_skill_comprehensive.py` — `validate_package_dependencies()`
+**Root cause**: Informational message listing detected package managers (pip, npm, yarn, cargo, go, brew).
+**Fix**: No fix needed. This confirms dependencies are documented.

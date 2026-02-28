@@ -48,26 +48,51 @@ uv run python scripts/validate_skill_comprehensive.py "<skill_path>" [--strict] 
 | **Review** | Grade C, no CRITICAL | Needs improvement first |
 | **Block** | Grade D or F, or CRITICAL | Do not deploy |
 
-## Common Issues
+## Issue Remediation
 
-### CRITICAL
-| Issue | Fix |
-|-------|-----|
-| SKILL.md not found | Create SKILL.md with frontmatter |
-| Malformed frontmatter | Fix YAML syntax |
+After identifying issues, consult the relevant fix guide and offer step-by-step remediation.
 
-### MAJOR
-| Issue | Fix |
-|-------|-----|
-| Name format invalid | Rename to kebab-case |
-| Required section missing | Add missing sections |
-| Referenced file not found | Create file or fix path |
+### [Skill Validation Fixes](references/skill-fixes.md)
+Comprehensive fixes for all skill validation errors (structure, frontmatter, names, descriptions, sections, TOC, pillars):
+  - [1. Structure Issues](references/skill-fixes.md#1-structure-issues)
+  - [2. Frontmatter Issues](references/skill-fixes.md#2-frontmatter-issues)
+  - [3. Name Field Issues](references/skill-fixes.md#3-name-field-issues)
+  - [4. Description Quality Issues](references/skill-fixes.md#4-description-quality-issues)
+  - [5. Token Budget and Progressive Disclosure](references/skill-fixes.md#5-token-budget-and-progressive-disclosure)
+  - [6. Required Sections (Strict Mode)](references/skill-fixes.md#6-required-sections-strict-mode)
+  - [7. Reference File Issues](references/skill-fixes.md#7-reference-file-issues)
+  - [8. TOC Embedding Issues](references/skill-fixes.md#8-toc-embedding-issues)
+  - [9. Allowed-Tools Issues](references/skill-fixes.md#9-allowed-tools-issues)
+  - [10. Content Quality Issues](references/skill-fixes.md#10-content-quality-issues)
+  - [11. 8+1 Pillars Issues](references/skill-fixes.md#11-81-pillars-issues)
+  - [12. OpenSpec Mode Issues](references/skill-fixes.md#12-openspec-mode-issues)
 
-### MINOR
-| Issue | Fix |
-|-------|-----|
-| Line count high | Use progressive disclosure |
-| Missing "Use when" | Add trigger phrases |
+### [Code Quality Fixes](references/code-quality-fixes.md)
+Fixes for encoding, security, and code quality issues:
+  - [1. Encoding Issues](references/code-quality-fixes.md#1-encoding-issues)
+  - [2. Line Ending Issues](references/code-quality-fixes.md#2-line-ending-issues)
+  - [3. BOM Issues](references/code-quality-fixes.md#3-bom-issues)
+  - [4. Secret Detection Issues](references/code-quality-fixes.md#4-secret-detection-issues)
+  - [5. Private Path Issues](references/code-quality-fixes.md#5-private-path-issues)
+  - [6. Absolute Path Issues](references/code-quality-fixes.md#6-absolute-path-issues)
+  - [7. Injection Detection Issues](references/code-quality-fixes.md#7-injection-detection-issues)
+  - [8. Path Traversal Issues](references/code-quality-fixes.md#8-path-traversal-issues)
+  - [9. Dangerous File Issues](references/code-quality-fixes.md#9-dangerous-file-issues)
+  - [10. Script Permission Issues](references/code-quality-fixes.md#10-script-permission-issues)
+  - [11. Plugin Path Validation Issues](references/code-quality-fixes.md#11-plugin-path-validation-issues)
+  - [12. File Access Issues](references/code-quality-fixes.md#12-file-access-issues)
+
+### Quick Fix Reference
+
+| Issue Type | Severity | Quick Fix |
+|-----------|----------|-----------|
+| Missing SKILL.md | CRITICAL | Create SKILL.md with `---` frontmatter containing `name` and `description` |
+| Malformed YAML | CRITICAL | Fix YAML syntax — check for missing quotes, colons, indentation |
+| Wrong name format | MAJOR | Use kebab-case matching the directory name |
+| Missing sections | MINOR | Add: Overview, Prerequisites, Instructions, Output, Error Handling, Examples, Resources |
+| No TOC in reference | MINOR | Add `## Table of Contents` with anchor links to all sections |
+| TOC not embedded | MINOR | Copy the referenced file's TOC as indented bullets after the link |
+| File too long | MINOR | Move content to references/ subdirectory (progressive disclosure) |
 
 ## Semantic Validation
 
