@@ -17,33 +17,49 @@ user-invocable: false
 
 # Setup GitHub Marketplace
 
-Set up a complete GitHub marketplace repository for Claude Code plugins with automated CI/CD pipelines.
+Set up a complete GitHub marketplace repository for Claude Code plugins with automated CI/CD pipelines, batch plugin linking, and cross-marketplace migration.
 
 ## Overview
 
-This skill walks through creating and configuring a **3-repo architecture** for distributing Claude Code plugins:
+This skill implements a **hub-and-spoke architecture** for distributing Claude Code plugins:
 
-1. **Plugin Repo** -- individual plugin source code, validated by cpv scripts
-2. **Marketplace Repo** -- central registry that aggregates plugins via git submodules
-3. **Consumer** -- end-user who installs plugins from the marketplace
+- **Hub** -- a single marketplace repository that serves as the central registry
+- **Spokes** -- any number of plugin repositories, each independently developed and versioned
 
-Key components created during setup:
-- **marketplace.json** -- plugin registry with metadata, versions, and source configuration
-- **GitHub Actions workflows** -- automated validation, submodule sync, and notification chain
-- **Sync scripts** -- version synchronization, README generation, hook installation
-- **Auto-updating README** -- plugin table and architecture diagram regenerated on every update
+There is no fixed repo count. One marketplace can aggregate 1 plugin or 1,000 plugins. The marketplace fetches plugin metadata via the **GitHub API** (not git submodules) and uses **repository_dispatch** events for real-time update notifications.
+
+```mermaid
+graph LR
+  P1[Plugin A] & P2[Plugin B] & P3[Plugin C] & PN[Plugin ...N] -->|repository_dispatch| M[Marketplace Hub]
+  M -->|gh api fetch| P1 & P2 & P3 & PN
+  M -->|README + registry| C1[Consumer 1] & C2[Consumer 2]
+```
+
+### Scenarios
+
+**Create a marketplace for multiple plugins:**
+> "Create a marketplace for these 10 plugins: svg-tools, code-formatter, test-runner, doc-gen, lint-helper, deploy-assist, schema-validator, api-client, log-parser, metrics-dashboard"
+
+**Add plugins to an existing marketplace:**
+> "Add plugins markdown-preview and diagram-builder to my marketplace awesome-claude-plugins"
+
+**Migrate plugins between marketplaces:**
+> "Move plugins svg-tools and code-formatter from marketplace old-plugins to marketplace new-plugins"
+
+### Components created
+
+- **marketplace.json** -- plugin registry with metadata, versions, source config
+- **GitHub Actions workflows** -- validation, API-based sync, notification chain
+- **Sync scripts** -- version sync via GitHub API, README generation, hooks
+- **Auto-updating README** -- plugin table and diagram regenerated on every update
 
 ## Prerequisites
 
-Before running this skill, ensure:
-
-- `gh` CLI is installed and authenticated (`gh auth status` must succeed)
-- Git is configured with `user.name` and `user.email`
-- A GitHub account with permission to create repositories
-- A **MARKETPLACE_PAT** personal access token with these scopes:
-  - `repo` -- full control of private repositories
-  - `workflow` -- update GitHub Action workflows
-- At least one Claude Code plugin repo to link (optional but recommended)
+- `gh` CLI installed and authenticated (`gh auth status`)
+- Git configured with `user.name` and `user.email`
+- GitHub account with repo creation permission
+- **MARKETPLACE_PAT** token with `repo` + `workflow` scopes
+- At least one plugin repo to link (optional)
 
 ## Arguments
 
@@ -51,80 +67,60 @@ Before running this skill, ensure:
 |----------|----------|-------------|
 | `<marketplace-name>` | Yes | Repository name in kebab-case (e.g. `my-claude-plugins`) |
 | `--owner <github-username>` | No | GitHub owner/org. Defaults to `gh api user -q .login` |
-| `--plugin <plugin-repo>` | No | Link a plugin repo immediately during setup |
+| `--plugin <repo>` | No | Repeatable. One or more plugin repos to link. Use multiple times: `--plugin repo1 --plugin repo2 --plugin repo3` |
+| `--source-marketplace <name>` | No | For migration: source marketplace to move plugins from |
+
+When `--plugin` is provided multiple times, all listed plugins are processed as a batch in Phase 3.
 
 ## Phase 1: Create Marketplace Repository
 
-### Step 1: Resolve owner
+### Step 1: Resolve owner and check existence
 
 ```bash
 OWNER={{owner}}
-if [ -z "$OWNER" ]; then
-  OWNER=$(gh api user -q .login)
-fi
+[ -z "$OWNER" ] && OWNER=$(gh api user -q .login)
+gh repo view "$OWNER/{{marketplace-name}}" --json name 2>/dev/null && echo "Repo exists, skip to Phase 2"
 ```
 
-### Step 2: Check if repo already exists
+### Step 2: Create, clone, and initialize
 
 ```bash
-gh repo view "$OWNER/{{marketplace-name}}" --json name 2>/dev/null
-```
-
-If the repo exists, skip creation and proceed to Phase 2.
-
-### Step 3: Create the repository
-
-```bash
-gh repo create "$OWNER/{{marketplace-name}}" --public \
-  --description "Claude Code plugin marketplace"
-```
-
-### Step 4: Clone and initialize structure
-
-```bash
-gh repo clone "$OWNER/{{marketplace-name}}"
-cd "{{marketplace-name}}"
+gh repo create "$OWNER/{{marketplace-name}}" --public --description "Claude Code plugin marketplace"
+gh repo clone "$OWNER/{{marketplace-name}}" && cd "{{marketplace-name}}"
 mkdir -p .claude-plugin .github/workflows scripts
 ```
 
-### Step 5: Create marketplace.json skeleton
+Write `.claude-plugin/marketplace.json` with name, version `"1.0.0"`, owner, and empty `"plugins": []` array.
 
-Write `.claude-plugin/marketplace.json`:
-```json
-{
-  "name": "{{marketplace-name}}",
-  "version": "1.0.0",
-  "description": "Claude Code plugin marketplace",
-  "owner": "{{owner}}",
-  "plugins": []
-}
-```
-
-### Step 6: Commit initial structure
+### Step 3: Commit and push
 
 ```bash
 git add -A && git commit -m "Initialize marketplace structure" && git push
 ```
 
 Reference: [Marketplace Architecture](references/marketplace-architecture.md)
+  - Hub-and-Spoke Architecture
+  - Notification Flow
+  - marketplace.json Schema
+  - Plugin Entry Schema
+  - MARKETPLACE_PAT Configuration
+  - Directory Structure
+  - Event Types
+  - Validation Pipeline
 
 ## Phase 2: Install Infrastructure
 
 ### Step 1: Install GitHub Actions workflows
 
-Copy and customize these workflow files into `.github/workflows/`:
+Copy into `.github/workflows/`, replacing `{{MARKETPLACE_OWNER}}` and `{{MARKETPLACE_REPO}}`:
 
-- **update-submodules.yml** -- triggered by repository_dispatch from plugin repos; pulls latest submodule commits and regenerates the README
-- **validate-marketplace.yml** -- runs on push/PR; validates marketplace.json schema, checks all plugin entries, runs cpv validation
-
-Replace placeholders in each template:
-- `{{MARKETPLACE_OWNER}}` with the resolved owner
-- `{{MARKETPLACE_REPO}}` with the marketplace name
+- **sync-plugins.yml** -- triggered by `repository_dispatch`; fetches plugin metadata via `gh api`, updates versions, regenerates README
+- **validate-marketplace.yml** -- runs on push/PR; validates schema, checks plugin entries via GitHub API, runs cpv
 
 Reference: [Workflow Templates](references/workflow-templates.md)
   - Placeholder Reference
   - notify-marketplace.yml (Plugin Side)
-  - update-submodules.yml (Marketplace Side)
+  - sync-plugins.yml (Marketplace Side)
   - validate-marketplace.yml (Marketplace CI)
   - Plugin CI Workflow (Optional)
 
@@ -132,8 +128,8 @@ Reference: [Workflow Templates](references/workflow-templates.md)
 
 Copy these scripts into `scripts/`:
 
-- **sync_marketplace_versions.py** -- reads each submodule's plugin.json, updates marketplace.json version fields
-- **generate-readme.py** -- generates README.md with plugin table, architecture diagram, and install instructions
+- **sync_marketplace_versions.py** -- fetches each plugin's `plugin.json` via `gh api`, decodes base64, updates marketplace.json
+- **generate-readme.py** -- generates README.md with plugin table, architecture diagram, install instructions
 - **setup-hooks.py** -- installs git pre-push hooks that run cpv validation before pushing
 
 ```bash
@@ -148,68 +144,89 @@ Reference: [Script Templates](references/script-templates.md)
   - pre-push-hook.py
   - push-plugins.sh
 
-### Step 3: Generate initial README
+### Step 3: Generate README, commit infrastructure
 
 ```bash
 uv run python scripts/generate-readme.py --marketplace-dir .
-```
-
-### Step 4: Commit infrastructure
-
-```bash
 git add -A && git commit -m "Install CI/CD infrastructure" && git push
 ```
 
-## Phase 3: Link Plugin Repos
+## Phase 3: Link Plugin Repos (Batch)
 
-For each plugin repo to link:
+This phase processes ALL plugins provided via `--plugin` arguments as a single batch. Whether 1 plugin or 100, the logic is identical.
 
-### Step 1: Add as git submodule
+### Step 1: Build the plugin list
 
-```bash
-git submodule add "https://github.com/{{owner}}/{{plugin-repo}}.git" "plugins/{{plugin-repo}}"
-```
-
-### Step 2: Install notification workflow in plugin repo
-
-Clone the plugin repo and install `.github/workflows/notify-marketplace.yml`. This workflow triggers a `repository_dispatch` event on the marketplace repo whenever the plugin is pushed.
-
-### Step 3: Configure MARKETPLACE_PAT secret
+Collect all plugins from `--plugin` arguments into an array:
 
 ```bash
-gh secret set MARKETPLACE_PAT --repo "{{owner}}/{{plugin-repo}}"
+PLUGINS=()
+for arg in "$@"; do PLUGINS+=("$arg"); done
 ```
 
-The user will be prompted to paste the PAT value.
+### Step 2: Fetch metadata and register each plugin
 
-### Step 4: Add plugin entry to marketplace.json
-
-Add an entry to the `plugins` array:
-```json
-{
-  "name": "{{plugin-repo}}",
-  "path": "plugins/{{plugin-repo}}",
-  "source": {
-    "type": "github",
-    "owner": "{{owner}}",
-    "repo": "{{plugin-repo}}"
-  },
-  "version": "0.0.0"
-}
-```
-
-### Step 5: Test notification chain
+For EACH plugin, fetch `plugin.json` via GitHub API and add an entry to `marketplace.json`:
 
 ```bash
-gh workflow run notify-marketplace.yml --repo "{{owner}}/{{plugin-repo}}"
+for PLUGIN in "${PLUGINS[@]}"; do
+  PLUGIN_JSON=$(gh api "repos/$OWNER/$PLUGIN/contents/.claude-plugin/plugin.json" \
+    -q '.content' | base64 --decode)
+  VERSION=$(echo "$PLUGIN_JSON" | jq -r '.version // "0.0.0"')
+  DESCRIPTION=$(echo "$PLUGIN_JSON" | jq -r '.description // ""')
+  jq --arg name "$PLUGIN" --arg version "$VERSION" --arg desc "$DESCRIPTION" --arg owner "$OWNER" \
+     '.plugins += [{"name": $name, "source": {"type": "github", "owner": $owner, "repo": $name}, "version": $version, "description": $desc}]' \
+     .claude-plugin/marketplace.json > tmp.json && mv tmp.json .claude-plugin/marketplace.json
+done
 ```
 
-Verify the marketplace repo receives the dispatch and updates.
+### Step 3: Install notify workflow on each plugin repo
 
-### Step 6: Commit changes
+For EACH plugin, install `.github/workflows/notify-marketplace.yml` via `gh api`. This workflow fires a `repository_dispatch` to the marketplace on every push:
 
 ```bash
-git add -A && git commit -m "Link plugin: {{plugin-repo}}" && git push
+for PLUGIN in "${PLUGINS[@]}"; do
+  WORKFLOW_CONTENT=$(cat templates/notify-marketplace.yml | \
+    sed "s/{{MARKETPLACE_OWNER}}/$OWNER/g" | sed "s/{{MARKETPLACE_REPO}}/{{marketplace-name}}/g")
+  EXISTING=$(gh api "repos/$OWNER/$PLUGIN/contents/.github/workflows/notify-marketplace.yml" \
+    -q '.sha' 2>/dev/null || echo "")
+  if [ -n "$EXISTING" ]; then
+    gh api --method PUT "repos/$OWNER/$PLUGIN/contents/.github/workflows/notify-marketplace.yml" \
+      -f message="Update notify-marketplace.yml for {{marketplace-name}}" \
+      -f content="$(echo "$WORKFLOW_CONTENT" | base64)" -f sha="$EXISTING"
+  else
+    gh api --method PUT "repos/$OWNER/$PLUGIN/contents/.github/workflows/notify-marketplace.yml" \
+      -f message="Install notify-marketplace.yml for {{marketplace-name}}" \
+      -f content="$(echo "$WORKFLOW_CONTENT" | base64)"
+  fi
+done
+```
+
+### Step 4: Configure MARKETPLACE_PAT secret (autonomous, batch)
+
+Check which repos are missing the secret. If any are missing, ask the user ONCE, then set on all:
+
+```bash
+MISSING=()
+for PLUGIN in "${PLUGINS[@]}"; do
+  HAS=$(gh secret list --repo "$OWNER/$PLUGIN" 2>/dev/null | grep -c "MARKETPLACE_PAT" || true)
+  [ "$HAS" -eq 0 ] && MISSING+=("$PLUGIN")
+done
+if [ ${#MISSING[@]} -gt 0 ]; then
+  PAT=$(AskUserQuestion "MARKETPLACE_PAT missing on ${#MISSING[@]} repos: ${MISSING[*]}. Provide PAT (repo+workflow scopes):")
+  for REPO in "${MISSING[@]}"; do
+    gh secret set MARKETPLACE_PAT --body "$PAT" --repo "$OWNER/$REPO"
+  done
+fi
+```
+
+### Step 5: Commit, sync, and generate README
+
+```bash
+git add -A && git commit -m "Link ${#PLUGINS[@]} plugins: ${PLUGINS[*]}" && git push
+uv run python scripts/sync_marketplace_versions.py --marketplace-dir .
+uv run python scripts/generate-readme.py --marketplace-dir .
+git add -A && git commit -m "Sync versions and regenerate README" && git push
 ```
 
 Reference: [Plugin Linking Guide](references/plugin-linking-guide.md)
@@ -218,40 +235,73 @@ Reference: [Plugin Linking Guide](references/plugin-linking-guide.md)
   - Configuring MARKETPLACE_PAT Secret
   - Installing Notification Workflow
   - Testing the Notification Chain
+  - Migrating Plugins Between Marketplaces
   - Batch Operations
 
 ## Phase 4: Plugin Management
 
-### Add a plugin
+### Add plugins (batch)
 
-1. Add git submodule for the plugin repo
-2. Install `notify-marketplace.yml` in the plugin's `.github/workflows/`
-3. Set `MARKETPLACE_PAT` secret on the plugin repo
-4. Add entry to `marketplace.json`
-5. Run `uv run python scripts/sync_marketplace_versions.py`
+Repeat Phase 3 with the new plugin list. The `marketplace.json` is appended to, not overwritten. Phase 3 runs identically for 1 or N plugins.
 
-### Remove a plugin
+### Remove plugins (batch)
 
-1. Remove the plugin entry from `marketplace.json`
-2. Run `git submodule deinit plugins/{{plugin-repo}} && git rm plugins/{{plugin-repo}}`
-3. Delete `notify-marketplace.yml` from the plugin repo
-4. Run `uv run python scripts/sync_marketplace_versions.py`
+For each plugin: remove from `marketplace.json`, delete `notify-marketplace.yml` from the plugin repo, regenerate README.
 
-### Update a plugin
+```bash
+for PLUGIN in "${PLUGINS_TO_REMOVE[@]}"; do
+  jq --arg name "$PLUGIN" '.plugins = [.plugins[] | select(.name != $name)]' \
+    .claude-plugin/marketplace.json > tmp.json && mv tmp.json .claude-plugin/marketplace.json
+  SHA=$(gh api "repos/$OWNER/$PLUGIN/contents/.github/workflows/notify-marketplace.yml" -q '.sha' 2>/dev/null || echo "")
+  [ -n "$SHA" ] && gh api --method DELETE "repos/$OWNER/$PLUGIN/contents/.github/workflows/notify-marketplace.yml" \
+    -f message="Remove marketplace notification" -f sha="$SHA"
+done
+uv run python scripts/generate-readme.py --marketplace-dir .
+git add -A && git commit -m "Remove plugins: ${PLUGINS_TO_REMOVE[*]}" && git push
+```
 
-Automatic via the notification chain:
-1. Developer pushes to plugin repo
-2. `notify-marketplace.yml` fires `repository_dispatch`
-3. Marketplace's `update-submodules.yml` pulls latest and regenerates README
+### Update plugins (automatic via CI)
+
+Automatic: developer pushes to plugin repo -> `notify-marketplace.yml` fires `repository_dispatch` -> marketplace `sync-plugins.yml` fetches latest `plugin.json` via `gh api` -> README regenerated.
+
+### Migrate plugins between marketplaces
+
+Move plugins from `--source-marketplace` to `{{marketplace-name}}`. Both must exist. For each plugin: copy entry to target `marketplace.json`, repoint `notify-marketplace.yml` to target via `gh api`, remove entry from source, regenerate READMEs on both, validate both.
+
+```bash
+SOURCE="{{source-marketplace}}" && TARGET="{{marketplace-name}}"
+SOURCE_JSON=$(gh api "repos/$OWNER/$SOURCE/contents/.claude-plugin/marketplace.json" -q '.content' | base64 --decode)
+for PLUGIN in "${PLUGINS_TO_MIGRATE[@]}"; do
+  ENTRY=$(echo "$SOURCE_JSON" | jq --arg name "$PLUGIN" '.plugins[] | select(.name == $name)')
+  jq --argjson entry "$ENTRY" '.plugins += [$entry]' .claude-plugin/marketplace.json > tmp.json && mv tmp.json .claude-plugin/marketplace.json
+  WORKFLOW=$(cat templates/notify-marketplace.yml | sed "s/{{MARKETPLACE_OWNER}}/$OWNER/g" | sed "s/{{MARKETPLACE_REPO}}/$TARGET/g")
+  SHA=$(gh api "repos/$OWNER/$PLUGIN/contents/.github/workflows/notify-marketplace.yml" -q '.sha' 2>/dev/null)
+  gh api --method PUT "repos/$OWNER/$PLUGIN/contents/.github/workflows/notify-marketplace.yml" \
+    -f message="Migrate to $TARGET" -f content="$(echo "$WORKFLOW" | base64)" -f sha="$SHA"
+done
+# Update source: remove entries, regenerate, push
+gh repo clone "$OWNER/$SOURCE" /tmp/source-mkt && cd /tmp/source-mkt
+for P in "${PLUGINS_TO_MIGRATE[@]}"; do
+  jq --arg name "$P" '.plugins = [.plugins[] | select(.name != $name)]' .claude-plugin/marketplace.json > tmp.json && mv tmp.json .claude-plugin/marketplace.json
+done
+uv run python scripts/generate-readme.py --marketplace-dir . && git add -A && git commit -m "Migrate out: ${PLUGINS_TO_MIGRATE[*]}" && git push
+# Update target: regenerate, push, validate both
+cd "$TARGET" && uv run python scripts/generate-readme.py --marketplace-dir .
+git add -A && git commit -m "Migrate in: ${PLUGINS_TO_MIGRATE[*]}" && git push
+uv run python scripts/validate_marketplace.py /tmp/source-mkt --verbose
+uv run python scripts/validate_marketplace.py "$TARGET" --verbose
+```
 
 Reference: [Plugin Linking Guide](references/plugin-linking-guide.md)
   - Adding a Plugin to the Marketplace
   - Removing a Plugin from the Marketplace
   - Updating a Plugin Version
+  - Migrating Plugins Between Marketplaces
+  - Batch Operations
 
 ## Phase 5: Validate and Verify
 
-### Step 1: Run marketplace validation
+### Step 1: Validate marketplace structure
 
 ```bash
 uv run python scripts/validate_marketplace.py {{marketplace-path}} --verbose
@@ -259,83 +309,67 @@ uv run python scripts/validate_marketplace.py {{marketplace-path}} --verbose
 
 Confirm: marketplace.json is valid, all plugin entries have source config, workflows are installed.
 
-### Step 2: Test end-to-end notification chain
+### Step 2: Validate each plugin via GitHub API
 
-Make a trivial commit to a linked plugin repo and push. Verify:
-- Plugin's `notify-marketplace.yml` triggers
-- Marketplace's `update-submodules.yml` runs
-- Submodule is updated and README regenerated
+For each plugin in `marketplace.json`, verify: repo exists, `plugin.json` fetchable, `notify-marketplace.yml` installed, `MARKETPLACE_PAT` secret set.
 
-### Step 3: Install git hooks
+```bash
+for PLUGIN in $(jq -r '.plugins[].name' .claude-plugin/marketplace.json); do
+  gh repo view "$OWNER/$PLUGIN" --json name > /dev/null
+  gh api "repos/$OWNER/$PLUGIN/contents/.claude-plugin/plugin.json" -q '.name' > /dev/null
+  gh api "repos/$OWNER/$PLUGIN/contents/.github/workflows/notify-marketplace.yml" -q '.name' > /dev/null
+  gh secret list --repo "$OWNER/$PLUGIN" | grep -q "MARKETPLACE_PAT"
+  echo "$PLUGIN: OK"
+done
+```
+
+### Step 3: Test end-to-end notification chain
+
+Trigger one plugin's notification workflow and verify the marketplace receives the dispatch:
+
+```bash
+FIRST_PLUGIN=$(jq -r '.plugins[0].name' .claude-plugin/marketplace.json)
+gh workflow run notify-marketplace.yml --repo "$OWNER/$FIRST_PLUGIN"
+```
+
+### Step 4: Install hooks and verify CI
 
 ```bash
 uv run python scripts/setup-hooks.py --marketplace-dir {{marketplace-path}}
+gh run list --repo "$OWNER/{{marketplace-name}}" --limit 5
 ```
 
-This installs a pre-push hook that runs cpv validation before every push.
-
-### Step 4: Verify CI workflows
-
-```bash
-gh run list --repo "{{owner}}/{{marketplace-name}}" --limit 5
-```
-
-Confirm recent workflow runs completed successfully.
+Confirm pre-push hooks are active and recent workflow runs completed successfully.
 
 ## Completion Checklist
 
 Copy this checklist and track your progress as you complete each step.
 
 ### Repository Setup
-- [ ] Marketplace GitHub repo created and public
-- [ ] .claude-plugin/marketplace.json created with valid schema
-- [ ] README.md generated with plugin table and architecture diagram
-- [ ] LICENSE file added (MIT recommended)
-- [ ] .gitignore configured (Python, Node, OS files)
+- [ ] Marketplace repo created, public, with LICENSE and .gitignore
+- [ ] .claude-plugin/marketplace.json valid; README.md generated
 
-### CI/CD Workflows
-- [ ] update-submodules.yml installed in .github/workflows/
-- [ ] validate-marketplace.yml installed in .github/workflows/
-- [ ] MARKETPLACE_PAT secret configured on marketplace repo
-- [ ] Workflows tested with manual dispatch (`gh workflow run`)
-- [ ] Workflow permissions set (contents: write for submodule updates)
+### CI/CD and Scripts
+- [ ] sync-plugins.yml + validate-marketplace.yml installed and tested
+- [ ] MARKETPLACE_PAT secret on marketplace repo; workflow permissions set
+- [ ] sync/generate/hooks scripts installed, executable, run with `uv run`
 
-### Scripts
-- [ ] scripts/sync_marketplace_versions.py installed
-- [ ] scripts/generate-readme.py installed
-- [ ] scripts/setup-hooks.py installed
-- [ ] All scripts are executable (`chmod +x`)
-- [ ] Scripts run successfully with `uv run`
-
-### Plugin Linking (repeat per plugin)
-- [ ] Plugin added as git submodule under plugins/
-- [ ] notify-marketplace.yml installed in plugin .github/workflows/
-- [ ] MARKETPLACE_PAT secret set on plugin repo
-- [ ] Plugin entry added to marketplace.json with correct source config
-- [ ] Notification chain tested (plugin push triggers marketplace update)
-- [ ] Plugin passes `validate_plugin.py` validation
+### Plugin Linking (for each plugin repo)
+- [ ] Metadata fetched via `gh api`, entry added to marketplace.json
+- [ ] notify-marketplace.yml installed via `gh api`; MARKETPLACE_PAT set via `gh secret set --body`
+- [ ] Notification chain tested; plugin passes cpv validation
 
 ### Validation
-- [ ] validate_marketplace.py passes with --verbose on marketplace repo
-- [ ] validate_plugin.py passes on each linked plugin
-- [ ] Git pre-push hooks installed and functional
-- [ ] CI validation workflow runs on PR and push events
-- [ ] All validation results show zero major findings
+- [ ] validate_marketplace.py passes --verbose on marketplace repo
+- [ ] All plugin repos reachable via GitHub API with notify-marketplace.yml and MARKETPLACE_PAT
+- [ ] Git pre-push hooks installed; CI validation runs on PR and push
+- [ ] Zero major findings across all validations
 
-### Documentation
-- [ ] README.md has architecture diagram (Mermaid)
-- [ ] README.md has plugin table (auto-generated from marketplace.json)
-- [ ] README.md has installation instructions for consumers
-- [ ] README.md has developer setup guide
-- [ ] README.md has marketplace maintenance section
+### Documentation and Security
+- [ ] README.md has Mermaid diagram, plugin table, install instructions, dev guide, maintenance section
 - [ ] CONTRIBUTING.md added with plugin submission guidelines
-
-### Security
-- [ ] MARKETPLACE_PAT has minimum required scopes (repo + workflow only)
-- [ ] No secrets committed to repository (checked with git log search)
-- [ ] No private filesystem paths in any committed files
-- [ ] .gitignore covers .env, *.pem, credentials files
-- [ ] Branch protection enabled on main branch
+- [ ] MARKETPLACE_PAT scoped to repo + workflow only; no secrets in git history
+- [ ] .gitignore covers .env, *.pem, credentials; branch protection on main
 
 ## Troubleshooting
 
@@ -346,7 +380,7 @@ Reference: [Troubleshooting Guide](references/troubleshooting.md)
 ## Resources
 
 ### [Marketplace Architecture](references/marketplace-architecture.md)
-- 3-Repo Architecture Pattern
+- Hub-and-Spoke Architecture
 - Notification Flow
 - marketplace.json Schema
 - Plugin Entry Schema
@@ -358,7 +392,7 @@ Reference: [Troubleshooting Guide](references/troubleshooting.md)
 ### [Workflow Templates](references/workflow-templates.md)
 - Placeholder Reference
 - notify-marketplace.yml (Plugin Side)
-- update-submodules.yml (Marketplace Side)
+- sync-plugins.yml (Marketplace Side)
 - validate-marketplace.yml (Marketplace CI)
 - Plugin CI Workflow (Optional)
 
@@ -377,6 +411,7 @@ Reference: [Troubleshooting Guide](references/troubleshooting.md)
 - Configuring MARKETPLACE_PAT Secret
 - Installing Notification Workflow
 - Testing the Notification Chain
+- Migrating Plugins Between Marketplaces
 - Batch Operations
 
 ### [README Template](references/readme-template.md)

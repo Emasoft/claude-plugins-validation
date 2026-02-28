@@ -1,10 +1,10 @@
 # Marketplace Architecture Reference
 
-Complete reference for the 3-repo architecture pattern used by Claude Code plugin marketplaces, including notification flows, schemas, PAT configuration, and directory conventions.
+Complete reference for the Hub-and-Spoke Architecture used by Claude Code plugin marketplaces: 1 marketplace hub + N plugin spokes (unlimited plugins). Includes notification flows, schemas, PAT configuration, and directory conventions.
 
 ## Table of Contents
 
-- [3-Repo Architecture Pattern](#3-repo-architecture-pattern)
+- [Hub-and-Spoke Architecture](#hub-and-spoke-architecture)
 - [Notification Flow](#notification-flow)
 - [marketplace.json Schema](#marketplacejson-schema)
 - [Plugin Entry Schema](#plugin-entry-schema)
@@ -15,15 +15,15 @@ Complete reference for the 3-repo architecture pattern used by Claude Code plugi
 
 ---
 
-## 3-Repo Architecture Pattern
+## Hub-and-Spoke Architecture
 
-The Claude Code plugin marketplace uses a 3-repo architecture to separate concerns between plugin development, plugin aggregation, and plugin consumption.
+The Claude Code plugin marketplace uses a hub-and-spoke architecture: 1 marketplace hub + N plugin spokes (unlimited plugins). This separates concerns between plugin development, plugin aggregation, and plugin consumption.
 
-### The Three Repositories
+### Repository Roles
 
-1. **Plugin Repository** -- Contains the plugin source code (`.claude-plugin/plugin.json`, agents, skills, commands, hooks). Each plugin lives in its own Git repository with its own version history, CI, and release process.
+1. **Plugin Repositories (Spokes)** -- Each plugin lives in its own Git repository with its own version history, CI, and release process. Contains the plugin source code (`.claude-plugin/plugin.json`, agents, skills, commands, hooks). There is no limit to the number of plugin repositories.
 
-2. **Marketplace Repository** -- Central registry that aggregates all plugins. Contains `.claude-plugin/marketplace.json` with metadata for every registered plugin. Plugins are tracked as Git submodules so the marketplace always references a specific commit of each plugin.
+2. **Marketplace Repository (Hub)** -- Central registry that aggregates all plugins. Contains `.claude-plugin/marketplace.json` with metadata for every registered plugin. Plugins are registered in `marketplace.json` with GitHub source configuration, and the marketplace uses `gh api` to fetch plugin versions from their source repositories.
 
 3. **Consumer (Claude Code)** -- Claude Code instances that discover, install, and update plugins from the marketplace. Consumers interact with the marketplace via `claude plugin` CLI commands.
 
@@ -31,17 +31,18 @@ The Claude Code plugin marketplace uses a 3-repo architecture to separate concer
 
 ```mermaid
 flowchart TB
-    subgraph PluginRepos["Plugin Repositories"]
-        PA[Plugin A Repo<br/>github.com/owner/plugin-a]
-        PB[Plugin B Repo<br/>github.com/owner/plugin-b]
+    subgraph PluginRepos["Plugin Repositories (N Spokes)"]
+        P1[Plugin 1 Repo<br/>github.com/owner/plugin-1]
+        P2[Plugin 2 Repo<br/>github.com/owner/plugin-2]
+        P3[Plugin 3 Repo<br/>github.com/owner/plugin-3]
+        PN["Plugin N Repo<br/>github.com/owner/plugin-n<br/>(...unlimited plugins)"]
     end
 
-    subgraph Marketplace["Marketplace Repository"]
+    subgraph Marketplace["Marketplace Repository (Hub)"]
         direction TB
         MJ[".claude-plugin/<br/>marketplace.json"]
-        GM[".gitmodules"]
         subgraph Workflows[".github/workflows/"]
-            US["update-submodules.yml<br/>(repository_dispatch)"]
+            US["update-plugins.yml<br/>(repository_dispatch)"]
             VL["validate-marketplace.yml<br/>(CI)"]
         end
         subgraph Scripts["scripts/"]
@@ -51,14 +52,18 @@ flowchart TB
     end
 
     subgraph Consumer["Claude Code"]
-        CC["claude plugin install<br/>plugin-a@marketplace"]
+        CC["claude plugin install<br/>plugin-1@marketplace"]
     end
 
-    PA -->|"1. Push to main"| NM1["notify-marketplace.yml"]
-    PB -->|"1. Push to main"| NM2["notify-marketplace.yml"]
+    P1 -->|"1. Push to main"| NM1["notify-marketplace.yml"]
+    P2 -->|"1. Push to main"| NM2["notify-marketplace.yml"]
+    P3 -->|"1. Push to main"| NM3["notify-marketplace.yml"]
+    PN -->|"1. Push to main"| NMN["notify-marketplace.yml"]
     NM1 -->|"2. repository_dispatch<br/>plugin-updated"| US
     NM2 -->|"2. repository_dispatch<br/>plugin-updated"| US
-    US -->|"3. git submodule update"| GM
+    NM3 -->|"2. repository_dispatch<br/>plugin-updated"| US
+    NMN -->|"2. repository_dispatch<br/>plugin-updated"| US
+    US -->|"3. gh api fetch<br/>plugin version"| MJ
     US -->|"4. python scripts/"| SV
     SV -->|"5. sync versions"| MJ
     US -->|"6. python scripts/"| GR
@@ -67,15 +72,15 @@ flowchart TB
     CC -->|"9. fetch & install"| Marketplace
 ```
 
-### Why 3 Repos?
+### Why Hub-and-Spoke?
 
 | Concern | Where It Lives | Why Separate |
 |---------|---------------|--------------|
-| Plugin code & logic | Plugin repo | Independent versioning, CI, contributors |
-| Plugin registry & discovery | Marketplace repo | Single source of truth for available plugins |
-| Plugin installation & usage | Consumer (Claude Code) | User-facing, reads from marketplace |
+| Plugin code & logic | Plugin repos (N spokes) | Independent versioning, CI, contributors per plugin |
+| Plugin registry & discovery | Marketplace repo (1 hub) | Single source of truth for all available plugins |
+| Plugin installation & usage | Consumer (Claude Code) | User-facing, reads from marketplace hub |
 
-This separation means plugin authors never touch the marketplace directly. They push to their own repo and the marketplace updates itself automatically via GitHub Actions.
+This separation means plugin authors never touch the marketplace directly. They push to their own repo (spoke) and the marketplace hub updates itself automatically via GitHub Actions. New plugins are added by registering them in `marketplace.json` -- there is no limit to the number of plugins a marketplace can aggregate.
 
 ---
 
@@ -101,16 +106,16 @@ This requires a `MARKETPLACE_PAT` secret with cross-repo permissions.
 
 ### Step 4: Marketplace Receives Dispatch
 
-The marketplace repository's `update-submodules.yml` workflow is triggered by the `repository_dispatch` event with `event_type: plugin-updated`.
+The marketplace repository's `update-plugins.yml` workflow is triggered by the `repository_dispatch` event with `event_type: plugin-updated`.
 
-### Step 5: Submodule Update
+### Step 5: GitHub API Version Fetch
 
-The workflow runs `git submodule update --remote` for the affected plugin, pulling the latest commit from the plugin's source repository.
+The workflow uses `gh api` to fetch the plugin's current `plugin.json` from its source repository, extracting the latest version without needing local clones or submodules.
 
 ### Step 6: Version Synchronization
 
 The `sync_marketplace_versions.py` script executes to:
-- Read the `plugin.json` from each submodule's `.claude-plugin/` directory
+- Use the GitHub API to read `plugin.json` from each plugin's source repository
 - Extract the current version string
 - Update the corresponding entry in `marketplace.json` with the new version
 
@@ -120,11 +125,11 @@ The `generate-readme.py` script runs to update the plugin table in the marketpla
 
 ### Step 8: Commit and Push
 
-The workflow commits the updated `.gitmodules` reference, `marketplace.json`, and `README.md`, then pushes to the marketplace repository.
+The workflow commits the updated `marketplace.json` and `README.md`, then pushes to the marketplace repository.
 
 ### Step 9: CI Validation
 
-The push to the marketplace repository triggers `validate-marketplace.yml`, which runs the full validation suite to ensure `marketplace.json` is valid, all submodules are present, and documentation is complete.
+The push to the marketplace repository triggers `validate-marketplace.yml`, which runs the full validation suite to ensure `marketplace.json` is valid, all plugin entries have valid source configurations, and documentation is complete.
 
 ### Step 10: Consumer Installation
 
@@ -249,13 +254,13 @@ The `source` field format depends on how the plugin is distributed:
 | Scenario | source Format | Example |
 |----------|---------------|---------|
 | Plugin as local subdirectory | String path | `"./my-plugin"` |
-| Plugin as git submodule | String path | `"./my-plugin"` |
+| Plugin from GitHub (hub-and-spoke) | Object | `{"type": "github", "owner": "acme", "repo": "plugin-name"}` |
 | Plugin cloned from remote | Object | `{"type": "git", "repository": "https://..."}` |
 | Plugin from npm | Object | `{"type": "npm", "package": "@org/plugin"}` |
 | Plugin from PyPI | Object | `{"type": "pip", "package": "claude-plugin-x"}` |
 | Plugin from URL | Object | `{"type": "url", "url": "https://...plugin.tar.gz"}` |
 
-**Critical:** For local marketplaces where plugins are subdirectories or git submodules, always use the string path format for `source`. Using `{"type": "git", ...}` for local plugins causes schema validation failures.
+**Critical:** For hub-and-spoke marketplaces, plugins are registered in `marketplace.json` with GitHub source configuration. The marketplace uses `gh api` to fetch plugin metadata and versions from their source repositories -- no Git submodules are needed.
 
 ---
 
@@ -267,7 +272,7 @@ A GitHub Personal Access Token (PAT) is required for the cross-repo `repository_
 
 | Permission | Scope | Reason |
 |------------|-------|--------|
-| Contents | Read and Write | Push submodule updates to marketplace |
+| Contents | Read and Write | Push marketplace.json updates and read plugin repo contents via API |
 | Metadata | Read-only | Access repository information |
 | Actions | Read and Write | Trigger and manage workflows |
 
@@ -289,7 +294,7 @@ A GitHub Personal Access Token (PAT) is required for the cross-repo `repository_
    gh secret set MARKETPLACE_PAT --repo owner/plugin-name-b
    ```
 
-5. Add the token as a secret on the marketplace repository (needed for submodule update pushes):
+5. Add the token as a secret on the marketplace repository (needed for GitHub API access and pushing marketplace.json updates):
    ```bash
    gh secret set MARKETPLACE_PAT --repo owner/marketplace-name
    ```
@@ -314,31 +319,20 @@ A GitHub Personal Access Token (PAT) is required for the cross-repo `repository_
 ```
 marketplace-repo/
 ├── .claude-plugin/
-│   └── marketplace.json            # Central plugin registry
+│   └── marketplace.json            # Central plugin registry (hub)
 ├── .github/
 │   └── workflows/
-│       ├── update-submodules.yml   # Receives plugin-updated dispatch events
+│       ├── update-plugins.yml      # Receives plugin-updated dispatch events
 │       └── validate-marketplace.yml # CI validation on push/PR
-├── plugins/                        # Git submodules directory
-│   ├── plugin-a/                   # -> github.com/owner/plugin-a
-│   │   ├── .claude-plugin/
-│   │   │   └── plugin.json
-│   │   ├── commands/
-│   │   ├── agents/
-│   │   ├── skills/
-│   │   └── README.md
-│   └── plugin-b/                   # -> github.com/owner/plugin-b
-│       ├── .claude-plugin/
-│       │   └── plugin.json
-│       └── README.md
 ├── scripts/
-│   ├── sync_marketplace_versions.py # Reads submodule plugin.json, updates marketplace.json
+│   ├── sync_marketplace_versions.py # Fetches plugin.json via GitHub API, updates marketplace.json
 │   └── generate-readme.py           # Auto-generates README plugin table
-├── .gitmodules                      # Submodule URL configuration
 ├── README.md                        # Auto-generated marketplace documentation
 ├── LICENSE                          # Repository license
 └── .gitignore
 ```
+
+Note: The marketplace hub does not contain plugin source code. Plugin metadata is fetched from spoke repositories via the GitHub API at sync time. The `marketplace.json` file is the single source of truth for all registered plugins and their versions.
 
 ### Plugin Repository Layout (Minimum)
 
@@ -365,7 +359,7 @@ plugin-repo/
 
 | Event Type | Source | Target | Trigger |
 |------------|--------|--------|---------|
-| `plugin-updated` | Plugin repo (`notify-marketplace.yml`) | Marketplace repo (`update-submodules.yml`) | Push to main with plugin file changes |
+| `plugin-updated` | Plugin repo (`notify-marketplace.yml`) | Marketplace repo (`update-plugins.yml`) | Push to main with plugin file changes |
 
 #### plugin-updated Payload
 
@@ -383,7 +377,7 @@ plugin-repo/
 
 | Event Type | Source | Target | Trigger |
 |------------|--------|--------|---------|
-| `workflow_dispatch` | Manual (GitHub UI or `gh workflow run`) | Marketplace repo (`update-submodules.yml`) | Manual sync trigger |
+| `workflow_dispatch` | Manual (GitHub UI or `gh workflow run`) | Marketplace repo (`update-plugins.yml`) | Manual sync trigger |
 
 Used for manual re-synchronization when automatic dispatch fails or when adding a new plugin for the first time.
 
@@ -407,7 +401,7 @@ After the marketplace repository is updated (either automatically via dispatch o
 4. **Version Format** -- All version strings must be strict semver `X.Y.Z`
 5. **Plugin Uniqueness** -- No duplicate plugin names
 6. **Source Validation** -- Each plugin must have a valid `source` field
-7. **Submodule Consistency** -- Submodule URLs must match `repository` fields in `marketplace.json`
+7. **Source Reachability** -- Plugin source repositories must be accessible and contain valid `plugin.json`
 8. **Documentation** -- README must contain Installation, Update, Uninstall, and Troubleshooting sections
 
 Run validation locally:

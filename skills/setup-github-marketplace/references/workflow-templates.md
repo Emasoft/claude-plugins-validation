@@ -10,7 +10,7 @@ values with your actual configuration before committing.
 
 - [Placeholder Reference](#placeholder-reference)
 - [notify-marketplace.yml (Plugin Side)](#notify-marketplaceyml-plugin-side)
-- [update-submodules.yml (Marketplace Side)](#update-submodulesyml-marketplace-side)
+- [sync-plugins.yml (Marketplace Side)](#sync-pluginsyml-marketplace-side)
 - [validate-marketplace.yml (Marketplace CI)](#validate-marketplaceyml-marketplace-ci)
 - [Plugin CI Workflow (Optional)](#plugin-ci-workflow-optional)
 
@@ -124,14 +124,14 @@ jobs:
 
 ---
 
-## update-submodules.yml (Marketplace Side)
+## sync-plugins.yml (Marketplace Side)
 
 This workflow is installed in the **marketplace repository**. It receives the
 `plugin-updated` dispatch event and updates `marketplace.json` by fetching the
 plugin's `plugin.json` directly via the GitHub API. This avoids the fragility
 of git submodules -- the API approach is stateless and more reliable in CI.
 
-**Install location:** `.github/workflows/update-submodules.yml`
+**Install location:** `.github/workflows/sync-plugins.yml`
 
 ### How It Works
 
