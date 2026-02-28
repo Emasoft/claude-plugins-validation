@@ -57,7 +57,7 @@ from validate_security import validate_security
 from validate_skill import validate_skill
 
 # Import shared validation infrastructure
-from validation_common import (
+from cpv_validation_common import (
     COLORS,
     ValidationReport,
     ValidationResult,

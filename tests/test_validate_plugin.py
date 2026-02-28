@@ -38,7 +38,7 @@ from validate_plugin import (  # noqa: E402
     validate_structure,
     validate_workflow_inline_python,
 )
-from validation_common import ValidationReport  # noqa: E402
+from cpv_validation_common import ValidationReport  # noqa: E402
 
 
 class TestValidateManifest:

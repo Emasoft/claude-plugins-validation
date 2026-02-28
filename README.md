@@ -183,7 +183,7 @@ claude-plugins-validation/
 │   ├── pre-commit                   # Pre-commit hook
 │   └── pre-push                     # Pre-push hook
 ├── scripts/
-│   ├── validation_common.py         # Shared validation utilities
+│   ├── cpv_validation_common.py         # Shared validation utilities
 │   ├── validate_plugin.py           # Main plugin validator
 │   ├── validate_skill.py            # Skill validator
 │   ├── validate_skill_comprehensive.py  # Comprehensive skill validator
@@ -258,7 +258,7 @@ claude-plugins-validation/
 │   ├── test_validate_skill.py
 │   ├── test_validate_skill_comprehensive.py
 │   ├── test_validate_xref.py
-│   ├── test_validation_common.py
+│   ├── test_cpv_validation_common.py
 │   └── fixtures/                    # Test fixtures
 │       ├── valid_plugin/
 │       └── invalid_plugin/

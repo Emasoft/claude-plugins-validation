@@ -28,7 +28,7 @@ from validate_mcp import (
     validate_path_value,
     validate_plugin_mcp,
 )
-from validation_common import ValidationReport
+from cpv_validation_common import ValidationReport
 
 
 class TestValidateEnvVarSyntax:

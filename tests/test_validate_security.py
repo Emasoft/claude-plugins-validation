@@ -35,7 +35,7 @@ from validate_security import (  # noqa: E402
     should_skip_directory,
     validate_security,
 )
-from validation_common import ValidationReport  # noqa: E402
+from cpv_validation_common import ValidationReport  # noqa: E402
 
 
 class TestScanForInjection:

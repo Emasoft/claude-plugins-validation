@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from validation_common import (
+from cpv_validation_common import (
     SECRET_PATTERNS,
     USER_PATH_PATTERNS,
     ValidationReport,

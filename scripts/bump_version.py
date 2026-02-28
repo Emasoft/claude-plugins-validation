@@ -18,7 +18,7 @@ import re
 import sys
 from pathlib import Path
 
-from validation_common import get_plugin_root
+from cpv_validation_common import get_plugin_root
 
 
 def parse_semver(version: str) -> tuple[int, int, int] | None:

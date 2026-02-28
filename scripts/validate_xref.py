@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from validation_common import (
+from cpv_validation_common import (
     COLORS,
     SKIP_DIRS,
     ValidationReport,

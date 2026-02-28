@@ -20,10 +20,10 @@ All notable changes to the Claude Plugins Validation plugin will be documented i
   - Language-aware token estimation (CJK, Latin, Cyrillic, Arabic, etc.)
   - Warns if total rules exceed 10k token budget
   - Wired into validate_plugin.py main pipeline
-- **validation_common:** Add WARNING level — never blocks validation, always reported
-- **validation_common:** Add NIT level — blocks only in --strict mode
-- **validation_common:** Add `exit_code_strict()` method for --strict mode
-- **validation_common:** Add `warning()`, `nit()`, `has_warning`, `has_nit` to ValidationReport
+- **cpv_validation_common:** Add WARNING level — never blocks validation, always reported
+- **cpv_validation_common:** Add NIT level — blocks only in --strict mode
+- **cpv_validation_common:** Add `exit_code_strict()` method for --strict mode
+- **cpv_validation_common:** Add `warning()`, `nit()`, `has_warning`, `has_nit` to ValidationReport
 - **All validators:** Add NIT and WARNING to Level type, colors, counts, print functions
 - **All validators:** Add `--strict` flag (NIT issues block with exit code 4)
 
@@ -73,10 +73,10 @@ All notable changes to the Claude Plugins Validation plugin will be documented i
 - **validate_lsp:** Add extensionToLanguage critical field validation
 - **validate_lsp:** Add transport validation (stdio, pipe)
 - **validate_lsp:** Add startupTimeout, shutdownTimeout, maxRestarts, restartOnCrash type checks
-- **validation_common:** Update VALID_HOOK_EVENTS to 18 events
-- **validation_common:** Expand VALID_TOOLS with 11 new tools (Skill, AskUserQuestion, EnterPlanMode, etc.)
-- **validation_common:** Add VALID_PLUGIN_ENV_VARS constant
-- **validation_common:** Add system absolute path detection with shebang exclusion
+- **cpv_validation_common:** Update VALID_HOOK_EVENTS to 18 events
+- **cpv_validation_common:** Expand VALID_TOOLS with 11 new tools (Skill, AskUserQuestion, EnterPlanMode, etc.)
+- **cpv_validation_common:** Add VALID_PLUGIN_ENV_VARS constant
+- **cpv_validation_common:** Add system absolute path detection with shebang exclusion
 
 ### Documentation
 
@@ -88,7 +88,7 @@ All notable changes to the Claude Plugins Validation plugin will be documented i
 ### Architecture Refactoring
 
 - **ValidationReport class unification**: Consolidated 11 duplicated ValidationReport implementations into a single class hierarchy
-  - Canonical `ValidationReport` and `ValidationResult` in `validation_common.py`
+  - Canonical `ValidationReport` and `ValidationResult` in `cpv_validation_common.py`
   - Subclasses: `HookValidationReport`, `SkillValidationReport`, `ComprehensiveSkillReport`, `MarketplaceValidationReport`
   - `PipelineValidationReport` kept standalone (incompatible interface)
   - 829+ lines of duplicated code eliminated

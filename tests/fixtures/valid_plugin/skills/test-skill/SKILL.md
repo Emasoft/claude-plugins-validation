@@ -32,7 +32,7 @@ Follow these steps for testing:
 ### Example 1: Basic Validation
 
 ```python
-from validation_common import ValidationReport
+from cpv_validation_common import ValidationReport
 
 report = ValidationReport()
 report.passed("Test passed successfully")

@@ -29,19 +29,19 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from validation_common import (
+from cpv_validation_common import (
     SEMVER_PATTERN,
     Level,
 )
-from validation_common import (
+from cpv_validation_common import (
     ValidationReport as BaseValidationReport,
 )
-from validation_common import (
+from cpv_validation_common import (
     ValidationResult as BaseValidationResult,
 )
 
 # =============================================================================
-# Data Classes — extend canonical validation_common types
+# Data Classes — extend canonical cpv_validation_common types
 # =============================================================================
 
 
@@ -159,7 +159,7 @@ RESERVED_MARKETPLACE_NAMES = {
 # Name validation pattern (kebab-case)
 NAME_PATTERN = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 
-# VERSION_PATTERN imported from validation_common as SEMVER_PATTERN
+# VERSION_PATTERN imported from cpv_validation_common as SEMVER_PATTERN
 
 # Required README sections for GitHub deployment
 # These patterns match common section header formats (# Section, ## Section, ### Section)
@@ -1256,7 +1256,7 @@ def validate_marketplace_private_info(
 
     # Import the shared scanning functions
     try:
-        from validation_common import (
+        from cpv_validation_common import (
             ABSOLUTE_PATH_PATTERNS,
             ALLOWED_DOC_PATH_PREFIXES,
             EXAMPLE_USERNAMES,
@@ -1266,12 +1266,12 @@ def validate_marketplace_private_info(
             build_private_path_patterns,
         )
     except ImportError:
-        # Fallback if validation_common is not available
+        # Fallback if cpv_validation_common is not available
         results.append(
             ValidationResult(
                 level="INFO",
                 category="private-info",
-                message="Could not import validation_common, skipping private info scan",
+                message="Could not import cpv_validation_common, skipping private info scan",
                 file=str(marketplace_dir),
             )
         )

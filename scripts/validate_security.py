@@ -25,7 +25,7 @@ import stat
 import sys
 from pathlib import Path
 
-from validation_common import (
+from cpv_validation_common import (
     DANGEROUS_FILES,
     SECRET_PATTERNS,
     SKIP_DIRS,
@@ -204,7 +204,7 @@ def is_validator_script(file_path: str) -> bool:
     """
     file_lower = file_path.lower()
     # Validator scripts that contain intentional pattern definitions
-    return ("validate_" in file_lower and file_lower.endswith(".py")) or "validation_common" in file_lower
+    return ("validate_" in file_lower and file_lower.endswith(".py")) or "cpv_validation_common" in file_lower
 
 
 def scan_for_injection(content: str, file_path: str, report: ValidationReport) -> int:

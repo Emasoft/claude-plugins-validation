@@ -34,7 +34,7 @@ from validate_hook import (
     validate_single_hook,
     validate_top_level_structure,
 )
-from validation_common import ValidationReport
+from cpv_validation_common import ValidationReport
 
 
 def test_validate_json_structure_valid_file(tmp_path: Path):

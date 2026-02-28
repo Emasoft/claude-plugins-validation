@@ -49,7 +49,7 @@ from validate_rules import validate_rules_directory
 
 # Import comprehensive skill validator (190+ rules from AgentSkills OpenSpec, Nixtla, Meta-Skills)
 from validate_skill_comprehensive import validate_skill as validate_skill_comprehensive
-from validation_common import ValidationReport, resolve_tool_command
+from cpv_validation_common import ValidationReport, resolve_tool_command
 
 
 def validate_manifest(
@@ -951,7 +951,7 @@ def validate_rules(plugin_root: Path, report: ValidationReport) -> None:
 def validate_no_local_paths(plugin_root: Path, report: ValidationReport) -> None:
     """Validate that plugin files don't contain hardcoded local or absolute paths.
 
-    Uses the stricter absolute path validation from validation_common.py.
+    Uses the stricter absolute path validation from cpv_validation_common.py.
 
     In plugins, ALL paths should be:
     - Relative to plugin root (e.g., ./scripts/foo.py)
@@ -969,8 +969,8 @@ def validate_no_local_paths(plugin_root: Path, report: ValidationReport) -> None
     - Allowed system paths (/tmp/, /dev/, /proc/, /sys/)
     - Generic example usernames in documentation
     """
-    # Import the stricter absolute path validation from validation_common
-    from validation_common import validate_no_absolute_paths
+    # Import the stricter absolute path validation from cpv_validation_common
+    from cpv_validation_common import validate_no_absolute_paths
 
     # Use the strict absolute path validator which checks for:
     # - Current user's username (auto-detected) - CRITICAL

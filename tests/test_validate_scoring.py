@@ -28,7 +28,7 @@ from validate_scoring import (
     compute_quality_score,
     generate_recommendations,
 )
-from validation_common import ValidationReport, ValidationResult
+from cpv_validation_common import ValidationReport, ValidationResult
 
 
 class TestCalculateCategoryScore:

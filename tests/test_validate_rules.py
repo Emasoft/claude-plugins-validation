@@ -25,7 +25,7 @@ from validate_rules import (
     validate_rule_file,
     validate_rules_directory,
 )
-from validation_common import ValidationReport
+from cpv_validation_common import ValidationReport
 
 
 class TestClassifyChar:

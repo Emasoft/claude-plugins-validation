@@ -40,7 +40,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from validation_common import ValidationReport
+from cpv_validation_common import ValidationReport
 
 # =============================================================================
 # Documentation Validation Report

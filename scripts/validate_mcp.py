@@ -33,7 +33,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from validation_common import ValidationReport
+from cpv_validation_common import ValidationReport
 
 # Valid transport types
 VALID_TRANSPORTS = {"stdio", "sse", "http"}

@@ -28,7 +28,7 @@ from validate_lsp import (  # noqa: E402
     validate_path_value,
     validate_plugin_lsp,
 )
-from validation_common import ValidationReport  # noqa: E402
+from cpv_validation_common import ValidationReport  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers

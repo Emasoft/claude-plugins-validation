@@ -19,7 +19,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from validation_common import get_plugin_root
+from cpv_validation_common import get_plugin_root
 
 
 @dataclass

@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from validation_common import get_plugin_root
+from cpv_validation_common import get_plugin_root
 
 
 def calculate_file_checksum(file_path: Path) -> str:

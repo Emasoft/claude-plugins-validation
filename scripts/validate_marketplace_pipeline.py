@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from validation_common import (
+from cpv_validation_common import (
     EXIT_CRITICAL,
     EXIT_MAJOR,
     EXIT_MINOR,

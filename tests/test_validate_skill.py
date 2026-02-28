@@ -37,7 +37,7 @@ from validate_skill import (  # noqa: E402
     validate_skill_content,
     validate_supporting_files,
 )
-from validation_common import ValidationReport  # noqa: E402
+from cpv_validation_common import ValidationReport  # noqa: E402
 
 
 def _make_report() -> ValidationReport:

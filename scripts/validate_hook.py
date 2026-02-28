@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from validation_common import VALID_HOOK_EVENTS, ValidationReport, resolve_tool_command
+from cpv_validation_common import VALID_HOOK_EVENTS, ValidationReport, resolve_tool_command
 
 # Events that support matchers
 EVENTS_WITH_MATCHERS = {

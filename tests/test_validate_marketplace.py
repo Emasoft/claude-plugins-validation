@@ -1,4 +1,4 @@
-"""Tests for validate_marketplace.py after refactoring to use canonical validation_common API.
+"""Tests for validate_marketplace.py after refactoring to use canonical cpv_validation_common API.
 
 These tests verify:
 1. MarketplaceValidationResult has category/suggestion fields + backward-compat aliases
@@ -56,9 +56,9 @@ class TestMarketplaceValidationResult:
         assert r.line == 42
 
     def test_inherits_from_base(self):
-        """MarketplaceValidationResult must inherit from validation_common.ValidationResult."""
+        """MarketplaceValidationResult must inherit from cpv_validation_common.ValidationResult."""
         from validate_marketplace import MarketplaceValidationResult
-        from validation_common import ValidationResult as BaseValidationResult
+        from cpv_validation_common import ValidationResult as BaseValidationResult
 
         assert issubclass(MarketplaceValidationResult, BaseValidationResult)
 
@@ -82,9 +82,9 @@ class TestMarketplaceValidationReport:
         assert hasattr(r, "plugins_found")
 
     def test_inherits_from_base(self):
-        """MarketplaceValidationReport must inherit from validation_common.ValidationReport."""
+        """MarketplaceValidationReport must inherit from cpv_validation_common.ValidationReport."""
         from validate_marketplace import MarketplaceValidationReport
-        from validation_common import ValidationReport as BaseValidationReport
+        from cpv_validation_common import ValidationReport as BaseValidationReport
 
         assert issubclass(MarketplaceValidationReport, BaseValidationReport)
 

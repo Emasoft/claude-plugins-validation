@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from validation_common import (
+from cpv_validation_common import (
     BUILTIN_AGENT_TYPES,
     EXIT_CRITICAL,
     EXIT_MAJOR,
@@ -51,10 +51,10 @@ from validation_common import (
     VALID_CONTEXT_VALUES,
     Level,
 )
-from validation_common import (
+from cpv_validation_common import (
     ValidationReport as BaseValidationReport,
 )
-from validation_common import (
+from cpv_validation_common import (
     ValidationResult as BaseValidationResult,
 )
 
@@ -62,7 +62,7 @@ from validation_common import (
 # Constants from Multiple Validation Sources
 # =============================================================================
 
-# Level type imported from validation_common
+# Level type imported from cpv_validation_common
 
 # Multi-scale scoring (0-3) from agent-validator
 Score = Literal[0, 1, 2, 3]
@@ -116,7 +116,7 @@ MAX_FRONTMATTER_CHARS_WARN = 12000
 MAX_FRONTMATTER_CHARS_ERROR = 15000
 
 # --- Valid Values ---
-# VALID_CONTEXT_VALUES and BUILTIN_AGENT_TYPES imported from validation_common
+# VALID_CONTEXT_VALUES and BUILTIN_AGENT_TYPES imported from cpv_validation_common
 VALID_MODEL_VALUES = {"sonnet", "opus", "haiku", "inherit"}
 
 # Valid Claude Code tools (2025)
@@ -400,7 +400,7 @@ class ComprehensiveSkillReport(BaseValidationReport):
     def exit_code(self) -> int:
         """Get appropriate exit code based on highest severity issue.
 
-        Uses the canonical exit code constants from validation_common.
+        Uses the canonical exit code constants from cpv_validation_common.
         """
         if self.has_critical:
             return EXIT_CRITICAL

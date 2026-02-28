@@ -24,7 +24,7 @@ import re
 import sys
 from pathlib import Path
 
-from validation_common import (
+from cpv_validation_common import (
     SKIP_DIRS,
     ValidationReport,
     print_report_summary,

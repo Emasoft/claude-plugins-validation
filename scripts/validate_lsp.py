@@ -33,7 +33,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from validation_common import ValidationReport
+from cpv_validation_common import ValidationReport
 
 # Known LSP server configuration fields
 KNOWN_LSP_FIELDS = {
