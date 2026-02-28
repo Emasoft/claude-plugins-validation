@@ -2,6 +2,39 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [1.7.0] - 2026-02-28
+
+### Bug Fixes
+
+- **validate_mcp.py:** Removed duplicate SSE deprecation warning that fired twice for each SSE-transport server
+- **validate_mcp.py:** Fixed `IndexError` in `print_results` when `exit_code >= 4` (NIT in strict mode)
+- **validate_mcp.py:** Fixed misleading comment (copy-paste artifact from SSE deprecation block)
+- **validate_lsp.py:** Added missing `nit` and `warning` counts to JSON output for consistent schema
+- **validate_skill.py:** Added missing `nit` and `warning` counts to JSON output for consistent schema
+- **cpv_validation_common.py:** Fixed `is_path_gitignored()` — `**` glob patterns now match at any depth (was only matching one level)
+- **cpv_validation_common.py:** Fixed `is_path_gitignored()` — negation patterns (`!important.txt`) now properly un-ignore files
+- **git-hooks/pre-push:** Fixed early return that skipped validation of subsequent refs when pushing multiple branches
+- **validate-marketplace.yml template:** Fixed subshell pipe bug — `FAILED` variable was always 0 due to `while read` running in subshell
+- **update-submodules.yml template:** Updated Python version from 3.11 to 3.12
+
+### Improvements
+
+- **GITHUB_WORKFLOW template:** Changed `uv run python` to `python3` (uv not installed in CI), added `--exclude .venv` to ruff check
+- **GITIGNORE_ADDITIONS template:** Added `.mypy_cache/` pattern to prevent false positive update detection
+- **PRE_COMMIT_HOOK/PRE_PUSH_HOOK templates:** Added `sys.stdout.isatty()` guard for color codes (no ANSI in non-TTY)
+- **notify-marketplace.yml template:** Changed path filter from `.claude-plugin/plugin.json` to `.claude-plugin/**` for consistency with skill docs
+- **Structural venv detection:** `_is_python_venv()` detects virtualenvs by structure (pyvenv.cfg, bin/activate) instead of name
+- **Venvs flagged as MAJOR** if not gitignored (upgraded from WARNING)
+
+### Documentation
+
+- Updated hook event count from 13 to 18 across all documentation (plugin-validator.md, SKILL.md, validation-procedures.md, hook-validation.md)
+- Fixed hook-validation.md: Setup event incorrectly listed as command-only (now correctly supports prompt/agent)
+- Updated SKILL.md hook types from "command vs prompt" to "command, prompt, agent"
+- Fixed skill-validation-skill references: wrong command name, non-existent skill reference
+- Fixed push-plugins.sh → push-plugins.py references in setup-github-marketplace SKILL.md
+- Updated README.md directory tree: added setup-github-marketplace skill, missing commands, agent references, test files, lint_files.py
+
 ## [1.6.0] - 2026-02-28
 
 ### Breaking Changes

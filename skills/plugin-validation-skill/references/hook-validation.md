@@ -80,7 +80,7 @@ There are **18 valid hook events**:
 | UserPromptSubmit | No | When user submits prompt |
 | Stop | No | When agent attempts to stop |
 | PreCompact | Yes | Before conversation compaction (command-only event) |
-| Setup | Yes | During initial setup (command-only event) |
+| Setup | Yes | During initial setup |
 | TeammateIdle | No | When a teammate session goes idle |
 | TaskCompleted | No | When a task is completed |
 | ConfigChange | Yes | When configuration changes |
@@ -117,7 +117,6 @@ These events fire globally and do not support matchers:
 
 These events only support hook type `"command"` — `"prompt"` and `"agent"` types are not valid for them:
 
-- Setup
 - PreCompact
 - Notification
 
@@ -267,7 +266,7 @@ Modifies the system prompt:
 | type | Yes | Must be "prompt" |
 | prompt | Yes | Text to add to system prompt |
 
-Note: Prompt type hooks are not valid for command-only events (Setup, PreCompact, Notification).
+Note: Prompt type hooks are not valid for command-only events (PreCompact, Notification).
 
 ### Agent Type
 
@@ -289,7 +288,7 @@ Runs an inline agent (subagent) as a hook:
 | model | No | Model ID to use for the agent. Defaults to current session model. |
 | timeout | No | Timeout in **seconds** (default: 60). Values over 1000 indicate confusion with milliseconds. |
 
-Note: Agent type hooks are not valid for command-only events (Setup, PreCompact, Notification).
+Note: Agent type hooks are not valid for command-only events (PreCompact, Notification).
 
 ---
 
@@ -566,9 +565,9 @@ Timeout is in **seconds**. A value over 1000 is almost certainly a mistake (woul
 ```json
 {
   "hooks": {
-    "Setup": [
+    "PreCompact": [
       {
-        "hooks": [{"type": "prompt", "prompt": "..."}]  // Setup only allows type "command"
+        "hooks": [{"type": "prompt", "prompt": "..."}]  // PreCompact only allows type "command"
       }
     ]
   }
@@ -579,7 +578,7 @@ Timeout is in **seconds**. A value over 1000 is almost certainly a mistake (woul
 ```json
 {
   "hooks": {
-    "Setup": [
+    "PreCompact": [
       {
         "hooks": [{"type": "command", "command": "..."}]
       }
@@ -598,7 +597,7 @@ Timeout is in **seconds**. A value over 1000 is almost certainly a mistake (woul
 - [ ] Top-level `hooks` key is an object (not an array)
 - [ ] All event names are valid (18 allowed)
 - [ ] Matchers only used with matcher-supporting events
-- [ ] Command-only events (Setup, PreCompact, Notification) use only type "command"
+- [ ] Command-only events (PreCompact, Notification) use only type "command"
 - [ ] All scripts use `${CLAUDE_PLUGIN_ROOT}` paths
 - [ ] All referenced scripts exist
 - [ ] All scripts are executable (`chmod +x`)

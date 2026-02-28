@@ -588,6 +588,8 @@ def print_json(report: SkillValidationReport) -> None:
             "critical": sum(1 for r in report.results if r.level == "CRITICAL"),
             "major": sum(1 for r in report.results if r.level == "MAJOR"),
             "minor": sum(1 for r in report.results if r.level == "MINOR"),
+            "warning": sum(1 for r in report.results if r.level == "WARNING"),
+            "nit": sum(1 for r in report.results if r.level == "NIT"),
             "info": sum(1 for r in report.results if r.level == "INFO"),
             "passed": sum(1 for r in report.results if r.level == "PASSED"),
         },

@@ -28,7 +28,7 @@ on:
   push:
     branches: [main, master]
     paths:
-      - '.claude-plugin/plugin.json'
+      - '.claude-plugin/**'
       - 'hooks/**'
       - 'commands/**'
       - 'agents/**'

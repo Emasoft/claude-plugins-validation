@@ -147,7 +147,7 @@ This prevents accidental leaking of private home directory paths in published pl
 ## Core Responsibilities
 
 1. **Plugin Structure Validation** - Verify `.claude-plugin/plugin.json` manifest, required fields, and component placement
-2. **Hook Validation** - Validate `hooks/hooks.json` structure, event types (13 valid), matchers, script paths
+2. **Hook Validation** - Validate `hooks/hooks.json` structure, event types (18 valid), matchers, script paths
 3. **Skill Validation** - Check SKILL.md frontmatter, required fields, references/ structure
 4. **MCP Server Validation** - Validate `.mcp.json`, transport types, environment variables
 5. **Marketplace Validation** - Check `marketplace.json` structure, plugin entries, source configurations

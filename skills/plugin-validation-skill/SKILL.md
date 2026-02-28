@@ -246,7 +246,7 @@ uv run python scripts/validate_marketplace.py /path/to/marketplace
 
 ## Validation Scripts
 
-This plugin includes five validation scripts:
+This plugin includes five key validation scripts:
 
 ### 1. validate_plugin.py - Main Plugin Validator
 
@@ -268,10 +268,10 @@ This plugin includes five validation scripts:
 
 **What it checks**:
 - JSON structure validity
-- Event types (13 valid events)
+- Event types (18 valid events)
 - Matcher patterns (tool names or regex)
 - Script paths and executability
-- Hook type configuration (command vs prompt)
+- Hook type configuration (command, prompt, agent)
 
 **Reference**: see `hook-validation.md` in Resources above
 

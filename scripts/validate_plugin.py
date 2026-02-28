@@ -1110,9 +1110,14 @@ def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
     for pattern_glob, desc in artifact_patterns.items():
         matches = list(plugin_root.rglob(pattern_glob))
         if matches:
-            # Check if they're gitignored
+            # Check if they're gitignored — also check parent dir patterns
             sample = matches[0].relative_to(plugin_root)
-            if not any(pattern_glob.replace("*", "") in line for line in lines):
+            # .pyc files are covered by either *.pyc or __pycache__/ in .gitignore
+            covered = any(pattern_glob.replace("*", "") in line for line in lines)
+            if not covered and pattern_glob == "*.pyc":
+                # __pycache__/ in .gitignore also covers .pyc files
+                covered = any("__pycache__" in line for line in lines)
+            if not covered:
                 report.warning(f"Found {len(matches)} {desc} file(s) (e.g. {sample}) that may not be gitignored")
 
 

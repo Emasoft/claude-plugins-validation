@@ -63,8 +63,8 @@ jobs:
 
           FAILED=0
 
-          # Loop through each submodule
-          git submodule foreach --quiet 'echo $name' | while read plugin; do
+          # Loop through each submodule (using process substitution to avoid subshell variable loss)
+          while read plugin; do
             if [ -d "$plugin/.claude-plugin" ]; then
               echo ""
               echo "--- Validating: $plugin ---"
@@ -89,7 +89,7 @@ jobs:
             else
               echo "⚠ $plugin: No .claude-plugin directory (skipping)"
             fi
-          done
+          done < <(git submodule foreach --quiet 'echo $name')
 
           if [ "$FAILED" -ne 0 ]; then
             echo ""

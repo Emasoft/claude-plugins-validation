@@ -46,6 +46,7 @@ uv run python scripts/validate_marketplace.py /path/to/marketplace
 | 1 | Critical issues |
 | 2 | Major issues |
 | 3 | Minor issues |
+| 4 | NIT issues (--strict only) |
 
 ## Key Rules
 

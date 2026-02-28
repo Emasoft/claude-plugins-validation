@@ -194,7 +194,7 @@ Reference: [Script Templates](references/script-templates.md)
   - generate-readme.py
   - setup-hooks.py
   - pre-push-hook.py
-  - push-plugins.sh
+  - push-plugins.py
 
 ### Step 3: Generate README, commit infrastructure
 
@@ -454,7 +454,7 @@ Reference: [Troubleshooting Guide](references/troubleshooting.md)
 - generate-readme.py
 - setup-hooks.py
 - pre-push-hook.py
-- push-plugins.sh
+- push-plugins.py
 
 ### [Plugin Linking Guide](references/plugin-linking-guide.md)
 - Adding a Plugin to the Marketplace

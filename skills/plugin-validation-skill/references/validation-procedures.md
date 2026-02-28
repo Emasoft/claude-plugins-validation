@@ -288,7 +288,7 @@ ruff check /path/to/script.py
 
 | Issue | Fix |
 |-------|-----|
-| Invalid event type | Use valid event from 13 allowed types |
+| Invalid event type | Use valid event from 18 allowed types |
 | Script not found | Use `${CLAUDE_PLUGIN_ROOT}/scripts/name.sh` |
 | Script not executable | Run `chmod +x scripts/*.sh` |
 | Invalid matcher | Use tool name or valid regex |

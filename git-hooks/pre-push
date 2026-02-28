@@ -189,10 +189,6 @@ def main() -> int:
                 plugin_files_changed = True
                 break
 
-        if not plugin_files_changed:
-            cprint(f"{GREEN}No plugin files changed. Skipping full validation.{NC}")
-            return 0
-
     # If stdin was empty or only deletions, nothing to validate
     if not plugin_files_changed:
         cprint(f"{GREEN}No plugin files changed. Skipping full validation.{NC}")

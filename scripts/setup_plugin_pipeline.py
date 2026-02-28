@@ -151,11 +151,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-RED = "\\033[0;31m"
-GREEN = "\\033[0;32m"
-YELLOW = "\\033[1;33m"
-BLUE = "\\033[0;34m"
-NC = "\\033[0m"
+if sys.stdout.isatty():
+    RED = "\\033[0;31m"
+    GREEN = "\\033[0;32m"
+    YELLOW = "\\033[1;33m"
+    BLUE = "\\033[0;34m"
+    NC = "\\033[0m"
+else:
+    RED = GREEN = YELLOW = BLUE = NC = ""
 
 
 def is_rebase_in_progress() -> bool:
@@ -251,11 +254,14 @@ import os
 import subprocess
 import sys
 
-RED = "\\033[0;31m"
-GREEN = "\\033[0;32m"
-YELLOW = "\\033[1;33m"
-BOLD = "\\033[1m"
-NC = "\\033[0m"
+if sys.stdout.isatty():
+    RED = "\\033[0;31m"
+    GREEN = "\\033[0;32m"
+    YELLOW = "\\033[1;33m"
+    BOLD = "\\033[1m"
+    NC = "\\033[0m"
+else:
+    RED = GREEN = YELLOW = BOLD = NC = ""
 
 
 def is_rebase_in_progress(git_dir: str) -> bool:
@@ -522,7 +528,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
+          python3 -m pip install --upgrade pip
           pip install ruff mypy pyyaml types-PyYAML
 
       - name: Find validator
@@ -537,13 +543,13 @@ jobs:
           fi
 
       - name: Lint all source files (read-only)
-        run: uv run python scripts/lint_files.py .
+        run: python3 scripts/lint_files.py .
 
       - name: Validate plugin(s)
         if: steps.find-validator.outputs.validator != ''
         run: |
           set +e
-          python ${{ steps.find-validator.outputs.validator }} . --verbose
+          python3 ${{ steps.find-validator.outputs.validator }} . --verbose
           exit_code=$?
           set -e
           # Exit codes: 0=pass, 1=critical, 2=major, 3=minor
@@ -558,7 +564,7 @@ jobs:
 
       - name: Lint Python files
         run: |
-          ruff check . --select=E,F,W --ignore=E501 || true
+          ruff check . --exclude .venv --select=E,F,W --ignore=E501 || true
 """
 
 GITIGNORE_ADDITIONS = """
@@ -581,6 +587,9 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
+
+# Type checking
+.mypy_cache/
 
 # Build artifacts
 dist/

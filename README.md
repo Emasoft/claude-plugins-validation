@@ -169,7 +169,13 @@ claude-plugins-validation/
 │   ├── plugin-validator.md          # Expert validation agent
 │   ├── skill-validation-agent.md    # Skill validation agent
 │   └── references/
+│       ├── code-quality-fixes.md
+│       ├── hook-fixes.md
+│       ├── marketplace-fixes.md
+│       ├── mcp-fixes.md
+│       ├── plugin-structure-fixes.md
 │       ├── plugin-validator-detailed-procedures.md
+│       ├── skill-fixes.md
 │       └── skill-semantic-validation.md
 ├── commands/
 │   ├── cpv-validate-agents.md       # Agent validation command
@@ -178,12 +184,14 @@ claude-plugins-validation/
 │   ├── cpv-validate-marketplace.md  # Marketplace validation command
 │   ├── cpv-validate-mcp.md          # MCP validation command
 │   ├── cpv-validate-plugin.md       # Plugin validation command
-│   └── cpv-validate-skill.md        # Skill validation command
+│   ├── cpv-validate-skill.md        # Skill validation command
+│   └── cpv-setup-github-marketplace.md # Marketplace setup command
 ├── git-hooks/
 │   ├── pre-commit                   # Pre-commit hook
 │   └── pre-push                     # Pre-push hook
 ├── scripts/
 │   ├── cpv_validation_common.py         # Shared validation utilities
+│   ├── lint_files.py                # Multi-language file linter
 │   ├── validate_plugin.py           # Main plugin validator
 │   ├── validate_skill.py            # Skill validator
 │   ├── validate_skill_comprehensive.py  # Comprehensive skill validator
@@ -224,6 +232,15 @@ claude-plugins-validation/
 │   │       ├── official-docs-urls.md
 │   │       ├── troubleshooting-python-scripts.md
 │   │       └── pre-push-hook.py
+│   ├── setup-github-marketplace/
+│   │   ├── SKILL.md                 # Marketplace setup skill
+│   │   └── references/
+│   │       ├── marketplace-structure.md
+│   │       ├── workflow-templates.md
+│   │       ├── script-templates.md
+│   │       ├── readme-template.md
+│   │       ├── troubleshooting.md
+│   │       └── pat-setup.md
 │   └── skill-validation-skill/
 │       ├── SKILL.md                 # Skill validation skill
 │       └── references/
@@ -259,6 +276,8 @@ claude-plugins-validation/
 │   ├── test_validate_skill_comprehensive.py
 │   ├── test_validate_xref.py
 │   ├── test_cpv_validation_common.py
+│   ├── test_extended_linting.py
+│   ├── test_toc_embedding.py
 │   └── fixtures/                    # Test fixtures
 │       ├── valid_plugin/
 │       └── invalid_plugin/

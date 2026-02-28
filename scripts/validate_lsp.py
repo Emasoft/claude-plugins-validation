@@ -500,6 +500,8 @@ def main() -> int:
                 "minor": sum(1 for r in report.results if r.level == "MINOR"),
                 "info": sum(1 for r in report.results if r.level == "INFO"),
                 "passed": sum(1 for r in report.results if r.level == "PASSED"),
+                "nit": sum(1 for r in report.results if r.level == "NIT"),
+                "warning": sum(1 for r in report.results if r.level == "WARNING"),
             },
             "results": [
                 {

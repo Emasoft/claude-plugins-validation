@@ -358,9 +358,9 @@ $ uv run python scripts/validate_skill_comprehensive.py ./skills/my-skill/ --jso
 ### Related Skills
 
 - `plugin-validation-skill` - Plugin-level validation
-- `marketplace-validation-skill` - Marketplace validation
+- `setup-github-marketplace` - Marketplace validation
 
 ## See Also
 
-- `/validate-skill` command - Invoke this validation
+- `/cpv-validate-skill` command - Invoke this validation
 - `skill-validation-agent` - Agent for automated skill audits

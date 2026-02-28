@@ -994,10 +994,11 @@ class TestGitignoreParsing:
     def test_is_path_gitignored_doublestar_pattern(self):
         """Double-star patterns should match across nested directories."""
         patterns = ["**/test"]
-        # After ** simplification, **/test becomes */test which matches sub/test
+        # **/test matches test at any depth including root (per git spec)
         assert is_path_gitignored("sub/test", patterns) is True
-        # Plain 'test' without directory prefix does not match */test
-        assert is_path_gitignored("test", patterns) is False
+        assert is_path_gitignored("a/b/c/test", patterns) is True
+        # **/test also matches bare 'test' at root level (confirmed with real git)
+        assert is_path_gitignored("test", patterns) is True
 
 
 class TestBuildPrivatePathPatterns:

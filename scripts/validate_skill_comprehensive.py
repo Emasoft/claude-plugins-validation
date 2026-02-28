@@ -818,9 +818,9 @@ def validate_allowed_tools_field(
             category="Frontmatter",
         )
 
-    # Over-permissioning warning
+    # Over-permissioning advisory — not blocking
     if len(tool_list) > 6:
-        report.minor(
+        report.warning(
             f"Many tools permitted ({len(tool_list)}) - consider limiting",
             "SKILL.md",
             category="Frontmatter",
