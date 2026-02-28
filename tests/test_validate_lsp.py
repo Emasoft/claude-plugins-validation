@@ -658,3 +658,52 @@ class TestMainFunction:
         monkeypatch.setattr(sys, "argv", ["validate_lsp.py"])
         exit_code = main()
         assert exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# Tests for v1.7.0 JSON output counts keys
+# ---------------------------------------------------------------------------
+
+
+class TestV170JsonOutput:
+    """Tests verifying JSON output from main() includes nit and warning count keys."""
+
+    def test_json_output_includes_nit_count(self, tmp_path, monkeypatch, capsys):
+        """JSON output counts dict must contain a 'nit' key."""
+        config_file = tmp_path / "lsp-config.json"
+        config_data = {
+            "languageServers": {
+                "gopls": {
+                    "command": "gopls",
+                    "extensionToLanguage": {".go": "go"},
+                },
+            },
+        }
+        config_file.write_text(json.dumps(config_data))
+        monkeypatch.setattr(sys, "argv", ["validate_lsp.py", "--json", str(config_file)])
+        exit_code = main()
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert "counts" in output
+        assert "nit" in output["counts"], "JSON counts dict must include 'nit' key"
+
+    def test_json_output_includes_warning_count(self, tmp_path, monkeypatch, capsys):
+        """JSON output counts dict must contain a 'warning' key."""
+        config_file = tmp_path / "lsp-config.json"
+        config_data = {
+            "languageServers": {
+                "gopls": {
+                    "command": "gopls",
+                    "extensionToLanguage": {".go": "go"},
+                },
+            },
+        }
+        config_file.write_text(json.dumps(config_data))
+        monkeypatch.setattr(sys, "argv", ["validate_lsp.py", "--json", str(config_file)])
+        exit_code = main()
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert "counts" in output
+        assert "warning" in output["counts"], "JSON counts dict must include 'warning' key"

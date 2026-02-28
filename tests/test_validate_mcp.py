@@ -682,3 +682,68 @@ class TestMainFunction:
         monkeypatch.setattr("sys.argv", ["validate_mcp", "--strict", str(mcp_file)])
         result = main()
         assert result == 0
+
+
+class TestV170Fixes:
+    """Tests for v1.7.0 fixes: SSE deprecation deduplication, NIT exit code handling, SSE validation."""
+
+    def test_sse_deprecation_warns_once(self, tmp_path):
+        """SSE-transport plugin should produce exactly one deprecation warning, not duplicated."""
+        claude_dir = tmp_path / ".claude-plugin"
+        claude_dir.mkdir()
+        manifest = {
+            "name": "sse-plugin",
+            "version": "1.0.0",
+            "description": "Plugin with SSE server",
+            "mcpServers": {
+                "sse-server": {
+                    "type": "sse",
+                    "url": "http://localhost:8080/sse",
+                }
+            },
+        }
+        (claude_dir / "plugin.json").write_text(json.dumps(manifest))
+        report = validate_plugin_mcp(tmp_path)
+        deprecation_results = [
+            r for r in report.results
+            if "deprecated" in r.message.lower() and "sse" in r.message.lower()
+        ]
+        assert len(deprecation_results) == 1, (
+            f"Expected exactly 1 SSE deprecation warning, got {len(deprecation_results)}: "
+            f"{[r.message for r in deprecation_results]}"
+        )
+
+    def test_print_results_nit_exit_code(self, capsys, monkeypatch):
+        """print_results should not crash (IndexError) when report exit_code is 4 (NIT)."""
+        report = ValidationReport()
+        # Add a NIT-level finding so the report has content
+        report.nit("Minor style issue")
+        # Monkeypatch exit_code property to return 4 (NIT), simulating --strict behavior
+        monkeypatch.setattr(type(report), "exit_code", property(lambda self: 4))
+        # This must not raise IndexError
+        print_results(report, verbose=False)
+        out = capsys.readouterr().out
+        assert "MCP Configuration Validation Report" in out
+        assert "Issues found" in out or "issues found" in out.lower()
+
+    def test_sse_transport_validation_passes(self):
+        """Valid SSE-transport server config should validate with a MINOR deprecation but no errors."""
+        report = ValidationReport()
+        config = {
+            "type": "sse",
+            "url": "http://localhost:9090/sse",
+        }
+        validate_mcp_server("my-sse-server", config, report)
+        # Should have exactly one MINOR for SSE deprecation
+        minors = [r for r in report.results if r.level == "MINOR"]
+        assert len(minors) == 1
+        assert "deprecated" in minors[0].message.lower()
+        assert "sse" in minors[0].message.lower()
+        # Should have no CRITICAL or MAJOR errors
+        criticals = [r for r in report.results if r.level == "CRITICAL"]
+        majors = [r for r in report.results if r.level == "MAJOR"]
+        assert len(criticals) == 0, f"Unexpected CRITICAL: {[c.message for c in criticals]}"
+        assert len(majors) == 0, f"Unexpected MAJOR: {[m.message for m in majors]}"
+        # Should have at least one PASSED result (server validated)
+        passed = [r for r in report.results if r.level == "PASSED"]
+        assert len(passed) >= 1

@@ -1457,3 +1457,29 @@ class TestAllowedToolsEdgeCases:
         frontmatter = {"allowed-tools": ["Read", "Write"]}
         validate_allowed_tools_field(frontmatter, report, strict_mode=True)
         assert any("comma-separated string" in r.message for r in report.results)
+
+
+# =============================================================================
+# Tests for v1.7.0 tool-count severity
+# =============================================================================
+
+
+class TestV170ToolCountSeverity:
+    """Tests verifying that the many-tools advisory uses WARNING level."""
+
+    def test_many_tools_is_warning_not_minor(self):
+        """7 tools should produce a WARNING-level 'Many tools permitted' result, not MINOR."""
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"allowed-tools": "Read, Write, Edit, Bash, Glob, Grep, Agent"}
+        validate_allowed_tools_field(frontmatter, report)
+        many_tools_results = [r for r in report.results if "Many tools permitted" in r.message]
+        assert len(many_tools_results) == 1, "Expected exactly one 'Many tools permitted' result"
+        assert many_tools_results[0].level == "WARNING", f"Expected WARNING level, got {many_tools_results[0].level}"
+
+    def test_few_tools_no_warning(self):
+        """2 tools should not produce any 'Many tools permitted' result."""
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"allowed-tools": "Read, Bash"}
+        validate_allowed_tools_field(frontmatter, report)
+        many_tools_results = [r for r in report.results if "Many tools permitted" in r.message]
+        assert len(many_tools_results) == 0, "Expected no 'Many tools permitted' result for 2 tools"
