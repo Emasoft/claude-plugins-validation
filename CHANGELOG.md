@@ -2,6 +2,18 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [1.7.1] - 2026-02-28
+
+### New Features
+
+- **`scripts/gitignore_filter.py`:** Helper module with `GitignoreFilter` class — pathlib-based, cross-platform gitignore-aware file scanning (walk, rglob, iterdir)
+- **Gitignore-aware validation:** All file scans in `validate_plugin.py` now skip gitignored files/directories, eliminating false positives for `.pyc`, `__pycache__`, etc.
+- **Tool count check downgraded to WARNING:** `allowed-tools` with >6 tools now produces a non-blocking WARNING instead of MINOR
+
+### Tests
+
+- Added 30 new tests (1048 total): GitignoreFilter class (15), extended gitignore parsing (8), validate_mcp fixes (3), JSON output counts (2), tool count severity (2)
+
 ## [1.7.0] - 2026-02-28
 
 ### Bug Fixes
