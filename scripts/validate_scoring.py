@@ -26,6 +26,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+# Import shared validation infrastructure
+from cpv_validation_common import (
+    COLORS,
+    ValidationReport,
+    ValidationResult,
+    calculate_letter_grade,
+)
+
 # Import all validators
 from validate_agent import validate_agent
 from validate_command import validate_command
@@ -55,14 +63,6 @@ from validate_plugin import (
 )
 from validate_security import validate_security
 from validate_skill import validate_skill
-
-# Import shared validation infrastructure
-from cpv_validation_common import (
-    COLORS,
-    ValidationReport,
-    ValidationResult,
-    calculate_letter_grade,
-)
 
 # =============================================================================
 # Scoring Constants

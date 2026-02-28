@@ -43,14 +43,14 @@ from pathlib import Path
 from typing import Any, cast
 
 import yaml
+from cpv_validation_common import ValidationReport, resolve_tool_command, validate_toc_embedding
+from gitignore_filter import GitignoreFilter
 from validate_hook import validate_hooks as validate_hook_file
 from validate_mcp import validate_plugin_mcp
 from validate_rules import validate_rules_directory
 
 # Import comprehensive skill validator (190+ rules from AgentSkills OpenSpec, Nixtla, Meta-Skills)
 from validate_skill_comprehensive import validate_skill as validate_skill_comprehensive
-from cpv_validation_common import ValidationReport, resolve_tool_command, validate_toc_embedding
-from gitignore_filter import GitignoreFilter
 
 # Module-level gitignore filter — initialized in main(), used by scan functions
 _gi: GitignoreFilter | None = None
@@ -741,14 +741,13 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
     }
 
     # Use gitignore-aware walk to skip ignored files and directories
-    for dirpath, dirnames, filenames in (_gi.walk(plugin_root, skip_dirs=skip_dirs) if _gi else os.walk(plugin_root)):
+    for dirpath, dirnames, filenames in _gi.walk(plugin_root, skip_dirs=skip_dirs) if _gi else os.walk(plugin_root):
         if not _gi:
             # Fallback filtering when gitignore filter not initialized
             dirnames[:] = [
-                d for d in dirnames
-                if not d.startswith(".")
-                and d not in skip_dirs
-                and not _is_python_venv(Path(dirpath) / d)
+                d
+                for d in dirnames
+                if not d.startswith(".") and d not in skip_dirs and not _is_python_venv(Path(dirpath) / d)
             ]
         rel_dir = Path(dirpath).relative_to(plugin_root)
 
@@ -841,12 +840,12 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
     # --- 3. Check compiled binaries platform coverage ---
     # Search for bin/ directories recursively, skip gitignored paths
     all_bin_dirs = []
-    for d in (_gi.rglob("bin") if _gi else plugin_root.rglob("bin")):
+    for d in _gi.rglob("bin") if _gi else plugin_root.rglob("bin"):
         if not d.is_dir():
             continue
         # Also skip venvs detected structurally
         rel_parts = d.relative_to(plugin_root).parts[:-1]
-        if any(_is_python_venv(plugin_root / Path(*rel_parts[:i + 1])) for i in range(len(rel_parts))):
+        if any(_is_python_venv(plugin_root / Path(*rel_parts[: i + 1])) for i in range(len(rel_parts))):
             continue
         all_bin_dirs.append(d)
     if not all_bin_dirs:
