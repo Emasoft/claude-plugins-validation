@@ -17,7 +17,7 @@ Validates skill directories using a comprehensive set of 190+ validation rules e
 
 ## Quick Navigation
 
-#### [Validation Rules](references/validation-rules.md)
+### [Validation Rules](references/validation-rules.md)
 Complete list of 190+ validation rules
 **Contents:**
 - 1. Structure Validation Rules (8 rules)

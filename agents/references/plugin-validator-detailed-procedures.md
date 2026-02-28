@@ -31,8 +31,8 @@ The pre-push hook automatically detects languages by:
 | JavaScript | eslint | `npm install eslint` (local) | .eslintrc, eslint.config.js |
 | TypeScript | eslint | `npm install eslint @typescript-eslint/parser` | eslint.config.js |
 | Shell | shellcheck | `brew install shellcheck` (macOS) | (none) |
-| Go | gofmt/go vet | (built-in with Go) | go.mod |
-| Rust | cargo fmt/clippy | (built-in with Rust) | Cargo.toml |
+| Go | go vet | (built-in with Go) | go.mod |
+| Rust | clippy | (built-in with Rust) | Cargo.toml |
 | Markdown | markdownlint | `npm install markdownlint-cli` | .markdownlint.json |
 | JSON | prettier | `npm install prettier` | .prettierrc |
 | YAML | yamllint | `pip install yamllint` | .yamllint.yaml |
@@ -71,30 +71,29 @@ The pre-push hook automatically detects languages by:
 
 ```
 □ C.1 Python lint verification:
-      □ ruff check --fix runs (auto-fixes what it can)
-      □ ruff format runs (after check)
+      □ ruff check runs (read-only, no --fix)
       □ mypy runs with --ignore-missing-imports
       □ Check for unresolved issues in output
 
 □ C.2 JavaScript lint verification:
-      □ eslint --fix runs (if config exists)
+      □ eslint runs (read-only, no --fix)
       □ Check for .eslintrc, .eslintrc.js, eslint.config.js
 
 □ C.3 Shell lint verification:
       □ shellcheck -x runs on each .sh file
-      □ Issues reported but don't auto-fix
+      □ Issues reported (read-only)
 
 □ C.4 Go lint verification:
-      □ gofmt -w runs (auto-fixes formatting)
+      □ gofmt -l runs (read-only, lists issues)
       □ go vet runs (reports issues)
 
 □ C.5 Rust lint verification:
-      □ cargo fmt runs (auto-fixes formatting)
+      □ cargo fmt --check runs (read-only)
       □ cargo clippy runs (reports issues)
 
 □ C.6 Markdown lint verification:
-      □ markdownlint --fix runs (auto-fixes formatting issues)
-      □ markdownlint runs again to verify (reports remaining issues)
+      □ markdownlint runs (read-only validation)
+      □ Check for reported issues (user must fix manually)
 
 □ C.7 JSON lint verification:
       □ Python json.load() validates syntax (always runs)
@@ -108,15 +107,13 @@ The pre-push hook automatically detects languages by:
 ### Verification Checklist: Auto-Fix Loop
 
 ```
-□ D.1 Check iteration counter: "--- Iteration 1/5 ---"
-□ D.2 Verify file modification detection: "Files modified by auto-fix, committing..."
-□ D.3 Verify auto-commit: "chore: Auto-fix lint/format issues (iteration N)"
-□ D.4 Check loop restart: "Restarting validation cycle..."
-□ D.5 Final outcome must be one of:
-      □ "✔ VALIDATION PASSED - Push allowed"
-      □ "✘ LINT ISSUES CANNOT BE AUTO-FIXED - Push blocked"
-      □ "✘ VALIDATION FAILED - Push blocked"
-      □ "✘ MAX ITERATIONS REACHED (5) - Push blocked"
+□ D.1 Verify linting completes in read-only mode
+□ D.2 Verify NO file modifications occur
+□ D.3 Verify NO auto-commits are made
+□ D.4 Final outcome must be one of:
+      □ "All checks passed — push allowed"
+      □ "Linting failed — push blocked"
+      □ "Validation failed — push blocked"
 ```
 
 ---
@@ -206,8 +203,8 @@ jobs:
 
 ### Phase 4: Git Hooks Installation
 ```
-□ 4.1 Run: bash scripts/setup_git_hooks.sh
-□ 4.2 Verify .git/hooks/pre-commit exists and is executable
+□ 4.1 Run: uv run python scripts/setup_git_hooks.py
+□ 4.2 Verify .git/hooks/pre-push exists and is executable
 □ 4.3 Verify .git/hooks/pre-push exists and is executable
 □ 4.4 For submodules: check .git/modules/*/hooks/
 ```
@@ -275,7 +272,7 @@ mypy --ignore-missing-imports .
 **Issue: "Max iterations reached"**
 ```bash
 git push --no-verify  # Bypass (use with caution!)
-ruff check . --fix && ruff format . && mypy .
+ruff check . && mypy . # read-only, no --fix
 git add -A && git commit -m "fix: Manual fixes" && git push
 ```
 
@@ -283,13 +280,13 @@ git add -A && git commit -m "fix: Manual fixes" && git push
 
 **Issue: "Hooks not firing"**
 ```bash
-chmod +x .git/hooks/pre-commit .git/hooks/pre-push
+chmod +x .git/hooks/pre-push
 ```
 
 **Issue: "Hooks exist but have old content"**
 ```bash
-rm .git/hooks/pre-commit .git/hooks/pre-push
-uv run python scripts/setup_plugin_pipeline.py . --fix
+rm .git/hooks/pre-push
+uv run python scripts/setup_plugin_pipeline.py . --validate
 ```
 
 ### GitHub CI Issues

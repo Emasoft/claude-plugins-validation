@@ -308,9 +308,9 @@ flowchart TB
 
 ### How It Works
 
-1. **Plugin Update**: When a plugin repo pushes changes, its `notify-marketplace.yml` workflow sends a repository dispatch event
+1. **Plugin Update**: When a plugin pushes changes, `notify-marketplace.yml` sends a repository dispatch event
 2. **Marketplace Update**: The marketplace's `update-submodules.yml` workflow triggers (via dispatch or scheduled cron)
-3. **Version Sync**: The `sync_marketplace_versions.py` script reads each plugin's version and updates `marketplace.json`
+3. **Version Sync**: `sync_marketplace_versions.py` reads each plugin's version and updates `marketplace.json`
 4. **Auto Commit**: Changes are committed and pushed automatically
 
 """

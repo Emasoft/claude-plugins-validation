@@ -42,7 +42,7 @@ flowchart TB
         direction TB
         MJ[".claude-plugin/<br/>marketplace.json"]
         subgraph Workflows[".github/workflows/"]
-            US["update-plugins.yml<br/>(repository_dispatch)"]
+            US["update-submodules.yml<br/>(repository_dispatch)"]
             VL["validate-marketplace.yml<br/>(CI)"]
         end
         subgraph Scripts["scripts/"]
@@ -98,7 +98,7 @@ The plugin repository's `notify-marketplace.yml` workflow triggers on the push e
 
 ### Step 3: Repository Dispatch Sent
 
-The workflow uses `peter-evans/repository-dispatch@v3` to send a `plugin-updated` event to the marketplace repository. The event payload includes:
+The workflow uses `peter-evans/repository-dispatch@v4` to send a `plugin-updated` event to the marketplace repository. The event payload includes:
 - `plugin` -- the plugin name from `plugin.json`
 - `version` -- the plugin version from `plugin.json`
 

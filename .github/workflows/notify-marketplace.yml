@@ -29,6 +29,7 @@ on:
     branches: [main, master]
     paths:
       - '.claude-plugin/plugin.json'
+      - 'hooks/**'
       - 'commands/**'
       - 'agents/**'
       - 'skills/**'
@@ -62,6 +63,7 @@ jobs:
             {
               "plugin": "${{ steps.plugin.outputs.name }}",
               "ref": "${{ steps.plugin.outputs.ref }}",
+              "source_repo": "${{ github.repository }}",
               "triggered_by": "${{ github.actor }}"
             }
 

@@ -416,6 +416,12 @@ shellcheck scripts/*.sh
 chmod +x scripts/*.sh
 ```
 
+### Linting Pipeline
+
+- [ ] lint_files.py runs read-only (no --fix, no auto-commit)
+- [ ] Pre-push hook is a thin wrapper calling scripts/lint_files.py and scripts/validate_plugin.py
+- [ ] Pre-commit hook only checks for sensitive data (no linting)
+
 ### General Script Requirements
 
 - [ ] Scripts don't use hardcoded paths
@@ -447,6 +453,7 @@ chmod +x scripts/*.sh
 ### Validation Scripts
 
 - [ ] All validation scripts pass with exit code 0
+- [ ] Verify lint_files.py passes: `python scripts/lint_files.py .`
 
 ```bash
 uv run python scripts/validate_plugin.py /path/to/plugin --verbose

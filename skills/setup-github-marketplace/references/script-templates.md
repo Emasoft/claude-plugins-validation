@@ -10,16 +10,16 @@ Each script is complete, functional, and can be copy-pasted into the appropriate
 - [generate-readme.py](#generate-readmepy)
 - [setup-hooks.py](#setup-hookspy)
 - [pre-push-hook.py](#pre-push-hookpy)
-- [push-plugins.sh](#push-pluginssh)
+- [push-plugins.py](#push-pluginspy)
 
 ## Placeholder Reference
 
 | Placeholder | Description | Where Used |
 |-------------|-------------|------------|
 | `{{MARKETPLACE_NAME}}` | Marketplace display name (e.g. "My Plugin Marketplace") | generate-readme.py |
-| `{{MARKETPLACE_OWNER}}` | GitHub username or organization | push-plugins.sh |
-| `{{MARKETPLACE_REPO}}` | GitHub repository name | push-plugins.sh |
-| `{{MARKETPLACE_DIR}}` | Local path to marketplace repo root | push-plugins.sh |
+| `{{MARKETPLACE_OWNER}}` | GitHub username or organization | push-plugins.py |
+| `{{MARKETPLACE_REPO}}` | GitHub repository name | push-plugins.py |
+| `{{MARKETPLACE_DIR}}` | Local path to marketplace repo root | push-plugins.py |
 
 ---
 
@@ -522,6 +522,9 @@ if __name__ == "__main__":
 ## setup-hooks.py
 
 Installs (or uninstalls) git hooks for marketplace validation.
+The pre-commit hook only checks for sensitive data (API keys, tokens, secrets).
+The pre-push hook is a thin wrapper that delegates to `scripts/lint_files.py`
+(read-only linting) and `scripts/validate_plugin.py` (validation).
 
 **Install location:** `scripts/setup-hooks.py`
 
@@ -530,8 +533,8 @@ Installs (or uninstalls) git hooks for marketplace validation.
 """
 setup-hooks.py - Install git hooks for marketplace validation
 
-Creates pre-push and pre-commit hooks that validate the marketplace
-before allowing changes to be pushed.
+Creates pre-commit (sensitive data check only) and pre-push (lint + validate)
+hooks. All linting is read-only -- no --fix, no --write, no auto-commit.
 
 Usage:
     python setup-hooks.py [--repo-dir PATH] [--uninstall]
@@ -547,90 +550,135 @@ import sys
 from pathlib import Path
 
 PRE_COMMIT_HOOK = '''\
-#!/usr/bin/env bash
-# Pre-commit hook: validate marketplace.json syntax
+#!/usr/bin/env python3
+# Pre-commit hook: check staged files for sensitive data ONLY
 # Installed by setup-hooks.py
+#
+# This hook does NOT lint or format. All linting is in pre-push via
+# scripts/lint_files.py (read-only, no --fix).
 
-set -euo pipefail
+import re
+import subprocess
+import sys
+from pathlib import Path
 
-MARKETPLACE_JSON=""
-for candidate in ".claude-plugin/marketplace.json" "marketplace.json"; do
-    if [ -f "$candidate" ]; then
-        MARKETPLACE_JSON="$candidate"
-        break
-    fi
-done
 
-if [ -z "$MARKETPLACE_JSON" ]; then
-    # No marketplace.json found - nothing to validate
-    exit 0
-fi
+def main() -> int:
+    print("Pre-commit: checking for sensitive data...")
 
-# Only validate if marketplace.json is staged
-if git diff --cached --name-only | grep -q "marketplace.json"; then
-    echo "Validating marketplace.json syntax..."
-    if ! python3 -c "import json, sys; json.load(open('$MARKETPLACE_JSON'))" 2>/dev/null; then
-        echo "ERROR: marketplace.json contains invalid JSON"
-        echo "Fix syntax errors before committing."
-        exit 1
-    fi
-    echo "marketplace.json syntax OK"
-fi
+    # Patterns that indicate leaked secrets (API keys, tokens, passwords)
+    sensitive_patterns = [
+        r"ANTHROPIC_API_KEY\\s*=",
+        r"OPENAI_API_KEY\\s*=",
+        r"sk-[a-zA-Z0-9]{20,}",
+        r"ghp_[a-zA-Z0-9]{36}",
+        r"gho_[a-zA-Z0-9]{36}",
+        r"github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59}",
+        r"AWS_SECRET_ACCESS_KEY\\s*=",
+        r"password\\s*=\\s*[\\"\\'\\'][^\\"\\'\\']{8,}",
+        r"secret\\s*=\\s*[\\"\\'\\'][^\\"\\'\\']{8,}",
+        r"token\\s*=\\s*[\\"\\'\\'][^\\"\\'\\']{8,}",
+    ]
+
+    # Get staged files (added, copied, modified)
+    result = subprocess.run(
+        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+        capture_output=True, text=True,
+    )
+    staged_files = [f for f in result.stdout.strip().splitlines() if f]
+
+    if not staged_files:
+        return 0
+
+    found_secrets = False
+
+    for pattern in sensitive_patterns:
+        regex = re.compile(pattern)
+        for filepath in staged_files:
+            path = Path(filepath)
+            if not path.is_file():
+                continue
+            try:
+                content = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for line_no, line in enumerate(content.splitlines(), start=1):
+                if regex.search(line):
+                    if not found_secrets:
+                        # Print header on first match for this pattern
+                        pass
+                    print(f"ERROR: Possible sensitive data found matching pattern: {pattern}")
+                    print(f"  -> {filepath}:{line_no}")
+                    found_secrets = True
+                    break  # One match per file per pattern is enough
+
+    if found_secrets:
+        print()
+        print("Commit blocked: remove secrets before committing.")
+        print("If these are false positives, use: git commit --no-verify")
+        return 1
+
+    print("No sensitive data detected.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
 '''
 
 PRE_PUSH_HOOK = '''\
-#!/usr/bin/env bash
-# Pre-push hook: validate marketplace before pushing
+#!/usr/bin/env python3
+# Pre-push hook: thin wrapper delegating to lint_files.py and validate_plugin.py
 # Installed by setup-hooks.py
+#
+# All linting is READ-ONLY (no --fix, no --write, no auto-commit).
+# lint_files.py is the single source of truth for all 15 linting functions.
 
-set -euo pipefail
+import subprocess
+import sys
+from pathlib import Path
 
-MARKETPLACE_JSON=""
-for candidate in ".claude-plugin/marketplace.json" "marketplace.json"; do
-    if [ -f "$candidate" ]; then
-        MARKETPLACE_JSON="$candidate"
-        break
-    fi
-done
 
-if [ -z "$MARKETPLACE_JSON" ]; then
-    echo "WARNING: No marketplace.json found - skipping validation"
-    exit 0
-fi
+def main() -> int:
+    # Resolve scripts/ directory relative to this hook file location
+    # Hook lives at .git/hooks/pre-push, so scripts/ is ../../scripts/
+    hook_path = Path(__file__).resolve()
+    script_dir = hook_path.parent.parent.parent / "scripts"
 
-echo "Running marketplace validation..."
+    print("Pre-push: running read-only linting...")
 
-# Check JSON syntax
-if ! python3 -c "import json, sys; json.load(open('$MARKETPLACE_JSON'))" 2>/dev/null; then
-    echo "ERROR: marketplace.json contains invalid JSON"
-    exit 1
-fi
+    # Step 1: Run lint_files.py (read-only linting, all 15 checks)
+    lint_script = script_dir / "lint_files.py"
+    if lint_script.is_file():
+        result = subprocess.run(
+            [sys.executable, str(lint_script), "."],
+        )
+        if result.returncode != 0:
+            print("ERROR: Linting failed. Fix issues before pushing.")
+            return 1
+        print("Linting passed.")
+    else:
+        print("WARNING: scripts/lint_files.py not found - skipping linting")
 
-# Run full validation if cpv is available
-if command -v cpv &>/dev/null; then
-    if ! cpv validate-marketplace .; then
-        echo "ERROR: Marketplace validation failed"
-        echo "Fix validation errors before pushing."
-        exit 1
-    fi
-elif [ -f "scripts/validate_marketplace.py" ]; then
-    if ! python3 scripts/validate_marketplace.py .; then
-        echo "ERROR: Marketplace validation failed"
-        exit 1
-    fi
-else
-    echo "NOTE: cpv not installed - only JSON syntax was checked"
-fi
+    # Step 2: Run validate_plugin.py (structural validation)
+    validate_script = script_dir / "validate_plugin.py"
+    if validate_script.is_file():
+        result = subprocess.run(
+            [sys.executable, str(validate_script), "."],
+        )
+        if result.returncode != 0:
+            print("ERROR: Validation failed. Fix issues before pushing.")
+            return 1
+        print("Validation passed.")
+    else:
+        print("WARNING: scripts/validate_plugin.py not found - skipping validation")
 
-# Optionally check version sync
-if [ -f "scripts/sync_marketplace_versions.py" ]; then
-    if ! python3 scripts/sync_marketplace_versions.py --check-only --quiet; then
-        echo "WARNING: Plugin versions may be out of sync"
-        echo "Run: python scripts/sync_marketplace_versions.py"
-    fi
-fi
+    print("Pre-push checks passed.")
+    return 0
 
-echo "Marketplace validation passed"
+
+if __name__ == "__main__":
+    sys.exit(main())
 '''
 
 
@@ -902,288 +950,332 @@ if __name__ == "__main__":
 
 ---
 
-## push-plugins.sh
+## push-plugins.py
 
 Master orchestration script for pushing updates to all plugins and the marketplace.
 Iterates over plugins, validates, optionally bumps versions, and pushes everything.
 
-**Install location:** `scripts/push-plugins.sh`
+**Install location:** `scripts/push-plugins.py`
 
-```bash
-#!/usr/bin/env bash
-# push-plugins.sh - Push updates to all plugins and the marketplace
-#
-# Iterates over plugin directories (from marketplace.json or subdirectories),
-# validates each plugin, optionally bumps versions, commits, and pushes.
-# After all plugins are updated, syncs marketplace versions, regenerates
-# the README, validates, commits, and pushes the marketplace itself.
-#
-# Usage:
-#   ./push-plugins.sh [OPTIONS]
-#
-# Options:
-#   --dry-run           Show what would happen without making changes
-#   --skip-validation   Skip plugin and marketplace validation steps
-#   --message MSG       Custom commit message (default: "Update plugins")
-#   --help              Show this help text
-#
-# Exit codes:
-#   0 - Success
-#   1 - Error
+```python
+#!/usr/bin/env python3
+"""
+push-plugins.py - Push updates to all plugins and the marketplace
 
-set -euo pipefail
+Iterates over plugin directories (from marketplace.json or subdirectories),
+validates each plugin, optionally bumps versions, commits, and pushes.
+After all plugins are updated, syncs marketplace versions, regenerates
+the README, validates, commits, and pushes the marketplace itself.
 
-# -- Color output helpers --
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+Usage:
+    python push-plugins.py [OPTIONS]
 
-info()    { echo -e "${BLUE}[INFO]${NC} $*"; }
-success() { echo -e "${GREEN}[OK]${NC} $*"; }
-warn()    { echo -e "${YELLOW}[WARN]${NC} $*"; }
-error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+Options:
+    --dry-run           Show what would happen without making changes
+    --skip-validation   Skip plugin and marketplace validation steps
+    --message MSG       Custom commit message (default: "Update plugins")
+    --help              Show this help text
 
-# -- Default configuration --
-DRY_RUN=false
-SKIP_VALIDATION=false
-COMMIT_MSG="Update plugins"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+Exit codes:
+    0 - Success
+    1 - Error
+"""
 
-# -- Parse arguments --
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --dry-run)
-            DRY_RUN=true
-            shift
-            ;;
-        --skip-validation)
-            SKIP_VALIDATION=true
-            shift
-            ;;
-        --message)
-            COMMIT_MSG="$2"
-            shift 2
-            ;;
-        --help)
-            head -25 "$0" | tail -20
-            exit 0
-            ;;
-        *)
-            error "Unknown option: $1"
-            exit 1
-            ;;
-    esac
-done
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
 
-# -- Locate marketplace.json --
-MARKETPLACE_JSON=""
-for candidate in "$REPO_ROOT/.claude-plugin/marketplace.json" "$REPO_ROOT/marketplace.json"; do
-    if [ -f "$candidate" ]; then
-        MARKETPLACE_JSON="$candidate"
-        break
-    fi
-done
 
-if [ -z "$MARKETPLACE_JSON" ]; then
-    error "Could not find marketplace.json in $REPO_ROOT"
-    exit 1
-fi
+# -- Color output helpers (cross-platform) --
+def _supports_color() -> bool:
+    """Check whether the terminal supports ANSI color codes."""
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
+    if sys.platform == "win32":
+        # Windows 10+ supports ANSI via virtual terminal processing
+        return os.environ.get("TERM") is not None or os.environ.get("WT_SESSION") is not None
+    return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
 
-info "Marketplace: $MARKETPLACE_JSON"
-if $DRY_RUN; then
-    warn "DRY RUN - no changes will be made"
-fi
 
-# -- Discover plugin directories --
-# Uses jq to parse marketplace.json if available, otherwise falls back to subdirectories
-get_plugin_dirs() {
-    if command -v jq &>/dev/null; then
-        jq -r '.plugins[]? | .source // ("./"+.name)' "$MARKETPLACE_JSON" 2>/dev/null | while read -r src; do
-            local dir="${src#./}"
-            if [ -d "$REPO_ROOT/$dir" ]; then
-                echo "$dir"
-            fi
-        done
-    else
+_COLOR = _supports_color()
+_RED = "\033[0;31m" if _COLOR else ""
+_GREEN = "\033[0;32m" if _COLOR else ""
+_YELLOW = "\033[1;33m" if _COLOR else ""
+_BLUE = "\033[0;34m" if _COLOR else ""
+_NC = "\033[0m" if _COLOR else ""
+
+
+def info(msg: str) -> None:
+    print(f"{_BLUE}[INFO]{_NC} {msg}")
+
+
+def success(msg: str) -> None:
+    print(f"{_GREEN}[OK]{_NC} {msg}")
+
+
+def warn(msg: str) -> None:
+    print(f"{_YELLOW}[WARN]{_NC} {msg}")
+
+
+def error(msg: str) -> None:
+    print(f"{_RED}[ERROR]{_NC} {msg}", file=sys.stderr)
+
+
+# -- Helpers --
+def run_git(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+    """Run a git command and return the result."""
+    return subprocess.run(
+        ["git"] + args,
+        capture_output=True, text=True, cwd=cwd,
+    )
+
+
+def find_marketplace_json(repo_root: Path) -> Path | None:
+    """Locate marketplace.json under the repo root."""
+    for candidate in [
+        repo_root / ".claude-plugin" / "marketplace.json",
+        repo_root / "marketplace.json",
+    ]:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def get_plugin_dirs(repo_root: Path, marketplace_json: Path) -> list[str]:
+    """
+    Discover plugin directories from marketplace.json (using stdlib json)
+    or by scanning subdirectories for plugin.json files.
+    """
+    plugin_dirs: list[str] = []
+
+    # Try parsing marketplace.json with the json module (no jq needed)
+    try:
+        with open(marketplace_json, "r", encoding="utf-8") as f:
+            data: dict[str, Any] = json.load(f)
+        plugins = data.get("plugins", [])
+        for p in plugins:
+            source = p.get("source", "./" + p.get("name", ""))
+            dir_name = source.lstrip("./")
+            if (repo_root / dir_name).is_dir():
+                plugin_dirs.append(dir_name)
+    except (json.JSONDecodeError, OSError):
         # Fallback: find directories that contain .claude-plugin/plugin.json
-        for dir in "$REPO_ROOT"/*/; do
-            dir_name="$(basename "$dir")"
-            if [ -f "$dir/.claude-plugin/plugin.json" ]; then
-                echo "$dir_name"
-            fi
-        done
-    fi
-}
+        for child in sorted(repo_root.iterdir()):
+            if child.is_dir() and (child / ".claude-plugin" / "plugin.json").is_file():
+                plugin_dirs.append(child.name)
 
-# -- Validate a single plugin --
-validate_plugin() {
-    local plugin_dir="$1"
-    local plugin_path="$REPO_ROOT/$plugin_dir"
+    return plugin_dirs
 
-    if ! [ -f "$plugin_path/.claude-plugin/plugin.json" ]; then
-        warn "$plugin_dir: no plugin.json found - skipping validation"
-        return 1
-    fi
+
+def validate_plugin(plugin_dir: str, repo_root: Path) -> bool:
+    """Validate a single plugin directory."""
+    plugin_path = repo_root / plugin_dir
+    plugin_json = plugin_path / ".claude-plugin" / "plugin.json"
+
+    if not plugin_json.is_file():
+        warn(f"{plugin_dir}: no plugin.json found - skipping validation")
+        return False
 
     # Check JSON syntax
-    if ! python3 -c "import json; json.load(open('$plugin_path/.claude-plugin/plugin.json'))" 2>/dev/null; then
-        error "$plugin_dir: plugin.json has invalid JSON"
-        return 1
-    fi
+    try:
+        with open(plugin_json, "r", encoding="utf-8") as f:
+            json.load(f)
+    except (json.JSONDecodeError, OSError) as exc:
+        error(f"{plugin_dir}: plugin.json has invalid JSON: {exc}")
+        return False
 
     # Run cpv if available
-    if command -v cpv &>/dev/null; then
-        if ! cpv validate-plugin "$plugin_path" --quiet 2>/dev/null; then
-            error "$plugin_dir: validation failed"
-            return 1
-        fi
-    fi
+    if shutil.which("cpv"):
+        result = subprocess.run(
+            ["cpv", "validate-plugin", str(plugin_path), "--quiet"],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            error(f"{plugin_dir}: validation failed")
+            return False
 
-    return 0
-}
+    return True
 
-# -- Push a single plugin --
-push_plugin() {
-    local plugin_dir="$1"
-    local plugin_path="$REPO_ROOT/$plugin_dir"
 
-    if ! [ -d "$plugin_path/.git" ]; then
-        warn "$plugin_dir: not a git repo (not a submodule?) - skipping push"
-        return 0
-    fi
+def push_plugin(
+    plugin_dir: str,
+    repo_root: Path,
+    commit_msg: str,
+    dry_run: bool,
+) -> bool:
+    """Push a single plugin (git submodule)."""
+    plugin_path = repo_root / plugin_dir
 
-    cd "$plugin_path"
+    if not (plugin_path / ".git").is_dir():
+        warn(f"{plugin_dir}: not a git repo (not a submodule?) - skipping push")
+        return True
 
     # Check for uncommitted changes
-    if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
-        info "$plugin_dir: staging and committing changes..."
-        if ! $DRY_RUN; then
-            git add -A
-            git commit -m "$COMMIT_MSG"
-        fi
-    fi
+    status = run_git(["status", "--porcelain"], cwd=plugin_path)
+    if status.stdout.strip():
+        info(f"{plugin_dir}: staging and committing changes...")
+        if not dry_run:
+            run_git(["add", "-A"], cwd=plugin_path)
+            run_git(["commit", "-m", commit_msg], cwd=plugin_path)
 
-    # Push if there are unpushed commits
-    local branch
-    branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
-    if [ -z "$branch" ]; then
-        warn "$plugin_dir: could not determine branch"
-        cd "$REPO_ROOT"
+    # Determine current branch
+    branch_result = run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=plugin_path)
+    branch = branch_result.stdout.strip()
+    if not branch:
+        warn(f"{plugin_dir}: could not determine branch")
+        return False
+
+    # Compare local vs remote
+    local_hash = run_git(["rev-parse", "HEAD"], cwd=plugin_path).stdout.strip()
+    remote_result = run_git(["rev-parse", f"origin/{branch}"], cwd=plugin_path)
+    remote_hash = remote_result.stdout.strip() if remote_result.returncode == 0 else ""
+
+    if local_hash != remote_hash:
+        info(f"{plugin_dir}: pushing to origin/{branch}...")
+        if not dry_run:
+            push_result = run_git(["push", "origin", branch], cwd=plugin_path)
+            if push_result.returncode != 0:
+                error(f"{plugin_dir}: push failed: {push_result.stderr.strip()}")
+                return False
+        success(f"{plugin_dir}: pushed")
+    else:
+        success(f"{plugin_dir}: already up to date")
+
+    return True
+
+
+def main() -> int:
+    """Main entry point."""
+    parser = argparse.ArgumentParser(
+        description="Push updates to all plugins and the marketplace",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Show what would happen without making changes",
+    )
+    parser.add_argument(
+        "--skip-validation", action="store_true",
+        help="Skip plugin and marketplace validation steps",
+    )
+    parser.add_argument(
+        "--message", default="Update plugins",
+        help='Custom commit message (default: "Update plugins")',
+    )
+    args = parser.parse_args()
+
+    dry_run: bool = args.dry_run
+    skip_validation: bool = args.skip_validation
+    commit_msg: str = args.message
+
+    # Resolve paths
+    script_dir = Path(__file__).resolve().parent
+    repo_root = script_dir.parent
+
+    # Locate marketplace.json
+    marketplace_json = find_marketplace_json(repo_root)
+    if marketplace_json is None:
+        error(f"Could not find marketplace.json in {repo_root}")
         return 1
-    fi
 
-    local local_hash remote_hash
-    local_hash="$(git rev-parse HEAD 2>/dev/null)"
-    remote_hash="$(git rev-parse "origin/$branch" 2>/dev/null || echo "")"
+    info(f"Marketplace: {marketplace_json}")
+    if dry_run:
+        warn("DRY RUN - no changes will be made")
 
-    if [ "$local_hash" != "$remote_hash" ]; then
-        info "$plugin_dir: pushing to origin/$branch..."
-        if ! $DRY_RUN; then
-            git push origin "$branch"
-        fi
-        success "$plugin_dir: pushed"
-    else
-        success "$plugin_dir: already up to date"
-    fi
+    # -- Discover plugin directories --
+    info("Discovering plugins...")
+    plugin_dirs = get_plugin_dirs(repo_root, marketplace_json)
 
-    cd "$REPO_ROOT"
-}
+    if not plugin_dirs:
+        warn("No plugin directories found")
+        return 0
 
-# -- Main workflow --
-info "Discovering plugins..."
-PLUGIN_DIRS=()
-while IFS= read -r dir; do
-    PLUGIN_DIRS+=("$dir")
-done < <(get_plugin_dirs)
+    info(f"Found {len(plugin_dirs)} plugin(s): {' '.join(plugin_dirs)}")
 
-if [ ${#PLUGIN_DIRS[@]} -eq 0 ]; then
-    warn "No plugin directories found"
-    exit 0
-fi
+    # Step 1: Validate all plugins
+    if not skip_validation:
+        info("Validating plugins...")
+        validation_failed = False
+        for pdir in plugin_dirs:
+            if not validate_plugin(pdir, repo_root):
+                validation_failed = True
+        if validation_failed:
+            error("Some plugins failed validation. Fix errors or use --skip-validation.")
+            return 1
+        success("All plugins validated")
 
-info "Found ${#PLUGIN_DIRS[@]} plugin(s): ${PLUGIN_DIRS[*]}"
+    # Step 2: Push each plugin
+    info("Pushing plugins...")
+    for pdir in plugin_dirs:
+        push_plugin(pdir, repo_root, commit_msg, dry_run)
 
-# Step 1: Validate all plugins
-if ! $SKIP_VALIDATION; then
-    info "Validating plugins..."
-    VALIDATION_FAILED=false
-    for plugin_dir in "${PLUGIN_DIRS[@]}"; do
-        if ! validate_plugin "$plugin_dir"; then
-            VALIDATION_FAILED=true
-        fi
-    done
+    # Step 3: Sync marketplace versions
+    sync_script = script_dir / "sync_marketplace_versions.py"
+    if sync_script.is_file():
+        info("Syncing marketplace versions...")
+        sync_args = [sys.executable, str(sync_script), "--marketplace", str(marketplace_json)]
+        if dry_run:
+            sync_args.append("--dry-run")
+        subprocess.run(sync_args)
 
-    if $VALIDATION_FAILED; then
-        error "Some plugins failed validation. Fix errors or use --skip-validation."
-        exit 1
-    fi
-    success "All plugins validated"
-fi
+    # Step 4: Regenerate README
+    gen_script = script_dir / "generate-readme.py"
+    if gen_script.is_file():
+        info("Regenerating README...")
+        if not dry_run:
+            subprocess.run(
+                [sys.executable, str(gen_script), "--marketplace", str(marketplace_json)],
+            )
 
-# Step 2: Push each plugin
-info "Pushing plugins..."
-for plugin_dir in "${PLUGIN_DIRS[@]}"; do
-    push_plugin "$plugin_dir"
-done
+    # Step 5: Validate the marketplace itself
+    if not skip_validation:
+        info("Validating marketplace...")
+        if shutil.which("cpv"):
+            result = subprocess.run(
+                ["cpv", "validate-marketplace", str(repo_root), "--quiet"],
+                capture_output=True, text=True,
+            )
+            if result.returncode != 0:
+                error("Marketplace validation failed after sync")
+                return 1
+        success("Marketplace validation passed")
 
-# Step 3: Sync marketplace versions
-if [ -f "$SCRIPT_DIR/sync_marketplace_versions.py" ]; then
-    info "Syncing marketplace versions..."
-    SYNC_ARGS=("$SCRIPT_DIR/sync_marketplace_versions.py" "--marketplace" "$MARKETPLACE_JSON")
-    if $DRY_RUN; then
-        SYNC_ARGS+=("--dry-run")
-    fi
-    python3 "${SYNC_ARGS[@]}"
-fi
+    # Step 6: Commit and push the marketplace
+    status = run_git(["status", "--porcelain"], cwd=repo_root)
+    if status.stdout.strip():
+        info("Committing marketplace changes...")
+        if not dry_run:
+            run_git(["add", "-A"], cwd=repo_root)
+            run_git(["commit", "-m", "chore: sync plugin versions and regenerate README"], cwd=repo_root)
 
-# Step 4: Regenerate README
-if [ -f "$SCRIPT_DIR/generate-readme.py" ]; then
-    info "Regenerating README..."
-    GEN_ARGS=("$SCRIPT_DIR/generate-readme.py" "--marketplace" "$MARKETPLACE_JSON")
-    if ! $DRY_RUN; then
-        python3 "${GEN_ARGS[@]}"
-    fi
-fi
+    branch_result = run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_root)
+    branch = branch_result.stdout.strip()
+    local_hash = run_git(["rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
+    remote_result = run_git(["rev-parse", f"origin/{branch}"], cwd=repo_root)
+    remote_hash = remote_result.stdout.strip() if remote_result.returncode == 0 else ""
 
-# Step 5: Validate the marketplace itself
-if ! $SKIP_VALIDATION; then
-    info "Validating marketplace..."
-    if command -v cpv &>/dev/null; then
-        if ! cpv validate-marketplace "$REPO_ROOT" --quiet 2>/dev/null; then
-            error "Marketplace validation failed after sync"
-            exit 1
-        fi
-    fi
-    success "Marketplace validation passed"
-fi
+    if local_hash != remote_hash:
+        info(f"Pushing marketplace to origin/{branch}...")
+        if not dry_run:
+            push_result = run_git(["push", "origin", branch], cwd=repo_root)
+            if push_result.returncode != 0:
+                error(f"Marketplace push failed: {push_result.stderr.strip()}")
+                return 1
+        success("Marketplace pushed")
+    else:
+        success("Marketplace already up to date")
 
-# Step 6: Commit and push the marketplace
-cd "$REPO_ROOT"
-if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
-    info "Committing marketplace changes..."
-    if ! $DRY_RUN; then
-        git add -A
-        git commit -m "chore: sync plugin versions and regenerate README"
-    fi
-fi
+    print()
+    success("All done!")
+    return 0
 
-BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
-LOCAL="$(git rev-parse HEAD 2>/dev/null)"
-REMOTE="$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo "")"
 
-if [ "$LOCAL" != "$REMOTE" ]; then
-    info "Pushing marketplace to origin/$BRANCH..."
-    if ! $DRY_RUN; then
-        git push origin "$BRANCH"
-    fi
-    success "Marketplace pushed"
-else
-    success "Marketplace already up to date"
-fi
-
-echo ""
-success "All done!"
+if __name__ == "__main__":
+    sys.exit(main())
 ```

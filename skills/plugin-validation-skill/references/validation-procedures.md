@@ -254,11 +254,12 @@ ruff check /path/to/script.py
 ### Git Hooks Setup Checklist
 
 - [ ] 1. Verify .git/hooks directory exists
-- [ ] 2. Create pre-commit hook script
-- [ ] 3. Make hook executable (chmod +x)
-- [ ] 4. Test hook with a sample commit
-- [ ] 5. Verify hook blocks invalid changes
-- [ ] 6. Document hook in plugin README
+- [ ] 2. Pre-commit hook only checks for sensitive data (no linting)
+- [ ] 3. Verify pre-push hook exists and delegates to scripts/lint_files.py (read-only, no --fix) and scripts/validate_plugin.py
+- [ ] 4. Make hooks executable (chmod +x)
+- [ ] 5. Test pre-push hook with a sample push
+- [ ] 6. Verify hook blocks invalid changes
+- [ ] 7. Document hooks in plugin README
 
 ### Marketplace Publishing Checklist
 

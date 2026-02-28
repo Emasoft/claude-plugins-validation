@@ -181,7 +181,13 @@ uv run python scripts/validate_mcp.py /path/to/plugin
 uv run python scripts/validate_marketplace.py /path/to/marketplace
 
 # Validate and setup development pipeline
-uv run python scripts/setup_plugin_pipeline.py /path/to/project --validate --fix
+uv run python scripts/setup_plugin_pipeline.py /path/to/project --validate
+
+# Lint files across 15 languages (read-only)
+uv run python scripts/lint_files.py /path/to/plugin
+
+# Install marketplace automation workflows
+uv run python scripts/setup_marketplace_automation.py /path/to/marketplace
 ```
 
 ## Exit Codes
@@ -198,31 +204,30 @@ uv run python scripts/setup_plugin_pipeline.py /path/to/project --validate --fix
 
 ## CI/CD Auto-Fix Loop
 
-The pre-push hook implements an automated loop that fixes linting/formatting issues:
+The pre-push hook validates all files in read-only mode:
 
 ```
-1. Run linting (all detected languages)
-2. If files modified → auto-commit → restart loop
-3. If lint failed but no changes → BLOCK (unfixable)
+1. Run linting on all detected languages (read-only, no --fix)
+2. Report issues to user
+3. If issues found → BLOCK push (user must fix manually)
 4. Run plugin validation
 5. If clean → push allowed
-6. Max 5 iterations → BLOCK (manual fix required)
 ```
 
-**Lint Order (IMPORTANT):** ruff check --fix → mypy → ruff check → ruff format (FORMAT LAST!)
+**Lint Order (read-only):** ruff check → mypy (no --fix, no formatting changes)
 
 ## Multi-Language Support
 
-| Language | Linter | Auto-Fix |
-|----------|--------|----------|
-| Python | ruff, mypy | Yes |
-| JavaScript/TypeScript | eslint | Yes |
-| Shell/Bash | shellcheck | No |
-| Go | gofmt, go vet | Yes |
-| Rust | cargo fmt, clippy | Yes |
-| Markdown | markdownlint-cli | Yes |
-| JSON | prettier | Yes |
-| YAML | yamllint | No |
+| Language | Linter |
+|----------|--------|
+| Python | ruff, mypy |
+| JavaScript/TypeScript | eslint |
+| Shell/Bash | shellcheck |
+| Go | go vet |
+| Rust | clippy |
+| Markdown | markdownlint-cli |
+| JSON | prettier |
+| YAML | yamllint |
 
 ## Detailed Procedures
 
@@ -353,4 +358,4 @@ Version sync: plugin.json (1.2.0) matches marketplace.json (1.2.0).
 - Use proactively before releasing or updating plugins
 - Run validation in CI/CD pipelines
 - **ALWAYS install the pre-push hook** to prevent broken plugins from reaching GitHub
-- **Run `setup_plugin_pipeline.py --validate --fix`** when setting up any new plugin project
+- **Run `setup_plugin_pipeline.py --validate`** when setting up any new plugin project

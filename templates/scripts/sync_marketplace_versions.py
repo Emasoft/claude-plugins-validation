@@ -37,7 +37,8 @@ def load_json(path: Path) -> dict[str, Any] | None:
     """Load and parse a JSON file."""
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data: dict[str, Any] = json.load(f)
+            return data
     except (json.JSONDecodeError, FileNotFoundError) as e:
         print(f"Error loading {path}: {e}", file=sys.stderr)
         return None

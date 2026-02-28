@@ -146,7 +146,7 @@ jobs:
           echo "name=$(jq -r '.name' .claude-plugin/plugin.json)" >> $GITHUB_OUTPUT
           echo "version=$(jq -r '.version' .claude-plugin/plugin.json)" >> $GITHUB_OUTPUT
       - name: Notify marketplace
-        uses: peter-evans/repository-dispatch@v3
+        uses: peter-evans/repository-dispatch@v4
         with:
           token: ${{ secrets.MARKETPLACE_PAT }}
           repository: {{OWNER}}/{{REPO_NAME}}

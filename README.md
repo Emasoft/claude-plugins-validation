@@ -204,7 +204,7 @@ claude-plugins-validation/
 │   ├── smart_exec.py                # Smart script executor
 │   ├── bump_version.py              # Version bumping utility
 │   ├── check_version_consistency.py # Version consistency checker
-│   ├── setup_git_hooks.sh           # Git hooks setup script
+│   ├── setup_git_hooks.py            # Git hooks setup script
 │   ├── setup_marketplace_automation.py
 │   ├── setup_plugin_pipeline.py
 │   └── update_marketplace_metadata.py

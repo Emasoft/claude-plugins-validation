@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # setup_git_hooks.sh - Install git hooks for plugin validation
 #
-# This script sets up pre-commit and pre-push hooks that automatically
-# validate the plugin before commits and pushes.
+# This script sets up pre-push hooks that automatically validate and lint the plugin before pushes.
 #
 # Usage:
 #   ./scripts/setup_git_hooks.sh          # Install hooks (default: copy)
@@ -84,7 +83,7 @@ if [ ! -d "$GIT_HOOKS_DEST" ]; then
 fi
 
 # List of hooks to install
-HOOKS=("pre-commit" "pre-push")
+HOOKS=("pre-push")
 
 # Remove hooks if requested
 if [ "$REMOVE_HOOKS" = true ]; then
@@ -141,11 +140,10 @@ echo -e "${BLUE}----------------------------------------${NC}"
 echo -e "${GREEN}Git hooks installed successfully!${NC}"
 echo ""
 echo -e "${BLUE}Installed hooks:${NC}"
-echo "  - pre-commit: Validates plugin on commit (blocks CRITICAL/MAJOR)"
-echo "  - pre-push: Full validation on push (strict mode - blocks ALL issues)"
+echo "  - pre-push: Read-only linting + plugin validation (blocks ALL issues)"
 echo ""
 echo -e "${BLUE}To test the hooks:${NC}"
-echo "  git commit --allow-empty -m 'Test commit'"
+echo "  git push --dry-run origin HEAD"
 echo ""
 echo -e "${BLUE}To bypass hooks temporarily:${NC}"
 echo "  git commit --no-verify -m 'message'"

@@ -2,6 +2,44 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [1.6.0] - 2026-02-28
+
+### Breaking Changes
+
+- **Linting architecture refactored:** All 15 lint functions extracted from embedded PRE_PUSH_HOOK string template into standalone `scripts/lint_files.py` module (single source of truth)
+- **All linting is now read-only:** Removed `--fix`, `--write`, `gofmt -w`, `ruff format`, and auto-commit from all lint functions. Linters report issues only.
+- **Pre-commit hook reduced:** No longer performs linting at commit time. Only checks for sensitive data (API keys, tokens, passwords).
+- **Pre-push hook is a thin wrapper:** Calls `scripts/lint_files.py` and `scripts/validate_plugin.py` as subprocesses instead of embedding 1500+ lines of lint logic.
+
+### New Features
+
+- **`scripts/lint_files.py`:** Standalone importable module with 15 read-only lint functions, cross-platform tool resolution, install hints, and CLI entry point
+- **Cross-platform git hooks:** All git hooks (`pre-push`, `pre-commit`) converted from bash to Python for Windows/macOS/Linux compatibility
+- **`scripts/setup_git_hooks.py`:** Cross-platform Python replacement for `setup_git_hooks.sh` with `--symlink`, `--remove`, `--help` flags and Windows symlink fallback
+- **ESLint flat config support:** JavaScript linting now detects `.mjs`, `.cjs`, `.ts` config files (ESLint 9+)
+- **push-plugins.py template:** Marketplace orchestration script template converted from bash to Python
+
+### Bug Fixes
+
+- **`_resolve_tool()` crash:** Wrapped `cpv_validation_common` import in try/except — no longer crashes when module is not importable
+- **ruff timeout silently passes:** After `subprocess.TimeoutExpired`, `lint_python()` now correctly returns `False` instead of falling through to `True`
+- **GitHub Actions `set +e` missing:** Added `set +e`/`set -e` around validation step in workflow template to properly capture exit codes
+- **Markdownlint stderr handling:** `lint_markdown()` now reads both stdout and stderr for lint output
+- **`Callable` import location:** Moved from `typing` inside function body to `collections.abc` at module level
+
+### Templates Updated
+
+- All hook templates in `setup_plugin_pipeline.py` are now Python (were already converted in this release)
+- `script-templates.md`: PRE_COMMIT_HOOK, PRE_PUSH_HOOK, and push-plugins templates converted from bash to Python
+- All agent docs, validation checklists, and skill references updated to reflect read-only linting architecture
+- GitHub Actions workflow templates updated to v4 actions, added `lint_files.py` step
+
+### Documentation
+
+- README.md updated with `setup_git_hooks.py` reference
+- Agent and skill docs purged of `--fix` references
+- Marketplace architecture docs updated for consistent naming
+
 ## [1.5.0] - 2026-02-27
 
 ### Breaking Changes

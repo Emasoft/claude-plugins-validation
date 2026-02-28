@@ -1042,7 +1042,7 @@ Comprehensive remediation guide for all issues detected by `validate_hook.py`.
 **Root cause**: The Python linter ruff found an issue.
 **Fix**:
 1. Run ruff locally: `ruff check path/to/script.py`
-2. Auto-fix where possible: `ruff check --fix path/to/script.py`
+2. Report issues: `ruff check path/to/script.py` (read-only, no --fix)
 3. Common codes: `F401` (unused import), `E501` (line too long), `F841` (unused variable)
 
 #### MAJOR: mypy type error
@@ -1088,7 +1088,7 @@ Comprehensive remediation guide for all issues detected by `validate_hook.py`.
 **Root cause**: eslint found a severity-2 (error) issue.
 **Fix**:
 1. Run eslint locally: `npx eslint path/to/script.mjs`
-2. Auto-fix where possible: `npx eslint --fix path/to/script.mjs`
+2. Report issues: `npx eslint path/to/script.mjs` (read-only, no --fix)
 
 #### MINOR: eslint warning
 

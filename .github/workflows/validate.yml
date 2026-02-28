@@ -34,6 +34,9 @@ jobs:
             echo "validator=" >> $GITHUB_OUTPUT
           fi
 
+      - name: Lint all source files (read-only)
+        run: uv run python scripts/lint_files.py .
+
       - name: Validate plugin(s)
         if: steps.find-validator.outputs.validator != ''
         run: |

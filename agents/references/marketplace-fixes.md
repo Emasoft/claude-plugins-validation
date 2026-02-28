@@ -1616,7 +1616,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Notify marketplace
-        uses: peter-evans/repository-dispatch@v3
+        uses: peter-evans/repository-dispatch@v4
         with:
           token: ${{ secrets.MARKETPLACE_PAT }}
           repository: owner/marketplace-repo

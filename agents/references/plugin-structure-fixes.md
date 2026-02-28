@@ -610,11 +610,7 @@ MCP validation is delegated to `validate_mcp.py`. All results are transferred di
    ```bash
    uv run ruff check --select E,F,W --ignore E501 scripts/
    ```
-2. Auto-fix what ruff can handle:
-   ```bash
-   uv run ruff check --select E,F,W --ignore E501 --fix scripts/
-   ```
-3. Manually fix remaining issues.
+2. Review and manually fix reported issues.
 
 ### MINOR: ruff not available
 

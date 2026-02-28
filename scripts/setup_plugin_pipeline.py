@@ -140,13 +140,12 @@ class PipelineStatus:
 # =============================================================================
 
 PRE_COMMIT_HOOK = '''#!/usr/bin/env python3
-"""pre-commit hook: Validate staged changes before commit.
+"""pre-commit hook: Sensitive data check before commit.
 
 SKIPS during rebase/cherry-pick/merge to prevent conflicts.
+Linting and JSON validation are deferred to pre-push.
 """
 
-import json
-import os
 import re
 import subprocess
 import sys
@@ -179,55 +178,6 @@ def is_rebase_in_progress() -> bool:
     return any(i.exists() for i in indicators)
 
 
-def get_staged_files() -> list[str]:
-    """Get list of staged files."""
-    result = subprocess.run(
-        ["git", "diff", "--cached", "--name-only"],
-        capture_output=True, text=True, timeout=30
-    )
-    if result.returncode == 0:
-        return [f for f in result.stdout.strip().split("\\n") if f]
-    return []
-
-
-def lint_python_files(files: list[str]) -> bool:
-    """Lint Python files with ruff."""
-    py_files = [f for f in files if f.endswith(".py") and Path(f).exists()]
-    if not py_files:
-        return True
-
-    try:
-        result = subprocess.run(
-            ["ruff", "check"] + py_files,
-            capture_output=True, timeout=60
-        )
-        return result.returncode == 0
-    except subprocess.TimeoutExpired:
-        print(f"{YELLOW}⚠ ruff timed out{NC}")
-        return True  # Don't block on timeout
-    except FileNotFoundError:
-        print(f"{YELLOW}⚠ ruff not installed{NC}")
-        return True
-
-
-def validate_json_files(files: list[str]) -> tuple[bool, list[str]]:
-    """Validate JSON syntax in staged JSON files."""
-    json_files = [f for f in files if f.endswith(".json")]
-    errors = []
-    for f in json_files:
-        try:
-            with open(f) as fp:
-                json.load(fp)
-        except json.JSONDecodeError as e:
-            errors.append(f"{f}: {e}")
-        except FileNotFoundError:
-            # File may have been deleted since staging - skip
-            pass
-        except OSError as e:
-            errors.append(f"{f}: I/O error: {e}")
-    return len(errors) == 0, errors
-
-
 def check_sensitive_data(diff: str) -> list[str]:
     """Check for potential sensitive data in diff."""
     patterns = [
@@ -256,27 +206,8 @@ def main() -> int:
 
     print("Running pre-commit validations...")
     failed = False
-    staged_files = get_staged_files()
 
-    # Validate JSON files
-    print("Checking JSON syntax... ", end="", flush=True)
-    json_ok, json_errors = validate_json_files(staged_files)
-    if json_ok:
-        print(f"{GREEN}✔{NC}")
-    else:
-        print(f"{RED}✘{NC}")
-        for err in json_errors:
-            print(f"  {RED}{err}{NC}")
-        failed = True
-
-    # Lint Python files
-    print("Linting Python files... ", end="", flush=True)
-    if lint_python_files(staged_files):
-        print(f"{GREEN}✔{NC}")
-    else:
-        print(f"{YELLOW}⚠ issues found (non-blocking){NC}")
-
-    # Check for sensitive data
+    # Check for sensitive data in staged diff
     print("Checking for sensitive data... ", end="", flush=True)
     try:
         diff_result = subprocess.run(
@@ -291,9 +222,10 @@ def main() -> int:
     if not warnings:
         print(f"{GREEN}✔{NC}")
     else:
-        print(f"{YELLOW}⚠ review recommended{NC}")
+        print(f"{RED}✘ review required{NC}")
         for w in warnings[:3]:
-            print(f"  {YELLOW}{w}{NC}")
+            print(f"  {RED}{w}{NC}")
+        failed = True
 
     if failed:
         print(f"\\n{RED}Pre-commit validation failed.{NC}")
@@ -309,1137 +241,101 @@ if __name__ == "__main__":
 '''
 
 PRE_PUSH_HOOK = '''#!/usr/bin/env python3
-"""pre-push hook: Full validation before pushing with auto-fix loop.
+"""pre-push hook: Lint and validate before pushing.
 
-Implements a CI/CD loop that:
-1. Runs linting/formatting with auto-fix (ruff)
-2. Checks if files were modified
-3. If modified, commits the fixes
-4. Re-runs validation
-5. Loops until clean or max iterations reached
-
-Blocks push only if unfixable issues remain after all auto-fix attempts.
+Thin wrapper that delegates to scripts/lint_files.py and
+scripts/validate_plugin.py — the single source of truth.
 """
 
-import shutil
+import os
 import subprocess
 import sys
-from pathlib import Path
 
 RED = "\\033[0;31m"
 GREEN = "\\033[0;32m"
 YELLOW = "\\033[1;33m"
-BLUE = "\\033[0;34m"
 BOLD = "\\033[1m"
 NC = "\\033[0m"
 
-MAX_FIX_ITERATIONS = 5
+
+def is_rebase_in_progress(git_dir: str) -> bool:
+    """Return True if a rebase is in progress — skip hook."""
+    return (
+        os.path.isdir(os.path.join(git_dir, "rebase-merge"))
+        or os.path.isdir(os.path.join(git_dir, "rebase-apply"))
+    )
 
 
-def get_repo_root() -> Path:
-    """Get repository root."""
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=10
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return Path(result.stdout.strip())
-    except subprocess.TimeoutExpired:
-        print(f"{YELLOW}⚠ git rev-parse timed out{NC}")
-    except OSError as e:
-        print(f"{RED}git error: {e}{NC}")
-    # Fallback to current directory
-    return Path.cwd()
-
-
-def find_validator() -> Path | None:
-    """Find the plugin validator script."""
-    repo_root = get_repo_root()
-
-    # Check common locations
+def find_scripts_dir(repo_root: str) -> str | None:
+    """Locate scripts/ directory — may be at root or in a subdirectory."""
     candidates = [
-        repo_root / "scripts" / "validate_plugin.py",
-        repo_root / "claude-plugins-validation" / "scripts" / "validate_plugin.py",
-        Path(__file__).parent.parent / "scripts" / "validate_plugin.py",
+        os.path.join(repo_root, "scripts"),
+        os.path.join(repo_root, "claude-plugins-validation", "scripts"),
     ]
-
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
+    for d in candidates:
+        if os.path.isdir(d):
+            return d
     return None
 
 
-def has_uncommitted_changes(repo_root: Path) -> bool:
-    """Check if there are uncommitted changes in tracked files."""
-    try:
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=repo_root,
-            capture_output=True, text=True, timeout=30
-        )
-        if result.returncode != 0:
-            print(f"{YELLOW}⚠ git status failed{NC}")
-            return False
-        # Filter for modified/added files (not untracked)
-        lines = [l for l in result.stdout.strip().split("\\n") if l and not l.startswith("??")]
-        return len(lines) > 0
-    except subprocess.TimeoutExpired:
-        print(f"{YELLOW}⚠ git status timed out{NC}")
-        return False
-    except OSError:
-        return False
-
-
-def detect_languages(repo_root: Path) -> dict[str, list[Path]]:
-    """Detect which programming languages are present in the repo.
-
-    Returns:
-        Dictionary mapping language name to list of files.
-    """
-    # Directories to exclude from scanning
-    exclude_dirs = {".venv", "venv", "__pycache__", ".git", "node_modules",
-                    ".mypy_cache", ".ruff_cache", "build", "dist", ".tox"}
-
-    def should_include(path: Path) -> bool:
-        return not any(part in exclude_dirs for part in path.parts)
-
-    languages: dict[str, list[Path]] = {}
-
-    # Python
-    py_files = [f for f in repo_root.glob("**/*.py") if should_include(f)]
-    if py_files:
-        languages["python"] = py_files
-
-    # JavaScript/TypeScript
-    js_files = [f for f in repo_root.glob("**/*.js") if should_include(f)]
-    ts_files = [f for f in repo_root.glob("**/*.ts") if should_include(f)]
-    jsx_files = [f for f in repo_root.glob("**/*.jsx") if should_include(f)]
-    tsx_files = [f for f in repo_root.glob("**/*.tsx") if should_include(f)]
-    all_js = js_files + ts_files + jsx_files + tsx_files
-    if all_js:
-        languages["javascript"] = all_js
-
-    # Shell/Bash
-    sh_files = [f for f in repo_root.glob("**/*.sh") if should_include(f)]
-    bash_files = [f for f in repo_root.glob("**/*.bash") if should_include(f)]
-    all_shell = sh_files + bash_files
-    if all_shell:
-        languages["shell"] = all_shell
-
-    # Go
-    go_files = [f for f in repo_root.glob("**/*.go") if should_include(f)]
-    if go_files:
-        languages["go"] = go_files
-
-    # Rust
-    rs_files = [f for f in repo_root.glob("**/*.rs") if should_include(f)]
-    if rs_files:
-        languages["rust"] = rs_files
-
-    # Markdown
-    md_files = [f for f in repo_root.glob("**/*.md") if should_include(f)]
-    mdx_files = [f for f in repo_root.glob("**/*.mdx") if should_include(f)]
-    all_md = md_files + mdx_files
-    if all_md:
-        languages["markdown"] = all_md
-
-    # JSON
-    json_files = [f for f in repo_root.glob("**/*.json") if should_include(f)]
-    if json_files:
-        languages["json"] = json_files
-
-    # YAML
-    yml_files = [f for f in repo_root.glob("**/*.yml") if should_include(f)]
-    yaml_files = [f for f in repo_root.glob("**/*.yaml") if should_include(f)]
-    all_yaml = yml_files + yaml_files
-    if all_yaml:
-        languages["yaml"] = all_yaml
-
-    return languages
-
-
-def install_python_tool(tool: str) -> bool:
-    """Try to install a Python CLI tool.
-
-    Priority:
-    1. uv tool install (preferred - installs tools in isolated envs)
-    2. uvx (just run, no install needed)
-    3. pipx (fallback - similar to uv tool)
-    4. pip install --user (last resort)
-
-    Returns:
-        True if installation succeeded, False otherwise.
-    """
-    last_error = ""
-
-    # Method 1: uv tool install (preferred for CLI tools)
-    # Always specify --python 3.12 for compatibility (some tools don't support 3.14+)
-    if shutil.which("uv"):
-        try:
-            result = subprocess.run(
-                ["uv", "tool", "install", "--python", "3.12", tool],
-                capture_output=True, text=True, timeout=120
-            )
-            if result.returncode == 0:
-                print(f"{GREEN}  ✔ {tool} installed via uv tool (Python 3.12){NC}")
-                return True
-            # If already installed, that's fine
-            if "already installed" in result.stderr.lower():
-                print(f"{GREEN}  ✔ {tool} already installed via uv tool{NC}")
-                return True
-            last_error = result.stderr.strip() or result.stdout.strip()
-        except subprocess.TimeoutExpired:
-            last_error = "uv tool timed out after 120s"
-        except OSError as e:
-            last_error = str(e)
-
-    # Method 2: pipx (similar to uv tool, if uv not available)
-    if shutil.which("pipx"):
-        try:
-            result = subprocess.run(
-                ["pipx", "install", tool],
-                capture_output=True, text=True, timeout=120
-            )
-            if result.returncode == 0:
-                print(f"{GREEN}  ✔ {tool} installed via pipx{NC}")
-                return True
-            if "already installed" in result.stderr.lower() or "already installed" in result.stdout.lower():
-                print(f"{GREEN}  ✔ {tool} already installed via pipx{NC}")
-                return True
-            last_error = result.stderr.strip() or result.stdout.strip()
-        except subprocess.TimeoutExpired:
-            last_error = "pipx timed out after 120s"
-        except OSError as e:
-            last_error = str(e)
-
-    # Method 3: pip install --user (last resort)
-    for pip_cmd in ["pip3", "pip"]:
-        if shutil.which(pip_cmd):
-            try:
-                result = subprocess.run(
-                    [pip_cmd, "install", "--user", tool],
-                    capture_output=True, text=True, timeout=120
-                )
-                if result.returncode == 0:
-                    print(f"{GREEN}  ✔ {tool} installed via {pip_cmd} --user{NC}")
-                    return True
-                last_error = result.stderr.strip() or result.stdout.strip()
-            except subprocess.TimeoutExpired:
-                last_error = f"{pip_cmd} timed out after 120s"
-            except OSError as e:
-                last_error = str(e)
-
-    if last_error:
-        print(f"{RED}  Install error: {last_error[:200]}{NC}")
-    return False
-
-
-def ensure_linter_installed(language: str, repo_root: Path) -> bool:
-    """Ensure the linter for a language is installed. Auto-install if possible.
-
-    Returns:
-        True if linter is available, False if cannot be installed.
-    """
-    if language == "python":
-        # Check and install ruff
-        if not shutil.which("ruff"):
-            print(f"{YELLOW}  Installing ruff...{NC}")
-            if not install_python_tool("ruff"):
-                print(f"{RED}  ✘ Could not install ruff{NC}")
-                return False
-
-        # Check and install mypy (for type checking)
-        if not shutil.which("mypy"):
-            print(f"{YELLOW}  Installing mypy...{NC}")
-            if not install_python_tool("mypy"):
-                print(f"{YELLOW}  ⚠ Could not install mypy, type checking will be skipped{NC}")
-                # Don't return False - mypy is optional, ruff is required
-
-        return True
-
-    elif language == "javascript":
-        # Check for eslint in node_modules or globally
-        local_eslint = repo_root / "node_modules" / ".bin" / "eslint"
-        if local_eslint.exists() or shutil.which("eslint"):
-            return True
-        # Check for package.json to install eslint
-        package_json = repo_root / "package.json"
-        if package_json.exists():
-            print(f"{YELLOW}  Installing eslint...{NC}")
-            # Try bun, then npm, then pnpm
-            for pkg_mgr in ["bun", "npm", "pnpm"]:
-                if shutil.which(pkg_mgr):
-                    result = subprocess.run(
-                        [pkg_mgr, "install", "eslint", "--save-dev"],
-                        cwd=repo_root,
-                        capture_output=True, text=True, timeout=120
-                    )
-                    if result.returncode == 0:
-                        print(f"{GREEN}  ✔ eslint installed via {pkg_mgr}{NC}")
-                        return True
-        print(f"{YELLOW}  ⚠ eslint not available, skipping JS/TS linting{NC}")
-        return False
-
-    elif language == "shell":
-        if shutil.which("shellcheck"):
-            return True
-        # Try to auto-install shellcheck (cross-platform)
-        print(f"{YELLOW}  Installing shellcheck...{NC}")
-        import platform
-        os_type = platform.system().lower()
-
-        # Define package managers by platform and priority
-        pkg_managers = []
-        if os_type == "darwin":  # macOS
-            pkg_managers = [
-                ("brew", ["brew", "install", "shellcheck"]),
-                ("port", ["sudo", "port", "install", "shellcheck"]),
-            ]
-        elif os_type == "linux":
-            pkg_managers = [
-                ("apt-get", ["sudo", "apt-get", "install", "-y", "shellcheck"]),
-                ("dnf", ["sudo", "dnf", "install", "-y", "ShellCheck"]),
-                ("yum", ["sudo", "yum", "install", "-y", "ShellCheck"]),
-                ("pacman", ["sudo", "pacman", "-S", "--noconfirm", "shellcheck"]),
-                ("zypper", ["sudo", "zypper", "install", "-y", "ShellCheck"]),
-                ("apk", ["sudo", "apk", "add", "shellcheck"]),
-                ("brew", ["brew", "install", "shellcheck"]),  # Linuxbrew
-            ]
-        elif os_type == "windows":
-            pkg_managers = [
-                ("scoop", ["scoop", "install", "shellcheck"]),
-                ("choco", ["choco", "install", "shellcheck", "-y"]),
-                ("winget", ["winget", "install", "--id", "koalaman.shellcheck", "-e"]),
-            ]
-
-        last_error = ""
-        for pkg_mgr, cmd in pkg_managers:
-            if shutil.which(pkg_mgr):
-                try:
-                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
-                    if result.returncode == 0:
-                        print(f"{GREEN}  ✔ shellcheck installed via {pkg_mgr}{NC}")
-                        return True
-                    last_error = f"{pkg_mgr}: {result.stderr.strip() or result.stdout.strip()}"
-                except subprocess.TimeoutExpired:
-                    print(f"{YELLOW}  ⚠ {pkg_mgr} install timed out after 180s, trying next...{NC}")
-                    last_error = f"{pkg_mgr}: timed out"
-                except OSError as e:
-                    last_error = f"{pkg_mgr}: {e}"
-
-        if last_error:
-            print(f"{YELLOW}  Last error: {last_error[:150]}{NC}")
-
-        # Provide platform-specific install instructions
-        install_hint = {
-            "darwin": "brew install shellcheck",
-            "linux": "apt install shellcheck  # or dnf/pacman/zypper",
-            "windows": "scoop install shellcheck  # or choco/winget",
-        }.get(os_type, "see https://github.com/koalaman/shellcheck#installing")
-        print(f"{YELLOW}  ⚠ shellcheck not installed (install via: {install_hint}){NC}")
-        return False
-
-    elif language == "go":
-        if shutil.which("gofmt"):
-            return True
-        # gofmt comes with Go installation, can't auto-install separately
-        import platform
-        os_type = platform.system().lower()
-        install_hint = {
-            "darwin": "brew install go  # or download from go.dev/dl",
-            "linux": "apt install golang  # or dnf/pacman, or download from go.dev/dl",
-            "windows": "scoop install go  # or choco install golang, or download from go.dev/dl",
-        }.get(os_type, "https://go.dev/dl/")
-        print(f"{YELLOW}  ⚠ Go tools not installed (install via: {install_hint}){NC}")
-        return False
-
-    elif language == "rust":
-        if shutil.which("cargo"):
-            # Check for rustfmt and clippy components
-            # Note: rustup may not exist if Rust was installed via brew/system package
-            has_rustup = shutil.which("rustup") is not None
-            if not shutil.which("rustfmt"):
-                if has_rustup:
-                    print(f"{YELLOW}  Installing rustfmt via rustup...{NC}")
-                    try:
-                        result = subprocess.run(
-                            ["rustup", "component", "add", "rustfmt"],
-                            capture_output=True, text=True, timeout=120
-                        )
-                        if result.returncode != 0:
-                            print(f"{YELLOW}  ⚠ rustfmt install failed: {result.stderr[:100]}{NC}")
-                    except subprocess.TimeoutExpired:
-                        print(f"{YELLOW}  ⚠ rustfmt install timed out{NC}")
-                else:
-                    print(f"{YELLOW}  ⚠ rustfmt not found and rustup unavailable{NC}")
-            if not shutil.which("cargo-clippy"):
-                if has_rustup:
-                    print(f"{YELLOW}  Installing clippy via rustup...{NC}")
-                    try:
-                        result = subprocess.run(
-                            ["rustup", "component", "add", "clippy"],
-                            capture_output=True, text=True, timeout=120
-                        )
-                        if result.returncode != 0:
-                            print(f"{YELLOW}  ⚠ clippy install failed: {result.stderr[:100]}{NC}")
-                    except subprocess.TimeoutExpired:
-                        print(f"{YELLOW}  ⚠ clippy install timed out{NC}")
-                else:
-                    print(f"{YELLOW}  ⚠ clippy not found and rustup unavailable{NC}")
-            return True
-        # Rust/Cargo not found
-        import platform
-        os_type = platform.system().lower()
-        install_hint = {
-            "darwin": "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh",
-            "linux": "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh",
-            "windows": "Download rustup-init.exe from https://rustup.rs/",
-        }.get(os_type, "https://rustup.rs/")
-        print(f"{YELLOW}  ⚠ Rust/Cargo not installed (install via: {install_hint}){NC}")
-        return False
-
-    elif language == "markdown":
-        # Check for markdownlint-cli (preferred) or markdownlint
-        # Try bun x / npx first (no global install needed)
-        if shutil.which("bun") or shutil.which("npx"):
-            return True  # Will use bun x or npx at runtime
-
-        # Check for globally installed markdownlint-cli
-        if shutil.which("markdownlint"):
-            return True
-
-        # Try to install globally
-        print(f"{YELLOW}  Installing markdownlint-cli...{NC}")
-        for pkg_mgr, cmd in [
-            ("bun", ["bun", "add", "-g", "markdownlint-cli"]),
-            ("npm", ["npm", "install", "-g", "markdownlint-cli"]),
-        ]:
-            if shutil.which(pkg_mgr):
-                try:
-                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-                    if result.returncode == 0:
-                        print(f"{GREEN}  ✔ markdownlint-cli installed via {pkg_mgr}{NC}")
-                        return True
-                except subprocess.TimeoutExpired:
-                    print(f"{YELLOW}  ⚠ {pkg_mgr} install timed out{NC}")
-                except OSError as e:
-                    print(f"{YELLOW}  ⚠ {pkg_mgr} install failed: {e}{NC}")
-
-        print(f"{YELLOW}  ⚠ markdownlint not available (install via: npm install -g markdownlint-cli){NC}")
-        return False
-
-    elif language == "json":
-        # JSON validation uses built-in Python json module + optional prettier
-        # We can always validate JSON with Python, so return True
-        # Optional: check for prettier for formatting
-        if shutil.which("bun") or shutil.which("npx") or shutil.which("prettier"):
-            return True
-
-        # JSON validation with Python is always available
-        print(f"{BLUE}  Using Python json module for JSON validation{NC}")
-        return True
-
-    elif language == "yaml":
-        # Check for yamllint
-        if shutil.which("yamllint"):
-            return True
-
-        # Try to install via uv pip (preferred) or pip
-        print(f"{YELLOW}  Installing yamllint...{NC}")
-        if not install_python_tool("yamllint"):
-            print(f"{YELLOW}  ⚠ Could not install yamllint{NC}")
-            # Provide manual install hint
-            print(f"{YELLOW}  ⚠ Install via: uv tool install --python 3.12 yamllint  OR  pipx install yamllint{NC}")
-            return False
-
-        return True
-
-    return False
-
-
-def lint_python(repo_root: Path) -> tuple[bool, bool]:
-    """Lint Python files with ruff.
-
-    Order: 1) lint+fix, 2) typecheck, 3) verify lint, 4) format (last)
-
-    Returns:
-        (success, files_changed)
-    """
-    files_changed = False
-
-    # Step 1: Run ruff check with auto-fix
-    print(f"{BLUE}    [1/4] ruff check --fix...{NC}")
-    try:
-        subprocess.run(
-            ["ruff", "check", "--fix", "--select=E,F,W,I", str(repo_root)],
-            capture_output=True, text=True, timeout=120
-        )
-    except subprocess.TimeoutExpired:
-        print(f"{YELLOW}    ruff check timed out{NC}")
-    except FileNotFoundError:
-        print(f"{RED}    ruff not found{NC}")
-        return False, files_changed
-
-    if has_uncommitted_changes(repo_root):
-        files_changed = True
-
-    # Step 2: Run type checker (mypy) if available
-    if shutil.which("mypy"):
-        print(f"{BLUE}    [2/4] mypy...{NC}")
-        try:
-            result = subprocess.run(
-                ["mypy", "--ignore-missing-imports", str(repo_root)],
-                capture_output=True, text=True, timeout=180
-            )
-            if result.returncode != 0:
-                print(f"{RED}    Type errors found:{NC}")
-                for line in result.stdout.strip().split("\\n")[:10]:
-                    print(f"      {line}")
-                return False, files_changed
-        except subprocess.TimeoutExpired:
-            print(f"{YELLOW}    mypy timed out, skipping{NC}")
-    else:
-        print(f"{YELLOW}    [2/4] mypy not installed, skipping typecheck{NC}")
-
-    # Step 3: Verify lint check passes (no remaining unfixable issues)
-    print(f"{BLUE}    [3/4] ruff check (verify)...{NC}")
-    try:
-        result = subprocess.run(
-            ["ruff", "check", "--select=E,F,W", str(repo_root)],
-            capture_output=True, text=True, timeout=120
-        )
-        if result.returncode != 0:
-            # Lint issues remain that can't be auto-fixed
-            print(f"{RED}    Unfixable lint issues remain{NC}")
-            return False, files_changed
-    except subprocess.TimeoutExpired:
-        print(f"{YELLOW}    ruff verify timed out{NC}")
-
-    # Step 4: Format ONLY if all above passed (formatting is last)
-    print(f"{BLUE}    [4/4] ruff format...{NC}")
-    try:
-        subprocess.run(
-            ["ruff", "format", str(repo_root)],
-            capture_output=True, text=True, timeout=120
-        )
-    except subprocess.TimeoutExpired:
-        print(f"{YELLOW}    ruff format timed out{NC}")
-
-    if has_uncommitted_changes(repo_root):
-        files_changed = True
-
-    return True, files_changed
-
-
-def lint_javascript(repo_root: Path) -> tuple[bool, bool]:
-    """Lint JavaScript/TypeScript files with eslint.
-
-    Prefers: bun x eslint > npx eslint > local eslint > global eslint
-
-    Returns:
-        (success, files_changed)
-    """
-    files_changed = False
-
-    # Find eslint - prefer bun/npx runners
-    local_eslint = repo_root / "node_modules" / ".bin" / "eslint"
-    if shutil.which("bun"):
-        eslint_cmd = ["bun", "x", "eslint"]
-    elif shutil.which("npx"):
-        eslint_cmd = ["npx", "eslint"]
-    elif local_eslint.exists():
-        eslint_cmd = [str(local_eslint)]
-    elif shutil.which("eslint"):
-        eslint_cmd = ["eslint"]
-    else:
-        print(f"{YELLOW}    eslint not available, skipping{NC}")
-        return True, False
-
-    # Check if eslint config exists
-    config_files = [".eslintrc", ".eslintrc.js", ".eslintrc.json", ".eslintrc.yml", "eslint.config.js"]
-    has_config = any((repo_root / cfg).exists() for cfg in config_files)
-
-    if not has_config:
-        print(f"{YELLOW}    No eslint config found, skipping{NC}")
-        return True, False
-
-    # Run eslint with --fix
-    print(f"{BLUE}    eslint --fix...{NC}")
-    try:
-        subprocess.run(
-            eslint_cmd + ["--fix", "."],
-            cwd=repo_root,
-            capture_output=True, text=True, timeout=120
-        )
-    except subprocess.TimeoutExpired:
-        print(f"{YELLOW}    eslint --fix timed out{NC}")
-    except FileNotFoundError:
-        print(f"{YELLOW}    eslint not found{NC}")
-        return True, False
-
-    if has_uncommitted_changes(repo_root):
-        files_changed = True
-
-    # Final check
-    try:
-        result = subprocess.run(
-            eslint_cmd + ["."],
-            cwd=repo_root,
-            capture_output=True, text=True, timeout=120
-        )
-        return result.returncode == 0, files_changed
-    except subprocess.TimeoutExpired:
-        print(f"{YELLOW}    eslint verify timed out{NC}")
-        return True, files_changed
-    except FileNotFoundError:
-        return True, files_changed
-
-
-def lint_shell(repo_root: Path, files: list[Path]) -> tuple[bool, bool]:
-    """Lint shell scripts with shellcheck.
-
-    Returns:
-        (success, files_changed) - shellcheck doesn't auto-fix, so files_changed is always False
-    """
-    print(f"{BLUE}    shellcheck...{NC}")
-
-    all_passed = True
-    for f in files:
-        try:
-            result = subprocess.run(
-                ["shellcheck", "-x", str(f)],
-                capture_output=True, text=True, timeout=60
-            )
-            if result.returncode != 0:
-                all_passed = False
-                print(f"{YELLOW}      {f.name}: issues found{NC}")
-        except subprocess.TimeoutExpired:
-            print(f"{YELLOW}      {f.name}: shellcheck timed out{NC}")
-        except FileNotFoundError:
-            print(f"{YELLOW}    shellcheck not found{NC}")
-            return True, False  # Skip if shellcheck not available
-
-    return all_passed, False
-
-
-def lint_go(repo_root: Path) -> tuple[bool, bool]:
-    """Lint Go files with gofmt and go vet.
-
-    Returns:
-        (success, files_changed)
-    """
-    files_changed = False
-
-    # Run gofmt -w (auto-fix)
-    print(f"{BLUE}    gofmt -w...{NC}")
-    try:
-        subprocess.run(
-            ["gofmt", "-w", "."],
-            cwd=repo_root,
-            capture_output=True, text=True, timeout=120
-        )
-    except subprocess.TimeoutExpired:
-        print(f"{YELLOW}    gofmt timed out{NC}")
-    except FileNotFoundError:
-        print(f"{RED}    gofmt not found{NC}")
-        return False, files_changed
-
-    if has_uncommitted_changes(repo_root):
-        files_changed = True
-
-    # Run go vet
-    print(f"{BLUE}    go vet...{NC}")
-    try:
-        result = subprocess.run(
-            ["go", "vet", "./..."],
-            cwd=repo_root,
-            capture_output=True, text=True, timeout=120
-        )
-        return result.returncode == 0, files_changed
-    except subprocess.TimeoutExpired:
-        print(f"{YELLOW}    go vet timed out{NC}")
-        return True, files_changed
-    except FileNotFoundError:
-        return True, files_changed
-
-
-def lint_rust(repo_root: Path) -> tuple[bool, bool]:
-    """Lint Rust files with cargo fmt and cargo clippy.
-
-    Returns:
-        (success, files_changed)
-    """
-    files_changed = False
-
-    # Check for Cargo.toml
-    if not (repo_root / "Cargo.toml").exists():
-        return True, False
-
-    # Run cargo fmt
-    print(f"{BLUE}    cargo fmt...{NC}")
-    try:
-        subprocess.run(
-            ["cargo", "fmt"],
-            cwd=repo_root,
-            capture_output=True, text=True, timeout=120
-        )
-    except subprocess.TimeoutExpired:
-        print(f"{YELLOW}    cargo fmt timed out{NC}")
-    except FileNotFoundError:
-        print(f"{RED}    cargo not found{NC}")
-        return False, files_changed
-
-    if has_uncommitted_changes(repo_root):
-        files_changed = True
-
-    # Run cargo clippy with auto-fix (if available)
-    print(f"{BLUE}    cargo clippy --fix...{NC}")
-    try:
-        subprocess.run(
-            ["cargo", "clippy", "--fix", "--allow-dirty", "--allow-staged"],
-            cwd=repo_root,
-            capture_output=True, text=True, timeout=180
-        )
-    except subprocess.TimeoutExpired:
-        print(f"{YELLOW}    cargo clippy --fix timed out{NC}")
-
-    if has_uncommitted_changes(repo_root):
-        files_changed = True
-
-    # Final check
-    try:
-        result = subprocess.run(
-            ["cargo", "clippy"],
-            cwd=repo_root,
-            capture_output=True, text=True, timeout=120
-        )
-        return result.returncode == 0, files_changed
-    except subprocess.TimeoutExpired:
-        print(f"{YELLOW}    cargo clippy verify timed out{NC}")
-        return True, files_changed
-    except FileNotFoundError:
-        return True, files_changed
-
-
-def lint_markdown(repo_root: Path, files: list[Path]) -> tuple[bool, bool]:
-    """Lint Markdown files with markdownlint-cli.
-
-    Prefers: bun x markdownlint > npx markdownlint > global markdownlint
-
-    Returns:
-        (success, files_changed)
-    """
-    files_changed = False
-
-    if not files:
-        return True, False
-
-    # Determine which runner to use
-    if shutil.which("bun"):
-        lint_cmd = ["bun", "x", "markdownlint-cli"]
-    elif shutil.which("npx"):
-        lint_cmd = ["npx", "markdownlint-cli"]
-    elif shutil.which("markdownlint"):
-        lint_cmd = ["markdownlint"]
-    else:
-        print(f"{YELLOW}    markdownlint not available, skipping{NC}")
-        return True, False
-
-    # Convert paths to strings for subprocess
-    file_paths = [str(f) for f in files]
-
-    # Run markdownlint with --fix
-    print(f"{BLUE}    markdownlint --fix...{NC}")
-    try:
-        result = subprocess.run(
-            lint_cmd + ["--fix"] + file_paths,
-            cwd=repo_root,
-            capture_output=True, text=True, timeout=120
-        )
-        # markdownlint returns 0 on success, 1 on lint errors
-        # After --fix, some errors may remain (unfixable)
-    except subprocess.TimeoutExpired:
-        print(f"{YELLOW}    markdownlint --fix timed out{NC}")
-    except FileNotFoundError:
-        print(f"{YELLOW}    markdownlint command not found{NC}")
-        return True, False
-
-    if has_uncommitted_changes(repo_root):
-        files_changed = True
-
-    # Final check (without --fix)
-    print(f"{BLUE}    markdownlint verify...{NC}")
-    try:
-        result = subprocess.run(
-            lint_cmd + file_paths,
-            cwd=repo_root,
-            capture_output=True, text=True, timeout=120
-        )
-        if result.returncode != 0 and result.stdout:
-            # Show first few issues
-            lines = result.stdout.strip().split("\n")[:5]
-            for line in lines:
-                print(f"{YELLOW}    {line}{NC}")
-            if len(result.stdout.strip().split("\n")) > 5:
-                print(f"{YELLOW}    ... and more{NC}")
-        return result.returncode == 0, files_changed
-    except subprocess.TimeoutExpired:
-        print(f"{YELLOW}    markdownlint verify timed out{NC}")
-        return True, files_changed
-    except FileNotFoundError:
-        return True, files_changed
-
-
-def lint_json(repo_root: Path, files: list[Path]) -> tuple[bool, bool]:
-    """Lint and optionally format JSON files.
-
-    Uses Python json module for validation (always available).
-    Uses prettier for formatting if available (bun x / npx / global).
-
-    Returns:
-        (success, files_changed)
-    """
-    files_changed = False
-    all_valid = True
-
-    if not files:
-        return True, False
-
-    # Step 1: Validate JSON syntax with Python
-    print(f"{BLUE}    json.load() validation...{NC}")
-    invalid_files = []
-    for f in files:
-        try:
-            with open(f, encoding="utf-8") as fp:
-                json.load(fp)
-        except json.JSONDecodeError as e:
-            invalid_files.append((f, str(e)))
-        except UnicodeDecodeError as e:
-            invalid_files.append((f, f"Binary/encoding error: {e}"))
-        except OSError as e:
-            invalid_files.append((f, f"I/O error: {e}"))
-
-    if invalid_files:
-        all_valid = False
-        for f, err in invalid_files[:5]:
-            print(f"{RED}    {f.name}: {err[:80]}{NC}")
-        if len(invalid_files) > 5:
-            print(f"{RED}    ... and {len(invalid_files) - 5} more{NC}")
-
-    # Step 2: Format with prettier if available
-    if shutil.which("bun"):
-        format_cmd = ["bun", "x", "prettier"]
-    elif shutil.which("npx"):
-        format_cmd = ["npx", "prettier"]
-    elif shutil.which("prettier"):
-        format_cmd = ["prettier"]
-    else:
-        # No formatter available, skip formatting
-        return all_valid, files_changed
-
-    # Convert paths to strings
-    file_paths = [str(f) for f in files]
-
-    print(f"{BLUE}    prettier --write (JSON)...{NC}")
-    try:
-        result = subprocess.run(
-            format_cmd + ["--write", "--parser", "json"] + file_paths,
-            cwd=repo_root,
-            capture_output=True, text=True, timeout=120
-        )
-    except subprocess.TimeoutExpired:
-        print(f"{YELLOW}    prettier timed out{NC}")
-    except FileNotFoundError:
-        pass  # Formatter not available
-
-    if has_uncommitted_changes(repo_root):
-        files_changed = True
-
-    return all_valid, files_changed
-
-
-def lint_yaml(repo_root: Path, files: list[Path]) -> tuple[bool, bool]:
-    """Lint YAML files with yamllint.
-
-    Returns:
-        (success, files_changed)
-    """
-    files_changed = False  # yamllint doesn't auto-fix
-
-    if not files:
-        return True, False
-
-    if not shutil.which("yamllint"):
-        print(f"{YELLOW}    yamllint not available, skipping{NC}")
-        return True, False
-
-    # Convert paths to strings
-    file_paths = [str(f) for f in files]
-
-    # Run yamllint with relaxed config (warnings for style, errors for syntax)
-    print(f"{BLUE}    yamllint...{NC}")
-    try:
-        # Use relaxed preset for less strict checking
-        result = subprocess.run(
-            ["yamllint", "-d", "relaxed", "--format", "parsable"] + file_paths,
-            cwd=repo_root,
-            capture_output=True, text=True, timeout=120
-        )
-        if result.returncode != 0:
-            # Show first few issues
-            lines = result.stdout.strip().split("\n")[:5] if result.stdout else []
-            for line in lines:
-                # parsable format: file:line:col: [error/warning] message
-                if "[error]" in line:
-                    print(f"{RED}    {line}{NC}")
-                else:
-                    print(f"{YELLOW}    {line}{NC}")
-            total_lines = len(result.stdout.strip().split("\n")) if result.stdout else 0
-            if total_lines > 5:
-                print(f"{YELLOW}    ... and {total_lines - 5} more{NC}")
-
-            # Only fail on errors, not warnings
-            if "[error]" in (result.stdout or ""):
-                return False, files_changed
-
-        return True, files_changed
-    except subprocess.TimeoutExpired:
-        print(f"{YELLOW}    yamllint timed out{NC}")
-        return True, files_changed
-    except FileNotFoundError:
-        print(f"{YELLOW}    yamllint not found{NC}")
-        return True, files_changed
-
-
-def run_linting(repo_root: Path) -> tuple[bool, bool]:
-    """Detect languages and run appropriate linters with auto-fix.
-
-    Returns:
-        (success, files_changed): Whether all linting passed and if any files were modified.
-    """
-    files_changed = False
-    all_passed = True
-
-    # Detect languages present
-    languages = detect_languages(repo_root)
-
-    if not languages:
-        print(f"{YELLOW}  No source files found to lint{NC}")
-        return True, False
-
-    print(f"{BLUE}  Detected languages: {', '.join(languages.keys())}{NC}")
-
-    # Lint each detected language
-    for lang, files in languages.items():
-        print(f"{BLUE}  [{lang.upper()}] ({len(files)} files){NC}")
-
-        # Ensure linter is installed
-        if not ensure_linter_installed(lang, repo_root):
-            continue
-
-        # Run language-specific linter
-        if lang == "python":
-            passed, changed = lint_python(repo_root)
-        elif lang == "javascript":
-            passed, changed = lint_javascript(repo_root)
-        elif lang == "shell":
-            passed, changed = lint_shell(repo_root, files)
-        elif lang == "go":
-            passed, changed = lint_go(repo_root)
-        elif lang == "rust":
-            passed, changed = lint_rust(repo_root)
-        elif lang == "markdown":
-            passed, changed = lint_markdown(repo_root, files)
-        elif lang == "json":
-            passed, changed = lint_json(repo_root, files)
-        elif lang == "yaml":
-            passed, changed = lint_yaml(repo_root, files)
-        else:
-            continue
-
-        if not passed:
-            all_passed = False
-        if changed:
-            files_changed = True
-
-    return all_passed, files_changed
-
-
-def commit_auto_fixes(repo_root: Path, iteration: int) -> bool:
-    """Stage and commit auto-fixed files.
-
-    Returns:
-        True if commit was successful, False otherwise.
-    """
-    print(f"{BLUE}  Staging auto-fixed files...{NC}")
-
-    # Stage all modified tracked files (not untracked)
-    result = subprocess.run(
-        ["git", "add", "-u"],
-        cwd=repo_root,
-        capture_output=True, text=True, timeout=30
-    )
-
-    if result.returncode != 0:
-        print(f"{RED}  ✘ Failed to stage files: {result.stderr}{NC}")
-        return False
-
-    # Check if there's anything to commit
-    result = subprocess.run(
-        ["git", "diff", "--cached", "--quiet"],
-        cwd=repo_root,
-        capture_output=True, timeout=30
-    )
-
-    if result.returncode == 0:
-        # Nothing to commit
-        return True
-
-    # Commit the auto-fixes
-    commit_msg = f"chore: Auto-fix lint/format issues (iteration {iteration})"
-    print(f"{BLUE}  Committing: {commit_msg}{NC}")
-
-    result = subprocess.run(
-        ["git", "commit", "-m", commit_msg, "--no-verify"],
-        cwd=repo_root,
-        capture_output=True, text=True, timeout=30
-    )
-
-    if result.returncode != 0:
-        print(f"{RED}  ✘ Failed to commit: {result.stderr}{NC}")
-        return False
-
-    print(f"{GREEN}  ✔ Auto-fix commit created{NC}")
-    return True
-
-
-def validate_plugin(plugin_path: Path, validator: Path) -> bool:
-    """Validate a single plugin."""
-    result = subprocess.run(
-        ["python3", str(validator), str(plugin_path)],
-        capture_output=True, timeout=120
-    )
-    return result.returncode == 0
-
-
-def run_validation_cycle(repo_root: Path, validator: Path) -> list[str]:
-    """Run full validation and return list of plugins with issues."""
-    issues = []
-
-    # Detect project type
-    marketplace_json = repo_root / ".claude-plugin" / "marketplace.json"
-    plugin_json = repo_root / ".claude-plugin" / "plugin.json"
-
-    if marketplace_json.exists():
-        # Marketplace - validate all plugins
-        print(f"{BLUE}  Validating marketplace plugins...{NC}")
-        import json
-        with open(marketplace_json) as f:
-            data = json.load(f)
-
-        for plugin in data.get("plugins", []):
-            name = plugin.get("name", "unknown")
-            source = plugin.get("source", f"./{name}")
-            plugin_path = repo_root / source.lstrip("./")
-
-            print(f"{BLUE}    {name}...{NC}", end=" ", flush=True)
-            if plugin_path.exists():
-                if validate_plugin(plugin_path, validator):
-                    print(f"{GREEN}✔{NC}")
-                else:
-                    print(f"{RED}✘{NC}")
-                    issues.append(name)
-            else:
-                print(f"{YELLOW}⚠ not found{NC}")
-
-    elif plugin_json.exists():
-        # Single plugin
-        print(f"{BLUE}  Validating plugin...{NC}", end=" ", flush=True)
-        if validate_plugin(repo_root, validator):
-            print(f"{GREEN}✔{NC}")
-        else:
-            print(f"{RED}✘{NC}")
-            issues.append("plugin")
-
-    return issues
+def find_python() -> str:
+    """Return best available Python interpreter."""
+    import shutil
+    for name in ("python3", "python"):
+        if shutil.which(name):
+            return name
+    return sys.executable
 
 
 def main() -> int:
-    print(f"{BOLD}{'=' * 60}{NC}")
-    print(f"{BOLD}Pre-Push Validation (with auto-fix loop){NC}")
-    print(f"{BOLD}{'=' * 60}{NC}")
-    print()
-
-    repo_root = get_repo_root()
-    validator = find_validator()
-
-    if not validator:
-        print(f"{YELLOW}⚠ Validator not found, skipping validation{NC}")
-        return 0
-
-    iteration = 0
-    while iteration < MAX_FIX_ITERATIONS:
-        iteration += 1
-        print(f"{BOLD}--- Iteration {iteration}/{MAX_FIX_ITERATIONS} ---{NC}")
-
-        # Step 1: Run linting with auto-fix
-        print(f"{BLUE}[1] Linting and formatting...{NC}")
-        lint_passed, files_changed = run_linting(repo_root)
-
-        # Step 2: If files changed, commit the fixes and restart
-        if files_changed:
-            print(f"{YELLOW}[2] Files modified by auto-fix, committing...{NC}")
-            if not commit_auto_fixes(repo_root, iteration):
-                print(f"{RED}✘ Failed to commit auto-fixes{NC}")
-                return 1
-
-            # Restart the loop to re-validate after commit
-            print(f"{BLUE}[3] Restarting validation cycle...{NC}")
-            print()
-            continue
-
-        # Step 3: Check if there are unfixable lint issues
-        # (lint failed but nothing was changed = can't be auto-fixed)
-        if not lint_passed:
-            print()
-            print(f"{BOLD}{'=' * 60}{NC}")
-            print(f"{RED}✘ LINT ISSUES CANNOT BE AUTO-FIXED - Push blocked{NC}")
-            print(f"{RED}  Run 'ruff check .' to see remaining issues{NC}")
-            print(f"{BOLD}{'=' * 60}{NC}")
-            return 1
-
-        # Step 4: Run plugin validation
-        print(f"{BLUE}[2] Running plugin validation...{NC}")
-        issues = run_validation_cycle(repo_root, validator)
-
-        # Step 5: Check validation results
-        if not issues:
-            # All good!
-            print()
-            print(f"{BOLD}{'=' * 60}{NC}")
-            print(f"{GREEN}✔ VALIDATION PASSED - Push allowed{NC}")
-            if iteration > 1:
-                print(f"{GREEN}  (Auto-fixed in {iteration - 1} iteration(s)){NC}")
-            print(f"{BOLD}{'=' * 60}{NC}")
-            return 0
-
-        # Validation failed - these are non-lint issues (schema, structure, etc.)
-        print()
-        print(f"{BOLD}{'=' * 60}{NC}")
-        print(f"{RED}✘ VALIDATION FAILED - Push blocked{NC}")
-        print(f"{RED}  Issues in: {', '.join(issues)}{NC}")
-        print(f"{RED}  (Not fixable by linting - manual fix required){NC}")
-        print(f"{BOLD}{'=' * 60}{NC}")
+    """Run linting and validation sequentially, fail-fast."""
+    # Determine repo root
+    try:
+        repo_root = subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"],
+            text=True,
+        ).strip()
+    except subprocess.CalledProcessError:
+        print(f"{RED}ERROR: Not inside a git repository{NC}")
         return 1
 
-    # Max iterations reached
-    print()
-    print(f"{BOLD}{'=' * 60}{NC}")
-    print(f"{RED}✘ MAX ITERATIONS REACHED ({MAX_FIX_ITERATIONS}) - Push blocked{NC}")
-    print(f"{RED}  Manual intervention required{NC}")
-    print(f"{BOLD}{'=' * 60}{NC}")
-    return 1
+    git_dir = os.path.join(repo_root, ".git")
+    if is_rebase_in_progress(git_dir):
+        print(f"{YELLOW}Rebase in progress — skipping pre-push hook{NC}")
+        return 0
+
+    scripts_dir = find_scripts_dir(repo_root)
+    if scripts_dir is None:
+        print(f"{YELLOW}WARNING: scripts/ directory not found — skipping hook{NC}")
+        return 0
+
+    python = find_python()
+    overall = 0
+
+    # Step 1: Read-only linting
+    lint_script = os.path.join(scripts_dir, "lint_files.py")
+    if os.path.isfile(lint_script):
+        print(f"{BOLD}Running file linting (read-only)...{NC}")
+        result = subprocess.run([python, lint_script, repo_root])
+        if result.returncode != 0:
+            print(f"{RED}Linting failed — push blocked{NC}")
+            overall = 1
+
+    # Step 2: Plugin validation
+    validate_script = os.path.join(scripts_dir, "validate_plugin.py")
+    if os.path.isfile(validate_script):
+        print(f"{BOLD}Running plugin validation...{NC}")
+        result = subprocess.run([python, validate_script, repo_root, "--verbose"])
+        if result.returncode != 0:
+            print(f"{RED}Validation failed — push blocked{NC}")
+            overall = max(overall, result.returncode)
+
+    if overall == 0:
+        print(f"{GREEN}{BOLD}All checks passed — push allowed{NC}")
+    else:
+        print(f"{RED}{BOLD}Push blocked (exit code: {overall}){NC}")
+
+    return overall
 
 
 if __name__ == "__main__":
@@ -1640,11 +536,16 @@ jobs:
             echo "validator=" >> $GITHUB_OUTPUT
           fi
 
+      - name: Lint all source files (read-only)
+        run: uv run python scripts/lint_files.py .
+
       - name: Validate plugin(s)
         if: steps.find-validator.outputs.validator != ''
         run: |
+          set +e
           python ${{ steps.find-validator.outputs.validator }} . --verbose
           exit_code=$?
+          set -e
           # Exit codes: 0=pass, 1=critical, 2=major, 3=minor
           # Strict mode: ALL non-zero exit codes block the pipeline
           if [ $exit_code -eq 0 ]; then

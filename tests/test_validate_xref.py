@@ -89,7 +89,7 @@ class TestValidateSubagentTypeMatching:
         )
 
         report = CrossReferenceValidationReport()
-        available_agents = set()  # No agents available
+        available_agents: set[str] = set()
         validate_subagent_type_matching(tmp_path, report, available_agents)
 
         assert report.has_major
@@ -145,7 +145,7 @@ class TestValidateCommandAgentRefs:
         )
 
         report = CrossReferenceValidationReport()
-        available_agents = set()
+        available_agents: set[str] = set()
         validate_command_agent_refs(tmp_path, report, available_agents)
 
         assert report.has_critical
