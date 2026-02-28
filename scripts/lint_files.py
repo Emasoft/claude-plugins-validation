@@ -73,8 +73,18 @@ def detect_languages(repo_root: Path) -> dict[str, list[Path]]:
     Returns:
         Dictionary mapping language name to list of files.
     """
-    exclude_dirs = {".venv", "venv", "__pycache__", ".git", "node_modules",
-                    ".mypy_cache", ".ruff_cache", "build", "dist", ".tox"}
+    exclude_dirs = {
+        ".venv",
+        "venv",
+        "__pycache__",
+        ".git",
+        "node_modules",
+        ".mypy_cache",
+        ".ruff_cache",
+        "build",
+        "dist",
+        ".tox",
+    }
 
     def should_include(path: Path) -> bool:
         return not any(part in exclude_dirs for part in path.parts)
@@ -198,8 +208,7 @@ def install_python_tool(tool: str) -> bool:
     if shutil.which("uv"):
         try:
             result = subprocess.run(
-                ["uv", "tool", "install", "--python", "3.12", tool],
-                capture_output=True, text=True, timeout=120
+                ["uv", "tool", "install", "--python", "3.12", tool], capture_output=True, text=True, timeout=120
             )
             if result.returncode == 0:
                 print(f"{GREEN}  ✔ {tool} installed via uv tool (Python 3.12){NC}")
@@ -216,10 +225,7 @@ def install_python_tool(tool: str) -> bool:
     # pipx (fallback)
     if shutil.which("pipx"):
         try:
-            result = subprocess.run(
-                ["pipx", "install", tool],
-                capture_output=True, text=True, timeout=120
-            )
+            result = subprocess.run(["pipx", "install", tool], capture_output=True, text=True, timeout=120)
             if result.returncode == 0:
                 print(f"{GREEN}  ✔ {tool} installed via pipx{NC}")
                 return True
@@ -237,8 +243,7 @@ def install_python_tool(tool: str) -> bool:
         if shutil.which(pip_cmd):
             try:
                 result = subprocess.run(
-                    [pip_cmd, "install", "--user", tool],
-                    capture_output=True, text=True, timeout=120
+                    [pip_cmd, "install", "--user", tool], capture_output=True, text=True, timeout=120
                 )
                 if result.returncode == 0:
                     print(f"{GREEN}  ✔ {tool} installed via {pip_cmd} --user{NC}")
@@ -292,7 +297,9 @@ def ensure_linter_installed(language: str, repo_root: Path) -> bool:
                     result = subprocess.run(
                         [pkg_mgr, "install", "eslint", "--save-dev"],
                         cwd=repo_root,
-                        capture_output=True, text=True, timeout=120
+                        capture_output=True,
+                        text=True,
+                        timeout=120,
                     )
                     if result.returncode == 0:
                         print(f"{GREEN}  ✔ eslint installed via {pkg_mgr}{NC}")
@@ -366,15 +373,17 @@ def ensure_linter_installed(language: str, repo_root: Path) -> bool:
             if not shutil.which("rustfmt") and has_rustup:
                 print(f"{YELLOW}  Installing rustfmt via rustup...{NC}")
                 try:
-                    subprocess.run(["rustup", "component", "add", "rustfmt"],
-                                   capture_output=True, text=True, timeout=120)
+                    subprocess.run(
+                        ["rustup", "component", "add", "rustfmt"], capture_output=True, text=True, timeout=120
+                    )
                 except (subprocess.TimeoutExpired, OSError):
                     print(f"{YELLOW}  ⚠ rustfmt install failed{NC}")
             if not shutil.which("cargo-clippy") and has_rustup:
                 print(f"{YELLOW}  Installing clippy via rustup...{NC}")
                 try:
-                    subprocess.run(["rustup", "component", "add", "clippy"],
-                                   capture_output=True, text=True, timeout=120)
+                    subprocess.run(
+                        ["rustup", "component", "add", "clippy"], capture_output=True, text=True, timeout=120
+                    )
                 except (subprocess.TimeoutExpired, OSError):
                     print(f"{YELLOW}  ⚠ clippy install failed{NC}")
             return True
@@ -423,20 +432,22 @@ def ensure_linter_installed(language: str, repo_root: Path) -> bool:
     elif language == "dockerfile":
         if _resolve_tool("hadolint") is not None:
             return True
-        hint = {"darwin": "brew install hadolint",
-                "linux": "apt install hadolint  # or download from github.com/hadolint/hadolint",
-                "windows": "scoop install hadolint  # or choco install hadolint"
-                }.get(os_type, "https://github.com/hadolint/hadolint#install")
+        hint = {
+            "darwin": "brew install hadolint",
+            "linux": "apt install hadolint  # or download from github.com/hadolint/hadolint",
+            "windows": "scoop install hadolint  # or choco install hadolint",
+        }.get(os_type, "https://github.com/hadolint/hadolint#install")
         print(f"{YELLOW}  ⚠ hadolint not found (install via: {hint}){NC}")
         return False
 
     elif language == "xml":
         if _resolve_tool("xmllint") is not None:
             return True
-        hint = {"darwin": "brew install libxml2  # or xcode-select --install (ships with macOS CLT)",
-                "linux": "apt install libxml2-utils  # or dnf install libxml2",
-                "windows": "choco install libxml2  # or download from xmlsoft.org"
-                }.get(os_type, "https://xmlsoft.org/downloads.html")
+        hint = {
+            "darwin": "brew install libxml2  # or xcode-select --install (ships with macOS CLT)",
+            "linux": "apt install libxml2-utils  # or dnf install libxml2",
+            "windows": "choco install libxml2  # or download from xmlsoft.org",
+        }.get(os_type, "https://xmlsoft.org/downloads.html")
         print(f"{YELLOW}  ⚠ xmllint not found (install via: {hint}){NC}")
         return False
 
@@ -462,10 +473,12 @@ def ensure_linter_installed(language: str, repo_root: Path) -> bool:
         # tomllib is stdlib in Python 3.11+; tomli is pip fallback for 3.10
         try:
             import tomllib  # noqa: F401
+
             return True
         except ModuleNotFoundError:
             try:
                 import tomli  # type: ignore[import-untyped]  # noqa: F401
+
                 return True
             except ModuleNotFoundError:
                 print(f"{YELLOW}  ⚠ TOML parser not found (need Python 3.11+ or: pip install tomli){NC}")
@@ -478,8 +491,7 @@ def ensure_linter_installed(language: str, repo_root: Path) -> bool:
             hint = "Install-Module -Name PSScriptAnalyzer -Scope CurrentUser"
         else:
             hint = (
-                "brew install powershell/tap/powershell"
-                " && pwsh -c 'Install-Module PSScriptAnalyzer -Scope CurrentUser'"
+                "brew install powershell/tap/powershell && pwsh -c 'Install-Module PSScriptAnalyzer -Scope CurrentUser'"
             )
         print(f"{YELLOW}  ⚠ PSScriptAnalyzer not found (install via: {hint}){NC}")
         return False
@@ -502,7 +514,9 @@ def lint_python(repo_root: Path) -> bool:
     try:
         result = subprocess.run(
             ["ruff", "check", "--select=E,F,W", "--ignore=E501", str(repo_root)],
-            capture_output=True, text=True, timeout=120
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         if result.returncode != 0:
             print(f"{RED}    Lint issues found{NC}")
@@ -522,8 +536,7 @@ def lint_python(repo_root: Path) -> bool:
         print(f"{BLUE}    [2/2] mypy...{NC}")
         try:
             result = subprocess.run(
-                ["mypy", "--ignore-missing-imports", str(repo_root)],
-                capture_output=True, text=True, timeout=180
+                ["mypy", "--ignore-missing-imports", str(repo_root)], capture_output=True, text=True, timeout=180
             )
             if result.returncode != 0:
                 print(f"{RED}    Type errors found:{NC}")
@@ -555,7 +568,16 @@ def lint_javascript(repo_root: Path) -> bool:
         return True
 
     # Check if eslint config exists
-    config_files = [".eslintrc", ".eslintrc.js", ".eslintrc.json", ".eslintrc.yml", "eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", "eslint.config.ts"]
+    config_files = [
+        ".eslintrc",
+        ".eslintrc.js",
+        ".eslintrc.json",
+        ".eslintrc.yml",
+        "eslint.config.js",
+        "eslint.config.mjs",
+        "eslint.config.cjs",
+        "eslint.config.ts",
+    ]
     has_config = any((repo_root / cfg).exists() for cfg in config_files)
     if not has_config:
         print(f"{YELLOW}    No eslint config found, skipping{NC}")
@@ -564,11 +586,7 @@ def lint_javascript(repo_root: Path) -> bool:
     # Read-only check (no --fix)
     print(f"{BLUE}    eslint...{NC}")
     try:
-        result = subprocess.run(
-            eslint_cmd + ["."],
-            cwd=repo_root,
-            capture_output=True, text=True, timeout=120
-        )
+        result = subprocess.run(eslint_cmd + ["."], cwd=repo_root, capture_output=True, text=True, timeout=120)
         return result.returncode == 0
     except subprocess.TimeoutExpired:
         print(f"{YELLOW}    eslint timed out{NC}")
@@ -583,10 +601,7 @@ def lint_shell(repo_root: Path, files: list[Path]) -> bool:
     all_passed = True
     for f in files:
         try:
-            result = subprocess.run(
-                ["shellcheck", "-x", str(f)],
-                capture_output=True, text=True, timeout=60
-            )
+            result = subprocess.run(["shellcheck", "-x", str(f)], capture_output=True, text=True, timeout=60)
             if result.returncode != 0:
                 all_passed = False
                 print(f"{YELLOW}      {f.name}: issues found{NC}")
@@ -603,11 +618,7 @@ def lint_go(repo_root: Path) -> bool:
     # gofmt -l: list files whose formatting differs (read-only, no -w)
     print(f"{BLUE}    gofmt -l (check formatting)...{NC}")
     try:
-        result = subprocess.run(
-            ["gofmt", "-l", "."],
-            cwd=repo_root,
-            capture_output=True, text=True, timeout=120
-        )
+        result = subprocess.run(["gofmt", "-l", "."], cwd=repo_root, capture_output=True, text=True, timeout=120)
         if result.stdout.strip():
             # Files need formatting
             print(f"{RED}    Files need formatting:{NC}")
@@ -623,11 +634,7 @@ def lint_go(repo_root: Path) -> bool:
     # go vet (read-only)
     print(f"{BLUE}    go vet...{NC}")
     try:
-        result = subprocess.run(
-            ["go", "vet", "./..."],
-            cwd=repo_root,
-            capture_output=True, text=True, timeout=120
-        )
+        result = subprocess.run(["go", "vet", "./..."], cwd=repo_root, capture_output=True, text=True, timeout=120)
         return result.returncode == 0
     except subprocess.TimeoutExpired:
         print(f"{YELLOW}    go vet timed out{NC}")
@@ -644,11 +651,7 @@ def lint_rust(repo_root: Path) -> bool:
     # cargo fmt --check (read-only: exits non-zero if changes needed)
     print(f"{BLUE}    cargo fmt --check...{NC}")
     try:
-        result = subprocess.run(
-            ["cargo", "fmt", "--check"],
-            cwd=repo_root,
-            capture_output=True, text=True, timeout=120
-        )
+        result = subprocess.run(["cargo", "fmt", "--check"], cwd=repo_root, capture_output=True, text=True, timeout=120)
         if result.returncode != 0:
             print(f"{RED}    Formatting issues found (run 'cargo fmt' to fix){NC}")
             return False
@@ -661,11 +664,7 @@ def lint_rust(repo_root: Path) -> bool:
     # cargo clippy (read-only, no --fix)
     print(f"{BLUE}    cargo clippy...{NC}")
     try:
-        result = subprocess.run(
-            ["cargo", "clippy"],
-            cwd=repo_root,
-            capture_output=True, text=True, timeout=120
-        )
+        result = subprocess.run(["cargo", "clippy"], cwd=repo_root, capture_output=True, text=True, timeout=120)
         return result.returncode == 0
     except subprocess.TimeoutExpired:
         print(f"{YELLOW}    cargo clippy timed out{NC}")
@@ -694,11 +693,7 @@ def lint_markdown(repo_root: Path, files: list[Path]) -> bool:
     # Read-only check (no --fix)
     print(f"{BLUE}    markdownlint...{NC}")
     try:
-        result = subprocess.run(
-            lint_cmd + file_paths,
-            cwd=repo_root,
-            capture_output=True, text=True, timeout=120
-        )
+        result = subprocess.run(lint_cmd + file_paths, cwd=repo_root, capture_output=True, text=True, timeout=120)
         if result.returncode != 0:
             output = (result.stdout or result.stderr or "").strip()
             if output:
@@ -759,7 +754,9 @@ def lint_yaml(repo_root: Path, files: list[Path]) -> bool:
         result = subprocess.run(
             ["yamllint", "-d", "relaxed", "--format", "parsable"] + file_paths,
             cwd=repo_root,
-            capture_output=True, text=True, timeout=120
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         if result.returncode != 0:
             lines = result.stdout.strip().split("\n")[:5] if result.stdout else []
@@ -794,10 +791,7 @@ def lint_dockerfile(repo_root: Path, files: list[Path]) -> bool:
     print(f"{BLUE}    hadolint...{NC}")
     for f in files:
         try:
-            result = subprocess.run(
-                cmd + [str(f)],
-                capture_output=True, text=True, timeout=60
-            )
+            result = subprocess.run(cmd + [str(f)], capture_output=True, text=True, timeout=60)
             if result.returncode != 0:
                 all_passed = False
                 print(f"{YELLOW}      {f.name}: issues found{NC}")
@@ -823,10 +817,7 @@ def lint_xml(repo_root: Path, files: list[Path]) -> bool:
     print(f"{BLUE}    xmllint --noout...{NC}")
     for f in files:
         try:
-            result = subprocess.run(
-                cmd + ["--noout", str(f)],
-                capture_output=True, text=True, timeout=60
-            )
+            result = subprocess.run(cmd + ["--noout", str(f)], capture_output=True, text=True, timeout=60)
             if result.returncode != 0:
                 all_passed = False
                 print(f"{YELLOW}      {f.name}: XML validation failed{NC}")
@@ -852,11 +843,7 @@ def lint_css(repo_root: Path, files: list[Path]) -> bool:
 
     print(f"{BLUE}    stylelint...{NC}")
     try:
-        result = subprocess.run(
-            cmd + file_paths,
-            cwd=repo_root,
-            capture_output=True, text=True, timeout=120
-        )
+        result = subprocess.run(cmd + file_paths, cwd=repo_root, capture_output=True, text=True, timeout=120)
         if result.returncode != 0 and result.stdout:
             for line in result.stdout.strip().split("\n")[:5]:
                 print(f"{YELLOW}    {line}{NC}")
@@ -880,11 +867,7 @@ def lint_html(repo_root: Path, files: list[Path]) -> bool:
 
     print(f"{BLUE}    htmlhint...{NC}")
     try:
-        result = subprocess.run(
-            cmd + file_paths,
-            cwd=repo_root,
-            capture_output=True, text=True, timeout=120
-        )
+        result = subprocess.run(cmd + file_paths, cwd=repo_root, capture_output=True, text=True, timeout=120)
         if result.returncode != 0 and result.stdout:
             for line in result.stdout.strip().split("\n")[:5]:
                 print(f"{YELLOW}    {line}{NC}")
@@ -912,9 +895,7 @@ def lint_sql(repo_root: Path, files: list[Path]) -> bool:
     print(f"{BLUE}    sqlfluff lint...{NC}")
     try:
         result = subprocess.run(
-            cmd + ["lint", "--dialect", "ansi"] + file_paths,
-            cwd=repo_root,
-            capture_output=True, text=True, timeout=180
+            cmd + ["lint", "--dialect", "ansi"] + file_paths, cwd=repo_root, capture_output=True, text=True, timeout=180
         )
         if result.returncode != 0 and result.stdout:
             for line in result.stdout.strip().split("\n")[:5]:
@@ -937,8 +918,10 @@ def lint_toml(repo_root: Path, files: list[Path]) -> bool:
         try:
             import tomli as tomllib  # type: ignore[no-redef]
         except ModuleNotFoundError:
-            print(f"{YELLOW}    ⚠ No TOML parser available (need Python 3.11+ "
-                  f"or 'pip install tomli'), cannot lint TOML files{NC}")
+            print(
+                f"{YELLOW}    ⚠ No TOML parser available (need Python 3.11+ "
+                f"or 'pip install tomli'), cannot lint TOML files{NC}"
+            )
             return True
 
     print(f"{BLUE}    TOML syntax validation...{NC}")
@@ -973,10 +956,7 @@ def lint_powershell(repo_root: Path, files: list[Path]) -> bool:
     print(f"{BLUE}    PSScriptAnalyzer...{NC}")
     for f in files:
         try:
-            result = subprocess.run(
-                cmd + ["-Path", str(f)],
-                capture_output=True, text=True, timeout=60
-            )
+            result = subprocess.run(cmd + ["-Path", str(f)], capture_output=True, text=True, timeout=60)
             if result.returncode != 0:
                 all_passed = False
                 print(f"{YELLOW}      {f.name}: issues found{NC}")
@@ -999,10 +979,7 @@ def lint_powershell(repo_root: Path, files: list[Path]) -> bool:
 def get_repo_root() -> Path:
     """Get repository root via git."""
     try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=10
-        )
+        result = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=10)
         if result.returncode == 0 and result.stdout.strip():
             return Path(result.stdout.strip())
     except (subprocess.TimeoutExpired, OSError):
@@ -1050,15 +1027,19 @@ def run_linting(repo_root: Path) -> bool:
 
         # Ensure linter is installed — emit WARNING if unavailable
         if not ensure_linter_installed(lang, repo_root):
-            print(f"{YELLOW}  ⚠ WARNING: {len(files)} {lang.upper()} file(s) "
-                  f"cannot be validated — no linter available for this format{NC}")
+            print(
+                f"{YELLOW}  ⚠ WARNING: {len(files)} {lang.upper()} file(s) "
+                f"cannot be validated — no linter available for this format{NC}"
+            )
             continue
 
         # Dispatch to language-specific linter
         lint_fn = _LINT_DISPATCH.get(lang)
         if lint_fn is None:
-            print(f"{YELLOW}  ⚠ WARNING: {len(files)} {lang.upper()} file(s) "
-                  f"cannot be validated — no lint function registered{NC}")
+            print(
+                f"{YELLOW}  ⚠ WARNING: {len(files)} {lang.upper()} file(s) "
+                f"cannot be validated — no lint function registered{NC}"
+            )
             continue
 
         passed = lint_fn(repo_root, files)

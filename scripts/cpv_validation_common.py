@@ -628,7 +628,11 @@ def is_path_gitignored(rel_path: str, patterns: list[str]) -> bool:
             if pattern.startswith("**/"):
                 # **/foo matches foo at any depth
                 suffix = pattern[3:]  # e.g., "dist" from "**/dist"
-                if fnmatch.fnmatch(rel_path, suffix) or fnmatch.fnmatch(rel_path, f"*/{suffix}") or f"/{suffix}" in f"/{rel_path}":
+                if (
+                    fnmatch.fnmatch(rel_path, suffix)
+                    or fnmatch.fnmatch(rel_path, f"*/{suffix}")
+                    or f"/{suffix}" in f"/{rel_path}"
+                ):
                     return True
                 continue
             elif pattern.endswith("/**"):
@@ -1828,14 +1832,10 @@ _TOC_SECTION_RE = re.compile(
 )
 
 # Regex to extract individual TOC heading titles (strip numbering, links, bullets)
-_TOC_ENTRY_RE = re.compile(
-    r"(?m)^[\s]*[-*]?\s*(?:\d+\.?\s*)?(?:\[([^\]]+)\]\([^)]*\)|(.+))"
-)
+_TOC_ENTRY_RE = re.compile(r"(?m)^[\s]*[-*]?\s*(?:\d+\.?\s*)?(?:\[([^\]]+)\]\([^)]*\)|(.+))")
 
 # Regex to find markdown links pointing to .md files in references/
-_MD_LINK_RE = re.compile(
-    r"\[([^\]]+)\]\(((?:references/)?[^\s)]+\.md)\)"
-)
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(((?:references/)?[^\s)]+\.md)\)")
 
 
 def extract_toc_headings(md_content: str) -> list[str]:
@@ -1975,10 +1975,7 @@ def validate_toc_embedding(
         search_end = min(len(lines), link_line_num + 50)
         nearby_text = "\n".join(lines[search_start:search_end])
 
-        embedded_count = sum(
-            1 for heading in toc_headings
-            if heading.lower() in nearby_text.lower()
-        )
+        embedded_count = sum(1 for heading in toc_headings if heading.lower() in nearby_text.lower())
 
         min_required = min(2, len(toc_headings))
         if embedded_count >= min_required:
@@ -2008,7 +2005,6 @@ def validate_toc_embedding(
 
     if refs_checked > 0 and refs_with_toc == refs_checked:
         report.passed(
-            f"All {refs_checked} referenced .md files have TOC embedded "
-            f"in {rel_file}",
+            f"All {refs_checked} referenced .md files have TOC embedded in {rel_file}",
             rel_file,
         )

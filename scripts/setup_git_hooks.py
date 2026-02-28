@@ -30,6 +30,7 @@ HOOKS: list[str] = ["pre-push"]
 # Color helpers -- disabled on Windows cmd.exe / when stdout is not a tty
 # ---------------------------------------------------------------------------
 
+
 def _colors_supported() -> bool:
     """Return True when the terminal likely supports ANSI escape codes."""
     if os.name == "nt":
@@ -72,6 +73,7 @@ def _err(msg: str) -> None:
 # ---------------------------------------------------------------------------
 # Core logic
 # ---------------------------------------------------------------------------
+
 
 def _repo_root() -> Path:
     """Derive the repository root from this script's location.
@@ -172,6 +174,7 @@ def _make_executable(path: Path) -> None:
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(

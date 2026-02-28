@@ -2,6 +2,18 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [1.7.3] - 2026-02-28
+
+### Bug Fixes
+
+- **Content-type early exit:** All 16 validators now detect wrong content at the given path and exit with a clear error message instead of crashing or producing confusing output (agent, command, hook, skill, MCP, LSP, rules, documentation, security, encoding, enterprise, xref, scoring, plugin, marketplace, marketplace_pipeline).
+- **Path resolution:** All 16 validators resolve paths to absolute via `.resolve()` in `main()`, preventing `ValueError` crashes from `relative_to()` when relative paths are used.
+- **Code formatting:** Ruff format applied to 7 files (cpv_validation_common, gitignore_filter, lint_files, setup_git_hooks, conftest, test_cpv_validation_common, test_extended_linting).
+
+### Tests
+
+- Added 37 early-exit tests in `tests/test_validator_early_exit.py` covering all 16 validators (1085 total tests).
+
 ## [1.7.2] - 2026-02-28
 
 ### Bug Fixes

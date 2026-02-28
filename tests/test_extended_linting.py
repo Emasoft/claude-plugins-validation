@@ -134,7 +134,9 @@ class TestTomlValidation:
     def test_tomllib_passes_valid_toml(self, tmp_path: Path):
         """tomllib successfully parses well-formed TOML content."""
         good_toml = tmp_path / "pyproject.toml"
-        good_toml.write_text('[project]\nname = "my-package"\nversion = "1.0.0"\ndescription = "A test package"\n\n[project.optional-dependencies]\ndev = ["pytest==8.0.0"]\n')
+        good_toml.write_text(
+            '[project]\nname = "my-package"\nversion = "1.0.0"\ndescription = "A test package"\n\n[project.optional-dependencies]\ndev = ["pytest==8.0.0"]\n'
+        )
         with open(good_toml, "rb") as fp:
             data = tomllib.load(fp)
         assert data["project"]["name"] == "my-package"
@@ -183,7 +185,9 @@ class TestCrossPlatformHints:
         result = ensure_linter_installed("dockerfile", tmp_path)
         if result is False:
             captured = capsys.readouterr().out
-            assert any(kw in captured for kw in ("brew", "scoop", "apt", "hadolint")), f"Expected install hint for hadolint, got: {captured!r}"
+            assert any(kw in captured for kw in ("brew", "scoop", "apt", "hadolint")), (
+                f"Expected install hint for hadolint, got: {captured!r}"
+            )
 
     def test_xmllint_hint_printed(self, tmp_path: Path, capsys):
         """ensure_linter_installed for xml prints hint mentioning libxml2 if xmllint missing."""

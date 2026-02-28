@@ -7,6 +7,7 @@ Tests the core validation infrastructure:
 - Severity levels and exit codes
 - Scoring and grading functions
 """
+
 from __future__ import annotations
 
 import json
@@ -522,6 +523,7 @@ class TestFixableIssue:
 
     def test_apply_returns_false_when_no_file(self):
         """FixableIssue.apply should return False if result has no file."""
+
         def mock_fix(file_path: str, line: int | None) -> bool:
             return True
 
@@ -533,6 +535,7 @@ class TestFixableIssue:
 
     def test_apply_returns_false_when_fix_func_fails(self):
         """FixableIssue.apply should return False when fix_func returns False."""
+
         def failing_fix(file_path: str, line: int | None) -> bool:
             return False
 
@@ -809,7 +812,9 @@ class TestValidationContext:
         def dummy_fix(file_path: str, line: int | None) -> bool:
             return True
 
-        ctx.add_fixable("MINOR", "Trailing whitespace", dummy_fix, "Remove trailing whitespace", file="README.md", line=5)
+        ctx.add_fixable(
+            "MINOR", "Trailing whitespace", dummy_fix, "Remove trailing whitespace", file="README.md", line=5
+        )
 
         report = ctx.finalize()
         assert len(report.fixable_issues) == 1

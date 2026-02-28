@@ -1,4 +1,5 @@
 """Shared pytest fixtures for validation tests."""
+
 from __future__ import annotations
 
 import json
@@ -57,9 +58,7 @@ def valid_plugin_dir(temp_dir, valid_plugin_json):
     # Create .claude-plugin directory with plugin.json
     claude_plugin = plugin_dir / ".claude-plugin"
     claude_plugin.mkdir()
-    (claude_plugin / "plugin.json").write_text(
-        json.dumps(valid_plugin_json, indent=2)
-    )
+    (claude_plugin / "plugin.json").write_text(json.dumps(valid_plugin_json, indent=2))
 
     # Create README.md
     (plugin_dir / "README.md").write_text(
