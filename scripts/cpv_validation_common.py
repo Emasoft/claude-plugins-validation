@@ -321,13 +321,25 @@ ABSOLUTE_PATH_PATTERNS = [
 ALLOWED_DOC_PATH_PREFIXES = {
     "/tmp/",
     "/var/tmp/",
+    "/var/lib/",  # Docker volumes, app data (e.g. /var/lib/postgresql/data)
+    "/var/log/",  # Log path examples (e.g. /var/log/myapp/)
+    "/var/run/",  # PID/socket files
     "/dev/",
     "/proc/",
     "/sys/",
     "/etc/",  # Common in config examples
+    "/bin/",  # Shell references (e.g. /bin/sh, /bin/bash)
+    "/sbin/",  # System binaries
     "/usr/bin/",  # Common in shebang/doc examples
+    "/usr/sbin/",  # System admin binaries
+    "/usr/lib/",  # Shared libraries (also covers /usr/lib64/)
+    "/usr/libexec/",  # Helper binaries (e.g. macOS ApplicationFirewall)
+    "/usr/share/",  # Shared data (e.g. /usr/share/dotnet)
     "/usr/local/",  # Common in installation examples
+    "/usr/include/",  # Header files
     "/opt/",  # Common in deployment examples
+    "/snap/",  # Snap packages
+    "/run/",  # Runtime data
 }
 
 # Files that should never be in a plugin
