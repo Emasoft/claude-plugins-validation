@@ -332,7 +332,8 @@ ALLOWED_DOC_PATH_PREFIXES = {
     "/sbin/",  # System binaries
     "/usr/bin/",  # Common in shebang/doc examples
     "/usr/sbin/",  # System admin binaries
-    "/usr/lib/",  # Shared libraries (also covers /usr/lib64/)
+    "/usr/lib/",  # Shared libraries
+    "/usr/lib64/",  # 64-bit shared libraries (RHEL/Fedora)
     "/usr/libexec/",  # Helper binaries (e.g. macOS ApplicationFirewall)
     "/usr/share/",  # Shared data (e.g. /usr/share/dotnet)
     "/usr/local/",  # Common in installation examples
