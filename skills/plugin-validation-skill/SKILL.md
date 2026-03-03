@@ -259,6 +259,9 @@ This plugin includes five key validation scripts:
 - Hooks configuration (calls validate_hook.py)
 - MCP servers (calls validate_mcp.py)
 - Script linting (ruff for Python, shellcheck for bash)
+- Plugin-shipped settings.json validation
+- Script shebang presence (cross-platform reliability)
+- Content presence check (manifest without content)
 
 **Reference**: [references/plugin-structure.md](references/plugin-structure.md)
 
@@ -272,6 +275,10 @@ This plugin includes five key validation scripts:
 - Matcher patterns (tool names or regex)
 - Script paths and executability
 - Hook type configuration (command, prompt, agent)
+- Fuzzy "did you mean?" for misspelled event names
+- Notification/SessionStart/PreCompact matcher validation
+- Bash command portability (interpreter, tilde paths, bare cd, backslashes)
+- Relative path portability (${CLAUDE_PLUGIN_ROOT} usage)
 
 **Reference**: see `hook-validation.md` in Resources above
 
@@ -375,7 +382,7 @@ my-plugin/
 
 ### Critical Rules
 
-1. **Components at ROOT**: commands/, agents/, skills/, hooks/ must be at plugin root, NOT inside .claude-plugin/
+1. **Components at ROOT**: commands/, agents/, skills/, hooks/, scripts/ must be at plugin root, NOT inside .claude-plugin/
 
 2. **Path variables**: Always use `${CLAUDE_PLUGIN_ROOT}` for plugin-relative paths
 
@@ -405,6 +412,7 @@ For detailed specifications, see the [Resources](#resources) section above.
 3. Verify matcher matches target tool
 4. Ensure scripts are executable: `chmod +x scripts/*.sh`
 5. Check script paths use `${CLAUDE_PLUGIN_ROOT}`
+6. Use `${CLAUDE_PLUGIN_ROOT}/...` instead of relative `./` paths
 
 ### MCP Server Not Starting
 

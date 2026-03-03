@@ -239,6 +239,10 @@ Comprehensive remediation guide for all issues detected by `validate_hook.py`.
    - `WorktreeRemove`
 3. **Wrong**: `"preToolUse"`, `"pre_tool_use"`, `"PreTooluse"`
 4. **Correct**: `"PreToolUse"`
+5. **New: Fuzzy matching** — the validator now suggests corrections for misspelled events. If you see `did you mean 'PreToolUse'?` in the error message, it detected a close match. Common typos:
+   - `preToolUse` → `PreToolUse` (wrong case)
+   - `PreTooluse` → `PreToolUse` (wrong capitalization)
+   - `PostTooluseFailure` → `PostToolUseFailure` (missing uppercase)
 
 ---
 
@@ -447,6 +451,50 @@ Comprehensive remediation guide for all issues detected by `validate_hook.py`.
 1. Common built-in tool names: `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `Task`, `WebFetch`, `WebSearch`, `NotebookEdit`
 2. MCP tool names start with `mcp__` (e.g., `mcp__slack__send_message`)
 3. This is informational — custom or MCP tool names are valid. Verify the name matches the tool you intend to intercept.
+
+---
+
+### INFO: Unknown Notification matcher type
+
+**Error message**: `Notification matcher '<part>' is not a common type — known types: auth_success, elicitation_dialog, idle_prompt, permission_prompt`
+**Severity**: INFO
+**Root cause**: A matcher for a `Notification` event uses a value that is not in the known set of notification types.
+**Fix**:
+1. Known Notification matcher types:
+   - `permission_prompt` — permission request notification
+   - `idle_prompt` — idle timeout prompt
+   - `auth_success` — authentication success
+   - `elicitation_dialog` — user dialog prompt
+2. Verify your matcher string matches one of these types, or use `"*"` to match all notifications.
+3. Custom notification types may be valid — this is informational only.
+
+---
+
+### INFO: Unknown SessionStart matcher source
+
+**Error message**: `SessionStart matcher '<part>' is not a known source — known values: clear, compact, resume, startup`
+**Severity**: INFO
+**Root cause**: A matcher for a `SessionStart` event uses a value that is not in the known set of session start sources.
+**Fix**:
+1. Known SessionStart sources:
+   - `startup` — fresh session start
+   - `resume` — resuming a previous session
+   - `clear` — session cleared
+   - `compact` — session compacted
+2. Use the correct source name, or omit the matcher to match all SessionStart events.
+
+---
+
+### INFO: Unknown PreCompact matcher trigger
+
+**Error message**: `PreCompact matcher '<part>' is not a known trigger — known values: auto, manual`
+**Severity**: INFO
+**Root cause**: A matcher for a `PreCompact` event uses a value that is not in the known set of compact triggers.
+**Fix**:
+1. Known PreCompact triggers:
+   - `auto` — automatic compaction
+   - `manual` — user-initiated compaction
+2. Use the correct trigger name, or omit the matcher to match all PreCompact events.
 
 ---
 
@@ -667,6 +715,102 @@ Comprehensive remediation guide for all issues detected by `validate_hook.py`.
    uv run python scripts/validate_hook.py hooks.json --plugin-root /path/to/plugin
    ```
 4. Ensure the script has been committed and is part of the plugin/project
+
+---
+
+### MINOR: Script without interpreter prefix
+
+**Error message**: `Command runs '<script>' without an explicit interpreter — add one (e.g. python3, node, bash) for cross-platform reliability`
+**Severity**: MINOR
+**Root cause**: The hook command's first token is a script file (`.py`, `.js`, `.ts`, `.sh`, `.rb`, `.pl`) but no interpreter is explicitly specified. Without an interpreter prefix, the script relies on the shebang line or OS file association, which may fail cross-platform.
+**Fix**:
+1. Add an explicit interpreter before the script:
+   ```json
+   { "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/check.py" }
+   ```
+   Not:
+   ```json
+   { "command": "${CLAUDE_PLUGIN_ROOT}/scripts/check.py" }
+   ```
+2. Common interpreter prefixes:
+   | Extension | Interpreter |
+   |-----------|-------------|
+   | `.py` | `python3` |
+   | `.js`, `.mjs` | `node` |
+   | `.ts` | `bun` or `npx tsx` |
+   | `.sh` | `bash` |
+   | `.rb` | `ruby` |
+   | `.pl` | `perl` |
+
+---
+
+### MINOR: Command starts with tilde path
+
+**Error message**: `Command starts with '~/' — tilde expansion may not work in hook commands. Use $HOME/ or ${CLAUDE_PLUGIN_ROOT}/ instead.`
+**Severity**: MINOR
+**Root cause**: The command starts with `~/` (tilde expansion). Tilde expansion is a shell feature that may not work in all execution contexts. Hook commands may be executed without a full shell, causing `~/` to be interpreted literally.
+**Fix**:
+1. Replace `~/` with `$HOME/`:
+   ```json
+   { "command": "$HOME/scripts/run.sh" }
+   ```
+2. Or better, use `${CLAUDE_PLUGIN_ROOT}/` for plugin-relative paths:
+   ```json
+   { "command": "${CLAUDE_PLUGIN_ROOT}/scripts/run.sh" }
+   ```
+
+---
+
+### MINOR: Bare 'cd' without chained command
+
+**Error message**: `'cd' alone has no effect — each hook runs in a fresh shell. Combine with your command: 'cd /dir && your-command'`
+**Severity**: MINOR
+**Root cause**: The command is just `cd <dir>` without any follow-up command. Each hook execution runs in a fresh shell process, so `cd` alone changes the directory of a shell that immediately exits — it has no lasting effect.
+**Fix**:
+1. Chain `cd` with your actual command using `&&`:
+   ```json
+   { "command": "cd ${CLAUDE_PLUGIN_ROOT} && python3 scripts/check.py" }
+   ```
+2. Or use the full path directly:
+   ```json
+   { "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/check.py" }
+   ```
+
+---
+
+### MINOR: Command contains backslash paths
+
+**Error message**: `Command contains backslash paths — use forward slashes for cross-platform compatibility`
+**Severity**: MINOR
+**Root cause**: The command contains backslash path separators (`\`), which are Windows-specific. For cross-platform compatibility, always use forward slashes (`/`), which work on all operating systems including Windows.
+**Fix**:
+1. Replace all backslashes with forward slashes:
+   ```json
+   { "command": "${CLAUDE_PLUGIN_ROOT}/scripts/check.py" }
+   ```
+   Not:
+   ```json
+   { "command": "${CLAUDE_PLUGIN_ROOT}\\scripts\\check.py" }
+   ```
+2. Forward slashes work on Windows, macOS, and Linux.
+
+---
+
+### MINOR: Relative path without CLAUDE_PLUGIN_ROOT
+
+**Error message**: `Command uses relative path '<path>' without ${CLAUDE_PLUGIN_ROOT} — hook working directory is not guaranteed. Use ${CLAUDE_PLUGIN_ROOT}/... for reliability.`
+**Severity**: MINOR
+**Root cause**: The command starts with a relative path like `./scripts/run.sh` but does not use `${CLAUDE_PLUGIN_ROOT}`. The working directory when a hook executes is NOT guaranteed to be the plugin root, so relative paths may fail to resolve.
+**Fix**:
+1. Replace relative paths with `${CLAUDE_PLUGIN_ROOT}`:
+   ```json
+   { "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh" }
+   ```
+   Not:
+   ```json
+   { "command": "bash ./scripts/run.sh" }
+   ```
+2. `${CLAUDE_PLUGIN_ROOT}` is always set to the plugin's installation directory, regardless of the current working directory.
 
 ---
 

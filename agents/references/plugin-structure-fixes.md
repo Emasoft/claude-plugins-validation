@@ -351,7 +351,7 @@ root cause, and step-by-step fix instructions.
 
 **Error message**: `<component>/ must be at plugin root, not in .claude-plugin/`
 **Severity**: CRITICAL
-**Root cause**: Directories like `commands/`, `agents/`, `skills/`, `hooks/`, `schemas/`, `bin/` were placed inside `.claude-plugin/` instead of at the plugin root. Claude Code looks for them at the root level.
+**Root cause**: Directories like `commands/`, `agents/`, `skills/`, `hooks/`, `schemas/`, `bin/`, `scripts/` were placed inside `.claude-plugin/` instead of at the plugin root. Claude Code looks for them at the root level.
 **Fix**:
 1. Move the directory to the plugin root:
    ```bash
@@ -367,6 +367,7 @@ root cause, and step-by-step fix instructions.
    ├── agents/
    ├── skills/
    ├── hooks/
+   ├── scripts/
    └── ...
    ```
 
@@ -386,6 +387,50 @@ root cause, and step-by-step fix instructions.
 1. If the directory is needed by your plugin, document its purpose in README.md.
 2. If it is a leftover or artifact, remove it.
 3. Known standard directories: `.claude-plugin`, `commands`, `agents`, `skills`, `hooks`, `scripts`, `docs`, `rules`, `schemas`, `bin`, `templates`, `tests`, `lib`, `libs`, `modules`, `resources`, `assets`, `data`, `config`, `configs`, `examples`, `samples`, `references`.
+
+### MAJOR: Plugin has manifest but no content
+
+**Error message**: `Plugin has a manifest but no content — expected at least one of: commands/, skills/, agents/, hooks/, scripts/, .mcp.json, or .lsp.json`
+**Severity**: MAJOR
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: The plugin has a `.claude-plugin/plugin.json` manifest but contains no actual content directories or configuration files. A plugin with only a manifest serves no purpose — it needs at least one component.
+**Fix**:
+1. Add at least one component to your plugin:
+   - `commands/` — slash commands (`.md` files)
+   - `agents/` — agent definitions (`.md` files)
+   - `skills/` — skill directories (each with `SKILL.md`)
+   - `hooks/` — hook configuration (`hooks.json`)
+   - `scripts/` — utility scripts
+   - `.mcp.json` — MCP server definitions
+   - `.lsp.json` — LSP server definitions
+2. A minimal plugin needs at least one of these to be useful.
+3. Re-run validation after adding content.
+
+### MAJOR: settings.json parse error
+
+**Error message**: `settings.json: JSON parse error: <error>`
+**Severity**: MAJOR
+**File**: `settings.json`
+**Root cause**: The plugin ships a `settings.json` file but it contains invalid JSON.
+**Fix**:
+1. Fix the JSON syntax in `settings.json`.
+2. Validate with: `python -c "import json; json.load(open('settings.json'))"`
+
+### MINOR: settings.json unrecognized key
+
+**Error message**: `settings.json: unrecognized key '<key>' — supported plugin settings: agent`
+**Severity**: MINOR
+**File**: `settings.json`
+**Root cause**: The plugin-shipped `settings.json` contains a key that is not recognized as a valid plugin setting. Currently, only `"agent"` is supported.
+**Fix**:
+1. Remove or rename the unrecognized key.
+2. The only supported plugin setting key is `agent`:
+   ```json
+   {
+     "agent": "my-custom-agent"
+   }
+   ```
+3. If the key is needed by your plugin scripts, consider moving it to a custom configuration file instead of `settings.json`.
 
 ---
 
@@ -691,6 +736,35 @@ MCP validation is delegated to `validate_mcp.py`. All results are transferred di
    brew install shellcheck   # macOS
    apt install shellcheck    # Ubuntu/Debian
    ```
+
+### MINOR: Scripts missing shebang
+
+**Error message**: `Scripts missing shebang (e.g. #!/usr/bin/env python3): <list>. Without a shebang, scripts may not run correctly across platforms.`
+**Severity**: MINOR
+**File**: `scripts/`
+**Root cause**: One or more script files (`.py`, `.sh`, `.bash`, `.rb`, `.pl`, `.php`) in the plugin's `scripts/` directory are missing a shebang line (`#!...`). Without a shebang, the OS cannot determine the correct interpreter.
+**Fix**:
+1. Add a shebang as the very first line of each script:
+   ```python
+   #!/usr/bin/env python3
+   ```
+   For bash scripts:
+   ```bash
+   #!/usr/bin/env bash
+   ```
+   For Ruby:
+   ```ruby
+   #!/usr/bin/env ruby
+   ```
+2. Common shebangs:
+   | Extension | Shebang |
+   |-----------|---------|
+   | `.py` | `#!/usr/bin/env python3` |
+   | `.sh`, `.bash` | `#!/usr/bin/env bash` |
+   | `.rb` | `#!/usr/bin/env ruby` |
+   | `.pl` | `#!/usr/bin/env perl` |
+   | `.php` | `#!/usr/bin/env php` |
+3. Use `#!/usr/bin/env <interpreter>` instead of hardcoded paths like `#!/usr/bin/python3` for portability.
 
 ---
 

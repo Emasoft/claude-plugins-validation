@@ -147,7 +147,7 @@ This prevents accidental leaking of private home directory paths in published pl
 ## Core Responsibilities
 
 1. **Plugin Structure Validation** - Verify `.claude-plugin/plugin.json` manifest, required fields, and component placement
-2. **Hook Validation** - Validate `hooks/hooks.json` structure, event types (18 valid), matchers, script paths
+2. **Hook Validation** - Validate `hooks/hooks.json` structure, event types (18 valid, with fuzzy matching suggestions), matchers (including Notification/SessionStart/PreCompact types), script paths, bash command portability (interpreter, tilde, cd, backslash, relative paths)
 3. **Skill Validation** - Check SKILL.md frontmatter, required fields, references/ structure
 4. **MCP Server Validation** - Validate `.mcp.json`, transport types, environment variables
 5. **Marketplace Validation** - Check `marketplace.json` structure, plugin entries, source configurations
@@ -252,7 +252,7 @@ Fixes for all `validate_plugin.py` issues (manifest, directory structure, agents
   - 4. Agent File Issues
   - 5. Hook Configuration Issues
   - 6. MCP Server Issues
-  - 7. Script Quality Issues
+  - 7. Script Quality Issues (including shebang line checks)
   - 8. Cross-Platform Compatibility Issues
   - 9. Skill Validation Issues
   - 10. README and LICENSE Issues
@@ -267,7 +267,7 @@ Fixes for all `validate_hook.py` issues (JSON structure, events, matchers, timeo
   - 2. Event Type Issues
   - 3. Matcher Issues
   - 4. Hook Type Issues
-  - 5. Command Hook Issues
+  - 5. Command Hook Issues (bash portability: interpreter, tilde expansion, cd usage, backslash escapes, relative paths)
   - 6. Prompt Hook Issues
   - 7. Agent Hook Issues
   - 8. Timeout Issues
