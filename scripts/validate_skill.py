@@ -95,8 +95,9 @@ def parse_frontmatter(content: str) -> tuple[dict[str, Any] | None, str, int]:
         return None, content, 0
 
 
-def validate_frontmatter(skill_path: Path, content: str, report: ValidationReport) -> dict[str, Any] | None:
+def validate_frontmatter(_skill_path: Path, content: str, report: ValidationReport) -> dict[str, Any] | None:
     """Validate YAML frontmatter structure and content."""
+    del _skill_path  # parameter reserved for per-file reporting
     # Check frontmatter exists
     if not content.startswith("---"):
         report.info("No YAML frontmatter found (optional but recommended)", "SKILL.md")
@@ -104,6 +105,7 @@ def validate_frontmatter(skill_path: Path, content: str, report: ValidationRepor
 
     # Parse frontmatter
     frontmatter, _body, _fm_end_line = parse_frontmatter(content)
+    del _body, _fm_end_line  # only frontmatter dict is needed here
 
     if frontmatter is None and content.startswith("---"):
         # Started with --- but failed to parse
