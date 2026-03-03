@@ -2,6 +2,24 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [1.7.5] - 2026-03-03
+
+### New Validation Checks (from claude-plugin-install.py gap analysis)
+
+- **validate_plugin.py:** Add `scripts/` to misplaced-component check (was missing from the `.claude-plugin/` guard)
+- **validate_plugin.py:** Validate plugin-shipped `settings.json` (JSON parse + unrecognized key warnings)
+- **validate_plugin.py:** Warn when plugin has a manifest but zero actual content (no commands/, skills/, agents/, hooks/, etc.)
+- **validate_plugin.py:** Check shebangs on plugin-level script files (.py, .sh, .rb, .pl, .php, .bash)
+- **validate_hook.py:** Fuzzy "did you mean?" suggestions for misspelled hook event names (via `difflib`)
+- **validate_hook.py:** Activate dead constants — validate Notification, SessionStart, and PreCompact matcher values
+- **validate_hook.py:** Bash command portability checks: script without interpreter, `~/` paths, bare `cd`, backslash paths
+- **validate_hook.py:** Warn on relative `./` paths in hook commands without `${CLAUDE_PLUGIN_ROOT}`
+
+### Tests
+
+- Added 16 tests for all 8 new validation checks (`test_new_validation_checks.py`)
+- Total test count: 1101
+
 ## [1.7.4] - 2026-03-03
 
 ### Security Fixes (from CPV upstream audit)
