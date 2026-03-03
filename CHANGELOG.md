@@ -2,6 +2,19 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [1.7.7] - 2026-03-03
+
+### Code Quality
+
+- Fix 4 pre-existing Pyright diagnostics across validation scripts
+- `validate_xref.py`: Use `available_agents` set instead of redundant filesystem check in `validate_subagent_type_matching()`
+- `cpv_validation_common.py`: Idiomatic `_` for unused tuple unpack
+- `validate_skill.py`: Prefix/del for reserved parameters
+- `validate_marketplace_pipeline.py`: Del for reserved `_verbose` parameter
+- Shellcheck resolution moved outside loop (single "not available" message)
+- Extracted `_check_matcher_values()` helper (eliminates 3 duplicated blocks)
+- Added `encoding="utf-8"` to all 36 `read_text()` calls across 11 scripts
+
 ## [1.7.6] - 2026-03-03
 
 ### Improvements
