@@ -7,7 +7,7 @@ runtime registry (known_marketplaces.json) and settings.json. Includes deep
 validation of hooks schemas, frontmatter, scripts, and MCP configs.
 
 Cross-platform: works on macOS, Linux, and Windows.
-Requires: Python 3.8+, no external dependencies.
+Requires: Python 3.12+, no external dependencies.
 """
 
 import argparse
@@ -23,11 +23,11 @@ import tarfile
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Literal
 
 IS_WINDOWS = platform.system() == "Windows"
 PYTHON_VERSION = sys.version_info
-TOOL_VERSION = "1.3.0"
+TOOL_VERSION = "1.7.9"
 
 
 # ── Paths ─────────────────────────────────────────────────
@@ -305,7 +305,7 @@ def _extract_tar(archive: Path, dest: Path, mode: Literal["r:gz", "r:bz2", "r:xz
             tf.extractall(dest)
 
 
-def find_plugin_root(search_dir: Path) -> Optional[Path]:
+def find_plugin_root(search_dir: Path) -> Path | None:
     """Find the plugin root directory (parent of .claude-plugin/plugin.json).
     Skips directories that also contain marketplace.json."""
     for pj in search_dir.rglob(".claude-plugin/plugin.json"):
@@ -367,7 +367,7 @@ WINDOWS_SCRIPT_EXTENSIONS = {".cmd", ".bat", ".ps1"}
 ALL_SCRIPT_EXTENSIONS = SCRIPT_EXTENSIONS | WINDOWS_SCRIPT_EXTENSIONS
 
 
-def _find_all_scripts(plugin_dir: Path) -> List[Path]:
+def _find_all_scripts(plugin_dir: Path) -> list[Path]:
     """Find all script files in a plugin directory."""
     scripts = []
     for f in plugin_dir.rglob("*"):
@@ -447,7 +447,7 @@ def _check_type(value, expected_types):
     return f"expected {' or '.join(expected_types)}, got {type(value).__name__}"
 
 
-def _fuzzy_match_event(wrong_name: str) -> Optional[str]:
+def _fuzzy_match_event(wrong_name: str) -> str | None:
     lower = wrong_name.lower()
     for valid in VALID_HOOK_EVENTS:
         if valid.lower() == lower:
@@ -514,7 +514,7 @@ def _validate_matcher(matcher: str, event_name: str, path: str) -> list[str]:
     return warnings
 
 
-def _validate_bash_command(cmd: str, path: str, plugin_root: Optional[Path] = None) -> tuple[list[str], list[str]]:
+def _validate_bash_command(cmd: str, path: str, plugin_root: Path | None = None) -> tuple[list[str], list[str]]:
     """Returns (errors, warnings)."""
     errors: list[str] = []
     warnings: list[str] = []
@@ -629,7 +629,7 @@ def _validate_bash_command(cmd: str, path: str, plugin_root: Optional[Path] = No
     return errors, warnings
 
 
-def _validate_hooks_structure(hooks_data: dict, source_file: str, plugin_root: Optional[Path] = None):
+def _validate_hooks_structure(hooks_data: dict, source_file: str, plugin_root: Path | None = None):
     errors = []
     warnings = []
 
@@ -740,7 +740,7 @@ def _validate_hooks_structure(hooks_data: dict, source_file: str, plugin_root: O
     return errors, warnings
 
 
-def _parse_simple_frontmatter(text: str) -> Optional[Tuple[Dict[str, str], str]]:
+def _parse_simple_frontmatter(text: str) -> tuple[dict[str, str], str] | None:
     """Parse YAML-like frontmatter from markdown. Returns (key_values, body) or None.
 
     This is a simple parser — no YAML library needed. Handles:
@@ -816,7 +816,7 @@ SKILL_MAX_CHARS = 5000
 
 def _validate_markdown_frontmatter(
     md_path: Path, component_type: str, rel_prefix: str = ""
-) -> Tuple[List[str], List[str]]:
+) -> tuple[list[str], list[str]]:
     """Validate YAML frontmatter in agent/command/skill markdown files.
     Returns (errors, warnings)."""
     errors: list[str] = []
@@ -1319,7 +1319,7 @@ def print_validation_report(errors, warnings, _plugin_name):
 # ── Install ───────────────────────────────────────────────
 
 
-def do_install(archive_path: str, marketplace_name: Optional[str], force: bool = False, dry_run: bool = False):
+def do_install(archive_path: str, marketplace_name: str | None, force: bool = False, dry_run: bool = False):
     if dry_run:
         info("DRY RUN — no files will be modified")
 
@@ -1603,8 +1603,8 @@ def do_list():
 
 def do_validate(source_path: str) -> None:
     p = Path(source_path)
-    tmpdir: Optional[str] = None  # Track if we created a temp dir
-    plugin_root: Optional[Path] = None
+    tmpdir: str | None = None  # Track if we created a temp dir
+    plugin_root: Path | None = None
 
     # Handle plugin@marketplace syntax for installed plugins
     if "@" in source_path and not p.exists():
@@ -1959,7 +1959,7 @@ def main():
         prog="claude-plugin-install",
         description=(
             "Install, validate, and manage Claude Code plugins.\n"
-            "Cross-platform: macOS, Linux, and Windows. Python 3.8+, no dependencies."
+            "Cross-platform: macOS, Linux, and Windows. Python 3.12+, no dependencies."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=HELP_EPILOG,

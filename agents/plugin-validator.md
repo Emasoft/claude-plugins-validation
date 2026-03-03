@@ -154,6 +154,15 @@ This prevents accidental leaking of private home directory paths in published pl
 6. **CI/CD Pipeline Validation** - Verify git hooks, GitHub Actions workflows, CI execution logs
 7. **Issue remediation** - When validation detects issues, consult the appropriate fix guide in references/ and offer to apply the fixes automatically
 8. **Local Plugin Installation** - Install, uninstall, and manage plugins locally via `scripts/claude-plugin-install.py` when the user doesn't need a GitHub marketplace
+9. **Cross-Reference Validation** - Validate internal references, links, and cross-component consistency (`validate_xref.py`)
+10. **Documentation Validation** - Check README, docstrings, and documentation completeness (`validate_documentation.py`)
+11. **Enterprise Compliance Validation** - Verify enterprise policy compliance, governance rules, and organizational standards (`validate_enterprise.py`)
+12. **Security Validation** - Detect secrets, dangerous patterns, injection risks, and path traversal vulnerabilities (`validate_security.py`)
+13. **Rules Validation** - Validate plugin rules files, rule syntax, and rule consistency (`validate_rules.py`)
+14. **Encoding Validation** - Check file encodings, BOM markers, line endings, and character set consistency (`validate_encoding.py`)
+15. **Scoring** - Compute overall quality score and weighted sub-scores for all validation dimensions (`validate_scoring.py`)
+16. **Command Validation** - Validate command files, slash-command definitions, and command metadata (`validate_command.py`)
+17. **Agent Validation** - Validate agent markdown files, frontmatter, required sections, and example blocks (`validate_agent.py`)
 
 ## Report Output (MANDATORY)
 
@@ -180,6 +189,33 @@ uv run python scripts/validate_skill.py /path/to/skill
 uv run python scripts/validate_hook.py /path/to/hooks.json
 uv run python scripts/validate_mcp.py /path/to/plugin
 uv run python scripts/validate_marketplace.py /path/to/marketplace
+
+# Validate cross-references and internal links
+uv run python scripts/validate_xref.py /path/to/plugin
+
+# Validate documentation completeness
+uv run python scripts/validate_documentation.py /path/to/plugin
+
+# Validate security (secrets, injection, path traversal)
+uv run python scripts/validate_security.py /path/to/plugin
+
+# Validate rules files and rule syntax
+uv run python scripts/validate_rules.py /path/to/plugin
+
+# Validate enterprise compliance and governance
+uv run python scripts/validate_enterprise.py /path/to/plugin
+
+# Validate file encodings and line endings
+uv run python scripts/validate_encoding.py /path/to/plugin
+
+# Compute quality score across all dimensions
+uv run python scripts/validate_scoring.py /path/to/plugin
+
+# Validate command files and slash-command definitions
+uv run python scripts/validate_command.py /path/to/plugin
+
+# Validate agent markdown files and frontmatter
+uv run python scripts/validate_agent.py /path/to/plugin
 
 # Validate and setup development pipeline
 uv run python scripts/setup_plugin_pipeline.py /path/to/project --validate
@@ -350,6 +386,103 @@ Fixes for encoding, security, and quality issues (encoding, secrets, paths, giti
   - 10. Script Permission Issues
   - 11. Plugin Path Validation Issues
   - 12. File Access Issues
+
+### [Cross-Reference Fixes](references/xref-fixes.md)
+Fixes for all `validate_xref.py` issues (broken links, missing targets, circular references):
+  - [1. Plugin Directory Issues](references/xref-fixes.md#1-plugin-directory-issues)
+  - [2. Task() Agent Reference Issues](references/xref-fixes.md#2-task-agent-reference-issues)
+  - [3. Subagent_type Matching Issues](references/xref-fixes.md#3-subagent_type-matching-issues)
+  - [4. Version Synchronization Issues](references/xref-fixes.md#4-version-synchronization-issues)
+  - [5. Command Agent Reference Issues](references/xref-fixes.md#5-command-agent-reference-issues)
+  - [6. Skill Reference Issues](references/xref-fixes.md#6-skill-reference-issues)
+  - [7. Hook Script Reference Issues](references/xref-fixes.md#7-hook-script-reference-issues)
+  - [8. File Read Issues](references/xref-fixes.md#8-file-read-issues)
+
+### [Documentation Fixes](references/documentation-fixes.md)
+Fixes for all `validate_documentation.py` issues (missing docs, incomplete sections, docstring quality):
+  - [1. README Existence Issues](references/documentation-fixes.md#1-readme-existence-issues)
+  - [2. README Content Section Issues](references/documentation-fixes.md#2-readme-content-section-issues)
+  - [3. Internal Link Issues](references/documentation-fixes.md#3-internal-link-issues)
+  - [4. CHANGELOG Issues](references/documentation-fixes.md#4-changelog-issues)
+  - [5. Heading Hierarchy Issues](references/documentation-fixes.md#5-heading-hierarchy-issues)
+  - [6. Code Block Issues](references/documentation-fixes.md#6-code-block-issues)
+  - [7. List Formatting Issues](references/documentation-fixes.md#7-list-formatting-issues)
+  - [8. Table Structure Issues](references/documentation-fixes.md#8-table-structure-issues)
+  - [9. Image Reference Issues](references/documentation-fixes.md#9-image-reference-issues)
+
+### [Security Fixes](references/security-fixes.md)
+Fixes for all `validate_security.py` issues (secrets, injection, dangerous patterns):
+  - 1. Secret Detection Issues
+  - 2. Command Injection Issues
+  - 3. Path Traversal Issues
+  - 4. Dangerous Pattern Issues
+  - 5. Permission Issues
+
+### [Rules Fixes](references/rules-fixes.md)
+Fixes for all `validate_rules.py` issues (rule syntax, consistency, conflicts):
+  - [1. Rules Directory Issues](references/rules-fixes.md#1-rules-directory-issues)
+  - [2. Rule File Read and Encoding Issues](references/rules-fixes.md#2-rule-file-read-and-encoding-issues)
+  - [3. Rule File Content Issues](references/rules-fixes.md#3-rule-file-content-issues)
+  - [4. Frontmatter Issues](references/rules-fixes.md#4-frontmatter-issues)
+  - [5. Security Issues in Rule Files](references/rules-fixes.md#5-security-issues-in-rule-files)
+  - [6. Token Budget Issues](references/rules-fixes.md#6-token-budget-issues)
+
+### [Enterprise Fixes](references/enterprise-fixes.md)
+Fixes for all `validate_enterprise.py` issues (policy compliance, governance, organizational standards):
+  - [1. Plugin/Path Level Issues](references/enterprise-fixes.md#1-pluginpath-level-issues)
+  - [2. Skill File Issues](references/enterprise-fixes.md#2-skill-file-issues)
+  - [3. Required Metadata: name and description](references/enterprise-fixes.md#3-required-metadata-name-and-description)
+  - [4. Author Field Issues](references/enterprise-fixes.md#4-author-field-issues)
+  - [5. License Field Issues](references/enterprise-fixes.md#5-license-field-issues)
+  - [6. Context Field Issues](references/enterprise-fixes.md#6-context-field-issues)
+  - [7. Agent Field Issues](references/enterprise-fixes.md#7-agent-field-issues)
+  - [8. User-Invocable Field Issues](references/enterprise-fixes.md#8-user-invocable-field-issues)
+  - [9. Tags Field Issues](references/enterprise-fixes.md#9-tags-field-issues)
+  - [10. Mode Field Issues](references/enterprise-fixes.md#10-mode-field-issues)
+  - [11. Agent Compliance Issues](references/enterprise-fixes.md#11-agent-compliance-issues)
+  - [12. Summary/Informational Messages](references/enterprise-fixes.md#12-summaryinformational-messages)
+
+### [Encoding Fixes](references/encoding-fixes.md)
+Fixes for all `validate_encoding.py` issues (character encoding, BOM, line endings):
+  - [1. Plugin Path Issues](references/encoding-fixes.md#1-plugin-path-issues)
+  - [2. UTF-8 Encoding Issues](references/encoding-fixes.md#2-utf-8-encoding-issues)
+  - [3. BOM (Byte Order Mark) Issues](references/encoding-fixes.md#3-bom-byte-order-mark-issues)
+  - [4. JSON Unicode Issues](references/encoding-fixes.md#4-json-unicode-issues)
+  - [5. Escape Sequence Issues](references/encoding-fixes.md#5-escape-sequence-issues)
+  - [6. Line Ending Issues — Source Files](references/encoding-fixes.md#6-line-ending-issues--source-files)
+  - [7. Line Ending Issues — Shell Scripts](references/encoding-fixes.md#7-line-ending-issues--shell-scripts)
+  - [8. Line Ending Issues — Batch Scripts](references/encoding-fixes.md#8-line-ending-issues--batch-scripts)
+  - [9. File Read Issues](references/encoding-fixes.md#9-file-read-issues)
+
+### [LSP Fixes](references/lsp-fixes.md)
+Fixes for LSP (Language Server Protocol) integration issues in plugin scripts and commands:
+  - [1. Config File Issues](references/lsp-fixes.md#1-config-file-issues)
+  - [2. Server-Level Structure Issues](references/lsp-fixes.md#2-server-level-structure-issues)
+  - [3. Unknown Fields](references/lsp-fixes.md#3-unknown-fields)
+  - [4. command Field Issues](references/lsp-fixes.md#4-command-field-issues)
+  - [5. extensionToLanguage Field Issues](references/lsp-fixes.md#5-extensiontolanguage-field-issues)
+  - [6. args Field Issues](references/lsp-fixes.md#6-args-field-issues)
+  - [7. filetypes Field Issues](references/lsp-fixes.md#7-filetypes-field-issues)
+  - [8. rootPatterns Field Issues](references/lsp-fixes.md#8-rootpatterns-field-issues)
+  - [9. initializationOptions and settings Field Issues](references/lsp-fixes.md#9-initializationoptions-and-settings-field-issues)
+  - [10. env Field Issues](references/lsp-fixes.md#10-env-field-issues)
+  - [11. cwd Field Issues](references/lsp-fixes.md#11-cwd-field-issues)
+  - [12. transport Field Issues](references/lsp-fixes.md#12-transport-field-issues)
+  - [13. Timeout Field Issues](references/lsp-fixes.md#13-timeout-field-issues)
+  - [14. maxRestarts Field Issues](references/lsp-fixes.md#14-maxrestarts-field-issues)
+  - [15. restartOnCrash Field Issues](references/lsp-fixes.md#15-restartoncrash-field-issues)
+  - [16. Environment Variable Syntax Issues](references/lsp-fixes.md#16-environment-variable-syntax-issues)
+  - [17. Path Value Issues](references/lsp-fixes.md#17-path-value-issues)
+  - [18. Informational Messages](references/lsp-fixes.md#18-informational-messages)
+
+### [Scoring Fixes](references/scoring-fixes.md)
+Fixes for all `validate_scoring.py` scoring issues (low scores, missing metrics, weight configuration):
+  - [1. How Scoring Works](references/scoring-fixes.md#1-how-scoring-works)
+  - [2. Category Definitions](references/scoring-fixes.md#2-category-definitions)
+  - [3. Status Thresholds](references/scoring-fixes.md#3-status-thresholds)
+  - [4. Sub-Validator Crash Messages](references/scoring-fixes.md#4-sub-validator-crash-messages)
+  - [5. Recommendation Messages](references/scoring-fixes.md#5-recommendation-messages)
+  - [6. How to Improve Each Category Score](references/scoring-fixes.md#6-how-to-improve-each-category-score)
 
 ## Examples
 

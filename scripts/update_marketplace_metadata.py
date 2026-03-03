@@ -23,23 +23,6 @@ from typing import Any
 from cpv_validation_common import get_plugin_root
 
 
-def calculate_file_checksum(file_path: Path) -> str:
-    """
-    Calculate SHA-256 checksum of a file.
-
-    Args:
-        file_path: Path to the file
-
-    Returns:
-        Hex-encoded SHA-256 checksum
-    """
-    sha256_hash = hashlib.sha256()
-    with open(file_path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            sha256_hash.update(chunk)
-    return sha256_hash.hexdigest()
-
-
 def calculate_directory_checksum(dir_path: Path, exclude_patterns: list[str] | None = None) -> str:
     """
     Calculate combined checksum of all files in a directory.

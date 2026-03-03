@@ -116,7 +116,7 @@ def get_submodule_paths(marketplace_dir: Path) -> list[dict[str, str]]:
     submodules = []
     current_submodule: dict[str, str] = {}
 
-    with open(gitmodules_path) as f:
+    with open(gitmodules_path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line.startswith("[submodule"):
@@ -330,7 +330,7 @@ flowchart TB
             if not dry_run:
                 marketplace_name = marketplace_dir.name
                 content = f"# {marketplace_name}\n\nClaude Code plugin marketplace.\n{architecture_section}"
-                readme_path.write_text(content)
+                readme_path.write_text(content, encoding="utf-8")
             return True
 
     # README exists - check for mermaid diagram
@@ -346,7 +346,7 @@ flowchart TB
         print("  [UPDATE] README.md - will append architecture diagram")
 
     if not dry_run:
-        with open(readme_path, "a") as f:
+        with open(readme_path, "a", encoding="utf-8") as f:
             f.write(architecture_section)
 
     return True
