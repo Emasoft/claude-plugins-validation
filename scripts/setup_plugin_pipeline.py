@@ -681,9 +681,7 @@ class PipelineSetup:
                 PipelineIssue(
                     level=IssueLevel.CRITICAL,
                     component="project",
-                    message=(
-                        "Not a valid plugin or marketplace (missing .claude-plugin/plugin.json or marketplace.json)"
-                    ),
+                    message=("Not a valid plugin or marketplace (missing .claude-plugin/plugin.json or marketplace.json)"),
                     fix_available=False,
                 )
             )
@@ -1089,11 +1087,7 @@ def print_status(status: PipelineStatus) -> None:
             print(f"  {icon} [{issue.component}] {issue.message}{fix_note}")
 
     print()
-    print(
-        f"Summary: {RED}{status.critical_count} critical{NC}, "
-        f"{YELLOW}{status.major_count} major{NC}, "
-        f"{BLUE}{status.minor_count} minor{NC}"
-    )
+    print(f"Summary: {RED}{status.critical_count} critical{NC}, {YELLOW}{status.major_count} major{NC}, {BLUE}{status.minor_count} minor{NC}")
 
     if status.is_valid:
         print(f"\n{GREEN}Pipeline is valid{NC}")
@@ -1117,9 +1111,7 @@ Examples:
 
     parser.add_argument("path", nargs="?", default=".", help="Path to project (default: current directory)")
 
-    parser.add_argument(
-        "--type", choices=["marketplace", "plugin"], help="Force project type (auto-detected by default)"
-    )
+    parser.add_argument("--type", choices=["marketplace", "plugin"], help="Force project type (auto-detected by default)")
 
     parser.add_argument("--validate", "-v", action="store_true", help="Validate pipeline only (don't fix)")
 
