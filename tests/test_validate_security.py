@@ -96,7 +96,8 @@ class TestScanForSecrets:
 
     def test_detects_aws_access_key(self, tmp_path):
         """scan_for_secrets should detect AWS access key IDs matching AKIA pattern."""
-        content = 'aws_key = "AKIAIOSFODNN7EXAMPLE"\n'
+        # Use a realistic but non-example AWS key (not in KNOWN_EXAMPLE_SECRETS)
+        content = 'aws_key = "AKIA44QH8DHBFAKEKEY1"\n'
         report = ValidationReport()
         count = scan_for_secrets(content, "plugin/config.py", report)
         assert count >= 1, f"Expected AWS key detection, got {count} issues"
@@ -467,8 +468,8 @@ class TestMainCLI:
         plugin_dir = tmp_path / "strict-plugin"
         plugin_dir.mkdir()
         (plugin_dir / ".claude-plugin").mkdir()
-        # Create a file with a real secret to trigger CRITICAL
-        (plugin_dir / "config.py").write_text('AWS_KEY = "AKIAIOSFODNN7EXAMPLE"\n')
+        # Create a file with a non-example AWS key to trigger CRITICAL
+        (plugin_dir / "config.py").write_text('AWS_KEY = "AKIA44QH8DHBFAKEKEY1"\n')
 
         monkeypatch.setattr("sys.argv", ["validate_security", str(plugin_dir), "--strict", "--json"])
         exit_code = main()
