@@ -2,6 +2,15 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [1.7.9] - 2026-03-03
+
+### Code Quality
+
+- Resolved all remaining Pyright hints in `claude-plugin-install.py`
+  (ctypes.windll Windows-only, unused unpack variables, reserved parameters)
+- Full clean sweep: Pyright 0/0/0, Ruff passed, Mypy 0 issues (28 files), 1101 tests pass
+- Self-validation: 0 CRITICAL/MAJOR/MINOR/NIT
+
 ## [1.7.8] - 2026-03-03
 
 ### Features
