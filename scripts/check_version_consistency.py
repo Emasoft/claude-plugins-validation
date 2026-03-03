@@ -226,6 +226,8 @@ Scans the following files for version information:
 Exit codes:
   0 - All versions are consistent
   1 - Version mismatch or error
+
+Example: uv run python scripts/check_version_consistency.py --verbose
         """,
     )
 
