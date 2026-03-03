@@ -848,7 +848,7 @@ def validate_allowed_tools_field(
         )
 
     # Over-permissioning advisory — not blocking
-    if len(tool_list) > 6:
+    if len(tool_list) > 10:
         report.warning(
             f"Many tools permitted ({len(tool_list)}) - consider limiting",
             "SKILL.md",

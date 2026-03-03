@@ -9,9 +9,11 @@ Comprehensive validation suite for Claude Code plugins, marketplaces, hooks, ski
 
 This plugin provides:
 
-- **Validation Scripts**: Python scripts for validating all plugin components
-- **Expert Agent**: `plugin-validator` agent for interactive validation
-- **Documentation Skill**: `plugin-validation-skill` with detailed reference guides
+- **Validation Scripts**: Python scripts for validating all plugin components (190+ rules)
+- **Expert Agent**: `plugin-validator` agent for interactive validation and remediation
+- **Skills**: `plugin-validation-skill`, `install-plugin`, `setup-github-marketplace`, `skill-validation-skill`
+- **Slash Commands**: 9 commands for validating, installing, and managing plugins
+- **Local Plugin Installer**: `claude-plugin-install.py` for installing plugins without a GitHub marketplace
 
 ## Installation (Production)
 
@@ -40,6 +42,20 @@ claude --plugin-dir ./OUTPUT_SKILLS/claude-plugins-validation
 ```
 
 ## Usage
+
+### Slash Commands
+
+| Command | Description |
+|---------|-------------|
+| `/cpv-validate-plugin` | Comprehensive plugin validation (manifest, hooks, skills, MCP, scripts) |
+| `/cpv-validate-hooks` | Validate hook configurations (hooks.json) |
+| `/cpv-validate-skill` | Validate skill directories (SKILL.md, frontmatter, references) |
+| `/cpv-validate-mcp` | Validate MCP server configurations |
+| `/cpv-validate-marketplace` | Validate marketplace configurations |
+| `/cpv-validate-agents` | Validate agent definition files |
+| `/cpv-validate-lsp` | Validate LSP server configurations |
+| `/cpv-install-plugin` | Install, uninstall, and manage plugins locally |
+| `/cpv-setup-github-marketplace` | Set up a GitHub marketplace with CI/CD |
 
 ### Validate a Plugin
 
@@ -72,6 +88,23 @@ uv run python scripts/validate_mcp.py /path/to/plugin
 
 # Validate marketplace
 uv run python scripts/validate_marketplace.py /path/to/marketplace
+
+# Cross-reference validation (agent refs, version sync, subagent types)
+uv run python scripts/validate_xref.py /path/to/plugin
+```
+
+### Install a Plugin Locally (No Marketplace)
+
+```bash
+# Install from archive or directory
+uv run python scripts/claude-plugin-install.py ./my-plugin.tar.gz
+uv run python scripts/claude-plugin-install.py ./my-plugin-dir/
+
+# Validate, list, uninstall, health check
+uv run python scripts/claude-plugin-install.py --validate ./my-plugin-dir/
+uv run python scripts/claude-plugin-install.py --list
+uv run python scripts/claude-plugin-install.py --uninstall my-plugin@local-my-plugin
+uv run python scripts/claude-plugin-install.py --doctor
 ```
 
 ### Use the Agent
@@ -117,26 +150,35 @@ Validation results use the following severity levels:
 ### Plugin Validation (`validate_plugin.py`)
 
 - Plugin manifest (`.claude-plugin/plugin.json`)
-- Directory structure
+- Directory structure and known directory whitelist
 - Component references (commands, agents, skills)
-- Hook configurations
+- Hook configurations (via comprehensive hook validator)
 - MCP server definitions
-- Script linting (Python via ruff, shell via shellcheck)
+- Script linting (Python via ruff/mypy, shell via shellcheck)
+- Content presence check (no empty plugins)
+- Settings.json validation (recognized keys)
+- Shebang verification for scripts
+- Cross-platform script portability
 
 ### Hook Validation (`validate_hook.py`)
 
-- JSON structure
-- Valid event types (18 supported)
-- Matcher syntax
+- JSON structure and schema
+- Valid event types (18 supported) with fuzzy matching suggestions
+- Matcher syntax and value validation (Notification types, SessionStart, PreCompact)
 - Script paths and executability
 - Hook type configuration
+- Bash command portability (interpreter detection, tilde expansion, bare `cd`, Windows paths, relative paths)
 
-### Skill Validation (`validate_skill.py`)
+### Skill Validation (`validate_skill.py` / `validate_skill_comprehensive.py`)
 
-- SKILL.md existence
-- Frontmatter YAML validity
-- Required fields (name, description)
+- SKILL.md existence and frontmatter YAML validity
+- Required fields (name, description, allowed-tools)
+- Required sections (Overview, Prerequisites, Instructions, Output, Error Handling, Examples, Resources)
 - Claude Code specific fields (context, agent, user-invocable)
+- Nixtla Quality Standards strict mode
+- AgentSkills OpenSpec compliance
+- Token budget analysis (line count, word count)
+- Reference file validation
 
 ### MCP Validation (`validate_mcp.py`)
 
@@ -153,6 +195,30 @@ Validation results use the following severity levels:
 - Plugin entry validation
 - Source type configuration
 - Local path resolution
+
+### Cross-Reference Validation (`validate_xref.py`)
+
+- Agent Task() call references
+- Subagent_type matching against available agents
+- Version synchronization across plugin.json, README.md, marketplace.json
+- Command agent references
+- Skill references
+- Hook script references
+
+### Additional Validators
+
+| Script | Purpose |
+|--------|---------|
+| `validate_agent.py` | Agent definition files |
+| `validate_command.py` | Command definition files |
+| `validate_documentation.py` | Documentation quality |
+| `validate_encoding.py` | File encoding |
+| `validate_enterprise.py` | Enterprise compliance |
+| `validate_lsp.py` | LSP server configurations |
+| `validate_rules.py` | Rule files validation |
+| `validate_scoring.py` | Scoring system |
+| `validate_security.py` | Security checks |
+| `validate_marketplace_pipeline.py` | CI/CD pipeline validation |
 
 ## Directory Structure
 
@@ -178,23 +244,27 @@ claude-plugins-validation/
 │       ├── skill-fixes.md
 │       └── skill-semantic-validation.md
 ├── commands/
+│   ├── cpv-install-plugin.md        # Local plugin install command
+│   ├── cpv-setup-github-marketplace.md # Marketplace setup command
 │   ├── cpv-validate-agents.md       # Agent validation command
 │   ├── cpv-validate-hooks.md        # Hook validation command
 │   ├── cpv-validate-lsp.md          # LSP validation command
 │   ├── cpv-validate-marketplace.md  # Marketplace validation command
 │   ├── cpv-validate-mcp.md          # MCP validation command
 │   ├── cpv-validate-plugin.md       # Plugin validation command
-│   ├── cpv-validate-skill.md        # Skill validation command
-│   └── cpv-setup-github-marketplace.md # Marketplace setup command
+│   └── cpv-validate-skill.md        # Skill validation command
 ├── git-hooks/
-│   ├── pre-commit                   # Pre-commit hook
-│   └── pre-push                     # Pre-push hook
+│   ├── pre-commit                   # Pre-commit validation hook
+│   └── pre-push                     # Pre-push validation hook
 ├── scripts/
-│   ├── cpv_validation_common.py         # Shared validation utilities
+│   ├── claude-plugin-install.py     # Local plugin installer (standalone)
+│   ├── cpv_validation_common.py     # Shared validation utilities
+│   ├── gitignore_filter.py          # Gitignore pattern filter
 │   ├── lint_files.py                # Multi-language file linter
+│   ├── smart_exec.py                # Smart script executor
 │   ├── validate_plugin.py           # Main plugin validator
 │   ├── validate_skill.py            # Skill validator
-│   ├── validate_skill_comprehensive.py  # Comprehensive skill validator
+│   ├── validate_skill_comprehensive.py  # Comprehensive skill validator (190+ rules)
 │   ├── validate_hook.py             # Hook validator
 │   ├── validate_mcp.py              # MCP server validator
 │   ├── validate_marketplace.py      # Marketplace validator
@@ -209,17 +279,17 @@ claude-plugins-validation/
 │   ├── validate_scoring.py          # Scoring validator
 │   ├── validate_security.py         # Security validator
 │   ├── validate_xref.py             # Cross-reference validator
-│   ├── smart_exec.py                # Smart script executor
 │   ├── bump_version.py              # Version bumping utility
 │   ├── check_version_consistency.py # Version consistency checker
-│   ├── setup_git_hooks.py            # Git hooks setup script
-│   ├── setup_marketplace_automation.py
-│   ├── setup_plugin_pipeline.py
-│   └── update_marketplace_metadata.py
+│   ├── setup_git_hooks.py           # Git hooks setup script
+│   ├── setup_marketplace_automation.py  # Marketplace automation setup
+│   ├── setup_plugin_pipeline.py     # Plugin pipeline setup
+│   └── update_marketplace_metadata.py   # Marketplace metadata updater
 ├── skills/
+│   ├── install-plugin/
+│   │   └── SKILL.md                 # Local plugin installation skill
 │   ├── plugin-validation-skill/
-│   │   ├── SKILL.md                 # Main skill file
-│   │   ├── README.md
+│   │   ├── SKILL.md                 # Main validation skill
 │   │   └── references/              # Detailed reference docs
 │   │       ├── plugin-structure.md
 │   │       ├── hook-validation.md
@@ -258,6 +328,11 @@ claude-plugins-validation/
 │       └── sync_marketplace_versions.py
 ├── tests/
 │   ├── conftest.py
+│   ├── test_cpv_validation_common.py
+│   ├── test_extended_linting.py
+│   ├── test_gitignore_filter.py
+│   ├── test_new_validation_checks.py
+│   ├── test_toc_embedding.py
 │   ├── test_validate_agent.py
 │   ├── test_validate_command.py
 │   ├── test_validate_documentation.py
@@ -265,19 +340,17 @@ claude-plugins-validation/
 │   ├── test_validate_enterprise.py
 │   ├── test_validate_hook.py
 │   ├── test_validate_lsp.py
-│   ├── test_validate_marketplace.py
 │   ├── test_validate_marketplace_pipeline.py
+│   ├── test_validate_marketplace.py
 │   ├── test_validate_mcp.py
 │   ├── test_validate_plugin.py
 │   ├── test_validate_rules.py
 │   ├── test_validate_scoring.py
 │   ├── test_validate_security.py
-│   ├── test_validate_skill.py
 │   ├── test_validate_skill_comprehensive.py
+│   ├── test_validate_skill.py
 │   ├── test_validate_xref.py
-│   ├── test_cpv_validation_common.py
-│   ├── test_extended_linting.py
-│   ├── test_toc_embedding.py
+│   ├── test_validator_early_exit.py
 │   └── fixtures/                    # Test fixtures
 │       ├── valid_plugin/
 │       └── invalid_plugin/
