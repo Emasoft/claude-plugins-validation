@@ -72,7 +72,7 @@ def _enable_ansi_windows():
     try:
         import ctypes
 
-        kernel32 = ctypes.windll.kernel32
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]  # Windows-only attribute
         handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
         mode = ctypes.c_ulong()
         kernel32.GetConsoleMode(handle, ctypes.byref(mode))
@@ -858,7 +858,8 @@ def _validate_markdown_frontmatter(
             )
         return errors, warnings
 
-    fm, body = parsed
+    fm, _body = parsed
+    del _body  # only frontmatter is validated
 
     # ── Unclosed frontmatter ──
     # (already handled by _parse_simple_frontmatter returning None for bad split)
@@ -1294,7 +1295,8 @@ def validate_plugin(plugin_root: Path) -> tuple[list[str], list[str]]:
     return errors, warnings
 
 
-def print_validation_report(errors, warnings, plugin_name):
+def print_validation_report(errors, warnings, _plugin_name):
+    del _plugin_name  # reserved for future use in report header
     if errors:
         print()
         for e in errors:
