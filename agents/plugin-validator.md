@@ -153,6 +153,7 @@ This prevents accidental leaking of private home directory paths in published pl
 5. **Marketplace Validation** - Check `marketplace.json` structure, plugin entries, source configurations
 6. **CI/CD Pipeline Validation** - Verify git hooks, GitHub Actions workflows, CI execution logs
 7. **Issue remediation** - When validation detects issues, consult the appropriate fix guide in references/ and offer to apply the fixes automatically
+8. **Local Plugin Installation** - Install, uninstall, and manage plugins locally via `scripts/claude-plugin-install.py` when the user doesn't need a GitHub marketplace
 
 ## Report Output (MANDATORY)
 
@@ -188,7 +189,25 @@ uv run python scripts/lint_files.py /path/to/plugin
 
 # Install marketplace automation workflows
 uv run python scripts/setup_marketplace_automation.py /path/to/marketplace
+
+# Install/manage plugins locally (no GitHub marketplace needed)
+uv run python scripts/claude-plugin-install.py <archive-or-dir>
+uv run python scripts/claude-plugin-install.py --validate <path-or-name@marketplace>
+uv run python scripts/claude-plugin-install.py --list
+uv run python scripts/claude-plugin-install.py --uninstall <name@marketplace>
+uv run python scripts/claude-plugin-install.py --doctor
 ```
+
+## Local Plugin Installation (without GitHub Marketplace)
+
+When the user wants to install a plugin locally without setting up a GitHub marketplace:
+
+1. Use `scripts/claude-plugin-install.py` — it wraps the plugin into a local marketplace structure under `~/.claude/plugins/marketplaces/` and registers it in Claude Code's `known_marketplaces.json`
+2. The script is self-contained (Python 3.8+, no external dependencies), cross-platform (macOS/Linux/Windows)
+3. It validates the plugin structure, fixes script permissions, and creates backups of modified settings
+4. After installation, always run `/cpv-validate-plugin` to verify the plugin passes all 190+ rules
+5. Use `--doctor` to diagnose issues with any installed plugin or settings
+6. For GitHub-based distribution instead, use the `setup-github-marketplace` skill
 
 ## Exit Codes
 
