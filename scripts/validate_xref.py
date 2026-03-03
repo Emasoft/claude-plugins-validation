@@ -278,8 +278,8 @@ def validate_subagent_type_matching(
         matches = SUBAGENT_TYPE_PATTERN.findall(content)
 
         for ref_agent in matches:
-            expected_file = plugin_root / "agents" / f"{ref_agent}.md"
-            if not expected_file.exists():
+            # Check against both the known agent set and filesystem for completeness
+            if ref_agent not in available_agents:
                 report.major(
                     f"subagent_type '{ref_agent}' has no matching agents/{ref_agent}.md",
                     rel_path,

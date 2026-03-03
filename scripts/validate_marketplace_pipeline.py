@@ -1350,6 +1350,7 @@ def validate_marketplace_pipeline(
     Returns:
         Complete validation report
     """
+    del _verbose  # reserved for future use
     report = PipelineValidationReport(marketplace_path=marketplace_path)
 
     # Run all category validations
