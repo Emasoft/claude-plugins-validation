@@ -433,7 +433,7 @@ def validate_supporting_files(skill_path: Path, report: ValidationReport) -> Non
     if not skill_md.exists():
         return
 
-    content = skill_md.read_text()
+    content = skill_md.read_text(encoding="utf-8")
 
     # Find markdown links to local files
     local_refs = re.findall(r"\[([^\]]+)\]\(([^)]+)\)", content)
@@ -480,7 +480,7 @@ def validate_skill(skill_path: Path) -> SkillValidationReport:
 
     # Read SKILL.md content
     skill_md = skill_path / "SKILL.md"
-    content = skill_md.read_text()
+    content = skill_md.read_text(encoding="utf-8")
 
     # Validate frontmatter
     frontmatter = validate_frontmatter(skill_path, content, report)

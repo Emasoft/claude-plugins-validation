@@ -139,7 +139,7 @@ def validate_json_structure(hook_path: Path, report: ValidationReport) -> dict[s
         return None
 
     try:
-        content = hook_path.read_text()
+        content = hook_path.read_text(encoding="utf-8")
         data = json.loads(content)
         report.passed("Valid JSON syntax")
         return cast(dict[str, Any], data)
@@ -192,6 +192,27 @@ def validate_event_name(event_name: str, report: ValidationReport) -> bool:
     return True
 
 
+def _check_matcher_values(
+    matcher: str,
+    known_values: set[str],
+    event_label: str,
+    values_label: str,
+    report: ValidationReport,
+) -> None:
+    """Check matcher parts against a set of known values, reporting info for unknowns."""
+    parts = re.split(r"[|()]", matcher)
+    for part in parts:
+        part = part.strip()
+        # Skip empty, wildcard, and regex patterns (contain metacharacters)
+        if not part or part == "*" or re.escape(part) != part:
+            continue
+        if part not in known_values:
+            report.info(
+                f"{event_label} matcher '{part}' is not a known {values_label} — "
+                f"known values: {', '.join(sorted(known_values))}"
+            )
+
+
 def validate_matcher(matcher: Any, event_name: str, report: ValidationReport) -> bool:
     """Validate a matcher pattern."""
     # Events without matchers - warn if matcher provided
@@ -226,38 +247,13 @@ def validate_matcher(matcher: Any, event_name: str, report: ValidationReport) ->
                 if re.match(r"^[A-Z][a-zA-Z]+$", part):
                     report.info(f"Matcher '{part}' is not a common tool name (may be custom or MCP tool)")
 
-    # Validate Notification matcher types
+    # Validate matcher values against known sets for specific event types
     if event_name == "Notification":
-        parts = re.split(r"[|()]", matcher)
-        for part in parts:
-            part = part.strip()
-            if part and part != "*" and part not in COMMON_NOTIFICATION_TYPES:
-                report.info(
-                    f"Notification matcher '{part}' is not a common type — "
-                    f"known types: {', '.join(sorted(COMMON_NOTIFICATION_TYPES))}"
-                )
-
-    # Validate SessionStart matcher sources
+        _check_matcher_values(matcher, COMMON_NOTIFICATION_TYPES, "Notification", "type", report)
     if event_name == "SessionStart":
-        parts = re.split(r"[|()]", matcher)
-        for part in parts:
-            part = part.strip()
-            if part and part != "*" and part not in SESSION_START_SOURCES:
-                report.info(
-                    f"SessionStart matcher '{part}' is not a known source — "
-                    f"known values: {', '.join(sorted(SESSION_START_SOURCES))}"
-                )
-
-    # Validate PreCompact matcher triggers
+        _check_matcher_values(matcher, SESSION_START_SOURCES, "SessionStart", "source", report)
     if event_name == "PreCompact":
-        parts = re.split(r"[|()]", matcher)
-        for part in parts:
-            part = part.strip()
-            if part and part != "*" and part not in COMPACT_TRIGGERS:
-                report.info(
-                    f"PreCompact matcher '{part}' is not a known trigger — "
-                    f"known values: {', '.join(sorted(COMPACT_TRIGGERS))}"
-                )
+        _check_matcher_values(matcher, COMPACT_TRIGGERS, "PreCompact", "trigger", report)
 
     return True
 
