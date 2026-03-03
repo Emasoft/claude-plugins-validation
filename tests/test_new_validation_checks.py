@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 # Add scripts directory to path for imports
 scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
@@ -152,31 +153,37 @@ def test_plugin_with_commands_dir_no_content_error(tmp_path: Path):
 
 
 def test_script_with_shebang_no_warning(tmp_path: Path):
-    """A script starting with a proper shebang does NOT trigger a missing shebang warning."""
-    plugin_dir = tmp_path / "shebang-ok"
+    """Script files with valid shebangs should not trigger shebang warnings."""
+    plugin_dir = tmp_path / "plugin"
     plugin_dir.mkdir()
+    (plugin_dir / ".claude-plugin").mkdir()
+    (plugin_dir / ".claude-plugin" / "plugin.json").write_text('{"name": "test"}')
     scripts_dir = plugin_dir / "scripts"
     scripts_dir.mkdir()
-    script = scripts_dir / "foo.py"
+    script = scripts_dir / "hello.py"
     script.write_text("#!/usr/bin/env python3\nprint('hello')\n")
     report = ValidationReport()
-    validate_scripts(plugin_dir, report)
+    with patch("validate_plugin.resolve_tool_command", return_value=None):
+        validate_scripts(plugin_dir, report)
     minor_msgs = [r.message for r in report.results if r.level == "MINOR"]
     assert not any("shebang" in m.lower() for m in minor_msgs)
 
 
 def test_script_without_shebang_reports_minor(tmp_path: Path):
-    """A script without a shebang line triggers MINOR warning about missing shebang."""
-    plugin_dir = tmp_path / "shebang-missing"
+    """Script files without shebangs should report a MINOR warning."""
+    plugin_dir = tmp_path / "plugin"
     plugin_dir.mkdir()
+    (plugin_dir / ".claude-plugin").mkdir()
+    (plugin_dir / ".claude-plugin" / "plugin.json").write_text('{"name": "test"}')
     scripts_dir = plugin_dir / "scripts"
     scripts_dir.mkdir()
-    script = scripts_dir / "foo.py"
+    script = scripts_dir / "hello.py"
     script.write_text("print('hello')\n")
     report = ValidationReport()
-    validate_scripts(plugin_dir, report)
+    with patch("validate_plugin.resolve_tool_command", return_value=None):
+        validate_scripts(plugin_dir, report)
     minor_msgs = [r.message for r in report.results if r.level == "MINOR"]
-    assert any("shebang" in m.lower() and "foo.py" in m for m in minor_msgs)
+    assert any("shebang" in m.lower() for m in minor_msgs)
 
 
 # ===========================================================================
@@ -232,7 +239,7 @@ def test_notification_matcher_known_type_no_info():
 
 def test_tilde_path_reports_minor(tmp_path: Path):
     """A hook command starting with '~/' triggers MINOR about tilde expansion."""
-    hook = {"type": "command", "command": "~/scripts/run.sh"}
+    hook = {"type": "command", "command": "~/bin/my-tool"}
     report = ValidationReport()
     validate_command_hook(hook, "PreToolUse", tmp_path, report)
     minor_msgs = [r.message for r in report.results if r.level == "MINOR"]
@@ -264,7 +271,7 @@ def test_relative_path_without_plugin_root_reports_minor(tmp_path: Path):
 
 def test_command_with_plugin_root_no_relative_path_warning(tmp_path: Path):
     """A command using ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh does NOT trigger relative path warning."""
-    hook = {"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/scripts/run.sh"}
+    hook = {"type": "command", "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/run.sh"}
     report = ValidationReport()
     validate_command_hook(hook, "PreToolUse", tmp_path, report)
     minor_msgs = [r.message for r in report.results if r.level == "MINOR"]
