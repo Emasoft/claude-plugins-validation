@@ -427,7 +427,7 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
                     if "Windows" in msg or "C:\\" in matched_text:
                         continue
                     # Skip absolute Unix paths in Python string literals
-                    # (e.g. help text mentioning #!/usr/bin/env or /usr/local/bin)
+                    # (e.g. help text mentioning shebangs or system bin directories)
                     if "Absolute Unix" in msg and (
                         "#!/" in line or "help" in stripped.lower() or "epilog" in stripped.lower()
                         or stripped.startswith(("'", '"', "f'", 'f"', "r'", 'r"'))
