@@ -12,7 +12,7 @@ This plugin provides:
 - **Validation Scripts**: Python scripts for validating all plugin components (190+ rules)
 - **Expert Agent**: `plugin-validator` agent for interactive validation and remediation
 - **Skills**: `plugin-validation-skill`, `install-plugin`, `setup-github-marketplace`, `skill-validation-skill`
-- **Slash Commands**: 9 commands for validating, installing, and managing plugins
+- **Slash Commands**: 17 commands for validating, installing, and managing plugins
 - **Local Plugin Installer**: `claude-plugin-install.py` for installing plugins without a GitHub marketplace
 
 ## Installation (Production)
@@ -54,8 +54,39 @@ claude --plugin-dir ./OUTPUT_SKILLS/claude-plugins-validation
 | `/cpv-validate-marketplace` | Validate marketplace configurations |
 | `/cpv-validate-agents` | Validate agent definition files |
 | `/cpv-validate-lsp` | Validate LSP server configurations |
+| `/cpv-validate-command` | Validate command definition files (frontmatter, structure) |
+| `/cpv-validate-documentation` | Validate documentation quality (README sections, links, images) |
+| `/cpv-validate-encoding` | Validate file encoding (UTF-8, BOM, line endings, control chars) |
+| `/cpv-validate-enterprise` | Validate enterprise compliance (author, license, SPDX, tags, context) |
+| `/cpv-validate-rules` | Validate rule files (.md files in rules/ directory) |
+| `/cpv-validate-scoring` | Compute plugin quality score (weighted category scoring) |
+| `/cpv-validate-security` | Security validation (injection, path traversal, secrets, permissions) |
+| `/cpv-validate-xref` | Cross-reference validation (agent refs, version sync, hook scripts) |
 | `/cpv-install-plugin` | Install, uninstall, and manage plugins locally |
 | `/cpv-setup-github-marketplace` | Set up a GitHub marketplace with CI/CD |
+
+## Utility Scripts
+
+| Script | Description |
+|--------|-------------|
+| `bump_version.py` | Bump semantic version across all plugin files |
+| `check_version_consistency.py` | Verify version consistency across files |
+| `lint_files.py` | Read-only file linting for 15 languages |
+| `setup_git_hooks.py` | Install/remove git hooks for plugin validation |
+| `setup_plugin_pipeline.py` | Setup and validate plugin development pipeline |
+| `update_marketplace_metadata.py` | Update marketplace.json when plugin files change |
+| `smart_exec.py` | Intelligent tool executor with cross-platform detection |
+
+## Common Options
+
+All validation scripts share the following flags:
+
+| Option | Description |
+|--------|-------------|
+| `--verbose, -v` | Show all results including passed checks |
+| `--json` | Output results as JSON |
+| `--strict` | Strict mode (NIT issues also block validation) |
+| `path` | Plugin root path (defaults to parent of scripts/) |
 
 ### Validate a Plugin
 

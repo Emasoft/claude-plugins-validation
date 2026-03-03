@@ -226,10 +226,11 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s --patch     # 1.0.0 -> 1.0.1
-  %(prog)s --minor     # 1.0.0 -> 1.1.0
-  %(prog)s --major     # 1.0.0 -> 2.0.0
-  %(prog)s --set 2.5.0 # Set explicit version
+  %(prog)s --patch          # 1.0.0 -> 1.0.1
+  %(prog)s --minor          # 1.0.0 -> 1.1.0
+  %(prog)s --major          # 1.0.0 -> 2.0.0
+  %(prog)s --set 2.5.0      # Set explicit version
+  %(prog)s --patch --dry-run  # Preview change without writing
         """,
     )
 

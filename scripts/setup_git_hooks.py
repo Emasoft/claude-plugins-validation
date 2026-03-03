@@ -179,7 +179,7 @@ def _make_executable(path: Path) -> None:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Install git hooks for plugin validation.",
-        epilog="Default behavior: Copy hooks from git-hooks/ to .git/hooks/.",
+        epilog="Default behavior: Copy hooks from git-hooks/ to .git/hooks/.\nExample: uv run python scripts/setup_git_hooks.py --symlink",
     )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(

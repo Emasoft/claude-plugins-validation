@@ -19,6 +19,7 @@ Supported languages:
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import platform
@@ -1052,7 +1053,29 @@ def run_linting(repo_root: Path) -> bool:
 
 def main() -> int:
     """Lint all files in a repository (read-only). Returns 0 if pass, 1 if fail."""
-    repo_root = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else get_repo_root()
+    parser = argparse.ArgumentParser(
+        description="Read-only file linting for plugin repositories.",
+        epilog=(
+            "Supports 15 languages: Python, JavaScript, Shell, Go, Rust, "
+            "Markdown, JSON, YAML, Dockerfile, XML, CSS, HTML, SQL, TOML, PowerShell. "
+            "All checks are read-only — no files are modified."
+        ),
+    )
+    parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=None,
+        help="Repository root path (default: auto-detected via git)",
+    )
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Show detailed output for each linter",
+    )
+    args = parser.parse_args()
+
+    repo_root = args.path.resolve() if args.path else get_repo_root()
 
     if not repo_root.is_dir():
         print(f"{RED}Error: {repo_root} is not a directory{NC}", file=sys.stderr)
