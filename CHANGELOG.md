@@ -2,6 +2,21 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [1.7.8] - 2026-03-03
+
+### Features
+
+- New `/cpv-install-plugin` command — wraps `claude-plugin-install.py` as a slash command
+- New `install-plugin` skill — instructions for local plugin installation without GitHub marketplace
+- Agent `plugin-validator.md` updated with local install responsibility and script documentation
+
+### Bug Fixes
+
+- Fixed tool-count parsing in `validate_skill_comprehensive.py` and `validate_skill.py`:
+  `Bash(git:*,gh:*)` now counts as 1 tool instead of being split at internal commas
+- Fixed all 14 ruff + 17 mypy errors in `claude-plugin-install.py`
+- Fixed `plugin-validation-skill/SKILL.md` line count (under 500 limit)
+
 ## [1.7.7] - 2026-03-03
 
 ### Code Quality
