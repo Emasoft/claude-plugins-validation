@@ -219,7 +219,7 @@ def test_notification_matcher_unknown_type_reports_info():
     result = validate_matcher("unknown_type", "Notification", report)
     assert result is True
     info_msgs = [r.message for r in report.results if r.level == "INFO"]
-    assert any("not a common type" in m and "known types" in m for m in info_msgs)
+    assert any("not a known type" in m and "known values" in m for m in info_msgs)
 
 
 def test_notification_matcher_known_type_no_info():

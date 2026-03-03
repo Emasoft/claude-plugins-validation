@@ -88,7 +88,7 @@ def validate_manifest(
         return None
 
     try:
-        manifest = json.loads(manifest_path.read_text())
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         report.critical(f"Invalid JSON in plugin.json: {e}", ".claude-plugin/plugin.json")
         return None
@@ -379,7 +379,7 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
     settings_path = plugin_root / "settings.json"
     if settings_path.exists():
         try:
-            settings_data = json.loads(settings_path.read_text())
+            settings_data = json.loads(settings_path.read_text(encoding="utf-8"))
             if not isinstance(settings_data, dict):
                 report.major("settings.json: root must be a JSON object", "settings.json")
             else:
@@ -438,7 +438,7 @@ def validate_commands(plugin_root: Path, report: ValidationReport) -> None:
 def validate_command_file(cmd_path: Path, report: ValidationReport) -> None:
     """Validate a single command file."""
     rel_path = f"commands/{cmd_path.name}"
-    content = cmd_path.read_text()
+    content = cmd_path.read_text(encoding="utf-8")
 
     # Check frontmatter
     if not content.startswith("---"):
@@ -500,7 +500,7 @@ def validate_agents(plugin_root: Path, report: ValidationReport) -> None:
 def validate_agent_file(agent_path: Path, report: ValidationReport) -> None:
     """Validate a single agent file."""
     rel_path = f"agents/{agent_path.name}"
-    content = agent_path.read_text()
+    content = agent_path.read_text(encoding="utf-8")
 
     # Check frontmatter
     if not content.startswith("---"):
@@ -654,6 +654,8 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
 
     # Shell scripts
     sh_files = list(scripts_dir.glob("*.sh"))
+    # Resolve shellcheck once, outside the loop
+    shellcheck_cmd = resolve_tool_command("shellcheck") if sh_files else None
     for sh_file in sh_files:
         if not os.access(sh_file, os.X_OK):
             report.major(
@@ -663,8 +665,7 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
         else:
             report.passed(f"Shell script executable: {sh_file.name}", f"scripts/{sh_file.name}")
 
-        # Shellcheck
-        shellcheck_cmd = resolve_tool_command("shellcheck")
+        # Shellcheck lint
         if shellcheck_cmd:
             result = subprocess.run(
                 shellcheck_cmd + [str(sh_file)],
@@ -676,8 +677,9 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
                 report.passed(f"Shellcheck passed: {sh_file.name}")
             else:
                 report.minor(f"Shellcheck issues in {sh_file.name}", f"scripts/{sh_file.name}")
-        else:
-            report.minor("shellcheck not available locally or via bunx/npx, skipping shell lint")
+    # Report shellcheck availability once (after loop)
+    if sh_files and not shellcheck_cmd:
+        report.minor("shellcheck not available locally or via bunx/npx, skipping shell lint")
 
     # Check shebangs on script files — scripts without shebangs may not run cross-platform
     shebang_extensions = {".py", ".sh", ".bash", ".rb", ".pl", ".php"}

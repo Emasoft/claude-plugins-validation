@@ -1958,7 +1958,7 @@ def validate_toc_embedding(
 
         # Read the referenced file and extract its TOC
         try:
-            ref_content = ref_path.read_text()
+            ref_content = ref_path.read_text(encoding="utf-8")
         except Exception:
             continue
 

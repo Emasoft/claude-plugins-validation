@@ -155,7 +155,7 @@ def check_plugin_notification_workflow(plugin_path: Path) -> PluginWorkflowStatu
 
     if workflow_path.exists():
         # Check if it still has placeholder values
-        content = workflow_path.read_text()
+        content = workflow_path.read_text(encoding="utf-8")
         if "YOUR_GITHUB_USERNAME" in content or "YOUR_MARKETPLACE_REPO_NAME" in content:
             result["needs_configuration"] = True
 
@@ -334,7 +334,7 @@ flowchart TB
             return True
 
     # README exists - check for mermaid diagram
-    content = readme_path.read_text()
+    content = readme_path.read_text(encoding="utf-8")
 
     if "```mermaid" in content:
         if verbose:
@@ -481,7 +481,7 @@ def get_full_status(
     status["readme"]["exists"] = readme_path.exists()
     status["readme"]["path"] = str(readme_path)
     if readme_path.exists():
-        content = readme_path.read_text()
+        content = readme_path.read_text(encoding="utf-8")
         status["readme"]["has_diagram"] = "```mermaid" in content
 
     # Check plugins

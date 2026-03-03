@@ -312,7 +312,7 @@ def validate_version_sync(
     plugin_json = plugin_root / ".claude-plugin" / "plugin.json"
     if plugin_json.exists():
         try:
-            manifest = json.loads(plugin_json.read_text())
+            manifest = json.loads(plugin_json.read_text(encoding="utf-8"))
             if "version" in manifest:
                 versions_found["plugin.json"] = manifest["version"]
         except (json.JSONDecodeError, Exception):
@@ -334,7 +334,7 @@ def validate_version_sync(
     marketplace_json = plugin_root.parent / "marketplace.json"
     if marketplace_json.exists():
         try:
-            marketplace = json.loads(marketplace_json.read_text())
+            marketplace = json.loads(marketplace_json.read_text(encoding="utf-8"))
             plugins = marketplace.get("plugins", [])
             plugin_name = plugin_root.name
             for plugin_entry in plugins:
@@ -349,7 +349,7 @@ def validate_version_sync(
     pyproject = plugin_root / "pyproject.toml"
     if pyproject.exists():
         try:
-            content = pyproject.read_text()
+            content = pyproject.read_text(encoding="utf-8")
             match = re.search(r'version\s*=\s*["\'](\d+\.\d+\.\d+)["\']', content)
             if match:
                 versions_found["pyproject.toml"] = match.group(1)
@@ -518,7 +518,7 @@ def validate_hook_script_refs(
     plugin_json = plugin_root / ".claude-plugin" / "plugin.json"
     if plugin_json.exists():
         try:
-            manifest = json.loads(plugin_json.read_text())
+            manifest = json.loads(plugin_json.read_text(encoding="utf-8"))
             if "hooks" in manifest:
                 hooks_val = manifest["hooks"]
                 if isinstance(hooks_val, str):
@@ -535,7 +535,7 @@ def validate_hook_script_refs(
 
     for hooks_file in hooks_files:
         try:
-            hooks_content = hooks_file.read_text()
+            hooks_content = hooks_file.read_text(encoding="utf-8")
             hooks_config = json.loads(hooks_content)
         except (json.JSONDecodeError, Exception) as e:
             report.minor(f"Could not parse hooks file: {e}", str(hooks_file.relative_to(plugin_root)))
