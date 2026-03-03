@@ -386,7 +386,7 @@ root cause, and step-by-step fix instructions.
 **Fix**:
 1. If the directory is needed by your plugin, document its purpose in README.md.
 2. If it is a leftover or artifact, remove it.
-3. Known standard directories: `.claude-plugin`, `commands`, `agents`, `skills`, `hooks`, `scripts`, `docs`, `rules`, `schemas`, `bin`, `templates`, `tests`, `lib`, `libs`, `modules`, `resources`, `assets`, `data`, `config`, `configs`, `examples`, `samples`, `references`.
+3. Known standard directories: `.claude-plugin`, `commands`, `agents`, `skills`, `hooks`, `scripts`, `docs`, `rules`, `schemas`, `bin`, `templates`, `tests`, `lib`, `libs`, `modules`, `resources`, `assets`, `data`, `config`, `configs`, `examples`, `samples`, `references`, `git-hooks`, `shared`, `fixtures`, `vendor`, `src`, `dist`, `build`, `out`, `target`.
 
 ### MAJOR: Plugin has manifest but no content
 

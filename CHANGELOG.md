@@ -2,6 +2,13 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [1.7.6] - 2026-03-03
+
+### Improvements
+
+- Expanded known directories whitelist: `git-hooks`, `shared`, `fixtures`, `vendor`, `src`, `dist`, `build`, `out`, `target` no longer trigger "non-standard directory" warnings
+- Excluded `git-hooks/`, `tests/`, `fixtures/` from cross-platform script scan (developer tooling, not end-user components)
+
 ## [1.7.5] - 2026-03-03
 
 ### New Validation Checks (from claude-plugin-install.py gap analysis)

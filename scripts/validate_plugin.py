@@ -352,6 +352,16 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         "examples",
         "samples",
         "references",
+        # Developer tooling dirs
+        "git-hooks",
+        "shared",
+        "fixtures",
+        "vendor",
+        "src",
+        "dist",
+        "build",
+        "out",
+        "target",
     }
     # Also skip hidden dirs and _dev dirs
     for item in plugin_root.iterdir():
@@ -782,7 +792,7 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
         ".zig": ("Zig", ["build.zig"]),
     }
 
-    # Directories to always skip (build artifacts, caches)
+    # Directories to always skip (build artifacts, caches, developer tooling)
     skip_dirs = {
         "__pycache__",
         "node_modules",
@@ -790,6 +800,9 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
         "build",
         "target",
         ".eggs",
+        "git-hooks",  # git hooks are developer tooling, not end-user components
+        "tests",  # test fixtures may contain platform-specific scripts
+        "fixtures",
     }
 
     # Use gitignore-aware walk to skip ignored files and directories
