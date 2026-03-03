@@ -49,32 +49,39 @@ import argparse
 import configparser
 import json
 import os
-
-# ANSI Colors - Enable Windows support
-import platform as _platform
 import stat
 import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-if _platform.system() == "Windows":
-    # Enable ANSI escape sequences on Windows 10+
-    try:
-        import ctypes
 
-        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-        kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
-    except (AttributeError, OSError):
-        pass  # Not Windows or older Windows without ANSI support
+def _colors_supported() -> bool:
+    """Return True only when the terminal supports ANSI escape sequences."""
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.name == "nt":  # type: ignore[unreachable]
+        # Enable ANSI on Windows 10+
+        try:
+            import ctypes
 
-RED = "\033[0;31m"
-GREEN = "\033[0;32m"
-YELLOW = "\033[1;33m"
-BLUE = "\033[0;34m"
-CYAN = "\033[0;36m"
-BOLD = "\033[1m"
-NC = "\033[0m"
+            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+            kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+        except (AttributeError, OSError):
+            pass
+        return bool(os.environ.get("WT_SESSION") or os.environ.get("ANSICON"))
+    return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+
+
+_USE_COLOR = _colors_supported()
+
+RED = "\033[0;31m" if _USE_COLOR else ""
+GREEN = "\033[0;32m" if _USE_COLOR else ""
+YELLOW = "\033[1;33m" if _USE_COLOR else ""
+BLUE = "\033[0;34m" if _USE_COLOR else ""
+CYAN = "\033[0;36m" if _USE_COLOR else ""
+BOLD = "\033[1m" if _USE_COLOR else ""
+NC = "\033[0m" if _USE_COLOR else ""
 
 
 class ProjectType(Enum):

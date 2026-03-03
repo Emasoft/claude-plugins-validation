@@ -20,6 +20,7 @@ Supported languages:
 from __future__ import annotations
 
 import json
+import os
 import platform
 import shutil
 import subprocess
@@ -28,15 +29,27 @@ from collections.abc import Callable
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Terminal colors
+# Terminal colors — respects NO_COLOR (https://no-color.org/) and non-TTY output
 # ---------------------------------------------------------------------------
 
-RED = "\033[0;31m"
-GREEN = "\033[0;32m"
-YELLOW = "\033[1;33m"
-BLUE = "\033[0;34m"
-BOLD = "\033[1m"
-NC = "\033[0m"
+
+def _colors_supported() -> bool:
+    """Return True only when the terminal supports ANSI escape sequences."""
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.name == "nt":  # type: ignore[unreachable]
+        return bool(os.environ.get("WT_SESSION") or os.environ.get("ANSICON"))
+    return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+
+
+_USE_COLOR = _colors_supported()
+
+RED = "\033[0;31m" if _USE_COLOR else ""
+GREEN = "\033[0;32m" if _USE_COLOR else ""
+YELLOW = "\033[1;33m" if _USE_COLOR else ""
+BLUE = "\033[0;34m" if _USE_COLOR else ""
+BOLD = "\033[1m" if _USE_COLOR else ""
+NC = "\033[0m" if _USE_COLOR else ""
 
 # ---------------------------------------------------------------------------
 # Tool resolution via smart_exec TOOL_DB
@@ -472,12 +485,12 @@ def ensure_linter_installed(language: str, repo_root: Path) -> bool:
     elif language == "toml":
         # tomllib is stdlib in Python 3.11+; tomli is pip fallback for 3.10
         try:
-            import tomllib  # noqa: F401
+            import tomllib  # noqa: F401  # type: ignore[reportUnusedImport]
 
             return True
         except ModuleNotFoundError:
             try:
-                import tomli  # type: ignore[import-untyped]  # noqa: F401
+                import tomli  # type: ignore[import-untyped,reportUnusedImport]  # noqa: F401
 
                 return True
             except ModuleNotFoundError:
@@ -504,10 +517,12 @@ def ensure_linter_installed(language: str, repo_root: Path) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def lint_python(repo_root: Path) -> bool:
+def lint_python(repo_root: Path, files: list[Path] | None = None) -> bool:  # noqa: ARG001
     """Lint Python files with ruff check + mypy (read-only, no --fix).
 
     Steps: 1) ruff check (no --fix), 2) mypy type-check
+    Files are discovered internally via ruff/mypy; the files param is unused but
+    kept for uniform dispatch signature.
     """
     # ruff check (read-only, no --fix)
     print(f"{BLUE}    [1/2] ruff check...{NC}")
@@ -551,8 +566,12 @@ def lint_python(repo_root: Path) -> bool:
     return True
 
 
-def lint_javascript(repo_root: Path) -> bool:
-    """Lint JavaScript/TypeScript files with eslint (read-only, no --fix)."""
+def lint_javascript(repo_root: Path, files: list[Path] | None = None) -> bool:  # noqa: ARG001
+    """Lint JavaScript/TypeScript files with eslint (read-only, no --fix).
+
+    Files are discovered internally via eslint; the files param is unused but
+    kept for uniform dispatch signature.
+    """
     # Find eslint
     local_eslint = repo_root / "node_modules" / ".bin" / "eslint"
     if shutil.which("bun"):
@@ -595,7 +614,7 @@ def lint_javascript(repo_root: Path) -> bool:
         return True
 
 
-def lint_shell(repo_root: Path, files: list[Path]) -> bool:
+def lint_shell(repo_root: Path, files: list[Path]) -> bool:  # noqa: ARG001
     """Lint shell scripts with shellcheck (read-only)."""
     print(f"{BLUE}    shellcheck...{NC}")
     all_passed = True
@@ -613,7 +632,7 @@ def lint_shell(repo_root: Path, files: list[Path]) -> bool:
     return all_passed
 
 
-def lint_go(repo_root: Path) -> bool:
+def lint_go(repo_root: Path, files: list[Path] | None = None) -> bool:  # noqa: ARG001
     """Lint Go files with gofmt -l (list mode) + go vet (read-only)."""
     # gofmt -l: list files whose formatting differs (read-only, no -w)
     print(f"{BLUE}    gofmt -l (check formatting)...{NC}")
@@ -643,7 +662,7 @@ def lint_go(repo_root: Path) -> bool:
         return True
 
 
-def lint_rust(repo_root: Path) -> bool:
+def lint_rust(repo_root: Path, files: list[Path] | None = None) -> bool:  # noqa: ARG001
     """Lint Rust files with cargo fmt --check + cargo clippy (read-only)."""
     if not (repo_root / "Cargo.toml").exists():
         return True
@@ -710,7 +729,7 @@ def lint_markdown(repo_root: Path, files: list[Path]) -> bool:
         return True
 
 
-def lint_json(repo_root: Path, files: list[Path]) -> bool:
+def lint_json(repo_root: Path, files: list[Path]) -> bool:  # noqa: ARG001
     """Validate JSON syntax with Python json module (read-only)."""
     if not files:
         return True
@@ -780,7 +799,7 @@ def lint_yaml(repo_root: Path, files: list[Path]) -> bool:
         return True
 
 
-def lint_dockerfile(repo_root: Path, files: list[Path]) -> bool:
+def lint_dockerfile(repo_root: Path, files: list[Path]) -> bool:  # noqa: ARG001
     """Lint Dockerfiles with hadolint (read-only)."""
     cmd = _resolve_tool("hadolint")
     if not cmd:
@@ -806,7 +825,7 @@ def lint_dockerfile(repo_root: Path, files: list[Path]) -> bool:
     return all_passed
 
 
-def lint_xml(repo_root: Path, files: list[Path]) -> bool:
+def lint_xml(repo_root: Path, files: list[Path]) -> bool:  # noqa: ARG001
     """Lint XML files with xmllint --noout (read-only)."""
     cmd = _resolve_tool("xmllint")
     if not cmd:
@@ -909,7 +928,7 @@ def lint_sql(repo_root: Path, files: list[Path]) -> bool:
         return True
 
 
-def lint_toml(repo_root: Path, files: list[Path]) -> bool:
+def lint_toml(repo_root: Path, files: list[Path]) -> bool:  # noqa: ARG001
     """Validate TOML files using Python's tomllib (read-only)."""
     # tomllib is stdlib in Python 3.11+; fall back to tomli for 3.10
     try:
@@ -945,7 +964,7 @@ def lint_toml(repo_root: Path, files: list[Path]) -> bool:
     return True
 
 
-def lint_powershell(repo_root: Path, files: list[Path]) -> bool:
+def lint_powershell(repo_root: Path, files: list[Path]) -> bool:  # noqa: ARG001
     """Lint PowerShell scripts with PSScriptAnalyzer (read-only)."""
     cmd = _resolve_tool("PSScriptAnalyzer")
     if not cmd:
@@ -1005,21 +1024,21 @@ def run_linting(repo_root: Path) -> bool:
 
     # Language -> lint function dispatch table (all read-only, return bool)
     _LINT_DISPATCH: dict[str, Callable[..., bool]] = {
-        "python": lambda r, _f: lint_python(r),
-        "javascript": lambda r, _f: lint_javascript(r),
-        "shell": lambda r, f: lint_shell(r, f),
-        "go": lambda r, _f: lint_go(r),
-        "rust": lambda r, _f: lint_rust(r),
-        "markdown": lambda r, f: lint_markdown(r, f),
-        "json": lambda r, f: lint_json(r, f),
-        "yaml": lambda r, f: lint_yaml(r, f),
-        "dockerfile": lambda r, f: lint_dockerfile(r, f),
-        "xml": lambda r, f: lint_xml(r, f),
-        "css": lambda r, f: lint_css(r, f),
-        "html": lambda r, f: lint_html(r, f),
-        "sql": lambda r, f: lint_sql(r, f),
-        "toml": lambda r, f: lint_toml(r, f),
-        "powershell": lambda r, f: lint_powershell(r, f),
+        "python": lint_python,
+        "javascript": lint_javascript,
+        "shell": lint_shell,
+        "go": lint_go,
+        "rust": lint_rust,
+        "markdown": lint_markdown,
+        "json": lint_json,
+        "yaml": lint_yaml,
+        "dockerfile": lint_dockerfile,
+        "xml": lint_xml,
+        "css": lint_css,
+        "html": lint_html,
+        "sql": lint_sql,
+        "toml": lint_toml,
+        "powershell": lint_powershell,
     }
 
     for lang, files in languages.items():

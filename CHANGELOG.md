@@ -2,6 +2,31 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [1.7.4] - 2026-03-03
+
+### Security Fixes (from CPV upstream audit)
+
+- **CPV-001 (CRITICAL):** `smart_exec.py` — Deno `run -A` replaced with minimal permissions (`--allow-read=.`, `--allow-write=.`, `--allow-env`, `--allow-net`, `--no-prompt`)
+- **CPV-002 (CRITICAL):** `smart_exec.py` — Docker volume mount changed from read-write to read-only (`:ro`) with `--security-opt=no-new-privileges` and `--cap-drop=ALL`
+- **CPV-003 (MAJOR):** `smart_exec.py` — PowerShell module/cmdlet name validation via regex to prevent command injection
+- **CPV-004 (MAJOR):** `smart_exec.py` — `resolve_tool()` now rejects unknown tools (raises `ValueError`) instead of auto-installing arbitrary npm packages via `npx --yes`
+
+### Bug Fixes
+
+- **CPV-005 (MAJOR):** `git-hooks/pre-push` — `run_script()` now has a 180s timeout to prevent indefinite hangs
+- **CPV-006 (MAJOR):** `git-hooks/pre-push` — `run_script()` now passes `cwd=repo_root` so scripts run from the correct directory
+- **CPV-007 (MUST-FIX):** `lint_files.py` — ANSI colors now respect `NO_COLOR` env var and non-TTY output
+- **CPV-008 (MUST-FIX):** `setup_plugin_pipeline.py` — Same ANSI color guard as CPV-007
+- **CPV-010 (MINOR):** `git-hooks/pre-push` — Added `NO_COLOR` check to `_colors_supported()`
+- **CPV-011 (NIT):** `cpv_validation_common.py` — Moved `import getpass` from lazy to top-level
+- **CPV-013 (NIT):** `smart_exec.py` — Added docstrings to all command builder functions
+
+### Code Quality
+
+- Uniform `(repo_root, files)` signature for all 15 lint functions in `lint_files.py`
+- Replaced lambda dispatch table with direct function references
+- Ruff lint + format clean across all files
+
 ## [1.7.3] - 2026-02-28
 
 ### Bug Fixes

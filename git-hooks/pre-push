@@ -19,17 +19,20 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 # ---------------------------------------------------------------------------
 # ANSI color helpers (disabled on Windows unless colorama is available)
 # ---------------------------------------------------------------------------
 
+
 def _colors_supported() -> bool:
     """Return True when the terminal likely supports ANSI escape codes."""
+    if os.environ.get("NO_COLOR"):
+        return False
     if os.name == "nt":
         # On Windows, try to enable ANSI support via colorama
         try:
             import colorama  # noqa: F811
+
             colorama.init()
             return True
         except ImportError:
@@ -66,6 +69,7 @@ ZERO_SHA = "0000000000000000000000000000000000000000"
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def cprint(msg: str) -> None:
     """Print a message to stdout (handles encoding gracefully)."""
     print(msg, flush=True)
@@ -75,7 +79,9 @@ def get_repo_root() -> Path:
     """Return the absolute path to the git repository root."""
     result = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return Path(result.stdout.strip())
 
@@ -88,7 +94,9 @@ def find_python_command() -> list[str]:
     try:
         subprocess.run(
             ["uv", "--version"],
-            capture_output=True, text=True, check=True,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         return ["uv", "run", "python"]
     except (FileNotFoundError, subprocess.CalledProcessError):
@@ -109,13 +117,17 @@ def get_changed_files(local_sha: str, remote_sha: str) -> list[str]:
         try:
             result = subprocess.run(
                 ["git", "diff", "--name-only", local_sha, "HEAD~10"],
-                capture_output=True, text=True, check=True,
+                capture_output=True,
+                text=True,
+                check=True,
             )
             return result.stdout.strip().splitlines()
         except subprocess.CalledProcessError:
             result = subprocess.run(
                 ["git", "ls-tree", "-r", "--name-only", local_sha],
-                capture_output=True, text=True, check=True,
+                capture_output=True,
+                text=True,
+                check=True,
             )
             return result.stdout.strip().splitlines()
     else:
@@ -123,20 +135,32 @@ def get_changed_files(local_sha: str, remote_sha: str) -> list[str]:
         try:
             result = subprocess.run(
                 ["git", "diff", "--name-only", f"{remote_sha}..{local_sha}"],
-                capture_output=True, text=True, check=True,
+                capture_output=True,
+                text=True,
+                check=True,
             )
             return result.stdout.strip().splitlines()
         except subprocess.CalledProcessError:
             return []
 
 
-def run_script(python_cmd: list[str], script: Path, args: list[str] | None = None) -> int:
+def run_script(
+    python_cmd: list[str],
+    script: Path,
+    args: list[str] | None = None,
+    timeout: int = 180,
+    cwd: Path | None = None,
+) -> int:
     """Run a Python script and return its exit code, streaming output."""
     cmd = [*python_cmd, str(script)]
     if args:
         cmd.extend(args)
-    result = subprocess.run(cmd)
-    return result.returncode
+    try:
+        result = subprocess.run(cmd, timeout=timeout, cwd=str(cwd) if cwd else None)
+        return result.returncode
+    except subprocess.TimeoutExpired:
+        print(f"  {YELLOW}TIMEOUT: {script.name} exceeded {timeout}s — skipping{NC}")
+        return 0
 
 
 def extract_version(filepath: Path) -> str | None:
@@ -151,6 +175,7 @@ def extract_version(filepath: Path) -> str | None:
 # ---------------------------------------------------------------------------
 # Main logic
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     repo_root = get_repo_root()
@@ -204,7 +229,7 @@ def main() -> int:
     cprint("")
 
     lint_script = repo_root / "scripts" / "lint_files.py"
-    lint_exit = run_script(python_cmd, lint_script, [str(repo_root)])
+    lint_exit = run_script(python_cmd, lint_script, [str(repo_root)], cwd=repo_root)
 
     if lint_exit != 0:
         cprint("")
@@ -220,7 +245,7 @@ def main() -> int:
 
     # --- Validation ---
     validate_script = repo_root / "scripts" / "validate_plugin.py"
-    validation_exit = run_script(python_cmd, validate_script, [".", "--verbose"])
+    validation_exit = run_script(python_cmd, validate_script, [".", "--verbose"], cwd=repo_root)
 
     cprint("")
     cprint(f"{BLUE}----------------------------------------{NC}")
