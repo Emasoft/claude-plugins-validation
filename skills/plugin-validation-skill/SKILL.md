@@ -11,7 +11,7 @@ tags:
   - mcp
   - quality-assurance
 user-invocable: true
-allowed-tools: Read, Bash(uv:*), Bash(python:*), Glob, Grep, Write, Task
+allowed-tools: Read, Bash(uv:*,python:*), Glob, Grep, Write, Task
 ---
 
 # Plugin Validation Skill
@@ -496,8 +496,4 @@ Add to `.vscode/tasks.json`:
 }
 ```
 
----
-
-## Official Documentation
-
-For official documentation URLs (Claude Code, MCP, Hooks, Skills, etc.), see `references/official-docs-urls.md`.
+For official documentation URLs, see `references/official-docs-urls.md`.
