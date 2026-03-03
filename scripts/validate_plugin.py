@@ -328,7 +328,6 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         ".claude-plugin",
         ".git",
         ".github",
-        ".gitignore",
         "commands",
         "agents",
         "skills",
@@ -386,14 +385,19 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
             else:
                 # Only "agent" is a recognized plugin setting key
                 recognized_keys = {"agent"}
+                has_unrecognized = False
                 for key in settings_data:
                     if key not in recognized_keys:
+                        has_unrecognized = True
                         report.minor(
                             f"settings.json: unrecognized key '{key}' — "
                             f"supported plugin settings: {', '.join(sorted(recognized_keys))}",
                             "settings.json",
                         )
-                report.passed("settings.json is valid", "settings.json")
+                if not has_unrecognized:
+                    report.passed("settings.json is valid", "settings.json")
+                else:
+                    report.passed("settings.json is parseable JSON", "settings.json")
         except json.JSONDecodeError as e:
             report.major(f"settings.json: JSON parse error: {e}", "settings.json")
 
@@ -681,7 +685,8 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
     scripts_missing_shebang = []
     for script in all_scripts:
         try:
-            first_line = script.read_text().split("\n", 1)[0]
+            with open(script, errors="replace") as f:
+                first_line = f.readline().rstrip("\n")
             if not first_line.startswith("#!"):
                 scripts_missing_shebang.append(script.name)
         except (OSError, UnicodeDecodeError):
