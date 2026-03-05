@@ -1033,6 +1033,7 @@ def validate_hooks_field(
         "ConfigChange",
         "WorktreeCreate",
         "WorktreeRemove",
+        "InstructionsLoaded",
     }
 
     for event_name in hooks.keys():

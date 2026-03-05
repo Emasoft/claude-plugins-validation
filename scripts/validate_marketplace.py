@@ -104,7 +104,7 @@ ValidationReport = MarketplaceValidationReport
 # =============================================================================
 
 # Valid source types for plugins in a marketplace
-VALID_SOURCE_TYPES = {"github", "url", "npm", "pip"}
+VALID_SOURCE_TYPES = {"github", "url", "npm", "pip", "git-subdir"}
 
 # Required fields in marketplace.json
 REQUIRED_MARKETPLACE_FIELDS = {"name", "owner", "plugins"}
@@ -143,6 +143,7 @@ SOURCE_REQUIRED_FIELDS = {
     "url": {"url"},
     "npm": {"package"},
     "pip": {"package"},
+    "git-subdir": {"repo", "subdir"},  # Points to a subdirectory within a git repo (v2.1.69+)
 }
 
 # Reserved marketplace names that cannot be used

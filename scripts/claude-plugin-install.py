@@ -408,6 +408,13 @@ VALID_HOOK_EVENTS = {
     "SessionStart",
     "SessionEnd",
     "PreCompact",
+    "Setup",
+    "TeammateIdle",
+    "TaskCompleted",
+    "ConfigChange",
+    "WorktreeCreate",
+    "WorktreeRemove",
+    "InstructionsLoaded",
 }
 
 TOOL_MATCHER_EVENTS = {"PreToolUse", "PermissionRequest", "PostToolUse", "PostToolUseFailure"}
