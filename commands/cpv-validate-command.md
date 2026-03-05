@@ -1,9 +1,7 @@
 ---
 name: cpv-validate-command
-description: |
-  Command file validation for Claude Code plugins. Validates command .md files
-  for correct YAML frontmatter, required fields, and argument hints.
-allowed-tools: Read, Bash(uv:*,python:*), Glob, Grep
+description: Validate command .md files in a plugin
+allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep
 argument-hint: "<plugin-path>"
 agent: plugin-validator
 user-invocable: true

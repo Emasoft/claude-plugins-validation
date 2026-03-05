@@ -1,9 +1,6 @@
 ---
 name: cpv-validate-plugin
-description: |
-  Comprehensive validation for Claude Code plugins. Validates manifest, hooks, agents,
-  skills (190+ rules), MCP servers, scripts, and directory structure. Use when auditing
-  plugin quality, preparing for marketplace publishing, or CI/CD integration.
+description: Run full validation on a Claude Code plugin
 allowed-tools: Read, Bash, Glob, Grep, Task, AskUserQuestion
 argument-hint: "<plugin_path_or_name> [--verbose] [--json]"
 agent: plugin-validator
@@ -24,7 +21,7 @@ Before running validation, you MUST check for private path detection:
    ```
 
 2. **If auto-detection fails**, use `AskUserQuestion` to ask the user:
-   > "To detect accidental private path leaks, what is your system username? (Found in /Users/**name**/ or /home/**name**/)"
+   > "To detect accidental private path leaks, what is your system username?"
 
 3. **Pass username to validation script** via environment variable:
    ```bash

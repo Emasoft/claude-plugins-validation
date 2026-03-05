@@ -1,10 +1,7 @@
 ---
 name: cpv-validate-documentation
-description: |
-  Documentation quality validation for Claude Code plugins. Checks README.md,
-  CHANGELOG.md, and inline docs for completeness, formatting, and consistency
-  with the plugin manifest.
-allowed-tools: Read, Bash(uv:*,python:*), Glob, Grep
+description: Check plugin documentation completeness
+allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep
 argument-hint: "<plugin-path>"
 agent: plugin-validator
 user-invocable: true

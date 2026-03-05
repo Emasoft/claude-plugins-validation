@@ -1,9 +1,7 @@
 ---
 name: cpv-validate-encoding
-description: |
-  File encoding validation for Claude Code plugins. Checks UTF-8 compliance,
-  BOM markers, and binary vs text file detection across the plugin directory.
-allowed-tools: Read, Bash(uv:*,python:*), Glob, Grep
+description: Validate file encoding in plugin files
+allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep
 argument-hint: "<plugin-path>"
 agent: plugin-validator
 user-invocable: true

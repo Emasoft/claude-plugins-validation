@@ -2,6 +2,16 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [1.8.3] - 2026-03-05
+
+### Quality Score Audit
+
+- Achieved 98/100 A+ self-validation score (up from 58/100 F)
+- Fixed 39 MAJOR command issues: shortened descriptions to ≤60 chars, fixed `Bash(uv:*,python:*)` tool patterns
+- Fixed 5 hardcoded example paths in command/agent docs
+- Fixed 16 mypy type annotation errors in `claude-plugin-install.py`
+- All 7 scoring categories now pass at Excellent level
+
 ## [1.8.2] - 2026-03-05
 
 ### Claude Code 2.1.69 Compatibility

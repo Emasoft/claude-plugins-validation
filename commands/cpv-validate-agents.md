@@ -1,9 +1,6 @@
 ---
 name: cpv-validate-agents
-description: |
-  Validate Claude Code agent definition files (.md). Checks YAML frontmatter, required
-  fields, name format, description quality, tool lists, and model specifications. Use
-  when creating or auditing agent definitions.
+description: Validate agent .md files in a plugin
 allowed-tools: Read, Bash, Glob, Grep, Task, AskUserQuestion
 argument-hint: "<agent_path_or_name> [--verbose] [--json]"
 agent: plugin-validator

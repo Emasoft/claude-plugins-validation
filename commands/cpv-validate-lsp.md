@@ -1,9 +1,6 @@
 ---
 name: cpv-validate-lsp
-description: |
-  Validate LSP (Language Server Protocol) server configurations in Claude Code.
-  Checks language server definitions, initialization options, and workspace settings.
-  Use when configuring LSP servers for code intelligence features.
+description: Validate LSP server config in a plugin
 allowed-tools: Read, Bash, Glob, Grep, Task, AskUserQuestion
 argument-hint: "<path_or_plugin_name> [--verbose] [--json]"
 agent: plugin-validator

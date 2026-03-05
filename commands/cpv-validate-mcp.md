@@ -1,10 +1,6 @@
 ---
 name: cpv-validate-mcp
-description: |
-  Validate MCP (Model Context Protocol) server configurations in Claude Code plugins.
-  Checks .mcp.json files and inline mcpServers definitions. Validates transport types,
-  required fields, paths, environment variables, and security. Use when configuring
-  MCP servers or debugging connection issues.
+description: Validate MCP server config in a plugin
 allowed-tools: Read, Bash, Glob, Grep, Task, AskUserQuestion
 argument-hint: "<path_or_plugin_name> [--verbose] [--json]"
 agent: plugin-validator

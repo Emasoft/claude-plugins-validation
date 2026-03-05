@@ -1,10 +1,7 @@
 ---
 name: cpv-validate-xref
-description: |
-  Cross-reference validation for Claude Code plugins. Checks agent Task() refs,
-  subagent_type matching, version sync, command agent refs, skill refs, and hook
-  script refs to ensure all internal references are consistent and valid.
-allowed-tools: Read, Bash(uv:*,python:*), Glob, Grep
+description: Cross-reference validate plugin components
+allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep
 argument-hint: "<plugin-path>"
 agent: plugin-validator
 user-invocable: true
