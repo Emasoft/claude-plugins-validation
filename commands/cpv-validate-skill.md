@@ -1,10 +1,6 @@
 ---
 name: cpv-validate-skill
-description: |
-  Validate skill directories using 190+ validation rules from AgentSkills OpenSpec,
-  Nixtla Quality Standards, and Meta-Skill frameworks. Use when checking skill quality,
-  auditing SKILL.md files, or preparing skills for deployment. Returns letter grade (A-F)
-  and detailed issue report.
+description: Validate skill directories in a plugin
 allowed-tools: Read, Bash, Glob, Grep, Task, AskUserQuestion
 argument-hint: "<skill_path_or_name> [--strict] [--openspec] [--pillars] [--verbose]"
 agent: plugin-validator

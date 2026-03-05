@@ -1,9 +1,7 @@
 ---
 name: cpv-validate-enterprise
-description: |
-  Enterprise compliance validation for Claude Code plugins. Checks licensing,
-  versioning, naming conventions, and organizational policies.
-allowed-tools: Read, Bash(uv:*,python:*), Glob, Grep
+description: Run enterprise-grade plugin validation
+allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep
 argument-hint: "<plugin-path>"
 agent: plugin-validator
 user-invocable: true

@@ -1,10 +1,7 @@
 ---
 name: cpv-validate-rules
-description: |
-  Rules file validation for Claude Code plugins. Validates all .md rule files
-  in the rules/ directory for correct frontmatter, required structure sections,
-  and valid glob patterns.
-allowed-tools: Read, Bash(uv:*,python:*), Glob, Grep
+description: "Validate .claude/rules/ directory files"
+allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep
 argument-hint: "<plugin-path>"
 agent: plugin-validator
 user-invocable: true

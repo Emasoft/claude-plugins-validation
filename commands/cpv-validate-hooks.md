@@ -1,9 +1,6 @@
 ---
 name: cpv-validate-hooks
-description: |
-  Validate Claude Code hook configurations (hooks.json). Checks event names, matchers,
-  command/prompt hooks, script references, and lints referenced scripts. Use when
-  debugging hook issues or auditing hook configurations.
+description: Validate hooks configuration in a plugin
 allowed-tools: Read, Bash, Glob, Grep, Task, AskUserQuestion
 argument-hint: "<hooks_path_or_plugin_name> [--plugin-root <path>] [--verbose] [--json]"
 agent: plugin-validator

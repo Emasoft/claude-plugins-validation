@@ -135,7 +135,7 @@ Before running any validation, you MUST ensure private info detection is configu
    ```
 
 2. **If auto-detection fails or returns empty**, use `AskUserQuestion` to ask:
-   > "To check for accidental private path leaks, what is your system username? (The name in your home folder path, e.g., /Users/**username**/ or /home/**username**/)"
+   > "To check for accidental private path leaks, what is your system username? (The name in your home folder path)"
 
 3. **When running validation scripts**, pass the username via environment variable:
    ```bash

@@ -1,10 +1,7 @@
 ---
 name: cpv-validate-security
-description: |
-  Security validation for Claude Code plugins. Scans for hardcoded secrets,
-  unsafe shell patterns, overly broad tool permissions, and private path leaks
-  that could expose sensitive data.
-allowed-tools: Read, Bash(uv:*,python:*), Glob, Grep
+description: Scan a plugin for security vulnerabilities
+allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep
 argument-hint: "<plugin-path>"
 agent: plugin-validator
 user-invocable: true
@@ -30,7 +27,7 @@ Validates security posture of a Claude Code plugin directory.
 
 - Scans for hardcoded secrets, tokens, and API keys in all files
 - Detects unsafe shell patterns (e.g., unquoted variables, `eval`, `rm -rf`)
-- Checks for private path leaks (e.g., `/Users/<username>/` in committed files)
+- Checks for private path leaks (e.g., absolute home directory paths in committed files)
 - Validates tool permission scopes are not overly broad
 - Flags world-writable scripts or missing executable permission guards
 

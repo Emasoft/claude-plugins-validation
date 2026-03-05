@@ -199,7 +199,8 @@ def load_jsonc(path: Path) -> dict:
     """Load a JSONC file (JSON with comments and trailing commas)."""
     text = path.read_text(encoding="utf-8")
     cleaned = strip_trailing_commas(strip_jsonc_comments(text))
-    return json.loads(cleaned)
+    result: dict = json.loads(cleaned)
+    return result
 
 
 # ── Safe JSON file operations ─────────────────────────────
@@ -306,7 +307,7 @@ def _extract_zip(archive: Path, dest: Path):
 
 def _extract_tar(archive: Path, dest: Path, mode: str):
     """Extract a tar archive with security filtering."""
-    with tarfile.open(archive, mode) as tf:
+    with tarfile.open(name=str(archive), mode=mode) as tf:  # type: ignore[call-overload]
         if PYTHON_VERSION >= (3, 12):
             tf.extractall(dest, filter="data")
         else:
@@ -786,7 +787,7 @@ def _fuzzy_match_event(wrong_name: str) -> Optional[str]:
 
 
 def _validate_matcher(matcher: str, event_name: str, path: str) -> list:
-    warnings = []
+    warnings: list[str] = []
     if not matcher or matcher == "*":
         return warnings
 
@@ -824,8 +825,8 @@ def _validate_matcher(matcher: str, event_name: str, path: str) -> list:
 
 def _validate_bash_command(cmd: str, path: str, plugin_root: Optional[Path] = None):
     """Returns (errors, warnings)."""
-    errors = []
-    warnings = []
+    errors: list[str] = []
+    warnings: list[str] = []
     stripped = cmd.strip()
     if not stripped:
         return errors, warnings
@@ -1076,8 +1077,8 @@ SKILL_MAX_CHARS = 5000
 def _validate_markdown_frontmatter(md_path: Path, component_type: str, rel_prefix: str = "") -> Tuple[List[str], List[str]]:
     """Validate YAML frontmatter in agent/command/skill markdown files.
     Returns (errors, warnings)."""
-    errors = []
-    warnings = []
+    errors: list[str] = []
+    warnings: list[str] = []
 
     try:
         text = md_path.read_text(encoding="utf-8")
@@ -1312,8 +1313,8 @@ def validate_plugin(plugin_root: Path, ignore_fn: Optional[Callable[[Path], bool
     """Validate a plugin directory. Returns (errors, warnings).
     If ignore_fn is provided, files/dirs matched by it are skipped during validation.
     If run_security_audit is False, skip the skill-audit external tool check."""
-    errors = []
-    warnings = []
+    errors: list[str] = []
+    warnings: list[str] = []
 
     # ── 1. Manifest ──────────────────────────────────────────
 
@@ -1484,9 +1485,9 @@ def validate_plugin(plugin_root: Path, ignore_fn: Optional[Callable[[Path], bool
             warnings.append("commands/ directory exists but contains no .md files")
         else:
             for md in cmd_files:
-                e, w = _validate_markdown_frontmatter(md, "command")
-                errors.extend(e)
-                warnings.extend(w)
+                cmd_e, cmd_w = _validate_markdown_frontmatter(md, "command")
+                errors.extend(cmd_e)
+                warnings.extend(cmd_w)
 
     skills_dir = plugin_root / "skills"
     if skills_dir.exists() and skills_dir.is_dir():
@@ -1497,9 +1498,9 @@ def validate_plugin(plugin_root: Path, ignore_fn: Optional[Callable[[Path], bool
             for md in skill_mds:
                 # Build a relative path like "skills/code-review/SKILL.md"
                 rel = str(md.relative_to(plugin_root))
-                e, w = _validate_markdown_frontmatter(md, "skill", rel_prefix=str(md.parent.relative_to(plugin_root)))
-                errors.extend(e)
-                warnings.extend(w)
+                sk_e, sk_w = _validate_markdown_frontmatter(md, "skill", rel_prefix=str(md.parent.relative_to(plugin_root)))
+                errors.extend(sk_e)
+                warnings.extend(sk_w)
 
     agents_dir = plugin_root / "agents"
     if agents_dir.exists() and agents_dir.is_dir():
@@ -1508,9 +1509,9 @@ def validate_plugin(plugin_root: Path, ignore_fn: Optional[Callable[[Path], bool
             warnings.append("agents/ directory exists but contains no .md files")
         else:
             for md in agent_mds:
-                e, w = _validate_markdown_frontmatter(md, "agent")
-                errors.extend(e)
-                warnings.extend(w)
+                ag_e, ag_w = _validate_markdown_frontmatter(md, "agent")
+                errors.extend(ag_e)
+                warnings.extend(ag_w)
 
     # ── 9. LSP configuration (.lsp.json) ────────────────────
 
@@ -2186,18 +2187,19 @@ def do_validate(source_path: str):
             sys.exit(1)
     elif p.is_dir():
         info(f"Validating plugin directory: {p}")
-        plugin_root = p if (p / ".claude-plugin" / "plugin.json").exists() else find_plugin_root(p)
-        if not plugin_root:
+        found_root = p if (p / ".claude-plugin" / "plugin.json").exists() else find_plugin_root(p)
+        if not found_root:
             err("No plugin found in directory. Expected: .claude-plugin/plugin.json")
             sys.exit(1)
+        plugin_root = found_root
         # Build gitignore matcher for directory validation
         ignore_fn = _build_gitignore_matcher(plugin_root)
     elif p.is_file():
         info("Extracting archive for validation...")
         tmpdir = tempfile.mkdtemp()
         extract_archive(source_path, Path(tmpdir))
-        plugin_root = find_plugin_root(Path(tmpdir))
-        if not plugin_root:
+        found_archive_root = find_plugin_root(Path(tmpdir))
+        if not found_archive_root:
             err("No plugin found in archive. Expected: <dir>/.claude-plugin/plugin.json")
             print("\nArchive contents:")
             for f in sorted(Path(tmpdir).rglob("*")):
@@ -2205,6 +2207,7 @@ def do_validate(source_path: str):
                     print(f"  {f.relative_to(Path(tmpdir))}")
             shutil.rmtree(tmpdir, ignore_errors=True)
             sys.exit(1)
+        plugin_root = found_archive_root
     else:
         err(f"Not found: {source_path}")
         sys.exit(1)

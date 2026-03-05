@@ -1,7 +1,7 @@
 ---
 name: cpv-install-plugin
-description: Install, validate, uninstall, and manage Claude Code plugins locally without a GitHub marketplace.
-allowed-tools: Read, Bash(uv:*,python:*), Glob, Grep, AskUserQuestion
+description: Install and manage Claude Code plugins locally
+allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep, AskUserQuestion
 argument-hint: "<archive-or-dir> [--marketplace <name>] [--force] [--dry-run] | --uninstall <name@marketplace> | --validate <path> | --list | --doctor"
 agent: plugin-validator
 user-invocable: true

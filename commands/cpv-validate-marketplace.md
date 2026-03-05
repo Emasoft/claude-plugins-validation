@@ -1,9 +1,6 @@
 ---
 name: cpv-validate-marketplace
-description: |
-  Validate Claude Code marketplace configurations (marketplace.json). Checks plugin entries,
-  version consistency, GitHub deployment structure, and private path leaks.
-  Use when publishing marketplaces or auditing marketplace configurations.
+description: "Validate marketplace.json structure"
 allowed-tools: Read, Bash, Glob, Grep, Task, AskUserQuestion
 argument-hint: "<marketplace_path_or_name> [--verbose] [--json]"
 agent: plugin-validator
@@ -83,7 +80,7 @@ If no exact match is found, fuzzy matching is used (e.g., `cpt-validate` → `cp
 
 ### 5. Private Path Detection (CRITICAL)
 - Scans all plugin content for private usernames
-- Detects absolute home paths (/Users/name/, /home/name/)
+- Detects absolute home directory paths in plugin content
 - Flags any leaked private information
 
 ### 6. Repository URLs

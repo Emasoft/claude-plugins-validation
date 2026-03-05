@@ -1,9 +1,7 @@
 ---
 name: cpv-validate-scoring
-description: |
-  Validation scoring for Claude Code plugins. Computes an overall quality score
-  from validation results, weighted by issue severity.
-allowed-tools: Read, Bash(uv:*,python:*), Glob, Grep
+description: Run quality scoring on a plugin
+allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep
 argument-hint: "<plugin-path>"
 agent: plugin-validator
 user-invocable: true
