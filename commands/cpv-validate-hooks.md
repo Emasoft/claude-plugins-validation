@@ -70,7 +70,7 @@ If no exact match is found, fuzzy matching is used (e.g., `valdiate-hooks` → `
 - Optional `description` field
 
 ### 2. Event Names
-Valid hook events:
+Valid hook events (19 total):
 - `PreToolUse` - Before tool execution (supports matchers)
 - `PostToolUse` - After successful tool execution (supports matchers)
 - `PostToolUseFailure` - After tool failure (supports matchers)
@@ -79,11 +79,17 @@ Valid hook events:
 - `Notification` - When notifications sent (supports matchers)
 - `Stop` - When agent attempts to stop (no matcher)
 - `SubagentStop` - When subagent stops (no matcher)
-- `SubagentStart` - When subagent starts (no matcher)
+- `SubagentStart` - When subagent starts (supports matchers)
 - `SessionStart` - At session start (supports matchers)
 - `SessionEnd` - At session end (no matcher)
 - `PreCompact` - Before conversation compaction (supports matchers)
 - `Setup` - Plugin setup (supports matchers)
+- `ConfigChange` - When configuration changes (supports matchers)
+- `TeammateIdle` - When a teammate session goes idle (no matcher)
+- `TaskCompleted` - When a task is completed (no matcher)
+- `WorktreeCreate` - When a git worktree is created (no matcher)
+- `WorktreeRemove` - When a git worktree is removed (no matcher)
+- `InstructionsLoaded` - When CLAUDE.md or rules files are loaded (no matcher)
 
 ### 3. Matcher Patterns
 - Validates regex syntax

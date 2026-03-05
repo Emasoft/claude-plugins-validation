@@ -223,6 +223,9 @@ skills/
 |----------|------------|----------|
 | `${CLAUDE_PLUGIN_ROOT}` | Absolute path to plugin directory | All plugin-relative paths |
 | `${CLAUDE_PROJECT_DIR}` | Current project root | Accessing project files |
+| `${CLAUDE_SKILL_DIR}` | Absolute path to skill's own directory | Skill self-references in SKILL.md |
+| `${CLAUDE_ENV_FILE}` | Path to env file (SessionStart/Setup only) | Persisting environment variables |
+| `${CLAUDE_CODE_REMOTE}` | `"true"` in remote environments | Detecting remote vs local execution |
 
 ### Usage in hooks.json
 

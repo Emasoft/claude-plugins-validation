@@ -2,6 +2,24 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [1.8.2] - 2026-03-05
+
+### Claude Code 2.1.69 Compatibility
+
+- **New hook event**: `InstructionsLoaded` — fires when CLAUDE.md or .claude/rules/*.md files load
+  Added to all VALID_HOOK_EVENTS sets across cpv_validation_common.py, validate_hook.py,
+  validate_skill_comprehensive.py, and claude-plugin-install.py
+- **New env var**: `${CLAUDE_SKILL_DIR}` — skills can reference their own directory in SKILL.md
+- **New MCP OAuth config**: `oauth.authServerMetadataUrl` — custom OAuth metadata discovery URL
+- **New source type**: `git-subdir` — points to a subdirectory within a git repo (requires repo + subdir)
+- **Synced hook events**: claude-plugin-install.py was missing Setup, ConfigChange events
+
+### Security Validator
+
+- Eliminated all false positives when scanning own plugin (86 CRITICAL + 8 MAJOR → 0)
+- Context-aware heuristics: KNOWN_EXAMPLE_SECRETS, is_shell_like_file(), Python-aware
+  backtick/eval/pipe-to-shell skips, relative path handling, Python string literal detection
+
 ## [1.7.9] - 2026-03-03
 
 ### Code Quality

@@ -115,7 +115,8 @@ Only these 18 event types are valid:
 - [ ] `ConfigChange` (NO matcher)
 - [ ] `WorktreeCreate` (NO matcher)
 - [ ] `WorktreeRemove` (NO matcher)
-- [ ] All events are from the valid set of 18 events (including TeammateIdle, TaskCompleted, ConfigChange, WorktreeCreate, WorktreeRemove)
+- [ ] `InstructionsLoaded` (NO matcher)
+- [ ] All events are from the valid set of 19 events (including InstructionsLoaded, TeammateIdle, TaskCompleted, ConfigChange, WorktreeCreate, WorktreeRemove)
 
 ### Matcher Configuration
 
@@ -304,7 +305,8 @@ uv run python scripts/validate_mcp.py /path/to/plugin
 |----------|--------|---------|
 | Plugin as local subdirectory | String path | `"source": "./my-plugin"` |
 | Plugin as git submodule | String path | `"source": "./my-plugin"` |
-| Plugin from remote git | Object | `"source": {"type": "git", "repository": "..."}` |
+| Plugin from remote git | Object | `"source": {"type": "github", "repo": "..."}` |
+| Plugin from git subdirectory | Object | `"source": {"type": "git-subdir", "repo": "...", "subdir": "..."}` |
 | Plugin from npm | Object | `"source": {"type": "npm", "package": "..."}` |
 | Plugin from URL | Object | `"source": {"type": "url", "url": "..."}` |
 

@@ -271,7 +271,7 @@ This plugin includes five key validation scripts:
 
 **What it checks**:
 - JSON structure validity
-- Event types (18 valid events)
+- Event types (19 valid events)
 - Matcher patterns (tool names or regex)
 - Script paths and executability
 - Hook type configuration (command, prompt, agent)

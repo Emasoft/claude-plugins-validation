@@ -24,6 +24,7 @@ Comprehensive remediation guide for all issues detected by `validate_hook.py`.
 | `TaskCompleted` | No (ignored) | Yes |
 | `WorktreeCreate` | No (ignored) | No (command only) |
 | `WorktreeRemove` | No (ignored) | No (command only) |
+| `InstructionsLoaded` | No (ignored) | No (command only) |
 
 ## Timeout Units
 
@@ -218,7 +219,7 @@ Comprehensive remediation guide for all issues detected by `validate_hook.py`.
 **Root cause**: An event name in the `"hooks"` object is not recognized by Claude Code.
 **Fix**:
 1. Check the event name for typos (names are case-sensitive)
-2. Valid event names are (all 18):
+2. Valid event names are (all 19):
    - `PreToolUse`
    - `PostToolUse`
    - `PostToolUseFailure`
@@ -237,6 +238,7 @@ Comprehensive remediation guide for all issues detected by `validate_hook.py`.
    - `ConfigChange`
    - `WorktreeCreate`
    - `WorktreeRemove`
+   - `InstructionsLoaded`
 3. **Wrong**: `"preToolUse"`, `"pre_tool_use"`, `"PreTooluse"`
 4. **Correct**: `"PreToolUse"`
 5. **New: Fuzzy matching** — the validator now suggests corrections for misspelled events. If you see `did you mean 'PreToolUse'?` in the error message, it detected a close match. Common typos:
@@ -429,7 +431,7 @@ Comprehensive remediation guide for all issues detected by `validate_hook.py`.
 **Severity**: INFO
 **Root cause**: A matcher is specified for an event that does not support matchers. The matcher will be silently ignored.
 **Fix**:
-1. Events that do NOT support matchers: `UserPromptSubmit`, `Stop`, `TeammateIdle`, `TaskCompleted`, `WorktreeCreate`, `WorktreeRemove`
+1. Events that do NOT support matchers: `UserPromptSubmit`, `Stop`, `TeammateIdle`, `TaskCompleted`, `WorktreeCreate`, `WorktreeRemove`, `InstructionsLoaded`
 2. Remove the `"matcher"` field or set it to `""` for clarity:
    ```json
    {
@@ -562,6 +564,7 @@ Comprehensive remediation guide for all issues detected by `validate_hook.py`.
    - `TeammateIdle`
    - `WorktreeCreate`
    - `WorktreeRemove`
+   - `InstructionsLoaded`
 2. Change the hook type to `"command"`:
    ```json
    { "type": "command", "command": "your-script.sh" }

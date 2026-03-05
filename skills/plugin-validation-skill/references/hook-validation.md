@@ -64,13 +64,13 @@ The top-level `hooks` key must be an object whose keys are event names and value
 
 ## 2. Valid Hook Events
 
-There are **18 valid hook events**:
+There are **19 valid hook events**:
 
 | Event | Has Matcher | Description |
 |-------|-------------|-------------|
 | PreToolUse | Yes | Before tool execution (can block/allow/modify) |
 | PostToolUse | Yes | After successful tool execution |
-| PreToolResponse | Yes | Event-only (not valid for validation hooks) |
+| PostToolUseFailure | Yes | After failed tool execution |
 | PermissionRequest | Yes | When permission dialog shown |
 | Notification | Yes | When notifications sent (command-only event) |
 | SessionStart | Yes | At session start |
@@ -86,6 +86,7 @@ There are **18 valid hook events**:
 | ConfigChange | Yes | When configuration changes |
 | WorktreeCreate | No | When a git worktree is created |
 | WorktreeRemove | No | When a git worktree is removed |
+| InstructionsLoaded | No | When CLAUDE.md or .claude/rules/*.md files are loaded (v2.1.69+) |
 
 ### Events With Matchers
 
@@ -112,6 +113,7 @@ These events fire globally and do not support matchers:
 - TaskCompleted
 - WorktreeCreate
 - WorktreeRemove
+- InstructionsLoaded
 
 ### Command-Only Events
 

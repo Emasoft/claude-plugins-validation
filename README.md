@@ -194,7 +194,7 @@ Validation results use the following severity levels:
 ### Hook Validation (`validate_hook.py`)
 
 - JSON structure and schema
-- Valid event types (18 supported) with fuzzy matching suggestions
+- Valid event types (19 supported, including InstructionsLoaded) with fuzzy matching suggestions
 - Matcher syntax and value validation (Notification types, SessionStart, PreCompact)
 - Script paths and executability
 - Hook type configuration
@@ -216,6 +216,7 @@ Validation results use the following severity levels:
 - `.mcp.json` structure
 - Transport types (stdio, http, sse)
 - Required fields per transport
+- OAuth configuration (clientId, callbackPort, authServerMetadataUrl)
 - Environment variable syntax
 - Path portability
 
@@ -224,7 +225,7 @@ Validation results use the following severity levels:
 - `marketplace.json` structure
 - Required fields (name, plugins)
 - Plugin entry validation
-- Source type configuration
+- Source type configuration (github, url, npm, pip, git-subdir)
 - Local path resolution
 
 ### Cross-Reference Validation (`validate_xref.py`)
