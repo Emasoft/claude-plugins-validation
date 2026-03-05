@@ -58,6 +58,7 @@ EVENTS_WITHOUT_MATCHERS = {
     "TaskCompleted",
     "WorktreeCreate",
     "WorktreeRemove",
+    "InstructionsLoaded",
 }
 
 # Valid hook types
