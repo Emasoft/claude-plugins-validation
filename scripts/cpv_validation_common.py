@@ -162,6 +162,7 @@ VALID_HOOK_EVENTS = {
     "ConfigChange",
     "WorktreeCreate",
     "WorktreeRemove",
+    "InstructionsLoaded",
 }
 
 # =============================================================================
@@ -212,6 +213,7 @@ VALID_PLUGIN_ENV_VARS = {
     "CLAUDE_PROJECT_DIR",  # Project root directory (all hooks)
     "CLAUDE_ENV_FILE",  # SessionStart/Setup only — write export statements to persist env vars
     "CLAUDE_CODE_REMOTE",  # Set to "true" in remote web environments; not set in local CLI
+    "CLAUDE_SKILL_DIR",  # Skill's own directory — for skills to reference their own files in SKILL.md
 }
 
 # Directories to skip when scanning (cache dirs, hidden dirs, etc.)

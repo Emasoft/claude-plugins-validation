@@ -323,6 +323,9 @@ def validate_mcp_server(
                 report.major(f"Server {server_name} 'oauth.clientId' must be a string")
             if "callbackPort" in oauth and not isinstance(oauth["callbackPort"], int):
                 report.major(f"Server {server_name} 'oauth.callbackPort' must be an integer")
+            # authServerMetadataUrl: custom OAuth metadata discovery URL (v2.1.69+)
+            if "authServerMetadataUrl" in oauth and not isinstance(oauth["authServerMetadataUrl"], str):
+                report.major(f"Server {server_name} 'oauth.authServerMetadataUrl' must be a string")
             report.passed(f"Server {server_name} has OAuth configuration")
 
     report.passed(f"Server {server_name} configuration validated")
