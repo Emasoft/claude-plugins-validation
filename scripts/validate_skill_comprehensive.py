@@ -44,11 +44,14 @@ from typing import Any, Literal
 import yaml
 from cpv_validation_common import (
     BUILTIN_AGENT_TYPES,
+    COLORS,
     EXIT_CRITICAL,
     EXIT_MAJOR,
     EXIT_MINOR,
     EXIT_OK,
+    SKILL_FRONTMATTER_FIELDS,
     VALID_CONTEXT_VALUES,
+    VALID_HOOK_EVENTS,
     VALID_TOOLS,
     Level,
     validate_toc_embedding,
@@ -85,18 +88,7 @@ OPENSPEC_ALLOWED_FIELDS = {
 }
 
 # --- Claude Code Extended Fields ---
-CLAUDE_CODE_FIELDS = {
-    "name",
-    "description",
-    "argument-hint",
-    "disable-model-invocation",
-    "user-invocable",
-    "allowed-tools",
-    "model",
-    "context",
-    "agent",
-    "hooks",
-}
+CLAUDE_CODE_FIELDS = SKILL_FRONTMATTER_FIELDS
 
 # --- Nixtla/Enterprise Extended Fields ---
 ENTERPRISE_REQUIRED_FIELDS = {"name", "description", "allowed-tools", "version", "author", "license"}
@@ -1014,27 +1006,7 @@ def validate_hooks_field(
         return
 
     # Validate hook structure (keys should be valid hook event names)
-    valid_hook_events = {
-        "PreToolUse",
-        "PostToolUse",
-        "PostToolUseFailure",
-        "PermissionRequest",
-        "UserPromptSubmit",
-        "Notification",
-        "Stop",
-        "SubagentStart",
-        "SubagentStop",
-        "Setup",
-        "SessionStart",
-        "SessionEnd",
-        "PreCompact",
-        "TeammateIdle",
-        "TaskCompleted",
-        "ConfigChange",
-        "WorktreeCreate",
-        "WorktreeRemove",
-        "InstructionsLoaded",
-    }
+    valid_hook_events = VALID_HOOK_EVENTS
 
     for event_name in hooks.keys():
         if event_name not in valid_hook_events:
@@ -2076,15 +2048,7 @@ def validate_skill(
 
 def print_results(report: ValidationReport, verbose: bool = False) -> None:
     """Print validation results in human-readable format."""
-    colors = {
-        "CRITICAL": "\033[91m",  # Red
-        "MAJOR": "\033[93m",  # Yellow
-        "MINOR": "\033[94m",  # Blue
-        "INFO": "\033[90m",  # Gray
-        "PASSED": "\033[92m",  # Green
-        "RESET": "\033[0m",
-        "BOLD": "\033[1m",
-    }
+    colors = COLORS
 
     # Count by level
     counts = {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "INFO": 0, "PASSED": 0}

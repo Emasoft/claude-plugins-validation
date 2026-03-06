@@ -152,7 +152,6 @@ def _install_hooks(src_dir: Path, dest_dir: Path, *, use_symlinks: bool) -> None
     print("  git push --dry-run origin HEAD")
     print()
     _info("To bypass hooks temporarily:")
-    print("  git commit --no-verify -m 'message'")
     print("  git push --no-verify")
     print()
     if use_symlinks:

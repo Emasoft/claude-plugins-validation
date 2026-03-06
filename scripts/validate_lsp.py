@@ -33,7 +33,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from cpv_validation_common import ValidationReport
+from cpv_validation_common import COLORS, VALID_PLUGIN_ENV_VARS, ValidationReport
 
 # Known LSP server configuration fields
 KNOWN_LSP_FIELDS = {
@@ -74,7 +74,7 @@ KNOWN_LANGUAGE_SERVERS = {
 ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 
 # Plugin-specific environment variables
-PLUGIN_ENV_VARS = {"CLAUDE_PLUGIN_ROOT", "CLAUDE_PROJECT_DIR"}
+PLUGIN_ENV_VARS = VALID_PLUGIN_ENV_VARS
 
 
 def is_absolute_path(path: str) -> bool:
@@ -404,16 +404,7 @@ def validate_plugin_lsp(
 
 def print_results(report: ValidationReport, verbose: bool = False) -> None:
     """Print validation results in human-readable format."""
-    colors = {
-        "CRITICAL": "\033[91m",
-        "MAJOR": "\033[93m",
-        "MINOR": "\033[94m",
-        "NIT": "\033[96m",
-        "WARNING": "\033[95m",
-        "INFO": "\033[90m",
-        "PASSED": "\033[92m",
-        "RESET": "\033[0m",
-    }
+    colors = COLORS
 
     counts = {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0, "INFO": 0, "PASSED": 0}
     for r in report.results:

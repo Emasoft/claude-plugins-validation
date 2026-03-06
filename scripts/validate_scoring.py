@@ -29,6 +29,10 @@ from typing import Any
 # Import shared validation infrastructure
 from cpv_validation_common import (
     COLORS,
+    EXIT_CRITICAL,
+    EXIT_MAJOR,
+    EXIT_MINOR,
+    EXIT_OK,
     ValidationReport,
     ValidationResult,
     calculate_letter_grade,
@@ -98,11 +102,7 @@ RATING_DESCRIPTIONS = {
     "0-4": "Poor - Major revision required",
 }
 
-# Exit codes - standard severity-based convention
-EXIT_PASS = 0  # No issues found
-EXIT_CRITICAL = 1  # Critical issues found
-EXIT_MAJOR = 2  # Major issues found (no critical)
-EXIT_MINOR = 3  # Minor issues only
+EXIT_PASS = EXIT_OK  # Alias for scoring module backward compat
 
 
 # =============================================================================

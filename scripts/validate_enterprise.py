@@ -41,6 +41,7 @@ from typing import Any
 import yaml
 from cpv_validation_common import (
     BUILTIN_AGENT_TYPES,
+    COLORS,
     EXIT_CRITICAL,
     EXIT_MAJOR,
     EXIT_OK,
@@ -760,15 +761,7 @@ def validate_enterprise_compliance(
 def print_results(report: EnterpriseComplianceReport, verbose: bool = False) -> None:
     """Print validation results in human-readable format."""
     # ANSI colors
-    colors = {
-        "CRITICAL": "\033[91m",  # Red
-        "MAJOR": "\033[93m",  # Yellow
-        "MINOR": "\033[94m",  # Blue
-        "INFO": "\033[90m",  # Gray
-        "PASSED": "\033[92m",  # Green
-        "RESET": "\033[0m",
-        "BOLD": "\033[1m",
-    }
+    colors = COLORS
 
     # Count by level
     counts = report.count_by_level()

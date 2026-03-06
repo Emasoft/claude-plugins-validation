@@ -747,8 +747,22 @@ KNOWN_TOOL_MATCHERS = {
     "WebFetch",
     "WebSearch",
     "Notebook",
+    "NotebookEdit",
+    "Skill",
+    "AskUserQuestion",
+    "EnterPlanMode",
+    "ExitPlanMode",
+    "EnterWorktree",
+    "TaskCreate",
+    "TaskUpdate",
+    "TaskList",
+    "TaskGet",
+    "TaskStop",
+    "ToolSearch",
     "TodoRead",
     "TodoWrite",
+    "LSP",
+    "Agent",
 }
 NOTIFICATION_MATCHERS = {"permission_prompt", "idle_prompt", "auth_success", "elicitation_dialog"}
 SESSION_START_MATCHERS = {"startup", "resume", "clear", "compact"}

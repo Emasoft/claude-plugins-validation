@@ -40,7 +40,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from cpv_validation_common import ValidationReport
+from cpv_validation_common import COLORS, ValidationReport
 
 # =============================================================================
 # Documentation Validation Report
@@ -718,14 +718,7 @@ def print_results(report: DocumentationValidationReport, verbose: bool = False) 
         verbose: If True, also show INFO and PASSED results
     """
     # ANSI colors
-    colors = {
-        "CRITICAL": "\033[91m",  # Red
-        "MAJOR": "\033[93m",  # Yellow
-        "MINOR": "\033[94m",  # Blue
-        "INFO": "\033[90m",  # Gray
-        "PASSED": "\033[92m",  # Green
-        "RESET": "\033[0m",
-    }
+    colors = COLORS
 
     # Count by level
     counts = {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "INFO": 0, "PASSED": 0}

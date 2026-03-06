@@ -43,7 +43,13 @@ from pathlib import Path
 from typing import Any, cast
 
 import yaml
-from cpv_validation_common import ValidationReport, resolve_tool_command, validate_toc_embedding
+from cpv_validation_common import (
+    COLORS,
+    ValidationReport,
+    resolve_tool_command,
+    validate_no_absolute_paths,
+    validate_toc_embedding,
+)
 from gitignore_filter import GitignoreFilter
 from validate_hook import validate_hooks as validate_hook_file
 from validate_mcp import validate_plugin_mcp
@@ -1084,9 +1090,6 @@ def validate_no_local_paths(plugin_root: Path, report: ValidationReport) -> None
     - Generic example usernames in documentation
     - Test directories (tests/) — contain intentional test fixture paths
     """
-    # Import the stricter absolute path validation from cpv_validation_common
-    from cpv_validation_common import validate_no_absolute_paths
-
     # Use the strict absolute path validator which checks for:
     # - Current user's username (auto-detected) - CRITICAL
     # - ANY absolute paths that don't use env vars - MAJOR
@@ -1260,16 +1263,7 @@ def validate_workflow_inline_python(plugin_root: Path, report: ValidationReport)
 
 def print_results(report: ValidationReport, verbose: bool = False) -> None:
     """Print validation results in human-readable format."""
-    colors = {
-        "CRITICAL": "\033[91m",
-        "MAJOR": "\033[93m",
-        "MINOR": "\033[94m",
-        "NIT": "\033[96m",
-        "WARNING": "\033[95m",
-        "INFO": "\033[90m",
-        "PASSED": "\033[92m",
-        "RESET": "\033[0m",
-    }
+    colors = COLORS
 
     counts = {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0, "INFO": 0, "PASSED": 0}
     for r in report.results:

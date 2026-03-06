@@ -231,6 +231,102 @@ SKIP_DIRS = {
     "*.egg-info",
 }
 
+# Binary file extensions — used by security and encoding validators to skip binary files
+BINARY_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".bmp",
+    ".ico",
+    ".webp",
+    ".svg",
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".bz2",
+    ".xz",
+    ".7z",
+    ".rar",
+    ".exe",
+    ".dll",
+    ".so",
+    ".dylib",
+    ".a",
+    ".o",
+    ".obj",
+    ".pyc",
+    ".pyo",
+    ".class",
+    ".jar",
+    ".war",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".otf",
+    ".eot",
+    ".mp3",
+    ".mp4",
+    ".avi",
+    ".mkv",
+    ".mov",
+    ".wav",
+    ".flac",
+    ".sqlite",
+    ".db",
+    ".sqlite3",
+}
+
+# Known Claude Code skill frontmatter fields (shared by skill validators)
+SKILL_FRONTMATTER_FIELDS = {
+    "name",
+    "description",
+    "argument-hint",
+    "disable-model-invocation",
+    "user-invocable",
+    "allowed-tools",
+    "model",
+    "context",
+    "agent",
+    "hooks",
+}
+
+
+def is_binary_file(file_path: Path) -> bool:
+    """Check if a file is binary based on extension or content."""
+    # Check extension first (fast path)
+    if file_path.suffix.lower() in BINARY_EXTENSIONS:
+        return True
+    # Check file content for null bytes (binary indicator)
+    try:
+        with open(file_path, "rb") as f:
+            chunk = f.read(8192)
+            return b"\x00" in chunk
+    except (OSError, PermissionError):
+        return True  # Treat unreadable files as binary
+
+
+def should_skip_directory(dir_name: str) -> bool:
+    """Check if a directory should be skipped during scanning."""
+    # Direct match against SKIP_DIRS
+    if dir_name in SKIP_DIRS:
+        return True
+    # Wildcard patterns (e.g., *.egg-info)
+    for skip_pattern in SKIP_DIRS:
+        if "*" in skip_pattern:
+            pattern = skip_pattern.replace("*", ".*")
+            if re.match(pattern, dir_name):
+                return True
+    return False
+
+
 # =============================================================================
 # Security Patterns
 # =============================================================================
