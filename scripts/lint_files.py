@@ -1120,7 +1120,7 @@ def main() -> int:
         sys.stdout = captured
         try:
             print(f"{'=' * 60}")
-            print(f"File Linting (read-only, no auto-fix)")
+            print("File Linting (read-only, no auto-fix)")
             print(f"{'=' * 60}")
             print()
             passed = run_linting(repo_root)
