@@ -1859,18 +1859,24 @@ Examples:
     marketplace_path = args.marketplace_path.resolve()
 
     # Verify path exists and contains marketplace content
+    early_error = None
     if not marketplace_path.exists():
-        print(f"Error: {marketplace_path} does not exist", file=sys.stderr)
-        return 1
-    if marketplace_path.is_dir() and not (marketplace_path / "marketplace.json").exists():
-        print(
-            f"Error: No marketplace.json found at {marketplace_path}\n"
-            f"Expected a marketplace directory with marketplace.json.",
-            file=sys.stderr,
-        )
-        return 1
-    if marketplace_path.is_file() and marketplace_path.name != "marketplace.json":
-        print(f"Error: {marketplace_path} is not a marketplace.json file", file=sys.stderr)
+        early_error = f"Error: {marketplace_path} does not exist"
+    elif marketplace_path.is_dir() and not (marketplace_path / "marketplace.json").exists():
+        early_error = f"Error: No marketplace.json found at {marketplace_path}. Expected a marketplace directory with marketplace.json."
+    elif marketplace_path.is_file() and marketplace_path.name != "marketplace.json":
+        early_error = f"Error: {marketplace_path} is not a marketplace.json file"
+
+    if early_error:
+        if args.report:
+            report_path = Path(args.report)
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(f"# Marketplace Validation\n\nCRITICAL: {early_error}\n", encoding="utf-8")
+            print("Marketplace Validation: FAIL (critical)")
+            print("  CRITICAL:1")
+            print(f"  Report: {report_path}")
+        else:
+            print(early_error, file=sys.stderr)
         return 1
 
     # Run validation

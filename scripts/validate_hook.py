@@ -1038,16 +1038,25 @@ def main() -> int:
     hook_path = Path(args.hook_path).resolve()
     plugin_root = Path(args.plugin_root).resolve() if args.plugin_root else None
 
+    # Early-exit errors: write minimal report if --report is specified
+    early_error = None
     if not hook_path.exists():
-        print(f"Error: {hook_path} does not exist", file=sys.stderr)
-        return 1
+        early_error = f"Error: {hook_path} does not exist"
+    elif not hook_path.is_file():
+        early_error = f"Error: {hook_path} is not a file (expected hooks.json)"
+    elif hook_path.suffix != ".json":
+        early_error = f"Error: {hook_path} is not a JSON file (expected hooks.json)"
 
-    # Verify content type — must be a JSON file (hooks.json)
-    if not hook_path.is_file():
-        print(f"Error: {hook_path} is not a file (expected hooks.json)", file=sys.stderr)
-        return 1
-    if hook_path.suffix != ".json":
-        print(f"Error: {hook_path} is not a JSON file (expected hooks.json)", file=sys.stderr)
+    if early_error:
+        if args.report:
+            report_path = Path(args.report)
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(f"# Hook Validation\n\nCRITICAL: {early_error}\n", encoding="utf-8")
+            print("Hook Validation: FAIL (critical)")
+            print("  CRITICAL:1")
+            print(f"  Report: {report_path}")
+        else:
+            print(early_error, file=sys.stderr)
         return 1
 
     report = validate_hooks(hook_path, plugin_root)
