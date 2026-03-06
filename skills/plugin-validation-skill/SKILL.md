@@ -11,7 +11,7 @@ tags:
   - mcp
   - quality-assurance
 user-invocable: true
-allowed-tools: Read, Bash(uv:*,python:*), Glob, Grep, Write, Task
+allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep, Write, Task
 ---
 
 # Plugin Validation Skill

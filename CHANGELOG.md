@@ -2,6 +2,19 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [1.8.4] - 2026-03-06
+
+### Documentation & Consistency Fixes
+
+- Documented `--update`, `--enable`, `--disable`, `-q/--quiet` flags in install-plugin command and skill
+- Documented `git-subdir` source type in marketplace-validation reference
+- Documented `authServerMetadataUrl` and `callbackPort` OAuth fields in mcp-validation reference
+- Fixed tool patterns in 2 skill SKILL.md files (`Bash(uv:*)` → `Bash(uv*)`)
+- Updated README: commands table, install examples, directory tree with 8 missing command files
+- Fixed tomli mypy `import-not-found` in lint_files.py
+- Made 16 scripts executable (chmod +x) for shebang consistency
+- Deep audit of all 28 scripts: ruff clean, mypy clean, no TODO/FIXME/HACK
+
 ## [1.8.3] - 2026-03-05
 
 ### Quality Score Audit

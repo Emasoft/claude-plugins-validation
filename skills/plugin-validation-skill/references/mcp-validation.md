@@ -214,6 +214,8 @@ The `oauth` field configures OAuth 2.0 authentication for remote (`http` or `sse
 | serverUrl | string | **Yes** | The OAuth authorization server URL |
 | clientId | string | No | The OAuth client ID |
 | scopes | array of strings | No | Requested OAuth scopes |
+| authServerMetadataUrl | string | No | Custom OAuth metadata discovery URL (v2.1.69+) |
+| callbackPort | integer | No | Local port for OAuth callback |
 
 ### OAuth Example
 
@@ -239,6 +241,8 @@ The `oauth` field configures OAuth 2.0 authentication for remote (`http` or `sse
 - `serverUrl` is required when the `oauth` object is present.
 - `clientId` and `scopes` are optional but recommended for explicit auth flows.
 - `scopes` must be an array of strings (not a single string).
+- `authServerMetadataUrl` overrides the default OAuth discovery endpoint (added in v2.1.69).
+- `callbackPort` specifies a fixed port for the local OAuth redirect server.
 
 ---
 

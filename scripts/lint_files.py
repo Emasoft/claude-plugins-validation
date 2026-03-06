@@ -483,7 +483,7 @@ def ensure_linter_installed(language: str, repo_root: Path) -> bool:
             return True
         except ModuleNotFoundError:
             try:
-                import tomli  # type: ignore[import-untyped,reportUnusedImport]  # noqa: F401
+                import tomli  # type: ignore[import-untyped,import-not-found]  # noqa: F401
 
                 return True
             except ModuleNotFoundError:

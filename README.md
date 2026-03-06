@@ -62,7 +62,7 @@ claude --plugin-dir ./OUTPUT_SKILLS/claude-plugins-validation
 | `/cpv-validate-scoring` | Compute plugin quality score (weighted category scoring) |
 | `/cpv-validate-security` | Security validation (injection, path traversal, secrets, permissions) |
 | `/cpv-validate-xref` | Cross-reference validation (agent refs, version sync, hook scripts) |
-| `/cpv-install-plugin` | Install, uninstall, and manage plugins locally |
+| `/cpv-install-plugin` | Install, update, enable/disable, and manage plugins locally |
 | `/cpv-setup-github-marketplace` | Set up a GitHub marketplace with CI/CD |
 
 ## Utility Scripts
@@ -135,6 +135,9 @@ uv run python scripts/claude-plugin-install.py ./my-plugin-dir/
 uv run python scripts/claude-plugin-install.py --validate ./my-plugin-dir/
 uv run python scripts/claude-plugin-install.py --list
 uv run python scripts/claude-plugin-install.py --uninstall my-plugin@local-my-plugin
+uv run python scripts/claude-plugin-install.py --update ./new-version.tar.gz my-marketplace
+uv run python scripts/claude-plugin-install.py --enable my-plugin@my-marketplace
+uv run python scripts/claude-plugin-install.py --disable my-plugin@my-marketplace
 uv run python scripts/claude-plugin-install.py --doctor
 ```
 
@@ -266,25 +269,41 @@ claude-plugins-validation/
 ├── agents/
 │   ├── plugin-validator.md          # Expert validation agent
 │   ├── skill-validation-agent.md    # Skill validation agent
-│   └── references/
+│   └── references/                  # Fix guides per validator
 │       ├── code-quality-fixes.md
+│       ├── documentation-fixes.md
+│       ├── encoding-fixes.md
+│       ├── enterprise-fixes.md
 │       ├── hook-fixes.md
+│       ├── lsp-fixes.md
 │       ├── marketplace-fixes.md
 │       ├── mcp-fixes.md
 │       ├── plugin-structure-fixes.md
 │       ├── plugin-validator-detailed-procedures.md
+│       ├── rules-fixes.md
+│       ├── scoring-fixes.md
+│       ├── security-fixes.md
 │       ├── skill-fixes.md
-│       └── skill-semantic-validation.md
+│       ├── skill-semantic-validation.md
+│       └── xref-fixes.md
 ├── commands/
-│   ├── cpv-install-plugin.md        # Local plugin install command
+│   ├── cpv-install-plugin.md        # Local plugin install/update/enable/disable
 │   ├── cpv-setup-github-marketplace.md # Marketplace setup command
 │   ├── cpv-validate-agents.md       # Agent validation command
+│   ├── cpv-validate-command.md      # Command validation command
+│   ├── cpv-validate-documentation.md # Documentation quality command
+│   ├── cpv-validate-encoding.md     # File encoding validation command
+│   ├── cpv-validate-enterprise.md   # Enterprise compliance command
 │   ├── cpv-validate-hooks.md        # Hook validation command
 │   ├── cpv-validate-lsp.md          # LSP validation command
 │   ├── cpv-validate-marketplace.md  # Marketplace validation command
 │   ├── cpv-validate-mcp.md          # MCP validation command
 │   ├── cpv-validate-plugin.md       # Plugin validation command
-│   └── cpv-validate-skill.md        # Skill validation command
+│   ├── cpv-validate-rules.md        # Rules validation command
+│   ├── cpv-validate-scoring.md      # Quality scoring command
+│   ├── cpv-validate-security.md     # Security validation command
+│   ├── cpv-validate-skill.md        # Skill validation command
+│   └── cpv-validate-xref.md        # Cross-reference validation command
 ├── git-hooks/
 │   ├── pre-commit                   # Pre-commit validation hook
 │   └── pre-push                     # Pre-push validation hook
