@@ -221,7 +221,9 @@ def install_python_tool(tool: str) -> bool:
     # uv tool install (preferred)
     if shutil.which("uv"):
         try:
-            result = subprocess.run(["uv", "tool", "install", "--python", "3.12", tool], capture_output=True, text=True, timeout=120)
+            result = subprocess.run(
+                ["uv", "tool", "install", "--python", "3.12", tool], capture_output=True, text=True, timeout=120
+            )
             if result.returncode == 0:
                 print(f"{GREEN}  ✔ {tool} installed via uv tool (Python 3.12){NC}")
                 return True
@@ -254,7 +256,9 @@ def install_python_tool(tool: str) -> bool:
     for pip_cmd in ["pip3", "pip"]:
         if shutil.which(pip_cmd):
             try:
-                result = subprocess.run([pip_cmd, "install", "--user", tool], capture_output=True, text=True, timeout=120)
+                result = subprocess.run(
+                    [pip_cmd, "install", "--user", tool], capture_output=True, text=True, timeout=120
+                )
                 if result.returncode == 0:
                     print(f"{GREEN}  ✔ {tool} installed via {pip_cmd} --user{NC}")
                     return True
@@ -383,13 +387,17 @@ def ensure_linter_installed(language: str, repo_root: Path) -> bool:
             if not shutil.which("rustfmt") and has_rustup:
                 print(f"{YELLOW}  Installing rustfmt via rustup...{NC}")
                 try:
-                    subprocess.run(["rustup", "component", "add", "rustfmt"], capture_output=True, text=True, timeout=120)
+                    subprocess.run(
+                        ["rustup", "component", "add", "rustfmt"], capture_output=True, text=True, timeout=120
+                    )
                 except (subprocess.TimeoutExpired, OSError):
                     print(f"{YELLOW}  ⚠ rustfmt install failed{NC}")
             if not shutil.which("cargo-clippy") and has_rustup:
                 print(f"{YELLOW}  Installing clippy via rustup...{NC}")
                 try:
-                    subprocess.run(["rustup", "component", "add", "clippy"], capture_output=True, text=True, timeout=120)
+                    subprocess.run(
+                        ["rustup", "component", "add", "clippy"], capture_output=True, text=True, timeout=120
+                    )
                 except (subprocess.TimeoutExpired, OSError):
                     print(f"{YELLOW}  ⚠ clippy install failed{NC}")
             return True
@@ -496,7 +504,9 @@ def ensure_linter_installed(language: str, repo_root: Path) -> bool:
         if os_type == "windows":
             hint = "Install-Module -Name PSScriptAnalyzer -Scope CurrentUser"
         else:
-            hint = "brew install powershell/tap/powershell && pwsh -c 'Install-Module PSScriptAnalyzer -Scope CurrentUser'"
+            hint = (
+                "brew install powershell/tap/powershell && pwsh -c 'Install-Module PSScriptAnalyzer -Scope CurrentUser'"
+            )
         print(f"{YELLOW}  ⚠ PSScriptAnalyzer not found (install via: {hint}){NC}")
         return False
 
@@ -541,7 +551,9 @@ def lint_python(repo_root: Path, files: list[Path] | None = None) -> bool:  # no
     if shutil.which("mypy"):
         print(f"{BLUE}    [2/2] mypy...{NC}")
         try:
-            result = subprocess.run(["mypy", "--ignore-missing-imports", str(repo_root)], capture_output=True, text=True, timeout=180)
+            result = subprocess.run(
+                ["mypy", "--ignore-missing-imports", str(repo_root)], capture_output=True, text=True, timeout=180
+            )
             if result.returncode != 0:
                 print(f"{RED}    Type errors found:{NC}")
                 for line in result.stdout.strip().splitlines()[:10]:
@@ -902,7 +914,9 @@ def lint_sql(repo_root: Path, files: list[Path]) -> bool:
 
     print(f"{BLUE}    sqlfluff lint...{NC}")
     try:
-        result = subprocess.run(cmd + ["lint", "--dialect", "ansi"] + file_paths, cwd=repo_root, capture_output=True, text=True, timeout=180)
+        result = subprocess.run(
+            cmd + ["lint", "--dialect", "ansi"] + file_paths, cwd=repo_root, capture_output=True, text=True, timeout=180
+        )
         if result.returncode != 0 and result.stdout:
             for line in result.stdout.strip().splitlines()[:5]:
                 print(f"{YELLOW}    {line}{NC}")
@@ -924,7 +938,9 @@ def lint_toml(repo_root: Path, files: list[Path]) -> bool:  # noqa: ARG001
         try:
             import tomli as tomllib  # type: ignore[no-redef]
         except ModuleNotFoundError:
-            print(f"{YELLOW}    ⚠ No TOML parser available (need Python 3.11+ or 'pip install tomli'), cannot lint TOML files{NC}")
+            print(
+                f"{YELLOW}    ⚠ No TOML parser available (need Python 3.11+ or 'pip install tomli'), cannot lint TOML files{NC}"
+            )
             return True
 
     print(f"{BLUE}    TOML syntax validation...{NC}")
@@ -1030,13 +1046,17 @@ def run_linting(repo_root: Path) -> bool:
 
         # Ensure linter is installed — emit WARNING if unavailable
         if not ensure_linter_installed(lang, repo_root):
-            print(f"{YELLOW}  ⚠ WARNING: {len(files)} {lang.upper()} file(s) cannot be validated — no linter available for this format{NC}")
+            print(
+                f"{YELLOW}  ⚠ WARNING: {len(files)} {lang.upper()} file(s) cannot be validated — no linter available for this format{NC}"
+            )
             continue
 
         # Dispatch to language-specific linter
         lint_fn = _LINT_DISPATCH.get(lang)
         if lint_fn is None:
-            print(f"{YELLOW}  ⚠ WARNING: {len(files)} {lang.upper()} file(s) cannot be validated — no lint function registered{NC}")
+            print(
+                f"{YELLOW}  ⚠ WARNING: {len(files)} {lang.upper()} file(s) cannot be validated — no lint function registered{NC}"
+            )
             continue
 
         passed = lint_fn(repo_root, files)
@@ -1069,7 +1089,8 @@ def main() -> int:
         help="Repository root path (default: auto-detected via git)",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         help="Show detailed output for each linter",
     )

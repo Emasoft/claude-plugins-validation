@@ -138,7 +138,6 @@ class EncodingValidationReport(ValidationReport):
 # =============================================================================
 
 
-
 def is_text_file(file_path: Path) -> bool:
     """Determine if file should be treated as text based on extension."""
     suffix = file_path.suffix.lower()
@@ -510,7 +509,9 @@ Exit Codes:
     parser.add_argument("plugin_path", type=Path, help="Path to the plugin directory to validate")
     parser.add_argument("-v", "--verbose", action="store_true", help="Show all results including INFO and PASSED")
     parser.add_argument("--json", action="store_true", help="Output results as JSON")
-    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
+    parser.add_argument(
+        "--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout"
+    )
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
 
     args = parser.parse_args()
@@ -542,6 +543,7 @@ Exit Codes:
         def _print_full(report, verbose=False):
             print_report_summary(report, "Encoding Validation Report")
             print_results_by_level(report, verbose=verbose)
+
         save_report_and_print_summary(report, Path(args.report), "Encoding Validation", _print_full, args.verbose)
     else:
         print_results_by_level(report, verbose=args.verbose)

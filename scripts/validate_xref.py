@@ -723,6 +723,11 @@ Exit codes:
         default=None,
         help="Save detailed report to file, print only summary to stdout",
     )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Strict mode: NIT issues also cause non-zero exit",
+    )
 
     args = parser.parse_args()
 
@@ -752,7 +757,9 @@ Exit codes:
             print_report_summary(report, "Cross-Reference Validation Report")
             print_results_by_level(report, verbose=verbose)
 
-        save_report_and_print_summary(report, Path(args.report), "Cross-Reference Validation", _print_full, args.verbose)
+        save_report_and_print_summary(
+            report, Path(args.report), "Cross-Reference Validation", _print_full, args.verbose
+        )
     else:
         print_report_summary(report, "Cross-Reference Validation Report")
         print_results_by_level(report, verbose=args.verbose)
@@ -769,7 +776,7 @@ Exit codes:
             if report.hook_script_refs:
                 print(f"  Hook scripts referenced: {len(report.hook_script_refs)}")
 
-    return report.exit_code
+    return report.exit_code_strict() if args.strict else report.exit_code
 
 
 if __name__ == "__main__":

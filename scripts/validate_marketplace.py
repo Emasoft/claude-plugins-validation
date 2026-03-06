@@ -1849,7 +1849,9 @@ Examples:
         help="Output results as JSON",
     )
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
-    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
+    parser.add_argument(
+        "--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout"
+    )
 
     args = parser.parse_args()
 

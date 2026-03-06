@@ -291,7 +291,12 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
     # Skip path checks for test files - they contain example data
     # Handle both absolute (/tests/) and relative (tests/) paths
     file_normalized = file_lower.replace("\\", "/")
-    if "test_" in file_lower or "_test.py" in file_lower or "/tests/" in file_normalized or file_normalized.startswith("tests/"):
+    if (
+        "test_" in file_lower
+        or "_test.py" in file_lower
+        or "/tests/" in file_normalized
+        or file_normalized.startswith("tests/")
+    ):
         return 0
 
     for line_num, line in enumerate(lines, start=1):
@@ -309,9 +314,7 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
             continue
 
         # Detect if this line is a Python string literal (help text, error messages, etc.)
-        is_python_string_line = file_lower.endswith(".py") and (
-            '"' in stripped or "'" in stripped
-        )
+        is_python_string_line = file_lower.endswith(".py") and ('"' in stripped or "'" in stripped)
 
         for pattern, msg in PATH_TRAVERSAL_PATTERNS:
             match = pattern.search(line)
@@ -344,7 +347,9 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
                     # Skip absolute Unix paths in Python string literals
                     # (e.g. help text mentioning shebangs or system bin directories)
                     if "Absolute Unix" in msg and (
-                        "#!/" in line or "help" in stripped.lower() or "epilog" in stripped.lower()
+                        "#!/" in line
+                        or "help" in stripped.lower()
+                        or "epilog" in stripped.lower()
                         or stripped.startswith(("'", '"', "f'", 'f"', "r'", 'r"'))
                     ):
                         continue
@@ -366,7 +371,12 @@ def scan_for_secrets(content: str, file_path: str, report: ValidationReport) -> 
     # Skip test files — they contain intentional example/mock secrets
     # Handle both absolute (/tests/) and relative (tests/) paths
     file_normalized = file_lower.replace("\\", "/")
-    if "test_" in file_lower or "_test.py" in file_lower or "/tests/" in file_normalized or file_normalized.startswith("tests/"):
+    if (
+        "test_" in file_lower
+        or "_test.py" in file_lower
+        or "/tests/" in file_normalized
+        or file_normalized.startswith("tests/")
+    ):
         return 0
 
     # Skip markdown documentation — contains example credentials for illustration
@@ -414,7 +424,12 @@ def scan_for_user_paths(content: str, file_path: str, report: ValidationReport) 
     # Skip test files - they contain example data
     # Handle both absolute (/tests/) and relative (tests/) paths
     file_normalized = file_lower.replace("\\", "/")
-    if "test_" in file_lower or "_test.py" in file_lower or "/tests/" in file_normalized or file_normalized.startswith("tests/"):
+    if (
+        "test_" in file_lower
+        or "_test.py" in file_lower
+        or "/tests/" in file_normalized
+        or file_normalized.startswith("tests/")
+    ):
         return 0
 
     for line_num, line in enumerate(lines, start=1):
@@ -651,7 +666,9 @@ Exit Codes:
     parser.add_argument("-v", "--verbose", action="store_true", help="Show all results including INFO and PASSED")
     parser.add_argument("--json", action="store_true", help="Output results as JSON")
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
-    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
+    parser.add_argument(
+        "--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout"
+    )
 
     args = parser.parse_args()
 
@@ -678,9 +695,11 @@ Exit Codes:
         output["plugin_path"] = str(plugin_path)
         print(json.dumps(output, indent=2))
     elif args.report:
+
         def _print_full(report, verbose=False):
             print_report_summary(report, "Security Validation Report")
             print_results_by_level(report, verbose=verbose)
+
         save_report_and_print_summary(report, Path(args.report), "Security Validation", _print_full, args.verbose)
     else:
         print_results_by_level(report, verbose=args.verbose)

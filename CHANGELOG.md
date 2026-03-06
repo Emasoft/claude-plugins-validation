@@ -2,6 +2,24 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [1.8.8] - 2026-03-06
+
+### Full Plugin Audit — Bug Fixes and Consistency
+
+- **CRITICAL**: Fixed pyproject.toml version mismatch (was 1.8.2, now synced with plugin.json)
+- **CRITICAL**: Fixed `cpv-install-plugin.md` and `install-plugin/SKILL.md` — `marketplace` is positional, not `--marketplace` flag
+- **CRITICAL**: Added missing `--strict` flag to `validate_xref.py` with `exit_code_strict()` support
+- **MAJOR**: Synced `VALID_TOOLS` in `cpv_validation_common.py` — added 6 missing tools (MultiEdit, Notebook, TodoRead, TodoWrite, LSP, Agent)
+- **MAJOR**: Fixed `setup-github-marketplace/SKILL.md` — corrected 4 non-existent script/workflow references
+- **MAJOR**: Added missing `--report`, `--marketplace-only`, `--skip-platform-checks` docs to `cpv-validate-plugin.md`
+- **MAJOR**: Updated README — added `--report` to options, mentioned both agents, added self-validation section
+- Fixed all `python3 -c` references to `uv run python -c` across 8 command/agent files
+- Added `cpv-setup-github-marketplace.md` Execution section explaining agent-driven workflow
+- Added `setup_marketplace_automation.py` to README utility scripts table
+- Added missing CHANGELOG note for versions 1.8.0-1.8.1
+- Reformatted all 20 Python scripts with ruff
+- Self-validation: PASS 157/157, 1101 tests pass
+
 ## [1.8.7] - 2026-03-06
 
 ### Token Optimization — Callers Updated
@@ -83,6 +101,10 @@ All notable changes to the Claude Plugins Validation plugin will be documented i
 - Eliminated all false positives when scanning own plugin (86 CRITICAL + 8 MAJOR → 0)
 - Context-aware heuristics: KNOWN_EXAMPLE_SECRETS, is_shell_like_file(), Python-aware
   backtick/eval/pipe-to-shell skips, relative path handling, Python string literal detection
+
+## [1.8.0] - [1.8.1] — Internal Development
+
+Internal refactoring and incremental improvements. No user-facing changes.
 
 ## [1.7.9] - 2026-03-03
 

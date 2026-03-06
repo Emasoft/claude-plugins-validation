@@ -10,7 +10,7 @@ Comprehensive validation suite for Claude Code plugins, marketplaces, hooks, ski
 This plugin provides:
 
 - **Validation Scripts**: Python scripts for validating all plugin components (190+ rules)
-- **Expert Agent**: `plugin-validator` agent for interactive validation and remediation
+- **Expert Agents**: `plugin-validator` agent for interactive validation and remediation, `skill-validation-agent` for specialized skill validation
 - **Skills**: `plugin-validation-skill`, `install-plugin`, `setup-github-marketplace`, `skill-validation-skill`
 - **Slash Commands**: 17 commands for validating, installing, and managing plugins
 - **Local Plugin Installer**: `claude-plugin-install.py` for installing plugins without a GitHub marketplace
@@ -75,6 +75,7 @@ claude --plugin-dir ./OUTPUT_SKILLS/claude-plugins-validation
 | `setup_git_hooks.py` | Install/remove git hooks for plugin validation |
 | `setup_plugin_pipeline.py` | Setup and validate plugin development pipeline |
 | `update_marketplace_metadata.py` | Update marketplace.json when plugin files change |
+| `setup_marketplace_automation.py` | Automates GitHub marketplace CI/CD pipeline setup |
 | `smart_exec.py` | Intelligent tool executor with cross-platform detection |
 
 ## Common Options
@@ -86,6 +87,7 @@ All validation scripts share the following flags:
 | `--verbose, -v` | Show all results including passed checks |
 | `--json` | Output results as JSON |
 | `--strict` | Strict mode (NIT issues also block validation) |
+| `--report PATH` | Save full output to file, print compact summary to stdout |
 | `path` | Plugin root path (defaults to parent of scripts/) |
 
 ### Validate a Plugin
@@ -143,9 +145,10 @@ uv run python scripts/claude-plugin-install.py --doctor
 
 ### Use the Agent
 
-Ask Claude to use the `plugin-validator` agent:
+Ask Claude to use one of the validation agents:
 
 > "Use the plugin-validator agent to validate my atlas-orchestrator plugin"
+> "Use the skill-validation-agent to validate my custom skill"
 
 ### Use the Skill
 
@@ -454,6 +457,14 @@ The agent verifies dependencies for all languages found in the plugin:
 | Shell/Bash | Shebang lines, `source` statements | Checks command availability |
 | PowerShell | `.psd1` manifests, `#Requires` statements | Checks module availability |
 | Ruby | `Gemfile` | Scans require statements, checks gems |
+
+## Self-Validation
+
+The plugin validates itself. Run:
+
+```bash
+uv run python scripts/validate_plugin.py . --verbose --report docs_dev/self-validation.md
+```
 
 ## Troubleshooting
 
