@@ -77,6 +77,7 @@ Low scores, missing metrics, weight configuration, recommendations.
 - **Never read files speculatively** — only read files mentioned in the report.
 - **Fix in priority order**: CRITICAL → MAJOR → MINOR → NIT.
 - **Skip WARNING items** — those are advisory and do not need fixing.
+- **ALWAYS write fix log** to `docs_dev/fix-log_<name>_YYYYMMDD.md` — return only summary to caller.
 - **After fixing**, return a one-line summary, not the full fix log.
 
 ## Examples
