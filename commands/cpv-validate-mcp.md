@@ -129,28 +129,6 @@ Supported variables:
 /cpv-validate-mcp ./my-plugin/.mcp.json --json
 ```
 
-## Output Example
-
-```
-============================================================
-MCP Configuration Validation Report
-============================================================
-
-Summary:
-  CRITICAL: 0
-  MAJOR:    1
-  MINOR:    1
-  NIT:      0
-  WARNING:  0
-
-Details:
-  [MAJOR] Server 'my-server' has hardcoded credential in headers[Authorization] - use environment variables
-  [MINOR] Server 'old-server' uses deprecated 'sse' transport - consider migrating to 'http'
-
-------------------------------------------------------------
-✗ Issues found
-```
-
 ## Configuration Examples
 
 ### stdio Server (Local MCP)
@@ -198,30 +176,14 @@ Details:
 }
 ```
 
-## Exit Codes
+## Output & Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| 0 | All checks passed |
-| 1 | CRITICAL issues (MCP will not work) |
-| 2 | MAJOR issues (significant problems) |
-| 3 | MINOR issues (may affect behavior) |
-| 4 | NIT issues found (only in --strict mode) |
-
-## Severity Levels
-
-| Severity | Behavior |
-|----------|----------|
-| CRITICAL | Always blocks (exit 1) |
-| MAJOR | Always blocks (exit 2) |
-| MINOR | Always blocks (exit 3) |
-| NIT | Blocks only in `--strict` mode (exit 4) |
-| WARNING | Never blocks, always reported (security advisories, best practices) |
+Uses standard CPV severity levels and exit codes. With `--report`, saves full output to file and prints only a compact summary. See `/cpv-validate-plugin` for details.
 
 ## Execution
 
 ```bash
-uv run python scripts/validate_mcp.py "$PATH" $OPTIONS
+uv run python scripts/validate_mcp.py "$PATH" $OPTIONS --report docs_dev/validate_mcp_$(date +%Y%m%d).md
 ```
 
 ## Related Commands

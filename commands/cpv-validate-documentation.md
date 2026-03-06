@@ -34,7 +34,7 @@ Validates documentation quality for a Claude Code plugin directory.
 ## Execution
 
 ```bash
-uv run python scripts/validate_documentation.py <plugin-path>
+uv run python scripts/validate_documentation.py <plugin-path> --report docs_dev/validate_documentation_$(date +%Y%m%d).md
 ```
 
 ## Related Commands

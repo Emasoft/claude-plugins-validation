@@ -34,7 +34,7 @@ Validates all command `.md` files in a Claude Code plugin's `commands/` director
 ## Execution
 
 ```bash
-uv run python scripts/validate_command.py <plugin-path>
+uv run python scripts/validate_command.py <plugin-path> --report docs_dev/validate_command_$(date +%Y%m%d).md
 ```
 
 ## Related Commands

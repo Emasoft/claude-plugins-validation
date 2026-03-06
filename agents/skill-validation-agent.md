@@ -31,7 +31,7 @@ You are a specialized agent for validating Claude Code skills according to multi
 ## Validation Command
 
 ```bash
-uv run python scripts/validate_skill_comprehensive.py "<skill_path>" [--strict] [--openspec] [--pillars] [--verbose]
+uv run python scripts/validate_skill_comprehensive.py "<skill_path>" [--strict] [--openspec] [--pillars] [--verbose] --report docs_dev/validate_skill_YYYYMMDD.md
 ```
 
 ## Quality Gates

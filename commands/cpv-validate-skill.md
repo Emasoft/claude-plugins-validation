@@ -144,30 +144,14 @@ Returns:
 | D | 60-69 | Reject, rework needed |
 | F | <60 | Broken |
 
-## Exit Codes
+## Output & Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| 0 | Grade A/B (pass) |
-| 1 | CRITICAL issues (Grade F) |
-| 2 | MAJOR issues (Grade D) |
-| 3 | MINOR issues (Grade C) |
-| 4 | NIT issues found (only in --strict mode) |
-
-## Severity Levels
-
-| Severity | Behavior |
-|----------|----------|
-| CRITICAL | Always blocks (exit 1) |
-| MAJOR | Always blocks (exit 2) |
-| MINOR | Always blocks (exit 3) |
-| NIT | Blocks only in `--strict` mode (exit 4) |
-| WARNING | Never blocks, always reported (security advisories, best practices) |
+Uses standard CPV severity levels and exit codes. With `--report`, saves full output to file and prints only a compact summary. See `/cpv-validate-plugin` for details.
 
 ## Execution
 
 ```bash
-uv run python scripts/validate_skill_comprehensive.py "$SKILL_PATH" $OPTIONS
+uv run python scripts/validate_skill_comprehensive.py "$SKILL_PATH" $OPTIONS --report docs_dev/validate_skill_$(date +%Y%m%d).md
 ```
 
 Where `$SKILL_PATH` is the provided path and `$OPTIONS` are the flags passed.

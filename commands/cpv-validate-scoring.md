@@ -34,7 +34,7 @@ Computes a quality score for a Claude Code plugin based on validation results.
 ## Execution
 
 ```bash
-uv run python scripts/validate_scoring.py <plugin-path>
+uv run python scripts/validate_scoring.py <plugin-path> --report docs_dev/validate_scoring_$(date +%Y%m%d).md
 ```
 
 ## Related Commands

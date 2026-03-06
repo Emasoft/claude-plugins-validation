@@ -115,36 +115,20 @@ Returns summary with:
 - **Plugins Found**: List of plugins in marketplace
 - **Details**: All validation results with file locations
 
-## Exit Codes
+## Output & Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| 0 | All checks passed |
-| 1 | CRITICAL issues (marketplace won't work or contains private info) |
-| 2 | MAJOR issues (significant problems) |
-| 3 | MINOR issues (may affect UX) |
-| 4 | NIT issues found (only in --strict mode) |
-
-## Severity Levels
-
-| Severity | Behavior |
-|----------|----------|
-| CRITICAL | Always blocks (exit 1) |
-| MAJOR | Always blocks (exit 2) |
-| MINOR | Always blocks (exit 3) |
-| NIT | Blocks only in `--strict` mode (exit 4) |
-| WARNING | Never blocks, always reported (security advisories, best practices) |
+Uses standard CPV severity levels and exit codes. With `--report`, saves full output to file and prints only a compact summary. See `/cpv-validate-plugin` for details.
 
 ## Execution
 
 When running from the CPV plugin directory:
 ```bash
-CLAUDE_PRIVATE_USERNAMES="$USERNAME" uv run python scripts/validate_marketplace.py "$MARKETPLACE_PATH" $OPTIONS
+CLAUDE_PRIVATE_USERNAMES="$USERNAME" uv run python scripts/validate_marketplace.py "$MARKETPLACE_PATH" $OPTIONS --report docs_dev/validate_marketplace_$(date +%Y%m%d).md
 ```
 
 When running from another plugin's directory (no pyproject.toml):
 ```bash
-CLAUDE_PRIVATE_USERNAMES="$USERNAME" uv run --with pyyaml python scripts/validate_marketplace.py "$MARKETPLACE_PATH" $OPTIONS
+CLAUDE_PRIVATE_USERNAMES="$USERNAME" uv run --with pyyaml python scripts/validate_marketplace.py "$MARKETPLACE_PATH" $OPTIONS --report docs_dev/validate_marketplace_$(date +%Y%m%d).md
 ```
 
 ## Related Commands

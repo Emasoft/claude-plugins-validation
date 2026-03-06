@@ -137,13 +137,12 @@ If no exact match is found, fuzzy matching is used (e.g., `cpt-validate` → `cp
 
 ## Output
 
-Returns summary with:
-- **Exit Code**: 0 (pass), 1 (CRITICAL), 2 (MAJOR), 3 (MINOR), 4 (NIT, --strict only)
-- **Counts**: Issues by severity level (CRITICAL, MAJOR, MINOR, NIT, WARNING)
-- **Details**: All validation results with file locations
-- **Report File**: Full output saved to `docs_dev/validate_<plugin-name>_<date>.md`
-
-**IMPORTANT**: Always save the full validation output to a timestamped `.md` file in `docs_dev/` and display the report file path at the end of the output.
+With `--report`, the full detailed output is saved to file and only a compact summary is printed:
+```
+Plugin Validation: PASS
+  CRITICAL:0 | MAJOR:0 | MINOR:2 | PASSED:155
+  Report: docs_dev/validate_plugin_20260306.md
+```
 
 ## Exit Codes
 
@@ -169,12 +168,12 @@ Returns summary with:
 
 When running from the CPV plugin directory (has pyproject.toml with pyyaml):
 ```bash
-uv run python scripts/validate_plugin.py "$PLUGIN_PATH" $OPTIONS
+uv run python scripts/validate_plugin.py "$PLUGIN_PATH" $OPTIONS --report docs_dev/validate_plugin_$(date +%Y%m%d).md
 ```
 
 When running from another plugin's directory (no pyproject.toml), use `--with` to provide pyyaml:
 ```bash
-uv run --with pyyaml python scripts/validate_plugin.py . $OPTIONS
+uv run --with pyyaml python scripts/validate_plugin.py . $OPTIONS --report docs_dev/validate_plugin_$(date +%Y%m%d).md
 ```
 
 ## Related Commands

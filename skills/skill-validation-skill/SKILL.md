@@ -87,7 +87,7 @@ This skill provides comprehensive validation for Claude Code skills according to
 ### 1. Run Basic Validation
 
 ```bash
-uv run python scripts/validate_skill_comprehensive.py path/to/skill/
+uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --report docs_dev/validate_skill_YYYYMMDD.md
 ```
 
 **Output**: Grade (A-F), issue counts, detailed results by category.
@@ -95,13 +95,13 @@ uv run python scripts/validate_skill_comprehensive.py path/to/skill/
 ### 2. Run Verbose Validation (Show All Checks)
 
 ```bash
-uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --verbose
+uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --verbose --report docs_dev/validate_skill_YYYYMMDD.md
 ```
 
 ### 3. Run Strict Mode (Nixtla Quality Standards)
 
 ```bash
-uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --strict
+uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --strict --report docs_dev/validate_skill_YYYYMMDD.md
 ```
 
 **Additional checks**:
@@ -113,7 +113,7 @@ uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --strict
 ### 4. Run OpenSpec Mode (AgentSkills Strict Whitelist)
 
 ```bash
-uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --openspec
+uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --openspec --report docs_dev/validate_skill_YYYYMMDD.md
 ```
 
 **Additional checks**:
@@ -124,7 +124,7 @@ uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --openspec
 ### 5. Run Pillars Validation (Language Skills)
 
 ```bash
-uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --pillars
+uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --pillars --report docs_dev/validate_skill_YYYYMMDD.md
 ```
 
 **Validates 8+1 Pillars coverage**:
@@ -141,7 +141,7 @@ uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --pillars
 ### 6. Combine All Modes
 
 ```bash
-uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --strict --openspec --pillars --verbose
+uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --strict --openspec --pillars --verbose --report docs_dev/validate_skill_YYYYMMDD.md
 ```
 
 ### 7. JSON Output (For CI/CD)
@@ -190,7 +190,7 @@ uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --json
 
 Copy this checklist and track your progress:
 
-- [ ] Run basic validation: `uv run python scripts/validate_skill_comprehensive.py path/to/skill/`
+- [ ] Run basic validation: `uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --report docs_dev/validate_skill_YYYYMMDD.md`
 - [ ] Fix all CRITICAL issues (Grade F blockers)
 - [ ] Fix all MAJOR issues (Grade D issues)
 - [ ] Run strict mode: add `--strict` flag
@@ -200,6 +200,13 @@ Copy this checklist and track your progress:
 - [ ] Run with `--verbose` to review all checks
 - [ ] Achieve Grade B or higher before deployment
 - [ ] Document any intentionally skipped checks
+
+## Report Output (MANDATORY)
+
+**ALWAYS use `--report` flag** when running validation scripts. This saves full output to a file and prints only a compact summary to stdout, preventing verbose output from consuming the model context.
+
+- Never read the report file yourself — provide the file path to the user
+- Use timestamped filenames: `docs_dev/validate_<name>_YYYYMMDD.md`
 
 ## Error Handling
 
@@ -232,7 +239,7 @@ Copy this checklist and track your progress:
 ### Example 1: Validate a Single Skill
 
 ```bash
-$ uv run python scripts/validate_skill_comprehensive.py ./skills/my-skill/
+$ uv run python scripts/validate_skill_comprehensive.py ./skills/my-skill/ --report docs_dev/validate_skill_YYYYMMDD.md
 
 ======================================================================
 Skill Validation: ./skills/my-skill/
@@ -259,7 +266,7 @@ Details:
 ### Example 2: Validate with Strict Mode
 
 ```bash
-$ uv run python scripts/validate_skill_comprehensive.py ./skills/lang-rust-dev/ --strict --pillars
+$ uv run python scripts/validate_skill_comprehensive.py ./skills/lang-rust-dev/ --strict --pillars --report docs_dev/validate_skill_YYYYMMDD.md
 
 ======================================================================
 Skill Validation: ./skills/lang-rust-dev/

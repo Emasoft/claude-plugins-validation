@@ -34,7 +34,7 @@ Validates enterprise compliance requirements for a Claude Code plugin.
 ## Execution
 
 ```bash
-uv run python scripts/validate_enterprise.py <plugin-path>
+uv run python scripts/validate_enterprise.py <plugin-path> --report docs_dev/validate_enterprise_$(date +%Y%m%d).md
 ```
 
 ## Related Commands
