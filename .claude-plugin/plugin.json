@@ -29,6 +29,5 @@
     "./agents/plugin-fixer.md",
     "./agents/semantic-validator.md"
   ],
-  "skills": "./skills/",
-  "hooks": "./hooks/"
+  "skills": "./skills/"
 }
