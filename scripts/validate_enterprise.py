@@ -49,7 +49,6 @@ from cpv_validation_common import (
     Level,
     ValidationReport,
     ValidationResult,
-    calculate_letter_grade,
     save_report_and_print_summary,
 )
 
@@ -840,7 +839,7 @@ def print_results(report: EnterpriseComplianceReport, verbose: bool = False) -> 
         rst = colors["RESET"]
         print(f"{minor}NOTICE: Minor compliance issues found{rst}")
 
-    print(f"\nScore: {report.score}/100 ({calculate_letter_grade(report.score)})")
+    print(f"\nScore: {report.score}/100")
     print()
 
 

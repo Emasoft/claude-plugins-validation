@@ -2061,10 +2061,9 @@ def print_results(report: ValidationReport, verbose: bool = False) -> None:
     print(f"Skill Validation: {report.skill_path}")
     print("=" * 70)
 
-    # Print grade
-    grade_colors = {"A": "\033[92m", "B": "\033[92m", "C": "\033[93m", "D": "\033[93m", "F": "\033[91m"}
-    grade_color = grade_colors.get(report.grade, "")
-    print(f"\n{colors['BOLD']}Grade: {grade_color}{report.grade}{colors['RESET']} ({report.overall_score:.1f}/100)")
+    # Print score
+    score_color = "\033[92m" if report.overall_score >= 80 else "\033[93m" if report.overall_score >= 60 else "\033[91m"
+    print(f"\n{colors['BOLD']}Score:{colors['RESET']} {score_color}{report.overall_score:.1f}/100{colors['RESET']}")
 
     # Print summary
     print("\nSummary:")

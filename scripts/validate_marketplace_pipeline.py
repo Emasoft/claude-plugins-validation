@@ -1393,7 +1393,7 @@ def format_text_report(report: PipelineValidationReport, verbose: bool = False) 
 
     # Overall score
     lines.append("-" * 70)
-    lines.append(f"OVERALL SCORE: {report.total_score:.1f}/100 (Grade: {report.grade})")
+    lines.append(f"OVERALL SCORE: {report.total_score:.1f}/100")
     lines.append(f"Status: {report.grade_description}")
     lines.append("-" * 70)
     lines.append("")

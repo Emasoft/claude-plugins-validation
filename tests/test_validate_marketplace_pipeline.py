@@ -550,7 +550,7 @@ class TestFormatTextReport:
         assert "MARKETPLACE PIPELINE VALIDATION REPORT" in text
         assert "test-marketplace" in text
         assert "OVERALL SCORE:" in text
-        assert "Grade:" in text
+        assert "OVERALL SCORE:" in text
         assert "CATEGORY BREAKDOWN:" in text
         assert "SUMMARY:" in text
         # Verbose mode should show passed results

@@ -36,7 +36,6 @@ from cpv_validation_common import (  # noqa: E402
     ValidationReport,
     ValidationResult,
     build_private_path_patterns,
-    calculate_letter_grade,
     check_utf8_encoding,
     colorize,
     format_result,
@@ -279,81 +278,6 @@ class TestScoring:
         assert report.score == 62
 
 
-class TestLetterGrade:
-    """Tests for letter grade calculation.
-
-    Grade scale:
-    - A+ : 97-100
-    - A  : 93-96
-    - A- : 90-92
-    - B+ : 87-89
-    - B  : 83-86
-    - B- : 80-82
-    - C+ : 77-79
-    - C  : 73-76
-    - C- : 70-72
-    - D  : 60-69
-    - F  : 0-59
-    """
-
-    def test_grade_a_plus(self):
-        """Score 97-100 should give grade A+."""
-        assert calculate_letter_grade(100) == "A+"
-        assert calculate_letter_grade(97) == "A+"
-
-    def test_grade_a(self):
-        """Score 93-96 should give grade A."""
-        assert calculate_letter_grade(96) == "A"
-        assert calculate_letter_grade(93) == "A"
-
-    def test_grade_a_minus(self):
-        """Score 90-92 should give grade A-."""
-        assert calculate_letter_grade(92) == "A-"
-        assert calculate_letter_grade(90) == "A-"
-
-    def test_grade_b_plus(self):
-        """Score 87-89 should give grade B+."""
-        assert calculate_letter_grade(89) == "B+"
-        assert calculate_letter_grade(87) == "B+"
-
-    def test_grade_b(self):
-        """Score 83-86 should give grade B."""
-        assert calculate_letter_grade(86) == "B"
-        assert calculate_letter_grade(83) == "B"
-
-    def test_grade_b_minus(self):
-        """Score 80-82 should give grade B-."""
-        assert calculate_letter_grade(82) == "B-"
-        assert calculate_letter_grade(80) == "B-"
-
-    def test_grade_c_plus(self):
-        """Score 77-79 should give grade C+."""
-        assert calculate_letter_grade(79) == "C+"
-        assert calculate_letter_grade(77) == "C+"
-
-    def test_grade_c(self):
-        """Score 73-76 should give grade C."""
-        assert calculate_letter_grade(76) == "C"
-        assert calculate_letter_grade(73) == "C"
-
-    def test_grade_c_minus(self):
-        """Score 70-72 should give grade C-."""
-        assert calculate_letter_grade(72) == "C-"
-        assert calculate_letter_grade(70) == "C-"
-
-    def test_grade_d(self):
-        """Score 60-69 should give grade D."""
-        assert calculate_letter_grade(69) == "D"
-        assert calculate_letter_grade(65) == "D"
-        assert calculate_letter_grade(60) == "D"
-
-    def test_grade_f(self):
-        """Score < 60 should give grade F."""
-        assert calculate_letter_grade(59) == "F"
-        assert calculate_letter_grade(30) == "F"
-        assert calculate_letter_grade(0) == "F"
-
-
 class TestSeverityConversion:
     """Tests for severity level conversion functions."""
 
@@ -402,7 +326,6 @@ class TestReportSerialization:
 
         d = report.to_dict()
         assert "score" in d
-        assert "grade" in d
         assert "exit_code" in d
         assert "counts" in d
         assert "results" in d
@@ -879,7 +802,7 @@ class TestPrintFunctions:
     """Tests for print_report_summary and print_results_by_level."""
 
     def test_print_report_summary_outputs_to_stdout(self, capsys):
-        """print_report_summary should print score, grade, and counts."""
+        """print_report_summary should print score and counts."""
         report = ValidationReport()
         report.passed("All good")
         report.minor("Small issue")
@@ -888,7 +811,7 @@ class TestPrintFunctions:
         captured = capsys.readouterr()
         assert "Test Report" in captured.out
         assert "97/100" in captured.out
-        assert "A+" in captured.out
+        assert "Syntactic Score" in captured.out
         assert "MINOR:    1" in captured.out
 
     def test_print_results_by_level_shows_errors(self, capsys):
