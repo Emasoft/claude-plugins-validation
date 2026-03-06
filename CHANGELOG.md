@@ -2,6 +2,19 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [1.8.7] - 2026-03-06
+
+### Token Optimization — Callers Updated
+
+- Updated all 15 validator command files to use `--report` in execution sections
+- Removed duplicate Output Example, Exit Codes, and Severity Levels sections from 6 large commands (~164 lines saved)
+- Kept `cpv-validate-plugin.md` as canonical reference for exit codes and severity levels
+- Updated all script invocations in 3 skill SKILL.md files to use `--report` flag
+- Added "Report Output (MANDATORY)" section to `skill-validation-skill/SKILL.md`
+- Updated `plugin-validation-skill/SKILL.md` report instructions to reference `--report` flag
+- Fixed all agent .md examples to demonstrate `--report` usage with compact summary output
+- Zero bare validate_* invocations remain across all commands, skills, and agents
+
 ## [1.8.6] - 2026-03-06
 
 ### Token Optimization — `--report` Flag

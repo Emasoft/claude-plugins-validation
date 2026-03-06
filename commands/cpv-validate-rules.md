@@ -34,7 +34,7 @@ Validates all rule files in the `rules/` directory of a Claude Code plugin.
 ## Execution
 
 ```bash
-uv run python scripts/validate_rules.py <plugin-path>
+uv run python scripts/validate_rules.py <plugin-path> --report docs_dev/validate_rules_$(date +%Y%m%d).md
 ```
 
 ## Related Commands

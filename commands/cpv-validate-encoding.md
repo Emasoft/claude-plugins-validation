@@ -34,7 +34,7 @@ Validates file encoding compliance for all files in a Claude Code plugin.
 ## Execution
 
 ```bash
-uv run python scripts/validate_encoding.py <plugin-path>
+uv run python scripts/validate_encoding.py <plugin-path> --report docs_dev/validate_encoding_$(date +%Y%m%d).md
 ```
 
 ## Related Commands

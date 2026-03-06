@@ -340,8 +340,8 @@ uv run python scripts/generate-readme.py --marketplace-dir . && git add -A && gi
 # Update target: regenerate, push, validate both
 cd "$TARGET" && uv run python scripts/generate-readme.py --marketplace-dir .
 git add -A && git commit -m "Migrate in: ${PLUGINS_TO_MIGRATE[*]}" && git push
-uv run python scripts/validate_marketplace.py /tmp/source-mkt --verbose
-uv run python scripts/validate_marketplace.py "$TARGET" --verbose
+uv run python scripts/validate_marketplace.py /tmp/source-mkt --verbose --report docs_dev/validate_marketplace_source_YYYYMMDD.md
+uv run python scripts/validate_marketplace.py "$TARGET" --verbose --report docs_dev/validate_marketplace_target_YYYYMMDD.md
 ```
 
 Reference: [Plugin Linking Guide](references/plugin-linking-guide.md)
@@ -356,7 +356,7 @@ Reference: [Plugin Linking Guide](references/plugin-linking-guide.md)
 ### Step 1: Validate marketplace structure
 
 ```bash
-uv run python scripts/validate_marketplace.py {{marketplace-path}} --verbose
+uv run python scripts/validate_marketplace.py {{marketplace-path}} --verbose --report docs_dev/validate_marketplace_YYYYMMDD.md
 ```
 
 Confirm: marketplace.json is valid, all plugin entries have source config, workflows are installed.

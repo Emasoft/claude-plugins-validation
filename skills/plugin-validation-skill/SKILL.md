@@ -50,13 +50,13 @@ export CLAUDE_PRIVATE_USERNAMES="your_username"
 Or pass it inline when running the validator:
 
 ```bash
-CLAUDE_PRIVATE_USERNAMES="your_username" uv run python scripts/validate_plugin.py /path/to/plugin
+CLAUDE_PRIVATE_USERNAMES="your_username" uv run python scripts/validate_plugin.py /path/to/plugin --report docs_dev/validate_plugin_YYYYMMDD.md
 ```
 
 ### Step 1-5: Validation
 
 1. Navigate to the claude-plugins-validation directory
-2. Run the validator: `uv run python scripts/validate_plugin.py /path/to/plugin`
+2. Run the validator: `uv run python scripts/validate_plugin.py /path/to/plugin --report docs_dev/validate_plugin_YYYYMMDD.md`
 3. Review output by severity (CRITICAL > MAJOR > MINOR)
 4. Fix issues in priority order
 5. Re-run validation until exit code 0
@@ -66,8 +66,8 @@ CLAUDE_PRIVATE_USERNAMES="your_username" uv run python scripts/validate_plugin.p
 Copy this checklist and track your progress:
 
 - [ ] Navigate to the claude-plugins-validation directory
-- [ ] Run the main validator: `uv run python scripts/validate_plugin.py /path/to/plugin`
-- [ ] Save the full validation report to a timestamped `.md` file in `docs_dev/` (e.g., `docs_dev/validate_<plugin-name>_<date>.md`)
+- [ ] Run the main validator: `uv run python scripts/validate_plugin.py /path/to/plugin --report docs_dev/validate_plugin_YYYYMMDD.md`
+- [ ] Always use `--report docs_dev/validate_<name>_YYYYMMDD.md` flag — saves full output to file, prints only compact summary
 - [ ] Present the summary table and issue list to the user
 - [ ] Always show the saved report file path at the end of the output
 - [ ] Fix all CRITICAL issues first (plugin won't work)
@@ -84,7 +84,7 @@ The validators return:
 - **Grade**: A-F letter grade for skill validation
 - **Report File**: Full output saved to `docs_dev/validate_<plugin-name>_<date>.md`
 
-**IMPORTANT**: Always save the full validation output to a timestamped `.md` file in `docs_dev/` and display the report file path to the user at the end of the validation output.
+**IMPORTANT**: Always use the `--report` flag when running validation scripts. This saves full output to a timestamped file and prints only a compact summary to stdout. Provide the report file path to the user — never read the report file yourself.
 
 ## Error Handling
 
@@ -100,13 +100,13 @@ The validators return:
 
 ```bash
 cd /path/to/claude-plugins-validation
-uv run python scripts/validate_plugin.py /path/to/my-plugin --verbose
+uv run python scripts/validate_plugin.py /path/to/my-plugin --verbose --report docs_dev/validate_plugin_YYYYMMDD.md
 ```
 
 ### Example 2: Validate a Skill Only
 
 ```bash
-uv run python scripts/validate_skill_comprehensive.py /path/to/skill-dir --strict
+uv run python scripts/validate_skill_comprehensive.py /path/to/skill-dir --strict --report docs_dev/validate_skill_YYYYMMDD.md
 ```
 
 ### Example 3: CI/CD Integration
@@ -211,23 +211,23 @@ Before publishing any plugin, use the **Master Validation Checklist** (see Resou
 
 ```bash
 cd /path/to/claude-plugins-validation
-uv run python scripts/validate_plugin.py /path/to/my-plugin --verbose
+uv run python scripts/validate_plugin.py /path/to/my-plugin --verbose --report docs_dev/validate_plugin_YYYYMMDD.md
 ```
 
 ### Validate Specific Components
 
 ```bash
 # Validate a skill
-uv run python scripts/validate_skill.py /path/to/skill-dir
+uv run python scripts/validate_skill.py /path/to/skill-dir --report docs_dev/validate_skill_YYYYMMDD.md
 
 # Validate hooks
-uv run python scripts/validate_hook.py /path/to/hooks.json
+uv run python scripts/validate_hook.py /path/to/hooks.json --report docs_dev/validate_hook_YYYYMMDD.md
 
 # Validate MCP configuration
-uv run python scripts/validate_mcp.py /path/to/plugin
+uv run python scripts/validate_mcp.py /path/to/plugin --report docs_dev/validate_mcp_YYYYMMDD.md
 
 # Validate a marketplace
-uv run python scripts/validate_marketplace.py /path/to/marketplace
+uv run python scripts/validate_marketplace.py /path/to/marketplace --report docs_dev/validate_marketplace_YYYYMMDD.md
 ```
 
 ### Interpret Exit Codes
@@ -435,7 +435,7 @@ See the **Troubleshooting** reference in the Resources section above for common 
 
 ### Marketplace Plugin Install Fails
 
-1. Validate marketplace.json: `uv run python scripts/validate_marketplace.py .`
+1. Validate marketplace.json: `uv run python scripts/validate_marketplace.py . --report docs_dev/validate_marketplace_YYYYMMDD.md`
 2. Check local paths resolve correctly
 3. Verify each plugin has required name field
 4. Check source configuration matches type
@@ -492,7 +492,7 @@ Add to `.vscode/tasks.json`:
 {
   "label": "Validate Plugin",
   "type": "shell",
-  "command": "uv run python /path/to/validate_plugin.py ${workspaceFolder} --verbose"
+  "command": "uv run python /path/to/validate_plugin.py ${workspaceFolder} --verbose --report docs_dev/validate_plugin_YYYYMMDD.md"
 }
 ```
 

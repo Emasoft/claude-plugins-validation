@@ -34,7 +34,7 @@ Validates security posture of a Claude Code plugin directory.
 ## Execution
 
 ```bash
-uv run python scripts/validate_security.py <plugin-path>
+uv run python scripts/validate_security.py <plugin-path> --report docs_dev/validate_security_$(date +%Y%m%d).md
 ```
 
 ## Related Commands

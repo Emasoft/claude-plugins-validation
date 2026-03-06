@@ -145,52 +145,14 @@ Valid specialized agent types:
 /cpv-validate-agents ./agents/ --json
 ```
 
-## Output Example
+## Output & Exit Codes
 
-```
-============================================================
-Agent Validation: ./agents/my-agent.md
-============================================================
-
-Summary:
-  CRITICAL: 0
-  MAJOR:    0
-  MINOR:    2
-  NIT:      0
-  WARNING:  0
-
-Details:
-  [MINOR] Description lacks "use when" phrase
-  [MINOR] No example blocks found in agent body
-
-------------------------------------------------------------
-✓ Agent validation passed
-```
-
-## Exit Codes
-
-| Code | Meaning |
-|------|---------|
-| 0 | All checks passed |
-| 1 | CRITICAL issues (agent will not work) |
-| 2 | MAJOR issues (significant problems) |
-| 3 | MINOR issues (may affect UX) |
-| 4 | NIT issues found (only in --strict mode) |
-
-## Severity Levels
-
-| Severity | Behavior |
-|----------|----------|
-| CRITICAL | Always blocks (exit 1) |
-| MAJOR | Always blocks (exit 2) |
-| MINOR | Always blocks (exit 3) |
-| NIT | Blocks only in `--strict` mode (exit 4) |
-| WARNING | Never blocks, always reported (security advisories, best practices) |
+Uses standard CPV severity levels and exit codes. With `--report`, saves full output to file and prints only a compact summary. See `/cpv-validate-plugin` for details.
 
 ## Execution
 
 ```bash
-uv run python scripts/validate_agent.py "$AGENT_PATH" $OPTIONS
+uv run python scripts/validate_agent.py "$AGENT_PATH" $OPTIONS --report docs_dev/validate_agent_$(date +%Y%m%d).md
 ```
 
 ## Related Commands

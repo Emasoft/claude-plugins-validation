@@ -130,7 +130,7 @@ Before running any validation, you MUST ensure private info detection is configu
 
 3. **When running validation scripts**, pass the username via environment variable:
    ```bash
-   CLAUDE_PRIVATE_USERNAMES="detected_or_provided_username" uv run python scripts/validate_plugin.py /path/to/plugin
+   CLAUDE_PRIVATE_USERNAMES="detected_or_provided_username" uv run python scripts/validate_plugin.py /path/to/plugin --report docs_dev/validate_plugin_YYYYMMDD.md
    ```
 
 This prevents accidental leaking of private home directory paths in published plugins.
@@ -200,10 +200,10 @@ uv run python scripts/validate_encoding.py /path/to/plugin --report docs_dev/val
 uv run python scripts/validate_scoring.py /path/to/plugin --report docs_dev/validate_scoring_YYYYMMDD.md
 
 # Validate command files and slash-command definitions
-uv run python scripts/validate_command.py /path/to/plugin
+uv run python scripts/validate_command.py /path/to/plugin --report docs_dev/validate_command_YYYYMMDD.md
 
 # Validate agent markdown files and frontmatter
-uv run python scripts/validate_agent.py /path/to/plugin
+uv run python scripts/validate_agent.py /path/to/plugin --report docs_dev/validate_agent_YYYYMMDD.md
 
 # Validate and setup development pipeline
 uv run python scripts/setup_plugin_pipeline.py /path/to/project --validate
@@ -477,11 +477,11 @@ Fixes for all `validate_scoring.py` scoring issues (low scores, missing metrics,
 <example>
 user: Validate my-plugin before release
 assistant: I'll run comprehensive validation on my-plugin to check for issues.
-[Runs: uv run python scripts/validate_plugin.py ./my-plugin --verbose]
-Found 0 CRITICAL, 1 MAJOR, 2 MINOR issues.
-MAJOR: Agent file missing example blocks.
-MINOR: README.md missing in skill directory.
-Recommendation: Add 2+ examples to agent files, add README.md to skills.
+[Runs: uv run python scripts/validate_plugin.py ./my-plugin --verbose --report docs_dev/validate_my-plugin_20260306.md]
+Plugin Validation: FAIL (major)
+  CRITICAL:0 | MAJOR:1 | MINOR:2 | PASSED:154
+  Report: docs_dev/validate_my-plugin_20260306.md
+The full report is at docs_dev/validate_my-plugin_20260306.md. Key issues: agent missing examples, skill missing README.
 </example>
 
 <example>

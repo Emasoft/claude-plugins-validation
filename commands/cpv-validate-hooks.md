@@ -131,53 +131,14 @@ For command hooks referencing scripts:
 /cpv-validate-hooks ./hooks/hooks.json --json
 ```
 
-## Output Example
+## Output & Exit Codes
 
-```
-============================================================
-Hook Validation: ./hooks/hooks.json
-============================================================
-
-Summary:
-  CRITICAL: 0
-  MAJOR:    1
-  MINOR:    2
-  NIT:      0
-  WARNING:  1
-
-Details:
-  [MAJOR] Script not executable: scripts/check.sh
-  [MINOR] Long timeout (60000ms / 60s) may cause delays
-  [MINOR] Matcher 'CustomTool' is not a common tool name
-
-------------------------------------------------------------
-! MINOR issues - may affect behavior
-```
-
-## Exit Codes
-
-| Code | Meaning |
-|------|---------|
-| 0 | All checks passed |
-| 1 | CRITICAL issues (hooks will not work) |
-| 2 | MAJOR issues (significant problems) |
-| 3 | MINOR issues (may affect behavior) |
-| 4 | NIT issues found (only in --strict mode) |
-
-## Severity Levels
-
-| Severity | Behavior |
-|----------|----------|
-| CRITICAL | Always blocks (exit 1) |
-| MAJOR | Always blocks (exit 2) |
-| MINOR | Always blocks (exit 3) |
-| NIT | Blocks only in `--strict` mode (exit 4) |
-| WARNING | Never blocks, always reported (security advisories, best practices) |
+Uses standard CPV severity levels and exit codes. With `--report`, saves full output to file and prints only a compact summary. See `/cpv-validate-plugin` for details.
 
 ## Execution
 
 ```bash
-uv run python scripts/validate_hook.py "$HOOKS_PATH" $OPTIONS
+uv run python scripts/validate_hook.py "$HOOKS_PATH" $OPTIONS --report docs_dev/validate_hook_$(date +%Y%m%d).md
 ```
 
 ## Related Commands

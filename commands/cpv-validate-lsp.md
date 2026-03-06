@@ -137,32 +137,16 @@ Currently validated:
 - ⏳ Server executable verification (planned)
 - ⏳ Initialization options schema validation (planned)
 
-## Exit Codes
+## Output & Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| 0 | All checks passed |
-| 1 | CRITICAL issues |
-| 2 | MAJOR issues |
-| 3 | MINOR issues |
-| 4 | NIT issues found (only in --strict mode) |
-
-## Severity Levels
-
-| Severity | Behavior |
-|----------|----------|
-| CRITICAL | Always blocks (exit 1) |
-| MAJOR | Always blocks (exit 2) |
-| MINOR | Always blocks (exit 3) |
-| NIT | Blocks only in `--strict` mode (exit 4) |
-| WARNING | Never blocks, always reported (security advisories, best practices) |
+Uses standard CPV severity levels and exit codes. With `--report`, saves full output to file and prints only a compact summary. See `/cpv-validate-plugin` for details.
 
 ## Execution
 
 When LSP validator is available:
 
 ```bash
-uv run python scripts/validate_lsp.py "$PATH" $OPTIONS
+uv run python scripts/validate_lsp.py "$PATH" $OPTIONS --report docs_dev/validate_lsp_$(date +%Y%m%d).md
 ```
 
 Currently falls back to basic JSON/structure validation.
