@@ -3,7 +3,7 @@ name: skill-validation-skill
 description: |
   Validate skills using 190+ rules from AgentSkills OpenSpec, Nixtla, and Meta-Skill frameworks.
   Use when validating SKILL.md files or auditing skill quality. Trigger with /cpv-validate-skill.
-allowed-tools: Read, Bash(uv:*), Bash(python:*), Glob, Grep
+allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep
 user-invocable: false
 ---
 

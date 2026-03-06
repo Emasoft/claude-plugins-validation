@@ -2,7 +2,7 @@
 name: cpv-install-plugin
 description: Install and manage Claude Code plugins locally
 allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep, AskUserQuestion
-argument-hint: "<archive-or-dir> [--marketplace <name>] [--force] [--dry-run] | --uninstall <name@marketplace> | --validate <path> | --list | --doctor"
+argument-hint: "<archive-or-dir> [--marketplace <name>] [--force] [--dry-run] | --update <src> <mkt> | --enable|--disable <name@mkt> | --list | --doctor"
 agent: plugin-validator
 user-invocable: true
 ---
@@ -19,6 +19,9 @@ Install, validate, uninstall, and manage Claude Code plugins on your local machi
 /cpv-install-plugin --validate ./my-plugin-dir/
 /cpv-install-plugin --list
 /cpv-install-plugin --uninstall my-plugin@my-local-market
+/cpv-install-plugin --update ./new-version.tar.gz my-local-market
+/cpv-install-plugin --enable my-plugin@my-local-market
+/cpv-install-plugin --disable my-plugin@my-local-market
 /cpv-install-plugin --doctor
 ```
 
@@ -39,9 +42,13 @@ Install, validate, uninstall, and manage Claude Code plugins on your local machi
 | `--force` | No | Overwrite existing plugin installation |
 | `--dry-run` | No | Simulate install without writing any files |
 | `--uninstall <name@marketplace>` | No | Remove an installed plugin by `name@marketplace` |
+| `--update <source> <marketplace>` | No | Update a plugin (uninstalls old, reinstalls from new source) |
+| `--enable <name@marketplace>` | No | Enable a previously disabled plugin |
+| `--disable <name@marketplace>` | No | Disable a plugin without removing it |
 | `--validate <path>` | No | Validate a plugin directory without installing |
 | `--list` | No | List all locally installed plugins |
 | `--doctor` | No | Run health checks on all installed plugins and registries |
+| `-q, --quiet` | No | Suppress non-error output and auto-confirm prompts |
 
 ## When To Use
 

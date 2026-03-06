@@ -8,7 +8,7 @@ tags:
   - install
   - local
   - management
-allowed-tools: Read, Bash(uv:*,python:*), Glob, Grep, AskUserQuestion
+allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep, AskUserQuestion
 user-invocable: false
 ---
 
@@ -51,6 +51,10 @@ Copy this checklist and track your progress:
 - **Dry run**: `uv run scripts/claude-plugin-install.py <source> --dry-run`
 - **List installed**: `uv run scripts/claude-plugin-install.py --list`
 - **Uninstall**: `uv run scripts/claude-plugin-install.py --uninstall <name@marketplace>`
+- **Update**: `uv run scripts/claude-plugin-install.py --update <new-source> <marketplace>`
+- **Enable**: `uv run scripts/claude-plugin-install.py --enable <name@marketplace>`
+- **Disable**: `uv run scripts/claude-plugin-install.py --disable <name@marketplace>`
+- **Quiet mode**: Add `-q` or `--quiet` to suppress non-error output
 
 ## Output
 

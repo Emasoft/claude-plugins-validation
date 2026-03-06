@@ -350,6 +350,29 @@ Download from URL:
 | type | Yes | `"url"` |
 | url | Yes | Download URL |
 
+### git-subdir Source
+
+Reference a subdirectory within a git repository (added in Claude Code 2.1.69):
+
+```json
+{
+  "name": "my-plugin",
+  "source": {
+    "type": "git-subdir",
+    "repo": "https://github.com/user/monorepo",
+    "subdir": "packages/my-plugin"
+  }
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| type | Yes | `"git-subdir"` |
+| repo | Yes | Git repository URL |
+| subdir | Yes | Subdirectory path within the repo |
+
+Use this when a plugin lives inside a larger monorepo rather than being the entire repository.
+
 ---
 
 ## 5. Local Development Marketplace
@@ -863,7 +886,7 @@ my-plugin/
 {"source": {"type": "svn"}}
 ```
 
-**Valid types:** git, local, npm, pip, url
+**Valid types:** git, git-subdir, local, npm, pip, url
 
 ### Error: Git Source Missing Repository
 
@@ -933,6 +956,7 @@ my-plugin/
 | Plugin as local subdirectory | String path | `"./my-plugin"` |
 | Plugin as git submodule | String path | `"./my-plugin"` |
 | Plugin cloned from remote | Object with type: git | `{"type": "git", "repository": "..."}` |
+| Plugin in monorepo subdir | Object with type: git-subdir | `{"type": "git-subdir", "repo": "...", "subdir": "..."}` |
 | Plugin from npm | Object with type: npm | `{"type": "npm", "package": "..."}` |
 | Plugin from PyPI | Object with type: pip | `{"type": "pip", "package": "claude-plugin-x"}` |
 
