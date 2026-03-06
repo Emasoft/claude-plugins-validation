@@ -192,3 +192,5 @@ uv run python scripts/validate_mcp.py "$PATH" $OPTIONS --report docs_dev/validat
 - `/cpv-validate-hooks` - Hook validation
 - `/cpv-validate-skill` - Skill validation
 - `/cpv-validate-agents` - Agent validation
+- `/cpv-fix-validation` — Fix issues from a validation report
+- `/cpv-semantic-validation` — Deep semantic analysis (uses opus)

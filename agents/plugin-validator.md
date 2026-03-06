@@ -68,6 +68,7 @@ uv run python scripts/lint_files.py /path/to/plugin --report docs_dev/lint_YYYYM
 - **NEVER fix issues** — tell the user to run `/cpv-fix-validation <report_path>`
 - **NEVER do semantic analysis** — tell the user to run `/cpv-semantic-validation <path>`
 - **Return 3 lines max**: verdict, severity counts, report file path
+- **Syntactic Score only** — scripts produce a 0-100 numeric score with PASS/CONDITIONAL_PASS/FAIL tiers. For Semantic Grading (A-F), direct user to `/cpv-semantic-validation`
 
 ## Examples
 

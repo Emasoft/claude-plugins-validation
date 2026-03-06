@@ -129,20 +129,20 @@ The comprehensive validator checks:
 ## Output
 
 Returns:
-- **Grade**: A-F letter grade with percentage score
+- **Syntactic Score**: 0-100 numeric with tier (PASS / CONDITIONAL_PASS / FAIL)
 - **Summary**: Count of issues by severity (CRITICAL, MAJOR, MINOR, NIT, WARNING)
 - **Pillars Coverage**: 8+1 Pillars scores (if `--pillars`)
 - **Details**: Categorized list of issues and passed checks
 
-## Grade System
+> For **Semantic Quality Grading** (A-F letter grades), use `/cpv-semantic-validation`.
 
-| Grade | Score | Status |
-|-------|-------|--------|
-| A | 90-100 | Production ready |
-| B | 80-89 | Good, minor improvements |
-| C | 70-79 | Acceptable |
-| D | 60-69 | Reject, rework needed |
-| F | <60 | Broken |
+## Tier System
+
+| Tier | Score | Status |
+|------|-------|--------|
+| PASS | 80-100 | Production ready |
+| CONDITIONAL_PASS | 60-79 | Needs improvements |
+| FAIL | 0-59 | Not deployable |
 
 ## Output & Exit Codes
 
@@ -162,3 +162,5 @@ Where `$SKILL_PATH` is the provided path and `$OPTIONS` are the flags passed.
 - `/cpv-validate-hooks` - Hook configuration validation
 - `/cpv-validate-agents` - Agent definition validation
 - `/cpv-validate-mcp` - MCP server configuration validation
+- `/cpv-fix-validation` — Fix issues from a validation report
+- `/cpv-semantic-validation` — Deep semantic analysis (uses opus)

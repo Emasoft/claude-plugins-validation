@@ -1,16 +1,19 @@
-# Scoring System Reference
+# Syntactic Scoring System Reference
 
-This document explains the multi-scale scoring (0-3) and letter grading (A-F) system.
+This document explains the **Syntactic Validation Score** — a 0-100 numeric score computed by scripts based on structural and mechanical checks.
+
+> **Note**: For **Semantic Quality Grading** (A-F letter grades based on AI judgment), see `/cpv-semantic-validation`. The two scoring systems are independent and complementary.
 
 ## Table of Contents
 
 - [1. Multi-Scale Criterion Scoring (0-3)](#1-multi-scale-criterion-scoring-0-3)
-- [2. Letter Grade System (A-F)](#2-letter-grade-system-a-f)
+- [2. Tier System (PASS / CONDITIONAL_PASS / FAIL)](#2-tier-system)
 - [3. Severity Levels](#3-severity-levels)
 - [4. Category Weighting](#4-category-weighting)
 - [5. Overall Score Calculation](#5-overall-score-calculation)
 - [6. Exit Codes](#6-exit-codes)
 - [7. Interpreting Results](#7-interpreting-results)
+- [8. Two Scoring Systems](#8-two-scoring-systems)
 
 ---
 
@@ -36,59 +39,41 @@ Each validation check receives a score from 0-3:
 
 ---
 
-## 2. Letter Grade System (A-F)
+## 2. Tier System
 
-### Grade Definitions
+The Syntactic Score (0-100) maps to three tiers:
 
-| Grade | Score Range | Status | Action Required |
-|-------|-------------|--------|-----------------|
-| **A** | 90-100 | Production Ready | Deploy with confidence |
-| **B** | 80-89 | Good | Minor improvements optional |
-| **C** | 70-79 | Acceptable | Plan improvements |
-| **D** | 60-69 | Reject | Major rework required |
-| **F** | < 60 | Broken | Rebuild or retire |
+| Tier | Score Range | Status | Action Required |
+|------|-------------|--------|-----------------|
+| **PASS** | 80-100 | Production ready | Deploy with confidence |
+| **CONDITIONAL_PASS** | 60-79 | Needs improvements | Fix MAJOR issues before deployment |
+| **FAIL** | 0-59 | Not deployable | Fix CRITICAL/MAJOR issues, major rework needed |
 
-### Grade Criteria
+### Tier Criteria
 
-#### Grade A (90-100)
+#### PASS (80-100)
 
 - No CRITICAL issues
-- No MAJOR issues
-- ≤ 2 MINOR issues
+- No or very few MAJOR issues (≤2)
+- MINOR issues acceptable
 - All required sections present
-- Description quality excellent
 - Token budget compliant
 
-#### Grade B (80-89)
+#### CONDITIONAL_PASS (60-79)
 
 - No CRITICAL issues
-- ≤ 2 MAJOR issues
-- Minor issues acceptable
-- Most best practices followed
-- Good discoverability
-
-#### Grade C (70-79)
-
-- No CRITICAL issues
-- Some MAJOR issues
+- Some MAJOR issues present
 - Multiple MINOR issues
-- Basic functionality works
-- Needs quality improvements
+- Basic functionality works but needs quality improvements
+- Should not be deployed without fixes
 
-#### Grade D (60-69)
+#### FAIL (0-59)
 
-- No CRITICAL issues (barely)
-- Multiple MAJOR issues
-- Many MINOR issues
-- Significant problems
-- Should not be deployed
-
-#### Grade F (< 60)
-
-- CRITICAL issues present
-- Fundamental problems
-- Skill may not function
-- Requires complete rework
+- CRITICAL issues present, OR
+- Many MAJOR issues
+- Fundamental structural problems
+- Skill may not function correctly
+- Requires significant rework
 
 ---
 
@@ -258,20 +243,20 @@ Total checks: 0 + 2 + 3 + 20 = 25
 Weighted score: (0*0) + (2*1) + (3*2) + (20*3) = 0 + 2 + 6 + 60 = 68
 Max possible: 25 * 3 = 75
 Percentage: (68/75) * 100 = 90.67%
-Grade: A
+Tier: PASS
 ```
 
 ---
 
 ## 6. Exit Codes
 
-| Code | Meaning | Grade Range |
-|------|---------|-------------|
-| **0** | All checks passed (including WARNING) | A, B |
-| **1** | CRITICAL issues found | F |
-| **2** | MAJOR issues found | D, F |
-| **3** | MINOR issues found | C |
-| **4** | NIT issues found (--strict mode only) | B, C |
+| Code | Meaning | Tier Range |
+|------|---------|------------|
+| **0** | All checks passed (including WARNING) | PASS |
+| **1** | CRITICAL issues found | FAIL |
+| **2** | MAJOR issues found | CONDITIONAL_PASS, FAIL |
+| **3** | MINOR issues found | PASS, CONDITIONAL_PASS |
+| **4** | NIT issues found (--strict mode only) | PASS, CONDITIONAL_PASS |
 
 > **Note**: WARNING severity never produces a non-zero exit code. WARNING results always map to exit code 0.
 
@@ -296,7 +281,7 @@ If multiple severity levels are present:
 Skill Validation: ./skills/my-skill/
 ======================================================================
 
-Grade: B (85.2/100)
+Syntactic Score: 90.67/100 (PASS)
 
 Summary:
   CRITICAL: 0
@@ -323,38 +308,48 @@ Details:
     [MINOR] Description should include 'Use when ...' phrase
 
 ----------------------------------------------------------------------
-✓ Skill validation passed (Grade B)
+✓ Skill validation passed (Syntactic Score: 90.67/100 — PASS)
 ```
 
 ### Priority Actions
 
-**Grade A/B**:
+**PASS (80-100)**:
 - Optional: Address MINOR issues
 - Deploy when ready
 
-**Grade C**:
+**CONDITIONAL_PASS (60-79)**:
 1. Address all MAJOR issues first
 2. Address MINOR issues that affect discoverability
 3. Re-validate before deployment
 
-**Grade D**:
-1. Create GitHub issue for each MAJOR problem
-2. Major rework required
-3. Do NOT deploy
-
-**Grade F**:
+**FAIL (0-59)**:
 1. Fix CRITICAL issues immediately
-2. Consider complete rewrite
-3. Validate incrementally during rebuild
+2. Fix MAJOR issues
+3. Consider significant rework
+4. Validate incrementally during rebuild
 
 ### Common Improvement Paths
 
 | From | To | Actions |
 |------|----|---------|
-| F → D | Fix CRITICAL issues (SKILL.md, frontmatter) |
-| D → C | Fix MAJOR issues (name format, references) |
-| C → B | Fix most MINOR issues (description, budget) |
-| B → A | Fix remaining MINOR, add optional elements |
+| FAIL → CONDITIONAL_PASS | Fix CRITICAL issues (SKILL.md, frontmatter) |
+| CONDITIONAL_PASS → PASS | Fix MAJOR issues (name format, references) |
+| Low PASS → High PASS | Fix remaining MINOR, add optional elements |
+
+---
+
+## 8. Two Scoring Systems
+
+This plugin validation suite uses **two independent scoring systems**:
+
+| System | Scale | Computed By | What It Measures |
+|--------|-------|-------------|------------------|
+| **Syntactic Score** | 0-100 numeric (PASS/CONDITIONAL_PASS/FAIL) | Scripts (`validate_*.py`) | Structural correctness, schema compliance, mechanical checks |
+| **Semantic Grade** | A-F letter grade | AI agent (`semantic-validator`, opus) | Description effectiveness, instruction clarity, example quality, workflow completeness |
+
+- Syntactic validation is **cheap** (sonnet model, ~2K tokens) — run it always
+- Semantic validation is **expensive** (opus model, ~50K tokens) — run it only via `/cpv-semantic-validation`
+- The two scores are **complementary**: a plugin can have a perfect Syntactic Score (100) but a poor Semantic Grade (D) if descriptions are vague and examples are toy-like
 
 ---
 
@@ -363,7 +358,8 @@ Details:
 | Aspect | Values |
 |--------|--------|
 | **Criterion Scale** | 0 (missing) to 3 (excellent) |
-| **Letter Grades** | A (90+), B (80-89), C (70-79), D (60-69), F (<60) |
+| **Syntactic Tiers** | PASS (80+), CONDITIONAL_PASS (60-79), FAIL (<60) |
 | **Severities** | CRITICAL, MAJOR, MINOR, NIT, WARNING, INFO, PASSED |
 | **Exit Codes** | 0 (pass/warning), 1 (CRITICAL), 2 (MAJOR), 3 (MINOR), 4 (NIT, strict only) |
 | **Calculation** | Weighted average: CRIT=0, MAJ=1, MIN=2, PASS=3 |
+| **Semantic Grade** | A-F (via `/cpv-semantic-validation` only) |

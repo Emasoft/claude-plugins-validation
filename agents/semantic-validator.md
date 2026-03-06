@@ -12,6 +12,8 @@ model: opus
 
 You perform deep semantic analysis that automated scripts cannot do. This is expensive (opus model) and should only be invoked explicitly via `/cpv-semantic-validation`.
 
+This produces a **Semantic Grade (A-F)**, independent of the **Syntactic Score (0-100)** produced by script validation. The two systems are complementary — a plugin can score 100 syntactically but grade D semantically if descriptions are vague or examples are unrealistic.
+
 ## Workflow
 
 1. **Run script validation first** (cheap baseline):

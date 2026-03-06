@@ -41,3 +41,5 @@ uv run python scripts/validate_enterprise.py <plugin-path> --report docs_dev/val
 
 - `/cpv-validate-plugin` - Full plugin validation
 - `/cpv-validate-scoring` - Compute quality score from validation results
+- `/cpv-fix-validation` — Fix issues from a validation report
+- `/cpv-semantic-validation` — Deep semantic analysis (uses opus)

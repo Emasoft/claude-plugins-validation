@@ -157,3 +157,5 @@ Currently falls back to basic JSON/structure validation.
 - `/cpv-validate-mcp` - MCP server validation (similar protocol validation)
 - `/cpv-validate-hooks` - Hook validation
 - `/cpv-validate-skill` - Skill validation
+- `/cpv-fix-validation` — Fix issues from a validation report
+- `/cpv-semantic-validation` — Deep semantic analysis (uses opus)

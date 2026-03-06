@@ -137,3 +137,5 @@ CLAUDE_PRIVATE_USERNAMES="$USERNAME" uv run --with pyyaml python scripts/validat
 - `/cpv-validate-skill` - Skill validation
 - `/cpv-validate-hooks` - Hook validation
 - `/cpv-validate-mcp` - MCP server validation
+- `/cpv-fix-validation` — Fix issues from a validation report
+- `/cpv-semantic-validation` — Deep semantic analysis (uses opus)

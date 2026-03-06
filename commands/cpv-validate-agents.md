@@ -161,3 +161,5 @@ uv run python scripts/validate_agent.py "$AGENT_PATH" $OPTIONS --report docs_dev
 - `/cpv-validate-skill` - Skill validation
 - `/cpv-validate-hooks` - Hook validation
 - `/cpv-validate-mcp` - MCP server validation
+- `/cpv-fix-validation` — Fix issues from a validation report
+- `/cpv-semantic-validation` — Deep semantic analysis (uses opus)

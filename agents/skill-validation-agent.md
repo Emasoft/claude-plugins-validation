@@ -33,6 +33,7 @@ uv run python scripts/validate_skill_comprehensive.py "<skill_path>" [--strict] 
 - **NEVER fix issues** — tell the user to run `/cpv-fix-validation <report_path>`
 - **NEVER do semantic analysis** — tell the user to run `/cpv-semantic-validation <path>`
 - **Return 3 lines max**: verdict, severity counts, report file path
+- **Syntactic Score only** — the script produces a 0-100 numeric score with PASS/CONDITIONAL_PASS/FAIL tiers. For Semantic Grading (A-F), direct user to `/cpv-semantic-validation`
 
 ## Examples
 

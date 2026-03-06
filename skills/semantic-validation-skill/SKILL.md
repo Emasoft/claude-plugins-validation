@@ -30,6 +30,8 @@ This skill performs AI-driven evaluation of:
 
 **Cost**: Uses opus model. Only invoke when you need deep quality analysis beyond what scripts provide.
 
+This produces a **Semantic Grade (A-F)**, complementary to the **Syntactic Score (0-100)** from script validation. The two systems are independent — run syntactic validation first (cheap), then semantic validation only when needed.
+
 ## Prerequisites
 
 - Python 3.12+ with `pyyaml` installed
