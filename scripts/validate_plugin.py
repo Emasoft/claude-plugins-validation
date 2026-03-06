@@ -267,18 +267,35 @@ def validate_manifest(
                         ".claude-plugin/plugin.json",
                     )
 
-    # Check for duplicate hooks.json - the standard hooks/hooks.json is auto-loaded
-    # so specifying it in manifest.hooks causes a duplicate load error
-    if "hooks" in manifest:
-        hooks_value = manifest["hooks"]
-        if isinstance(hooks_value, str):
-            # Normalize the path to check if it points to the auto-loaded file
-            normalized = hooks_value.replace("\\", "/").lstrip("./")
-            if normalized == "hooks/hooks.json":
-                report.major(
-                    "manifest.hooks points to 'hooks/hooks.json' which is auto-loaded by "
-                    "Claude Code. This causes a duplicate load error. Remove the 'hooks' "
-                    "field from plugin.json to fix.",
+    # Claude Code auto-discovers standard directories (commands/, agents/, skills/,
+    # hooks/) without needing them declared in plugin.json. Declaring the default path
+    # is redundant — only non-standard paths need explicit declaration.
+    auto_discovered_defaults = {
+        "commands": "./commands/",
+        "agents": "./agents/",
+        "skills": "./skills/",
+        "hooks": "./hooks/",
+    }
+    for key, default_path in auto_discovered_defaults.items():
+        if key in manifest:
+            value = manifest[key]
+            # String pointing to the default directory is redundant
+            if isinstance(value, str):
+                normalized = value.replace("\\", "/").rstrip("/") + "/"
+                if normalized == default_path:
+                    report.nit(
+                        f"Field '{key}' points to '{default_path}' which is auto-discovered "
+                        f"by Claude Code. Remove it from plugin.json — only non-standard "
+                        f"paths need explicit declaration.",
+                        ".claude-plugin/plugin.json",
+                    )
+            # Array of files inside the default directory is also redundant
+            elif isinstance(value, list) and all(
+                isinstance(p, str) and p.startswith(default_path) for p in value
+            ):
+                report.nit(
+                    f"Field '{key}' lists files inside '{default_path}' which is "
+                    f"auto-discovered by Claude Code. Remove it from plugin.json.",
                     ".claude-plugin/plugin.json",
                 )
 
