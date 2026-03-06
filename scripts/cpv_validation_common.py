@@ -201,6 +201,12 @@ VALID_TOOLS = {
     "TaskGet",
     "TaskStop",
     "ToolSearch",
+    "MultiEdit",
+    "Notebook",
+    "TodoRead",
+    "TodoWrite",
+    "LSP",
+    "Agent",
 }
 
 # Valid model values for agents

@@ -65,15 +65,15 @@ graph LR
 
 1. **Create marketplace repo** -- Run `gh repo create` with the marketplace name, clone it, and initialize the directory structure (`.claude-plugin/`, `.github/workflows/`, `scripts/`).
 2. **Initialize structure** -- Write `marketplace.json` with name, version, owner, and an empty plugins array. Generate the initial README.
-3. **Configure CI/CD** -- Install `sync-plugins.yml` and `validate-marketplace.yml` workflows, plus the sync/generate/hooks Python scripts. Set `MARKETPLACE_PAT` secret on the marketplace repo.
+3. **Configure CI/CD** -- Install `update-submodules.yml` and `validate-marketplace.yml` workflows, plus the sync/generate/hooks Python scripts. Set `MARKETPLACE_PAT` secret on the marketplace repo.
 4. **Link plugins** -- For each plugin repo: fetch `plugin.json` via `gh api`, add an entry to `marketplace.json`, install `notify-marketplace.yml` on the plugin repo, and set `MARKETPLACE_PAT` secret.
 5. **Verify and push** -- Run `validate_marketplace.py --verbose`, trigger a test notification from one plugin, confirm the marketplace CI picks it up, and push all changes.
 
 ## Output
 
 - **Marketplace repository** with `.claude-plugin/marketplace.json` containing all linked plugin entries.
-- **CI/CD workflows**: `sync-plugins.yml` (marketplace-side sync on dispatch) and `validate-marketplace.yml` (schema and plugin validation on push/PR).
-- **Sync scripts**: `sync_marketplace_versions.py`, `generate-readme.py`, `setup-hooks.py` in `scripts/`.
+- **CI/CD workflows**: `update-submodules.yml` (marketplace-side sync on dispatch) and `validate-marketplace.yml` (schema and plugin validation on push/PR).
+- **Sync scripts**: `sync_marketplace_versions.py`, `update_marketplace_metadata.py`, `setup_git_hooks.py` in `scripts/`.
 - **Auto-generated README.md** with a plugin table, Mermaid architecture diagram, and install instructions.
 - **Notification workflow** (`notify-marketplace.yml`) installed on each linked plugin repo.
 
@@ -166,13 +166,13 @@ Reference: [Marketplace Architecture](references/marketplace-architecture.md)
 
 Copy into `.github/workflows/`, replacing `{{MARKETPLACE_OWNER}}` and `{{MARKETPLACE_REPO}}`:
 
-- **sync-plugins.yml** -- triggered by `repository_dispatch`; fetches plugin metadata via `gh api`, updates versions, regenerates README
+- **update-submodules.yml** -- triggered by `repository_dispatch`; fetches plugin metadata via `gh api`, updates versions, regenerates README
 - **validate-marketplace.yml** -- runs on push/PR; validates schema, checks plugin entries via GitHub API, runs cpv
 
 Reference: [Workflow Templates](references/workflow-templates.md)
   - Placeholder Reference
   - notify-marketplace.yml (Plugin Side)
-  - sync-plugins.yml (Marketplace Side)
+  - update-submodules.yml (Marketplace Side)
   - validate-marketplace.yml (Marketplace CI)
   - Plugin CI Workflow (Optional)
 
@@ -181,8 +181,8 @@ Reference: [Workflow Templates](references/workflow-templates.md)
 Copy these scripts into `scripts/`:
 
 - **sync_marketplace_versions.py** -- fetches each plugin's `plugin.json` via `gh api`, decodes base64, updates marketplace.json
-- **generate-readme.py** -- generates README.md with plugin table, architecture diagram, install instructions
-- **setup-hooks.py** -- installs git pre-push hooks that run cpv validation before pushing
+- **update_marketplace_metadata.py** -- generates README.md with plugin table, architecture diagram, install instructions
+- **setup_git_hooks.py** -- installs git pre-push hooks that run cpv validation before pushing
 
 ```bash
 chmod +x scripts/*.py
@@ -191,15 +191,15 @@ chmod +x scripts/*.py
 Reference: [Script Templates](references/script-templates.md)
   - Placeholder Reference
   - sync_marketplace_versions.py
-  - generate-readme.py
-  - setup-hooks.py
+  - update_marketplace_metadata.py
+  - setup_git_hooks.py
   - pre-push-hook.py
   - push-plugins.py
 
 ### Step 3: Generate README, commit infrastructure
 
 ```bash
-uv run python scripts/generate-readme.py --marketplace-dir .
+uv run python scripts/update_marketplace_metadata.py --marketplace-dir .
 git add -A && git commit -m "Install CI/CD infrastructure" && git push
 ```
 
@@ -238,7 +238,7 @@ For EACH plugin, install `.github/workflows/notify-marketplace.yml` via `gh api`
 
 ```bash
 for PLUGIN in "${PLUGINS[@]}"; do
-  WORKFLOW_CONTENT=$(cat templates/notify-marketplace.yml | \
+  WORKFLOW_CONTENT=$(cat templates/github-workflows/notify-marketplace.yml | \
     sed "s/{{MARKETPLACE_OWNER}}/$OWNER/g" | sed "s/{{MARKETPLACE_REPO}}/{{marketplace-name}}/g")
   EXISTING=$(gh api "repos/$OWNER/$PLUGIN/contents/.github/workflows/notify-marketplace.yml" \
     -q '.sha' 2>/dev/null || echo "")
@@ -277,7 +277,7 @@ fi
 ```bash
 git add -A && git commit -m "Link ${#PLUGINS[@]} plugins: ${PLUGINS[*]}" && git push
 uv run python scripts/sync_marketplace_versions.py --marketplace-dir .
-uv run python scripts/generate-readme.py --marketplace-dir .
+uv run python scripts/update_marketplace_metadata.py --marketplace-dir .
 git add -A && git commit -m "Sync versions and regenerate README" && git push
 ```
 
@@ -308,13 +308,13 @@ for PLUGIN in "${PLUGINS_TO_REMOVE[@]}"; do
   [ -n "$SHA" ] && gh api --method DELETE "repos/$OWNER/$PLUGIN/contents/.github/workflows/notify-marketplace.yml" \
     -f message="Remove marketplace notification" -f sha="$SHA"
 done
-uv run python scripts/generate-readme.py --marketplace-dir .
+uv run python scripts/update_marketplace_metadata.py --marketplace-dir .
 git add -A && git commit -m "Remove plugins: ${PLUGINS_TO_REMOVE[*]}" && git push
 ```
 
 ### Update plugins (automatic via CI)
 
-Automatic: developer pushes to plugin repo -> `notify-marketplace.yml` fires `repository_dispatch` -> marketplace `sync-plugins.yml` fetches latest `plugin.json` via `gh api` -> README regenerated.
+Automatic: developer pushes to plugin repo -> `notify-marketplace.yml` fires `repository_dispatch` -> marketplace `update-submodules.yml` fetches latest `plugin.json` via `gh api` -> README regenerated.
 
 ### Migrate plugins between marketplaces
 
@@ -326,7 +326,7 @@ SOURCE_JSON=$(gh api "repos/$OWNER/$SOURCE/contents/.claude-plugin/marketplace.j
 for PLUGIN in "${PLUGINS_TO_MIGRATE[@]}"; do
   ENTRY=$(echo "$SOURCE_JSON" | jq --arg name "$PLUGIN" '.plugins[] | select(.name == $name)')
   jq --argjson entry "$ENTRY" '.plugins += [$entry]' .claude-plugin/marketplace.json > tmp.json && mv tmp.json .claude-plugin/marketplace.json
-  WORKFLOW=$(cat templates/notify-marketplace.yml | sed "s/{{MARKETPLACE_OWNER}}/$OWNER/g" | sed "s/{{MARKETPLACE_REPO}}/$TARGET/g")
+  WORKFLOW=$(cat templates/github-workflows/notify-marketplace.yml | sed "s/{{MARKETPLACE_OWNER}}/$OWNER/g" | sed "s/{{MARKETPLACE_REPO}}/$TARGET/g")
   SHA=$(gh api "repos/$OWNER/$PLUGIN/contents/.github/workflows/notify-marketplace.yml" -q '.sha' 2>/dev/null)
   gh api --method PUT "repos/$OWNER/$PLUGIN/contents/.github/workflows/notify-marketplace.yml" \
     -f message="Migrate to $TARGET" -f content="$(echo "$WORKFLOW" | base64)" -f sha="$SHA"
@@ -336,9 +336,9 @@ gh repo clone "$OWNER/$SOURCE" /tmp/source-mkt && cd /tmp/source-mkt
 for P in "${PLUGINS_TO_MIGRATE[@]}"; do
   jq --arg name "$P" '.plugins = [.plugins[] | select(.name != $name)]' .claude-plugin/marketplace.json > tmp.json && mv tmp.json .claude-plugin/marketplace.json
 done
-uv run python scripts/generate-readme.py --marketplace-dir . && git add -A && git commit -m "Migrate out: ${PLUGINS_TO_MIGRATE[*]}" && git push
+uv run python scripts/update_marketplace_metadata.py --marketplace-dir . && git add -A && git commit -m "Migrate out: ${PLUGINS_TO_MIGRATE[*]}" && git push
 # Update target: regenerate, push, validate both
-cd "$TARGET" && uv run python scripts/generate-readme.py --marketplace-dir .
+cd "$TARGET" && uv run python scripts/update_marketplace_metadata.py --marketplace-dir .
 git add -A && git commit -m "Migrate in: ${PLUGINS_TO_MIGRATE[*]}" && git push
 uv run python scripts/validate_marketplace.py /tmp/source-mkt --verbose --report docs_dev/validate_marketplace_source_YYYYMMDD.md
 uv run python scripts/validate_marketplace.py "$TARGET" --verbose --report docs_dev/validate_marketplace_target_YYYYMMDD.md
@@ -387,7 +387,7 @@ gh workflow run notify-marketplace.yml --repo "$OWNER/$FIRST_PLUGIN"
 ### Step 4: Install hooks and verify CI
 
 ```bash
-uv run python scripts/setup-hooks.py --marketplace-dir {{marketplace-path}}
+uv run python scripts/setup_git_hooks.py --marketplace-dir {{marketplace-path}}
 gh run list --repo "$OWNER/{{marketplace-name}}" --limit 5
 ```
 
@@ -402,7 +402,7 @@ Copy this checklist and track your progress as you complete each step.
 - [ ] .claude-plugin/marketplace.json valid; README.md generated
 
 ### CI/CD and Scripts
-- [ ] sync-plugins.yml + validate-marketplace.yml installed and tested
+- [ ] update-submodules.yml + validate-marketplace.yml installed and tested
 - [ ] MARKETPLACE_PAT secret on marketplace repo; workflow permissions set
 - [ ] sync/generate/hooks scripts installed, executable, run with `uv run`
 
@@ -444,15 +444,15 @@ Reference: [Troubleshooting Guide](references/troubleshooting.md)
 ### [Workflow Templates](references/workflow-templates.md)
 - Placeholder Reference
 - notify-marketplace.yml (Plugin Side)
-- sync-plugins.yml (Marketplace Side)
+- update-submodules.yml (Marketplace Side)
 - validate-marketplace.yml (Marketplace CI)
 - Plugin CI Workflow (Optional)
 
 ### [Script Templates](references/script-templates.md)
 - Placeholder Reference
 - sync_marketplace_versions.py
-- generate-readme.py
-- setup-hooks.py
+- update_marketplace_metadata.py
+- setup_git_hooks.py
 - pre-push-hook.py
 - push-plugins.py
 

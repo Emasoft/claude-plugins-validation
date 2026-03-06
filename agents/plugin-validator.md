@@ -122,7 +122,7 @@ Before running any validation, you MUST ensure private info detection is configu
 
 1. **Check if username can be auto-detected** by running:
    ```bash
-   python3 -c "import getpass; print(getpass.getuser())"
+   uv run python -c "import getpass; print(getpass.getuser())"
    ```
 
 2. **If auto-detection fails or returns empty**, use `AskUserQuestion` to ask:

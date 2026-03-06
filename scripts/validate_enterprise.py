@@ -895,7 +895,9 @@ Exit codes:
         action="store_true",
         help="Enterprise mode: all rules become CRITICAL (fail-fast)",
     )
-    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
+    parser.add_argument(
+        "--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout"
+    )
     args = parser.parse_args()
 
     plugin_path = Path(args.plugin_path).resolve()

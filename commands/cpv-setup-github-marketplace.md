@@ -42,8 +42,25 @@ Set up a complete GitHub marketplace for Claude Code plugins with automated CI/C
 - Git configured with user.name and user.email
 - GitHub Personal Access Token with `repo` + `workflow` scopes
 
+## Execution
+
+This command delegates to the `plugin-validator` agent using the `setup-github-marketplace` skill.
+The agent orchestrates multiple scripts and GitHub API calls in phases:
+
+```bash
+# Phase 1: Create marketplace repo structure
+gh repo create <marketplace-name> --public
+
+# Phase 2: Install validation and automation scripts
+uv run python scripts/setup_marketplace_automation.py --marketplace-dir <path> --full
+
+# Phase 3: Validate the setup
+uv run python scripts/validate_marketplace.py <path> --verbose --report docs_dev/validate_marketplace_$(date +%Y%m%d).md
+```
+
 ## Notes
 
-- The agent runs in fork mode and follows the setup-github-marketplace skill instructions
-- Uses the plugin-validator agent which has full knowledge of marketplace validation rules
+- The agent follows the `setup-github-marketplace` skill instructions for the full multi-phase workflow
+- Uses the `plugin-validator` agent which has full knowledge of marketplace validation rules
+- The underlying script is `scripts/setup_marketplace_automation.py` (accepts `--marketplace-dir`, `--dry-run`, `--full`, `--status`)
 - Run `/cpv-validate-marketplace` afterwards to verify the setup

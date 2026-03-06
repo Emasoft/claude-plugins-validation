@@ -2,7 +2,7 @@
 name: cpv-install-plugin
 description: Install and manage Claude Code plugins locally
 allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep, AskUserQuestion
-argument-hint: "<archive-or-dir> [--marketplace <name>] [--force] [--dry-run] | --update <src> <mkt> | --enable|--disable <name@mkt> | --list | --doctor"
+argument-hint: "<archive-or-dir> [<marketplace>] [--force] [--dry-run] | --update <src> <mkt> | --enable|--disable <name@mkt> | --list | --doctor"
 agent: plugin-validator
 user-invocable: true
 ---
@@ -15,7 +15,7 @@ Install, validate, uninstall, and manage Claude Code plugins on your local machi
 
 ```
 /cpv-install-plugin ./my-plugin.tar.gz
-/cpv-install-plugin ./my-plugin-dir/ --marketplace my-local-market
+/cpv-install-plugin ./my-plugin-dir/ my-local-market
 /cpv-install-plugin --validate ./my-plugin-dir/
 /cpv-install-plugin --list
 /cpv-install-plugin --uninstall my-plugin@my-local-market
@@ -38,7 +38,7 @@ Install, validate, uninstall, and manage Claude Code plugins on your local machi
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `<archive-or-dir>` | Yes (for install) | Path to plugin `.tar.gz`/`.zip` archive or directory |
-| `--marketplace <name>` | No | Target marketplace name (defaults to `local`) |
+| `<marketplace>` | No | Target marketplace name (positional, defaults to `local`) |
 | `--force` | No | Overwrite existing plugin installation |
 | `--dry-run` | No | Simulate install without writing any files |
 | `--uninstall <name@marketplace>` | No | Remove an installed plugin by `name@marketplace` |

@@ -17,7 +17,7 @@ Before running validation, you MUST check for private path detection:
 
 1. **Auto-detect username**:
    ```bash
-   python3 -c "import getpass; print(getpass.getuser())"
+   uv run python -c "import getpass; print(getpass.getuser())"
    ```
 
 2. **If auto-detection fails**, use `AskUserQuestion` to ask the user:
@@ -67,6 +67,9 @@ If no exact match is found, fuzzy matching is used (e.g., `cpt-validate` → `cp
 | `--strict` | Treat NIT issues as blocking (exit 4) |
 | `--verbose` | Show all checks including passed |
 | `--json` | Output results as JSON |
+| `--report PATH` | Save full output to file, print compact summary to stdout |
+| `--marketplace-only` | Skip plugin.json requirement for marketplace-only repos |
+| `--skip-platform-checks [PLATFORM...]` | Skip platform-specific checks (e.g., `--skip-platform-checks windows`) |
 
 ## What Gets Validated
 

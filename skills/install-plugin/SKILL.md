@@ -46,7 +46,7 @@ Copy this checklist and track your progress:
 
 ### Additional commands
 
-- **Custom marketplace name**: `uv run scripts/claude-plugin-install.py <source> --marketplace my-plugins`
+- **Custom marketplace name**: `uv run scripts/claude-plugin-install.py <source> my-plugins`
 - **Force reinstall**: `uv run scripts/claude-plugin-install.py <source> --force`
 - **Dry run**: `uv run scripts/claude-plugin-install.py <source> --dry-run`
 - **List installed**: `uv run scripts/claude-plugin-install.py --list`
@@ -85,7 +85,7 @@ uv run scripts/claude-plugin-install.py ./my-awesome-plugin
 
 Install from a tarball with custom marketplace name:
 ```bash
-uv run scripts/claude-plugin-install.py plugin-v1.0.tar.gz --marketplace my-plugins
+uv run scripts/claude-plugin-install.py plugin-v1.0.tar.gz my-plugins
 ```
 
 Dry-run to preview changes:

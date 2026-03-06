@@ -15,7 +15,7 @@ Validates a skill directory using the comprehensive skill validator (190+ rules)
 
 Before running validation, ensure private path detection is configured:
 
-1. **Auto-detect username**: `python3 -c "import getpass; print(getpass.getuser())"`
+1. **Auto-detect username**: `uv run python -c "import getpass; print(getpass.getuser())"`
 2. **If auto-detection fails**, ask the user for their system username
 3. **Pass to script**: `CLAUDE_PRIVATE_USERNAMES="username" uv run python scripts/...`
 

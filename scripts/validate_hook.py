@@ -1029,7 +1029,9 @@ def main() -> int:
         help="Show all results including passed checks",
     )
     parser.add_argument("--json", action="store_true", help="Output as JSON")
-    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
+    parser.add_argument(
+        "--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout"
+    )
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
     args = parser.parse_args()
 
@@ -1053,7 +1055,9 @@ def main() -> int:
     if args.json:
         print_json(report)
     elif args.report:
-        save_report_and_print_summary(report, Path(args.report), f"Hook Validation: {hook_path}", print_results, args.verbose)
+        save_report_and_print_summary(
+            report, Path(args.report), f"Hook Validation: {hook_path}", print_results, args.verbose
+        )
     else:
         print_results(report, args.verbose)
 
