@@ -715,7 +715,8 @@ def main() -> int:
         for report in reports:
             if args.report:
                 save_report_and_print_summary(
-                    report, Path(args.report), f"Command Validation: {report.command_path}", print_results, args.verbose
+                    report, Path(args.report), f"Command Validation: {report.command_path}", print_results, args.verbose,
+                    plugin_path=args.path,
                 )
             else:
                 print_results(report, args.verbose)

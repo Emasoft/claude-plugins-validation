@@ -2217,7 +2217,8 @@ def main() -> int:
         print_json(report)
     elif args.report:
         save_report_and_print_summary(
-            report, Path(args.report), "Comprehensive Skill Validation", print_results, args.verbose
+            report, Path(args.report), "Comprehensive Skill Validation", print_results, args.verbose,
+            plugin_path=args.skill_path,
         )
     else:
         print_results(report, args.verbose)

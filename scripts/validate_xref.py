@@ -758,7 +758,8 @@ Exit codes:
             print_results_by_level(report, verbose=verbose)
 
         save_report_and_print_summary(
-            report, Path(args.report), "Cross-Reference Validation", _print_full, args.verbose
+            report, Path(args.report), "Cross-Reference Validation", _print_full, args.verbose,
+            plugin_path=args.plugin_path,
         )
     else:
         print_report_summary(report, "Cross-Reference Validation Report")

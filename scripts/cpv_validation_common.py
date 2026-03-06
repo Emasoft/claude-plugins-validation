@@ -1543,7 +1543,7 @@ def print_results_by_level(report: ValidationReport, verbose: bool = False) -> N
                     print(f"  {format_result(result)}")
 
 
-def print_compact_summary(report: ValidationReport, title: str, report_path: Path | None = None) -> None:
+def print_compact_summary(report: ValidationReport, title: str, report_path: Path | None = None, plugin_path: Path | str | None = None) -> None:
     """Print a concise summary: counts by severity + verdict."""
     counts = report.count_by_level()
     exit_code = report.exit_code
@@ -1570,6 +1570,8 @@ def print_compact_summary(report: ValidationReport, title: str, report_path: Pat
         parts.append(f"{COLORS.get(level, '')}{level}:{c}{COLORS['RESET']}")
     print(f"  {' | '.join(parts)}")
     print(f"  {verdict_line}")
+    if plugin_path:
+        print(f"  Plugin: {plugin_path}")
     if report_path:
         print(f"  Report: {report_path}")
 
@@ -1580,6 +1582,7 @@ def save_report_and_print_summary(
     title: str,
     print_fn: Callable[..., None],
     *args: Any,
+    plugin_path: Path | str | None = None,
     **kwargs: Any,
 ) -> None:
     """Save full detailed report to file, print only compact summary to stdout.
@@ -1589,6 +1592,7 @@ def save_report_and_print_summary(
         report_path: Path to write the detailed report file
         title: Title for the compact summary
         print_fn: The script's print_results function (captures its stdout)
+        plugin_path: Path to the validated plugin/skill (shown in compact summary)
         *args, **kwargs: Additional arguments passed to print_fn
     """
     import io
@@ -1607,7 +1611,7 @@ def save_report_and_print_summary(
     report_path.write_text(buffer.getvalue())
 
     # Print compact summary to real stdout
-    print_compact_summary(report, title, report_path)
+    print_compact_summary(report, title, report_path, plugin_path=plugin_path)
 
 
 # =============================================================================

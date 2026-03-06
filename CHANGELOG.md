@@ -2,6 +2,27 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [1.9.1] - 2026-03-07
+
+### Accurate Token Cost Measurement
+
+- **Rewrote `cpv_token_cost.py`**: Replaced opaque `total_tokens` approach with transcript-based parsing that reads the agent's own JSONL transcript for full per-API-call usage breakdown (input, output, cache_write, cache_read)
+- **Created `hooks/hooks.json`**: SubagentStop hook fires after every validation agent completes, auto-reporting token cost via systemMessage
+- **4-category pricing**: Accurate per-model cost using separate rates for input, output, cache_creation, and cache_read tokens (cache reads are 90% cheaper than regular input)
+- **Dual-mode script**: Works as SubagentStop hook (stdin JSON) and CLI tool (`--transcript PATH`)
+- **Added `plugin_path` to compact summary**: All 15 validation scripts now display the validated plugin/skill path in compact output
+- **Updated `print_compact_summary()` and `save_report_and_print_summary()`** in `cpv_validation_common.py` to accept `plugin_path` parameter
+- **Added `hooks` key to `plugin.json`** manifest
+- All 1090 tests pass, Pyright clean
+
+## [1.9.0] - 2026-03-06
+
+### Dual Scoring System
+
+- Syntactic validation: severity counts + binary VALID/INVALID verdict (no grades, no tiers)
+- Semantic validation: A-F letter grades via Opus AI (explicit opt-in only)
+- Removed `calculate_letter_grade` and `calculate_syntactic_tier` from codebase
+
 ## [1.8.8] - 2026-03-06
 
 ### Full Plugin Audit — Bug Fixes and Consistency

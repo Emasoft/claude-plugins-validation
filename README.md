@@ -76,6 +76,7 @@ claude --plugin-dir ./OUTPUT_SKILLS/claude-plugins-validation
 | `setup_plugin_pipeline.py` | Setup and validate plugin development pipeline |
 | `update_marketplace_metadata.py` | Update marketplace.json when plugin files change |
 | `setup_marketplace_automation.py` | Automates GitHub marketplace CI/CD pipeline setup |
+| `cpv_token_cost.py` | Token cost reporter — parses agent transcripts for accurate cost breakdown |
 | `smart_exec.py` | Intelligent tool executor with cross-platform detection |
 
 ## Common Options
@@ -307,11 +308,14 @@ claude-plugins-validation/
 │   ├── cpv-validate-security.md     # Security validation command
 │   ├── cpv-validate-skill.md        # Skill validation command
 │   └── cpv-validate-xref.md        # Cross-reference validation command
+├── hooks/
+│   └── hooks.json                   # SubagentStop hook (token cost reporter)
 ├── git-hooks/
 │   ├── pre-commit                   # Pre-commit validation hook
 │   └── pre-push                     # Pre-push validation hook
 ├── scripts/
 │   ├── claude-plugin-install.py     # Local plugin installer (standalone)
+│   ├── cpv_token_cost.py            # Token cost reporter (hook + CLI)
 │   ├── cpv_validation_common.py     # Shared validation utilities
 │   ├── gitignore_filter.py          # Gitignore pattern filter
 │   ├── lint_files.py                # Multi-language file linter

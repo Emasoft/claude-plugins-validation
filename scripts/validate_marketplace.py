@@ -1912,7 +1912,7 @@ Examples:
     elif args.report:
         Path(args.report).parent.mkdir(parents=True, exist_ok=True)
         Path(args.report).write_text(format_report(report, args.verbose))
-        print_compact_summary(report, "Marketplace Validation", Path(args.report))
+        print_compact_summary(report, "Marketplace Validation", Path(args.report), plugin_path=args.marketplace_path)
     else:
         print(format_report(report, args.verbose))
 
