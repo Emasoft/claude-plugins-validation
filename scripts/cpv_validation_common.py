@@ -1580,6 +1580,69 @@ def print_results_by_level(report: ValidationReport, verbose: bool = False) -> N
                     print(f"  {format_result(result)}")
 
 
+def print_compact_summary(report: ValidationReport, title: str, report_path: Path | None = None) -> None:
+    """Print a concise 3-line summary: counts by severity + verdict."""
+    counts = report.count_by_level()
+    exit_code = report.exit_code
+
+    # Determine verdict
+    if exit_code == EXIT_OK:
+        verdict = f"{COLORS['PASSED']}PASS{COLORS['RESET']}"
+    elif exit_code == EXIT_CRITICAL:
+        verdict = f"{COLORS['CRITICAL']}FAIL (critical){COLORS['RESET']}"
+    elif exit_code == EXIT_MAJOR:
+        verdict = f"{COLORS['MAJOR']}FAIL (major){COLORS['RESET']}"
+    else:
+        verdict = f"{COLORS['MINOR']}WARN (minor){COLORS['RESET']}"
+
+    # Print compact output
+    print(f"{COLORS['BOLD']}{title}{COLORS['RESET']}: {verdict}")
+    parts = []
+    for level in ("CRITICAL", "MAJOR", "MINOR", "NIT", "WARNING", "PASSED"):
+        c = counts.get(level, 0)
+        if c > 0:
+            parts.append(f"{COLORS.get(level, '')}{level}:{c}{COLORS['RESET']}")
+    print(f"  {' | '.join(parts)}" if parts else "  No issues found")
+    if report_path:
+        print(f"  Report: {report_path}")
+
+
+def save_report_and_print_summary(
+    report: ValidationReport,
+    report_path: Path,
+    title: str,
+    print_fn: Callable[..., None],
+    *args: Any,
+    **kwargs: Any,
+) -> None:
+    """Save full detailed report to file, print only compact summary to stdout.
+
+    Args:
+        report: The validation report
+        report_path: Path to write the detailed report file
+        title: Title for the compact summary
+        print_fn: The script's print_results function (captures its stdout)
+        *args, **kwargs: Additional arguments passed to print_fn
+    """
+    import io
+    import sys
+
+    # Capture full verbose output
+    old_stdout = sys.stdout
+    sys.stdout = buffer = io.StringIO()
+    try:
+        print_fn(report, *args, **kwargs)
+    finally:
+        sys.stdout = old_stdout
+
+    # Write captured output to report file
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(buffer.getvalue())
+
+    # Print compact summary to real stdout
+    print_compact_summary(report, title, report_path)
+
+
 # =============================================================================
 # File Encoding Utilities
 # =============================================================================

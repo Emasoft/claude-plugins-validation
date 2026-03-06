@@ -35,6 +35,7 @@ from cpv_validation_common import (
     SKILL_FRONTMATTER_FIELDS,
     VALID_CONTEXT_VALUES,
     ValidationReport,
+    save_report_and_print_summary,
 )
 
 # Maximum recommended SKILL.md line count per Anthropic docs
@@ -623,6 +624,7 @@ def main() -> int:
         help="Show all results including passed checks",
     )
     parser.add_argument("--json", action="store_true", help="Output as JSON")
+    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
     args = parser.parse_args()
 
@@ -649,7 +651,10 @@ def main() -> int:
     if args.json:
         print_json(report)
     else:
-        print_results(report, args.verbose)
+        if args.report:
+            save_report_and_print_summary(report, Path(args.report), "Skill Validation", print_results, args.verbose)
+        else:
+            print_results(report, args.verbose)
 
     if args.strict:
         return report.exit_code_strict()

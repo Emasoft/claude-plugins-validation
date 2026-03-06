@@ -117,40 +117,40 @@ For detailed semantic validation criteria and report format, see:
 
 ## Workflow
 
-1. **Run script validation first**: `uv run python scripts/validate_skill_comprehensive.py`
-2. **Read the SKILL.md** to evaluate semantic criteria
-3. **Document findings** (Pass/Partial/Fail for each criterion)
-4. **Generate report** with prioritized recommendations
+1. **Run script validation first** — ALWAYS use `--report` to save output to file:
+   ```bash
+   uv run python scripts/validate_skill_comprehensive.py <skill_path> --report docs_dev/validate_skill_YYYYMMDD.md [--strict] [--openspec] [--pillars] [--verbose]
+   ```
+2. **Never read the report file** — provide the file path to the user
+3. **Read the SKILL.md** to evaluate semantic criteria
+4. **Document findings** (Pass/Partial/Fail for each criterion)
+5. **Generate report** with prioritized recommendations
 
 ## Examples
 
 <example>
 user: Validate my-skill with strict mode
 assistant: I'll run comprehensive validation with Nixtla strict mode.
-[Runs: uv run python scripts/validate_skill_comprehensive.py ./my-skill --strict --verbose]
-Grade: B (85/100)
-CRITICAL: 0, MAJOR: 1, MINOR: 2
-MAJOR: Missing "Use when..." phrase in description.
-MINOR: No checklist pattern found.
-Recommendation: Add "Use when..." to description, add TOC to large reference files.
+[Runs: uv run python scripts/validate_skill_comprehensive.py ./my-skill --strict --verbose --report docs_dev/validate_my-skill_20260306.md]
+Skill Validation: FAIL (major)
+  CRITICAL:0 | MAJOR:1 | MINOR:2 | PASSED:15
+  Report: docs_dev/validate_my-skill_20260306.md
 </example>
 
 <example>
 user: Validate lang-rust-dev with pillars mode
 assistant: I'll validate with 8+1 Pillars coverage for this language skill.
-[Runs: uv run python scripts/validate_skill_comprehensive.py ./lang-rust-dev --pillars --verbose]
-Grade: A (94/100)
-Pillars Coverage: 8/9 (89%)
-- Module: 1.0/1.0 (Full)
-- Error: 1.0/1.0 (Full)
-- Concurrency: 0.5/1.0 (Partial)
-All CRITICAL requirements passed. Minor: Add more concurrency examples.
+[Runs: uv run python scripts/validate_skill_comprehensive.py ./lang-rust-dev --pillars --verbose --report docs_dev/validate_lang-rust-dev_20260306.md]
+Skill Validation: PASS
+  MINOR:1 | PASSED:22
+  Report: docs_dev/validate_lang-rust-dev_20260306.md
 </example>
 
 ## Notes
 
-- Always use the comprehensive validator script FIRST
-- Then perform semantic analysis by READING the files
+- **ALWAYS use `--report`** to save detailed output to file — never let verbose output consume context
+- **Never read the report file** yourself — provide the path to the user for review
+- Then perform semantic analysis by READING the actual skill files
 - Apply appropriate modes based on skill type
 - Prioritize CRITICAL and MAJOR issues
 - Return minimal reports to the orchestrator

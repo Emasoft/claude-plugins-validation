@@ -2,6 +2,19 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [1.8.6] - 2026-03-06
+
+### Token Optimization — `--report` Flag
+
+- Added `--report PATH` flag to all 17 validator scripts
+- When `--report` is used: saves full detailed output to file, prints only 3-line compact summary to stdout (severity counts + verdict + report path)
+- Added `print_compact_summary()` and `save_report_and_print_summary()` to `cpv_validation_common.py`
+- Updated agent instructions (plugin-validator.md, skill-validation-agent.md) to always use `--report` flag
+- Agents now provide report file paths to users instead of reading verbose output into context
+- Estimated ~60% reduction in per-validation token consumption
+- Fixed type mismatch in `validate_marketplace_pipeline.py` (inline compact summary for `PipelineValidationReport`)
+- All 1101 tests pass, ruff clean, Pyright clean, 98/100 A+ self-validation
+
 ## [1.8.5] - 2026-03-06
 
 ### Code Deduplication & Audit Fixes

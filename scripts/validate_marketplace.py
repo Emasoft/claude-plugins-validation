@@ -32,6 +32,7 @@ from urllib.parse import urlparse
 from cpv_validation_common import (
     SEMVER_PATTERN,
     Level,
+    print_compact_summary,
 )
 from cpv_validation_common import (
     ValidationReport as BaseValidationReport,
@@ -1848,6 +1849,7 @@ Examples:
         help="Output results as JSON",
     )
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
+    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
 
     args = parser.parse_args()
 
@@ -1899,6 +1901,10 @@ Examples:
             "exit_code": report.exit_code_strict() if args.strict else report.exit_code,
         }
         print(json.dumps(output, indent=2))
+    elif args.report:
+        Path(args.report).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.report).write_text(format_report(report, args.verbose))
+        print_compact_summary(report, "Marketplace Validation", Path(args.report))
     else:
         print(format_report(report, args.verbose))
 

@@ -745,6 +745,7 @@ Rating scale (0-10 per category):
         help="Output results as JSON instead of formatted text",
     )
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
+    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
 
     args = parser.parse_args()
 
@@ -774,6 +775,33 @@ Rating scale (0-10 per category):
     # Output results
     if args.json:
         print(report.to_json())
+    elif args.report:
+        import io as _io
+
+        # Capture the full text report into a buffer
+        _buf = _io.StringIO()
+        _original_stdout = sys.stdout
+        try:
+            sys.stdout = _buf
+            print_quality_report(report, verbose=args.verbose)
+        finally:
+            sys.stdout = _original_stdout
+
+        # Write full report to file
+        report_path = Path(args.report)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(_buf.getvalue())
+
+        # Print compact summary to stdout
+        if report.status == "PASS":
+            verdict = f"{COLORS['PASSED']}PASS{COLORS['RESET']}"
+        elif report.status == "CONDITIONAL_PASS":
+            verdict = f"{COLORS['MAJOR']}CONDITIONAL PASS{COLORS['RESET']}"
+        else:
+            verdict = f"{COLORS['CRITICAL']}FAIL{COLORS['RESET']}"
+        print(f"{COLORS['BOLD']}Plugin Quality Score{COLORS['RESET']}: {verdict}")
+        print(f"  Score: {report.overall_score:.1f}/100 ({report.letter_grade})")
+        print(f"  Report: {report_path}")
     else:
         print_quality_report(report, verbose=args.verbose)
 

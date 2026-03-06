@@ -155,52 +155,49 @@ This prevents accidental leaking of private home directory paths in published pl
 16. **Command Validation** - Validate command files, slash-command definitions, and command metadata (`validate_command.py`)
 17. **Agent Validation** - Validate agent markdown files, frontmatter, required sections, and example blocks (`validate_agent.py`)
 
-## Report Output (MANDATORY)
+## Report Output (MANDATORY — Token Efficiency)
 
-After every validation run, you MUST:
+**ALWAYS use `--report` flag** when running validation scripts. This saves the full detailed output to a file and prints only a compact summary (severity counts + verdict) to stdout. This prevents verbose validation output from consuming the model's context window.
 
-1. **Save the full validation output** to a timestamped `.md` file:
+1. **Always pass `--report`** pointing to a timestamped `.md` file:
    ```
-   docs_dev/validate_<plugin-name>_<YYYYMMDD>.md
+   --report docs_dev/validate_<plugin-name>_<YYYYMMDD>.md
    ```
-2. **Display the report file path** prominently at the end of your response:
-   ```
-   Report saved to: docs_dev/validate_<plugin-name>_<date>.md
-   ```
-3. **Never omit the report path** — the user needs it to review or share the results
+2. **Never read the report file yourself** — provide the file path to the user so they can review it
+3. **Display the report file path** prominently at the end of your response
 
 ## Validation Scripts
 
 ```bash
 # Validate entire plugin
-uv run python scripts/validate_plugin.py /path/to/plugin --verbose
+uv run python scripts/validate_plugin.py /path/to/plugin --verbose --report docs_dev/validate_plugin_YYYYMMDD.md
 
 # Validate specific components
-uv run python scripts/validate_skill.py /path/to/skill
-uv run python scripts/validate_hook.py /path/to/hooks.json
-uv run python scripts/validate_mcp.py /path/to/plugin
-uv run python scripts/validate_marketplace.py /path/to/marketplace
+uv run python scripts/validate_skill.py /path/to/skill --report docs_dev/validate_skill_YYYYMMDD.md
+uv run python scripts/validate_hook.py /path/to/hooks.json --report docs_dev/validate_hook_YYYYMMDD.md
+uv run python scripts/validate_mcp.py /path/to/plugin --report docs_dev/validate_mcp_YYYYMMDD.md
+uv run python scripts/validate_marketplace.py /path/to/marketplace --report docs_dev/validate_marketplace_YYYYMMDD.md
 
 # Validate cross-references and internal links
-uv run python scripts/validate_xref.py /path/to/plugin
+uv run python scripts/validate_xref.py /path/to/plugin --report docs_dev/validate_xref_YYYYMMDD.md
 
 # Validate documentation completeness
-uv run python scripts/validate_documentation.py /path/to/plugin
+uv run python scripts/validate_documentation.py /path/to/plugin --report docs_dev/validate_docs_YYYYMMDD.md
 
 # Validate security (secrets, injection, path traversal)
-uv run python scripts/validate_security.py /path/to/plugin
+uv run python scripts/validate_security.py /path/to/plugin --report docs_dev/validate_security_YYYYMMDD.md
 
 # Validate rules files and rule syntax
-uv run python scripts/validate_rules.py /path/to/plugin
+uv run python scripts/validate_rules.py /path/to/plugin --report docs_dev/validate_rules_YYYYMMDD.md
 
 # Validate enterprise compliance and governance
-uv run python scripts/validate_enterprise.py /path/to/plugin
+uv run python scripts/validate_enterprise.py /path/to/plugin --report docs_dev/validate_enterprise_YYYYMMDD.md
 
 # Validate file encodings and line endings
-uv run python scripts/validate_encoding.py /path/to/plugin
+uv run python scripts/validate_encoding.py /path/to/plugin --report docs_dev/validate_encoding_YYYYMMDD.md
 
 # Compute quality score across all dimensions
-uv run python scripts/validate_scoring.py /path/to/plugin
+uv run python scripts/validate_scoring.py /path/to/plugin --report docs_dev/validate_scoring_YYYYMMDD.md
 
 # Validate command files and slash-command definitions
 uv run python scripts/validate_command.py /path/to/plugin

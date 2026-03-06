@@ -35,6 +35,7 @@ from cpv_validation_common import (
     is_binary_file,
     print_report_summary,
     print_results_by_level,
+    save_report_and_print_summary,
     should_skip_directory,
 )
 
@@ -650,6 +651,7 @@ Exit Codes:
     parser.add_argument("-v", "--verbose", action="store_true", help="Show all results including INFO and PASSED")
     parser.add_argument("--json", action="store_true", help="Output results as JSON")
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
+    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
 
     args = parser.parse_args()
 
@@ -675,6 +677,11 @@ Exit Codes:
         output = report.to_dict()
         output["plugin_path"] = str(plugin_path)
         print(json.dumps(output, indent=2))
+    elif args.report:
+        def _print_full(report, verbose=False):
+            print_report_summary(report, "Security Validation Report")
+            print_results_by_level(report, verbose=verbose)
+        save_report_and_print_summary(report, Path(args.report), "Security Validation", _print_full, args.verbose)
     else:
         print_results_by_level(report, verbose=args.verbose)
         print_report_summary(report, title=f"Security Validation: {plugin_path.name}")
