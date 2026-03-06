@@ -1,15 +1,14 @@
 ---
 name: semantic-validation-skill
 description: |
-  Deep AI-driven semantic validation for skills and agents. Evaluates description triggering,
-  instruction clarity, example quality, and workflow completeness. Expensive (uses opus).
-  Trigger with /cpv-semantic-validation. Explicit opt-in only.
+  Deep AI-driven semantic validation for skills and agents. Use when checking description
+  triggering effectiveness, instruction clarity, example quality, and workflow completeness.
+  Expensive (uses opus). Trigger with /cpv-semantic-validation. Explicit opt-in only.
 tags:
   - validation
   - semantic
   - quality
   - skills
-agent: semantic-validator
 user-invocable: true
 allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep
 ---
@@ -39,21 +38,15 @@ This skill performs AI-driven evaluation of:
 
 ## Instructions
 
-### Step 1: Run Script Validation First (Baseline)
-
-The semantic validator always runs cheap script validation first to establish a baseline:
-
-```bash
-uv run python scripts/validate_skill_comprehensive.py "<skill_path>" --strict --report docs_dev/validate_semantic_baseline_YYYYMMDD.md
-```
-
-### Step 2: Deep Semantic Analysis
-
-The agent reads the actual SKILL.md and agent .md files, evaluating 7 semantic criteria that require AI judgment.
-
-### Step 3: Review Results
-
-The agent produces a grade (A-F) and writes a detailed report to `docs_dev/semantic_validation_YYYYMMDD.md`.
+1. Navigate to the claude-plugins-validation directory
+2. Run the command: `/cpv-semantic-validation <skill_or_agent_path>`
+3. The agent runs cheap script validation first as a baseline:
+   ```bash
+   uv run python scripts/validate_skill_comprehensive.py "<skill_path>" --strict --report docs_dev/validate_semantic_baseline_YYYYMMDD.md
+   ```
+4. The agent reads the actual SKILL.md and agent .md files
+5. The agent evaluates 7 semantic criteria that require AI judgment
+6. Review the grade (A-F) and report at `docs_dev/semantic_validation_YYYYMMDD.md`
 
 ## Output
 
@@ -82,6 +75,6 @@ The agent produces a grade (A-F) and writes a detailed report to `docs_dev/seman
 
 ## Resources
 
-- [Semantic Validation Criteria](../../agents/references/skill-semantic-validation.md) — Full criteria, rubrics, report format
+- Semantic Validation Criteria — see `agents/references/skill-semantic-validation.md` for full criteria, rubrics, report format
 - `skill-validation-skill` — Script-based validation (cheap, fast)
 - `plugin-validation-skill` — Full plugin validation
