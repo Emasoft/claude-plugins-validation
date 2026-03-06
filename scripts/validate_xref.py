@@ -39,6 +39,7 @@ from cpv_validation_common import (
     ValidationReport,
     print_report_summary,
     print_results_by_level,
+    save_report_and_print_summary,
 )
 
 # =============================================================================
@@ -716,6 +717,12 @@ Exit codes:
         action="store_true",
         help="Output results as JSON",
     )
+    parser.add_argument(
+        "--report",
+        type=str,
+        default=None,
+        help="Save detailed report to file, print only summary to stdout",
+    )
 
     args = parser.parse_args()
 
@@ -739,6 +746,13 @@ Exit codes:
     # Output results
     if args.json:
         print(report.to_json())
+    elif args.report:
+
+        def _print_full(report, verbose=False):
+            print_report_summary(report, "Cross-Reference Validation Report")
+            print_results_by_level(report, verbose=verbose)
+
+        save_report_and_print_summary(report, Path(args.report), "Cross-Reference Validation", _print_full, args.verbose)
     else:
         print_report_summary(report, "Cross-Reference Validation Report")
         print_results_by_level(report, verbose=args.verbose)

@@ -32,7 +32,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from cpv_validation_common import COLORS, VALID_HOOK_EVENTS, ValidationReport, resolve_tool_command
+from cpv_validation_common import (
+    COLORS,
+    VALID_HOOK_EVENTS,
+    ValidationReport,
+    resolve_tool_command,
+    save_report_and_print_summary,
+)
 
 # Events that support matchers
 EVENTS_WITH_MATCHERS = {
@@ -1023,6 +1029,7 @@ def main() -> int:
         help="Show all results including passed checks",
     )
     parser.add_argument("--json", action="store_true", help="Output as JSON")
+    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
     args = parser.parse_args()
 
@@ -1045,6 +1052,8 @@ def main() -> int:
 
     if args.json:
         print_json(report)
+    elif args.report:
+        save_report_and_print_summary(report, Path(args.report), f"Hook Validation: {hook_path}", print_results, args.verbose)
     else:
         print_results(report, args.verbose)
 

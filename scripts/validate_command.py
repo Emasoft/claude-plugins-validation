@@ -41,6 +41,7 @@ from cpv_validation_common import (
     VALID_TOOLS,
     ValidationReport,
     check_utf8_encoding,
+    save_report_and_print_summary,
 )
 
 # =============================================================================
@@ -658,6 +659,7 @@ def main() -> int:
     )
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
+    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
     args = parser.parse_args()
 
     path = Path(args.path).resolve()
@@ -709,7 +711,10 @@ def main() -> int:
             print(json.dumps(combined, indent=2))
     else:
         for report in reports:
-            print_results(report, args.verbose)
+            if args.report:
+                save_report_and_print_summary(report, Path(args.report), f"Command Validation: {report.command_path}", print_results, args.verbose)
+            else:
+                print_results(report, args.verbose)
 
     # Return worst exit code — in strict mode NIT issues also block
     if args.strict:

@@ -50,6 +50,7 @@ from cpv_validation_common import (
     ValidationReport,
     ValidationResult,
     calculate_letter_grade,
+    save_report_and_print_summary,
 )
 
 # =============================================================================
@@ -894,6 +895,7 @@ Exit codes:
         action="store_true",
         help="Enterprise mode: all rules become CRITICAL (fail-fast)",
     )
+    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
     args = parser.parse_args()
 
     plugin_path = Path(args.plugin_path).resolve()
@@ -918,6 +920,8 @@ Exit codes:
 
     if args.json:
         print_json(report)
+    elif args.report:
+        save_report_and_print_summary(report, Path(args.report), "Enterprise Validation", print_results, args.verbose)
     else:
         print_results(report, args.verbose)
 

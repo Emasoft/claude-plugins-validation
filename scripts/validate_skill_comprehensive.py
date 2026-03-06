@@ -54,6 +54,7 @@ from cpv_validation_common import (
     VALID_HOOK_EVENTS,
     VALID_TOOLS,
     Level,
+    save_report_and_print_summary,
     validate_toc_embedding,
 )
 from cpv_validation_common import (
@@ -2183,6 +2184,7 @@ def main() -> int:
         action="store_true",
         help="Enable 8+1 Pillars validation (for lang-* and convert-* skills)",
     )
+    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
     args = parser.parse_args()
 
     skill_path = Path(args.skill_path).resolve()
@@ -2212,6 +2214,8 @@ def main() -> int:
 
     if args.json:
         print_json(report)
+    elif args.report:
+        save_report_and_print_summary(report, Path(args.report), "Comprehensive Skill Validation", print_results, args.verbose)
     else:
         print_results(report, args.verbose)
 

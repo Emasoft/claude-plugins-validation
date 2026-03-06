@@ -38,6 +38,7 @@ from cpv_validation_common import (
     USER_PATH_PATTERNS,
     ValidationReport,
     check_utf8_encoding,
+    save_report_and_print_summary,
 )
 
 # =============================================================================
@@ -403,6 +404,7 @@ def main() -> int:
     parser.add_argument("--verbose", "-v", action="store_true", help="Show all results")
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
+    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
     args = parser.parse_args()
 
     path = Path(args.path).resolve()
@@ -431,7 +433,10 @@ def main() -> int:
     if args.json:
         print_json(report)
     else:
-        print_results(report, args.verbose)
+        if args.report:
+            save_report_and_print_summary(report, Path(args.report), "Rules Validation", print_results, args.verbose)
+        else:
+            print_results(report, args.verbose)
 
     if args.strict:
         return report.exit_code_strict()

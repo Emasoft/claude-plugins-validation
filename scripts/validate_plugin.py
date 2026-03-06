@@ -47,6 +47,7 @@ from cpv_validation_common import (
     COLORS,
     ValidationReport,
     resolve_tool_command,
+    save_report_and_print_summary,
     validate_no_absolute_paths,
     validate_toc_embedding,
 )
@@ -1354,6 +1355,7 @@ def main() -> int:
         "Valid platforms: windows, macos, linux. Use without args to skip all.",
     )
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
+    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
     parser.add_argument("path", nargs="?", help="Plugin root path (default: parent of scripts/)")
     args = parser.parse_args()
 
@@ -1417,7 +1419,10 @@ def main() -> int:
     if args.json:
         print_json(report)
     else:
-        print_results(report, args.verbose)
+        if args.report:
+            save_report_and_print_summary(report, Path(args.report), "Plugin Validation", print_results, args.verbose)
+        else:
+            print_results(report, args.verbose)
 
     if args.strict:
         return report.exit_code_strict()
