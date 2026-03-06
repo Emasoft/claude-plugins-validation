@@ -308,8 +308,6 @@ claude-plugins-validation/
 │   ├── cpv-validate-security.md     # Security validation command
 │   ├── cpv-validate-skill.md        # Skill validation command
 │   └── cpv-validate-xref.md        # Cross-reference validation command
-├── hooks/
-│   └── hooks.json                   # SubagentStop hook (token cost reporter)
 ├── git-hooks/
 │   ├── pre-commit                   # Pre-commit validation hook
 │   └── pre-push                     # Pre-push validation hook
