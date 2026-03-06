@@ -527,7 +527,7 @@ def main() -> int:
         print(json.dumps(output, indent=2))
     else:
         if args.report:
-            save_report_and_print_summary(report, Path(args.report), "LSP Validation", print_results, args.verbose)
+            save_report_and_print_summary(report, Path(args.report), "LSP Validation", print_results, args.verbose, plugin_path=args.path)
         else:
             print_results(report, args.verbose)
 

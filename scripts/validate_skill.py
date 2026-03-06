@@ -654,7 +654,7 @@ def main() -> int:
         print_json(report)
     else:
         if args.report:
-            save_report_and_print_summary(report, Path(args.report), "Skill Validation", print_results, args.verbose)
+            save_report_and_print_summary(report, Path(args.report), "Skill Validation", print_results, args.verbose, plugin_path=args.skill_path)
         else:
             print_results(report, args.verbose)
 

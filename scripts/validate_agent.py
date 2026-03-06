@@ -1200,7 +1200,8 @@ def main() -> int:
             if args.report:
                 agent_file = report.agent_path or args.path
                 save_report_and_print_summary(
-                    report, Path(args.report), f"Agent Validation: {agent_file}", print_results, args.verbose
+                    report, Path(args.report), f"Agent Validation: {agent_file}", print_results, args.verbose,
+                    plugin_path=args.path,
                 )
             else:
                 print_results(report, args.verbose)
