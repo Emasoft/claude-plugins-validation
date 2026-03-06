@@ -35,7 +35,6 @@ from cpv_validation_common import (
     EXIT_OK,
     ValidationReport,
     ValidationResult,
-    calculate_letter_grade,
 )
 
 # Import all validators
@@ -174,7 +173,6 @@ class QualityScoreReport:
     Attributes:
         plugin_path: Path to the validated plugin
         overall_score: Overall quality score (0-100)
-        letter_grade: Letter grade (A+, A, B, etc.)
         status: Overall status (PASS, CONDITIONAL_PASS, FAIL)
         category_scores: Individual category scores
         critical_failures: List of critical failures that cause automatic fail
@@ -184,7 +182,6 @@ class QualityScoreReport:
 
     plugin_path: str
     overall_score: float = 0.0
-    letter_grade: str = "F"
     status: str = "FAIL"
     category_scores: dict[str, CategoryScore] = field(default_factory=dict)
     critical_failures: list[str] = field(default_factory=list)
@@ -196,7 +193,6 @@ class QualityScoreReport:
         return {
             "plugin_path": self.plugin_path,
             "overall_score": round(self.overall_score, 2),
-            "letter_grade": self.letter_grade,
             "status": self.status,
             "category_scores": {name: cat.to_dict() for name, cat in self.category_scores.items()},
             "critical_failures": self.critical_failures,
@@ -573,7 +569,7 @@ def compute_quality_score(plugin_path: Path) -> QualityScoreReport:
         report.overall_score = 0.0
 
     # Determine letter grade
-    report.letter_grade = calculate_letter_grade(int(report.overall_score))
+    # letter_grade removed — no grading in syntactic validation
 
     # Determine pass/fail status
     has_critical = len(report.critical_failures) > 0
@@ -621,7 +617,7 @@ def print_quality_report(report: QualityScoreReport, verbose: bool = False) -> N
         status_symbol = "FAIL"
 
     print(f"\n{COLORS['BOLD']}Overall Score:{COLORS['RESET']} ", end="")
-    print(f"{status_color}{report.overall_score:.1f}/100 ({report.letter_grade}){COLORS['RESET']}")
+    print(f"{status_color}{report.overall_score:.1f}/100{COLORS['RESET']}")
     print(f"{COLORS['BOLD']}Status:{COLORS['RESET']} {status_color}{status_symbol}{COLORS['RESET']}")
 
     # Category breakdown
@@ -802,7 +798,7 @@ Rating scale (0-10 per category):
         else:
             verdict = f"{COLORS['CRITICAL']}FAIL{COLORS['RESET']}"
         print(f"{COLORS['BOLD']}Plugin Quality Score{COLORS['RESET']}: {verdict}")
-        print(f"  Score: {report.overall_score:.1f}/100 ({report.letter_grade})")
+        print(f"  Score: {report.overall_score:.1f}/100")
         print(f"  Report: {report_path}")
     else:
         print_quality_report(report, verbose=args.verbose)

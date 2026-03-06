@@ -3,7 +3,7 @@ name: semantic-validation-skill
 description: |
   Deep AI-driven semantic validation for skills and agents. Use when checking description
   triggering effectiveness, instruction clarity, example quality, and workflow completeness.
-  Expensive (uses opus). Trigger with /cpv-semantic-validation. Explicit opt-in only.
+  WARNING: this skill is extremely expensive (10x more tokens). Trigger with /cpv-semantic-validation. Explicit opt-in only.
 tags:
   - validation
   - semantic

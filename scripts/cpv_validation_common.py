@@ -1051,7 +1051,7 @@ class ValidationReport:
         counts = self.count_by_level()
         return {
             "score": self.score,
-            "grade": calculate_letter_grade(self.score),
+            "score_pct": self.score,
             "exit_code": self.exit_code,
             "counts": counts,
             "results": [r.to_dict() for r in self.results],
@@ -1416,46 +1416,6 @@ def get_plugin_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def calculate_letter_grade(score: int) -> str:
-    """Convert numeric score (0-100) to letter grade.
-
-    Grade scale:
-    - A+ : 97-100
-    - A  : 93-96
-    - A- : 90-92
-    - B+ : 87-89
-    - B  : 83-86
-    - B- : 80-82
-    - C+ : 77-79
-    - C  : 73-76
-    - C- : 70-72
-    - D  : 60-69
-    - F  : 0-59
-    """
-    if score >= 97:
-        return "A+"
-    elif score >= 93:
-        return "A"
-    elif score >= 90:
-        return "A-"
-    elif score >= 87:
-        return "B+"
-    elif score >= 83:
-        return "B"
-    elif score >= 80:
-        return "B-"
-    elif score >= 77:
-        return "C+"
-    elif score >= 73:
-        return "C"
-    elif score >= 70:
-        return "C-"
-    elif score >= 60:
-        return "D"
-    else:
-        return "F"
-
-
 def is_valid_kebab_case(name: str) -> bool:
     """Check if name follows kebab-case convention."""
     return bool(NAME_PATTERN.match(name))
@@ -1507,7 +1467,6 @@ def print_report_summary(report: ValidationReport, title: str = "Validation Repo
     """Print a formatted summary of a validation report."""
     counts = report.count_by_level()
     score = report.score
-    grade = calculate_letter_grade(score)
 
     print(f"\n{'=' * 60}")
     print(f"{COLORS['BOLD']}{title}{COLORS['RESET']}")
@@ -1522,11 +1481,9 @@ def print_report_summary(report: ValidationReport, title: str = "Validation Repo
     print(f"{COLORS['INFO']}INFO:     {counts['INFO']}{COLORS['RESET']}")
     print(f"{COLORS['PASSED']}PASSED:   {counts['PASSED']}{COLORS['RESET']}")
 
-    # Print score and grade
+    # Print score
     grade_color = COLORS["PASSED"] if score >= 80 else COLORS["MAJOR"] if score >= 60 else COLORS["CRITICAL"]
-    print(
-        f"\n{COLORS['BOLD']}Health Score:{COLORS['RESET']} {grade_color}{score}/100 (Grade: {grade}){COLORS['RESET']}"
-    )
+    print(f"\n{COLORS['BOLD']}Syntactic Score:{COLORS['RESET']} {grade_color}{score}/100{COLORS['RESET']}")
 
     # Print exit code interpretation
     exit_code = report.exit_code
@@ -1587,28 +1544,32 @@ def print_results_by_level(report: ValidationReport, verbose: bool = False) -> N
 
 
 def print_compact_summary(report: ValidationReport, title: str, report_path: Path | None = None) -> None:
-    """Print a concise 3-line summary: counts by severity + verdict."""
+    """Print a concise summary: counts by severity + verdict."""
     counts = report.count_by_level()
     exit_code = report.exit_code
 
-    # Determine verdict
+    # Determine verdict — VALID/INVALID for the whole plugin or skill
     if exit_code == EXIT_OK:
-        verdict = f"{COLORS['PASSED']}PASS{COLORS['RESET']}"
+        verdict = f"{COLORS['PASSED']}VALID{COLORS['RESET']}"
+        verdict_line = f"{COLORS['PASSED']}Verdict: VALID{COLORS['RESET']}"
     elif exit_code == EXIT_CRITICAL:
-        verdict = f"{COLORS['CRITICAL']}FAIL (critical){COLORS['RESET']}"
+        verdict = f"{COLORS['CRITICAL']}INVALID{COLORS['RESET']}"
+        verdict_line = f"{COLORS['CRITICAL']}Verdict: INVALID — critical issues must be fixed{COLORS['RESET']}"
     elif exit_code == EXIT_MAJOR:
-        verdict = f"{COLORS['MAJOR']}FAIL (major){COLORS['RESET']}"
+        verdict = f"{COLORS['MAJOR']}INVALID{COLORS['RESET']}"
+        verdict_line = f"{COLORS['MAJOR']}Verdict: INVALID — major issues must be fixed{COLORS['RESET']}"
     else:
-        verdict = f"{COLORS['MINOR']}WARN (minor){COLORS['RESET']}"
+        verdict = f"{COLORS['MINOR']}INVALID{COLORS['RESET']}"
+        verdict_line = f"{COLORS['MINOR']}Verdict: INVALID — minor issues should be fixed{COLORS['RESET']}"
 
-    # Print compact output
+    # Print compact output — always show all levels, PASSED first, WARNING last
     print(f"{COLORS['BOLD']}{title}{COLORS['RESET']}: {verdict}")
     parts = []
-    for level in ("CRITICAL", "MAJOR", "MINOR", "NIT", "WARNING", "PASSED"):
+    for level in ("PASSED", "CRITICAL", "MAJOR", "MINOR", "NIT", "WARNING"):
         c = counts.get(level, 0)
-        if c > 0:
-            parts.append(f"{COLORS.get(level, '')}{level}:{c}{COLORS['RESET']}")
-    print(f"  {' | '.join(parts)}" if parts else "  No issues found")
+        parts.append(f"{COLORS.get(level, '')}{level}:{c}{COLORS['RESET']}")
+    print(f"  {' | '.join(parts)}")
+    print(f"  {verdict_line}")
     if report_path:
         print(f"  Report: {report_path}")
 

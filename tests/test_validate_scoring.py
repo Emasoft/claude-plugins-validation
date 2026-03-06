@@ -168,7 +168,6 @@ class TestComputeQualityScore:
         report = compute_quality_score(plugin_dir)
         assert isinstance(report, QualityScoreReport)
         assert 0.0 <= report.overall_score <= 100.0
-        assert report.letter_grade in ("A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D", "F")
         assert report.status in ("PASS", "CONDITIONAL_PASS", "FAIL")
 
     def test_nonexistent_plugin_returns_failing_score(self, tmp_path):
@@ -235,10 +234,9 @@ class TestQualityScoreReportSerialization:
     """Tests for QualityScoreReport.to_dict and to_json methods."""
 
     def test_to_dict_includes_all_top_level_fields(self):
-        """QualityScoreReport.to_dict returns dict with plugin_path, overall_score, letter_grade, status, etc."""
+        """QualityScoreReport.to_dict returns dict with plugin_path, overall_score, status, etc."""
         report = QualityScoreReport(plugin_path="/fake/path")
         report.overall_score = 85.0
-        report.letter_grade = "B"
         report.status = "CONDITIONAL_PASS"
         report.critical_failures = ["[security] Secret found"]
         report.recommendations = ["Fix secrets"]
@@ -256,7 +254,6 @@ class TestQualityScoreReportSerialization:
         d = report.to_dict()
         assert d["plugin_path"] == "/fake/path"
         assert d["overall_score"] == 85.0
-        assert d["letter_grade"] == "B"
         assert d["status"] == "CONDITIONAL_PASS"
         assert d["critical_failures"] == ["[security] Secret found"]
         assert d["recommendations"] == ["Fix secrets"]
@@ -269,13 +266,12 @@ class TestQualityScoreReportSerialization:
         """QualityScoreReport.to_json returns a parseable JSON string with correct indent."""
         report = QualityScoreReport(plugin_path="/test/plugin")
         report.overall_score = 72.5
-        report.letter_grade = "C"
         report.status = "CONDITIONAL_PASS"
         json_str = report.to_json(indent=2)
         parsed = json.loads(json_str)
         assert parsed["plugin_path"] == "/test/plugin"
         assert parsed["overall_score"] == 72.5
-        assert parsed["letter_grade"] == "C"
+        assert parsed["status"] == "CONDITIONAL_PASS"
 
 
 class TestCategorizeResultsAdditional:
@@ -528,7 +524,6 @@ class TestPrintQualityReport:
         """Helper: build a QualityScoreReport with multiple categories and issues."""
         report = QualityScoreReport(plugin_path="/test/my-plugin")
         report.overall_score = 72.3
-        report.letter_grade = "C"
         report.status = "CONDITIONAL_PASS"
         report.category_scores = {
             "security": CategoryScore(
@@ -603,7 +598,6 @@ class TestPrintQualityReport:
         """print_quality_report always prints the Rating Guide section with score range descriptions."""
         report = QualityScoreReport(plugin_path="/test/simple")
         report.overall_score = 95.0
-        report.letter_grade = "A"
         report.status = "PASS"
         print_quality_report(report, verbose=False)
         captured = capsys.readouterr().out
