@@ -314,7 +314,7 @@ uv run python scripts/validate_marketplace_pipeline.py /path/to/marketplace --ve
 # ✓ Plugin B: notify-marketplace.yml present
 # ✗ Plugin C: Missing notify-marketplace.yml workflow
 #
-# Total Score: 97/100 (Grade: A)
+# Total Syntactic Score: 97/100 (PASS)
 ```
 
 ### Example: Setup Pipeline for New Marketplace

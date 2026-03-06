@@ -41,3 +41,5 @@ uv run python scripts/validate_rules.py <plugin-path> --report docs_dev/validate
 
 - `/cpv-validate-plugin` - Full plugin validation
 - `/cpv-validate-documentation` - Documentation quality validation
+- `/cpv-fix-validation` — Fix issues from a validation report
+- `/cpv-semantic-validation` — Deep semantic analysis (uses opus)

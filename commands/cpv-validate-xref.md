@@ -42,3 +42,5 @@ uv run python scripts/validate_xref.py <plugin-path> --report docs_dev/validate_
 - `/cpv-validate-plugin` - Full plugin validation
 - `/cpv-validate-agents` - Agent-only validation
 - `/cpv-validate-hooks` - Hook-only validation
+- `/cpv-fix-validation` — Fix issues from a validation report
+- `/cpv-semantic-validation` — Deep semantic analysis (uses opus)

@@ -38,9 +38,11 @@ Script-based validation of skill structure, frontmatter, content quality, and pi
 
 ## Output
 
-- **Grade**: A-F letter grade with percentage score
+- **Syntactic Score**: 0-100 numeric with tier (PASS / CONDITIONAL_PASS / FAIL)
 - **Exit Code**: 0 (pass), 1 (CRITICAL), 2 (MAJOR), 3 (MINOR), 4 (NIT)
 - **Report File**: Full output saved to `docs_dev/validate_skill_YYYYMMDD.md`
+
+> For **Semantic Quality Grading** (A-F letter grades), use `/cpv-semantic-validation` instead.
 
 **ALWAYS use `--report`** — never let verbose output consume context.
 

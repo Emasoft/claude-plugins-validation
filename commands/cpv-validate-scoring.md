@@ -37,7 +37,21 @@ Computes a quality score for a Claude Code plugin based on validation results.
 uv run python scripts/validate_scoring.py <plugin-path> --report docs_dev/validate_scoring_$(date +%Y%m%d).md
 ```
 
+## Scoring Type
+
+This command produces a **Syntactic Score** (0-100 numeric) with tiers:
+
+| Tier | Score | Status |
+|------|-------|--------|
+| PASS | 80-100 | Production ready |
+| CONDITIONAL_PASS | 60-79 | Needs improvements |
+| FAIL | 0-59 | Not deployable |
+
+> For **Semantic Quality Grading** (A-F letter grades based on AI judgment), use `/cpv-semantic-validation`.
+
 ## Related Commands
 
 - `/cpv-validate-plugin` - Full plugin validation
 - `/cpv-validate-enterprise` - Enterprise compliance validation
+- `/cpv-fix-validation` — Fix issues from a validation report
+- `/cpv-semantic-validation` — Deep semantic analysis (uses opus)

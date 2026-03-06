@@ -187,3 +187,5 @@ uv run --with pyyaml python scripts/validate_plugin.py . $OPTIONS --report docs_
 - `/cpv-validate-agents` - Agent-only validation
 - `/cpv-validate-mcp` - MCP server validation
 - `/cpv-validate-lsp` - LSP server validation
+- `/cpv-fix-validation` — Fix issues from a validation report
+- `/cpv-semantic-validation` — Deep semantic analysis (uses opus)

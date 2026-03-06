@@ -48,9 +48,12 @@ This skill runs validation scripts that check:
 
 ## Output
 
+- **Syntactic Score**: 0-100 numeric with tier (PASS / CONDITIONAL_PASS / FAIL)
 - **Exit Code**: 0 (pass), 1 (CRITICAL), 2 (MAJOR), 3 (MINOR), 4 (NIT, --strict only). WARNING never blocks.
 - **Summary**: Issue counts by severity level
 - **Report File**: Full output saved to `docs_dev/validate_<plugin-name>_<date>.md`
+
+> For **Semantic Quality Grading** (A-F letter grades), use `/cpv-semantic-validation`.
 
 ## Error Handling
 

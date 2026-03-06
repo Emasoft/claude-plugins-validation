@@ -100,7 +100,7 @@ uv run python scripts/validate_marketplace_pipeline.py /path/to/marketplace --ve
 # - Submodule health score
 # - Workflow presence and correctness
 # - Version sync status
-# - Overall grade (A-F)
+# - Overall syntactic score (0-100) with tier (PASS/CONDITIONAL_PASS/FAIL)
 ```
 
 ### 3.2 Component-Level Validation

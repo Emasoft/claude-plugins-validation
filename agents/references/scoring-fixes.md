@@ -101,7 +101,9 @@ Minimum threshold: **6/10**
 | **CONDITIONAL_PASS** | No critical failures AND overall score between 60–79 OR some categories below threshold |
 | **FAIL** | Any critical failure present OR overall score < 60 |
 
-**Letter grades** are calculated from the overall score (0–100).
+**Syntactic Tiers** are derived from the overall score (0–100): PASS (80+), CONDITIONAL_PASS (60-79), FAIL (<60).
+
+> **Note**: Letter grades (A-F) are used exclusively by the **Semantic Validation** system (`/cpv-semantic-validation`), not by the syntactic scoring.
 
 ---
 
