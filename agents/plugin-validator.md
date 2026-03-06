@@ -47,8 +47,7 @@ uv run python scripts/validate_encoding.py /path/to/plugin --report docs_dev/val
 uv run python scripts/validate_scoring.py /path/to/plugin --report docs_dev/validate_scoring_YYYYMMDD.md
 uv run python scripts/validate_command.py /path/to/plugin --report docs_dev/validate_command_YYYYMMDD.md
 uv run python scripts/validate_agent.py /path/to/plugin --report docs_dev/validate_agent_YYYYMMDD.md
-# lint_files.py has no --report flag; output is inherently compact (lint summary only)
-uv run python scripts/lint_files.py /path/to/plugin
+uv run python scripts/lint_files.py /path/to/plugin --report docs_dev/lint_YYYYMMDD.md
 ```
 
 ## Exit Codes

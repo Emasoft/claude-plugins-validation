@@ -20,6 +20,7 @@ Supported languages:
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import platform
@@ -1094,6 +1095,13 @@ def main() -> int:
         action="store_true",
         help="Show detailed output for each linter",
     )
+    parser.add_argument(
+        "--report",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Save full output to file, print only compact summary to stdout",
+    )
     args = parser.parse_args()
 
     repo_root = args.path.resolve() if args.path else get_repo_root()
@@ -1101,6 +1109,39 @@ def main() -> int:
     if not repo_root.is_dir():
         print(f"{RED}Error: {repo_root} is not a directory{NC}", file=sys.stderr)
         return 1
+
+    # When --report is used, capture all output to file and print only a summary
+    if args.report:
+        report_path = Path(args.report)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        # Capture all stdout to a StringIO buffer
+        captured = io.StringIO()
+        original_stdout = sys.stdout
+        sys.stdout = captured
+        try:
+            print(f"{'=' * 60}")
+            print(f"File Linting (read-only, no auto-fix)")
+            print(f"{'=' * 60}")
+            print()
+            passed = run_linting(repo_root)
+            print()
+            if passed:
+                print("All linting checks passed")
+            else:
+                print("Linting issues found")
+        finally:
+            sys.stdout = original_stdout
+        # Write captured output to report file (strip ANSI codes for readability)
+        import re
+
+        ansi_escape = re.compile(r"\x1b\[[0-9;]*m")
+        report_content = ansi_escape.sub("", captured.getvalue())
+        report_path.write_text(report_content, encoding="utf-8")
+        # Print compact summary to real stdout
+        verdict = "PASS" if passed else "FAIL"
+        print(f"Lint: {verdict}")
+        print(f"  Report: {report_path}")
+        return 0 if passed else 1
 
     print(f"{BOLD}{'=' * 60}{NC}")
     print(f"{BOLD}File Linting (read-only, no auto-fix){NC}")
