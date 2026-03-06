@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from cpv_validation_common import VALID_HOOK_EVENTS, ValidationReport, resolve_tool_command
+from cpv_validation_common import COLORS, VALID_HOOK_EVENTS, ValidationReport, resolve_tool_command
 
 # Events that support matchers
 EVENTS_WITH_MATCHERS = {
@@ -918,16 +918,7 @@ def validate_hooks(
 def print_results(report: HookValidationReport, verbose: bool = False) -> None:
     """Print validation results in human-readable format."""
     # ANSI colors
-    colors = {
-        "CRITICAL": "\033[91m",  # Red
-        "MAJOR": "\033[93m",  # Yellow
-        "MINOR": "\033[94m",  # Blue
-        "NIT": "\033[96m",  # Cyan
-        "WARNING": "\033[95m",  # Magenta
-        "INFO": "\033[90m",  # Gray
-        "PASSED": "\033[92m",  # Green
-        "RESET": "\033[0m",
-    }
+    colors = COLORS
 
     # Count by level
     counts = {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0, "INFO": 0, "PASSED": 0}

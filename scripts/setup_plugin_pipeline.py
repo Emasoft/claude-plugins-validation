@@ -568,10 +568,6 @@ jobs:
             echo "✘ Validation failed (exit code: $exit_code)"
             exit $exit_code
           fi
-
-      - name: Lint Python files
-        run: |
-          ruff check . --exclude .venv --select=E,F,W --ignore=E501 || true
 """
 
 GITIGNORE_ADDITIONS = """

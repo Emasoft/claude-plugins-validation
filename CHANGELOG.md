@@ -2,6 +2,21 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [1.8.5] - 2026-03-06
+
+### Code Deduplication & Audit Fixes
+
+- Centralized `BINARY_EXTENSIONS`, `is_binary_file()`, `should_skip_directory()` in `cpv_validation_common.py`
+- Centralized `SKILL_FRONTMATTER_FIELDS` — shared by `validate_skill.py` and `validate_skill_comprehensive.py`
+- Replaced local `colors = {...}` dicts with `COLORS` import in 10 validators
+- Replaced hardcoded `valid_hook_events` in `validate_skill_comprehensive.py` with `VALID_HOOK_EVENTS` import
+- Replaced hardcoded `PLUGIN_ENV_VARS` in `validate_lsp.py` and `validate_mcp.py` with `VALID_PLUGIN_ENV_VARS` import
+- Imported `EXIT_*` constants in `validate_scoring.py` from common instead of redefining
+- Updated `KNOWN_TOOL_MATCHERS` in installer with all modern Claude Code tools
+- Fixed help text in `setup_git_hooks.py` (commit → push bypass instruction)
+- Removed redundant `ruff check` step from embedded GitHub Actions workflow in `setup_plugin_pipeline.py`
+- All 1101 tests pass, ruff clean, mypy clean, 98/100 A+ self-validation
+
 ## [1.8.4] - 2026-03-06
 
 ### Documentation & Consistency Fixes

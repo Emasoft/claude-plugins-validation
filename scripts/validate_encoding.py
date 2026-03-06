@@ -25,10 +25,11 @@ import sys
 from pathlib import Path
 
 from cpv_validation_common import (
-    SKIP_DIRS,
     ValidationReport,
+    is_binary_file,
     print_report_summary,
     print_results_by_level,
+    should_skip_directory,
 )
 
 # =============================================================================
@@ -102,58 +103,6 @@ BATCH_EXTENSIONS = {
     ".ps1",
 }
 
-# Binary file extensions to skip
-BINARY_EXTENSIONS = {
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".gif",
-    ".bmp",
-    ".ico",
-    ".webp",
-    ".svg",
-    ".pdf",
-    ".doc",
-    ".docx",
-    ".xls",
-    ".xlsx",
-    ".ppt",
-    ".pptx",
-    ".zip",
-    ".tar",
-    ".gz",
-    ".bz2",
-    ".xz",
-    ".7z",
-    ".rar",
-    ".exe",
-    ".dll",
-    ".so",
-    ".dylib",
-    ".a",
-    ".o",
-    ".obj",
-    ".pyc",
-    ".pyo",
-    ".class",
-    ".jar",
-    ".war",
-    ".woff",
-    ".woff2",
-    ".ttf",
-    ".otf",
-    ".eot",
-    ".mp3",
-    ".mp4",
-    ".avi",
-    ".mkv",
-    ".mov",
-    ".wav",
-    ".flac",
-    ".sqlite",
-    ".db",
-    ".sqlite3",
-}
 
 # =============================================================================
 # Encoding Validation Report
@@ -187,32 +136,6 @@ class EncodingValidationReport(ValidationReport):
 # Encoding Detection Utilities
 # =============================================================================
 
-
-def is_binary_file(file_path: Path) -> bool:
-    """Check if a file is binary based on extension or content."""
-    # Check extension first (fast path)
-    if file_path.suffix.lower() in BINARY_EXTENSIONS:
-        return True
-
-    # Check file content for null bytes (binary indicator)
-    try:
-        with open(file_path, "rb") as f:
-            chunk = f.read(8192)
-            return b"\x00" in chunk
-    except (OSError, PermissionError):
-        return True  # Treat unreadable files as binary
-
-
-def should_skip_directory(dir_name: str) -> bool:
-    """Check if a directory should be skipped during scanning."""
-    if dir_name in SKIP_DIRS:
-        return True
-    for skip_pattern in SKIP_DIRS:
-        if "*" in skip_pattern:
-            pattern = skip_pattern.replace("*", ".*")
-            if re.match(pattern, dir_name):
-                return True
-    return False
 
 
 def is_text_file(file_path: Path) -> bool:

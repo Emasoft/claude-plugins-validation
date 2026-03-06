@@ -30,11 +30,12 @@ from cpv_validation_common import (
     EXAMPLE_USERNAMES,
     KNOWN_EXAMPLE_SECRETS,
     SECRET_PATTERNS,
-    SKIP_DIRS,
     USER_PATH_PATTERNS,
     ValidationReport,
+    is_binary_file,
     print_report_summary,
     print_results_by_level,
+    should_skip_directory,
 )
 
 # =============================================================================
@@ -107,95 +108,8 @@ PATH_TRAVERSAL_PATTERNS = [
 ]
 
 # =============================================================================
-# Binary File Detection
-# =============================================================================
-
-# File extensions that are typically binary
-BINARY_EXTENSIONS = {
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".gif",
-    ".bmp",
-    ".ico",
-    ".webp",
-    ".svg",
-    ".pdf",
-    ".doc",
-    ".docx",
-    ".xls",
-    ".xlsx",
-    ".ppt",
-    ".pptx",
-    ".zip",
-    ".tar",
-    ".gz",
-    ".bz2",
-    ".xz",
-    ".7z",
-    ".rar",
-    ".exe",
-    ".dll",
-    ".so",
-    ".dylib",
-    ".a",
-    ".o",
-    ".obj",
-    ".pyc",
-    ".pyo",
-    ".class",
-    ".jar",
-    ".war",
-    ".woff",
-    ".woff2",
-    ".ttf",
-    ".otf",
-    ".eot",
-    ".mp3",
-    ".mp4",
-    ".avi",
-    ".mkv",
-    ".mov",
-    ".wav",
-    ".flac",
-    ".sqlite",
-    ".db",
-    ".sqlite3",
-}
-
-# =============================================================================
 # Security Validation Functions
 # =============================================================================
-
-
-def is_binary_file(file_path: Path) -> bool:
-    """Check if a file is binary based on extension or content."""
-    # Check extension first (fast path)
-    if file_path.suffix.lower() in BINARY_EXTENSIONS:
-        return True
-
-    # Check file content for null bytes (binary indicator)
-    try:
-        with open(file_path, "rb") as f:
-            chunk = f.read(8192)
-            return b"\x00" in chunk
-    except (OSError, PermissionError):
-        return True  # Treat unreadable files as binary
-
-
-def should_skip_directory(dir_name: str) -> bool:
-    """Check if a directory should be skipped during scanning."""
-    # Direct match
-    if dir_name in SKIP_DIRS:
-        return True
-    # Wildcard patterns (e.g., *.egg-info)
-    for skip_pattern in SKIP_DIRS:
-        if "*" in skip_pattern:
-            # Convert glob pattern to regex
-            pattern = skip_pattern.replace("*", ".*")
-            if re.match(pattern, dir_name):
-                return True
-    return False
 
 
 def is_validator_script(file_path: str) -> bool:

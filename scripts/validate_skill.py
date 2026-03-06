@@ -29,24 +29,19 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from cpv_validation_common import BUILTIN_AGENT_TYPES, VALID_CONTEXT_VALUES, ValidationReport
+from cpv_validation_common import (
+    BUILTIN_AGENT_TYPES,
+    COLORS,
+    SKILL_FRONTMATTER_FIELDS,
+    VALID_CONTEXT_VALUES,
+    ValidationReport,
+)
 
 # Maximum recommended SKILL.md line count per Anthropic docs
 MAX_SKILL_LINES = 500
 
 # Known frontmatter fields per official docs
-KNOWN_FRONTMATTER_FIELDS = {
-    "name",
-    "description",
-    "argument-hint",
-    "disable-model-invocation",
-    "user-invocable",
-    "allowed-tools",
-    "model",
-    "context",
-    "agent",
-    "hooks",
-}
+KNOWN_FRONTMATTER_FIELDS = SKILL_FRONTMATTER_FIELDS
 
 
 @dataclass
@@ -537,17 +532,7 @@ def validate_skill(skill_path: Path) -> SkillValidationReport:
 
 def print_results(report: SkillValidationReport, verbose: bool = False) -> None:
     """Print validation results in human-readable format."""
-    # ANSI colors
-    colors = {
-        "CRITICAL": "\033[91m",  # Red
-        "MAJOR": "\033[93m",  # Yellow
-        "MINOR": "\033[94m",  # Blue
-        "NIT": "\033[96m",  # Cyan — blocks only in --strict
-        "WARNING": "\033[95m",  # Magenta — never blocks, always reported
-        "INFO": "\033[90m",  # Gray
-        "PASSED": "\033[92m",  # Green
-        "RESET": "\033[0m",
-    }
+    colors = COLORS
 
     # Count by level
     counts = {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0, "INFO": 0, "PASSED": 0}

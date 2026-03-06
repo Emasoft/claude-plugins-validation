@@ -33,6 +33,7 @@ from typing import Any
 
 import yaml
 from cpv_validation_common import (
+    COLORS,
     SECRET_PATTERNS,
     USER_PATH_PATTERNS,
     ValidationReport,
@@ -322,16 +323,7 @@ def validate_rules_directory(
 
 def print_results(report: ValidationReport, verbose: bool = False) -> None:
     """Print validation results in human-readable format."""
-    colors = {
-        "CRITICAL": "\033[91m",
-        "MAJOR": "\033[93m",
-        "MINOR": "\033[94m",
-        "NIT": "\033[96m",
-        "WARNING": "\033[95m",
-        "INFO": "\033[90m",
-        "PASSED": "\033[92m",
-        "RESET": "\033[0m",
-    }
+    colors = COLORS
 
     counts: dict[str, int] = {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0, "INFO": 0, "PASSED": 0}
     for r in report.results:
