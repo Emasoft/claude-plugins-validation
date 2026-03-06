@@ -7,12 +7,6 @@ description: |
   improvement recommendations. Use for quality audits, pre-deployment checks, or
   CI/CD integration.
 model: sonnet
-tools:
-  - Read
-  - Bash
-  - Glob
-  - Grep
-  - Write
 ---
 
 # Skill Validation Agent

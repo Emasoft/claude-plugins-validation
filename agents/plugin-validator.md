@@ -1,15 +1,6 @@
 ---
 name: plugin-validator
 description: Expert agent for comprehensive validation of Claude Code plugins, marketplaces, hooks, skills, and MCP servers. Performs deep structural analysis, specification compliance checks, CI/CD pipeline verification, and provides actionable remediation guidance.
-tools:
-  - Bash
-  - Read
-  - Write
-  - Edit
-  - Glob
-  - Grep
-  - Task
-  - AskUserQuestion
 ---
 
 # Plugin Validator Agent
