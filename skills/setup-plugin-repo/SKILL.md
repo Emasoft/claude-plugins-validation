@@ -87,9 +87,7 @@ Plugin: <placeholder-for-plugin-name> | Owner: <placeholder-for-github-repo-owne
 
 ## Compiling Templates
 
-Replace all `<placeholder-for-...>` tokens with user values. Use `grep -r 'placeholder-for-' <file>` to verify none remain. See the Placeholder Reference table in each reference file for token descriptions.
-
-Only the hub-and-spoke marketplace architecture (submodules + repository_dispatch) is supported. Decline requests for alternative structures.
+Replace `<placeholder-for-...>` tokens with user values. Run `grep -r 'placeholder-for-'` to verify none remain. Each plugin MUST have its own repo — never embed plugins inside the marketplace. Plugins version independently, PRs stay isolated, and subtrees/worktrees cause merge conflicts at scale.
 
 ## Token Optimization
 

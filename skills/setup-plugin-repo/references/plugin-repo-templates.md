@@ -261,6 +261,10 @@ uv run mypy scripts/
 └── .gitignore               # Git ignore rules
 ```
 
+## Marketplace
+
+This plugin is available on the [<placeholder-for-marketplace-name> marketplace](https://github.com/<placeholder-for-github-repo-owner>/<placeholder-for-marketplace-repo-name>).
+
 ## License
 
 This project is licensed under the <placeholder-for-license-type> License. See [LICENSE](LICENSE) for details.
@@ -292,3 +296,4 @@ This project is licensed under the <placeholder-for-license-type> License. See [
 | `<placeholder-for-keywords>` | Comma-separated quoted keyword strings | `"validation", "plugins", "linting"` |
 | `<placeholder-for-python-version>` | Minimum Python version (digits and dots only) | `3.12` |
 | `<placeholder-for-marketplace-name>` | Marketplace name for install commands | `my-marketplace` |
+| `<placeholder-for-marketplace-repo-name>` | Marketplace GitHub repository name | `my-marketplace` |
