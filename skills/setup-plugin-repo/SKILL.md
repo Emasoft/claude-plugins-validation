@@ -27,7 +27,7 @@ Creates a Claude Code plugin GitHub repo with CI/CD, git hooks, and marketplace 
 ## Instructions
 
 1. **Create GitHub repo**: `gh repo create <owner>/<name> --public --clone`, then `cd` into it
-2. **Initialize plugin structure** from `references/plugin-repo-templates.md`: create `plugin.json`, `pyproject.toml`, `.gitignore`, `README.md` — fill all `{{PLACEHOLDER}}` values
+2. **Initialize plugin structure** from `references/plugin-repo-templates.md`: create `plugin.json`, `pyproject.toml`, `.gitignore`, `README.md` — fill all `<placeholder-for-...>` values
 3. **Install CI/CD workflows** from `references/plugin-workflows.md`: copy `ci.yml`, `release.yml`, `validate.yml`, `notify-marketplace.yml` into `.github/workflows/`
 4. **Install git hooks** from `references/plugin-hooks-and-scripts.md`: copy `pre-push` to `.githooks/`, add `publish.py` and `setup-hooks.py` to `scripts/`, run `git config core.hooksPath .githooks`
 5. **Configure marketplace notification**: ask user for `MARKETPLACE_PAT`, run `gh secret set MARKETPLACE_PAT` (skip if declined)
@@ -62,13 +62,13 @@ Report: repo URL, validation result (VALID/INVALID + severity counts), installed
 
 **Input:**
 ```
-Plugin: my-code-formatter | Owner: Emasoft | Desc: Custom style formatter
+Plugin: <placeholder-for-plugin-name> | Owner: <placeholder-for-github-repo-owner> | Desc: <placeholder-for-plugin-description>
 ```
 
 **Output:**
 ```
 [DONE] setup-plugin-repo
-  Repo: https://github.com/Emasoft/my-code-formatter
+  Repo: https://github.com/<placeholder-for-github-repo-owner>/<placeholder-for-plugin-name>
   Validation: VALID (0 critical, 0 major, 1 minor)
   Workflows: ci.yml, release.yml, validate.yml, notify-marketplace.yml
   Hooks: pre-push | Marketplace: configured

@@ -21,9 +21,9 @@ Save as `git-hooks/pre-push`:
 
 ```python
 #!/usr/bin/env python3
-"""Pre-push hook for {{PLUGIN_NAME}}.
+"""Pre-push hook for <placeholder-for-plugin-name>.
 
-Exit codes from {{VALIDATE_SCRIPT}}:
+Exit codes from <placeholder-for-validate-script>:
   0 - All checks passed
   1 - CRITICAL issues found (blocks push)
   2 - MAJOR issues found (blocks push)
@@ -151,7 +151,7 @@ def main() -> int:
     if local_version:
         try:
             r = subprocess.run(
-                ["git", "show", "{{DEFAULT_BRANCH}}:.claude-plugin/plugin.json"],
+                ["git", "show", "<placeholder-for-default-branch>:.claude-plugin/plugin.json"],
                 capture_output=True, text=True, cwd=str(repo_root))
             if r.returncode == 0:
                 rv = json.loads(r.stdout).get("version")
@@ -166,14 +166,14 @@ def main() -> int:
     # Gate 2: Lint
     python_cmd = find_python_command()
     cprint(f"{BLUE}Running linting...{NC}")
-    if run_script(python_cmd, repo_root / "scripts" / "{{LINT_SCRIPT}}",
+    if run_script(python_cmd, repo_root / "scripts" / "<placeholder-for-lint-script>",
                   [str(repo_root)], cwd=repo_root) != 0:
         cprint(f"{RED}BLOCKED: Linting issues found{NC}")
         return 1
 
     # Gate 3: Validate (strict mode)
     cprint(f"{BLUE}Running validation...{NC}")
-    ve = run_script(python_cmd, repo_root / "scripts" / "{{VALIDATE_SCRIPT}}",
+    ve = run_script(python_cmd, repo_root / "scripts" / "<placeholder-for-validate-script>",
                     [".", "--verbose", "--strict"], cwd=repo_root)
 
     # Optional: marketplace.json consistency
@@ -220,9 +220,9 @@ Unified publish pipeline: test -> lint -> validate -> consistency -> bump -> com
 
 ```
 Step 1: Check working tree     git status --porcelain (must be clean)
-Step 2: Run tests               uv run pytest {{TEST_DIR}}/ -x -q --tb=short
-Step 3: Lint files               uv run python scripts/{{LINT_SCRIPT}} .
-Step 4: Validate plugin          uv run python scripts/{{VALIDATE_SCRIPT}} . --strict
+Step 2: Run tests               uv run pytest <placeholder-for-test-dir>/ -x -q --tb=short
+Step 3: Lint files               uv run python scripts/<placeholder-for-lint-script> .
+Step 4: Validate plugin          uv run python scripts/<placeholder-for-validate-script> . --strict
 Step 5: Version consistency      check all version sources match
 Step 6: Bump version             update plugin.json, pyproject.toml, __version__ vars
 Step 7: Commit                   git add -A && git commit -m "chore: bump version to X.Y.Z"
@@ -305,15 +305,15 @@ if __name__ == "__main__":
 
 ## Placeholder Reference
 
-All repo-specific values use `{{PLACEHOLDER}}` tokens. Replace before use.
+All repo-specific values use `<placeholder-for-...>` tokens. Replace before use.
 
 | Placeholder | Description | Example Value |
 |---|---|---|
-| `{{PLUGIN_NAME}}` | Plugin name (used in docstrings) | `my-awesome-plugin` |
-| `{{DEFAULT_BRANCH}}` | Remote branch for version comparison | `origin/master` or `origin/main` |
-| `{{LINT_SCRIPT}}` | Lint script filename in `scripts/` | `lint_files.py` |
-| `{{VALIDATE_SCRIPT}}` | Validation script filename in `scripts/` | `validate_plugin.py` |
-| `{{TEST_DIR}}` | Test suite directory | `tests` |
+| `<placeholder-for-plugin-name>` | Plugin name (used in docstrings) | `my-awesome-plugin` |
+| `<placeholder-for-default-branch>` | Remote branch for version comparison | `origin/master` or `origin/main` |
+| `<placeholder-for-lint-script>` | Lint script filename in `scripts/` | `lint_files.py` |
+| `<placeholder-for-validate-script>` | Validation script filename in `scripts/` | `validate_plugin.py` |
+| `<placeholder-for-test-dir>` | Test suite directory | `tests` |
 
 ### Installation Quick-Start
 

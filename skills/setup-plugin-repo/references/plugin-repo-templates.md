@@ -15,18 +15,18 @@ Place this file at `.claude-plugin/plugin.json` in the repository root.
 
 ```json
 {
-  "name": "{{PLUGIN_NAME}}",
-  "version": "{{PLUGIN_VERSION}}",
-  "description": "{{PLUGIN_DESCRIPTION}}",
+  "name": "<placeholder-for-plugin-name>",
+  "version": "<placeholder-for-plugin-version>",
+  "description": "<placeholder-for-plugin-description>",
   "author": {
-    "name": "{{AUTHOR_NAME}}",
-    "email": "{{AUTHOR_EMAIL}}"
+    "name": "<placeholder-for-plugin-author-name>",
+    "email": "<placeholder-for-author-email>"
   },
-  "homepage": "https://github.com/{{GITHUB_OWNER}}/{{REPO_NAME}}",
-  "repository": "https://github.com/{{GITHUB_OWNER}}/{{REPO_NAME}}",
-  "license": "{{LICENSE}}",
+  "homepage": "https://github.com/<placeholder-for-github-repo-owner>/<placeholder-for-plugin-github-repo>",
+  "repository": "https://github.com/<placeholder-for-github-repo-owner>/<placeholder-for-plugin-github-repo>",
+  "license": "<placeholder-for-license-type>",
   "keywords": [
-    {{KEYWORDS}}
+    <placeholder-for-keywords>
   ]
 }
 ```
@@ -52,11 +52,11 @@ build-backend = "hatchling.build"
 packages = ["scripts"]
 
 [project]
-name = "{{PLUGIN_NAME}}"
-version = "{{PLUGIN_VERSION}}"
-description = "{{PLUGIN_DESCRIPTION}}"
+name = "<placeholder-for-plugin-name>"
+version = "<placeholder-for-plugin-version>"
+description = "<placeholder-for-plugin-description>"
 readme = "README.md"
-requires-python = ">={{PYTHON_VERSION}}"
+requires-python = ">=<placeholder-for-python-version>"
 dependencies = [
     "mypy>=1.19.1",
     "pytest>=8.0.0",
@@ -77,12 +77,12 @@ ignore = ["E501"]
 "tests/*.py" = ["E402"]
 
 [tool.mypy]
-python_version = "{{PYTHON_VERSION}}"
+python_version = "<placeholder-for-python-version>"
 warn_return_any = true
 warn_unused_configs = true
 
 [tool.pyright]
-pythonVersion = "{{PYTHON_VERSION}}"
+pythonVersion = "<placeholder-for-python-version>"
 extraPaths = ["scripts", "tests"]
 reportMissingImports = "warning"
 typeCheckingMode = "basic"
@@ -91,7 +91,7 @@ typeCheckingMode = "basic"
 ### Notes
 - Replace `packages = ["scripts"]` with the actual package directory for your plugin.
 - Adjust `dependencies` to include only what your plugin needs.
-- `{{PYTHON_VERSION}}` should be a version string like `3.12` (without the `>=` prefix, which is already included in the template where needed).
+- `<placeholder-for-python-version>` should be a version string like `3.12` (without the `>=` prefix, which is already included in the template where needed).
 
 ---
 
@@ -160,17 +160,17 @@ Cargo.lock
 Place this file at the repository root.
 
 ````markdown
-# {{PLUGIN_NAME}}
+# <placeholder-for-plugin-name>
 
-{{PLUGIN_DESCRIPTION}}
+<placeholder-for-plugin-description>
 
 ## Installation
 
 ### From GitHub
 
 ```bash
-gh repo clone {{GITHUB_OWNER}}/{{REPO_NAME}}
-cd {{REPO_NAME}}
+gh repo clone <placeholder-for-github-repo-owner>/<placeholder-for-plugin-github-repo>
+cd <placeholder-for-plugin-github-repo>
 uv venv --python 3.12
 source .venv/bin/activate
 uv pip install -e .
@@ -183,7 +183,7 @@ Add to your Claude Code configuration:
 ```json
 {
   "plugins": [
-    "https://github.com/{{GITHUB_OWNER}}/{{REPO_NAME}}"
+    "https://github.com/<placeholder-for-github-repo-owner>/<placeholder-for-plugin-github-repo>"
   ]
 }
 ```
@@ -199,13 +199,13 @@ uv run python scripts/main.py --help
 
 ### Prerequisites
 
-- Python >= {{PYTHON_VERSION}}
+- Python >= <placeholder-for-python-version>
 - [uv](https://docs.astral.sh/uv/) package manager
 
 ### Setup
 
 ```bash
-uv venv --python {{PYTHON_VERSION}}
+uv venv --python <placeholder-for-python-version>
 source .venv/bin/activate
 uv pip install -e ".[dev]"
 ```
@@ -227,7 +227,7 @@ uv run mypy scripts/
 ## Project Structure
 
 ```
-{{REPO_NAME}}/
+<placeholder-for-plugin-github-repo>/
 ├── .claude-plugin/
 │   └── plugin.json          # Plugin manifest
 ├── scripts/                 # Plugin source code
@@ -240,11 +240,11 @@ uv run mypy scripts/
 
 ## License
 
-This project is licensed under the {{LICENSE}} License. See [LICENSE](LICENSE) for details.
+This project is licensed under the <placeholder-for-license-type> License. See [LICENSE](LICENSE) for details.
 
 ## Author
 
-**{{AUTHOR_NAME}}** - [GitHub](https://github.com/{{GITHUB_OWNER}})
+**<placeholder-for-plugin-author-name>** - [GitHub](https://github.com/<placeholder-for-github-repo-owner>)
 ````
 
 ### Notes
@@ -258,13 +258,13 @@ This project is licensed under the {{LICENSE}} License. See [LICENSE](LICENSE) f
 
 | Placeholder | Description | Example Value |
 |---|---|---|
-| `{{PLUGIN_NAME}}` | Plugin package name (lowercase, hyphens allowed) | `my-awesome-plugin` |
-| `{{PLUGIN_VERSION}}` | Semantic version string | `1.0.0` |
-| `{{PLUGIN_DESCRIPTION}}` | One-line description of the plugin | `A plugin that validates Claude Code configurations` |
-| `{{AUTHOR_NAME}}` | Author's display name or GitHub username | `JaneDev` |
-| `{{AUTHOR_EMAIL}}` | Author's email (can use GitHub noreply) | `12345+JaneDev@users.noreply.github.com` |
-| `{{GITHUB_OWNER}}` | GitHub account or organization name | `JaneDev` |
-| `{{REPO_NAME}}` | GitHub repository name (usually matches plugin name) | `my-awesome-plugin` |
-| `{{LICENSE}}` | SPDX license identifier | `MIT` |
-| `{{KEYWORDS}}` | Comma-separated quoted keyword strings | `"validation", "plugins", "linting"` |
-| `{{PYTHON_VERSION}}` | Minimum Python version (digits and dots only) | `3.12` |
+| `<placeholder-for-plugin-name>` | Plugin package name (lowercase, hyphens allowed) | `my-awesome-plugin` |
+| `<placeholder-for-plugin-version>` | Semantic version string | `1.0.0` |
+| `<placeholder-for-plugin-description>` | One-line description of the plugin | `A plugin that validates Claude Code configurations` |
+| `<placeholder-for-plugin-author-name>` | Author's display name or GitHub username | `my-org` |
+| `<placeholder-for-author-email>` | Author's email (can use GitHub noreply) | `user@example.com` |
+| `<placeholder-for-github-repo-owner>` | GitHub account or organization name | `my-org` |
+| `<placeholder-for-plugin-github-repo>` | GitHub repository name (usually matches plugin name) | `my-awesome-plugin` |
+| `<placeholder-for-license-type>` | SPDX license identifier | `MIT` |
+| `<placeholder-for-keywords>` | Comma-separated quoted keyword strings | `"validation", "plugins", "linting"` |
+| `<placeholder-for-python-version>` | Minimum Python version (digits and dots only) | `3.12` |

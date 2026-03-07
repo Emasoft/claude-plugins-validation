@@ -7,8 +7,8 @@
 - [notify-marketplace.yml.template (Plugin Side)](#notify-marketplaceymltemplate-plugin-side)
 
 Reusable GitHub Actions workflow templates for the Claude Plugin Marketplace
-ecosystem. Based on production workflows from the Emasoft marketplace. Replace
-all `{{PLACEHOLDER}}` values with your actual configuration before committing.
+ecosystem. Based on production marketplace workflows. Replace
+all `<placeholder-for-...>` values with your actual configuration before committing.
 
 ---
 
@@ -16,9 +16,9 @@ all `{{PLACEHOLDER}}` values with your actual configuration before committing.
 
 | Placeholder | Description | Example |
 |-------------|-------------|---------|
-| `{{MARKETPLACE_OWNER}}` | GitHub username or org that owns the marketplace repo | `acme-org` |
-| `{{MARKETPLACE_REPO}}` | Marketplace repository name | `my-plugins-marketplace` |
-| `{{PYTHON_VERSION}}` | Python version for CI jobs | `3.12` |
+| `<placeholder-for-marketplace-owner>` | GitHub username or org that owns the marketplace repo | `my-org` |
+| `<placeholder-for-marketplace-repo-name>` | Marketplace repository name | `my-plugins-marketplace` |
+| `<placeholder-for-python-version>` | Python version for CI jobs | `3.12` |
 
 ### Required Secrets
 
@@ -56,7 +56,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '{{PYTHON_VERSION}}'
+          python-version: '<placeholder-for-python-version>'
 
       - name: Install dependencies
         run: |
@@ -221,7 +221,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '{{PYTHON_VERSION}}'
+          python-version: '<placeholder-for-python-version>'
 
       - name: Fetch and update plugin version
         env:
@@ -399,7 +399,7 @@ event to the marketplace repo so it can pull the latest plugin metadata.
    - Name: `MARKETPLACE_PAT`
    - Value: the PAT from step 1.
 
-3. **Replace the placeholders** `{{MARKETPLACE_OWNER}}` and `{{MARKETPLACE_REPO}}` below.
+3. **Replace the placeholders** `<placeholder-for-marketplace-owner>` and `<placeholder-for-marketplace-repo-name>` below.
 
 > **Important:** Do NOT use `GITHUB_TOKEN` -- it lacks permission to trigger
 > workflows in other repositories.
@@ -430,8 +430,8 @@ on:
 
 env:
   # Update these to match your marketplace repo
-  MARKETPLACE_OWNER: '{{MARKETPLACE_OWNER}}'
-  MARKETPLACE_REPO: '{{MARKETPLACE_REPO}}'
+  MARKETPLACE_OWNER: '<placeholder-for-marketplace-owner>'
+  MARKETPLACE_REPO: '<placeholder-for-marketplace-repo-name>'
 
 jobs:
   notify:

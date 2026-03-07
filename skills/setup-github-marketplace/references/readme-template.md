@@ -7,22 +7,22 @@
 - [Auto-Generation](#auto-generation)
 - [Customization Guide](#customization-guide)
 
-Reference for the auto-generated README.md that is placed in each marketplace repository. The template uses placeholder syntax and is filled in by `generate-readme.py`.
+Reference for the auto-generated README.md that is placed in each marketplace repository. The template uses `<placeholder-for-...>` syntax and is filled in by `generate-readme.py`.
 
 ---
 
 ## Template Content
 
-Below is the full README template. Placeholders use `{{PLACEHOLDER}}` syntax and are replaced at generation time. The plugin table between sentinel comments is fully auto-generated.
+Below is the full README template. Placeholders use `<placeholder-for-...>` syntax and are replaced at generation time. The plugin table between sentinel comments is fully auto-generated.
 
 ````markdown
-# {{MARKETPLACE_NAME}} Marketplace
+# <placeholder-for-marketplace-name> Marketplace
 
-[![Validate](https://github.com/{{OWNER}}/{{REPO_NAME}}/actions/workflows/validate.yml/badge.svg)](https://github.com/{{OWNER}}/{{REPO_NAME}}/actions/workflows/validate.yml)
-[![Plugins](https://img.shields.io/badge/plugins-{{PLUGIN_COUNT}}-blue)](https://github.com/{{OWNER}}/{{REPO_NAME}})
-[![License](https://img.shields.io/badge/license-{{LICENSE}}-green)](LICENSE)
+[![Validate](https://github.com/<placeholder-for-github-repo-owner>/<placeholder-for-marketplace-repo-name>/actions/workflows/validate.yml/badge.svg)](https://github.com/<placeholder-for-github-repo-owner>/<placeholder-for-marketplace-repo-name>/actions/workflows/validate.yml)
+[![Plugins](https://img.shields.io/badge/plugins-<placeholder-for-plugin-count>-blue)](https://github.com/<placeholder-for-github-repo-owner>/<placeholder-for-marketplace-repo-name>)
+[![License](https://img.shields.io/badge/license-<placeholder-for-license-type>-green)](LICENSE)
 
-{{DESCRIPTION}}
+<placeholder-for-marketplace-description>
 
 This marketplace provides a centralized repository where Claude Code plugins are maintained as Git submodules, automatically updated when their source repositories change.
 
@@ -37,7 +37,7 @@ flowchart TB
         PB[Plugin B Repo]
     end
 
-    subgraph Marketplace["{{MARKETPLACE_NAME}} Repository"]
+    subgraph Marketplace["<placeholder-for-marketplace-name> Repository"]
         direction TB
         MJ[".claude-plugin/<br/>marketplace.json"]
         GM[".gitmodules"]
@@ -79,31 +79,31 @@ flowchart TB
 
 ```bash
 # Register the marketplace with Claude Code (HTTPS)
-claude plugin marketplace add {{MARKETPLACE_NAME}} https://github.com/{{OWNER}}/{{REPO_NAME}}.git
+claude plugin marketplace add <placeholder-for-marketplace-name> https://github.com/<placeholder-for-github-repo-owner>/<placeholder-for-marketplace-repo-name>.git
 
 # Or using SSH
-claude plugin marketplace add {{MARKETPLACE_NAME}} git@github.com:{{OWNER}}/{{REPO_NAME}}.git
+claude plugin marketplace add <placeholder-for-marketplace-name> git@github.com:<placeholder-for-github-repo-owner>/<placeholder-for-marketplace-repo-name>.git
 ```
 
 ### Installing a Plugin
 
 ```bash
 # List all available plugins
-claude plugin search @{{MARKETPLACE_NAME}}
+claude plugin search @<placeholder-for-marketplace-name>
 
 # Install a specific plugin
-claude plugin install <plugin-name>@{{MARKETPLACE_NAME}}
+claude plugin install <plugin-name>@<placeholder-for-marketplace-name>
 
 # Install with a specific scope
-claude plugin install <plugin-name>@{{MARKETPLACE_NAME}} --scope user
-claude plugin install <plugin-name>@{{MARKETPLACE_NAME}} --scope project
+claude plugin install <plugin-name>@<placeholder-for-marketplace-name> --scope user
+claude plugin install <plugin-name>@<placeholder-for-marketplace-name> --scope project
 ```
 
 ### Updating Plugins
 
 ```bash
 # Update a specific plugin
-claude plugin update <plugin-name>@{{MARKETPLACE_NAME}}
+claude plugin update <plugin-name>@<placeholder-for-marketplace-name>
 ```
 
 ---
@@ -149,7 +149,7 @@ jobs:
         uses: peter-evans/repository-dispatch@v4
         with:
           token: ${{ secrets.MARKETPLACE_PAT }}
-          repository: {{OWNER}}/{{REPO_NAME}}
+          repository: <placeholder-for-github-repo-owner>/<placeholder-for-marketplace-repo-name>
           event-type: plugin-updated
           client-payload: >-
             {"plugin": "${{ steps.plugin.outputs.name }}",
@@ -208,7 +208,7 @@ For detailed troubleshooting, see the [Troubleshooting Guide](../references/trou
 
 ## License
 
-{{LICENSE_TEXT}}
+<placeholder-for-license-text>
 
 Individual plugins maintain their own licenses. See each plugin's repository for details.
 ````
@@ -221,13 +221,13 @@ The following placeholders are recognized by `generate-readme.py` and replaced d
 
 | Placeholder | Source | Description |
 |-------------|--------|-------------|
-| `{{MARKETPLACE_NAME}}` | `marketplace.json` > `name` | Display name of the marketplace |
-| `{{OWNER}}` | GitHub API or CLI argument | GitHub owner (user or organization) |
-| `{{REPO_NAME}}` | GitHub API or CLI argument | Repository name on GitHub |
-| `{{DESCRIPTION}}` | `marketplace.json` > `description` | One-line marketplace description |
-| `{{PLUGIN_COUNT}}` | Computed | Number of plugins in `marketplace.json` |
-| `{{LICENSE}}` | `LICENSE` file or CLI argument | SPDX license identifier (e.g., `MIT`) |
-| `{{LICENSE_TEXT}}` | `LICENSE` file | Full license notice sentence |
+| `<placeholder-for-marketplace-name>` | `marketplace.json` > `name` | Display name of the marketplace |
+| `<placeholder-for-github-repo-owner>` | GitHub API or CLI argument | GitHub owner (user or organization) |
+| `<placeholder-for-marketplace-repo-name>` | GitHub API or CLI argument | Repository name on GitHub |
+| `<placeholder-for-marketplace-description>` | `marketplace.json` > `description` | One-line marketplace description |
+| `<placeholder-for-plugin-count>` | Computed | Number of plugins in `marketplace.json` |
+| `<placeholder-for-license-type>` | `LICENSE` file or CLI argument | SPDX license identifier (e.g., `MIT`) |
+| `<placeholder-for-license-text>` | `LICENSE` file | Full license notice sentence |
 
 ### Plugin Table Sentinels
 
@@ -253,7 +253,7 @@ The plugin table is bounded by HTML comments that act as sentinels:
 
 1. Reads the template from `templates/README-marketplace.md` (or uses a built-in default)
 2. Reads `.claude-plugin/marketplace.json` to extract marketplace metadata
-3. Replaces all `{{PLACEHOLDER}}` tokens with actual values
+3. Replaces all `<placeholder-for-...>` tokens with actual values
 4. Builds the plugin table rows from the `plugins` array
 5. Inserts the table between `<!-- PLUGINS_TABLE_START -->` and `<!-- PLUGINS_TABLE_END -->`
 6. Writes the result to `README.md` at the repository root
@@ -295,14 +295,14 @@ This content will not be overwritten by generate-readme.py.
 Edit the badge URLs in the template header. The default uses `shields.io` flat badges. Change the style parameter:
 
 ```markdown
-![badge](https://img.shields.io/badge/plugins-{{PLUGIN_COUNT}}-blue?style=for-the-badge)
+![badge](https://img.shields.io/badge/plugins-<placeholder-for-plugin-count>-blue?style=for-the-badge)
 ```
 
 ### Adding Extra Placeholders
 
 To add a custom placeholder:
 
-1. Add the placeholder in the template: `{{MY_CUSTOM_FIELD}}`
+1. Add the placeholder in the template: `<placeholder-for-custom-field>`
 2. Update `generate-readme.py` to resolve it from the appropriate source (marketplace.json, CLI args, or environment)
 3. Add a row to the Placeholder Reference table in this document
 
