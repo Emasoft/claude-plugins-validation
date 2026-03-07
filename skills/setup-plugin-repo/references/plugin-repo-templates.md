@@ -162,9 +162,20 @@ Place this file at the repository root.
 ````markdown
 # <placeholder-for-plugin-name>
 
+[![CI](https://github.com/<placeholder-for-github-repo-owner>/<placeholder-for-plugin-github-repo>/actions/workflows/ci.yml/badge.svg)](https://github.com/<placeholder-for-github-repo-owner>/<placeholder-for-plugin-github-repo>/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/version-<placeholder-for-plugin-version>-blue)](https://github.com/<placeholder-for-github-repo-owner>/<placeholder-for-plugin-github-repo>)
+[![License](https://img.shields.io/badge/license-<placeholder-for-license-type>-green)](LICENSE)
+[![Validation](https://github.com/<placeholder-for-github-repo-owner>/<placeholder-for-plugin-github-repo>/actions/workflows/validate.yml/badge.svg)](https://github.com/<placeholder-for-github-repo-owner>/<placeholder-for-plugin-github-repo>/actions/workflows/validate.yml)
+
 <placeholder-for-plugin-description>
 
 ## Installation
+
+### From Marketplace
+
+```bash
+claude plugin install <placeholder-for-plugin-name>@<placeholder-for-marketplace-name>
+```
 
 ### From GitHub
 
@@ -186,6 +197,18 @@ Add to your Claude Code configuration:
     "https://github.com/<placeholder-for-github-repo-owner>/<placeholder-for-plugin-github-repo>"
   ]
 }
+```
+
+## Uninstall
+
+```bash
+claude plugin uninstall <placeholder-for-plugin-name>
+```
+
+## Update
+
+```bash
+claude plugin update <placeholder-for-plugin-name>@<placeholder-for-marketplace-name>
 ```
 
 ## Usage
@@ -268,3 +291,4 @@ This project is licensed under the <placeholder-for-license-type> License. See [
 | `<placeholder-for-license-type>` | SPDX license identifier | `MIT` |
 | `<placeholder-for-keywords>` | Comma-separated quoted keyword strings | `"validation", "plugins", "linting"` |
 | `<placeholder-for-python-version>` | Minimum Python version (digits and dots only) | `3.12` |
+| `<placeholder-for-marketplace-name>` | Marketplace name for install commands | `my-marketplace` |

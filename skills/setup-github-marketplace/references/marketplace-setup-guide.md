@@ -72,16 +72,16 @@ When `--plugin` is provided multiple times, all listed plugins are processed as 
 ### Step 1: Resolve owner and check existence
 
 ```bash
-OWNER={{owner}}
+OWNER=<placeholder-for-github-repo-owner>
 [ -z "$OWNER" ] && OWNER=$(gh api user -q .login)
-gh repo view "$OWNER/{{marketplace-name}}" --json name 2>/dev/null && echo "Repo exists, skip to Phase 2"
+gh repo view "$OWNER/<placeholder-for-marketplace-repo-name>" --json name 2>/dev/null && echo "Repo exists, skip to Phase 2"
 ```
 
 ### Step 2: Create, clone, and initialize
 
 ```bash
-gh repo create "$OWNER/{{marketplace-name}}" --public --description "Claude Code plugin marketplace"
-gh repo clone "$OWNER/{{marketplace-name}}" && cd "{{marketplace-name}}"
+gh repo create "$OWNER/<placeholder-for-marketplace-repo-name>" --public --description "Claude Code plugin marketplace"
+gh repo clone "$OWNER/<placeholder-for-marketplace-repo-name>" && cd "<placeholder-for-marketplace-repo-name>"
 mkdir -p .claude-plugin .github/workflows scripts
 ```
 
@@ -191,7 +191,7 @@ for PLUGIN in "${PLUGINS[@]}"; do
       -f content="$(echo "$WORKFLOW_CONTENT" | base64)" -f sha="$EXISTING"
   else
     gh api --method PUT "repos/$OWNER/$PLUGIN/contents/.github/workflows/notify-marketplace.yml" \
-      -f message="Install notify-marketplace.yml for {{marketplace-name}}" \
+      -f message="Install notify-marketplace.yml for <placeholder-for-marketplace-repo-name>" \
       -f content="$(echo "$WORKFLOW_CONTENT" | base64)"
   fi
 done
@@ -261,10 +261,10 @@ Automatic: developer pushes to plugin repo -> `notify-marketplace.yml` fires `re
 
 ### Migrate plugins between marketplaces
 
-Move plugins from `--source-marketplace` to `{{marketplace-name}}`. Both must exist. For each plugin: copy entry to target `marketplace.json`, repoint `notify-marketplace.yml` to target via `gh api`, remove entry from source, regenerate READMEs on both, validate both.
+Move plugins from `--source-marketplace` to `<placeholder-for-marketplace-repo-name>`. Both must exist. For each plugin: copy entry to target `marketplace.json`, repoint `notify-marketplace.yml` to target via `gh api`, remove entry from source, regenerate READMEs on both, validate both.
 
 ```bash
-SOURCE="{{source-marketplace}}" && TARGET="{{marketplace-name}}"
+SOURCE="<placeholder-for-source-marketplace>" && TARGET="<placeholder-for-marketplace-repo-name>"
 SOURCE_JSON=$(gh api "repos/$OWNER/$SOURCE/contents/.claude-plugin/marketplace.json" -q '.content' | base64 --decode)
 for PLUGIN in "${PLUGINS_TO_MIGRATE[@]}"; do
   ENTRY=$(echo "$SOURCE_JSON" | jq --arg name "$PLUGIN" '.plugins[] | select(.name == $name)')
@@ -299,7 +299,7 @@ Reference: [Plugin Linking Guide](plugin-linking-guide.md)
 ### Step 1: Validate marketplace structure
 
 ```bash
-uv run python scripts/validate_marketplace.py {{marketplace-path}} --verbose --report docs_dev/validate_marketplace_YYYYMMDD.md
+uv run python scripts/validate_marketplace.py <placeholder-for-marketplace-path> --verbose --report docs_dev/validate_marketplace_YYYYMMDD.md
 ```
 
 Confirm: marketplace.json is valid, all plugin entries have source config, workflows are installed.
@@ -330,8 +330,8 @@ gh workflow run notify-marketplace.yml --repo "$OWNER/$FIRST_PLUGIN"
 ### Step 4: Install hooks and verify CI
 
 ```bash
-uv run python scripts/setup_git_hooks.py --marketplace-dir {{marketplace-path}}
-gh run list --repo "$OWNER/{{marketplace-name}}" --limit 5
+uv run python scripts/setup_git_hooks.py --marketplace-dir <placeholder-for-marketplace-path>
+gh run list --repo "$OWNER/<placeholder-for-marketplace-repo-name>" --limit 5
 ```
 
 Confirm pre-push hooks are active and recent workflow runs completed successfully.

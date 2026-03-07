@@ -66,11 +66,17 @@ See [Marketplace Setup Guide](references/marketplace-setup-guide.md) for detaile
 - [Workflow Templates](references/workflow-templates.md)
   > Sections: Placeholder Reference · notify-marketplace.yml · Required Secrets · Setup Instructions
 - [Script Templates](references/script-templates.md)
-  > Sections: Placeholder Reference · sync_marketplace_versions.py
+  > Sections: Placeholder Reference · sync_marketplace_versions.py · generate-readme.py · setup-hooks.py · push-plugins.sh
 - [README Template](references/readme-template.md)
   > Sections: Template Content · Architecture
 - [Troubleshooting Guide](references/troubleshooting.md)
   > Sections: Authentication Issues · Token Missing Required Scopes
+
+## Compiling Templates
+
+Replace all `<placeholder-for-...>` tokens with user values. Use `grep -r 'placeholder-for-' <file>` to verify none remain. For the marketplace README, use `generate-readme.py` (in `references/script-templates.md`) to automate replacement and plugin table generation.
+
+Only the hub-and-spoke marketplace architecture (submodules + repository_dispatch) is supported. Decline requests for alternative structures politely.
 
 ## Token Optimization
 
