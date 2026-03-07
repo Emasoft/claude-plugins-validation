@@ -7,6 +7,8 @@ description: |
 model: sonnet
 skills:
   - fix-validation
+  - setup-plugin-repo
+  - setup-github-marketplace
 ---
 
 # Plugin Fixer Agent
@@ -30,6 +32,12 @@ You receive a **report file path** (e.g., `docs_dev/validate_plugin_20260306.md`
 ## Fix Guides
 
 The `fix-validation` skill (loaded via frontmatter) provides the complete error-to-fix index. Use it to look up which reference file in `skills/fix-validation/references/` covers each error. Read only the relevant section — never load entire reference files.
+
+## Pipeline Infrastructure
+
+For issues involving CI/CD workflows, git hooks, publish scripts, or marketplace configuration:
+- **Plugin repo issues** → consult `setup-plugin-repo` skill references (hooks, workflows, publish pipeline)
+- **Marketplace issues** → consult `setup-github-marketplace` skill references (sync scripts, dispatch workflows, marketplace.json)
 
 ## Rules
 

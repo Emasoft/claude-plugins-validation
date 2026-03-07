@@ -3,59 +3,61 @@
 ## Table of Contents
 - [Placeholder Reference](#placeholder-reference)
 - [sync_marketplace_versions.py](#sync_marketplace_versionspy)
-- [generate-readme.py](#generate-readmepy)
-- [setup-hooks.py](#setup-hookspy)
+- [pre-commit-hook.py](#pre-commit-hookpy)
 - [pre-push-hook.py](#pre-push-hookpy)
-- [push-plugins.py](#push-pluginspy)
+- [setup-hooks.py](#setup-hookspy)
+- [push-plugins.sh](#push-pluginssh)
 
 Ready-to-use scripts for managing a Claude Code plugin marketplace repository.
-Each script is complete, functional, and can be copy-pasted into the appropriate location.
+Each script is based on production code from the Emasoft marketplace. Replace
+all `{{PLACEHOLDER}}` values with your actual configuration before use.
 
 ## Placeholder Reference
 
 | Placeholder | Description | Where Used |
 |-------------|-------------|------------|
-| `{{MARKETPLACE_NAME}}` | Marketplace display name (e.g. "My Plugin Marketplace") | generate-readme.py |
-| `{{MARKETPLACE_OWNER}}` | GitHub username or organization | push-plugins.py |
-| `{{MARKETPLACE_REPO}}` | GitHub repository name | push-plugins.py |
-| `{{MARKETPLACE_DIR}}` | Local path to marketplace repo root | push-plugins.py |
+| `{{MARKETPLACE_OWNER}}` | GitHub username or organization | push-plugins.sh |
+| `{{MARKETPLACE_REPO}}` | GitHub repository name | push-plugins.sh |
+| `{{MARKETPLACE_DIR}}` | Local path to marketplace repo root | push-plugins.sh |
+| `{{CPV_SUBDIR}}` | Relative path from repo root to CPV install | pre-commit-hook.py |
+| `{{SUBMODULE_NAMES}}` | Comma-separated list of submodule names | setup-hooks.py |
 
 ---
 
 ## sync_marketplace_versions.py
 
 Syncs plugin versions in marketplace.json by reading each plugin's plugin.json,
-either from local submodule directories or from their GitHub repos via the `gh` CLI.
+supporting both URL-based sources (dict with `"source": "github"`) and
+path-based sources (string starting with `./`).
 
 **Install location:** `scripts/sync_marketplace_versions.py`
 
 ```python
 #!/usr/bin/env python3
 """
-sync_marketplace_versions.py - Sync plugin versions to marketplace.json
+sync_marketplace_versions.py - Sync plugin versions from plugin sources to marketplace.json
 
-Reads version information from each plugin's plugin.json (locally or via GitHub API)
-and updates the corresponding entry in marketplace.json.
+This script reads version information from each plugin's plugin.json and updates
+the corresponding entry in marketplace.json. It supports both URL-based sources
+(dict with "source": "github") and path-based sources (string starting with "./").
 
 Usage:
-    python sync_marketplace_versions.py [--marketplace PATH] [--dry-run] [--check-only]
+    python sync_marketplace_versions.py [--marketplace PATH] [--dry-run]
 
 Exit codes:
-    0 - Success (versions updated or already in sync)
-    1 - Error (missing files, invalid JSON, network failure, etc.)
-    2 - Out of sync (--check-only mode, versions differ)
+    0 - Success (updated or already in sync)
+    1 - Error (missing files, invalid JSON, etc.)
 """
 
 import argparse
 import json
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 
 def find_marketplace_json(start_path: Path) -> Path | None:
-    """Find marketplace.json by checking common locations relative to start_path."""
+    """Find marketplace.json in common locations."""
     candidates = [
         start_path / ".claude-plugin" / "marketplace.json",
         start_path / "marketplace.json",
@@ -67,7 +69,7 @@ def find_marketplace_json(start_path: Path) -> Path | None:
 
 
 def load_json(path: Path) -> dict[str, Any] | None:
-    """Load and parse a JSON file, returning None on failure."""
+    """Load and parse a JSON file."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -77,92 +79,49 @@ def load_json(path: Path) -> dict[str, Any] | None:
 
 
 def save_json(path: Path, data: dict[str, Any]) -> bool:
-    """Save data to a JSON file with 2-space indent and trailing newline."""
+    """Save data to a JSON file with pretty formatting."""
     try:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
             f.write("\n")
         return True
-    except OSError as e:
+    except Exception as e:
         print(f"Error saving {path}: {e}", file=sys.stderr)
         return False
 
 
-def get_local_plugin_version(plugin_dir: Path) -> str | None:
-    """Read version from a local plugin's plugin.json."""
+def get_plugin_version(plugin_dir: Path) -> str | None:
+    """Get version from a plugin's plugin.json."""
     plugin_json_path = plugin_dir / ".claude-plugin" / "plugin.json"
     if not plugin_json_path.exists():
         return None
+
     data = load_json(plugin_json_path)
     if data is None:
         return None
+
     return data.get("version")
 
 
-def get_remote_plugin_version(repo_url: str) -> str | None:
-    """Fetch version from a plugin's plugin.json on GitHub via the gh CLI."""
-    # Extract owner/repo from URL (handles https://github.com/owner/repo.git)
-    repo_url = repo_url.rstrip("/").removesuffix(".git")
-    parts = repo_url.split("/")
-    if len(parts) < 2:
-        return None
-    owner_repo = f"{parts[-2]}/{parts[-1]}"
-
-    try:
-        result = subprocess.run(
-            ["gh", "api", f"repos/{owner_repo}/contents/.claude-plugin/plugin.json",
-             "--jq", ".content"],
-            capture_output=True, text=True, timeout=30,
-        )
-        if result.returncode != 0:
-            return None
-        import base64
-        content = base64.b64decode(result.stdout.strip()).decode("utf-8")
-        data = json.loads(content)
-        return data.get("version")
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception) as e:
-        print(f"Warning: Could not fetch version from {owner_repo}: {e}", file=sys.stderr)
-        return None
-
-
-def resolve_marketplace_root(marketplace_path: Path) -> Path:
-    """Given the path to marketplace.json, return the repository root directory."""
-    if marketplace_path.parent.name == ".claude-plugin":
-        return marketplace_path.parent.parent
-    return marketplace_path.parent
-
-
-def get_submodule_urls(marketplace_dir: Path) -> dict[str, str]:
-    """Parse .gitmodules to build a mapping of submodule name -> remote URL."""
-    gitmodules = marketplace_dir / ".gitmodules"
-    if not gitmodules.exists():
-        return {}
-    urls: dict[str, str] = {}
-    current_name = ""
-    with open(gitmodules, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line.startswith("[submodule"):
-                current_name = line.split('"')[1] if '"' in line else ""
-            elif line.startswith("url = ") and current_name:
-                urls[current_name] = line.split("=", 1)[1].strip()
-    return urls
-
-
 def sync_versions(
-    marketplace_path: Path,
-    *,
-    dry_run: bool = False,
-    check_only: bool = False,
-    verbose: bool = True,
+    marketplace_path: Path, dry_run: bool = False, verbose: bool = True
 ) -> tuple[bool, list[str]]:
     """
-    Sync plugin versions from submodules/GitHub to marketplace.json.
+    Sync plugin versions from plugin sources (URL-based or path-based) to marketplace.json.
+
+    Args:
+        marketplace_path: Path to marketplace.json
+        dry_run: If True, don't write changes
+        verbose: If True, print progress
 
     Returns:
-        (success, list_of_updated_plugin_names)
+        Tuple of (success, list of updated plugin names)
     """
-    marketplace_dir = resolve_marketplace_root(marketplace_path)
+    marketplace_dir = marketplace_path.parent
+    if marketplace_path.parent.name == ".claude-plugin":
+        marketplace_dir = marketplace_path.parent.parent
+
+    # Load marketplace.json
     marketplace_data = load_json(marketplace_path)
     if marketplace_data is None:
         return False, []
@@ -173,56 +132,56 @@ def sync_versions(
             print("No plugins found in marketplace.json")
         return True, []
 
-    submodule_urls = get_submodule_urls(marketplace_dir)
     updated_plugins: list[str] = []
-    out_of_sync = False
+    changes_made = False
 
     for plugin in plugins:
         plugin_name = plugin.get("name", "")
         if not plugin_name:
             continue
 
-        # Try local directory first
+        # Determine plugin directory from source
         source = plugin.get("source", f"./{plugin_name}")
-        if source.startswith("./"):
+        if isinstance(source, str) and source.startswith("./"):
+            # Path-based source (legacy): plugin dir is relative to marketplace
             plugin_dir = marketplace_dir / source[2:]
+        elif isinstance(source, dict) and source.get("source") in ("github", "url"):
+            # URL-based source: look in OUTPUT_SKILLS/ for local dev copy
+            plugin_dir = marketplace_dir / "OUTPUT_SKILLS" / plugin_name
+            if not plugin_dir.exists():
+                # Also try parent's OUTPUT_SKILLS (if marketplace_dir is a subdirectory)
+                plugin_dir = marketplace_dir.parent / "OUTPUT_SKILLS" / plugin_name
         else:
             plugin_dir = marketplace_dir / plugin_name
 
-        actual_version: str | None = None
-        if plugin_dir.exists():
-            actual_version = get_local_plugin_version(plugin_dir)
+        if not plugin_dir.exists():
+            if verbose:
+                print(f"  [SKIP] {plugin_name}: directory not found at {plugin_dir}")
+            continue
 
-        # Fall back to GitHub API if local version not available
-        if actual_version is None:
-            repo_url = plugin.get("repository", submodule_urls.get(plugin_name, ""))
-            if repo_url:
-                actual_version = get_remote_plugin_version(repo_url)
-
+        # Get version from plugin.json
+        actual_version = get_plugin_version(plugin_dir)
         if actual_version is None:
             if verbose:
-                print(f"  [SKIP] {plugin_name}: could not determine version")
+                print(f"  [SKIP] {plugin_name}: could not read version")
             continue
 
         marketplace_version = plugin.get("version", "")
+
         if actual_version != marketplace_version:
             if verbose:
                 print(f"  [UPDATE] {plugin_name}: {marketplace_version} -> {actual_version}")
-            if not check_only:
-                plugin["version"] = actual_version
+            plugin["version"] = actual_version
             updated_plugins.append(plugin_name)
-            out_of_sync = True
+            changes_made = True
         else:
             if verbose:
                 print(f"  [OK] {plugin_name}: {actual_version}")
 
-    # Save changes unless dry-run or check-only
-    if updated_plugins and not dry_run and not check_only:
+    # Save changes
+    if changes_made and not dry_run:
         if not save_json(marketplace_path, marketplace_data):
             return False, updated_plugins
-
-    if check_only and out_of_sync:
-        return False, updated_plugins
 
     return True, updated_plugins
 
@@ -230,27 +189,33 @@ def sync_versions(
 def main() -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="Sync plugin versions from submodules to marketplace.json"
+        description="Sync plugin versions from plugin sources to marketplace.json"
     )
     parser.add_argument(
-        "--marketplace", type=Path, default=None,
+        "--marketplace",
+        type=Path,
+        default=None,
         help="Path to marketplace.json (auto-detected if not specified)",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
-        help="Show what would change without writing to disk",
+        "--dry-run",
+        action="store_true",
+        help="Show what would be changed without making changes",
     )
     parser.add_argument(
-        "--check-only", action="store_true",
-        help="Exit with code 2 if any versions are out of sync (no writes)",
-    )
-    parser.add_argument(
-        "-q", "--quiet", action="store_true",
+        "-q", "--quiet",
+        action="store_true",
         help="Suppress output except errors",
     )
+
     args = parser.parse_args()
 
-    marketplace_path = args.marketplace or find_marketplace_json(Path.cwd())
+    # Find marketplace.json
+    if args.marketplace:
+        marketplace_path = args.marketplace
+    else:
+        marketplace_path = find_marketplace_json(Path.cwd())
+
     if marketplace_path is None:
         print("Error: Could not find marketplace.json", file=sys.stderr)
         print("Use --marketplace to specify the path", file=sys.stderr)
@@ -260,21 +225,12 @@ def main() -> int:
         print(f"Syncing versions in {marketplace_path}")
         if args.dry_run:
             print("(dry run - no changes will be made)")
-        if args.check_only:
-            print("(check only - no changes will be made)")
 
     success, updated = sync_versions(
-        marketplace_path,
-        dry_run=args.dry_run,
-        check_only=args.check_only,
-        verbose=not args.quiet,
+        marketplace_path, dry_run=args.dry_run, verbose=not args.quiet
     )
 
     if not success:
-        if args.check_only and updated:
-            if not args.quiet:
-                print(f"\nOut of sync: {', '.join(updated)}")
-            return 2
         return 1
 
     if not args.quiet:
@@ -292,475 +248,349 @@ if __name__ == "__main__":
 
 ---
 
-## generate-readme.py
+## pre-commit-hook.py
 
-Generates the marketplace README.md automatically from marketplace.json data,
-including a Mermaid architecture diagram and an auto-generated plugin table.
+Pre-commit validation for marketplace and plugin repos. Validates
+marketplace.json, plugin.json files (JSON syntax, required fields, semver),
+hooks.json files, Python linting, version consistency, and sensitive data
+patterns. Automatically skips during rebase/cherry-pick/merge/am operations.
 
-**Install location:** `scripts/generate-readme.py`
+**Install location:** `scripts/pre-commit-hook.py`
+**Git hook target:** `.git/hooks/pre-commit`
 
 ```python
 #!/usr/bin/env python3
+"""pre-commit-hook.py - Pre-commit validation for marketplace and plugins.
+
+This script validates:
+1. marketplace.json if changed
+2. plugin.json files (JSON syntax, required fields, semver)
+3. hooks.json files
+4. Python files (linting)
+5. Version consistency
+6. Sensitive data patterns
+
+IMPORTANT: This hook is SKIPPED during:
+- git rebase (interactive or not)
+- git cherry-pick
+- git merge (during conflict resolution)
+- git am (applying patches)
+
+This prevents validation errors during history rewriting operations.
+
+To install as git hook:
+    cp scripts/pre-commit-hook.py .git/hooks/pre-commit
+    chmod +x .git/hooks/pre-commit
 """
-generate-readme.py - Generate marketplace README.md from marketplace.json
 
-Reads marketplace.json and produces a complete README with:
-  - Title and description
-  - Mermaid architecture diagram
-  - Auto-generated plugin table
-  - Installation instructions
-  - Developer setup guide
-  - Last-updated timestamp
-
-Usage:
-    python generate-readme.py [--marketplace PATH] [--output PATH]
-
-Exit codes:
-    0 - Success
-    1 - Error
-"""
-
-import argparse
 import json
-import sys
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
-
-
-def load_marketplace(path: Path) -> dict[str, Any] | None:
-    """Load and validate marketplace.json."""
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, FileNotFoundError) as e:
-        print(f"Error loading {path}: {e}", file=sys.stderr)
-        return None
-
-    if "name" not in data:
-        print(f"Error: marketplace.json missing 'name' field", file=sys.stderr)
-        return None
-    return data
-
-
-def build_plugin_table(plugins: list[dict[str, Any]]) -> str:
-    """Build a markdown table of plugins from the plugins array."""
-    if not plugins:
-        return "_No plugins registered yet._\n"
-
-    lines = [
-        "| Plugin | Version | Description | Repository |",
-        "|--------|---------|-------------|------------|",
-    ]
-    for p in plugins:
-        name = p.get("name", "unknown")
-        version = p.get("version", "-")
-        description = p.get("description", "-")
-        repo = p.get("repository", "")
-        repo_link = f"[source]({repo})" if repo else "-"
-        lines.append(f"| **{name}** | `{version}` | {description} | {repo_link} |")
-
-    return "\n".join(lines) + "\n"
-
-
-def build_mermaid_diagram(marketplace_name: str, plugins: list[dict[str, Any]]) -> str:
-    """Build a Mermaid architecture diagram showing marketplace structure."""
-    nodes: list[str] = []
-    links: list[str] = []
-
-    nodes.append(f'    MP["{marketplace_name}"]')
-    nodes.append('    MJ["marketplace.json"]')
-    links.append("    MP --> MJ")
-
-    for i, p in enumerate(plugins):
-        node_id = f"P{i}"
-        name = p.get("name", f"plugin-{i}")
-        nodes.append(f'    {node_id}["{name}"]')
-        links.append(f"    MJ --> {node_id}")
-
-    diagram_lines = ["```mermaid", "graph TD"] + nodes + [""] + links + ["```"]
-    return "\n".join(diagram_lines) + "\n"
-
-
-def generate_readme(data: dict[str, Any]) -> str:
-    """Generate the full README markdown from marketplace data."""
-    name = data.get("name", "Plugin Marketplace")
-    description = data.get("description", "A Claude Code plugin marketplace.")
-    plugins = data.get("plugins", [])
-    owner = data.get("owner", "")
-    repo_url = data.get("repository", "")
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-
-    sections: list[str] = []
-
-    # Title and description
-    sections.append(f"# {name}\n")
-    sections.append(f"{description}\n")
-
-    # Architecture diagram
-    sections.append("## Architecture\n")
-    sections.append(build_mermaid_diagram(name, plugins))
-
-    # Plugin table
-    sections.append("## Plugins\n")
-    sections.append(build_plugin_table(plugins))
-
-    # Installation instructions
-    sections.append("## Installation\n")
-    sections.append("### Quick Install (single plugin)\n")
-    sections.append("```bash")
-    sections.append("# Install a specific plugin from this marketplace")
-    if repo_url:
-        sections.append(f'claude plugin install "{repo_url}#<plugin-name>"')
-    else:
-        sections.append('claude plugin install "<marketplace-url>#<plugin-name>"')
-    sections.append("```\n")
-
-    sections.append("### Install All Plugins\n")
-    sections.append("```bash")
-    sections.append("# Clone the marketplace and install all plugins")
-    if repo_url:
-        sections.append(f"git clone --recurse-submodules {repo_url}")
-    else:
-        sections.append("git clone --recurse-submodules <marketplace-url>")
-    sections.append("cd <marketplace-directory>")
-    sections.append("# Each subdirectory is a plugin - install them individually")
-    for p in plugins:
-        pname = p.get("name", "plugin")
-        sections.append(f'claude plugin install "./{pname}"')
-    sections.append("```\n")
-
-    # Developer setup
-    sections.append("## Developer Setup\n")
-    sections.append("```bash")
-    sections.append("# Clone with submodules")
-    if repo_url:
-        sections.append(f"git clone --recurse-submodules {repo_url}")
-    else:
-        sections.append("git clone --recurse-submodules <marketplace-url>")
-    sections.append("")
-    sections.append("# Install validation tools")
-    sections.append("pip install claude-plugins-validation")
-    sections.append("")
-    sections.append("# Validate the marketplace")
-    sections.append("cpv validate-marketplace .")
-    sections.append("")
-    sections.append("# Sync plugin versions")
-    sections.append("python scripts/sync_marketplace_versions.py")
-    sections.append("")
-    sections.append("# Set up git hooks")
-    sections.append("python scripts/setup-hooks.py")
-    sections.append("```\n")
-
-    # Footer
-    sections.append("---\n")
-    if owner:
-        sections.append(f"Maintained by **{owner}**.\n")
-    sections.append(f"_Last updated: {timestamp}_\n")
-    sections.append("_This README was auto-generated from marketplace.json._\n")
-
-    return "\n".join(sections)
-
-
-def main() -> int:
-    """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Generate marketplace README.md from marketplace.json"
-    )
-    parser.add_argument(
-        "--marketplace", type=Path, default=None,
-        help="Path to marketplace.json (searches current directory if not specified)",
-    )
-    parser.add_argument(
-        "--output", type=Path, default=None,
-        help="Output path for README.md (defaults to same directory as marketplace.json)",
-    )
-    args = parser.parse_args()
-
-    # Locate marketplace.json
-    if args.marketplace:
-        mp_path = args.marketplace
-    else:
-        for candidate in [
-            Path.cwd() / ".claude-plugin" / "marketplace.json",
-            Path.cwd() / "marketplace.json",
-        ]:
-            if candidate.exists():
-                mp_path = candidate
-                break
-        else:
-            print("Error: Could not find marketplace.json", file=sys.stderr)
-            return 1
-
-    data = load_marketplace(mp_path)
-    if data is None:
-        return 1
-
-    readme_content = generate_readme(data)
-
-    # Determine output path
-    if args.output:
-        out_path = args.output
-    else:
-        root = mp_path.parent
-        if root.name == ".claude-plugin":
-            root = root.parent
-        out_path = root / "README.md"
-
-    out_path.write_text(readme_content, encoding="utf-8")
-    print(f"Generated {out_path}")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
-```
-
----
-
-## setup-hooks.py
-
-Installs (or uninstalls) git hooks for marketplace validation.
-The pre-commit hook only checks for sensitive data (API keys, tokens, secrets).
-The pre-push hook is a thin wrapper that delegates to `scripts/lint_files.py`
-(read-only linting) and `scripts/validate_plugin.py` (validation).
-
-**Install location:** `scripts/setup-hooks.py`
-
-```python
-#!/usr/bin/env python3
-"""
-setup-hooks.py - Install git hooks for marketplace validation
-
-Creates pre-commit (sensitive data check only) and pre-push (lint + validate)
-hooks. All linting is read-only -- no --fix, no --write, no auto-commit.
-
-Usage:
-    python setup-hooks.py [--repo-dir PATH] [--uninstall]
-
-Exit codes:
-    0 - Success
-    1 - Error (not a git repo, permission denied, etc.)
-"""
-
-import argparse
-import stat
-import sys
-from pathlib import Path
-
-PRE_COMMIT_HOOK = '''\
-#!/usr/bin/env python3
-# Pre-commit hook: check staged files for sensitive data ONLY
-# Installed by setup-hooks.py
-#
-# This hook does NOT lint or format. All linting is in pre-push via
-# scripts/lint_files.py (read-only, no --fix).
-
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
+# ANSI Colors
+RED = "\033[0;31m"
+GREEN = "\033[0;32m"
+YELLOW = "\033[1;33m"
+BLUE = "\033[0;34m"
+NC = "\033[0m"
 
-def main() -> int:
-    print("Pre-commit: checking for sensitive data...")
 
-    # Patterns that indicate leaked secrets (API keys, tokens, passwords)
-    sensitive_patterns = [
-        r"ANTHROPIC_API_KEY\\s*=",
-        r"OPENAI_API_KEY\\s*=",
-        r"sk-[a-zA-Z0-9]{20,}",
-        r"ghp_[a-zA-Z0-9]{36}",
-        r"gho_[a-zA-Z0-9]{36}",
-        r"github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59}",
-        r"AWS_SECRET_ACCESS_KEY\\s*=",
-        r"password\\s*=\\s*[\\"\\'\\'][^\\"\\'\\']{8,}",
-        r"secret\\s*=\\s*[\\"\\'\\'][^\\"\\'\\']{8,}",
-        r"token\\s*=\\s*[\\"\\'\\'][^\\"\\'\\']{8,}",
+def is_rebase_in_progress(git_dir: Path) -> bool:
+    """Check if we're in the middle of a rebase or other history-rewriting operation.
+
+    During rebase/cherry-pick/merge, commits are being replayed and we should
+    skip validation to avoid conflicts and slowdowns.
+    """
+    # Check for rebase indicators
+    rebase_indicators = [
+        git_dir / "rebase-merge",      # git rebase (interactive)
+        git_dir / "rebase-apply",       # git rebase (non-interactive) / git am
+        git_dir / "CHERRY_PICK_HEAD",   # git cherry-pick
+        git_dir / "MERGE_HEAD",         # git merge in progress
+        git_dir / "BISECT_LOG",         # git bisect
     ]
 
-    # Get staged files (added, copied, modified)
+    for indicator in rebase_indicators:
+        if indicator.exists():
+            return True
+
+    # Also check environment variable (some git operations set this)
+    if os.environ.get("GIT_AUTHOR_DATE"):
+        # During rebase, git sets GIT_AUTHOR_DATE to preserve original timestamps
+        # This is a secondary indicator
+        pass  # Not conclusive on its own
+
+    return False
+
+
+def get_git_dir() -> Path:
+    """Get the .git directory path (handles both regular repos and submodules)."""
     result = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-        capture_output=True, text=True,
+        ["git", "rev-parse", "--git-dir"],
+        capture_output=True,
+        text=True,
+        timeout=10
     )
-    staged_files = [f for f in result.stdout.strip().splitlines() if f]
-
-    if not staged_files:
-        return 0
-
-    found_secrets = False
-
-    for pattern in sensitive_patterns:
-        regex = re.compile(pattern)
-        for filepath in staged_files:
-            path = Path(filepath)
-            if not path.is_file():
-                continue
-            try:
-                content = path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            for line_no, line in enumerate(content.splitlines(), start=1):
-                if regex.search(line):
-                    if not found_secrets:
-                        # Print header on first match for this pattern
-                        pass
-                    print(f"ERROR: Possible sensitive data found matching pattern: {pattern}")
-                    print(f"  -> {filepath}:{line_no}")
-                    found_secrets = True
-                    break  # One match per file per pattern is enough
-
-    if found_secrets:
-        print()
-        print("Commit blocked: remove secrets before committing.")
-        print("If these are false positives, use: git commit --no-verify")
-        return 1
-
-    print("No sensitive data detected.")
-    return 0
+    if result.returncode == 0:
+        return Path(result.stdout.strip()).resolve()
+    # Fallback
+    return Path(".git")
 
 
-if __name__ == "__main__":
-    sys.exit(main())
-'''
+def run_command(cmd: list[str], cwd: Path | None = None) -> tuple[int, str, str]:
+    """Run a command and return exit code, stdout, stderr."""
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        return result.returncode, result.stdout, result.stderr
+    except Exception as e:
+        return 1, "", str(e)
 
-PRE_PUSH_HOOK = '''\
-#!/usr/bin/env python3
-# Pre-push hook: thin wrapper delegating to lint_files.py and validate_plugin.py
-# Installed by setup-hooks.py
-#
-# All linting is READ-ONLY (no --fix, no --write, no auto-commit).
-# lint_files.py is the single source of truth for all 15 linting functions.
 
-import subprocess
-import sys
-from pathlib import Path
+def get_staged_files() -> list[str]:
+    """Get list of staged files."""
+    code, stdout, _ = run_command(["git", "diff", "--cached", "--name-only"])
+    if code == 0:
+        return [f for f in stdout.strip().split("\n") if f]
+    return []
+
+
+def get_staged_diff() -> str:
+    """Get staged diff content."""
+    code, stdout, _ = run_command(["git", "diff", "--cached", "-U0"])
+    return stdout if code == 0 else ""
+
+
+def validate_semver(version: str) -> bool:
+    """Validate semver format."""
+    pattern = r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?(\+[a-zA-Z0-9.]+)?$"
+    return bool(re.match(pattern, version))
+
+
+def validate_marketplace_json(repo_root: Path) -> tuple[bool, str]:
+    """Validate marketplace.json."""
+    # {{CPV_SUBDIR}} — relative path from repo root to CPV installation
+    validator = repo_root / "{{CPV_SUBDIR}}" / "scripts" / "validate_marketplace.py"
+    if not validator.exists():
+        return True, "validator not found"
+
+    code, stdout, stderr = run_command(
+        ["uv", "run", "python", str(validator), str(repo_root)],
+        cwd=repo_root / "{{CPV_SUBDIR}}"
+    )
+    if code == 0:
+        return True, ""
+    return False, "Run: uv run python scripts/validate_marketplace.py . --verbose"
+
+
+def validate_plugin_json(file_path: Path) -> tuple[bool, str]:
+    """Validate a plugin.json file."""
+    try:
+        with open(file_path) as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        return False, f"invalid JSON: {e}"
+
+    name = data.get("name")
+    version = data.get("version")
+
+    if not name:
+        return False, "missing 'name' field"
+    if not version:
+        return False, "missing 'version' field"
+    if not validate_semver(version):
+        return False, f"invalid version format: {version}"
+
+    return True, ""
+
+
+def validate_hooks_json(file_path: Path, repo_root: Path) -> tuple[bool, str]:
+    """Validate a hooks.json file."""
+    # {{CPV_SUBDIR}} — relative path from repo root to CPV installation
+    validator = repo_root / "{{CPV_SUBDIR}}" / "scripts" / "validate_hook.py"
+
+    if validator.exists():
+        code, _, _ = run_command(
+            ["uv", "run", "python", str(validator), str(file_path), "--quiet"],
+            cwd=repo_root / "{{CPV_SUBDIR}}"
+        )
+        if code == 0:
+            return True, ""
+        return True, "has issues (non-blocking)"  # Non-blocking, still return True
+
+    # Fallback: just check JSON validity
+    try:
+        with open(file_path) as f:
+            json.load(f)
+        return True, "JSON valid"
+    except json.JSONDecodeError:
+        return False, "invalid JSON"
+
+
+def lint_python_files(files: list[str], repo_root: Path) -> tuple[bool, str]:
+    """Lint Python files with ruff."""
+    existing_files = [f for f in files if (repo_root / f).exists()]
+    if not existing_files:
+        return True, "no files to lint"
+
+    code, _, _ = run_command(
+        ["uv", "run", "ruff", "check"] + existing_files,
+        cwd=repo_root
+    )
+    if code == 0:
+        return True, ""
+    return False, "linting issues (non-blocking)"
+
+
+def check_version_consistency(repo_root: Path) -> tuple[bool, bool]:
+    """Check version consistency. Returns (passed, was_fixed)."""
+    sync_script = repo_root / "scripts" / "sync-versions.py"
+    if not sync_script.exists():
+        return True, False
+
+    code, _, _ = run_command(
+        ["python3", str(sync_script), "--check", str(repo_root)],
+        cwd=repo_root
+    )
+    if code == 0:
+        return True, False
+
+    # Auto-fix by syncing
+    run_command(["python3", str(sync_script), str(repo_root)], cwd=repo_root)
+
+    # Stage the updated marketplace.json
+    marketplace_json = repo_root / ".claude-plugin" / "marketplace.json"
+    if marketplace_json.exists():
+        run_command(["git", "add", str(marketplace_json)], cwd=repo_root)
+        return True, True
+
+    return True, True
+
+
+def check_sensitive_data(diff: str) -> bool:
+    """Check for sensitive data patterns in diff."""
+    patterns = [
+        r"password\s*[:=]",
+        r"api[_-]?key\s*[:=]",
+        r"secret\s*[:=]",
+        r"token\s*[:=].*['\"][a-zA-Z0-9]{20,}['\"]",
+        r"private[_-]?key",
+    ]
+
+    for line in diff.split("\n"):
+        # Skip removed lines
+        if line.startswith("-"):
+            continue
+        # Skip obvious placeholders
+        if any(x in line.lower() for x in ["example", "placeholder", "your_", "<", "todo"]):
+            continue
+
+        for pattern in patterns:
+            if re.search(pattern, line, re.IGNORECASE):
+                return True
+    return False
 
 
 def main() -> int:
-    # Resolve scripts/ directory relative to this hook file location
-    # Hook lives at .git/hooks/pre-push, so scripts/ is ../../scripts/
-    hook_path = Path(__file__).resolve()
-    script_dir = hook_path.parent.parent.parent / "scripts"
+    """Main pre-commit hook function."""
+    # Get git directory and check for rebase
+    git_dir = get_git_dir()
 
-    print("Pre-push: running read-only linting...")
+    if is_rebase_in_progress(git_dir):
+        print(f"{BLUE}[pre-commit] Skipping validation during rebase/cherry-pick/merge{NC}")
+        return 0  # Allow commit to proceed without validation
 
-    # Step 1: Run lint_files.py (read-only linting, all 15 checks)
-    lint_script = script_dir / "lint_files.py"
-    if lint_script.is_file():
-        result = subprocess.run(
-            [sys.executable, str(lint_script), "."],
-        )
-        if result.returncode != 0:
-            print("ERROR: Linting failed. Fix issues before pushing.")
-            return 1
-        print("Linting passed.")
-    else:
-        print("WARNING: scripts/lint_files.py not found - skipping linting")
+    repo_root = Path(subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True
+    ).stdout.strip())
 
-    # Step 2: Run validate_plugin.py (structural validation)
-    validate_script = script_dir / "validate_plugin.py"
-    if validate_script.is_file():
-        result = subprocess.run(
-            [sys.executable, str(validate_script), "."],
-        )
-        if result.returncode != 0:
-            print("ERROR: Validation failed. Fix issues before pushing.")
-            return 1
-        print("Validation passed.")
-    else:
-        print("WARNING: scripts/validate_plugin.py not found - skipping validation")
+    print("Running pre-commit validations...")
 
-    print("Pre-push checks passed.")
-    return 0
+    validation_failed = False
+    staged_files = get_staged_files()
 
-
-if __name__ == "__main__":
-    sys.exit(main())
-'''
-
-
-def install_hook(hooks_dir: Path, hook_name: str, hook_content: str) -> bool:
-    """Write a hook file and make it executable."""
-    hook_path = hooks_dir / hook_name
-    if hook_path.exists():
-        existing = hook_path.read_text(encoding="utf-8")
-        if "setup-hooks.py" in existing:
-            # Our hook already installed - overwrite with latest version
-            pass
+    # 1. Validate marketplace.json if changed
+    if any("marketplace.json" in f for f in staged_files):
+        print("Validating marketplace.json... ", end="", flush=True)
+        passed, msg = validate_marketplace_json(repo_root)
+        if passed:
+            print(f"{GREEN}OK{NC}")
         else:
-            print(f"  WARNING: {hook_name} already exists (not ours) - skipping")
-            print(f"  To overwrite, remove {hook_path} and re-run this script")
-            return False
+            print(f"{RED}FAIL{NC}")
+            print(f"{RED}Marketplace validation failed. {msg}{NC}")
+            validation_failed = True
 
-    hook_path.write_text(hook_content, encoding="utf-8")
-    hook_path.chmod(hook_path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-    print(f"  Installed {hook_path}")
-    return True
+    # 2. Validate changed plugin.json files
+    plugin_jsons = [f for f in staged_files if f.endswith("plugin.json")]
+    for plugin_json in plugin_jsons:
+        file_path = repo_root / plugin_json
+        if file_path.exists():
+            print(f"Validating {plugin_json}... ", end="", flush=True)
+            passed, msg = validate_plugin_json(file_path)
+            if passed:
+                print(f"{GREEN}OK{NC}")
+            else:
+                print(f"{RED}FAIL {msg}{NC}")
+                validation_failed = True
 
+    # 3. Validate changed hooks.json files
+    hooks_jsons = [f for f in staged_files if f.endswith("hooks.json")]
+    for hooks_json in hooks_jsons:
+        file_path = repo_root / hooks_json
+        if file_path.exists():
+            print(f"Validating {hooks_json}... ", end="", flush=True)
+            passed, msg = validate_hooks_json(file_path, repo_root)
+            if passed:
+                print(f"{GREEN}OK{NC}" + (f" ({msg})" if msg else ""))
+            else:
+                print(f"{YELLOW}WARN {msg}{NC}")
 
-def uninstall_hook(hooks_dir: Path, hook_name: str) -> bool:
-    """Remove a hook if it was installed by this script."""
-    hook_path = hooks_dir / hook_name
-    if not hook_path.exists():
-        print(f"  {hook_name}: not found (nothing to remove)")
-        return True
-    content = hook_path.read_text(encoding="utf-8")
-    if "setup-hooks.py" not in content:
-        print(f"  {hook_name}: not installed by setup-hooks.py - skipping")
-        return False
-    hook_path.unlink()
-    print(f"  Removed {hook_path}")
-    return True
+    # 4. Lint changed Python files
+    py_files = [f for f in staged_files if f.endswith(".py")]
+    if py_files:
+        print("Linting Python files... ", end="", flush=True)
+        passed, msg = lint_python_files(py_files, repo_root)
+        if passed:
+            print(f"{GREEN}OK{NC}" + (f" ({msg})" if msg else ""))
+        else:
+            print(f"{YELLOW}WARN {msg}{NC}")
 
+    # 5. Check version consistency
+    print("Checking version consistency... ", end="", flush=True)
+    passed, was_fixed = check_version_consistency(repo_root)
+    if passed and not was_fixed:
+        print(f"{GREEN}OK{NC}")
+    elif was_fixed:
+        print(f"{YELLOW}WARN versions out of sync, syncing...{NC}")
+        print("  Staged updated marketplace.json")
+    else:
+        print(f"{YELLOW}WARN sync script not found{NC}")
 
-def main() -> int:
-    """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Install git hooks for marketplace validation"
-    )
-    parser.add_argument(
-        "--repo-dir", type=Path, default=Path.cwd(),
-        help="Path to the git repository root (default: current directory)",
-    )
-    parser.add_argument(
-        "--uninstall", action="store_true",
-        help="Remove hooks installed by this script",
-    )
-    args = parser.parse_args()
+    # 6. Check for sensitive data
+    print("Checking for sensitive data... ", end="", flush=True)
+    diff = get_staged_diff()
+    if check_sensitive_data(diff):
+        print(f"{YELLOW}WARN potential sensitive data detected - please review{NC}")
+    else:
+        print(f"{GREEN}OK{NC}")
 
-    git_dir = args.repo_dir / ".git"
-    if not git_dir.is_dir():
-        print(f"Error: {args.repo_dir} is not a git repository", file=sys.stderr)
+    # Final result
+    if validation_failed:
+        print()
+        print(f"{RED}Pre-commit validation failed. Please fix the issues above.{NC}")
+        print("To bypass (not recommended): git commit --no-verify")
         return 1
 
-    hooks_dir = git_dir / "hooks"
-    hooks_dir.mkdir(exist_ok=True)
-
-    hooks = {
-        "pre-commit": PRE_COMMIT_HOOK,
-        "pre-push": PRE_PUSH_HOOK,
-    }
-
-    if args.uninstall:
-        print("Uninstalling marketplace hooks...")
-        for name in hooks:
-            uninstall_hook(hooks_dir, name)
-        print("Done.")
-        return 0
-
-    print("Installing marketplace hooks...")
-    all_ok = True
-    for name, content in hooks.items():
-        if not install_hook(hooks_dir, name, content):
-            all_ok = False
-
-    if all_ok:
-        print("All hooks installed successfully.")
-    else:
-        print("Some hooks were skipped (see warnings above).")
-
+    print(f"{GREEN}Pre-commit validations passed{NC}")
     return 0
 
 
@@ -772,174 +602,486 @@ if __name__ == "__main__":
 
 ## pre-push-hook.py
 
-Standalone Python pre-push hook for marketplace validation.
-Can be used directly as `.git/hooks/pre-push` or kept in `scripts/` and symlinked.
+Validates the local repo before allowing `git push`. Finds CPV from the
+installed plugin cache and runs `validate_plugin.py --strict` or
+`validate_marketplace.py --strict` depending on repo type. Blocks push on
+any validation failures.
 
-**Install location:** `.git/hooks/pre-push` or `scripts/pre-push-hook.py`
+**Install location:** `scripts/pre-push-hook.py`
+**Git hook target:** `.git/hooks/pre-push`
 
 ```python
 #!/usr/bin/env python3
-"""
-pre-push-hook.py - Pre-push validation for marketplace repositories
+"""pre-push-hook.py - Validate the current repo before allowing git push.
 
-Validates marketplace.json structure and plugin entries before allowing a push.
-Can be installed directly as .git/hooks/pre-push or called from a shell hook.
+Installed as .git/hooks/pre-push in any plugin or marketplace repo.
+Uses CPV (claude-plugins-validation) from the plugin cache with --strict.
+Validates the LOCAL repo (the one being pushed), blocking if any issues found.
 
-Usage:
-    python pre-push-hook.py           # Run validation
-    python pre-push-hook.py --strict  # Fail on warnings too
+To install:
+    python3 scripts/setup-hooks.py
+    # OR manually:
+    cp scripts/pre-push-hook.py .git/hooks/pre-push
+    chmod +x .git/hooks/pre-push
 
 Exit codes:
-    0 - Validation passed
-    1 - Validation failed (errors found)
+    0 - All validations passed, push allowed
+    1 - Validation failed, push blocked
 """
 
-import argparse
-import json
+import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
-REQUIRED_MARKETPLACE_FIELDS = {"name", "version", "plugins"}
-REQUIRED_PLUGIN_FIELDS = {"name", "version", "description"}
+# ANSI Colors
+_USE_COLOR = (
+    not os.environ.get("NO_COLOR")
+    and os.name != "nt"
+    and hasattr(sys.stdout, "isatty")
+    and sys.stdout.isatty()
+)
+RED = "\033[0;31m" if _USE_COLOR else ""
+GREEN = "\033[0;32m" if _USE_COLOR else ""
+YELLOW = "\033[1;33m" if _USE_COLOR else ""
+BLUE = "\033[0;34m" if _USE_COLOR else ""
+BOLD = "\033[1m" if _USE_COLOR else ""
+NC = "\033[0m" if _USE_COLOR else ""
 
 
-def find_marketplace_json() -> Path | None:
-    """Locate marketplace.json in the repository."""
-    for candidate in [
-        Path(".claude-plugin/marketplace.json"),
-        Path("marketplace.json"),
-    ]:
-        if candidate.exists():
-            return candidate
+def find_cpv_dir() -> Path | None:
+    """Find the CPV plugin directory from the installed plugin cache."""
+    # {{MARKETPLACE_OWNER}} — your GitHub org or username
+    cache_base = Path.home() / ".claude" / "plugins" / "cache" / "{{MARKETPLACE_OWNER}}" / "claude-plugins-validation"
+    if not cache_base.is_dir():
+        return None
+    # Get latest version directory by sorting version strings
+    versions = sorted(
+        [d for d in cache_base.iterdir() if d.is_dir()],
+        key=lambda d: d.name,
+    )
+    if not versions:
+        return None
+    latest = versions[-1]
+    if (latest / "scripts" / "validate_plugin.py").is_file():
+        return latest
     return None
 
 
-def load_and_validate_json(path: Path) -> tuple[dict[str, Any] | None, list[str]]:
-    """Load JSON and return (data, errors). Errors list is empty on success."""
-    errors: list[str] = []
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except json.JSONDecodeError as e:
-        errors.append(f"Invalid JSON in {path}: {e}")
-        return None, errors
-    except FileNotFoundError:
-        errors.append(f"File not found: {path}")
-        return None, errors
-
-    if not isinstance(data, dict):
-        errors.append(f"{path} root must be a JSON object")
-        return None, errors
-
-    return data, errors
+def get_repo_root() -> Path:
+    """Return the git repository root."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True, check=True,
+    )
+    return Path(result.stdout.strip())
 
 
-def validate_marketplace(data: dict[str, Any], strict: bool = False) -> list[str]:
-    """Validate marketplace.json structure and plugin entries."""
-    errors: list[str] = []
-    warnings: list[str] = []
-
-    # Check required top-level fields
-    missing_fields = REQUIRED_MARKETPLACE_FIELDS - set(data.keys())
-    if missing_fields:
-        errors.append(f"Missing required fields: {', '.join(sorted(missing_fields))}")
-
-    # Validate plugins array
-    plugins = data.get("plugins")
-    if plugins is None:
-        errors.append("No 'plugins' array found")
-        return errors + (warnings if strict else [])
-
-    if not isinstance(plugins, list):
-        errors.append("'plugins' must be an array")
-        return errors + (warnings if strict else [])
-
-    seen_names: set[str] = set()
-    for i, plugin in enumerate(plugins):
-        prefix = f"plugins[{i}]"
-
-        if not isinstance(plugin, dict):
-            errors.append(f"{prefix}: must be an object")
-            continue
-
-        # Check required plugin fields
-        missing_plugin = REQUIRED_PLUGIN_FIELDS - set(plugin.keys())
-        if missing_plugin:
-            errors.append(f"{prefix}: missing fields: {', '.join(sorted(missing_plugin))}")
-
-        # Check for duplicate names
-        pname = plugin.get("name", "")
-        if pname:
-            if pname in seen_names:
-                errors.append(f"{prefix}: duplicate plugin name '{pname}'")
-            seen_names.add(pname)
-
-        # Warn on missing optional but recommended fields
-        if "repository" not in plugin:
-            warnings.append(f"{prefix} ({pname}): no 'repository' URL")
-
-    result = list(errors)
-    if strict:
-        result.extend(warnings)
-    return result
+def is_marketplace(repo_root: Path) -> bool:
+    """Check if this repo is a marketplace (has marketplace.json)."""
+    return (repo_root / ".claude-plugin" / "marketplace.json").is_file()
 
 
-def check_version_sync() -> list[str]:
-    """Optionally check if versions are in sync (non-blocking warning)."""
-    sync_script = Path("scripts/sync_marketplace_versions.py")
-    if not sync_script.exists():
-        return []
+def is_plugin(repo_root: Path) -> bool:
+    """Check if this repo is a plugin (has plugin.json)."""
+    return (repo_root / ".claude-plugin" / "plugin.json").is_file()
+
+
+def run_validator(
+    cpv_dir: Path,
+    script_name: str,
+    target: Path,
+    timeout: int = 120,
+) -> tuple[int, str]:
+    """Run a CPV validation script with --strict. Returns (exit_code, output)."""
+    script = cpv_dir / "scripts" / script_name
+    if not script.is_file():
+        return -1, f"Validator not found: {script}"
+
+    cmd = ["uv", "run", "python", str(script), str(target), "--strict"]
 
     try:
         result = subprocess.run(
-            [sys.executable, str(sync_script), "--check-only", "--quiet"],
-            capture_output=True, text=True, timeout=60,
+            cmd,
+            capture_output=True, text=True,
+            timeout=timeout,
+            cwd=str(cpv_dir),
         )
-        if result.returncode == 2:
-            return ["Plugin versions are out of sync - run sync_marketplace_versions.py"]
-    except (subprocess.TimeoutExpired, OSError):
-        pass
-    return []
+        return result.returncode, result.stdout + result.stderr
+    except subprocess.TimeoutExpired:
+        return -1, f"TIMEOUT: {script_name} exceeded {timeout}s"
+    except FileNotFoundError:
+        return -1, "uv not found -- install uv first"
 
 
 def main() -> int:
-    """Main entry point."""
-    parser = argparse.ArgumentParser(description="Pre-push marketplace validation")
-    parser.add_argument(
-        "--strict", action="store_true",
-        help="Treat warnings as errors",
-    )
-    args = parser.parse_args()
+    repo_root = get_repo_root()
 
-    mp_path = find_marketplace_json()
-    if mp_path is None:
-        print("No marketplace.json found - skipping validation")
+    print(f"{BOLD}{'=' * 60}{NC}")
+    print(f"{BOLD}Pre-Push Validation (--strict){NC}")
+    print(f"{BOLD}{'=' * 60}{NC}")
+    print()
+
+    # Find CPV
+    cpv_dir = find_cpv_dir()
+    if cpv_dir is None:
+        print(f"{RED}ERROR: CPV plugin not found in cache.{NC}")
+        print("Install it: claude /cpv-install-plugin claude-plugins-validation")
+        return 1
+
+    print(f"{BLUE}Repo:{NC}     {repo_root}")
+    print(f"{BLUE}CPV:{NC}      {cpv_dir}")
+    print()
+
+    # Detect what kind of repo this is and validate accordingly
+    if is_marketplace(repo_root):
+        print(f"{BLUE}Detected: marketplace repo{NC}")
+        print(f"{BLUE}Validating marketplace.json with --strict...{NC}")
+        code, output = run_validator(cpv_dir, "validate_marketplace.py", repo_root)
+    elif is_plugin(repo_root):
+        print(f"{BLUE}Detected: plugin repo{NC}")
+        print(f"{BLUE}Validating plugin with --strict...{NC}")
+        code, output = run_validator(cpv_dir, "validate_plugin.py", repo_root)
+    else:
+        print(f"{YELLOW}Not a plugin or marketplace repo. Skipping validation.{NC}")
         return 0
 
-    print(f"Validating {mp_path}...")
+    # Show relevant output lines
+    for line in output.splitlines():
+        if any(sev in line for sev in ("CRITICAL", "MAJOR", "MINOR", "NIT", "PASSED", "Plugin Validation", "Marketplace Validation")):
+            print(f"  {line.strip()}")
 
-    data, parse_errors = load_and_validate_json(mp_path)
-    if parse_errors:
-        for err in parse_errors:
-            print(f"  ERROR: {err}")
+    # Verdict
+    print()
+    print(f"{BOLD}{'=' * 60}{NC}")
+    if code == 0:
+        print(f"{GREEN}  PASSED -- push allowed{NC}")
+        print(f"{BOLD}{'=' * 60}{NC}")
+        return 0
+    else:
+        print(f"{RED}  BLOCKED -- validation issues found (exit {code}){NC}")
+        print(f"{RED}  Fix ALL issues before pushing.{NC}")
+        print(f"{BOLD}{'=' * 60}{NC}")
         return 1
 
-    assert data is not None
-    validation_errors = validate_marketplace(data, strict=args.strict)
-    sync_warnings = check_version_sync()
 
-    if validation_errors:
-        for err in validation_errors:
-            print(f"  ERROR: {err}")
-        return 1
+if __name__ == "__main__":
+    sys.exit(main())
+```
 
-    for warn in sync_warnings:
-        print(f"  WARNING: {warn}")
+---
 
-    plugin_count = len(data.get("plugins", []))
-    print(f"  OK: {plugin_count} plugin(s) validated")
+## setup-hooks.py
+
+Installs git hooks for the marketplace repo and all submodules. Uses a
+rebase-safe architecture: pre-commit validates and lints (skips during
+rebase), pre-push runs full CPV validation, post-rewrite regenerates
+changelog after rebase/amend, post-merge regenerates changelog after merge.
+Removes legacy post-commit hooks that cause rebase conflicts.
+
+**Install location:** `scripts/setup-hooks.py`
+
+```python
+#!/usr/bin/env python3
+"""setup-hooks.py - Install git hooks for marketplace and all submodules.
+
+Hook Architecture (v2 - rebase-safe):
+- pre-commit: Lint, validate, version sync (skips during rebase)
+- pre-push: Full validation, blocks broken plugins
+- post-rewrite: Regenerate changelog after rebase/amend (fires once)
+- post-merge: Regenerate changelog after merge
+
+Usage:
+    python scripts/setup-hooks.py
+"""
+
+import os
+import shutil
+import stat
+import sys
+from pathlib import Path
+
+# ANSI Colors
+GREEN = "\033[0;32m"
+YELLOW = "\033[1;33m"
+RED = "\033[0;31m"
+BLUE = "\033[0;34m"
+NC = "\033[0m"
+
+
+def check_git_cliff() -> bool:
+    """Check if git-cliff is installed."""
+    return shutil.which("git-cliff") is not None
+
+
+def make_executable(path: Path) -> None:
+    """Make a file executable."""
+    current = os.stat(path)
+    os.chmod(path, current.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+def create_pre_commit_hook(hooks_dir: Path, repo_root: Path) -> None:
+    """Create pre-commit hook for main repo with rebase detection."""
+    source = repo_root / "scripts" / "pre-commit-hook.py"
+    target = hooks_dir / "pre-commit"
+
+    if source.exists():
+        shutil.copy2(source, target)
+        make_executable(target)
+        print(f"{GREEN}OK{NC} Created pre-commit hook")
+    else:
+        print(f"{YELLOW}WARN{NC} pre-commit-hook.py not found, skipping")
+
+
+def create_pre_push_hook(hooks_dir: Path, repo_root: Path) -> None:
+    """Create pre-push hook for main repo."""
+    source = repo_root / "scripts" / "pre-push-hook.py"
+    target = hooks_dir / "pre-push"
+
+    if source.exists():
+        shutil.copy2(source, target)
+        make_executable(target)
+        print(f"{GREEN}OK{NC} Created pre-push hook")
+    else:
+        print(f"{YELLOW}WARN{NC} pre-push-hook.py not found, skipping")
+
+
+def create_post_rewrite_hook(hooks_dir: Path, repo_name: str = "main repo") -> None:
+    """Create post-rewrite hook for changelog generation after rebase/amend.
+
+    post-rewrite fires ONCE after:
+    - git rebase completes (all commits replayed)
+    - git commit --amend completes
+
+    This avoids the mid-rebase CHANGELOG conflicts.
+    """
+    hook_content = f'''#!/usr/bin/env python3
+"""post-rewrite hook: Update CHANGELOG.md after rebase/amend completes.
+
+This hook fires ONCE after rebase or amend operations complete,
+avoiding the mid-rebase conflicts that post-commit causes.
+
+Arguments passed by git:
+- $1: "rebase" or "amend"
+- stdin: list of rewritten commits (old-sha new-sha)
+"""
+
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+def main() -> int:
+    operation = sys.argv[1] if len(sys.argv) > 1 else "unknown"
+
+    if not shutil.which("git-cliff"):
+        return 0  # Silent skip if git-cliff not installed
+
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    repo_root = Path(result.stdout.strip())
+
+    cliff_toml = repo_root / "cliff.toml"
+    if not cliff_toml.exists():
+        return 0  # Silent skip if no cliff.toml
+
+    print(f"[post-rewrite] Regenerating CHANGELOG.md after {{operation}}...")
+
+    result = subprocess.run(
+        ["git-cliff", "-o", "CHANGELOG.md"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    if result.returncode != 0:
+        print(f"Warning: git-cliff failed: {{result.stderr}}")
+        return 0
+
+    # Check if changelog changed
+    status = subprocess.run(
+        ["git", "diff", "--quiet", "CHANGELOG.md"],
+        cwd=repo_root,
+        capture_output=True,
+        timeout=30,
+    )
+
+    if status.returncode != 0:
+        print("CHANGELOG.md updated - remember to commit it!")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+'''
+
+    target = hooks_dir / "post-rewrite"
+    target.write_text(hook_content)
+    make_executable(target)
+    print(f"{GREEN}OK{NC} Created post-rewrite hook ({repo_name})")
+
+
+def create_post_merge_hook(hooks_dir: Path, repo_name: str = "main repo") -> None:
+    """Create post-merge hook for changelog generation after merge."""
+    hook_content = f'''#!/usr/bin/env python3
+"""post-merge hook: Update CHANGELOG.md after merge completes."""
+
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+def main() -> int:
+    if not shutil.which("git-cliff"):
+        return 0
+
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    repo_root = Path(result.stdout.strip())
+
+    cliff_toml = repo_root / "cliff.toml"
+    if not cliff_toml.exists():
+        return 0
+
+    print("[post-merge] Regenerating CHANGELOG.md...")
+
+    result = subprocess.run(
+        ["git-cliff", "-o", "CHANGELOG.md"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    if result.returncode != 0:
+        print(f"Warning: git-cliff failed: {{result.stderr}}")
+        return 0
+
+    status = subprocess.run(
+        ["git", "diff", "--quiet", "CHANGELOG.md"],
+        cwd=repo_root,
+        capture_output=True,
+        timeout=30,
+    )
+
+    if status.returncode != 0:
+        print("CHANGELOG.md updated - remember to commit it!")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+'''
+
+    target = hooks_dir / "post-merge"
+    target.write_text(hook_content)
+    make_executable(target)
+    print(f"{GREEN}OK{NC} Created post-merge hook ({repo_name})")
+
+
+def remove_old_post_commit_hook(hooks_dir: Path, repo_name: str = "main repo") -> None:
+    """Remove the old post-commit hook that caused rebase conflicts."""
+    post_commit = hooks_dir / "post-commit"
+    if post_commit.exists():
+        post_commit.unlink()
+        print(f"{YELLOW}REMOVED{NC} old post-commit hook ({repo_name})")
+
+
+def setup_submodule_hooks(submodule_name: str, repo_root: Path) -> bool:
+    """Set up hooks for a submodule."""
+    hooks_dir = repo_root / ".git" / "modules" / submodule_name / "hooks"
+
+    if not hooks_dir.exists():
+        print(f"{RED}FAIL{NC} Submodule {submodule_name} not found or not initialized")
+        return False
+
+    # Remove old problematic post-commit hook
+    remove_old_post_commit_hook(hooks_dir, submodule_name)
+
+    # Install new hooks
+    create_post_rewrite_hook(hooks_dir, submodule_name)
+    create_post_merge_hook(hooks_dir, submodule_name)
+
+    return True
+
+
+def main() -> int:
+    """Main setup function."""
+    script_dir = Path(__file__).parent
+    repo_root = script_dir.parent
+
+    print(f"{BLUE}{'=' * 60}{NC}")
+    print(f"{BLUE}Git Hooks Setup v2 - Rebase-Safe Architecture{NC}")
+    print(f"{BLUE}{'=' * 60}{NC}")
+    print(f"Repository root: {repo_root}")
+    print()
+
+    # Check dependencies
+    if not check_git_cliff():
+        print(f"{YELLOW}Warning:{NC} git-cliff not installed. Install: brew install git-cliff")
+    print()
+
+    # Main repository hooks
+    print(f"{BLUE}Main repository hooks{NC}")
+    print("-" * 40)
+
+    main_hooks_dir = repo_root / ".git" / "hooks"
+    main_hooks_dir.mkdir(parents=True, exist_ok=True)
+
+    # Remove old post-commit hook
+    remove_old_post_commit_hook(main_hooks_dir, "main repo")
+
+    # Install new hooks
+    create_pre_commit_hook(main_hooks_dir, repo_root)
+    create_pre_push_hook(main_hooks_dir, repo_root)
+    create_post_rewrite_hook(main_hooks_dir, "main repo")
+    create_post_merge_hook(main_hooks_dir, "main repo")
+
+    # Submodule hooks
+    # {{SUBMODULE_NAMES}} — comma-separated list of your plugin submodule names
+    print()
+    print(f"{BLUE}Submodule hooks{NC}")
+    print("-" * 40)
+
+    for submodule in "{{SUBMODULE_NAMES}}".split(","):
+        submodule = submodule.strip()
+        if submodule and not submodule.startswith("{{"):
+            setup_submodule_hooks(submodule, repo_root)
+
+    # Summary
+    print()
+    print(f"{GREEN}{'=' * 60}{NC}")
+    print(f"{GREEN}All git hooks installed successfully!{NC}")
+    print(f"{GREEN}{'=' * 60}{NC}")
+    print()
+    print("Hook architecture (v2 - rebase-safe):")
+    print()
+    print("  Main repo:")
+    print("    pre-commit    -> Lint, validate, version sync (skips during rebase)")
+    print("    pre-push      -> Full validation, blocks broken plugins")
+    print("    post-rewrite  -> Changelog after rebase/amend (fires ONCE)")
+    print("    post-merge    -> Changelog after merge")
+    print()
+    print("  Submodules:")
+    print("    post-rewrite  -> Changelog after rebase/amend (fires ONCE)")
+    print("    post-merge    -> Changelog after merge")
+    print()
+    print(f"{YELLOW}NOTE:{NC} post-commit hooks removed to prevent rebase conflicts.")
+    print(f"      Changelog is now generated only after rebase/amend/merge completes.")
+
     return 0
 
 
@@ -949,332 +1091,301 @@ if __name__ == "__main__":
 
 ---
 
-## push-plugins.py
+## push-plugins.sh
 
-Master orchestration script for pushing updates to all plugins and the marketplace.
-Iterates over plugins, validates, optionally bumps versions, and pushes everything.
+Validates and pushes local plugin repos, then pushes the marketplace.
+For each plugin path provided: validates with CPV `validate_plugin.py --strict`,
+pushes to its git origin, syncs marketplace.json versions, validates the
+marketplace with `validate_marketplace.py --strict`, and pushes the
+marketplace repo. Supports `--dry-run` and `--no-validate` flags.
 
-**Install location:** `scripts/push-plugins.py`
+**Install location:** `scripts/push-plugins.sh`
 
-```python
-#!/usr/bin/env python3
-"""
-push-plugins.py - Push updates to all plugins and the marketplace
+```bash
+#!/usr/bin/env bash
+# Validate and push local plugin repos, then push marketplace.
+# Usage: ./scripts/push-plugins.sh [/path/to/plugin ...] [--dry-run] [--no-validate]
+#
+# Each path must be a local git clone of a plugin repo.
+# The script:
+#   1. Validates each local plugin with CPV validate_plugin.py --strict
+#   2. Pushes each plugin to its own git origin
+#   3. Syncs marketplace.json versions
+#   4. Validates marketplace with CPV validate_marketplace.py --strict
+#   5. Pushes the marketplace repo
+#
+# If no plugin paths given, only the marketplace is validated and pushed.
+#
+# Examples:
+#   ./scripts/push-plugins.sh ~/Code/my-plugin                # One plugin + marketplace
+#   ./scripts/push-plugins.sh ~/Code/plugin1 ~/Code/plugin2   # Multiple + marketplace
+#   ./scripts/push-plugins.sh --dry-run ~/Code/my-plugin      # Validate only, no push
+#   ./scripts/push-plugins.sh                                 # Marketplace only
 
-Iterates over plugin directories (from marketplace.json or subdirectories),
-validates each plugin, optionally bumps versions, commits, and pushes.
-After all plugins are updated, syncs marketplace versions, regenerates
-the README, validates, commits, and pushes the marketplace itself.
+set -euo pipefail
 
-Usage:
-    python push-plugins.py [OPTIONS]
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MARKETPLACE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-Options:
-    --dry-run           Show what would happen without making changes
-    --skip-validation   Skip plugin and marketplace validation steps
-    --message MSG       Custom commit message (default: "Update plugins")
-    --help              Show this help text
+# Find the CPV validator from the plugin cache (latest installed version)
+find_cpv_dir() {
+    # {{MARKETPLACE_OWNER}} — your GitHub org or username
+    local cache_base="$HOME/.claude/plugins/cache/{{MARKETPLACE_OWNER}}/claude-plugins-validation"
+    if [ ! -d "$cache_base" ]; then
+        echo ""
+        return
+    fi
+    local latest
+    latest=$(ls -1d "$cache_base"/*/ 2>/dev/null | sort -t/ -k"$(echo "$cache_base" | tr -cd '/' | wc -c | tr -d ' ')" -V | tail -1)
+    if [ -n "$latest" ] && [ -f "${latest}scripts/validate_plugin.py" ]; then
+        echo "${latest}"
+    else
+        echo ""
+    fi
+}
 
-Exit codes:
-    0 - Success
-    1 - Error
-"""
+# -- Parse arguments --------------------------------------------------------
 
-import argparse
-import json
-import os
-import shutil
-import subprocess
-import sys
-from pathlib import Path
-from typing import Any
+DRY_RUN=""
+VALIDATE="yes"
+declare -a PLUGIN_PATHS=()
 
+for arg in "$@"; do
+    if [ "$arg" = "--dry-run" ]; then
+        DRY_RUN="yes"
+    elif [ "$arg" = "--no-validate" ]; then
+        VALIDATE=""
+    else
+        # Resolve to absolute path
+        resolved="$(cd "$arg" 2>/dev/null && pwd)" || {
+            echo "ERROR: '$arg' is not a valid directory"
+            exit 1
+        }
+        PLUGIN_PATHS+=("$resolved")
+    fi
+done
 
-# -- Color output helpers (cross-platform) --
-def _supports_color() -> bool:
-    """Check whether the terminal supports ANSI color codes."""
-    if os.environ.get("NO_COLOR"):
-        return False
-    if os.environ.get("FORCE_COLOR"):
-        return True
-    if sys.platform == "win32":
-        # Windows 10+ supports ANSI via virtual terminal processing
-        return os.environ.get("TERM") is not None or os.environ.get("WT_SESSION") is not None
-    return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+# Track results
+declare -a VALIDATED=()
+declare -a PUSHED=()
+declare -a VALIDATION_FAILED_LIST=()
+declare -a PUSH_FAILED_LIST=()
+declare -a SKIPPED=()
 
+PLUGIN_COUNT=${#PLUGIN_PATHS[@]}
+echo "============================================================"
+if [ "$PLUGIN_COUNT" -gt 0 ]; then
+    echo "  Validate + push $PLUGIN_COUNT plugin(s) + marketplace"
+else
+    echo "  Push marketplace only (no plugin paths given)"
+fi
+echo "============================================================"
+for p in "${PLUGIN_PATHS[@]}"; do echo "  - $p"; done
+echo ""
 
-_COLOR = _supports_color()
-_RED = "\033[0;31m" if _COLOR else ""
-_GREEN = "\033[0;32m" if _COLOR else ""
-_YELLOW = "\033[1;33m" if _COLOR else ""
-_BLUE = "\033[0;34m" if _COLOR else ""
-_NC = "\033[0m" if _COLOR else ""
+# -- Find CPV ---------------------------------------------------------------
 
+CPV_DIR=$(find_cpv_dir)
+if [ -z "$CPV_DIR" ]; then
+    echo "ERROR: CPV plugin not found in cache. Install it first:"
+    echo "  claude /cpv-install-plugin claude-plugins-validation"
+    exit 1
+fi
 
-def info(msg: str) -> None:
-    print(f"{_BLUE}[INFO]{_NC} {msg}")
+VALIDATOR="$CPV_DIR/scripts/validate_plugin.py"
+MARKETPLACE_VALIDATOR="$CPV_DIR/scripts/validate_marketplace.py"
 
+echo "Using CPV from: $CPV_DIR"
+echo ""
 
-def success(msg: str) -> None:
-    print(f"{_GREEN}[OK]{_NC} {msg}")
+# -- Validate + push each plugin --------------------------------------------
 
+VALIDATION_FAILED=0
 
-def warn(msg: str) -> None:
-    print(f"{_YELLOW}[WARN]{_NC} {msg}")
+if [ "$PLUGIN_COUNT" -gt 0 ]; then
+    echo "--- plugin validation + push (--strict) ---"
 
+    set +e
 
-def error(msg: str) -> None:
-    print(f"{_RED}[ERROR]{_NC} {msg}", file=sys.stderr)
+    for plugin_path in "${PLUGIN_PATHS[@]}"; do
+        plugin_name=$(basename "$plugin_path")
+        echo -n "  $plugin_name ($plugin_path)... "
 
+        # Verify it's a git repo
+        if [ ! -d "$plugin_path/.git" ]; then
+            echo "NOT A GIT REPO"
+            VALIDATION_FAILED_LIST+=("$plugin_name (not a git repo)")
+            VALIDATION_FAILED=1
+            continue
+        fi
 
-# -- Helpers --
-def run_git(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-    """Run a git command and return the result."""
-    return subprocess.run(
-        ["git"] + args,
-        capture_output=True, text=True, cwd=cwd,
-    )
+        # Verify it has plugin.json
+        if [ ! -f "$plugin_path/.claude-plugin/plugin.json" ]; then
+            echo "NOT A PLUGIN (no .claude-plugin/plugin.json)"
+            VALIDATION_FAILED_LIST+=("$plugin_name (not a plugin)")
+            VALIDATION_FAILED=1
+            continue
+        fi
 
+        # Validate with CPV --strict
+        if [ -n "$VALIDATE" ]; then
+            VOUTPUT=$(cd "$CPV_DIR" && uv run python "$VALIDATOR" "$plugin_path" --strict 2>&1)
+            VCODE=$?
+            if [ "$VCODE" -eq 0 ]; then
+                echo -n "PASSED "
+                VALIDATED+=("$plugin_name")
+            else
+                echo "BLOCKED (exit $VCODE)"
+                echo "$VOUTPUT" | grep -E "CRITICAL|MAJOR|MINOR|NIT" | head -10
+                VALIDATION_FAILED_LIST+=("$plugin_name (exit $VCODE)")
+                VALIDATION_FAILED=1
+                continue
+            fi
+        fi
 
-def find_marketplace_json(repo_root: Path) -> Path | None:
-    """Locate marketplace.json under the repo root."""
-    for candidate in [
-        repo_root / ".claude-plugin" / "marketplace.json",
-        repo_root / "marketplace.json",
-    ]:
-        if candidate.is_file():
-            return candidate
-    return None
+        # Push to origin
+        BRANCH=$(cd "$plugin_path" && git symbolic-ref --short HEAD 2>/dev/null || echo "main")
+        if [ -n "$DRY_RUN" ]; then
+            echo "DRY-RUN (would push to origin/$BRANCH)"
+            SKIPPED+=("$plugin_name (dry-run)")
+        else
+            if (cd "$plugin_path" && git push origin "$BRANCH" 2>&1); then
+                echo "PUSHED"
+                PUSHED+=("$plugin_name")
+            else
+                echo "PUSH FAILED"
+                PUSH_FAILED_LIST+=("$plugin_name")
+            fi
+        fi
+    done
 
+    set -e
 
-def get_plugin_dirs(repo_root: Path, marketplace_json: Path) -> list[str]:
-    """
-    Discover plugin directories from marketplace.json (using stdlib json)
-    or by scanning subdirectories for plugin.json files.
-    """
-    plugin_dirs: list[str] = []
+    echo ""
+    if [ "$VALIDATION_FAILED" -eq 1 ]; then
+        echo "ERROR: Validation failed for some plugins. Fix issues before pushing."
+        echo ""
+        echo "Failed:"
+        for f in "${VALIDATION_FAILED_LIST[@]}"; do echo "  ! $f"; done
+        exit 1
+    fi
+fi
 
-    # Try parsing marketplace.json with the json module (no jq needed)
-    try:
-        with open(marketplace_json, "r", encoding="utf-8") as f:
-            data: dict[str, Any] = json.load(f)
-        plugins = data.get("plugins", [])
-        for p in plugins:
-            source = p.get("source", "./" + p.get("name", ""))
-            dir_name = source.lstrip("./")
-            if (repo_root / dir_name).is_dir():
-                plugin_dirs.append(dir_name)
-    except (json.JSONDecodeError, OSError):
-        # Fallback: find directories that contain .claude-plugin/plugin.json
-        for child in sorted(repo_root.iterdir()):
-            if child.is_dir() and (child / ".claude-plugin" / "plugin.json").is_file():
-                plugin_dirs.append(child.name)
+# -- Validate marketplace ---------------------------------------------------
 
-    return plugin_dirs
+echo "--- marketplace validation (--strict) ---"
 
+if [ -n "$VALIDATE" ] && [ -f "$MARKETPLACE_VALIDATOR" ]; then
+    echo -n "  marketplace.json... "
+    set +e
+    VOUTPUT=$(cd "$CPV_DIR" && uv run python "$MARKETPLACE_VALIDATOR" "$MARKETPLACE_DIR" --strict 2>&1)
+    VCODE=$?
+    set -e
+    if [ "$VCODE" -eq 0 ]; then
+        echo "PASSED"
+    else
+        echo "BLOCKED (exit $VCODE)"
+        echo "$VOUTPUT" | grep -E "CRITICAL|MAJOR|MINOR|NIT" | head -10
+        echo ""
+        echo "ERROR: Marketplace validation failed. Fix issues before pushing."
+        exit 1
+    fi
+else
+    echo "  SKIPPED"
+fi
+echo ""
 
-def validate_plugin(plugin_dir: str, repo_root: Path) -> bool:
-    """Validate a single plugin directory."""
-    plugin_path = repo_root / plugin_dir
-    plugin_json = plugin_path / ".claude-plugin" / "plugin.json"
+# -- Sync versions into marketplace.json ------------------------------------
 
-    if not plugin_json.is_file():
-        warn(f"{plugin_dir}: no plugin.json found - skipping validation")
-        return False
+echo "--- marketplace version sync ---"
+cd "$MARKETPLACE_DIR"
 
-    # Check JSON syntax
-    try:
-        with open(plugin_json, "r", encoding="utf-8") as f:
-            json.load(f)
-    except (json.JSONDecodeError, OSError) as exc:
-        error(f"{plugin_dir}: plugin.json has invalid JSON: {exc}")
-        return False
+if [ -f "scripts/sync_marketplace_versions.py" ]; then
+    echo "  Syncing versions..."
+    uv run python scripts/sync_marketplace_versions.py --quiet 2>&1 || true
+fi
 
-    # Run cpv if available
-    if shutil.which("cpv"):
-        result = subprocess.run(
-            ["cpv", "validate-plugin", str(plugin_path), "--quiet"],
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            error(f"{plugin_dir}: validation failed")
-            return False
+# Commit if marketplace.json changed
+if ! git diff --quiet .claude-plugin/marketplace.json 2>/dev/null; then
+    git add .claude-plugin/marketplace.json
+    git commit -m "chore: sync marketplace.json plugin versions"
+    echo "  Committed version sync"
+fi
 
-    return True
+# -- Push marketplace -------------------------------------------------------
 
+echo ""
+echo "--- marketplace push ---"
 
-def push_plugin(
-    plugin_dir: str,
-    repo_root: Path,
-    commit_msg: str,
-    dry_run: bool,
-) -> bool:
-    """Push a single plugin (git submodule)."""
-    plugin_path = repo_root / plugin_dir
+BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "main")
+LOCAL=$(git rev-parse HEAD 2>/dev/null)
+REMOTE=$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo "none")
 
-    if not (plugin_path / ".git").is_dir():
-        warn(f"{plugin_dir}: not a git repo (not a submodule?) - skipping push")
-        return True
+if [ "$LOCAL" = "$REMOTE" ] && git diff --staged --quiet 2>/dev/null; then
+    echo "  SKIP: marketplace already up to date"
+    SKIPPED+=("marketplace (up to date)")
+else
+    if [ -n "$DRY_RUN" ]; then
+        echo "  DRY-RUN: would push marketplace to origin/$BRANCH"
+        SKIPPED+=("marketplace (dry-run)")
+    else
+        MARKETPLACE_PUSHED=0
+        for attempt in 1 2 3; do
+            echo "  Push attempt $attempt/3..."
+            git pull origin "$BRANCH" --rebase 2>&1 || true
+            if git push origin "$BRANCH" 2>&1; then
+                MARKETPLACE_PUSHED=1
+                break
+            fi
+            echo "  Push attempt $attempt failed, retrying in 5s..."
+            sleep 5
+        done
+        if [ "$MARKETPLACE_PUSHED" -eq 1 ]; then
+            echo "  PUSHED marketplace"
+            PUSHED+=("marketplace")
+        else
+            echo "  FAILED marketplace (after 3 attempts)"
+            exit 1
+        fi
+    fi
+fi
 
-    # Check for uncommitted changes
-    status = run_git(["status", "--porcelain"], cwd=plugin_path)
-    if status.stdout.strip():
-        info(f"{plugin_dir}: staging and committing changes...")
-        if not dry_run:
-            run_git(["add", "-A"], cwd=plugin_path)
-            run_git(["commit", "-m", commit_msg], cwd=plugin_path)
+# -- Summary ----------------------------------------------------------------
 
-    # Determine current branch
-    branch_result = run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=plugin_path)
-    branch = branch_result.stdout.strip()
-    if not branch:
-        warn(f"{plugin_dir}: could not determine branch")
-        return False
-
-    # Compare local vs remote
-    local_hash = run_git(["rev-parse", "HEAD"], cwd=plugin_path).stdout.strip()
-    remote_result = run_git(["rev-parse", f"origin/{branch}"], cwd=plugin_path)
-    remote_hash = remote_result.stdout.strip() if remote_result.returncode == 0 else ""
-
-    if local_hash != remote_hash:
-        info(f"{plugin_dir}: pushing to origin/{branch}...")
-        if not dry_run:
-            push_result = run_git(["push", "origin", branch], cwd=plugin_path)
-            if push_result.returncode != 0:
-                error(f"{plugin_dir}: push failed: {push_result.stderr.strip()}")
-                return False
-        success(f"{plugin_dir}: pushed")
-    else:
-        success(f"{plugin_dir}: already up to date")
-
-    return True
-
-
-def main() -> int:
-    """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Push updates to all plugins and the marketplace",
-    )
-    parser.add_argument(
-        "--dry-run", action="store_true",
-        help="Show what would happen without making changes",
-    )
-    parser.add_argument(
-        "--skip-validation", action="store_true",
-        help="Skip plugin and marketplace validation steps",
-    )
-    parser.add_argument(
-        "--message", default="Update plugins",
-        help='Custom commit message (default: "Update plugins")',
-    )
-    args = parser.parse_args()
-
-    dry_run: bool = args.dry_run
-    skip_validation: bool = args.skip_validation
-    commit_msg: str = args.message
-
-    # Resolve paths
-    script_dir = Path(__file__).resolve().parent
-    repo_root = script_dir.parent
-
-    # Locate marketplace.json
-    marketplace_json = find_marketplace_json(repo_root)
-    if marketplace_json is None:
-        error(f"Could not find marketplace.json in {repo_root}")
-        return 1
-
-    info(f"Marketplace: {marketplace_json}")
-    if dry_run:
-        warn("DRY RUN - no changes will be made")
-
-    # -- Discover plugin directories --
-    info("Discovering plugins...")
-    plugin_dirs = get_plugin_dirs(repo_root, marketplace_json)
-
-    if not plugin_dirs:
-        warn("No plugin directories found")
-        return 0
-
-    info(f"Found {len(plugin_dirs)} plugin(s): {' '.join(plugin_dirs)}")
-
-    # Step 1: Validate all plugins
-    if not skip_validation:
-        info("Validating plugins...")
-        validation_failed = False
-        for pdir in plugin_dirs:
-            if not validate_plugin(pdir, repo_root):
-                validation_failed = True
-        if validation_failed:
-            error("Some plugins failed validation. Fix errors or use --skip-validation.")
-            return 1
-        success("All plugins validated")
-
-    # Step 2: Push each plugin
-    info("Pushing plugins...")
-    for pdir in plugin_dirs:
-        push_plugin(pdir, repo_root, commit_msg, dry_run)
-
-    # Step 3: Sync marketplace versions
-    sync_script = script_dir / "sync_marketplace_versions.py"
-    if sync_script.is_file():
-        info("Syncing marketplace versions...")
-        sync_args = [sys.executable, str(sync_script), "--marketplace", str(marketplace_json)]
-        if dry_run:
-            sync_args.append("--dry-run")
-        subprocess.run(sync_args)
-
-    # Step 4: Regenerate README
-    gen_script = script_dir / "generate-readme.py"
-    if gen_script.is_file():
-        info("Regenerating README...")
-        if not dry_run:
-            subprocess.run(
-                [sys.executable, str(gen_script), "--marketplace", str(marketplace_json)],
-            )
-
-    # Step 5: Validate the marketplace itself
-    if not skip_validation:
-        info("Validating marketplace...")
-        if shutil.which("cpv"):
-            result = subprocess.run(
-                ["cpv", "validate-marketplace", str(repo_root), "--quiet"],
-                capture_output=True, text=True,
-            )
-            if result.returncode != 0:
-                error("Marketplace validation failed after sync")
-                return 1
-        success("Marketplace validation passed")
-
-    # Step 6: Commit and push the marketplace
-    status = run_git(["status", "--porcelain"], cwd=repo_root)
-    if status.stdout.strip():
-        info("Committing marketplace changes...")
-        if not dry_run:
-            run_git(["add", "-A"], cwd=repo_root)
-            run_git(["commit", "-m", "chore: sync plugin versions and regenerate README"], cwd=repo_root)
-
-    branch_result = run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_root)
-    branch = branch_result.stdout.strip()
-    local_hash = run_git(["rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
-    remote_result = run_git(["rev-parse", f"origin/{branch}"], cwd=repo_root)
-    remote_hash = remote_result.stdout.strip() if remote_result.returncode == 0 else ""
-
-    if local_hash != remote_hash:
-        info(f"Pushing marketplace to origin/{branch}...")
-        if not dry_run:
-            push_result = run_git(["push", "origin", branch], cwd=repo_root)
-            if push_result.returncode != 0:
-                error(f"Marketplace push failed: {push_result.stderr.strip()}")
-                return 1
-        success("Marketplace pushed")
-    else:
-        success("Marketplace already up to date")
-
-    print()
-    success("All done!")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+echo ""
+echo "============================================================"
+echo "  Results"
+echo "============================================================"
+echo ""
+if [ ${#VALIDATED[@]} -gt 0 ]; then
+    echo "  VALIDATED (${#VALIDATED[@]}):"
+    for p in "${VALIDATED[@]}"; do echo "    OK $p"; done
+fi
+if [ ${#PUSHED[@]} -gt 0 ]; then
+    echo "  PUSHED (${#PUSHED[@]}):"
+    for p in "${PUSHED[@]}"; do echo "    OK $p"; done
+fi
+if [ ${#SKIPPED[@]} -gt 0 ]; then
+    echo "  SKIPPED (${#SKIPPED[@]}):"
+    for s in "${SKIPPED[@]}"; do echo "    - $s"; done
+fi
+if [ ${#PUSH_FAILED_LIST[@]} -gt 0 ]; then
+    echo "  PUSH FAILED (${#PUSH_FAILED_LIST[@]}):"
+    for f in "${PUSH_FAILED_LIST[@]}"; do echo "    FAIL $f"; done
+fi
+echo ""
+echo "Done."
 ```
+
+---
+
+## Action Version Reference
+
+All scripts in this document are tested with:
+
+| Tool | Version | Notes |
+|------|---------|-------|
+| `uv` | 0.5+ | Python package manager and runner |
+| `ruff` | 0.8+ | Python linter/formatter |
+| `git-cliff` | 2.0+ | Changelog generator (optional) |
+| `gh` | 2.40+ | GitHub CLI for API access |
