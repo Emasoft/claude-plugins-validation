@@ -6,6 +6,8 @@
 - [setup-hooks.py Template](#setup-hookspy-template)
 - [Placeholder Reference](#placeholder-reference)
 
+> For plugins with compiled binaries, see [`plugin-binary-builds.md`](plugin-binary-builds.md) for adding build phases to the pre-push hook and publish pipeline.
+
 ---
 
 ## pre-push Hook Template

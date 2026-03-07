@@ -27,8 +27,8 @@ Creates a Claude Code plugin GitHub repo with CI/CD, git hooks, and marketplace 
 ## Instructions
 
 1. **Create GitHub repo**: `gh repo create <owner>/<name> --public --clone`, then `cd` into it
-2. **Initialize plugin structure** from `references/plugin-repo-templates.md`: create `plugin.json`, `pyproject.toml`, `.gitignore`, `README.md` — fill all `<placeholder-for-...>` values
-3. **Install CI/CD workflows** from `references/plugin-workflows.md`: copy `ci.yml`, `release.yml`, `validate.yml`, `notify-marketplace.yml` into `.github/workflows/`
+2. **Initialize plugin**: from `references/plugin-repo-templates.md` create `plugin.json`, `pyproject.toml`, `.gitignore`, `README.md`. Scan for compiled components — if found, add build phases per `references/plugin-binary-builds.md`
+3. **Install workflows**: from `references/plugin-workflows.md` copy `ci.yml`, `release.yml`, `validate.yml`, `notify-marketplace.yml` to `.github/workflows/`. For compiled binaries, add `build-binaries.yml` per `references/plugin-binary-builds.md`
 4. **Install git hooks** from `references/plugin-hooks-and-scripts.md`: copy `pre-push` to `.githooks/`, add `publish.py` and `setup-hooks.py` to `scripts/`, run `git config core.hooksPath .githooks`
 5. **Configure marketplace notification**: ask user for `MARKETPLACE_PAT`, run `gh secret set MARKETPLACE_PAT` (skip if declined)
 6. **Validate**: run `uv run scripts/validate_plugin.py .` — fix CRITICAL/MAJOR issues
@@ -76,18 +76,14 @@ Plugin: <placeholder-for-plugin-name> | Owner: <placeholder-for-github-repo-owne
 
 ## Resources
 
-- [`references/plugin-repo-templates.md`](references/plugin-repo-templates.md)
-  > plugin.json Template · pyproject.toml Template · .gitignore Template · README.md Template · Placeholder Reference
-
-- [`references/plugin-workflows.md`](references/plugin-workflows.md)
-  > ci.yml · release.yml · validate.yml · notify-marketplace.yml · Placeholder Reference · Setup Instructions
-
-- [`references/plugin-hooks-and-scripts.md`](references/plugin-hooks-and-scripts.md)
-  > pre-push Hook Template · publish.py Pipeline Template · setup-hooks.py Template · Placeholder Reference
+- [`references/plugin-repo-templates.md`](references/plugin-repo-templates.md) — plugin.json, pyproject.toml, .gitignore, README templates
+- [`references/plugin-workflows.md`](references/plugin-workflows.md) — ci.yml, release.yml, validate.yml, notify-marketplace.yml
+- [`references/plugin-hooks-and-scripts.md`](references/plugin-hooks-and-scripts.md) — pre-push hook, publish.py, setup-hooks.py
+- [`references/plugin-binary-builds.md`](references/plugin-binary-builds.md) — build-binaries.yml, binary distribution, platform detection
 
 ## Compiling Templates
 
-Replace `<placeholder-for-...>` tokens with user values. Run `grep -r 'placeholder-for-'` to verify none remain. Each plugin MUST have its own repo — never embed plugins inside the marketplace. Plugins version independently, PRs stay isolated, and subtrees/worktrees cause merge conflicts at scale.
+Replace `<placeholder-for-...>` tokens with user values. Run `grep -r 'placeholder-for-'` to verify none remain. Each plugin MUST have its own repo — never embed plugins inside the marketplace.
 
 ## Token Optimization
 

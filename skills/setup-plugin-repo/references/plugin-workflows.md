@@ -9,6 +9,8 @@
 - [Placeholder Reference](#placeholder-reference)
 - [Setup Instructions](#setup-instructions)
 
+> For plugins with compiled binaries, see [`plugin-binary-builds.md`](plugin-binary-builds.md) for the `build-binaries.yml` cross-compilation workflow and CI build step patterns.
+
 ---
 
 ## ci.yml -- Continuous Integration

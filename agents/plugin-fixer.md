@@ -37,6 +37,7 @@ The `fix-validation` skill (loaded via frontmatter) provides the complete error-
 
 For issues involving CI/CD workflows, git hooks, publish scripts, or marketplace configuration:
 - **Plugin repo issues** → consult `setup-plugin-repo` skill references (hooks, workflows, publish pipeline)
+- **Compiled binary issues** → consult `setup-plugin-repo` skill's `plugin-binary-builds.md` for cross-compilation, build phases, and binary distribution
 - **Marketplace issues** → consult `setup-github-marketplace` skill references (sync scripts, dispatch workflows, marketplace.json)
 
 ## Marketplace Structure Policy
