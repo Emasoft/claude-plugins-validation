@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
+
 import re
 import stat
 import sys
@@ -32,11 +32,11 @@ from cpv_validation_common import (
     SECRET_PATTERNS,
     USER_PATH_PATTERNS,
     ValidationReport,
+    get_gitignore_filter,
     is_binary_file,
     print_report_summary,
     print_results_by_level,
     save_report_and_print_summary,
-    should_skip_directory,
 )
 
 # =============================================================================
@@ -449,11 +449,9 @@ def scan_for_user_paths(content: str, file_path: str, report: ValidationReport) 
 def check_dangerous_files(plugin_path: Path, report: ValidationReport) -> int:
     """Check for presence of dangerous files in the plugin. Returns count found."""
     issues_found = 0
+    gi = get_gitignore_filter(plugin_path)
 
-    for root, dirs, files in os.walk(plugin_path):
-        # Skip hidden and cache directories
-        dirs[:] = [d for d in dirs if not should_skip_directory(d)]
-
+    for root, dirs, files in gi.walk(plugin_path):
         for filename in files:
             if filename in DANGEROUS_FILES:
                 full_path = Path(root) / filename
@@ -467,11 +465,9 @@ def check_dangerous_files(plugin_path: Path, report: ValidationReport) -> int:
 def check_script_permissions(plugin_path: Path, report: ValidationReport) -> int:
     """Check script files for proper permissions. Returns count of issues found."""
     issues_found = 0
+    gi = get_gitignore_filter(plugin_path)
 
-    for root, dirs, files in os.walk(plugin_path):
-        # Skip hidden and cache directories
-        dirs[:] = [d for d in dirs if not should_skip_directory(d)]
-
+    for root, dirs, files in gi.walk(plugin_path):
         for filename in files:
             file_path = Path(root) / filename
             rel_path = file_path.relative_to(plugin_path)
@@ -537,10 +533,9 @@ def scan_all_files(plugin_path: Path, report: ValidationReport) -> dict[str, int
         "user_path_issues": 0,
     }
 
-    for root, dirs, files in os.walk(plugin_path):
-        # Filter out directories to skip
-        dirs[:] = [d for d in dirs if not should_skip_directory(d)]
+    gi = get_gitignore_filter(plugin_path)
 
+    for root, dirs, files in gi.walk(plugin_path):
         for filename in files:
             file_path = Path(root) / filename
             rel_path = str(file_path.relative_to(plugin_path))

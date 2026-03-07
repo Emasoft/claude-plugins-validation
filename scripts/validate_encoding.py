@@ -19,18 +19,18 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
+
 import re
 import sys
 from pathlib import Path
 
 from cpv_validation_common import (
     ValidationReport,
+    get_gitignore_filter,
     is_binary_file,
     print_report_summary,
     print_results_by_level,
     save_report_and_print_summary,
-    should_skip_directory,
 )
 
 # =============================================================================
@@ -440,11 +440,11 @@ def validate_encoding(plugin_path: Path) -> EncodingValidationReport:
 
     report.info(f"Starting encoding scan of: {plugin_path}")
 
-    # Walk through all files
-    for root, dirs, files in os.walk(plugin_path):
-        # Filter out directories to skip
-        dirs[:] = [d for d in dirs if not should_skip_directory(d)]
+    # Use gitignore-aware walker to skip ignored paths
+    gi = get_gitignore_filter(plugin_path)
 
+    # Walk through all files
+    for root, dirs, files in gi.walk(plugin_path):
         for filename in files:
             file_path = Path(root) / filename
 

@@ -33,12 +33,17 @@ YELLOW = "\033[1;33m" if _USE_COLOR else ""
 BLUE = "\033[0;34m" if _USE_COLOR else ""
 NC = "\033[0m" if _USE_COLOR else ""
 
-# Directories to skip when scanning for Python __version__ variables
-EXCLUDE_DIRS = frozenset({
-    "__pycache__", ".venv", "venv", "env", ".env",
-    "node_modules", ".git", ".mypy_cache", ".ruff_cache",
-    "tests", "tests_dev", "docs_dev", "scripts_dev",
-})
+# Lazy-initialized gitignore filter for file scanning
+_gi = None
+
+
+def _get_gi(plugin_root: Path):  # noqa: ANN202
+    """Get or create GitignoreFilter for the plugin root."""
+    global _gi  # noqa: PLW0603
+    if _gi is None:
+        from gitignore_filter import GitignoreFilter
+        _gi = GitignoreFilter(plugin_root)
+    return _gi
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -155,11 +160,9 @@ def update_pyproject_toml(plugin_root: Path, new_version: str) -> tuple[bool, st
 
 def update_python_versions(plugin_root: Path, new_version: str) -> list[tuple[bool, str]]:
     """Update __version__ = 'X.Y.Z' in all Python files."""
+    gi = _get_gi(plugin_root)
     results: list[tuple[bool, str]] = []
-    for py_file in plugin_root.rglob("*.py"):
-        parts = set(py_file.relative_to(plugin_root).parts)
-        if parts & EXCLUDE_DIRS or any(p.startswith(".") for p in py_file.relative_to(plugin_root).parts):
-            continue
+    for py_file in gi.rglob("*.py"):
         try:
             content = py_file.read_text(encoding="utf-8")
             pattern = r'^(__version__\s*=\s*["\'])(\d+\.\d+\.\d+)(["\'])$'
@@ -209,10 +212,8 @@ def check_version_consistency(plugin_root: Path) -> tuple[bool, str]:
             pass
 
     # Python __version__ variables
-    for py_file in plugin_root.rglob("*.py"):
-        parts = set(py_file.relative_to(plugin_root).parts)
-        if parts & EXCLUDE_DIRS or any(p.startswith(".") for p in py_file.relative_to(plugin_root).parts):
-            continue
+    gi = _get_gi(plugin_root)
+    for py_file in gi.rglob("*.py"):
         try:
             content = py_file.read_text(encoding="utf-8")
             m = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']', content, re.MULTILINE)
