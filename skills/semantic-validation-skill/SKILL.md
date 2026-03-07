@@ -1,9 +1,6 @@
 ---
 name: semantic-validation-skill
-description: |
-  Deep AI-driven semantic validation for skills and agents. Use when checking description
-  triggering effectiveness, instruction clarity, example quality, and workflow completeness.
-  WARNING: this skill is extremely expensive (10x more tokens). Trigger with /cpv-semantic-validation. Explicit opt-in only.
+description: "Deep AI semantic validation for skills/agents. Use when checking triggering, clarity, examples. Trigger with /cpv-semantic-validation. 10x token cost."
 tags:
   - validation
   - semantic
@@ -80,3 +77,10 @@ This produces a **Semantic Grade (A-F)**, complementary to the **Syntactic Score
 - Semantic Validation Criteria — see `agents/references/skill-semantic-validation.md` for full criteria, rubrics, report format
 - `skill-validation-skill` — Script-based validation (cheap, fast)
 - `plugin-validation-skill` — Full plugin validation
+
+## Validation Checklist
+Copy this checklist and track your progress:
+- [ ] Confirm explicit user opt-in
+- [ ] Run semantic validation on target skill
+- [ ] Review A-F grade and per-criterion scores
+- [ ] Address failing criteria

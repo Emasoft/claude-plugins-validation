@@ -80,6 +80,7 @@ These require AI judgment and cannot be performed by scripts:
 
 For the full semantic validation criteria, scoring rubrics, and report format, see:
 **[references/skill-semantic-validation.md](references/skill-semantic-validation.md)**
+> **Sections:** Description Quality · Instructions Quality · Example Quality · Workflow Validation · Technical Quality · Output Patterns · Report Format
 
 ## Rules
 
