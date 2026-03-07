@@ -30,6 +30,8 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from gitignore_filter import GitignoreFilter
+
 # ---------------------------------------------------------------------------
 # Terminal colors — respects NO_COLOR (https://no-color.org/) and non-TTY output
 # ---------------------------------------------------------------------------
@@ -85,125 +87,95 @@ def _resolve_tool(tool_name: str) -> list[str] | None:
 def detect_languages(repo_root: Path) -> dict[str, list[Path]]:
     """Detect which programming languages are present in the repo.
 
+    Uses GitignoreFilter to respect .gitignore patterns instead of hardcoded exclude dirs.
+
     Returns:
         Dictionary mapping language name to list of files.
     """
-    exclude_dirs = {
-        ".venv",
-        "venv",
-        "__pycache__",
-        ".git",
-        "node_modules",
-        ".mypy_cache",
-        ".ruff_cache",
-        "build",
-        "dist",
-        ".tox",
-    }
-
-    def should_include(path: Path) -> bool:
-        # Skip known cache/build dirs AND any *_dev directories (gitignored, not shipped)
-        return not any(
-            part in exclude_dirs or part.endswith("_dev") or part.startswith(".")
-            for part in path.parts
-        )
+    gi = GitignoreFilter(repo_root)
 
     languages: dict[str, list[Path]] = {}
 
     # Python
-    py_files = [f for f in repo_root.glob("**/*.py") if should_include(f)]
+    py_files = list(gi.rglob("*.py"))
     if py_files:
         languages["python"] = py_files
 
     # JavaScript/TypeScript
-    js_exts = ("**/*.js", "**/*.ts", "**/*.jsx", "**/*.tsx")
     all_js: list[Path] = []
-    for ext in js_exts:
-        all_js.extend(f for f in repo_root.glob(ext) if should_include(f))
+    for ext in ("*.js", "*.ts", "*.jsx", "*.tsx"):
+        all_js.extend(gi.rglob(ext))
     if all_js:
         languages["javascript"] = all_js
 
     # Shell/Bash
-    sh_files = [f for f in repo_root.glob("**/*.sh") if should_include(f)]
-    bash_files = [f for f in repo_root.glob("**/*.bash") if should_include(f)]
-    all_shell = sh_files + bash_files
+    all_shell = list(gi.rglob("*.sh")) + list(gi.rglob("*.bash"))
     if all_shell:
         languages["shell"] = all_shell
 
     # Go
-    go_files = [f for f in repo_root.glob("**/*.go") if should_include(f)]
+    go_files = list(gi.rglob("*.go"))
     if go_files:
         languages["go"] = go_files
 
     # Rust
-    rs_files = [f for f in repo_root.glob("**/*.rs") if should_include(f)]
+    rs_files = list(gi.rglob("*.rs"))
     if rs_files:
         languages["rust"] = rs_files
 
     # Markdown
-    md_files = [f for f in repo_root.glob("**/*.md") if should_include(f)]
-    mdx_files = [f for f in repo_root.glob("**/*.mdx") if should_include(f)]
-    all_md = md_files + mdx_files
+    all_md = list(gi.rglob("*.md")) + list(gi.rglob("*.mdx"))
     if all_md:
         languages["markdown"] = all_md
 
     # JSON
-    json_files = [f for f in repo_root.glob("**/*.json") if should_include(f)]
+    json_files = list(gi.rglob("*.json"))
     if json_files:
         languages["json"] = json_files
 
     # YAML
-    yml_files = [f for f in repo_root.glob("**/*.yml") if should_include(f)]
-    yaml_files = [f for f in repo_root.glob("**/*.yaml") if should_include(f)]
-    all_yaml = yml_files + yaml_files
+    all_yaml = list(gi.rglob("*.yml")) + list(gi.rglob("*.yaml"))
     if all_yaml:
         languages["yaml"] = all_yaml
 
     # Dockerfile
-    dockerfile_files = [f for f in repo_root.glob("**/Dockerfile") if should_include(f)]
-    dockerfile_files += [f for f in repo_root.glob("**/Dockerfile.*") if should_include(f)]
-    dockerfile_files += [f for f in repo_root.glob("**/*.dockerfile") if should_include(f)]
+    dockerfile_files = list(gi.rglob("Dockerfile")) + list(gi.rglob("Dockerfile.*")) + list(gi.rglob("*.dockerfile"))
     if dockerfile_files:
         languages["dockerfile"] = dockerfile_files
 
     # XML
-    xml_exts = ("**/*.xml", "**/*.xhtml", "**/*.xsd", "**/*.xsl")
     all_xml: list[Path] = []
-    for ext in xml_exts:
-        all_xml.extend(f for f in repo_root.glob(ext) if should_include(f))
+    for ext in ("*.xml", "*.xhtml", "*.xsd", "*.xsl"):
+        all_xml.extend(gi.rglob(ext))
     if all_xml:
         languages["xml"] = all_xml
 
     # CSS/SCSS/Less
-    css_exts = ("**/*.css", "**/*.scss", "**/*.less")
     all_css: list[Path] = []
-    for ext in css_exts:
-        all_css.extend(f for f in repo_root.glob(ext) if should_include(f))
+    for ext in ("*.css", "*.scss", "*.less"):
+        all_css.extend(gi.rglob(ext))
     if all_css:
         languages["css"] = all_css
 
     # HTML
-    html_files = [f for f in repo_root.glob("**/*.html") if should_include(f)]
-    htm_files = [f for f in repo_root.glob("**/*.htm") if should_include(f)]
-    all_html = html_files + htm_files
+    all_html = list(gi.rglob("*.html")) + list(gi.rglob("*.htm"))
     if all_html:
         languages["html"] = all_html
 
     # SQL
-    sql_files = [f for f in repo_root.glob("**/*.sql") if should_include(f)]
+    sql_files = list(gi.rglob("*.sql"))
     if sql_files:
         languages["sql"] = sql_files
 
     # TOML
-    toml_files = [f for f in repo_root.glob("**/*.toml") if should_include(f)]
+    toml_files = list(gi.rglob("*.toml"))
     if toml_files:
         languages["toml"] = toml_files
 
     # PowerShell
-    ps_exts = ("**/*.ps1", "**/*.psm1", "**/*.psd1")
     all_ps: list[Path] = []
-    for ext in ps_exts:
-        all_ps.extend(f for f in repo_root.glob(ext) if should_include(f))
+    for ext in ("*.ps1", "*.psm1", "*.psd1"):
+        all_ps.extend(gi.rglob(ext))
     if all_ps:
         languages["powershell"] = all_ps
 

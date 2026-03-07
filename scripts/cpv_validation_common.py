@@ -790,6 +790,24 @@ def is_path_gitignored(rel_path: str, patterns: list[str]) -> bool:
     return False
 
 
+def get_gitignore_filter(plugin_root: Path):  # noqa: ANN201
+    """Create a GitignoreFilter for the given plugin root.
+
+    Returns a GitignoreFilter instance that respects .gitignore patterns.
+    All validators should use this instead of hardcoded skip lists.
+
+    Usage:
+        gi = get_gitignore_filter(plugin_root)
+        for dirpath, dirnames, filenames in gi.walk():
+            ...
+        for path in gi.rglob("*.py"):
+            ...
+    """
+    from gitignore_filter import GitignoreFilter
+
+    return GitignoreFilter(plugin_root)
+
+
 def get_skip_dirs_with_gitignore(root_path: Path, additional_skip: set[str] | None = None) -> set[str]:
     """Get combined set of directories to skip (built-in + gitignored).
 

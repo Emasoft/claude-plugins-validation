@@ -23,7 +23,7 @@ scripts_dir = Path(__file__).parent.parent / "scripts"
 if str(scripts_dir) not in sys.path:
     sys.path.insert(0, str(scripts_dir))
 
-from cpv_validation_common import ValidationReport  # noqa: E402
+from cpv_validation_common import ValidationReport, should_skip_directory  # noqa: E402
 from validate_security import (  # noqa: E402
     check_dangerous_files,
     check_script_permissions,
@@ -34,7 +34,6 @@ from validate_security import (  # noqa: E402
     scan_for_path_traversal,
     scan_for_secrets,
     scan_for_user_paths,
-    should_skip_directory,
     validate_security,
 )
 

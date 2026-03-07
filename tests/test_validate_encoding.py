@@ -37,10 +37,10 @@ from validate_encoding import (
     is_binary_file,
     is_text_file,
     main,
-    should_skip_directory,
     validate_encoding,
     validate_file,
 )
+from cpv_validation_common import should_skip_directory
 
 
 class TestCheckUtf8Encoding:
