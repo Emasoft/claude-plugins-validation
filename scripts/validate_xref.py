@@ -35,11 +35,11 @@ from typing import Any
 import yaml
 from cpv_validation_common import (
     COLORS,
-    SKIP_DIRS,
     ValidationReport,
     print_report_summary,
     print_results_by_level,
     save_report_and_print_summary,
+    should_skip_directory,
 )
 
 # =============================================================================
@@ -166,7 +166,7 @@ def should_skip_dir(path: Path) -> bool:
     Returns:
         True if directory should be skipped
     """
-    return path.name in SKIP_DIRS or path.name.startswith(".")
+    return should_skip_directory(path.name) or path.name.startswith(".")
 
 
 def parse_yaml_frontmatter(content: str) -> dict[str, Any] | None:
