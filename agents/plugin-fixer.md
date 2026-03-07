@@ -3,7 +3,7 @@ name: plugin-fixer
 description: |
   Fix agent that reads validation report files and applies fixes one by one.
   Does NOT validate — only fixes issues identified by the validator agents.
-  Consults fix guides in agents/references/ for remediation steps.
+  Consults fix guides in skills/fix-validation/references/ for remediation steps.
 model: sonnet
 skills:
   - fix-validation
@@ -21,7 +21,7 @@ You receive a **report file path** (e.g., `docs_dev/validate_plugin_20260306.md`
 
 1. **Read the report file** to get the list of issues with severity, file path, and description
 2. **For each issue** (CRITICAL first, then MAJOR, then MINOR):
-   a. Consult the appropriate fix guide in `agents/references/` (see Fix Guides below)
+   a. Consult the appropriate fix guide in `skills/fix-validation/references/` (see Fix Guides below)
    b. Read the offending file
    c. Apply the fix following the guide's step-by-step instructions
    d. Move to the next issue
@@ -29,63 +29,7 @@ You receive a **report file path** (e.g., `docs_dev/validate_plugin_20260306.md`
 
 ## Fix Guides
 
-Consult these references for exact remediation steps:
-
-### [Plugin Structure Fixes](references/plugin-structure-fixes.md)
-Manifest, directory structure, agents, paths, versions, scripts, shebang, cross-platform.
-> **Sections:** Plugin Manifest Issues · Directory Structure Issues · Command File Issues · Agent File Issues · Hook Configuration Issues · MCP Server Issues · Script Quality Issues · Cross-Platform Compatibility Issues · Skill Validation Issues · README and LICENSE Issues · Rules Validation Issues · Path and Private Info Issues · .gitignore Issues · Workflow Inline Python Issues
-
-### [Hook Configuration Fixes](references/hook-fixes.md)
-JSON structure, events, matchers, timeouts, scripts, bash portability.
-> **Sections:** hooks.json Structure Issues · Event Type Issues · Matcher Issues · Hook Type Issues · Command Hook Issues · Prompt Hook Issues · Agent Hook Issues · Timeout Issues · Script Path Issues · Script Linting Issues · Field Validation Issues · Informational Notices
-
-### [Skill Validation Fixes](references/skill-fixes.md)
-SKILL.md structure, frontmatter, names, descriptions, sections, TOC, pillars.
-> **Sections:** Structure Issues · Frontmatter Issues · Name Field Issues · Description Quality Issues · Token Budget and Progressive Disclosure · Required Sections (Strict Mode) · Reference File Issues · TOC Embedding Issues · Allowed-Tools Issues · Content Quality Issues · 8+1 Pillars Issues · OpenSpec Mode Issues
-
-### [MCP Server Fixes](references/mcp-fixes.md)
-Configuration, transports, environment variables, paths, OAuth.
-> **Sections:** Configuration File Issues · Server Definition Issues · Transport Type Issues · stdio Transport Issues · HTTP/SSE Transport Issues · Environment Variable Issues · Path Issues · Args / Env / Cwd Field Issues · Headers Issues · Timeout Issues · OAuth Issues · Plugin Manifest Issues
-
-### [Marketplace Fixes](references/marketplace-fixes.md)
-Structure, plugins, submodules, pipeline, version sync, secrets.
-> **Sections:** marketplace.json Structure Issues · Plugin Entry Issues · Source Type Issues · Git Submodule Issues · Pipeline Workflow Issues · Version Sync Issues · Secret Configuration Issues · GitHub Deployment Issues
-
-### [Code Quality Fixes](references/code-quality-fixes.md)
-Encoding, secrets, paths, gitignore, security, permissions.
-> **Sections:** Encoding Issues · Line Ending Issues · BOM Issues · Secret Detection Issues · Private Path Issues · Absolute Path Issues · Injection Detection Issues · Path Traversal Issues · Dangerous File Issues · Script Permission Issues · Plugin Path Validation Issues · File Access Issues
-
-### [Cross-Reference Fixes](references/xref-fixes.md)
-Broken links, missing targets, agent references, version sync.
-> **Sections:** Plugin Directory Issues · Task() Agent Reference Issues · Subagent_type Matching Issues · Version Synchronization Issues · Command Agent Reference Issues · Skill Reference Issues · Hook Script Reference Issues · File Read Issues
-
-### [Documentation Fixes](references/documentation-fixes.md)
-README, content sections, links, CHANGELOG, headings, code blocks.
-> **Sections:** README Existence Issues · README Content Section Issues · Internal Link Issues · CHANGELOG Issues · Heading Hierarchy Issues · Code Block Issues · List Formatting Issues · Table Structure Issues · Image Reference Issues
-
-### [Security Fixes](references/security-fixes.md)
-Secrets, injection, path traversal, dangerous patterns, permissions.
-> **Sections:** Plugin Path Issues · Injection Detection Issues · Path Traversal Issues · Secret Detection Issues · Hardcoded User Path Issues · Dangerous File Issues · Script Permission Issues · File Read Issues
-
-### [Rules Fixes](references/rules-fixes.md)
-Rule syntax, consistency, frontmatter, security, token budget.
-> **Sections:** Rules Directory Issues · Rule File Read and Encoding Issues · Rule File Content Issues · Frontmatter Issues · Security Issues in Rule Files · Token Budget Issues
-
-### [Enterprise Fixes](references/enterprise-fixes.md)
-Policy compliance, governance, metadata, author, license, tags.
-> **Sections:** Plugin/Path Level Issues · Skill File Issues · Required Metadata: name and description · Author Field Issues · License Field Issues · Context Field Issues · Agent Field Issues · User-Invocable Field Issues · Tags Field Issues · Mode Field Issues · Agent Compliance Issues · Summary/Informational Messages
-
-### [Encoding Fixes](references/encoding-fixes.md)
-UTF-8, BOM, line endings, JSON unicode, escape sequences.
-> **Sections:** Plugin Path Issues · UTF-8 Encoding Issues · BOM (Byte Order Mark) Issues · JSON Unicode Issues · Escape Sequence Issues · Line Ending Issues — Source Files · Line Ending Issues — Shell Scripts · Line Ending Issues — Batch Scripts · File Read Issues
-
-### [LSP Fixes](references/lsp-fixes.md)
-Config, server structure, command, filetypes, args, env, transport.
-> **Sections:** Config File Issues · Server-Level Structure Issues · Unknown Fields · command Field Issues · extensionToLanguage Field Issues · args Field Issues · filetypes Field Issues · rootPatterns Field Issues · initializationOptions and settings Field Issues · env Field Issues · cwd Field Issues · transport Field Issues · Timeout Field Issues · maxRestarts Field Issues · restartOnCrash Field Issues · Environment Variable Syntax Issues · Path Value Issues · Informational Messages
-
-### [Scoring Fixes](references/scoring-fixes.md)
-Low scores, missing metrics, weight configuration, recommendations.
-> **Sections:** How Scoring Works · Category Definitions · Status Thresholds · Sub-Validator Crash Messages · Recommendation Messages · How to Improve Each Category Score
+The `fix-validation` skill (loaded via frontmatter) provides the complete error-to-fix index. Use it to look up which reference file in `skills/fix-validation/references/` covers each error. Read only the relevant section — never load entire reference files.
 
 ## Rules
 

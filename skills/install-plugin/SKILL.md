@@ -2,7 +2,7 @@
 name: install-plugin
 description: >
   Install, uninstall, or manage Claude Code plugins locally without a GitHub
-  marketplace. Use when you need to install, update, or manage Claude Code
+  marketplace. Use when installing, updating, or managing Claude Code
   plugins from local paths or archives.
 tags:
   - plugin

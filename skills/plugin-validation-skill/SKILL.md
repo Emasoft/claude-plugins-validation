@@ -1,6 +1,6 @@
 ---
 name: plugin-validation-skill
-description: Use when you need to validate Claude Code plugins for structural correctness, quality compliance, and marketplace readiness. Trigger with /cpv-validate-plugin.
+description: Validates Claude Code plugins for structural correctness, quality compliance, and marketplace readiness. Use when validating a plugin. Trigger with /cpv-validate-plugin.
 tags: [validation, plugins, marketplace, hooks, skills, mcp, quality-assurance]
 user-invocable: true
 allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep, Write
