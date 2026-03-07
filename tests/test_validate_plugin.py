@@ -219,8 +219,8 @@ class TestManifestFieldValidation:
         assert any("Missing recommended field 'version'" in m for m in minor_msgs)
         assert any("Missing recommended field 'description'" in m for m in minor_msgs)
 
-    def test_uppercase_name_reports_major(self, tmp_path):
-        """validate_manifest reports MAJOR when plugin name has uppercase letters (line 121)."""
+    def test_uppercase_name_reports_critical(self, tmp_path):
+        """validate_manifest reports CRITICAL when plugin name has uppercase letters."""
         plugin_dir = tmp_path / "upper-plugin"
         plugin_dir.mkdir()
         claude_dir = plugin_dir / ".claude-plugin"
@@ -229,11 +229,11 @@ class TestManifestFieldValidation:
         (claude_dir / "plugin.json").write_text(json.dumps(manifest))
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
-        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("must be lowercase" in m for m in major_msgs)
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert any("uppercase" in m.lower() for m in critical_msgs)
 
-    def test_name_with_spaces_reports_major(self, tmp_path):
-        """validate_manifest reports MAJOR when plugin name contains spaces (line 123)."""
+    def test_name_with_spaces_reports_critical(self, tmp_path):
+        """validate_manifest reports CRITICAL when plugin name contains spaces."""
         plugin_dir = tmp_path / "spaced-plugin"
         plugin_dir.mkdir()
         claude_dir = plugin_dir / ".claude-plugin"
@@ -242,11 +242,11 @@ class TestManifestFieldValidation:
         (claude_dir / "plugin.json").write_text(json.dumps(manifest))
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
-        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("cannot contain spaces" in m for m in major_msgs)
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert any("naming pattern" in m.lower() for m in critical_msgs)
 
-    def test_non_kebab_case_name_reports_major(self, tmp_path):
-        """validate_manifest reports MAJOR when plugin name is not kebab-case (line 128)."""
+    def test_non_kebab_case_name_reports_critical(self, tmp_path):
+        """validate_manifest reports CRITICAL when plugin name starts with digit."""
         plugin_dir = tmp_path / "bad-name"
         plugin_dir.mkdir()
         claude_dir = plugin_dir / ".claude-plugin"
@@ -255,8 +255,8 @@ class TestManifestFieldValidation:
         (claude_dir / "plugin.json").write_text(json.dumps(manifest))
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
-        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("kebab-case" in m for m in major_msgs)
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert any("must not start with a digit" in m for m in critical_msgs)
 
     def test_bad_semver_reports_major(self, tmp_path):
         """validate_manifest reports MAJOR when version is not semver (line 134)."""

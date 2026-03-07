@@ -30,6 +30,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 from cpv_validation_common import (
+    MAX_NAME_LENGTH,
+    NAME_PATTERN,
     SEMVER_PATTERN,
     Level,
     print_compact_summary,
@@ -158,9 +160,7 @@ RESERVED_MARKETPLACE_NAMES = {
     "life-sciences",
 }
 
-# Name validation pattern (kebab-case)
-NAME_PATTERN = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
-
+# NAME_PATTERN and MAX_NAME_LENGTH imported from cpv_validation_common
 # VERSION_PATTERN imported from cpv_validation_common as SEMVER_PATTERN
 
 # Required README sections for GitHub deployment
@@ -321,15 +321,35 @@ def validate_marketplace_name(name: Any, json_path: str) -> list[ValidationResul
         )
         return results
 
-    # Warn if not kebab-case
+    # Length check
+    if len(name) > MAX_NAME_LENGTH:
+        results.append(
+            ValidationResult(
+                level="MAJOR",
+                category="manifest",
+                message=f"Marketplace name '{name}' exceeds {MAX_NAME_LENGTH} chars ({len(name)})",
+                file=json_path,
+            )
+        )
+
+    # Naming pattern check (kebab-case, must start and end with letter)
     if not NAME_PATTERN.match(name):
         results.append(
             ValidationResult(
-                level="MINOR",
+                level="CRITICAL",
                 category="manifest",
-                message=f"Marketplace name '{name}' should use kebab-case (lowercase with hyphens)",
+                message=f"Marketplace name '{name}' does not match naming pattern (lowercase letters, digits, hyphens; must start with letter)",
                 file=json_path,
                 suggestion="Use format: my-marketplace-name",
+            )
+        )
+    elif name[-1].isdigit():
+        results.append(
+            ValidationResult(
+                level="CRITICAL",
+                category="manifest",
+                message=f"Marketplace name '{name}' must not end with a digit",
+                file=json_path,
             )
         )
 
@@ -369,17 +389,35 @@ def validate_plugin_entry(
                 )
             )
 
-    # Validate name format
+    # Validate name format (uniform naming rules)
     name = plugin.get("name")
     if isinstance(name, str) and name:
+        if len(name) > MAX_NAME_LENGTH:
+            results.append(
+                ValidationResult(
+                    level="MAJOR",
+                    category="plugin",
+                    message=f"Plugin name '{name}' exceeds {MAX_NAME_LENGTH} chars ({len(name)})",
+                    file=json_path,
+                )
+            )
         if not NAME_PATTERN.match(name):
             results.append(
                 ValidationResult(
-                    level="MINOR",
+                    level="CRITICAL",
                     category="plugin",
-                    message=f"Plugin name '{name}' should use kebab-case",
+                    message=f"Plugin name '{name}' does not match naming pattern (lowercase, hyphens, must start with letter)",
                     file=json_path,
                     suggestion="Use format: my-plugin-name",
+                )
+            )
+        elif name[-1].isdigit():
+            results.append(
+                ValidationResult(
+                    level="CRITICAL",
+                    category="plugin",
+                    message=f"Plugin name '{name}' must not end with a digit",
+                    file=json_path,
                 )
             )
 

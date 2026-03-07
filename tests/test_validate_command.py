@@ -87,13 +87,13 @@ class TestValidateNameField:
         assert "CRITICAL" not in levels
         assert "MAJOR" not in levels
 
-    def test_uppercase_name_reports_major(self):
-        """A name with uppercase letters should produce at least one MAJOR issue about case."""
+    def test_uppercase_name_reports_critical(self):
+        """A name with uppercase letters should produce CRITICAL issue about case."""
         frontmatter = {"name": "MyCommand"}
         report = CommandValidationReport()
         validate_name_field(frontmatter, "MyCommand.md", report)
-        major_messages = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("lowercase" in m for m in major_messages)
+        critical_messages = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert any("uppercase" in m.lower() for m in critical_messages)
 
 
 class TestValidateToolPattern:
@@ -266,19 +266,19 @@ class TestValidateNameFieldEdgeCases:
         validate_name_field(frontmatter, "bad.md", report)
         assert any(r.level == "CRITICAL" and "must be a string" in r.message for r in report.results)
 
-    def test_name_with_consecutive_hyphens_reports_major(self):
-        """A name containing '--' should produce a MAJOR issue (line 228)."""
+    def test_name_with_consecutive_hyphens_reports_critical(self):
+        """A name containing '--' should produce a CRITICAL issue."""
         frontmatter = {"name": "my--command"}
         report = CommandValidationReport()
         validate_name_field(frontmatter, "my--command.md", report)
-        assert any(r.level == "MAJOR" and "consecutive hyphens" in r.message for r in report.results)
+        assert any(r.level == "CRITICAL" and "consecutive hyphens" in r.message for r in report.results)
 
-    def test_name_starting_with_hyphen_reports_major(self):
-        """A name starting or ending with a hyphen should produce MAJOR (line 232)."""
+    def test_name_starting_with_hyphen_reports_critical(self):
+        """A name starting with a hyphen should produce CRITICAL."""
         frontmatter = {"name": "-my-command"}
         report = CommandValidationReport()
         validate_name_field(frontmatter, "-my-command.md", report)
-        assert any(r.level == "MAJOR" and "start/end with hyphen" in r.message for r in report.results)
+        assert any(r.level == "CRITICAL" and "naming pattern" in r.message.lower() for r in report.results)
 
 
 class TestValidateDescriptionField:

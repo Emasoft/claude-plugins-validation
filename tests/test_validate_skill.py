@@ -91,14 +91,14 @@ class TestValidateNameField:
         assert not report.has_major
         assert any(r.level == "PASSED" and "'name' field present" in r.message for r in report.results)
 
-    def test_uppercase_name_reports_major(self):
-        """A name containing uppercase letters should report MAJOR issue."""
+    def test_uppercase_name_reports_critical(self):
+        """A name containing uppercase letters should report CRITICAL issue."""
         frontmatter = {"name": "My-Skill"}
         report = _make_report()
-        validate_name_field(frontmatter, "My-Skill", report)
-        assert report.has_major
-        msgs = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("lowercase" in m for m in msgs)
+        validate_name_field(frontmatter, "my-skill", report)
+        assert report.has_critical
+        msgs = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert any("uppercase" in m.lower() for m in msgs)
 
 
 class TestValidateSkillContent:
@@ -269,23 +269,23 @@ class TestValidateNameFieldExtended:
         crit_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
         assert any("must be a string" in m for m in crit_msgs)
 
-    def test_name_exceeding_64_chars_reports_major(self):
-        """Name longer than 64 characters should report MAJOR (line 152)."""
-        long_name = "a" * 65
+    def test_name_exceeding_70_chars_reports_major(self):
+        """Name longer than 70 characters should report MAJOR."""
+        long_name = "a" + "-bcde" * 14  # 71 chars, valid kebab-case
         frontmatter = {"name": long_name}
         report = _make_report()
         validate_name_field(frontmatter, long_name, report)
         assert report.has_major
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("exceeds 64 characters" in m for m in major_msgs)
+        assert any("exceeds 70" in m for m in major_msgs)
 
-    def test_name_differs_from_directory_reports_info(self):
-        """Name that differs from directory name should report INFO (line 168)."""
+    def test_name_differs_from_directory_reports_major(self):
+        """Name that differs from directory name should report MAJOR."""
         frontmatter = {"name": "actual-name"}
         report = _make_report()
         validate_name_field(frontmatter, "directory-name", report)
-        info_msgs = [r.message for r in report.results if r.level == "INFO"]
-        assert any("differs from directory name" in m for m in info_msgs)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("must match directory name" in m for m in major_msgs)
 
 
 class TestValidateDescriptionField:

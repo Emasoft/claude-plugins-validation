@@ -33,7 +33,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from cpv_validation_common import COLORS, VALID_PLUGIN_ENV_VARS, ValidationReport, save_report_and_print_summary
+from cpv_validation_common import COLORS, VALID_PLUGIN_ENV_VARS, ValidationReport, save_report_and_print_summary, validate_component_name
 
 # Valid transport types
 VALID_TRANSPORTS = {"stdio", "sse", "http"}
@@ -394,9 +394,8 @@ def validate_mcp_config(
             report.major(f"Duplicate server name: {server_name}")
         server_names.add(server_name)
 
-        # Validate server name format
-        if not re.match(r"^[a-zA-Z][a-zA-Z0-9_-]*$", server_name):
-            report.minor(f"Server name '{server_name}' should be alphanumeric with hyphens/underscores")
+        # Validate server name format — uses shared validate_component_name for uniform rules
+        validate_component_name(server_name, "mcp-server", report)
 
         if not isinstance(server_config, dict):
             report.critical(f"Server '{server_name}' config must be an object")

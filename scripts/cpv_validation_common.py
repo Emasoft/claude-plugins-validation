@@ -821,10 +821,66 @@ def get_skip_dirs_with_gitignore(root_path: Path, additional_skip: set[str] | No
 NAME_PATTERN = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 
 # Maximum recommended values for names and descriptions
-MAX_NAME_LENGTH = 64
+MAX_NAME_LENGTH = 70
 MAX_DESCRIPTION_LENGTH = 1024
 MIN_BODY_CHARS = 100
 MAX_BODY_WORDS = 2000
+
+# =============================================================================
+# Shared Naming Validation
+# =============================================================================
+
+
+def validate_component_name(
+    name: str,
+    component_type: str,
+    report: "ValidationReport",
+    *,
+    directory_name: str | None = None,
+) -> None:
+    """Validate a component name against uniform naming rules.
+
+    Enforces consistent naming across all component types (plugin, skill, agent,
+    command, mcp-server, marketplace-plugin, reference-file):
+    - Must start with a lowercase letter
+    - Must end with a lowercase letter (no digit at end)
+    - Only lowercase letters, digits, and single hyphens allowed
+    - No consecutive hyphens, no underscores, no uppercase
+    - Max length: MAX_NAME_LENGTH (70) chars
+    - For skills: frontmatter name must match directory name
+
+    Args:
+        name: The component name to validate.
+        component_type: Human-readable type label for error messages.
+        report: ValidationReport to accumulate results into.
+        directory_name: If provided, name must match this (for skill dir-name check).
+    """
+    if not name:
+        report.add("CRITICAL", f"{component_type} name is empty")
+        return
+    # Length check
+    if len(name) > MAX_NAME_LENGTH:
+        report.add("MAJOR", f"{component_type} name '{name}' exceeds {MAX_NAME_LENGTH} chars ({len(name)})")
+    # Pattern check: NAME_PATTERN validates structure (start with letter, kebab-case, no --)
+    if not NAME_PATTERN.match(name):
+        # Provide specific diagnostic message
+        if name[0].isdigit():
+            report.add("CRITICAL", f"{component_type} name '{name}' must not start with a digit")
+        elif "--" in name:
+            report.add("CRITICAL", f"{component_type} name '{name}' contains consecutive hyphens")
+        elif "_" in name:
+            report.add("CRITICAL", f"{component_type} name '{name}' contains underscore (use hyphen)")
+        elif any(c.isupper() for c in name):
+            report.add("CRITICAL", f"{component_type} name '{name}' contains uppercase (use lowercase)")
+        else:
+            report.add("CRITICAL", f"{component_type} name '{name}' does not match naming pattern (lowercase letters, digits, hyphens; must start with letter)")
+    elif name[-1].isdigit():
+        # Pattern matched but name ends with digit — not allowed
+        report.add("CRITICAL", f"{component_type} name '{name}' must not end with a digit")
+    # Directory name match (for skills: frontmatter name must equal directory name)
+    if directory_name is not None and name != directory_name:
+        report.add("MAJOR", f"{component_type} frontmatter name '{name}' must match directory name '{directory_name}'")
+
 
 # =============================================================================
 # Data Classes
