@@ -69,25 +69,18 @@ uv run python scripts/validate_skill_comprehensive.py ./skills/lang-rust-dev/ --
 ## Resources
 
 - [Validation Rules](references/validation-rules.md) — Complete 190+ rules reference
-  > **Sections:** Structure Validation Rules (8 rules) · Frontmatter Validation Rules (25 rules) · Name Field Validation Rules (12 rules) · Description Quality Rules (15 rules) · Token Budget Rules (8 rules) · Required Sections Rules (9 rules) · Path Format Rules (6 rules) · Resource Reference Rules (8 rules) · Allowed-Tools Rules (10 rules) · 8+1 Pillars Rules (18 rules) · Progressive Disclosure Rules (12 rules) · Content Quality Rules (15 rules) · Agent-Specific Rules (22 rules)
+  > Sections: Structure · Frontmatter · Name · Description · Token Budget · Required Sections · Paths · Resources · Allowed-Tools · Pillars · Progressive Disclosure · Content Quality · Agent-Specific
 - [Frontmatter Schema](references/frontmatter-schema.md) — Field requirements
-  > **Sections:** Required Fields · Optional Fields (Claude Code) · Enterprise Fields · Field Validation Details · Field Whitelist Modes · Examples
-- [Pillars Coverage](references/pillars-coverage.md) — 8+1 Pillars validation guide
-  > **Sections:** When to Apply Pillars Validation · The 8 Core Pillars · The 9th Pillar (REPL/Workflow) · Scoring System · Coverage Thresholds · Gap Mitigation Strategies · Example Evaluation
-- [Scoring System](references/scoring-system.md) — Grading and scoring details
-  > **Sections:** Multi-Scale Criterion Scoring · Tier System · Severity Levels · Category Weighting · Overall Score Calculation · Exit Codes · Interpreting Results · Two Scoring Systems
+  > Sections: Required Fields · Optional Fields · Enterprise Fields · Validation Details · Whitelist Modes · Examples
+- [Pillars Coverage](references/pillars-coverage.md) — 8+1 Pillars guide
+  > Sections: When to Apply · Core Pillars · 9th Pillar · Scoring · Thresholds · Gap Mitigation
+- [Scoring System](references/scoring-system.md) — Grading details
+  > Sections: Criterion Scoring · Tiers · Severity · Weighting · Score Calculation · Exit Codes
 
 ## Token Optimization
 
-- **ALWAYS use `--report <path>`** — saves full output to file, only compact summary to stdout.
-- **NEVER read the generated report file** — provide the path to the user.
-- **Single script call** — the comprehensive validator does everything in one invocation.
-
-## Related
-
-- `/cpv-validate-skill` — Invoke this validation
-- `/cpv-fix-validation` — Fix issues from a report
-- `/cpv-semantic-validation` — Deep semantic analysis (uses opus)
+- **ALWAYS use `--report <path>`** — saves full output to file, only compact summary to stdout
+- **NEVER read the generated report** — provide the path to the user
 
 ## Validation Checklist
 Copy this checklist and track your progress:

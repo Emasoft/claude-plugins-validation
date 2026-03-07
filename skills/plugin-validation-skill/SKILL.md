@@ -10,15 +10,7 @@ allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep, Write
 
 ## Overview
 
-This skill runs automated validation on Claude Code plugins, checking manifests, hooks, skills, MCP servers, and marketplace configs against 190+ structural and quality rules. It produces a severity-graded report with actionable fix guidance so you can resolve issues before publishing.
-
-Validates Claude Code plugins and components for quality and compliance. Checks:
-- Plugin manifest (`plugin.json`) structure/fields
-- Hook configs (`hooks.json`) and scripts
-- Skill frontmatter and content (190+ rules)
-- MCP server configs (`.mcp.json`)
-- Marketplace configs and git submodules
-- Agent definitions and system prompts
+Validates Claude Code plugins against 190+ structural and quality rules covering manifests, hooks, skills, MCP servers, marketplace configs, and agents. Produces a severity-graded report with actionable fix guidance.
 
 ## Prerequisites
 
@@ -99,18 +91,9 @@ uv run python scripts/validate_skill_comprehensive.py /path/to/skill-dir --stric
 
 ## Token Optimization
 
-- **ALWAYS use `--report <path>`** — #1 token saver; without it, verbose output floods context.
-- **NEVER read the report file** — just provide the path to the user.
-- **NEVER read plugin source files** — scripts handle reading internally.
-- **Subagents DON'T inherit skills** — saves ~50K tokens per agent.
-- **One script = one validation** — don't chain scripts.
-
-## Related Commands
-
-- `/cpv-fix-validation` — Fix issues from a validation report
-- `/cpv-semantic-validation` — Deep semantic analysis (uses opus)
-- `/cpv-validate-skill` — Single skill validation
-- `/cpv-validate-hooks` — Hook-only validation
+- **ALWAYS use `--report <path>`** — saves full output to file, only compact summary to stdout
+- **NEVER read the report file** — just provide the path to the user
+- **One script = one validation** — don't chain scripts
 
 ## Validation Checklist
 Copy this checklist and track your progress:
