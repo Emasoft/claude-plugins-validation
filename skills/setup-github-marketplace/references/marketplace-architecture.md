@@ -1,7 +1,5 @@
 # Marketplace Architecture Reference
 
-Complete reference for the Hub-and-Spoke Architecture used by Claude Code plugin marketplaces: 1 marketplace hub + N plugin spokes (unlimited plugins). Includes notification flows, schemas, PAT configuration, and directory conventions.
-
 ## Table of Contents
 
 - [Hub-and-Spoke Architecture](#hub-and-spoke-architecture)
@@ -12,6 +10,8 @@ Complete reference for the Hub-and-Spoke Architecture used by Claude Code plugin
 - [Directory Structure](#directory-structure)
 - [Event Types](#event-types)
 - [Validation Pipeline](#validation-pipeline)
+
+Complete reference for the Hub-and-Spoke Architecture used by Claude Code plugin marketplaces: 1 marketplace hub + N plugin spokes (unlimited plugins). Includes notification flows, schemas, PAT configuration, and directory conventions.
 
 ---
 

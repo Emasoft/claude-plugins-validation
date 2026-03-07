@@ -1,5 +1,22 @@
 # Hook Configuration — Validation Issues and Fixes
 
+## Table of Contents
+
+- [1. hooks.json Structure Issues](#1-hooksjson-structure-issues)
+- [2. Event Type Issues](#2-event-type-issues)
+- [3. Matcher Issues](#3-matcher-issues)
+- [4. Hook Type Issues](#4-hook-type-issues)
+- [5. Command Hook Issues](#5-command-hook-issues)
+- [6. Prompt Hook Issues](#6-prompt-hook-issues)
+- [7. Agent Hook Issues](#7-agent-hook-issues)
+- [8. Timeout Issues](#8-timeout-issues)
+- [9. Script Path Issues](#9-script-path-issues)
+- [10. Script Linting Issues](#10-script-linting-issues)
+- [11. Field Validation Issues](#11-field-validation-issues)
+- [12. Informational Notices](#12-informational-notices)
+
+---
+
 Comprehensive remediation guide for all issues detected by `validate_hook.py`.
 
 ## Valid Hook Events (all 18)
@@ -37,23 +54,6 @@ Comprehensive remediation guide for all issues detected by `validate_hook.py`.
 | `30000` | 30 seconds |
 | `60000` | 1 minute |
 | `600000` | 10 minutes |
-
-## Table of Contents
-
-- [1. hooks.json Structure Issues](#1-hooksjson-structure-issues)
-- [2. Event Type Issues](#2-event-type-issues)
-- [3. Matcher Issues](#3-matcher-issues)
-- [4. Hook Type Issues](#4-hook-type-issues)
-- [5. Command Hook Issues](#5-command-hook-issues)
-- [6. Prompt Hook Issues](#6-prompt-hook-issues)
-- [7. Agent Hook Issues](#7-agent-hook-issues)
-- [8. Timeout Issues](#8-timeout-issues)
-- [9. Script Path Issues](#9-script-path-issues)
-- [10. Script Linting Issues](#10-script-linting-issues)
-- [11. Field Validation Issues](#11-field-validation-issues)
-- [12. Informational Notices](#12-informational-notices)
-
----
 
 ## 1. hooks.json Structure Issues
 

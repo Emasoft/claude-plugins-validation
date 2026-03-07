@@ -1,11 +1,5 @@
 # Workflow Templates
 
-Reusable GitHub Actions workflow templates for the Claude Plugin Marketplace ecosystem.
-Each template is a complete, copy-pasteable YAML file. Replace all `{{PLACEHOLDER}}`
-values with your actual configuration before committing.
-
----
-
 ## Table of Contents
 
 - [Placeholder Reference](#placeholder-reference)
@@ -13,6 +7,10 @@ values with your actual configuration before committing.
 - [sync-plugins.yml (Marketplace Side)](#sync-pluginsyml-marketplace-side)
 - [validate-marketplace.yml (Marketplace CI)](#validate-marketplaceyml-marketplace-ci)
 - [Plugin CI Workflow (Optional)](#plugin-ci-workflow-optional)
+
+Reusable GitHub Actions workflow templates for the Claude Plugin Marketplace ecosystem.
+Each template is a complete, copy-pasteable YAML file. Replace all `{{PLACEHOLDER}}`
+values with your actual configuration before committing.
 
 ---
 

@@ -1,5 +1,16 @@
 # Quality Scoring — Validation Issues and Fixes
 
+## Table of Contents
+
+- [1. How Scoring Works](#1-how-scoring-works)
+- [2. Category Definitions](#2-category-definitions)
+- [3. Status Thresholds](#3-status-thresholds)
+- [4. Sub-Validator Crash Messages](#4-sub-validator-crash-messages)
+- [5. Recommendation Messages](#5-recommendation-messages)
+- [6. How to Improve Each Category Score](#6-how-to-improve-each-category-score)
+
+---
+
 Comprehensive remediation guide for all issues detected by `validate_scoring.py`.
 
 ## Overview
@@ -15,17 +26,6 @@ This reference explains:
 - How the scoring system works
 - How to interpret and act on recommendations
 - How to achieve PASS status
-
----
-
-## Table of Contents
-
-- [1. How Scoring Works](#1-how-scoring-works)
-- [2. Category Definitions](#2-category-definitions)
-- [3. Status Thresholds](#3-status-thresholds)
-- [4. Sub-Validator Crash Messages](#4-sub-validator-crash-messages)
-- [5. Recommendation Messages](#5-recommendation-messages)
-- [6. How to Improve Each Category Score](#6-how-to-improve-each-category-score)
 
 ---
 

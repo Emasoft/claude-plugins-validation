@@ -1,9 +1,5 @@
 # Syntactic Scoring System Reference
 
-This document explains the **Syntactic Validation Score** — a 0-100 numeric score computed by scripts based on structural and mechanical checks.
-
-> **Note**: For **Semantic Quality Grading** (A-F letter grades based on AI judgment), see `/cpv-semantic-validation`. The two scoring systems are independent and complementary.
-
 ## Table of Contents
 
 - [1. Multi-Scale Criterion Scoring (0-3)](#1-multi-scale-criterion-scoring-0-3)
@@ -14,6 +10,10 @@ This document explains the **Syntactic Validation Score** — a 0-100 numeric sc
 - [6. Exit Codes](#6-exit-codes)
 - [7. Interpreting Results](#7-interpreting-results)
 - [8. Two Scoring Systems](#8-two-scoring-systems)
+
+This document explains the **Syntactic Validation Score** — a 0-100 numeric score computed by scripts based on structural and mechanical checks.
+
+> **Note**: For **Semantic Quality Grading** (A-F letter grades based on AI judgment), see `/cpv-semantic-validation`. The two scoring systems are independent and complementary.
 
 ---
 

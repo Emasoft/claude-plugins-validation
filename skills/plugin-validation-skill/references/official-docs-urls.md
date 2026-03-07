@@ -1,7 +1,5 @@
 # Official Documentation URLs
 
-For the most up-to-date specifications, fetch and read these official documentation URLs. Specifications change frequently, so always consult the latest versions before validating plugins.
-
 ## Table of Contents
 
 1. [Claude Code Fundamentals](#claude-code-fundamentals)
@@ -18,6 +16,8 @@ For the most up-to-date specifications, fetch and read these official documentat
 12. [How to Use Official Documentation](#how-to-use-official-documentation)
 
 ---
+
+For the most up-to-date specifications, fetch and read these official documentation URLs. Specifications change frequently, so always consult the latest versions before validating plugins.
 
 ## Claude Code Fundamentals
 

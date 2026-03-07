@@ -1,5 +1,17 @@
 # Encoding — Validation Issues and Fixes
 
+## Table of Contents
+
+- [1. Plugin Path Issues](#1-plugin-path-issues)
+- [2. UTF-8 Encoding Issues](#2-utf-8-encoding-issues)
+- [3. BOM (Byte Order Mark) Issues](#3-bom-byte-order-mark-issues)
+- [4. JSON Unicode Issues](#4-json-unicode-issues)
+- [5. Escape Sequence Issues](#5-escape-sequence-issues)
+- [6. Line Ending Issues — Source Files](#6-line-ending-issues--source-files)
+- [7. Line Ending Issues — Shell Scripts](#7-line-ending-issues--shell-scripts)
+- [8. Line Ending Issues — Batch Scripts](#8-line-ending-issues--batch-scripts)
+- [9. File Read Issues](#9-file-read-issues)
+
 Comprehensive remediation guide for all issues detected by `validate_encoding.py`.
 
 ## Overview
@@ -17,22 +29,6 @@ The encoding validator scans all text files in the plugin directory and checks s
 **Text files checked**: `.py`, `.sh`, `.bash`, `.zsh`, `.md`, `.json`, `.yaml`, `.yml`, `.toml`, `.txt`, `.js`, `.ts`, `.tsx`, `.jsx`, `.html`, `.htm`, `.css`, `.xml`, `.ini`, `.cfg`, `.conf`, and similar.
 
 **Binary files and directories** (`.png`, `.jpg`, `.zip`, `.pyc`, `__pycache__`, `.git`, `node_modules`, etc.) are automatically skipped.
-
----
-
-## Table of Contents
-
-- [1. Plugin Path Issues](#1-plugin-path-issues)
-- [2. UTF-8 Encoding Issues](#2-utf-8-encoding-issues)
-- [3. BOM (Byte Order Mark) Issues](#3-bom-byte-order-mark-issues)
-- [4. JSON Unicode Issues](#4-json-unicode-issues)
-- [5. Escape Sequence Issues](#5-escape-sequence-issues)
-- [6. Line Ending Issues — Source Files](#6-line-ending-issues--source-files)
-- [7. Line Ending Issues — Shell Scripts](#7-line-ending-issues--shell-scripts)
-- [8. Line Ending Issues — Batch Scripts](#8-line-ending-issues--batch-scripts)
-- [9. File Read Issues](#9-file-read-issues)
-
----
 
 ## 1. Plugin Path Issues
 

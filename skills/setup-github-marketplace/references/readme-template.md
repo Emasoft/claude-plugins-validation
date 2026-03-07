@@ -1,13 +1,13 @@
 # README Template
 
-Reference for the auto-generated README.md that is placed in each marketplace repository. The template uses placeholder syntax and is filled in by `generate-readme.py`.
-
 ## Table of Contents
 
 - [Template Content](#template-content)
 - [Placeholder Reference](#placeholder-reference)
 - [Auto-Generation](#auto-generation)
 - [Customization Guide](#customization-guide)
+
+Reference for the auto-generated README.md that is placed in each marketplace repository. The template uses placeholder syntax and is filled in by `generate-readme.py`.
 
 ---
 
