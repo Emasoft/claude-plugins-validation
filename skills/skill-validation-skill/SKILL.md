@@ -78,3 +78,10 @@ uv run python scripts/validate_skill_comprehensive.py ./skills/lang-rust-dev/ --
 - `/cpv-validate-skill` — Invoke this validation
 - `/cpv-fix-validation` — Fix issues from a report
 - `/cpv-semantic-validation` — Deep semantic analysis (uses opus)
+
+## Validation Checklist
+Copy this checklist and track your progress:
+- [ ] Verify SKILL.md exists with valid frontmatter
+- [ ] Check name and description fields
+- [ ] Validate references directory structure
+- [ ] Run validate_skill.py on target skill

@@ -113,3 +113,10 @@ uv run python scripts/validate_skill_comprehensive.py /path/to/skill-dir --stric
 - `/cpv-semantic-validation` — Deep semantic analysis (uses opus)
 - `/cpv-validate-skill` — Single skill validation
 - `/cpv-validate-hooks` — Hook-only validation
+
+## Validation Checklist
+Copy this checklist and track your progress:
+- [ ] Run validate_plugin.py with --verbose
+- [ ] Review CRITICAL and MAJOR issues
+- [ ] Fix all blocking issues
+- [ ] Re-run validation to confirm clean
