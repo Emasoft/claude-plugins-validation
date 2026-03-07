@@ -96,15 +96,13 @@ my-plugin/
   "homepage": "https://github.com/author/my-plugin",
   "repository": "https://github.com/author/my-plugin",
   "license": "MIT",
-  "keywords": ["utility", "automation", "development"],
-  "agents": [
-    "./agents/my-agent.md",
-    "./agents/another-agent.md"
-  ],
-  "skills": "./skills/",
-  "hooks": "./hooks/additional-hooks.json"
+  "keywords": ["utility", "automation", "development"]
 }
 ```
+
+> **Note**: Do NOT declare `commands`, `agents`, `skills`, or `hooks` when they use default
+> paths (`./commands/`, `./agents/`, `./skills/`, `./hooks/`). Claude Code auto-discovers
+> these standard directories. Only declare them when pointing to a non-standard location.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -119,23 +117,32 @@ my-plugin/
 
 ### Fields to Avoid
 
-These fields are NOT valid in plugin.json:
+These fields are NOT valid or are redundant in plugin.json:
 
-| Invalid Field | Why |
-|---------------|-----|
+| Field | Why |
+|-------|-----|
 | scripts | Not part of plugin spec |
 | templates | Not part of plugin spec |
-| hooks (for hooks.json) | hooks/hooks.json auto-loads |
+| `"commands": "./commands/"` | Redundant — auto-discovered |
+| `"agents": "./agents/"` | Redundant — auto-discovered |
+| `"skills": "./skills/"` | Redundant — auto-discovered |
+| `"hooks": "./hooks/"` | Redundant — auto-discovered |
 
-### Agent Field Format
+**Auto-discovery rule**: Claude Code automatically finds `commands/`, `agents/`, `skills/`,
+and `hooks/` at the plugin root. Only declare these fields when pointing to a **non-standard**
+path (e.g., `"commands": "./src/my-commands/"`).
 
-The `agents` field MUST be an array of file paths:
+### Agent Field Format (non-standard paths only)
+
+If agents are in the standard `agents/` directory, do NOT declare them — they are auto-discovered.
+
+Only use the `agents` field when pointing to a non-standard location, and it MUST be an array of file paths:
 
 ```json
 {
   "agents": [
-    "./agents/my-agent.md",
-    "./agents/another-agent.md"
+    "./custom-agents/my-agent.md",
+    "./custom-agents/another-agent.md"
   ]
 }
 ```
@@ -143,7 +150,7 @@ The `agents` field MUST be an array of file paths:
 NOT a directory path:
 ```json
 {
-  "agents": "./agents/"  // WRONG!
+  "agents": "./custom-agents/"  // WRONG — must be array of file paths
 }
 ```
 
@@ -313,20 +320,28 @@ my-plugin/
 
 ### Error: Agents as Directory Path
 
-**Wrong:**
+**Wrong** (default path — redundant, remove entirely):
 ```json
 {
   "agents": "./agents/"
 }
 ```
 
-**Correct:**
+**Correct** (non-standard path — use array of file paths):
 ```json
 {
   "agents": [
-    "./agents/agent-one.md",
-    "./agents/agent-two.md"
+    "./custom-agents/agent-one.md",
+    "./custom-agents/agent-two.md"
   ]
+}
+```
+
+**Best** (default `agents/` directory — don't declare at all):
+```json
+{
+  "name": "my-plugin",
+  "version": "1.0.0"
 }
 ```
 
@@ -346,19 +361,22 @@ my-plugin/
 }
 ```
 
-### Error: Adding hooks.json to Manifest
+### Error: Declaring Auto-Discovered Default Paths
 
 **Wrong:**
 ```json
 {
-  "hooks": "./hooks/hooks.json"
+  "commands": "./commands/",
+  "agents": "./agents/",
+  "skills": "./skills/",
+  "hooks": "./hooks/"
 }
 ```
 
 **Correct:**
-- Just place hooks.json in hooks/ directory
-- It's auto-loaded by Claude Code
-- Only use hooks field for ADDITIONAL hook files
+- Remove ALL of the above from plugin.json
+- Claude Code auto-discovers `commands/`, `agents/`, `skills/`, `hooks/` at plugin root
+- Only declare these fields when pointing to a **non-standard** path
 
 ---
 
@@ -372,6 +390,7 @@ my-plugin/
 - [ ] Version follows semver (X.Y.Z)
 - [ ] All components at plugin ROOT (not in .claude-plugin/)
 - [ ] agents field is array of .md paths (if present)
+- [ ] No redundant default-path declarations in manifest (commands/, agents/, skills/, hooks/)
 - [ ] All referenced files exist
 - [ ] Scripts are executable (`chmod +x`)
 - [ ] All paths use `${CLAUDE_PLUGIN_ROOT}`

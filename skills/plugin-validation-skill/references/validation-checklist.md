@@ -43,11 +43,14 @@ Master checklist for validating all Claude Code plugin components. Use this chec
 
 ### Manifest Rules
 
-- [ ] `agents` field is array of `.md` file paths (NOT directory)
+- [ ] `agents` field is array of `.md` file paths (NOT directory) — only if using non-standard path
 - [ ] `scripts` field is NOT present (invalid field)
 - [ ] `templates` field is NOT present (invalid field)
-- [ ] `hooks` field NOT pointing to `./hooks/hooks.json` (auto-loaded)
-- [ ] `hooks` field only used for ADDITIONAL hook files
+- [ ] `commands` field NOT present if pointing to default `./commands/` (auto-discovered)
+- [ ] `agents` field NOT present if pointing to default `./agents/` (auto-discovered)
+- [ ] `skills` field NOT present if pointing to default `./skills/` (auto-discovered)
+- [ ] `hooks` field NOT present if pointing to default `./hooks/` (auto-discovered)
+- [ ] Component path fields only used for **non-standard** locations
 
 ### Manifest Validation Command
 

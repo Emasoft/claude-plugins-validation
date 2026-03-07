@@ -315,21 +315,49 @@ root cause, and step-by-step fix instructions.
    ```
 2. Only `hooks`, `mcpServers`, and `lspServers` may use inline objects.
 
-### MAJOR: manifest.hooks points to auto-loaded hooks/hooks.json
+### CRITICAL: Redundant default-path declaration (string)
 
-**Error message**: `manifest.hooks points to 'hooks/hooks.json' which is auto-loaded by Claude Code. This causes a duplicate load error. Remove the 'hooks' field from plugin.json to fix.`
-**Severity**: MAJOR
+**Error message**: `Field '<key>' points to '<default_path>' which is auto-discovered by Claude Code. This causes a malformed manifest error and the plugin will not load. Remove it from plugin.json — only non-standard paths need explicit declaration.`
+**Severity**: CRITICAL
 **File**: `.claude-plugin/plugin.json`
-**Root cause**: `hooks/hooks.json` is automatically loaded by Claude Code. Specifying it again in the manifest causes a duplicate load conflict.
+**Root cause**: Claude Code auto-discovers standard directories (`commands/`, `agents/`, `skills/`, `hooks/`) at the plugin root. Declaring them in the manifest causes Claude Code to reject the manifest as malformed — the plugin **will not load** and an "invalid manifest file" error is shown.
 **Fix**:
-1. Remove the `hooks` field entirely from `plugin.json`:
+1. Remove the redundant field from `plugin.json`. For example, remove `"commands": "./commands/"`, `"skills": "./skills/"`, `"hooks": "./hooks/"`, etc.
+2. Only declare these fields when pointing to a **non-standard** location (e.g., `"commands": "./src/my-commands/"`).
+3. Minimal correct manifest:
    ```json
    {
      "name": "my-plugin",
+     "version": "1.0.0",
+     "description": "My plugin"
+   }
+   ```
+4. Auto-discovered defaults that must NOT be declared:
+
+   | Field | Default path | Action |
+   |-------|-------------|--------|
+   | commands | `./commands/` | Remove from manifest |
+   | agents | `./agents/` | Remove from manifest |
+   | skills | `./skills/` | Remove from manifest |
+   | hooks | `./hooks/` | Remove from manifest |
+
+### CRITICAL: Redundant default-path declaration (array)
+
+**Error message**: `Field '<key>' lists files inside '<default_path>' which is auto-discovered by Claude Code. This causes a malformed manifest error and the plugin will not load. Remove it from plugin.json.`
+**Severity**: CRITICAL
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: The manifest lists individual files inside a standard auto-discovered directory (e.g., `"commands": ["./commands/cmd-a.md", "./commands/cmd-b.md"]`). Claude Code rejects this as a malformed manifest — the plugin **will not load**.
+**Fix**:
+1. Remove the field entirely from `plugin.json`:
+   ```diff
+   {
+     "name": "my-plugin",
+   - "commands": ["./commands/cmd-a.md", "./commands/cmd-b.md"],
      "version": "1.0.0"
    }
    ```
-2. The file `hooks/hooks.json` will be auto-discovered by Claude Code.
+2. All files inside `commands/`, `agents/`, `skills/`, and `hooks/` are auto-discovered.
+3. Only use explicit file lists when referencing files **outside** the default directories.
 
 ---
 
