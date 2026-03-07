@@ -235,6 +235,8 @@ SKIP_DIRS = {
     "dist",
     "build",
     "*.egg-info",
+    # Dev-only directories (gitignored, not shipped)
+    "*_dev",
 }
 
 # Binary file extensions — used by security and encoding validators to skip binary files
