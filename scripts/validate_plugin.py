@@ -269,7 +269,7 @@ def validate_manifest(
 
     # Claude Code auto-discovers standard directories (commands/, agents/, skills/,
     # hooks/) without needing them declared in plugin.json. Declaring the default path
-    # is redundant — only non-standard paths need explicit declaration.
+    # causes Claude Code to reject the manifest as malformed — the plugin won't load.
     auto_discovered_defaults = {
         "commands": "./commands/",
         "agents": "./agents/",
@@ -279,23 +279,25 @@ def validate_manifest(
     for key, default_path in auto_discovered_defaults.items():
         if key in manifest:
             value = manifest[key]
-            # String pointing to the default directory is redundant
+            # String pointing to the default directory breaks plugin loading
             if isinstance(value, str):
                 normalized = value.replace("\\", "/").rstrip("/") + "/"
                 if normalized == default_path:
-                    report.nit(
+                    report.critical(
                         f"Field '{key}' points to '{default_path}' which is auto-discovered "
-                        f"by Claude Code. Remove it from plugin.json — only non-standard "
+                        f"by Claude Code. This causes a malformed manifest error and the "
+                        f"plugin will not load. Remove it from plugin.json — only non-standard "
                         f"paths need explicit declaration.",
                         ".claude-plugin/plugin.json",
                     )
-            # Array of files inside the default directory is also redundant
+            # Array of files inside the default directory also breaks plugin loading
             elif isinstance(value, list) and all(
                 isinstance(p, str) and p.startswith(default_path) for p in value
             ):
-                report.nit(
+                report.critical(
                     f"Field '{key}' lists files inside '{default_path}' which is "
-                    f"auto-discovered by Claude Code. Remove it from plugin.json.",
+                    f"auto-discovered by Claude Code. This causes a malformed manifest "
+                    f"error and the plugin will not load. Remove it from plugin.json.",
                     ".claude-plugin/plugin.json",
                 )
 

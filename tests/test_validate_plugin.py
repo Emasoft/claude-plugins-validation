@@ -418,18 +418,70 @@ class TestManifestPathFields:
         passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
         assert any("inline configuration object" in m for m in passed_msgs)
 
-    def test_hooks_duplicate_hooks_json_reports_major(self, tmp_path):
-        """validate_manifest reports MAJOR when hooks points to auto-loaded hooks/hooks.json (lines 262-267)."""
+    def test_hooks_default_path_reports_critical(self, tmp_path):
+        """validate_manifest reports CRITICAL when hooks points to auto-discovered default path."""
         plugin_dir = tmp_path / "dup-hooks"
         plugin_dir.mkdir()
         claude_dir = plugin_dir / ".claude-plugin"
         claude_dir.mkdir()
-        manifest = {"name": "dup-hooks", "version": "1.0.0", "hooks": "./hooks/hooks.json"}
+        manifest = {"name": "dup-hooks", "version": "1.0.0", "hooks": "./hooks/"}
         (claude_dir / "plugin.json").write_text(json.dumps(manifest))
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
-        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("duplicate load error" in m for m in major_msgs)
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert any("auto-discovered" in m and "malformed manifest" in m for m in critical_msgs)
+
+    def test_commands_default_path_reports_critical(self, tmp_path):
+        """validate_manifest reports CRITICAL when commands points to auto-discovered default path."""
+        plugin_dir = tmp_path / "dup-cmds"
+        plugin_dir.mkdir()
+        claude_dir = plugin_dir / ".claude-plugin"
+        claude_dir.mkdir()
+        manifest = {"name": "dup-cmds", "version": "1.0.0", "commands": "./commands/"}
+        (claude_dir / "plugin.json").write_text(json.dumps(manifest))
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert any("auto-discovered" in m and "malformed manifest" in m for m in critical_msgs)
+
+    def test_skills_default_path_reports_critical(self, tmp_path):
+        """validate_manifest reports CRITICAL when skills points to auto-discovered default path."""
+        plugin_dir = tmp_path / "dup-skills"
+        plugin_dir.mkdir()
+        claude_dir = plugin_dir / ".claude-plugin"
+        claude_dir.mkdir()
+        manifest = {"name": "dup-skills", "version": "1.0.0", "skills": "./skills"}
+        (claude_dir / "plugin.json").write_text(json.dumps(manifest))
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert any("auto-discovered" in m and "malformed manifest" in m for m in critical_msgs)
+
+    def test_agents_array_default_path_reports_critical(self, tmp_path):
+        """validate_manifest reports CRITICAL when agents lists files in auto-discovered default dir."""
+        plugin_dir = tmp_path / "dup-agents"
+        plugin_dir.mkdir()
+        claude_dir = plugin_dir / ".claude-plugin"
+        claude_dir.mkdir()
+        manifest = {"name": "dup-agents", "version": "1.0.0", "agents": ["./agents/a.md", "./agents/b.md"]}
+        (claude_dir / "plugin.json").write_text(json.dumps(manifest))
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert any("auto-discovered" in m and "malformed manifest" in m for m in critical_msgs)
+
+    def test_nonstandard_path_no_critical(self, tmp_path):
+        """validate_manifest does NOT flag non-standard paths as redundant."""
+        plugin_dir = tmp_path / "custom-paths"
+        plugin_dir.mkdir()
+        claude_dir = plugin_dir / ".claude-plugin"
+        claude_dir.mkdir()
+        manifest = {"name": "custom-paths", "version": "1.0.0", "commands": "./src/my-commands/"}
+        (claude_dir / "plugin.json").write_text(json.dumps(manifest))
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert not any("auto-discovered" in m for m in critical_msgs)
 
 
 class TestValidateStructureExtended:
