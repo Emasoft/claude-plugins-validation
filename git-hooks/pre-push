@@ -219,6 +219,43 @@ def main() -> int:
         cprint(f"{GREEN}No plugin files changed. Skipping full validation.{NC}")
         return 0
 
+    # --- Version bump enforcement ---
+    # Block push if local version is not greater than remote version
+    cprint(f"{BLUE}Checking version bump...{NC}")
+
+    local_version = extract_version(repo_root / ".claude-plugin" / "plugin.json")
+    if local_version:
+        # Get remote version from origin
+        try:
+            remote_result = subprocess.run(
+                ["git", "show", "origin/master:.claude-plugin/plugin.json"],
+                capture_output=True,
+                text=True,
+                cwd=str(repo_root),
+            )
+            if remote_result.returncode == 0:
+                remote_version = json.loads(remote_result.stdout).get("version")
+                if remote_version and local_version == remote_version:
+                    cprint(f"{RED}========================================{NC}")
+                    cprint(f"{RED}  BLOCKED: Version not bumped!{NC}")
+                    cprint(f"{RED}  Local: {local_version}  Remote: {remote_version}{NC}")
+                    cprint(f"{RED}  Run: uv run python scripts/publish.py --patch{NC}")
+                    cprint(f"{RED}========================================{NC}")
+                    return 1
+                elif remote_version:
+                    cprint(f"{GREEN}Version bump OK: {remote_version} → {local_version}{NC}")
+                else:
+                    cprint(f"{GREEN}Version: {local_version} (no remote version to compare){NC}")
+            else:
+                # Remote branch or file doesn't exist yet — first push, allow
+                cprint(f"{GREEN}Version: {local_version} (first push){NC}")
+        except Exception:
+            # Git command failed — don't block on this, proceed to validation
+            cprint(f"{YELLOW}Could not check remote version — proceeding{NC}")
+    else:
+        cprint(f"{YELLOW}No local version found — skipping version check{NC}")
+
+    cprint("")
     cprint(f"{BLUE}Running full plugin validation...{NC}")
     cprint("")
 
