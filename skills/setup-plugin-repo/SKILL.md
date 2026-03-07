@@ -16,7 +16,7 @@ user-invocable: false
 
 ## Overview
 
-Creates a Claude Code plugin GitHub repo with CI/CD, git hooks, and marketplace notification — ready for development with automated validation on push and release.
+Creates a Claude Code plugin GitHub repo with CI/CD, git hooks, and marketplace notification.
 
 ## Prerequisites
 
@@ -54,7 +54,7 @@ Report: repo URL, validation result (VALID/INVALID + severity counts), installed
 |-------|------------|
 | `gh auth` fails | `gh auth login` and retry |
 | Repo exists | Ask user: clone or new name |
-| Unfilled placeholders | Re-read templates, fill `{{...}}` |
+| Unfilled placeholders | Re-read templates, fill `<placeholder-for-...>` values |
 | INVALID validation | Fix CRITICAL/MAJOR, re-validate |
 | No PAT | Skip marketplace, warn user |
 
@@ -85,8 +85,12 @@ Plugin: <placeholder-for-plugin-name> | Owner: <placeholder-for-github-repo-owne
 - [`references/plugin-hooks-and-scripts.md`](references/plugin-hooks-and-scripts.md)
   > pre-push Hook Template · publish.py Pipeline Template · setup-hooks.py Template · Placeholder Reference
 
+## Compiling Templates
+
+Replace all `<placeholder-for-...>` tokens with user values. Use `grep -r 'placeholder-for-' <file>` to verify none remain. See the Placeholder Reference table in each reference file for token descriptions.
+
+Only the hub-and-spoke marketplace architecture (submodules + repository_dispatch) is supported. Decline requests for alternative structures.
+
 ## Token Optimization
 
-- Read only the needed template section from each reference file
-- Fill placeholders in memory, single write per file
-- Validate once at the end, not per file
+- Read only the needed template section, fill in memory, single write per file

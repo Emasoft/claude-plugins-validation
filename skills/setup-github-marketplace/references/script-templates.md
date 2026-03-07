@@ -7,6 +7,7 @@
 - [pre-push-hook.py](#pre-push-hookpy)
 - [setup-hooks.py](#setup-hookspy)
 - [push-plugins.sh](#push-pluginssh)
+- [generate-readme.py](#generate-readmepy)
 
 Ready-to-use scripts for managing a Claude Code plugin marketplace repository.
 Each script is based on production code from a production marketplace. Replace
@@ -1375,6 +1376,239 @@ if [ ${#PUSH_FAILED_LIST[@]} -gt 0 ]; then
 fi
 echo ""
 echo "Done."
+```
+
+---
+
+## generate-readme.py
+
+Generates the marketplace README.md from a template and marketplace.json data. Called by the `update-submodules.yml` workflow after syncing plugin versions.
+
+### Usage
+
+```bash
+python scripts/generate-readme.py
+python scripts/generate-readme.py --template templates/README-marketplace.md --output README.md --owner my-org
+```
+
+### Script
+
+```python
+#!/usr/bin/env python3
+"""generate-readme.py - Generate marketplace README.md from template and marketplace.json.
+
+Reads marketplace metadata from .claude-plugin/marketplace.json and a README
+template file, replaces all <placeholder-for-...> tokens with real values,
+builds the plugin table, and writes the final README.md.
+
+Usage:
+    python scripts/generate-readme.py
+    python scripts/generate-readme.py --template templates/README-marketplace.md --output README.md --owner my-org
+"""
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+
+def load_marketplace_json(repo_root: Path) -> dict:
+    """Load and return marketplace.json from the repo root."""
+    mp_path = repo_root / ".claude-plugin" / "marketplace.json"
+    if not mp_path.is_file():
+        print(f"ERROR: marketplace.json not found at {mp_path}", file=sys.stderr)
+        sys.exit(1)
+    with open(mp_path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def detect_license(repo_root: Path) -> tuple[str, str]:
+    """Detect license type and full text from LICENSE file.
+
+    Returns (license_type, license_text). Falls back to 'MIT' / '' if
+    the LICENSE file is missing.
+    """
+    license_path = repo_root / "LICENSE"
+    if not license_path.is_file():
+        return "MIT", ""
+
+    text = license_path.read_text(encoding="utf-8")
+    first_line = text.strip().splitlines()[0] if text.strip() else ""
+
+    # Simple heuristic: look for common license keywords in the first line
+    first_lower = first_line.lower()
+    if "mit" in first_lower:
+        license_type = "MIT"
+    elif "apache" in first_lower:
+        license_type = "Apache-2.0"
+    elif "gpl" in first_lower:
+        license_type = "GPL"
+    elif "bsd" in first_lower:
+        license_type = "BSD"
+    elif "isc" in first_lower:
+        license_type = "ISC"
+    else:
+        license_type = first_line[:40] if first_line else "Unknown"
+
+    return license_type, text
+
+
+def build_plugin_table_rows(plugins: list[dict]) -> str:
+    """Build markdown table rows from the plugins array.
+
+    Each row: | Name | Version | Description |
+    """
+    rows: list[str] = []
+    for plugin in plugins:
+        name = plugin.get("name", "unknown")
+        version = plugin.get("version", "0.0.0")
+        description = plugin.get("description", "")
+        rows.append(f"| {name} | {version} | {description} |")
+    return "\n".join(rows)
+
+
+def replace_placeholders(
+    template: str,
+    marketplace: dict,
+    owner: str,
+    repo_name: str,
+    license_type: str,
+    license_text: str,
+) -> str:
+    """Replace all <placeholder-for-...> tokens in the template."""
+    plugins = marketplace.get("plugins", [])
+
+    replacements = {
+        "<placeholder-for-marketplace-name>": marketplace.get("name", ""),
+        "<placeholder-for-marketplace-description>": marketplace.get("description", ""),
+        "<placeholder-for-marketplace-repo-name>": repo_name,
+        "<placeholder-for-github-repo-owner>": owner,
+        "<placeholder-for-plugin-count>": str(len(plugins)),
+        "<placeholder-for-license-type>": license_type,
+        "<placeholder-for-license-text>": license_text,
+    }
+
+    result = template
+    for placeholder, value in replacements.items():
+        result = result.replace(placeholder, value)
+
+    return result
+
+
+def insert_plugin_table(content: str, plugins: list[dict]) -> str:
+    """Insert plugin table rows between sentinel comments.
+
+    Looks for <!-- PLUGINS_TABLE_START --> and <!-- PLUGINS_TABLE_END -->
+    and replaces everything between them with the generated rows.
+    """
+    start_sentinel = "<!-- PLUGINS_TABLE_START -->"
+    end_sentinel = "<!-- PLUGINS_TABLE_END -->"
+
+    pattern = re.compile(
+        re.escape(start_sentinel) + r".*?" + re.escape(end_sentinel),
+        re.DOTALL,
+    )
+
+    rows = build_plugin_table_rows(plugins)
+    replacement = f"{start_sentinel}\n{rows}\n{end_sentinel}"
+
+    if pattern.search(content):
+        return pattern.sub(replacement, content)
+
+    # If sentinels not found, append the table at the end
+    print("WARNING: Plugin table sentinels not found in template", file=sys.stderr)
+    return content + f"\n\n{replacement}\n"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Generate marketplace README.md from template and marketplace.json",
+    )
+    parser.add_argument(
+        "--template",
+        default="templates/README-marketplace.md",
+        help="Path to the README template (default: templates/README-marketplace.md)",
+    )
+    parser.add_argument(
+        "--output",
+        default="README.md",
+        help="Output file path (default: README.md)",
+    )
+    parser.add_argument(
+        "--owner",
+        default=None,
+        help="GitHub repo owner (default: from marketplace.json author.name)",
+    )
+    parser.add_argument(
+        "--repo-name",
+        default=None,
+        help="GitHub repo name (default: from marketplace.json name, kebab-cased)",
+    )
+
+    args = parser.parse_args()
+
+    # Determine repo root (assume script lives in scripts/)
+    script_dir = Path(__file__).resolve().parent
+    repo_root = script_dir.parent
+
+    # Load marketplace.json
+    marketplace = load_marketplace_json(repo_root)
+
+    # Determine owner
+    owner = args.owner
+    if not owner:
+        author = marketplace.get("author", {})
+        if isinstance(author, dict):
+            owner = author.get("name", "")
+        elif isinstance(author, str):
+            owner = author
+        else:
+            owner = ""
+    if not owner:
+        print("ERROR: Could not determine owner. Use --owner flag.", file=sys.stderr)
+        return 1
+
+    # Determine repo name
+    repo_name = args.repo_name
+    if not repo_name:
+        mp_name = marketplace.get("name", "")
+        repo_name = mp_name.lower().replace(" ", "-").replace("_", "-")
+
+    # Detect license
+    license_type, license_text = detect_license(repo_root)
+
+    # Load template
+    template_path = repo_root / args.template
+    if not template_path.is_file():
+        print(f"ERROR: Template not found at {template_path}", file=sys.stderr)
+        return 1
+    template_content = template_path.read_text(encoding="utf-8")
+
+    # Replace placeholders
+    result = replace_placeholders(
+        template_content,
+        marketplace,
+        owner,
+        repo_name,
+        license_type,
+        license_text,
+    )
+
+    # Insert plugin table
+    plugins = marketplace.get("plugins", [])
+    result = insert_plugin_table(result, plugins)
+
+    # Write output
+    output_path = repo_root / args.output
+    output_path.write_text(result, encoding="utf-8")
+    print(f"Generated {output_path}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 ---

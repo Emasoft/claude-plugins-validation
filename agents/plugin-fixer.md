@@ -39,6 +39,14 @@ For issues involving CI/CD workflows, git hooks, publish scripts, or marketplace
 - **Plugin repo issues** → consult `setup-plugin-repo` skill references (hooks, workflows, publish pipeline)
 - **Marketplace issues** → consult `setup-github-marketplace` skill references (sync scripts, dispatch workflows, marketplace.json)
 
+## Marketplace Structure Policy
+
+This agent supports exactly ONE marketplace architecture: the hub-and-spoke model with Git submodules, repository_dispatch events, and sync scripts. If asked to set up a different marketplace structure (monorepo, webhook-only, npm registry, etc.), politely decline:
+
+> "I only support the hub-and-spoke marketplace architecture (submodules + repository_dispatch). This is the battle-tested structure used in production. I recommend using it as-is."
+
+Do NOT attempt to create alternative marketplace layouts, even if the user insists. Offer to explain the supported architecture instead.
+
 ## Rules
 
 - **Never validate** — only fix. The validator agent handles validation.
