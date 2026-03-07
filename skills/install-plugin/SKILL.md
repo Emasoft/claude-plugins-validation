@@ -1,9 +1,8 @@
 ---
 name: install-plugin
 description: >
-  Install, uninstall, or manage Claude Code plugins locally without a GitHub
-  marketplace. Use when installing, updating, or managing Claude Code
-  plugins from local paths or archives.
+  Install or manage Claude Code plugins locally without a GitHub marketplace.
+  Use when installing or managing plugins from local paths. Trigger with /cpv-install-plugin.
 tags:
   - plugin
   - install
@@ -79,51 +78,20 @@ If the user reports issues, run `--doctor` first to diagnose.
 
 ## Examples
 
-Install a plugin from a local directory:
 ```bash
-uv run scripts/claude-plugin-install.py ./my-awesome-plugin
-```
-
-Install from a tarball with custom marketplace name:
-```bash
-uv run scripts/claude-plugin-install.py plugin-v1.0.tar.gz my-plugins
-```
-
-Dry-run to preview changes:
-```bash
-uv run scripts/claude-plugin-install.py ./plugin --dry-run
-```
-
-Validate and health-check after install:
-```bash
-uv run scripts/claude-plugin-install.py --validate my-plugin@local-my-plugin
-uv run scripts/claude-plugin-install.py --doctor
+uv run scripts/claude-plugin-install.py ./my-plugin         # install from directory
+uv run scripts/claude-plugin-install.py plugin.tar.gz mymp   # install from tarball
+uv run scripts/claude-plugin-install.py ./plugin --dry-run   # preview changes
+uv run scripts/claude-plugin-install.py --doctor             # health check
 ```
 
 ## Resources
 
 - Script: `scripts/claude-plugin-install.py`
-- Command: `/cpv-install-plugin`
-- Related: `/cpv-validate-plugin` (run after installation for full 190+ rule validation)
-- Related: `/cpv-setup-github-marketplace` (for GitHub-hosted distribution instead)
-
-## What the Script Does
-
-1. **Extracts** the plugin from archive (.tar.gz, .zip, .tar.bz2, .tar.xz) or copies from directory
-2. **Validates** the plugin structure (manifest, hooks, agents, skills, scripts, MCP servers)
-3. **Wraps** the plugin into a local marketplace structure under `~/.claude/plugins/marketplaces/`
-4. **Registers** the marketplace in Claude Code's `known_marketplaces.json` runtime registry
-5. **Fixes permissions** on hook scripts and other executables (chmod +x)
-6. **Creates backups** of all modified settings files before changes
+- Related: `/cpv-validate-plugin`, `/cpv-setup-github-marketplace`
 
 ## Token Optimization
 
-- **Use `--quiet` flag** when running install in automated contexts.
-- **`--dry-run` first** if unsure — avoids filesystem changes and rollback overhead.
-
-## Critical Rules
-
-1. ALWAYS run the script via `uv run` to ensure the correct Python environment
-2. ALWAYS validate after installation: `uv run scripts/claude-plugin-install.py --validate name@marketplace`
-3. NEVER manually edit `known_marketplaces.json` — use the script's install/uninstall commands
-4. Cross-platform: works on macOS, Linux, and Windows
+- Use `--quiet` flag in automated contexts
+- Use `--dry-run` first if unsure — avoids filesystem changes
+- ALWAYS run via `uv run`; NEVER manually edit `known_marketplaces.json`
