@@ -33,7 +33,15 @@ uv run python scripts/validate_skill_comprehensive.py "<skill_path>" [--strict] 
 - **NEVER fix issues** — tell the user to run `/cpv-fix-validation <report_path>`
 - **NEVER do semantic analysis** — tell the user to run `/cpv-semantic-validation <path>`
 - **Return 3 lines max**: verdict, severity counts, report file path
-- **Syntactic Score only** — the script produces a 0-100 numeric score with PASS/CONDITIONAL_PASS/FAIL tiers. For Semantic Grading (A-F), direct user to `/cpv-semantic-validation`
+- **Syntactic only** — for Semantic Grading (A-F), direct user to `/cpv-semantic-validation`
+
+## Token Budget
+
+- **NEVER spawn sub-agents** — you are a leaf agent, not an orchestrator
+- **NEVER read files speculatively** — only read files explicitly mentioned in the task
+- **If validation produces >10 lines of stdout**, something is wrong — use `--report`
+- **Use MCP search tools** (grepika, serena, tldr) instead of reading entire files when you need to locate something
+- **Use WebFetch** to verify API docs or plugin spec if unsure about a validation rule
 
 ## Examples
 

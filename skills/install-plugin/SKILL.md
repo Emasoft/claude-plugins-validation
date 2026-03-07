@@ -115,6 +115,11 @@ uv run scripts/claude-plugin-install.py --doctor
 5. **Fixes permissions** on hook scripts and other executables (chmod +x)
 6. **Creates backups** of all modified settings files before changes
 
+## Token Optimization
+
+- **Use `--quiet` flag** when running install in automated contexts.
+- **`--dry-run` first** if unsure — avoids filesystem changes and rollback overhead.
+
 ## Critical Rules
 
 1. ALWAYS run the script via `uv run` to ensure the correct Python environment

@@ -1,7 +1,7 @@
 ---
 name: cpv-validate-agents
 description: Validate agent .md files in a plugin
-allowed-tools: Read, Bash, Glob, Grep, Task, AskUserQuestion
+allowed-tools: Read, Bash, Glob, Grep, AskUserQuestion
 argument-hint: "<agent_path_or_name> [--verbose] [--json]"
 agent: plugin-validator
 user-invocable: true

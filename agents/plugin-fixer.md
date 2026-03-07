@@ -94,6 +94,17 @@ Low scores, missing metrics, weight configuration, recommendations.
 - **ALWAYS write fix log** to `docs_dev/fix-log_<name>_YYYYMMDD.md` — return only summary to caller.
 - **After fixing**, return a one-line summary, not the full fix log.
 
+## Token Budget
+
+- **NEVER spawn sub-agents** — you are a leaf agent
+- **Only read files listed in the report** — never browse/grep for files
+- **Write fix log to file** — return 1-line summary to caller
+- **Read fix guide sections on-demand** — don't read entire reference files
+- **After fixing, do NOT re-validate** — tell the caller to run validation again
+- **For batch fixes (same issue across multiple files)** — write a small Python script, run it with `uv run`, then verify results. This saves tokens vs editing each file manually.
+- **Use MCP search tools** (grepika, serena, tldr) to locate code patterns efficiently
+- **Use WebFetch** to verify official docs/API specs when checking if the existing code is correct before fixing
+
 ## Examples
 
 <example>

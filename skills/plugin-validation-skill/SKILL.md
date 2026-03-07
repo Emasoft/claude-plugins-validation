@@ -11,7 +11,7 @@ tags:
   - mcp
   - quality-assurance
 user-invocable: true
-allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep, Write, Task
+allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep, Write
 ---
 
 # Plugin Validation Skill
@@ -107,6 +107,15 @@ uv run python scripts/validate_skill_comprehensive.py /path/to/skill-dir --stric
   - 8. Validation Checklist
 - [Troubleshooting](references/troubleshooting-python-scripts.md) - Common issues and fixes
   > **Sections:** Bash Arithmetic Exit Codes · Unused Variable Warnings · Missing Python Dependencies · Git Hook Not Running · Plugin JSON Missing Required Fields · Ruff Linting Errors · Marketplace Plugin Source Format · Version Consistency · Git Tag Already Exists · subprocess.run Output Truncation · Best Practices Summary · Quick Diagnostic Commands
+
+## Token Optimization
+
+- **ALWAYS use `--report <path>`** — this is the #1 token saver. Without it, full verbose output flows into context.
+- **NEVER read the generated report file** — provide the path to the user.
+- **NEVER read plugin source files** — the scripts do all reading internally.
+- **Subagents DON'T inherit skills** — they start clean, which saves ~50K tokens of system prompt per agent.
+- **The `agent: plugin-validator` field** routes this to a lightweight Sonnet agent that runs scripts only.
+- **One script invocation = one validation** — don't chain multiple scripts in one command.
 
 ## Related Commands
 

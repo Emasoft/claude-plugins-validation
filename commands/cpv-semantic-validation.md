@@ -1,7 +1,7 @@
 ---
 name: cpv-semantic-validation
 description: Deep AI-driven semantic validation of skills and agents (uses opus)
-allowed-tools: Read, Bash, Glob, Grep, Task, AskUserQuestion
+allowed-tools: Read, Bash, Glob, Grep, AskUserQuestion
 argument-hint: "<skill_or_agent_path>"
 agent: semantic-validator
 user-invocable: true

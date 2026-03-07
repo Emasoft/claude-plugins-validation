@@ -1,7 +1,7 @@
 ---
 name: cpv-validate-skill
 description: Validate skill directories in a plugin
-allowed-tools: Read, Bash, Glob, Grep, Task, AskUserQuestion
+allowed-tools: Read, Bash, Glob, Grep, AskUserQuestion
 argument-hint: "<skill_path_or_name> [--strict] [--openspec] [--pillars] [--verbose]"
 agent: plugin-validator
 user-invocable: true
