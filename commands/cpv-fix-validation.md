@@ -1,7 +1,7 @@
 ---
 name: cpv-fix-validation
 description: Fix issues from a validation report file
-allowed-tools: Read, Bash, Glob, Grep, Write, Edit, Task, AskUserQuestion
+allowed-tools: Read, Bash, Glob, Grep, Write, Edit, AskUserQuestion
 argument-hint: "<report_file_path>"
 agent: plugin-fixer
 user-invocable: true

@@ -1,7 +1,7 @@
 ---
 name: cpv-validate-hooks
 description: Validate hooks configuration in a plugin
-allowed-tools: Read, Bash, Glob, Grep, Task, AskUserQuestion
+allowed-tools: Read, Bash, Glob, Grep, AskUserQuestion
 argument-hint: "<hooks_path_or_plugin_name> [--plugin-root <path>] [--verbose] [--json]"
 agent: plugin-validator
 user-invocable: true

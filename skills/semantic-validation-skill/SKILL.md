@@ -72,6 +72,13 @@ This produces a **Semantic Grade (A-F)**, complementary to the **Syntactic Score
 /cpv-semantic-validation ./agents/my-agent.md
 ```
 
+## Token Optimization
+
+- **Explicit opt-in only** — never run automatically. Uses opus (10x cost).
+- **Run script baseline first** — the cheap syntactic check catches 90% of issues.
+- **Read only the target SKILL.md/agent .md** — not the entire plugin tree.
+- **Write full report to file** — return only grade + filepath.
+
 ## Resources
 
 - Semantic Validation Criteria — see `agents/references/skill-semantic-validation.md` for full criteria, rubrics, report format

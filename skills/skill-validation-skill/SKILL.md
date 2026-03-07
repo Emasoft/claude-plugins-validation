@@ -77,6 +77,12 @@ uv run python scripts/validate_skill_comprehensive.py ./skills/lang-rust-dev/ --
 - [Scoring System](references/scoring-system.md) — Grading and scoring details
   > **Sections:** Multi-Scale Criterion Scoring · Tier System · Severity Levels · Category Weighting · Overall Score Calculation · Exit Codes · Interpreting Results · Two Scoring Systems
 
+## Token Optimization
+
+- **ALWAYS use `--report <path>`** — saves full output to file, only compact summary to stdout.
+- **NEVER read the generated report file** — provide the path to the user.
+- **Single script call** — the comprehensive validator does everything in one invocation.
+
 ## Related
 
 - `/cpv-validate-skill` — Invoke this validation

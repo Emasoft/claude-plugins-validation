@@ -1,7 +1,7 @@
 ---
 name: cpv-validate-plugin
 description: Run full validation on a Claude Code plugin
-allowed-tools: Read, Bash, Glob, Grep, Task, AskUserQuestion
+allowed-tools: Read, Bash, Glob, Grep, AskUserQuestion
 argument-hint: "<plugin_path_or_name> [--verbose] [--json]"
 agent: plugin-validator
 user-invocable: true

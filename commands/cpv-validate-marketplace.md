@@ -1,7 +1,7 @@
 ---
 name: cpv-validate-marketplace
 description: "Validate marketplace.json structure"
-allowed-tools: Read, Bash, Glob, Grep, Task, AskUserQuestion
+allowed-tools: Read, Bash, Glob, Grep, AskUserQuestion
 argument-hint: "<marketplace_path_or_name> [--verbose] [--json]"
 agent: plugin-validator
 user-invocable: true

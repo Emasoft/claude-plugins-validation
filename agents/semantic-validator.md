@@ -88,6 +88,14 @@ For the full semantic validation criteria, scoring rubrics, and report format, s
 - **Only invoked explicitly** — never as part of standard validation.
 - **Write all output to file** — return only grade + filepath to caller.
 
+## Token Budget
+
+- **Read only SKILL.md and agent .md** — not the entire plugin tree
+- **Write full analysis to file** — return only grade + filepath
+- **Do NOT read reference files unless evaluating progressive disclosure**
+- **Use WebFetch** to check Claude Code plugin spec docs when evaluating semantic correctness
+- **Use MCP search tools** (grepika, serena, tldr) for efficient code lookup
+
 ## Examples
 
 <example>
