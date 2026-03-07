@@ -245,7 +245,8 @@ def main() -> int:
 
     # --- Validation ---
     validate_script = repo_root / "scripts" / "validate_plugin.py"
-    validation_exit = run_script(python_cmd, validate_script, [".", "--verbose"], cwd=repo_root)
+    # --strict: NIT issues also block push (zero tolerance)
+    validation_exit = run_script(python_cmd, validate_script, [".", "--verbose", "--strict"], cwd=repo_root)
 
     cprint("")
     cprint(f"{BLUE}----------------------------------------{NC}")
