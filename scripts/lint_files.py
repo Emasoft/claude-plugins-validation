@@ -99,6 +99,15 @@ def detect_languages(repo_root: Path) -> dict[str, list[Path]]:
         "build",
         "dist",
         ".tox",
+        # Dev-only directories (gitignored, not shipped)
+        "docs_dev",
+        "scripts_dev",
+        "tests_dev",
+        "samples_dev",
+        "examples_dev",
+        "downloads_dev",
+        "libs_dev",
+        "builds_dev",
     }
 
     def should_include(path: Path) -> bool:
