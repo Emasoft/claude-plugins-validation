@@ -81,7 +81,7 @@ This produces a **Semantic Grade (A-F)**, complementary to the **Syntactic Score
 
 ## Resources
 
-- Semantic Validation Criteria — see `agents/references/skill-semantic-validation.md` for full criteria, rubrics, report format
+- Semantic Validation Criteria — see `skills/fix-validation/references/skill-semantic-validation.md` for full criteria, rubrics, report format
 - `skill-validation-skill` — Script-based validation (cheap, fast)
 - `plugin-validation-skill` — Full plugin validation
 

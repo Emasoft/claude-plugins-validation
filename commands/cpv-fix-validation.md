@@ -27,7 +27,7 @@ Reads a validation report file and fixes the issues it contains, one by one, in 
 
 1. The fixer agent reads the report file
 2. Fixes issues in priority order: CRITICAL → MAJOR → MINOR → NIT
-3. Consults fix guides in `agents/references/` for each issue type
+3. Consults fix guides in `skills/fix-validation/references/` for each issue type
 4. Skips WARNING items (advisory only)
 5. Returns summary: `fixed N of M issues`
 
