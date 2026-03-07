@@ -107,7 +107,7 @@ Reference: [Marketplace Architecture](marketplace-architecture.md)
 
 ### Step 1: Install GitHub Actions workflows
 
-Copy into `.github/workflows/`, replacing `{{MARKETPLACE_OWNER}}` and `{{MARKETPLACE_REPO}}`:
+Copy into `.github/workflows/`, replacing `<placeholder-for-marketplace-owner>` and `<placeholder-for-marketplace-repo-name>`:
 
 - **update-submodules.yml** -- triggered by `repository_dispatch`; fetches plugin metadata via `gh api`, updates versions, regenerates README
 - **validate-marketplace.yml** -- runs on push/PR; validates schema, checks plugin entries via GitHub API, runs cpv
@@ -182,12 +182,12 @@ For EACH plugin, install `.github/workflows/notify-marketplace.yml` via `gh api`
 ```bash
 for PLUGIN in "${PLUGINS[@]}"; do
   WORKFLOW_CONTENT=$(cat templates/github-workflows/notify-marketplace.yml | \
-    sed "s/{{MARKETPLACE_OWNER}}/$OWNER/g" | sed "s/{{MARKETPLACE_REPO}}/{{marketplace-name}}/g")
+    sed "s/<placeholder-for-marketplace-owner>/$OWNER/g" | sed "s/<placeholder-for-marketplace-repo-name>/$MARKETPLACE/g")
   EXISTING=$(gh api "repos/$OWNER/$PLUGIN/contents/.github/workflows/notify-marketplace.yml" \
     -q '.sha' 2>/dev/null || echo "")
   if [ -n "$EXISTING" ]; then
     gh api --method PUT "repos/$OWNER/$PLUGIN/contents/.github/workflows/notify-marketplace.yml" \
-      -f message="Update notify-marketplace.yml for {{marketplace-name}}" \
+      -f message="Update notify-marketplace.yml for $MARKETPLACE" \
       -f content="$(echo "$WORKFLOW_CONTENT" | base64)" -f sha="$EXISTING"
   else
     gh api --method PUT "repos/$OWNER/$PLUGIN/contents/.github/workflows/notify-marketplace.yml" \
@@ -269,7 +269,7 @@ SOURCE_JSON=$(gh api "repos/$OWNER/$SOURCE/contents/.claude-plugin/marketplace.j
 for PLUGIN in "${PLUGINS_TO_MIGRATE[@]}"; do
   ENTRY=$(echo "$SOURCE_JSON" | jq --arg name "$PLUGIN" '.plugins[] | select(.name == $name)')
   jq --argjson entry "$ENTRY" '.plugins += [$entry]' .claude-plugin/marketplace.json > tmp.json && mv tmp.json .claude-plugin/marketplace.json
-  WORKFLOW=$(cat templates/github-workflows/notify-marketplace.yml | sed "s/{{MARKETPLACE_OWNER}}/$OWNER/g" | sed "s/{{MARKETPLACE_REPO}}/$TARGET/g")
+  WORKFLOW=$(cat templates/github-workflows/notify-marketplace.yml | sed "s/<placeholder-for-marketplace-owner>/$OWNER/g" | sed "s/<placeholder-for-marketplace-repo-name>/$TARGET/g")
   SHA=$(gh api "repos/$OWNER/$PLUGIN/contents/.github/workflows/notify-marketplace.yml" -q '.sha' 2>/dev/null)
   gh api --method PUT "repos/$OWNER/$PLUGIN/contents/.github/workflows/notify-marketplace.yml" \
     -f message="Migrate to $TARGET" -f content="$(echo "$WORKFLOW" | base64)" -f sha="$SHA"

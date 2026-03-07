@@ -286,7 +286,7 @@ jobs:
 
 ### Step 2: Customize the Workflow
 
-Replace `MARKETPLACE-OWNER/MARKETPLACE-REPO` with the actual marketplace repository identifier (e.g., `Emasoft/claude-marketplace`).
+Replace `MARKETPLACE-OWNER/MARKETPLACE-REPO` with the actual marketplace repository identifier (e.g., `<placeholder-for-github-repo-owner>/<placeholder-for-marketplace-repo-name>`).
 
 ### Step 3: Commit and Push
 

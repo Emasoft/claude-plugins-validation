@@ -17,56 +17,56 @@ The marketplace.json lives at `.claude-plugin/marketplace.json` and defines the 
 
 ```json
 {
-  "name": "{{MARKETPLACE_NAME}}",
-  "version": "{{MARKETPLACE_VERSION}}",
+  "name": "<placeholder-for-marketplace-name>",
+  "version": "<placeholder-for-marketplace-version>",
   "owner": {
-    "name": "{{MARKETPLACE_OWNER}}",
-    "email": "{{OWNER_EMAIL}}"
+    "name": "<placeholder-for-marketplace-owner>",
+    "email": "<placeholder-for-author-email>"
   },
   "metadata": {
-    "description": "{{MARKETPLACE_DESCRIPTION}}"
+    "description": "<placeholder-for-marketplace-description>"
   },
   "plugins": [
     {
-      "name": "{{PLUGIN_NAME}}",
+      "name": "<placeholder-for-plugin-name>",
       "source": {
         "source": "github",
-        "repo": "{{MARKETPLACE_OWNER}}/{{PLUGIN_NAME}}"
+        "repo": "<placeholder-for-marketplace-owner>/<placeholder-for-plugin-name>"
       },
-      "description": "{{PLUGIN_DESCRIPTION}}",
-      "version": "{{PLUGIN_VERSION}}",
+      "description": "<placeholder-for-plugin-description>",
+      "version": "<placeholder-for-plugin-version>",
       "author": {
-        "name": "{{MARKETPLACE_OWNER}}",
-        "email": "{{OWNER_EMAIL}}"
+        "name": "<placeholder-for-marketplace-owner>",
+        "email": "<placeholder-for-author-email>"
       },
-      "repository": "https://github.com/{{MARKETPLACE_OWNER}}/{{PLUGIN_NAME}}",
-      "license": "{{PLUGIN_LICENSE}}",
+      "repository": "https://github.com/<placeholder-for-marketplace-owner>/<placeholder-for-plugin-name>",
+      "license": "<placeholder-for-plugin-license>",
       "keywords": [
-        "{{KEYWORD_1}}",
-        "{{KEYWORD_2}}",
-        "{{KEYWORD_3}}"
+        "<placeholder-for-keyword-1>",
+        "<placeholder-for-keyword-2>",
+        "<placeholder-for-keyword-3>"
       ],
-      "category": "{{PLUGIN_CATEGORY}}"
+      "category": "<placeholder-for-plugin-category>"
     },
     {
-      "name": "{{PLUGIN_NAME_2}}",
+      "name": "<placeholder-for-plugin-name-2>",
       "source": {
         "source": "github",
-        "repo": "{{MARKETPLACE_OWNER}}/{{PLUGIN_NAME_2}}"
+        "repo": "<placeholder-for-marketplace-owner>/<placeholder-for-plugin-name-2>"
       },
-      "description": "{{PLUGIN_DESCRIPTION_2}}",
-      "version": "{{PLUGIN_VERSION_2}}",
+      "description": "<placeholder-for-plugin-description-2>",
+      "version": "<placeholder-for-plugin-version-2>",
       "author": {
-        "name": "{{MARKETPLACE_OWNER}}",
-        "email": "{{OWNER_EMAIL}}"
+        "name": "<placeholder-for-marketplace-owner>",
+        "email": "<placeholder-for-author-email>"
       },
-      "repository": "https://github.com/{{MARKETPLACE_OWNER}}/{{PLUGIN_NAME_2}}",
-      "license": "{{PLUGIN_LICENSE_2}}",
+      "repository": "https://github.com/<placeholder-for-marketplace-owner>/<placeholder-for-plugin-name-2>",
+      "license": "<placeholder-for-plugin-license-2>",
       "keywords": [
-        "{{KEYWORD_1}}",
-        "{{KEYWORD_2}}"
+        "<placeholder-for-keyword-1>",
+        "<placeholder-for-keyword-2>"
       ],
-      "category": "{{PLUGIN_CATEGORY_2}}"
+      "category": "<placeholder-for-plugin-category-2>"
     }
   ]
 }
@@ -90,7 +90,7 @@ The marketplace.json lives at `.claude-plugin/marketplace.json` and defines the 
 Configuration for [git-cliff](https://git-cliff.org) changelog generation. Place at repository root.
 
 ```toml
-# git-cliff configuration for {{MARKETPLACE_NAME}} marketplace
+# git-cliff configuration for <placeholder-for-marketplace-name> marketplace
 # https://git-cliff.org/docs/configuration
 
 [changelog]
@@ -137,7 +137,7 @@ split_commits = false
 # regex for preprocessing the commit messages
 commit_preprocessors = [
   # Replace issue numbers
-  { pattern = '\((\w+\s)?#([0-9]+)\)', replace = "([#${2}](https://github.com/{{MARKETPLACE_OWNER}}/{{MARKETPLACE_NAME}}/issues/${2}))" },
+  { pattern = '\((\w+\s)?#([0-9]+)\)', replace = "([#${2}](https://github.com/<placeholder-for-marketplace-owner>/<placeholder-for-marketplace-name>/issues/${2}))" },
   # Remove trailing whitespace
   { pattern = '\s+$', replace = "" },
 ]
@@ -268,19 +268,19 @@ condensation_report*.md
 
 ## Placeholder Reference
 
-All `{{PLACEHOLDER}}` names used in the templates above, with descriptions and example values.
+All `<placeholder-for-...>` names used in the templates above, with descriptions and example values.
 
 | Placeholder | Description | Example Value |
 |---|---|---|
-| `{{MARKETPLACE_NAME}}` | Marketplace repository name (kebab-case) | `my-plugins` |
-| `{{MARKETPLACE_VERSION}}` | Marketplace-level semver version | `1.0.0` |
-| `{{MARKETPLACE_OWNER}}` | GitHub username or org that owns the marketplace | `MyGitHubUser` |
-| `{{OWNER_EMAIL}}` | Owner's GitHub noreply email | `12345+MyGitHubUser@users.noreply.github.com` |
-| `{{MARKETPLACE_DESCRIPTION}}` | Short description of the marketplace | `My collection of Claude Code plugins` |
-| `{{PLUGIN_NAME}}` | Plugin repo name (kebab-case, matches GitHub repo) | `my-awesome-plugin` |
-| `{{PLUGIN_DESCRIPTION}}` | One-line description of what the plugin does | `Automates code review with AI-powered analysis` |
-| `{{PLUGIN_VERSION}}` | Plugin semver version | `1.2.3` |
-| `{{PLUGIN_LICENSE}}` | SPDX license identifier | `MIT` |
-| `{{PLUGIN_CATEGORY}}` | Plugin category (`workflow`, `developer-tools`, `productivity`, `utilities`) | `developer-tools` |
-| `{{KEYWORD_1}}`, `{{KEYWORD_2}}`, etc. | Searchable tags for the plugin | `validation`, `linting` |
-| `{{PLUGIN_NAME_2}}`, `{{PLUGIN_VERSION_2}}`, etc. | Same fields for additional plugin entries | (same format as above) |
+| `<placeholder-for-marketplace-name>` | Marketplace repository name (kebab-case) | `my-plugins` |
+| `<placeholder-for-marketplace-version>` | Marketplace-level semver version | `1.0.0` |
+| `<placeholder-for-marketplace-owner>` | GitHub username or org that owns the marketplace | `my-org` |
+| `<placeholder-for-author-email>` | Owner's GitHub noreply email | `<placeholder-for-author-email>` |
+| `<placeholder-for-marketplace-description>` | Short description of the marketplace | `My collection of Claude Code plugins` |
+| `<placeholder-for-plugin-name>` | Plugin repo name (kebab-case, matches GitHub repo) | `my-awesome-plugin` |
+| `<placeholder-for-plugin-description>` | One-line description of what the plugin does | `Automates code review with AI-powered analysis` |
+| `<placeholder-for-plugin-version>` | Plugin semver version | `1.2.3` |
+| `<placeholder-for-plugin-license>` | SPDX license identifier | `MIT` |
+| `<placeholder-for-plugin-category>` | Plugin category (`workflow`, `developer-tools`, `productivity`, `utilities`) | `developer-tools` |
+| `<placeholder-for-keyword-1>`, `<placeholder-for-keyword-2>`, etc. | Searchable tags for the plugin | `validation`, `linting` |
+| `<placeholder-for-plugin-name-2>`, `<placeholder-for-plugin-version-2>`, etc. | Same fields for additional plugin entries | (same format as above) |

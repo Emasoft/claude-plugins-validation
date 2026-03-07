@@ -20,9 +20,9 @@ name: CI
 
 on:
   push:
-    branches: [{{DEFAULT_BRANCH}}]
+    branches: [<placeholder-for-default-branch>]
   pull_request:
-    branches: [{{DEFAULT_BRANCH}}]
+    branches: [<placeholder-for-default-branch>]
 
 jobs:
   validate:
@@ -144,9 +144,9 @@ name: Plugin Validation
 
 on:
   push:
-    branches: [{{DEFAULT_BRANCH}}]
+    branches: [<placeholder-for-default-branch>]
   pull_request:
-    branches: [{{DEFAULT_BRANCH}}]
+    branches: [<placeholder-for-default-branch>]
 
 jobs:
   validate:
@@ -170,8 +170,8 @@ jobs:
         run: |
           if [ -f "scripts/validate_plugin.py" ]; then
             echo "validator=scripts/validate_plugin.py" >> $GITHUB_OUTPUT
-          elif [ -f "{{VALIDATION_SUBMODULE_PATH}}/scripts/validate_plugin.py" ]; then
-            echo "validator={{VALIDATION_SUBMODULE_PATH}}/scripts/validate_plugin.py" >> $GITHUB_OUTPUT
+          elif [ -f "<placeholder-for-validation-submodule-path>/scripts/validate_plugin.py" ]; then
+            echo "validator=<placeholder-for-validation-submodule-path>/scripts/validate_plugin.py" >> $GITHUB_OUTPUT
           else
             echo "validator=" >> $GITHUB_OUTPUT
           fi
@@ -240,7 +240,7 @@ name: Notify Marketplace
 
 on:
   push:
-    branches: [{{DEFAULT_BRANCH}}]
+    branches: [<placeholder-for-default-branch>]
     paths:
       - '.claude-plugin/plugin.json'
       - 'hooks/**'
@@ -254,8 +254,8 @@ env:
   # Example: If your marketplace is at https://github.com/johndoe/my-claude-plugins
   #   MARKETPLACE_OWNER: 'johndoe'
   #   MARKETPLACE_REPO: 'my-claude-plugins'
-  MARKETPLACE_OWNER: '{{MARKETPLACE_OWNER}}'
-  MARKETPLACE_REPO: '{{MARKETPLACE_REPO}}'
+  MARKETPLACE_OWNER: '<placeholder-for-marketplace-owner>'
+  MARKETPLACE_REPO: '<placeholder-for-marketplace-repo-name>'
 
 jobs:
   notify:
@@ -297,10 +297,10 @@ jobs:
 
 | Placeholder | Description | Example Value |
 |---|---|---|
-| `{{DEFAULT_BRANCH}}` | Your repository's default branch name | `main` |
-| `{{VALIDATION_SUBMODULE_PATH}}` | Path to the CPV validation submodule (if used) | `claude-plugins-validation` |
-| `{{MARKETPLACE_OWNER}}` | GitHub username or org that owns the marketplace repo | `Emasoft` |
-| `{{MARKETPLACE_REPO}}` | Name of your marketplace repository | `emasoft-plugins` |
+| `<placeholder-for-default-branch>` | Your repository's default branch name | `main` |
+| `<placeholder-for-validation-submodule-path>` | Path to the CPV validation submodule (if used) | `my-validation-plugin` |
+| `<placeholder-for-marketplace-owner>` | GitHub username or org that owns the marketplace repo | `my-org` |
+| `<placeholder-for-marketplace-repo-name>` | Name of your marketplace repository | `my-plugins-marketplace` |
 
 **Secrets required:**
 
@@ -324,7 +324,7 @@ jobs:
    - `validate.yml` -- runs plugin validation with CPV
    - `notify-marketplace.yml` -- notifies your marketplace repo on plugin changes
 
-3. **Replace all `{{PLACEHOLDER}}` values** with your actual values (see Placeholder Reference above).
+3. **Replace all `<placeholder-for-...>` values** with your actual values (see Placeholder Reference above).
 
 4. **Create the `MARKETPLACE_PAT` secret**:
    - Go to GitHub Settings -> Developer settings -> Personal access tokens -> Tokens (classic)

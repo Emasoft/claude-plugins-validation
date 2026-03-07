@@ -9,18 +9,18 @@
 - [push-plugins.sh](#push-pluginssh)
 
 Ready-to-use scripts for managing a Claude Code plugin marketplace repository.
-Each script is based on production code from the Emasoft marketplace. Replace
-all `{{PLACEHOLDER}}` values with your actual configuration before use.
+Each script is based on production code from a production marketplace. Replace
+all `<placeholder-for-...>` values with your actual configuration before use.
 
 ## Placeholder Reference
 
 | Placeholder | Description | Where Used |
 |-------------|-------------|------------|
-| `{{MARKETPLACE_OWNER}}` | GitHub username or organization | push-plugins.sh |
-| `{{MARKETPLACE_REPO}}` | GitHub repository name | push-plugins.sh |
-| `{{MARKETPLACE_DIR}}` | Local path to marketplace repo root | push-plugins.sh |
-| `{{CPV_SUBDIR}}` | Relative path from repo root to CPV install | pre-commit-hook.py |
-| `{{SUBMODULE_NAMES}}` | Comma-separated list of submodule names | setup-hooks.py |
+| `<placeholder-for-marketplace-owner>` | GitHub username or organization | push-plugins.sh |
+| `<placeholder-for-marketplace-repo-name>` | GitHub repository name | push-plugins.sh |
+| `<placeholder-for-marketplace-dir>` | Local path to marketplace repo root | push-plugins.sh |
+| `<placeholder-for-cpv-subdir>` | Relative path from repo root to CPV install | pre-commit-hook.py |
+| `<placeholder-for-submodule-names>` | Comma-separated list of submodule names | setup-hooks.py |
 
 ---
 
@@ -377,14 +377,14 @@ def validate_semver(version: str) -> bool:
 
 def validate_marketplace_json(repo_root: Path) -> tuple[bool, str]:
     """Validate marketplace.json."""
-    # {{CPV_SUBDIR}} — relative path from repo root to CPV installation
-    validator = repo_root / "{{CPV_SUBDIR}}" / "scripts" / "validate_marketplace.py"
+    # <placeholder-for-cpv-subdir> — relative path from repo root to CPV installation
+    validator = repo_root / "<placeholder-for-cpv-subdir>" / "scripts" / "validate_marketplace.py"
     if not validator.exists():
         return True, "validator not found"
 
     code, stdout, stderr = run_command(
         ["uv", "run", "python", str(validator), str(repo_root)],
-        cwd=repo_root / "{{CPV_SUBDIR}}"
+        cwd=repo_root / "<placeholder-for-cpv-subdir>"
     )
     if code == 0:
         return True, ""
@@ -414,13 +414,13 @@ def validate_plugin_json(file_path: Path) -> tuple[bool, str]:
 
 def validate_hooks_json(file_path: Path, repo_root: Path) -> tuple[bool, str]:
     """Validate a hooks.json file."""
-    # {{CPV_SUBDIR}} — relative path from repo root to CPV installation
-    validator = repo_root / "{{CPV_SUBDIR}}" / "scripts" / "validate_hook.py"
+    # <placeholder-for-cpv-subdir> — relative path from repo root to CPV installation
+    validator = repo_root / "<placeholder-for-cpv-subdir>" / "scripts" / "validate_hook.py"
 
     if validator.exists():
         code, _, _ = run_command(
             ["uv", "run", "python", str(validator), str(file_path), "--quiet"],
-            cwd=repo_root / "{{CPV_SUBDIR}}"
+            cwd=repo_root / "<placeholder-for-cpv-subdir>"
         )
         if code == 0:
             return True, ""
@@ -651,8 +651,8 @@ NC = "\033[0m" if _USE_COLOR else ""
 
 def find_cpv_dir() -> Path | None:
     """Find the CPV plugin directory from the installed plugin cache."""
-    # {{MARKETPLACE_OWNER}} — your GitHub org or username
-    cache_base = Path.home() / ".claude" / "plugins" / "cache" / "{{MARKETPLACE_OWNER}}" / "claude-plugins-validation"
+    # <placeholder-for-marketplace-owner> — your GitHub org or username
+    cache_base = Path.home() / ".claude" / "plugins" / "cache" / "<placeholder-for-marketplace-owner>" / "<placeholder-for-validation-plugin-name>"
     if not cache_base.is_dir():
         return None
     # Get latest version directory by sorting version strings
@@ -726,7 +726,7 @@ def main() -> int:
     cpv_dir = find_cpv_dir()
     if cpv_dir is None:
         print(f"{RED}ERROR: CPV plugin not found in cache.{NC}")
-        print("Install it: claude /cpv-install-plugin claude-plugins-validation")
+        print("Install it: claude /cpv-install-plugin <placeholder-for-validation-plugin-name>")
         return 1
 
     print(f"{BLUE}Repo:{NC}     {repo_root}")
@@ -1051,14 +1051,14 @@ def main() -> int:
     create_post_merge_hook(main_hooks_dir, "main repo")
 
     # Submodule hooks
-    # {{SUBMODULE_NAMES}} — comma-separated list of your plugin submodule names
+    # <placeholder-for-submodule-names> — comma-separated list of your plugin submodule names
     print()
     print(f"{BLUE}Submodule hooks{NC}")
     print("-" * 40)
 
-    for submodule in "{{SUBMODULE_NAMES}}".split(","):
+    for submodule in "<placeholder-for-submodule-names>".split(","):
         submodule = submodule.strip()
-        if submodule and not submodule.startswith("{{"):
+        if submodule and not submodule.startswith("<placeholder"):
             setup_submodule_hooks(submodule, repo_root)
 
     # Summary
@@ -1129,8 +1129,8 @@ MARKETPLACE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Find the CPV validator from the plugin cache (latest installed version)
 find_cpv_dir() {
-    # {{MARKETPLACE_OWNER}} — your GitHub org or username
-    local cache_base="$HOME/.claude/plugins/cache/{{MARKETPLACE_OWNER}}/claude-plugins-validation"
+    # <placeholder-for-marketplace-owner> — your GitHub org or username
+    local cache_base="$HOME/.claude/plugins/cache/<placeholder-for-marketplace-owner>/<placeholder-for-validation-plugin-name>"
     if [ ! -d "$cache_base" ]; then
         echo ""
         return
@@ -1188,7 +1188,7 @@ echo ""
 CPV_DIR=$(find_cpv_dir)
 if [ -z "$CPV_DIR" ]; then
     echo "ERROR: CPV plugin not found in cache. Install it first:"
-    echo "  claude /cpv-install-plugin claude-plugins-validation"
+    echo "  claude /cpv-install-plugin <placeholder-for-validation-plugin-name>"
     exit 1
 fi
 
