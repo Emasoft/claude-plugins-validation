@@ -1,22 +1,5 @@
 # Code Quality -- Validation Issues and Fixes
 
-Comprehensive remediation guide for encoding, security, and code quality issues detected by the CPV (Claude Plugins Validation) framework.
-
-## Severity Levels
-
-| Level | Blocking? | Score Impact | Description |
-|---|---|---|---|
-| CRITICAL | Always blocks | -25 per issue | Must fix before plugin can be used |
-| MAJOR | Always blocks | -10 per issue | Should fix; indicates significant problems |
-| MINOR | Always blocks | -3 per issue | Recommended to fix; quality/portability concerns |
-| NIT | Blocks in `--strict` only | -1 per issue | Style and best-practice nitpicks |
-| WARNING | Never blocks | None | Security advisories, always reported |
-| INFO | Never blocks | None | Informational, shown in verbose mode only |
-
-Exit codes: `0` = OK, `1` = CRITICAL, `2` = MAJOR, `3` = MINOR, `4` = NIT (strict mode only).
-
----
-
 ## Table of Contents
 
 - [1. Encoding Issues](#1-encoding-issues)
@@ -74,7 +57,20 @@ Exit codes: `0` = OK, `1` = CRITICAL, `2` = MAJOR, `3` = MINOR, `4` = NIT (stric
 - [12. File Access Issues](#12-file-access-issues)
   - [12.1 Cannot Read File (MINOR)](#121-cannot-read-file-minor)
 
----
+Comprehensive remediation guide for encoding, security, and code quality issues detected by the CPV (Claude Plugins Validation) framework.
+
+## Severity Levels
+
+| Level | Blocking? | Score Impact | Description |
+|---|---|---|---|
+| CRITICAL | Always blocks | -25 per issue | Must fix before plugin can be used |
+| MAJOR | Always blocks | -10 per issue | Should fix; indicates significant problems |
+| MINOR | Always blocks | -3 per issue | Recommended to fix; quality/portability concerns |
+| NIT | Blocks in `--strict` only | -1 per issue | Style and best-practice nitpicks |
+| WARNING | Never blocks | None | Security advisories, always reported |
+| INFO | Never blocks | None | Informational, shown in verbose mode only |
+
+Exit codes: `0` = OK, `1` = CRITICAL, `2` = MAJOR, `3` = MINOR, `4` = NIT (strict mode only).
 
 ## 1. Encoding Issues
 

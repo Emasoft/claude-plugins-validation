@@ -1,8 +1,9 @@
 ---
 name: install-plugin
 description: >
-  Use when installing, uninstalling, or managing Claude Code plugins locally
-  without a GitHub marketplace. Trigger with "install plugin" or "manage local plugins".
+  Install, uninstall, or manage Claude Code plugins locally without a GitHub
+  marketplace. Use when you need to install, update, or manage Claude Code
+  plugins from local paths or archives.
 tags:
   - plugin
   - install
@@ -16,13 +17,13 @@ user-invocable: false
 
 ## Overview
 
-This skill wraps `scripts/claude-plugin-install.py` — a self-contained Python tool that installs, validates, uninstalls, and manages Claude Code plugins locally. It creates a local marketplace structure and registers the plugin in Claude Code's runtime registry (`known_marketplaces.json`).
+Wraps `scripts/claude-plugin-install.py` — a self-contained Python tool that installs, validates, uninstalls, and manages plugins locally. Creates a local marketplace structure and registers it in Claude Code's runtime registry (`known_marketplaces.json`).
 
-Use this when the user wants to install a plugin **without** setting up a GitHub marketplace. For GitHub-based distribution, use the `setup-github-marketplace` skill instead.
+Use when the user wants to install a plugin **without** a GitHub marketplace. For GitHub-based distribution, use `setup-github-marketplace` instead.
 
 ## Prerequisites
 
-- [ ] Python 3.8+ available (the script has no external dependencies)
+- [ ] Python 3.8+ available (no external dependencies)
 - [ ] The plugin to install has a valid `.claude-plugin/plugin.json` manifest
 - [ ] Run via `uv run` to ensure the correct Python environment
 
@@ -63,16 +64,16 @@ The script prints colored status messages:
 - Yellow `[WARN]` — non-blocking advisory
 - Red `[ERR]` — blocking error
 
-Install output includes: extraction status, validation results, marketplace registration, permissions fixes.
+Output includes: extraction status, validation results, registration, permissions fixes.
 
 ## Error Handling
 
 | Problem | Solution |
 |---------|----------|
-| "Plugin manifest not found" | Ensure `.claude-plugin/plugin.json` exists in the plugin root |
-| "Marketplace already exists" | Use `--force` to overwrite existing installation |
-| "Permission denied on hooks" | The script auto-fixes permissions; if it fails, manually `chmod +x` hook scripts |
-| "settings.json parse error" | The script handles JSONC (comments + trailing commas) automatically |
+| "Plugin manifest not found" | Ensure `.claude-plugin/plugin.json` exists in plugin root |
+| "Marketplace already exists" | Use `--force` to overwrite |
+| "Permission denied on hooks" | Script auto-fixes; if it fails, manually `chmod +x` hook scripts |
+| "settings.json parse error" | Script handles JSONC (comments + trailing commas) automatically |
 
 If the user reports issues, run `--doctor` first to diagnose.
 

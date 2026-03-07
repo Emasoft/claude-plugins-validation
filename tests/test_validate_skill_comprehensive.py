@@ -1071,14 +1071,24 @@ class TestTokenBudgetBranches:
     """Tests for validate_token_budget edge cases (lines 1164, 1170, 1181, 1187)."""
 
     def test_excessive_line_count_is_major(self):
-        """Content exceeding MAX_SKILL_LINES_ERROR should be major."""
+        """Content exceeding 500 lines should be major."""
         from validate_skill_comprehensive import validate_token_budget
 
         report = ValidationReport(skill_path="test")
-        content = "---\nname: test\n---\n" + ("line\n" * 850)
-        body = "line\n" * 850
+        content = "---\nname: test\n---\n" + ("line\n" * 550)
+        body = "line\n" * 550
         validate_token_budget(content, body, report)
         assert any("lines" in r.message and r.level == "MAJOR" for r in report.results)
+
+    def test_excessive_char_count_is_major(self):
+        """Content exceeding 5000 characters should be major."""
+        from validate_skill_comprehensive import validate_token_budget
+
+        report = ValidationReport(skill_path="test")
+        body = "x" * 5500
+        content = "---\nname: test\n---\n" + body
+        validate_token_budget(content, body, report)
+        assert any("characters" in r.message and r.level == "MAJOR" for r in report.results)
 
     def test_excessive_word_count_is_major(self):
         """Content exceeding MAX_WORD_COUNT_ERROR should be major."""
@@ -1237,7 +1247,7 @@ class TestReferenceFilesValidation:
         assert any("Nested references directory" in r.message for r in report.results)
 
     def test_long_reference_file_without_toc_flagged(self, tmp_path):
-        """Reference file >100 lines without TOC should be flagged."""
+        """Reference file without TOC in first 200 chars should be MINOR."""
         from validate_skill_comprehensive import validate_reference_files
 
         skill_dir = tmp_path / "my-skill"
@@ -1249,10 +1259,12 @@ class TestReferenceFilesValidation:
 
         report = ValidationReport(skill_path=str(skill_dir))
         validate_reference_files(skill_dir, report)
-        assert any("no table of contents" in r.message for r in report.results)
+        toc_results = [r for r in report.results if "no table of contents" in r.message]
+        assert toc_results, "Expected a TOC warning"
+        assert toc_results[0].level == "MINOR"
 
     def test_long_reference_file_with_toc_passes(self, tmp_path):
-        """Reference file >100 lines with TOC should pass."""
+        """Reference file with TOC in first 200 chars should pass."""
         from validate_skill_comprehensive import validate_reference_files
 
         skill_dir = tmp_path / "my-skill"

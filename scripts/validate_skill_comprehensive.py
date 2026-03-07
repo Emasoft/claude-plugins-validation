@@ -103,8 +103,9 @@ ALL_KNOWN_FIELDS = (
 )
 
 # --- Token Budget Constants ---
-MAX_SKILL_LINES = 500  # Warning threshold
-MAX_SKILL_LINES_ERROR = 800  # Error threshold
+MAX_SKILL_LINES = 500  # Hard limit — MAJOR if exceeded
+MAX_CHAR_COUNT_WARN = 4000  # Character warning threshold
+MAX_CHAR_COUNT_ERROR = 5000  # Character error threshold (hard limit)
 MAX_WORD_COUNT_WARN = 3500
 MAX_WORD_COUNT_ERROR = 5000
 MAX_DESCRIPTION_WARN = 200
@@ -175,8 +176,8 @@ VAGUE_NAME_WORDS = {
 # --- Gerund Pattern (verb + -ing, recommended by Anthropic docs) ---
 RE_GERUND_NAME = re.compile(r"^[a-z]+-[a-z]*ing(-[a-z]+)*$")
 
-# --- Reference File TOC Threshold (Anthropic docs: files > 100 lines need TOC) ---
-REFERENCE_TOC_THRESHOLD = 100
+# --- Reference File TOC ---
+# TOC must appear in the first 200 characters of referenced .md files
 
 # --- Windows Backslash Pattern (any backslash in path context) ---
 RE_WINDOWS_PATH = re.compile(r"\\[a-zA-Z_]")
@@ -1101,26 +1102,42 @@ def validate_field_whitelist(
 
 
 def validate_token_budget(content: str, body: str, report: ValidationReport) -> None:
-    """Validate token budget (line count, word count)."""
+    """Validate token budget (line count, character count, word count).
+
+    Hard limits: 500 lines and 5000 characters. Both conditions enforced.
+    """
     total_lines = content.count("\n") + 1
+    char_count = len(content)
     word_count = len(body.split())
 
-    # Line count check
-    if total_lines > MAX_SKILL_LINES_ERROR:
+    # Line count check — 500 lines is the hard limit
+    if total_lines > MAX_SKILL_LINES:
         report.major(
-            f"SKILL.md has {total_lines} lines (max {MAX_SKILL_LINES_ERROR}). Must use progressive disclosure.",
-            "SKILL.md",
-            category="Token Budget",
-        )
-    elif total_lines > MAX_SKILL_LINES:
-        report.minor(
-            f"SKILL.md has {total_lines} lines (recommended: under {MAX_SKILL_LINES}). "
-            "Consider moving detailed content to supporting files.",
+            f"SKILL.md has {total_lines} lines (max {MAX_SKILL_LINES}). "
+            "Must use progressive disclosure — move content to reference files.",
             "SKILL.md",
             category="Token Budget",
         )
     else:
         report.passed(f"SKILL.md line count OK ({total_lines} lines)", "SKILL.md", category="Token Budget")
+
+    # Character count check — 5000 characters is the hard limit
+    if char_count > MAX_CHAR_COUNT_ERROR:
+        report.major(
+            f"SKILL.md has {char_count} characters (max {MAX_CHAR_COUNT_ERROR}). "
+            "Must use progressive disclosure — move content to reference files.",
+            "SKILL.md",
+            category="Token Budget",
+        )
+    elif char_count > MAX_CHAR_COUNT_WARN:
+        report.minor(
+            f"SKILL.md has {char_count} characters (recommended: under {MAX_CHAR_COUNT_WARN}). "
+            "Consider moving detailed content to supporting files.",
+            "SKILL.md",
+            category="Token Budget",
+        )
+    else:
+        report.passed(f"SKILL.md character count OK ({char_count} chars)", "SKILL.md", category="Token Budget")
 
     # Word count check
     if word_count > MAX_WORD_COUNT_ERROR:
@@ -1725,34 +1742,33 @@ def validate_reference_files(skill_path: Path, report: ValidationReport) -> None
                     category="Structure",
                 )
 
-    # Check for long reference files without TOC
+    # Check reference files for TOC presence (must appear in first 200 chars)
     for ref_file in refs_dir.glob("*.md"):
         try:
             content = ref_file.read_text(encoding="utf-8")
             line_count = content.count("\n") + 1
+            head = content[:200]  # TOC must be discoverable in the first 200 characters
 
-            if line_count > REFERENCE_TOC_THRESHOLD:
-                # Check for presence of a table of contents
-                # Common TOC indicators: "## Contents", "## Table of Contents", "## TOC", numbered list at top
-                has_toc = bool(
-                    re.search(r"(?im)^##\s*(contents|table\s+of\s+contents|toc|index)(\s|$)", content)
-                    or re.search(r"(?m)^-\s*\[.*\]\(#", content[:2000])  # Markdown anchor links
-                    or re.search(r"(?m)^1\.\s+\[.*\]\(#", content[:2000])  # Numbered TOC
+            # Check for TOC indicators in the first 200 chars
+            has_toc_early = bool(
+                re.search(r"(?im)^##\s*(contents|table\s+of\s+contents|toc|index)(\s|$)", head)
+                or re.search(r"(?m)^-\s*\[.*\]\(#", head)  # Markdown anchor links
+                or re.search(r"(?m)^1\.\s+\[.*\]\(#", head)  # Numbered TOC
+            )
+
+            if not has_toc_early:
+                report.minor(
+                    f"Reference file has no table of contents in the first 200 characters "
+                    f"({line_count} lines): references/{ref_file.name}",
+                    f"references/{ref_file.name}",
+                    category="Reference Files",
                 )
-
-                if not has_toc:
-                    report.minor(
-                        f"Reference file has {line_count} lines but no table of contents "
-                        f"(Anthropic docs: files > {REFERENCE_TOC_THRESHOLD} lines should have TOC)",
-                        f"references/{ref_file.name}",
-                        category="Reference Files",
-                    )
-                else:
-                    report.passed(
-                        f"Reference file has TOC ({line_count} lines): references/{ref_file.name}",
-                        f"references/{ref_file.name}",
-                        category="Reference Files",
-                    )
+            else:
+                report.passed(
+                    f"Reference file has TOC ({line_count} lines): references/{ref_file.name}",
+                    f"references/{ref_file.name}",
+                    category="Reference Files",
+                )
         except Exception:
             report.minor(
                 f"Could not read reference file: references/{ref_file.name}",

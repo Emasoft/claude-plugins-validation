@@ -5,6 +5,8 @@ description: |
   Does NOT validate — only fixes issues identified by the validator agents.
   Consults fix guides in agents/references/ for remediation steps.
 model: sonnet
+skills:
+  - fix-validation
 ---
 
 # Plugin Fixer Agent

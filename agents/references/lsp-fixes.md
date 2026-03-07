@@ -1,24 +1,5 @@
 # LSP Configuration — Validation Issues and Fixes
 
-Comprehensive remediation guide for all issues detected by `validate_lsp.py`.
-
-## Overview
-
-The LSP validator checks Language Server Protocol server configuration files for Claude Code plugins. It validates:
-
-- JSON structure of config files
-- Required and recommended fields for each server definition
-- Path portability (no hardcoded absolute paths)
-- Environment variable syntax
-- Field type correctness
-- Transport, timeout, and restart settings
-
-**Config file locations checked** (in order): `.lsp.json`, `lsp.json`, `lsp-config.json`, `.vscode/settings.json`
-
-**Known LSP server keys**: `command`, `args`, `filetypes`, `rootPatterns`, `initializationOptions`, `settings`, `env`, `cwd`, `transport`, `extensionToLanguage`, `workspaceFolder`, `startupTimeout`, `shutdownTimeout`, `restartOnCrash`, `maxRestarts`
-
----
-
 ## Table of Contents
 
 - [1. Config File Issues](#1-config-file-issues)
@@ -39,6 +20,23 @@ The LSP validator checks Language Server Protocol server configuration files for
 - [16. Environment Variable Syntax Issues](#16-environment-variable-syntax-issues)
 - [17. Path Value Issues](#17-path-value-issues)
 - [18. Informational Messages](#18-informational-messages)
+
+## Overview
+
+Comprehensive remediation guide for all issues detected by `validate_lsp.py`.
+
+The LSP validator checks Language Server Protocol server configuration files for Claude Code plugins. It validates:
+
+- JSON structure of config files
+- Required and recommended fields for each server definition
+- Path portability (no hardcoded absolute paths)
+- Environment variable syntax
+- Field type correctness
+- Transport, timeout, and restart settings
+
+**Config file locations checked** (in order): `.lsp.json`, `lsp.json`, `lsp-config.json`, `.vscode/settings.json`
+
+**Known LSP server keys**: `command`, `args`, `filetypes`, `rootPatterns`, `initializationOptions`, `settings`, `env`, `cwd`, `transport`, `extensionToLanguage`, `workspaceFolder`, `startupTimeout`, `shutdownTimeout`, `restartOnCrash`, `maxRestarts`
 
 ---
 

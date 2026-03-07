@@ -1,13 +1,5 @@
 # Rules Validation — Validation Issues and Fixes
 
-Comprehensive remediation guide for all issues detected by `validate_rules.py`.
-
-## Overview
-
-Rule files are plain Markdown files placed in a plugin's `rules/` directory. They are loaded alongside `CLAUDE.md` into the model context for every session. Rules support optional YAML frontmatter with a `paths` field for path-specific activation.
-
-**Token budget**: All rule files combined must stay under **10,000 estimated tokens**.
-
 ## Table of Contents
 
 - [1. Rules Directory Issues](#1-rules-directory-issues)
@@ -16,6 +8,14 @@ Rule files are plain Markdown files placed in a plugin's `rules/` directory. The
 - [4. Frontmatter Issues](#4-frontmatter-issues)
 - [5. Security Issues in Rule Files](#5-security-issues-in-rule-files)
 - [6. Token Budget Issues](#6-token-budget-issues)
+
+Comprehensive remediation guide for all issues detected by `validate_rules.py`.
+
+## Overview
+
+Rule files are plain Markdown files placed in a plugin's `rules/` directory. They are loaded alongside `CLAUDE.md` into the model context for every session. Rules support optional YAML frontmatter with a `paths` field for path-specific activation.
+
+**Token budget**: All rule files combined must stay under **10,000 estimated tokens**.
 
 ---
 

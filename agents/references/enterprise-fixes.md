@@ -1,5 +1,22 @@
 # Enterprise Compliance — Validation Issues and Fixes
 
+## Table of Contents
+
+- [1. Plugin/Path Level Issues](#1-pluginpath-level-issues)
+- [2. Skill File Issues](#2-skill-file-issues)
+- [3. Required Metadata: name and description](#3-required-metadata-name-and-description)
+- [4. Author Field Issues](#4-author-field-issues)
+- [5. License Field Issues](#5-license-field-issues)
+- [6. Context Field Issues](#6-context-field-issues)
+- [7. Agent Field Issues](#7-agent-field-issues)
+- [8. User-Invocable Field Issues](#8-user-invocable-field-issues)
+- [9. Tags Field Issues](#9-tags-field-issues)
+- [10. Mode Field Issues](#10-mode-field-issues)
+- [11. Agent Compliance Issues](#11-agent-compliance-issues)
+- [12. Summary/Informational Messages](#12-summaryinformational-messages)
+
+---
+
 Comprehensive remediation guide for all issues detected by `validate_enterprise.py`.
 
 ## Overview
@@ -17,23 +34,6 @@ The enterprise compliance validator checks skills (in `skills/`) and agents (in 
 9. All agents must have `name` and `description`
 
 **Strict mode** (`--strict`): All MAJOR issues become CRITICAL.
-
----
-
-## Table of Contents
-
-- [1. Plugin/Path Level Issues](#1-pluginpath-level-issues)
-- [2. Skill File Issues](#2-skill-file-issues)
-- [3. Required Metadata: name and description](#3-required-metadata-name-and-description)
-- [4. Author Field Issues](#4-author-field-issues)
-- [5. License Field Issues](#5-license-field-issues)
-- [6. Context Field Issues](#6-context-field-issues)
-- [7. Agent Field Issues](#7-agent-field-issues)
-- [8. User-Invocable Field Issues](#8-user-invocable-field-issues)
-- [9. Tags Field Issues](#9-tags-field-issues)
-- [10. Mode Field Issues](#10-mode-field-issues)
-- [11. Agent Compliance Issues](#11-agent-compliance-issues)
-- [12. Summary/Informational Messages](#12-summaryinformational-messages)
 
 ---
 

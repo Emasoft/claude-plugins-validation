@@ -1,9 +1,5 @@
 # Plugin Structure — Validation Issues and Fixes
 
-Comprehensive remediation guide for all issues detected by `validate_plugin.py`.
-Every entry includes the **exact error message** (for automated matching), severity,
-root cause, and step-by-step fix instructions.
-
 ## Table of Contents
 
 - [1. Plugin Manifest Issues](#1-plugin-manifest-issues)
@@ -20,6 +16,10 @@ root cause, and step-by-step fix instructions.
 - [12. Path and Private Info Issues](#12-path-and-private-info-issues)
 - [13. .gitignore Issues](#13-gitignore-issues)
 - [14. Workflow Inline Python Issues](#14-workflow-inline-python-issues)
+
+Comprehensive remediation guide for all issues detected by `validate_plugin.py`.
+Every entry includes the **exact error message** (for automated matching), severity,
+root cause, and step-by-step fix instructions.
 
 ---
 

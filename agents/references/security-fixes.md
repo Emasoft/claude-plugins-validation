@@ -1,5 +1,16 @@
 # Security Validation — Validation Issues and Fixes
 
+## Table of Contents
+
+- [1. Plugin Path Issues](#1-plugin-path-issues)
+- [2. Injection Detection Issues](#2-injection-detection-issues)
+- [3. Path Traversal Issues](#3-path-traversal-issues)
+- [4. Secret Detection Issues](#4-secret-detection-issues)
+- [5. Hardcoded User Path Issues](#5-hardcoded-user-path-issues)
+- [6. Dangerous File Issues](#6-dangerous-file-issues)
+- [7. Script Permission Issues](#7-script-permission-issues)
+- [8. File Read Issues](#8-file-read-issues)
+
 Comprehensive remediation guide for all issues detected by `validate_security.py`.
 
 ## Overview of Security Checks
@@ -23,19 +34,6 @@ Comprehensive remediation guide for all issues detected by `validate_security.py
 | Shell script missing shebang | MINOR | `check_script_permissions()` |
 | Cannot read file | MINOR | `scan_all_files()` |
 | Non-standard shebang | INFO | `check_script_permissions()` |
-
-## Table of Contents
-
-- [1. Plugin Path Issues](#1-plugin-path-issues)
-- [2. Injection Detection Issues](#2-injection-detection-issues)
-- [3. Path Traversal Issues](#3-path-traversal-issues)
-- [4. Secret Detection Issues](#4-secret-detection-issues)
-- [5. Hardcoded User Path Issues](#5-hardcoded-user-path-issues)
-- [6. Dangerous File Issues](#6-dangerous-file-issues)
-- [7. Script Permission Issues](#7-script-permission-issues)
-- [8. File Read Issues](#8-file-read-issues)
-
----
 
 ## 1. Plugin Path Issues
 

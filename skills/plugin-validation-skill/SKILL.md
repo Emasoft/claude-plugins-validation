@@ -1,50 +1,40 @@
 ---
 name: plugin-validation-skill
-description: |
-  Validate Claude Code plugins, hooks, skills, MCP. Use when checking plugin quality. Trigger with /cpv-validate-plugin.
-tags:
-  - validation
-  - plugins
-  - marketplace
-  - hooks
-  - skills
-  - mcp
-  - quality-assurance
+description: Use when you need to validate Claude Code plugins for structural correctness, quality compliance, and marketplace readiness. Trigger with /cpv-validate-plugin.
+tags: [validation, plugins, marketplace, hooks, skills, mcp, quality-assurance]
 user-invocable: true
 allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep, Write
 ---
 
 # Plugin Validation Skill
 
-Validates Claude Code plugins and all their components for quality and compliance.
-
 ## Overview
 
-This skill runs validation scripts that check:
-- Plugin manifest (`plugin.json`) structure and fields
-- Hook configurations (`hooks.json`) and script validation
-- Skill frontmatter and content quality (190+ rules)
-- MCP server configurations (`.mcp.json`)
-- Marketplace configurations and git submodules
+This skill runs automated validation on Claude Code plugins, checking manifests, hooks, skills, MCP servers, and marketplace configs against 190+ structural and quality rules. It produces a severity-graded report with actionable fix guidance so you can resolve issues before publishing.
+
+Validates Claude Code plugins and components for quality and compliance. Checks:
+- Plugin manifest (`plugin.json`) structure/fields
+- Hook configs (`hooks.json`) and scripts
+- Skill frontmatter and content (190+ rules)
+- MCP server configs (`.mcp.json`)
+- Marketplace configs and git submodules
 - Agent definitions and system prompts
 
 ## Prerequisites
 
-- Python 3.12+ with `pyyaml` installed
-- `uv` package manager for running validation scripts
+- Python 3.12+ with `pyyaml`, `uv` package manager
 - Plugin directory with valid structure (`.claude-plugin/plugin.json`)
 
 ## Instructions
 
-1. Ensure private path detection is configured (auto-detected, or set `CLAUDE_PRIVATE_USERNAMES="your_username"`)
-2. Navigate to the claude-plugins-validation directory
-3. Run the validator:
+1. Set `CLAUDE_PRIVATE_USERNAMES="your_username"` if needed (usually auto-detected)
+2. Run the validator:
    ```bash
    uv run python scripts/validate_plugin.py /path/to/plugin --report docs_dev/validate_plugin_YYYYMMDD.md
    ```
-4. Review the compact summary output (always use `--report` to save full details to file)
-5. Fix issues in priority order: CRITICAL > MAJOR > MINOR (use `/cpv-fix-validation <report_path>`)
-6. Re-run validation until exit code 0
+3. Review compact summary (always use `--report` to save details to file)
+4. Fix issues: CRITICAL > MAJOR > MINOR (use `/cpv-fix-validation <report_path>`)
+5. Re-run until exit code 0
 
 ## Output
 
@@ -57,9 +47,9 @@ This skill runs validation scripts that check:
 
 ## Error Handling
 
-- **Non-zero exit code**: Report severity level and failing checks. Do NOT publish until MAJOR/CRITICAL resolved.
-- **Missing dependencies**: Install with `uv pip install ruff mypy` or `brew install shellcheck`.
-- **Invalid JSON/YAML**: Show parse error with file path and line number.
+- **Non-zero exit**: Report severity and failing checks. Do NOT publish until MAJOR/CRITICAL resolved.
+- **Missing deps**: `uv pip install ruff mypy` or `brew install shellcheck`.
+- **Invalid JSON/YAML**: Show parse error with path and line number.
 
 ## Examples
 
@@ -106,16 +96,14 @@ uv run python scripts/validate_skill_comprehensive.py /path/to/skill-dir --stric
   - 7. Common Hook Errors
   - 8. Validation Checklist
 - [Troubleshooting](references/troubleshooting-python-scripts.md) - Common issues and fixes
-  > **Sections:** Bash Arithmetic Exit Codes · Unused Variable Warnings · Missing Python Dependencies · Git Hook Not Running · Plugin JSON Missing Required Fields · Ruff Linting Errors · Marketplace Plugin Source Format · Version Consistency · Git Tag Already Exists · subprocess.run Output Truncation · Best Practices Summary · Quick Diagnostic Commands
 
 ## Token Optimization
 
-- **ALWAYS use `--report <path>`** — this is the #1 token saver. Without it, full verbose output flows into context.
-- **NEVER read the generated report file** — provide the path to the user.
-- **NEVER read plugin source files** — the scripts do all reading internally.
-- **Subagents DON'T inherit skills** — they start clean, which saves ~50K tokens of system prompt per agent.
-- **The `agent: plugin-validator` field** routes this to a lightweight Sonnet agent that runs scripts only.
-- **One script invocation = one validation** — don't chain multiple scripts in one command.
+- **ALWAYS use `--report <path>`** — #1 token saver; without it, verbose output floods context.
+- **NEVER read the report file** — just provide the path to the user.
+- **NEVER read plugin source files** — scripts handle reading internally.
+- **Subagents DON'T inherit skills** — saves ~50K tokens per agent.
+- **One script = one validation** — don't chain scripts.
 
 ## Related Commands
 

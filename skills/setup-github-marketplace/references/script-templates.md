@@ -1,16 +1,15 @@
 # Script Templates
 
-Ready-to-use scripts for managing a Claude Code plugin marketplace repository.
-Each script is complete, functional, and can be copy-pasted into the appropriate location.
-
 ## Table of Contents
-
 - [Placeholder Reference](#placeholder-reference)
 - [sync_marketplace_versions.py](#sync_marketplace_versionspy)
 - [generate-readme.py](#generate-readmepy)
 - [setup-hooks.py](#setup-hookspy)
 - [pre-push-hook.py](#pre-push-hookpy)
 - [push-plugins.py](#push-pluginspy)
+
+Ready-to-use scripts for managing a Claude Code plugin marketplace repository.
+Each script is complete, functional, and can be copy-pasted into the appropriate location.
 
 ## Placeholder Reference
 
