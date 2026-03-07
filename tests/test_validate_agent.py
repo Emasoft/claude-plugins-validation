@@ -160,14 +160,14 @@ class TestValidateNameField:
         passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
         assert any("'name' field present" in m for m in passed_msgs)
 
-    def test_uppercase_name_reports_major(self):
-        """validate_name_field reports MAJOR when name contains uppercase letters."""
+    def test_uppercase_name_reports_critical(self):
+        """validate_name_field reports CRITICAL when name contains uppercase letters."""
         report = AgentValidationReport()
         frontmatter = {"name": "Code-Reviewer"}
         validate_name_field(frontmatter, "Code-Reviewer.md", report)
 
-        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("lowercase" in m for m in major_msgs)
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert any("uppercase" in m.lower() for m in critical_msgs)
 
 
 class TestValidateToolsField:
@@ -937,19 +937,19 @@ class TestValidateNameFieldEdgeCases:
         info_msgs = [r.message for r in report.results if r.level == "INFO"]
         assert any("my-agent" in m for m in info_msgs)
 
-    def test_consecutive_hyphens_reports_major(self):
-        """validate_name_field reports MAJOR for names with consecutive hyphens."""
+    def test_consecutive_hyphens_reports_critical(self):
+        """validate_name_field reports CRITICAL for names with consecutive hyphens."""
         report = AgentValidationReport()
         validate_name_field({"name": "my--agent"}, "my--agent.md", report)
-        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("consecutive hyphens" in m for m in major_msgs)
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert any("consecutive hyphens" in m for m in critical_msgs)
 
-    def test_name_starting_with_hyphen_reports_major(self):
-        """validate_name_field reports MAJOR for names starting with a hyphen."""
+    def test_name_starting_with_hyphen_reports_critical(self):
+        """validate_name_field reports CRITICAL for names starting with a hyphen."""
         report = AgentValidationReport()
         validate_name_field({"name": "-my-agent"}, "-my-agent.md", report)
-        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("start/end with hyphen" in m for m in major_msgs)
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert any("naming pattern" in m.lower() for m in critical_msgs)
 
     def test_non_string_name_reports_critical(self):
         """validate_name_field reports CRITICAL when name is not a string."""

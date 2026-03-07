@@ -395,13 +395,13 @@ class TestValidateMarketplaceNameEdgeCases:
 class TestValidatePluginEntryFields:
     """Tests for validate_plugin_entry covering version, source, path, repository, tags, deps."""
 
-    def test_non_kebab_name_produces_minor(self, tmp_path):
-        """Plugin name not in kebab-case must produce MINOR (lines 373-374)."""
+    def test_non_kebab_name_produces_critical(self, tmp_path):
+        """Plugin name not in kebab-case must produce CRITICAL."""
         from validate_marketplace import validate_plugin_entry
 
         plugin = {"name": "BadName!", "source": "github"}
         results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
-        assert any(r.level == "MINOR" and "kebab-case" in r.message for r in results)
+        assert any(r.level == "CRITICAL" and "naming pattern" in r.message.lower() for r in results)
 
     def test_non_string_version_produces_major(self, tmp_path):
         """Non-string version must produce MAJOR (lines 387-397)."""

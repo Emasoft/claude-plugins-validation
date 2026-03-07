@@ -48,6 +48,7 @@ from cpv_validation_common import (
     ValidationReport,
     resolve_tool_command,
     save_report_and_print_summary,
+    validate_component_name,
     validate_no_absolute_paths,
     validate_toc_embedding,
 )
@@ -125,18 +126,11 @@ def validate_manifest(
                 ".claude-plugin/plugin.json",
             )
 
-    # Name validation
+    # Name validation — uses shared validate_component_name for uniform rules
     if "name" in manifest:
         name = manifest["name"]
-        if name != name.lower():
-            report.major(f"Plugin name must be lowercase: {name}", ".claude-plugin/plugin.json")
-        if " " in name:
-            report.major(
-                f"Plugin name cannot contain spaces: {name}",
-                ".claude-plugin/plugin.json",
-            )
-        if not re.match(r"^[a-z][a-z0-9-]*$", name):
-            report.major(f"Plugin name must be kebab-case: {name}", ".claude-plugin/plugin.json")
+        if isinstance(name, str):
+            validate_component_name(name, "plugin", report)
 
     # Version validation
     if "version" in manifest:

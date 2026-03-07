@@ -55,6 +55,7 @@ from cpv_validation_common import (
     VALID_TOOLS,
     Level,
     save_report_and_print_summary,
+    validate_component_name,
     validate_toc_embedding,
 )
 from cpv_validation_common import (
@@ -74,7 +75,7 @@ from cpv_validation_common import (
 Score = Literal[0, 1, 2, 3]
 
 # --- AgentSkills OpenSpec Constants ---
-MAX_SKILL_NAME_LENGTH = 64
+MAX_SKILL_NAME_LENGTH = 70  # Aligned with MAX_NAME_LENGTH in cpv_validation_common
 MAX_DESCRIPTION_LENGTH = 1024
 MAX_COMPATIBILITY_LENGTH = 500
 
@@ -531,37 +532,16 @@ def validate_name_field(
     # Unicode NFKC normalization (AgentSkills OpenSpec)
     name = unicodedata.normalize("NFKC", name.strip())
 
-    # Length check (max 64 chars)
-    if len(name) > MAX_SKILL_NAME_LENGTH:
-        report.major(
-            f"Skill name exceeds {MAX_SKILL_NAME_LENGTH} characters ({len(name)} chars): {name}",
-            "SKILL.md",
-            category="Frontmatter",
-        )
+    # Uniform naming validation via shared function (length, pattern, end-digit, dir-name match)
+    # Dir-name match is always MAJOR when name is in frontmatter
+    validate_component_name(
+        name,
+        "skill",
+        report,
+        directory_name=unicodedata.normalize("NFKC", skill_dir_name) if "name" in frontmatter else None,
+    )
 
-    # Lowercase check
-    if name != name.lower():
-        report.major(f"Skill name must be lowercase: {name}", "SKILL.md", category="Frontmatter")
-
-    # Kebab-case format check
-    if not re.match(r"^[a-z][a-z0-9-]*[a-z0-9]$", name) and len(name) > 1:
-        # Allow Unicode characters for i18n support
-        if not all(c.isalnum() or c == "-" for c in name):
-            report.major(
-                f"Skill name must use only letters, numbers, hyphens: {name}",
-                "SKILL.md",
-                category="Frontmatter",
-            )
-
-    # No leading/trailing hyphens
-    if name.startswith("-") or name.endswith("-"):
-        report.major("Skill name cannot start or end with a hyphen", "SKILL.md", category="Frontmatter")
-
-    # No consecutive hyphens
-    if "--" in name:
-        report.major("Skill name cannot contain consecutive hyphens", "SKILL.md", category="Frontmatter")
-
-    # Reserved words check
+    # Reserved words check (Anthropic-specific)
     name_lower = name.lower()
     if "anthropic" in name_lower or "claude" in name_lower:
         report.major(f"Skill name contains reserved word: {name}", "SKILL.md", category="Frontmatter")
@@ -592,22 +572,6 @@ def validate_name_field(
             report.info(
                 f"Consider gerund naming pattern (verb + -ing) for skill: {name} "
                 "(e.g., 'processing-pdfs', 'analyzing-data', 'building-apis')",
-                "SKILL.md",
-                category="Frontmatter",
-            )
-
-    # Directory name match check (AgentSkills OpenSpec requirement)
-    dir_name = unicodedata.normalize("NFKC", skill_dir_name)
-    if "name" in frontmatter and dir_name != name:
-        if strict_openspec:
-            report.major(
-                f"Directory name '{skill_dir_name}' must match skill name '{name}'",
-                "SKILL.md",
-                category="Frontmatter",
-            )
-        else:
-            report.info(
-                f"Skill name '{name}' differs from directory name '{skill_dir_name}'",
                 "SKILL.md",
                 category="Frontmatter",
             )

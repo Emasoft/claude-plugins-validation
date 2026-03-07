@@ -33,9 +33,8 @@ from cpv_validation_common import (
     COLORS,
     MAX_BODY_WORDS,
     MAX_DESCRIPTION_LENGTH,
-    MAX_NAME_LENGTH,
     MIN_BODY_CHARS,
-    NAME_PATTERN,
+    validate_component_name,
     SECRET_PATTERNS,
     USER_PATH_PATTERNS,
     VALID_CONTEXT_VALUES,
@@ -194,31 +193,8 @@ def validate_name_field(frontmatter: dict[str, Any], filename: str, report: Agen
         report.critical(f"'name' must be a string, got {type(name).__name__}", filename)
         return
 
-    # Length check
-    if len(name) > MAX_NAME_LENGTH:
-        report.major(
-            f"Name exceeds {MAX_NAME_LENGTH} chars ({len(name)} chars): {name}",
-            filename,
-        )
-
-    # Lowercase check
-    if name != name.lower():
-        report.major(f"Name must be lowercase: {name}", filename)
-
-    # Kebab-case pattern check
-    if not NAME_PATTERN.match(name):
-        report.major(
-            f"Name must be kebab-case (lowercase letters, numbers, hyphens): {name}",
-            filename,
-        )
-
-    # Consecutive hyphens check
-    if "--" in name:
-        report.major(f"Name cannot contain consecutive hyphens: {name}", filename)
-
-    # Start/end hyphen check
-    if name.startswith("-") or name.endswith("-"):
-        report.major(f"Name cannot start/end with hyphen: {name}", filename)
+    # Uniform naming validation via shared function
+    validate_component_name(name, "agent", report)
 
 
 def validate_description_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
