@@ -197,7 +197,7 @@ Use the skill like this...
         minor_results = [r for r in report.results if r.level == "MINOR"]
         assert len(minor_results) == 1
         assert "setup-guide.md" in minor_results[0].message
-        assert "Table of Contents" in minor_results[0].message
+        assert "0/3 TOC headings" in minor_results[0].message
 
     def test_validate_toc_embedding_nonexistent_file(self, tmp_path: Path):
         """Link points to non-existent file produces no error (graceful skip)."""
@@ -280,7 +280,7 @@ Use the skill...
         assert len(minor_results) == 0
 
     def test_validate_toc_embedding_partial_embedding(self, tmp_path: Path):
-        """Only 1 of 5 TOC entries embedded produces MINOR (needs at least 2)."""
+        """Only 1 of 5 TOC entries embedded produces MINOR (all must be present)."""
         # Create reference with 5 TOC entries
         ref_dir = tmp_path / "references"
         ref_dir.mkdir()
@@ -316,7 +316,7 @@ Monitoring content...
 
 Scaling content...
 """)
-        # SKILL.md embeds only 1 of the 5 headings (below the threshold of 2)
+        # SKILL.md embeds only 1 of the 5 headings (all 5 must be present)
         skill_content = """\
 # My Skill
 
@@ -335,7 +335,7 @@ Use the skill...
         report = ValidationReport()
         validate_toc_embedding(skill_content, skill_path, tmp_path, report)
 
-        # Should get MINOR since only 1 of 5 headings embedded (needs at least 2)
+        # Should get MINOR since only 1 of 5 headings embedded (all 5 required)
         minor_results = [r for r in report.results if r.level == "MINOR"]
         assert len(minor_results) == 1
         assert "big-guide.md" in minor_results[0].message
