@@ -6,4 +6,6 @@ skill: publish-to-marketplace
 user-invocable: true
 ---
 
+# /cpv-publish-to-marketplace Command
+
 $ARGUMENTS
