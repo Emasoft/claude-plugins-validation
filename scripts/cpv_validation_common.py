@@ -2212,12 +2212,14 @@ def validate_toc_embedding(
             # Report as WARNING since we cannot tell which it is.
             report.warning(
                 f"Link to '{ref_path.name}' in a list entry of {rel_file} "
-                f"points to a file with a TOC ({len(toc_headings)} sections) "
-                f"but only {embedded_count}/{len(toc_headings)} headings are "
-                f"embedded. All TOC entries must be present so agents can "
-                f"discover all content. If this is a reference, embed the "
-                f"full TOC. If this is a TOC title, avoid using markdown "
-                f"links in TOC entries to prevent this ambiguity.",
+                f"has {embedded_count}/{len(toc_headings)} TOC headings "
+                f"embedded. SKILL.md must copy the COMPLETE TOC of each "
+                f"referenced .md file immediately after its link. Any missing "
+                f"TOC entry will never be discovered by the progressive "
+                f"discovery algorithm — that content becomes invisible to "
+                f"agents. If this is a reference, embed all "
+                f"{len(toc_headings)} headings. If this is a TOC title, "
+                f"avoid using markdown links to prevent this ambiguity.",
                 rel_file,
             )
         else:
@@ -2225,8 +2227,11 @@ def validate_toc_embedding(
             report.minor(
                 f"Reference to '{ref_path.name}' in {rel_file} has "
                 f"{embedded_count}/{len(toc_headings)} TOC headings embedded. "
-                f"All {len(toc_headings)} must be present so agents can "
-                f"discover all content in the reference file.",
+                f"SKILL.md must copy the COMPLETE TOC of each referenced .md "
+                f"file immediately after its link. Any missing TOC entry will "
+                f"never be discovered by the progressive discovery algorithm "
+                f"— that content becomes invisible to agents. Embed all "
+                f"{len(toc_headings)} headings.",
                 rel_file,
             )
 
