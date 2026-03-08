@@ -79,14 +79,12 @@ Report: plugin name, old/new version, push status, marketplace dispatch status (
 **Input:** `publish my-plugin to marketplace`
 **Output:**
 ```
-[DONE] publish-to-marketplace
-  Plugin: my-plugin (1.0.0 -> 1.0.1)
-  Push: success | Dispatch: triggered
-  Marketplace: <owner>/<marketplace-repo> updated
+[DONE] Plugin: my-plugin 1.0.0->1.0.1 | Push: ok | Dispatch: triggered
 ```
 
 ## Resources
 
-- [`references/publish-pipeline-guide.md`](references/publish-pipeline-guide.md) — PAT setup, notify-marketplace.yml, dispatch chain, marketplace.json format
+- [`references/publish-pipeline-guide.md`](references/publish-pipeline-guide.md)
+  > Section 1: PAT Setup · Section 2: notify-marketplace.yml · Section 3: The Dispatch Chain · Section 4: publish.py Pipeline · Section 5: Pre-Push Hook Gates · Section 6: marketplace.json Entry Format · Section 7: Troubleshooting
 - `setup-plugin-repo` skill — publish.py, pre-push hook, CI workflows
 - `setup-github-marketplace` skill — marketplace repo creation, sync workflows

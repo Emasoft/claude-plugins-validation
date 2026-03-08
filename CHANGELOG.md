@@ -2,6 +2,116 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [1.10.5] - 2026-03-08
+
+### Fix All 14 TOC Embedding Warnings
+
+- **Embedded complete TOC headings** in all 5 SKILL.md files (plugin-validation-skill, publish-to-marketplace, setup-github-marketplace, setup-plugin-repo, skill-validation-skill)
+- Every reference `.md` link now has the full TOC copied immediately after it, enabling progressive discovery by agents
+- Compressed Examples, Token Optimization, and Checklist sections to stay under 4000 byte SKILL.md limit
+- Updated CHANGELOG with all missing versions since v1.9.2
+- Validation: 0 CRITICAL, 0 MAJOR, 0 MINOR, 0 NIT, 0 WARNING
+- All 1110 tests pass
+
+## [1.10.4] - 2026-03-08
+
+### Audit Bug Fixes
+
+- **Fixed `_TOC_ENTRY_RE` regex**: Now requires list markers (`-`, `*`, `+`, `1.`) — previously matched prose paragraphs as TOC entries
+- **Fixed `publish.py` uv.lock dirty state**: Auto-commits `uv.lock` if it's the only dirty file (caused by `uv run` side effect)
+- **Fixed code fence language tags** in `plugin-binary-builds.md` (bare `` ``` `` → `` ```text ``)
+
+## [1.10.3] - 2026-03-08
+
+### Progressive Discovery Messaging
+
+- **Improved validation messages**: TOC embedding warnings now explain that missing headings break the progressive discovery algorithm — content becomes invisible to agents
+- Updated both WARNING (list-item links) and MINOR (standalone links) messages
+
+## [1.10.2] - 2026-03-08
+
+### Strict TOC Embedding Enforcement
+
+- **Require ALL TOC headings embedded**, not just `min(2, len)` — partial embedding defeats progressive discovery
+- Updated `validate_toc_embedding()` to check `embedded_count == len(toc_headings)`
+
+## [1.10.1] - 2026-03-08
+
+### Publish Pipeline Enforcement
+
+- **Block direct `git push`**: Pre-push hook now checks for `CPV_PUBLISH_PIPELINE` env var — only `publish.py` can push
+- `publish.py` sets `CPV_PUBLISH_PIPELINE=1` before calling `git push`
+- All pushes must go through `uv run python scripts/publish.py --patch|--minor|--major`
+
+## [1.10.0] - 2026-03-08
+
+### Binary Compilation Support & Marketplace Publishing
+
+- **New skill: `publish-to-marketplace`** — PAT setup, notification workflow, publish pipeline for any marketplace
+- **New reference: `plugin-binary-builds.md`** — cross-compilation workflow (5 platforms), binary distribution, platform detection
+- **Binary build phases** added to pre-push hook, publish.py, and CI workflow templates
+- Generic marketplace support — no hardcoded repo names, uses `<placeholder-for-...>` tokens
+- Updated README with 3 new commands, 4 new agents/skills, fixed directory tree
+- Fixed broken ref in semantic-validator agent, script advice in plugin-fixer
+- All validators now use `GitignoreFilter` instead of hardcoded skip sets
+
+## [1.9.9] - 2026-03-07
+
+### Plugin Repo Templates
+
+- Enhanced README templates with marketplace links, structure rationale
+- Added compilation instructions placeholder for binary plugins
+
+## [1.9.8] - 2026-03-07
+
+### Template Standardization
+
+- Enhanced README templates, marketplace enforcement, compilation instructions
+- Standardized placeholder format across all templates
+
+## [1.9.7] - 2026-03-07
+
+### Template Security
+
+- Redacted repo-specific values from all templates
+- Standardized `<placeholder-for-...>` format across templates
+
+## [1.9.6] - 2026-03-07
+
+### Pipeline Knowledge
+
+- Added pipeline knowledge (`plugin-hooks-and-scripts.md`, `plugin-workflows.md`) to plugin-fixer agent
+
+## [1.9.5] - 2026-03-07
+
+### Fix Validation Skill
+
+- **New skill: `fix-validation`** with reference files for remediation steps
+- Moved fix reference files from `agents/references/` to `skills/fix-validation/references/`
+- Enforced 5000 char / 500 line limits, TOC in first 200 chars for reference files
+- Resolved MINOR validation issues in skill SKILL.md files
+
+## [1.9.4] - 2026-03-07
+
+### GitignoreFilter Adoption
+
+- All validators now respect `.gitignore` — skip `*_dev` directories
+- Refactored all validators to use `GitignoreFilter` instead of hardcoded skip lists
+
+## [1.9.3] - 2026-03-07
+
+### Unified Publish Pipeline
+
+- **Merged publish scripts** into unified `publish.py` pipeline (test → lint → validate → consistency → bump → commit → push)
+- Enforced version bump check in pre-push hook
+- Excluded `_dev` directories from `lint_files.py`
+
+## [1.9.2] - 2026-03-07
+
+### Internal Improvements
+
+- Internal refactoring and incremental improvements
+
 ## [1.9.1] - 2026-03-07
 
 ### Accurate Token Cost Measurement

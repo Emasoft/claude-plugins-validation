@@ -60,31 +60,20 @@ Report: repo URL, validation result (VALID/INVALID + severity counts), installed
 
 ## Examples
 
-**Input:**
-```
-Plugin: <placeholder-for-plugin-name> | Owner: <placeholder-for-github-repo-owner> | Desc: <placeholder-for-plugin-description>
-```
-
-**Output:**
-```
-[DONE] setup-plugin-repo
-  Repo: https://github.com/<placeholder-for-github-repo-owner>/<placeholder-for-plugin-name>
-  Validation: VALID (0 critical, 0 major, 1 minor)
-  Workflows: ci.yml, release.yml, validate.yml, notify-marketplace.yml
-  Hooks: pre-push | Marketplace: configured
-```
+**Input:** `Plugin: my-plugin | Owner: my-org`
+**Output:** `[DONE] Repo: github.com/my-org/my-plugin | VALID | Hooks: pre-push | Marketplace: ok`
 
 ## Resources
 
-- [`references/plugin-repo-templates.md`](references/plugin-repo-templates.md) — plugin.json, pyproject.toml, .gitignore, README templates
-- [`references/plugin-workflows.md`](references/plugin-workflows.md) — ci.yml, release.yml, validate.yml, notify-marketplace.yml
-- [`references/plugin-hooks-and-scripts.md`](references/plugin-hooks-and-scripts.md) — pre-push hook, publish.py, setup-hooks.py
-- [`references/plugin-binary-builds.md`](references/plugin-binary-builds.md) — build-binaries.yml, binary distribution, platform detection
-
-## Compiling Templates
-
-Replace `<placeholder-for-...>` tokens with user values. Run `grep -r 'placeholder-for-'` to verify none remain. Each plugin MUST have its own repo — never embed plugins inside the marketplace.
+- [`references/plugin-repo-templates.md`](references/plugin-repo-templates.md)
+  > plugin.json Template · pyproject.toml Template · .gitignore Template · README.md Template · Placeholder Reference
+- [`references/plugin-workflows.md`](references/plugin-workflows.md)
+  > ci.yml -- Continuous Integration · release.yml -- GitHub Release on Tag · validate.yml -- Plugin Validation · notify-marketplace.yml -- Marketplace Notification · Placeholder Reference · Setup Instructions
+- [`references/plugin-hooks-and-scripts.md`](references/plugin-hooks-and-scripts.md)
+  > pre-push Hook Template · publish.py Pipeline Template · setup-hooks.py Template · Placeholder Reference
+- [`references/plugin-binary-builds.md`](references/plugin-binary-builds.md)
+  > When to Add a Build Phase · build-binaries.yml — Cross-Platform Compilation Workflow · Binary Distribution Pattern · Platform Detection Wrapper · Extending the Python Pre-Push Hook · Extending publish.py for Binary Builds · Extending ci.yml for Binary Builds · Cargo Release Profile (Rust Optimization)
 
 ## Token Optimization
 
-- Read only the needed template section, fill in memory, single write per file
+Read only the needed template section. Replace `<placeholder-for-...>` tokens with user values. Run `grep -r 'placeholder-for-'` to verify none remain.
