@@ -1,7 +1,7 @@
 ---
 name: publish-to-marketplace
 description: >
-  Use when publishing a plugin to the emasoft-plugins marketplace.
+  Use when publishing a plugin to a GitHub-hosted marketplace.
   Trigger with "publish plugin", "push to marketplace", "marketplace sync".
 tags:
   - marketplace
@@ -18,7 +18,7 @@ user-invocable: false
 
 ## Overview
 
-Publishes a validated Claude Code plugin to the emasoft-plugins GitHub marketplace. Configures the notification workflow, PAT secret, and publish pipeline so that every `git push` automatically syncs the marketplace.
+Publishes a validated Claude Code plugin to a GitHub-hosted marketplace repo. Configures the notification workflow, PAT secret, and publish pipeline so that every `git push` automatically syncs the marketplace.
 
 ## Prerequisites
 
@@ -28,6 +28,10 @@ Publishes a validated Claude Code plugin to the emasoft-plugins GitHub marketpla
 - `uv` on PATH, plugin has `pyproject.toml`
 
 ## Instructions
+
+### Phase 0: Discover Marketplace
+
+Ask the user for their marketplace repo coordinates (`<owner>/<marketplace-repo>`). Verify it exists: `gh repo view <owner>/<marketplace-repo> --json name`. All subsequent placeholders use these values.
 
 ### Phase 1: Configure Notification Pipeline
 
@@ -72,13 +76,13 @@ Report: plugin name, old/new version, push status, marketplace dispatch status (
 
 ## Examples
 
-**Input:** `publish my-plugin to emasoft-plugins marketplace`
+**Input:** `publish my-plugin to marketplace`
 **Output:**
 ```
 [DONE] publish-to-marketplace
   Plugin: my-plugin (1.0.0 -> 1.0.1)
   Push: success | Dispatch: triggered
-  Marketplace: emasoft-plugins updated
+  Marketplace: <owner>/<marketplace-repo> updated
 ```
 
 ## Resources
