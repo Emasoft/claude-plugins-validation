@@ -178,6 +178,14 @@ def extract_version(filepath: Path) -> str | None:
 
 
 def main() -> int:
+    # ── Pipeline enforcement: only publish.py may push ──
+    if not os.environ.get("CPV_PUBLISH_PIPELINE"):
+        cprint(f"{RED}========================================{NC}")
+        cprint(f"{RED}  BLOCKED: Direct push not allowed{NC}")
+        cprint(f"{RED}  Use: uv run python scripts/publish.py --patch{NC}")
+        cprint(f"{RED}========================================{NC}")
+        return 1
+
     repo_root = get_repo_root()
 
     cprint(f"{BLUE}========================================{NC}")
