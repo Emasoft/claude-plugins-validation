@@ -146,7 +146,7 @@ node_modules/
 
 # Rust
 target/
-Cargo.lock
+Cargo.lock  # Remove this line for binary plugins (commit Cargo.lock for reproducible builds)
 ```
 
 ### Notes
