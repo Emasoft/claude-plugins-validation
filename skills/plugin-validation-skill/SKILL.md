@@ -45,16 +45,9 @@ Validates Claude Code plugins against 190+ structural and quality rules covering
 
 ## Examples
 
-### Example 1: Validate a Plugin
-
 ```bash
-uv run python scripts/validate_plugin.py /path/to/my-plugin --verbose --report docs_dev/validate_plugin_YYYYMMDD.md
-```
-
-### Example 2: Validate a Skill Only
-
-```bash
-uv run python scripts/validate_skill_comprehensive.py /path/to/skill-dir --strict --report docs_dev/validate_skill_YYYYMMDD.md
+uv run python scripts/validate_plugin.py /path/to/plugin --verbose --report docs_dev/report.md
+uv run python scripts/validate_skill_comprehensive.py /path/to/skill/ --strict --report docs_dev/report.md
 ```
 
 ## Resources
@@ -87,17 +80,15 @@ uv run python scripts/validate_skill_comprehensive.py /path/to/skill-dir --stric
   - 6. Script Requirements
   - 7. Common Hook Errors
   - 8. Validation Checklist
-- [Troubleshooting](references/troubleshooting-python-scripts.md) - Common issues and fixes
+- [Troubleshooting](references/troubleshooting-python-scripts.md)
+  > Bash Arithmetic Exit Codes · Unused Variable Warnings - Pyright/ruff · Missing Python Dependencies - ModuleNotFoundError · Git Hook Not Running · Plugin JSON Missing Required Fields · Ruff Linting - Unused Variable Error · Marketplace Plugin Source Format · Version Consistency Between Plugins and Marketplace · Git Tag Already Exists Error · subprocess.run Output Truncation · Best Practices Summary · Quick Diagnostic Commands
 
 ## Token Optimization
 
-- **ALWAYS use `--report <path>`** — saves full output to file, only compact summary to stdout
-- **NEVER read the report file** — just provide the path to the user
-- **One script = one validation** — don't chain scripts
+Always use `--report <path>`. Provide the report path to the user, never read it. One script per validation.
 
-## Validation Checklist
+## Checklist
 Copy this checklist and track your progress:
-- [ ] Run validate_plugin.py with --verbose
-- [ ] Review CRITICAL and MAJOR issues
-- [ ] Fix all blocking issues
-- [ ] Re-run validation to confirm clean
+- [ ] Run validate_plugin.py --verbose --report
+- [ ] Fix CRITICAL > MAJOR > MINOR
+- [ ] Re-run until exit 0

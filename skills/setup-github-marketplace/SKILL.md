@@ -65,13 +65,13 @@ See [Marketplace Setup Guide](references/marketplace-setup-guide.md) for detaile
 ## Resources
 
 - [Workflow Templates](references/workflow-templates.md)
-  > Sections: Placeholder Reference · notify-marketplace.yml · Required Secrets · Setup Instructions
+  > Placeholder Reference · validate.yml (Marketplace CI) · update-submodules.yml (Dispatch Receiver) · notify-marketplace.yml.template (Plugin Side)
 - [Script Templates](references/script-templates.md)
-  > Sections: Placeholder Reference · sync_marketplace_versions.py · generate-readme.py · setup-hooks.py · push-plugins.sh
+  > Placeholder Reference · sync_marketplace_versions.py · pre-commit-hook.py · pre-push-hook.py · setup-hooks.py · push-plugins.sh · generate-readme.py
 - [README Template](references/readme-template.md)
-  > Sections: Template Content · Architecture
+  > Template Content · Placeholder Reference · Auto-Generation · Customization Guide
 - [Troubleshooting Guide](references/troubleshooting.md)
-  > Sections: Authentication Issues · Token Missing Required Scopes
+  > Authentication Issues · Repository Creation Failures · CI/CD Pipeline Issues · Notification Chain Failures · Validation Failures · Secret Configuration Issues · Common Error Messages · Debug Commands
 
 ## Compiling Templates
 
@@ -81,4 +81,4 @@ Only the hub-and-spoke architecture (1 marketplace repo + N independent plugin r
 
 ## Token Optimization
 
-Load reference files on-demand as each phase is reached, rather than reading all upfront.
+Load reference files on-demand as each phase is reached, not all upfront.
