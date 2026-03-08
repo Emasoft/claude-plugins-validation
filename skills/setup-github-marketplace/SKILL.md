@@ -40,7 +40,8 @@ Copy this checklist and track your progress:
 - [ ] Link plugins
 - [ ] Run validation
 
-See [Marketplace Setup Guide](references/marketplace-setup-guide.md) for detailed commands.
+See [Marketplace Setup Guide](references/marketplace-setup-guide.md) for detailed commands:
+  > Overview · Prerequisites · Arguments · Phase 1: Create Marketplace Repository · Phase 2: Install Infrastructure · Phase 3: Link Plugin Repos · Phase 4: Plugin Management · Phase 5: Validate and Verify · Error Handling · Examples · Complete step-by-step instructions for creating, configuring, and managing a GitHub marketplace for Claude Code plugins.
 
 ## Output
 
