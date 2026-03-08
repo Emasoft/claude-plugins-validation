@@ -1,0 +1,88 @@
+---
+name: publish-to-marketplace
+description: >
+  Use when publishing a plugin to the emasoft-plugins marketplace.
+  Trigger with "publish plugin", "push to marketplace", "marketplace sync".
+tags:
+  - marketplace
+  - publish
+  - ci-cd
+  - plugin
+allowed-tools: Read, Bash(git:*,gh:*,uv:*), Write, Edit, Glob, Grep, AskUserQuestion
+agent: plugin-validator
+context: fork
+user-invocable: false
+---
+
+# Publish Plugin to Marketplace
+
+## Overview
+
+Publishes a validated Claude Code plugin to the emasoft-plugins GitHub marketplace. Configures the notification workflow, PAT secret, and publish pipeline so that every `git push` automatically syncs the marketplace.
+
+## Prerequisites
+
+- Plugin repo with valid `.claude-plugin/plugin.json` (name, version, description)
+- `gh` CLI authenticated (`gh auth status`)
+- Marketplace repo exists with `marketplace.json` (see `setup-github-marketplace` skill)
+- `uv` on PATH, plugin has `pyproject.toml`
+
+## Instructions
+
+### Phase 1: Configure Notification Pipeline
+
+1. **Create PAT**: Ask user for a GitHub PAT with `repo` scope (or fine-grained with Contents R/W on marketplace repo). See `references/publish-pipeline-guide.md` Section 1
+2. **Set secret**: `gh secret set MARKETPLACE_PAT --repo <owner>/<plugin-repo>`
+3. **Install notify-marketplace.yml**: Copy from `references/publish-pipeline-guide.md` Section 2 into `.github/workflows/`. Fill `MARKETPLACE_OWNER` and `MARKETPLACE_REPO`
+4. **Verify CI workflows**: Ensure `ci.yml`, `validate.yml`, `release.yml` exist (from `setup-plugin-repo` skill)
+
+### Phase 2: Configure Publish Pipeline
+
+5. **Install publish.py**: Copy from `setup-plugin-repo` skill's `plugin-hooks-and-scripts.md` into `scripts/`. Fill placeholders
+6. **Install pre-push hook**: Copy from same reference into `git-hooks/pre-push`. Run `uv run python scripts/setup-hooks.py`
+7. **Verify hooks**: `git config core.hooksPath` should show `git-hooks`
+
+### Phase 3: Publish
+
+8. **Run publish**: `uv run python scripts/publish.py --patch` (or `--minor`/`--major`)
+9. **Verify dispatch**: Check marketplace repo Actions tab — `update-submodules.yml` should trigger within 30s
+10. **Verify marketplace.json**: Plugin version should update in marketplace repo
+
+Copy this checklist and track your progress:
+- [ ] PAT created and secret set
+- [ ] notify-marketplace.yml installed
+- [ ] CI workflows present
+- [ ] publish.py + pre-push hook installed
+- [ ] First publish successful
+- [ ] Marketplace sync verified
+
+## Output
+
+Report: plugin name, old/new version, push status, marketplace dispatch status (triggered/failed/not_configured). On failure, report which phase failed with error.
+
+## Error Handling
+
+| Error | Resolution |
+|-------|------------|
+| `MARKETPLACE_PAT` missing | `gh secret set MARKETPLACE_PAT` |
+| Dispatch not received | Check PAT scope, verify workflow is on default branch |
+| Pre-push blocks | Fix validation/lint issues, bump version |
+| Version mismatch | Run `publish.py` which auto-bumps all sources |
+| Push rejected | Check branch protection; PAT owner must be admin |
+
+## Examples
+
+**Input:** `publish my-plugin to emasoft-plugins marketplace`
+**Output:**
+```
+[DONE] publish-to-marketplace
+  Plugin: my-plugin (1.0.0 -> 1.0.1)
+  Push: success | Dispatch: triggered
+  Marketplace: emasoft-plugins updated
+```
+
+## Resources
+
+- [`references/publish-pipeline-guide.md`](references/publish-pipeline-guide.md) — PAT setup, notify-marketplace.yml, dispatch chain, marketplace.json format
+- `setup-plugin-repo` skill — publish.py, pre-push hook, CI workflows
+- `setup-github-marketplace` skill — marketplace repo creation, sync workflows
