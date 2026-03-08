@@ -170,7 +170,7 @@ jobs:
 
 ### Naming Convention
 
-```
+```text
 <binary-name>-<os>-<arch>[.exe]
 ```
 
@@ -321,7 +321,7 @@ Insert a **build phase** before the version bump check in the pre-push hook temp
 
 Insert a build step in the publish pipeline **after lint, before validate** (between Step 3 and Step 4 in the pipeline template from `plugin-hooks-and-scripts.md`):
 
-```
+```text
 Step 3: Lint files
 Step 3.5: Build compiled components    ← NEW
 Step 4: Validate plugin

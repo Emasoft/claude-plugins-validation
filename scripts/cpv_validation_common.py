@@ -2057,8 +2057,9 @@ _TOC_SECTION_RE = re.compile(
     re.DOTALL,
 )
 
-# Regex to extract individual TOC heading titles (strip numbering, links, bullets)
-_TOC_ENTRY_RE = re.compile(r"(?m)^[\s]*[-*]?\s*(?:\d+\.?\s*)?(?:\[([^\]]+)\]\([^)]*\)|(.+))")
+# Regex to extract individual TOC heading titles from list items only.
+# Must start with a list marker (-, *, +, or digit.) to avoid matching prose paragraphs.
+_TOC_ENTRY_RE = re.compile(r"(?m)^[\s]*(?:[-*+]|\d+\.)\s+(?:\[([^\]]+)\]\([^)]*\)|(.+))")
 
 # Regex to find markdown links pointing to .md files in references/
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(((?:references/)?[^\s)]+\.md)\)")
