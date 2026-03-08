@@ -319,8 +319,8 @@ Use `publish.py --patch` to re-sync all version sources.
 | Placeholder | Description | Example |
 |---|---|---|
 | `<placeholder-for-default-branch>` | Plugin repo default branch | `main` |
-| `<placeholder-for-github-repo-owner>` | GitHub username or org | `Emasoft` |
-| `<placeholder-for-plugin-name>` | Plugin repository name | `claude-plugins-validation` |
-| `<placeholder-for-plugin-description>` | One-line plugin description | `Validates Claude Code plugins` |
-| `<placeholder-for-marketplace-owner>` | Marketplace repo owner | `Emasoft` |
-| `<placeholder-for-marketplace-repo-name>` | Marketplace repo name | `emasoft-plugins` |
+| `<placeholder-for-github-repo-owner>` | GitHub username or org | `my-github-user` |
+| `<placeholder-for-plugin-name>` | Plugin repository name | `my-plugin` |
+| `<placeholder-for-plugin-description>` | One-line plugin description | `My Claude Code plugin` |
+| `<placeholder-for-marketplace-owner>` | Marketplace repo owner | `my-github-user` |
+| `<placeholder-for-marketplace-repo-name>` | Marketplace repo name | `my-marketplace-repo` |
