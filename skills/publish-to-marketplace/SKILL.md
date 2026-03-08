@@ -35,9 +35,9 @@ Ask the user for their marketplace repo coordinates (`<owner>/<marketplace-repo>
 
 ### Phase 1: Configure Notification Pipeline
 
-1. **Create PAT**: Ask user for a GitHub PAT with `repo` scope (or fine-grained with Contents R/W on marketplace repo). See `references/publish-pipeline-guide.md` Section 1
+1. **Create PAT**: Ask user for a GitHub PAT with `repo` scope (or fine-grained with Contents R/W on marketplace repo). See publish-pipeline-guide (Resources) Section 1
 2. **Set secret**: `gh secret set MARKETPLACE_PAT --repo <owner>/<plugin-repo>`
-3. **Install notify-marketplace.yml**: Copy from `references/publish-pipeline-guide.md` Section 2 into `.github/workflows/`. Fill `MARKETPLACE_OWNER` and `MARKETPLACE_REPO`
+3. **Install notify-marketplace.yml**: Copy from publish-pipeline-guide (Resources) Section 2 into `.github/workflows/`. Fill `MARKETPLACE_OWNER` and `MARKETPLACE_REPO`
 4. **Verify CI workflows**: Ensure `ci.yml`, `validate.yml`, `release.yml` exist (from `setup-plugin-repo` skill)
 
 ### Phase 2: Configure Publish Pipeline
@@ -84,7 +84,7 @@ Report: plugin name, old/new version, push status, marketplace dispatch status (
 
 ## Resources
 
-- [`references/publish-pipeline-guide.md`](references/publish-pipeline-guide.md)
+- [Publish Pipeline Guide](references/publish-pipeline-guide.md)
   > Section 1: PAT Setup · Section 2: notify-marketplace.yml · Section 3: The Dispatch Chain · Section 4: publish.py Pipeline · Section 5: Pre-Push Hook Gates · Section 6: marketplace.json Entry Format · Section 7: Troubleshooting
 - `setup-plugin-repo` skill — publish.py, pre-push hook, CI workflows
 - `setup-github-marketplace` skill — marketplace repo creation, sync workflows

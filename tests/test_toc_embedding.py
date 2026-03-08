@@ -6,7 +6,8 @@ These functions ensure that when a SKILL.md links to a .md reference file that h
 Table of Contents, the SKILL.md embeds at least some of those TOC headings inline so
 agents can see what content is available before navigating.
 
-Coverage: 15 tests covering all major code paths including list-item ambiguity handling.
+Coverage: 25 tests covering all major code paths including list-item ambiguity handling
+and backtick reference detection.
 """
 
 from __future__ import annotations
@@ -600,3 +601,199 @@ Use the skill...
         minor_results = [r for r in report.results if r.level == "MINOR"]
         assert len(minor_results) == 1
         assert "api-ref.md" in minor_results[0].message
+
+
+class TestBacktickRefDetection:
+    """Tests for backtick reference detection in validate_toc_embedding()."""
+
+    @staticmethod
+    def _make_ref_with_toc(ref_dir: Path, name: str) -> None:
+        """Helper: create a reference .md file with a 3-heading TOC."""
+        (ref_dir / name).write_text(
+            "# Guide\n\n## Table of Contents\n\n"
+            "- [Alpha](#alpha)\n- [Beta](#beta)\n- [Gamma](#gamma)\n\n"
+            "## Alpha\n\nA\n\n## Beta\n\nB\n\n## Gamma\n\nG\n"
+        )
+
+    @staticmethod
+    def _make_ref_no_toc(ref_dir: Path, name: str) -> None:
+        """Helper: create a reference .md file WITHOUT a TOC."""
+        (ref_dir / name).write_text("# Simple\n\n## Intro\n\nContent.\n")
+
+    def test_backtick_ref_reports_format_minor(self, tmp_path: Path):
+        """Backtick ref to file with TOC produces format MINOR + TOC embedding MINOR."""
+        ref_dir = tmp_path / "references"
+        ref_dir.mkdir()
+        self._make_ref_with_toc(ref_dir, "api-guide.md")
+
+        skill_content = "# Skill\n\nSee `references/api-guide.md` for details.\n"
+        skill_path = tmp_path / "SKILL.md"
+        skill_path.write_text(skill_content)
+
+        report = ValidationReport()
+        validate_toc_embedding(skill_content, skill_path, tmp_path, report)
+
+        minors = [r for r in report.results if r.level == "MINOR"]
+        assert len(minors) == 2, f"Expected 2 MINORs (format + TOC), got {len(minors)}: {[m.message[:60] for m in minors]}"
+        assert any("backtick" in m.message.lower() for m in minors)
+        assert any("0/3 TOC headings" in m.message for m in minors)
+
+    def test_backtick_ref_no_toc_only_format_minor(self, tmp_path: Path):
+        """Backtick ref to file without TOC produces only format MINOR."""
+        ref_dir = tmp_path / "references"
+        ref_dir.mkdir()
+        self._make_ref_no_toc(ref_dir, "simple-doc.md")
+
+        skill_content = "# Skill\n\nSee `references/simple-doc.md` for info.\n"
+        skill_path = tmp_path / "SKILL.md"
+        skill_path.write_text(skill_content)
+
+        report = ValidationReport()
+        validate_toc_embedding(skill_content, skill_path, tmp_path, report)
+
+        minors = [r for r in report.results if r.level == "MINOR"]
+        assert len(minors) == 1
+        assert "backtick" in minors[0].message.lower()
+
+    def test_backtick_ref_nonexistent_file(self, tmp_path: Path):
+        """Backtick ref to non-existent file produces no report."""
+        skill_content = "# Skill\n\nSee `references/does-not-exist.md` for info.\n"
+        skill_path = tmp_path / "SKILL.md"
+        skill_path.write_text(skill_content)
+
+        report = ValidationReport()
+        validate_toc_embedding(skill_content, skill_path, tmp_path, report)
+
+        assert len(report.results) == 0
+
+    def test_backtick_ref_in_fenced_code_ignored(self, tmp_path: Path):
+        """Backtick ref inside fenced code block is ignored."""
+        ref_dir = tmp_path / "references"
+        ref_dir.mkdir()
+        self._make_ref_with_toc(ref_dir, "api-guide.md")
+
+        skill_content = (
+            "# Skill\n\n```markdown\nSee `references/api-guide.md` for details.\n```\n\nDone.\n"
+        )
+        skill_path = tmp_path / "SKILL.md"
+        skill_path.write_text(skill_content)
+
+        report = ValidationReport()
+        validate_toc_embedding(skill_content, skill_path, tmp_path, report)
+
+        # No results — backtick ref inside code block is ignored
+        assert len(report.results) == 0
+
+    def test_backtick_ref_same_file_as_link_no_double_toc(self, tmp_path: Path):
+        """Both proper link and backtick ref to same file: format MINOR but no double TOC check."""
+        ref_dir = tmp_path / "references"
+        ref_dir.mkdir()
+        self._make_ref_with_toc(ref_dir, "api-guide.md")
+
+        skill_content = (
+            "# Skill\n\n"
+            "See the [API Guide](references/api-guide.md) for details.\n"
+            "- Alpha\n- Beta\n- Gamma\n\n"
+            "Also see `references/api-guide.md` in the codebase.\n"
+        )
+        skill_path = tmp_path / "SKILL.md"
+        skill_path.write_text(skill_content)
+
+        report = ValidationReport()
+        validate_toc_embedding(skill_content, skill_path, tmp_path, report)
+
+        passed = [r for r in report.results if r.level == "PASSED"]
+        minors = [r for r in report.results if r.level == "MINOR"]
+        # 1 PASSED from proper link (TOC embedded), 1 MINOR for backtick format
+        assert len(passed) == 1
+        assert len(minors) == 1
+        assert "backtick" in minors[0].message.lower()
+
+    def test_backtick_ref_bare_filename(self, tmp_path: Path):
+        """Backtick ref with bare filename (no directory) is detected."""
+        ref_file = tmp_path / "notes.md"
+        ref_file.write_text("# Notes\n\n## Intro\n\nContent.\n")
+
+        skill_content = "# Skill\n\nSee `notes.md` for info.\n"
+        skill_path = tmp_path / "SKILL.md"
+        skill_path.write_text(skill_content)
+
+        report = ValidationReport()
+        validate_toc_embedding(skill_content, skill_path, tmp_path, report)
+
+        minors = [r for r in report.results if r.level == "MINOR"]
+        assert len(minors) == 1
+        assert "backtick" in minors[0].message.lower()
+
+    def test_backtick_ref_non_md_ignored(self, tmp_path: Path):
+        """Backtick refs to non-.md files (script.py, git status) are not matched."""
+        skill_content = "# Skill\n\nRun `validate_plugin.py` and `git status` to check.\n"
+        skill_path = tmp_path / "SKILL.md"
+        skill_path.write_text(skill_content)
+
+        report = ValidationReport()
+        validate_toc_embedding(skill_content, skill_path, tmp_path, report)
+
+        assert len(report.results) == 0
+
+    def test_backtick_ref_multiple_same_line(self, tmp_path: Path):
+        """Two backtick refs on one line produce two format MINORs."""
+        ref_dir = tmp_path / "references"
+        ref_dir.mkdir()
+        self._make_ref_no_toc(ref_dir, "a.md")
+        self._make_ref_no_toc(ref_dir, "b.md")
+
+        skill_content = "# Skill\n\nSee `references/a.md` and `references/b.md` for details.\n"
+        skill_path = tmp_path / "SKILL.md"
+        skill_path.write_text(skill_content)
+
+        report = ValidationReport()
+        validate_toc_embedding(skill_content, skill_path, tmp_path, report)
+
+        minors = [r for r in report.results if r.level == "MINOR"]
+        assert len(minors) == 2
+        filenames = [m.message for m in minors]
+        assert any("a.md" in f for f in filenames)
+        assert any("b.md" in f for f in filenames)
+
+    def test_backtick_ref_with_toc_fully_embedded(self, tmp_path: Path):
+        """Backtick ref with all TOC headings nearby: format MINOR but TOC counts as checked."""
+        ref_dir = tmp_path / "references"
+        ref_dir.mkdir()
+        self._make_ref_with_toc(ref_dir, "api-guide.md")
+
+        skill_content = (
+            "# Skill\n\n"
+            "See `references/api-guide.md` for details.\n"
+            "- Alpha\n- Beta\n- Gamma\n\n"
+            "Done.\n"
+        )
+        skill_path = tmp_path / "SKILL.md"
+        skill_path.write_text(skill_content)
+
+        report = ValidationReport()
+        validate_toc_embedding(skill_content, skill_path, tmp_path, report)
+
+        minors = [r for r in report.results if r.level == "MINOR"]
+        passed = [r for r in report.results if r.level == "PASSED"]
+        # 1 format MINOR (backtick) + 1 PASSED (TOC fully embedded)
+        assert len(minors) == 1
+        assert "backtick" in minors[0].message.lower()
+        assert len(passed) == 1
+
+    def test_backtick_ref_in_tilde_fence_ignored(self, tmp_path: Path):
+        """Backtick ref inside tilde-fenced code block is ignored."""
+        ref_dir = tmp_path / "references"
+        ref_dir.mkdir()
+        self._make_ref_with_toc(ref_dir, "api-guide.md")
+
+        skill_content = (
+            "# Skill\n\n~~~\nSee `references/api-guide.md` here.\n~~~\n\nDone.\n"
+        )
+        skill_path = tmp_path / "SKILL.md"
+        skill_path.write_text(skill_content)
+
+        report = ValidationReport()
+        validate_toc_embedding(skill_content, skill_path, tmp_path, report)
+
+        assert len(report.results) == 0

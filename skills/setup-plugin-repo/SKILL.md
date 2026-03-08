@@ -27,9 +27,9 @@ Creates a Claude Code plugin GitHub repo with CI/CD, git hooks, and marketplace 
 ## Instructions
 
 1. **Create GitHub repo**: `gh repo create <owner>/<name> --public --clone`, then `cd` into it
-2. **Initialize plugin**: from `references/plugin-repo-templates.md` create `plugin.json`, `pyproject.toml`, `.gitignore`, `README.md`. Scan for compiled components — if found, add build phases per `references/plugin-binary-builds.md`
-3. **Install workflows**: from `references/plugin-workflows.md` copy `ci.yml`, `release.yml`, `validate.yml`, `notify-marketplace.yml` to `.github/workflows/`. For compiled binaries, add `build-binaries.yml` per `references/plugin-binary-builds.md`
-4. **Install git hooks** from `references/plugin-hooks-and-scripts.md`: copy `pre-push` to `.githooks/`, add `publish.py` and `setup-hooks.py` to `scripts/`, run `git config core.hooksPath .githooks`
+2. **Initialize plugin**: from plugin-repo-templates (see Resources) create `plugin.json`, `pyproject.toml`, `.gitignore`, `README.md`. Scan for compiled components — if found, add build phases per plugin-binary-builds (see Resources)
+3. **Install workflows**: from plugin-workflows (see Resources) copy `ci.yml`, `release.yml`, `validate.yml`, `notify-marketplace.yml` to `.github/workflows/`. For compiled binaries, add `build-binaries.yml` per plugin-binary-builds (see Resources)
+4. **Install git hooks** from plugin-hooks-and-scripts (see Resources): copy `pre-push` to `.githooks/`, add `publish.py` and `setup-hooks.py` to `scripts/`, run `git config core.hooksPath .githooks`
 5. **Configure marketplace notification**: ask user for `MARKETPLACE_PAT`, run `gh secret set MARKETPLACE_PAT` (skip if declined)
 6. **Validate**: run `uv run scripts/validate_plugin.py .` — fix CRITICAL/MAJOR issues
 7. **Commit and push**: stage all, commit "Initial plugin scaffold", push to `main`
@@ -65,13 +65,13 @@ Report: repo URL, validation result (VALID/INVALID + severity counts), installed
 
 ## Resources
 
-- [`references/plugin-repo-templates.md`](references/plugin-repo-templates.md)
+- [Plugin Repo Templates](references/plugin-repo-templates.md)
   > plugin.json Template · pyproject.toml Template · .gitignore Template · README.md Template · Placeholder Reference
-- [`references/plugin-workflows.md`](references/plugin-workflows.md)
+- [Plugin Workflows](references/plugin-workflows.md)
   > ci.yml -- Continuous Integration · release.yml -- GitHub Release on Tag · validate.yml -- Plugin Validation · notify-marketplace.yml -- Marketplace Notification · Placeholder Reference · Setup Instructions
-- [`references/plugin-hooks-and-scripts.md`](references/plugin-hooks-and-scripts.md)
+- [Plugin Hooks and Scripts](references/plugin-hooks-and-scripts.md)
   > pre-push Hook Template · publish.py Pipeline Template · setup-hooks.py Template · Placeholder Reference
-- [`references/plugin-binary-builds.md`](references/plugin-binary-builds.md)
+- [Plugin Binary Builds](references/plugin-binary-builds.md)
   > When to Add a Build Phase · build-binaries.yml — Cross-Platform Compilation Workflow · Binary Distribution Pattern · Platform Detection Wrapper · Extending the Python Pre-Push Hook · Extending publish.py for Binary Builds · Extending ci.yml for Binary Builds · Cargo Release Profile (Rust Optimization)
 
 ## Token Optimization

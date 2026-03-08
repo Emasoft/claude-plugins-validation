@@ -2064,6 +2064,12 @@ _TOC_ENTRY_RE = re.compile(r"(?m)^[\s]*(?:[-*+]|\d+\.)\s+(?:\[([^\]]+)\]\([^)]*\
 # Regex to find markdown links pointing to .md files in references/
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(((?:references/)?[^\s)]+\.md)\)")
 
+# Regex to find backtick-enclosed references to .md files.
+# Matches `references/foo.md` or `foo.md` (single backticks only).
+# Lookbehind/lookahead prevent matching inside triple-backtick fences or
+# double-backtick code spans. Group 2 captures the file path.
+_BACKTICK_REF_RE = re.compile(r"(?<!`)`((?:[\w./-]+/)?[\w.-]+\.md)`(?!`)")
+
 
 def extract_toc_headings(md_content: str) -> list[str]:
     """Extract TOC heading titles from a markdown file's Table of Contents section.
@@ -2098,6 +2104,25 @@ _TOC_EXEMPT_DIRS = {"agents", "commands", "rules"}
 
 # Regex to detect list items (bulleted or numbered)
 _LIST_ITEM_RE = re.compile(r"\s*(?:[-*+]|\d+\.)\s")
+
+
+def _build_fenced_line_set(lines: list[str]) -> set[int]:
+    """Return the set of 0-based line indices inside fenced code blocks.
+
+    Tracks ``` and ~~~ fences (with optional language tag) using a toggle.
+    Used to skip backtick references that appear in code examples.
+    """
+    inside: set[int] = set()
+    in_code_block = False
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_code_block = not in_code_block
+            inside.add(idx)  # Fence line itself is "inside" too
+            continue
+        if in_code_block:
+            inside.add(idx)
+    return inside
 
 
 def _is_toc_exempt(file_path: Path) -> bool:
@@ -2150,6 +2175,8 @@ def validate_toc_embedding(
     rel_file = md_file_path.name
     refs_checked = 0
     refs_with_toc = 0
+    # Track lines inside fenced code blocks — backtick refs there are skipped
+    fenced_lines = _build_fenced_line_set(lines)
 
     for link_match in _MD_LINK_RE.finditer(md_content):
         link_target = link_match.group(2)
@@ -2235,6 +2262,100 @@ def validate_toc_embedding(
                 f"{len(toc_headings)} headings.",
                 rel_file,
             )
+
+    # --- Backtick reference detection ---
+    # Build set of files already checked via proper markdown links to avoid
+    # double-counting TOC embedding checks.
+    already_checked_files: set[str] = set()
+    for link_match in _MD_LINK_RE.finditer(md_content):
+        link_target = link_match.group(2)
+        ref_path = base_dir / link_target
+        if not ref_path.is_file():
+            ref_path = md_file_path.parent / link_target
+        if ref_path.is_file():
+            already_checked_files.add(str(ref_path.resolve()))
+
+    for bt_match in _BACKTICK_REF_RE.finditer(md_content):
+        bt_path_str = bt_match.group(1)
+
+        # Determine the line number of this backtick reference
+        bt_start = bt_match.start()
+        bt_line_num = md_content[:bt_start].count("\n")
+
+        # Skip if inside a fenced code block
+        if bt_line_num in fenced_lines:
+            continue
+
+        # Resolve the referenced file path (same logic as markdown links)
+        ref_path = base_dir / bt_path_str
+        if not ref_path.is_file():
+            ref_path = md_file_path.parent / bt_path_str
+            if not ref_path.is_file():
+                continue
+
+        # Only validate .md files (already enforced by regex, but be safe)
+        if ref_path.suffix.lower() != ".md":
+            continue
+
+        # Always report MINOR for the backtick format itself — backtick
+        # references are invisible to the TOC embedding algorithm and
+        # agents cannot discover the referenced content.
+        report.minor(
+            f"Reference to '{ref_path.name}' in {rel_file} uses backtick "
+            f"format (`{bt_path_str}`) instead of a markdown link. Use "
+            f"[{ref_path.stem}]({bt_path_str}) so progressive discovery "
+            f"can find it — backtick references are invisible to the TOC "
+            f"embedding algorithm.",
+            rel_file,
+        )
+
+        # If this file was already checked via a proper markdown link,
+        # skip the TOC embedding check (avoid double-counting)
+        resolved = str(ref_path.resolve())
+        if resolved in already_checked_files:
+            continue
+
+        # Read the referenced file and extract its TOC
+        try:
+            ref_content = ref_path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+
+        toc_headings = extract_toc_headings(ref_content)
+
+        if not toc_headings:
+            # No TOC in the backtick-referenced file — nothing more to check
+            already_checked_files.add(resolved)
+            continue
+
+        refs_checked += 1
+
+        # Check if TOC headings appear within ~50 lines after the backtick ref
+        search_start = max(0, bt_line_num)
+        search_end = min(len(lines), bt_line_num + 50)
+        nearby_text = "\n".join(lines[search_start:search_end])
+
+        embedded_count = sum(
+            1 for heading in toc_headings if heading.lower() in nearby_text.lower()
+        )
+
+        if embedded_count == len(toc_headings):
+            refs_with_toc += 1
+        else:
+            # TOC not fully embedded — report missing embedding as separate MINOR
+            report.minor(
+                f"Backtick reference to '{ref_path.name}' in {rel_file} has "
+                f"{embedded_count}/{len(toc_headings)} TOC headings embedded. "
+                f"Convert to a markdown link and copy the COMPLETE TOC of the "
+                f"referenced file immediately after the link. Any missing TOC "
+                f"entry will never be discovered by the progressive discovery "
+                f"algorithm — that content becomes invisible to agents. "
+                f"Embed all {len(toc_headings)} headings.",
+                rel_file,
+            )
+
+        # Track so we don't double-check if the same file appears again
+        already_checked_files.add(resolved)
 
     if refs_checked > 0 and refs_with_toc == refs_checked:
         report.passed(
