@@ -75,7 +75,7 @@ See [Marketplace Setup Guide](references/marketplace-setup-guide.md) for detaile
 
 ## Compiling Templates
 
-Replace all `<placeholder-for-...>` tokens with user values. Use `grep -r 'placeholder-for-' <file>` to verify none remain. For the marketplace README, use `generate-readme.py` (in `references/script-templates.md`) to automate replacement and plugin table generation.
+Replace all `<placeholder-for-...>` tokens with user values. Use `grep -r 'placeholder-for-' <file>` to verify none remain. For the marketplace README, use generate-readme.py (in script-templates — see Resources) to automate replacement and plugin table generation.
 
 Only the hub-and-spoke architecture (1 marketplace repo + N independent plugin repos) is supported. Each plugin MUST have its own GitHub repo because: plugins version independently from the marketplace; contributors can fork/clone a single plugin without pulling the whole marketplace; PRs stay isolated to each plugin's repo; and embedding plugins via Git subtrees/worktrees creates merge conflicts and scaling problems. Decline alternative structures politely and explain the rationale.
 

@@ -22,7 +22,7 @@ Script-based validation of skill structure, frontmatter, content quality, and pi
 ## Prerequisites
 
 - Python 3.12+ with `pyyaml` installed
-- Skill directory containing `SKILL.md`
+- Skill directory containing a SKILL.md file
 
 ## Instructions
 
