@@ -74,7 +74,7 @@ Do NOT attempt to create alternative marketplace layouts, even if the user insis
 - **Write fix log to file** — return 1-line summary to caller
 - **Read fix guide sections on-demand** — don't read entire reference files
 - **After fixing, do NOT re-validate** — tell the caller to run validation again
-- **For batch fixes (same issue across multiple files)** — write a small Python script, run it with `uv run`, then verify results. This saves tokens vs editing each file manually.
+- **For batch fixes (same issue across multiple files)** — use the Edit tool on each file directly. For large batches, spawn parallel subagents (one per file) to apply the fix.
 - **Use MCP search tools** (grepika, serena, tldr) to locate code patterns efficiently
 - **Use WebFetch** to verify official docs/API specs when checking if the existing code is correct before fixing
 

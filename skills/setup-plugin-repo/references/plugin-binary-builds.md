@@ -160,7 +160,7 @@ jobs:
 
 ### Adapting for Non-Rust Languages
 
-- **Go**: Replace `cargo build` with `GOOS=<os> GOARCH=<arch> go build -o <output>`. No need for `cross`.
+- **Go**: Replace `cargo build` with `GOOS=<os> GOARCH=<arch> go build -o <output>`. No need for `cross`. Windows targets must include `.exe` suffix in the output path (e.g., `-o my-tool-windows-x86_64.exe`).
 - **C/C++**: Use cross-compilation toolchains (e.g., `gcc-aarch64-linux-gnu`). macOS builds need Xcode.
 - **JS/TS bundled binaries** (e.g., `pkg`, `bun build --compile`): Replace cargo steps with the appropriate bundler command per target.
 
@@ -348,13 +348,15 @@ Add this to the pipeline:
 **Version bump for Rust**: If the plugin includes a `Cargo.toml`, the `do_bump()` function should also update `version = "X.Y.Z"` in `Cargo.toml`. Add this function alongside `update_pyproject_toml`:
 
 ```python
+import re  # Add to the top-level imports of publish.py
+
+
 def update_cargo_toml(root: Path, new_ver: str) -> tuple[bool, str]:
     """Update version in Cargo.toml."""
     cargo = root / "<placeholder-for-source-dir>" / "Cargo.toml"
     if not cargo.is_file():
         return True, "No Cargo.toml found (skipped)"
     text = cargo.read_text(encoding="utf-8")
-    import re
     updated = re.sub(
         r'^version\s*=\s*"[^"]*"',
         f'version = "{new_ver}"',
