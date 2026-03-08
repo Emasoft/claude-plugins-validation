@@ -2203,8 +2203,8 @@ def validate_toc_embedding(
 
         embedded_count = sum(1 for heading in toc_headings if heading.lower() in nearby_text.lower())
 
-        min_required = min(2, len(toc_headings))
-        if embedded_count >= min_required:
+        # All TOC headings must be embedded — partial TOCs hide content from agents
+        if embedded_count == len(toc_headings):
             refs_with_toc += 1
         elif is_list_item:
             # Ambiguous: link in a list item could be a TOC title that
@@ -2213,19 +2213,20 @@ def validate_toc_embedding(
             report.warning(
                 f"Link to '{ref_path.name}' in a list entry of {rel_file} "
                 f"points to a file with a TOC ({len(toc_headings)} sections) "
-                f"but the TOC is not embedded after the link. If this is a "
-                f"reference, embed the TOC so agents know what it contains. "
-                f"If this is an embedded TOC title, avoid using markdown "
+                f"but only {embedded_count}/{len(toc_headings)} headings are "
+                f"embedded. All TOC entries must be present so agents can "
+                f"discover all content. If this is a reference, embed the "
+                f"full TOC. If this is a TOC title, avoid using markdown "
                 f"links in TOC entries to prevent this ambiguity.",
                 rel_file,
             )
         else:
-            # Clear standalone reference — TOC must be embedded
+            # Clear standalone reference — full TOC must be embedded
             report.minor(
-                f"Reference to '{ref_path.name}' in {rel_file} does not "
-                f"include the file's Table of Contents ({len(toc_headings)} "
-                f"sections). Embed the TOC inline so agents can see what "
-                f"content is available before navigating to it.",
+                f"Reference to '{ref_path.name}' in {rel_file} has "
+                f"{embedded_count}/{len(toc_headings)} TOC headings embedded. "
+                f"All {len(toc_headings)} must be present so agents can "
+                f"discover all content in the reference file.",
                 rel_file,
             )
 
