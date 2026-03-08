@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -353,6 +354,7 @@ Examples:
 
     # ── Step 8: Push ──
     print(f"\n{BLUE}═══ Step 8: Push to origin ═══{NC}")
+    os.environ["CPV_PUBLISH_PIPELINE"] = "1"
     run(["git", "push", "origin", "HEAD"], cwd=root)
     print(f"\n{GREEN}✓ Published v{new_version}{NC}")
 
