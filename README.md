@@ -10,9 +10,9 @@ Comprehensive validation suite for Claude Code plugins, marketplaces, hooks, ski
 This plugin provides:
 
 - **Validation Scripts**: Python scripts for validating all plugin components (190+ rules)
-- **Expert Agents**: `plugin-validator` agent for interactive validation and remediation, `skill-validation-agent` for specialized skill validation
-- **Skills**: `plugin-validation-skill`, `install-plugin`, `setup-github-marketplace`, `skill-validation-skill`
-- **Slash Commands**: 17 commands for validating, installing, and managing plugins
+- **Expert Agents**: `plugin-validator` for interactive validation, `skill-validation-agent` for skill validation, `plugin-fixer` for automated remediation, `semantic-validator` for deep AI-driven quality analysis
+- **Skills**: `plugin-validation-skill`, `skill-validation-skill`, `fix-validation`, `semantic-validation-skill`, `install-plugin`, `setup-plugin-repo`, `setup-github-marketplace`, `publish-to-marketplace`
+- **Slash Commands**: 20 commands for validating, installing, fixing, and publishing plugins
 - **Local Plugin Installer**: `claude-plugin-install.py` for installing plugins without a GitHub marketplace
 
 ## Installation (Production)
@@ -62,8 +62,11 @@ claude --plugin-dir ./OUTPUT_SKILLS/claude-plugins-validation
 | `/cpv-validate-scoring` | Compute plugin quality score (weighted category scoring) |
 | `/cpv-validate-security` | Security validation (injection, path traversal, secrets, permissions) |
 | `/cpv-validate-xref` | Cross-reference validation (agent refs, version sync, hook scripts) |
+| `/cpv-fix-validation` | Auto-fix issues from a validation report |
+| `/cpv-semantic-validation` | Deep AI-driven semantic analysis (opus, explicit opt-in) |
 | `/cpv-install-plugin` | Install, update, enable/disable, and manage plugins locally |
 | `/cpv-setup-github-marketplace` | Set up a GitHub marketplace with CI/CD |
+| `/cpv-publish-to-marketplace` | Publish a plugin to a GitHub-hosted marketplace |
 
 ## Utility Scripts
 
@@ -273,25 +276,13 @@ claude-plugins-validation/
 ├── agents/
 │   ├── plugin-validator.md          # Expert validation agent
 │   ├── skill-validation-agent.md    # Skill validation agent
-│   └── references/                  # Fix guides per validator
-│       ├── code-quality-fixes.md
-│       ├── documentation-fixes.md
-│       ├── encoding-fixes.md
-│       ├── enterprise-fixes.md
-│       ├── hook-fixes.md
-│       ├── lsp-fixes.md
-│       ├── marketplace-fixes.md
-│       ├── mcp-fixes.md
-│       ├── plugin-structure-fixes.md
-│       ├── plugin-validator-detailed-procedures.md
-│       ├── rules-fixes.md
-│       ├── scoring-fixes.md
-│       ├── security-fixes.md
-│       ├── skill-fixes.md
-│       ├── skill-semantic-validation.md
-│       └── xref-fixes.md
+│   ├── plugin-fixer.md              # Automated remediation agent
+│   └── semantic-validator.md        # Deep AI-driven quality analysis agent
 ├── commands/
+│   ├── cpv-fix-validation.md        # Auto-fix validation issues
 │   ├── cpv-install-plugin.md        # Local plugin install/update/enable/disable
+│   ├── cpv-publish-to-marketplace.md # Publish plugin to marketplace
+│   ├── cpv-semantic-validation.md   # Deep semantic analysis (opus)
 │   ├── cpv-setup-github-marketplace.md # Marketplace setup command
 │   ├── cpv-validate-agents.md       # Agent validation command
 │   ├── cpv-validate-command.md      # Command validation command
@@ -307,7 +298,7 @@ claude-plugins-validation/
 │   ├── cpv-validate-scoring.md      # Quality scoring command
 │   ├── cpv-validate-security.md     # Security validation command
 │   ├── cpv-validate-skill.md        # Skill validation command
-│   └── cpv-validate-xref.md        # Cross-reference validation command
+│   └── cpv-validate-xref.md         # Cross-reference validation command
 ├── git-hooks/
 │   ├── pre-commit                   # Pre-commit validation hook
 │   └── pre-push                     # Pre-push validation hook
@@ -342,38 +333,33 @@ claude-plugins-validation/
 │   ├── setup_plugin_pipeline.py     # Plugin pipeline setup
 │   └── update_marketplace_metadata.py   # Marketplace metadata updater
 ├── skills/
+│   ├── fix-validation/              # Automated fix guides
+│   │   ├── SKILL.md
+│   │   └── references/              # Per-validator fix guides
 │   ├── install-plugin/
 │   │   └── SKILL.md                 # Local plugin installation skill
 │   ├── plugin-validation-skill/
 │   │   ├── SKILL.md                 # Main validation skill
 │   │   └── references/              # Detailed reference docs
-│   │       ├── plugin-structure.md
-│   │       ├── hook-validation.md
-│   │       ├── skill-validation.md
-│   │       ├── mcp-validation.md
-│   │       ├── marketplace-validation.md
-│   │       ├── pipeline-validation.md
-│   │       ├── validation-checklist.md
-│   │       ├── validation-procedures.md
-│   │       ├── official-docs-urls.md
-│   │       ├── troubleshooting-python-scripts.md
-│   │       └── pre-push-hook.py
+│   ├── publish-to-marketplace/
+│   │   ├── SKILL.md                 # Publish plugin to marketplace
+│   │   └── references/
+│   │       └── publish-pipeline-guide.md
+│   ├── semantic-validation-skill/
+│   │   └── SKILL.md                 # Deep semantic analysis skill
 │   ├── setup-github-marketplace/
 │   │   ├── SKILL.md                 # Marketplace setup skill
 │   │   └── references/
-│   │       ├── marketplace-structure.md
-│   │       ├── workflow-templates.md
-│   │       ├── script-templates.md
-│   │       ├── readme-template.md
-│   │       ├── troubleshooting.md
-│   │       └── pat-setup.md
+│   ├── setup-plugin-repo/
+│   │   ├── SKILL.md                 # Plugin repo scaffolding skill
+│   │   └── references/
+│   │       ├── plugin-binary-builds.md
+│   │       ├── plugin-hooks-and-scripts.md
+│   │       ├── plugin-repo-templates.md
+│   │       └── plugin-workflows.md
 │   └── skill-validation-skill/
 │       ├── SKILL.md                 # Skill validation skill
 │       └── references/
-│           ├── frontmatter-schema.md
-│           ├── pillars-coverage.md
-│           ├── scoring-system.md
-│           └── validation-rules.md
 ├── templates/
 │   ├── README-marketplace.md
 │   ├── github-workflows/
