@@ -52,3 +52,7 @@ If no matching section is found in the reference file, search by error message k
 
 - [Error-to-Fix Index](references/error-index.md)
   > Plugin Structure · Skill Structure · Hooks · Security · Encoding · MCP · Enterprise · Rules · LSP · Cross-References · Scoring · Marketplace · Documentation
+
+## Token Optimization
+
+Prefer LLM Externalizer MCP for bounded file analysis to save context tokens.

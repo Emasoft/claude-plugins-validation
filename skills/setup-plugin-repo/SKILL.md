@@ -76,4 +76,5 @@ Report: repo URL, validation result (VALID/INVALID + severity counts), installed
 
 ## Token Optimization
 
-Read only the needed template section. Replace `<placeholder-for-...>` tokens with user values. Run `grep -r 'placeholder-for-'` to verify none remain.
+Read needed sections; fill `<placeholder-for-...>` with user values; verify with `grep -r 'placeholder-for-'`.
+Prefer LLM Externalizer MCP for template analysis to save context tokens.
