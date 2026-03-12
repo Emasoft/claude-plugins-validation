@@ -51,7 +51,7 @@ If no matching section is found in the reference file, search by error message k
 ## Resources
 
 - [Error-to-Fix Index](references/error-index.md)
-  > Plugin Structure · Skill Structure · Hooks · Security · Encoding · MCP · Enterprise · Rules · LSP · Cross-References · Scoring · Marketplace · Documentation
+  > Plugin Structure · Skill Structure · Hooks · Security · Encoding · MCP · Enterprise · Rules · LSP · Cross-References · Scoring · Marketplace · Documentation · Agent · Command · Marketplace Pipeline · Skill (Basic)
 
 ## Token Optimization
 

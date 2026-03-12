@@ -179,7 +179,7 @@ def detect_executors() -> dict[str, bool]:
 
 def get_version(cmd: list[str]) -> str | None:
     try:
-        p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=10)
         if p.returncode != 0:
             return None
         out = (p.stdout or "").strip().splitlines()

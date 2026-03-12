@@ -72,8 +72,6 @@ claude --plugin-dir ./OUTPUT_SKILLS/claude-plugins-validation
 
 | Script | Description |
 |--------|-------------|
-| `bump_version.py` | Bump semantic version across all plugin files |
-| `check_version_consistency.py` | Verify version consistency across files |
 | `lint_files.py` | Read-only file linting for 15 languages |
 | `setup_git_hooks.py` | Install/remove git hooks for plugin validation |
 | `setup_plugin_pipeline.py` | Setup and validate plugin development pipeline |
@@ -326,8 +324,6 @@ claude-plugins-validation/
 │   ├── validate_scoring.py          # Scoring validator
 │   ├── validate_security.py         # Security validator
 │   ├── validate_xref.py             # Cross-reference validator
-│   ├── bump_version.py              # Version bumping utility
-│   ├── check_version_consistency.py # Version consistency checker
 │   ├── setup_git_hooks.py           # Git hooks setup script
 │   ├── setup_marketplace_automation.py  # Marketplace automation setup
 │   ├── setup_plugin_pipeline.py     # Plugin pipeline setup

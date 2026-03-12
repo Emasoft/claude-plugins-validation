@@ -326,11 +326,10 @@ def should_skip_directory(dir_name: str) -> bool:
     # Direct match against SKIP_DIRS
     if dir_name in SKIP_DIRS:
         return True
-    # Wildcard patterns (e.g., *.egg-info)
+    # Wildcard patterns (e.g., *.egg-info) — use fnmatch for correct glob semantics
     for skip_pattern in SKIP_DIRS:
         if "*" in skip_pattern:
-            pattern = skip_pattern.replace("*", ".*")
-            if re.match(pattern, dir_name):
+            if fnmatch.fnmatch(dir_name, skip_pattern):
                 return True
     return False
 
