@@ -87,4 +87,8 @@ Report: plugin name, old/new version, push status, marketplace dispatch status (
 - [Publish Pipeline Guide](references/publish-pipeline-guide.md)
   > Section 1: PAT Setup · Section 2: notify-marketplace.yml · Section 3: The Dispatch Chain · Section 4: publish.py Pipeline · Section 5: Pre-Push Hook Gates · Section 6: marketplace.json Entry Format · Section 7: Troubleshooting
 - `setup-plugin-repo` skill — publish.py, pre-push hook, CI workflows
-- `setup-github-marketplace` skill — marketplace repo creation, sync workflows
+- `setup-github-marketplace` skill — marketplace repo, sync workflows
+
+## Token Optimization
+
+Prefer LLM Externalizer MCP for bounded file analysis to save context tokens.

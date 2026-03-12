@@ -85,7 +85,8 @@ uv run python scripts/validate_skill_comprehensive.py /path/to/skill/ --strict -
 
 ## Token Optimization
 
-Always use `--report <path>`. Provide the report path to the user, never read it. One script per validation.
+Always `--report <path>` — share path, don't read. One script per run.
+Prefer LLM Externalizer MCP for report analysis to save context tokens.
 
 ## Checklist
 Copy this checklist and track your progress:

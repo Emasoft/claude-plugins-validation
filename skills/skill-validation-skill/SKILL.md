@@ -17,7 +17,7 @@ Validates skill directories using 190+ validation rules from:
 
 ## Overview
 
-Script-based validation of skill structure, frontmatter, content quality, and pillar coverage. For deep semantic analysis (description triggering, example quality), use `/cpv-semantic-validation` instead.
+Script-based validation of structure, frontmatter, content, and pillars. For semantic analysis use `/cpv-semantic-validation`.
 
 ## Prerequisites
 
@@ -79,7 +79,7 @@ uv run python scripts/validate_skill_comprehensive.py ./skills/lang-rust-dev/ --
 
 ## Token Optimization
 
-Always use `--report <path>`. Provide the path to the user, never read it.
+Always `--report <path>` — share path, don't read. Prefer LLM Externalizer MCP for report analysis.
 
 ## Checklist
 Copy this checklist and track your progress:
