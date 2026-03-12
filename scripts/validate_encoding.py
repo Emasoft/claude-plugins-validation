@@ -241,7 +241,7 @@ def check_json_unicode(content: str, file_path: str, report: EncodingValidationR
     Returns:
         True if JSON Unicode is valid, False otherwise
     """
-    if not file_path.endswith(".json"):
+    if not file_path.lower().endswith(".json"):
         return True
 
     try:
@@ -284,7 +284,7 @@ def check_escape_sequences(content: str, file_path: str, report: EncodingValidat
         issues_found = True
 
     # For JSON files, check for unescaped characters that should be escaped
-    if file_path.endswith(".json"):
+    if file_path.lower().endswith(".json"):
         # Detect bare newlines inside string values (should be \n)
         # This is a heuristic - proper parsing would require JSON parsing
         lines = content.split("\n")

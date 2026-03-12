@@ -6,16 +6,19 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           submodules: recursive
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
 
       - name: Set up Python
         run: uv python install 3.12
@@ -39,9 +42,11 @@ jobs:
 
       - name: Validate plugin(s)
         if: steps.find-validator.outputs.validator != ''
+        env:
+          VALIDATOR: ${{ steps.find-validator.outputs.validator }}
         run: |
           set +e  # Don't exit on error - we need to capture exit code
-          uv run python ${{ steps.find-validator.outputs.validator }} . --verbose
+          uv run python "$VALIDATOR" . --verbose
           exit_code=$?
           set -e  # Re-enable exit on error
           # Exit codes: 0=pass, 1=critical, 2=major, 3=minor

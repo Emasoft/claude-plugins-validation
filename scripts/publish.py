@@ -35,16 +35,16 @@ BLUE = "\033[0;34m" if _USE_COLOR else ""
 NC = "\033[0m" if _USE_COLOR else ""
 
 # Lazy-initialized gitignore filter for file scanning
-_gi = None
+_gi_cache: dict = {}
 
 
 def _get_gi(plugin_root: Path):  # noqa: ANN202
-    """Get or create GitignoreFilter for the plugin root."""
-    global _gi  # noqa: PLW0603
-    if _gi is None:
+    """Get or create GitignoreFilter for the plugin root, keyed by resolved path."""
+    key = str(plugin_root.resolve())
+    if key not in _gi_cache:
         from gitignore_filter import GitignoreFilter
-        _gi = GitignoreFilter(plugin_root)
-    return _gi
+        _gi_cache[key] = GitignoreFilter(plugin_root)
+    return _gi_cache[key]
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

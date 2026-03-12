@@ -16,6 +16,10 @@ Maps each CPV validator to its fix reference guide with section numbers.
 - Scoring
 - Marketplace
 - Documentation
+- Agent
+- Command
+- Marketplace Pipeline
+- Skill (Basic)
 
 ## Plugin Structure
 
@@ -94,3 +98,27 @@ marketplace.json → §1 · Plugin entries → §2 · Pipeline → §5
 **validate_documentation.py** → [documentation-fixes.md](documentation-fixes.md)
 
 README → §1-2 · Links → §3 · CHANGELOG → §4 · Headings → §5
+
+## Agent
+
+**validate_agent.py** → [plugin-structure-fixes.md](plugin-structure-fixes.md)
+
+Agent markdown files → structure, frontmatter, description, allowed-tools
+
+## Command
+
+**validate_command.py** → [plugin-structure-fixes.md](plugin-structure-fixes.md)
+
+Command markdown files → structure, frontmatter, name, argument-hint
+
+## Marketplace Pipeline
+
+**validate_marketplace_pipeline.py** → [marketplace-fixes.md](marketplace-fixes.md)
+
+Publishing pipeline → notify-marketplace.yml, publish.py, pre-push hook, PAT secrets
+
+## Skill (Basic)
+
+**validate_skill.py** → [skill-fixes.md](skill-fixes.md)
+
+Basic skill validation → structure, frontmatter, name matching, directories

@@ -2,6 +2,28 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [1.10.7] - 2026-03-12
+
+### LLM Externalizer MCP Integration
+
+- **Added LLM Externalizer instruction** to all 8 skill SKILL.md Token Optimization sections
+- Agents now instructed to prefer `mcp__llm-externalizer__*` for bounded analysis tasks
+- Compressed existing text in tight SKILL.md files to stay under 4000 bytes
+- All 1120 tests pass
+
+## [1.10.6] - 2026-03-12
+
+### Backtick Reference Detection
+
+- **New validator feature**: Detects backtick-enclosed `.md` references in SKILL.md files
+- Added `_BACKTICK_REF_RE` regex and `_build_fenced_line_set()` for code block exclusion
+- Backtick refs always report format MINOR (invisible to progressive discovery)
+- Backtick refs to existing `.md` files get full TOC embedding check
+- Deduplication: files already checked via markdown links skip double TOC check
+- **Moved Error Index** from fix-validation/SKILL.md to `references/error-index.md`
+- **Fixed all 37 backtick MINORs** across 5 SKILL.md files
+- 10 new tests in `TestBacktickRefDetection` (1120 total)
+
 ## [1.10.5] - 2026-03-08
 
 ### Fix All 14 TOC Embedding Warnings
