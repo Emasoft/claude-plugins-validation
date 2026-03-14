@@ -57,7 +57,10 @@ def calculate_directory_checksum(dir_path: Path, exclude_patterns: list[str] | N
         # Include relative path in hash for structure-awareness
         rel_path = file_path.relative_to(dir_path)
         sha256_hash.update(str(rel_path).encode("utf-8"))
-        sha256_hash.update(file_path.read_bytes())
+        try:
+            sha256_hash.update(file_path.read_bytes())
+        except OSError:
+            continue  # Broken symlink, permission denied
 
     return sha256_hash.hexdigest()
 
