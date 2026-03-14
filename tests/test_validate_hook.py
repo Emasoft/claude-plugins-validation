@@ -639,6 +639,22 @@ def test_http_hook_in_command_only_event(tmp_path: Path):
     )
 
 
+def test_http_hook_no_unknown_field_warnings(tmp_path: Path):
+    """HTTP hook fields 'url' and 'headers' should not trigger unknown field warnings."""
+    hook = {
+        "type": "http",
+        "url": "https://example.com/webhook",
+        "headers": {"Authorization": "Bearer tok"},
+        "timeout": 5000,
+    }
+    r = HookValidationReport()
+    validate_single_hook(hook, "PreToolUse", tmp_path, r)
+    unknown_warnings = [
+        res for res in r.results if res.level == "WARNING" and "Unknown hook field" in res.message
+    ]
+    assert len(unknown_warnings) == 0, f"Unexpected unknown-field warnings: {unknown_warnings}"
+
+
 def test_postcompact_command_only(tmp_path: Path):
     """PostCompact rejects prompt and agent type hooks with CRITICAL."""
     for bad_type, extra in [("prompt", {"prompt": "Summarise"}), ("agent", {"prompt": "Analyse"})]:
