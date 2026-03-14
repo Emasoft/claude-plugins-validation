@@ -95,4 +95,4 @@ uv run scripts/claude-plugin-install.py --doctor             # health check
 - Use `--quiet` flag in automated contexts
 - Use `--dry-run` first if unsure — avoids filesystem changes
 - ALWAYS run via `uv run`; NEVER manually edit `known_marketplaces.json`
-- Prefer LLM Externalizer MCP for bounded file analysis to save context tokens
+- Use LLM Externalizer MCP (`chat`, `code_task`, `check_imports`) for file analysis — pass paths via `input_files_paths`
