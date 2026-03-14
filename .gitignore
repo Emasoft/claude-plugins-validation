@@ -20,6 +20,10 @@ dmypy.json
 # Linting
 .ruff_cache/
 
+# Claude Code
+.claude/
+llm_externalizer_output/
+
 # IDE
 .idea/
 .vscode/
