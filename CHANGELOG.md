@@ -2,6 +2,20 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [1.11.0] - 2026-03-14
+
+### Claude Code v2.1.0–v2.1.76 Changelog Alignment
+
+- **3 new hook events**: `PostCompact`, `Elicitation`, `ElicitationResult` (v2.1.76)
+- **HTTP hook type**: `"http"` now valid alongside command/prompt/agent (v2.1.63)
+- **Full model IDs**: Agent/skill/command `model:` fields now accept `claude-opus-4-6`, `claude-sonnet-4-6`, etc. (v2.1.74)
+- **5 new tool matchers**: `ExitWorktree`, `TaskOutput`, `CronCreate`, `CronDelete`, `CronList` (v2.1.71–72)
+- **HTTP hook validation**: `validate_http_hook()` checks url, headers, timeout
+- **`is_valid_model()` function**: Centralized model validation accepting short names + full IDs
+- Updated COMMAND_ONLY_EVENTS, EVENTS_WITHOUT_MATCHERS, COMMON_TOOL_NAMES, VALID_TOOLS
+- Updated all 4 model validators (agent, command, skill, install script)
+- All 1120+ tests pass, 0 validation issues
+
 ## [1.10.7] - 2026-03-12
 
 ### LLM Externalizer MCP Integration

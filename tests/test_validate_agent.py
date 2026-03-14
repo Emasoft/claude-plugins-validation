@@ -977,3 +977,42 @@ class TestExampleBlockStructureValidation:
         validate_example_blocks(content, "ex-test.md", report)
         info_msgs = [r.message for r in report.results if r.level == "INFO"]
         assert any("commentary" in m for m in info_msgs)
+
+
+# ---------------------------------------------------------------------------
+# Changelog-driven tests: full model ID support in validate_agent.py
+# ---------------------------------------------------------------------------
+
+
+class TestValidateModelFieldFullIds:
+    """Tests for validate_model_field accepting full model IDs (v2.1.74+)."""
+
+    def test_full_model_id_accepted(self):
+        """validate_model_field accepts a full model ID like 'claude-opus-4-6' without error."""
+        report = AgentValidationReport()
+        validate_model_field({"model": "claude-opus-4-6"}, "agent.md", report)
+        # Must not produce MAJOR
+        assert not report.has_major
+        passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
+        assert any("claude-opus-4-6" in m for m in passed_msgs)
+
+    def test_invalid_full_model_id_rejected(self):
+        """validate_model_field rejects non-Claude model IDs like 'gpt-4' with MAJOR."""
+        report = AgentValidationReport()
+        validate_model_field({"model": "gpt-4"}, "agent.md", report)
+        assert report.has_major
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("Invalid 'model' value" in m for m in major_msgs)
+
+    def test_short_model_names_still_accepted(self):
+        """validate_model_field still accepts short names: haiku, sonnet, opus, inherit."""
+        for short_name in ("haiku", "sonnet", "opus", "inherit"):
+            report = AgentValidationReport()
+            validate_model_field({"model": short_name}, "agent.md", report)
+            assert not report.has_major, f"Short name '{short_name}' should be accepted"
+
+    def test_claude_sonnet_full_id_accepted(self):
+        """validate_model_field accepts 'claude-sonnet-4-6' as a valid full model ID."""
+        report = AgentValidationReport()
+        validate_model_field({"model": "claude-sonnet-4-6"}, "agent.md", report)
+        assert not report.has_major

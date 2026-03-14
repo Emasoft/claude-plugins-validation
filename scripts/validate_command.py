@@ -40,6 +40,7 @@ from cpv_validation_common import (
     VALID_TOOLS,
     ValidationReport,
     check_utf8_encoding,
+    is_valid_model,
     save_report_and_print_summary,
 )
 
@@ -346,12 +347,13 @@ def validate_model_field(frontmatter: dict[str, Any], filename: str, report: Com
         report.major(f"'model' must be a string, got {type(model).__name__}", filename)
         return
 
-    model_lower = model.lower()
-    # Valid models for commands: sonnet, opus, haiku (not 'inherit')
+    # v2.1.74+: accept short names AND full model IDs (claude-opus-4-6)
+    # Commands don't support 'inherit' — only sonnet, opus, haiku or full IDs
     command_valid_models = {"sonnet", "opus", "haiku"}
-    if model_lower not in command_valid_models:
+    model_lower = model.lower()
+    if model_lower not in command_valid_models and not is_valid_model(model):
         report.major(
-            f"Invalid 'model' value: {model}. Valid values: {sorted(command_valid_models)}",
+            f"Invalid 'model' value: {model}. Valid: {sorted(command_valid_models)} or full ID like claude-opus-4-6",
             filename,
         )
         return

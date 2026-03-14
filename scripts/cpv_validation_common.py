@@ -156,6 +156,7 @@ VALID_HOOK_EVENTS = {
     "SessionStart",
     "SessionEnd",
     "PreCompact",
+    "PostCompact",  # v2.1.76 — fires after compaction completes
     "Setup",
     "TeammateIdle",
     "TaskCompleted",
@@ -163,6 +164,8 @@ VALID_HOOK_EVENTS = {
     "WorktreeCreate",
     "WorktreeRemove",
     "InstructionsLoaded",
+    "Elicitation",  # v2.1.76 — intercept MCP elicitation requests
+    "ElicitationResult",  # v2.1.76 — intercept elicitation responses
 }
 
 # =============================================================================
@@ -195,22 +198,35 @@ VALID_TOOLS = {
     "EnterPlanMode",
     "ExitPlanMode",
     "EnterWorktree",
+    "ExitWorktree",  # v2.1.72
     "TaskCreate",
     "TaskUpdate",
     "TaskList",
     "TaskGet",
     "TaskStop",
+    "TaskOutput",  # v2.1.71
     "ToolSearch",
     "MultiEdit",
     "Notebook",
     "TodoRead",
     "TodoWrite",
+    "CronCreate",  # v2.1.71
+    "CronDelete",  # v2.1.71
+    "CronList",  # v2.1.71
     "LSP",
     "Agent",
 }
 
-# Valid model values for agents
+# Valid model short names for agents (v2.1.74+: full model IDs also accepted)
 VALID_MODELS = {"haiku", "sonnet", "opus", "inherit"}
+
+# Regex for full model IDs like claude-opus-4-5, claude-sonnet-4-6, claude-haiku-4-5-20251001
+_FULL_MODEL_ID_RE = re.compile(r"^claude-(?:opus|sonnet|haiku)-\d[\w.-]*$")
+
+
+def is_valid_model(value: str) -> bool:
+    """Check if a model value is valid (short name or full model ID)."""
+    return value.lower() in VALID_MODELS or bool(_FULL_MODEL_ID_RE.match(value))
 
 # Environment variables provided by Claude Code at plugin load time
 # Plugins must use these instead of hardcoded absolute paths

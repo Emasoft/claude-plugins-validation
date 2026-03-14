@@ -65,22 +65,27 @@ EVENTS_WITHOUT_MATCHERS = {
     "WorktreeCreate",
     "WorktreeRemove",
     "InstructionsLoaded",
+    "Elicitation",  # v2.1.76 — fires for any MCP elicitation request
+    "ElicitationResult",  # v2.1.76 — fires for any elicitation response
 }
 
-# Valid hook types
-VALID_HOOK_TYPES = {"command", "prompt", "agent"}
+# Valid hook types (v2.1.63+: "http" hooks POST JSON to a URL)
+VALID_HOOK_TYPES = {"command", "http", "prompt", "agent"}
 
-# Events that ONLY support type: "command" hooks (not prompt or agent)
+# Events that only support "command" or "http" hooks (not prompt or agent)
 COMMAND_ONLY_EVENTS = {
     "ConfigChange",
     "Notification",
     "PreCompact",
+    "PostCompact",  # v2.1.76
     "SessionEnd",
     "SessionStart",
     "SubagentStart",
     "TeammateIdle",
     "WorktreeCreate",
     "WorktreeRemove",
+    "Elicitation",  # v2.1.76
+    "ElicitationResult",  # v2.1.76
 }
 
 # Common tool names for matcher validation hints
@@ -92,9 +97,19 @@ COMMON_TOOL_NAMES = {
     "Glob",
     "Grep",
     "Task",
+    "Agent",
     "WebFetch",
     "WebSearch",
     "NotebookEdit",
+    "EnterWorktree",
+    "ExitWorktree",
+    "ToolSearch",
+    "TaskCreate",
+    "TaskOutput",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "LSP",
 }
 
 # Common notification types
@@ -261,6 +276,8 @@ def validate_matcher(matcher: Any, event_name: str, report: ValidationReport) ->
         _check_matcher_values(matcher, SESSION_START_SOURCES, "SessionStart", "source", report)
     if event_name == "PreCompact":
         _check_matcher_values(matcher, COMPACT_TRIGGERS, "PreCompact", "trigger", report)
+    if event_name == "PostCompact":
+        _check_matcher_values(matcher, COMPACT_TRIGGERS, "PostCompact", "trigger", report)
 
     return True
 
@@ -707,6 +724,54 @@ def validate_prompt_hook(
     return True
 
 
+def validate_http_hook(
+    hook: dict[str, Any],
+    event_name: str,
+    report: ValidationReport,
+) -> bool:
+    """Validate an HTTP-type hook (v2.1.63+: POST JSON to a URL)."""
+    if "url" not in hook:
+        report.critical("HTTP hook missing required 'url' field")
+        return False
+
+    url = hook["url"]
+    if not isinstance(url, str):
+        report.critical(f"HTTP hook 'url' must be a string, got {type(url).__name__}")
+        return False
+
+    url_stripped = url.strip()
+    if not url_stripped:
+        report.critical("HTTP hook 'url' cannot be empty")
+        return False
+
+    # Basic URL validation — must start with http:// or https://
+    if not url_stripped.startswith(("http://", "https://")):
+        report.major(f"HTTP hook 'url' should start with http:// or https://, got: {url_stripped[:40]}")
+
+    # Validate optional headers field
+    if "headers" in hook:
+        headers = hook["headers"]
+        if not isinstance(headers, dict):
+            report.major(f"HTTP hook 'headers' must be an object, got {type(headers).__name__}")
+        else:
+            for k, v in headers.items():
+                if not isinstance(v, str):
+                    report.major(f"HTTP hook header '{k}' value must be a string")
+
+    # Validate timeout if present (milliseconds)
+    if "timeout" in hook:
+        timeout = hook["timeout"]
+        if not isinstance(timeout, (int, float)):
+            report.major(f"HTTP hook 'timeout' must be a number, got {type(timeout).__name__}")
+        elif timeout <= 0:
+            report.major("HTTP hook 'timeout' must be positive")
+        elif timeout > 600000:
+            report.warning(f"HTTP hook timeout is {timeout}ms ({timeout / 1000:.0f}s) — unusually long")
+
+    report.passed(f"HTTP hook URL: {url_stripped[:60]}")
+    return True
+
+
 def validate_single_hook(
     hook: Any,
     event_name: str,
@@ -732,16 +797,16 @@ def validate_single_hook(
     if hook_type in {"prompt", "agent"} and event_name in COMMAND_ONLY_EVENTS:
         hook_path_str = report.hook_path
         report.critical(
-            f"Event '{event_name}' only supports type 'command' hooks, "
+            f"Event '{event_name}' only supports 'command' or 'http' hooks, "
             f"not '{hook_type}'. Prompt and agent hooks are not supported for this event.",
             hook_path_str,
         )
 
-    # Validate async field (only valid on command hooks)
-    if hook.get("async") is True and hook_type != "command":
+    # Validate async field (only valid on command/http hooks)
+    if hook.get("async") is True and hook_type not in {"command", "http"}:
         hook_path_str = report.hook_path
         report.major(
-            f"'async: true' is only supported on type 'command' hooks, "
+            f"'async: true' is only supported on 'command' or 'http' hooks, "
             f"not '{hook_type}'. Prompt and agent hooks cannot run asynchronously.",
             hook_path_str,
         )
@@ -749,6 +814,9 @@ def validate_single_hook(
     # Validate based on type
     if hook_type == "command":
         if not validate_command_hook(hook, event_name, plugin_root, report):
+            return False
+    elif hook_type == "http":
+        if not validate_http_hook(hook, event_name, report):
             return False
     elif hook_type == "prompt":
         if not validate_prompt_hook(hook, event_name, report):
