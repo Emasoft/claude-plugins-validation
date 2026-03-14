@@ -114,7 +114,7 @@ def test_validate_single_hook_type_errors(tmp_path: Path):
     # Prompt on command-only event (SessionStart)
     r3 = HookValidationReport()
     validate_single_hook({"type": "prompt", "prompt": "Do something"}, "SessionStart", tmp_path, r3)
-    assert any("only supports type 'command'" in r.message for r in r3.results if r.level == "CRITICAL")
+    assert any("only supports 'command' or 'http'" in r.message for r in r3.results if r.level == "CRITICAL")
 
 
 def test_validate_hooks_valid_end_to_end(tmp_path: Path):
@@ -360,7 +360,7 @@ def test_validate_single_hook_async_on_non_command(tmp_path: Path):
     report = HookValidationReport()
     validate_single_hook({"type": "prompt", "prompt": "Review this", "async": True}, "Stop", tmp_path, report)
     assert any(
-        "'async: true' is only supported on type 'command'" in r.message for r in report.results if r.level == "MAJOR"
+        "'async: true' is only supported on 'command' or 'http'" in r.message for r in report.results if r.level == "MAJOR"
     )
 
 
@@ -526,3 +526,138 @@ def test_validate_command_hook_non_string_command(tmp_path: Path):
     result = validate_command_hook({"type": "command", "command": 42}, "PreToolUse", tmp_path, report)
     assert result is False
     assert any("'command' must be a string" in r.message for r in report.results if r.level == "CRITICAL")
+
+
+# ---------------------------------------------------------------------------
+# Changelog-driven tests: new hook events, HTTP hooks, PostCompact, Elicitation
+# ---------------------------------------------------------------------------
+
+
+def test_new_hook_events_accepted(tmp_path: Path):
+    """PostCompact, Elicitation, and ElicitationResult are accepted as valid hook events."""
+    for event in ("PostCompact", "Elicitation", "ElicitationResult"):
+        hooks_data = {
+            "hooks": {
+                event: [{"hooks": [{"type": "command", "command": "echo ok"}]}]
+            }
+        }
+        hooks_file = tmp_path / f"hooks_{event}.json"
+        hooks_file.write_text(json.dumps(hooks_data))
+        report = validate_hooks(hooks_file, plugin_root=tmp_path)
+        assert not any(
+            "Unknown hook event" in r.message and event in r.message
+            for r in report.results
+            if r.level == "CRITICAL"
+        ), f"Event {event} should be accepted but was rejected"
+
+
+def test_http_hook_valid(tmp_path: Path):
+    """A valid HTTP hook with a proper https URL should pass without CRITICAL or MAJOR issues."""
+    hooks_data = {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "Bash",
+                    "hooks": [{"type": "http", "url": "https://example.com/webhook"}],
+                }
+            ]
+        }
+    }
+    hooks_file = tmp_path / "hooks.json"
+    hooks_file.write_text(json.dumps(hooks_data))
+    report = validate_hooks(hooks_file, plugin_root=tmp_path)
+    assert not report.has_critical
+    assert not report.has_major
+
+
+def test_http_hook_missing_url(tmp_path: Path):
+    """An HTTP hook without a 'url' field should produce CRITICAL."""
+    from validate_hook import validate_http_hook
+
+    report = ValidationReport()
+    result = validate_http_hook({"type": "http"}, "PreToolUse", report)
+    assert result is False
+    assert any("missing required 'url'" in r.message for r in report.results if r.level == "CRITICAL")
+
+
+def test_http_hook_bad_url_format(tmp_path: Path):
+    """An HTTP hook with a non-http/https URL should produce MAJOR."""
+    from validate_hook import validate_http_hook
+
+    report = ValidationReport()
+    validate_http_hook({"type": "http", "url": "ftp://example.com/hook"}, "PreToolUse", report)
+    assert any(
+        "should start with http://" in r.message for r in report.results if r.level == "MAJOR"
+    )
+
+
+def test_http_hook_headers_validation(tmp_path: Path):
+    """HTTP hook headers must be a dict; non-string header values each produce MAJOR."""
+    from validate_hook import validate_http_hook
+
+    # Non-dict headers
+    r1 = ValidationReport()
+    validate_http_hook({"type": "http", "url": "https://example.com", "headers": ["list"]}, "PreToolUse", r1)
+    assert any("'headers' must be an object" in r.message for r in r1.results if r.level == "MAJOR")
+
+    # Non-string header value
+    r2 = ValidationReport()
+    validate_http_hook(
+        {"type": "http", "url": "https://example.com", "headers": {"X-Token": 12345}},
+        "PreToolUse",
+        r2,
+    )
+    assert any("header 'X-Token' value must be a string" in r.message for r in r2.results if r.level == "MAJOR")
+
+    # Valid headers — no MAJOR
+    r3 = ValidationReport()
+    validate_http_hook(
+        {"type": "http", "url": "https://example.com", "headers": {"Authorization": "Bearer tok"}},
+        "PreToolUse",
+        r3,
+    )
+    assert not r3.has_major
+
+
+def test_http_hook_in_command_only_event(tmp_path: Path):
+    """HTTP hooks should be allowed in command-only events like SessionStart."""
+    hooks_data = {
+        "hooks": {
+            "SessionStart": [
+                {"hooks": [{"type": "http", "url": "https://example.com/on-start"}]}
+            ]
+        }
+    }
+    hooks_file = tmp_path / "hooks.json"
+    hooks_file.write_text(json.dumps(hooks_data))
+    report = validate_hooks(hooks_file, plugin_root=tmp_path)
+    # Should not produce CRITICAL about command-only restriction
+    assert not any(
+        "only supports 'command' or 'http'" in r.message and "SessionStart" in r.message
+        for r in report.results
+        if r.level == "CRITICAL"
+    )
+
+
+def test_postcompact_command_only(tmp_path: Path):
+    """PostCompact rejects prompt and agent type hooks with CRITICAL."""
+    for bad_type, extra in [("prompt", {"prompt": "Summarise"}), ("agent", {"prompt": "Analyse"})]:
+        hook = {"type": bad_type, **extra}
+        r = HookValidationReport()
+        validate_single_hook(hook, "PostCompact", tmp_path, r)
+        assert any(
+            "only supports 'command' or 'http'" in res.message
+            for res in r.results
+            if res.level == "CRITICAL"
+        ), f"PostCompact should reject '{bad_type}' hooks"
+
+
+def test_elicitation_no_matchers(tmp_path: Path):
+    """Elicitation events should warn (INFO) if a matcher is provided, since matchers are ignored."""
+    from cpv_validation_common import ValidationReport as VReport
+    from validate_hook import validate_matcher
+
+    report = VReport()
+    result = validate_matcher("Bash", "Elicitation", report)
+    assert result is True
+    assert any("matchers are ignored" in r.message for r in report.results if r.level == "INFO")

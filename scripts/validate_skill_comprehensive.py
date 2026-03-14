@@ -116,6 +116,9 @@ MAX_FRONTMATTER_CHARS_ERROR = 15000
 # VALID_CONTEXT_VALUES and BUILTIN_AGENT_TYPES imported from cpv_validation_common
 VALID_MODEL_VALUES = {"sonnet", "opus", "haiku", "inherit"}
 
+# v2.1.74+: full model IDs also accepted (claude-opus-4-6, claude-sonnet-4-6, etc.)
+_FULL_MODEL_ID_RE = re.compile(r"^claude-(?:opus|sonnet|haiku)-\d[\w.-]*$")
+
 # VALID_TOOLS imported from cpv_validation_common
 
 # --- Nixtla Strict Mode Required Sections ---
@@ -927,13 +930,14 @@ def validate_model_field(
         )
         return
 
-    if model not in VALID_MODEL_VALUES:
+    # v2.1.74+: accept short names AND full model IDs (claude-opus-4-6)
+    if model not in VALID_MODEL_VALUES and not _FULL_MODEL_ID_RE.match(model):
         report.major(
-            f"Invalid 'model' value: '{model}'. Valid values: {sorted(VALID_MODEL_VALUES)}",
+            f"Invalid 'model' value: '{model}'. Valid: {sorted(VALID_MODEL_VALUES)} or full ID like claude-opus-4-6",
             "SKILL.md",
             category="Frontmatter",
         )
-    elif model == "haiku":
+    elif model == "haiku" or (model.startswith("claude-haiku") and _FULL_MODEL_ID_RE.match(model)):
         # Haiku penalty: haiku is less reliable for complex skills
         report.minor(
             "'model: haiku' specified - haiku is less reliable for complex tasks. "

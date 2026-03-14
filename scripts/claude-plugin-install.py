@@ -725,6 +725,7 @@ VALID_HOOK_EVENTS = {
     "SessionStart",
     "SessionEnd",
     "PreCompact",
+    "PostCompact",  # v2.1.76 — fires after compaction completes
     "Setup",
     "ConfigChange",
     "TeammateIdle",
@@ -732,6 +733,8 @@ VALID_HOOK_EVENTS = {
     "WorktreeCreate",
     "WorktreeRemove",
     "InstructionsLoaded",
+    "Elicitation",  # v2.1.76 — intercept MCP elicitation requests
+    "ElicitationResult",  # v2.1.76 — intercept elicitation responses
 }
 
 TOOL_MATCHER_EVENTS = {"PreToolUse", "PermissionRequest", "PostToolUse", "PostToolUseFailure"}
@@ -753,20 +756,26 @@ KNOWN_TOOL_MATCHERS = {
     "EnterPlanMode",
     "ExitPlanMode",
     "EnterWorktree",
+    "ExitWorktree",  # v2.1.72
     "TaskCreate",
     "TaskUpdate",
     "TaskList",
     "TaskGet",
     "TaskStop",
+    "TaskOutput",  # v2.1.71
     "ToolSearch",
     "TodoRead",
     "TodoWrite",
+    "CronCreate",  # v2.1.71
+    "CronDelete",  # v2.1.71
+    "CronList",  # v2.1.71
     "LSP",
     "Agent",
 }
 NOTIFICATION_MATCHERS = {"permission_prompt", "idle_prompt", "auth_success", "elicitation_dialog"}
 SESSION_START_MATCHERS = {"startup", "resume", "clear", "compact"}
 PRECOMPACT_MATCHERS = {"manual", "auto"}
+POSTCOMPACT_MATCHERS = {"manual", "auto"}  # v2.1.76 — same triggers as PreCompact
 NO_MATCHER_EVENTS = {
     "UserPromptSubmit",
     "Stop",
@@ -778,6 +787,8 @@ NO_MATCHER_EVENTS = {
     "WorktreeRemove",
     "TeammateIdle",
     "TaskCompleted",
+    "Elicitation",  # v2.1.76
+    "ElicitationResult",  # v2.1.76
 }
 VALID_HOOK_TYPES = {"command", "http", "prompt", "agent"}
 COMPONENT_PATH_FIELDS = {
@@ -1136,6 +1147,8 @@ AGENT_KNOWN_FIELDS = {
 AGENT_REQUIRED_FIELDS = {"name", "description"}
 AGENT_BOOLEAN_FIELDS = {"background"}
 AGENT_VALID_MODELS = {"haiku", "sonnet", "opus", "inherit"}
+# v2.1.74+: full model IDs also accepted (claude-opus-4-6, claude-sonnet-4-6, etc.)
+_FULL_MODEL_ID_RE = re.compile(r"^claude-(?:opus|sonnet|haiku)-\d[\w.-]*$")
 AGENT_VALID_PERMISSION_MODES = {"default", "acceptedits", "dontask", "bypasspermissions", "plan"}
 AGENT_VALID_MEMORY_SCOPES = {"user", "project", "local"}
 AGENT_VALID_ISOLATION = {"worktree"}
@@ -1230,10 +1243,10 @@ def _validate_markdown_frontmatter(
                     f"{label}: unknown frontmatter field '{key}'. Known fields: {', '.join(sorted(AGENT_KNOWN_FIELDS))}"
                 )
 
-        # ── Model validation ──
+        # ── Model validation (v2.1.74+: short names AND full model IDs) ──
         model_val = fm.get("model", "").lower()
-        if model_val and model_val not in AGENT_VALID_MODELS:
-            warnings.append(f"{label}: model '{fm['model']}' — known values: {', '.join(sorted(AGENT_VALID_MODELS))}")
+        if model_val and model_val not in AGENT_VALID_MODELS and not _FULL_MODEL_ID_RE.match(fm.get("model", "")):
+            warnings.append(f"{label}: model '{fm['model']}' — known values: {', '.join(sorted(AGENT_VALID_MODELS))} or full ID like claude-opus-4-6")
 
         # ── Boolean fields ──
         for bf in AGENT_BOOLEAN_FIELDS:
@@ -1281,10 +1294,10 @@ def _validate_markdown_frontmatter(
                     f"{label}: unknown frontmatter field '{key}'. Command fields: {', '.join(sorted(COMMAND_KNOWN_FIELDS))}"
                 )
 
-        # ── Model validation ──
+        # ── Model validation (v2.1.74+: short names AND full model IDs) ──
         model_val = fm.get("model", "").lower()
-        if model_val and model_val not in AGENT_VALID_MODELS:
-            warnings.append(f"{label}: model '{fm['model']}' — known values: {', '.join(sorted(AGENT_VALID_MODELS))}")
+        if model_val and model_val not in AGENT_VALID_MODELS and not _FULL_MODEL_ID_RE.match(fm.get("model", "")):
+            warnings.append(f"{label}: model '{fm['model']}' — known values: {', '.join(sorted(AGENT_VALID_MODELS))} or full ID like claude-opus-4-6")
 
     elif component_type == "skill":
         # ── Recommended field ──

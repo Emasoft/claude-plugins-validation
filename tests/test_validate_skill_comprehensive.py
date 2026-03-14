@@ -769,6 +769,63 @@ class TestPackageDependenciesValidation:
         assert any("package dependencies" in r.message for r in report.results)
 
 
+# ---------------------------------------------------------------------------
+# Changelog-driven tests: full model ID support in validate_skill_comprehensive.py
+# ---------------------------------------------------------------------------
+
+
+class TestModelFieldFullIdsInSkill:
+    """Tests for validate_model_field accepting full model IDs in skill validation (v2.1.74+)."""
+
+    def test_full_model_id_accepted_in_skill(self):
+        """validate_model_field accepts 'claude-sonnet-4-6' as a full model ID without MAJOR."""
+        from validate_skill_comprehensive import validate_model_field
+
+        report = ValidationReport(skill_path="test")
+        validate_model_field({"model": "claude-sonnet-4-6"}, report)
+        assert not report.has_major
+        passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
+        assert any("claude-sonnet-4-6" in m for m in passed_msgs)
+
+    def test_haiku_full_id_gets_minor_penalty(self):
+        """validate_model_field gives a MINOR penalty for full haiku IDs like 'claude-haiku-4-5'."""
+        from validate_skill_comprehensive import validate_model_field
+
+        report = ValidationReport(skill_path="test")
+        validate_model_field({"model": "claude-haiku-4-5"}, report)
+        # Must be MINOR, not MAJOR
+        assert report.has_minor
+        assert not report.has_major
+        minor_msgs = [r.message for r in report.results if r.level == "MINOR"]
+        assert any("haiku" in m.lower() for m in minor_msgs)
+
+    def test_claude_opus_full_id_passes(self):
+        """validate_model_field accepts 'claude-opus-4-6' without any penalty."""
+        from validate_skill_comprehensive import validate_model_field
+
+        report = ValidationReport(skill_path="test")
+        validate_model_field({"model": "claude-opus-4-6"}, report)
+        assert not report.has_major
+        assert not report.has_minor
+
+    def test_haiku_full_id_with_date_suffix_gets_penalty(self):
+        """validate_model_field gives MINOR penalty for 'claude-haiku-4-5-20251001'."""
+        from validate_skill_comprehensive import validate_model_field
+
+        report = ValidationReport(skill_path="test")
+        validate_model_field({"model": "claude-haiku-4-5-20251001"}, report)
+        assert report.has_minor
+        assert not report.has_major
+
+    def test_unknown_full_model_id_rejected(self):
+        """validate_model_field rejects non-Claude full IDs like 'gpt-4-turbo' with MAJOR."""
+        from validate_skill_comprehensive import validate_model_field
+
+        report = ValidationReport(skill_path="test")
+        validate_model_field({"model": "gpt-4-turbo"}, report)
+        assert report.has_major
+
+
 class TestFullValidationWithNewFields:
     """End-to-end validation tests including new fields."""
 

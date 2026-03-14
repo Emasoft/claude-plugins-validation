@@ -39,6 +39,7 @@ from cpv_validation_common import (
     USER_PATH_PATTERNS,
     VALID_CONTEXT_VALUES,
     VALID_MODELS,
+    is_valid_model,
     VALID_TOOLS,
     ValidationReport,
     check_utf8_encoding,
@@ -307,10 +308,10 @@ def validate_model_field(frontmatter: dict[str, Any], filename: str, report: Age
         report.major(f"'model' must be a string, got {type(model).__name__}", filename)
         return
 
-    model_lower = model.lower()
-    if model_lower not in VALID_MODELS:
+    # v2.1.74+: accept short names (haiku/sonnet/opus/inherit) AND full model IDs (claude-opus-4-5)
+    if not is_valid_model(model):
         report.major(
-            f"Invalid 'model' value: {model}. Valid values: {VALID_MODELS}",
+            f"Invalid 'model' value: {model}. Valid: {VALID_MODELS} or full ID like claude-opus-4-6",
             filename,
         )
         return
