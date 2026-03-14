@@ -1148,3 +1148,116 @@ class TestValidateNoAbsolutePaths:
 
         errors = report.get_all_errors()
         assert len(errors) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Changelog-driven tests: is_valid_model, VALID_TOOLS, VALID_HOOK_EVENTS
+# ---------------------------------------------------------------------------
+
+
+class TestIsValidModel:
+    """Tests for the is_valid_model() function (v2.1.74+: full model IDs accepted)."""
+
+    def test_is_valid_model_short_names(self):
+        """Short names haiku, sonnet, opus, inherit must all be accepted by is_valid_model."""
+        from cpv_validation_common import is_valid_model
+
+        for name in ("haiku", "sonnet", "opus", "inherit"):
+            assert is_valid_model(name) is True, f"Short name '{name}' should be valid"
+
+    def test_is_valid_model_full_ids_accepted(self):
+        """Full model IDs like claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5-20251001 must pass."""
+        from cpv_validation_common import is_valid_model
+
+        valid_ids = [
+            "claude-opus-4-6",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5",
+            "claude-haiku-4-5-20251001",
+            "claude-sonnet-4-5-20250101",
+            "claude-opus-4-0",
+        ]
+        for model_id in valid_ids:
+            assert is_valid_model(model_id) is True, f"Full model ID '{model_id}' should be valid"
+
+    def test_is_valid_model_rejects_invalid(self):
+        """Non-Claude model IDs and random strings must be rejected by is_valid_model."""
+        from cpv_validation_common import is_valid_model
+
+        invalid_values = [
+            "gpt-4",
+            "gpt-4-turbo",
+            "claude-unknown-4-5",
+            "random-string",
+            "llama3",
+            "claude",
+            "claude-3",
+            "",
+        ]
+        for bad in invalid_values:
+            assert is_valid_model(bad) is False, f"Value '{bad}' should be invalid"
+
+    def test_is_valid_model_case_insensitive_for_short_names(self):
+        """Short names should be accepted case-insensitively (Haiku, SONNET, etc.)."""
+        from cpv_validation_common import is_valid_model
+
+        assert is_valid_model("Haiku") is True
+        assert is_valid_model("SONNET") is True
+        assert is_valid_model("Opus") is True
+
+
+class TestNewToolsInValidTools:
+    """Tests that new tools added in v2.1.71-v2.1.72 are present in VALID_TOOLS."""
+
+    def test_exit_worktree_in_valid_tools(self):
+        """ExitWorktree (v2.1.72) must be in VALID_TOOLS."""
+        from cpv_validation_common import VALID_TOOLS
+
+        assert "ExitWorktree" in VALID_TOOLS
+
+    def test_task_output_in_valid_tools(self):
+        """TaskOutput (v2.1.71) must be in VALID_TOOLS."""
+        from cpv_validation_common import VALID_TOOLS
+
+        assert "TaskOutput" in VALID_TOOLS
+
+    def test_cron_tools_in_valid_tools(self):
+        """CronCreate, CronDelete, CronList (v2.1.71) must all be in VALID_TOOLS."""
+        from cpv_validation_common import VALID_TOOLS
+
+        for tool in ("CronCreate", "CronDelete", "CronList"):
+            assert tool in VALID_TOOLS, f"{tool} should be in VALID_TOOLS"
+
+    def test_enter_worktree_still_in_valid_tools(self):
+        """EnterWorktree must still be in VALID_TOOLS alongside the new ExitWorktree."""
+        from cpv_validation_common import VALID_TOOLS
+
+        assert "EnterWorktree" in VALID_TOOLS
+
+
+class TestNewHooksInValidHookEvents:
+    """Tests that PostCompact, Elicitation, ElicitationResult are in VALID_HOOK_EVENTS."""
+
+    def test_postcompact_in_valid_hook_events(self):
+        """PostCompact (v2.1.76) must be in VALID_HOOK_EVENTS."""
+        from cpv_validation_common import VALID_HOOK_EVENTS
+
+        assert "PostCompact" in VALID_HOOK_EVENTS
+
+    def test_elicitation_in_valid_hook_events(self):
+        """Elicitation (v2.1.76) must be in VALID_HOOK_EVENTS."""
+        from cpv_validation_common import VALID_HOOK_EVENTS
+
+        assert "Elicitation" in VALID_HOOK_EVENTS
+
+    def test_elicitation_result_in_valid_hook_events(self):
+        """ElicitationResult (v2.1.76) must be in VALID_HOOK_EVENTS."""
+        from cpv_validation_common import VALID_HOOK_EVENTS
+
+        assert "ElicitationResult" in VALID_HOOK_EVENTS
+
+    def test_precompact_still_in_valid_hook_events(self):
+        """PreCompact must still be present alongside the new PostCompact."""
+        from cpv_validation_common import VALID_HOOK_EVENTS
+
+        assert "PreCompact" in VALID_HOOK_EVENTS
