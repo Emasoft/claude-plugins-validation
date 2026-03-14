@@ -261,6 +261,7 @@ def npm_exec_argv(pkg: str, cmd: str, tool_args: list[str]) -> list[str]:
 
 def deno_npm_argv(pkg: str, cmd: str, tool_args: list[str], latest: bool = True) -> list[str]:
     """Build argv for running an npm package via Deno with minimal permissions."""
+    _ = cmd  # kept in signature for API consistency; deno npm: spec runs the package's default binary
     ver = "@latest" if latest else ""
     spec = f"npm:{pkg}{ver}"
     return [
@@ -273,7 +274,6 @@ def deno_npm_argv(pkg: str, cmd: str, tool_args: list[str], latest: bool = True)
         "--no-prompt",
         spec,
         "--",
-        cmd,
     ] + tool_args
 
 

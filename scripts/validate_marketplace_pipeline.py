@@ -269,13 +269,13 @@ class PipelineValidationReport:
         """Return appropriate exit code based on score."""
         score = self.total_score
         if score >= 90:
-            return EXIT_OK  # A grade
+            return EXIT_OK       # A grade — pipeline healthy
         elif score >= 70:
-            return EXIT_CRITICAL  # B or C grade
+            return EXIT_MINOR    # B or C grade — minor gaps
         elif score >= 60:
-            return EXIT_MAJOR  # D grade
+            return EXIT_MAJOR    # D grade — manual updates required
         else:
-            return EXIT_MINOR  # F grade (ironic but follows spec)
+            return EXIT_CRITICAL  # F grade — pipeline broken
 
     def to_dict(self) -> dict[str, Any]:
         """Convert report to dictionary for JSON serialization."""

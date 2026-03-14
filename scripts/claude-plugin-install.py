@@ -2506,7 +2506,7 @@ def do_doctor(verbose: bool = False):
                 if not src_type:
                     # Object sources (github, url, npm, pip, git-subdir) require a "source" type field
                     warn(f"  marketplace.json: plugin '{p_name_display}' source object missing 'source' type field")
-                issues += 1
+                    issues += 1
             # String sources like "./plugins/name" are valid relative paths per the Anthropic spec
 
         # Check if registered in extraKnownMarketplaces (informational only)
