@@ -319,30 +319,29 @@ class TestReportHelpers:
         assert report.has_minor() is True
 
     def test_exit_code_branches(self, tmp_path):
-        """exit_code returns 0 for A, 1 for B/C, 2 for D, 3 for F based on total_score."""
+        """exit_code returns 0 for A, 3 for B/C, 2 for D, 1 for F based on total_score."""
         mp = tmp_path / "mp"
         mp.mkdir()
-        # Build a report scoring exactly in each bracket
-        # F grade (score < 60) -> exit_code 3
+        # F grade (score < 60) -> exit_code 1 (EXIT_CRITICAL — worst grade = most severe exit)
         report_f = PipelineValidationReport(marketplace_path=mp)
         for cat_name in report_f.categories:
             report_f.passed(cat_name, "ok", 20.0)
             report_f.add("CRITICAL", cat_name, "bad", 80.0, 0.0)
-        assert report_f.exit_code() == 3  # EXIT_MINOR for F
+        assert report_f.exit_code() == 1  # EXIT_CRITICAL for F
 
-        # D grade (60 <= score < 70) -> exit_code 2
+        # D grade (60 <= score < 70) -> exit_code 2 (EXIT_MAJOR)
         report_d = PipelineValidationReport(marketplace_path=mp)
         for cat_name in report_d.categories:
             report_d.passed(cat_name, "ok", 65.0)
             report_d.add("MAJOR", cat_name, "issue", 35.0, 0.0)
         assert report_d.exit_code() == 2  # EXIT_MAJOR for D
 
-        # B grade (80 <= score < 90) -> exit_code 1
+        # B grade (80 <= score < 90) -> exit_code 3 (EXIT_MINOR — minor gaps only)
         report_b = PipelineValidationReport(marketplace_path=mp)
         for cat_name in report_b.categories:
             report_b.passed(cat_name, "ok", 85.0)
             report_b.add("MINOR", cat_name, "nit", 15.0, 0.0)
-        assert report_b.exit_code() == 1  # EXIT_CRITICAL for B/C
+        assert report_b.exit_code() == 3  # EXIT_MINOR for B/C
 
     def test_to_dict_serialization(self, tmp_path):
         """to_dict returns a complete JSON-serializable dictionary with all report fields."""
