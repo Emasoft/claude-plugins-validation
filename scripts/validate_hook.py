@@ -867,6 +867,8 @@ def validate_single_hook(
         "type",
         "command",
         "prompt",
+        "url",  # HTTP hooks (v2.1.63+)
+        "headers",  # HTTP hooks (v2.1.63+)
         "model",
         "timeout",
         "async",
