@@ -49,6 +49,8 @@ from cpv_validation_common import (
     resolve_tool_command,
     save_report_and_print_summary,
     validate_component_name,
+    validate_md_file_paths,
+    validate_md_urls,
     validate_no_absolute_paths,
     validate_toc_embedding,
 )
@@ -64,9 +66,7 @@ from validate_skill_comprehensive import validate_skill as validate_skill_compre
 _gi: GitignoreFilter | None = None
 
 
-def validate_manifest(
-    plugin_root: Path, report: ValidationReport, marketplace_only: bool = False
-) -> dict[str, Any] | None:
+def validate_manifest(plugin_root: Path, report: ValidationReport, marketplace_only: bool = False) -> dict[str, Any] | None:
     """Validate plugin.json manifest.
 
     Args:
@@ -89,8 +89,7 @@ def validate_manifest(
 
     if marketplace_only:
         report.major(
-            "plugin.json EXISTS but should NOT for marketplace-only (strict=false). "
-            "Remove .claude-plugin/plugin.json to fix CLI uninstall issues.",
+            "plugin.json EXISTS but should NOT for marketplace-only (strict=false). Remove .claude-plugin/plugin.json to fix CLI uninstall issues.",
             ".claude-plugin/plugin.json",
         )
         return None
@@ -163,8 +162,7 @@ def validate_manifest(
     for key in manifest.keys():
         if key not in known_fields:
             report.warning(
-                f"Unknown manifest field '{key}' — not part of the Claude Code plugin spec. "
-                f"If used by plugin scripts, consider documenting it.",
+                f"Unknown manifest field '{key}' — not part of the Claude Code plugin spec. If used by plugin scripts, consider documenting it.",
                 ".claude-plugin/plugin.json",
             )
 
@@ -173,9 +171,7 @@ def validate_manifest(
         repo_val = manifest["repository"]
         if not isinstance(repo_val, str):
             report.major(
-                f"Field 'repository' must be a string URL (e.g. "
-                f'"https://github.com/user/repo"), not {type(repo_val).__name__}. '
-                f'Claude Code rejects object format like {{"type":"git","url":"..."}}.',
+                f'Field \'repository\' must be a string URL (e.g. "https://github.com/user/repo"), not {type(repo_val).__name__}. Claude Code rejects object format like {{"type":"git","url":"..."}}.',
                 ".claude-plugin/plugin.json",
             )
 
@@ -278,20 +274,13 @@ def validate_manifest(
                 normalized = value.replace("\\", "/").rstrip("/") + "/"
                 if normalized == default_path:
                     report.critical(
-                        f"Field '{key}' points to '{default_path}' which is auto-discovered "
-                        f"by Claude Code. This causes a malformed manifest error and the "
-                        f"plugin will not load. Remove it from plugin.json — only non-standard "
-                        f"paths need explicit declaration.",
+                        f"Field '{key}' points to '{default_path}' which is auto-discovered by Claude Code. This causes a malformed manifest error and the plugin will not load. Remove it from plugin.json — only non-standard paths need explicit declaration.",
                         ".claude-plugin/plugin.json",
                     )
             # Array of files inside the default directory also breaks plugin loading
-            elif isinstance(value, list) and all(
-                isinstance(p, str) and p.startswith(default_path) for p in value
-            ):
+            elif isinstance(value, list) and all(isinstance(p, str) and p.startswith(default_path) for p in value):
                 report.critical(
-                    f"Field '{key}' lists files inside '{default_path}' which is "
-                    f"auto-discovered by Claude Code. This causes a malformed manifest "
-                    f"error and the plugin will not load. Remove it from plugin.json.",
+                    f"Field '{key}' lists files inside '{default_path}' which is auto-discovered by Claude Code. This causes a malformed manifest error and the plugin will not load. Remove it from plugin.json.",
                     ".claude-plugin/plugin.json",
                 )
 
@@ -390,10 +379,7 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         if dirname.startswith(".") or dirname.endswith("_dev"):
             continue
         if dirname.lower() not in known_dirs:
-            report.warning(
-                f"Non-standard directory '{dirname}/' — not part of the plugin spec. "
-                f"If needed by plugin scripts, consider documenting its purpose in README."
-            )
+            report.warning(f"Non-standard directory '{dirname}/' — not part of the plugin spec. If needed by plugin scripts, consider documenting its purpose in README.")
 
     # Validate plugin-shipped settings.json if present
     settings_path = plugin_root / "settings.json"
@@ -410,8 +396,7 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
                     if key not in recognized_keys:
                         has_unrecognized = True
                         report.minor(
-                            f"settings.json: unrecognized key '{key}' — "
-                            f"supported plugin settings: {', '.join(sorted(recognized_keys))}",
+                            f"settings.json: unrecognized key '{key}' — supported plugin settings: {', '.join(sorted(recognized_keys))}",
                             "settings.json",
                         )
                 if not has_unrecognized:
@@ -424,13 +409,10 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
     # Check that plugin has at least some actual content beyond just a manifest
     content_indicators = ["commands", "skills", "agents", "hooks", "scripts"]
     file_indicators = [".mcp.json", ".lsp.json"]
-    has_content = any((plugin_root / d).is_dir() for d in content_indicators) or any(
-        (plugin_root / f).exists() for f in file_indicators
-    )
+    has_content = any((plugin_root / d).is_dir() for d in content_indicators) or any((plugin_root / f).exists() for f in file_indicators)
     if not has_content:
         report.major(
-            "Plugin has a manifest but no content — "
-            "expected at least one of: commands/, skills/, agents/, hooks/, scripts/, .mcp.json, or .lsp.json",
+            "Plugin has a manifest but no content — expected at least one of: commands/, skills/, agents/, hooks/, scripts/, .mcp.json, or .lsp.json",
             ".claude-plugin/plugin.json",
         )
 
@@ -715,8 +697,7 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
             pass
     if scripts_missing_shebang:
         report.minor(
-            f"Scripts missing shebang (e.g. #!/usr/bin/env python3): {', '.join(sorted(scripts_missing_shebang))}. "
-            "Without a shebang, scripts may not run correctly across platforms.",
+            f"Scripts missing shebang (e.g. #!/usr/bin/env python3): {', '.join(sorted(scripts_missing_shebang))}. Without a shebang, scripts may not run correctly across platforms.",
             "scripts/",
         )
 
@@ -836,11 +817,7 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
     for dirpath, dirnames, filenames in _gi.walk(plugin_root, skip_dirs=skip_dirs) if _gi else os.walk(plugin_root):
         if not _gi:
             # Fallback filtering when gitignore filter not initialized
-            dirnames[:] = [
-                d
-                for d in dirnames
-                if not d.startswith(".") and d not in skip_dirs and not _is_python_venv(Path(dirpath) / d)
-            ]
+            dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in skip_dirs and not _is_python_venv(Path(dirpath) / d)]
         rel_dir = Path(dirpath).relative_to(plugin_root)
 
         for filename in filenames:
@@ -862,21 +839,14 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
             if platforms:
                 platforms_str = ", ".join(sorted(platforms))
                 report.warning(
-                    f"Found {len(paths)} {lang_name} script(s) ({ext}) — "
-                    f"only natively available on {platforms_str}. {note}. "
-                    f"Consider providing cross-platform alternatives or documenting requirements.",
+                    f"Found {len(paths)} {lang_name} script(s) ({ext}) — only natively available on {platforms_str}. {note}. Consider providing cross-platform alternatives or documenting requirements.",
                 )
             else:
                 report.warning(
-                    f"Found {len(paths)} {lang_name} script(s) ({ext}) — {note}. "
-                    f"Consider providing cross-platform alternatives.",
+                    f"Found {len(paths)} {lang_name} script(s) ({ext}) — {note}. Consider providing cross-platform alternatives.",
                 )
     else:
-        has_scripts = any(
-            any(f.endswith(ext) for ext in CROSSPLATFORM_EXTENSIONS)
-            for _, _, files in (_gi.walk(plugin_root, skip_dirs=skip_dirs) if _gi else os.walk(plugin_root))
-            for f in files
-        )
+        has_scripts = any(any(f.endswith(ext) for ext in CROSSPLATFORM_EXTENSIONS) for _, _, files in (_gi.walk(plugin_root, skip_dirs=skip_dirs) if _gi else os.walk(plugin_root)) for f in files)
         if has_scripts:
             report.passed("All scripts use cross-platform languages")
 
@@ -916,18 +886,9 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
             if has_bin:
                 report.info(f"Found {len(source_paths)} {lang_name} source file(s) with compiled binaries in bin/")
             elif has_build_system or has_build_script:
-                report.warning(
-                    f"Found {len(source_paths)} {lang_name} source file(s) "
-                    f"with build system but no pre-compiled binaries in bin/. "
-                    f"Users will need to compile before use."
-                )
+                report.warning(f"Found {len(source_paths)} {lang_name} source file(s) with build system but no pre-compiled binaries in bin/. Users will need to compile before use.")
             else:
-                report.major(
-                    f"Found {len(source_paths)} {lang_name} source file(s) "
-                    f"but no compiled binaries in bin/ and no build script "
-                    f"(build.sh, install.sh, Makefile, etc.). "
-                    f"Provide pre-compiled binaries or a build/install script."
-                )
+                report.major(f"Found {len(source_paths)} {lang_name} source file(s) but no compiled binaries in bin/ and no build script (build.sh, install.sh, Makefile, etc.). Provide pre-compiled binaries or a build/install script.")
 
     # --- 3. Check compiled binaries platform coverage ---
     # Search for bin/ directories recursively, skip gitignored paths
@@ -987,19 +948,11 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
         missing = RECOMMENDED_PLATFORMS - detected_platforms
         if missing:
             missing_str = ", ".join(sorted(missing))
-            report.warning(
-                f"Compiled binaries missing for: {missing_str}. "
-                f"Detected platforms: {', '.join(sorted(detected_platforms))}. "
-                f"Consider providing binaries for all major platforms."
-            )
+            report.warning(f"Compiled binaries missing for: {missing_str}. Detected platforms: {', '.join(sorted(detected_platforms))}. Consider providing binaries for all major platforms.")
         else:
             report.passed(f"Compiled binaries cover recommended platforms: {', '.join(sorted(detected_platforms))}")
     else:
-        report.warning(
-            f"Found {len(binary_files)} binary file(s) without platform identifiers "
-            f"in filename. Use naming convention like 'tool-darwin-arm64', "
-            f"'tool-linux-amd64', 'tool-windows-amd64.exe' for multi-platform support."
-        )
+        report.warning(f"Found {len(binary_files)} binary file(s) without platform identifiers in filename. Use naming convention like 'tool-darwin-arm64', 'tool-linux-amd64', 'tool-windows-amd64.exe' for multi-platform support.")
 
 
 def validate_skills(plugin_root: Path, report: ValidationReport, skip_platform_checks: list[str] | None = None) -> None:
@@ -1143,10 +1096,7 @@ def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
     gitignore_path = plugin_root / ".gitignore"
 
     if not gitignore_path.exists():
-        report.major(
-            "No .gitignore file found — cache files, build artifacts, "
-            "and secrets may be accidentally included in the plugin"
-        )
+        report.major("No .gitignore file found — cache files, build artifacts, and secrets may be accidentally included in the plugin")
         return
 
     try:
@@ -1174,10 +1124,7 @@ def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
     # Check for common anti-patterns in .gitignore
     # Ignoring the entire plugin source is almost certainly wrong
     if "*.py" in lines or "*.js" in lines or "*.ts" in lines:
-        report.major(
-            ".gitignore ignores all source files (*.py, *.js, or *.ts) — "
-            "this will exclude plugin code from distribution"
-        )
+        report.major(".gitignore ignores all source files (*.py, *.js, or *.ts) — this will exclude plugin code from distribution")
 
     # Scan for actual venv directories by structure (any name, not just .venv/venv)
     for item in plugin_root.iterdir():
@@ -1186,10 +1133,7 @@ def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
             # Check if this specific directory is covered by .gitignore
             covered = any(dirname.lower() in line.lower() for line in lines)
             if not covered:
-                report.major(
-                    f"Virtual environment '{dirname}/' detected (contains pyvenv.cfg) "
-                    f"but not covered by .gitignore. Add '{dirname}/' to .gitignore."
-                )
+                report.major(f"Virtual environment '{dirname}/' detected (contains pyvenv.cfg) but not covered by .gitignore. Add '{dirname}/' to .gitignore.")
 
     # Check that non-plugin artifacts that may exist are ignored
     # Look for actual artifacts in the tree that should be gitignored
@@ -1264,9 +1208,7 @@ def validate_workflow_inline_python(plugin_root: Path, report: ValidationReport)
                 snippet = bad_match.group(0)
                 found_any = True
                 report.major(
-                    f"Inline Python uses dict bracket access in f-string: {snippet} "
-                    "-- shell quoting will strip inner quotes causing NameError. "
-                    "Extract value into a local variable first.",
+                    f"Inline Python uses dict bracket access in f-string: {snippet} -- shell quoting will strip inner quotes causing NameError. Extract value into a local variable first.",
                     rel_path,
                     line_num,
                 )
@@ -1341,6 +1283,68 @@ def print_json(report: ValidationReport) -> None:
     print(json.dumps(output, indent=2))
 
 
+def validate_md_content_references(plugin_root: Path, report: ValidationReport) -> None:
+    """Validate file path references and URLs inside all .md files in the plugin.
+
+    Scans commands/, agents/, skills/, README.md for:
+    - Broken file path references (markdown links and backtick paths)
+    - Dead URLs (HTTP HEAD check with sanitization)
+    """
+    # Collect all .md files to check (excluding tests/, _dev/ dirs, and CHANGELOG)
+    md_files: list[Path] = []
+
+    # README.md at root
+    readme = plugin_root / "README.md"
+    if readme.exists():
+        md_files.append(readme)
+
+    # Commands
+    commands_dir = plugin_root / "commands"
+    if commands_dir.is_dir():
+        md_files.extend(commands_dir.glob("*.md"))
+
+    # Agents
+    agents_dir = plugin_root / "agents"
+    if agents_dir.is_dir():
+        md_files.extend(agents_dir.glob("*.md"))
+
+    # Skills (SKILL.md + references/*.md)
+    skills_dir = plugin_root / "skills"
+    if skills_dir.is_dir():
+        for skill_dir in skills_dir.iterdir():
+            if skill_dir.is_dir():
+                skill_md = skill_dir / "SKILL.md"
+                if skill_md.exists():
+                    md_files.append(skill_md)
+                refs_dir = skill_dir / "references"
+                if refs_dir.is_dir():
+                    md_files.extend(refs_dir.glob("*.md"))
+
+    if not md_files:
+        return
+
+    report.info(f"Checking content references in {len(md_files)} .md file(s)")
+
+    # Patterns to skip in path validation (common false positives)
+    skip_patterns = {
+        "node_modules/",
+        "__pycache__/",
+        ".git/",
+        "<placeholder",
+        "${",
+        "$(",
+    }
+
+    # Shared URL cache across all files (avoid re-checking same URL)
+    url_cache: dict[str, bool] = {}
+
+    for md_file in sorted(md_files):
+        # Validate file path references
+        validate_md_file_paths(md_file, plugin_root, report, skip_patterns=skip_patterns)
+        # Validate URLs
+        validate_md_urls(md_file, plugin_root, report, url_cache=url_cache)
+
+
 def main() -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -1364,13 +1368,10 @@ def main() -> int:
         "--skip-platform-checks",
         nargs="*",
         metavar="PLATFORM",
-        help="Skip platform-specific checks (e.g., --skip-platform-checks windows). "
-        "Valid platforms: windows, macos, linux. Use without args to skip all.",
+        help="Skip platform-specific checks (e.g., --skip-platform-checks windows). Valid platforms: windows, macos, linux. Use without args to skip all.",
     )
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
-    parser.add_argument(
-        "--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout"
-    )
+    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
     parser.add_argument("path", nargs="?", help="Plugin root path (default: parent of scripts/)")
     args = parser.parse_args()
 
@@ -1398,9 +1399,7 @@ def main() -> int:
         elif not args.marketplace_only:
             # No .claude-plugin/ found and no version subdirs — not a plugin directory
             print(
-                f"Error: No Claude Code plugin found at {plugin_root}\n"
-                f"Expected a .claude-plugin/ directory. "
-                f"Make sure you are running this from the plugin root directory.",
+                f"Error: No Claude Code plugin found at {plugin_root}\nExpected a .claude-plugin/ directory. Make sure you are running this from the plugin root directory.",
                 file=sys.stderr,
             )
             return 1
@@ -1428,6 +1427,7 @@ def main() -> int:
     validate_no_local_paths(plugin_root, report)
     validate_gitignore(plugin_root, report)
     validate_cross_platform(plugin_root, report)
+    validate_md_content_references(plugin_root, report)
     validate_workflow_inline_python(plugin_root, report)
 
     # Output
