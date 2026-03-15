@@ -587,14 +587,14 @@ def validate_plugin_entry(
             )
 
     # Validate string-typed optional fields
-    for field in ("description", "homepage", "license", "category"):
-        val = plugin.get(field)
+    for field_name in ("description", "homepage", "license", "category"):
+        val = plugin.get(field_name)
         if val is not None and not isinstance(val, str):
             results.append(
                 ValidationResult(
                     level="MINOR",
                     category="plugin",
-                    message=f"Plugin '{plugin_id}' {field} must be a string, got {type(val).__name__}",
+                    message=f"Plugin '{plugin_id}' {field_name} must be a string, got {type(val).__name__}",
                     file=json_path,
                 )
             )
