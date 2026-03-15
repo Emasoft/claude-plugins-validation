@@ -228,6 +228,7 @@ def is_valid_model(value: str) -> bool:
     """Check if a model value is valid (short name or full model ID)."""
     return value.lower() in VALID_MODELS or bool(_FULL_MODEL_ID_RE.match(value))
 
+
 # Environment variables provided by Claude Code at plugin load time
 # Plugins must use these instead of hardcoded absolute paths
 VALID_PLUGIN_ENV_VARS = {
@@ -768,11 +769,7 @@ def is_path_gitignored(rel_path: str, patterns: list[str]) -> bool:
             if pattern.startswith("**/"):
                 # **/foo matches foo at any depth
                 suffix = pattern[3:]  # e.g., "dist" from "**/dist"
-                if (
-                    fnmatch.fnmatch(rel_path, suffix)
-                    or fnmatch.fnmatch(rel_path, f"*/{suffix}")
-                    or f"/{suffix}" in f"/{rel_path}"
-                ):
+                if fnmatch.fnmatch(rel_path, suffix) or fnmatch.fnmatch(rel_path, f"*/{suffix}") or f"/{suffix}" in f"/{rel_path}":
                     return True
                 continue
             elif pattern.endswith("/**"):
@@ -1791,8 +1788,7 @@ def scan_file_for_private_info(
             line_num = content[: match.start()].count("\n") + 1
             issues_found += 1
             report.critical(
-                f"Private info leaked: {desc} - found '{matched_text}' "
-                "(replace with relative path or ${CLAUDE_PLUGIN_ROOT})",
+                f"Private info leaked: {desc} - found '{matched_text}' (replace with relative path or ${{CLAUDE_PLUGIN_ROOT}})",
                 rel_path,
                 line_num,
             )
@@ -1988,8 +1984,7 @@ def scan_file_for_absolute_paths(
             # Use MINOR for system paths in scripts (may be intentional), MAJOR for home paths
             severity = "minor" if desc == "system absolute path" and not is_doc_file else "major"
             getattr(report, severity)(
-                f"Absolute path found: '{matched_text[:60]}...' - "
-                "use relative path, ${CLAUDE_PLUGIN_ROOT}, or ${CLAUDE_PROJECT_DIR}",
+                f"Absolute path found: '{matched_text[:60]}...' - use relative path, ${{CLAUDE_PLUGIN_ROOT}}, or ${{CLAUDE_PROJECT_DIR}}",
                 rel_path,
                 line_num,
             )
@@ -2028,6 +2023,7 @@ def validate_no_absolute_paths(
         gi = GitignoreFilter(root_path)
         walker = gi.walk(root_path, skip_dirs=extra_skip)
     else:
+
         def _raw_walk():  # type: ignore[return]
             for dirpath, dirnames, filenames in os.walk(root_path):
                 dirnames[:] = [d for d in dirnames if not should_skip_directory(d) and d not in extra_skip]
@@ -2228,10 +2224,7 @@ def validate_toc_embedding(
                 # We can't require TOC embedding, but the file itself should
                 # have a TOC for progressive discovery.
                 report.nit(
-                    f"Referenced file '{ref_path.name}' (linked from a list in "
-                    f"{rel_file}) has no Table of Contents section. All .md "
-                    f"reference files should include a TOC for progressive "
-                    f"discovery.",
+                    f"Referenced file '{ref_path.name}' (linked from a list in {rel_file}) has no Table of Contents section. All .md reference files should include a TOC for progressive discovery.",
                     rel_file,
                 )
             # For non-list links or exempt files: skip (no TOC to embed)
@@ -2316,11 +2309,7 @@ def validate_toc_embedding(
         # references are invisible to the TOC embedding algorithm and
         # agents cannot discover the referenced content.
         report.minor(
-            f"Reference to '{ref_path.name}' in {rel_file} uses backtick "
-            f"format (`{bt_path_str}`) instead of a markdown link. Use "
-            f"[{ref_path.stem}]({bt_path_str}) so progressive discovery "
-            f"can find it — backtick references are invisible to the TOC "
-            f"embedding algorithm.",
+            f"Reference to '{ref_path.name}' in {rel_file} uses backtick format (`{bt_path_str}`) instead of a markdown link. Use [{ref_path.stem}]({bt_path_str}) so progressive discovery can find it — backtick references are invisible to the TOC embedding algorithm.",
             rel_file,
         )
 
@@ -2350,9 +2339,7 @@ def validate_toc_embedding(
         search_end = min(len(lines), bt_line_num + 50)
         nearby_text = "\n".join(lines[search_start:search_end])
 
-        embedded_count = sum(
-            1 for heading in toc_headings if heading.lower() in nearby_text.lower()
-        )
+        embedded_count = sum(1 for heading in toc_headings if heading.lower() in nearby_text.lower())
 
         if embedded_count == len(toc_headings):
             refs_with_toc += 1
@@ -2377,3 +2364,338 @@ def validate_toc_embedding(
             f"All {refs_checked} referenced .md files have TOC embedded in {rel_file}",
             rel_file,
         )
+
+
+def validate_md_file_paths(
+    md_file: Path,
+    plugin_root: Path,
+    report: ValidationReport,
+    *,
+    skip_patterns: set[str] | None = None,
+) -> None:
+    """Validate that file paths referenced in a markdown file exist on disk.
+
+    Extracts paths from:
+    1. Markdown links: [text](path) where path doesn't start with http/#
+    2. Backtick references that look like file paths: `path/to/file.ext`
+    3. Fenced code block references are SKIPPED (too many false positives)
+
+    Paths are resolved relative to the .md file's parent directory first,
+    then relative to plugin_root.
+    """
+    try:
+        content = md_file.read_text(encoding="utf-8")
+    except Exception:
+        return
+
+    if skip_patterns is None:
+        skip_patterns = set()
+
+    rel_md = str(md_file.relative_to(plugin_root)) if md_file.is_relative_to(plugin_root) else md_file.name
+
+    # Strip fenced code blocks to avoid false positives from example code
+    # Match ```...``` blocks (including with language specifier)
+    content_no_codeblocks = re.sub(r"```[\s\S]*?```", "", content)
+
+    # 1. Extract markdown link targets: [text](path)
+    # Skip: URLs (http/https/mailto), anchors (#), empty
+    md_link_re = re.compile(r"\[(?:[^\]]*)\]\(([^)]+)\)")
+
+    # 2. Extract backtick file path references: `path/to/file.ext`
+    # Only match if it looks like a real file path (has extension or path separator)
+    backtick_path_re = re.compile(r"(?<!`)``?([^`\n]+\.\w{1,10})``?(?!`)")
+
+    checked_paths: set[str] = set()
+
+    def _is_template_or_example_path(path: str) -> bool:
+        """Return True if path looks like a documentation template/example, not a real reference."""
+        # Template variables: {var}, <placeholder>, $VAR, YYYYMMDD
+        if re.search(r"[{}<>]|\$\w|YYYY|placeholder|my-plugin|my-agent|my-skill|your-", path, re.IGNORECASE):
+            return True
+        # Glob patterns: *.md, **/*.py
+        if "*" in path:
+            return True
+        # Regex-like patterns (contain special regex chars that aren't path chars)
+        if re.search(r"[?!\\^|+\[\]]", path):
+            return True
+        # Shell commands: chmod, ls, cat, shellcheck, ruff, mypy, npx, etc.
+        if re.match(r"^(chmod|ls|cat|mkdir|rm|cp|mv|git|uv|pip|npm|bun|curl|wget|shellcheck|ruff|mypy|npx|deno|node|python|python3)\s", path):
+            return True
+        # Paths starting with ~ (user home dir references in docs)
+        if path.startswith("~"):
+            return True
+        # Generic example paths used in documentation (other-file, subfolder/file, etc.)
+        if re.match(r"^\.\./(other|example|some)", path) or re.match(r"^(subfolder|subdir|folder|other)/", path):
+            return True
+        # Paths referencing common config files that may not exist in this plugin
+        # but are referenced as documentation examples
+        if re.match(r"^\.(vscode|docker|github|claude)/", path) or re.match(r"^\./(vscode|docker|github|claude)/", path):
+            return True
+        return False
+
+    for match in md_link_re.finditer(content_no_codeblocks):
+        raw_path = match.group(1).strip()
+        # Skip URLs, anchors, mailto, data URIs
+        if raw_path.startswith(("http://", "https://", "#", "mailto:", "data:", "tel:")):
+            continue
+        # Strip anchor from path (e.g., "file.md#section" -> "file.md")
+        path_no_anchor = raw_path.split("#")[0].strip()
+        if not path_no_anchor:
+            continue
+        # Skip template/example paths and caller-specified patterns
+        if _is_template_or_example_path(path_no_anchor):
+            continue
+        if any(pat in path_no_anchor for pat in skip_patterns):
+            continue
+        if path_no_anchor in checked_paths:
+            continue
+        checked_paths.add(path_no_anchor)
+
+        # Try resolving: first relative to .md file, then relative to plugin root
+        resolved = md_file.parent / path_no_anchor
+        if not resolved.exists():
+            resolved = plugin_root / path_no_anchor
+        if not resolved.exists():
+            report.minor(
+                f"Broken file reference: [{path_no_anchor}] in {rel_md} — file not found",
+                rel_md,
+            )
+        else:
+            report.passed(
+                f"File reference OK: {path_no_anchor} ({rel_md})",
+                rel_md,
+            )
+
+    for match in backtick_path_re.finditer(content_no_codeblocks):
+        raw_path = match.group(1).strip()
+        # Only check paths that contain a directory separator (skip bare filenames
+        # that are likely code identifiers like `json.loads` or `sys.argv`)
+        if "/" not in raw_path and "\\" not in raw_path:
+            continue
+        # Skip URLs that somehow ended up in backticks
+        if raw_path.startswith(("http://", "https://")):
+            continue
+        # Skip shell commands, env vars, flags
+        if raw_path.startswith(("$", "--", "-")):
+            continue
+        # Skip template/example paths and caller-specified patterns
+        if _is_template_or_example_path(raw_path):
+            continue
+        if any(pat in raw_path for pat in skip_patterns):
+            continue
+        if raw_path in checked_paths:
+            continue
+        checked_paths.add(raw_path)
+
+        # Strip leading ./
+        clean_path = raw_path.lstrip("./")
+
+        resolved = md_file.parent / clean_path
+        if not resolved.exists():
+            resolved = plugin_root / clean_path
+        if not resolved.exists():
+            # Don't report MINOR for backtick paths — too many false positives
+            # Use WARNING instead (non-blocking)
+            report.warning(
+                f"Possible broken backtick path: `{raw_path}` in {rel_md}",
+                rel_md,
+            )
+
+
+def _sanitize_url(url: str) -> str | None:
+    """Sanitize a URL before making HTTP requests.
+
+    Returns the sanitized URL, or None if the URL is unsafe.
+    Prevents SSRF, command injection, and other URL-based attacks.
+    """
+    from urllib.parse import urlparse
+
+    # Only allow http/https schemes — block file://, ftp://, javascript:, data:, etc.
+    if not url.startswith(("http://", "https://")):
+        return None
+
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return None
+
+    # Must have a valid hostname
+    if not parsed.hostname:
+        return None
+
+    host = parsed.hostname.lower()
+
+    # Block private/internal IPs and localhost variants
+    unsafe_hosts = {
+        "localhost",
+        "127.0.0.1",
+        "0.0.0.0",
+        "::1",
+        "[::1]",
+        "169.254.169.254",  # AWS metadata endpoint
+        "metadata.google.internal",  # GCP metadata
+    }
+    if host in unsafe_hosts:
+        return None
+
+    # Block private IP ranges (10.x, 172.16-31.x, 192.168.x)
+    import ipaddress
+
+    try:
+        ip = ipaddress.ip_address(host)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            return None
+    except ValueError:
+        pass  # Not an IP address — hostname is fine
+
+    # Block URLs with credentials (user:pass@host)
+    if parsed.username or parsed.password:
+        return None
+
+    # Block non-standard ports commonly used for internal services
+    if parsed.port and parsed.port not in (80, 443, 8080, 8443):
+        return None
+
+    # Strip fragments — they're client-side only
+    # Rebuild URL without fragment to avoid injection in fragment
+    clean = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+    if parsed.query:
+        # Only allow simple query params (no nested URLs or shell chars)
+        safe_query = re.sub(r"[;&|`$(){}]", "", parsed.query)
+        if safe_query:
+            clean += f"?{safe_query}"
+
+    # Length limit — URLs over 2048 chars are suspicious
+    if len(clean) > 2048:
+        return None
+
+    return clean
+
+
+def validate_md_urls(
+    md_file: Path,
+    plugin_root: Path,
+    report: ValidationReport,
+    *,
+    timeout: float = 8.0,
+    skip_domains: set[str] | None = None,
+    url_cache: dict[str, bool] | None = None,
+) -> None:
+    """Validate that URLs referenced in a markdown file are reachable.
+
+    Extracts URLs from markdown links [text](url) and bare URLs in text.
+    Does HTTP HEAD requests with timeout. Reports dead URLs as WARNING.
+
+    Uses a cache dict (shared across calls) to avoid re-checking the same URL.
+    All URLs are sanitized before any network request is made.
+    """
+    import ssl
+    import urllib.error
+    import urllib.request
+    from urllib.parse import urlparse
+
+    try:
+        content = md_file.read_text(encoding="utf-8")
+    except Exception:
+        return
+
+    if skip_domains is None:
+        # Domains to skip: localhost, example domains, local IPs, placeholders
+        skip_domains = {
+            "localhost",
+            "127.0.0.1",
+            "0.0.0.0",
+            "example.com",
+            "example.org",
+            "example.net",
+            "evil.com",
+            "attacker.com",
+            "malicious.com",  # Security documentation examples
+            "placeholder",
+            "your-",
+        }
+
+    if url_cache is None:
+        url_cache = {}
+
+    rel_md = str(md_file.relative_to(plugin_root)) if md_file.is_relative_to(plugin_root) else md_file.name
+
+    # Strip fenced code blocks — URLs in code examples shouldn't be validated
+    content_no_codeblocks = re.sub(r"```[\s\S]*?```", "", content)
+
+    # Extract URLs from markdown links AND bare URLs
+    url_re = re.compile(r"https?://[^\s\)\]\"'<>]+")
+
+    # Create SSL context once, outside the loop
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    checked_urls: set[str] = set()
+
+    for match in url_re.finditer(content_no_codeblocks):
+        raw_url = match.group(0).rstrip(".,;:!?)`")  # Strip trailing punctuation and backticks
+
+        if raw_url in checked_urls:
+            continue
+        checked_urls.add(raw_url)
+
+        # Skip malformed/truncated URLs (bare protocol, too short to be real)
+        if len(raw_url) < 12 or raw_url in ("http://", "https://", "http://`", "https://`"):
+            continue
+        # Skip template URLs with placeholders, generic owner/repo patterns, and ellipsis
+        if re.search(r"[{}<>]|\$\w|placeholder|your-|example\.com|/owner/|/OWNER/|/user/|/USER/|\.\.\.", raw_url, re.IGNORECASE):
+            continue
+
+        # Skip known-skippable domains before sanitization
+        try:
+            parsed = urlparse(raw_url)
+            host = parsed.hostname or ""
+            if any(skip in host for skip in skip_domains):
+                continue
+        except Exception:
+            continue
+
+        # Sanitize URL before any network request
+        safe_url = _sanitize_url(raw_url)
+        if safe_url is None:
+            continue  # Silently skip unsafe URLs (internal IPs, credentials, etc.)
+
+        # Check cache
+        if safe_url in url_cache:
+            if not url_cache[safe_url]:
+                report.warning(f"Dead URL: {raw_url} in {rel_md}", rel_md)
+            continue
+
+        # HTTP HEAD request with timeout
+        try:
+            req = urllib.request.Request(safe_url, method="HEAD")
+            req.add_header("User-Agent", "Mozilla/5.0 (compatible; CPV-LinkChecker/1.0)")
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+                if resp.status >= 400:
+                    url_cache[safe_url] = False
+                    report.warning(f"Dead URL (HTTP {resp.status}): {raw_url} in {rel_md}", rel_md)
+                else:
+                    url_cache[safe_url] = True
+        except urllib.error.HTTPError as e:
+            if e.code == 405:
+                # Some servers reject HEAD — retry with GET
+                try:
+                    req2 = urllib.request.Request(safe_url, method="GET")
+                    req2.add_header("User-Agent", "Mozilla/5.0 (compatible; CPV-LinkChecker/1.0)")
+                    with urllib.request.urlopen(req2, timeout=timeout, context=ctx) as resp2:
+                        url_cache[safe_url] = resp2.status < 400
+                        if resp2.status >= 400:
+                            report.warning(f"Dead URL (HTTP {resp2.status}): {raw_url} in {rel_md}", rel_md)
+                except Exception:
+                    url_cache[safe_url] = False
+                    report.warning(f"Dead URL (unreachable): {raw_url} in {rel_md}", rel_md)
+            elif e.code in (401, 403):
+                # Auth-protected URLs — treat as valid (they exist, just need auth)
+                url_cache[safe_url] = True
+            else:
+                url_cache[safe_url] = False
+                report.warning(f"Dead URL (HTTP {e.code}): {raw_url} in {rel_md}", rel_md)
+        except Exception:
+            url_cache[safe_url] = False
+            report.warning(f"Dead URL (unreachable): {raw_url} in {rel_md}", rel_md)
