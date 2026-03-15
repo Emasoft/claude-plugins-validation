@@ -95,6 +95,7 @@ For the full semantic validation criteria, scoring rubrics, and report format, s
 - **Do NOT read reference files unless evaluating progressive disclosure**
 - **Use WebFetch** to check Claude Code plugin spec docs when evaluating semantic correctness
 - **Use MCP search tools** (grepika, serena, tldr) for efficient code lookup
+- **Use LLM Externalizer MCP** (`mcp__plugin_llm-externalizer_llm-externalizer__*`) when available for bounded reads — analyzing SKILL.md content, reading reference files for progressive disclosure checks. Use `chat` or `code_task` with `input_files_paths`. Set `ensemble: false` to save opus tokens for grading.
 
 ## Examples
 

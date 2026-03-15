@@ -21,7 +21,7 @@ All notable changes to the Claude Plugins Validation plugin will be documented i
 ### LLM Externalizer MCP Integration
 
 - **Added LLM Externalizer instruction** to all 8 skill SKILL.md Token Optimization sections
-- Agents now instructed to prefer `mcp__llm-externalizer__*` for bounded analysis tasks
+- Agents now instructed to prefer `mcp__plugin_llm-externalizer_llm-externalizer__*` for bounded analysis tasks
 - Compressed existing text in tight SKILL.md files to stay under 4000 bytes
 - All 1120 tests pass
 
