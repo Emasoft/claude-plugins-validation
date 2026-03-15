@@ -77,6 +77,7 @@ Do NOT attempt to create alternative marketplace layouts, even if the user insis
 - **For batch fixes (same issue across multiple files)** — use the Edit tool on each file directly. For large batches, spawn parallel subagents (one per file) to apply the fix.
 - **Use MCP search tools** (grepika, serena, tldr) to locate code patterns efficiently
 - **Use WebFetch** to verify official docs/API specs when checking if the existing code is correct before fixing
+- **Use LLM Externalizer MCP** (`mcp__plugin_llm-externalizer_llm-externalizer__*`) when available for bounded analysis — reading fix guides, analyzing report contents, comparing file versions. Use `chat` or `code_task` with `input_files_paths`. Set `ensemble: false` for simple reads.
 
 ## Examples
 
