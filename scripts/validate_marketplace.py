@@ -146,7 +146,7 @@ SOURCE_REQUIRED_FIELDS = {
     "url": {"url"},
     "npm": {"package"},
     "pip": {"package"},
-    "git-subdir": {"repo", "subdir"},  # Points to a subdirectory within a git repo (v2.1.69+)
+    "git-subdir": {"url", "path"},  # Points to a subdirectory within a git repo (v2.1.69+)
 }
 
 # Reserved marketplace names that cannot be used
@@ -363,6 +363,20 @@ def validate_marketplace_name(name: Any, json_path: str) -> list[ValidationResul
                 file=json_path,
             )
         )
+    else:
+        # Impersonation detection — flag names that look like official Anthropic marketplaces
+        lower = name.lower()
+        impersonation_keywords = {"official", "anthropic", "claude-code", "claude-plugins"}
+        if any(kw in lower for kw in impersonation_keywords):
+            results.append(
+                ValidationResult(
+                    level="MAJOR",
+                    category="marketplace",
+                    message=f"Marketplace name '{name}' may impersonate an official Anthropic marketplace",
+                    file=json_path,
+                    suggestion="Avoid names containing 'official', 'anthropic', 'claude-code', or 'claude-plugins'",
+                )
+            )
 
     return results
 
@@ -516,6 +530,99 @@ def validate_plugin_entry(
                 )
             )
 
+    # Validate author structure (spec: object with name required, email optional)
+    author = plugin.get("author")
+    if author is not None:
+        if not isinstance(author, dict):
+            results.append(
+                ValidationResult(
+                    level="MINOR",
+                    category="plugin",
+                    message=f"Plugin '{plugin_id}' author must be an object with 'name' field, got {type(author).__name__}",
+                    file=json_path,
+                )
+            )
+        elif "name" not in author:
+            results.append(
+                ValidationResult(
+                    level="MINOR",
+                    category="plugin",
+                    message=f"Plugin '{plugin_id}' author object missing required 'name' field",
+                    file=json_path,
+                )
+            )
+
+    # Validate strict field type (spec: boolean, default true)
+    strict = plugin.get("strict")
+    if strict is not None and not isinstance(strict, bool):
+        results.append(
+            ValidationResult(
+                level="MINOR",
+                category="plugin",
+                message=f"Plugin '{plugin_id}' strict must be a boolean, got {type(strict).__name__}",
+                file=json_path,
+            )
+        )
+
+    # Validate keywords type (spec: array of strings)
+    keywords = plugin.get("keywords")
+    if keywords is not None:
+        if not isinstance(keywords, list):
+            results.append(
+                ValidationResult(
+                    level="MINOR",
+                    category="plugin",
+                    message=f"Plugin '{plugin_id}' keywords must be an array",
+                    file=json_path,
+                )
+            )
+        elif not all(isinstance(k, str) for k in keywords):
+            results.append(
+                ValidationResult(
+                    level="MINOR",
+                    category="plugin",
+                    message=f"Plugin '{plugin_id}' keywords must be strings",
+                    file=json_path,
+                )
+            )
+
+    # Validate string-typed optional fields
+    for field in ("description", "homepage", "license", "category"):
+        val = plugin.get(field)
+        if val is not None and not isinstance(val, str):
+            results.append(
+                ValidationResult(
+                    level="MINOR",
+                    category="plugin",
+                    message=f"Plugin '{plugin_id}' {field} must be a string, got {type(val).__name__}",
+                    file=json_path,
+                )
+            )
+
+    # Validate component config field types (spec: string|array for commands/agents, string|object for hooks/mcpServers/lspServers)
+    for field in ("commands", "agents"):
+        val = plugin.get(field)
+        if val is not None and not isinstance(val, (str, list)):
+            results.append(
+                ValidationResult(
+                    level="MINOR",
+                    category="plugin",
+                    message=f"Plugin '{plugin_id}' {field} must be a string or array, got {type(val).__name__}",
+                    file=json_path,
+                )
+            )
+    for field in ("hooks", "mcpServers", "lspServers"):
+        val = plugin.get(field)
+        if val is not None and not isinstance(val, (str, dict)):
+            results.append(
+                ValidationResult(
+                    level="MINOR",
+                    category="plugin",
+                    message=f"Plugin '{plugin_id}' {field} must be a string or object, got {type(val).__name__}",
+                    file=json_path,
+                )
+            )
+
     return results
 
 
@@ -605,7 +712,7 @@ def validate_plugin_source(
                     )
                 )
 
-        # Validate SHA format for GitHub sources
+        # Validate SHA format (all source types that support it)
         if "sha" in source:
             sha = source["sha"]
             if not isinstance(sha, str) or not re.match(r"^[0-9a-f]{40}$", sha):
@@ -614,6 +721,30 @@ def validate_plugin_source(
                         level="MINOR",
                         category="source",
                         message=f"Plugin '{plugin_id}' source 'sha' must be a 40-character hex string",
+                        file=json_path,
+                    )
+                )
+
+        # Validate ref type (all source types that support it)
+        if "ref" in source and not isinstance(source["ref"], str):
+            results.append(
+                ValidationResult(
+                    level="MINOR",
+                    category="source",
+                    message=f"Plugin '{plugin_id}' source 'ref' must be a string",
+                    file=json_path,
+                )
+            )
+
+        # Validate repo format for github sources (must be owner/repo)
+        if source_type == "github" and "repo" in source:
+            repo = source["repo"]
+            if isinstance(repo, str) and "/" not in repo:
+                results.append(
+                    ValidationResult(
+                        level="MAJOR",
+                        category="source",
+                        message=f"Plugin '{plugin_id}' github source 'repo' must be in 'owner/repo' format, got '{repo}'",
                         file=json_path,
                     )
                 )
@@ -1691,6 +1822,21 @@ def validate_marketplace(marketplace_path: Path) -> ValidationReport:
                 message="'owner' object missing required 'name' field",
                 file=json_path,
             )
+        elif not isinstance(owner["name"], str) or not owner["name"].strip():
+            report.add_marketplace_result(
+                level="MAJOR",
+                category="marketplace",
+                message="'owner.name' must be a non-empty string",
+                file=json_path,
+            )
+        # Validate optional email field type
+        if "email" in owner and not isinstance(owner["email"], str):
+            report.add_marketplace_result(
+                level="MINOR",
+                category="marketplace",
+                message=f"'owner.email' must be a string, got {type(owner['email']).__name__}",
+                file=json_path,
+            )
     elif owner is not None:
         report.add_marketplace_result(
             level="MAJOR",
@@ -1734,14 +1880,17 @@ def validate_marketplace(marketplace_path: Path) -> ValidationReport:
             workflow_results = validate_workflow_inline_python(marketplace_dir)
             report.results.extend(workflow_results)
 
-    # Validate optional fields
-    if "description" in data and not isinstance(data["description"], str):
-        report.add_marketplace_result(
-            level="MINOR",
-            category="manifest",
-            message="description field must be a string",
-            file=json_path,
-        )
+    # Validate optional fields — description and version can be top-level or nested under metadata
+    has_description = False
+    if "description" in data:
+        has_description = True
+        if not isinstance(data["description"], str):
+            report.add_marketplace_result(
+                level="MINOR",
+                category="manifest",
+                message="description field must be a string",
+                file=json_path,
+            )
 
     if "version" in data:
         version = data["version"]
@@ -1759,6 +1908,50 @@ def validate_marketplace(marketplace_path: Path) -> ValidationReport:
                 message=f"Marketplace version '{version}' should follow semver format",
                 file=json_path,
             )
+
+    # Validate metadata nested object (spec allows metadata.description, metadata.version, metadata.pluginRoot)
+    if "metadata" in data:
+        metadata = data["metadata"]
+        if not isinstance(metadata, dict):
+            report.add_marketplace_result(
+                level="MINOR",
+                category="manifest",
+                message=f"'metadata' must be an object, got {type(metadata).__name__}",
+                file=json_path,
+            )
+        else:
+            if "description" in metadata:
+                has_description = True
+                if not isinstance(metadata["description"], str):
+                    report.add_marketplace_result(
+                        level="MINOR",
+                        category="manifest",
+                        message="metadata.description must be a string",
+                        file=json_path,
+                    )
+            if "version" in metadata and not isinstance(metadata["version"], str):
+                report.add_marketplace_result(
+                    level="MINOR",
+                    category="manifest",
+                    message="metadata.version must be a string",
+                    file=json_path,
+                )
+            if "pluginRoot" in metadata and not isinstance(metadata["pluginRoot"], str):
+                report.add_marketplace_result(
+                    level="MINOR",
+                    category="manifest",
+                    message="metadata.pluginRoot must be a string",
+                    file=json_path,
+                )
+
+    # Warn if marketplace has no description at all
+    if not has_description:
+        report.add_marketplace_result(
+            level="WARNING",
+            category="manifest",
+            message="No marketplace description provided — add 'description' or 'metadata.description'",
+            file=json_path,
+        )
 
     return report
 
