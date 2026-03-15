@@ -22,6 +22,8 @@ dmypy.json
 
 # Claude Code
 .claude/
+.tldr/
+.tldrignore
 llm_externalizer_output/
 
 # IDE
@@ -32,11 +34,6 @@ llm_externalizer_output/
 
 # OS
 .DS_Store
-
-# Claude Code local session data
-.claude/
-.tldr/
-.tldrignore
 Thumbs.db
 
 # Environment
