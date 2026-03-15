@@ -727,7 +727,7 @@ def main() -> int:
     cpv_dir = find_cpv_dir()
     if cpv_dir is None:
         print(f"{RED}ERROR: CPV plugin not found in cache.{NC}")
-        print("Install it: claude /cpv-install-plugin <placeholder-for-validation-plugin-name>")
+        print("Install it: claude plugin install claude-plugins-validation@<marketplace-name>")
         return 1
 
     print(f"{BLUE}Repo:{NC}     {repo_root}")
@@ -1189,7 +1189,7 @@ echo ""
 CPV_DIR=$(find_cpv_dir)
 if [ -z "$CPV_DIR" ]; then
     echo "ERROR: CPV plugin not found in cache. Install it first:"
-    echo "  claude /cpv-install-plugin <placeholder-for-validation-plugin-name>"
+    echo "  claude plugin install claude-plugins-validation@<marketplace-name>"
     exit 1
 fi
 

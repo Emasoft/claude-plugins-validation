@@ -64,7 +64,6 @@ claude --plugin-dir ./OUTPUT_SKILLS/claude-plugins-validation
 | `/cpv-validate-xref` | Cross-reference validation (agent refs, version sync, hook scripts) |
 | `/cpv-fix-validation` | Auto-fix issues from a validation report |
 | `/cpv-semantic-validation` | Deep AI-driven semantic analysis (opus, explicit opt-in) |
-| `/cpv-install-plugin` | Install, update, enable/disable, and manage plugins locally |
 | `/cpv-setup-github-marketplace` | Set up a GitHub marketplace with CI/CD |
 | `/cpv-publish-to-marketplace` | Publish a plugin to a GitHub-hosted marketplace |
 
@@ -265,7 +264,6 @@ claude-plugins-validation/
 │   └── semantic-validator.md        # Deep AI-driven quality analysis agent
 ├── commands/
 │   ├── cpv-fix-validation.md        # Auto-fix validation issues
-│   ├── cpv-install-plugin.md        # Local plugin install/update/enable/disable
 │   ├── cpv-publish-to-marketplace.md # Publish plugin to marketplace
 │   ├── cpv-semantic-validation.md   # Deep semantic analysis (opus)
 │   ├── cpv-setup-github-marketplace.md # Marketplace setup command
@@ -288,7 +286,6 @@ claude-plugins-validation/
 │   ├── pre-commit                   # Pre-commit validation hook
 │   └── pre-push                     # Pre-push validation hook
 ├── scripts/
-│   ├── (claude-plugin-install.py moved to claude-plugins-management plugin)
 │   ├── cpv_token_cost.py            # Token cost reporter (hook + CLI)
 │   ├── cpv_validation_common.py     # Shared validation utilities
 │   ├── gitignore_filter.py          # Gitignore pattern filter
@@ -319,8 +316,6 @@ claude-plugins-validation/
 │   ├── fix-validation/              # Automated fix guides
 │   │   ├── SKILL.md
 │   │   └── references/              # Per-validator fix guides
-│   ├── install-plugin/
-│   │   └── SKILL.md                 # Local plugin installation skill
 │   ├── plugin-validation-skill/
 │   │   ├── SKILL.md                 # Main validation skill
 │   │   └── references/              # Detailed reference docs
