@@ -600,25 +600,25 @@ def validate_plugin_entry(
             )
 
     # Validate component config field types (spec: string|array for commands/agents, string|object for hooks/mcpServers/lspServers)
-    for field in ("commands", "agents"):
-        val = plugin.get(field)
+    for field_name in ("commands", "agents"):
+        val = plugin.get(field_name)
         if val is not None and not isinstance(val, (str, list)):
             results.append(
                 ValidationResult(
                     level="MINOR",
                     category="plugin",
-                    message=f"Plugin '{plugin_id}' {field} must be a string or array, got {type(val).__name__}",
+                    message=f"Plugin '{plugin_id}' {field_name} must be a string or array, got {type(val).__name__}",
                     file=json_path,
                 )
             )
-    for field in ("hooks", "mcpServers", "lspServers"):
-        val = plugin.get(field)
+    for field_name in ("hooks", "mcpServers", "lspServers"):
+        val = plugin.get(field_name)
         if val is not None and not isinstance(val, (str, dict)):
             results.append(
                 ValidationResult(
                     level="MINOR",
                     category="plugin",
-                    message=f"Plugin '{plugin_id}' {field} must be a string or object, got {type(val).__name__}",
+                    message=f"Plugin '{plugin_id}' {field_name} must be a string or object, got {type(val).__name__}",
                     file=json_path,
                 )
             )
