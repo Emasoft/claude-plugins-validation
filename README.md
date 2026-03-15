@@ -11,9 +11,9 @@ This plugin provides:
 
 - **Validation Scripts**: Python scripts for validating all plugin components (190+ rules)
 - **Expert Agents**: `plugin-validator` for interactive validation, `skill-validation-agent` for skill validation, `plugin-fixer` for automated remediation, `semantic-validator` for deep AI-driven quality analysis
-- **Skills**: `plugin-validation-skill`, `skill-validation-skill`, `fix-validation`, `semantic-validation-skill`, `install-plugin`, `setup-plugin-repo`, `setup-github-marketplace`, `publish-to-marketplace`
-- **Slash Commands**: 20 commands for validating, installing, fixing, and publishing plugins
-- **Local Plugin Installer**: `claude-plugin-install.py` for installing plugins without a GitHub marketplace
+- **Skills**: `plugin-validation-skill`, `skill-validation-skill`, `fix-validation`, `semantic-validation-skill`, `setup-plugin-repo`, `setup-github-marketplace`, `publish-to-marketplace`
+- **Slash Commands**: 19 commands for validating, fixing, and publishing plugins
+- **Plugin Management**: For installing/managing plugins, see [claude-plugins-management](https://github.com/Emasoft/claude-plugins-management)
 
 ## Installation (Production)
 
@@ -130,20 +130,7 @@ uv run python scripts/validate_xref.py /path/to/plugin
 
 ### Install a Plugin Locally (No Marketplace)
 
-```bash
-# Install from archive or directory
-uv run python scripts/claude-plugin-install.py ./my-plugin.tar.gz
-uv run python scripts/claude-plugin-install.py ./my-plugin-dir/
-
-# Validate, list, uninstall, health check
-uv run python scripts/claude-plugin-install.py --validate ./my-plugin-dir/
-uv run python scripts/claude-plugin-install.py --list
-uv run python scripts/claude-plugin-install.py --uninstall my-plugin@local-my-plugin
-uv run python scripts/claude-plugin-install.py --update ./new-version.tar.gz my-marketplace
-uv run python scripts/claude-plugin-install.py --enable my-plugin@my-marketplace
-uv run python scripts/claude-plugin-install.py --disable my-plugin@my-marketplace
-uv run python scripts/claude-plugin-install.py --doctor
-```
+For plugin installation and management, use the dedicated [claude-plugins-management](https://github.com/Emasoft/claude-plugins-management) plugin.
 
 ### Use the Agent
 
@@ -301,7 +288,7 @@ claude-plugins-validation/
 │   ├── pre-commit                   # Pre-commit validation hook
 │   └── pre-push                     # Pre-push validation hook
 ├── scripts/
-│   ├── claude-plugin-install.py     # Local plugin installer (standalone)
+│   ├── (claude-plugin-install.py moved to claude-plugins-management plugin)
 │   ├── cpv_token_cost.py            # Token cost reporter (hook + CLI)
 │   ├── cpv_validation_common.py     # Shared validation utilities
 │   ├── gitignore_filter.py          # Gitignore pattern filter
