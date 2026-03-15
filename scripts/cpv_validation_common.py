@@ -2372,6 +2372,7 @@ def validate_md_file_paths(
     report: ValidationReport,
     *,
     skip_patterns: set[str] | None = None,
+    is_reference_doc: bool = False,
 ) -> None:
     """Validate that file paths referenced in a markdown file exist on disk.
 
@@ -2382,6 +2383,12 @@ def validate_md_file_paths(
 
     Paths are resolved relative to the .md file's parent directory first,
     then relative to plugin_root.
+
+    Args:
+        is_reference_doc: If True, this file is a reference/fix guide that
+            describes the USER's plugin structure. Plugin-internal backtick
+            paths are downgraded from MINOR to WARNING since they describe
+            the target plugin, not this plugin.
     """
     try:
         content = md_file.read_text(encoding="utf-8")
@@ -2426,6 +2433,10 @@ def validate_md_file_paths(
             return True
         # Generic example paths used in documentation (other-file, subfolder/file, etc.)
         if re.match(r"^\.\./(other|example|some)", path) or re.match(r"^(subfolder|subdir|folder|other)/", path):
+            return True
+        # Example filenames commonly used in documentation (foo, bar, run, test, etc.)
+        basename = path.rsplit("/", 1)[-1].split(".")[0] if "/" in path else ""
+        if basename in ("foo", "bar", "baz", "run", "test", "example", "sample", "demo", "my", "your"):
             return True
         # Paths referencing common config files that may not exist in this plugin
         # but are referenced as documentation examples
@@ -2490,12 +2501,46 @@ def validate_md_file_paths(
         # Strip leading ./
         clean_path = raw_path.lstrip("./")
 
+        # Determine if this path looks like it references a file inside the plugin
+        # (starts with a known plugin directory like scripts/, commands/, agents/,
+        # skills/, references/, hooks/, or a plugin config file)
+        plugin_internal_prefixes = (
+            "scripts/",
+            "commands/",
+            "agents/",
+            "skills/",
+            "references/",
+            "hooks/",
+            "rules/",
+            "templates/",
+            "docs/",
+            ".claude-plugin/",
+        )
+        is_plugin_internal = clean_path.startswith(plugin_internal_prefixes)
+
         resolved = md_file.parent / clean_path
         if not resolved.exists():
             resolved = plugin_root / clean_path
-        if not resolved.exists():
-            # Don't report MINOR for backtick paths — too many false positives
-            # Use WARNING instead (non-blocking)
+        if resolved.exists():
+            report.passed(
+                f"Backtick path OK: `{raw_path}` ({rel_md})",
+                rel_md,
+            )
+        elif is_plugin_internal and not is_reference_doc:
+            # Path clearly references a plugin directory and this is NOT a
+            # reference/fix guide — it's a real broken reference
+            report.minor(
+                f"Broken backtick path: `{raw_path}` in {rel_md} — file not found in plugin",
+                rel_md,
+            )
+        elif is_plugin_internal and is_reference_doc:
+            # Reference docs describe the USER's plugin structure, not this plugin
+            report.warning(
+                f"Backtick path in reference doc: `{raw_path}` in {rel_md} — not found (may describe target plugin)",
+                rel_md,
+            )
+        else:
+            # External or ambiguous path — flag as warning (non-blocking)
             report.warning(
                 f"Possible broken backtick path: `{raw_path}` in {rel_md}",
                 rel_md,

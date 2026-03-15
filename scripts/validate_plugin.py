@@ -1338,9 +1338,17 @@ def validate_md_content_references(plugin_root: Path, report: ValidationReport) 
     # Shared URL cache across all files (avoid re-checking same URL)
     url_cache: dict[str, bool] = {}
 
+    # Reference files (skills/*/references/*.md) are documentation about the USER's
+    # plugin, not about this plugin. Backtick paths in those files describe the target
+    # plugin structure, so they should not be validated as references to files in THIS
+    # plugin. We pass a flag to downgrade plugin-internal backtick path errors to
+    # WARNING in reference files.
     for md_file in sorted(md_files):
+        # Reference files and command files describe the USER's plugin structure,
+        # not this plugin. Backtick paths there are documentation examples.
+        is_reference_doc = "/references/" in str(md_file) or "/commands/" in str(md_file)
         # Validate file path references
-        validate_md_file_paths(md_file, plugin_root, report, skip_patterns=skip_patterns)
+        validate_md_file_paths(md_file, plugin_root, report, skip_patterns=skip_patterns, is_reference_doc=is_reference_doc)
         # Validate URLs
         validate_md_urls(md_file, plugin_root, report, url_cache=url_cache)
 
