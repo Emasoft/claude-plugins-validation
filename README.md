@@ -1,5 +1,8 @@
 # Claude Plugins Validation
 
+<!--BADGES-START-->
+<!--BADGES-END-->
+
 > **Installation:** This plugin is distributed via the [Emasoft Plugins Marketplace](https://github.com/Emasoft/emasoft-plugins).
 > See [Installation](#installation) below for instructions.
 
@@ -89,6 +92,15 @@ claude --plugin-dir ./OUTPUT_SKILLS/claude-plugins-validation
 | `/cpv-bump-version` | Bump plugin version (patch/minor/major) |
 | `/cpv-version` | Show management tools version |
 
+### Plugin/Marketplace Creation Commands (v2.1.0)
+
+| Command | Description |
+|---------|-------------|
+| `/cpv-create-plugin-repo` | Scaffold a new plugin repo with all standard files |
+| `/cpv-create-marketplace-repo` | Scaffold a new marketplace hub repo (pointers only, no plugin code) |
+| `/cpv-standardize-plugin` | Audit and fix an existing plugin repo to match standards |
+| `/cpv-standardize-marketplace` | Audit and fix an existing marketplace to match standards |
+
 ## Utility Scripts
 
 | Script | Description |
@@ -113,6 +125,15 @@ claude --plugin-dir ./OUTPUT_SKILLS/claude-plugins-validation
 | `manage_github_validate.py` | Validate GitHub repos/marketplaces without installing |
 | `bump_version.py` | Semantic version bumping (patch/minor/major/set) |
 | `cpv_management_common.py` | Shared management infrastructure (JSONC, safe I/O, archives) |
+
+### Creation & Standardization Scripts (v2.1.0)
+
+| Script | Description |
+|--------|-------------|
+| `generate_plugin_repo.py` | Scaffold a complete plugin repo with all standard files |
+| `generate_marketplace_repo.py` | Scaffold a marketplace hub repo (pointers to external plugin repos) |
+| `standardize_plugin.py` | Audit and fix existing plugin repo to match CPV standards |
+| `standardize_marketplace.py` | Audit and fix existing marketplace repo to match standards |
 
 ## Common Options
 
