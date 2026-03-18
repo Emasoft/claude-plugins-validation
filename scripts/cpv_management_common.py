@@ -55,7 +55,7 @@ __all__ = [
 
 IS_WINDOWS = platform.system() == "Windows"
 PYTHON_VERSION = sys.version_info
-TOOL_VERSION = "2.0.0"
+TOOL_VERSION = "2.1.0"
 
 
 # ── Paths ─────────────────────────────────────────────────

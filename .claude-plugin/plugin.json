@@ -1,7 +1,7 @@
 {
   "name": "claude-plugins-validation",
-  "version": "2.0.0",
-  "description": "Comprehensive validation and management suite for Claude Code plugins, marketplaces, hooks, skills, MCP servers, LSP servers, and rules. Includes 190+ validation rules, plugin lifecycle management (install/uninstall/update/enable/disable), marketplace operations, health checks, security auditing, and GitHub repo validation. Features severity hierarchy (CRITICAL/MAJOR/MINOR/NIT/WARNING), --strict mode, language-aware token estimation, and detailed skill documentation.",
+  "version": "2.1.0",
+  "description": "Comprehensive validation, management, and standardization suite for Claude Code plugins and marketplaces. Includes 190+ validation rules, plugin lifecycle management, marketplace operations, health checks, security auditing, GitHub repo validation, plugin/marketplace repo scaffolding, and standardization tooling. Features severity hierarchy, --strict mode, language-aware token estimation, and universal plugin/marketplace templates.",
   "author": {
     "name": "Emasoft",
     "email": "713559+Emasoft@users.noreply.github.com"
@@ -25,6 +25,9 @@
     "installer",
     "plugin-lifecycle",
     "search",
-    "doctor"
+    "doctor",
+    "scaffolding",
+    "templates",
+    "standardization"
   ]
 }

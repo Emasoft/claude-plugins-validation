@@ -2,6 +2,35 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.1.0] - 2026-03-18
+
+### Validation Rules Completion + Universal Standards
+
+#### 7 New Validation Rules (Phase A)
+- **Version consistency**: SKILL.md frontmatter version checked against plugin.json (validate_xref.py)
+- **Pipeline readiness**: pre-push hook, publish.py, cliff.toml, workflows, notify-marketplace.yml (validate_plugin.py)
+- **Workflow best practices**: flags `uv pip install --system` (use uvx), unpinned actions/checkout (validate_plugin.py)
+- **Script permissions**: Python scripts with shebang should be executable on Unix (validate_plugin.py)
+- **.gitignore requirements**: must ignore `.claude/`, `llm_externalizer_output/`, `.tldr/` (validate_plugin.py)
+- **README badge markers**: `<!--BADGES-START-->` / `<!--BADGES-END-->` for automated badge updates (validate_plugin.py)
+- **pyproject.toml + .python-version**: recommended for Python plugins (validate_plugin.py)
+
+#### Plugin/Marketplace Repo Generators (Phase B)
+- **generate_plugin_repo.py** (1489 LOC): Scaffolds complete plugin repos with 16 files — manifest, pyproject.toml, .gitignore, README with badges, LICENSE, cliff.toml, publish.py, setup-hooks, pre-push hook, 4 GitHub workflows, component dirs, test skeleton
+- **generate_marketplace_repo.py** (890 LOC): Scaffolds marketplace HUB repos — marketplace.json with `{source: "github", repo: "owner/repo"}` entries (HUBS ONLY, no plugin code), auto-generated README catalog, CI/CD workflows, catalog updater
+- **standardize_plugin.py**: Audits existing plugin repos against CPV standards, optionally fixes gaps
+- **standardize_marketplace.py**: Audits existing marketplaces, flags local-path sources as errors
+
+#### New Components (Phase C)
+- **Agent**: `plugin-creator.md` — guides plugin/marketplace creation workflow
+- **Skills**: `create-plugin/SKILL.md`, `standardize-plugin/SKILL.md`
+- **Commands**: `/cpv-create-plugin-repo`, `/cpv-create-marketplace-repo`, `/cpv-standardize-plugin`, `/cpv-standardize-marketplace`
+
+#### Marketplace Architecture Enforcement
+- Marketplaces must be HUBS ONLY — pointers to external GitHub repos, never plugin code
+- Plugin sources validated: `{"source": "github", "repo": "owner/repo"}` format enforced
+- Local paths (`./plugins/...`) flagged as errors in marketplace validation
+
 ## [2.0.0] - 2026-03-18
 
 ### MAJOR: Merged claude-plugins-management (CPM v1.4.0) into CPV
