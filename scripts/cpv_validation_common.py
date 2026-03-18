@@ -2433,8 +2433,8 @@ def validate_md_file_paths(
         # Paths starting with ~ (user home dir references in docs)
         if path.startswith("~"):
             return True
-        # Generic example paths used in documentation (other-file, subfolder/file, etc.)
-        if re.match(r"^\.\./(other|example|some)", path) or re.match(r"^(subfolder|subdir|folder|other)/", path):
+        # Generic example paths used in documentation (other-file, subfolder/file, docs_dev/, etc.)
+        if re.match(r"^\.\./(other|example|some)", path) or re.match(r"^(subfolder|subdir|folder|other|docs_dev|scripts_dev|tests_dev)/", path):
             return True
         # Example filenames commonly used in documentation (foo, bar, run, test, etc.)
         basename = path.rsplit("/", 1)[-1].split(".")[0] if "/" in path else ""
@@ -2442,7 +2442,7 @@ def validate_md_file_paths(
             return True
         # Paths referencing common config files that may not exist in this plugin
         # but are referenced as documentation examples
-        if re.match(r"^\.(vscode|docker|github|claude)/", path) or re.match(r"^\./(vscode|docker|github|claude)/", path):
+        if re.match(r"^\.?/?\.(vscode|docker|github|claude)/", path) or re.match(r"^\./(vscode|docker|github|claude)/", path):
             return True
         return False
 
@@ -2500,8 +2500,29 @@ def validate_md_file_paths(
             continue
         checked_paths.add(raw_path)
 
-        # Strip leading ./
-        clean_path = raw_path.lstrip("./")
+        # Skip paths that contain spaces — likely error messages, not actual paths
+        if " " in raw_path:
+            continue
+        # Skip absolute system paths used as examples in docs (e.g., /usr/local/bin/script.sh)
+        if raw_path.startswith("/"):
+            continue
+
+        # Strip leading ./ properly (remove only the prefix "./" not individual chars)
+        clean_path = raw_path
+        while clean_path.startswith("./"):
+            clean_path = clean_path[2:]
+
+        # Well-known plugin structure paths — standard paths every plugin doc references
+        well_known_plugin_paths = {
+            ".claude-plugin/plugin.json",
+            ".claude-plugin/marketplace.json",
+            "hooks/hooks.json",
+            ".mcp.json",
+            ".lsp.json",
+            "settings.json",
+        }
+        if raw_path in well_known_plugin_paths or clean_path in well_known_plugin_paths:
+            continue
 
         # Determine if this path looks like it references a file inside the plugin
         # (starts with a known plugin directory like scripts/, commands/, agents/,
@@ -2516,7 +2537,9 @@ def validate_md_file_paths(
             "rules/",
             "templates/",
             "docs/",
+            "docs_dev/",
             ".claude-plugin/",
+            "claude-plugin/",
         )
         is_plugin_internal = clean_path.startswith(plugin_internal_prefixes)
 
@@ -2528,21 +2551,18 @@ def validate_md_file_paths(
                 f"Backtick path OK: `{raw_path}` ({rel_md})",
                 rel_md,
             )
-        elif is_plugin_internal and not is_reference_doc:
-            # Path clearly references a plugin directory and this is NOT a
-            # reference/fix guide — it's a real broken reference
+        elif is_reference_doc:
+            # Reference/command docs describe the USER's plugin structure, not this plugin —
+            # unresolved paths are expected and not a problem
+            continue
+        elif is_plugin_internal:
+            # Path clearly references a plugin directory in a non-reference doc — real broken reference
             report.minor(
                 f"Broken backtick path: `{raw_path}` in {rel_md} — file not found in plugin",
                 rel_md,
             )
-        elif is_plugin_internal and is_reference_doc:
-            # Reference docs describe the USER's plugin structure, not this plugin
-            report.warning(
-                f"Backtick path in reference doc: `{raw_path}` in {rel_md} — not found (may describe target plugin)",
-                rel_md,
-            )
         else:
-            # External or ambiguous path — flag as warning (non-blocking)
+            # External or ambiguous path in non-reference doc — flag as warning (non-blocking)
             report.warning(
                 f"Possible broken backtick path: `{raw_path}` in {rel_md}",
                 rel_md,
