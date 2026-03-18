@@ -46,7 +46,7 @@ Copy this checklist and track your progress:
 
 ## Output
 
-Report: repo URL, validation result (VALID/INVALID + severity counts), installed workflows/hooks, skipped steps. On failure, report which step failed with error.
+Report: repo URL, VALID/INVALID + severity counts, installed workflows/hooks, skipped steps.
 
 ## Error Handling
 
@@ -72,7 +72,7 @@ Report: repo URL, validation result (VALID/INVALID + severity counts), installed
 - [Plugin Hooks and Scripts](references/plugin-hooks-and-scripts.md)
   > pre-push Hook Template · publish.py Pipeline Template · setup-hooks.py Template · Placeholder Reference
 - [Plugin Binary Builds](references/plugin-binary-builds.md)
-  > Build phases, cross-platform compilation, binary distribution, platform detection, publish.py/ci.yml extensions, Cargo release
+  > When to Add a Build Phase · build-binaries.yml — Cross-Platform Compilation Workflow · Binary Distribution Pattern · Platform Detection Wrapper · Extending the Python Pre-Push Hook · Extending publish.py for Binary Builds · Extending ci.yml for Binary Builds · Cargo Release Profile (Rust Optimization)
 
 ## Token Optimization
 
