@@ -76,6 +76,7 @@ VALID_HOOK_TYPES = {"command", "http", "prompt", "agent"}
 # Events that only support "command" or "http" hooks (not prompt or agent)
 COMMAND_ONLY_EVENTS = {
     "ConfigChange",
+    "InstructionsLoaded",
     "Notification",
     "PreCompact",
     "PostCompact",  # v2.1.76
@@ -185,6 +186,19 @@ def validate_top_level_structure(data: Any, report: ValidationReport) -> bool:
             report.major(f"'description' must be a string, got {type(desc).__name__}")
         else:
             report.passed(f"Description: {desc[:50]}...")
+
+    # Check for 'disableAllHooks' field (valid top-level boolean)
+    if "disableAllHooks" in data:
+        if not isinstance(data["disableAllHooks"], bool):
+            report.major(f"'disableAllHooks' must be a boolean, got {type(data['disableAllHooks']).__name__}")
+        else:
+            report.passed(f"disableAllHooks: {data['disableAllHooks']}")
+
+    # Check for unknown top-level fields
+    known_top_level = {"hooks", "description", "disableAllHooks"}
+    for key in data:
+        if key not in known_top_level:
+            report.warning(f"Unknown top-level field '{key}' in hooks config")
 
     # Check for 'hooks' key
     if "hooks" not in data:
@@ -721,6 +735,14 @@ def validate_http_hook(
                 if not isinstance(v, str):
                     report.major(f"HTTP hook header '{k}' value must be a string")
 
+    # Validate optional allowedEnvVars field (list of env var names for header interpolation)
+    if "allowedEnvVars" in hook:
+        allowed = hook["allowedEnvVars"]
+        if not isinstance(allowed, list):
+            report.major(f"HTTP hook 'allowedEnvVars' must be an array, got {type(allowed).__name__}")
+        elif not all(isinstance(v, str) for v in allowed):
+            report.major("HTTP hook 'allowedEnvVars' must contain only strings")
+
     # Validate timeout if present (milliseconds)
     if "timeout" in hook:
         timeout = hook["timeout"]
@@ -830,6 +852,7 @@ def validate_single_hook(
         "prompt",
         "url",  # HTTP hooks (v2.1.63+)
         "headers",  # HTTP hooks (v2.1.63+)
+        "allowedEnvVars",  # HTTP hooks — env vars for header interpolation
         "model",
         "timeout",
         "async",
