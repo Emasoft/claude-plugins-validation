@@ -166,14 +166,15 @@ VALID_HOOK_EVENTS = {
     "InstructionsLoaded",
     "Elicitation",  # v2.1.76 — intercept MCP elicitation requests
     "ElicitationResult",  # v2.1.76 — intercept elicitation responses
+    "StopFailure",  # v2.1.78 — fires when turn ends due to API error (rate limit, auth failure)
 }
 
 # =============================================================================
 # Common Constants
 # =============================================================================
 
-# Valid context values for agents and skills (only "fork" is documented)
-VALID_CONTEXT_VALUES = {"fork"}
+# Valid context values for agents and skills ("fork" renamed to "branch" in v2.1.77; "fork" still works as alias)
+VALID_CONTEXT_VALUES = {"fork", "branch"}
 
 # Built-in agent types provided by Claude Code
 BUILTIN_AGENT_TYPES = {"Explore", "Plan", "general-purpose"}
@@ -233,6 +234,7 @@ def is_valid_model(value: str) -> bool:
 # Plugins must use these instead of hardcoded absolute paths
 VALID_PLUGIN_ENV_VARS = {
     "CLAUDE_PLUGIN_ROOT",  # Plugin's root directory (all plugin hooks)
+    "CLAUDE_PLUGIN_DATA",  # Persistent data directory that survives updates (v2.1.78)
     "CLAUDE_PROJECT_DIR",  # Project root directory (all hooks)
     "CLAUDE_ENV_FILE",  # SessionStart/Setup only — write export statements to persist env vars
     "CLAUDE_CODE_REMOTE",  # Set to "true" in remote web environments; not set in local CLI
@@ -439,7 +441,7 @@ ABSOLUTE_PATH_PATTERNS = [
     (
         re.compile(
             r"(?<![#!])"
-            r"(?<!\$\{CLAUDE_PLUGIN_ROOT\})(?<!\$\{CLAUDE_PROJECT_DIR\})(?<![\w$\{])"
+            r"(?<!\$\{CLAUDE_PLUGIN_ROOT\})(?<!\$\{CLAUDE_PLUGIN_DATA\})(?<!\$\{CLAUDE_PROJECT_DIR\})(?<![\w$\{])"
             r'(/(?:usr|opt|etc|var|bin|sbin|lib|root)/[^\s"\'`>\]})]+)'
         ),
         "system absolute path",

@@ -33,7 +33,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from cpv_validation_common import COLORS, VALID_PLUGIN_ENV_VARS, ValidationReport, save_report_and_print_summary, validate_component_name
+from cpv_validation_common import (
+    COLORS,
+    VALID_PLUGIN_ENV_VARS,
+    ValidationReport,
+    save_report_and_print_summary,
+    validate_component_name,
+)
 
 # Valid transport types
 VALID_TRANSPORTS = {"stdio", "sse", "http"}
@@ -118,6 +124,10 @@ def validate_path_value(value: str, report: ValidationReport, context: str, plug
     # Validate env var syntax in path
     validate_env_var_syntax(value, report, context)
 
+    # ${CLAUDE_PLUGIN_DATA} paths are persistent external state — skip filesystem resolution
+    if "${CLAUDE_PLUGIN_DATA}" in value or "$CLAUDE_PLUGIN_DATA" in value:
+        return
+
     # If plugin_root provided and path uses CLAUDE_PLUGIN_ROOT, verify the file exists
     if plugin_root and "${CLAUDE_PLUGIN_ROOT}" in value:
         # Substitute to check existence
@@ -188,11 +198,7 @@ def validate_mcp_server(
                 cmd_args = config.get("args", [])
                 pkg_name = cmd_args[0] if cmd_args and isinstance(cmd_args[0], str) else None
                 if pkg_name and not pkg_name.startswith((".", "/", "${")):
-                    report.warning(
-                        f"Server {server_name} uses {command} to execute remote package "
-                        f"'{pkg_name}' — this downloads and runs code from a registry. "
-                        f"Verify the package is trusted and consider pinning a version."
-                    )
+                    report.warning(f"Server {server_name} uses {command} to execute remote package '{pkg_name}' — this downloads and runs code from a registry. Verify the package is trusted and consider pinning a version.")
 
         # Warn about url field ignored for stdio transport
         if "url" in config and transport == "stdio":
@@ -226,16 +232,9 @@ def validate_mcp_server(
                     )
                 )
                 if not is_localhost:
-                    report.warning(
-                        f"Server {server_name} connects to remote URL '{url}' — "
-                        f"remote MCP servers can access tool results and conversation data. "
-                        f"Ensure the server is trusted and uses HTTPS."
-                    )
+                    report.warning(f"Server {server_name} connects to remote URL '{url}' — remote MCP servers can access tool results and conversation data. Ensure the server is trusted and uses HTTPS.")
                     if url.startswith("http://") and not is_localhost:
-                        report.major(
-                            f"Server {server_name} uses unencrypted HTTP for remote server — "
-                            f"use HTTPS to protect data in transit."
-                        )
+                        report.major(f"Server {server_name} uses unencrypted HTTP for remote server — use HTTPS to protect data in transit.")
 
         # SSE is deprecated
         if transport == "sse":
@@ -297,10 +296,7 @@ def validate_mcp_server(
                     # Warn about hardcoded credentials
                     if key.lower() in ("authorization", "x-api-key", "api-key"):
                         if "${" not in value:
-                            report.major(
-                                f"Server {server_name} has hardcoded credential in "
-                                f"headers[{key}] - use environment variables"
-                            )
+                            report.major(f"Server {server_name} has hardcoded credential in headers[{key}] - use environment variables")
 
     # Validate timeout field
     if "timeout" in config:
@@ -530,9 +526,7 @@ def main() -> int:
     parser.add_argument("--verbose", "-v", action="store_true", help="Show all results")
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
     parser.add_argument("--json", action="store_true", help="Output as JSON")
-    parser.add_argument(
-        "--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout"
-    )
+    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
     parser.add_argument(
         "path",
         nargs="?",
@@ -558,8 +552,7 @@ def main() -> int:
         has_mcp = (path / ".mcp.json").exists() or (path / ".claude-plugin").is_dir()
         if not has_mcp:
             print(
-                f"Error: No MCP configuration found at {path}\n"
-                f"Expected .mcp.json file or a plugin directory with .claude-plugin/.",
+                f"Error: No MCP configuration found at {path}\nExpected .mcp.json file or a plugin directory with .claude-plugin/.",
                 file=sys.stderr,
             )
             return 1

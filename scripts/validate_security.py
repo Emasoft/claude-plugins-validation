@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import argparse
 import json
-
 import re
 import stat
 import sys
@@ -99,9 +98,7 @@ PATH_TRAVERSAL_PATTERNS = [
     (re.compile(r"\.\.\\"), "Path traversal ..\\ detected"),
     # Absolute paths (except environment variable placeholders)
     (
-        re.compile(
-            r"(?<!\$\{CLAUDE_PLUGIN_ROOT\})(?<!\$\{CLAUDE_PROJECT_DIR\})(?<![\w$\{])/(?:usr|etc|var|tmp|opt|bin|sbin|lib|root)/"
-        ),
+        re.compile(r"(?<!\$\{CLAUDE_PLUGIN_ROOT\})(?<!\$\{CLAUDE_PLUGIN_DATA\})(?<!\$\{CLAUDE_PROJECT_DIR\})(?<![\w$\{])/(?:usr|etc|var|tmp|opt|bin|sbin|lib|root)/"),
         "Absolute Unix system path detected",
     ),
     # Windows absolute paths
@@ -186,14 +183,7 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
     # Determine if file is a test file - test files often have mock/example content
     # Handle both absolute (/tests/) and relative (tests/) paths, plus conftest.py
     file_normalized = file_lower.replace("\\", "/")
-    is_test_file = (
-        "test_" in file_lower
-        or "_test.py" in file_lower
-        or "/tests/" in file_normalized
-        or file_normalized.startswith("tests/")
-        or "/conftest.py" in file_normalized
-        or file_normalized == "conftest.py"
-    )
+    is_test_file = "test_" in file_lower or "_test.py" in file_lower or "/tests/" in file_normalized or file_normalized.startswith("tests/") or "/conftest.py" in file_normalized or file_normalized == "conftest.py"
 
     # Determine if file is a validator script - they contain intentional patterns
     is_validator = is_validator_script(file_path)
@@ -291,12 +281,7 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
     # Skip path checks for test files - they contain example data
     # Handle both absolute (/tests/) and relative (tests/) paths
     file_normalized = file_lower.replace("\\", "/")
-    if (
-        "test_" in file_lower
-        or "_test.py" in file_lower
-        or "/tests/" in file_normalized
-        or file_normalized.startswith("tests/")
-    ):
+    if "test_" in file_lower or "_test.py" in file_lower or "/tests/" in file_normalized or file_normalized.startswith("tests/"):
         return 0
 
     for line_num, line in enumerate(lines, start=1):
@@ -346,12 +331,7 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
                         continue
                     # Skip absolute Unix paths in Python string literals
                     # (e.g. help text mentioning shebangs or system bin directories)
-                    if "Absolute Unix" in msg and (
-                        "#!/" in line
-                        or "help" in stripped.lower()
-                        or "epilog" in stripped.lower()
-                        or stripped.startswith(("'", '"', "f'", 'f"', "r'", 'r"'))
-                    ):
+                    if "Absolute Unix" in msg and ("#!/" in line or "help" in stripped.lower() or "epilog" in stripped.lower() or stripped.startswith(("'", '"', "f'", 'f"', "r'", 'r"'))):
                         continue
 
                 report.critical(f"{msg}: {line.strip()[:80]}", file_path, line_num)
@@ -371,12 +351,7 @@ def scan_for_secrets(content: str, file_path: str, report: ValidationReport) -> 
     # Skip test files — they contain intentional example/mock secrets
     # Handle both absolute (/tests/) and relative (tests/) paths
     file_normalized = file_lower.replace("\\", "/")
-    if (
-        "test_" in file_lower
-        or "_test.py" in file_lower
-        or "/tests/" in file_normalized
-        or file_normalized.startswith("tests/")
-    ):
+    if "test_" in file_lower or "_test.py" in file_lower or "/tests/" in file_normalized or file_normalized.startswith("tests/"):
         return 0
 
     # Skip markdown documentation — contains example credentials for illustration
@@ -424,12 +399,7 @@ def scan_for_user_paths(content: str, file_path: str, report: ValidationReport) 
     # Skip test files - they contain example data
     # Handle both absolute (/tests/) and relative (tests/) paths
     file_normalized = file_lower.replace("\\", "/")
-    if (
-        "test_" in file_lower
-        or "_test.py" in file_lower
-        or "/tests/" in file_normalized
-        or file_normalized.startswith("tests/")
-    ):
+    if "test_" in file_lower or "_test.py" in file_lower or "/tests/" in file_normalized or file_normalized.startswith("tests/"):
         return 0
 
     for line_num, line in enumerate(lines, start=1):
@@ -661,9 +631,7 @@ Exit Codes:
     parser.add_argument("-v", "--verbose", action="store_true", help="Show all results including INFO and PASSED")
     parser.add_argument("--json", action="store_true", help="Output results as JSON")
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
-    parser.add_argument(
-        "--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout"
-    )
+    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
 
     args = parser.parse_args()
 

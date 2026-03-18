@@ -72,6 +72,7 @@ VERSION_PATTERN = re.compile(
 )
 
 # Pattern to find hook script references in hooks.json
+# Only matches CLAUDE_PLUGIN_ROOT paths (CLAUDE_PLUGIN_DATA paths are persistent external state, not resolvable)
 HOOK_SCRIPT_PATTERN = re.compile(
     r'\$\{CLAUDE_PLUGIN_ROOT\}/([^"\'}\s]+)',
 )
@@ -758,7 +759,11 @@ Exit codes:
             print_results_by_level(report, verbose=verbose)
 
         save_report_and_print_summary(
-            report, Path(args.report), "Cross-Reference Validation", _print_full, args.verbose,
+            report,
+            Path(args.report),
+            "Cross-Reference Validation",
+            _print_full,
+            args.verbose,
             plugin_path=args.plugin_path,
         )
     else:

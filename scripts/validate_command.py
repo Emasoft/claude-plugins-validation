@@ -35,13 +35,13 @@ from cpv_validation_common import (
     EXIT_MAJOR,
     EXIT_OK,
     SECRET_PATTERNS,
-    validate_component_name,
     USER_PATH_PATTERNS,
     VALID_TOOLS,
     ValidationReport,
     check_utf8_encoding,
     is_valid_model,
     save_report_and_print_summary,
+    validate_component_name,
 )
 
 # =============================================================================
@@ -138,8 +138,7 @@ def validate_file_format(content: str, report: CommandValidationReport, filename
 
     if marker_count < 2:
         report.critical(
-            f"Missing YAML frontmatter markers (found {marker_count}, need 2). "
-            "File must start with --- and end frontmatter with ---",
+            f"Missing YAML frontmatter markers (found {marker_count}, need 2). File must start with --- and end frontmatter with ---",
             filename,
         )
         return False
@@ -225,8 +224,7 @@ def validate_description_field(frontmatter: dict[str, Any], filename: str, repor
     # Length check - COMMANDS have shorter max (60 chars vs 1024 for agents)
     if len(desc) > MAX_COMMAND_DESCRIPTION_LENGTH:
         report.major(
-            f"Description exceeds {MAX_COMMAND_DESCRIPTION_LENGTH} chars ({len(desc)} chars). "
-            "Command descriptions must be brief for slash command menu.",
+            f"Description exceeds {MAX_COMMAND_DESCRIPTION_LENGTH} chars ({len(desc)} chars). Command descriptions must be brief for slash command menu.",
             filename,
         )
 
@@ -406,10 +404,7 @@ def validate_body_content(content: str, filename: str, report: CommandValidation
         report.passed(f"Command body has adequate content ({len(body_text)} chars)", filename)
 
     # Check for common command body patterns
-    has_instructions = any(
-        keyword in body_text.lower()
-        for keyword in ["you", "will", "should", "must", "when", "if", "task", "do", "perform", "execute"]
-    )
+    has_instructions = any(keyword in body_text.lower() for keyword in ["you", "will", "should", "must", "when", "if", "task", "do", "perform", "execute"])
     if not has_instructions:
         report.info(
             "Command body should contain clear instructions for Claude",
@@ -429,16 +424,15 @@ def validate_security(content: str, filename: str, report: CommandValidationRepo
         match = pattern.search(content)
         if match:
             report.major(
-                f"Contains hardcoded user path: {match.group()}. "
-                "Use ${CLAUDE_PLUGIN_ROOT} or ${CLAUDE_PROJECT_DIR} instead",
+                f"Contains hardcoded user path: {match.group()}. Use ${{CLAUDE_PLUGIN_ROOT}} or ${{CLAUDE_PROJECT_DIR}} instead",
                 filename,
             )
 
-    # Check for ${CLAUDE_PLUGIN_ROOT} usage (good practice for plugin commands)
+    # Check for ${CLAUDE_PLUGIN_ROOT} or ${CLAUDE_PLUGIN_DATA} usage (good practice for plugin commands)
     if "/scripts/" in content or "\\scripts\\" in content:
-        if "${CLAUDE_PLUGIN_ROOT}" not in content and "$CLAUDE_PLUGIN_ROOT" not in content:
+        if "${CLAUDE_PLUGIN_ROOT}" not in content and "$CLAUDE_PLUGIN_ROOT" not in content and "${CLAUDE_PLUGIN_DATA}" not in content:
             report.info(
-                "Consider using ${CLAUDE_PLUGIN_ROOT} for plugin-relative paths",
+                "Consider using ${CLAUDE_PLUGIN_ROOT} or ${CLAUDE_PLUGIN_DATA} for plugin-relative paths",
                 filename,
             )
 
@@ -633,9 +627,7 @@ def main() -> int:
     )
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
-    parser.add_argument(
-        "--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout"
-    )
+    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
     args = parser.parse_args()
 
     path = Path(args.path).resolve()
@@ -676,9 +668,7 @@ def main() -> int:
                             "info": sum(1 for x in r.results if x.level == "INFO"),
                             "passed": sum(1 for x in r.results if x.level == "PASSED"),
                         },
-                        "results": [
-                            {"level": x.level, "message": x.message, "file": x.file, "line": x.line} for x in r.results
-                        ],
+                        "results": [{"level": x.level, "message": x.message, "file": x.file, "line": x.line} for x in r.results],
                     }
                     for r in reports
                 ],
@@ -689,7 +679,11 @@ def main() -> int:
         for report in reports:
             if args.report:
                 save_report_and_print_summary(
-                    report, Path(args.report), f"Command Validation: {report.command_path}", print_results, args.verbose,
+                    report,
+                    Path(args.report),
+                    f"Command Validation: {report.command_path}",
+                    print_results,
+                    args.verbose,
                     plugin_path=args.path,
                 )
             else:

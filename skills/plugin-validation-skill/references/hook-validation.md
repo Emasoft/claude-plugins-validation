@@ -64,7 +64,7 @@ The top-level `hooks` key must be an object whose keys are event names and value
 
 ## 2. Valid Hook Events
 
-There are **19 valid hook events**:
+There are **23 valid hook events**:
 
 | Event | Has Matcher | Description |
 |-------|-------------|-------------|
@@ -87,6 +87,10 @@ There are **19 valid hook events**:
 | WorktreeCreate | No | When a git worktree is created |
 | WorktreeRemove | No | When a git worktree is removed |
 | InstructionsLoaded | No | When CLAUDE.md or .claude/rules/*.md files are loaded (v2.1.69+) |
+| PostCompact | Yes | After conversation compaction completes (v2.1.76, command-only) |
+| Elicitation | No | When MCP server requests structured input (v2.1.76, command-only) |
+| ElicitationResult | No | When user responds to MCP elicitation (v2.1.76, command-only) |
+| StopFailure | No | When turn ends due to API error — rate limit, auth failure (v2.1.78) |
 
 ### Events With Matchers
 
@@ -109,18 +113,31 @@ These events fire globally and do not support matchers:
 
 - UserPromptSubmit
 - Stop
+- StopFailure
 - TeammateIdle
 - TaskCompleted
 - WorktreeCreate
 - WorktreeRemove
 - InstructionsLoaded
+- Elicitation
+- ElicitationResult
 
 ### Command-Only Events
 
-These events only support hook type `"command"` — `"prompt"` and `"agent"` types are not valid for them:
+These events only support hook type `"command"` or `"http"` — `"prompt"` and `"agent"` types are not valid for them:
 
 - PreCompact
+- PostCompact
 - Notification
+- ConfigChange
+- SessionStart
+- SessionEnd
+- SubagentStart
+- TeammateIdle
+- WorktreeCreate
+- WorktreeRemove
+- Elicitation
+- ElicitationResult
 
 ### Example for Each Event
 
