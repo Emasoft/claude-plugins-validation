@@ -34,16 +34,16 @@ from cpv_validation_common import (
     MAX_BODY_WORDS,
     MAX_DESCRIPTION_LENGTH,
     MIN_BODY_CHARS,
-    validate_component_name,
     SECRET_PATTERNS,
     USER_PATH_PATTERNS,
     VALID_CONTEXT_VALUES,
     VALID_MODELS,
-    is_valid_model,
     VALID_TOOLS,
     ValidationReport,
     check_utf8_encoding,
+    is_valid_model,
     save_report_and_print_summary,
+    validate_component_name,
 )
 
 # Known frontmatter fields per official docs (agent-specific)
@@ -61,6 +61,7 @@ KNOWN_FRONTMATTER_FIELDS = {
     "hooks",
     "color",
     "capabilities",
+    "effort",
     "maxTurns",
     "mcpServers",
     "memory",
@@ -611,6 +612,23 @@ def validate_background_field(frontmatter: dict[str, Any], filename: str, report
         report.passed(f"Valid background: {bg_val}", rel_path)
 
 
+def validate_effort_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
+    """Validate the 'effort' frontmatter field (v2.1.78)."""
+    if "effort" not in frontmatter:
+        return
+
+    rel_path = filename
+    effort_val = frontmatter["effort"]
+    valid_effort_values = {"low", "medium", "high"}
+    if isinstance(effort_val, str):
+        if effort_val.lower() not in valid_effort_values:
+            report.major(f"Invalid 'effort' value: '{effort_val}'. Must be one of: {sorted(valid_effort_values)}", rel_path)
+        else:
+            report.passed(f"Valid effort: {effort_val}", rel_path)
+    else:
+        report.major(f"'effort' must be a string, got {type(effort_val).__name__}", rel_path)
+
+
 def validate_disallowed_tools_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
     """Validate the 'disallowedTools' frontmatter field.
 
@@ -734,8 +752,7 @@ def validate_hooks_field(frontmatter: dict[str, Any], filename: str, report: Age
                 hook_type = hook["type"]
                 if hook_type not in {"command", "prompt"}:
                     report.major(
-                        f"Invalid hook type '{hook_type}' in '{event_name}[{i}].hooks[{j}]'. "
-                        "Valid types: command, prompt",
+                        f"Invalid hook type '{hook_type}' in '{event_name}[{i}].hooks[{j}]'. Valid types: command, prompt",
                         filename,
                     )
 
@@ -911,11 +928,11 @@ def validate_security(content: str, filename: str, report: AgentValidationReport
                 filename,
             )
 
-    # Check for ${CLAUDE_PLUGIN_ROOT} usage (good practice)
+    # Check for ${CLAUDE_PLUGIN_ROOT} or ${CLAUDE_PLUGIN_DATA} usage (good practice)
     if "/scripts/" in content or "\\scripts\\" in content:
-        if "${CLAUDE_PLUGIN_ROOT}" not in content and "$CLAUDE_PLUGIN_ROOT" not in content:
+        if "${CLAUDE_PLUGIN_ROOT}" not in content and "$CLAUDE_PLUGIN_ROOT" not in content and "${CLAUDE_PLUGIN_DATA}" not in content:
             report.info(
-                "Consider using ${CLAUDE_PLUGIN_ROOT} for plugin-relative paths",
+                "Consider using ${CLAUDE_PLUGIN_ROOT} or ${CLAUDE_PLUGIN_DATA} for plugin-relative paths",
                 filename,
             )
 
@@ -985,6 +1002,7 @@ def validate_agent(agent_path: Path) -> AgentValidationReport:
         validate_isolation_field(frontmatter, filename, report)
         validate_max_turns_field(frontmatter, filename, report)
         validate_background_field(frontmatter, filename, report)
+        validate_effort_field(frontmatter, filename, report)
 
         # Cross-field validations
         validate_task_tool_prohibition(frontmatter, filename, report)
@@ -1119,9 +1137,7 @@ def main() -> int:
         help="Show all results including passed checks",
     )
     parser.add_argument("--json", action="store_true", help="Output as JSON")
-    parser.add_argument(
-        "--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout"
-    )
+    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
     args = parser.parse_args()
 
@@ -1163,9 +1179,7 @@ def main() -> int:
                             "info": sum(1 for x in r.results if x.level == "INFO"),
                             "passed": sum(1 for x in r.results if x.level == "PASSED"),
                         },
-                        "results": [
-                            {"level": x.level, "message": x.message, "file": x.file, "line": x.line} for x in r.results
-                        ],
+                        "results": [{"level": x.level, "message": x.message, "file": x.file, "line": x.line} for x in r.results],
                     }
                     for r in reports
                 ],
@@ -1177,7 +1191,11 @@ def main() -> int:
             if args.report:
                 agent_file = report.agent_path or args.path
                 save_report_and_print_summary(
-                    report, Path(args.report), f"Agent Validation: {agent_file}", print_results, args.verbose,
+                    report,
+                    Path(args.report),
+                    f"Agent Validation: {agent_file}",
+                    print_results,
+                    args.verbose,
                     plugin_path=args.path,
                 )
             else:

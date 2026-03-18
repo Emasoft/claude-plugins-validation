@@ -228,7 +228,8 @@ skills/
 
 | Variable | Expands To | Use Case |
 |----------|------------|----------|
-| `${CLAUDE_PLUGIN_ROOT}` | Absolute path to plugin directory | All plugin-relative paths |
+| `${CLAUDE_PLUGIN_ROOT}` | Absolute path to plugin directory | All plugin-relative paths (changes on update) |
+| `${CLAUDE_PLUGIN_DATA}` | Persistent data directory (~/.claude/plugins/data/{id}/) | Dependencies, caches, state that survives updates (v2.1.78) |
 | `${CLAUDE_PROJECT_DIR}` | Current project root | Accessing project files |
 | `${CLAUDE_SKILL_DIR}` | Absolute path to skill's own directory | Skill self-references in SKILL.md |
 | `${CLAUDE_ENV_FILE}` | Path to env file (SessionStart/Setup only) | Persisting environment variables |

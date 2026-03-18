@@ -116,6 +116,10 @@ def validate_path_value(
 
     validate_env_var_syntax(value, report, context)
 
+    # ${CLAUDE_PLUGIN_DATA} paths are persistent external state — skip filesystem resolution
+    if "${CLAUDE_PLUGIN_DATA}" in value or "$CLAUDE_PLUGIN_DATA" in value:
+        return
+
     if plugin_root and "${CLAUDE_PLUGIN_ROOT}" in value:
         resolved = value.replace("${CLAUDE_PLUGIN_ROOT}", str(plugin_root))
         resolved_path = Path(resolved)
@@ -172,8 +176,7 @@ def validate_lsp_server(
     # Validate extensionToLanguage (recommended field per official docs)
     if "extensionToLanguage" not in config:
         report.minor(
-            f"Server '{server_name}' missing recommended 'extensionToLanguage' field - "
-            f'maps file extensions to language IDs (e.g., {{".go": "go"}})',
+            f"Server '{server_name}' missing recommended 'extensionToLanguage' field - maps file extensions to language IDs (e.g., {{\".go\": \"go\"}})",
         )
     else:
         etl = config["extensionToLanguage"]
@@ -461,9 +464,7 @@ def main() -> int:
     parser.add_argument("--verbose", "-v", action="store_true", help="Show all results")
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
-    parser.add_argument(
-        "--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout"
-    )
+    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
     parser.add_argument(
         "path",
         nargs="?",
@@ -489,8 +490,7 @@ def main() -> int:
         has_lsp = (path / ".claude-plugin").is_dir() or any(path.glob("*.lsp.json")) or (path / "lsp").is_dir()
         if not has_lsp:
             print(
-                f"Error: No LSP configuration found at {path}\n"
-                f"Expected a plugin directory with .claude-plugin/ or LSP config files.",
+                f"Error: No LSP configuration found at {path}\nExpected a plugin directory with .claude-plugin/ or LSP config files.",
                 file=sys.stderr,
             )
             return 1

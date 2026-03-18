@@ -67,6 +67,7 @@ EVENTS_WITHOUT_MATCHERS = {
     "InstructionsLoaded",
     "Elicitation",  # v2.1.76 — fires for any MCP elicitation request
     "ElicitationResult",  # v2.1.76 — fires for any elicitation response
+    "StopFailure",  # v2.1.78 — fires on API errors (rate limit, auth failure)
 }
 
 # Valid hook types (v2.1.63+: "http" hooks POST JSON to a URL)
@@ -132,6 +133,7 @@ SESSION_START_SOURCES = {"startup", "resume", "clear", "compact"}
 # Environment variables available in hooks
 VALID_ENV_VARS = {
     "CLAUDE_PLUGIN_ROOT",  # Plugin hooks only
+    "CLAUDE_PLUGIN_DATA",  # Persistent data directory (v2.1.78)
     "CLAUDE_PROJECT_DIR",  # All hooks
     "CLAUDE_ENV_FILE",  # SessionStart and Setup only
     "CLAUDE_CODE_REMOTE",  # All hooks
@@ -204,10 +206,7 @@ def validate_event_name(event_name: str, report: ValidationReport) -> bool:
         # Fuzzy match for "did you mean?" suggestions
         close = difflib.get_close_matches(event_name, sorted(VALID_HOOK_EVENTS), n=1, cutoff=0.6)
         if close:
-            report.critical(
-                f"Unknown hook event: '{event_name}' — did you mean '{close[0]}'? "
-                f"Valid events: {sorted(VALID_HOOK_EVENTS)}"
-            )
+            report.critical(f"Unknown hook event: '{event_name}' — did you mean '{close[0]}'? Valid events: {sorted(VALID_HOOK_EVENTS)}")
         else:
             report.critical(f"Unknown hook event: '{event_name}'. Valid events: {sorted(VALID_HOOK_EVENTS)}")
         return False
@@ -229,10 +228,7 @@ def _check_matcher_values(
         if not part or part == "*" or re.escape(part) != part:
             continue
         if part not in known_values:
-            report.info(
-                f"{event_label} matcher '{part}' is not a known {values_label} — "
-                f"known values: {', '.join(sorted(known_values))}"
-            )
+            report.info(f"{event_label} matcher '{part}' is not a known {values_label} — known values: {', '.join(sorted(known_values))}")
 
 
 def validate_matcher(matcher: Any, event_name: str, report: ValidationReport) -> bool:
@@ -558,15 +554,8 @@ def validate_command_hook(
     cmd_first_token = command.strip().split()[0] if command.strip() else ""
     # Strip quotes from the token
     cmd_first_token = cmd_first_token.strip("'\"")
-    if (
-        cmd_first_token.startswith("/")
-        and not cmd_first_token.startswith("${")
-        and not cmd_first_token.startswith("$CLAUDE_")
-    ):
-        report.major(
-            f"Command uses absolute path '{cmd_first_token}' — "
-            "use ${CLAUDE_PLUGIN_ROOT} or ${CLAUDE_PROJECT_DIR} for portability"
-        )
+    if cmd_first_token.startswith("/") and not cmd_first_token.startswith("${") and not cmd_first_token.startswith("$CLAUDE_"):
+        report.major(f"Command uses absolute path '{cmd_first_token}' — use ${{CLAUDE_PLUGIN_ROOT}} or ${{CLAUDE_PROJECT_DIR}} for portability")
 
     # Bash command portability checks
     stripped_cmd = command.strip()
@@ -581,45 +570,23 @@ def validate_command_hook(
         interpreter_names = {"python", "python3", "node", "bun", "deno", "bash", "sh", "ruby", "perl", "env"}
         has_interpreter = len(cmd_tokens) >= 2 and cmd_tokens[0] in interpreter_names
         if not has_interpreter:
-            report.minor(
-                f"Command runs '{cmd_first_token}' without an explicit interpreter — "
-                "add one (e.g. python3, node, bash) for cross-platform reliability"
-            )
+            report.minor(f"Command runs '{cmd_first_token}' without an explicit interpreter — add one (e.g. python3, node, bash) for cross-platform reliability")
 
     # 3b: Tilde path that may not expand in hook commands
     if re.search(r"(^|\s)~/", stripped_cmd):
-        report.minor(
-            "Command uses '~/' path — tilde expansion may not work in hook commands. "
-            "Use $HOME/ or ${CLAUDE_PLUGIN_ROOT}/ instead."
-        )
+        report.minor("Command uses '~/' path — tilde expansion may not work in hook commands. Use $HOME/ or ${CLAUDE_PLUGIN_ROOT}/ instead.")
 
     # 3c: Bare 'cd' without chained command (no effect in fresh shell)
-    if (
-        (stripped_cmd.startswith("cd ") or stripped_cmd == "cd")
-        and "&&" not in stripped_cmd
-        and ";" not in stripped_cmd
-    ):
-        report.minor(
-            "'cd' alone has no effect — each hook runs in a fresh shell. "
-            "Combine with your command: 'cd /dir && your-command'"
-        )
+    if (stripped_cmd.startswith("cd ") or stripped_cmd == "cd") and "&&" not in stripped_cmd and ";" not in stripped_cmd:
+        report.minor("'cd' alone has no effect — each hook runs in a fresh shell. Combine with your command: 'cd /dir && your-command'")
 
     # 3d: Windows-style backslash paths (look for drive-letter patterns or consecutive backslash dirs)
     if re.search(r"[A-Za-z]:\\\\|\\\\[A-Za-z]", command):
-        report.minor(
-            "Command contains Windows-style backslash paths — use forward slashes for cross-platform compatibility"
-        )
+        report.minor("Command contains Windows-style backslash paths — use forward slashes for cross-platform compatibility")
 
-    # Relative path without $CLAUDE_PLUGIN_ROOT — may not resolve at runtime
-    if (
-        cmd_first_token.startswith("./")
-        and "${CLAUDE_PLUGIN_ROOT}" not in command
-        and "$CLAUDE_PLUGIN_ROOT" not in command
-    ):
-        report.minor(
-            f"Command uses relative path '{cmd_first_token}' without ${{CLAUDE_PLUGIN_ROOT}} — "
-            "hook working directory is not guaranteed. Use ${CLAUDE_PLUGIN_ROOT}/... for reliability."
-        )
+    # Relative path without $CLAUDE_PLUGIN_ROOT or $CLAUDE_PLUGIN_DATA — may not resolve at runtime
+    if cmd_first_token.startswith("./") and "${CLAUDE_PLUGIN_ROOT}" not in command and "$CLAUDE_PLUGIN_ROOT" not in command and "${CLAUDE_PLUGIN_DATA}" not in command and "$CLAUDE_PLUGIN_DATA" not in command:
+        report.minor(f"Command uses relative path '{cmd_first_token}' without ${{CLAUDE_PLUGIN_ROOT}} — hook working directory is not guaranteed. Use ${{CLAUDE_PLUGIN_ROOT}}/... for reliability.")
 
     # Security warning for package executors running remote packages in hooks
     package_executors = {"npx", "bunx", "uvx", "pipx", "pnpx"}
@@ -633,11 +600,7 @@ def validate_command_hook(
                 pkg_name = part
                 break
         if pkg_name and not pkg_name.startswith((".", "/", "${")):
-            report.warning(
-                f"Hook command uses {cmd_first_token} to execute remote package "
-                f"'{pkg_name}' — this downloads and runs code from a registry. "
-                f"Verify the package is trusted and consider pinning a version."
-            )
+            report.warning(f"Hook command uses {cmd_first_token} to execute remote package '{pkg_name}' — this downloads and runs code from a registry. Verify the package is trusted and consider pinning a version.")
 
     # Validate timeout if present (Claude Code hooks use milliseconds)
     if "timeout" in hook:
@@ -662,7 +625,7 @@ def validate_command_hook(
         validate_script(script_path, report)
     elif script_path:
         # Script path detected but doesn't exist
-        if plugin_root and "${CLAUDE_PLUGIN_ROOT}" not in hook["command"]:
+        if plugin_root and "${CLAUDE_PLUGIN_ROOT}" not in hook["command"] and "${CLAUDE_PLUGIN_DATA}" not in hook["command"]:
             # Absolute path that should exist
             report.major(f"Script not found: {script_path}")
 
@@ -797,8 +760,7 @@ def validate_single_hook(
     if hook_type in {"prompt", "agent"} and event_name in COMMAND_ONLY_EVENTS:
         hook_path_str = report.hook_path
         report.critical(
-            f"Event '{event_name}' only supports 'command' or 'http' hooks, "
-            f"not '{hook_type}'. Prompt and agent hooks are not supported for this event.",
+            f"Event '{event_name}' only supports 'command' or 'http' hooks, not '{hook_type}'. Prompt and agent hooks are not supported for this event.",
             hook_path_str,
         )
 
@@ -806,8 +768,7 @@ def validate_single_hook(
     if hook.get("async") is True and hook_type not in {"command", "http"}:
         hook_path_str = report.hook_path
         report.major(
-            f"'async: true' is only supported on 'command' or 'http' hooks, "
-            f"not '{hook_type}'. Prompt and agent hooks cannot run asynchronously.",
+            f"'async: true' is only supported on 'command' or 'http' hooks, not '{hook_type}'. Prompt and agent hooks cannot run asynchronously.",
             hook_path_str,
         )
 
@@ -879,10 +840,7 @@ def validate_single_hook(
     }
     for key in hook:
         if key not in known_hook_fields:
-            report.warning(
-                f"Unknown hook field '{key}' — not part of the Claude Code hook spec. "
-                f"If used by plugin scripts, consider documenting it."
-            )
+            report.warning(f"Unknown hook field '{key}' — not part of the Claude Code hook spec. If used by plugin scripts, consider documenting it.")
 
     return True
 
@@ -1099,9 +1057,7 @@ def main() -> int:
         help="Show all results including passed checks",
     )
     parser.add_argument("--json", action="store_true", help="Output as JSON")
-    parser.add_argument(
-        "--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout"
-    )
+    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
     args = parser.parse_args()
 
@@ -1135,7 +1091,11 @@ def main() -> int:
         print_json(report)
     elif args.report:
         save_report_and_print_summary(
-            report, Path(args.report), f"Hook Validation: {hook_path}", print_results, args.verbose,
+            report,
+            Path(args.report),
+            f"Hook Validation: {hook_path}",
+            print_results,
+            args.verbose,
             plugin_path=args.hook_path,
         )
     else:
