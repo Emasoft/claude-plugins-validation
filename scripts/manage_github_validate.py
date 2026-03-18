@@ -19,7 +19,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-from cpv_management_common import ok, info, warn, err, BOLD, NC, GREEN, RED
+from cpv_management_common import ok, info, warn, err
+from manage_marketplace import _normalize_github_source
 
 __all__ = [
     "validate_github_plugin",
@@ -27,27 +28,6 @@ __all__ = [
     "audit_github_plugin",
     "audit_github_marketplace",
 ]
-
-
-def _normalize_repo(source: str) -> str:
-    """Normalize various GitHub URL formats to owner/repo."""
-    s = source.strip().rstrip("/")
-    # Remove .git suffix
-    if s.endswith(".git"):
-        s = s[:-4]
-    # Handle SSH URLs first (git@github.com:owner/repo) — must check before HTTPS
-    if s.startswith("git@"):
-        s = s.split(":")[-1].lstrip("/")
-        return s
-    # Handle full HTTPS URLs
-    if "github.com" in s:
-        parts = s.split("github.com")[-1].strip("/").split("/")
-        if len(parts) >= 2:
-            return f"{parts[0]}/{parts[1]}"
-    # Already owner/repo format
-    if "/" in s and not s.startswith("http"):
-        return s
-    return s
 
 
 def _clone_repo(repo: str, dest: Path) -> bool:
@@ -99,7 +79,7 @@ def _run_skill_audit(target: Path) -> int:
 
 def validate_github_plugin(repo: str) -> int:
     """Clone and validate a GitHub plugin without installing."""
-    repo = _normalize_repo(repo)
+    repo = _normalize_github_source(repo)
     tmpdir = tempfile.mkdtemp(prefix="cpv-github-plugin-")
     target = Path(tmpdir) / "plugin"
     try:
@@ -112,7 +92,7 @@ def validate_github_plugin(repo: str) -> int:
 
 def validate_github_marketplace(repo: str) -> int:
     """Clone and validate a GitHub marketplace without registering."""
-    repo = _normalize_repo(repo)
+    repo = _normalize_github_source(repo)
     tmpdir = tempfile.mkdtemp(prefix="cpv-github-mkt-")
     target = Path(tmpdir) / "marketplace"
     try:
@@ -125,7 +105,7 @@ def validate_github_marketplace(repo: str) -> int:
 
 def audit_github_plugin(repo: str) -> int:
     """Clone, validate, and security-audit a GitHub plugin."""
-    repo = _normalize_repo(repo)
+    repo = _normalize_github_source(repo)
     tmpdir = tempfile.mkdtemp(prefix="cpv-audit-plugin-")
     target = Path(tmpdir) / "plugin"
     try:
@@ -143,7 +123,7 @@ def audit_github_plugin(repo: str) -> int:
 
 def audit_github_marketplace(repo: str) -> int:
     """Clone, validate, and security-audit a GitHub marketplace."""
-    repo = _normalize_repo(repo)
+    repo = _normalize_github_source(repo)
     tmpdir = tempfile.mkdtemp(prefix="cpv-audit-mkt-")
     target = Path(tmpdir) / "marketplace"
     try:

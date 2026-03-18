@@ -20,7 +20,7 @@ import subprocess
 import sys
 from typing import List
 
-from cpv_management_common import info, err, warn
+from cpv_management_common import info, err, BOLD, NC
 
 __all__ = [
     "_require_claude_cli",
@@ -30,11 +30,6 @@ __all__ = [
     "_marketplace_help",
     "main",
 ]
-
-# ── ANSI colors (disable if not a TTY) ──────────────────────
-C = sys.stdout.isatty()
-BOLD = "\033[1m" if C else ""
-NC = "\033[0m" if C else ""
 
 
 def _require_claude_cli() -> str:

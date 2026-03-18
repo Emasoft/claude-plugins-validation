@@ -23,6 +23,8 @@ import sys
 from pathlib import Path
 from typing import List, Tuple
 
+from manage_plugin import read_plugin_meta, _portable_path, _run_cpv_validation
+
 from cpv_management_common import (
     CLAUDE_DIR,
     PLUGINS_DIR,
@@ -48,32 +50,11 @@ from cpv_management_common import (
 __all__ = [
     "do_doctor",
     "_run_claude_validate",
-    "read_plugin_meta",
-    "_portable_path",
 ]
 
 
-# ── Helper functions (extracted from claude-plugin-install.py) ───────
 
-
-def read_plugin_meta(plugin_root: Path) -> dict:
-    """Read plugin.json and return metadata with defaults."""
-    pj = plugin_root / ".claude-plugin" / "plugin.json"
-    try:
-        meta = json.loads(pj.read_text(encoding="utf-8"))
-    except Exception:
-        meta = {}
-    return {
-        "name": meta.get("name") or plugin_root.name,
-        "version": meta.get("version", "1.0.0"),
-        "description": meta.get("description", ""),
-    }
-
-
-def _portable_path(p: Path) -> str:
-    """Convert a path to forward slashes for JSON storage.
-    Claude Code (Node.js) expects forward slashes even on Windows."""
-    return str(p).replace("\\", "/")
+# read_plugin_meta and _portable_path are imported from manage_plugin
 
 
 # ── Claude CLI validate helper ───────────────────────────────────────
@@ -476,20 +457,8 @@ def do_doctor(verbose: bool = False):
             meta = read_plugin_meta(plug_dir)
             plugin_key = f"{meta['name']}@{mp_name}"
 
-            # Use CPV's modular validator instead of CPM's monolithic one
-            _scripts_dir = Path(__file__).resolve().parent
-            _validate_script = _scripts_dir / "validate_plugin.py"
-            if _validate_script.exists():
-                _vresult = subprocess.run(
-                    [sys.executable, str(_validate_script), str(plug_dir)],
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                )
-                v_errors = [line for line in _vresult.stderr.splitlines() if "CRITICAL" in line or "MAJOR" in line]
-                v_warnings = [line for line in _vresult.stderr.splitlines() if "MINOR" in line or "WARNING" in line]
-            else:
-                v_errors, v_warnings = [], []
+            # Use CPV's modular validator via shared helper from manage_plugin
+            v_errors, v_warnings, _valid = _run_cpv_validation(plug_dir, quiet=True)
 
             status_parts = []
             if v_errors:

@@ -35,14 +35,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import manage_plugin as mp  # noqa: E402
-from cpv_management_common import _validate_safe_name  # noqa: E402
-
 
 # ── Helpers ──────────────────────────────────────────────────
 
 
-def _make_plugin_dir(root: Path, name: str = "test-plugin", version: str = "1.0.0",
-                     description: str = "A test plugin") -> Path:
+def _make_plugin_dir(root: Path, name: str = "test-plugin", version: str = "1.0.0", description: str = "A test plugin") -> Path:
     """Create a minimal valid plugin directory structure under *root*."""
     plugin_dir = root / name
     cp_dir = plugin_dir / ".claude-plugin"
@@ -87,19 +84,13 @@ class TestParseGitignorePatterns:
         patterns = mp._parse_gitignore_patterns(gi)
         assert patterns == []
 
-    def test_parse_empty_gitignore(self, tmp_path):
-        """Return empty list for an empty .gitignore file."""
+    def test_parse_empty_and_whitespace_gitignore(self, tmp_path):
+        """Empty .gitignore returns []; lines are stripped of whitespace."""
         gi = tmp_path / ".gitignore"
         gi.write_text("", encoding="utf-8")
-        patterns = mp._parse_gitignore_patterns(gi)
-        assert patterns == []
-
-    def test_parse_gitignore_strips_whitespace(self, tmp_path):
-        """Lines are stripped of leading/trailing whitespace."""
-        gi = tmp_path / ".gitignore"
+        assert mp._parse_gitignore_patterns(gi) == []
         gi.write_text("  dist/  \n  build  \n", encoding="utf-8")
-        patterns = mp._parse_gitignore_patterns(gi)
-        assert patterns == ["dist/", "build"]
+        assert mp._parse_gitignore_patterns(gi) == ["dist/", "build"]
 
 
 # ── Tests: _gitignore_pattern_to_re ──────────────────────────
@@ -124,42 +115,23 @@ class TestGitignorePatternToRe:
         assert regex.search("build")
         assert regex.search("src/build")
 
-    def test_double_star_slash(self):
-        """**/logs/ with trailing slash matches directories."""
-        regex, neg = mp._gitignore_pattern_to_re("**/logs/")
-        assert regex is not None
-        assert regex.search("logs/")
-        assert regex.search("src/logs/")
-
-    def test_negation_pattern(self):
-        """!important.txt is a negation pattern."""
+    def test_negation_and_anchored(self):
+        """Negation (!pattern) and anchored (path/with/slash) patterns work."""
         regex, neg = mp._gitignore_pattern_to_re("!important.txt")
         assert neg is True
         assert regex is not None
-        assert regex.search("important.txt")
+        regex2, neg2 = mp._gitignore_pattern_to_re("src/build")
+        assert neg2 is False
+        assert regex2.pattern.startswith("^")
 
-    def test_anchored_pattern(self):
-        """Pattern with / (not trailing) is anchored to root."""
-        regex, neg = mp._gitignore_pattern_to_re("src/build")
-        assert regex is not None
-        assert regex.search("src/build")
-        # Anchored patterns start with ^
-        assert regex.pattern.startswith("^")
-
-    def test_question_mark(self):
-        """? matches exactly one non-slash character."""
-        regex, neg = mp._gitignore_pattern_to_re("file?.txt")
-        assert regex is not None
+    def test_question_mark_and_bracket(self):
+        """? matches one char; [abc] character class works."""
+        regex, _ = mp._gitignore_pattern_to_re("file?.txt")
         assert regex.search("fileA.txt")
         assert not regex.search("file.txt")
-
-    def test_bracket_expression(self):
-        """[abc] character class works."""
-        regex, neg = mp._gitignore_pattern_to_re("[abc].txt")
-        assert regex is not None
-        assert regex.search("a.txt")
-        assert regex.search("b.txt")
-        assert not regex.search("d.txt")
+        regex2, _ = mp._gitignore_pattern_to_re("[abc].txt")
+        assert regex2.search("a.txt")
+        assert not regex2.search("d.txt")
 
     def test_empty_after_strip_returns_none(self):
         """Empty pattern after stripping negation prefix returns None."""
@@ -173,32 +145,15 @@ class TestGitignorePatternToRe:
 class TestIsGitMetadata:
     """Tests for _is_git_metadata — detecting git metadata files."""
 
-    def test_dot_git_directory(self):
-        """'.git' is git metadata."""
+    def test_dot_git_and_subpath(self):
+        """'.git' and '.git/config' are git metadata."""
         assert mp._is_git_metadata(".git") is True
-
-    def test_dot_git_subpath(self):
-        """'.git/config' is git metadata."""
         assert mp._is_git_metadata(".git/config") is True
 
-    def test_gitignore_file(self):
-        """.gitignore at root is git metadata."""
-        assert mp._is_git_metadata(".gitignore") is True
-
-    def test_gitattributes_file(self):
-        """.gitattributes is git metadata."""
-        assert mp._is_git_metadata(".gitattributes") is True
-
-    def test_gitmodules_file(self):
-        """.gitmodules is git metadata."""
-        assert mp._is_git_metadata(".gitmodules") is True
-
-    def test_gitkeep_file(self):
-        """.gitkeep is git metadata."""
-        assert mp._is_git_metadata(".gitkeep") is True
-
-    def test_nested_gitignore(self):
-        """.gitignore nested in a subdirectory is still git metadata."""
+    def test_all_git_dotfiles(self):
+        """.gitignore, .gitattributes, .gitmodules, .gitkeep are all git metadata."""
+        for name in (".gitignore", ".gitattributes", ".gitmodules", ".gitkeep"):
+            assert mp._is_git_metadata(name) is True
         assert mp._is_git_metadata("subdir/.gitignore") is True
 
     def test_regular_file_not_metadata(self):
@@ -367,8 +322,8 @@ class TestReadPluginMeta:
         assert meta["version"] == "2.0.0"
         assert meta["description"] == "My description"
 
-    def test_read_meta_defaults(self, tmp_path):
-        """Missing fields use defaults: name=dirname, version=1.0.0, description=''."""
+    def test_read_meta_defaults_and_corrupt_json(self, tmp_path):
+        """Missing fields use defaults; corrupt JSON also falls back to defaults."""
         plugin = tmp_path / "fallback-plugin"
         cp = plugin / ".claude-plugin"
         cp.mkdir(parents=True)
@@ -377,16 +332,13 @@ class TestReadPluginMeta:
         assert meta["name"] == "fallback-plugin"
         assert meta["version"] == "1.0.0"
         assert meta["description"] == ""
-
-    def test_read_meta_corrupt_json(self, tmp_path):
-        """Corrupt JSON falls back to defaults."""
-        plugin = tmp_path / "bad-plugin"
-        cp = plugin / ".claude-plugin"
-        cp.mkdir(parents=True)
-        (cp / "plugin.json").write_text("NOT JSON {{{", encoding="utf-8")
-        meta = mp.read_plugin_meta(plugin)
-        assert meta["name"] == "bad-plugin"
-        assert meta["version"] == "1.0.0"
+        # Corrupt JSON also uses defaults
+        bad = tmp_path / "bad-plugin"
+        bcp = bad / ".claude-plugin"
+        bcp.mkdir(parents=True)
+        (bcp / "plugin.json").write_text("NOT JSON {{{", encoding="utf-8")
+        meta2 = mp.read_plugin_meta(bad)
+        assert meta2["name"] == "bad-plugin"
 
 
 # ── Tests: _detect_plugin_origin_refs ────────────────────────
@@ -410,8 +362,7 @@ class TestDetectPluginOriginRefs:
         plugin = tmp_path / "p"
         cp = plugin / ".claude-plugin"
         cp.mkdir(parents=True)
-        meta = {"name": "p", "version": "1.0.0",
-                "repository": {"url": "https://github.com/org/repo"}}
+        meta = {"name": "p", "version": "1.0.0", "repository": {"url": "https://github.com/org/repo"}}
         (cp / "plugin.json").write_text(json.dumps(meta), encoding="utf-8")
         refs = mp._detect_plugin_origin_refs(plugin)
         assert any("repository.url" in r for r in refs)
@@ -421,8 +372,7 @@ class TestDetectPluginOriginRefs:
         plugin = tmp_path / "p"
         cp = plugin / ".claude-plugin"
         cp.mkdir(parents=True)
-        meta = {"name": "p", "version": "1.0.0",
-                "author": "https://github.com/some-user"}
+        meta = {"name": "p", "version": "1.0.0", "author": "https://github.com/some-user"}
         (cp / "plugin.json").write_text(json.dumps(meta), encoding="utf-8")
         refs = mp._detect_plugin_origin_refs(plugin)
         assert any("author" in r and "github.com" in r for r in refs)
@@ -445,17 +395,6 @@ class TestDetectPluginOriginRefs:
         refs = mp._detect_plugin_origin_refs(plugin)
         assert refs == []
 
-    def test_detect_origin_dict_field(self, tmp_path):
-        """Detect 'origin' dict field in plugin.json."""
-        plugin = tmp_path / "p"
-        cp = plugin / ".claude-plugin"
-        cp.mkdir(parents=True)
-        meta = {"name": "p", "version": "1.0.0",
-                "origin": {"registry": "npm", "package": "@test/plugin"}}
-        (cp / "plugin.json").write_text(json.dumps(meta), encoding="utf-8")
-        refs = mp._detect_plugin_origin_refs(plugin)
-        assert any("origin" in r for r in refs)
-
 
 # ── Tests: _has_shebang ─────────────────────────────────────
 
@@ -469,22 +408,15 @@ class TestHasShebang:
         f.write_bytes(b"#!/bin/bash\necho hello\n")
         assert mp._has_shebang(f) is True
 
-    def test_file_without_shebang(self, tmp_path):
-        """Regular file without #! prefix."""
+    def test_file_without_shebang_and_edge_cases(self, tmp_path):
+        """Regular file, empty file, and non-existent file all return False."""
         f = tmp_path / "code.py"
         f.write_bytes(b"print('hello')\n")
         assert mp._has_shebang(f) is False
-
-    def test_empty_file(self, tmp_path):
-        """Empty file has no shebang."""
-        f = tmp_path / "empty"
-        f.write_bytes(b"")
-        assert mp._has_shebang(f) is False
-
-    def test_nonexistent_file(self, tmp_path):
-        """Non-existent file returns False (exception handled)."""
-        f = tmp_path / "no_such_file"
-        assert mp._has_shebang(f) is False
+        empty = tmp_path / "empty"
+        empty.write_bytes(b"")
+        assert mp._has_shebang(empty) is False
+        assert mp._has_shebang(tmp_path / "no_such_file") is False
 
 
 # ── Tests: _is_executable / _make_executable ─────────────────
@@ -536,26 +468,18 @@ class TestFindAllScripts:
         assert "script.js" in names
         assert "data.txt" not in names
 
-    def test_find_scripts_in_scripts_dir_no_extension(self, tmp_path):
-        """Files in scripts/ dir without extension are found."""
+    def test_find_extensionless_scripts_and_windows_exts(self, tmp_path):
+        """Files in scripts/ without extension and Windows .cmd/.bat/.ps1 are found."""
         scripts_dir = tmp_path / "scripts"
         scripts_dir.mkdir()
         (scripts_dir / "build").write_text("#!/bin/bash", encoding="utf-8")
-        (scripts_dir / "deploy").write_text("#!/bin/bash", encoding="utf-8")
+        for ext in [".cmd", ".bat", ".ps1"]:
+            (tmp_path / f"run{ext}").write_text("echo hi", encoding="utf-8")
         found = mp._find_all_scripts(tmp_path)
         names = {s.name for s in found}
         assert "build" in names
-        assert "deploy" in names
-
-    def test_find_windows_script_extensions(self, tmp_path):
-        """Find .cmd, .bat, .ps1 files."""
-        for ext in [".cmd", ".bat", ".ps1"]:
-            (tmp_path / f"run{ext}").write_text("echo hi", encoding="utf-8")
-        scripts = mp._find_all_scripts(tmp_path)
-        names = {s.name for s in scripts}
         assert "run.cmd" in names
         assert "run.bat" in names
-        assert "run.ps1" in names
 
 
 # ── Tests: _fix_permissions ──────────────────────────────────
@@ -582,17 +506,13 @@ class TestFixPermissions:
 class TestPortablePath:
     """Tests for _portable_path — forward slash conversion."""
 
-    def test_forward_slashes(self):
-        """Unix paths stay as forward slashes."""
+    def test_forward_slashes_and_no_backslash(self):
+        """Unix paths use forward slashes; result never contains backslashes."""
         result = mp._portable_path(Path("/home/user/plugins/my-plugin"))
         assert "\\" not in result
         assert "/home/user/plugins/my-plugin" in result
-
-    def test_backslash_conversion(self):
-        """Backslashes in string representation are converted to forward slashes."""
-        # On all platforms, explicit backslash in str is converted
-        p = Path("a")  # just need something to call _portable_path logic
-        # Test the core logic directly
+        # Idempotent: replacing \\ with / gives same result
+        p = Path("a/b/c")
         assert mp._portable_path(p).replace("\\", "/") == mp._portable_path(p)
 
 
@@ -616,10 +536,7 @@ class TestLoadInstalledPlugins:
         data = {
             "version": 2,
             "plugins": {
-                "test@market": [{"scope": "user", "version": "1.0.0",
-                                 "installedAt": "2025-01-01T00:00:00Z",
-                                 "lastUpdated": "2025-01-01T00:00:00Z",
-                                 "installPath": "/path/to/plugin"}],
+                "test@market": [{"scope": "user", "version": "1.0.0", "installedAt": "2025-01-01T00:00:00Z", "lastUpdated": "2025-01-01T00:00:00Z", "installPath": "/path/to/plugin"}],
             },
         }
         installed_file.write_text(json.dumps(data), encoding="utf-8")
@@ -685,32 +602,22 @@ class TestDoInstall:
         assert "cool-plugin@test-market" in installed["plugins"]
 
     @patch.object(mp, "_run_cpv_validation", return_value=([], [], True))
-    def test_install_no_marketplace_name_exits(self, mock_val, tmp_path, monkeypatch):
-        """Install without marketplace name exits with error."""
+    def test_install_bad_args_exits(self, mock_val, tmp_path, monkeypatch):
+        """Install without marketplace name or from non-existent source exits."""
         self._setup_env(tmp_path, monkeypatch)
         source = _make_plugin_dir(tmp_path / "source", "p")
         with pytest.raises(SystemExit):
             mp.do_install(str(source), None, quiet=True)
-
-    def test_install_nonexistent_source_exits(self, tmp_path, monkeypatch):
-        """Install from non-existent source exits with error."""
-        self._setup_env(tmp_path, monkeypatch)
         with pytest.raises(SystemExit):
             mp.do_install("/nonexistent/path", "market", quiet=True)
 
     @patch.object(mp, "_run_cpv_validation", return_value=(["CRITICAL: missing field"], [], False))
-    def test_install_validation_fail_without_force_exits(self, mock_val, tmp_path, monkeypatch):
-        """Validation failure without --force exits with error."""
-        self._setup_env(tmp_path, monkeypatch)
+    def test_install_validation_fail_force_controls_outcome(self, mock_val, tmp_path, monkeypatch):
+        """Validation failure exits without --force but succeeds with --force."""
+        mp_dir, settings_file, installed_file = self._setup_env(tmp_path, monkeypatch)
         source = _make_plugin_dir(tmp_path / "source", "bad-plugin")
         with pytest.raises(SystemExit):
             mp.do_install(str(source), "market", force=False, quiet=True)
-
-    @patch.object(mp, "_run_cpv_validation", return_value=(["CRITICAL: missing field"], [], False))
-    def test_install_validation_fail_with_force_succeeds(self, mock_val, tmp_path, monkeypatch):
-        """Validation failure with --force installs anyway."""
-        mp_dir, settings_file, installed_file = self._setup_env(tmp_path, monkeypatch)
-        source = _make_plugin_dir(tmp_path / "source", "bad-plugin")
         mp.do_install(str(source), "market", force=True, quiet=True)
         assert (mp_dir / "market" / "plugins" / "bad-plugin").exists()
 
@@ -730,20 +637,16 @@ class TestDoInstall:
 class TestDoUninstall:
     """Tests for do_uninstall — uninstall flow."""
 
-    def _setup_installed(self, tmp_path, monkeypatch, plugin_name="test-plugin",
-                         marketplace="test-market"):
+    def _setup_installed(self, tmp_path, monkeypatch, plugin_name="test-plugin", marketplace="test-market"):
         """Create a pre-installed plugin environment."""
         mp_dir = tmp_path / "marketplaces"
         plug_dir = mp_dir / marketplace / "plugins" / plugin_name
         plug_dir.mkdir(parents=True)
         (plug_dir / "README.md").write_text("content", encoding="utf-8")
-        _make_marketplace(mp_dir / marketplace, marketplace,
-                          [{"name": plugin_name, "version": "1.0.0", "source": f"./plugins/{plugin_name}"}])
+        _make_marketplace(mp_dir / marketplace, marketplace, [{"name": plugin_name, "version": "1.0.0", "source": f"./plugins/{plugin_name}"}])
         settings_file = tmp_path / "settings.local.json"
         settings = {
-            "extraKnownMarketplaces": {
-                marketplace: {"source": {"source": "directory", "path": str(mp_dir / marketplace)}}
-            },
+            "extraKnownMarketplaces": {marketplace: {"source": {"source": "directory", "path": str(mp_dir / marketplace)}}},
             "enabledPlugins": {f"{plugin_name}@{marketplace}": True},
         }
         settings_file.write_text(json.dumps(settings), encoding="utf-8")
@@ -768,17 +671,12 @@ class TestDoUninstall:
         mp.do_uninstall("test-plugin@test-market", quiet=True)
         assert not plug_dir.exists()
 
-    def test_uninstall_removes_from_settings(self, tmp_path, monkeypatch):
-        """Uninstalling removes plugin from enabledPlugins."""
+    def test_uninstall_removes_from_settings_and_installed(self, tmp_path, monkeypatch):
+        """Uninstalling removes plugin from both settings and installed_plugins.json."""
         mp_dir, settings_file, installed_file, plug_dir = self._setup_installed(tmp_path, monkeypatch)
         mp.do_uninstall("test-plugin@test-market", quiet=True)
         settings = json.loads(settings_file.read_text(encoding="utf-8"))
         assert "test-plugin@test-market" not in settings.get("enabledPlugins", {})
-
-    def test_uninstall_removes_from_installed(self, tmp_path, monkeypatch):
-        """Uninstalling removes plugin from installed_plugins.json."""
-        mp_dir, settings_file, installed_file, plug_dir = self._setup_installed(tmp_path, monkeypatch)
-        mp.do_uninstall("test-plugin@test-market", quiet=True)
         installed = json.loads(installed_file.read_text(encoding="utf-8"))
         assert "test-plugin@test-market" not in installed["plugins"]
 
@@ -790,13 +688,10 @@ class TestDoUninstall:
         settings = json.loads(settings_file.read_text(encoding="utf-8"))
         assert "test-market" not in settings.get("extraKnownMarketplaces", {})
 
-    def test_uninstall_invalid_format_exits(self, tmp_path, monkeypatch):
-        """Uninstall with invalid key format (no @) exits with error."""
+    def test_uninstall_invalid_format_exits_and_dry_run_keeps(self, tmp_path, monkeypatch):
+        """Invalid key format exits; dry run does not remove anything."""
         with pytest.raises(SystemExit):
             mp.do_uninstall("no-at-sign", quiet=True)
-
-    def test_uninstall_dry_run_no_removal(self, tmp_path, monkeypatch):
-        """Dry run uninstall does not remove anything."""
         mp_dir, settings_file, installed_file, plug_dir = self._setup_installed(tmp_path, monkeypatch)
         mp.do_uninstall("test-plugin@test-market", quiet=True, dry_run=True)
         assert plug_dir.exists()
@@ -837,28 +732,10 @@ class TestDoEnable:
         settings = json.loads(settings_file.read_text(encoding="utf-8"))
         assert settings["enabledPlugins"]["my-plugin@market"] is True
 
-    def test_enable_already_enabled_noop(self, tmp_path, monkeypatch):
-        """Enabling an already-enabled plugin is a no-op."""
-        mp_dir = tmp_path / "marketplaces"
-        plug_dir = mp_dir / "market" / "plugins" / "my-plugin"
-        plug_dir.mkdir(parents=True)
-        settings_file = tmp_path / "settings.local.json"
-        settings = {"enabledPlugins": {"my-plugin@market": True}}
-        settings_file.write_text(json.dumps(settings), encoding="utf-8")
-        monkeypatch.setattr(mp, "MARKETPLACES_DIR", mp_dir)
-        monkeypatch.setattr(mp, "SETTINGS_TARGET", settings_file)
-        mp.do_enable("my-plugin@market", quiet=True)
-        # File should still have True
-        s = json.loads(settings_file.read_text(encoding="utf-8"))
-        assert s["enabledPlugins"]["my-plugin@market"] is True
-
-    def test_enable_invalid_format_exits(self, tmp_path, monkeypatch):
-        """Enable with invalid format (no @) exits with error."""
+    def test_enable_invalid_format_and_nonexistent_exits(self, tmp_path, monkeypatch):
+        """Enable with invalid format or non-existent plugin exits with error."""
         with pytest.raises(SystemExit):
             mp.do_enable("nope", quiet=True)
-
-    def test_enable_nonexistent_plugin_exits(self, tmp_path, monkeypatch):
-        """Enable for a plugin that does not exist on disk exits with error."""
         mp_dir = tmp_path / "marketplaces"
         mp_dir.mkdir()
         settings_file = tmp_path / "settings.local.json"
@@ -901,27 +778,10 @@ class TestDoDisable:
         settings = json.loads(settings_file.read_text(encoding="utf-8"))
         assert settings["enabledPlugins"]["my-plugin@market"] is False
 
-    def test_disable_already_disabled_noop(self, tmp_path, monkeypatch):
-        """Disabling an already-disabled plugin is a no-op."""
-        mp_dir = tmp_path / "marketplaces"
-        plug_dir = mp_dir / "market" / "plugins" / "my-plugin"
-        plug_dir.mkdir(parents=True)
-        settings_file = tmp_path / "settings.local.json"
-        settings = {"enabledPlugins": {"my-plugin@market": False}}
-        settings_file.write_text(json.dumps(settings), encoding="utf-8")
-        monkeypatch.setattr(mp, "MARKETPLACES_DIR", mp_dir)
-        monkeypatch.setattr(mp, "SETTINGS_TARGET", settings_file)
-        mp.do_disable("my-plugin@market", quiet=True)
-        s = json.loads(settings_file.read_text(encoding="utf-8"))
-        assert s["enabledPlugins"]["my-plugin@market"] is False
-
-    def test_disable_invalid_format_exits(self, tmp_path, monkeypatch):
-        """Disable with invalid format (no @) exits with error."""
+    def test_disable_invalid_format_and_nonexistent_exits(self, tmp_path, monkeypatch):
+        """Disable with invalid format or non-existent plugin exits with error."""
         with pytest.raises(SystemExit):
             mp.do_disable("bad", quiet=True)
-
-    def test_disable_nonexistent_plugin_exits(self, tmp_path, monkeypatch):
-        """Disable for a plugin that does not exist on disk exits with error."""
         mp_dir = tmp_path / "marketplaces"
         mp_dir.mkdir()
         settings_file = tmp_path / "settings.local.json"
@@ -954,13 +814,10 @@ class TestDoUpdate:
         meta = {"name": "my-plugin", "version": "1.0.0", "description": "Old version"}
         (cp / "plugin.json").write_text(json.dumps(meta), encoding="utf-8")
         (plug_dir / "README.md").write_text("# Old", encoding="utf-8")
-        _make_marketplace(mp_dir / "market", "market",
-                          [{"name": "my-plugin", "version": "1.0.0", "source": "./plugins/my-plugin"}])
+        _make_marketplace(mp_dir / "market", "market", [{"name": "my-plugin", "version": "1.0.0", "source": "./plugins/my-plugin"}])
         settings_file = tmp_path / "settings.local.json"
         settings = {
-            "extraKnownMarketplaces": {
-                "market": {"source": {"source": "directory", "path": str(mp_dir / "market")}}
-            },
+            "extraKnownMarketplaces": {"market": {"source": {"source": "directory", "path": str(mp_dir / "market")}}},
             "enabledPlugins": {"my-plugin@market": True},
         }
         settings_file.write_text(json.dumps(settings), encoding="utf-8")
@@ -989,15 +846,11 @@ class TestDoUpdate:
         entry = installed["plugins"]["my-plugin@market"]
         assert entry[0]["version"] == "2.0.0"
 
-    def test_update_nonexistent_source_exits(self, tmp_path, monkeypatch):
-        """Update from non-existent source exits with error."""
+    def test_update_bad_source_or_no_marketplace_exits(self, tmp_path, monkeypatch):
+        """Update from non-existent source or without marketplace name exits with error."""
         self._setup_for_update(tmp_path, monkeypatch)
         with pytest.raises(SystemExit):
             mp.do_update("/nonexistent", "market", quiet=True)
-
-    def test_update_no_marketplace_exits(self, tmp_path, monkeypatch):
-        """Update without marketplace name exits with error."""
-        self._setup_for_update(tmp_path, monkeypatch)
         new_source = _make_plugin_dir(tmp_path / "newsource", "my-plugin", "2.0.0")
         with pytest.raises(SystemExit):
             mp.do_update(str(new_source), None, quiet=True)

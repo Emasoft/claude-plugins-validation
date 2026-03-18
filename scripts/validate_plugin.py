@@ -320,6 +320,7 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         "hooks": "INFO",
         "scripts": "INFO",
         "docs": "INFO",
+        "output-styles": "INFO",
     }
 
     for d, level in common_dirs.items():
@@ -370,6 +371,7 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         "build",
         "out",
         "target",
+        "output-styles",
     }
     # Also skip hidden dirs and _dev dirs
     for item in plugin_root.iterdir():
@@ -407,7 +409,7 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
             report.major(f"settings.json: JSON parse error: {e}", "settings.json")
 
     # Check that plugin has at least some actual content beyond just a manifest
-    content_indicators = ["commands", "skills", "agents", "hooks", "scripts"]
+    content_indicators = ["commands", "skills", "agents", "hooks", "scripts", "output-styles"]
     file_indicators = [".mcp.json", ".lsp.json"]
     has_content = any((plugin_root / d).is_dir() for d in content_indicators) or any((plugin_root / f).exists() for f in file_indicators)
     if not has_content:

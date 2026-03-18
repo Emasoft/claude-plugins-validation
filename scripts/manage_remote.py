@@ -19,23 +19,16 @@ Usage:
 import sys
 from typing import List
 
-from manage_marketplace import _require_claude_cli, _run_claude_plugin
-from cpv_management_common import err
+from manage_marketplace import _run_claude_plugin
+from cpv_management_common import err, BOLD, NC
 
 __all__ = ["do_remote", "_remote_help"]
-
-# ── Color constants ──────────────────────────────────────
-# Match the style used by the rest of the management suite.
-_C = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
-BOLD = "\033[1m" if _C else ""
-NC = "\033[0m" if _C else ""
-
 
 # ── Remote subcommand dispatch ───────────────────────────
 
 
 def do_remote(argv: List[str]):
-    """Handle `claude-plugin-install remote <subcommand> [args]`."""
+    """Handle `manage_remote.py remote <subcommand> [args]`."""
     if not argv:
         _remote_help()
         sys.exit(1)
@@ -50,7 +43,7 @@ def do_remote(argv: List[str]):
     if subcmd == "install" or subcmd == "i":
         if not rest:
             err(
-                "Usage: claude-plugin-install remote install <plugin[@marketplace]> [--scope <scope>]"
+                "Usage: manage_remote.py remote install <plugin[@marketplace]> [--scope <scope>]"
             )
             sys.exit(1)
         cmd = ["install"] + rest
@@ -60,7 +53,7 @@ def do_remote(argv: List[str]):
     elif subcmd == "update":
         if not rest:
             err(
-                "Usage: claude-plugin-install remote update <plugin[@marketplace]> [--scope <scope>]"
+                "Usage: manage_remote.py remote update <plugin[@marketplace]> [--scope <scope>]"
             )
             sys.exit(1)
         cmd = ["update"] + rest
@@ -70,7 +63,7 @@ def do_remote(argv: List[str]):
     elif subcmd == "uninstall" or subcmd == "remove" or subcmd == "rm":
         if not rest:
             err(
-                "Usage: claude-plugin-install remote uninstall <plugin[@marketplace]> [--scope <scope>]"
+                "Usage: manage_remote.py remote uninstall <plugin[@marketplace]> [--scope <scope>]"
             )
             sys.exit(1)
         cmd = ["uninstall"] + rest
@@ -85,7 +78,7 @@ def do_remote(argv: List[str]):
     elif subcmd == "enable":
         if not rest:
             err(
-                "Usage: claude-plugin-install remote enable <plugin[@marketplace]> [--scope <scope>]"
+                "Usage: manage_remote.py remote enable <plugin[@marketplace]> [--scope <scope>]"
             )
             sys.exit(1)
         cmd = ["enable"] + rest
@@ -95,7 +88,7 @@ def do_remote(argv: List[str]):
     elif subcmd == "disable":
         if not rest:
             err(
-                "Usage: claude-plugin-install remote disable <plugin[@marketplace]> [--scope <scope>]"
+                "Usage: manage_remote.py remote disable <plugin[@marketplace]> [--scope <scope>]"
             )
             sys.exit(1)
         cmd = ["disable"] + rest
@@ -104,7 +97,7 @@ def do_remote(argv: List[str]):
 
     elif subcmd == "validate":
         if not rest:
-            err("Usage: claude-plugin-install remote validate <path>")
+            err("Usage: manage_remote.py remote validate <path>")
             sys.exit(1)
         cmd = ["validate"] + rest
         rc = _run_claude_plugin(cmd, quiet=quiet)
@@ -124,10 +117,10 @@ def do_remote(argv: List[str]):
 
 
 def _remote_help():
-    print(f"""{BOLD}claude-plugin-install remote{NC} — Manage plugins from GitHub marketplaces
+    print(f"""{BOLD}manage_remote.py remote{NC} — Manage plugins from GitHub marketplaces
 
 {BOLD}Usage:{NC}
-  claude-plugin-install remote <command> <plugin[@marketplace]> [options]
+  manage_remote.py remote <command> <plugin[@marketplace]> [options]
 
 {BOLD}Commands:{NC}
   install <plugin[@marketplace]> [--scope <scope>]
@@ -159,26 +152,26 @@ def _remote_help():
 
 {BOLD}Examples:{NC}
   # Install a plugin from a registered marketplace
-  claude-plugin-install remote install my-plugin@my-marketplace
+  manage_remote.py remote install my-plugin@my-marketplace
 
   # Install with project scope
-  claude-plugin-install remote install my-plugin --scope project
+  manage_remote.py remote install my-plugin --scope project
 
   # Update a plugin to latest version
-  claude-plugin-install remote update my-plugin@my-marketplace
+  manage_remote.py remote update my-plugin@my-marketplace
 
   # List all installed plugins
-  claude-plugin-install remote list
+  manage_remote.py remote list
 
   # List all available plugins (JSON)
-  claude-plugin-install remote list --available --json
+  manage_remote.py remote list --available --json
 
   # Uninstall a remote plugin
-  claude-plugin-install remote uninstall my-plugin@my-marketplace
+  manage_remote.py remote uninstall my-plugin@my-marketplace
 
   # Enable/disable
-  claude-plugin-install remote enable my-plugin@my-marketplace
-  claude-plugin-install remote disable my-plugin@my-marketplace
+  manage_remote.py remote enable my-plugin@my-marketplace
+  manage_remote.py remote disable my-plugin@my-marketplace
 """)
 
 
