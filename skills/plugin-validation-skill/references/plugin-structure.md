@@ -44,6 +44,8 @@ my-plugin/
 ├── docs/                     # Documentation (optional)
 │   └── usage.md
 ├── .mcp.json                 # MCP server definitions (optional)
+├── .lsp.json                 # LSP server configurations (optional)
+├── settings.json             # Default settings applied when enabled (optional, agent settings only)
 ├── README.md                 # Plugin documentation
 └── LICENSE                   # License file
 ```
@@ -271,12 +273,49 @@ skills/
 }
 ```
 
+### Persistent Data with ${CLAUDE_PLUGIN_DATA}
+
+Use `${CLAUDE_PLUGIN_DATA}` for state that should survive plugin updates (dependencies, caches, generated code). The directory resolves to `~/.claude/plugins/data/{id}/` and is created automatically on first reference.
+
+**Recommended pattern** — install dependencies on first run and re-install when manifest changes:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [{
+      "hooks": [{
+        "type": "command",
+        "command": "diff -q \"${CLAUDE_PLUGIN_ROOT}/package.json\" \"${CLAUDE_PLUGIN_DATA}/package.json\" >/dev/null 2>&1 || (cd \"${CLAUDE_PLUGIN_DATA}\" && cp \"${CLAUDE_PLUGIN_ROOT}/package.json\" . && npm install) || rm -f \"${CLAUDE_PLUGIN_DATA}/package.json\""
+      }]
+    }]
+  }
+}
+```
+
+**Use NODE_PATH** in MCP servers to reference persisted dependencies:
+
+```json
+{
+  "mcpServers": {
+    "my-server": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/server.js"],
+      "env": { "NODE_PATH": "${CLAUDE_PLUGIN_DATA}/node_modules" }
+    }
+  }
+}
+```
+
+The data directory is deleted on `plugin uninstall` from last scope (unless `--keep-data` is passed).
+
 ### Path Rules
 
 1. **Always use variables** for plugin paths - never hardcode
-2. **Relative paths** start with `./` when in manifest
-3. **No path traversal** - `../` may not work after installation
-4. **Absolute paths break** portability across systems
+2. **Use `${CLAUDE_PLUGIN_ROOT}`** for scripts, binaries, config bundled with the plugin (changes on update)
+3. **Use `${CLAUDE_PLUGIN_DATA}`** for installed dependencies, caches, state (persists across updates)
+4. **Relative paths** start with `./` when in manifest
+5. **No path traversal** - `../` may not work after installation
+6. **Absolute paths break** portability across systems
 
 ---
 

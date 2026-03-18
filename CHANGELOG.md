@@ -2,6 +2,21 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [1.12.0] - 2026-03-18
+
+### Claude Code v2.1.76–v2.1.78 Alignment
+
+- **StopFailure hook event** (v2.1.78): fires on API errors (rate limit, auth failure). Added to all event lists.
+- **${CLAUDE_PLUGIN_DATA} env var** (v2.1.78): persistent data directory surviving updates. Recognized in 8 validators, skip filesystem resolution for DATA paths, updated lookbehind patterns.
+- **Agent `effort` frontmatter** (v2.1.78): low/medium/high model effort. New `validate_effort_field()` function.
+- **`branch` context value** (v2.1.77): /fork renamed to /branch, both accepted.
+- **LLM Externalizer MCP instructions** added to all 4 agents (plugin-validator, skill-validation-agent, plugin-fixer, semantic-validator).
+- **Fixed old LLM Externalizer tool prefix** in CHANGELOG (`mcp__llm-externalizer__*` → `mcp__plugin_llm-externalizer_llm-externalizer__*`).
+- **Updated hook-validation.md** reference: 23 events (was 19), fixed incorrect PreToolResponse reference, corrected event categorizations.
+- **Updated plugin-structure.md** reference: CLAUDE_PLUGIN_DATA env var, SessionStart hook pattern for dependency management, persistent data best practices.
+- **Updated README.md**: 23 hook events, env var list, deep path/URL validation mention.
+- All 1150 tests pass
+
 ## [1.11.0] - 2026-03-14
 
 ### Claude Code v2.1.0–v2.1.76 Changelog Alignment

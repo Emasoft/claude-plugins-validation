@@ -27,7 +27,7 @@ Creates a Claude Code plugin GitHub repo with CI/CD, git hooks, and marketplace 
 ## Instructions
 
 1. **Create GitHub repo**: `gh repo create <owner>/<name> --public --clone`, then `cd` into it
-2. **Initialize plugin**: from plugin-repo-templates (see Resources) create `plugin.json`, `pyproject.toml`, `.gitignore`, `README.md`. Scan for compiled components — if found, add build phases per plugin-binary-builds (see Resources)
+2. **Initialize plugin**: from plugin-repo-templates (see Resources) create `plugin.json`, `pyproject.toml`, `.gitignore`, `README.md`. Use `${CLAUDE_PLUGIN_ROOT}` for bundled scripts and `${CLAUDE_PLUGIN_DATA}` for dependencies/caches that survive updates. Scan for compiled components — if found, add build phases per plugin-binary-builds (see Resources)
 3. **Install workflows**: from plugin-workflows (see Resources) copy `ci.yml`, `release.yml`, `validate.yml`, `notify-marketplace.yml` to `.github/workflows/`. For compiled binaries, add `build-binaries.yml` per plugin-binary-builds (see Resources)
 4. **Install git hooks** from plugin-hooks-and-scripts (see Resources): copy `pre-push` to `.githooks/`, add `publish.py` and `setup-hooks.py` to `scripts/`, run `git config core.hooksPath .githooks`
 5. **Configure marketplace notification**: ask user for `MARKETPLACE_PAT`, run `gh secret set MARKETPLACE_PAT` (skip if declined)
