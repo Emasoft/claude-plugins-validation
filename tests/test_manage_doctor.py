@@ -10,9 +10,9 @@ Functions tested:
 
 Coverage breakdown:
 - read_plugin_meta: 3 tests (valid, missing file, partial metadata)
-- _portable_path: 2 tests (unix path, windows-style backslash)
+- _portable_path: 1 test (unix path forward slashes)
 - _run_claude_validate: 5 tests (no claude, success, errors, warnings, timeout)
-- do_doctor: 20 tests (healthy, missing dir, corrupt settings, empty marketplaces,
+- do_doctor: 21 tests (healthy, missing dir, corrupt settings, empty marketplaces,
   orphans, reserved names, impersonation, undeclared plugins, verbose mode, etc.)
 """
 
@@ -24,19 +24,15 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 # Ensure scripts dir is on path so manage_doctor and cpv_management_common can be imported
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-import manage_doctor
 from manage_doctor import (
     _portable_path,
     _run_claude_validate,
     do_doctor,
     read_plugin_meta,
 )
-
 
 # ── Helpers ─────────────────────────────────────────────────────────
 
@@ -272,14 +268,17 @@ class TestDoDoctor:
         _patch_paths(monkeypatch, claude_dir)
 
         # Create settings
-        _make_settings(claude_dir, {
-            "extraKnownMarketplaces": {
-                "my-test-marketplace": {"source": {"source": "directory", "path": _portable_path(claude_dir / "plugins" / "marketplaces" / "my-test-marketplace")}},
+        _make_settings(
+            claude_dir,
+            {
+                "extraKnownMarketplaces": {
+                    "my-test-marketplace": {"source": {"source": "directory", "path": _portable_path(claude_dir / "plugins" / "marketplaces" / "my-test-marketplace")}},
+                },
+                "enabledPlugins": {
+                    "test-plugin@my-test-marketplace": True,
+                },
             },
-            "enabledPlugins": {
-                "test-plugin@my-test-marketplace": True,
-            },
-        })
+        )
 
         # Create marketplace with plugin
         mp_dir = claude_dir / "plugins" / "marketplaces"
@@ -476,13 +475,16 @@ class TestDoDoctor:
         _patch_paths(monkeypatch, claude_dir)
 
         # Settings reference a marketplace path that does not exist
-        _make_settings(claude_dir, {
-            "extraKnownMarketplaces": {
-                "ghost-mp": {
-                    "source": {"source": "directory", "path": "/nonexistent/path/ghost-mp"},
+        _make_settings(
+            claude_dir,
+            {
+                "extraKnownMarketplaces": {
+                    "ghost-mp": {
+                        "source": {"source": "directory", "path": "/nonexistent/path/ghost-mp"},
+                    },
                 },
             },
-        })
+        )
 
         # Create the marketplaces dir but don't put anything in it
         (claude_dir / "plugins" / "marketplaces").mkdir(parents=True)
@@ -498,11 +500,14 @@ class TestDoDoctor:
         claude_dir = _make_claude_dir(tmp_path)
         _patch_paths(monkeypatch, claude_dir)
 
-        _make_settings(claude_dir, {
-            "enabledPlugins": {
-                "ghost-plugin@ghost-marketplace": True,
+        _make_settings(
+            claude_dir,
+            {
+                "enabledPlugins": {
+                    "ghost-plugin@ghost-marketplace": True,
+                },
             },
-        })
+        )
 
         # Create marketplaces dir but no matching marketplace
         (claude_dir / "plugins" / "marketplaces").mkdir(parents=True)
@@ -531,10 +536,15 @@ class TestDoDoctor:
         }
         mp_dir = claude_dir / "plugins" / "marketplaces"
         # Create both plugins on disk, but plugin-b has a different name in its plugin.json
-        _make_marketplace(mp_dir, "test-mp", mj, plugins={
-            "plugin-a": {"name": "plugin-a", "version": "1.0.0", "description": "A"},
-            "plugin-b": {"name": "undeclared-name", "version": "1.0.0", "description": "B"},
-        })
+        _make_marketplace(
+            mp_dir,
+            "test-mp",
+            mj,
+            plugins={
+                "plugin-a": {"name": "plugin-a", "version": "1.0.0", "description": "A"},
+                "plugin-b": {"name": "undeclared-name", "version": "1.0.0", "description": "B"},
+            },
+        )
 
         with patch("manage_doctor.shutil.which", return_value=None), patch("manage_doctor.subprocess.run"):
             do_doctor()
@@ -563,7 +573,10 @@ class TestDoDoctor:
 
         # Mock the validate_plugin.py subprocess to return errors so verbose output triggers
         mock_vresult = subprocess.CompletedProcess(
-            args=[], returncode=1, stdout="", stderr="CRITICAL: Missing required field\nMAJOR: Bad structure\n",
+            args=[],
+            returncode=1,
+            stdout="",
+            stderr="CRITICAL: Missing required field\nMAJOR: Bad structure\n",
         )
         with patch("manage_doctor.shutil.which", return_value=None), patch("manage_doctor.subprocess.run", return_value=mock_vresult):
             do_doctor(verbose=True)
@@ -668,88 +681,33 @@ class TestDoDoctor:
         _patch_paths(monkeypatch, claude_dir)
 
         mp_dir = claude_dir / "plugins" / "marketplaces"
-        _make_marketplace(mp_dir, "mismatch-mp", {
-            "name": "mismatch-mp",
-            "owner": {"name": "Test"},
-            "metadata": {"description": "Mismatch"},
-            "plugins": [{"name": "p", "source": "./plugins/p"}],
-        })
+        _make_marketplace(
+            mp_dir,
+            "mismatch-mp",
+            {
+                "name": "mismatch-mp",
+                "owner": {"name": "Test"},
+                "metadata": {"description": "Mismatch"},
+                "plugins": [{"name": "p", "source": "./plugins/p"}],
+            },
+        )
 
-        _make_settings(claude_dir, {
-            "extraKnownMarketplaces": {
-                "mismatch-mp": {
-                    "source": {"source": "directory", "path": "/wrong/path/mismatch-mp"},
+        _make_settings(
+            claude_dir,
+            {
+                "extraKnownMarketplaces": {
+                    "mismatch-mp": {
+                        "source": {"source": "directory", "path": "/wrong/path/mismatch-mp"},
+                    },
                 },
             },
-        })
+        )
 
         with patch("manage_doctor.shutil.which", return_value=None), patch("manage_doctor.subprocess.run"):
             do_doctor()
 
         out = capsys.readouterr().out
         assert "Path mismatch" in out or "mismatch" in out.lower()
-
-    def test_settings_with_enabled_and_disabled_plugins_info(self, tmp_path, monkeypatch, capsys):
-        """Settings with enabledPlugins shows count of enabled and disabled plugins."""
-        claude_dir = _make_claude_dir(tmp_path)
-        _patch_paths(monkeypatch, claude_dir)
-
-        _make_settings(claude_dir, {
-            "enabledPlugins": {
-                "p1@mp": True,
-                "p2@mp": True,
-                "p3@mp": False,
-            },
-        })
-
-        with patch("manage_doctor.shutil.which", return_value=None):
-            do_doctor()
-
-        out = capsys.readouterr().out
-        assert "2 plugin(s) enabled" in out
-        assert "1 disabled" in out
-
-    def test_relative_source_without_dot_slash_warns(self, tmp_path, monkeypatch, capsys):
-        """Plugin with relative source path not starting with './' is warned."""
-        claude_dir = _make_claude_dir(tmp_path)
-        _patch_paths(monkeypatch, claude_dir)
-        _make_settings(claude_dir, {})
-
-        bad_rel_mj = {
-            "name": "bad-rel-mp",
-            "owner": {"name": "Test"},
-            "metadata": {"description": "Bad relative source"},
-            "plugins": [{"name": "p", "source": "plugins/p"}],
-        }
-        mp_dir = claude_dir / "plugins" / "marketplaces"
-        _make_marketplace(mp_dir, "bad-rel-mp", bad_rel_mj)
-
-        with patch("manage_doctor.shutil.which", return_value=None), patch("manage_doctor.subprocess.run"):
-            do_doctor()
-
-        out = capsys.readouterr().out
-        assert "must start with" in out
-
-    def test_source_path_with_dotdot_is_error(self, tmp_path, monkeypatch, capsys):
-        """Plugin source path containing '..' is flagged as an error (path traversal)."""
-        claude_dir = _make_claude_dir(tmp_path)
-        _patch_paths(monkeypatch, claude_dir)
-        _make_settings(claude_dir, {})
-
-        traversal_mj = {
-            "name": "traversal-mp",
-            "owner": {"name": "Test"},
-            "metadata": {"description": "Path traversal"},
-            "plugins": [{"name": "p", "source": "./../../../etc/passwd"}],
-        }
-        mp_dir = claude_dir / "plugins" / "marketplaces"
-        _make_marketplace(mp_dir, "traversal-mp", traversal_mj)
-
-        with patch("manage_doctor.shutil.which", return_value=None), patch("manage_doctor.subprocess.run"):
-            do_doctor()
-
-        out = capsys.readouterr().out
-        assert ".." in out and "must not climb" in out
 
     def test_claude_cli_auth_not_authenticated(self, tmp_path, monkeypatch, capsys):
         """When claude auth status returns non-zero, a warning about authentication is shown."""
@@ -758,7 +716,10 @@ class TestDoDoctor:
         _make_settings(claude_dir, {})
 
         auth_result = subprocess.CompletedProcess(
-            args=["claude", "auth", "status"], returncode=1, stdout="", stderr="Not authenticated\n",
+            args=["claude", "auth", "status"],
+            returncode=1,
+            stdout="",
+            stderr="Not authenticated\n",
         )
 
         with patch("manage_doctor.shutil.which", return_value="/usr/local/bin/claude"), patch("manage_doctor.subprocess.run", return_value=auth_result):

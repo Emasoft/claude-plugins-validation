@@ -132,9 +132,9 @@ def _detect_components(plug_dir: Path) -> Dict[str, int]:
                 result[comp_type] = count
     for comp_type, filename in _SPECIAL_COMPONENTS.items():
         path = plug_dir / filename
-        if comp_type == "hooks":
+        if comp_type in ("hooks", "output-styles"):  # directory-based components
             if path.exists() and path.is_dir():
-                result["hooks"] = 1
+                result[comp_type] = 1
         else:
             if path.exists() and path.is_file():
                 result[comp_type] = 1

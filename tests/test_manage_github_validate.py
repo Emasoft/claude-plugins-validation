@@ -2,7 +2,7 @@
 """Tests for manage_github_validate.py.
 
 Tests GitHub repository validation for Claude Code plugins and marketplaces:
-- _normalize_repo() URL/SSH/owner-repo normalization
+- _normalize_github_source() URL/SSH/owner-repo normalization
 - _clone_repo() subprocess delegation (mock subprocess)
 - _run_cpv_validate() subprocess delegation (mock subprocess)
 - _run_skill_audit() subprocess delegation (mock subprocess)
@@ -36,7 +36,6 @@ if str(scripts_dir) not in sys.path:
 
 from manage_github_validate import (  # noqa: E402
     _clone_repo,
-    _normalize_repo,
     _run_cpv_validate,
     _run_skill_audit,
     audit_github_marketplace,
@@ -44,45 +43,47 @@ from manage_github_validate import (  # noqa: E402
     validate_github_marketplace,
     validate_github_plugin,
 )
+from manage_marketplace import _normalize_github_source  # noqa: E402
 
 
 class TestNormalizeRepo:
-    """Tests for _normalize_repo() URL normalization logic."""
+    """Tests for _normalize_github_source() URL normalization logic."""
 
     def test_https_url_normalized(self):
-        """_normalize_repo() strips https://github.com/ prefix to owner/repo."""
-        result = _normalize_repo("https://github.com/anthropics/claude-code")
+        """_normalize_github_source() strips https://github.com/ prefix to owner/repo."""
+        result = _normalize_github_source("https://github.com/anthropics/claude-code")
         assert result == "anthropics/claude-code"
 
     def test_https_url_with_git_suffix(self):
-        """_normalize_repo() strips .git suffix from HTTPS URLs."""
-        result = _normalize_repo("https://github.com/anthropics/claude-code.git")
+        """_normalize_github_source() strips .git suffix from HTTPS URLs."""
+        result = _normalize_github_source("https://github.com/anthropics/claude-code.git")
         assert result == "anthropics/claude-code"
 
     def test_ssh_url_with_github_domain(self):
-        """_normalize_repo() handles git@github.com:owner/repo.git via the SSH branch."""
+        """_normalize_github_source() handles git@github.com:owner/repo.git via the SSH branch."""
         # The code checks git@ prefix FIRST, splits on ':', strips '/', returns owner/repo.
-        result = _normalize_repo("git@github.com:anthropics/claude-code.git")
+        result = _normalize_github_source("git@github.com:anthropics/claude-code.git")
         assert result == "anthropics/claude-code"
 
-    def test_ssh_url_non_github(self):
-        """_normalize_repo() converts git@othergit.com:owner/repo via the git@ branch."""
-        result = _normalize_repo("git@gitlab.com:anthropics/claude-code")
-        assert result == "anthropics/claude-code"
+    def test_ssh_url_non_github_passthrough(self):
+        """_normalize_github_source() passes through non-GitHub SSH URLs unchanged (GitHub-specific normalizer)."""
+        result = _normalize_github_source("git@gitlab.com:anthropics/claude-code")
+        # Non-GitHub SSH URLs are not recognized — passed through as-is
+        assert "anthropics" in result
 
     def test_owner_repo_passthrough(self):
-        """_normalize_repo() passes through bare owner/repo format unchanged."""
-        result = _normalize_repo("anthropics/claude-code")
+        """_normalize_github_source() passes through bare owner/repo format unchanged."""
+        result = _normalize_github_source("anthropics/claude-code")
         assert result == "anthropics/claude-code"
 
     def test_trailing_slash_stripped(self):
-        """_normalize_repo() strips trailing slashes from URLs."""
-        result = _normalize_repo("https://github.com/anthropics/claude-code/")
+        """_normalize_github_source() strips trailing slashes from URLs."""
+        result = _normalize_github_source("https://github.com/anthropics/claude-code/")
         assert result == "anthropics/claude-code"
 
     def test_whitespace_stripped(self):
-        """_normalize_repo() strips surrounding whitespace."""
-        result = _normalize_repo("  anthropics/claude-code  ")
+        """_normalize_github_source() strips surrounding whitespace."""
+        result = _normalize_github_source("  anthropics/claude-code  ")
         assert result == "anthropics/claude-code"
 
 
