@@ -358,6 +358,30 @@ def validate_version_sync(
         except Exception:
             pass
 
+    # Check SKILL.md files for version in frontmatter
+    skills_dir = plugin_root / "skills"
+    if skills_dir.is_dir():
+        for skill_subdir in skills_dir.iterdir():
+            if not skill_subdir.is_dir():
+                continue
+            skill_md = skill_subdir / "SKILL.md"
+            if not skill_md.exists():
+                continue
+            try:
+                content = skill_md.read_text(encoding="utf-8")
+                if content.startswith("---"):
+                    end = content.find("---", 3)
+                    if end > 0:
+                        fm_text = content[3:end]
+                        for line in fm_text.splitlines():
+                            line = line.strip()
+                            if line.startswith("version:"):
+                                ver = line.split(":", 1)[1].strip().strip("'\"")
+                                if ver:
+                                    versions_found[f"skills/{skill_subdir.name}/SKILL.md"] = ver
+            except Exception:
+                pass
+
     report.version_sources = versions_found
 
     if len(versions_found) < 2:

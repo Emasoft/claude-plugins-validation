@@ -9,6 +9,8 @@ skills:
   - fix-validation
   - setup-plugin-repo
   - setup-github-marketplace
+  - create-plugin
+  - standardize-plugin
 ---
 
 # Plugin Fixer Agent
