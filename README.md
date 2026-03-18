@@ -182,13 +182,15 @@ Validation results use the following severity levels:
 - Script linting (Python via ruff/mypy, shell via shellcheck)
 - Content presence check (no empty plugins)
 - Settings.json validation (recognized keys)
+- Environment variable validation (`${CLAUDE_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_DATA}`, `${CLAUDE_PROJECT_DIR}`, `${CLAUDE_SKILL_DIR}`, `${CLAUDE_ENV_FILE}`, `${CLAUDE_CODE_REMOTE}`)
+- Deep path and URL validation in .md files (76+ files scanned, SSRF-safe URL checker)
 - Shebang verification for scripts
 - Cross-platform script portability
 
 ### Hook Validation (`validate_hook.py`)
 
 - JSON structure and schema
-- Valid event types (19 supported, including InstructionsLoaded) with fuzzy matching suggestions
+- Valid event types (23 supported, including StopFailure, Elicitation, ElicitationResult, PostCompact) with fuzzy matching suggestions
 - Matcher syntax and value validation (Notification types, SessionStart, PreCompact)
 - Script paths and executability
 - Hook type configuration

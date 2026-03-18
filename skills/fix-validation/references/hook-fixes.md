@@ -219,7 +219,7 @@ Comprehensive remediation guide for all issues detected by `validate_hook.py`.
 **Root cause**: An event name in the `"hooks"` object is not recognized by Claude Code.
 **Fix**:
 1. Check the event name for typos (names are case-sensitive)
-2. Valid event names are (all 19):
+2. Valid event names are (all 23):
    - `PreToolUse`
    - `PostToolUse`
    - `PostToolUseFailure`
@@ -227,11 +227,13 @@ Comprehensive remediation guide for all issues detected by `validate_hook.py`.
    - `UserPromptSubmit`
    - `Notification`
    - `Stop`
+   - `StopFailure` (v2.1.78)
    - `SubagentStop`
    - `SubagentStart`
    - `SessionStart`
    - `SessionEnd`
    - `PreCompact`
+   - `PostCompact` (v2.1.76)
    - `Setup`
    - `TeammateIdle`
    - `TaskCompleted`
@@ -239,6 +241,8 @@ Comprehensive remediation guide for all issues detected by `validate_hook.py`.
    - `WorktreeCreate`
    - `WorktreeRemove`
    - `InstructionsLoaded`
+   - `Elicitation` (v2.1.76)
+   - `ElicitationResult` (v2.1.76)
 3. **Wrong**: `"preToolUse"`, `"pre_tool_use"`, `"PreTooluse"`
 4. **Correct**: `"PreToolUse"`
 5. **New: Fuzzy matching** — the validator now suggests corrections for misspelled events. If you see `did you mean 'PreToolUse'?` in the error message, it detected a close match. Common typos:

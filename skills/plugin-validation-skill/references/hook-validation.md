@@ -98,14 +98,16 @@ These events support tool-specific or context-specific matchers:
 
 - PreToolUse
 - PostToolUse
-- PreToolResponse
+- PostToolUseFailure
+- PermissionRequest
 - Notification
-- SessionStart
-- SessionEnd (note: no matcher at runtime, but matcher field accepted in config)
-- SubagentStart
-- SubagentStop (note: no matcher at runtime, but matcher field accepted in config)
-- ConfigChange
+- PreCompact
 - Setup
+- SessionStart
+- SessionEnd
+- SubagentStart
+- SubagentStop
+- ConfigChange
 
 ### Events Without Matchers
 
