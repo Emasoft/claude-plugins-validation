@@ -51,6 +51,7 @@ The top-level `hooks` key must be an object whose keys are event names and value
 |-------|----------|-------------|
 | description | No | Human-readable description |
 | hooks | Yes | Object mapping event names to arrays of hook objects |
+| disableAllHooks | No | Boolean — temporarily disable all hooks (default: false) |
 
 ### JSON Structure Rules
 
@@ -267,27 +268,59 @@ Executes a shell command:
 |-------|----------|-------------|
 | type | Yes | Must be "command" |
 | command | Yes | Script path (use ${CLAUDE_PLUGIN_ROOT}) |
-| timeout | No | Timeout in **seconds** (default: 60). Values over 1000 indicate confusion with milliseconds. |
+| timeout | No | Timeout in **seconds** (default: 600). Values over 1000 indicate confusion with milliseconds. |
 | statusMessage | No | Message shown in UI to indicate progress while the hook runs |
 | async | No | If true, the hook runs asynchronously (fire-and-forget). Default: false |
+| once | No | If true, runs only once per session (skill/agent hooks only) |
+
+### HTTP Type
+
+POSTs hook input as JSON to a URL (v2.1.63+):
+
+```json
+{
+  "type": "http",
+  "url": "http://localhost:8080/hooks/endpoint",
+  "headers": { "Authorization": "Bearer $MY_TOKEN" },
+  "allowedEnvVars": ["MY_TOKEN"],
+  "timeout": 30,
+  "statusMessage": "Checking policy..."
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| type | Yes | Must be "http" |
+| url | Yes | URL for POST request (http:// or https://) |
+| headers | No | Key-value pairs, supports `$VAR_NAME` interpolation |
+| allowedEnvVars | No | List of env var names allowed for header interpolation |
+| timeout | No | Timeout in seconds (default: 30) |
+| statusMessage | No | Message shown in UI during hook execution |
+| once | No | If true, runs only once per session (skill/agent hooks only) |
 
 ### Prompt Type
 
-Modifies the system prompt:
+Evaluates a prompt with an LLM. Use `$ARGUMENTS` placeholder for hook input JSON:
 
 ```json
 {
   "type": "prompt",
-  "prompt": "Always follow coding standards when modifying files."
+  "prompt": "Evaluate if Claude should stop: $ARGUMENTS. Check if all tasks are complete.",
+  "model": "claude-3-5-haiku-20241022",
+  "timeout": 30
 }
 ```
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | type | Yes | Must be "prompt" |
-| prompt | Yes | Text to add to system prompt |
+| prompt | Yes | Prompt text with `$ARGUMENTS` placeholder for hook input JSON |
+| model | No | Model to use (defaults to fast model) |
+| timeout | No | Timeout in seconds (default: 30) |
+| statusMessage | No | Message shown in UI during hook execution |
+| once | No | If true, runs only once per session (skill/agent hooks only) |
 
-Note: Prompt type hooks are not valid for command-only events (PreCompact, Notification).
+Note: Prompt type hooks are not valid for command-only events.
 
 ### Agent Type
 
@@ -305,11 +338,13 @@ Runs an inline agent (subagent) as a hook:
 | Field | Required | Description |
 |-------|----------|-------------|
 | type | Yes | Must be "agent" |
-| prompt | Yes | Prompt text sent to the agent |
+| prompt | Yes | Prompt text with `$ARGUMENTS` placeholder for hook input JSON |
 | model | No | Model ID to use for the agent. Defaults to current session model. |
 | timeout | No | Timeout in **seconds** (default: 60). Values over 1000 indicate confusion with milliseconds. |
+| statusMessage | No | Message shown in UI during hook execution |
+| once | No | If true, runs only once per session (skill/agent hooks only) |
 
-Note: Agent type hooks are not valid for command-only events (PreCompact, Notification).
+Note: Agent type hooks are not valid for command-only events.
 
 ---
 
