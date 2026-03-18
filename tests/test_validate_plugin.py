@@ -645,6 +645,9 @@ Thumbs.db
 .env
 .venv/
 venv/
+.claude/
+llm_externalizer_output/
+.tldr/
 """
         (plugin_dir / ".gitignore").write_text(gitignore_content)
         report = ValidationReport()

@@ -36,11 +36,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import re
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any, cast
+
+IS_WINDOWS = platform.system() == "Windows"
 
 import yaml
 from cpv_validation_common import (
@@ -418,6 +421,18 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
             ".claude-plugin/plugin.json",
         )
 
+    # Check pyproject.toml for Python plugins
+    has_py_scripts = (plugin_root / "scripts").is_dir() and any((plugin_root / "scripts").glob("*.py"))
+    if has_py_scripts:
+        if (plugin_root / "pyproject.toml").exists():
+            report.passed("pyproject.toml exists")
+        else:
+            report.minor("pyproject.toml not found — recommended for Python plugins")
+        if (plugin_root / ".python-version").exists():
+            report.passed(".python-version exists")
+        else:
+            report.warning(".python-version not found — recommended for reproducible builds")
+
 
 def validate_commands(plugin_root: Path, report: ValidationReport) -> None:
     """Validate command definitions."""
@@ -579,6 +594,15 @@ def validate_mcp(plugin_root: Path, report: ValidationReport) -> None:
         report.add(result.level, result.message, result.file, result.line)
 
 
+def _has_shebang(path: Path) -> bool:
+    """Check if a file starts with a shebang (#!) line."""
+    try:
+        with open(path, "rb") as f:
+            return f.read(2) == b"#!"
+    except Exception:
+        return False
+
+
 def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
     """Validate Python and shell scripts."""
     scripts_dir = plugin_root / "scripts"
@@ -684,6 +708,13 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
     # Report shellcheck availability once (after loop)
     if sh_files and not shellcheck_cmd:
         report.minor("shellcheck not available locally or via bunx/npx, skipping shell lint")
+
+    # Check Python scripts with shebang are executable (Unix only)
+    if not IS_WINDOWS:
+        if scripts_dir.is_dir():
+            for py_file in scripts_dir.glob("*.py"):
+                if _has_shebang(py_file) and not os.access(py_file, os.X_OK):
+                    report.warning(f"scripts/{py_file.name} has shebang but is not executable — run: chmod +x scripts/{py_file.name}", f"scripts/{py_file.name}")
 
     # Check shebangs on script files — scripts without shebangs may not run cross-platform
     shebang_extensions = {".py", ".sh", ".bash", ".rb", ".pl", ".php"}
@@ -999,12 +1030,20 @@ def validate_skills(plugin_root: Path, report: ValidationReport, skip_platform_c
 
 
 def validate_readme(plugin_root: Path, report: ValidationReport) -> None:
-    """Validate README.md exists."""
+    """Validate README.md exists and has recommended markers."""
     readme = plugin_root / "README.md"
     if readme.exists():
         report.passed("README.md found")
     else:
         report.minor("README.md not found")
+
+    # Badge markers for automated badge updates
+    if readme.exists():
+        readme_content = readme.read_text(encoding="utf-8", errors="replace")
+        if "<!--BADGES-START-->" in readme_content and "<!--BADGES-END-->" in readme_content:
+            report.passed("README.md has badge markers for automated updates", "README.md")
+        else:
+            report.warning("README.md missing badge markers (<!--BADGES-START--> / <!--BADGES-END-->)", "README.md")
 
 
 def validate_license(plugin_root: Path, report: ValidationReport) -> None:
@@ -1086,6 +1125,10 @@ EXPECTED_GITIGNORE_CATEGORIES: list[tuple[list[str], str, str]] = [
     ([".env", "*.env"], "Environment files (.env)", "major"),
     # Virtual environments
     ([".venv", "venv"], "Virtual environment directories", "major"),
+    # Claude Code runtime directories
+    ([".claude"], "Claude Code cache directory (.claude/)", "minor"),
+    (["llm_externalizer_output"], "LLM Externalizer output directory", "warning"),
+    ([".tldr"], "TLDR cache directory (.tldr/)", "warning"),
 ]
 
 
@@ -1355,6 +1398,65 @@ def validate_md_content_references(plugin_root: Path, report: ValidationReport) 
         validate_md_urls(md_file, plugin_root, report, url_cache=url_cache)
 
 
+def validate_pipeline_readiness(plugin_root: Path, report: ValidationReport) -> None:
+    """Check that the plugin has CI/CD pipeline infrastructure."""
+    # Pre-push hook
+    hook_paths = [
+        plugin_root / ".githooks" / "pre-push",
+        plugin_root / "git-hooks" / "pre-push",
+    ]
+    if any(p.exists() for p in hook_paths):
+        report.passed("Pre-push hook found")
+    else:
+        report.minor("No pre-push hook found (.githooks/pre-push or git-hooks/pre-push) — recommended for quality gates")
+
+    # Publish script
+    if (plugin_root / "scripts" / "publish.py").exists():
+        report.passed("scripts/publish.py found")
+    else:
+        report.warning("No scripts/publish.py found — recommended for release automation")
+
+    # Changelog config
+    if (plugin_root / "cliff.toml").exists():
+        report.passed("cliff.toml found (git-cliff changelog)")
+    else:
+        report.warning("No cliff.toml found — recommended for automated changelog generation")
+
+    # GitHub workflows
+    workflows_dir = plugin_root / ".github" / "workflows"
+    if workflows_dir.is_dir() and list(workflows_dir.glob("*.yml")):
+        report.passed("GitHub workflows found")
+    else:
+        report.minor("No .github/workflows/*.yml found — recommended for CI/CD automation")
+
+    # Marketplace notification workflow
+    if workflows_dir.is_dir():
+        notify_names = ["notify-marketplace.yml", "notify.yml", "marketplace-notify.yml"]
+        if any((workflows_dir / n).exists() for n in notify_names):
+            report.passed("Marketplace notification workflow found")
+        else:
+            report.warning("No notify-marketplace.yml workflow — plugin updates won't auto-notify marketplaces")
+
+
+def validate_workflow_best_practices(plugin_root: Path, report: ValidationReport) -> None:
+    """Check GitHub workflow files for common anti-patterns."""
+    workflows_dir = plugin_root / ".github" / "workflows"
+    if not workflows_dir.is_dir():
+        return
+    for wf in workflows_dir.glob("*.yml"):
+        try:
+            content = wf.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        rel = str(wf.relative_to(plugin_root))
+        # Check for uv pip install --system (should use uvx)
+        if "uv pip install --system" in content:
+            report.nit(f"{rel}: uses 'uv pip install --system' — prefer 'uvx' for reproducible installs", rel)
+        # Check for unpinned actions/checkout
+        if "actions/checkout@" not in content and "actions/checkout" in content:
+            report.nit(f"{rel}: uses 'actions/checkout' without version pin — pin to '@v4' or similar", rel)
+
+
 def main() -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -1439,6 +1541,8 @@ def main() -> int:
     validate_cross_platform(plugin_root, report)
     validate_md_content_references(plugin_root, report)
     validate_workflow_inline_python(plugin_root, report)
+    validate_pipeline_readiness(plugin_root, report)
+    validate_workflow_best_practices(plugin_root, report)
 
     # Output
     if args.json:
