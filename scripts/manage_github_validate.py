@@ -35,14 +35,15 @@ def _normalize_repo(source: str) -> str:
     # Remove .git suffix
     if s.endswith(".git"):
         s = s[:-4]
+    # Handle SSH URLs first (git@github.com:owner/repo) — must check before HTTPS
+    if s.startswith("git@"):
+        s = s.split(":")[-1].lstrip("/")
+        return s
     # Handle full HTTPS URLs
     if "github.com" in s:
         parts = s.split("github.com")[-1].strip("/").split("/")
         if len(parts) >= 2:
             return f"{parts[0]}/{parts[1]}"
-    # Handle SSH URLs
-    if s.startswith("git@"):
-        s = s.split(":")[-1]
     # Already owner/repo format
     if "/" in s and not s.startswith("http"):
         return s
