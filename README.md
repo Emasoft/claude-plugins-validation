@@ -3,17 +3,17 @@
 > **Installation:** This plugin is distributed via the [Emasoft Plugins Marketplace](https://github.com/Emasoft/emasoft-plugins).
 > See [Installation](#installation) below for instructions.
 
-Comprehensive validation suite for Claude Code plugins, marketplaces, hooks, skills, and MCP servers.
+Comprehensive validation and management suite for Claude Code plugins, marketplaces, hooks, skills, and MCP servers.
 
 ## Overview
 
 This plugin provides:
 
-- **Validation Scripts**: Python scripts for validating all plugin components (190+ rules)
-- **Expert Agents**: `plugin-validator` for interactive validation, `skill-validation-agent` for skill validation, `plugin-fixer` for automated remediation, `semantic-validator` for deep AI-driven quality analysis
-- **Skills**: `plugin-validation-skill`, `skill-validation-skill`, `fix-validation`, `semantic-validation-skill`, `setup-plugin-repo`, `setup-github-marketplace`, `publish-to-marketplace`
-- **Slash Commands**: 19 commands for validating, fixing, and publishing plugins
-- **Plugin Management**: For installing/managing plugins, see [claude-plugins-management](https://github.com/Emasoft/claude-plugins-management)
+- **Validation Scripts**: 17 Python validators with 190+ rules for all plugin components
+- **Management Scripts**: Plugin lifecycle management — install, uninstall, update, enable, disable, search, doctor, marketplace operations
+- **Expert Agents**: `plugin-validator`, `skill-validation-agent`, `plugin-fixer`, `semantic-validator` (validation) + `plugin-manager` (management)
+- **Skills**: 8 skills covering validation, management, publishing, scaffolding, and marketplace operations
+- **Slash Commands**: 36 commands for validating, managing, fixing, and publishing plugins
 
 ## Installation (Production)
 
@@ -66,6 +66,28 @@ claude --plugin-dir ./OUTPUT_SKILLS/claude-plugins-validation
 | `/cpv-semantic-validation` | Deep AI-driven semantic analysis (opus, explicit opt-in) |
 | `/cpv-setup-github-marketplace` | Set up a GitHub marketplace with CI/CD |
 | `/cpv-publish-to-marketplace` | Publish a plugin to a GitHub-hosted marketplace |
+| `/cpv-setup-plugin-repo` | Create and configure a plugin GitHub repository |
+
+### Plugin Management Commands (v2.0.0)
+
+| Command | Description |
+|---------|-------------|
+| `/cpv-install-plugin` | Install a plugin from local directory, archive, or remote marketplace |
+| `/cpv-uninstall-plugin` | Uninstall a plugin and clean up settings |
+| `/cpv-update-plugin` | Update an installed plugin from a new source |
+| `/cpv-enable-plugin` | Enable a disabled plugin |
+| `/cpv-disable-plugin` | Disable a plugin without removing it |
+| `/cpv-list-plugins` | List all installed plugins with version, status, components |
+| `/cpv-search-plugins` | Search plugins by component type or text |
+| `/cpv-doctor` | Health-check all plugins, settings, and marketplaces |
+| `/cpv-manage-marketplaces` | Add, remove, list, or update GitHub marketplaces |
+| `/cpv-manage-remote-plugins` | Install/update/uninstall remote plugins from GitHub |
+| `/cpv-validate-github-plugin` | Validate a GitHub plugin without installing |
+| `/cpv-validate-github-marketplace` | Validate a GitHub marketplace without registering |
+| `/cpv-audit-security` | Security audit via skill-audit (TruffleHog/ShellCheck/Semgrep) |
+| `/cpv-audit-github-plugin` | Security audit a GitHub plugin repository |
+| `/cpv-bump-version` | Bump plugin version (patch/minor/major) |
+| `/cpv-version` | Show management tools version |
 
 ## Utility Scripts
 
@@ -78,6 +100,19 @@ claude --plugin-dir ./OUTPUT_SKILLS/claude-plugins-validation
 | `setup_marketplace_automation.py` | Automates GitHub marketplace CI/CD pipeline setup |
 | `cpv_token_cost.py` | Token cost reporter — parses agent transcripts for accurate cost breakdown |
 | `smart_exec.py` | Intelligent tool executor with cross-platform detection |
+
+### Management Scripts (v2.0.0)
+
+| Script | Description |
+|--------|-------------|
+| `manage_plugin.py` | Plugin lifecycle: install, uninstall, update, enable, disable |
+| `manage_registry.py` | List and search installed plugins by component type or text |
+| `manage_doctor.py` | Health-check all plugins, settings, and marketplaces |
+| `manage_marketplace.py` | Marketplace management: add, remove, list, update registrations |
+| `manage_remote.py` | Remote plugin operations via claude CLI delegation |
+| `manage_github_validate.py` | Validate GitHub repos/marketplaces without installing |
+| `bump_version.py` | Semantic version bumping (patch/minor/major/set) |
+| `cpv_management_common.py` | Shared management infrastructure (JSONC, safe I/O, archives) |
 
 ## Common Options
 
@@ -127,9 +162,21 @@ uv run python scripts/validate_marketplace.py /path/to/marketplace
 uv run python scripts/validate_xref.py /path/to/plugin
 ```
 
-### Install a Plugin Locally (No Marketplace)
+### Install a Plugin Locally
 
-For plugin installation and management, use the dedicated [claude-plugins-management](https://github.com/Emasoft/claude-plugins-management) plugin.
+```bash
+# Install from directory
+uv run scripts/manage_plugin.py ./my-plugin/ my-marketplace
+
+# Install from archive
+uv run scripts/manage_plugin.py plugin.tar.gz my-marketplace
+
+# List installed plugins
+uv run scripts/manage_registry.py --list
+
+# Health check
+uv run scripts/manage_doctor.py --verbose
+```
 
 ### Use the Agent
 

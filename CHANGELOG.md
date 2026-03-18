@@ -2,6 +2,43 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.0.0] - 2026-03-18
+
+### MAJOR: Merged claude-plugins-management (CPM v1.4.0) into CPV
+
+Integrates all 25 unique features from the claude-plugins-management plugin, creating a unified plugin for both validation (190+ rules) AND lifecycle management.
+
+#### New Management Scripts (8)
+- **cpv_management_common.py**: Shared infrastructure — JSONC parser (comments + trailing commas), atomic JSON I/O with timestamped backups, archive extraction (zip/tar/tgz/bz2/xz) with path traversal prevention, cross-platform Windows support, color output helpers
+- **manage_plugin.py**: Plugin lifecycle — install from directories or archives (gitignore-aware copy), uninstall with cache cleanup, update (uninstall + reinstall), enable/disable via settings.local.json
+- **manage_registry.py**: List installed plugins with version/status/components, search by component type (commands/agents/skills/hooks/mcp/lsp/rules/output-styles) or free text
+- **manage_doctor.py**: Health check — Claude CLI auth, settings integrity, marketplace validation (reserved names, impersonation, kebab-case), per-plugin validation, orphaned entry detection
+- **manage_marketplace.py**: Marketplace CRUD — add/remove/list/update registrations via `claude` CLI, normalize GitHub URLs (HTTPS/SSH/git://owner/repo)
+- **manage_remote.py**: Remote plugin operations — install/update/uninstall/enable/disable via `claude` CLI delegation, scoped installation (user/project/local)
+- **manage_github_validate.py**: GitHub repo validation — clone with `gh repo clone --depth 1`, run CPV validators, optional skill-audit security scan, temp dir cleanup
+- **bump_version.py**: Semantic version bumping — patch/minor/major/set across plugin.json and pyproject.toml
+
+#### New Commands (16)
+- `/cpv-install-plugin`, `/cpv-uninstall-plugin`, `/cpv-update-plugin`
+- `/cpv-enable-plugin`, `/cpv-disable-plugin`, `/cpv-version`
+- `/cpv-list-plugins`, `/cpv-search-plugins`, `/cpv-doctor`
+- `/cpv-manage-marketplaces`, `/cpv-manage-remote-plugins`
+- `/cpv-validate-github-plugin`, `/cpv-validate-github-marketplace`
+- `/cpv-audit-security`, `/cpv-audit-github-plugin`, `/cpv-bump-version`
+
+#### New Agent (1)
+- **plugin-manager.md**: Autonomous management agent (sonnet, maxTurns: 20) for install/uninstall/search/doctor/marketplace operations
+
+#### New Skill (1)
+- **plugin-management/SKILL.md**: Complete lifecycle management documentation with all script references
+
+#### Architecture
+- CPM's monolithic 4365-line `claude-plugin-install.py` decomposed into 7 focused modules + 1 shared library
+- Management modules call CPV validators via subprocess (no circular imports, clean separation)
+- CPM's validation code discarded — CPV's 190+ rule validators are strictly superior
+- All 20 existing `/cpv-*` commands preserved with identical behavior
+- All 1150 existing tests pass unchanged (0.84s)
+
 ## [1.12.0] - 2026-03-18
 
 ### Claude Code v2.1.76–v2.1.78 Alignment
