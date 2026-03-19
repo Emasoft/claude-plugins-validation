@@ -462,23 +462,38 @@ def gen_cliff_toml(p: PluginParams) -> str:
 
 
 def gen_publish_py(p: PluginParams) -> str:
-    """Generate scripts/publish.py — unified publish pipeline."""
+    """Generate scripts/publish.py — unified publish pipeline with --gate mode."""
     _ = p  # unused but kept for consistent signature
     return r'''#!/usr/bin/env python3
-"""Unified publish pipeline: test -> lint -> validate -> bump -> commit -> tag -> push.
+"""Unified publish pipeline: lint -> validate -> test -> bump -> badge -> changelog -> commit -> push.
+
+Modes:
+  --gate           Pre-push gate: lint + validate + tests only (no bump/push).
+                   Called by git-hooks/pre-push automatically.
+  --install-hook   Install git-hooks/pre-push into .git/hooks/ and set core.hooksPath.
+  --patch/--minor/--major  Full release pipeline (12 stages).
 
 Pipeline stages (all fail-fast — any failure aborts):
-  1. Check working tree is clean
-  2. Run tests (pytest)
-  3. Lint files (ruff)
-  4. Validate plugin (validate_plugin.py)
-  5. Check version consistency across all sources
-  6. Bump version in plugin.json, pyproject.toml, and __version__ vars
-  7. Generate changelog (git-cliff)
-  8. Commit, tag, push
-  9. Create GitHub release (gh CLI)
+   1. Check working tree is clean
+   2. Lint files (ruff)
+   3. Validate plugin (validate_plugin.py --strict)
+   4. Run tests (pytest)
+   5. Check version consistency across all sources
+   6. Bump version in plugin.json, pyproject.toml, and __version__ vars
+   7. Update README version badge
+   8. Generate changelog (git-cliff)
+   9. Commit, tag, push
+  10. Create GitHub release (gh CLI)
+
+Gate stages (--gate mode, called by pre-push hook):
+   G1. Version bump check (local vs remote)
+   G2. Lint (ruff)
+   G3. Validate (--strict, blocks on CRITICAL/MAJOR/MINOR/NIT)
+   G4. Tests (pytest)
 
 Usage:
+    uv run python scripts/publish.py --gate
+    uv run python scripts/publish.py --install-hook
     uv run python scripts/publish.py --patch
     uv run python scripts/publish.py --minor
     uv run python scripts/publish.py --major
@@ -491,6 +506,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -676,11 +692,112 @@ def do_bump(root: Path, new_ver: str, dry_run: bool = False) -> bool:
     return ok1 and ok2
 
 
+# -- Hook installer ------------------------------------------------------------
+
+def install_hook(root: Path) -> int:
+    """Copy git-hooks/pre-push to .git/hooks/pre-push and set core.hooksPath."""
+    cprint(f"\n{BOLD}Installing git hooks...{NC}")
+    source = root / "git-hooks" / "pre-push"
+    if not source.is_file():
+        cprint(f"  {RED}git-hooks/pre-push not found{NC}")
+        return 1
+    git_dir = root / ".git"
+    if not git_dir.is_dir():
+        cprint(f"  {RED}.git/ not found — is this a git repository?{NC}")
+        return 1
+    hooks_dir = git_dir / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    dest = hooks_dir / "pre-push"
+    shutil.copy2(source, dest)
+    dest.chmod(dest.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    cprint(f"  {GREEN}Installed: git-hooks/pre-push -> .git/hooks/pre-push{NC}")
+    # Also set core.hooksPath so git finds hooks in git-hooks/ directly
+    subprocess.run(["git", "config", "core.hooksPath", "git-hooks"],
+                   cwd=str(root), check=False)
+    cprint(f"  {GREEN}Set git config core.hooksPath = git-hooks{NC}")
+    return 0
+
+
+# -- Gate mode (pre-push quality checks) --------------------------------------
+
+def run_gate(root: Path) -> int:
+    """Pre-push gate: blocks on any quality issue. Returns 0 if clean."""
+    cprint(f"\n{BOLD}Pre-push gate checks{NC}\n")
+
+    # Gate 1: Version bump check — local vs remote
+    cprint(f"{BLUE}[G1] Checking version bump...{NC}")
+    local_ver = get_current_version(root)
+    if local_ver:
+        try:
+            r = subprocess.run(
+                ["git", "show", "origin/main:.claude-plugin/plugin.json"],
+                capture_output=True, text=True, cwd=str(root))
+            if r.returncode == 0:
+                remote_ver = json.loads(r.stdout).get("version")
+                if remote_ver and local_ver == remote_ver:
+                    cprint(f"  {RED}BLOCKED: Version not bumped ({local_ver}){NC}")
+                    return 1
+                cprint(f"  {GREEN}Version bump OK: {remote_ver} -> {local_ver}{NC}")
+        except Exception:
+            cprint(f"  {YELLOW}Could not check remote version (new repo?){NC}")
+
+    # Gate 2: Lint with ruff directly
+    cprint(f"\n{BLUE}[G2] Linting...{NC}")
+    scripts_dir = root / "scripts"
+    if scripts_dir.is_dir():
+        lint_result = subprocess.run(
+            ["uv", "run", "ruff", "check", "scripts/"],
+            cwd=str(root), timeout=120)
+        if lint_result.returncode != 0:
+            cprint(f"  {RED}BLOCKED: Lint issues found{NC}")
+            return 1
+        cprint(f"  {GREEN}Lint passed.{NC}")
+    else:
+        cprint(f"  {YELLOW}No scripts/ directory — skipping lint.{NC}")
+
+    # Gate 3: Validate plugin (--strict, blocks on CRITICAL/MAJOR/MINOR/NIT)
+    cprint(f"\n{BLUE}[G3] Validating plugin...{NC}")
+    validator = root / "scripts" / "validate_plugin.py"
+    if validator.is_file():
+        ve = subprocess.run(
+            ["uv", "run", "python", str(validator), ".", "--strict"],
+            cwd=str(root), timeout=180).returncode
+        # Exit codes: 0=pass, 1=CRITICAL, 2=MAJOR, 3=MINOR, 4=NIT, 5+=WARNING
+        if ve != 0 and ve < 5:
+            labels = {1: "CRITICAL", 2: "MAJOR", 3: "MINOR", 4: "NIT"}
+            cprint(f"  {RED}BLOCKED: {labels.get(ve, f'exit {ve}')} issues found{NC}")
+            return 1
+        cprint(f"  {GREEN}Validation passed.{NC}")
+    else:
+        cprint(f"  {YELLOW}No validate_plugin.py — skipping.{NC}")
+
+    # Gate 4: Tests
+    cprint(f"\n{BLUE}[G4] Running tests...{NC}")
+    test_dir = root / "tests"
+    if test_dir.is_dir() and any(test_dir.glob("test_*.py")):
+        try:
+            te = subprocess.run(
+                ["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"],
+                cwd=str(root), timeout=300).returncode
+        except subprocess.TimeoutExpired:
+            cprint(f"  {YELLOW}Tests timed out after 300s, skipping.{NC}")
+            te = 0
+        if te != 0:
+            cprint(f"  {RED}BLOCKED: Tests failed{NC}")
+            return 1
+        cprint(f"  {GREEN}Tests passed.{NC}")
+    else:
+        cprint(f"  {YELLOW}No test files found — skipping.{NC}")
+
+    cprint(f"\n{GREEN}{BOLD}All gates passed.{NC}")
+    return 0
+
+
 # -- Pipeline stages -----------------------------------------------------------
 
 def stage_check_clean(root: Path) -> None:
     """Step 1: Working tree must be clean."""
-    cprint(f"\n{BOLD}[1/9] Checking working tree...{NC}")
+    cprint(f"\n{BOLD}[1/10] Checking working tree...{NC}")
     r = run(["git", "status", "--porcelain"], cwd=root, capture=True)
     if r.stdout.strip():
         cprint(f"  {RED}Working tree is dirty. Commit or stash changes first.{NC}")
@@ -688,25 +805,15 @@ def stage_check_clean(root: Path) -> None:
         sys.exit(1)
     cprint(f"  {GREEN}Clean.{NC}")
 
-def stage_tests(root: Path) -> None:
-    """Step 2: Run pytest."""
-    cprint(f"\n{BOLD}[2/9] Running tests...{NC}")
-    test_dir = root / "tests"
-    if not test_dir.is_dir():
-        cprint(f"  {YELLOW}No tests/ directory — skipping.{NC}")
-        return
-    run(["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"], cwd=root)
-    cprint(f"  {GREEN}Tests passed.{NC}")
-
 def stage_lint(root: Path) -> None:
-    """Step 3: Lint with ruff."""
-    cprint(f"\n{BOLD}[3/9] Linting...{NC}")
+    """Step 2: Lint with ruff."""
+    cprint(f"\n{BOLD}[2/10] Linting...{NC}")
     run(["uv", "run", "ruff", "check", "scripts/"], cwd=root)
     cprint(f"  {GREEN}Lint passed.{NC}")
 
 def stage_validate(root: Path) -> None:
-    """Step 4: Validate plugin structure."""
-    cprint(f"\n{BOLD}[4/9] Validating plugin...{NC}")
+    """Step 3: Validate plugin structure."""
+    cprint(f"\n{BOLD}[3/10] Validating plugin...{NC}")
     validator = root / "scripts" / "validate_plugin.py"
     if not validator.is_file():
         cprint(f"  {YELLOW}No validate_plugin.py — skipping.{NC}")
@@ -714,9 +821,19 @@ def stage_validate(root: Path) -> None:
     run(["uv", "run", "python", str(validator), ".", "--strict"], cwd=root)
     cprint(f"  {GREEN}Validation passed.{NC}")
 
+def stage_tests(root: Path) -> None:
+    """Step 4: Run pytest."""
+    cprint(f"\n{BOLD}[4/10] Running tests...{NC}")
+    test_dir = root / "tests"
+    if not test_dir.is_dir():
+        cprint(f"  {YELLOW}No tests/ directory — skipping.{NC}")
+        return
+    run(["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"], cwd=root)
+    cprint(f"  {GREEN}Tests passed.{NC}")
+
 def stage_consistency(root: Path) -> None:
     """Step 5: Check version consistency."""
-    cprint(f"\n{BOLD}[5/9] Checking version consistency...{NC}")
+    cprint(f"\n{BOLD}[5/10] Checking version consistency...{NC}")
     ok, msg = check_version_consistency(root)
     cprint(f"  {msg}")
     if not ok:
@@ -726,15 +843,34 @@ def stage_consistency(root: Path) -> None:
 
 def stage_bump(root: Path, new_ver: str, dry_run: bool) -> None:
     """Step 6: Bump version."""
-    cprint(f"\n{BOLD}[6/9] Bumping version...{NC}")
+    cprint(f"\n{BOLD}[6/10] Bumping version...{NC}")
     if not do_bump(root, new_ver, dry_run=dry_run):
         cprint(f"  {RED}Version bump failed.{NC}")
         sys.exit(1)
     cprint(f"  {GREEN}Version bumped to {new_ver}.{NC}")
 
+def stage_update_badges(root: Path, old_ver: str, new_ver: str, dry_run: bool) -> None:
+    """Step 7: Replace version badge in README.md."""
+    cprint(f"\n{BOLD}[7/10] Updating README badge...{NC}")
+    readme = root / "README.md"
+    if not readme.exists():
+        cprint(f"  {YELLOW}No README.md — skipping badge update.{NC}")
+        return
+    content = readme.read_text(encoding="utf-8")
+    old_badge = f"version-{old_ver}-blue"
+    new_badge = f"version-{new_ver}-blue"
+    if old_badge not in content:
+        cprint(f"  {YELLOW}Version badge not found in README.md, skipping.{NC}")
+        return
+    if dry_run:
+        cprint(f"  Would update badge: {old_badge} -> {new_badge}")
+        return
+    readme.write_text(content.replace(old_badge, new_badge, 1), encoding="utf-8")
+    cprint(f"  {GREEN}Updated README badge: {old_ver} -> {new_ver}{NC}")
+
 def stage_changelog(root: Path, dry_run: bool) -> None:
-    """Step 7: Generate changelog with git-cliff."""
-    cprint(f"\n{BOLD}[7/9] Generating changelog...{NC}")
+    """Step 8: Generate changelog with git-cliff."""
+    cprint(f"\n{BOLD}[8/10] Generating changelog...{NC}")
     if not shutil.which("git-cliff"):
         cprint(f"  {YELLOW}git-cliff not installed — skipping changelog.{NC}")
         return
@@ -749,8 +885,8 @@ def stage_changelog(root: Path, dry_run: bool) -> None:
     cprint(f"  {GREEN}Changelog generated.{NC}")
 
 def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
-    """Step 8: Commit, tag, push."""
-    cprint(f"\n{BOLD}[8/9] Committing and pushing...{NC}")
+    """Step 9: Commit, tag, push."""
+    cprint(f"\n{BOLD}[9/10] Committing and pushing...{NC}")
     tag = f"v{new_ver}"
     if dry_run:
         cprint(f"  Would commit: chore: bump version to {new_ver}")
@@ -764,8 +900,8 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
     cprint(f"  {GREEN}Pushed {tag}.{NC}")
 
 def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
-    """Step 9: Create GitHub release via gh CLI."""
-    cprint(f"\n{BOLD}[9/9] Creating GitHub release...{NC}")
+    """Step 10: Create GitHub release via gh CLI."""
+    cprint(f"\n{BOLD}[10/10] Creating GitHub release...{NC}")
     tag = f"v{new_ver}"
     if not shutil.which("gh"):
         cprint(f"  {YELLOW}gh CLI not installed — skipping release.{NC}")
@@ -788,15 +924,33 @@ def main() -> int:
         description="Unified publish pipeline for Claude Code plugins.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    bump_group = parser.add_mutually_exclusive_group(required=True)
-    bump_group.add_argument("--patch", action="store_const", dest="bump", const="patch")
-    bump_group.add_argument("--minor", action="store_const", dest="bump", const="minor")
-    bump_group.add_argument("--major", action="store_const", dest="bump", const="major")
+    # Mutually exclusive: --gate / --install-hook / --patch/--minor/--major
+    mode_group = parser.add_mutually_exclusive_group(required=True)
+    mode_group.add_argument("--gate", action="store_true",
+                            help="Pre-push gate mode: lint + validate + tests only (no bump/push)")
+    mode_group.add_argument("--install-hook", action="store_true",
+                            help="Install pre-push hook into .git/hooks/ and set core.hooksPath")
+    mode_group.add_argument("--patch", action="store_const", dest="bump", const="patch",
+                            help="Bump patch version and publish")
+    mode_group.add_argument("--minor", action="store_const", dest="bump", const="minor",
+                            help="Bump minor version and publish")
+    mode_group.add_argument("--major", action="store_const", dest="bump", const="major",
+                            help="Bump major version and publish")
     parser.add_argument("--dry-run", action="store_true", help="Preview only, no changes")
     parser.add_argument("--skip-tests", action="store_true", help="Skip pytest step")
     args = parser.parse_args()
 
     root = get_repo_root()
+
+    # --install-hook mode: just set up the hook and exit
+    if args.install_hook:
+        return install_hook(root)
+
+    # --gate mode: run quality checks only (called by pre-push hook)
+    if args.gate:
+        return run_gate(root)
+
+    # Full publish pipeline (--patch/--minor/--major)
     current = get_current_version(root)
     if not current:
         cprint(f"{RED}Cannot read version from .claude-plugin/plugin.json{NC}")
@@ -812,12 +966,13 @@ def main() -> int:
         cprint(f"{YELLOW}(dry-run mode — no changes will be made){NC}")
 
     stage_check_clean(root)
-    if not args.skip_tests:
-        stage_tests(root)
     stage_lint(root)
     stage_validate(root)
+    if not args.skip_tests:
+        stage_tests(root)
     stage_consistency(root)
     stage_bump(root, new_ver, args.dry_run)
+    stage_update_badges(root, current, new_ver, args.dry_run)
     stage_changelog(root, args.dry_run)
     stage_commit_and_push(root, new_ver, args.dry_run)
     stage_gh_release(root, new_ver, args.dry_run)
@@ -887,217 +1042,20 @@ if __name__ == "__main__":
 
 
 def gen_pre_push_hook(p: PluginParams) -> str:
-    """Generate git-hooks/pre-push — quality gates before push."""
-    return f'''#!/usr/bin/env python3
-"""Pre-push hook for {p.name}.
-
-Quality gates (all must pass — only WARNINGs are allowed through):
-  1. Version bump check — blocks if local version matches remote
-  2. Lint — runs ruff check on scripts/
-  3. Validate — runs validate_plugin.py in strict mode
-  4. Tests — runs pytest on tests/ directory
-
-Exit codes from validate_plugin.py:
-  0 - All checks passed
-  1 - CRITICAL issues found (blocks push)
-  2 - MAJOR issues found (blocks push)
-  3 - MINOR issues found (blocks push)
-  4 - NIT issues found (blocks push)
-  5+ - WARNING only (allowed through)
-"""
-
-import fnmatch
-import json
-import os
-import subprocess
-import sys
-from pathlib import Path
-
-
-# -- ANSI colors ---------------------------------------------------------------
-
-def _colors_supported() -> bool:
-    if os.environ.get("NO_COLOR"):
-        return False
-    if os.name == "nt":
-        return False
-    return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
-
-_USE_COLOR = _colors_supported()
-RED    = "\\033[0;31m" if _USE_COLOR else ""
-YELLOW = "\\033[1;33m" if _USE_COLOR else ""
-GREEN  = "\\033[0;32m" if _USE_COLOR else ""
-BLUE   = "\\033[0;34m" if _USE_COLOR else ""
-NC     = "\\033[0m"    if _USE_COLOR else ""
-
-
-# -- Plugin file patterns (trigger full validation when changed) ---------------
-
-PLUGIN_PATTERNS = [
-    ".claude-plugin/*", "agents/*", "commands/*", "skills/*",
-    "hooks/*", "scripts/*.py", "scripts/*.sh", "tests/*", "*.mcp.json",
-]
-
-ZERO_SHA = "0" * 40
-
-
-# -- Helpers -------------------------------------------------------------------
-
-def cprint(msg: str) -> None:
-    print(msg, flush=True)
-
-def get_repo_root() -> Path:
-    r = subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                       capture_output=True, text=True, check=True)
-    return Path(r.stdout.strip())
-
-def find_python_command() -> list[str]:
-    """Prefer uv run python; fall back to python3."""
-    try:
-        subprocess.run(["uv", "--version"], capture_output=True, check=True)
-        return ["uv", "run", "python"]
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        return ["python3"]
-
-def file_matches_plugin_patterns(filepath: str) -> bool:
-    normalised = filepath.replace(os.sep, "/")
-    return any(fnmatch.fnmatch(normalised, pat) for pat in PLUGIN_PATTERNS)
-
-def get_changed_files(local_sha: str, remote_sha: str) -> list[str]:
-    if remote_sha == ZERO_SHA:
-        try:
-            r = subprocess.run(["git", "diff", "--name-only", local_sha, "HEAD~10"],
-                               capture_output=True, text=True, check=True)
-            return r.stdout.strip().splitlines()
-        except subprocess.CalledProcessError:
-            r = subprocess.run(["git", "ls-tree", "-r", "--name-only", local_sha],
-                               capture_output=True, text=True, check=True)
-            return r.stdout.strip().splitlines()
-    else:
-        try:
-            r = subprocess.run(["git", "diff", "--name-only", f"{{remote_sha}}..{{local_sha}}"],
-                               capture_output=True, text=True, check=True)
-            return r.stdout.strip().splitlines()
-        except subprocess.CalledProcessError:
-            return []
-
-def run_script(python_cmd: list[str], script: Path, args: list[str] | None = None,
-               timeout: int = 180, cwd: Path | None = None) -> int:
-    cmd = [*python_cmd, str(script)] + (args or [])
-    try:
-        return subprocess.run(cmd, timeout=timeout,
-                              cwd=str(cwd) if cwd else None).returncode
-    except subprocess.TimeoutExpired:
-        cprint(f"  {{YELLOW}}TIMEOUT: {{script.name}} exceeded {{timeout}}s{{NC}}")
-        return 0
-
-def extract_version(filepath: Path) -> str | None:
-    try:
-        return json.loads(filepath.read_text(encoding="utf-8")).get("version")
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return None
-
-
-# -- Main logic ----------------------------------------------------------------
-
-def main() -> int:
-    repo_root = get_repo_root()
-    cprint(f"{{BLUE}}  Pre-push Full Plugin Validation{{NC}}\\n")
-
-    remote = sys.argv[1] if len(sys.argv) > 1 else "<unknown>"
-    cprint(f"{{BLUE}}Pushing to:{{NC}} {{remote}}\\n")
-
-    # Parse stdin: each line is LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA
-    plugin_files_changed = False
-    for line in sys.stdin.read().strip().splitlines():
-        parts = line.split()
-        if len(parts) < 4:
-            continue
-        _, local_sha, _, remote_sha = parts[:4]
-        if local_sha == ZERO_SHA:
-            continue
-        if any(file_matches_plugin_patterns(f)
-               for f in get_changed_files(local_sha, remote_sha)):
-            plugin_files_changed = True
-            break
-
-    if not plugin_files_changed:
-        cprint(f"{{GREEN}}No plugin files changed. Skipping validation.{{NC}}")
-        return 0
-
-    # Gate 1: Version bump enforcement
-    cprint(f"{{BLUE}}Checking version bump...{{NC}}")
-    local_version = extract_version(repo_root / ".claude-plugin" / "plugin.json")
-    if local_version:
-        try:
-            r = subprocess.run(
-                ["git", "show", "origin/main:.claude-plugin/plugin.json"],
-                capture_output=True, text=True, cwd=str(repo_root))
-            if r.returncode == 0:
-                rv = json.loads(r.stdout).get("version")
-                if rv and local_version == rv:
-                    cprint(f"{{RED}}BLOCKED: Version not bumped! "
-                           f"Local={{local_version}} Remote={{rv}}{{NC}}")
-                    return 1
-                cprint(f"{{GREEN}}Version bump OK: {{rv}} -> {{local_version}}{{NC}}")
-        except Exception:
-            cprint(f"{{YELLOW}}Could not check remote version{{NC}}")
-
-    # Gate 2: Lint
-    python_cmd = find_python_command()
-    cprint(f"{{BLUE}}Running linting...{{NC}}")
-    lint_script = repo_root / "scripts" / "lint_files.py"
-    if lint_script.is_file():
-        if run_script(python_cmd, lint_script, [str(repo_root)], cwd=repo_root) != 0:
-            cprint(f"{{RED}}BLOCKED: Linting issues found{{NC}}")
-            return 1
-
-    # Gate 3: Validate (strict mode — blocks on CRITICAL, MAJOR, MINOR, NIT)
-    cprint(f"{{BLUE}}Running validation...{{NC}}")
-    validate_script = repo_root / "scripts" / "validate_plugin.py"
-    ve = 0
-    if validate_script.is_file():
-        ve = run_script(python_cmd, validate_script,
-                        [".", "--verbose", "--strict"], cwd=repo_root)
-    # Block on anything except 0 (pass) and 5+ (WARNING-only)
-    if ve != 0 and ve < 5:
-        labels = {{1: "CRITICAL", 2: "MAJOR", 3: "MINOR", 4: "NIT"}}
-        cprint(f"{{RED}}BLOCKED: {{labels.get(ve, f'exit {{ve}}')}} issues found{{NC}}")
-        return 1
-
-    # Gate 4: Tests (blocks push if any test fails)
-    cprint(f"{{BLUE}}Running tests...{{NC}}")
-    test_dir = repo_root / "tests"
-    if test_dir.is_dir() and any(test_dir.glob("test_*.py")):
-        try:
-            te = subprocess.run(
-                [*python_cmd, "-m", "pytest", str(test_dir), "-q", "--tb=short"],
-                cwd=str(repo_root), timeout=300,
-            ).returncode
-        except subprocess.TimeoutExpired:
-            cprint(f"{{YELLOW}}Tests timed out after 300s, skipping.{{NC}}")
-            te = 0
-        if te != 0:
-            cprint(f"{{RED}}BLOCKED: Tests failed{{NC}}")
-            return 1
-        cprint(f"{{GREEN}}Tests passed.{{NC}}")
-    else:
-        cprint(f"{{YELLOW}}No test files found in tests/, skipping.{{NC}}")
-
-    # Optional: marketplace.json consistency
-    mj = repo_root / "marketplace.json"
-    if mj.is_file():
-        pv = extract_version(repo_root / ".claude-plugin" / "plugin.json")
-        mv = extract_version(mj)
-        if pv and mv and pv != mv:
-            cprint(f"{{YELLOW}}WARNING: plugin.json={{pv}} != marketplace.json={{mv}}{{NC}}")
-
-    cprint(f"{{GREEN}}PASSED: Push allowed.{{NC}}")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    """Generate git-hooks/pre-push — thin bash delegator to publish.py --gate."""
+    _ = p  # unused but kept for consistent signature
+    return '''#!/usr/bin/env bash
+# Pre-push hook — delegates to publish.py --gate for all quality checks.
+# Follows the PSS (perfect-skill-suggester) pattern: one script, two modes.
+set -euo pipefail
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+if command -v uv &> /dev/null; then
+    uv run python scripts/publish.py --gate
+else
+    python3 scripts/publish.py --gate
+fi
+exit $?
 '''
 
 

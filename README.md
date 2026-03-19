@@ -93,7 +93,7 @@ claude --plugin-dir ./OUTPUT_SKILLS/claude-plugins-validation
 |---------|-------------|
 | `/cpv-create-local-plugin` | Scaffold a new plugin repo locally (no GitHub) |
 | `/cpv-create-local-marketplace` | Scaffold a new marketplace hub locally (no GitHub) |
-| `/cpv-publish-as-github-repo` | End-to-end: validate, standardize, create GitHub repo, push, configure CI/CD |
+| `/cpv-publish-a-plugin-as-github-repo` | End-to-end: validate, standardize, create GitHub repo, push, configure CI/CD |
 | `/cpv-create-github-marketplace` | Create a GitHub marketplace with full CI/CD automation |
 | `/cpv-publish-plugin-to-marketplace` | Register a plugin in a marketplace with validation and owner verification |
 | `/cpv-standardize` | Audit and fix a plugin or marketplace repo (auto-detects type) |
@@ -334,7 +334,7 @@ claude-plugins-validation/
 │   ├── cpv-create-local-marketplace.md
 │   ├── cpv-create-local-plugin.md
 │   ├── cpv-fix-validation.md
-│   ├── cpv-publish-as-github-repo.md
+│   ├── cpv-publish-a-plugin-as-github-repo.md
 │   ├── cpv-publish-plugin-to-marketplace.md
 │   ├── cpv-semantic-validation.md
 │   ├── cpv-standardize.md

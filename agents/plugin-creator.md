@@ -32,7 +32,7 @@ All at `${CLAUDE_PLUGIN_ROOT}/scripts/`. Run with `uv run "${CLAUDE_PLUGIN_ROOT}
 | `manage_github_validate.py` | Validate a GitHub plugin/marketplace without installing |
 | `bump_version.py` | Bump plugin version (patch/minor/major) |
 
-## Workflow: Publish Plugin as GitHub Repo (/cpv-publish-as-github-repo)
+## Workflow: Publish Plugin as GitHub Repo (/cpv-publish-a-plugin-as-github-repo)
 
 ### THE GOLDEN RULE: FIX EVERYTHING BEFORE PUBLISHING
 
@@ -55,7 +55,7 @@ The pre-push hook runs `--strict` and blocks on CRITICAL, MAJOR, MINOR, and NIT.
 6. Check for compiled binaries (Cargo.toml, go.mod, Makefile) — if found, sources MUST be in `src/` subdirectory with binaries in `src/<component>/bin/`. Add `build-binaries.yml` as fallback only.
 7. Git init + commit (if not already a git repo)
 8. Create GitHub repo: `gh repo create <owner>/<name> --public --source . --push`
-9. Configure git hooks: `git config core.hooksPath git-hooks` (or run setup_git_hooks.py if present). **The pre-push hook is the quality gate of the entire pipeline** — it runs lint + validate (--strict) + tests and blocks pushes with ANY non-WARNING issue.
+9. Configure git hooks: `uv run python scripts/publish.py --install-hook`. **The pre-push hook delegates to `publish.py --gate`** — it runs lint + validate (--strict) + tests and blocks pushes with ANY non-WARNING issue.
 10. Optionally configure marketplace notification:
     - Update notify-marketplace.yml with correct MARKETPLACE_OWNER and MARKETPLACE_REPO values
     - Check env: `test -n "$MARKETPLACE_PAT"` before asking user
@@ -88,7 +88,7 @@ The pre-push hook runs `--strict` and blocks on CRITICAL, MAJOR, MINOR, and NIT.
 1. Ask user for: plugin name, description, author, license, GitHub owner, marketplace name
 2. Run `generate_plugin_repo.py` with collected params
 3. Run `validate_plugin.py` on the result — it MUST pass
-4. Suggest next steps: git init, gh repo create, /cpv-publish-as-github-repo
+4. Suggest next steps: git init, gh repo create, /cpv-publish-a-plugin-as-github-repo
 
 ## CRITICAL: Marketplace Architecture
 

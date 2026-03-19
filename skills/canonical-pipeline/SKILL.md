@@ -21,8 +21,8 @@ This skill defines the standard files, workflows, and hooks that every Emasoft C
 | `.gitignore` | YES | Must include `.claude/`, `.tldr/`, `llm_externalizer_output/` |
 | `README.md` | YES | Must have `<!--BADGES-START-->` / `<!--BADGES-END-->` markers |
 | `cliff.toml` | YES | git-cliff changelog configuration |
-| `scripts/publish.py` | YES | 9-stage release pipeline script |
-| `.githooks/pre-push` | YES | Quality gate: validate + lint + test before push |
+| `scripts/publish.py` | YES | 10-stage release pipeline + --gate mode + --install-hook |
+| `git-hooks/pre-push` | YES | Thin bash delegator to `publish.py --gate` |
 | `CHANGELOG.md` | YES | Auto-generated changelog |
 | `LICENSE` | YES | License file (MIT recommended) |
 
@@ -48,40 +48,62 @@ Binary plugins keep sources in `src/<component>/` and pre-compiled binaries in `
 
 ## Git Hooks
 
-### pre-push (`.githooks/pre-push`)
+### pre-push (`git-hooks/pre-push`)
 
-Quality gate that runs before every push (follows PSS pattern — delegates to `publish.py --gate`):
-1. Version bump check: blocks if local version matches remote (forces semver bump)
-2. Lint: `uv run ruff check scripts/ tests/` (Python) or `npx eslint src/` (JS/TS)
-3. Validate plugin: `uv run scripts/validate_plugin.py . --strict` (blocks on CRITICAL/MAJOR/MINOR)
-4. Test: `uv run pytest tests/ -q` (Python) or `npx jest` (JS/TS)
+Thin bash delegator that calls `publish.py --gate` (follows PSS pattern — one script, two modes):
 
-If ANY step fails, the push is blocked. NITs are warnings only.
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+uv run python scripts/publish.py --gate
+```
+
+The `--gate` mode runs 4 quality gates:
+1. **Version bump check**: blocks if local version matches remote (forces semver bump)
+2. **Lint**: `uv run ruff check scripts/` (Python) or `npx eslint src/` (JS/TS)
+3. **Validate plugin**: `uv run scripts/validate_plugin.py . --strict` (blocks on CRITICAL/MAJOR/MINOR/NIT)
+4. **Tests**: `uv run pytest tests/ -q` (Python) or `npx jest` (JS/TS)
+
+If ANY gate fails, the push is blocked. WARNINGs are allowed through.
 
 ### Setup
 
 ```bash
-git config core.hooksPath .githooks
-# Or use the setup script if present:
-uv run python scripts/setup_git_hooks.py
+# Self-install via publish.py (preferred):
+uv run python scripts/publish.py --install-hook
+# Or manually:
+git config core.hooksPath git-hooks
 ```
 
 ## Release Pipeline (`scripts/publish.py`)
 
-The 12-stage release pipeline (follows PSS `pss_ship.py` pattern):
+The publish script supports three modes:
 
-1. **Pre-flight checks**: Clean working tree, on main branch
-2. **Lint**: `uv run ruff check scripts/ tests/`
-3. **Validate plugin**: `uv run scripts/validate_plugin.py . --strict` (blocks on CRITICAL/MAJOR/MINOR)
+### Gate mode (`--gate`)
+Called by the pre-push hook. Runs quality checks only, no version bump or push:
+- **G1**: Version bump check (local vs remote)
+- **G2**: Lint (`ruff check scripts/`)
+- **G3**: Validate (`--strict`, blocks on CRITICAL/MAJOR/MINOR/NIT)
+- **G4**: Tests (`pytest tests/ -x -q`)
+
+### Install mode (`--install-hook`)
+Self-installs `git-hooks/pre-push` into `.git/hooks/` and sets `core.hooksPath`.
+
+### Publish mode (`--patch`/`--minor`/`--major`)
+The 10-stage release pipeline (follows PSS `pss_ship.py` pattern):
+
+1. **Pre-flight checks**: Clean working tree
+2. **Lint**: `uv run ruff check scripts/`
+3. **Validate plugin**: `--strict` (blocks on CRITICAL/MAJOR/MINOR/NIT)
 4. **Run tests**: `uv run pytest tests/ -q`
 5. **Version consistency**: Check all version sources match (plugin.json, pyproject.toml)
 6. **Bump version**: Update plugin.json, pyproject.toml, `__version__` vars
 7. **Update README badge**: Replace `version-X.Y.Z-blue` with new version
-8. **Generate changelog**: `git-cliff --tag vX.Y.Z -o CHANGELOG.md` (if git-cliff installed)
-9. **Build binaries**: Compile for current platform (if compiled sources exist, skip if no changes)
-10. **Git commit**: `git commit -am "bump: version X.Y.Z → X.Y.Z"`
-11. **Git tag**: `git tag vX.Y.Z`
-12. **Push**: `git push && git push --tags`
+8. **Generate changelog**: `git-cliff -o CHANGELOG.md` (if git-cliff installed)
+9. **Commit, tag, push**: `git commit`, `git tag vX.Y.Z`, `git push --tags`
+10. **GitHub release**: `gh release create vX.Y.Z` (if gh CLI installed)
 
 After push, GitHub handles:
 - **GitHub Release**: Triggered by tag via `release.yml`
@@ -153,7 +175,7 @@ See [Pipeline Rules](references/pipeline-rules.md) for the full set of mandatory
 
 ### Publish plugin to GitHub
 ```
-/cpv-publish-as-github-repo ./my-plugin --owner MyGitHub
+/cpv-publish-a-plugin-as-github-repo ./my-plugin --owner MyGitHub
 ```
 
 ### Standardize an existing repo

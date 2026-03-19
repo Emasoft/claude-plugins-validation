@@ -26,7 +26,7 @@ After generation:
 2. **FIX ALL issues** (CRITICAL, MAJOR, MINOR, NIT) — only WARNINGs may remain. The pre-push hook will block publishing otherwise. See common fixes in the canonical-pipeline skill.
 3. Re-validate until only WARNINGs remain
 4. Suggest `git init && git add -A && git commit -m "Initial scaffold"`
-5. To publish on GitHub, use `/cpv-publish-as-github-repo <target-dir>`
+5. To publish on GitHub, use `/cpv-publish-a-plugin-as-github-repo <target-dir>`
 6. To register in a marketplace, use `/cpv-publish-plugin-to-marketplace`
 
 **IMPORTANT**: The generated pre-push hook runs 4 gates (version bump, lint, validate --strict, tests) and blocks pushes with ANY non-WARNING issue. Fix everything BEFORE the first push.
