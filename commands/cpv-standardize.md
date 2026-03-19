@@ -16,31 +16,33 @@ Smart standardization command that auto-detects whether the target directory is 
 
 **Audit only (report gaps):**
 ```bash
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" <path>
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" <path>
 ```
 
 **Audit and fix (add missing files):**
 ```bash
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" <path> --fix
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" <path> --fix
 ```
 
 **Preview fixes without applying:**
 ```bash
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" <path> --fix --dry-run
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" <path> --fix --dry-run
 ```
 
 Checks for missing: .githooks/pre-push, scripts/publish.py, cliff.toml, .github/workflows/{ci,release,validate,notify-marketplace}.yml, .python-version, pyproject.toml, badge markers in README.md, .gitignore entries.
+
+**After standardize --fix, you MUST still fix remaining issues manually.** The pre-push hook blocks on CRITICAL, MAJOR, MINOR, and NIT. Run `validate_plugin.py --strict`, fix all issues, re-validate until only WARNINGs remain.
 
 ## Marketplace Standardization
 
 **Audit only:**
 ```bash
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_marketplace.py" <path>
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_marketplace.py" <path>
 ```
 
 **Audit and fix:**
 ```bash
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_marketplace.py" <path> --fix
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_marketplace.py" <path> --fix
 ```
 
 Checks: marketplace.json structure, all plugin sources point to external GitHub repos (flags local paths as errors), CI/CD workflows exist, README has plugin catalog.

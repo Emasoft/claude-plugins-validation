@@ -1,0 +1,103 @@
+# Pipeline Rules — Mandatory for ALL Plugin Operations
+
+These rules MUST be followed by every agent, command, and skill that creates, publishes, standardizes, or fixes a plugin repository.
+
+## Pre-Push Hook: The Quality Gate
+
+The pre-push hook is the **keystone of the entire pipeline**. It runs 4 gates in sequence and blocks the push if ANY gate fails:
+
+| Gate | What It Does | Blocks On |
+|------|-------------|-----------|
+| 1. Version bump | Compares local vs remote version | Same version (must bump) |
+| 2. Lint | `ruff check scripts/ tests/` | Any lint error |
+| 3. Validate | `validate_plugin.py . --strict` | CRITICAL, MAJOR, MINOR, NIT (exit codes 1-4) |
+| 4. Tests | `pytest tests/ -q` | Any test failure |
+
+**Only WARNINGs (exit code 5+) pass through.** Everything else blocks.
+
+## Fix-All Mandate
+
+Before publishing or pushing a plugin, ALL CRITICAL, MAJOR, MINOR, and NIT issues MUST be fixed. The workflow is:
+
+```
+validate --strict → fix issues → re-validate → repeat until only WARNINGs remain → then proceed
+```
+
+Never skip this loop. Never publish with unfixed issues. The pre-push hook will block you anyway.
+
+## Running CPV Scripts
+
+Always use this exact command form when running CPV scripts from outside the CPV project:
+```bash
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/<script>.py" <args>
+```
+Without `--with pyyaml`, you get `ModuleNotFoundError: No module named 'yaml'`.
+
+## Processing Validation Output
+
+Always strip ANSI color codes and use macOS-compatible grep:
+```bash
+... 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
+```
+Use `grep -oE` (extended regex), NOT `grep -oP` (Perl regex — unavailable on macOS).
+
+## GitHub Secrets
+
+Always use `--body` flag:
+```bash
+gh secret set MARKETPLACE_PAT --repo <owner>/<repo> --body "$MARKETPLACE_PAT"
+```
+Piping via `echo | gh secret set` does NOT work reliably.
+
+Check if the env var exists first: `test -n "$MARKETPLACE_PAT"`
+
+## Marketplace Notification
+
+After `standardize_plugin.py --fix` generates `notify-marketplace.yml`, ALWAYS update:
+- `MARKETPLACE_OWNER` → actual marketplace owner (e.g., `Emasoft`)
+- `MARKETPLACE_REPO` → actual marketplace repo name (e.g., `emasoft-plugins`)
+
+The generated values are placeholders that will NOT work.
+
+## All Scripts Are Python
+
+The plugin repo pipeline is always Python:
+- Pre-push hook: Python script
+- publish.py: Python script
+- setup_git_hooks.py: Python script
+- All validation scripts: Python
+
+GitHub YAML workflows ONLY:
+- Run read-only checks (lint, validate, test)
+- Create releases (attach artifacts)
+- Send notifications (repository_dispatch)
+- NEVER commit code, create PRs, or modify the repo
+
+## Binary Plugins
+
+Compiled sources live in `src/<component>/`. Pre-compiled binaries in `src/<component>/bin/`.
+Compilation happens **locally** via `publish.py` — NOT on GitHub CI.
+`build-binaries.yml` is a FALLBACK only for CI-only environments.
+
+## README Requirements
+
+README MUST include:
+- Badge markers: `<!--BADGES-START-->` / `<!--BADGES-END-->`
+- Components table (auto-generated from commands/agents/skills/hooks)
+- Install section (marketplace + GitHub + manual)
+- Uninstall section
+- Update section
+- Troubleshooting section (3 required topics: hook path not found, old version after update, restart required)
+
+## Common Fixes Reference
+
+| Issue | Fix |
+|-------|-----|
+| SKILL.md missing sections | Add: Overview, Prerequisites, Instructions (numbered), Output, Error Handling, Examples, Resources |
+| .gitignore gaps | Append missing patterns: __pycache__/, .venv/, .env, dist/, build/, .coverage, .pytest_cache/, .ruff_cache/, node_modules/, *_dev/ |
+| Missing README badges | Add `<!--BADGES-START-->` block with CI, Version, License, Validation badges |
+| Missing LICENSE | Create MIT LICENSE file |
+| Script not executable | `chmod +x <script>` |
+| Ruff lint errors | `uv run ruff check --fix scripts/` then manually fix remaining |
+| Missing author.email | Add `"email": "nnn+user@users.noreply.github.com"` to plugin.json |
+| Absolute paths | Replace with `${CLAUDE_PLUGIN_ROOT}` or document as intentional system binaries |
