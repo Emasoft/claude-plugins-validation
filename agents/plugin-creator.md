@@ -113,7 +113,9 @@ These errors were made in real publish runs. Do NOT repeat them:
 7. **standardize_plugin.py exit code 1 is expected** after `--fix` if warnings remain. Only CRITICAL/MAJOR matter for proceed/abort decisions.
 8. **Check `author.email`** in plugin.json — suggest GitHub noreply format if missing.
 9. **CI workflows need `uv sync --extra dev`** not just `uv sync`. Without `--extra dev`, ruff/pytest/mypy/pyyaml are NOT installed and ALL CI runs fail.
-10. **Update notify-marketplace.yml BEFORE the first push**. The standardize script creates it with placeholders. If you push first, the marketplace notification fails silently with old values.
+10. **Update notify-marketplace.yml BEFORE the first push**. The standardize script creates it with placeholders. If you push first, the marketplace notification fails silently with old values. Use `--marketplace` flag with standardize to auto-fill.
+11. **Always run local dry-run BEFORE the first push**: `echo "" | uv run python git-hooks/pre-push` and `uv run python scripts/publish.py --dry-run`. This catches template bugs, missing deps, import errors.
+12. **Always verify CI AFTER the first push**: `sleep 30 && gh run list --repo <owner>/<name> --limit 5`. If any workflow failed, fix and push again. Never leave failing CI as the final state.
 
 ## TOKEN OPTIMIZATION
 Use `mcp__plugin_llm-externalizer_llm-externalizer__*` tools for bounded tasks. Always pass file paths via `input_files_paths`.

@@ -62,7 +62,10 @@ uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py
 ```
 This adds any missing standard files: .gitignore, .python-version, cliff.toml, .githooks/pre-push, .github/workflows/{ci,release,validate,notify-marketplace}.yml, scripts/publish.py, scripts/setup_git_hooks.py. It does NOT modify existing plugin code.
 
-After standardize, fix any remaining .gitignore gaps (standardize warns but does not auto-add all entries — you must append them manually).
+If `--marketplace` was provided, pass it to standardize so notify-marketplace.yml gets filled:
+```bash
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" <plugin-folder> --fix --marketplace <owner/marketplace-repo>
+```
 
 ### Phase 2b: Generate README component tables
 Scan the plugin directory for components and fill the README placeholders:
@@ -77,6 +80,17 @@ Scan the plugin directory for components and fill the README placeholders:
 uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" <plugin-folder> --strict 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | tail -5
 ```
 **GATE CHECK**: Only proceed to Phase 3 if NO CRITICAL, MAJOR, MINOR, or NIT issues remain. Warnings are OK.
+
+### Phase 2d: Pre-publish local dry-run
+Before the first push, verify the generated pipeline works locally:
+```bash
+# Test the pre-push hook can run (pipe empty stdin to simulate non-hook invocation)
+cd <plugin-folder> && echo "" | uv run python git-hooks/pre-push 2>&1
+
+# Test publish.py dry-run
+uv run python scripts/publish.py --dry-run 2>&1
+```
+Both must complete without import errors or crashes. If either fails, fix the issue before proceeding.
 
 ### Phase 3: Initialize git (if not already a git repo)
 ```bash
@@ -129,6 +143,18 @@ Report to the user:
 - GitHub repo URL
 - Marketplace notification status
 
+### Phase 8b: Post-push CI verification
+Wait 30 seconds after the first push, then verify CI workflows passed:
+```bash
+sleep 30
+gh run list --repo <owner>/<plugin-name> --limit 5
+```
+If any run shows `failure`:
+```bash
+gh run view <run-id> --repo <owner>/<plugin-name> --log-failed 2>&1 | head -30
+```
+Fix the issue (usually Mega-Linter config or dependency problems), bump version, and push again. Do NOT leave a failing CI as the final state.
+
 ## Checklist (copy and track progress)
 
 - [ ] Plugin validated with --strict (zero CRITICAL/MAJOR/MINOR/NIT)
@@ -142,7 +168,9 @@ Report to the user:
 - [ ] Git hooks configured (pre-push with --strict)
 - [ ] notify-marketplace.yml MARKETPLACE_OWNER/MARKETPLACE_REPO updated
 - [ ] Marketplace PAT secret set (if marketplace specified)
+- [ ] Pre-publish dry-run passed (pre-push hook + publish.py --dry-run)
 - [ ] Final validation passed (--strict, only WARNINGs)
+- [ ] Post-push CI verification: all GitHub Actions workflows passing
 
 ## Binary Plugins (Rust, Go, C/C++)
 

@@ -1329,6 +1329,9 @@ def print_results(report: ValidationReport, verbose: bool = False) -> None:
     else:
         print(f"{colors['MINOR']}! MINOR issues found - may affect UX{colors['RESET']}")
 
+    # Machine-readable summary for CI/CD parsing
+    print(f"SUMMARY: CRITICAL={counts['CRITICAL']} MAJOR={counts['MAJOR']} MINOR={counts['MINOR']} NIT={counts['NIT']} WARNING={counts['WARNING']}")
+
     print()
 
 
@@ -1505,9 +1508,17 @@ def main() -> int:
         help="Skip platform-specific checks (e.g., --skip-platform-checks windows). Valid platforms: windows, macos, linux. Use without args to skip all.",
     )
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
+    parser.add_argument("--no-color", action="store_true", help="Disable ANSI color codes in output")
     parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
     parser.add_argument("path", nargs="?", help="Plugin root path (default: parent of scripts/)")
     args = parser.parse_args()
+
+    # Disable ANSI colors when --no-color is passed or stdout is not a TTY
+    if args.no_color or not (hasattr(sys.stdout, "isatty") and sys.stdout.isatty()):
+        import cpv_validation_common
+
+        for key in list(cpv_validation_common.COLORS.keys()):
+            cpv_validation_common.COLORS[key] = ""
 
     # Determine plugin root — always resolve to absolute path so relative_to() works
     if args.path:
