@@ -107,6 +107,45 @@ def _run_claude_validate(target_path: Path) -> Tuple[List[str], List[str]]:
     return errors, warnings
 
 
+def _check_orphaned_settings(settings: dict) -> int:
+    """Check for orphaned marketplace and plugin entries in settings.
+    Returns the number of new issues found."""
+    issues = 0
+    ekm = settings.get("extraKnownMarketplaces", {})
+    for mp_name, mp_cfg in ekm.items():
+        source = mp_cfg.get("source", {})
+        if source.get("source") == "directory":
+            mp_path = Path(source.get("path", ""))
+            if not mp_path.exists():
+                print()
+                warn(
+                    f"Orphaned marketplace in settings: '{mp_name}' points to non-existent path: {mp_path}"
+                )
+                issues += 1
+
+    ep = settings.get("enabledPlugins", {})
+    for pkey, enabled in ep.items():
+        if "@" in pkey:
+            pname, mpname = pkey.split("@", 1)
+            plug_in_marketplace = MARKETPLACES_DIR / mpname / "plugins" / pname
+            plug_in_cache = CACHE_DIR / mpname / pname
+            if (
+                not plug_in_marketplace.exists()
+                and not plug_in_cache.exists()
+                and enabled
+            ):
+                mp_exists = (MARKETPLACES_DIR / mpname).exists() or (
+                    CACHE_DIR / mpname
+                ).exists()
+                if not mp_exists:
+                    print()
+                    warn(
+                        f"Orphaned entry in enabledPlugins: '{pkey}' — marketplace '{mpname}' not found"
+                    )
+                    issues += 1
+    return issues
+
+
 # ── Doctor command ───────────────────────────────────────────────────
 
 
@@ -178,14 +217,21 @@ def do_doctor(verbose: bool = False):
         else:
             info(f"{label}: not present (this is OK)")
 
+    # Load settings once for all checks below (before MARKETPLACES_DIR check
+    # so orphaned entries are detected even when no marketplaces directory exists)
+    settings = load_json_safe(SETTINGS_TARGET)
+
     # 4. Check marketplaces directory
     if not MARKETPLACES_DIR.exists():
         info("No local marketplaces directory yet.")
+        # Still check for orphaned settings entries even without marketplace directory
+        issues += _check_orphaned_settings(settings)
         print()
+        if issues == 0:
+            ok("All checks passed — installation is healthy")
+        else:
+            warn(f"{issues} issue(s) found")
         return
-
-    # Load settings once for all checks below
-    settings = load_json_safe(SETTINGS_TARGET)
 
     # 5. Validate each marketplace
     for mp_dir in sorted(MARKETPLACES_DIR.iterdir()):
@@ -499,40 +545,7 @@ def do_doctor(verbose: bool = False):
                 issues += 1
 
     # 6. Check for orphaned entries in settings
-    ekm = settings.get("extraKnownMarketplaces", {})
-    for mp_name, mp_cfg in ekm.items():
-        source = mp_cfg.get("source", {})
-        if source.get("source") == "directory":
-            mp_path = Path(source.get("path", ""))
-            if not mp_path.exists():
-                print()
-                warn(
-                    f"Orphaned marketplace in settings: '{mp_name}' points to non-existent path: {mp_path}"
-                )
-                issues += 1
-
-    ep = settings.get("enabledPlugins", {})
-    for pkey, enabled in ep.items():
-        if "@" in pkey:
-            pname, mpname = pkey.split("@", 1)
-            # Check both marketplace dir and cache — GitHub-sourced plugins live in cache only
-            plug_in_marketplace = MARKETPLACES_DIR / mpname / "plugins" / pname
-            plug_in_cache = CACHE_DIR / mpname / pname
-            if (
-                not plug_in_marketplace.exists()
-                and not plug_in_cache.exists()
-                and enabled
-            ):
-                # Also check if the marketplace itself exists (could be managed externally)
-                mp_exists = (MARKETPLACES_DIR / mpname).exists() or (
-                    CACHE_DIR / mpname
-                ).exists()
-                if not mp_exists:
-                    print()
-                    warn(
-                        f"Orphaned entry in enabledPlugins: '{pkey}' — marketplace '{mpname}' not found"
-                    )
-                    issues += 1
+    issues += _check_orphaned_settings(settings)
 
     # Summary
     print()
