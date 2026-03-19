@@ -16,7 +16,7 @@ This plugin provides:
 - **Management Scripts**: Plugin lifecycle management — install, uninstall, update, enable, disable, search, doctor, marketplace operations
 - **Expert Agents**: `plugin-validator`, `skill-validation-agent`, `plugin-fixer`, `semantic-validator` (validation) + `plugin-manager` (management)
 - **Skills**: 8 skills covering validation, management, publishing, scaffolding, and marketplace operations
-- **Slash Commands**: 36 commands for validating, managing, fixing, and publishing plugins
+- **Slash Commands**: 37 commands for validating, managing, fixing, and publishing plugins
 
 ## Installation (Production)
 
@@ -67,9 +67,6 @@ claude --plugin-dir ./OUTPUT_SKILLS/claude-plugins-validation
 | `/cpv-validate-xref` | Cross-reference validation (agent refs, version sync, hook scripts) |
 | `/cpv-fix-validation` | Auto-fix issues from a validation report |
 | `/cpv-semantic-validation` | Deep AI-driven semantic analysis (opus, explicit opt-in) |
-| `/cpv-setup-github-marketplace` | Set up a GitHub marketplace with CI/CD |
-| `/cpv-publish-to-marketplace` | Publish a plugin to a GitHub-hosted marketplace |
-| `/cpv-setup-plugin-repo` | Create and configure a plugin GitHub repository |
 
 ### Plugin Management Commands (v2.0.0)
 
@@ -85,21 +82,21 @@ claude --plugin-dir ./OUTPUT_SKILLS/claude-plugins-validation
 | `/cpv-doctor` | Health-check all plugins, settings, and marketplaces |
 | `/cpv-manage-marketplaces` | Add, remove, list, or update GitHub marketplaces |
 | `/cpv-manage-remote-plugins` | Install/update/uninstall remote plugins from GitHub |
-| `/cpv-validate-github-plugin` | Validate a GitHub plugin without installing |
-| `/cpv-validate-github-marketplace` | Validate a GitHub marketplace without registering |
-| `/cpv-audit-security` | Security audit via skill-audit (TruffleHog/ShellCheck/Semgrep) |
-| `/cpv-audit-github-plugin` | Security audit a GitHub plugin repository |
+| `/cpv-validate-github-plugin` | Validate a GitHub plugin without installing (use `--audit` for security scan) |
+| `/cpv-validate-github-marketplace` | Validate a GitHub marketplace without registering (use `--audit` for security scan) |
 | `/cpv-bump-version` | Bump plugin version (patch/minor/major) |
 | `/cpv-version` | Show management tools version |
 
-### Plugin/Marketplace Creation Commands (v2.1.0)
+### Plugin/Marketplace Creation & Publishing Commands (v2.1.0+)
 
 | Command | Description |
 |---------|-------------|
-| `/cpv-create-plugin-repo` | Scaffold a new plugin repo with all standard files |
-| `/cpv-create-marketplace-repo` | Scaffold a new marketplace hub repo (pointers only, no plugin code) |
-| `/cpv-standardize-plugin` | Audit and fix an existing plugin repo to match standards |
-| `/cpv-standardize-marketplace` | Audit and fix an existing marketplace to match standards |
+| `/cpv-create-local-plugin` | Scaffold a new plugin repo locally (no GitHub) |
+| `/cpv-create-local-marketplace` | Scaffold a new marketplace hub locally (no GitHub) |
+| `/cpv-publish-as-github-repo` | End-to-end: validate, standardize, create GitHub repo, push, configure CI/CD |
+| `/cpv-create-github-marketplace` | Create a GitHub marketplace with full CI/CD automation |
+| `/cpv-publish-plugin-to-marketplace` | Register a plugin in a marketplace with validation and owner verification |
+| `/cpv-standardize` | Audit and fix a plugin or marketplace repo (auto-detects type) |
 
 ## Utility Scripts
 
@@ -333,25 +330,16 @@ claude-plugins-validation/
 │   ├── plugin-fixer.md              # Automated remediation agent
 │   └── semantic-validator.md        # Deep AI-driven quality analysis agent
 ├── commands/
-│   ├── cpv-fix-validation.md        # Auto-fix validation issues
-│   ├── cpv-publish-to-marketplace.md # Publish plugin to marketplace
-│   ├── cpv-semantic-validation.md   # Deep semantic analysis (opus)
-│   ├── cpv-setup-github-marketplace.md # Marketplace setup command
-│   ├── cpv-validate-agents.md       # Agent validation command
-│   ├── cpv-validate-command.md      # Command validation command
-│   ├── cpv-validate-documentation.md # Documentation quality command
-│   ├── cpv-validate-encoding.md     # File encoding validation command
-│   ├── cpv-validate-enterprise.md   # Enterprise compliance command
-│   ├── cpv-validate-hooks.md        # Hook validation command
-│   ├── cpv-validate-lsp.md          # LSP validation command
-│   ├── cpv-validate-marketplace.md  # Marketplace validation command
-│   ├── cpv-validate-mcp.md          # MCP validation command
-│   ├── cpv-validate-plugin.md       # Plugin validation command
-│   ├── cpv-validate-rules.md        # Rules validation command
-│   ├── cpv-validate-scoring.md      # Quality scoring command
-│   ├── cpv-validate-security.md     # Security validation command
-│   ├── cpv-validate-skill.md        # Skill validation command
-│   └── cpv-validate-xref.md         # Cross-reference validation command
+│   ├── cpv-create-github-marketplace.md
+│   ├── cpv-create-local-marketplace.md
+│   ├── cpv-create-local-plugin.md
+│   ├── cpv-fix-validation.md
+│   ├── cpv-publish-as-github-repo.md
+│   ├── cpv-publish-plugin-to-marketplace.md
+│   ├── cpv-semantic-validation.md
+│   ├── cpv-standardize.md
+│   ├── cpv-validate-*.md (14 validators)
+│   └── ... (37 commands total)
 ├── git-hooks/
 │   ├── pre-commit                   # Pre-commit validation hook
 │   └── pre-push                     # Pre-push validation hook
