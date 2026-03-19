@@ -115,7 +115,7 @@ Fix and push again. Do NOT leave failing CI as the final state.
 
 The `.mega-linter.yml` config must include:
 - `COPYPASTE_JSCPD_ARGUMENTS: "--threshold 5"` — 0% is too strict for plugin repos
-- `REPOSITORY_CHECKOV_ARGUMENTS: "--skip-check CKV_GHA_7,CKV_GHA_1"` — these flag missing top-level workflow permissions, but we set permissions per-job
+- `REPOSITORY_CHECKOV_ARGUMENTS: "--skip-check CKV2_GHA_1"` — flags missing top-level workflow permissions, but we set permissions per-job
 - `.gitignore` must include `megalinter-reports/` and `mega-linter.log`
 
 ## Common Fixes Reference
