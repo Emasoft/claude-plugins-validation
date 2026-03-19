@@ -125,6 +125,7 @@ dependencies = []
 [project.optional-dependencies]
 dev = [
     "mypy>=1.19.1",
+    "pyyaml>=6.0",
     "pytest>=8.0.0",
     "pytest-cov>=4.1.0",
     "ruff>=0.14.14",
@@ -1113,7 +1114,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --extra dev
 
       - name: Lint source files
         run: uv run ruff check scripts/
@@ -1159,7 +1160,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --extra dev
 
       - name: Run full plugin validation
         run: |
@@ -1235,7 +1236,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --extra dev
 
       - name: Find validator
         id: find-validator
