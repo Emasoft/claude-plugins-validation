@@ -1,5 +1,7 @@
 ---
+name: cpv-validate-github-plugin
 description: Validate a Claude Code plugin from a GitHub repository without installing it (optional --audit for security scan)
+user-invocable: true
 ---
 
 Validate a plugin hosted on GitHub by cloning it to a temporary directory and running the full CPV validation suite (190+ rules).

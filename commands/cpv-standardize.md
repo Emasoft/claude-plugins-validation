@@ -1,5 +1,7 @@
 ---
+name: cpv-standardize
 description: Audit and fix a plugin or marketplace repo to match CPV standards (auto-detects type from directory content)
+user-invocable: true
 ---
 
 Smart standardization command that auto-detects whether the target directory is a **plugin** or **marketplace** and runs the appropriate standardizer.

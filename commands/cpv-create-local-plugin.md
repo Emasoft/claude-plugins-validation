@@ -1,5 +1,7 @@
 ---
+name: cpv-create-local-plugin
 description: Create a new Claude Code plugin locally with all standard files (local only — no GitHub repo creation)
+user-invocable: true
 ---
 
 Scaffold a complete plugin repository **locally** using the generator script. This command creates the directory structure and files on disk only — it does NOT create a GitHub repository or push anything.
