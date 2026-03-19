@@ -25,16 +25,36 @@ End-to-end command that takes a local plugin folder and publishes it as a comple
 
 ### Phase 1: Validate the plugin
 ```bash
-uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" <plugin-folder> --verbose
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" <plugin-folder> --verbose --strict 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
 ```
-**IMPORTANT**: Always use `--with pyyaml` when running CPV scripts from outside the CPV project venv.
+**IMPORTANT**: Always use `--with pyyaml` when running CPV scripts from outside the CPV project venv. Always strip ANSI codes with `sed` when processing output. Use `grep -oE` (NOT `-oP`) for macOS compatibility.
 
-If CRITICAL or MAJOR issues exist, report them and ask the user to fix before continuing. Do NOT proceed with a broken plugin.
+### Phase 1b: FIX ALL ISSUES (mandatory)
+**DO NOT skip this phase. DO NOT proceed to Phase 3+ with ANY non-WARNING issues.**
 
-When processing validation output, always strip ANSI color codes before grepping:
+The pre-push hook runs `--strict` and blocks on CRITICAL, MAJOR, MINOR, and NIT. If you don't fix them now, the push will be blocked later.
+
+For each issue found in Phase 1:
+1. **CRITICAL/MAJOR/MINOR/NIT** → YOU MUST FIX THEM. Read the offending file, understand the issue, apply the fix.
+2. **WARNING** → These are advisory only. Note them but do not block on them.
+
+Common fixes:
+- **SKILL.md missing Nixtla sections** (Overview, Prerequisites, Output, Error Handling, Examples, Resources) → Add the missing `## Section` headings with appropriate content to the SKILL.md file
+- **SKILL.md missing numbered step-by-step** → Add numbered list under `## Instructions`
+- **Missing .gitignore entries** → Append the missing patterns to .gitignore
+- **Missing README badges** → Add `<!--BADGES-START-->` / `<!--BADGES-END-->` with badge markdown
+- **Missing LICENSE** → Create MIT LICENSE file
+- **Shell script not executable** → `chmod +x <script>`
+- **Absolute paths in scripts** → Replace with `${CLAUDE_PLUGIN_ROOT}` or relative paths (or document as intentional for system binaries like `/usr/bin/docker`)
+- **Missing author.email** → Add `"email": "nnn+user@users.noreply.github.com"` to plugin.json author object
+- **Ruff lint errors** → Run `uv run ruff check --fix scripts/` then manually fix remaining
+- **Broken backtick paths** → Fix or remove the reference
+
+After fixing, re-run validation. Repeat until ONLY warnings remain:
 ```bash
-... 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" <plugin-folder> --strict 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | tail -5
 ```
+The last line must say `✔ All checks passed` or `WARNING issues only`. If it says CRITICAL/MAJOR/MINOR, keep fixing.
 
 ### Phase 2: Standardize the plugin repo structure
 ```bash
@@ -42,7 +62,7 @@ uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py
 ```
 This adds any missing standard files: .gitignore, .python-version, cliff.toml, .githooks/pre-push, .github/workflows/{ci,release,validate,notify-marketplace}.yml, scripts/publish.py, scripts/setup_git_hooks.py. It does NOT modify existing plugin code.
 
-**Note**: Exit code 1 after `--fix` is expected if warnings remain (gitignore entries, badges). Only CRITICAL/MAJOR issues matter.
+After standardize, fix any remaining .gitignore gaps (standardize warns but does not auto-add all entries — you must append them manually).
 
 ### Phase 2b: Generate README component tables
 Scan the plugin directory for components and fill the README placeholders:
@@ -51,6 +71,12 @@ Scan the plugin directory for components and fill the README placeholders:
 - Scan `skills/*/SKILL.md` frontmatter → generate `| Skill | Description |` table
 - Read `hooks/hooks.json` (if present) → list hook events and their purpose
 - Write actual usage examples for each command
+
+### Phase 2c: Re-validate after all fixes
+```bash
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" <plugin-folder> --strict 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | tail -5
+```
+**GATE CHECK**: Only proceed to Phase 3 if NO CRITICAL, MAJOR, MINOR, or NIT issues remain. Warnings are OK.
 
 ### Phase 3: Initialize git (if not already a git repo)
 ```bash
@@ -92,22 +118,31 @@ If --marketplace is provided:
 
 ### Phase 7: Final validation
 ```bash
-uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" <plugin-folder> --verbose 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" <plugin-folder> --verbose --strict 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
 ```
-Use `grep -oE` (NOT `grep -oP`) for macOS compatibility when parsing output.
+**This MUST show only WARNINGs or all-clear.** If any CRITICAL/MAJOR/MINOR/NIT remain, go back and fix them before considering the publish complete. The pre-push hook will block future pushes on these same issues.
 
 ### Phase 8: Report results
+Report to the user:
+- Severity counts table (PASSED, CRITICAL, MAJOR, MINOR, NIT, WARNING)
+- List of any remaining WARNINGs (advisory only)
+- GitHub repo URL
+- Marketplace notification status
 
 ## Checklist (copy and track progress)
 
-- [ ] Plugin validated (no CRITICAL/MAJOR issues)
+- [ ] Plugin validated with --strict (zero CRITICAL/MAJOR/MINOR/NIT)
+- [ ] ALL issues fixed (SKILL.md sections, .gitignore, badges, LICENSE, lint)
 - [ ] Standard files added (standardize_plugin.py --fix)
+- [ ] README has Components table, Install/Uninstall, Troubleshooting
+- [ ] Re-validated clean (only WARNINGs remain)
 - [ ] Git initialized and committed
 - [ ] GitHub repo created and pushed
 - [ ] CI/CD workflows present (ci.yml, release.yml, validate.yml, notify-marketplace.yml)
-- [ ] Git hooks configured (pre-push)
+- [ ] Git hooks configured (pre-push with --strict)
+- [ ] notify-marketplace.yml MARKETPLACE_OWNER/MARKETPLACE_REPO updated
 - [ ] Marketplace PAT secret set (if marketplace specified)
-- [ ] Final validation passed
+- [ ] Final validation passed (--strict, only WARNINGs)
 
 ## Binary Plugins (Rust, Go, C/C++)
 

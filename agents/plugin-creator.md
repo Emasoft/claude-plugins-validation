@@ -34,17 +34,33 @@ All at `${CLAUDE_PLUGIN_ROOT}/scripts/`. Run with `uv run "${CLAUDE_PLUGIN_ROOT}
 
 ## Workflow: Publish Plugin as GitHub Repo (/cpv-publish-as-github-repo)
 
-1. Validate plugin: `validate_plugin.py <folder> --verbose` — MUST pass (no CRITICAL/MAJOR)
-2. Standardize: `standardize_plugin.py <folder> --fix` — adds missing files
-3. Check for compiled binaries (Cargo.toml, go.mod, Makefile) — if found, sources MUST be in `src/` subdirectory with binaries in `src/<component>/bin/`. Add `build-binaries.yml` as fallback only.
-4. **Generate README component tables**: Scan `commands/*.md`, `agents/*.md`, `skills/*/SKILL.md` frontmatter. Generate markdown tables listing each component name + description. Fill the README placeholders.
-5. Git init + commit (if not already a git repo)
-6. Create GitHub repo: `gh repo create <owner>/<name> --public --source . --push`
-7. Configure git hooks: run whichever hook setup script exists in the plugin (`setup_git_hooks.py` or `setup-hooks.py`)
-8. Optionally configure marketplace notification:
-   - Update notify-marketplace.yml with correct MARKETPLACE_OWNER and MARKETPLACE_REPO values
-   - Set the PAT secret: `gh secret set MARKETPLACE_PAT --repo <owner>/<plugin> --body "$MARKETPLACE_PAT"` (MUST use `--body` flag)
-9. Final validation
+### THE GOLDEN RULE: FIX EVERYTHING BEFORE PUBLISHING
+
+The pre-push hook runs `--strict` and blocks on CRITICAL, MAJOR, MINOR, and NIT. Only WARNINGs pass through. If you don't fix issues BEFORE creating the GitHub repo, the push will be blocked and you'll have to fix them anyway. Fix them FIRST.
+
+### Steps
+
+1. **Validate** (`--strict`): `uv run --with pyyaml python validate_plugin.py <folder> --verbose --strict`
+2. **Standardize**: `standardize_plugin.py <folder> --fix` — adds missing files
+3. **FIX ALL ISSUES** (CRITICAL → MAJOR → MINOR → NIT): Read each offending file, apply the fix. Common fixes:
+   - SKILL.md missing sections → add Overview, Prerequisites, Output, Error Handling, Examples, Resources
+   - .gitignore gaps → append missing patterns
+   - Missing badges → add `<!--BADGES-START-->` block
+   - Missing LICENSE → create MIT LICENSE file
+   - Script not executable → `chmod +x`
+   - Ruff lint errors → `uv run ruff check --fix scripts/`
+   - Missing author.email → add noreply GitHub email
+4. **Generate README component tables**: Scan `commands/*.md`, `agents/*.md`, `skills/*/SKILL.md` frontmatter → generate tables. Add Install/Uninstall/Update/Troubleshooting sections.
+5. **Re-validate** (`--strict`): MUST show only WARNINGs. If any CRITICAL/MAJOR/MINOR/NIT remain, go back to step 3.
+6. Check for compiled binaries (Cargo.toml, go.mod, Makefile) — if found, sources MUST be in `src/` subdirectory with binaries in `src/<component>/bin/`. Add `build-binaries.yml` as fallback only.
+7. Git init + commit (if not already a git repo)
+8. Create GitHub repo: `gh repo create <owner>/<name> --public --source . --push`
+9. Configure git hooks: `git config core.hooksPath git-hooks` (or run setup_git_hooks.py if present). **The pre-push hook is the quality gate of the entire pipeline** — it runs lint + validate (--strict) + tests and blocks pushes with ANY non-WARNING issue.
+10. Optionally configure marketplace notification:
+    - Update notify-marketplace.yml with correct MARKETPLACE_OWNER and MARKETPLACE_REPO values
+    - Check env: `test -n "$MARKETPLACE_PAT"` before asking user
+    - Set secret: `gh secret set MARKETPLACE_PAT --repo <owner>/<plugin> --body "$MARKETPLACE_PAT"` (MUST use `--body` flag)
+11. **Final validation** (`--strict`): MUST pass with only WARNINGs
 
 ## Workflow: Create GitHub Marketplace (/cpv-create-github-marketplace)
 
