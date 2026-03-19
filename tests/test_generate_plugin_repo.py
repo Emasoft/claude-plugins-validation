@@ -186,12 +186,12 @@ class TestGenCliffToml:
 
     def test_contains_changelog_section(self):
         """Generated cliff.toml contains [changelog] section."""
-        content = gen_cliff_toml()
+        content = gen_cliff_toml(_default_params())
         assert "[changelog]" in content
 
     def test_contains_git_section(self):
         """Generated cliff.toml contains [git] section with commit parsers."""
-        content = gen_cliff_toml()
+        content = gen_cliff_toml(_default_params())
         assert "[git]" in content
         assert "conventional_commits" in content
         assert "commit_parsers" in content
@@ -381,8 +381,6 @@ class TestGeneratedRepoValidation:
         target = self._generate_and_validate(tmp_path)
         report = ValidationReport()
         validate_pipeline_readiness(target, report)
-        msgs_minor = [r.message for r in report.results if r.level == "MINOR"]
-        msgs_warning = [r.message for r in report.results if r.level == "WARNING"]
         # Generated repos should have pre-push hook, publish.py, cliff.toml, workflows
         passed = [r.message for r in report.results if r.level == "PASSED"]
         assert any("pre-push" in m.lower() for m in passed), "Should find pre-push hook"

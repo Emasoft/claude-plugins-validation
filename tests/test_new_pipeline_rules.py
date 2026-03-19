@@ -418,10 +418,13 @@ class TestPyprojectPythonVersion:
 
     def test_pyproject_present_with_py_scripts_passes(self, tmp_path):
         """pyproject.toml present when scripts/*.py exist reports PASSED."""
-        plugin = _make_plugin(tmp_path, extra_files={
-            "scripts/tool.py": "print('tool')\n",
-            "pyproject.toml": "[project]\nname = 'test'\nversion = '1.0.0'\n",
-        })
+        plugin = _make_plugin(
+            tmp_path,
+            extra_files={
+                "scripts/tool.py": "print('tool')\n",
+                "pyproject.toml": "[project]\nname = 'test'\nversion = '1.0.0'\n",
+            },
+        )
         report = ValidationReport()
         validate_structure(plugin, report)
         msgs = [r.message for r in report.results if r.level == "PASSED"]
@@ -445,11 +448,14 @@ class TestPyprojectPythonVersion:
 
     def test_python_version_present_passes(self, tmp_path):
         """Existing .python-version with scripts/*.py reports PASSED."""
-        plugin = _make_plugin(tmp_path, extra_files={
-            "scripts/tool.py": "print('tool')\n",
-            "pyproject.toml": "[project]\nname = 'test'\nversion = '1.0.0'\n",
-            ".python-version": "3.12\n",
-        })
+        plugin = _make_plugin(
+            tmp_path,
+            extra_files={
+                "scripts/tool.py": "print('tool')\n",
+                "pyproject.toml": "[project]\nname = 'test'\nversion = '1.0.0'\n",
+                ".python-version": "3.12\n",
+            },
+        )
         report = ValidationReport()
         validate_structure(plugin, report)
         msgs = [r.message for r in report.results if r.level == "PASSED"]
@@ -457,10 +463,13 @@ class TestPyprojectPythonVersion:
 
     def test_python_version_absent_with_py_scripts_warns(self, tmp_path):
         """Missing .python-version with scripts/*.py reports WARNING."""
-        plugin = _make_plugin(tmp_path, extra_files={
-            "scripts/tool.py": "print('tool')\n",
-            "pyproject.toml": "[project]\nname = 'test'\nversion = '1.0.0'\n",
-        })
+        plugin = _make_plugin(
+            tmp_path,
+            extra_files={
+                "scripts/tool.py": "print('tool')\n",
+                "pyproject.toml": "[project]\nname = 'test'\nversion = '1.0.0'\n",
+            },
+        )
         report = ValidationReport()
         validate_structure(plugin, report)
         msgs = [r.message for r in report.results if r.level == "WARNING"]
@@ -485,9 +494,12 @@ class TestSkillMdVersionSync:
 
     def test_matching_version_passes(self, tmp_path):
         """Plugin.json and SKILL.md with same version reports PASSED."""
-        plugin = _make_plugin(tmp_path, extra_files={
-            "skills/my-skill/SKILL.md": "---\nname: my-skill\nversion: 1.0.0\n---\n\n# My Skill\n",
-        })
+        plugin = _make_plugin(
+            tmp_path,
+            extra_files={
+                "skills/my-skill/SKILL.md": "---\nname: my-skill\nversion: 1.0.0\n---\n\n# My Skill\n",
+            },
+        )
         # Plugin manifest already has version 1.0.0
         report = CrossReferenceValidationReport()
         validate_version_sync(plugin, report)
@@ -497,9 +509,12 @@ class TestSkillMdVersionSync:
 
     def test_mismatching_version_warns(self, tmp_path):
         """Plugin.json 1.0.0 and SKILL.md 2.0.0 reports MAJOR version mismatch."""
-        plugin = _make_plugin(tmp_path, extra_files={
-            "skills/my-skill/SKILL.md": "---\nname: my-skill\nversion: 2.0.0\n---\n\n# My Skill\n",
-        })
+        plugin = _make_plugin(
+            tmp_path,
+            extra_files={
+                "skills/my-skill/SKILL.md": "---\nname: my-skill\nversion: 2.0.0\n---\n\n# My Skill\n",
+            },
+        )
         report = CrossReferenceValidationReport()
         validate_version_sync(plugin, report)
         msgs = [r.message for r in report.results if r.level == "MAJOR"]
@@ -507,19 +522,25 @@ class TestSkillMdVersionSync:
 
     def test_no_version_field_in_skill_is_fine(self, tmp_path):
         """SKILL.md without version field does not add a version source."""
-        plugin = _make_plugin(tmp_path, extra_files={
-            "skills/my-skill/SKILL.md": "---\nname: my-skill\n---\n\n# My Skill\n",
-        })
+        plugin = _make_plugin(
+            tmp_path,
+            extra_files={
+                "skills/my-skill/SKILL.md": "---\nname: my-skill\n---\n\n# My Skill\n",
+            },
+        )
         report = CrossReferenceValidationReport()
         validate_version_sync(plugin, report)
         assert "skills/my-skill/SKILL.md" not in report.version_sources
 
     def test_multiple_skills_checked(self, tmp_path):
         """Multiple SKILL.md files with differing versions are all detected."""
-        plugin = _make_plugin(tmp_path, extra_files={
-            "skills/skill-a/SKILL.md": "---\nname: skill-a\nversion: 1.0.0\n---\n\n# A\n",
-            "skills/skill-b/SKILL.md": "---\nname: skill-b\nversion: 1.0.0\n---\n\n# B\n",
-        })
+        plugin = _make_plugin(
+            tmp_path,
+            extra_files={
+                "skills/skill-a/SKILL.md": "---\nname: skill-a\nversion: 1.0.0\n---\n\n# A\n",
+                "skills/skill-b/SKILL.md": "---\nname: skill-b\nversion: 1.0.0\n---\n\n# B\n",
+            },
+        )
         report = CrossReferenceValidationReport()
         validate_version_sync(plugin, report)
         assert "skills/skill-a/SKILL.md" in report.version_sources

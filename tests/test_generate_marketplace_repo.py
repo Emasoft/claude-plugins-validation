@@ -185,8 +185,13 @@ class TestPluginSources:
         target = tmp_path / "mkt"
         target.mkdir()
         result = generate_marketplace_repo(
-            target, DEFAULT_NAME, DEFAULT_OWNER_NAME, DEFAULT_DESCRIPTION,
-            DEFAULT_GITHUB_OWNER, DEFAULT_PLUGINS, dry_run=False,
+            target,
+            DEFAULT_NAME,
+            DEFAULT_OWNER_NAME,
+            DEFAULT_DESCRIPTION,
+            DEFAULT_GITHUB_OWNER,
+            DEFAULT_PLUGINS,
+            dry_run=False,
         )
         assert result == 0
         mj_path = target / ".claude-plugin" / "marketplace.json"
@@ -245,8 +250,13 @@ class TestFullMarketplaceGeneration:
         target = tmp_path / "marketplace"
         target.mkdir()
         result = generate_marketplace_repo(
-            target, DEFAULT_NAME, DEFAULT_OWNER_NAME, DEFAULT_DESCRIPTION,
-            DEFAULT_GITHUB_OWNER, DEFAULT_PLUGINS, dry_run=False,
+            target,
+            DEFAULT_NAME,
+            DEFAULT_OWNER_NAME,
+            DEFAULT_DESCRIPTION,
+            DEFAULT_GITHUB_OWNER,
+            DEFAULT_PLUGINS,
+            dry_run=False,
         )
         assert result == 0
         assert (target / ".claude-plugin" / "marketplace.json").exists()
@@ -263,8 +273,13 @@ class TestFullMarketplaceGeneration:
         target = tmp_path / "mkt"
         target.mkdir()
         generate_marketplace_repo(
-            target, DEFAULT_NAME, DEFAULT_OWNER_NAME, DEFAULT_DESCRIPTION,
-            DEFAULT_GITHUB_OWNER, DEFAULT_PLUGINS, dry_run=False,
+            target,
+            DEFAULT_NAME,
+            DEFAULT_OWNER_NAME,
+            DEFAULT_DESCRIPTION,
+            DEFAULT_GITHUB_OWNER,
+            DEFAULT_PLUGINS,
+            dry_run=False,
         )
         data = json.loads((target / ".claude-plugin" / "marketplace.json").read_text())
         assert data["name"] == DEFAULT_NAME
@@ -277,8 +292,13 @@ class TestFullMarketplaceGeneration:
         target = tmp_path / "mkt"
         target.mkdir()
         generate_marketplace_repo(
-            target, DEFAULT_NAME, DEFAULT_OWNER_NAME, DEFAULT_DESCRIPTION,
-            DEFAULT_GITHUB_OWNER, DEFAULT_PLUGINS, dry_run=False,
+            target,
+            DEFAULT_NAME,
+            DEFAULT_OWNER_NAME,
+            DEFAULT_DESCRIPTION,
+            DEFAULT_GITHUB_OWNER,
+            DEFAULT_PLUGINS,
+            dry_run=False,
         )
         pre_push = target / ".githooks" / "pre-push"
         assert os.access(pre_push, os.X_OK), ".githooks/pre-push should be executable"
@@ -288,8 +308,13 @@ class TestFullMarketplaceGeneration:
         target = tmp_path / "mkt"
         target.mkdir()
         result = generate_marketplace_repo(
-            target, "official", DEFAULT_OWNER_NAME, DEFAULT_DESCRIPTION,
-            DEFAULT_GITHUB_OWNER, [], dry_run=False,
+            target,
+            "official",
+            DEFAULT_OWNER_NAME,
+            DEFAULT_DESCRIPTION,
+            DEFAULT_GITHUB_OWNER,
+            [],
+            dry_run=False,
         )
         assert result == 1
 
@@ -298,8 +323,13 @@ class TestFullMarketplaceGeneration:
         target = tmp_path / "mkt"
         target.mkdir()
         result = generate_marketplace_repo(
-            target, DEFAULT_NAME, DEFAULT_OWNER_NAME, DEFAULT_DESCRIPTION,
-            DEFAULT_GITHUB_OWNER, ["not-a-valid-repo"], dry_run=False,
+            target,
+            DEFAULT_NAME,
+            DEFAULT_OWNER_NAME,
+            DEFAULT_DESCRIPTION,
+            DEFAULT_GITHUB_OWNER,
+            ["not-a-valid-repo"],
+            dry_run=False,
         )
         assert result == 1
 
@@ -317,8 +347,13 @@ class TestMarketplaceDryRun:
         target = tmp_path / "mkt"
         target.mkdir()
         result = generate_marketplace_repo(
-            target, DEFAULT_NAME, DEFAULT_OWNER_NAME, DEFAULT_DESCRIPTION,
-            DEFAULT_GITHUB_OWNER, DEFAULT_PLUGINS, dry_run=True,
+            target,
+            DEFAULT_NAME,
+            DEFAULT_OWNER_NAME,
+            DEFAULT_DESCRIPTION,
+            DEFAULT_GITHUB_OWNER,
+            DEFAULT_PLUGINS,
+            dry_run=True,
         )
         assert result == 0
         actual_files = [f for f in target.rglob("*") if f.is_file()]
@@ -329,8 +364,13 @@ class TestMarketplaceDryRun:
         target = tmp_path / "mkt"
         target.mkdir()
         result = generate_marketplace_repo(
-            target, "official", DEFAULT_OWNER_NAME, DEFAULT_DESCRIPTION,
-            DEFAULT_GITHUB_OWNER, [], dry_run=True,
+            target,
+            "official",
+            DEFAULT_OWNER_NAME,
+            DEFAULT_DESCRIPTION,
+            DEFAULT_GITHUB_OWNER,
+            [],
+            dry_run=True,
         )
         assert result == 1
 
