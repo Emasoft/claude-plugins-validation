@@ -587,7 +587,11 @@ def do_install(
                     info("Aborted.")
                     return
             if not dry_run:
-                shutil.rmtree(dest_plugin_dir)
+                try:
+                    shutil.rmtree(dest_plugin_dir)
+                except OSError as e:
+                    err(f"Failed to remove existing plugin directory: {e}")
+                    sys.exit(1)
 
         if dry_run:
             if not quiet:

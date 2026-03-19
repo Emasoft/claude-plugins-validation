@@ -254,7 +254,14 @@ def backup_file(path: Path):
 
     # Keep only the 5 most recent backups per original filename
     pattern = f"{path.name}.*.bak"
-    backups = sorted(backup_dir.glob(pattern), key=lambda p: p.stat().st_mtime)
+
+    def _safe_mtime(p: Path) -> float:
+        try:
+            return p.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    backups = sorted(backup_dir.glob(pattern), key=_safe_mtime)
     for old in backups[:-5]:
         old.unlink(missing_ok=True)
 

@@ -134,10 +134,15 @@ def validate_manifest(plugin_root: Path, report: ValidationReport, marketplace_o
         if isinstance(name, str):
             validate_component_name(name, "plugin", report)
 
-    # Version validation
+    # Version validation — guard against non-string values (e.g. "version": 123)
     if "version" in manifest:
         version = manifest["version"]
-        if not re.match(r"^\d+\.\d+\.\d+", version):
+        if not isinstance(version, str):
+            report.major(
+                f"Version must be a string, got {type(version).__name__}: {version}",
+                ".claude-plugin/plugin.json",
+            )
+        elif not re.match(r"^\d+\.\d+\.\d+", version):
             report.major(
                 f"Version must be semver format: {version}",
                 ".claude-plugin/plugin.json",
@@ -242,7 +247,12 @@ def validate_manifest(plugin_root: Path, report: ValidationReport, marketplace_o
                 )
             elif isinstance(value, list):
                 for i, path in enumerate(value):
-                    if isinstance(path, str) and not path.startswith("./"):
+                    if not isinstance(path, str):
+                        report.major(
+                            f"Field '{key}[{i}]' must be a string path, got {type(path).__name__}",
+                            ".claude-plugin/plugin.json",
+                        )
+                    elif not path.startswith("./"):
                         report.major(
                             f"Field '{key}[{i}]' path must start with './': {path}",
                             ".claude-plugin/plugin.json",
@@ -623,15 +633,19 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
             if pyproject.exists():
                 ruff_args.extend(["--config", str(pyproject)])
             ruff_args.extend([str(f) for f in py_files])
-            result = subprocess.run(
-                ruff_args,
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-            if result.returncode == 0:
+            try:
+                result = subprocess.run(
+                    ruff_args,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+            except subprocess.TimeoutExpired:
+                report.warning("Ruff timed out after 60s — skipping lint check")
+                result = None
+            if result is not None and result.returncode == 0:
                 report.passed(f"Ruff check passed for {len(py_files)} Python files")
-            else:
+            elif result is not None:
                 # Aggregate ruff errors per-file to avoid inflating MAJOR count
                 # Ruff output format: "path/to/file.py:line:col: CODE message"
                 errors_by_file: dict[str, int] = {}
@@ -665,15 +679,19 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
             if pyproject.exists():
                 mypy_args.extend(["--config-file", str(pyproject)])
             mypy_args.extend([str(f) for f in py_files])
-            result = subprocess.run(
-                mypy_args,
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-            if result.returncode == 0:
+            try:
+                result = subprocess.run(
+                    mypy_args,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+            except subprocess.TimeoutExpired:
+                report.warning("Mypy timed out after 60s — skipping type check")
+                result = None
+            if result is not None and result.returncode == 0:
                 report.passed(f"Mypy check passed for {len(py_files)} Python files")
-            else:
+            elif result is not None:
                 for line in result.stdout.strip().split("\n"):
                     if line and not line.startswith("Success"):
                         report.minor(f"Mypy: {line}")
@@ -695,12 +713,16 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
 
         # Shellcheck lint
         if shellcheck_cmd:
-            result = subprocess.run(
-                shellcheck_cmd + [str(sh_file)],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
+            try:
+                result = subprocess.run(
+                    shellcheck_cmd + [str(sh_file)],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+            except subprocess.TimeoutExpired:
+                report.warning(f"Shellcheck timed out on {sh_file.name}")
+                continue
             if result.returncode == 0:
                 report.passed(f"Shellcheck passed: {sh_file.name}")
             else:
