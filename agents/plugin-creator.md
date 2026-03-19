@@ -41,7 +41,9 @@ All at `${CLAUDE_PLUGIN_ROOT}/scripts/`. Run with `uv run "${CLAUDE_PLUGIN_ROOT}
 5. Git init + commit (if not already a git repo)
 6. Create GitHub repo: `gh repo create <owner>/<name> --public --source . --push`
 7. Configure git hooks: run whichever hook setup script exists in the plugin (`setup_git_hooks.py` or `setup-hooks.py`)
-8. Optionally configure marketplace notification (PAT + notify-marketplace.yml)
+8. Optionally configure marketplace notification:
+   - Update notify-marketplace.yml with correct MARKETPLACE_OWNER and MARKETPLACE_REPO values
+   - Set the PAT secret: `gh secret set MARKETPLACE_PAT --repo <owner>/<plugin> --body "$MARKETPLACE_PAT"` (MUST use `--body` flag)
 9. Final validation
 
 ## Workflow: Create GitHub Marketplace (/cpv-create-github-marketplace)
