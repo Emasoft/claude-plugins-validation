@@ -48,7 +48,7 @@ gh repo create <owner>/<marketplace-name> --public --source . --push
 
 ### Phase 4: Validate marketplace
 ```bash
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/validate_marketplace.py" /tmp/marketplace-scaffold --verbose
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_marketplace.py" /tmp/marketplace-scaffold --verbose 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
 ```
 
 ### Phase 5: Verify each linked plugin (if --add-plugin provided)

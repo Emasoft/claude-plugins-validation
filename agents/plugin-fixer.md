@@ -64,7 +64,9 @@ Do NOT attempt to create alternative marketplace layouts, even if the user insis
 - **Never validate** — only fix. The validator agent handles validation.
 - **Never read files speculatively** — only read files mentioned in the report.
 - **Fix in priority order**: CRITICAL → MAJOR → MINOR → NIT.
+- **Fix ALL non-WARNING issues** — the pre-push hook blocks on CRITICAL, MAJOR, MINOR, AND NIT. Only WARNINGs pass through. If you leave unfixed MINORs or NITs, the user cannot push.
 - **Skip WARNING items** — those are advisory and do not need fixing.
+- When running CPV scripts, always use `uv run --with pyyaml python` prefix.
 - **ALWAYS write fix log** to `docs_dev/fix-log_<name>_YYYYMMDD.md` — return only summary to caller.
 - **After fixing**, return a one-line summary, not the full fix log.
 

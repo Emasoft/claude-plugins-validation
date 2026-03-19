@@ -132,6 +132,18 @@ Marketplaces follow the **hub-only architecture**:
 - Scripts in `scripts/` or `bin/`
 - CI: `shellcheck` on all `.sh` files
 
+## Pipeline Rules
+
+See [Pipeline Rules](references/pipeline-rules.md) for the full set of mandatory rules covering:
+- Pre-push hook 4-gate enforcement (version bump, lint, validate --strict, tests)
+- Fix-all mandate (only WARNINGs may remain before publishing)
+- Running CPV scripts (`uv run --with pyyaml python`)
+- Processing validation output (strip ANSI, use `grep -oE`)
+- GitHub secrets (`--body` flag mandatory)
+- Marketplace notification configuration
+- README requirements (badges, components, install/uninstall, troubleshooting)
+- Common fixes reference table
+
 ## Quick Reference
 
 ### Create a new plugin (local)
