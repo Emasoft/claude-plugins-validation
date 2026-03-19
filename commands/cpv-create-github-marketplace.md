@@ -1,6 +1,6 @@
 ---
 name: cpv-create-github-marketplace
-description: Create a GitHub marketplace repository for Claude Code plugins (hub-only, no plugin code inside)
+description: Create a GitHub marketplace with full CI/CD — scaffold, push, configure automation (replaces cpv-setup-github-marketplace)
 allowed-tools: Read, Bash(git:*,gh:*,uv:*), Write, Edit, Glob, Grep, AskUserQuestion
 argument-hint: "<owner/marketplace-name> [--add-plugin <owner/plugin-repo>]..."
 agent: plugin-creator
@@ -9,7 +9,9 @@ user-invocable: true
 
 # /cpv-create-github-marketplace
 
-Create a complete GitHub marketplace repository for Claude Code plugins. The marketplace is a HUB — it contains pointers to external plugin repos, never plugin code itself.
+Create a complete GitHub marketplace repository for Claude Code plugins with full CI/CD automation. The marketplace is a HUB — it contains pointers to external plugin repos, never plugin code itself.
+
+> **Note:** This command replaces the former `/cpv-setup-github-marketplace`. It performs the full workflow: scaffold, create GitHub repo, install CI/CD workflows, configure automation, and validate.
 
 ## Usage
 

@@ -1,6 +1,6 @@
 ---
 name: cpv-publish-as-github-repo
-description: End-to-end: scaffold a plugin repo, create GitHub repo, push, and configure CI/CD pipeline for marketplace publishing
+description: End-to-end: validate, standardize, create GitHub repo, push, and configure full CI/CD pipeline for a plugin (replaces cpv-setup-plugin-repo)
 allowed-tools: Read, Bash(git:*,gh:*,uv:*), Write, Edit, Glob, Grep, AskUserQuestion
 argument-hint: "<plugin-folder> [--owner <github-username>] [--marketplace <owner/marketplace-repo>]"
 agent: plugin-creator
@@ -10,6 +10,8 @@ user-invocable: true
 # /cpv-publish-as-github-repo
 
 End-to-end command that takes a local plugin folder and publishes it as a complete GitHub repository with full CI/CD pipeline, ready for marketplace publishing.
+
+> **Note:** This command replaces the former `/cpv-setup-plugin-repo`. It performs all the same operations (CI/CD setup, git hooks, marketplace notification) plus validation and standardization.
 
 ## Usage
 

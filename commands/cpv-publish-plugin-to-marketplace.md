@@ -1,6 +1,6 @@
 ---
 name: cpv-publish-plugin-to-marketplace
-description: Add a plugin to a marketplace by registering its GitHub repo, with owner verification and CI/CD setup
+description: Register a plugin in a marketplace — validate, verify ownership, add entry, configure CI/CD notification (replaces cpv-publish-to-marketplace)
 allowed-tools: Read, Bash(git:*,gh:*,uv:*), Write, Edit, Glob, Grep, AskUserQuestion
 argument-hint: "<owner/plugin-repo> [--marketplace <owner/marketplace-repo>]"
 agent: plugin-manager
@@ -10,6 +10,8 @@ user-invocable: true
 # /cpv-publish-plugin-to-marketplace
 
 Register a plugin's GitHub repo in a marketplace, with owner verification and full CI/CD pipeline setup.
+
+> **Note:** This command replaces the former `/cpv-publish-to-marketplace`. It performs all the same operations (PAT setup, notification workflow) plus remote validation, owner verification, and marketplace catalog update.
 
 ## Usage
 
