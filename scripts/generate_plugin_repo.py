@@ -511,13 +511,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 # -- ANSI colors ---------------------------------------------------------------
+
 
 def _colors_ok() -> bool:
     if os.environ.get("NO_COLOR"):
         return False
     return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+
 
 _C = _colors_ok()
 RED    = "\033[0;31m" if _C else ""
@@ -529,6 +530,7 @@ NC     = "\033[0m" if _C else ""
 
 
 # -- Helpers -------------------------------------------------------------------
+
 
 def cprint(msg: str) -> None:
     print(msg, flush=True)
@@ -782,10 +784,13 @@ def run_gate(root: Path) -> int:
         except subprocess.TimeoutExpired:
             cprint(f"  {YELLOW}Tests timed out after 300s, skipping.{NC}")
             te = 0
-        if te != 0:
+        if te == 5:
+            cprint(f"  {YELLOW}No tests collected — skipping.{NC}")
+        elif te != 0:
             cprint(f"  {RED}BLOCKED: Tests failed{NC}")
             return 1
-        cprint(f"  {GREEN}Tests passed.{NC}")
+        else:
+            cprint(f"  {GREEN}Tests passed.{NC}")
     else:
         cprint(f"  {YELLOW}No test files found — skipping.{NC}")
 
@@ -828,8 +833,15 @@ def stage_tests(root: Path) -> None:
     if not test_dir.is_dir():
         cprint(f"  {YELLOW}No tests/ directory — skipping.{NC}")
         return
-    run(["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"], cwd=root)
-    cprint(f"  {GREEN}Tests passed.{NC}")
+    # pytest exit code 5 = no tests collected, which is OK for fresh plugins
+    r = run(["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"], cwd=root, check=False)
+    if r.returncode == 5:
+        cprint(f"  {YELLOW}No tests collected — skipping.{NC}")
+    elif r.returncode != 0:
+        cprint(f"  {RED}Tests failed (exit {r.returncode}).{NC}")
+        sys.exit(r.returncode)
+    else:
+        cprint(f"  {GREEN}Tests passed.{NC}")
 
 def stage_consistency(root: Path) -> None:
     """Step 5: Check version consistency."""
@@ -996,7 +1008,6 @@ Usage: uv run python scripts/setup-hooks.py
 
 from __future__ import annotations
 
-import os
 import shutil
 import stat
 import sys
