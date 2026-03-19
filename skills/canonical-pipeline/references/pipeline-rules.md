@@ -51,6 +51,12 @@ Piping via `echo | gh secret set` does NOT work reliably.
 
 Check if the env var exists first: `test -n "$MARKETPLACE_PAT"`
 
+## CI Workflow Dependencies
+
+CI workflows MUST use `uv sync --extra dev` (NOT just `uv sync`).
+ruff, pytest, mypy, pyyaml are in `[project.optional-dependencies] dev`.
+Without `--extra dev`, ALL CI runs fail with "Failed to spawn: ruff".
+
 ## Marketplace Notification
 
 After `standardize_plugin.py --fix` generates `notify-marketplace.yml`, ALWAYS update:

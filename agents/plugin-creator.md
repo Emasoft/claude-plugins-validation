@@ -112,6 +112,8 @@ These errors were made in real publish runs. Do NOT repeat them:
 6. **Use `grep -oE` not `grep -oP`** — macOS grep does not support Perl regex (`-P`).
 7. **standardize_plugin.py exit code 1 is expected** after `--fix` if warnings remain. Only CRITICAL/MAJOR matter for proceed/abort decisions.
 8. **Check `author.email`** in plugin.json — suggest GitHub noreply format if missing.
+9. **CI workflows need `uv sync --extra dev`** not just `uv sync`. Without `--extra dev`, ruff/pytest/mypy/pyyaml are NOT installed and ALL CI runs fail.
+10. **Update notify-marketplace.yml BEFORE the first push**. The standardize script creates it with placeholders. If you push first, the marketplace notification fails silently with old values.
 
 ## TOKEN OPTIMIZATION
 Use `mcp__plugin_llm-externalizer_llm-externalizer__*` tools for bounded tasks. Always pass file paths via `input_files_paths`.
