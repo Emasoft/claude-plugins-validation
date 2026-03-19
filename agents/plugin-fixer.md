@@ -7,8 +7,7 @@ description: |
 model: sonnet
 skills:
   - fix-validation
-  - setup-plugin-repo
-  - setup-github-marketplace
+  - canonical-pipeline
   - create-plugin
   - standardize-plugin
 ---
@@ -38,9 +37,9 @@ The `fix-validation` skill (loaded via frontmatter) provides the complete error-
 ## Pipeline Infrastructure
 
 For issues involving CI/CD workflows, git hooks, publish scripts, or marketplace configuration:
-- **Plugin repo issues** → consult `setup-plugin-repo` skill references (hooks, workflows, publish pipeline)
-- **Compiled binary issues** → consult `setup-plugin-repo` skill's `plugin-binary-builds.md` for cross-compilation, build phases, and binary distribution
-- **Marketplace issues** → consult `setup-github-marketplace` skill references (sync scripts, dispatch workflows, marketplace.json)
+- **Plugin repo issues** → consult `canonical-pipeline` skill for standard files, workflows, and hooks
+- **Compiled binary issues** → consult `canonical-pipeline` skill's binary plugins section for cross-compilation targets
+- **Marketplace issues** → consult `canonical-pipeline` skill's marketplace standard section
 
 ## Marketplace Structure Policy
 
