@@ -29,6 +29,8 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 # Add scripts directory to path for imports
 scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
 if str(scripts_dir) not in sys.path:
@@ -40,6 +42,7 @@ from manage_github_validate import (  # noqa: E402
     _run_skill_audit,
     audit_github_marketplace,
     audit_github_plugin,
+    main,
     validate_github_marketplace,
     validate_github_plugin,
 )
@@ -237,3 +240,61 @@ class TestHighLevelOrchestrators:
         """audit_github_marketplace() returns worst exit code when validate fails but audit passes."""
         rc = audit_github_marketplace("anthropics/my-marketplace")
         assert rc == 1
+
+
+class TestCLIAuditFlag:
+    """Tests for the --audit CLI flag in main() arg parsing and dispatch."""
+
+    @patch("manage_github_validate.audit_github_plugin", return_value=0)
+    @patch("sys.argv", ["prog", "--plugin", "owner/repo", "--audit"])
+    def test_plugin_with_audit_flag_calls_audit_function(self, mock_audit):
+        """main() dispatches to audit_github_plugin when --plugin and --audit are both set."""
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
+        mock_audit.assert_called_once_with("owner/repo")
+
+    @patch("manage_github_validate.validate_github_plugin", return_value=0)
+    @patch("sys.argv", ["prog", "--plugin", "owner/repo"])
+    def test_plugin_without_audit_calls_validate_function(self, mock_validate):
+        """main() dispatches to validate_github_plugin when --plugin is set without --audit."""
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
+        mock_validate.assert_called_once_with("owner/repo")
+
+    @patch("manage_github_validate.audit_github_marketplace", return_value=0)
+    @patch("sys.argv", ["prog", "--marketplace", "owner/repo", "--audit"])
+    def test_marketplace_with_audit_flag_calls_audit_function(self, mock_audit):
+        """main() dispatches to audit_github_marketplace when --marketplace and --audit are both set."""
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
+        mock_audit.assert_called_once_with("owner/repo")
+
+    @patch("manage_github_validate.validate_github_marketplace", return_value=0)
+    @patch("sys.argv", ["prog", "--marketplace", "owner/repo"])
+    def test_marketplace_without_audit_calls_validate_function(self, mock_validate):
+        """main() dispatches to validate_github_marketplace when --marketplace is set without --audit."""
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
+        mock_validate.assert_called_once_with("owner/repo")
+
+    @patch("manage_github_validate.audit_github_plugin", return_value=0)
+    @patch("sys.argv", ["prog", "--audit-plugin", "owner/repo"])
+    def test_legacy_audit_plugin_flag_still_works(self, mock_audit):
+        """main() dispatches to audit_github_plugin via legacy --audit-plugin flag (backward compat)."""
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
+        mock_audit.assert_called_once_with("owner/repo")
+
+    @patch("manage_github_validate.audit_github_marketplace", return_value=0)
+    @patch("sys.argv", ["prog", "--audit-marketplace", "owner/repo"])
+    def test_legacy_audit_marketplace_flag_still_works(self, mock_audit):
+        """main() dispatches to audit_github_marketplace via legacy --audit-marketplace flag (backward compat)."""
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
+        mock_audit.assert_called_once_with("owner/repo")
