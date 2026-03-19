@@ -586,7 +586,8 @@ def get_current_version(plugin_root: Path) -> str | None:
         return None
     try:
         data = json.loads(pj.read_text(encoding="utf-8"))
-        return data.get("version")
+        ver = data.get("version")
+        return str(ver) if ver is not None else None
     except (json.JSONDecodeError, OSError):
         return None
 

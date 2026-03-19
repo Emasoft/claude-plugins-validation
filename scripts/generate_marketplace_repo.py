@@ -75,6 +75,7 @@ def _plugin_entry(owner_repo: str) -> dict:
         "name": repo_name,
         "description": f"(update description for {repo_name})",
         "source": {"source": "github", "repo": owner_repo},
+        "repository": f"https://github.com/{owner_repo}",
     }
 
 
@@ -123,6 +124,8 @@ To list your plugin in this marketplace:
 claude plugin marketplace add {github_owner}/{name}
 ```
 
+Restart Claude Code after adding the marketplace for it to take effect.
+
 ## Installing Plugins
 
 ```bash
@@ -138,6 +141,29 @@ claude plugin install <plugin-name>@{name}
 ```bash
 claude plugin update <plugin-name>@{name}
 ```
+
+## Uninstall
+
+```bash
+# Remove a single plugin
+claude plugin uninstall <plugin-name>@{name}
+
+# Remove the marketplace
+claude plugin marketplace remove {github_owner}/{name}
+```
+
+After uninstalling, restart Claude Code for changes to take effect.
+
+## Troubleshooting
+
+| Issue | Resolution |
+|-------|------------|
+| Plugin not found | Run `claude plugin search @{name}` to list available plugins |
+| Install fails | Ensure `gh` CLI is authenticated: `gh auth status` |
+| Plugin not loading | Restart Claude Code after install: exit and reopen |
+| Marketplace not listed | Re-add: `claude plugin marketplace add {github_owner}/{name}` |
+| Hook path not found after update | Run `git config core.hooksPath git-hooks` in the plugin directory |
+| Old version after update | Run `claude plugin update <plugin-name>@{name}` and restart Claude Code |
 """
 
 
