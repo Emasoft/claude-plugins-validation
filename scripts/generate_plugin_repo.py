@@ -884,16 +884,19 @@ def gen_pre_push_hook(p: PluginParams) -> str:
     return f'''#!/usr/bin/env python3
 """Pre-push hook for {p.name}.
 
-Quality gates (all must pass):
+Quality gates (all must pass — only WARNINGs are allowed through):
   1. Version bump check — blocks if local version matches remote
   2. Lint — runs ruff check on scripts/
   3. Validate — runs validate_plugin.py in strict mode
+  4. Tests — runs pytest on tests/ directory
 
 Exit codes from validate_plugin.py:
   0 - All checks passed
   1 - CRITICAL issues found (blocks push)
   2 - MAJOR issues found (blocks push)
-  3 - MINOR issues found (blocks push in strict mode)
+  3 - MINOR issues found (blocks push)
+  4 - NIT issues found (blocks push)
+  5+ - WARNING only (allowed through)
 """
 
 import fnmatch
@@ -925,7 +928,7 @@ NC     = "\\033[0m"    if _USE_COLOR else ""
 
 PLUGIN_PATTERNS = [
     ".claude-plugin/*", "agents/*", "commands/*", "skills/*",
-    "hooks/*", "scripts/*.py", "scripts/*.sh", "*.mcp.json",
+    "hooks/*", "scripts/*.py", "scripts/*.sh", "tests/*", "*.mcp.json",
 ]
 
 ZERO_SHA = "0" * 40
@@ -1042,13 +1045,32 @@ def main() -> int:
             cprint(f"{{RED}}BLOCKED: Linting issues found{{NC}}")
             return 1
 
-    # Gate 3: Validate (strict mode)
+    # Gate 3: Validate (strict mode — blocks on CRITICAL, MAJOR, MINOR, NIT)
     cprint(f"{{BLUE}}Running validation...{{NC}}")
     validate_script = repo_root / "scripts" / "validate_plugin.py"
     ve = 0
     if validate_script.is_file():
         ve = run_script(python_cmd, validate_script,
                         [".", "--verbose", "--strict"], cwd=repo_root)
+    # Block on anything except 0 (pass) and 5+ (WARNING-only)
+    if ve != 0 and ve < 5:
+        labels = {{1: "CRITICAL", 2: "MAJOR", 3: "MINOR", 4: "NIT"}}
+        cprint(f"{{RED}}BLOCKED: {{labels.get(ve, f'exit {{ve}}')}} issues found{{NC}}")
+        return 1
+
+    # Gate 4: Tests (blocks push if any test fails)
+    cprint(f"{{BLUE}}Running tests...{{NC}}")
+    test_dir = repo_root / "tests"
+    if test_dir.is_dir() and any(test_dir.glob("test_*.py")):
+        te = run_script(python_cmd, Path("-m"),
+                        ["pytest", str(test_dir), "-q", "--tb=short"],
+                        cwd=repo_root, timeout=300)
+        if te != 0:
+            cprint(f"{{RED}}BLOCKED: Tests failed{{NC}}")
+            return 1
+        cprint(f"{{GREEN}}Tests passed.{{NC}}")
+    else:
+        cprint(f"{{YELLOW}}No test files found in tests/, skipping.{{NC}}")
 
     # Optional: marketplace.json consistency
     mj = repo_root / "marketplace.json"
@@ -1058,12 +1080,8 @@ def main() -> int:
         if pv and mv and pv != mv:
             cprint(f"{{YELLOW}}WARNING: plugin.json={{pv}} != marketplace.json={{mv}}{{NC}}")
 
-    if ve == 0:
-        cprint(f"{{GREEN}}PASSED: Push allowed.{{NC}}")
-    else:
-        labels = {{1: "CRITICAL", 2: "MAJOR", 3: "MINOR"}}
-        cprint(f"{{RED}}BLOCKED: {{labels.get(ve, f'exit {{ve}}')}} issues found{{NC}}")
-    return 0 if ve == 0 else 1
+    cprint(f"{{GREEN}}PASSED: Push allowed.{{NC}}")
+    return 0
 
 
 if __name__ == "__main__":
