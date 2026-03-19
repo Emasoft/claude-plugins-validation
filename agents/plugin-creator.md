@@ -84,5 +84,18 @@ All at `${CLAUDE_PLUGIN_ROOT}/scripts/`. Run with `uv run "${CLAUDE_PLUGIN_ROOT}
 
 Plugin sources in marketplace.json MUST use: `{"source": "github", "repo": "owner/repo-name"}`
 
+## HARD-WON LESSONS (from post-mortems)
+
+These errors were made in real publish runs. Do NOT repeat them:
+
+1. **Always `uv run --with pyyaml python`** when running CPV scripts (validate_plugin.py, standardize_plugin.py) from outside the CPV project. Without `--with pyyaml`, you get `ModuleNotFoundError: No module named 'yaml'`.
+2. **Always `--body` flag for `gh secret set`**. Piping via `echo | gh secret set` does NOT work reliably. Use: `gh secret set NAME --repo owner/repo --body "$VALUE"`
+3. **Always update notify-marketplace.yml** after standardize generates it. The MARKETPLACE_OWNER and MARKETPLACE_REPO env vars are placeholders that MUST be replaced with the actual marketplace owner and repo name.
+4. **Check `$MARKETPLACE_PAT` env var** before asking the user for it. Run `test -n "$MARKETPLACE_PAT"` first.
+5. **Strip ANSI codes** when processing validation output: `| sed 's/\x1b\[[0-9;]*m//g'`
+6. **Use `grep -oE` not `grep -oP`** — macOS grep does not support Perl regex (`-P`).
+7. **standardize_plugin.py exit code 1 is expected** after `--fix` if warnings remain. Only CRITICAL/MAJOR matter for proceed/abort decisions.
+8. **Check `author.email`** in plugin.json — suggest GitHub noreply format if missing.
+
 ## TOKEN OPTIMIZATION
 Use `mcp__plugin_llm-externalizer_llm-externalizer__*` tools for bounded tasks. Always pass file paths via `input_files_paths`.
