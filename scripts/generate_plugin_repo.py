@@ -1093,7 +1093,7 @@ if __name__ == "__main__":
 
 
 def gen_ci_yml(p: PluginParams) -> str:
-    """Generate .github/workflows/ci.yml — CI on push/PR to main."""
+    """Generate .github/workflows/ci.yml — Mega-Linter + validate + test."""
     _ = p  # unused but kept for consistent signature
     return """name: CI
 
@@ -1104,7 +1104,35 @@ on:
     branches: [main]
 
 jobs:
+  mega-linter:
+    name: Mega-Linter
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Mega-Linter
+        uses: oxsecurity/megalinter@v8
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VALIDATE_ALL_CODEBASE: false
+
+      - name: Upload Mega-Linter reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mega-linter-reports
+          path: |
+            megalinter-reports/
+            mega-linter.log
+
   validate:
+    name: Plugin Validation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1118,19 +1146,33 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
-      - name: Lint source files
-        run: uv run ruff check scripts/
-
-      - name: Run plugin validation
+      - name: Validate plugin
         run: |
           if [ -f "scripts/validate_plugin.py" ]; then
             uv run python scripts/validate_plugin.py . --verbose
           fi
 
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
       - name: Run tests
         run: |
-          if [ -d "tests" ]; then
+          if [ -d "tests" ] && ls tests/test_*.py 1>/dev/null 2>&1; then
             uv run pytest tests/ -v
+          else
+            echo "No test files found, skipping"
           fi
 """
 
@@ -1213,7 +1255,7 @@ jobs:
 
 
 def gen_validate_yml(p: PluginParams) -> str:
-    """Generate .github/workflows/validate.yml — plugin validation workflow."""
+    """Generate .github/workflows/validate.yml — CPV plugin validation only (linting is in ci.yml via Mega-Linter)."""
     _ = p  # unused but kept for consistent signature
     return """name: Plugin Validation
 
@@ -1251,10 +1293,7 @@ jobs:
             echo "validator=" >> $GITHUB_OUTPUT
           fi
 
-      - name: Lint source files
-        run: uv run ruff check scripts/
-
-      - name: Validate plugin(s)
+      - name: Validate plugin
         if: steps.find-validator.outputs.validator != ''
         run: |
           set +e
@@ -1268,10 +1307,51 @@ jobs:
             echo "Validation failed (exit code: $exit_code)"
             exit $exit_code
           fi
+"""
 
-      - name: Lint Python files
-        run: |
-          uv run ruff check scripts/ --select=E,F,W --ignore=E501 || echo "Lint issues found (non-blocking)"
+
+def gen_mega_linter_yml(p: PluginParams) -> str:
+    """Generate .mega-linter.yml — Mega-Linter configuration."""
+    _ = p  # unused but kept for consistent signature
+    return """# Mega-Linter configuration
+# https://megalinter.io/latest/configuration/
+
+# Only lint changed files (faster, less noise)
+APPLY_FIXES: none
+VALIDATE_ALL_CODEBASE: false
+
+# Enable these linter groups
+ENABLE_LINTERS:
+  - PYTHON_RUFF
+  - PYTHON_MYPY
+  - PYTHON_BANDIT
+  - BASH_SHELLCHECK
+  - BASH_SHFMT
+  - JSON_JSONLINT
+  - YAML_YAMLLINT
+  - MARKDOWN_MARKDOWNLINT
+  - SPELL_CSPELL
+  - COPYPASTE_JSCPD
+  - REPOSITORY_CHECKOV
+  - REPOSITORY_GITLEAKS
+  - REPOSITORY_TRIVY
+
+# Exclude paths
+FILTER_REGEX_EXCLUDE: "(tests_dev/|docs_dev/|scripts_dev/|samples_dev/|examples_dev/|builds_dev/|downloads_dev/|libs_dev/|llm_externalizer_output/|\\.claude/|\\.tldr/)"
+
+# Python settings
+PYTHON_RUFF_ARGUMENTS: "--select=E,F,W,I --ignore=E501"
+PYTHON_MYPY_ARGUMENTS: "--ignore-missing-imports"
+
+# Markdown settings — allow long lines in README (badges)
+MARKDOWN_MARKDOWNLINT_FILTER_REGEX_EXCLUDE: "CHANGELOG\\.md"
+
+# Spell check — add project-specific words
+SPELL_CSPELL_FILTER_REGEX_EXCLUDE: "(uv\\.lock|\\.json)"
+
+# Disable reporters that create PR comments (we handle that ourselves)
+DISABLE_REPORTERS:
+  - GITHUB_COMMENT_REPORTER
 """
 
 
@@ -1369,6 +1449,8 @@ def generate_all_files(p: PluginParams) -> list[tuple[str, str, bool]]:
         ("scripts/setup-hooks.py", gen_setup_hooks_py(), True),
         # Git hooks
         ("git-hooks/pre-push", gen_pre_push_hook(p), True),
+        # Mega-Linter config
+        (".mega-linter.yml", gen_mega_linter_yml(p), False),
         # CI/CD workflows
         (".github/workflows/ci.yml", gen_ci_yml(p), False),
         (".github/workflows/release.yml", gen_release_yml(p), False),
