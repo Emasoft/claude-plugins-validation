@@ -95,6 +95,29 @@ README MUST include:
 - Update section
 - Troubleshooting section (3 required topics: hook path not found, old version after update, restart required)
 
+## Pre-Publish Local Dry-Run
+
+Before the first push, ALWAYS verify the generated pipeline works locally:
+1. Run the pre-push hook: `echo "" | uv run python git-hooks/pre-push`
+2. Run publish.py dry-run: `uv run python scripts/publish.py --dry-run`
+Both must complete without crashes. This catches import errors, missing deps, and template bugs.
+
+## Post-Push CI Verification
+
+After every first push to a new GitHub repo, ALWAYS verify CI passes:
+```bash
+sleep 30 && gh run list --repo <owner>/<plugin-name> --limit 5
+```
+If any workflow failed, investigate with `gh run view <id> --log-failed | head -30`.
+Fix and push again. Do NOT leave failing CI as the final state.
+
+## Mega-Linter Configuration
+
+The `.mega-linter.yml` config must include:
+- `COPYPASTE_JSCPD_ARGUMENTS: "--threshold 5"` — 0% is too strict for plugin repos
+- `REPOSITORY_CHECKOV_ARGUMENTS: "--skip-check CKV_GHA_7,CKV_GHA_1"` — these flag missing top-level workflow permissions, but we set permissions per-job
+- `.gitignore` must include `megalinter-reports/` and `mega-linter.log`
+
 ## Common Fixes Reference
 
 | Issue | Fix |

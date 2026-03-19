@@ -426,10 +426,11 @@ _EXECUTABLE_FILES: set[str] = {
 }
 
 
-def fix_missing_files(plugin_path: Path, results: list[AuditItem], dry_run: bool = False) -> list[str]:
+def fix_missing_files(plugin_path: Path, results: list[AuditItem], dry_run: bool = False, marketplace: str | None = None) -> list[str]:
     """Generate missing standard files using templates from generate_plugin_repo.
 
     Only creates files that do not already exist. Never overwrites existing files.
+    If marketplace is provided (owner/repo), patches notify-marketplace.yml with the values.
     Returns list of created (or would-create in dry-run) file paths.
     """
     import importlib
@@ -495,6 +496,14 @@ def fix_missing_files(plugin_path: Path, results: list[AuditItem], dry_run: bool
         if is_executable:
             file_path.chmod(file_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
+        # Patch notify-marketplace.yml with marketplace owner/repo if provided
+        if rel_path == ".github/workflows/notify-marketplace.yml" and marketplace:
+            owner, repo = marketplace.split("/", 1)
+            patched = file_path.read_text(encoding="utf-8")
+            patched = patched.replace("MARKETPLACE_OWNER: ''", f"MARKETPLACE_OWNER: '{owner}'")
+            patched = patched.replace("MARKETPLACE_REPO: 'my-plugins-marketplace'", f"MARKETPLACE_REPO: '{repo}'")
+            file_path.write_text(patched, encoding="utf-8")
+
         print(f"  {GREEN}Created:{NC} {file_path}{' [exec]' if is_executable else ''}")
         created.append(str(file_path))
 
@@ -508,6 +517,21 @@ def fix_missing_files(plugin_path: Path, results: list[AuditItem], dry_run: bool
                 dir_path.mkdir(parents=True, exist_ok=True)
                 print(f"  {GREEN}Created dir:{NC} {dir_path}/")
             created.append(str(dir_path) + "/")
+
+    # Auto-add missing .gitignore entries when an existing .gitignore is present
+    gitignore_path = plugin_path / ".gitignore"
+    if not dry_run and gitignore_path.exists():
+        content = gitignore_path.read_text(encoding="utf-8")
+        missing = []
+        for entry in REQUIRED_GITIGNORE_ENTRIES:
+            if entry not in content:
+                missing.append(entry)
+        if missing:
+            with open(gitignore_path, "a", encoding="utf-8") as f:
+                f.write("\n# Added by CPV standardize\n")
+                for entry in missing:
+                    f.write(f"{entry}\n")
+            print(f"  {GREEN}Updated:{NC} .gitignore — added {len(missing)} missing entries")
 
     return created
 
@@ -544,6 +568,7 @@ Examples:
     parser.add_argument("--fix", action="store_true", help="Generate missing standard files from templates")
     parser.add_argument("--dry-run", action="store_true", help="Show what --fix would do without writing files")
     parser.add_argument("--report", type=Path, default=None, help="Save audit report to this file path")
+    parser.add_argument("--marketplace", type=str, help="Marketplace owner/repo for notify-marketplace.yml (e.g., Emasoft/emasoft-plugins)")
     parser.add_argument("--validate", action="store_true", help="Also run validate_plugin.py for full validation")
 
     args = parser.parse_args()
@@ -574,7 +599,7 @@ Examples:
     # Fix mode — generate missing files
     if args.fix:
         print(f"{BOLD}Fix Mode{NC} {'(dry-run)' if args.dry_run else ''}")
-        created = fix_missing_files(plugin_path, results, dry_run=args.dry_run)
+        created = fix_missing_files(plugin_path, results, dry_run=args.dry_run, marketplace=args.marketplace)
         if created and not args.dry_run:
             # Re-run audit after fixes to show updated status
             print(f"\n{BOLD}Post-fix audit:{NC}")
