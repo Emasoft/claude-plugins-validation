@@ -25,15 +25,24 @@ End-to-end command that takes a local plugin folder and publishes it as a comple
 
 ### Phase 1: Validate the plugin
 ```bash
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" <plugin-folder> --verbose
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" <plugin-folder> --verbose
 ```
+**IMPORTANT**: Always use `--with pyyaml` when running CPV scripts from outside the CPV project venv.
+
 If CRITICAL or MAJOR issues exist, report them and ask the user to fix before continuing. Do NOT proceed with a broken plugin.
+
+When processing validation output, always strip ANSI color codes before grepping:
+```bash
+... 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
+```
 
 ### Phase 2: Standardize the plugin repo structure
 ```bash
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" <plugin-folder> --fix
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" <plugin-folder> --fix
 ```
 This adds any missing standard files: .gitignore, .python-version, cliff.toml, .githooks/pre-push, .github/workflows/{ci,release,validate,notify-marketplace}.yml, scripts/publish.py, scripts/setup_git_hooks.py. It does NOT modify existing plugin code.
+
+**Note**: Exit code 1 after `--fix` is expected if warnings remain (gitignore entries, badges). Only CRITICAL/MAJOR issues matter.
 
 ### Phase 2b: Generate README component tables
 Scan the plugin directory for components and fill the README placeholders:
@@ -74,15 +83,18 @@ fi
 ### Phase 6: Configure marketplace notification (optional)
 If --marketplace is provided:
 1. Verify the marketplace repo exists: `gh repo view <marketplace-repo> --json name`
-2. Ask user for a GitHub PAT with `repo` scope (or fine-grained with Contents R/W on marketplace repo)
-3. Set secret: `gh secret set MARKETPLACE_PAT --repo <owner>/<plugin-name> --body "$MARKETPLACE_PAT"` (MUST use `--body` flag)
-4. Update `notify-marketplace.yml` — set `MARKETPLACE_OWNER` and `MARKETPLACE_REPO` env vars to the correct marketplace owner/repo
+2. Update `notify-marketplace.yml` — edit `MARKETPLACE_OWNER` and `MARKETPLACE_REPO` env vars to match the `--marketplace` argument (e.g., `Emasoft` and `emasoft-plugins`)
+3. Check if `$MARKETPLACE_PAT` env var is already set: `test -n "$MARKETPLACE_PAT" && echo "PAT found" || echo "PAT not set"`
+   - If set: use it directly
+   - If not set: ask user for a GitHub PAT with `repo` scope (or fine-grained with Contents R/W on marketplace repo)
+4. Set secret: `gh secret set MARKETPLACE_PAT --repo <owner>/<plugin-name> --body "$MARKETPLACE_PAT"` (MUST use `--body` flag — piping does NOT work reliably)
 4. Verify notify-marketplace.yml exists in .github/workflows/ (it should, from Phase 2)
 
 ### Phase 7: Final validation
 ```bash
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" <plugin-folder> --verbose
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" <plugin-folder> --verbose 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
 ```
+Use `grep -oE` (NOT `grep -oP`) for macOS compatibility when parsing output.
 
 ### Phase 8: Report results
 
