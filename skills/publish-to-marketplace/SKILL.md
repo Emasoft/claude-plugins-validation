@@ -42,15 +42,16 @@ Ask the user for their marketplace repo coordinates (`<owner>/<marketplace-repo>
 
 ### Phase 2: Configure Publish Pipeline
 
-5. **Install publish.py**: Copy from `setup-plugin-repo` skill's `plugin-hooks-and-scripts.md` into `scripts/`. Fill placeholders
-6. **Install pre-push hook**: Copy from same reference into `git-hooks/pre-push`. Run `uv run python scripts/setup-hooks.py`
+5. **Install publish.py**: Should already exist from standardize. Verify with `test -f scripts/publish.py`
+6. **Install pre-push hook**: `uv run python scripts/publish.py --install-hook` (PSS pattern)
 7. **Verify hooks**: `git config core.hooksPath` should show `git-hooks`
 
 ### Phase 3: Publish
 
-8. **Run publish**: `uv run python scripts/publish.py --patch` (or `--minor`/`--major`)
-9. **Verify dispatch**: Check marketplace repo Actions tab — `update-submodules.yml` should trigger within 30s
-10. **Verify marketplace.json**: Plugin version should update in marketplace repo
+8. **Run gate check**: `uv run python scripts/publish.py --gate` (verify quality gates pass)
+9. **Run publish**: `uv run python scripts/publish.py --patch` (or `--minor`/`--major`)
+10. **Verify dispatch**: Check marketplace repo Actions tab — `update-submodules.yml` should trigger within 30s
+11. **Verify marketplace.json**: Plugin version should update in marketplace repo
 
 Copy this checklist and track your progress:
 - [ ] PAT created and secret set

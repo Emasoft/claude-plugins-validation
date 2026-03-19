@@ -185,10 +185,10 @@ See [Pipeline Rules](references/pipeline-rules.md) for the full set of mandatory
 
 ### Create a marketplace
 ```
-/cpv-create-github-marketplace MyGitHub/my-marketplace
+/cpv-create-a-github-marketplace MyGitHub/my-marketplace
 ```
 
 ### Publish to marketplace
 ```
-/cpv-publish-plugin-to-marketplace MyGitHub/my-plugin --marketplace MyGitHub/my-marketplace
+/cpv-publish-a-plugin-to-a-github-marketplace MyGitHub/my-plugin --marketplace MyGitHub/my-marketplace
 ```

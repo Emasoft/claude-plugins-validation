@@ -27,6 +27,6 @@ After generation:
 3. Re-validate until only WARNINGs remain
 4. Suggest `git init && git add -A && git commit -m "Initial scaffold"`
 5. To publish on GitHub, use `/cpv-publish-a-plugin-as-github-repo <target-dir>`
-6. To register in a marketplace, use `/cpv-publish-plugin-to-marketplace`
+6. To register in a marketplace, use `/cpv-publish-a-plugin-to-a-github-marketplace`
 
 **IMPORTANT**: The generated pre-push hook runs 4 gates (version bump, lint, validate --strict, tests) and blocks pushes with ANY non-WARNING issue. Fix everything BEFORE the first push.

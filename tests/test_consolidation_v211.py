@@ -78,6 +78,18 @@ class TestObsoleteCommandsRemoved:
         """cpv-standardize-plugin.md should not exist in commands/."""
         assert not (COMMANDS_DIR / "cpv-standardize-plugin.md").exists()
 
+    def test_old_publish_as_github_repo_removed(self):
+        """cpv-publish-as-github-repo.md replaced by cpv-publish-a-plugin-as-github-repo.md."""
+        assert not (COMMANDS_DIR / "cpv-publish-as-github-repo.md").exists()
+
+    def test_old_publish_plugin_to_marketplace_removed(self):
+        """cpv-publish-plugin-to-marketplace.md replaced by cpv-publish-a-plugin-to-a-github-marketplace.md."""
+        assert not (COMMANDS_DIR / "cpv-publish-plugin-to-marketplace.md").exists()
+
+    def test_old_create_github_marketplace_removed(self):
+        """cpv-create-github-marketplace.md replaced by cpv-create-a-github-marketplace.md."""
+        assert not (COMMANDS_DIR / "cpv-create-github-marketplace.md").exists()
+
 
 class TestNewCommandFrontmatter:
     """Verify new commands have correct YAML frontmatter fields."""
@@ -99,6 +111,24 @@ class TestNewCommandFrontmatter:
         fm = _parse_frontmatter(COMMANDS_DIR / "cpv-standardize.md")
         assert fm is not None
         assert fm.get("name") == "cpv-standardize"
+
+    def test_publish_a_plugin_as_github_repo_has_name_field(self):
+        """cpv-publish-a-plugin-as-github-repo.md frontmatter must have correct name."""
+        fm = _parse_frontmatter(COMMANDS_DIR / "cpv-publish-a-plugin-as-github-repo.md")
+        assert fm is not None
+        assert fm.get("name") == "cpv-publish-a-plugin-as-github-repo"
+
+    def test_publish_a_plugin_to_a_github_marketplace_has_name_field(self):
+        """cpv-publish-a-plugin-to-a-github-marketplace.md frontmatter must have correct name."""
+        fm = _parse_frontmatter(COMMANDS_DIR / "cpv-publish-a-plugin-to-a-github-marketplace.md")
+        assert fm is not None
+        assert fm.get("name") == "cpv-publish-a-plugin-to-a-github-marketplace"
+
+    def test_create_a_github_marketplace_has_name_field(self):
+        """cpv-create-a-github-marketplace.md frontmatter must have correct name."""
+        fm = _parse_frontmatter(COMMANDS_DIR / "cpv-create-a-github-marketplace.md")
+        assert fm is not None
+        assert fm.get("name") == "cpv-create-a-github-marketplace"
 
 
 class TestCanonicalPipelineSkill:
