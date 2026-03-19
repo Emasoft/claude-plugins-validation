@@ -513,7 +513,9 @@ NC     = "\033[0m" if _C else ""
 def cprint(msg: str) -> None:
     print(msg, flush=True)
 
-def run(cmd: list[str], cwd: Path | None = None, *, check: bool = True, capture: bool = False) -> subprocess.CompletedProcess[str]:
+def run(
+    cmd: list[str], cwd: Path | None = None, *, check: bool = True, capture: bool = False,
+) -> subprocess.CompletedProcess[str]:
     """Run a command, stream output, fail-fast on error."""
     cprint(f"  {BLUE}$ {' '.join(cmd)}{NC}")
     result = subprocess.run(cmd, cwd=str(cwd) if cwd else None, text=True,
@@ -737,7 +739,7 @@ def stage_changelog(root: Path, dry_run: bool) -> None:
         cprint(f"  {YELLOW}No cliff.toml — skipping changelog.{NC}")
         return
     if dry_run:
-        cprint(f"  Would run: git-cliff -o CHANGELOG.md")
+        cprint("  Would run: git-cliff -o CHANGELOG.md")
         return
     run(["git-cliff", "-o", "CHANGELOG.md"], cwd=root)
     cprint(f"  {GREEN}Changelog generated.{NC}")
@@ -749,7 +751,7 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
     if dry_run:
         cprint(f"  Would commit: chore: bump version to {new_ver}")
         cprint(f"  Would tag: {tag}")
-        cprint(f"  Would push: origin HEAD --tags")
+        cprint("  Would push: origin HEAD --tags")
         return
     run(["git", "add", "-A"], cwd=root)
     run(["git", "commit", "-m", f"chore: bump version to {new_ver}"], cwd=root)
