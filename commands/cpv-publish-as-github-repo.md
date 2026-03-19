@@ -75,7 +75,8 @@ fi
 If --marketplace is provided:
 1. Verify the marketplace repo exists: `gh repo view <marketplace-repo> --json name`
 2. Ask user for a GitHub PAT with `repo` scope (or fine-grained with Contents R/W on marketplace repo)
-3. Set secret: `gh secret set MARKETPLACE_PAT --repo <owner>/<plugin-name>`
+3. Set secret: `gh secret set MARKETPLACE_PAT --repo <owner>/<plugin-name> --body "$MARKETPLACE_PAT"` (MUST use `--body` flag)
+4. Update `notify-marketplace.yml` — set `MARKETPLACE_OWNER` and `MARKETPLACE_REPO` env vars to the correct marketplace owner/repo
 4. Verify notify-marketplace.yml exists in .github/workflows/ (it should, from Phase 2)
 
 ### Phase 7: Final validation
