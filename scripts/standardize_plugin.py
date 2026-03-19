@@ -442,6 +442,11 @@ def fix_missing_files(plugin_path: Path, results: list[AuditItem], dry_run: bool
         print(f"  {GREEN}No fixable missing files.{NC}")
         return []
 
+    # Add scripts/ to sys.path BEFORE importing generator modules
+    scripts_dir = str(Path(__file__).resolve().parent)
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+
     # Read plugin.json to populate template params
     manifest = _read_plugin_json(plugin_path)
     if not manifest:
@@ -452,10 +457,6 @@ def fix_missing_files(plugin_path: Path, results: list[AuditItem], dry_run: bool
     params = _params_from_manifest(manifest)
 
     # Import generator functions from generate_plugin_repo
-    # Add scripts/ to sys.path so we can import the sibling module
-    scripts_dir = str(Path(__file__).resolve().parent)
-    if scripts_dir not in sys.path:
-        sys.path.insert(0, scripts_dir)
     gen_module = importlib.import_module("generate_plugin_repo")
 
     created: list[str] = []

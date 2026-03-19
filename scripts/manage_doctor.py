@@ -540,13 +540,13 @@ def do_doctor(verbose: bool = False):
         ok("All checks passed — installation is healthy")
     else:
         warn(f"{issues} issue(s) found")
-    script = sys.argv[0]
+    scripts_dir = Path(__file__).resolve().parent
     print()
     print(f"  {BOLD}Next steps:{NC}")
-    print(f"    List plugins:    {script} --list")
-    print(f"    Validate one:    {script} --validate <name>@<marketplace>")
+    print(f"    List plugins:    uv run {scripts_dir / 'manage_registry.py'} --list")
+    print(f"    Validate one:    uv run {scripts_dir / 'validate_plugin.py'} <path>")
     if not verbose:
-        print(f"    Verbose doctor:  {script} --doctor --verbose")
+        print(f"    Verbose doctor:  uv run {scripts_dir / 'manage_doctor.py'} --verbose")
     print()
 
 

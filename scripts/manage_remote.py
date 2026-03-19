@@ -28,7 +28,7 @@ __all__ = ["do_remote", "_remote_help"]
 
 
 def do_remote(argv: List[str]):
-    """Handle `manage_remote.py remote <subcommand> [args]`."""
+    """Handle `manage_remote.py <subcommand> [args]`. Delegates to `claude plugin <subcommand>`."""
     if not argv:
         _remote_help()
         sys.exit(1)
@@ -43,7 +43,7 @@ def do_remote(argv: List[str]):
     if subcmd == "install" or subcmd == "i":
         if not rest:
             err(
-                "Usage: manage_remote.py remote install <plugin[@marketplace]> [--scope <scope>]"
+                "Usage: manage_remote.py install <plugin[@marketplace]> [--scope <scope>]"
             )
             sys.exit(1)
         cmd = ["install"] + rest
@@ -53,7 +53,7 @@ def do_remote(argv: List[str]):
     elif subcmd == "update":
         if not rest:
             err(
-                "Usage: manage_remote.py remote update <plugin[@marketplace]> [--scope <scope>]"
+                "Usage: manage_remote.py update <plugin[@marketplace]> [--scope <scope>]"
             )
             sys.exit(1)
         cmd = ["update"] + rest
@@ -63,7 +63,7 @@ def do_remote(argv: List[str]):
     elif subcmd == "uninstall" or subcmd == "remove" or subcmd == "rm":
         if not rest:
             err(
-                "Usage: manage_remote.py remote uninstall <plugin[@marketplace]> [--scope <scope>]"
+                "Usage: manage_remote.py uninstall <plugin[@marketplace]> [--scope <scope>]"
             )
             sys.exit(1)
         cmd = ["uninstall"] + rest
@@ -78,7 +78,7 @@ def do_remote(argv: List[str]):
     elif subcmd == "enable":
         if not rest:
             err(
-                "Usage: manage_remote.py remote enable <plugin[@marketplace]> [--scope <scope>]"
+                "Usage: manage_remote.py enable <plugin[@marketplace]> [--scope <scope>]"
             )
             sys.exit(1)
         cmd = ["enable"] + rest
@@ -88,7 +88,7 @@ def do_remote(argv: List[str]):
     elif subcmd == "disable":
         if not rest:
             err(
-                "Usage: manage_remote.py remote disable <plugin[@marketplace]> [--scope <scope>]"
+                "Usage: manage_remote.py disable <plugin[@marketplace]> [--scope <scope>]"
             )
             sys.exit(1)
         cmd = ["disable"] + rest
@@ -97,7 +97,7 @@ def do_remote(argv: List[str]):
 
     elif subcmd == "validate":
         if not rest:
-            err("Usage: manage_remote.py remote validate <path>")
+            err("Usage: manage_remote.py validate <path>")
             sys.exit(1)
         cmd = ["validate"] + rest
         rc = _run_claude_plugin(cmd, quiet=quiet)
@@ -117,10 +117,10 @@ def do_remote(argv: List[str]):
 
 
 def _remote_help():
-    print(f"""{BOLD}manage_remote.py remote{NC} — Manage plugins from GitHub marketplaces
+    print(f"""{BOLD}manage_remote.py{NC} — Manage plugins from GitHub marketplaces
 
 {BOLD}Usage:{NC}
-  manage_remote.py remote <command> <plugin[@marketplace]> [options]
+  manage_remote.py <command> <plugin[@marketplace]> [options]
 
 {BOLD}Commands:{NC}
   install <plugin[@marketplace]> [--scope <scope>]
@@ -152,26 +152,26 @@ def _remote_help():
 
 {BOLD}Examples:{NC}
   # Install a plugin from a registered marketplace
-  manage_remote.py remote install my-plugin@my-marketplace
+  manage_remote.py install my-plugin@my-marketplace
 
   # Install with project scope
-  manage_remote.py remote install my-plugin --scope project
+  manage_remote.py install my-plugin --scope project
 
   # Update a plugin to latest version
-  manage_remote.py remote update my-plugin@my-marketplace
+  manage_remote.py update my-plugin@my-marketplace
 
   # List all installed plugins
-  manage_remote.py remote list
+  manage_remote.py list
 
   # List all available plugins (JSON)
-  manage_remote.py remote list --available --json
+  manage_remote.py list --available --json
 
   # Uninstall a remote plugin
-  manage_remote.py remote uninstall my-plugin@my-marketplace
+  manage_remote.py uninstall my-plugin@my-marketplace
 
   # Enable/disable
-  manage_remote.py remote enable my-plugin@my-marketplace
-  manage_remote.py remote disable my-plugin@my-marketplace
+  manage_remote.py enable my-plugin@my-marketplace
+  manage_remote.py disable my-plugin@my-marketplace
 """)
 
 

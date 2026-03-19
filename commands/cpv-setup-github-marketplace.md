@@ -52,10 +52,10 @@ The agent orchestrates multiple scripts and GitHub API calls in phases:
 gh repo create <marketplace-name> --public
 
 # Phase 2: Install validation and automation scripts
-uv run python scripts/setup_marketplace_automation.py --marketplace-dir <path> --full
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/setup_marketplace_automation.py" --marketplace-dir <path> --full
 
 # Phase 3: Validate the setup
-uv run python scripts/validate_marketplace.py <path> --verbose --report docs_dev/validate_marketplace_$(date +%Y%m%d).md
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/validate_marketplace.py" <path> --verbose
 ```
 
 ## Notes

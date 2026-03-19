@@ -192,7 +192,8 @@ def _build_gitignore_matcher(plugin_dir: Path) -> Callable[[Path], bool]:
 
         def _is_ignored_git(path: Path) -> bool:
             rel = path.relative_to(plugin_dir)
-            rel_str = str(rel)
+            # Normalize to forward slashes — git check-ignore outputs forward slashes even on Windows
+            rel_str = str(rel).replace("\\", "/")
             if _is_git_metadata(rel_str):
                 return True
             return rel_str in ignored_paths

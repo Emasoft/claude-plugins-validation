@@ -164,6 +164,9 @@ def validate_marketplace_json(marketplace_dir: Path) -> tuple[dict | None, list[
         # Validate each plugin entry
         seen_names: set[str] = set()
         for i, plugin in enumerate(plugins):
+            if not isinstance(plugin, dict):
+                findings.append(Finding(SEVERITY_ERROR, f"Plugin entry {i}: expected object, got {type(plugin).__name__}"))
+                continue
             pname = plugin.get("name", f"(entry {i})")
 
             if not plugin.get("name"):

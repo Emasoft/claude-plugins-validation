@@ -41,7 +41,7 @@ All at `${CLAUDE_PLUGIN_ROOT}/scripts/`. Run with `uv run "${CLAUDE_PLUGIN_ROOT}
 3. Check for compiled binaries (Cargo.toml, go.mod, Makefile) — if found, add build-binaries.yml
 4. Git init + commit (if not already a git repo)
 5. Create GitHub repo: `gh repo create <owner>/<name> --public --source . --push`
-6. Configure git hooks: `uv run python scripts/setup_git_hooks.py` or `scripts/setup-hooks.py`
+6. Configure git hooks: run whichever hook setup script exists in the plugin (`setup_git_hooks.py` or `setup-hooks.py`)
 7. Optionally configure marketplace notification (PAT + notify-marketplace.yml)
 8. Final validation
 
@@ -61,7 +61,7 @@ All at `${CLAUDE_PLUGIN_ROOT}/scripts/`. Run with `uv run "${CLAUDE_PLUGIN_ROOT}
 3. **Owner verification (SECURITY)**: plugin owner MUST match marketplace owner
 4. Clone marketplace: `gh repo clone <owner/marketplace> /tmp/mkt-update -- --depth 1`
 5. Add plugin entry to marketplace.json (GitHub source only, NEVER local paths)
-6. Update README catalog: `uv run python scripts/update_catalog.py`
+6. Update README catalog: run `update_catalog.py` from the cloned marketplace repo (if it exists)
 7. Validate marketplace: `validate_marketplace.py /tmp/mkt-update --verbose`
 8. Commit + push: `git commit -m "feat: add <plugin> v<version>" && git push`
 9. Configure notification workflow on plugin repo (optional)
