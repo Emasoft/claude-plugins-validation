@@ -116,6 +116,7 @@ These errors were made in real publish runs. Do NOT repeat them:
 10. **Update notify-marketplace.yml BEFORE the first push**. The standardize script creates it with placeholders. If you push first, the marketplace notification fails silently with old values. Use `--marketplace` flag with standardize to auto-fill.
 11. **Always run local dry-run BEFORE the first push**: `echo "" | uv run python git-hooks/pre-push` and `uv run python scripts/publish.py --dry-run`. This catches template bugs, missing deps, import errors.
 12. **Always verify CI AFTER the first push**: `sleep 30 && gh run list --repo <owner>/<name> --limit 5`. If any workflow failed, fix and push again. Never leave failing CI as the final state.
+13. **Checkov check IDs use `CKV2_` prefix** for GitHub Actions checks (not `CKV_`). The correct skip is `--skip-check CKV2_GHA_1`.
 
 ## TOKEN OPTIMIZATION
 Use `mcp__plugin_llm-externalizer_llm-externalizer__*` tools for bounded tasks. Always pass file paths via `input_files_paths`.
