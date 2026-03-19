@@ -36,12 +36,13 @@ All at `${CLAUDE_PLUGIN_ROOT}/scripts/`. Run with `uv run "${CLAUDE_PLUGIN_ROOT}
 
 1. Validate plugin: `validate_plugin.py <folder> --verbose` — MUST pass (no CRITICAL/MAJOR)
 2. Standardize: `standardize_plugin.py <folder> --fix` — adds missing files
-3. Check for compiled binaries (Cargo.toml, go.mod, Makefile) — if found, add build-binaries.yml
-4. Git init + commit (if not already a git repo)
-5. Create GitHub repo: `gh repo create <owner>/<name> --public --source . --push`
-6. Configure git hooks: run whichever hook setup script exists in the plugin (`setup_git_hooks.py` or `setup-hooks.py`)
-7. Optionally configure marketplace notification (PAT + notify-marketplace.yml)
-8. Final validation
+3. Check for compiled binaries (Cargo.toml, go.mod, Makefile) — if found, sources MUST be in `src/` subdirectory with binaries in `src/<component>/bin/`. Add `build-binaries.yml` as fallback only.
+4. **Generate README component tables**: Scan `commands/*.md`, `agents/*.md`, `skills/*/SKILL.md` frontmatter. Generate markdown tables listing each component name + description. Fill the README placeholders.
+5. Git init + commit (if not already a git repo)
+6. Create GitHub repo: `gh repo create <owner>/<name> --public --source . --push`
+7. Configure git hooks: run whichever hook setup script exists in the plugin (`setup_git_hooks.py` or `setup-hooks.py`)
+8. Optionally configure marketplace notification (PAT + notify-marketplace.yml)
+9. Final validation
 
 ## Workflow: Create GitHub Marketplace (/cpv-create-github-marketplace)
 

@@ -35,6 +35,14 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" <plugin-folder> --f
 ```
 This adds any missing standard files: .gitignore, .python-version, cliff.toml, .githooks/pre-push, .github/workflows/{ci,release,validate,notify-marketplace}.yml, scripts/publish.py, scripts/setup_git_hooks.py. It does NOT modify existing plugin code.
 
+### Phase 2b: Generate README component tables
+Scan the plugin directory for components and fill the README placeholders:
+- Scan `commands/*.md` frontmatter → generate `| Command | Description |` table
+- Scan `agents/*.md` frontmatter → generate `| Agent | Description |` table
+- Scan `skills/*/SKILL.md` frontmatter → generate `| Skill | Description |` table
+- Read `hooks/hooks.json` (if present) → list hook events and their purpose
+- Write actual usage examples for each command
+
 ### Phase 3: Initialize git (if not already a git repo)
 ```bash
 cd <plugin-folder>
@@ -90,11 +98,13 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" <plugin-folder> --verb
 
 ## Binary Plugins (Rust, Go, C/C++)
 
-For plugins with compiled binaries (like perfect-skill-suggester):
+For plugins with compiled binaries (follows the perfect-skill-suggester pattern):
 1. Check for Cargo.toml, go.mod, Makefile, CMakeLists.txt
-2. If found, add `.github/workflows/build-binaries.yml` from the plugin-binary-builds reference
-3. The build workflow compiles for macOS (x86_64 + arm64), Linux (x86_64 + arm64), and Windows (x86_64)
-4. Binaries are attached to GitHub releases
+2. Sources MUST live in `src/<component>/` (e.g., `src/skill-suggester/`)
+3. Pre-compiled binaries go in `src/<component>/bin/<name>-<platform>-<arch>`
+4. Compilation happens **locally** via `publish.py` — NOT on GitHub CI
+5. Add `.github/workflows/build-binaries.yml` as a **fallback only** for CI-only environments
+6. Binaries are committed alongside version bumps and pushed with the code
 
 ## Multi-Language Plugins
 
