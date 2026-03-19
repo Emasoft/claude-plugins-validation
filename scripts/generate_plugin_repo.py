@@ -1356,7 +1356,7 @@ PYTHON_MYPY_ARGUMENTS: "--ignore-missing-imports"
 COPYPASTE_JSCPD_ARGUMENTS: "--threshold 5"
 
 # Checkov — skip workflow-level permission checks (we set permissions per-job)
-REPOSITORY_CHECKOV_ARGUMENTS: "--skip-check CKV_GHA_7,CKV_GHA_1"
+REPOSITORY_CHECKOV_ARGUMENTS: "--skip-check CKV2_GHA_1"
 
 # Markdown settings — allow long lines in README (badges)
 MARKDOWN_MARKDOWNLINT_FILTER_REGEX_EXCLUDE: "CHANGELOG\\.md"
