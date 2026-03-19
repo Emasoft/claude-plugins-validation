@@ -28,15 +28,28 @@ Also check `hooks.json` and hook scripts for references to binaries that must be
 
 If any compiled component is found, add a build step **before** the validate/test steps in:
 - `git-hooks/pre-push` (local builds — current platform only)
-- `scripts/publish.py` (release builds — current platform only)
-- `.github/workflows/ci.yml` (CI builds — current platform only)
-- `.github/workflows/build-binaries.yml` (cross-compilation — all 5 platforms)
+- `scripts/publish.py` (release builds — current platform only, all targets via cross-compilation)
+
+## Source/Binary Separation
+
+Compiled sources MUST live in a `src/` subdirectory (e.g., `src/skill-suggester/` for Rust). Pre-compiled binaries are committed to `src/<component>/bin/` (e.g., `src/skill-suggester/bin/pss-darwin-arm64`).
+
+**Why**: Claude Code downloads the entire plugin repo. Sources and compilation artifacts waste bandwidth and confuse the parser. By keeping them in `src/`, the plugin's main directories (`commands/`, `agents/`, `skills/`, `hooks/`, `scripts/`) stay clean.
+
+**Build flow** (follows PSS pattern):
+1. Developer runs `publish.py --patch` locally
+2. publish.py calls `build_all.py` which cross-compiles for all 5 platforms using local toolchains (Rust: `cargo build --release --target <triple>`, Go: `GOOS=... GOARCH=... go build`)
+3. Binaries are placed in `src/<component>/bin/<name>-<platform>-<arch>`
+4. Binaries are committed alongside the version bump
+5. `git push` triggers `notify-marketplace.yml` (notification only, NO compilation on CI)
+
+**The `build-binaries.yml` workflow is a FALLBACK** for when local cross-compilation is not possible (e.g., CI-only environments). It should NOT be used for regular releases.
 
 ---
 
-## build-binaries.yml — Cross-Platform Compilation Workflow
+## build-binaries.yml — Cross-Platform Compilation Workflow (FALLBACK)
 
-Cross-compiles the binary for 5 targets: darwin-arm64, darwin-x86_64, linux-arm64, linux-x86_64, windows-x86_64. Uses native compilation on macOS and `cross` on Linux for cross-targets.
+**Use local compilation for regular releases.** This workflow is a fallback for when local cross-compilation is unavailable. It cross-compiles for 5 targets: darwin-arm64, darwin-x86_64, linux-arm64, linux-x86_64, windows-x86_64.
 
 ```yaml
 name: Build Binaries

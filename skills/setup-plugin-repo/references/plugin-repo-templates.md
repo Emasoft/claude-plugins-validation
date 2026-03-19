@@ -211,12 +211,27 @@ claude plugin uninstall <placeholder-for-plugin-name>
 claude plugin update <placeholder-for-plugin-name>@<placeholder-for-marketplace-name>
 ```
 
+## Components
+
+### Commands
+
+<placeholder-for-commands-table>
+
+### Agents
+
+<placeholder-for-agents-table>
+
+### Skills
+
+<placeholder-for-skills-table>
+
+### Hooks
+
+<placeholder-for-hooks-description>
+
 ## Usage
 
-```bash
-# Run the plugin
-uv run python scripts/main.py --help
-```
+<placeholder-for-usage-instructions>
 
 ## Development
 
@@ -247,19 +262,51 @@ uv run ruff format scripts/ tests/
 uv run mypy scripts/
 ```
 
+### Release
+
+```bash
+uv run python scripts/publish.py --patch    # 1.0.0 → 1.0.1
+uv run python scripts/publish.py --minor    # 1.0.0 → 1.1.0
+```
+
 ## Project Structure
 
 ```
 <placeholder-for-plugin-github-repo>/
 ├── .claude-plugin/
 │   └── plugin.json          # Plugin manifest
-├── scripts/                 # Plugin source code
+├── commands/                # Slash commands (*.md)
+├── agents/                  # Agent definitions (*.md)
+├── skills/                  # Skill directories (SKILL.md)
+├── hooks/                   # Hook configurations
+├── scripts/                 # Python scripts (pipeline, validators)
 ├── tests/                   # Test suite
+├── .githooks/pre-push       # Quality gate (lint + validate + test)
+├── .github/workflows/       # CI/CD (ci, release, validate, notify)
+├── cliff.toml               # git-cliff changelog config
 ├── pyproject.toml           # Project configuration
 ├── README.md                # This file
+├── CHANGELOG.md             # Auto-generated changelog
 ├── LICENSE                  # License file
 └── .gitignore               # Git ignore rules
 ```
+
+## Troubleshooting
+
+### Hook path not found
+If you get "can't open file" errors from hooks, reinstall them:
+```bash
+uv run python scripts/setup_git_hooks.py
+```
+
+### Old version after update
+Claude Code may cache the old version. Restart Claude Code to pick up changes:
+```bash
+# Close and reopen Claude Code
+```
+
+### Restart required after update
+After updating the plugin, restart Claude Code to reload all components.
 
 ## Marketplace
 
@@ -276,8 +323,12 @@ This project is licensed under the <placeholder-for-license-type> License. See [
 
 ### Notes
 - The README uses standard sections expected by the Claude Code plugin ecosystem.
-- Adjust the "Usage" section to reflect your plugin's actual entry point and commands.
-- The "Project Structure" tree should be updated as your plugin grows.
+- The agent MUST fill `<placeholder-for-commands-table>` by scanning `commands/*.md` frontmatter and generating a markdown table with `| Command | Description |` columns.
+- The agent MUST fill `<placeholder-for-agents-table>` by scanning `agents/*.md` frontmatter and generating a markdown table with `| Agent | Description |` columns.
+- The agent MUST fill `<placeholder-for-skills-table>` by scanning `skills/*/SKILL.md` frontmatter and generating a markdown table with `| Skill | Description |` columns.
+- The agent MUST fill `<placeholder-for-hooks-description>` by reading `hooks/hooks.json` (if present) and listing each hook event and its purpose.
+- The agent MUST fill `<placeholder-for-usage-instructions>` with actual usage examples showing how to invoke the plugin's commands, activate its agents, and use its skills.
+- The Troubleshooting section includes the 3 required topics: hook path not found, old version after update, restart required.
 
 ---
 
@@ -297,3 +348,8 @@ This project is licensed under the <placeholder-for-license-type> License. See [
 | `<placeholder-for-python-version>` | Minimum Python version (digits and dots only) | `3.12` |
 | `<placeholder-for-marketplace-name>` | Marketplace name for install commands | `my-marketplace` |
 | `<placeholder-for-marketplace-repo-name>` | Marketplace GitHub repository name | `my-marketplace` |
+| `<placeholder-for-commands-table>` | Auto-generated: scan `commands/*.md` frontmatter | `\| /cmd \| desc \|` table |
+| `<placeholder-for-agents-table>` | Auto-generated: scan `agents/*.md` frontmatter | `\| agent \| desc \|` table |
+| `<placeholder-for-skills-table>` | Auto-generated: scan `skills/*/SKILL.md` frontmatter | `\| skill \| desc \|` table |
+| `<placeholder-for-hooks-description>` | Auto-generated: read `hooks/hooks.json` events | Hook event list |
+| `<placeholder-for-usage-instructions>` | Agent writes actual usage examples | Command invocations |

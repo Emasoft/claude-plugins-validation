@@ -173,10 +173,27 @@ def main() -> int:
         cprint(f"{RED}BLOCKED: Linting issues found{NC}")
         return 1
 
-    # Gate 3: Validate (strict mode)
+    # Gate 3: Validate (strict mode — blocks on CRITICAL, MAJOR, and MINOR)
     cprint(f"{BLUE}Running validation...{NC}")
     ve = run_script(python_cmd, repo_root / "scripts" / "<placeholder-for-validate-script>",
                     [".", "--verbose", "--strict"], cwd=repo_root)
+    if ve != 0:
+        labels = {1: "CRITICAL", 2: "MAJOR", 3: "MINOR"}
+        cprint(f"{RED}BLOCKED: {labels.get(ve, f'exit {ve}')} issues found{NC}")
+        return 1
+
+    # Gate 4: Tests (blocks push if any test fails)
+    cprint(f"{BLUE}Running tests...{NC}")
+    test_dir = repo_root / "<placeholder-for-test-dir>"
+    if test_dir.is_dir():
+        te = run_script(python_cmd, Path("-m"), ["pytest", str(test_dir), "-q", "--tb=short"],
+                        cwd=repo_root, timeout=300)
+        if te != 0:
+            cprint(f"{RED}BLOCKED: Tests failed{NC}")
+            return 1
+        cprint(f"{GREEN}Tests passed.{NC}")
+    else:
+        cprint(f"{YELLOW}No test directory found, skipping tests.{NC}")
 
     # Optional: marketplace.json consistency
     mj = repo_root / "marketplace.json"
@@ -186,12 +203,8 @@ def main() -> int:
         if pv and mv and pv != mv:
             cprint(f"{YELLOW}WARNING: plugin.json={pv} != marketplace.json={mv}{NC}")
 
-    if ve == 0:
-        cprint(f"{GREEN}PASSED: Push allowed.{NC}")
-    else:
-        labels = {1: "CRITICAL", 2: "MAJOR", 3: "MINOR"}
-        cprint(f"{RED}BLOCKED: {labels.get(ve, f'exit {ve}')} issues found{NC}")
-    return 0 if ve == 0 else 1
+    cprint(f"{GREEN}PASSED: Push allowed.{NC}")
+    return 0
 
 
 if __name__ == "__main__":
@@ -221,14 +234,18 @@ Unified publish pipeline: test -> lint -> validate -> consistency -> bump -> com
 **Pipeline stages** (all fail-fast -- any failure aborts the pipeline):
 
 ```
-Step 1: Check working tree     git status --porcelain (must be clean)
-Step 2: Run tests               uv run pytest <placeholder-for-test-dir>/ -x -q --tb=short
-Step 3: Lint files               uv run python scripts/<placeholder-for-lint-script> .
-Step 4: Validate plugin          uv run python scripts/<placeholder-for-validate-script> . --strict
-Step 5: Version consistency      check all version sources match
-Step 6: Bump version             update plugin.json, pyproject.toml, __version__ vars
-Step 7: Commit                   git add -A && git commit -m "chore: bump version to X.Y.Z"
-Step 8: Push                     git push origin HEAD
+Step 1:  Check working tree     git status --porcelain (must be clean)
+Step 2:  Lint files              uv run python scripts/<placeholder-for-lint-script> .
+Step 3:  Validate plugin         uv run python scripts/<placeholder-for-validate-script> . --strict
+Step 4:  Run tests               uv run pytest <placeholder-for-test-dir>/ -x -q --tb=short
+Step 5:  Version consistency     check all version sources match
+Step 6:  Bump version            update plugin.json, pyproject.toml, __version__ vars
+Step 7:  Update README badge     replace version-X.Y.Z-blue with new version in README.md
+Step 8:  Generate changelog      git-cliff --tag vX.Y.Z -o CHANGELOG.md (if git-cliff installed)
+Step 9:  Build binaries          compile for current platform (if compiled sources exist)
+Step 10: Commit                  git add -A && git commit -m "bump: version X.Y.Z → X.Y.Z"
+Step 11: Tag                     git tag vX.Y.Z
+Step 12: Push                    git push && git push --tags
 ```
 
 **CLI usage:**

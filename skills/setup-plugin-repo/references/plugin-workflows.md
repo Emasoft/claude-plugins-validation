@@ -109,19 +109,20 @@ jobs:
       - name: Generate changelog
         id: changelog
         run: |
-          # Get the previous tag
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-
-          if [ -z "$PREV_TAG" ]; then
-            # First release - get all commits
-            CHANGELOG=$(git log --pretty=format:"- %s (%h)" HEAD)
+          # Use git-cliff if available, fall back to git log
+          if command -v git-cliff &> /dev/null; then
+            git-cliff --latest --strip header > changelog.txt
+          elif pipx run git-cliff --latest --strip header > changelog.txt 2>/dev/null; then
+            true  # pipx fallback succeeded
           else
-            # Get commits since previous tag
-            CHANGELOG=$(git log --pretty=format:"- %s (%h)" ${PREV_TAG}..HEAD)
+            # Fallback: generate from git log
+            PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+            if [ -z "$PREV_TAG" ]; then
+              git log --pretty=format:"- %s (%h)" HEAD > changelog.txt
+            else
+              git log --pretty=format:"- %s (%h)" ${PREV_TAG}..HEAD > changelog.txt
+            fi
           fi
-
-          # Write changelog to file for multi-line output
-          echo "$CHANGELOG" > changelog.txt
           echo "changelog_file=changelog.txt" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release

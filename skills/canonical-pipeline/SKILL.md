@@ -37,22 +37,26 @@ This skill defines the standard files, workflows, and hooks that every Emasoft C
 
 ### Binary Plugins (Rust, Go, C/C++)
 
-Binary plugins add:
+Binary plugins keep sources in `src/<component>/` and pre-compiled binaries in `src/<component>/bin/`:
+- Compilation happens **locally** via `publish.py` (NOT on GitHub CI)
+- Binaries for all 5 platforms are committed alongside version bumps
+- `build-binaries.yml` exists as a **fallback only** for CI-only environments
 
 | Workflow | Triggers | Purpose |
 |----------|----------|---------|
-| `.github/workflows/build-binaries.yml` | release published | Cross-compile for 6 targets: macOS (x86_64, arm64), Linux (x86_64, arm64), Windows (x86_64), plus universal macOS |
+| `.github/workflows/build-binaries.yml` | manual / source changes | FALLBACK cross-compilation (prefer local builds) |
 
 ## Git Hooks
 
 ### pre-push (`.githooks/pre-push`)
 
-Quality gate that runs before every push:
-1. Validate plugin: `uv run scripts/validate_plugin.py .`
-2. Lint: `uv run ruff check src/ tests/` (Python) or `npx eslint src/` (JS/TS)
-3. Test: `uv run pytest tests/ -q` (Python) or `npx jest` (JS/TS)
+Quality gate that runs before every push (follows PSS pattern — delegates to `publish.py --gate`):
+1. Version bump check: blocks if local version matches remote (forces semver bump)
+2. Lint: `uv run ruff check scripts/ tests/` (Python) or `npx eslint src/` (JS/TS)
+3. Validate plugin: `uv run scripts/validate_plugin.py . --strict` (blocks on CRITICAL/MAJOR/MINOR)
+4. Test: `uv run pytest tests/ -q` (Python) or `npx jest` (JS/TS)
 
-If any step fails, the push is blocked.
+If ANY step fails, the push is blocked. NITs are warnings only.
 
 ### Setup
 
@@ -64,17 +68,24 @@ uv run python scripts/setup_git_hooks.py
 
 ## Release Pipeline (`scripts/publish.py`)
 
-The 9-stage release pipeline:
+The 12-stage release pipeline (follows PSS `pss_ship.py` pattern):
 
-1. **Pre-flight checks**: Clean working tree, on main branch, tests pass
-2. **Version bump**: `bump_version.py --patch|--minor|--major`
-3. **Changelog generation**: `git-cliff -o CHANGELOG.md`
-4. **README badge update**: Update version badge
-5. **Git commit**: `git commit -am "release: vX.Y.Z"`
-6. **Git tag**: `git tag vX.Y.Z`
-7. **Push**: `git push && git push --tags`
-8. **GitHub Release**: Triggered by tag via `release.yml`
-9. **Marketplace notification**: Triggered by release via `notify-marketplace.yml`
+1. **Pre-flight checks**: Clean working tree, on main branch
+2. **Lint**: `uv run ruff check scripts/ tests/`
+3. **Validate plugin**: `uv run scripts/validate_plugin.py . --strict` (blocks on CRITICAL/MAJOR/MINOR)
+4. **Run tests**: `uv run pytest tests/ -q`
+5. **Version consistency**: Check all version sources match (plugin.json, pyproject.toml)
+6. **Bump version**: Update plugin.json, pyproject.toml, `__version__` vars
+7. **Update README badge**: Replace `version-X.Y.Z-blue` with new version
+8. **Generate changelog**: `git-cliff --tag vX.Y.Z -o CHANGELOG.md` (if git-cliff installed)
+9. **Build binaries**: Compile for current platform (if compiled sources exist, skip if no changes)
+10. **Git commit**: `git commit -am "bump: version X.Y.Z → X.Y.Z"`
+11. **Git tag**: `git tag vX.Y.Z`
+12. **Push**: `git push && git push --tags`
+
+After push, GitHub handles:
+- **GitHub Release**: Triggered by tag via `release.yml`
+- **Marketplace notification**: Triggered by release via `notify-marketplace.yml`
 
 ## Marketplace Standard
 
