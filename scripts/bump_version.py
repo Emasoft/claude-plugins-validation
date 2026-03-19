@@ -56,6 +56,11 @@ def main():
     # Compute new version
     if args.set:
         new_version = args.set
+        # Validate --set value is valid semver
+        parts = new_version.split(".")
+        if len(parts) != 3 or not all(p.isdigit() for p in parts):
+            print(f"ERROR: '{new_version}' is not valid semver (x.y.z)", file=sys.stderr)
+            sys.exit(1)
     elif args.major:
         new_version = bump_version(current, "major")
     elif args.minor:

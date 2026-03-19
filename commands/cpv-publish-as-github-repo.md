@@ -50,9 +50,15 @@ If the repo already exists, ask the user whether to push to the existing repo.
 
 ### Phase 5: Configure CI/CD pipeline
 ```bash
-# Set up git hooks
+# Set up git hooks (plugin may use either script name)
 cd <plugin-folder>
-uv run python scripts/setup_git_hooks.py 2>/dev/null || uv run python scripts/setup-hooks.py 2>/dev/null || true
+if [ -f scripts/setup_git_hooks.py ]; then
+  uv run python scripts/setup_git_hooks.py
+elif [ -f scripts/setup-hooks.py ]; then
+  uv run python scripts/setup-hooks.py
+else
+  echo "No hook setup script found — configure git hooks manually"
+fi
 ```
 
 ### Phase 6: Configure marketplace notification (optional)

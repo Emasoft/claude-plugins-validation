@@ -414,7 +414,7 @@ def main() -> int:
 
     table_header = """| Plugin | Description | Install |
 |--------|-------------|---------|"""
-    table = table_header + "\\n" + "\\n".join(rows) if rows else table_header + "\\n| (no plugins yet) | | |"
+    table = table_header + "\n" + "\n".join(rows) if rows else table_header + "\n| (no plugins yet) | | |"
 
     # Read existing README
     if not readme_path.exists():
@@ -424,7 +424,7 @@ def main() -> int:
     content = readme_path.read_text(encoding="utf-8")
 
     # Replace the Plugins section table (between "## Plugins" and the next "##")
-    lines = content.split("\\n")
+    lines = content.split("\n")
     new_lines: list[str] = []
     in_plugins_section = False
     table_replaced = False
@@ -454,7 +454,7 @@ def main() -> int:
         print("Warning: ## Plugins section not found in README.md", file=sys.stderr)
         return 0
 
-    readme_path.write_text("\\n".join(new_lines), encoding="utf-8")
+    readme_path.write_text("\n".join(new_lines), encoding="utf-8")
     print(f"Updated README.md with {{len(plugins)}} plugin(s)")
     return 0
 

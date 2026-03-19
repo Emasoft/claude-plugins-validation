@@ -120,13 +120,14 @@ version = "{p.version}"
 description = "{p.description}"
 readme = "README.md"
 requires-python = ">={p.python_version}"
-dependencies = [
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
     "mypy>=1.19.1",
     "pytest>=8.0.0",
     "pytest-cov>=4.1.0",
-    "pyyaml>=6.0.3",
     "ruff>=0.14.14",
-    "types-pyyaml>=6.0.12",
 ]
 
 [tool.ruff]
@@ -220,12 +221,24 @@ def gen_readme(p: PluginParams) -> str:
     """Generate README.md with badges, installation, usage, and development sections."""
     owner = p.github_owner
     repo = p.repo_name
+    # Skip badge URLs if github_owner is empty (avoids broken // in URLs)
+    if owner:
+        badges = (
+            f"[![CI](https://github.com/{owner}/{repo}/actions/workflows/ci.yml/badge.svg)]"
+            f"(https://github.com/{owner}/{repo}/actions/workflows/ci.yml)\n"
+            f"[![Version](https://img.shields.io/badge/version-{p.version}-blue)]"
+            f"(https://github.com/{owner}/{repo})\n"
+            f"[![License](https://img.shields.io/badge/license-{p.license}-green)](LICENSE)\n"
+            f"[![Validation](https://github.com/{owner}/{repo}/actions/workflows/validate.yml/badge.svg)]"
+            f"(https://github.com/{owner}/{repo}/actions/workflows/validate.yml)"
+        )
+    else:
+        badges = f"<!-- Badges will appear here once github_owner is set -->"
     return f"""# {p.name}
 
-[![CI](https://github.com/{owner}/{repo}/actions/workflows/ci.yml/badge.svg)](https://github.com/{owner}/{repo}/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-{p.version}-blue)](https://github.com/{owner}/{repo})
-[![License](https://img.shields.io/badge/license-{p.license}-green)](LICENSE)
-[![Validation](https://github.com/{owner}/{repo}/actions/workflows/validate.yml/badge.svg)](https://github.com/{owner}/{repo}/actions/workflows/validate.yml)
+<!--BADGES-START-->
+{badges}
+<!--BADGES-END-->
 
 {p.description}
 
@@ -365,7 +378,7 @@ SOFTWARE.
 """
 
 
-def gen_cliff_toml() -> str:
+def gen_cliff_toml(p: PluginParams) -> str:
     """Generate cliff.toml for git-cliff changelog generation."""
     # TOML uses triple-double-quotes (""") for multi-line strings, which collides
     # with Python triple-quoted strings. We inject them via a variable.
@@ -414,7 +427,7 @@ def gen_cliff_toml() -> str:
     result += "split_commits = false\n"
     result += "commit_preprocessors = [\n"
     result += r"  { pattern = '\((\w+\s)?#([0-9]+)\)',"
-    result += ' replace = "([#${2}](https://github.com/OWNER/REPO/issues/${2}))" },\n'
+    result += f' replace = "([#${{2}}](https://github.com/{p.github_owner}/{p.name}/issues/${{2}}))" }},\n'
     result += r"  { pattern = '\s+$', replace = " + '"" },\n'
     result += "]\n"
     result += 'commit_parsers = [\n'
@@ -1328,7 +1341,7 @@ def generate_all_files(p: PluginParams) -> list[tuple[str, str, bool]]:
         ("README.md", gen_readme(p), False),
         ("LICENSE", gen_license_mit(p), False),
         # Changelog config
-        ("cliff.toml", gen_cliff_toml(), False),
+        ("cliff.toml", gen_cliff_toml(p), False),
         # Scripts
         ("scripts/__init__.py", gen_scripts_init(p), False),
         ("scripts/publish.py", gen_publish_py(p), True),
