@@ -1,5 +1,5 @@
 ---
-name: cpv-publish-as-github-repo
+name: cpv-publish-a-plugin-as-github-repo
 description: "End-to-end: validate, standardize, create GitHub repo, push, and configure full CI/CD pipeline for a plugin (replaces cpv-setup-plugin-repo)"
 allowed-tools: Read, Bash(git:*,gh:*,uv:*), Write, Edit, Glob, Grep, AskUserQuestion
 argument-hint: "<plugin-folder> [--owner <github-username>] [--marketplace <owner/marketplace-repo>]"
@@ -7,18 +7,18 @@ agent: plugin-creator
 user-invocable: true
 ---
 
-# /cpv-publish-as-github-repo
+# /cpv-publish-a-plugin-as-github-repo
 
 End-to-end command that takes a local plugin folder and publishes it as a complete GitHub repository with full CI/CD pipeline, ready for marketplace publishing.
 
-> **Note:** This command replaces the former `/cpv-setup-plugin-repo`. It performs all the same operations (CI/CD setup, git hooks, marketplace notification) plus validation and standardization.
+> **Note:** This command replaces the former `/cpv-setup-plugin-repo` and `/cpv-publish-as-github-repo`. It performs all the same operations (CI/CD setup, git hooks, marketplace notification) plus validation and standardization.
 
 ## Usage
 
 ```
-/cpv-publish-as-github-repo ./my-plugin
-/cpv-publish-as-github-repo ./my-plugin --owner MyGitHub
-/cpv-publish-as-github-repo ./my-plugin --owner MyGitHub --marketplace MyGitHub/my-marketplace
+/cpv-publish-a-plugin-as-github-repo ./my-plugin
+/cpv-publish-a-plugin-as-github-repo ./my-plugin --owner MyGitHub
+/cpv-publish-a-plugin-as-github-repo ./my-plugin --owner MyGitHub --marketplace MyGitHub/my-marketplace
 ```
 
 ## What It Does
@@ -60,7 +60,7 @@ The last line must say `✔ All checks passed` or `WARNING issues only`. If it s
 ```bash
 uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" <plugin-folder> --fix
 ```
-This adds any missing standard files: .gitignore, .python-version, cliff.toml, .githooks/pre-push, .github/workflows/{ci,release,validate,notify-marketplace}.yml, scripts/publish.py, scripts/setup_git_hooks.py. It does NOT modify existing plugin code.
+This adds any missing standard files: .gitignore, .python-version, cliff.toml, git-hooks/pre-push, .github/workflows/{ci,release,validate,notify-marketplace}.yml, scripts/publish.py, scripts/setup-hooks.py. It does NOT modify existing plugin code.
 
 If `--marketplace` was provided, pass it to standardize so notify-marketplace.yml gets filled:
 ```bash
@@ -84,11 +84,11 @@ uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" <
 ### Phase 2d: Pre-publish local dry-run
 Before the first push, verify the generated pipeline works locally:
 ```bash
-# Test the pre-push hook can run (pipe empty stdin to simulate non-hook invocation)
-cd <plugin-folder> && echo "" | uv run python git-hooks/pre-push 2>&1
+# Test the gate mode (same code path the pre-push hook uses)
+cd <plugin-folder> && uv run python scripts/publish.py --gate 2>&1
 
 # Test publish.py dry-run
-uv run python scripts/publish.py --dry-run 2>&1
+uv run python scripts/publish.py --patch --dry-run 2>&1
 ```
 Both must complete without import errors or crashes. If either fails, fix the issue before proceeding.
 
@@ -109,15 +109,9 @@ If the repo already exists, ask the user whether to push to the existing repo.
 
 ### Phase 5: Configure CI/CD pipeline
 ```bash
-# Set up git hooks (plugin may use either script name)
+# Install pre-push hook via publish.py --install-hook (PSS pattern)
 cd <plugin-folder>
-if [ -f scripts/setup_git_hooks.py ]; then
-  uv run python scripts/setup_git_hooks.py
-elif [ -f scripts/setup-hooks.py ]; then
-  uv run python scripts/setup-hooks.py
-else
-  echo "No hook setup script found — configure git hooks manually"
-fi
+uv run python scripts/publish.py --install-hook
 ```
 
 ### Phase 6: Configure marketplace notification (optional)
