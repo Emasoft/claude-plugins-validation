@@ -1,5 +1,7 @@
 ---
+name: cpv-create-local-marketplace
 description: Create a new marketplace hub locally for Claude Code plugins (local only — no GitHub repo creation)
+user-invocable: true
 ---
 
 Scaffold a marketplace hub repository **locally**. This command creates the directory structure and files on disk only — it does NOT create a GitHub repository or push anything.

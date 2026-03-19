@@ -1,5 +1,7 @@
 ---
+name: cpv-validate-github-marketplace
 description: Validate a Claude Code marketplace from a GitHub repository without registering it (optional --audit for security scan)
+user-invocable: true
 ---
 
 Validate a marketplace hosted on GitHub by cloning it to a temporary directory and running the CPV marketplace validator.

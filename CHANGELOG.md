@@ -2,6 +2,37 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.1.1] - 2026-03-19
+
+### Command Consolidation + Canonical Pipeline Standard
+
+Consolidated 43 commands → 37 commands by merging overlapping commands.
+
+#### Command Changes
+- **Renamed**: `cpv-create-plugin-repo` → `cpv-create-local-plugin` (emphasizes local-only operation)
+- **Renamed**: `cpv-create-marketplace-repo` → `cpv-create-local-marketplace` (emphasizes local-only operation)
+- **Enhanced**: `cpv-publish-as-github-repo` — absorbs `cpv-setup-plugin-repo` workflow
+- **Enhanced**: `cpv-create-github-marketplace` — absorbs `cpv-setup-github-marketplace` workflow
+- **Enhanced**: `cpv-publish-plugin-to-marketplace` — absorbs `cpv-publish-to-marketplace` workflow
+- **Enhanced**: `cpv-validate-github-plugin` — adds `--audit` flag (absorbs `cpv-audit-github-plugin`)
+- **Enhanced**: `cpv-validate-github-marketplace` — adds `--audit` flag (absorbs `cpv-audit-security`)
+- **New**: `cpv-standardize` — auto-detects plugin vs marketplace, replaces both `cpv-standardize-plugin` and `cpv-standardize-marketplace`
+- **Removed** (moved to scripts_dev/): `cpv-setup-plugin-repo`, `cpv-setup-github-marketplace`, `cpv-publish-to-marketplace`, `cpv-audit-github-plugin`, `cpv-audit-security`, `cpv-standardize-marketplace`, `cpv-standardize-plugin`
+
+#### Script Changes
+- `manage_github_validate.py`: Added `--audit` flag for combined `--plugin/--marketplace` + security audit. Legacy `--audit-plugin` and `--audit-marketplace` flags kept as hidden backward-compat aliases.
+
+#### New Skill
+- `canonical-pipeline/SKILL.md`: Documents the canonical file structure, CI/CD workflows, git hooks, and release pipeline standard for all Emasoft plugins and marketplaces.
+
+#### Agent Updates
+- `plugin-creator`: Replaced `setup-plugin-repo`, `setup-github-marketplace`, `publish-to-marketplace` skills with `canonical-pipeline` skill
+- `plugin-fixer`: Replaced `setup-plugin-repo`, `setup-github-marketplace` skills with `canonical-pipeline` skill; updated body references
+
+#### Documentation
+- Updated README command tables and directory structure listing
+- Updated setup-plugin-repo skill trigger reference
+
 ## [2.1.0] - 2026-03-18
 
 ### Validation Rules Completion + Universal Standards
