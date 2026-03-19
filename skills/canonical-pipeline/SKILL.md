@@ -1,0 +1,149 @@
+---
+name: canonical-pipeline
+description: >
+  Documents the canonical file structure, CI/CD workflows, git hooks, and release pipeline
+  standard for all Emasoft Claude Code plugins and marketplaces. Use as a reference when
+  creating, standardizing, or auditing plugin repositories.
+---
+
+# Canonical Plugin Pipeline Standard
+
+This skill defines the standard files, workflows, and hooks that every Emasoft Claude Code plugin repository MUST have.
+
+## Standard Plugin Files
+
+| File | Required | Purpose |
+|------|----------|---------|
+| `.claude-plugin/plugin.json` | YES | Plugin manifest (name, version, description, components) |
+| `pyproject.toml` | Python | Python project config (or `package.json` for JS/TS) |
+| `.python-version` | Python | Runtime version pinning (e.g., `3.12`) |
+| `.node-version` | JS/TS | Runtime version pinning (e.g., `22`) |
+| `.gitignore` | YES | Must include `.claude/`, `.tldr/`, `llm_externalizer_output/` |
+| `README.md` | YES | Must have `<!--BADGES-START-->` / `<!--BADGES-END-->` markers |
+| `cliff.toml` | YES | git-cliff changelog configuration |
+| `scripts/publish.py` | YES | 9-stage release pipeline script |
+| `.githooks/pre-push` | YES | Quality gate: validate + lint + test before push |
+| `CHANGELOG.md` | YES | Auto-generated changelog |
+| `LICENSE` | YES | License file (MIT recommended) |
+
+## Standard CI/CD Workflows
+
+| Workflow | Required | Triggers | Purpose |
+|----------|----------|----------|---------|
+| `.github/workflows/ci.yml` | YES | push, PR | Lint + validate + test |
+| `.github/workflows/release.yml` | YES | version tag (`v*`) | Create GitHub Release |
+| `.github/workflows/validate.yml` | YES | push, PR | Run CPV validation |
+| `.github/workflows/notify-marketplace.yml` | Marketplace | release published | Notify marketplace via repository_dispatch |
+
+### Binary Plugins (Rust, Go, C/C++)
+
+Binary plugins add:
+
+| Workflow | Triggers | Purpose |
+|----------|----------|---------|
+| `.github/workflows/build-binaries.yml` | release published | Cross-compile for 6 targets: macOS (x86_64, arm64), Linux (x86_64, arm64), Windows (x86_64), plus universal macOS |
+
+## Git Hooks
+
+### pre-push (`.githooks/pre-push`)
+
+Quality gate that runs before every push:
+1. Validate plugin: `uv run scripts/validate_plugin.py .`
+2. Lint: `uv run ruff check src/ tests/` (Python) or `npx eslint src/` (JS/TS)
+3. Test: `uv run pytest tests/ -q` (Python) or `npx jest` (JS/TS)
+
+If any step fails, the push is blocked.
+
+### Setup
+
+```bash
+git config core.hooksPath .githooks
+# Or use the setup script if present:
+uv run python scripts/setup_git_hooks.py
+```
+
+## Release Pipeline (`scripts/publish.py`)
+
+The 9-stage release pipeline:
+
+1. **Pre-flight checks**: Clean working tree, on main branch, tests pass
+2. **Version bump**: `bump_version.py --patch|--minor|--major`
+3. **Changelog generation**: `git-cliff -o CHANGELOG.md`
+4. **README badge update**: Update version badge
+5. **Git commit**: `git commit -am "release: vX.Y.Z"`
+6. **Git tag**: `git tag vX.Y.Z`
+7. **Push**: `git push && git push --tags`
+8. **GitHub Release**: Triggered by tag via `release.yml`
+9. **Marketplace notification**: Triggered by release via `notify-marketplace.yml`
+
+## Marketplace Standard
+
+Marketplaces follow the **hub-only architecture**:
+- NO plugin code inside the marketplace repo
+- `marketplace.json` with GitHub source pointers: `{"source": "github", "repo": "owner/name"}`
+- Each plugin lives in its OWN GitHub repo
+
+### Marketplace Files
+
+| File | Required | Purpose |
+|------|----------|---------|
+| `.claude-plugin/marketplace.json` | YES | Plugin registry (GitHub source pointers only) |
+| `README.md` | YES | Auto-generated plugin catalog |
+| `scripts/update_catalog.py` | YES | Regenerate README from marketplace.json |
+| `.github/workflows/validate.yml` | YES | Validate marketplace on push/PR |
+| `.github/workflows/update-catalog.yml` | YES | Auto-update README when marketplace.json changes |
+| `.githooks/pre-push` | YES | Quality gate |
+| `cliff.toml` | YES | Changelog configuration |
+
+## Language-Specific Additions
+
+### Python Plugins
+- `pyproject.toml` with `[project]` metadata and `[tool.ruff]` config
+- `.python-version` (e.g., `3.12`)
+- CI: `ruff check`, `ruff format --check`, `mypy`, `pytest`
+
+### JavaScript/TypeScript Plugins
+- `package.json` with metadata and scripts
+- `.node-version` (e.g., `22`)
+- CI: `eslint`, `prettier --check`, `tsc --noEmit`, `jest`/`vitest`
+
+### Rust Plugins
+- `Cargo.toml` with metadata
+- CI: `cargo clippy`, `cargo fmt --check`, `cargo test`
+- `build-binaries.yml` for cross-compilation
+
+### Go Plugins
+- `go.mod` with module path
+- CI: `go vet`, `staticcheck`, `go test`
+- `build-binaries.yml` for cross-compilation
+
+### Shell Plugins
+- Scripts in `scripts/` or `bin/`
+- CI: `shellcheck` on all `.sh` files
+
+## Quick Reference
+
+### Create a new plugin (local)
+```
+/cpv-create-local-plugin
+```
+
+### Publish plugin to GitHub
+```
+/cpv-publish-as-github-repo ./my-plugin --owner MyGitHub
+```
+
+### Standardize an existing repo
+```
+/cpv-standardize ./my-plugin --fix
+```
+
+### Create a marketplace
+```
+/cpv-create-github-marketplace MyGitHub/my-marketplace
+```
+
+### Publish to marketplace
+```
+/cpv-publish-plugin-to-marketplace MyGitHub/my-plugin --marketplace MyGitHub/my-marketplace
+```

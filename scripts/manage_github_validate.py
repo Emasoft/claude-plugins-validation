@@ -7,9 +7,9 @@ and cleans up. No installation or registration occurs.
 
 Usage:
     uv run scripts/manage_github_validate.py --plugin <owner/repo>
+    uv run scripts/manage_github_validate.py --plugin <owner/repo> --audit
     uv run scripts/manage_github_validate.py --marketplace <owner/repo>
-    uv run scripts/manage_github_validate.py --audit-plugin <owner/repo>
-    uv run scripts/manage_github_validate.py --audit-marketplace <owner/repo>
+    uv run scripts/manage_github_validate.py --marketplace <owner/repo> --audit
 """
 
 import argparse
@@ -141,18 +141,27 @@ def main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--plugin", type=str, help="Validate a GitHub plugin (owner/repo)")
     group.add_argument("--marketplace", type=str, help="Validate a GitHub marketplace (owner/repo)")
-    group.add_argument("--audit-plugin", type=str, help="Security audit a GitHub plugin (owner/repo)")
-    group.add_argument("--audit-marketplace", type=str, help="Security audit a GitHub marketplace (owner/repo)")
+    # Backward compat (hidden) — legacy standalone audit flags
+    group.add_argument("--audit-plugin", type=str, help=argparse.SUPPRESS)
+    group.add_argument("--audit-marketplace", type=str, help=argparse.SUPPRESS)
+    # New --audit flag that combines with --plugin or --marketplace
+    parser.add_argument("--audit", action="store_true", help="Also run security audit (skill-audit)")
     args = parser.parse_args()
 
-    if args.plugin:
-        sys.exit(validate_github_plugin(args.plugin))
-    elif args.marketplace:
-        sys.exit(validate_github_marketplace(args.marketplace))
-    elif args.audit_plugin:
+    if args.audit_plugin:
         sys.exit(audit_github_plugin(args.audit_plugin))
     elif args.audit_marketplace:
         sys.exit(audit_github_marketplace(args.audit_marketplace))
+    elif args.plugin:
+        if args.audit:
+            sys.exit(audit_github_plugin(args.plugin))
+        else:
+            sys.exit(validate_github_plugin(args.plugin))
+    elif args.marketplace:
+        if args.audit:
+            sys.exit(audit_github_marketplace(args.marketplace))
+        else:
+            sys.exit(validate_github_marketplace(args.marketplace))
 
 
 if __name__ == "__main__":
