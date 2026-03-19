@@ -10,9 +10,7 @@ tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion
 skills:
   - create-plugin
   - standardize-plugin
-  - setup-plugin-repo
-  - setup-github-marketplace
-  - publish-to-marketplace
+  - canonical-pipeline
   - plugin-validation-skill
   - plugin-management
 ---
