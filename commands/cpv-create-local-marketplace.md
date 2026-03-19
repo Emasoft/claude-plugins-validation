@@ -22,4 +22,4 @@ Parse the user's request for marketplace name, description, and any initial plug
 
 After generation:
 1. Suggest `git init && git add -A && git commit -m "Initial marketplace scaffold"`
-2. To publish on GitHub, use `/cpv-create-github-marketplace`
+2. To publish on GitHub, use `/cpv-create-a-github-marketplace`

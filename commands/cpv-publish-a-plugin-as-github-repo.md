@@ -149,6 +149,26 @@ gh run view <run-id> --repo <owner>/<plugin-name> --log-failed 2>&1 | head -30
 ```
 Fix the issue (usually Mega-Linter config or dependency problems), bump version, and push again. Do NOT leave a failing CI as the final state.
 
+### Phase 9: Marketplace publish prompt
+After successful GitHub repo creation and CI verification, **always ask the user**:
+
+> "Would you like to publish this plugin to a marketplace? Options:
+> 1. **Existing marketplace** — publish to one of your existing marketplaces (e.g., Emasoft/emasoft-plugins)
+> 2. **New marketplace** — create a new marketplace first, then publish to it
+> 3. **No** — skip marketplace publishing for now"
+
+**If the user chooses option 1 (existing marketplace):**
+- Ask which marketplace (suggest known ones from the owner, e.g., `<owner>/emasoft-plugins`)
+- Run: `/cpv-publish-a-plugin-to-a-github-marketplace <owner>/<plugin-repo> --marketplace <owner>/<marketplace-repo>`
+
+**If the user chooses option 2 (new marketplace):**
+- Ask for the marketplace name (suggest `<owner>-plugins` as default)
+- Run: `/cpv-create-a-github-marketplace <owner>/<marketplace-name>`
+- Then run: `/cpv-publish-a-plugin-to-a-github-marketplace <owner>/<plugin-repo> --marketplace <owner>/<marketplace-name>`
+
+**If the user chooses option 3 (no):**
+- Skip and report final results.
+
 ## Checklist (copy and track progress)
 
 - [ ] Plugin validated with --strict (zero CRITICAL/MAJOR/MINOR/NIT)
@@ -165,6 +185,7 @@ Fix the issue (usually Mega-Linter config or dependency problems), bump version,
 - [ ] Pre-publish dry-run passed (pre-push hook + publish.py --dry-run)
 - [ ] Final validation passed (--strict, only WARNINGs)
 - [ ] Post-push CI verification: all GitHub Actions workflows passing
+- [ ] Marketplace publish prompt shown (existing/new/skip)
 
 ## Binary Plugins (Rust, Go, C/C++)
 

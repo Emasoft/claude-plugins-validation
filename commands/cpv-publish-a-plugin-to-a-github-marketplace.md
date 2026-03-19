@@ -1,23 +1,23 @@
 ---
-name: cpv-publish-plugin-to-marketplace
-description: Register a plugin in a marketplace — validate, verify ownership, add entry, configure CI/CD notification (replaces cpv-publish-to-marketplace)
+name: cpv-publish-a-plugin-to-a-github-marketplace
+description: Register a plugin in a marketplace — validate, verify ownership, add entry, configure CI/CD notification
 allowed-tools: Read, Bash(git:*,gh:*,uv:*), Write, Edit, Glob, Grep, AskUserQuestion
 argument-hint: "<owner/plugin-repo> [--marketplace <owner/marketplace-repo>]"
-agent: plugin-manager
+agent: plugin-creator
 user-invocable: true
 ---
 
-# /cpv-publish-plugin-to-marketplace
+# /cpv-publish-a-plugin-to-a-github-marketplace
 
 Register a plugin's GitHub repo in a marketplace, with owner verification and full CI/CD pipeline setup.
 
-> **Note:** This command replaces the former `/cpv-publish-to-marketplace`. It performs all the same operations (PAT setup, notification workflow) plus remote validation, owner verification, and marketplace catalog update.
+> **Note:** This command replaces the former `/cpv-publish-to-marketplace` and `/cpv-publish-a-plugin-to-a-github-marketplace`. It performs all the same operations (PAT setup, notification workflow) plus remote validation, owner verification, and marketplace catalog update.
 
 ## Usage
 
 ```
-/cpv-publish-plugin-to-marketplace Emasoft/my-plugin
-/cpv-publish-plugin-to-marketplace Emasoft/my-plugin --marketplace Emasoft/emasoft-plugins
+/cpv-publish-a-plugin-to-a-github-marketplace Emasoft/my-plugin
+/cpv-publish-a-plugin-to-a-github-marketplace Emasoft/my-plugin --marketplace Emasoft/emasoft-plugins
 ```
 
 ## What It Does
@@ -135,6 +135,6 @@ For compiled plugins (Rust, Go, C/C++), the plugin's `build-binaries.yml` workfl
 | Plugin repo not found | Check URL, ensure it's public or gh has access |
 | Plugin has CRITICAL issues | Fix validation issues first |
 | Owner mismatch | Only marketplace owner can add plugins |
-| Marketplace repo not found | Create one first with `/cpv-create-github-marketplace` |
+| Marketplace repo not found | Create one first with `/cpv-create-a-github-marketplace` |
 | Push fails | Check branch protection, PAT scope |
 | Plugin already in marketplace | Update existing entry with new version |

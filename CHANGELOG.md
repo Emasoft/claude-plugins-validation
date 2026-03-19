@@ -12,8 +12,8 @@ Consolidated 43 commands → 37 commands by merging overlapping commands.
 - **Renamed**: `cpv-create-plugin-repo` → `cpv-create-local-plugin` (emphasizes local-only operation)
 - **Renamed**: `cpv-create-marketplace-repo` → `cpv-create-local-marketplace` (emphasizes local-only operation)
 - **Enhanced**: `cpv-publish-a-plugin-as-github-repo` — absorbs `cpv-setup-plugin-repo` workflow
-- **Enhanced**: `cpv-create-github-marketplace` — absorbs `cpv-setup-github-marketplace` workflow
-- **Enhanced**: `cpv-publish-plugin-to-marketplace` — absorbs `cpv-publish-to-marketplace` workflow
+- **Enhanced**: `cpv-create-a-github-marketplace` — absorbs `cpv-setup-github-marketplace` workflow
+- **Enhanced**: `cpv-publish-a-plugin-to-a-github-marketplace` — absorbs `cpv-publish-to-marketplace` workflow
 - **Enhanced**: `cpv-validate-github-plugin` — adds `--audit` flag (absorbs `cpv-audit-github-plugin`)
 - **Enhanced**: `cpv-validate-github-marketplace` — adds `--audit` flag (absorbs `cpv-audit-security`)
 - **New**: `cpv-standardize` — auto-detects plugin vs marketplace, replaces both `cpv-standardize-plugin` and `cpv-standardize-marketplace`

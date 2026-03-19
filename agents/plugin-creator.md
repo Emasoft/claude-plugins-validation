@@ -61,8 +61,12 @@ The pre-push hook runs `--strict` and blocks on CRITICAL, MAJOR, MINOR, and NIT.
     - Check env: `test -n "$MARKETPLACE_PAT"` before asking user
     - Set secret: `gh secret set MARKETPLACE_PAT --repo <owner>/<plugin> --body "$MARKETPLACE_PAT"` (MUST use `--body` flag)
 11. **Final validation** (`--strict`): MUST pass with only WARNINGs
+12. **Marketplace publish prompt**: Ask user if they want to publish to a marketplace:
+    - **Existing**: Run `/cpv-publish-a-plugin-to-a-github-marketplace <owner>/<plugin> --marketplace <owner>/<marketplace>`
+    - **New**: Run `/cpv-create-a-github-marketplace <owner>/<name>`, then publish to it
+    - **Skip**: Report results and finish
 
-## Workflow: Create GitHub Marketplace (/cpv-create-github-marketplace)
+## Workflow: Create GitHub Marketplace (/cpv-create-a-github-marketplace)
 
 1. Parse `<owner/marketplace-name>`, validate (kebab-case, not reserved)
 2. Generate scaffold: `generate_marketplace_repo.py /tmp/scaffold --name <name> --github-owner <owner>`
@@ -71,7 +75,7 @@ The pre-push hook runs `--strict` and blocks on CRITICAL, MAJOR, MINOR, and NIT.
 5. Validate marketplace: `validate_marketplace.py /tmp/scaffold --verbose`
 6. Verify each linked plugin (if --add-plugin provided): exists, correct owner, has plugin.json
 
-## Workflow: Publish Plugin to Marketplace (/cpv-publish-plugin-to-marketplace)
+## Workflow: Publish Plugin to Marketplace (/cpv-publish-a-plugin-to-a-github-marketplace)
 
 1. Verify plugin repo: `gh repo view <owner/plugin> --json name,owner`
 2. Validate plugin remotely: `manage_github_validate.py --plugin <owner/plugin>`
@@ -114,7 +118,7 @@ These errors were made in real publish runs. Do NOT repeat them:
 8. **Check `author.email`** in plugin.json — suggest GitHub noreply format if missing.
 9. **CI workflows need `uv sync --extra dev`** not just `uv sync`. Without `--extra dev`, ruff/pytest/mypy/pyyaml are NOT installed and ALL CI runs fail.
 10. **Update notify-marketplace.yml BEFORE the first push**. The standardize script creates it with placeholders. If you push first, the marketplace notification fails silently with old values. Use `--marketplace` flag with standardize to auto-fill.
-11. **Always run local dry-run BEFORE the first push**: `echo "" | uv run python git-hooks/pre-push` and `uv run python scripts/publish.py --dry-run`. This catches template bugs, missing deps, import errors.
+11. **Always run local dry-run BEFORE the first push**: `uv run python scripts/publish.py --gate` and `uv run python scripts/publish.py --patch --dry-run`. This catches template bugs, missing deps, import errors.
 12. **Always verify CI AFTER the first push**: `sleep 30 && gh run list --repo <owner>/<name> --limit 5`. If any workflow failed, fix and push again. Never leave failing CI as the final state.
 13. **Checkov check IDs use `CKV2_` prefix** for GitHub Actions checks (not `CKV_`). The correct skip is `--skip-check CKV2_GHA_1`.
 
