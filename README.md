@@ -8,6 +8,30 @@
 
 Comprehensive validation and management suite for Claude Code plugins, marketplaces, hooks, skills, and MCP servers.
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Installation](#installation)
+- [Part 1: Validation](#part-1-validation)
+  - [Validation Commands](#validation-commands)
+  - [How to Validate](#how-to-validate)
+  - [Common Validation Options](#common-validation-options)
+  - [Exit Codes](#exit-codes)
+  - [Validation Coverage](#validation-coverage)
+- [Part 2: Plugin & Marketplace Management](#part-2-plugin--marketplace-management)
+  - [Regular Operations](#regular-operations)
+    - [Install / Uninstall / Update](#install--uninstall--update)
+    - [Enable / Disable](#enable--disable)
+    - [List / Search / Marketplace](#list--search--marketplace)
+    - [Create / Publish](#create--publish)
+  - [Fix, Doctor & Diagnostics](#fix-doctor--diagnostics)
+    - [Doctor](#doctor)
+    - [Fix Validation Issues](#fix-validation-issues)
+- [Scripts Reference](#scripts-reference)
+- [Agents](#agents)
+- [Requirements](#requirements)
+- [Troubleshooting](#troubleshooting)
+
 ## Overview
 
 | Category | Count | Description |
