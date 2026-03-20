@@ -44,7 +44,7 @@ def _make_claude_dir(tmp_path: Path) -> Path:
     return claude_dir
 
 
-def _make_settings(claude_dir: Path, data: dict, filename: str = "settings.local.json") -> Path:
+def _make_settings(claude_dir: Path, data: dict, filename: str = "settings.json") -> Path:
     """Write a settings JSON file inside the claude dir."""
     sf = claude_dir / filename
     sf.write_text(json.dumps(data), encoding="utf-8")

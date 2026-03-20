@@ -1,6 +1,6 @@
 ---
 name: cpv-doctor
-description: Health-check all installed Claude Code plugins, settings, and marketplaces
+description: Health-check all installed Claude Code plugins, settings, and marketplaces (--fix to auto-repair)
 agent: plugin-manager
 user-invocable: true
 ---
@@ -11,10 +11,14 @@ Run the plugin health check:
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_doctor.py"
 ```
 
-For full validation details and security scanning, add `--verbose`:
+For full validation details: `--verbose`. To auto-fix orphaned entries: `--fix`.
 
 ```bash
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_doctor.py" --verbose
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_doctor.py" --verbose --fix
 ```
 
-The doctor checks: Claude CLI authentication, settings integrity, marketplace registration, `claude plugin validate` on each marketplace, plugin validation, and orphaned entries. Report results clearly, highlighting issues and suggesting fixes.
+Checks: CLI auth, settings integrity, marketplace registrations, plugin validation, orphaned entries, stale `settings.local.json` entries.
+
+`--fix` auto-removes: orphaned marketplace registrations pointing to missing directories, orphaned `enabledPlugins` entries for missing plugins/marketplaces.
+
+See the **plugin-management** skill for full details.

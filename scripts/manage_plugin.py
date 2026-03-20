@@ -758,16 +758,31 @@ def do_uninstall(plugin_key: str, quiet: bool = False, dry_run: bool = False):
     plugins_parent = mp_dir / "plugins"
     remaining = [d for d in (plugins_parent.iterdir() if plugins_parent.exists() else []) if d.is_dir()]
 
-    settings = load_json_safe(SETTINGS_TARGET)
+    # Clean ALL settings files that might reference this plugin
+    settings_files_to_clean = [SETTINGS_TARGET]
+    user_local = SETTINGS_TARGET.parent / "settings.local.json"
+    if user_local.exists() and user_local != SETTINGS_TARGET:
+        settings_files_to_clean.append(user_local)
+
+    for sf in settings_files_to_clean:
+        if not sf.exists():
+            continue
+        s = load_json_safe(sf)
+        changed = False
+        if not remaining:
+            if s.get("extraKnownMarketplaces", {}).pop(marketplace_name, None) is not None:
+                changed = True
+        if s.get("enabledPlugins", {}).pop(plugin_key, None) is not None:
+            changed = True
+        if changed:
+            save_json_safe(sf, s)
+
     if not remaining:
         if not quiet:
             info(f"Marketplace '{marketplace_name}' is now empty, removing...")
         shutil.rmtree(mp_dir, ignore_errors=True)
-        settings.get("extraKnownMarketplaces", {}).pop(marketplace_name, None)
         if not quiet:
             ok(f"Removed empty marketplace '{marketplace_name}'")
-    settings.get("enabledPlugins", {}).pop(plugin_key, None)
-    save_json_safe(SETTINGS_TARGET, settings)
 
     installed = _load_installed_plugins()
     plugins_map = installed["plugins"]
