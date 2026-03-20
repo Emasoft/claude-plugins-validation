@@ -10,8 +10,8 @@ Usage:
     uv run scripts/manage_plugin.py <source> <marketplace> [--force] [--dry-run] [--quiet]
     uv run scripts/manage_plugin.py --uninstall <plugin>@<marketplace> [--dry-run]
     uv run scripts/manage_plugin.py --update <source> <marketplace> [--force] [--dry-run]
-    uv run scripts/manage_plugin.py --enable <plugin>@<marketplace> [--scope user|local]
-    uv run scripts/manage_plugin.py --disable <plugin>@<marketplace> [--scope user|local]
+    uv run scripts/manage_plugin.py --enable <plugin> [--scope user|local]
+    uv run scripts/manage_plugin.py --disable <plugin> [--scope user|local]
     uv run scripts/manage_plugin.py --version
 """
 
@@ -795,29 +795,138 @@ def do_uninstall(plugin_key: str, quiet: bool = False, dry_run: bool = False):
 
 
 def _resolve_settings_file(scope: str) -> Path:
-    """Return the settings file for the given scope ('user' or 'local').
+    """Return the settings file for the given scope.
 
-    Uses SETTINGS_TARGET for 'local' (default) to respect monkeypatching in tests.
+    Scopes:
+      'user'  → ~/.claude/settings.json (shared across machines)
+      'local' → project .claude/settings.local.json (per-project)
+      default → SETTINGS_TARGET (~/.claude/settings.local.json, monkeypatchable)
     """
     if scope == "user":
         return SETTINGS_FILE
+    if scope == "local":
+        # Project-level settings (relative to cwd)
+        project_settings = Path.cwd() / ".claude" / "settings.local.json"
+        return project_settings
+    # Default: user-level local (SETTINGS_TARGET = ~/.claude/settings.local.json)
     return SETTINGS_TARGET
 
 
-def do_enable(plugin_key: str, quiet: bool = False, dry_run: bool = False, scope: str = "local"):
-    if "@" not in plugin_key:
-        err("Format: --enable <plugin-name>@<marketplace-name>")
+def _collect_all_plugin_keys() -> dict[str, list[str]]:
+    """Scan all settings files and return {plugin_key: [files_where_listed]}.
+
+    Also scans enabledPlugins across settings.json, settings.local.json,
+    and project .claude/settings.local.json.
+    """
+    result: dict[str, list[str]] = {}
+    files_to_check = [SETTINGS_FILE, SETTINGS_TARGET]
+    project_settings = Path.cwd() / ".claude" / "settings.local.json"
+    if project_settings.exists():
+        files_to_check.append(project_settings)
+    for sf in files_to_check:
+        if not sf.exists():
+            continue
+        try:
+            data = json.loads(sf.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        for key in data.get("enabledPlugins", {}):
+            result.setdefault(key, []).append(str(sf))
+    return result
+
+
+def _resolve_plugin_key(query: str) -> str:
+    """Resolve a plugin query to a full plugin_name@marketplace key.
+
+    Accepts:
+      plugin-name                         → find unique match across settings
+      plugin-name@marketplace-name        → use as-is
+      plugin-name@owner/marketplace-name  → strip owner/ prefix for key
+
+    Raises SystemExit on ambiguity or not found.
+    """
+    # Case 3: owner/marketplace format — strip owner, key is name@marketplace
+    if "@" in query and "/" in query.split("@", 1)[1]:
+        plugin_name, owner_marketplace = query.split("@", 1)
+        marketplace_name = owner_marketplace.split("/", 1)[1]
+        return f"{plugin_name}@{marketplace_name}"
+
+    # Case 2: already has @marketplace
+    if "@" in query:
+        return query
+
+    # Case 1: bare plugin name — search for unique match
+    all_keys = _collect_all_plugin_keys()
+    matches = [k for k in all_keys if k.split("@", 1)[0] == query]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        err(f"Ambiguous plugin name '{query}'. Matches found:")
+        for m in sorted(matches):
+            print(f"  - {m}")
+        err("Specify the full key: --enable/--disable <name>@<marketplace>")
         sys.exit(1)
 
+    # Not found in settings — maybe it's on disk but never toggled yet
+    disk_matches: list[str] = []
+    if MARKETPLACES_DIR.exists():
+        for mkt_dir in MARKETPLACES_DIR.iterdir():
+            if not mkt_dir.is_dir():
+                continue
+            plug_dir = mkt_dir / "plugins" / query
+            if plug_dir.is_dir():
+                disk_matches.append(f"{query}@{mkt_dir.name}")
+            # Also check cache dir
+        cache_dir = MARKETPLACES_DIR.parent / "cache"
+        if cache_dir.exists():
+            for mkt_dir in cache_dir.iterdir():
+                if not mkt_dir.is_dir():
+                    continue
+                plug_dir = mkt_dir / query
+                if plug_dir.is_dir():
+                    disk_matches.append(f"{query}@{mkt_dir.name}")
+
+    if len(disk_matches) == 1:
+        return disk_matches[0]
+    if len(disk_matches) > 1:
+        err(f"Ambiguous plugin name '{query}'. Found in multiple marketplaces:")
+        for m in sorted(disk_matches):
+            print(f"  - {m}")
+        err("Specify the full key: --enable/--disable <name>@<marketplace>")
+        sys.exit(1)
+
+    err(f"Plugin '{query}' not found in any settings file or marketplace.")
+    sys.exit(1)
+
+
+def _verify_plugin_installed(plugin_key: str) -> bool:
+    """Check if the plugin is installed (exists in enabledPlugins or on disk)."""
+    all_keys = _collect_all_plugin_keys()
+    if plugin_key in all_keys:
+        return True
+    # Check on disk (cache or plugins dir)
     plugin_name, marketplace_name = plugin_key.split("@", 1)
-    _validate_safe_name(plugin_name, "plugin")
-    _validate_safe_name(marketplace_name, "marketplace")
     plug_dir = MARKETPLACES_DIR / marketplace_name / "plugins" / plugin_name
-    if not plug_dir.exists():
-        err(f"Plugin not found: {plug_dir}")
+    if plug_dir.is_dir():
+        return True
+    cache_dir = MARKETPLACES_DIR.parent / "cache" / marketplace_name / plugin_name
+    if cache_dir.is_dir():
+        return True
+    return False
+
+
+def do_enable(plugin_key: str, quiet: bool = False, dry_run: bool = False, scope: str = "user"):
+    plugin_key = _resolve_plugin_key(plugin_key)
+    if not _verify_plugin_installed(plugin_key):
+        err(f"Plugin '{plugin_key}' is not installed. Install it first.")
         sys.exit(1)
 
     target = _resolve_settings_file(scope)
+
+    # Ensure parent directory exists for project-level settings
+    if scope == "local":
+        target.parent.mkdir(parents=True, exist_ok=True)
+
     settings = load_json_safe(target)
     ep = settings.setdefault("enabledPlugins", {})
     if ep.get(plugin_key) is True:
@@ -827,30 +936,43 @@ def do_enable(plugin_key: str, quiet: bool = False, dry_run: bool = False, scope
 
     if dry_run:
         if not quiet:
-            ok(f"Would enable {plugin_key} in {target.name}")
+            ok(f"Would enable {plugin_key} in {target}")
+        if scope == "local":
+            ok(f"Would disable {plugin_key} at user level (cascading)")
         return
 
     ep[plugin_key] = True
     save_json_safe(target, settings)
     if not quiet:
-        ok(f"Enabled {plugin_key} in {target.name}")
+        ok(f"Enabled {plugin_key} in {target}")
+
+    # Cascading: when enabling at project level, disable at user level
+    # so the plugin must be explicitly enabled per-project
+    if scope == "local":
+        user_settings = load_json_safe(SETTINGS_FILE)
+        user_ep = user_settings.setdefault("enabledPlugins", {})
+        if user_ep.get(plugin_key) is not False:
+            user_ep[plugin_key] = False
+            save_json_safe(SETTINGS_FILE, user_settings)
+            if not quiet:
+                info(f"Disabled {plugin_key} at user level (must be enabled per-project now)")
+
+    if not quiet:
         print("  Run /reload-plugins or restart Claude Code for changes to take effect.")
 
 
-def do_disable(plugin_key: str, quiet: bool = False, dry_run: bool = False, scope: str = "local"):
-    if "@" not in plugin_key:
-        err("Format: --disable <plugin-name>@<marketplace-name>")
-        sys.exit(1)
-
-    plugin_name, marketplace_name = plugin_key.split("@", 1)
-    _validate_safe_name(plugin_name, "plugin")
-    _validate_safe_name(marketplace_name, "marketplace")
-    plug_dir = MARKETPLACES_DIR / marketplace_name / "plugins" / plugin_name
-    if not plug_dir.exists():
-        err(f"Plugin not found: {plug_dir}")
+def do_disable(plugin_key: str, quiet: bool = False, dry_run: bool = False, scope: str = "user"):
+    plugin_key = _resolve_plugin_key(plugin_key)
+    if not _verify_plugin_installed(plugin_key):
+        err(f"Plugin '{plugin_key}' is not installed. Nothing to disable.")
         sys.exit(1)
 
     target = _resolve_settings_file(scope)
+
+    # Ensure parent directory exists for project-level settings
+    if scope == "local":
+        target.parent.mkdir(parents=True, exist_ok=True)
+
     settings = load_json_safe(target)
     ep = settings.setdefault("enabledPlugins", {})
     if ep.get(plugin_key) is False:
@@ -860,13 +982,15 @@ def do_disable(plugin_key: str, quiet: bool = False, dry_run: bool = False, scop
 
     if dry_run:
         if not quiet:
-            ok(f"Would disable {plugin_key} in {target.name}")
+            ok(f"Would disable {plugin_key} in {target}")
         return
 
     ep[plugin_key] = False
     save_json_safe(target, settings)
     if not quiet:
-        ok(f"Disabled {plugin_key} in {target.name}")
+        ok(f"Disabled {plugin_key} in {target}")
+        if scope == "local":
+            info("This project will NOT load this plugin, even if it's enabled at user level.")
         print("  Run /reload-plugins or restart Claude Code for changes to take effect.")
 
 
@@ -963,10 +1087,10 @@ def main():
     parser.add_argument("marketplace", nargs="?", help="Marketplace name")
     parser.add_argument("--uninstall", type=str, help="Uninstall plugin (name@marketplace)")
     parser.add_argument("--update", action="store_true", help="Update instead of install")
-    parser.add_argument("--enable", type=str, help="Enable plugin (name@marketplace)")
-    parser.add_argument("--disable", type=str, help="Disable plugin (name@marketplace)")
-    parser.add_argument("--scope", choices=["user", "local"], default="local",
-                        help="Target settings file: 'user' = settings.json, 'local' = settings.local.json (default: local)")
+    parser.add_argument("--enable", type=str, help="Enable plugin (name, name@marketplace, or name@owner/marketplace)")
+    parser.add_argument("--disable", type=str, help="Disable plugin (name, name@marketplace, or name@owner/marketplace)")
+    parser.add_argument("--scope", choices=["user", "local"], default="user",
+                        help="Target: 'user' = ~/.claude/settings.json (default), 'local' = project .claude/settings.local.json")
     parser.add_argument("--force", "-f", action="store_true", help="Force install despite errors")
     parser.add_argument("--dry-run", "-n", action="store_true", help="Preview without changes")
     parser.add_argument("--quiet", "-q", action="store_true", help="Minimal output")
