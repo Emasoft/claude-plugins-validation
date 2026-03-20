@@ -148,7 +148,7 @@ class TestCanonicalPipelineSkill:
 class TestCommandCount:
     """Verify total command count after consolidation."""
 
-    def test_total_command_count_is_37(self):
-        """commands/ directory should contain exactly 37 .md files after consolidation."""
+    def test_total_command_count_is_38(self):
+        """commands/ directory should contain exactly 38 .md files."""
         md_files = list(COMMANDS_DIR.glob("*.md"))
-        assert len(md_files) == 37, f"Expected 37 commands, found {len(md_files)}: {sorted(f.name for f in md_files)}"
+        assert len(md_files) == 38, f"Expected 38 commands, found {len(md_files)}: {sorted(f.name for f in md_files)}"
