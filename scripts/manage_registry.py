@@ -9,6 +9,7 @@ Lists and searches installed plugins with component detection:
 Usage:
     uv run scripts/manage_registry.py --list
     uv run scripts/manage_registry.py --search <query>
+    uv run scripts/manage_registry.py --marketplace <name|owner/name>
 """
 
 import argparse
@@ -19,6 +20,7 @@ from typing import Dict, Tuple
 
 from cpv_management_common import (
     MARKETPLACES_DIR,
+    SETTINGS_FILE,
     SETTINGS_TARGET,
     INSTALLED_FILE,
     info,
@@ -38,6 +40,7 @@ from manage_plugin import read_plugin_meta
 __all__ = [
     "do_list",
     "do_search",
+    "do_list_marketplace_plugins",
     "_detect_components",
     "_format_components",
     "_COMPONENT_TYPES",
@@ -244,6 +247,165 @@ def do_search(query: str):
     print()
 
 
+# ── List Marketplace Plugins ──────────────────────────────
+
+
+def _resolve_marketplace_name(query: str) -> str:
+    """Resolve a marketplace query to a marketplace directory name.
+
+    Accepts:
+      marketplace-name            → use as-is
+      owner/marketplace-name      → strip owner/ prefix
+    """
+    if "/" in query:
+        return query.split("/", 1)[1]
+    return query
+
+
+def _find_marketplace_json(mp_name: str) -> "Path | None":
+    """Find marketplace.json for a given marketplace name.
+
+    Checks: marketplaces/<name>/.claude-plugin/marketplace.json
+            marketplaces/<name>/marketplace.json
+    """
+    mp_dir = MARKETPLACES_DIR / mp_name
+    if not mp_dir.is_dir():
+        return None
+    for sub in [".claude-plugin/marketplace.json", "marketplace.json"]:
+        candidate = mp_dir / sub
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _get_marketplace_owner(mp_name: str) -> str:
+    """Extract owner from marketplace registration in settings files."""
+    for sf in [SETTINGS_FILE, SETTINGS_TARGET]:
+        if not sf.exists():
+            continue
+        try:
+            data = json.loads(sf.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        entry = data.get("extraKnownMarketplaces", {}).get(mp_name, {})
+        source = entry.get("source", {})
+        src_type = source.get("source", "")
+        if src_type == "github":
+            repo = source.get("repo", "")
+            if "/" in repo:
+                return repo.split("/", 1)[0]
+        elif src_type == "git":
+            url = source.get("url", "")
+            # Extract owner from https://github.com/Owner/repo.git
+            parts = url.replace(".git", "").rstrip("/").split("/")
+            if len(parts) >= 2:
+                return parts[-2]
+        elif src_type == "directory":
+            path = source.get("path", "")
+            # Try to extract owner from path structure
+            if path:
+                return Path(path).parent.name
+    return ""
+
+
+def _load_enabled_plugins() -> "dict[str, dict[str, bool | None]]":
+    """Load enabledPlugins from all settings files.
+
+    Returns {plugin_key: {"user": True/False/None, "local": True/False/None}}.
+    """
+    result: dict[str, dict[str, "bool | None"]] = {}
+
+    # User-level: ~/.claude/settings.json
+    if SETTINGS_FILE.exists():
+        try:
+            data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+            for key, val in data.get("enabledPlugins", {}).items():
+                result.setdefault(key, {"user": None, "local": None})
+                result[key]["user"] = val
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Project-level: .claude/settings.local.json
+    project_settings = Path.cwd() / ".claude" / "settings.local.json"
+    if project_settings.exists():
+        try:
+            data = json.loads(project_settings.read_text(encoding="utf-8"))
+            for key, val in data.get("enabledPlugins", {}).items():
+                result.setdefault(key, {"user": None, "local": None})
+                result[key]["local"] = val
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    return result
+
+
+def do_list_marketplace_plugins(query: str):
+    """List all plugins available in a marketplace with their enabled status."""
+    mp_name = _resolve_marketplace_name(query)
+    mj_path = _find_marketplace_json(mp_name)
+    if not mj_path:
+        err(f"Marketplace '{mp_name}' not found locally.")
+        err(f"Checked: {MARKETPLACES_DIR / mp_name}")
+        err("Is the marketplace registered? Run: /cpv-manage-marketplaces list")
+        sys.exit(1)
+
+    try:
+        mj_data = json.loads(mj_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        err(f"Cannot read {mj_path}: {e}")
+        sys.exit(1)
+
+    mp_display_name = mj_data.get("name", mp_name)
+    mp_version = mj_data.get("version", "?")
+    mp_owner = _get_marketplace_owner(mp_name)
+    plugins = mj_data.get("plugins", [])
+
+    # Load enabled status from all settings files
+    all_enabled = _load_enabled_plugins()
+
+    # Header
+    owner_str = f"{mp_owner}/" if mp_owner else ""
+    print(f"\n{BOLD}Marketplace: {owner_str}{mp_display_name}{NC}  v{mp_version}")
+    print(f"Plugins: {len(plugins)}")
+    print()
+
+    if not plugins:
+        info("No plugins in this marketplace.")
+        return
+
+    # Table header
+    hdr = f"  {'Plugin':<40} {'Version':<10} {'User':<10} {'Local':<10}"
+    print(f"{BOLD}{hdr}{NC}")
+    print(f"  {'─' * 40} {'─' * 10} {'─' * 10} {'─' * 10}")
+
+    for p in sorted(plugins, key=lambda x: x.get("name", "")):
+        name = p.get("name", "?")
+        version = p.get("version", "?")
+        plugin_key = f"{name}@{mp_name}"
+
+        statuses = all_enabled.get(plugin_key, {"user": None, "local": None})
+        user_val = statuses.get("user")
+        local_val = statuses.get("local")
+
+        if user_val is True:
+            user_str = f"{GREEN}enabled{NC}"
+        elif user_val is False:
+            user_str = f"{RED}disabled{NC}"
+        else:
+            user_str = f"{YELLOW}--{NC}"
+
+        if local_val is True:
+            local_str = f"{GREEN}enabled{NC}"
+        elif local_val is False:
+            local_str = f"{RED}disabled{NC}"
+        else:
+            local_str = f"{YELLOW}--{NC}"
+
+        print(f"  {name:<40} {version:<10} {user_str:<21} {local_str:<21}")
+
+    print()
+
+
 # ── Main ──────────────────────────────────────────────────
 
 
@@ -252,12 +414,15 @@ def main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--list", action="store_true", help="List all installed plugins")
     group.add_argument("--search", type=str, help="Search plugins by type or text")
+    group.add_argument("--marketplace", type=str, help="List plugins in a marketplace (name or owner/name)")
     args = parser.parse_args()
 
     if args.list:
         do_list()
     elif args.search:
         do_search(args.search)
+    elif args.marketplace:
+        do_list_marketplace_plugins(args.marketplace)
 
 
 if __name__ == "__main__":
