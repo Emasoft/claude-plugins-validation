@@ -28,7 +28,8 @@ def _parse_frontmatter(path: Path) -> dict | None:
     parts = text.split("---", 2)
     if len(parts) < 3:
         return None
-    return yaml.safe_load(parts[1])
+    result: dict = yaml.safe_load(parts[1])
+    return result
 
 
 class TestNewCommandsExist:
