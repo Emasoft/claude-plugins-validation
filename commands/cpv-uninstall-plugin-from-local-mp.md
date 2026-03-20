@@ -1,6 +1,6 @@
 ---
-name: cpv-uninstall-plugin
-description: Uninstall a Claude Code plugin and clean up settings
+name: cpv-uninstall-plugin-from-local-mp
+description: Uninstall a Claude Code plugin from a local marketplace and clean up settings
 argument-hint: "<plugin-name>@<marketplace-name> [--dry-run]"
 user-invocable: true
 ---

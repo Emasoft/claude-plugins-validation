@@ -90,6 +90,14 @@ class TestObsoleteCommandsRemoved:
         """cpv-create-github-marketplace.md replaced by cpv-create-a-github-marketplace.md."""
         assert not (COMMANDS_DIR / "cpv-create-github-marketplace.md").exists()
 
+    def test_old_install_plugin_removed(self):
+        """cpv-install-plugin.md replaced by cpv-install-plugin-from-local-mp.md."""
+        assert not (COMMANDS_DIR / "cpv-install-plugin.md").exists()
+
+    def test_old_uninstall_plugin_removed(self):
+        """cpv-uninstall-plugin.md replaced by cpv-uninstall-plugin-from-local-mp.md."""
+        assert not (COMMANDS_DIR / "cpv-uninstall-plugin.md").exists()
+
 
 class TestNewCommandFrontmatter:
     """Verify new commands have correct YAML frontmatter fields."""
@@ -129,6 +137,18 @@ class TestNewCommandFrontmatter:
         fm = _parse_frontmatter(COMMANDS_DIR / "cpv-create-a-github-marketplace.md")
         assert fm is not None
         assert fm.get("name") == "cpv-create-a-github-marketplace"
+
+    def test_install_plugin_from_local_mp_has_name_field(self):
+        """cpv-install-plugin-from-local-mp.md frontmatter must have correct name."""
+        fm = _parse_frontmatter(COMMANDS_DIR / "cpv-install-plugin-from-local-mp.md")
+        assert fm is not None
+        assert fm.get("name") == "cpv-install-plugin-from-local-mp"
+
+    def test_uninstall_plugin_from_local_mp_has_name_field(self):
+        """cpv-uninstall-plugin-from-local-mp.md frontmatter must have correct name."""
+        fm = _parse_frontmatter(COMMANDS_DIR / "cpv-uninstall-plugin-from-local-mp.md")
+        assert fm is not None
+        assert fm.get("name") == "cpv-uninstall-plugin-from-local-mp"
 
 
 class TestCanonicalPipelineSkill:

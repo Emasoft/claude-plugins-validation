@@ -72,8 +72,8 @@ claude --plugin-dir ./OUTPUT_SKILLS/claude-plugins-validation
 
 | Command | Description |
 |---------|-------------|
-| `/cpv-install-plugin` | Install a plugin from local directory, archive, or remote marketplace |
-| `/cpv-uninstall-plugin` | Uninstall a plugin and clean up settings |
+| `/cpv-install-plugin-from-local-mp` | Install a plugin from local directory or archive into a local marketplace |
+| `/cpv-uninstall-plugin-from-local-mp` | Uninstall a plugin from a local marketplace and clean up settings |
 | `/cpv-update-plugin` | Update an installed plugin from a new source |
 | `/cpv-enable-plugin` | Enable a disabled plugin |
 | `/cpv-disable-plugin` | Disable a plugin without removing it |

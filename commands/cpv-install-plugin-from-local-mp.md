@@ -1,6 +1,6 @@
 ---
-name: cpv-install-plugin
-description: Install a Claude Code plugin from a local directory, archive, or remote marketplace
+name: cpv-install-plugin-from-local-mp
+description: Install a Claude Code plugin from a local directory or archive into a local marketplace (no GitHub)
 argument-hint: "<source> <marketplace> [--force] [--dry-run] [--scope user|project|local]"
 user-invocable: true
 ---
