@@ -281,7 +281,7 @@ uv run python scripts/publish.py --minor    # 1.0.0 → 1.1.0
 ├── hooks/                   # Hook configurations
 ├── scripts/                 # Python scripts (pipeline, validators)
 ├── tests/                   # Test suite
-├── .githooks/pre-push       # Quality gate (lint + validate + test)
+├── git-hooks/pre-push       # Quality gate (thin delegator to publish.py --gate)
 ├── .github/workflows/       # CI/CD (ci, release, validate, notify)
 ├── cliff.toml               # git-cliff changelog config
 ├── pyproject.toml           # Project configuration

@@ -23,7 +23,7 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/generate_plugin_repo.py" <target-dir> \
   [--dry-run]
 ```
 
-Generated files: plugin.json, pyproject.toml, .python-version, .gitignore, README.md (with badge markers), LICENSE, cliff.toml, scripts/publish.py, scripts/setup_git_hooks.py, .githooks/pre-push, .github/workflows/{ci,release,validate,notify-marketplace}.yml, empty commands/agents/skills/tests/ directories.
+Generated files: plugin.json, pyproject.toml, .python-version, .gitignore, README.md (with badge markers), LICENSE, cliff.toml, scripts/publish.py (with --gate/--install-hook modes), scripts/setup-hooks.py, git-hooks/pre-push (thin bash delegator), .github/workflows/{ci,release,validate,notify-marketplace}.yml, empty commands/agents/skills/tests/ directories.
 
 ## Create a Marketplace Hub
 

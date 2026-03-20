@@ -121,6 +121,12 @@ These errors were made in real publish runs. Do NOT repeat them:
 11. **Always run local dry-run BEFORE the first push**: `uv run python scripts/publish.py --gate` and `uv run python scripts/publish.py --patch --dry-run`. This catches template bugs, missing deps, import errors.
 12. **Always verify CI AFTER the first push**: `sleep 30 && gh run list --repo <owner>/<name> --limit 5`. If any workflow failed, fix and push again. Never leave failing CI as the final state.
 13. **Checkov check IDs use `CKV2_` prefix** for GitHub Actions checks (not `CKV_`). The correct skip is `--skip-check CKV2_GHA_1`.
+14. **pytest exit code 5 = no tests collected** — this is OK for fresh plugins. The template's `stage_tests()` handles this. Don't panic on exit 5.
+15. **`__init__.py` files do NOT need shebangs** — the validator now excludes them. If you see a shebang warning for `__init__.py`, it's a stale CPV version.
+16. **Marketplace plugin entries MUST include `repository` field** — `"repository": "https://github.com/owner/repo"`. Without it, `validate_marketplace.py` reports MAJOR.
+17. **`validate_marketplace.py` accepts both paths** — `marketplace.json` at root OR in `.claude-plugin/`. Pass the repo root directory, not the file.
+18. **Set `git config user.name/email` before committing** in temp directories (`/tmp/marketplace-update`, `/tmp/marketplace-scaffold`). Without it, git may refuse to commit in clean environments.
+19. **Marketplace README needs Uninstall + Troubleshooting sections** — the marketplace validator blocks on missing sections. The generator now includes them.
 
 ## TOKEN OPTIMIZATION
 Use `mcp__plugin_llm-externalizer_llm-externalizer__*` tools for bounded tasks. Always pass file paths via `input_files_paths`.

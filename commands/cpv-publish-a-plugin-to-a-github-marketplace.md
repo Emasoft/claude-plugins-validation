@@ -34,7 +34,7 @@ Extract plugin name, version, and description from plugin.json.
 ```bash
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_github_validate.py" --plugin <owner/plugin-repo>
 ```
-If CRITICAL/MAJOR issues found, report and ask user to fix first.
+If CRITICAL/MAJOR issues found, BLOCK and ask user to fix first. If MINOR/NIT issues found, WARN the user — these will block the pre-push hook on the plugin repo.
 
 ### Phase 3: Determine the marketplace
 If --marketplace not provided, ask the user. Verify the marketplace exists:
@@ -66,7 +66,8 @@ Read `/tmp/marketplace-update/.claude-plugin/marketplace.json`. Add or update th
   "name": "<plugin-name>",
   "description": "<plugin-description>",
   "version": "<plugin-version>",
-  "source": {"source": "github", "repo": "<owner/plugin-repo>"}
+  "source": {"source": "github", "repo": "<owner/plugin-repo>"},
+  "repository": "https://github.com/<owner/plugin-repo>"
 }
 ```
 
@@ -80,12 +81,14 @@ uv run python scripts/update_catalog.py 2>/dev/null || true
 
 ### Phase 7: Validate marketplace
 ```bash
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/validate_marketplace.py" /tmp/marketplace-update --verbose
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_marketplace.py" /tmp/marketplace-update --verbose 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
 ```
 
 ### Phase 8: Commit and push marketplace changes
 ```bash
 cd /tmp/marketplace-update
+git config user.name "$(gh api user -q .login)"
+git config user.email "$(gh api user -q '.id')"+$(gh api user -q .login)@users.noreply.github.com"
 git add -A
 git commit -m "feat: add <plugin-name> v<version>"
 git push origin main
@@ -97,16 +100,17 @@ Check if the plugin repo has notify-marketplace.yml:
 gh api repos/<owner/plugin-repo>/contents/.github/workflows/notify-marketplace.yml 2>/dev/null
 ```
 If not present:
-1. Ask user for a PAT with `repo` scope
-2. `gh secret set MARKETPLACE_PAT --repo <owner/plugin-repo>`
-3. Add notify-marketplace.yml to the plugin repo (if user approves)
+1. Check if PAT is already set: `test -n "$MARKETPLACE_PAT" && echo "PAT found" || echo "PAT not set"`
+2. If not set, ask user for a PAT with `repo` scope
+3. `gh secret set MARKETPLACE_PAT --repo <owner/plugin-repo> --body "$MARKETPLACE_PAT"` (MUST use `--body` flag)
+4. Add notify-marketplace.yml to the plugin repo (if user approves)
 
 ### Phase 10: Report results
 
 ## Checklist
 
 - [ ] Plugin repo verified (exists, has plugin.json)
-- [ ] Plugin validated remotely (no CRITICAL/MAJOR)
+- [ ] Plugin validated remotely (no CRITICAL/MAJOR; MINORs warned)
 - [ ] Marketplace repo verified
 - [ ] Owner match confirmed (plugin owner == marketplace owner)
 - [ ] Plugin entry added to marketplace.json (GitHub source only)

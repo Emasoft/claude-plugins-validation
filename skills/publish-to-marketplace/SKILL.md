@@ -9,7 +9,7 @@ tags:
   - ci-cd
   - plugin
 allowed-tools: Read, Bash(git:*,gh:*,uv:*), Write, Edit, Glob, Grep, AskUserQuestion
-agent: plugin-validator
+agent: plugin-creator
 context: fork
 user-invocable: false
 ---
@@ -24,7 +24,7 @@ Publishes a validated Claude Code plugin to a GitHub-hosted marketplace repo. Co
 
 - Plugin repo with valid `.claude-plugin/plugin.json` (name, version, description)
 - `gh` CLI authenticated (`gh auth status`)
-- Marketplace repo exists with `marketplace.json` (see `setup-github-marketplace` skill)
+- Marketplace repo exists with `marketplace.json` (see `canonical-pipeline` skill or `/cpv-create-a-github-marketplace`)
 - `uv` on PATH, plugin has `pyproject.toml`
 
 ## Instructions
@@ -36,7 +36,7 @@ Ask the user for their marketplace repo coordinates (`<owner>/<marketplace-repo>
 ### Phase 1: Configure Notification Pipeline
 
 1. **Create PAT**: Ask user for a GitHub PAT with `repo` scope (or fine-grained with Contents R/W on marketplace repo). See publish-pipeline-guide (Resources) Section 1
-2. **Set secret**: `gh secret set MARKETPLACE_PAT --repo <owner>/<plugin-repo>`
+2. **Set secret**: `gh secret set MARKETPLACE_PAT --repo <owner>/<plugin-repo> --body "$MARKETPLACE_PAT"` (MUST use `--body` flag)
 3. **Install notify-marketplace.yml**: Copy from publish-pipeline-guide (Resources) Section 2 into `.github/workflows/`. Fill `MARKETPLACE_OWNER` and `MARKETPLACE_REPO`
 4. **Verify CI workflows**: Ensure `ci.yml`, `validate.yml`, `release.yml` exist (from `setup-plugin-repo` skill)
 
@@ -87,8 +87,9 @@ Report: plugin name, old/new version, push status, marketplace dispatch status (
 
 - [Publish Pipeline Guide](references/publish-pipeline-guide.md)
   > Section 1: PAT Setup · Section 2: notify-marketplace.yml · Section 3: The Dispatch Chain · Section 4: publish.py Pipeline · Section 5: Pre-Push Hook Gates · Section 6: marketplace.json Entry Format · Section 7: Troubleshooting
-- `setup-plugin-repo` skill — publish.py, pre-push hook, CI workflows
-- `setup-github-marketplace` skill — marketplace repo, sync workflows
+- `canonical-pipeline` skill — publish.py (--gate/--install-hook/--patch), pre-push hook, CI workflows
+- `/cpv-create-a-github-marketplace` — marketplace repo creation
+- `/cpv-publish-a-plugin-to-a-github-marketplace` — marketplace publishing
 
 ## Token Optimization
 

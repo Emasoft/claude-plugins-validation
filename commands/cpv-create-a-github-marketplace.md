@@ -42,7 +42,10 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/generate_marketplace_repo.py" /tmp/marketp
 ### Phase 3: Create GitHub repository
 ```bash
 cd /tmp/marketplace-scaffold
-git init && git add -A && git commit -m "Initial marketplace scaffold"
+git init
+git config user.name "<owner>"
+git config user.email "<nnn>+<owner>@users.noreply.github.com"
+git add -A && git commit -m "Initial marketplace scaffold"
 gh repo create <owner>/<marketplace-name> --public --source . --push
 ```
 
@@ -71,7 +74,8 @@ The marketplace is a **hub with pointers**, NOT a monorepo:
     {
       "name": "my-plugin",
       "description": "A plugin",
-      "source": {"source": "github", "repo": "<owner>/my-plugin"}
+      "source": {"source": "github", "repo": "<owner>/my-plugin"},
+      "repository": "https://github.com/<owner>/my-plugin"
     }
   ]
 }
@@ -100,7 +104,7 @@ The marketplace is a **hub with pointers**, NOT a monorepo:
 | `.github/workflows/validate.yml` | Marketplace validation CI |
 | `.github/workflows/update-catalog.yml` | Auto-update README on marketplace.json changes |
 | `scripts/update_catalog.py` | Regenerate README from marketplace.json |
-| `.githooks/pre-push` | Pre-push quality gate |
+| `git-hooks/pre-push` | Pre-push quality gate (thin bash delegator to publish.py --gate) |
 | `cliff.toml` | Changelog configuration |
 
 ## Error Handling
