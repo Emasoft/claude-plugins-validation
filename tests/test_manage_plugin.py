@@ -722,7 +722,6 @@ class TestDoEnable:
         settings = {"enabledPlugins": {"my-plugin@market": False}}
         settings_file.write_text(json.dumps(settings), encoding="utf-8")
         monkeypatch.setattr(mp, "MARKETPLACES_DIR", mp_dir)
-        monkeypatch.setattr(mp, "SETTINGS_FILE", settings_file)
         monkeypatch.setattr(mp, "SETTINGS_TARGET", settings_file)
         return settings_file
 
@@ -740,7 +739,6 @@ class TestDoEnable:
         settings_file = tmp_path / "settings.local.json"
         settings_file.write_text("{}", encoding="utf-8")
         monkeypatch.setattr(mp, "MARKETPLACES_DIR", mp_dir)
-        monkeypatch.setattr(mp, "SETTINGS_FILE", settings_file)
         monkeypatch.setattr(mp, "SETTINGS_TARGET", settings_file)
         with pytest.raises(SystemExit):
             mp.do_enable("nope", quiet=True)
@@ -770,7 +768,6 @@ class TestDoDisable:
         settings = {"enabledPlugins": {"my-plugin@market": True}}
         settings_file.write_text(json.dumps(settings), encoding="utf-8")
         monkeypatch.setattr(mp, "MARKETPLACES_DIR", mp_dir)
-        monkeypatch.setattr(mp, "SETTINGS_FILE", settings_file)
         monkeypatch.setattr(mp, "SETTINGS_TARGET", settings_file)
         return settings_file
 
@@ -887,36 +884,6 @@ class TestDoUpdate:
         assert meta["version"] == "1.0.0"
 
 
-# ── Tests: _resolve_settings_file ────────────────────────────
-
-
-class TestResolveSettingsFile:
-    """Tests for _resolve_settings_file -- scope-based settings file resolution."""
-
-    def test_scope_user_returns_settings_target(self, tmp_path, monkeypatch):
-        """scope='user' returns SETTINGS_TARGET (~/.claude/settings.json)."""
-        fake_settings = tmp_path / "settings.json"
-        monkeypatch.setattr(mp, "SETTINGS_TARGET", fake_settings)
-        result = mp._resolve_settings_file("user")
-        assert result == fake_settings
-
-    def test_scope_local_returns_project_settings(self, tmp_path, monkeypatch):
-        """scope='local' returns project .claude/settings.local.json based on cwd."""
-        monkeypatch.chdir(tmp_path)
-        result = mp._resolve_settings_file("local")
-        expected = tmp_path / ".claude" / "settings.local.json"
-        assert result == expected
-
-    def test_scope_default_returns_settings_target(self, tmp_path, monkeypatch):
-        """Default scope returns SETTINGS_TARGET (same as user)."""
-        fake_target = tmp_path / "settings.json"
-        monkeypatch.setattr(mp, "SETTINGS_TARGET", fake_target)
-        result = mp._resolve_settings_file("user")
-        assert result == fake_target
-        result2 = mp._resolve_settings_file("")
-        assert result2 == fake_target
-
-
 # ── Tests: _collect_all_plugin_keys ──────────────────────────
 
 
@@ -927,7 +894,7 @@ class TestCollectAllPluginKeys:
         """Keys from SETTINGS_TARGET (~/.claude/settings.json) are collected."""
         sf = tmp_path / "settings.json"
         sf.write_text(json.dumps({"enabledPlugins": {"plugA@market1": True}}), encoding="utf-8")
-        monkeypatch.setattr(mp, "SETTINGS_FILE", sf)
+        monkeypatch.setattr(mp, "SETTINGS_TARGET", sf)
         monkeypatch.setattr(mp, "SETTINGS_TARGET", sf)
         monkeypatch.chdir(tmp_path)
         result = mp._collect_all_plugin_keys()
@@ -936,24 +903,11 @@ class TestCollectAllPluginKeys:
 
     def test_does_not_collect_from_nonexistent_settings(self, tmp_path, monkeypatch):
         """Missing SETTINGS_TARGET file returns empty dict (no crash)."""
-        monkeypatch.setattr(mp, "SETTINGS_FILE", tmp_path / "nope.json")
         monkeypatch.setattr(mp, "SETTINGS_TARGET", tmp_path / "nope.json")
         monkeypatch.chdir(tmp_path)
         result = mp._collect_all_plugin_keys()
         assert result == {}
 
-    def test_collects_keys_from_project_settings(self, tmp_path, monkeypatch):
-        """Keys from project .claude/settings.local.json are collected when file exists."""
-        proj_claude = tmp_path / ".claude"
-        proj_claude.mkdir()
-        proj_settings = proj_claude / "settings.local.json"
-        proj_settings.write_text(json.dumps({"enabledPlugins": {"plugC@market3": True}}), encoding="utf-8")
-        monkeypatch.setattr(mp, "SETTINGS_FILE", tmp_path / "nonexistent1.json")
-        monkeypatch.setattr(mp, "SETTINGS_TARGET", tmp_path / "nonexistent2.json")
-        monkeypatch.chdir(tmp_path)
-        result = mp._collect_all_plugin_keys()
-        assert "plugC@market3" in result
-        assert str(proj_settings) in result["plugC@market3"]
 
 
 # ── Tests: _resolve_plugin_key ───────────────────────────────
@@ -966,7 +920,7 @@ class TestResolvePluginKey:
         """Create settings.json with given enabledPlugins and patch module."""
         sf = tmp_path / "settings.json"
         sf.write_text(json.dumps({"enabledPlugins": keys_map}), encoding="utf-8")
-        monkeypatch.setattr(mp, "SETTINGS_FILE", sf)
+        monkeypatch.setattr(mp, "SETTINGS_TARGET", sf)
         monkeypatch.setattr(mp, "SETTINGS_TARGET", sf)
         monkeypatch.setattr(mp, "MARKETPLACES_DIR", tmp_path / "marketplaces")
         monkeypatch.chdir(tmp_path)
@@ -1003,7 +957,7 @@ class TestResolvePluginKey:
         """Bare name found in marketplace plugins dir but not in settings resolves correctly."""
         sf = tmp_path / "settings.json"
         sf.write_text(json.dumps({"enabledPlugins": {}}), encoding="utf-8")
-        monkeypatch.setattr(mp, "SETTINGS_FILE", sf)
+        monkeypatch.setattr(mp, "SETTINGS_TARGET", sf)
         monkeypatch.setattr(mp, "SETTINGS_TARGET", sf)
         mp_dir = tmp_path / "marketplaces"
         plug_dir = mp_dir / "local-market" / "plugins" / "disk-plugin"
@@ -1024,7 +978,7 @@ class TestVerifyPluginInstalled:
         """Plugin key found in settings enabledPlugins returns True."""
         sf = tmp_path / "settings.json"
         sf.write_text(json.dumps({"enabledPlugins": {"my-plug@market": True}}), encoding="utf-8")
-        monkeypatch.setattr(mp, "SETTINGS_FILE", sf)
+        monkeypatch.setattr(mp, "SETTINGS_TARGET", sf)
         monkeypatch.setattr(mp, "SETTINGS_TARGET", sf)
         monkeypatch.setattr(mp, "MARKETPLACES_DIR", tmp_path / "marketplaces")
         monkeypatch.chdir(tmp_path)
@@ -1034,7 +988,7 @@ class TestVerifyPluginInstalled:
         """Plugin key found in marketplace plugins dir on disk returns True."""
         sf = tmp_path / "settings.json"
         sf.write_text(json.dumps({}), encoding="utf-8")
-        monkeypatch.setattr(mp, "SETTINGS_FILE", sf)
+        monkeypatch.setattr(mp, "SETTINGS_TARGET", sf)
         monkeypatch.setattr(mp, "SETTINGS_TARGET", sf)
         mp_dir = tmp_path / "marketplaces"
         plug_dir = mp_dir / "market" / "plugins" / "disk-only"
@@ -1047,7 +1001,7 @@ class TestVerifyPluginInstalled:
         """Plugin key not in settings and not on disk returns False."""
         sf = tmp_path / "settings.json"
         sf.write_text(json.dumps({}), encoding="utf-8")
-        monkeypatch.setattr(mp, "SETTINGS_FILE", sf)
+        monkeypatch.setattr(mp, "SETTINGS_TARGET", sf)
         monkeypatch.setattr(mp, "SETTINGS_TARGET", sf)
         mp_dir = tmp_path / "marketplaces"
         mp_dir.mkdir()
@@ -1056,82 +1010,3 @@ class TestVerifyPluginInstalled:
         assert mp._verify_plugin_installed("ghost@nowhere") is False
 
 
-# ── Tests: do_enable with scope="local" cascading ────────────
-
-
-class TestDoEnableLocalScope:
-    """Tests for do_enable with scope='local' -- project-level enable with cascading."""
-
-    def _setup_local_enable(self, tmp_path, monkeypatch):
-        """Set up environment for local-scope enable tests."""
-        mp_dir = tmp_path / "marketplaces"
-        plug_dir = mp_dir / "market" / "plugins" / "my-plugin"
-        plug_dir.mkdir(parents=True)
-        # User-level settings with plugin enabled
-        user_settings = tmp_path / "settings.json"
-        user_settings.write_text(json.dumps({"enabledPlugins": {"my-plugin@market": True}}), encoding="utf-8")
-        # User local settings (SETTINGS_TARGET) -- empty
-        user_local = tmp_path / "settings.local.json"
-        user_local.write_text(json.dumps({}), encoding="utf-8")
-        monkeypatch.setattr(mp, "MARKETPLACES_DIR", mp_dir)
-        monkeypatch.setattr(mp, "SETTINGS_FILE", user_settings)
-        monkeypatch.setattr(mp, "SETTINGS_TARGET", user_local)
-        # Project dir
-        proj_dir = tmp_path / "project"
-        proj_dir.mkdir()
-        monkeypatch.chdir(proj_dir)
-        return user_settings, proj_dir
-
-    def test_enable_local_cascades_disables_user_level(self, tmp_path, monkeypatch):
-        """Enabling at local scope writes project settings AND disables at user level."""
-        user_settings, proj_dir = self._setup_local_enable(tmp_path, monkeypatch)
-        mp.do_enable("my-plugin@market", quiet=True, scope="local")
-        # Project settings created and plugin enabled
-        proj_settings = proj_dir / ".claude" / "settings.local.json"
-        assert proj_settings.exists()
-        proj_data = json.loads(proj_settings.read_text(encoding="utf-8"))
-        assert proj_data["enabledPlugins"]["my-plugin@market"] is True
-        # User level cascaded to disabled
-        user_data = json.loads(user_settings.read_text(encoding="utf-8"))
-        assert user_data["enabledPlugins"]["my-plugin@market"] is False
-
-    def test_enable_local_dry_run_shows_cascading_no_write(self, tmp_path, monkeypatch):
-        """Dry run with local scope does not write any files."""
-        user_settings, proj_dir = self._setup_local_enable(tmp_path, monkeypatch)
-        mp.do_enable("my-plugin@market", quiet=False, dry_run=True, scope="local")
-        # Project settings NOT created
-        proj_settings = proj_dir / ".claude" / "settings.local.json"
-        assert not proj_settings.exists()
-        # User level NOT changed
-        user_data = json.loads(user_settings.read_text(encoding="utf-8"))
-        assert user_data["enabledPlugins"]["my-plugin@market"] is True
-
-
-# ── Tests: do_disable with scope="local" ─────────────────────
-
-
-class TestDoDisableLocalScope:
-    """Tests for do_disable with scope='local' -- project-level disable."""
-
-    def test_disable_local_writes_project_settings(self, tmp_path, monkeypatch):
-        """Disabling at local scope writes False to project settings file."""
-        mp_dir = tmp_path / "marketplaces"
-        plug_dir = mp_dir / "market" / "plugins" / "my-plugin"
-        plug_dir.mkdir(parents=True)
-        # User-level settings with plugin enabled
-        user_settings = tmp_path / "settings.json"
-        user_settings.write_text(json.dumps({"enabledPlugins": {"my-plugin@market": True}}), encoding="utf-8")
-        user_local = tmp_path / "settings.local.json"
-        user_local.write_text(json.dumps({}), encoding="utf-8")
-        monkeypatch.setattr(mp, "MARKETPLACES_DIR", mp_dir)
-        monkeypatch.setattr(mp, "SETTINGS_FILE", user_settings)
-        monkeypatch.setattr(mp, "SETTINGS_TARGET", user_local)
-        proj_dir = tmp_path / "project"
-        proj_dir.mkdir()
-        monkeypatch.chdir(proj_dir)
-        mp.do_disable("my-plugin@market", quiet=True, scope="local")
-        # Project settings created with plugin disabled
-        proj_settings = proj_dir / ".claude" / "settings.local.json"
-        assert proj_settings.exists()
-        proj_data = json.loads(proj_settings.read_text(encoding="utf-8"))
-        assert proj_data["enabledPlugins"]["my-plugin@market"] is False
