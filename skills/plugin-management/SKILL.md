@@ -1,5 +1,5 @@
 ---
-name: cpm-plugin-management
+name: plugin-management
 description: >
   Install, validate, audit, and manage Claude Code plugins from local sources or GitHub
   marketplaces. Triggers when user mentions installing plugins, validating plugins, security
@@ -112,6 +112,17 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/bump_version.py" --set 2.0.0
 ```
 
 Updates plugin.json + pyproject.toml.
+
+## Creation & Publishing (used by plugin-creator agent)
+
+```bash
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/generate_plugin_repo.py" <target> --name <n> --description <d> --author <a> --author-email <e> --github-owner <o>
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/generate_marketplace_repo.py" <target> --name <n> --owner-name <o> --github-owner <o> [--add-plugin owner/repo]
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" <path> --fix [--marketplace owner/repo]
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_marketplace.py" <path> --fix
+```
+
+Related commands: `/cpv-create-local-plugin`, `/cpv-create-local-marketplace`, `/cpv-publish-a-plugin-as-github-repo`, `/cpv-create-a-github-marketplace`, `/cpv-publish-a-plugin-to-a-github-marketplace`, `/cpv-standardize`.
 
 ## Flags
 

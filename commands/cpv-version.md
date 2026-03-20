@@ -1,5 +1,8 @@
 ---
+name: cpv-version
 description: Show the CPV management tools version
+agent: plugin-manager
+user-invocable: true
 ---
 
 Show the management CLI version:

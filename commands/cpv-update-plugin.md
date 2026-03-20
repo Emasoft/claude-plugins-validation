@@ -1,5 +1,8 @@
 ---
+name: cpv-update-plugin
 description: Update an installed Claude Code plugin from a new source
+agent: plugin-manager
+user-invocable: true
 ---
 
 Update a plugin by uninstalling the old version and reinstalling from a new source:
