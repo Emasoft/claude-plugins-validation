@@ -78,6 +78,7 @@ claude --plugin-dir ./OUTPUT_SKILLS/claude-plugins-validation
 | `/cpv-enable-plugin` | Enable a disabled plugin |
 | `/cpv-disable-plugin` | Disable a plugin without removing it |
 | `/cpv-list-plugins` | List all installed plugins with version, status, components |
+| `/cpv-list-mp-plugins` | List all plugins in a marketplace with version and enabled status |
 | `/cpv-search-plugins` | Search plugins by component type or text |
 | `/cpv-doctor` | Health-check all plugins, settings, and marketplaces |
 | `/cpv-manage-marketplaces` | Add, remove, list, or update GitHub marketplaces |
@@ -339,7 +340,7 @@ claude-plugins-validation/
 │   ├── cpv-semantic-validation.md
 │   ├── cpv-standardize.md
 │   ├── cpv-validate-*.md (14 validators)
-│   └── ... (37 commands total)
+│   └── ... (38 commands total)
 ├── git-hooks/
 │   ├── pre-commit                   # Pre-commit validation hook
 │   └── pre-push                     # Pre-push validation hook

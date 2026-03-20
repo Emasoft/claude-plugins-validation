@@ -88,7 +88,7 @@ uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_marketplace.
 ```bash
 cd /tmp/marketplace-update
 git config user.name "$(gh api user -q .login)"
-git config user.email "$(gh api user -q '.id')"+$(gh api user -q .login)@users.noreply.github.com"
+git config user.email "$(gh api user -q '.id')+$(gh api user -q '.login')@users.noreply.github.com"
 git add -A
 git commit -m "feat: add <plugin-name> v<version>"
 git push origin main
