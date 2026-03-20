@@ -19,7 +19,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from cpv_management_common import ok, info, warn, err
+from cpv_management_common import err, info, ok, warn
 from manage_marketplace import _normalize_github_source
 
 __all__ = [

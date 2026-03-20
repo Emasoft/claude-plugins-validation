@@ -19,17 +19,17 @@ from pathlib import Path
 from typing import Dict, Tuple
 
 from cpv_management_common import (
+    BOLD,
+    CYAN,
+    GREEN,
     MARKETPLACES_DIR,
+    NC,
+    RED,
     SETTINGS_FILE,
     SETTINGS_TARGET,
-    info,
-    err,
-    BOLD,
-    NC,
-    GREEN,
     YELLOW,
-    CYAN,
-    RED,
+    err,
+    info,
 )
 from manage_plugin import read_plugin_meta
 
@@ -292,13 +292,13 @@ def _get_marketplace_owner(mp_name: str) -> str:
         if src_type == "github":
             repo = source.get("repo", "")
             if "/" in repo:
-                return repo.split("/", 1)[0]
+                return str(repo.split("/", 1)[0])
         elif src_type == "git":
             url = source.get("url", "")
             # Extract owner from https://github.com/Owner/repo.git
             parts = url.replace(".git", "").rstrip("/").split("/")
             if len(parts) >= 2:
-                return parts[-2]
+                return str(parts[-2])
         elif src_type == "directory":
             path = source.get("path", "")
             # Try to extract owner from path structure

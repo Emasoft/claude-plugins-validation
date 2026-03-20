@@ -12,8 +12,6 @@ Usage:
 
 from __future__ import annotations
 
-from __future__ import annotations
-
 import argparse
 import json
 import os
@@ -363,7 +361,8 @@ def _read_plugin_json(plugin_path: Path) -> dict:
     manifest_path = plugin_path / ".claude-plugin" / "plugin.json"
     if not manifest_path.exists():
         return {}
-    return json.loads(manifest_path.read_text(encoding="utf-8"))
+    result: dict = json.loads(manifest_path.read_text(encoding="utf-8"))
+    return result
 
 
 def _params_from_manifest(manifest: dict) -> PluginParams:
@@ -398,7 +397,7 @@ def _params_from_manifest(manifest: dict) -> PluginParams:
 
 def _guess_github_owner(manifest: dict) -> str:
     """Extract github owner from repository URL in manifest."""
-    repo_url = manifest.get("repository", "") or manifest.get("homepage", "")
+    repo_url: str = manifest.get("repository", "") or manifest.get("homepage", "")
     if not repo_url:
         return ""
     # Parse github.com/<owner>/<repo> pattern
