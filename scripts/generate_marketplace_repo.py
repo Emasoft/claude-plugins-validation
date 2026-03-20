@@ -314,7 +314,8 @@ jobs:
 
 def _update_catalog_workflow(name: str) -> str:
     """Generate .github/workflows/update-catalog.yml to regenerate README."""
-    return f"""name: Update Catalog
+    _ = name  # unused but kept for consistent signature
+    return """name: Update Catalog
 
 on:
   push:
@@ -336,7 +337,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          token: ${{{{ secrets.GITHUB_TOKEN }}}}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
