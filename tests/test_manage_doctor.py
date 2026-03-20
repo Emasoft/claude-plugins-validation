@@ -85,7 +85,8 @@ def _patch_paths(monkeypatch, claude_dir: Path):
         mod = sys.modules.get(mod_name)
         if mod:
             monkeypatch.setattr(mod, "CLAUDE_DIR", claude_dir)
-            monkeypatch.setattr(mod, "PLUGINS_DIR", plugins_dir)
+            if hasattr(mod, "PLUGINS_DIR"):
+                monkeypatch.setattr(mod, "PLUGINS_DIR", plugins_dir)
             monkeypatch.setattr(mod, "MARKETPLACES_DIR", marketplaces_dir)
             monkeypatch.setattr(mod, "CACHE_DIR", cache_dir)
             monkeypatch.setattr(mod, "SETTINGS_FILE", settings_file)
