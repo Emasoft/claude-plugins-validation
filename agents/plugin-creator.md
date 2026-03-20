@@ -66,67 +66,28 @@ The pre-push hook runs `--strict` and blocks on CRITICAL, MAJOR, MINOR, and NIT.
     - **New**: Run `/cpv-create-a-github-marketplace <owner>/<name>`, then publish to it
     - **Skip**: Report results and finish
 
-## Workflow: Create GitHub Marketplace (/cpv-create-a-github-marketplace)
+## Other Workflows
 
-1. Parse `<owner/marketplace-name>`, validate (kebab-case, not reserved)
-2. Generate scaffold: `generate_marketplace_repo.py /tmp/scaffold --name <name> --github-owner <owner>`
-3. Git init + commit
-4. Create GitHub repo: `gh repo create <owner>/<name> --public --source . --push`
-5. Validate marketplace: `validate_marketplace.py /tmp/scaffold --verbose`
-6. Verify each linked plugin (if --add-plugin provided): exists, correct owner, has plugin.json
+For **Create GitHub Marketplace**, **Publish Plugin to Marketplace**, and **New Plugin (local only)** — see the corresponding command files:
+- `/cpv-create-a-github-marketplace`
+- `/cpv-publish-a-plugin-to-a-github-marketplace`
+- `/cpv-create-local-plugin`
 
-## Workflow: Publish Plugin to Marketplace (/cpv-publish-a-plugin-to-a-github-marketplace)
-
-1. Verify plugin repo: `gh repo view <owner/plugin> --json name,owner`
-2. Validate plugin remotely: `manage_github_validate.py --plugin <owner/plugin>`
-3. **Owner verification (SECURITY)**: plugin owner MUST match marketplace owner
-4. Clone marketplace: `gh repo clone <owner/marketplace> /tmp/mkt-update -- --depth 1`
-5. Add plugin entry to marketplace.json (GitHub source only, NEVER local paths)
-6. Update README catalog: run `update_catalog.py` from the cloned marketplace repo (if it exists)
-7. Validate marketplace: `validate_marketplace.py /tmp/mkt-update --verbose`
-8. Commit + push: `git commit -m "feat: add <plugin> v<version>" && git push`
-9. Configure notification workflow on plugin repo (optional)
-
-## Workflow: New Plugin (local only)
-
-1. Ask user for: plugin name, description, author, license, GitHub owner, marketplace name
-2. Run `generate_plugin_repo.py` with collected params
-3. Run `validate_plugin.py` on the result — it MUST pass
-4. Suggest next steps: git init, gh repo create, /cpv-publish-a-plugin-as-github-repo
+For enable/disable with scope, marketplace listing, and all management operations — see the **plugin-management** skill.
 
 ## CRITICAL: Marketplace Architecture
 
-**Marketplaces are HUBS ONLY.** They contain plugin metadata and pointers to external GitHub repos. NEVER put plugin code inside a marketplace repo. Each plugin must have its own GitHub repo for:
-- Discoverability via GitHub search
-- Independent issue tracking and PRs
-- Independent release cycles
-- Independent CI/CD
+**Marketplaces are HUBS ONLY.** Plugin sources in marketplace.json MUST use: `{"source": "github", "repo": "owner/repo-name"}`. NEVER use local paths. Each plugin must have its own GitHub repo.
 
-Plugin sources in marketplace.json MUST use: `{"source": "github", "repo": "owner/repo-name"}`
+## HARD-WON LESSONS
 
-## HARD-WON LESSONS (from post-mortems)
-
-These errors were made in real publish runs. Do NOT repeat them:
-
-1. **Always `uv run --with pyyaml python`** when running CPV scripts (validate_plugin.py, standardize_plugin.py) from outside the CPV project. Without `--with pyyaml`, you get `ModuleNotFoundError: No module named 'yaml'`.
-2. **Always `--body` flag for `gh secret set`**. Piping via `echo | gh secret set` does NOT work reliably. Use: `gh secret set NAME --repo owner/repo --body "$VALUE"`
-3. **Always update notify-marketplace.yml** after standardize generates it. The MARKETPLACE_OWNER and MARKETPLACE_REPO env vars are placeholders that MUST be replaced with the actual marketplace owner and repo name.
-4. **Check `$MARKETPLACE_PAT` env var** before asking the user for it. Run `test -n "$MARKETPLACE_PAT"` first.
-5. **Strip ANSI codes** when processing validation output: `| sed 's/\x1b\[[0-9;]*m//g'`
-6. **Use `grep -oE` not `grep -oP`** — macOS grep does not support Perl regex (`-P`).
-7. **standardize_plugin.py exit code 1 is expected** after `--fix` if warnings remain. Only CRITICAL/MAJOR matter for proceed/abort decisions.
-8. **Check `author.email`** in plugin.json — suggest GitHub noreply format if missing.
-9. **CI workflows need `uv sync --extra dev`** not just `uv sync`. Without `--extra dev`, ruff/pytest/mypy/pyyaml are NOT installed and ALL CI runs fail.
-10. **Update notify-marketplace.yml BEFORE the first push**. The standardize script creates it with placeholders. If you push first, the marketplace notification fails silently with old values. Use `--marketplace` flag with standardize to auto-fill.
-11. **Always run local dry-run BEFORE the first push**: `uv run python scripts/publish.py --gate` and `uv run python scripts/publish.py --patch --dry-run`. This catches template bugs, missing deps, import errors.
-12. **Always verify CI AFTER the first push**: `sleep 30 && gh run list --repo <owner>/<name> --limit 5`. If any workflow failed, fix and push again. Never leave failing CI as the final state.
-13. **Checkov check IDs use `CKV2_` prefix** for GitHub Actions checks (not `CKV_`). The correct skip is `--skip-check CKV2_GHA_1`.
-14. **pytest exit code 5 = no tests collected** — this is OK for fresh plugins. The template's `stage_tests()` handles this. Don't panic on exit 5.
-15. **`__init__.py` files do NOT need shebangs** — the validator now excludes them. If you see a shebang warning for `__init__.py`, it's a stale CPV version.
-16. **Marketplace plugin entries MUST include `repository` field** — `"repository": "https://github.com/owner/repo"`. Without it, `validate_marketplace.py` reports MAJOR.
-17. **`validate_marketplace.py` accepts both paths** — `marketplace.json` at root OR in `.claude-plugin/`. Pass the repo root directory, not the file.
-18. **Set `git config user.name/email` before committing** in temp directories (`/tmp/marketplace-update`, `/tmp/marketplace-scaffold`). Without it, git may refuse to commit in clean environments.
-19. **Marketplace README needs Uninstall + Troubleshooting sections** — the marketplace validator blocks on missing sections. The generator now includes them.
+See the **plugin-management** skill for the full list of 19 hard-won lessons from real publish runs. Key ones to never forget:
+- Always `uv run --with pyyaml python` when running CPV scripts from outside the CPV venv
+- Always `--body` flag for `gh secret set`
+- Always `git config user.name/email` before committing in /tmp directories
+- Always run `publish.py --gate` before the first push
+- Marketplace entries MUST include `repository` field
+- Strip ANSI codes: `| sed 's/\x1b\[[0-9;]*m//g'`
 
 ## TOKEN OPTIMIZATION
 Use `mcp__plugin_llm-externalizer_llm-externalizer__*` tools for bounded tasks. Always pass file paths via `input_files_paths`.

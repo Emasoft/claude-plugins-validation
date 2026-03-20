@@ -94,7 +94,7 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_marketplace.py" update [name]
 ## Remote Plugins (GitHub marketplaces)
 
 ```bash
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_remote.py" install <plugin>@<mkt> [--scope user|project|local]
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_remote.py" install <plugin>@<mkt> [--scope user|local]
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_remote.py" update <plugin>@<mkt>
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_remote.py" uninstall <plugin>@<mkt>
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_remote.py" enable <plugin>@<mkt>
@@ -128,6 +128,28 @@ Updates plugin.json + pyproject.toml.
 - Backups: `~/.claude/backups/`
 - Plugin persistent data: `${CLAUDE_PLUGIN_DATA}` survives updates; deleted on uninstall (use `--keep-data` to preserve)
 - Settings files: `~/.claude/settings.json` (user), `.claude/settings.local.json` (project-local)
+
+## Hard-Won Lessons (from real publish runs)
+
+1. **Always `uv run --with pyyaml python`** when running CPV scripts from outside the CPV venv. Without it: `ModuleNotFoundError: No module named 'yaml'`.
+2. **Always `--body` flag for `gh secret set`**. Piping does NOT work. Use: `gh secret set NAME --repo owner/repo --body "$VALUE"`
+3. **Always update notify-marketplace.yml** after standardize. MARKETPLACE_OWNER/MARKETPLACE_REPO are placeholders.
+4. **Check `$MARKETPLACE_PAT` env var** before asking the user: `test -n "$MARKETPLACE_PAT"` first.
+5. **Strip ANSI codes** when processing validation output: `| sed 's/\x1b\[[0-9;]*m//g'`
+6. **Use `grep -oE` not `grep -oP`** — macOS grep has no Perl regex.
+7. **standardize_plugin.py exit code 1 is expected** after `--fix` if warnings remain.
+8. **Check `author.email`** in plugin.json — suggest GitHub noreply format if missing.
+9. **CI needs `uv sync --extra dev`** not just `uv sync` — without it ruff/pytest/mypy are missing.
+10. **Update notify-marketplace.yml BEFORE the first push** — use `--marketplace` flag with standardize.
+11. **Run local dry-run BEFORE first push**: `publish.py --gate` and `publish.py --patch --dry-run`.
+12. **Verify CI AFTER first push**: `gh run list --repo <owner>/<name> --limit 5`.
+13. **Checkov uses `CKV2_` prefix** for GitHub Actions (not `CKV_`).
+14. **pytest exit code 5 = no tests collected** — OK for fresh plugins.
+15. **`__init__.py` files do NOT need shebangs** — validator excludes them.
+16. **Marketplace entries MUST include `repository` field** — without it, MAJOR validation error.
+17. **`validate_marketplace.py` accepts both paths** — `marketplace.json` at root or `.claude-plugin/`.
+18. **Set `git config user.name/email`** before committing in /tmp directories.
+19. **Marketplace README needs Uninstall + Troubleshooting sections** — validator blocks on missing.
 
 ## TOKEN OPTIMIZATION
 Use `mcp__plugin_llm-externalizer_llm-externalizer__*` tools instead of reading files into your context. Always pass file paths via `input_files_paths`.

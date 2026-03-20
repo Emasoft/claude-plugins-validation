@@ -38,7 +38,7 @@ Ask the user for their marketplace repo coordinates (`<owner>/<marketplace-repo>
 1. **Create PAT**: Ask user for a GitHub PAT with `repo` scope (or fine-grained with Contents R/W on marketplace repo). See publish-pipeline-guide (Resources) Section 1
 2. **Set secret**: `gh secret set MARKETPLACE_PAT --repo <owner>/<plugin-repo> --body "$MARKETPLACE_PAT"` (MUST use `--body` flag)
 3. **Install notify-marketplace.yml**: Copy from publish-pipeline-guide (Resources) Section 2 into `.github/workflows/`. Fill `MARKETPLACE_OWNER` and `MARKETPLACE_REPO`
-4. **Verify CI workflows**: Ensure `ci.yml`, `validate.yml`, `release.yml` exist (from `setup-plugin-repo` skill)
+4. **Verify CI workflows**: Ensure `ci.yml`, `validate.yml`, `release.yml` exist (see `canonical-pipeline` skill)
 
 ### Phase 2: Configure Publish Pipeline
 

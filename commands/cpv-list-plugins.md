@@ -1,5 +1,8 @@
 ---
+name: cpv-list-plugins
 description: List all locally installed Claude Code plugins with version, status, and components
+agent: plugin-manager
+user-invocable: true
 ---
 
 List all locally installed plugins:
