@@ -29,7 +29,6 @@ __all__ = [
     "MARKETPLACES_DIR",
     "CACHE_DIR",
     "SETTINGS_FILE",
-    "SETTINGS_LOCAL_FILE",
     "INSTALLED_FILE",
     "SETTINGS_TARGET",
     "C",
@@ -75,13 +74,12 @@ PLUGINS_DIR = CLAUDE_DIR / "plugins"
 MARKETPLACES_DIR = PLUGINS_DIR / "marketplaces"
 CACHE_DIR = PLUGINS_DIR / "cache"
 SETTINGS_FILE = CLAUDE_DIR / "settings.json"
-SETTINGS_LOCAL_FILE = CLAUDE_DIR / "settings.local.json"
 INSTALLED_FILE = PLUGINS_DIR / "installed_plugins.json"
 
-# We write marketplace registration to settings.local.json (user-level,
-# not committed to repos) so we never interfere with a project's
-# settings.json or a hand-crafted global settings.json.
-SETTINGS_TARGET = SETTINGS_LOCAL_FILE
+# All plugin/marketplace operations write to ~/.claude/settings.json (user-level).
+# ~/.claude/settings.local.json is NOT used — it only applies if Claude Code
+# is launched from ~/ which is not a valid project directory.
+SETTINGS_TARGET = SETTINGS_FILE
 
 
 # ── Colors ────────────────────────────────────────────────

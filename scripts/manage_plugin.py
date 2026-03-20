@@ -804,28 +804,22 @@ def _resolve_settings_file(scope: str) -> Path:
     """Return the settings file for the given scope.
 
     Scopes:
-      'user'  → ~/.claude/settings.json (shared across machines)
-      'local' → project .claude/settings.local.json (per-project)
-      default → SETTINGS_TARGET (~/.claude/settings.local.json, monkeypatchable)
+      'user' (default) → ~/.claude/settings.json
+      'local'          → <project>/.claude/settings.local.json
     """
-    if scope == "user":
-        return SETTINGS_FILE
     if scope == "local":
-        # Project-level settings (relative to cwd)
-        project_settings = Path.cwd() / ".claude" / "settings.local.json"
-        return project_settings
-    # Default: user-level local (SETTINGS_TARGET = ~/.claude/settings.local.json)
+        return Path.cwd() / ".claude" / "settings.local.json"
+    # Default: user-level (~/.claude/settings.json via SETTINGS_TARGET)
     return SETTINGS_TARGET
 
 
 def _collect_all_plugin_keys() -> dict[str, list[str]]:
-    """Scan all settings files and return {plugin_key: [files_where_listed]}.
+    """Scan settings files and return {plugin_key: [files_where_listed]}.
 
-    Also scans enabledPlugins across settings.json, settings.local.json,
-    and project .claude/settings.local.json.
+    Checks ~/.claude/settings.json and project .claude/settings.local.json.
     """
     result: dict[str, list[str]] = {}
-    files_to_check = [SETTINGS_FILE, SETTINGS_TARGET]
+    files_to_check = [SETTINGS_TARGET]
     project_settings = Path.cwd() / ".claude" / "settings.local.json"
     if project_settings.exists():
         files_to_check.append(project_settings)
@@ -1096,7 +1090,7 @@ def main():
     parser.add_argument("--enable", type=str, help="Enable plugin (name, name@marketplace, or name@owner/marketplace)")
     parser.add_argument("--disable", type=str, help="Disable plugin (name, name@marketplace, or name@owner/marketplace)")
     parser.add_argument("--scope", choices=["user", "local"], default="user",
-                        help="Target: 'user' = ~/.claude/settings.json (default), 'local' = project .claude/settings.local.json")
+                        help="'user' (default) = ~/.claude/settings.json, 'local' = <project>/.claude/settings.local.json")
     parser.add_argument("--force", "-f", action="store_true", help="Force install despite errors")
     parser.add_argument("--dry-run", "-n", action="store_true", help="Preview without changes")
     parser.add_argument("--quiet", "-q", action="store_true", help="Minimal output")

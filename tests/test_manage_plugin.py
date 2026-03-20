@@ -893,10 +893,10 @@ class TestDoUpdate:
 class TestResolveSettingsFile:
     """Tests for _resolve_settings_file -- scope-based settings file resolution."""
 
-    def test_scope_user_returns_settings_file(self, tmp_path, monkeypatch):
-        """scope='user' returns the global SETTINGS_FILE path."""
+    def test_scope_user_returns_settings_target(self, tmp_path, monkeypatch):
+        """scope='user' returns SETTINGS_TARGET (~/.claude/settings.json)."""
         fake_settings = tmp_path / "settings.json"
-        monkeypatch.setattr(mp, "SETTINGS_FILE", fake_settings)
+        monkeypatch.setattr(mp, "SETTINGS_TARGET", fake_settings)
         result = mp._resolve_settings_file("user")
         assert result == fake_settings
 
@@ -908,10 +908,10 @@ class TestResolveSettingsFile:
         assert result == expected
 
     def test_scope_default_returns_settings_target(self, tmp_path, monkeypatch):
-        """Any other scope (including empty string) returns SETTINGS_TARGET."""
-        fake_target = tmp_path / "settings.local.json"
+        """Default scope returns SETTINGS_TARGET (same as user)."""
+        fake_target = tmp_path / "settings.json"
         monkeypatch.setattr(mp, "SETTINGS_TARGET", fake_target)
-        result = mp._resolve_settings_file("default")
+        result = mp._resolve_settings_file("user")
         assert result == fake_target
         result2 = mp._resolve_settings_file("")
         assert result2 == fake_target
@@ -923,27 +923,24 @@ class TestResolveSettingsFile:
 class TestCollectAllPluginKeys:
     """Tests for _collect_all_plugin_keys -- scanning settings files for plugin keys."""
 
-    def test_collects_keys_from_settings_file(self, tmp_path, monkeypatch):
-        """Keys from SETTINGS_FILE (user-level) are collected."""
+    def test_collects_keys_from_settings_target(self, tmp_path, monkeypatch):
+        """Keys from SETTINGS_TARGET (~/.claude/settings.json) are collected."""
         sf = tmp_path / "settings.json"
         sf.write_text(json.dumps({"enabledPlugins": {"plugA@market1": True}}), encoding="utf-8")
         monkeypatch.setattr(mp, "SETTINGS_FILE", sf)
-        monkeypatch.setattr(mp, "SETTINGS_TARGET", tmp_path / "nonexistent.json")
+        monkeypatch.setattr(mp, "SETTINGS_TARGET", sf)
         monkeypatch.chdir(tmp_path)
         result = mp._collect_all_plugin_keys()
         assert "plugA@market1" in result
         assert str(sf) in result["plugA@market1"]
 
-    def test_collects_keys_from_settings_target(self, tmp_path, monkeypatch):
-        """Keys from SETTINGS_TARGET (user local) are collected."""
-        st = tmp_path / "settings.local.json"
-        st.write_text(json.dumps({"enabledPlugins": {"plugB@market2": False}}), encoding="utf-8")
-        monkeypatch.setattr(mp, "SETTINGS_FILE", tmp_path / "nonexistent.json")
-        monkeypatch.setattr(mp, "SETTINGS_TARGET", st)
+    def test_does_not_collect_from_nonexistent_settings(self, tmp_path, monkeypatch):
+        """Missing SETTINGS_TARGET file returns empty dict (no crash)."""
+        monkeypatch.setattr(mp, "SETTINGS_FILE", tmp_path / "nope.json")
+        monkeypatch.setattr(mp, "SETTINGS_TARGET", tmp_path / "nope.json")
         monkeypatch.chdir(tmp_path)
         result = mp._collect_all_plugin_keys()
-        assert "plugB@market2" in result
-        assert str(st) in result["plugB@market2"]
+        assert result == {}
 
     def test_collects_keys_from_project_settings(self, tmp_path, monkeypatch):
         """Keys from project .claude/settings.local.json are collected when file exists."""
@@ -966,11 +963,11 @@ class TestResolvePluginKey:
     """Tests for _resolve_plugin_key -- resolving bare names and full keys."""
 
     def _setup_settings(self, tmp_path, monkeypatch, keys_map: dict):
-        """Create SETTINGS_FILE with given enabledPlugins and patch module."""
+        """Create settings.json with given enabledPlugins and patch module."""
         sf = tmp_path / "settings.json"
         sf.write_text(json.dumps({"enabledPlugins": keys_map}), encoding="utf-8")
         monkeypatch.setattr(mp, "SETTINGS_FILE", sf)
-        monkeypatch.setattr(mp, "SETTINGS_TARGET", tmp_path / "nonexistent.json")
+        monkeypatch.setattr(mp, "SETTINGS_TARGET", sf)
         monkeypatch.setattr(mp, "MARKETPLACES_DIR", tmp_path / "marketplaces")
         monkeypatch.chdir(tmp_path)
 
@@ -1007,7 +1004,7 @@ class TestResolvePluginKey:
         sf = tmp_path / "settings.json"
         sf.write_text(json.dumps({"enabledPlugins": {}}), encoding="utf-8")
         monkeypatch.setattr(mp, "SETTINGS_FILE", sf)
-        monkeypatch.setattr(mp, "SETTINGS_TARGET", tmp_path / "nonexistent.json")
+        monkeypatch.setattr(mp, "SETTINGS_TARGET", sf)
         mp_dir = tmp_path / "marketplaces"
         plug_dir = mp_dir / "local-market" / "plugins" / "disk-plugin"
         plug_dir.mkdir(parents=True)
@@ -1028,7 +1025,7 @@ class TestVerifyPluginInstalled:
         sf = tmp_path / "settings.json"
         sf.write_text(json.dumps({"enabledPlugins": {"my-plug@market": True}}), encoding="utf-8")
         monkeypatch.setattr(mp, "SETTINGS_FILE", sf)
-        monkeypatch.setattr(mp, "SETTINGS_TARGET", tmp_path / "nonexistent.json")
+        monkeypatch.setattr(mp, "SETTINGS_TARGET", sf)
         monkeypatch.setattr(mp, "MARKETPLACES_DIR", tmp_path / "marketplaces")
         monkeypatch.chdir(tmp_path)
         assert mp._verify_plugin_installed("my-plug@market") is True
@@ -1038,7 +1035,7 @@ class TestVerifyPluginInstalled:
         sf = tmp_path / "settings.json"
         sf.write_text(json.dumps({}), encoding="utf-8")
         monkeypatch.setattr(mp, "SETTINGS_FILE", sf)
-        monkeypatch.setattr(mp, "SETTINGS_TARGET", tmp_path / "nonexistent.json")
+        monkeypatch.setattr(mp, "SETTINGS_TARGET", sf)
         mp_dir = tmp_path / "marketplaces"
         plug_dir = mp_dir / "market" / "plugins" / "disk-only"
         plug_dir.mkdir(parents=True)
@@ -1051,7 +1048,7 @@ class TestVerifyPluginInstalled:
         sf = tmp_path / "settings.json"
         sf.write_text(json.dumps({}), encoding="utf-8")
         monkeypatch.setattr(mp, "SETTINGS_FILE", sf)
-        monkeypatch.setattr(mp, "SETTINGS_TARGET", tmp_path / "nonexistent.json")
+        monkeypatch.setattr(mp, "SETTINGS_TARGET", sf)
         mp_dir = tmp_path / "marketplaces"
         mp_dir.mkdir()
         monkeypatch.setattr(mp, "MARKETPLACES_DIR", mp_dir)

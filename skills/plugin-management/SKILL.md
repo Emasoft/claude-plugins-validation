@@ -138,7 +138,7 @@ Related commands: `/cpv-create-local-plugin`, `/cpv-create-local-marketplace`, `
 - Run `/reload-plugins` after install/update/uninstall/enable/disable
 - Backups: `~/.claude/backups/`
 - Plugin persistent data: `${CLAUDE_PLUGIN_DATA}` survives updates; deleted on uninstall (use `--keep-data` to preserve)
-- Settings files: `~/.claude/settings.json` (user), `.claude/settings.local.json` (project-local)
+- Settings files: `~/.claude/settings.json` (user-level), `<project>/.claude/settings.local.json` (project-local)
 
 ## Hard-Won Lessons (from real publish runs)
 

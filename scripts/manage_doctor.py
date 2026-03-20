@@ -31,7 +31,7 @@ from cpv_management_common import (
     MARKETPLACES_DIR,
     CACHE_DIR,
     SETTINGS_FILE,
-    SETTINGS_LOCAL_FILE,
+    # SETTINGS_LOCAL_FILE removed — ~/.claude/settings.local.json is not a valid Claude Code location
     SETTINGS_TARGET,
     ok,
     info,
@@ -197,7 +197,6 @@ def do_doctor(verbose: bool = False):
     # 3. Check settings files
     for label, path in [
         ("settings.json", SETTINGS_FILE),
-        ("settings.local.json", SETTINGS_LOCAL_FILE),
     ]:
         if path.exists():
             try:
