@@ -722,6 +722,7 @@ class TestDoEnable:
         settings = {"enabledPlugins": {"my-plugin@market": False}}
         settings_file.write_text(json.dumps(settings), encoding="utf-8")
         monkeypatch.setattr(mp, "MARKETPLACES_DIR", mp_dir)
+        monkeypatch.setattr(mp, "SETTINGS_FILE", settings_file)
         monkeypatch.setattr(mp, "SETTINGS_TARGET", settings_file)
         return settings_file
 
@@ -733,15 +734,16 @@ class TestDoEnable:
         assert settings["enabledPlugins"]["my-plugin@market"] is True
 
     def test_enable_invalid_format_and_nonexistent_exits(self, tmp_path, monkeypatch):
-        """Enable with invalid format or non-existent plugin exits with error."""
-        with pytest.raises(SystemExit):
-            mp.do_enable("nope", quiet=True)
+        """Enable with non-existent plugin exits with error."""
         mp_dir = tmp_path / "marketplaces"
         mp_dir.mkdir()
         settings_file = tmp_path / "settings.local.json"
         settings_file.write_text("{}", encoding="utf-8")
         monkeypatch.setattr(mp, "MARKETPLACES_DIR", mp_dir)
+        monkeypatch.setattr(mp, "SETTINGS_FILE", settings_file)
         monkeypatch.setattr(mp, "SETTINGS_TARGET", settings_file)
+        with pytest.raises(SystemExit):
+            mp.do_enable("nope", quiet=True)
         with pytest.raises(SystemExit):
             mp.do_enable("ghost@market", quiet=True)
 
@@ -768,6 +770,7 @@ class TestDoDisable:
         settings = {"enabledPlugins": {"my-plugin@market": True}}
         settings_file.write_text(json.dumps(settings), encoding="utf-8")
         monkeypatch.setattr(mp, "MARKETPLACES_DIR", mp_dir)
+        monkeypatch.setattr(mp, "SETTINGS_FILE", settings_file)
         monkeypatch.setattr(mp, "SETTINGS_TARGET", settings_file)
         return settings_file
 
