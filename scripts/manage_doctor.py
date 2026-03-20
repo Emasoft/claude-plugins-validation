@@ -174,7 +174,7 @@ def _check_orphaned_settings(settings: dict, fix: bool = False, settings_path: P
                 if fix:
                     local_data["enabledPlugins"] = {}
                     save_json_safe(user_local, local_data)
-                    ok(f"  Cleared stale enabledPlugins from ~/.claude/settings.local.json")
+                    ok("  Cleared stale enabledPlugins from ~/.claude/settings.local.json")
         except (json.JSONDecodeError, OSError):
             pass
 
