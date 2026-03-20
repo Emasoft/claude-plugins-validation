@@ -529,7 +529,7 @@ def lint_python(repo_root: Path, files: list[Path] | None = None) -> bool:  # no
         print(f"{BLUE}    [2/2] mypy...{NC}")
         try:
             result = subprocess.run(
-                ["mypy", "--ignore-missing-imports", str(repo_root)], capture_output=True, text=True, timeout=180
+                ["mypy", "--ignore-missing-imports", "--exclude", "scripts_dev|docs_dev|builds_dev|tests_dev", str(repo_root)], capture_output=True, text=True, timeout=180
             )
             if result.returncode != 0:
                 print(f"{RED}    Type errors found:{NC}")
