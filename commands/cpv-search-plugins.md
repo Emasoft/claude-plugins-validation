@@ -16,3 +16,5 @@ The query can be:
 - A text string: matches plugin names, descriptions, and component types
 
 Present matching plugins with their details. If no matches found, suggest broadening the search or using `/cpv-list-plugins` to see all plugins.
+
+See the **plugin-management** skill for all list/search operations.
