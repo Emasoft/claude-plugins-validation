@@ -416,7 +416,11 @@ def _load_installed_plugins() -> dict:
 
 
 def _run_cpv_validation(plugin_root: Path, quiet: bool = False) -> Tuple[List[str], List[str], bool]:
-    """Run CPV's validate_plugin.py via subprocess. Returns (errors, warnings, valid)."""
+    """Run CPV's validate_plugin.py via subprocess. Returns (errors, warnings, valid).
+
+    Exit codes: 0=pass, 1=CRITICAL, 2=MAJOR, 3=MINOR, 4=NIT, 5+=WARNING.
+    Only CRITICAL and MAJOR (exit 1-2) block installation.
+    """
     scripts_dir = Path(__file__).resolve().parent
     validate_script = scripts_dir / "validate_plugin.py"
     if not validate_script.exists():
@@ -430,9 +434,11 @@ def _run_cpv_validation(plugin_root: Path, quiet: bool = False) -> Tuple[List[st
         text=True,
         timeout=120,
     )
-    v_errors = [line for line in result.stderr.splitlines() if "CRITICAL" in line or "MAJOR" in line]
-    v_warnings = [line for line in result.stderr.splitlines() if "MINOR" in line or "WARNING" in line]
-    valid = result.returncode == 0
+    output = result.stdout + result.stderr
+    v_errors = [line for line in output.splitlines() if "CRITICAL" in line or "MAJOR" in line]
+    v_warnings = [line for line in output.splitlines() if "MINOR" in line or "NIT" in line or "WARNING" in line]
+    # Only CRITICAL (exit 1) and MAJOR (exit 2) block installation
+    valid = result.returncode in (0, 3, 4, 5)
     return v_errors, v_warnings, valid
 
 
