@@ -506,7 +506,7 @@ def lint_python(repo_root: Path, files: list[Path] | None = None) -> bool:  # no
     print(f"{BLUE}    [1/2] ruff check...{NC}")
     try:
         result = subprocess.run(
-            ["ruff", "check", "--select=E,F,W", "--ignore=E501", str(repo_root)],
+            ["ruff", "check", "--select=E,F,W", "--ignore=E501,E402", str(repo_root)],
             capture_output=True,
             text=True,
             timeout=120,

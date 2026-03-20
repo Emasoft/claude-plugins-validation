@@ -12,10 +12,16 @@ Usage:
 
 from __future__ import annotations
 
+from __future__ import annotations
+
 import argparse
 import json
 import os
 import stat
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from generate_plugin_repo import PluginParams
 import sys
 from pathlib import Path
 
@@ -360,7 +366,7 @@ def _read_plugin_json(plugin_path: Path) -> dict:
     return json.loads(manifest_path.read_text(encoding="utf-8"))
 
 
-def _params_from_manifest(manifest: dict) -> "PluginParams":
+def _params_from_manifest(manifest: dict) -> PluginParams:
     """Build PluginParams from a plugin.json manifest dict.
 
     Falls back to sensible defaults for missing fields so that template
