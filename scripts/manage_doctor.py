@@ -10,7 +10,7 @@ Validates the entire plugin ecosystem:
 - Orphaned entries detection (settings referencing missing plugins/marketplaces)
 
 Usage:
-    uv run scripts/manage_doctor.py [--verbose]
+    uv run scripts/manage_doctor.py [--verbose] [--fix]
 """
 
 import argparse
@@ -31,7 +31,6 @@ from cpv_management_common import (
     MARKETPLACES_DIR,
     CACHE_DIR,
     SETTINGS_FILE,
-    # SETTINGS_LOCAL_FILE removed — ~/.claude/settings.local.json is not a valid Claude Code location
     SETTINGS_TARGET,
     ok,
     info,
@@ -39,6 +38,7 @@ from cpv_management_common import (
     err,
     load_jsonc,
     load_json_safe,
+    save_json_safe,
     BOLD,
     NC,
     GREEN,
@@ -107,49 +107,79 @@ def _run_claude_validate(target_path: Path) -> Tuple[List[str], List[str]]:
     return errors, warnings
 
 
-def _check_orphaned_settings(settings: dict) -> int:
+def _check_orphaned_settings(settings: dict, fix: bool = False, settings_path: Path | None = None) -> int:
     """Check for orphaned marketplace and plugin entries in settings.
-    Returns the number of new issues found."""
+
+    When fix=True, removes orphaned entries and saves the file.
+    Returns the number of issues found.
+    """
     issues = 0
+    changed = False
+
+    # 1. Orphaned marketplace registrations (directory sources pointing to missing paths)
     ekm = settings.get("extraKnownMarketplaces", {})
-    for mp_name, mp_cfg in ekm.items():
+    orphaned_mkts: list[str] = []
+    for mp_name, mp_cfg in list(ekm.items()):
         source = mp_cfg.get("source", {})
         if source.get("source") == "directory":
             mp_path = Path(source.get("path", ""))
             if not mp_path.exists():
                 print()
-                warn(
-                    f"Orphaned marketplace in settings: '{mp_name}' points to non-existent path: {mp_path}"
-                )
+                warn(f"Orphaned marketplace '{mp_name}' — directory not found: {mp_path}")
+                orphaned_mkts.append(mp_name)
                 issues += 1
 
+    # 2. Orphaned enabledPlugins (plugin or marketplace doesn't exist)
     ep = settings.get("enabledPlugins", {})
-    for pkey, enabled in ep.items():
-        if "@" in pkey:
-            pname, mpname = pkey.split("@", 1)
-            plug_in_marketplace = MARKETPLACES_DIR / mpname / "plugins" / pname
-            plug_in_cache = CACHE_DIR / mpname / pname
-            if (
-                not plug_in_marketplace.exists()
-                and not plug_in_cache.exists()
-                and enabled
-            ):
-                mp_exists = (MARKETPLACES_DIR / mpname).exists() or (
-                    CACHE_DIR / mpname
-                ).exists()
-                if not mp_exists:
-                    print()
-                    warn(
-                        f"Orphaned entry in enabledPlugins: '{pkey}' — marketplace '{mpname}' not found"
-                    )
-                    issues += 1
+    orphaned_plugins: list[str] = []
+    for pkey, enabled in list(ep.items()):
+        if "@" not in pkey:
+            continue
+        pname, mpname = pkey.split("@", 1)
+        plug_in_marketplace = MARKETPLACES_DIR / mpname / "plugins" / pname
+        plug_in_cache = CACHE_DIR / mpname / pname
+        if not plug_in_marketplace.exists() and not plug_in_cache.exists() and enabled:
+            mp_exists = (MARKETPLACES_DIR / mpname).exists() or (CACHE_DIR / mpname).exists()
+            if not mp_exists:
+                print()
+                warn(f"Orphaned enabledPlugins entry: '{pkey}' — marketplace '{mpname}' not found")
+                orphaned_plugins.append(pkey)
+                issues += 1
+
+    # 3. Fix if requested
+    if fix and (orphaned_mkts or orphaned_plugins):
+        for mp_name in orphaned_mkts:
+            ekm.pop(mp_name, None)
+            ok(f"  Removed orphaned marketplace: {mp_name}")
+            changed = True
+        for pkey in orphaned_plugins:
+            ep.pop(pkey, None)
+            ok(f"  Removed orphaned plugin entry: {pkey}")
+            changed = True
+        if changed and settings_path:
+            save_json_safe(settings_path, settings)
+            ok(f"  Saved cleaned {settings_path.name}")
+
+    # 4. Check ~/.claude/settings.local.json for stale enabledPlugins
+    user_local = CLAUDE_DIR / "settings.local.json"
+    if user_local.exists():
+        try:
+            local_data = json.loads(user_local.read_text(encoding="utf-8"))
+            local_ep = local_data.get("enabledPlugins", {})
+            if local_ep:
+                print()
+                warn(f"~/.claude/settings.local.json has {len(local_ep)} enabledPlugins entries — these should be in settings.json")
+                issues += len(local_ep)
+        except (json.JSONDecodeError, OSError):
+            pass
+
     return issues
 
 
 # ── Doctor command ───────────────────────────────────────────────────
 
 
-def do_doctor(verbose: bool = False):
+def do_doctor(verbose: bool = False, fix: bool = False):
     """Check overall health of local plugin installation."""
     print(f"{BOLD}Plugin installation health check{NC}")
     print()
@@ -224,7 +254,7 @@ def do_doctor(verbose: bool = False):
     if not MARKETPLACES_DIR.exists():
         info("No local marketplaces directory yet.")
         # Still check for orphaned settings entries even without marketplace directory
-        issues += _check_orphaned_settings(settings)
+        issues += _check_orphaned_settings(settings, fix=fix, settings_path=SETTINGS_TARGET)
         print()
         if issues == 0:
             ok("All checks passed — installation is healthy")
@@ -544,7 +574,7 @@ def do_doctor(verbose: bool = False):
                 issues += 1
 
     # 6. Check for orphaned entries in settings
-    issues += _check_orphaned_settings(settings)
+    issues += _check_orphaned_settings(settings, fix=fix, settings_path=SETTINGS_TARGET)
 
     # Summary
     print()
@@ -565,8 +595,9 @@ def do_doctor(verbose: bool = False):
 def main():
     parser = argparse.ArgumentParser(description="Plugin health check")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed validation")
+    parser.add_argument("--fix", action="store_true", help="Auto-fix orphaned entries in settings files")
     args = parser.parse_args()
-    do_doctor(verbose=args.verbose)
+    do_doctor(verbose=args.verbose, fix=args.fix)
 
 
 if __name__ == "__main__":
