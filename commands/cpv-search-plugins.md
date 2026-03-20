@@ -1,5 +1,8 @@
 ---
+name: cpv-search-plugins
 description: Search installed plugins by component type (commands, agents, skills, rules, hooks, mcp, lsp) or text query
+agent: plugin-manager
+user-invocable: true
 ---
 
 Search installed plugins:
