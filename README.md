@@ -1,6 +1,10 @@
 # Claude Plugins Validation
 
 <!--BADGES-START-->
+![Version](https://img.shields.io/badge/version-2.3.2-blue)
+![Tests](https://img.shields.io/badge/tests-1549%20passed-brightgreen)
+![Validation](https://img.shields.io/badge/validation-0%20issues-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-green)
 <!--BADGES-END-->
 
 > **Installation:** This plugin is distributed via the [Emasoft Plugins Marketplace](https://github.com/Emasoft/emasoft-plugins).
