@@ -37,9 +37,9 @@ For development only: `claude --plugin-dir ./claude-plugins-validation`
 
 ---
 
-# Part 1: Validation
+## Part 1: Validation
 
-## Validation Commands
+### Validation Commands
 
 | Command | Description |
 |---------|-------------|
@@ -62,7 +62,7 @@ For development only: `claude --plugin-dir ./claude-plugins-validation`
 | `/cpv-validate-github-plugin` | Validate a GitHub plugin without installing (`--audit` for security scan) |
 | `/cpv-validate-github-marketplace` | Validate a GitHub marketplace without registering (`--audit` for security scan) |
 
-## How to Validate
+### How to Validate
 
 ```bash
 # Full plugin validation
@@ -82,7 +82,7 @@ uv run scripts/manage_github_validate.py --plugin owner/repo
 uv run scripts/manage_github_validate.py --marketplace owner/repo --audit
 ```
 
-## Common Validation Options
+### Common Validation Options
 
 | Option | Description |
 |--------|-------------|
@@ -92,7 +92,7 @@ uv run scripts/manage_github_validate.py --marketplace owner/repo --audit
 | `--report PATH` | Save full output to file, print compact summary |
 | `path` | Plugin root path (defaults to parent of scripts/) |
 
-## Exit Codes
+### Exit Codes
 
 | Code | Level | Description |
 |------|-------|-------------|
@@ -104,7 +104,7 @@ uv run scripts/manage_github_validate.py --marketplace owner/repo --audit
 
 Severity levels: CRITICAL, MAJOR, MINOR always block. NIT blocks only in strict mode. WARNING and INFO are informational.
 
-## Validation Coverage
+### Validation Coverage
 
 | Validator | What it checks |
 |-----------|---------------|
@@ -126,11 +126,11 @@ Severity levels: CRITICAL, MAJOR, MINOR always block. NIT blocks only in strict 
 
 ---
 
-# Part 2: Plugin & Marketplace Management
+## Part 2: Plugin & Marketplace Management
 
-## Regular Operations
+### Regular Operations
 
-### Install / Uninstall / Update
+#### Install / Uninstall / Update
 
 | Command | Description |
 |---------|-------------|
@@ -139,7 +139,7 @@ Severity levels: CRITICAL, MAJOR, MINOR always block. NIT blocks only in strict 
 | `/cpv-update-plugin` | Update from a new source |
 | `/cpv-manage-remote-plugins` | Install/update/uninstall from GitHub marketplaces |
 
-### Enable / Disable
+#### Enable / Disable
 
 | Command | Description |
 |---------|-------------|
@@ -150,7 +150,7 @@ Smart name resolution accepts: `plugin-name`, `name@marketplace`, `name@owner/ma
 
 Scope: `--scope user` (default, `~/.claude/settings.json`) or `--scope local` (`<project>/.claude/settings.local.json`).
 
-### List / Search / Marketplace
+#### List / Search / Marketplace
 
 | Command | Description |
 |---------|-------------|
@@ -161,7 +161,7 @@ Scope: `--scope user` (default, `~/.claude/settings.json`) or `--scope local` (`
 | `/cpv-bump-version` | Bump plugin version (patch/minor/major) |
 | `/cpv-version` | Show management tools version |
 
-### Create / Publish
+#### Create / Publish
 
 | Command | Description |
 |---------|-------------|
@@ -172,14 +172,14 @@ Scope: `--scope user` (default, `~/.claude/settings.json`) or `--scope local` (`
 | `/cpv-publish-a-plugin-to-a-github-marketplace` | Register a plugin in a marketplace |
 | `/cpv-standardize` | Audit and fix a repo to match standards (auto-detects type) |
 
-## Fix, Doctor & Diagnostics
+### Fix, Doctor & Diagnostics
 
 | Command | Description |
 |---------|-------------|
 | `/cpv-fix-validation` | Auto-fix issues from a validation report |
 | `/cpv-doctor` | Health-check all plugins, settings, marketplaces (`--fix` to auto-repair) |
 
-### Doctor
+#### Doctor
 
 ```bash
 # Diagnose
@@ -193,7 +193,7 @@ Checks: CLI auth, settings integrity, marketplace registrations, plugin validati
 
 `--fix` auto-removes: orphaned marketplace registrations, stale `enabledPlugins` entries, stale `~/.claude/settings.local.json` entries.
 
-### Fix Validation Issues
+#### Fix Validation Issues
 
 After running validation, use the fixer to auto-remediate:
 
