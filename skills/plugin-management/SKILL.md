@@ -18,9 +18,33 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" ./plugin/ my-mkt
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" plugin.tar.gz my-mkt
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --update ./plugin-v2/ my-mkt
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --uninstall name@mkt
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --enable name@mkt
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --disable name@mkt
 ```
+
+## Enable / Disable (with scope and smart resolution)
+
+Smart plugin name resolution — accepts 3 formats:
+- `plugin-name` — auto-resolves if unique across all settings/marketplaces
+- `plugin-name@marketplace` — explicit marketplace
+- `plugin-name@owner/marketplace` — disambiguate same-name marketplaces
+
+### User level (default — `~/.claude/settings.json`)
+```bash
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --enable <plugin>
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --disable <plugin>
+```
+
+### Project-local level (`.claude/settings.local.json` in current project)
+```bash
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --enable <plugin> --scope local
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --disable <plugin> --scope local
+```
+
+### Scope cascading rules
+- **`--scope local` + enable**: Plugin enabled in this project, **auto-disabled at user level** (must be enabled per-project)
+- **`--scope local` + disable**: Plugin disabled in this project only, even if enabled at user level
+- **`--scope user`** (default): Plugin toggled globally for all projects
+
+The script checks that the plugin is installed before enabling/disabling. Exits with error if not found.
 
 ## Validate (190+ rules: manifest, hooks, frontmatter, MCP, LSP, security, encoding, enterprise)
 
@@ -49,11 +73,14 @@ Checks: prompt injection, secrets (TruffleHog), shell issues (ShellCheck), code 
 ```bash
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_registry.py" --list
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_registry.py" --search <query>
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_registry.py" --marketplace <name|owner/name>
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_doctor.py" [--verbose]
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --version
 ```
 
-Search types: `commands`, `agents`, `skills`, `hooks`, `mcp`, `lsp`, `rules`, `output-styles`, or any text.
+- `--list`: All locally installed plugins with version and enabled status
+- `--search <query>`: Search by component type (`commands`, `agents`, `skills`, `hooks`, `mcp`, `lsp`, `rules`, `output-styles`) or free text
+- `--marketplace <name>`: List all plugins in a marketplace with version, user-level and project-local enabled status
 
 ## Marketplace
 
@@ -88,7 +115,7 @@ Updates plugin.json + pyproject.toml.
 
 ## Flags
 
-`-f`/`--force` install despite errors | `-n`/`--dry-run` preview only | `-q`/`--quiet` suppress output | `-v`/`--verbose` full details + security audit
+`-f`/`--force` install despite errors | `-n`/`--dry-run` preview only | `-q`/`--quiet` suppress output | `-v`/`--verbose` full details + security audit | `--scope user|local` target settings file
 
 ## Plugin Variables
 
@@ -97,9 +124,10 @@ Updates plugin.json + pyproject.toml.
 
 ## Notes
 
-- Run `/reload-plugins` after install/update/uninstall
+- Run `/reload-plugins` after install/update/uninstall/enable/disable
 - Backups: `~/.claude/backups/`
 - Plugin persistent data: `${CLAUDE_PLUGIN_DATA}` survives updates; deleted on uninstall (use `--keep-data` to preserve)
+- Settings files: `~/.claude/settings.json` (user), `.claude/settings.local.json` (project-local)
 
 ## TOKEN OPTIMIZATION
 Use `mcp__plugin_llm-externalizer_llm-externalizer__*` tools instead of reading files into your context. Always pass file paths via `input_files_paths`.
