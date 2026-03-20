@@ -19,7 +19,7 @@ All scripts are at `${CLAUDE_PLUGIN_ROOT}/scripts/`. Run with `uv run "${CLAUDE_
 | Script | Purpose |
 |---|---|
 | `manage_plugin.py` | Install, uninstall, update, enable, disable plugins |
-| `manage_registry.py` | List and search installed plugins |
+| `manage_registry.py` | List/search installed plugins, list marketplace plugins |
 | `manage_doctor.py` | Health-check all plugins, settings, marketplaces |
 | `manage_marketplace.py` | Add/remove/list/update marketplace registrations |
 | `manage_remote.py` | Install/update/uninstall remote plugins via claude CLI |
@@ -41,7 +41,19 @@ All scripts are at `${CLAUDE_PLUGIN_ROOT}/scripts/`. Run with `uv run "${CLAUDE_
 **Install and validate a plugin:**
 1. Validate first: `uv run "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" <source>`
 2. If clean, install: `uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" <source> <marketplace>`
-3. Suggest `/reload-plugins`
+3. Enable: `uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --enable <name>@<marketplace>`
+4. Suggest `/reload-plugins`
+
+**Enable/disable with scope:**
+- User-level (default): `--enable <plugin>` or `--disable <plugin>`
+- Project-local: `--enable <plugin> --scope local` or `--disable <plugin> --scope local`
+- Smart name resolution: bare name auto-resolves, or use `name@marketplace`, or `name@owner/marketplace`
+- Cascading: `--scope local` + enable auto-disables at user level (per-project opt-in)
+- Cascading: `--scope local` + disable blocks user-level enable for this project
+
+**List marketplace plugins:**
+1. `uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_registry.py" --marketplace <name|owner/name>`
+2. Shows each plugin's name, version, user-level status, project-local status
 
 **Health check:**
 1. Run `uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_doctor.py" --verbose`

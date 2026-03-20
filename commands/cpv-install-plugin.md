@@ -1,30 +1,46 @@
 ---
+name: cpv-install-plugin
 description: Install a Claude Code plugin from a local directory, archive, or remote marketplace
+argument-hint: "<source> <marketplace> [--force] [--dry-run] [--scope user|project|local]"
+user-invocable: true
 ---
 
 Install a plugin using the CPV management CLI.
 
-**For local installs**, provide a source (directory or archive) and a marketplace name:
+## Local Install
+
+Provide a source (directory or archive) and a marketplace name:
 ```bash
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" <source> <marketplace>
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" <source> <marketplace> [--force] [--dry-run]
 ```
 
-**For remote installs** from a registered marketplace:
+## Remote Install
+
+From a registered GitHub marketplace:
 ```bash
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_remote.py" install <plugin>@<marketplace> [--scope user|project|local]
 ```
 
-**For updates**, use `--update`:
+## Update
+
 ```bash
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --update <source> <marketplace>
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --update <source> <marketplace> [--force]
 ```
 
-Parse the user's request to determine:
-1. Whether this is a local install, remote install, or update
-2. The source path or plugin name
-3. The marketplace name (ask if not provided)
-4. Any flags (--force, --dry-run, --quiet, --scope)
+## Workflow
 
-Run the appropriate command and report the result. After successful install, remind the user to run `/reload-plugins`.
+1. Determine if this is a local install, remote install, or update
+2. For local installs, validate first: `uv run "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" <source>`
+3. Run the install command
+4. After install, enable the plugin if needed:
+   - User-level: `uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --enable <name>@<marketplace>`
+   - Project-local: `uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --enable <name>@<marketplace> --scope local`
+5. Remind user to run `/reload-plugins` or restart Claude Code
 
-If the command fails, show the error and suggest: check the source path exists, ensure `.claude-plugin/plugin.json` is present, or try `/cpv-validate-plugin` first.
+## Error Handling
+
+| Error | Resolution |
+|-------|------------|
+| Source not found | Check the path exists |
+| Missing plugin.json | Ensure `.claude-plugin/plugin.json` is present; try `/cpv-validate-plugin` first |
+| Install fails | Use `--force` to override validation errors, or fix issues first |
