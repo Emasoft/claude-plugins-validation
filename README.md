@@ -75,8 +75,8 @@ claude --plugin-dir ./OUTPUT_SKILLS/claude-plugins-validation
 | `/cpv-install-plugin-from-local-mp` | Install a plugin from local directory or archive into a local marketplace |
 | `/cpv-uninstall-plugin-from-local-mp` | Uninstall a plugin from a local marketplace and clean up settings |
 | `/cpv-update-plugin` | Update an installed plugin from a new source |
-| `/cpv-enable-plugin` | Enable a plugin (smart name resolution: bare name, name@mkt, name@owner/mkt) |
-| `/cpv-disable-plugin` | Disable a plugin without removing it (smart name resolution) |
+| `/cpv-enable-plugin` | Enable a plugin (`--scope user\|local`, smart name resolution) |
+| `/cpv-disable-plugin` | Disable a plugin without removing it (`--scope user\|local`, smart name resolution) |
 | `/cpv-list-plugins` | List all installed plugins with version, status, components |
 | `/cpv-list-mp-plugins` | List all plugins in a marketplace with version and enabled status |
 | `/cpv-search-plugins` | Search plugins by component type or text |
