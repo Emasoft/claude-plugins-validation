@@ -10,8 +10,8 @@ Usage:
     uv run scripts/manage_plugin.py <source> <marketplace> [--force] [--dry-run] [--quiet]
     uv run scripts/manage_plugin.py --uninstall <plugin>@<marketplace> [--dry-run]
     uv run scripts/manage_plugin.py --update <source> <marketplace> [--force] [--dry-run]
-    uv run scripts/manage_plugin.py --enable <plugin>@<marketplace>
-    uv run scripts/manage_plugin.py --disable <plugin>@<marketplace>
+    uv run scripts/manage_plugin.py --enable <plugin>@<marketplace> [--scope user|local]
+    uv run scripts/manage_plugin.py --disable <plugin>@<marketplace> [--scope user|local]
     uv run scripts/manage_plugin.py --version
 """
 
@@ -31,6 +31,7 @@ from cpv_management_common import (
     IS_WINDOWS,
     MARKETPLACES_DIR,
     CACHE_DIR,
+    SETTINGS_FILE,
     SETTINGS_TARGET,
     INSTALLED_FILE,
     TOOL_VERSION,
@@ -793,7 +794,17 @@ def do_uninstall(plugin_key: str, quiet: bool = False, dry_run: bool = False):
 # ── Lifecycle: Enable / Disable ───────────────────────────
 
 
-def do_enable(plugin_key: str, quiet: bool = False, dry_run: bool = False):
+def _resolve_settings_file(scope: str) -> Path:
+    """Return the settings file for the given scope ('user' or 'local').
+
+    Uses SETTINGS_TARGET for 'local' (default) to respect monkeypatching in tests.
+    """
+    if scope == "user":
+        return SETTINGS_FILE
+    return SETTINGS_TARGET
+
+
+def do_enable(plugin_key: str, quiet: bool = False, dry_run: bool = False, scope: str = "local"):
     if "@" not in plugin_key:
         err("Format: --enable <plugin-name>@<marketplace-name>")
         sys.exit(1)
@@ -806,26 +817,27 @@ def do_enable(plugin_key: str, quiet: bool = False, dry_run: bool = False):
         err(f"Plugin not found: {plug_dir}")
         sys.exit(1)
 
-    settings = load_json_safe(SETTINGS_TARGET)
+    target = _resolve_settings_file(scope)
+    settings = load_json_safe(target)
     ep = settings.setdefault("enabledPlugins", {})
     if ep.get(plugin_key) is True:
         if not quiet:
-            info(f"{plugin_key} is already enabled.")
+            info(f"{plugin_key} is already enabled in {target.name}.")
         return
 
     if dry_run:
         if not quiet:
-            ok(f"Would enable {plugin_key}")
+            ok(f"Would enable {plugin_key} in {target.name}")
         return
 
     ep[plugin_key] = True
-    save_json_safe(SETTINGS_TARGET, settings)
+    save_json_safe(target, settings)
     if not quiet:
-        ok(f"Enabled {plugin_key}")
+        ok(f"Enabled {plugin_key} in {target.name}")
         print("  Run /reload-plugins or restart Claude Code for changes to take effect.")
 
 
-def do_disable(plugin_key: str, quiet: bool = False, dry_run: bool = False):
+def do_disable(plugin_key: str, quiet: bool = False, dry_run: bool = False, scope: str = "local"):
     if "@" not in plugin_key:
         err("Format: --disable <plugin-name>@<marketplace-name>")
         sys.exit(1)
@@ -838,22 +850,23 @@ def do_disable(plugin_key: str, quiet: bool = False, dry_run: bool = False):
         err(f"Plugin not found: {plug_dir}")
         sys.exit(1)
 
-    settings = load_json_safe(SETTINGS_TARGET)
+    target = _resolve_settings_file(scope)
+    settings = load_json_safe(target)
     ep = settings.setdefault("enabledPlugins", {})
     if ep.get(plugin_key) is False:
         if not quiet:
-            info(f"{plugin_key} is already disabled.")
+            info(f"{plugin_key} is already disabled in {target.name}.")
         return
 
     if dry_run:
         if not quiet:
-            ok(f"Would disable {plugin_key}")
+            ok(f"Would disable {plugin_key} in {target.name}")
         return
 
     ep[plugin_key] = False
-    save_json_safe(SETTINGS_TARGET, settings)
+    save_json_safe(target, settings)
     if not quiet:
-        ok(f"Disabled {plugin_key}")
+        ok(f"Disabled {plugin_key} in {target.name}")
         print("  Run /reload-plugins or restart Claude Code for changes to take effect.")
 
 
@@ -952,6 +965,8 @@ def main():
     parser.add_argument("--update", action="store_true", help="Update instead of install")
     parser.add_argument("--enable", type=str, help="Enable plugin (name@marketplace)")
     parser.add_argument("--disable", type=str, help="Disable plugin (name@marketplace)")
+    parser.add_argument("--scope", choices=["user", "local"], default="local",
+                        help="Target settings file: 'user' = settings.json, 'local' = settings.local.json (default: local)")
     parser.add_argument("--force", "-f", action="store_true", help="Force install despite errors")
     parser.add_argument("--dry-run", "-n", action="store_true", help="Preview without changes")
     parser.add_argument("--quiet", "-q", action="store_true", help="Minimal output")
@@ -964,9 +979,9 @@ def main():
     if args.uninstall:
         do_uninstall(args.uninstall, quiet=args.quiet, dry_run=args.dry_run)
     elif args.enable:
-        do_enable(args.enable, quiet=args.quiet, dry_run=args.dry_run)
+        do_enable(args.enable, quiet=args.quiet, dry_run=args.dry_run, scope=args.scope)
     elif args.disable:
-        do_disable(args.disable, quiet=args.quiet, dry_run=args.dry_run)
+        do_disable(args.disable, quiet=args.quiet, dry_run=args.dry_run, scope=args.scope)
     elif args.update:
         if not args.source:
             err("Source path required for update")
