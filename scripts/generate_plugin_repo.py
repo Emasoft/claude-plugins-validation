@@ -238,7 +238,7 @@ def gen_readme(p: PluginParams) -> str:
             f"(https://github.com/{owner}/{repo}/actions/workflows/validate.yml)"
         )
     else:
-        badges = f"<!-- Badges will appear here once github_owner is set -->"
+        badges = "<!-- Badges will appear here once github_owner is set -->"
     return f"""# {p.name}
 
 <!--BADGES-START-->
@@ -1585,10 +1585,10 @@ Examples:
     if not args.dry_run:
         print(f"\n{BOLD}Next steps:{NC}")
         print(f"  cd {target}")
-        print(f"  git init && git add -A && git commit -m 'Initial scaffold'")
+        print("  git init && git add -A && git commit -m 'Initial scaffold'")
         print(f"  uv venv --python {params.python_version} && source .venv/bin/activate")
-        print(f"  uv pip install -e .")
-        print(f"  uv run python scripts/setup-hooks.py")
+        print("  uv pip install -e .")
+        print("  uv run python scripts/setup-hooks.py")
 
     return 0
 
