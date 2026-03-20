@@ -25,7 +25,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from cpv_management_common import (
     IS_WINDOWS,
