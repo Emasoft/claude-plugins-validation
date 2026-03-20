@@ -1983,7 +1983,14 @@ def scan_file_for_absolute_paths(
 
             line_num = content[: match.start()].count("\n") + 1
             issues_found += 1
-            # Use MINOR for system paths in scripts (may be intentional), MAJOR for home paths
+            # System binary paths (/usr/bin/, /usr/local/bin/, /opt/homebrew/bin/) are expected
+            # for tool detection — downgrade to INFO in all files, not just docs
+            _system_binary_prefixes = ("/usr/bin/", "/usr/local/bin/", "/opt/homebrew/bin/", "/bin/", "/sbin/", "/usr/sbin/")
+            if desc == "system absolute path" and any(matched_text.startswith(p) for p in _system_binary_prefixes):
+                report.info(f"System binary path: '{matched_text[:60]}' (OK for tool detection)", rel_path)
+                issues_found -= 1  # Don't count this as an issue
+                continue
+            # Use MINOR for other system paths in scripts, MAJOR for home paths
             severity = "minor" if desc == "system absolute path" and not is_doc_file else "major"
             getattr(report, severity)(
                 f"Absolute path found: '{matched_text[:60]}...' - use relative path, ${{CLAUDE_PLUGIN_ROOT}}, or ${{CLAUDE_PROJECT_DIR}}",
@@ -2511,6 +2518,12 @@ def validate_md_file_paths(
         clean_path = raw_path
         while clean_path.startswith("./"):
             clean_path = clean_path[2:]
+
+        # Skip paths under directories typically gitignored (runtime artifacts, dev folders)
+        # These are paths created at runtime, not present in the repo at rest
+        _gitignored_dir_patterns = ("_dev/", "_dev\\", "llm_externalizer_output/", "megalinter-reports/", ".venv/", "node_modules/", "dist/", "build/", "__pycache__/", ".pytest_cache/", ".ruff_cache/")
+        if any(clean_path.startswith(p) or f"/{p}" in clean_path for p in _gitignored_dir_patterns):
+            continue
 
         # Well-known plugin structure paths — standard paths every plugin doc references
         well_known_plugin_paths = {

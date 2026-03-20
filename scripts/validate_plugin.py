@@ -297,6 +297,19 @@ def validate_manifest(plugin_root: Path, report: ValidationReport, marketplace_o
                     ".claude-plugin/plugin.json",
                 )
 
+    # Check for duplicate hooks loading — Claude Code auto-discovers hooks/hooks.json,
+    # so explicitly pointing to it in plugin.json causes it to load twice (runtime error)
+    hooks_value = manifest.get("hooks")
+    if isinstance(hooks_value, str):
+        normalized_hooks = hooks_value.replace("\\", "/")
+        if normalized_hooks in ("./hooks/hooks.json", "hooks/hooks.json"):
+            report.warning(
+                "Field 'hooks' points to './hooks/hooks.json' which Claude Code already auto-loads by convention. "
+                "This causes a 'Duplicate hooks file detected' runtime error. Remove the 'hooks' field from plugin.json "
+                "or use a non-default path.",
+                ".claude-plugin/plugin.json",
+            )
+
     return cast(dict[str, Any], manifest)
 
 
@@ -711,11 +724,11 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
         else:
             report.passed(f"Shell script executable: {sh_file.name}", f"scripts/{sh_file.name}")
 
-        # Shellcheck lint
+        # Shellcheck lint — use -x to follow source directives, inline disables are respected
         if shellcheck_cmd:
             try:
                 result = subprocess.run(
-                    shellcheck_cmd + [str(sh_file)],
+                    shellcheck_cmd + ["-x", "-f", "json", str(sh_file)],
                     capture_output=True,
                     text=True,
                     timeout=30,
@@ -726,7 +739,19 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
             if result.returncode == 0:
                 report.passed(f"Shellcheck passed: {sh_file.name}")
             else:
-                report.minor(f"Shellcheck issues in {sh_file.name}", f"scripts/{sh_file.name}")
+                # Parse JSON output to report individual issues (respecting inline disables)
+                try:
+                    findings = json.loads(result.stdout) if result.stdout.strip() else []
+                except (json.JSONDecodeError, ValueError):
+                    findings = []
+                if findings:
+                    for finding in findings[:5]:
+                        code = finding.get("code", "?")
+                        msg = finding.get("message", "unknown")
+                        line = finding.get("line", 0)
+                        report.minor(f"Shellcheck SC{code} (line {line}): {msg}", f"scripts/{sh_file.name}")
+                else:
+                    report.minor(f"Shellcheck issues in {sh_file.name}", f"scripts/{sh_file.name}")
     # Report shellcheck availability once (after loop)
     if sh_files and not shellcheck_cmd:
         report.minor("shellcheck not available locally or via bunx/npx, skipping shell lint")
@@ -740,8 +765,8 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
 
     # Check shebangs on script files — scripts without shebangs may not run cross-platform
     shebang_extensions = {".py", ".sh", ".bash", ".rb", ".pl", ".php"}
-    # __init__.py files are module markers, not scripts — never need shebangs
-    all_scripts = [f for f in scripts_dir.iterdir() if f.is_file() and f.suffix.lower() in shebang_extensions and f.name != "__init__.py"]
+    # __init__.py and _-prefixed files are module markers/internal modules — never need shebangs
+    all_scripts = [f for f in scripts_dir.iterdir() if f.is_file() and f.suffix.lower() in shebang_extensions and f.name != "__init__.py" and not f.stem.startswith("_")]
     scripts_missing_shebang = []
     for script in all_scripts:
         try:
