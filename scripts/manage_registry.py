@@ -378,30 +378,27 @@ def do_list_marketplace_plugins(query: str):
     print(f"{BOLD}{hdr}{NC}")
     print(f"  {'─' * 40} {'─' * 10} {'─' * 10} {'─' * 10}")
 
+    def _status_str(val: "bool | None") -> tuple[str, str]:
+        """Return (colored_string, raw_text) for alignment."""
+        if val is True:
+            return f"{GREEN}enabled{NC}", "enabled"
+        if val is False:
+            return f"{RED}disabled{NC}", "disabled"
+        return f"{YELLOW}--{NC}", "--"
+
     for p in sorted(plugins, key=lambda x: x.get("name", "")):
         name = p.get("name", "?")
         version = p.get("version", "?")
         plugin_key = f"{name}@{mp_name}"
 
         statuses = all_enabled.get(plugin_key, {"user": None, "local": None})
-        user_val = statuses.get("user")
-        local_val = statuses.get("local")
+        user_colored, user_raw = _status_str(statuses.get("user"))
+        local_colored, local_raw = _status_str(statuses.get("local"))
 
-        if user_val is True:
-            user_str = f"{GREEN}enabled{NC}"
-        elif user_val is False:
-            user_str = f"{RED}disabled{NC}"
-        else:
-            user_str = f"{YELLOW}--{NC}"
-
-        if local_val is True:
-            local_str = f"{GREEN}enabled{NC}"
-        elif local_val is False:
-            local_str = f"{RED}disabled{NC}"
-        else:
-            local_str = f"{YELLOW}--{NC}"
-
-        print(f"  {name:<40} {version:<10} {user_str:<21} {local_str:<21}")
+        # Pad based on raw text length, then insert colored version
+        user_pad = " " * (10 - len(user_raw))
+        local_pad = " " * (10 - len(local_raw))
+        print(f"  {name:<40} {version:<10} {user_colored}{user_pad} {local_colored}{local_pad}")
 
     print()
 
