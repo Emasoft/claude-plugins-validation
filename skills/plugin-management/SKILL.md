@@ -20,22 +20,31 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --update ./plugin-v2/ my
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --uninstall name@mkt
 ```
 
-## Enable / Disable (with smart name resolution)
+## Enable / Disable (with smart name resolution and scope)
 
 Smart plugin name resolution — accepts 3 formats:
 - `plugin-name` — auto-resolves if unique across all settings/marketplaces
 - `plugin-name@marketplace` — explicit marketplace
 - `plugin-name@owner/marketplace` — disambiguate same-name marketplaces
 
+### User level (default — `~/.claude/settings.json`)
 ```bash
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --enable <plugin>
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --disable <plugin>
 ```
 
-Writes to `~/.claude/settings.json` (the only file Claude Code reads for `enabledPlugins`).
-The script checks that the plugin is installed before enabling/disabling. Exits with error if not found.
+### Project-local (`<project>/.claude/settings.local.json`)
+```bash
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --enable <plugin> --scope local
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --disable <plugin> --scope local
+```
 
-**Note**: Claude Code does NOT support per-project `enabledPlugins` overrides. The enable/disable state is always global (user-level).
+### Scope precedence (discovered from live testing)
+- User `True` **overrides** local `False` — a user-level enable cannot be disabled locally
+- User **not set** + local `True` → plugin enabled only in this project
+- `--scope local` + enable → sets local `True` AND **removes** the key from user settings (so user `True` doesn't override)
+
+The script checks that the plugin is installed before enabling/disabling. Exits with error if not found.
 
 ## Validate (190+ rules: manifest, hooks, frontmatter, MCP, LSP, security, encoding, enterprise)
 
@@ -117,7 +126,7 @@ Related commands: `/cpv-create-local-plugin`, `/cpv-create-local-marketplace`, `
 
 ## Flags
 
-`-f`/`--force` install despite errors | `-n`/`--dry-run` preview only | `-q`/`--quiet` suppress output | `-v`/`--verbose` full details + security audit
+`-f`/`--force` install despite errors | `-n`/`--dry-run` preview only | `-q`/`--quiet` suppress output | `-v`/`--verbose` full details + security audit | `--scope user|local` enable/disable target
 
 ## Plugin Variables
 
@@ -129,7 +138,7 @@ Related commands: `/cpv-create-local-plugin`, `/cpv-create-local-marketplace`, `
 - Run `/reload-plugins` after install/update/uninstall/enable/disable
 - Backups: `~/.claude/backups/`
 - Plugin persistent data: `${CLAUDE_PLUGIN_DATA}` survives updates; deleted on uninstall (use `--keep-data` to preserve)
-- Settings file: `~/.claude/settings.json` (enabledPlugins is user-level only)
+- Settings: `~/.claude/settings.json` (user), `<project>/.claude/settings.local.json` (local)
 
 ## Hard-Won Lessons (from real publish runs)
 
