@@ -19,3 +19,5 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --update <source> <marke
 ```
 
 After successful update, remind the user to run `/reload-plugins`.
+
+See the **plugin-management** skill for full details.

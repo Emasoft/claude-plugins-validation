@@ -15,8 +15,8 @@ This plugin provides:
 - **Validation Scripts**: 17 Python validators with 190+ rules for all plugin components
 - **Management Scripts**: Plugin lifecycle management — install, uninstall, update, enable, disable, search, doctor, marketplace operations
 - **Expert Agents**: `plugin-validator`, `skill-validation-agent`, `plugin-fixer`, `semantic-validator` (validation) + `plugin-manager` (management)
-- **Skills**: 8 skills covering validation, management, publishing, scaffolding, and marketplace operations
-- **Slash Commands**: 37 commands for validating, managing, fixing, and publishing plugins
+- **Skills**: 11 skills covering validation, management, publishing, scaffolding, and marketplace operations
+- **Slash Commands**: 38 commands for validating, managing, fixing, and publishing plugins
 
 ## Installation (Production)
 

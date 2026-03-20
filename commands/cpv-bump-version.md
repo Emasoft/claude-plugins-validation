@@ -15,3 +15,5 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/bump_version.py" --set 2.0.0  # explicit v
 ```
 
 Updates both `plugin.json` and `pyproject.toml` (if present).
+
+See the **plugin-management** skill for version bump details.

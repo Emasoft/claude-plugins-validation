@@ -2,6 +2,62 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.3.0] - 2026-03-20
+
+### Plugin Management Consolidation
+
+#### Enable/Disable with Smart Name Resolution
+- **Smart plugin resolution**: accepts bare name (`plugin`), `plugin@marketplace`, or `plugin@owner/marketplace`
+- **`--scope user|local`**: user-level (`~/.claude/settings.json`, default) or project-local (`<project>/.claude/settings.local.json`)
+- **Scope precedence**: user `True` overrides local; `--scope local` + enable removes key from user settings so local takes effect
+- **Installed check**: verifies plugin exists before enable/disable
+
+#### New Commands
+- **`/cpv-list-mp-plugins`**: list all plugins in a marketplace with version, user-level and project-local enabled status
+- **`/cpv-doctor --fix`**: auto-removes orphaned marketplace registrations and plugin entries from settings files
+
+#### Command Renames (38 commands total, was 37)
+- `cpv-publish-as-github-repo` → `cpv-publish-a-plugin-as-github-repo`
+- `cpv-publish-plugin-to-marketplace` → `cpv-publish-a-plugin-to-a-github-marketplace`
+- `cpv-create-github-marketplace` → `cpv-create-a-github-marketplace`
+- `cpv-install-plugin` → `cpv-install-plugin-from-local-mp`
+- `cpv-uninstall-plugin` → `cpv-uninstall-plugin-from-local-mp`
+
+#### Architecture: Single Source of Truth
+- `plugin-management` skill is the SOLE authority for all management operations
+- `plugin-manager` agent references skill via `skills: [plugin-management]` — no duplicated instructions
+- All 10+ management commands are thin wrappers with frontmatter + skill reference
+- 19 hard-won lessons from real publish runs moved to skill
+
+#### Bug Fixes
+- Validation no longer blocks install on MINOR/NIT issues (only CRITICAL/MAJOR block)
+- `__init__.py` excluded from shebang check (false positive)
+- Marketplace generator: missing `repository` field, README uninstall/troubleshooting sections
+- `validate_marketplace.py` early exit now checks `.claude-plugin/marketplace.json`
+- Uninstall cleans ALL settings files (user + user-local + project-local)
+- `_run_cpv_validation` catches `TimeoutExpired` gracefully
+- `do_list`/`do_search` check both user AND project-local enabled status
+- Doctor orphan check flags stale disabled entries too
+- `_resolve_settings_file` validates cwd is a project root before `--scope local`
+- Broken shell quoting in marketplace publish command git config
+- Table alignment fixed for `NO_COLOR=1`
+
+#### PSS Architecture Alignment (publish.py template)
+- `--gate` mode: pre-push quality checks (version bump, lint, validate, tests)
+- `--install-hook`: self-installs `git-hooks/pre-push` into `.git/hooks/`
+- `stage_update_badges()`: README badge auto-update during release
+- Pre-push hook: thin bash delegator to `publish.py --gate` (replaces 200-line Python)
+- Pipeline reordered: lint before tests (catch cheap errors first), 10 stages
+- pytest exit code 5 (no tests collected) handled gracefully
+
+#### Tests
+- +33 tests for management features (smart resolution, scope, marketplace listing)
+- 1549 total (was 1523)
+
+## [2.2.0] - 2026-03-20
+
+_Version bump only — all changes landed in 2.3.0._
+
 ## [2.1.1] - 2026-03-19
 
 ### Command Consolidation + Canonical Pipeline Standard
