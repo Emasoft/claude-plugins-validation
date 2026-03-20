@@ -2,6 +2,29 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.3.2] - 2026-03-20
+
+### Validation Pipeline — Zero Issues
+
+- **Ruff E402 fix**: moved `IS_WINDOWS` after all imports in `validate_plugin.py`, added per-file-ignore
+- **Nixtla strict-mode compliance**: restructured 4 skill files (canonical-pipeline, create-plugin, plugin-management, standardize-plugin) with all required sections (Overview, Prerequisites, Instructions, Output, Error Handling, Examples, Resources)
+- **Skill descriptions**: shortened to <200 chars, added "Use when..." and "Trigger with..." phrases
+- **Progressive discovery**: added TOC sections to all reference files, embedded complete TOC headings in all SKILL.md Resource links
+- **Parent traversal fix**: eliminated 3 `../` references by copying pipeline-rules.md to each skill's own references/
+- **Size compliance**: all SKILL.md files now under 4000 chars (moved overflow to references/)
+- **Mypy fixes**: 7 type errors resolved in cpv_management_common.py, manage_registry.py, standardize_plugin.py, test_consolidation_v211.py
+- **chmod +x**: all 14 scripts with shebangs now executable
+- **Import sorting**: auto-fixed 11 ruff I001 issues
+- **Checklists**: added workflow checklists to 4 skill Instructions sections
+
+New reference files:
+- `skills/canonical-pipeline/references/detailed-standard.md`
+- `skills/plugin-management/references/detailed-commands.md`
+- `skills/plugin-management/references/hard-won-lessons.md`
+- Pipeline-rules.md copied to create-plugin, standardize-plugin, setup-plugin-repo references/
+
+**Result**: CRITICAL=0 MAJOR=0 MINOR=0 NIT=0 WARNING=0 — perfectly clean publish pipeline
+
 ## [2.3.0] - 2026-03-20
 
 ### Plugin Management Consolidation
