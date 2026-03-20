@@ -740,7 +740,8 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
 
     # Check shebangs on script files — scripts without shebangs may not run cross-platform
     shebang_extensions = {".py", ".sh", ".bash", ".rb", ".pl", ".php"}
-    all_scripts = [f for f in scripts_dir.iterdir() if f.is_file() and f.suffix.lower() in shebang_extensions]
+    # __init__.py files are module markers, not scripts — never need shebangs
+    all_scripts = [f for f in scripts_dir.iterdir() if f.is_file() and f.suffix.lower() in shebang_extensions and f.name != "__init__.py"]
     scripts_missing_shebang = []
     for script in all_scripts:
         try:
