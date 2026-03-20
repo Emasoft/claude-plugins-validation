@@ -10,8 +10,8 @@ Usage:
     uv run scripts/manage_plugin.py <source> <marketplace> [--force] [--dry-run] [--quiet]
     uv run scripts/manage_plugin.py --uninstall <plugin>@<marketplace> [--dry-run]
     uv run scripts/manage_plugin.py --update <source> <marketplace> [--force] [--dry-run]
-    uv run scripts/manage_plugin.py --enable <plugin> [--scope user|local]
-    uv run scripts/manage_plugin.py --disable <plugin> [--scope user|local]
+    uv run scripts/manage_plugin.py --enable <plugin>
+    uv run scripts/manage_plugin.py --disable <plugin>
     uv run scripts/manage_plugin.py --version
 """
 
@@ -31,7 +31,6 @@ from cpv_management_common import (
     IS_WINDOWS,
     MARKETPLACES_DIR,
     CACHE_DIR,
-    SETTINGS_FILE,
     SETTINGS_TARGET,
     INSTALLED_FILE,
     TOOL_VERSION,
@@ -800,38 +799,21 @@ def do_uninstall(plugin_key: str, quiet: bool = False, dry_run: bool = False):
 # ── Lifecycle: Enable / Disable ───────────────────────────
 
 
-def _resolve_settings_file(scope: str) -> Path:
-    """Return the settings file for the given scope.
-
-    Scopes:
-      'user' (default) → ~/.claude/settings.json
-      'local'          → <project>/.claude/settings.local.json
-    """
-    if scope == "local":
-        return Path.cwd() / ".claude" / "settings.local.json"
-    # Default: user-level (~/.claude/settings.json via SETTINGS_TARGET)
-    return SETTINGS_TARGET
-
-
 def _collect_all_plugin_keys() -> dict[str, list[str]]:
-    """Scan settings files and return {plugin_key: [files_where_listed]}.
+    """Scan ~/.claude/settings.json and return {plugin_key: [files_where_listed]}.
 
-    Checks ~/.claude/settings.json and project .claude/settings.local.json.
+    Claude Code only reads enabledPlugins from ~/.claude/settings.json (user-level).
+    Project-level settings do NOT support enabledPlugins.
     """
     result: dict[str, list[str]] = {}
-    files_to_check = [SETTINGS_TARGET]
-    project_settings = Path.cwd() / ".claude" / "settings.local.json"
-    if project_settings.exists():
-        files_to_check.append(project_settings)
-    for sf in files_to_check:
-        if not sf.exists():
-            continue
-        try:
-            data = json.loads(sf.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            continue
-        for key in data.get("enabledPlugins", {}):
-            result.setdefault(key, []).append(str(sf))
+    if not SETTINGS_TARGET.exists():
+        return result
+    try:
+        data = json.loads(SETTINGS_TARGET.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return result
+    for key in data.get("enabledPlugins", {}):
+        result.setdefault(key, []).append(str(SETTINGS_TARGET))
     return result
 
 
@@ -915,82 +897,55 @@ def _verify_plugin_installed(plugin_key: str) -> bool:
     return False
 
 
-def do_enable(plugin_key: str, quiet: bool = False, dry_run: bool = False, scope: str = "user"):
+def do_enable(plugin_key: str, quiet: bool = False, dry_run: bool = False):
+    """Enable a plugin in ~/.claude/settings.json (user-level)."""
     plugin_key = _resolve_plugin_key(plugin_key)
     if not _verify_plugin_installed(plugin_key):
         err(f"Plugin '{plugin_key}' is not installed. Install it first.")
         sys.exit(1)
 
-    target = _resolve_settings_file(scope)
-
-    # Ensure parent directory exists for project-level settings
-    if scope == "local":
-        target.parent.mkdir(parents=True, exist_ok=True)
-
-    settings = load_json_safe(target)
+    settings = load_json_safe(SETTINGS_TARGET)
     ep = settings.setdefault("enabledPlugins", {})
     if ep.get(plugin_key) is True:
         if not quiet:
-            info(f"{plugin_key} is already enabled in {target.name}.")
+            info(f"{plugin_key} is already enabled.")
         return
 
     if dry_run:
         if not quiet:
-            ok(f"Would enable {plugin_key} in {target}")
-        if scope == "local":
-            ok(f"Would disable {plugin_key} at user level (cascading)")
+            ok(f"Would enable {plugin_key}")
         return
 
     ep[plugin_key] = True
-    save_json_safe(target, settings)
+    save_json_safe(SETTINGS_TARGET, settings)
     if not quiet:
-        ok(f"Enabled {plugin_key} in {target}")
-
-    # Cascading: when enabling at project level, disable at user level
-    # so the plugin must be explicitly enabled per-project
-    if scope == "local":
-        user_settings = load_json_safe(SETTINGS_FILE)
-        user_ep = user_settings.setdefault("enabledPlugins", {})
-        if user_ep.get(plugin_key) is not False:
-            user_ep[plugin_key] = False
-            save_json_safe(SETTINGS_FILE, user_settings)
-            if not quiet:
-                info(f"Disabled {plugin_key} at user level (must be enabled per-project now)")
-
-    if not quiet:
+        ok(f"Enabled {plugin_key}")
         print("  Run /reload-plugins or restart Claude Code for changes to take effect.")
 
 
-def do_disable(plugin_key: str, quiet: bool = False, dry_run: bool = False, scope: str = "user"):
+def do_disable(plugin_key: str, quiet: bool = False, dry_run: bool = False):
+    """Disable a plugin in ~/.claude/settings.json (user-level)."""
     plugin_key = _resolve_plugin_key(plugin_key)
     if not _verify_plugin_installed(plugin_key):
         err(f"Plugin '{plugin_key}' is not installed. Nothing to disable.")
         sys.exit(1)
 
-    target = _resolve_settings_file(scope)
-
-    # Ensure parent directory exists for project-level settings
-    if scope == "local":
-        target.parent.mkdir(parents=True, exist_ok=True)
-
-    settings = load_json_safe(target)
+    settings = load_json_safe(SETTINGS_TARGET)
     ep = settings.setdefault("enabledPlugins", {})
     if ep.get(plugin_key) is False:
         if not quiet:
-            info(f"{plugin_key} is already disabled in {target.name}.")
+            info(f"{plugin_key} is already disabled.")
         return
 
     if dry_run:
         if not quiet:
-            ok(f"Would disable {plugin_key} in {target}")
+            ok(f"Would disable {plugin_key}")
         return
 
     ep[plugin_key] = False
-    save_json_safe(target, settings)
+    save_json_safe(SETTINGS_TARGET, settings)
     if not quiet:
-        ok(f"Disabled {plugin_key} in {target}")
-        if scope == "local":
-            info("This project will NOT load this plugin, even if it's enabled at user level.")
+        ok(f"Disabled {plugin_key}")
         print("  Run /reload-plugins or restart Claude Code for changes to take effect.")
 
 
@@ -1089,8 +1044,6 @@ def main():
     parser.add_argument("--update", action="store_true", help="Update instead of install")
     parser.add_argument("--enable", type=str, help="Enable plugin (name, name@marketplace, or name@owner/marketplace)")
     parser.add_argument("--disable", type=str, help="Disable plugin (name, name@marketplace, or name@owner/marketplace)")
-    parser.add_argument("--scope", choices=["user", "local"], default="user",
-                        help="'user' (default) = ~/.claude/settings.json, 'local' = <project>/.claude/settings.local.json")
     parser.add_argument("--force", "-f", action="store_true", help="Force install despite errors")
     parser.add_argument("--dry-run", "-n", action="store_true", help="Preview without changes")
     parser.add_argument("--quiet", "-q", action="store_true", help="Minimal output")
@@ -1103,9 +1056,9 @@ def main():
     if args.uninstall:
         do_uninstall(args.uninstall, quiet=args.quiet, dry_run=args.dry_run)
     elif args.enable:
-        do_enable(args.enable, quiet=args.quiet, dry_run=args.dry_run, scope=args.scope)
+        do_enable(args.enable, quiet=args.quiet, dry_run=args.dry_run)
     elif args.disable:
-        do_disable(args.disable, quiet=args.quiet, dry_run=args.dry_run, scope=args.scope)
+        do_disable(args.disable, quiet=args.quiet, dry_run=args.dry_run)
     elif args.update:
         if not args.source:
             err("Source path required for update")

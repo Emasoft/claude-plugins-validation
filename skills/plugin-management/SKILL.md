@@ -20,31 +20,22 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --update ./plugin-v2/ my
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --uninstall name@mkt
 ```
 
-## Enable / Disable (with scope and smart resolution)
+## Enable / Disable (with smart name resolution)
 
 Smart plugin name resolution — accepts 3 formats:
 - `plugin-name` — auto-resolves if unique across all settings/marketplaces
 - `plugin-name@marketplace` — explicit marketplace
 - `plugin-name@owner/marketplace` — disambiguate same-name marketplaces
 
-### User level (default — `~/.claude/settings.json`)
 ```bash
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --enable <plugin>
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --disable <plugin>
 ```
 
-### Project-local level (`.claude/settings.local.json` in current project)
-```bash
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --enable <plugin> --scope local
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --disable <plugin> --scope local
-```
-
-### Scope cascading rules
-- **`--scope local` + enable**: Plugin enabled in this project, **auto-disabled at user level** (must be enabled per-project)
-- **`--scope local` + disable**: Plugin disabled in this project only, even if enabled at user level
-- **`--scope user`** (default): Plugin toggled globally for all projects
-
+Writes to `~/.claude/settings.json` (the only file Claude Code reads for `enabledPlugins`).
 The script checks that the plugin is installed before enabling/disabling. Exits with error if not found.
+
+**Note**: Claude Code does NOT support per-project `enabledPlugins` overrides. The enable/disable state is always global (user-level).
 
 ## Validate (190+ rules: manifest, hooks, frontmatter, MCP, LSP, security, encoding, enterprise)
 
@@ -94,7 +85,7 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_marketplace.py" update [name]
 ## Remote Plugins (GitHub marketplaces)
 
 ```bash
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_remote.py" install <plugin>@<mkt> [--scope user|local]
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_remote.py" install <plugin>@<mkt>
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_remote.py" update <plugin>@<mkt>
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_remote.py" uninstall <plugin>@<mkt>
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_remote.py" enable <plugin>@<mkt>
@@ -126,7 +117,7 @@ Related commands: `/cpv-create-local-plugin`, `/cpv-create-local-marketplace`, `
 
 ## Flags
 
-`-f`/`--force` install despite errors | `-n`/`--dry-run` preview only | `-q`/`--quiet` suppress output | `-v`/`--verbose` full details + security audit | `--scope user|local` target settings file
+`-f`/`--force` install despite errors | `-n`/`--dry-run` preview only | `-q`/`--quiet` suppress output | `-v`/`--verbose` full details + security audit
 
 ## Plugin Variables
 
@@ -138,7 +129,7 @@ Related commands: `/cpv-create-local-plugin`, `/cpv-create-local-marketplace`, `
 - Run `/reload-plugins` after install/update/uninstall/enable/disable
 - Backups: `~/.claude/backups/`
 - Plugin persistent data: `${CLAUDE_PLUGIN_DATA}` survives updates; deleted on uninstall (use `--keep-data` to preserve)
-- Settings files: `~/.claude/settings.json` (user-level), `<project>/.claude/settings.local.json` (project-local)
+- Settings file: `~/.claude/settings.json` (enabledPlugins is user-level only)
 
 ## Hard-Won Lessons (from real publish runs)
 
