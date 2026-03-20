@@ -22,28 +22,27 @@ import subprocess
 from pathlib import Path
 from typing import List, Tuple
 
-from manage_plugin import read_plugin_meta, _portable_path, _run_cpv_validation
-
 from cpv_management_common import (
-    CLAUDE_DIR,
-    MARKETPLACES_DIR,
+    BOLD,
     CACHE_DIR,
+    CLAUDE_DIR,
+    CYAN,
+    GREEN,
+    MARKETPLACES_DIR,
+    NC,
+    RED,
     SETTINGS_FILE,
     SETTINGS_TARGET,
-    ok,
-    info,
-    warn,
-    err,
-    load_jsonc,
-    load_json_safe,
-    save_json_safe,
-    BOLD,
-    NC,
-    GREEN,
     YELLOW,
-    CYAN,
-    RED,
+    err,
+    info,
+    load_json_safe,
+    load_jsonc,
+    ok,
+    save_json_safe,
+    warn,
 )
+from manage_plugin import _portable_path, _run_cpv_validation, read_plugin_meta
 
 __all__ = [
     "do_doctor",

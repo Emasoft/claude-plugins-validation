@@ -43,8 +43,6 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
-IS_WINDOWS = platform.system() == "Windows"
-
 import yaml
 from cpv_validation_common import (
     COLORS,
@@ -64,6 +62,8 @@ from validate_rules import validate_rules_directory
 
 # Import comprehensive skill validator (190+ rules from AgentSkills OpenSpec, Nixtla, Meta-Skills)
 from validate_skill_comprehensive import validate_skill as validate_skill_comprehensive
+
+IS_WINDOWS = platform.system() == "Windows"
 
 # Module-level gitignore filter — initialized in main(), used by scan functions
 _gi: GitignoreFilter | None = None

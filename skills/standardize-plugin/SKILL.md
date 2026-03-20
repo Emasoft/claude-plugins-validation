@@ -1,70 +1,82 @@
 ---
 name: standardize-plugin
 description: >
-  Audit and standardize existing Claude Code plugin or marketplace repositories to match
-  CPV standards. Triggers when user mentions standardizing, auditing repo structure,
-  fixing plugin infrastructure, or enforcing standards on existing plugins.
+  Audit and fix plugin/marketplace repos to match CPV standards.
+  Use when standardizing or auditing repo structure. Trigger with /cpv-standardize.
 ---
 
 # Standardize Plugin / Marketplace
 
-## Audit a Plugin Repository
+## Overview
 
+Audits existing plugin or marketplace repositories against CPV standards and auto-fixes missing files, workflows, and hooks.
+
+## Prerequisites
+
+- `uv` on PATH
+- CPV plugin installed
+- Target repository accessible on disk
+
+## Instructions
+
+1. **Audit a Plugin**:
+   ```bash
+   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" <plugin-path> [--report report.md]
+   ```
+   Checks: 190+ validation rules, pipeline readiness, file inventory, .gitignore, README badges.
+
+2. **Fix a Plugin** (generates missing files, does NOT modify existing code):
+   ```bash
+   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" <plugin-path> --fix [--dry-run]
+   ```
+
+3. **After --fix**, manually fix remaining issues:
+   - .gitignore gaps, SKILL.md missing Nixtla sections, README badges, MINOR/NIT issues
+   - Pre-push hook blocks on CRITICAL, MAJOR, MINOR, NIT — only WARNINGs pass
+
+Copy this checklist and track your progress:
+- [ ] Audit report reviewed
+- [ ] `--fix` applied
+- [ ] Remaining issues fixed manually
+- [ ] Re-validation passed
+
+4. **Audit/Fix a Marketplace**:
+   ```bash
+   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_marketplace.py" <path> [--fix] [--dry-run]
+   ```
+
+## Output
+
+- Audit report listing all standard files: present, missing, or needs update
+- After `--fix`: generated files (workflows, hooks, cliff.toml, .python-version, badge markers)
+- Exit code 1 after `--fix` is expected if warnings remain
+
+## Error Handling
+
+| Error | Resolution |
+|-------|------------|
+| `standardize exit code 1` | Expected after --fix if warnings remain — fix manually |
+| Missing `plugin.json` | Target is not a plugin — check path |
+| `ModuleNotFoundError: yaml` | Use `uv run --with pyyaml python` |
+
+## Examples
+
+**Audit:**
 ```bash
-uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" <plugin-path> [--report report.md]
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" ./my-plugin/
 ```
 
-Checks: validation rules (190+), pipeline readiness (hooks, workflows, publish.py, cliff.toml), file inventory vs standard template, .gitignore completeness, README badge markers.
-
-## Fix a Plugin Repository
-
+**Fix and re-validate:**
 ```bash
-uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" <plugin-path> --fix [--dry-run]
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" ./my-plugin/ --fix
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" ./my-plugin/ --strict
 ```
 
-Generates missing files without modifying existing code: adds workflows, hooks, cliff.toml, .python-version, badge markers. Does NOT touch plugin.json, pyproject.toml versions, or existing source code.
+## Resources
 
-After standardize --fix, you MUST still fix remaining issues manually:
-- .gitignore gaps (standardize warns but does not auto-add all entries)
-- SKILL.md missing Nixtla sections (Overview, Prerequisites, Output, Error Handling, Examples, Resources)
-- README badge markers and component tables
-- Any MINOR or NIT issues
-The pre-push hook blocks on CRITICAL, MAJOR, MINOR, and NIT. Only WARNINGs pass.
+- [Pipeline Rules](references/pipeline-rules.md) — mandatory rules for all plugin operations
+  > Pre-Push Hook: The Quality Gate · Fix-All Mandate · Running CPV Scripts · Processing Validation Output · GitHub Secrets · CI Workflow Dependencies · Marketplace Notification · All Scripts Are Python · Binary Plugins · README Requirements · Pre-Publish Local Dry-Run · Post-Push CI Verification · Mega-Linter Configuration · Common Fixes Reference
 
-## Audit a Marketplace
+## Token Optimization
 
-```bash
-uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_marketplace.py" <marketplace-path> [--report report.md]
-```
-
-Validates marketplace.json, checks all plugin sources point to external GitHub repos (flags local paths), verifies CI/CD workflows.
-
-## Fix a Marketplace
-
-```bash
-uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_marketplace.py" <marketplace-path> --fix [--dry-run]
-```
-
-## Standard Plugin Files
-
-Every plugin repo SHOULD have:
-- `.claude-plugin/plugin.json` — manifest (REQUIRED)
-- `pyproject.toml` — Python project config
-- `.python-version` — reproducible builds
-- `.gitignore` — includes .claude/, .tldr/, llm_externalizer_output/
-- `README.md` — with `<!--BADGES-START-->` / `<!--BADGES-END-->`
-- `cliff.toml` — changelog generation
-- `scripts/publish.py` — release automation
-- `git-hooks/pre-push` — thin bash delegator to `publish.py --gate`
-  → Runs 4 gates: version bump, lint, validate --strict, tests. Blocks ALL except WARNINGs.
-- `.github/workflows/ci.yml` — lint + validate + test
-- `.github/workflows/release.yml` — tagged releases
-- `.github/workflows/validate.yml` — plugin validation
-- `.github/workflows/notify-marketplace.yml` — marketplace notification
-
-## Pipeline Rules
-
-See [Pipeline Rules](../canonical-pipeline/references/pipeline-rules.md) for the full set of mandatory rules.
-
-## TOKEN OPTIMIZATION
 Use `mcp__plugin_llm-externalizer_llm-externalizer__*` tools for bounded analysis. Pass file paths via `input_files_paths`.

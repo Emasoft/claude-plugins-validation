@@ -19,8 +19,8 @@ Usage:
 import sys
 from typing import List
 
+from cpv_management_common import BOLD, NC, err
 from manage_marketplace import _run_claude_plugin
-from cpv_management_common import err, BOLD, NC
 
 __all__ = ["do_remote", "_remote_help"]
 

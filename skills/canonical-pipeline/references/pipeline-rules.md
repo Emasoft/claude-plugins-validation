@@ -1,5 +1,22 @@
 # Pipeline Rules — Mandatory for ALL Plugin Operations
 
+## Table of Contents
+
+- [Pre-Push Hook: The Quality Gate](#pre-push-hook-the-quality-gate)
+- [Fix-All Mandate](#fix-all-mandate)
+- [Running CPV Scripts](#running-cpv-scripts)
+- [Processing Validation Output](#processing-validation-output)
+- [GitHub Secrets](#github-secrets)
+- [CI Workflow Dependencies](#ci-workflow-dependencies)
+- [Marketplace Notification](#marketplace-notification)
+- [All Scripts Are Python](#all-scripts-are-python)
+- [Binary Plugins](#binary-plugins)
+- [README Requirements](#readme-requirements)
+- [Pre-Publish Local Dry-Run](#pre-publish-local-dry-run)
+- [Post-Push CI Verification](#post-push-ci-verification)
+- [Mega-Linter Configuration](#mega-linter-configuration)
+- [Common Fixes Reference](#common-fixes-reference)
+
 These rules MUST be followed by every agent, command, and skill that creates, publishes, standardizes, or fixes a plugin repository.
 
 ## Pre-Push Hook: The Quality Gate

@@ -20,7 +20,7 @@ import subprocess
 import sys
 from typing import List
 
-from cpv_management_common import info, err, BOLD, NC
+from cpv_management_common import BOLD, NC, err, info
 
 __all__ = [
     "_require_claude_cli",

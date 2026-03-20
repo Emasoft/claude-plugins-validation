@@ -226,7 +226,8 @@ def load_jsonc(path: Path) -> dict:
     """Load a JSONC file (JSON with comments and trailing commas)."""
     text = path.read_text(encoding="utf-8")
     cleaned = strip_trailing_commas(strip_jsonc_comments(text))
-    return json.loads(cleaned)
+    result: dict = json.loads(cleaned)
+    return result
 
 
 # ── Safe JSON file operations ─────────────────────────────
@@ -344,7 +345,7 @@ def _extract_zip(archive: Path, dest: Path):
 
 def _extract_tar(archive: Path, dest: Path, mode: str):
     """Extract a tar archive with security filtering."""
-    with tarfile.open(archive, mode) as tf:
+    with tarfile.open(archive, mode) as tf:  # type: ignore[call-overload]
         if PYTHON_VERSION >= (3, 12):
             # Per-member extract with filter="data" (safe against path traversal)
             for member in tf.getmembers():

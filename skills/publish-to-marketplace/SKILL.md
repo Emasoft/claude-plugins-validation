@@ -18,7 +18,7 @@ user-invocable: false
 
 ## Overview
 
-Publishes a validated Claude Code plugin to a GitHub-hosted marketplace repo. Configures the notification workflow, PAT secret, and publish pipeline so that every `git push` automatically syncs the marketplace.
+Publishes a validated Claude Code plugin to a GitHub-hosted marketplace repo. Configures notification workflow, PAT secret, and publish pipeline.
 
 ## Prerequisites
 
@@ -35,7 +35,7 @@ Ask the user for their marketplace repo coordinates (`<owner>/<marketplace-repo>
 
 ### Phase 1: Configure Notification Pipeline
 
-1. **Create PAT**: Ask user for a GitHub PAT with `repo` scope (or fine-grained with Contents R/W on marketplace repo). See publish-pipeline-guide (Resources) Section 1
+1. **Create PAT**: Ask user for a GitHub PAT with `repo` scope. See publish-pipeline-guide (Resources) Section 1
 2. **Set secret**: `gh secret set MARKETPLACE_PAT --repo <owner>/<plugin-repo> --body "$MARKETPLACE_PAT"` (MUST use `--body` flag)
 3. **Install notify-marketplace.yml**: Copy from publish-pipeline-guide (Resources) Section 2 into `.github/workflows/`. Fill `MARKETPLACE_OWNER` and `MARKETPLACE_REPO`
 4. **Verify CI workflows**: Ensure `ci.yml`, `validate.yml`, `release.yml` exist (see `canonical-pipeline` skill)
@@ -87,9 +87,7 @@ Report: plugin name, old/new version, push status, marketplace dispatch status (
 
 - [Publish Pipeline Guide](references/publish-pipeline-guide.md)
   > Section 1: PAT Setup · Section 2: notify-marketplace.yml · Section 3: The Dispatch Chain · Section 4: publish.py Pipeline · Section 5: Pre-Push Hook Gates · Section 6: marketplace.json Entry Format · Section 7: Troubleshooting
-- `canonical-pipeline` skill — publish.py (--gate/--install-hook/--patch), pre-push hook, CI workflows
-- `/cpv-create-a-github-marketplace` — marketplace repo creation
-- `/cpv-publish-a-plugin-to-a-github-marketplace` — marketplace publishing
+- `canonical-pipeline` skill — publish.py, pre-push hook, CI workflows
 
 ## Token Optimization
 

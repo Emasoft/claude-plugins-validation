@@ -22,7 +22,6 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-
 # -- ANSI colors (disabled when NO_COLOR is set or stdout is not a tty) ------
 
 

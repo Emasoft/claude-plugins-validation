@@ -29,6 +29,7 @@ ignore = ["E501"]  # Allow longer lines
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*.py" = ["E402"]  # Imports after sys.path manipulation in test files
+"scripts/validate_plugin.py" = ["E402"]  # Imports after sys.path setup
 
 [tool.mypy]
 python_version = "3.12"
