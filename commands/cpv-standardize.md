@@ -29,7 +29,7 @@ uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py
 uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" <path> --fix --dry-run
 ```
 
-Checks for missing: .githooks/pre-push, scripts/publish.py, cliff.toml, .github/workflows/{ci,release,validate,notify-marketplace}.yml, .python-version, pyproject.toml, badge markers in README.md, .gitignore entries.
+Checks for missing: git-hooks/pre-push, scripts/publish.py, cliff.toml, .github/workflows/{ci,release,validate,notify-marketplace}.yml, .python-version, pyproject.toml, badge markers in README.md, .gitignore entries.
 
 **After standardize --fix, you MUST still fix remaining issues manually.** The pre-push hook blocks on CRITICAL, MAJOR, MINOR, and NIT. Run `validate_plugin.py --strict`, fix all issues, re-validate until only WARNINGs remain.
 

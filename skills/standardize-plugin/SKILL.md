@@ -55,7 +55,7 @@ Every plugin repo SHOULD have:
 - `README.md` — with `<!--BADGES-START-->` / `<!--BADGES-END-->`
 - `cliff.toml` — changelog generation
 - `scripts/publish.py` — release automation
-- `.githooks/pre-push` — quality gate
+- `git-hooks/pre-push` — thin bash delegator to `publish.py --gate`
   → Runs 4 gates: version bump, lint, validate --strict, tests. Blocks ALL except WARNINGs.
 - `.github/workflows/ci.yml` — lint + validate + test
 - `.github/workflows/release.yml` — tagged releases
