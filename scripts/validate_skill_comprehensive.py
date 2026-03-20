@@ -212,7 +212,8 @@ RE_DYNAMIC_CONTEXT = re.compile(r"!\s*`[^`]+`")  # Matches `!`command``
 RE_ULTRATHINK = re.compile(r"\bultrathink\b", re.IGNORECASE)
 
 # --- Checklist Pattern (best practices: [ ] and [x] checkboxes) ---
-RE_CHECKLIST = re.compile(r"^\s*[-*]\s+\[[x ]\]", re.IGNORECASE | re.MULTILINE)
+# Match both unordered (- [ ]) and numbered (1. [ ]) checklist formats
+RE_CHECKLIST = re.compile(r"^\s*(?:[-*]|\d+\.)\s+\[[x ]\]", re.IGNORECASE | re.MULTILINE)
 
 # --- Examples Pattern (best practices: input/output examples) ---
 RE_EXAMPLE_BLOCK = re.compile(r"```.*?\n.*?```", re.DOTALL)  # Code blocks
@@ -642,7 +643,7 @@ def validate_description_field(
         # Must include "Use when..." phrase
         if not RE_DESCRIPTION_USE_WHEN.search(desc):
             report.major(
-                "Description must include 'Use when ...' phrase (Nixtla strict mode)",
+                "Description must include 'Use when ...' phrase (Nixtla strict mode). Both 'Use when ...' AND 'Trigger with ...' are required.",
                 "SKILL.md",
                 category="Description Quality",
             )
@@ -650,7 +651,7 @@ def validate_description_field(
         # Must include "Trigger with..." phrase
         if not RE_DESCRIPTION_TRIGGER_WITH.search(desc):
             report.minor(
-                "Description should include 'Trigger with ...' phrase (Nixtla strict mode)",
+                "Description should include 'Trigger with ...' phrase (Nixtla strict mode). Both 'Use when ...' AND 'Trigger with ...' are required.",
                 "SKILL.md",
                 category="Description Quality",
             )
@@ -1192,7 +1193,7 @@ def validate_required_sections(body: str, report: ValidationReport, strict_mode:
         has_numbered = bool(re.search(r"(?m)^\s*1\.\s+\S+", instructions))
         if not has_numbered:
             report.major(
-                "'## Instructions' must include numbered step-by-step list",
+                "'## Instructions' must include numbered step-by-step list (e.g., '1. First step\\n2. Second step\\n3. Third step'). Bullet lists (- [ ]) don't satisfy this requirement.",
                 "SKILL.md",
                 category="Required Sections",
             )
