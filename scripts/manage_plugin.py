@@ -427,12 +427,17 @@ def _run_cpv_validation(plugin_root: Path, quiet: bool = False) -> Tuple[List[st
             warn("CPV validation script not found — skipping validation")
         return [], [], True
 
-    result = subprocess.run(
-        [sys.executable, str(validate_script), str(plugin_root)],
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, str(validate_script), str(plugin_root)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        if not quiet:
+            warn("Validation timed out after 120s — skipping")
+        return [], ["Validation timeout"], True
     output = result.stdout + result.stderr
     v_errors = [line for line in output.splitlines() if "CRITICAL" in line or "MAJOR" in line]
     v_warnings = [line for line in output.splitlines() if "MINOR" in line or "NIT" in line or "WARNING" in line]
@@ -760,9 +765,14 @@ def do_uninstall(plugin_key: str, quiet: bool = False, dry_run: bool = False):
 
     # Clean ALL settings files that might reference this plugin
     settings_files_to_clean = [SETTINGS_TARGET]
+    # Also check ~/.claude/settings.local.json (legacy or stale)
     user_local = SETTINGS_TARGET.parent / "settings.local.json"
     if user_local.exists() and user_local != SETTINGS_TARGET:
         settings_files_to_clean.append(user_local)
+    # Also check project-level .claude/settings.local.json (--scope local entries)
+    project_local = Path.cwd() / ".claude" / "settings.local.json"
+    if project_local.exists():
+        settings_files_to_clean.append(project_local)
 
     for sf in settings_files_to_clean:
         if not sf.exists():
@@ -821,7 +831,13 @@ def _resolve_settings_file(scope: str) -> Path:
     'local'          → <project>/.claude/settings.local.json
     """
     if scope == "local":
-        return Path.cwd() / ".claude" / "settings.local.json"
+        project_claude = Path.cwd() / ".claude"
+        # Validate we're in a project directory, not a random folder
+        if not project_claude.exists() and not (Path.cwd() / ".git").exists():
+            err("Not a project directory (no .claude/ or .git/ found).")
+            err("Run from a project root or use --scope user instead.")
+            sys.exit(1)
+        return project_claude / "settings.local.json"
     return SETTINGS_TARGET
 
 

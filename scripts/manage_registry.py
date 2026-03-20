@@ -22,12 +22,8 @@ from cpv_management_common import (
     MARKETPLACES_DIR,
     SETTINGS_FILE,
     SETTINGS_TARGET,
-    INSTALLED_FILE,
     info,
-    ok,
-    warn,
     err,
-    load_json_safe,
     BOLD,
     NC,
     GREEN,
@@ -60,7 +56,7 @@ def do_list():
     print(f"{BOLD}Locally installed plugins:{NC}")
     print()
 
-    settings = load_json_safe(SETTINGS_TARGET)
+    all_enabled = _load_enabled_plugins()
     found = False
     for mp_dir in sorted(MARKETPLACES_DIR.iterdir()):
         if not mp_dir.is_dir():
@@ -79,12 +75,15 @@ def do_list():
             meta = read_plugin_meta(plug_dir)
             plugin_key = f"{meta['name']}@{mp_name}"
 
-            enabled = settings.get("enabledPlugins", {}).get(plugin_key, None)
+            # Check both user and project-local enabled status
+            statuses = all_enabled.get(plugin_key, {"user": None, "local": None})
+            # Effective status: local overrides user if set
+            effective = statuses.get("local") if statuses.get("local") is not None else statuses.get("user")
             status = (
                 f"{GREEN}enabled{NC}"
-                if enabled
+                if effective is True
                 else f"{YELLOW}disabled{NC}"
-                if enabled is False
+                if effective is False
                 else ""
             )
 
@@ -177,7 +176,7 @@ def do_search(query: str):
         query_lower = type_aliases[query_lower]
         is_type_filter = True
 
-    settings = load_json_safe(SETTINGS_TARGET)
+    all_enabled = _load_enabled_plugins()
     matches = []
 
     for mp_dir in sorted(MARKETPLACES_DIR.iterdir()):
@@ -208,8 +207,9 @@ def do_search(query: str):
                 matched = query_lower in searchable
 
             if matched:
-                enabled = settings.get("enabledPlugins", {}).get(plugin_key, None)
-                matches.append((meta, mp_name, plug_dir, components, enabled))
+                statuses = all_enabled.get(plugin_key, {"user": None, "local": None})
+                effective = statuses.get("local") if statuses.get("local") is not None else statuses.get("user")
+                matches.append((meta, mp_name, plug_dir, components, effective))
 
     if not matches:
         if is_type_filter:
@@ -226,13 +226,12 @@ def do_search(query: str):
     print(f"{BOLD}Plugins {label}:{NC}  ({len(matches)} found)")
     print()
 
-    for meta, mp_name, plug_dir, components, enabled in matches:
-        plugin_key = f"{meta['name']}@{mp_name}"
+    for meta, mp_name, plug_dir, components, effective in matches:
         status = (
             f"{GREEN}enabled{NC}"
-            if enabled
+            if effective is True
             else f"{YELLOW}disabled{NC}"
-            if enabled is False
+            if effective is False
             else ""
         )
         comp_str = _format_components(components)

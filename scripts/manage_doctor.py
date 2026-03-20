@@ -27,7 +27,6 @@ from manage_plugin import read_plugin_meta, _portable_path, _run_cpv_validation
 
 from cpv_management_common import (
     CLAUDE_DIR,
-    PLUGINS_DIR,
     MARKETPLACES_DIR,
     CACHE_DIR,
     SETTINGS_FILE,
@@ -54,7 +53,7 @@ __all__ = [
 
 
 
-# read_plugin_meta and _portable_path are imported from manage_plugin
+# read_plugin_meta, _portable_path, _run_cpv_validation imported from manage_plugin
 
 
 # ── Claude CLI validate helper ───────────────────────────────────────
@@ -132,13 +131,13 @@ def _check_orphaned_settings(settings: dict, fix: bool = False, settings_path: P
     # 2. Orphaned enabledPlugins (plugin or marketplace doesn't exist)
     ep = settings.get("enabledPlugins", {})
     orphaned_plugins: list[str] = []
-    for pkey, enabled in list(ep.items()):
+    for pkey, _val in list(ep.items()):
         if "@" not in pkey:
             continue
         pname, mpname = pkey.split("@", 1)
         plug_in_marketplace = MARKETPLACES_DIR / mpname / "plugins" / pname
         plug_in_cache = CACHE_DIR / mpname / pname
-        if not plug_in_marketplace.exists() and not plug_in_cache.exists() and enabled:
+        if not plug_in_marketplace.exists() and not plug_in_cache.exists():
             mp_exists = (MARKETPLACES_DIR / mpname).exists() or (CACHE_DIR / mpname).exists()
             if not mp_exists:
                 print()
@@ -161,6 +160,8 @@ def _check_orphaned_settings(settings: dict, fix: bool = False, settings_path: P
             ok(f"  Saved cleaned {settings_path.name}")
 
     # 4. Check ~/.claude/settings.local.json for stale enabledPlugins
+    # Note: project-level .claude/settings.local.json with enabledPlugins is VALID
+    # (--scope local writes there). Only ~/.claude/settings.local.json is stale.
     user_local = CLAUDE_DIR / "settings.local.json"
     if user_local.exists():
         try:
@@ -168,8 +169,12 @@ def _check_orphaned_settings(settings: dict, fix: bool = False, settings_path: P
             local_ep = local_data.get("enabledPlugins", {})
             if local_ep:
                 print()
-                warn(f"~/.claude/settings.local.json has {len(local_ep)} enabledPlugins entries — these should be in settings.json")
+                warn(f"~/.claude/settings.local.json has {len(local_ep)} stale enabledPlugins entries (should be in settings.json or project .claude/settings.local.json)")
                 issues += len(local_ep)
+                if fix:
+                    local_data["enabledPlugins"] = {}
+                    save_json_safe(user_local, local_data)
+                    ok(f"  Cleared stale enabledPlugins from ~/.claude/settings.local.json")
         except (json.JSONDecodeError, OSError):
             pass
 
