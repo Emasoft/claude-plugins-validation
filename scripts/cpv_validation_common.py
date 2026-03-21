@@ -475,6 +475,12 @@ ALLOWED_DOC_PATH_PREFIXES = {
     "/run/",  # Runtime data
 }
 
+# System binary paths — expected for tool detection, not portability issues
+_SYSTEM_BINARY_PREFIXES = ("/usr/bin/", "/usr/local/bin/", "/opt/homebrew/bin/", "/bin/", "/sbin/", "/usr/sbin/")
+
+# Directories typically gitignored — backtick path checker skips these (runtime artifacts)
+_GITIGNORED_DIR_PATTERNS = ("_dev/", "llm_externalizer_output/", "megalinter-reports/", ".venv/", "node_modules/", "dist/", "build/", "__pycache__/", ".pytest_cache/", ".ruff_cache/")
+
 # Files that should never be in a plugin
 DANGEROUS_FILES = {
     ".env",
@@ -1983,10 +1989,8 @@ def scan_file_for_absolute_paths(
 
             line_num = content[: match.start()].count("\n") + 1
             issues_found += 1
-            # System binary paths (/usr/bin/, /usr/local/bin/, /opt/homebrew/bin/) are expected
-            # for tool detection — downgrade to INFO in all files, not just docs
-            _system_binary_prefixes = ("/usr/bin/", "/usr/local/bin/", "/opt/homebrew/bin/", "/bin/", "/sbin/", "/usr/sbin/")
-            if desc == "system absolute path" and any(matched_text.startswith(p) for p in _system_binary_prefixes):
+            # System binary paths are expected for tool detection — downgrade to INFO
+            if desc == "system absolute path" and any(matched_text.startswith(p) for p in _SYSTEM_BINARY_PREFIXES):
                 report.info(f"System binary path: '{matched_text[:60]}' (OK for tool detection)", rel_path)
                 issues_found -= 1  # Don't count this as an issue
                 continue
@@ -2519,10 +2523,8 @@ def validate_md_file_paths(
         while clean_path.startswith("./"):
             clean_path = clean_path[2:]
 
-        # Skip paths under directories typically gitignored (runtime artifacts, dev folders)
-        # These are paths created at runtime, not present in the repo at rest
-        _gitignored_dir_patterns = ("_dev/", "_dev\\", "llm_externalizer_output/", "megalinter-reports/", ".venv/", "node_modules/", "dist/", "build/", "__pycache__/", ".pytest_cache/", ".ruff_cache/")
-        if any(clean_path.startswith(p) or f"/{p}" in clean_path for p in _gitignored_dir_patterns):
+        # Skip paths under gitignored directories (runtime artifacts, dev folders)
+        if any(clean_path.startswith(p) or f"/{p}" in clean_path for p in _GITIGNORED_DIR_PATTERNS):
             continue
 
         # Well-known plugin structure paths — standard paths every plugin doc references
