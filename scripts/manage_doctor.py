@@ -158,24 +158,17 @@ def _check_orphaned_settings(settings: dict, fix: bool = False, settings_path: P
             save_json_safe(settings_path, settings)
             ok(f"  Saved cleaned {settings_path.name}")
 
-    # 4. Check ~/.claude/settings.local.json for stale enabledPlugins
-    # Note: project-level .claude/settings.local.json with enabledPlugins is VALID
-    # (--scope local writes there). Only ~/.claude/settings.local.json is stale.
+    # 4. Check ~/.claude/settings.local.json — this file should NOT exist at user level.
+    # settings.local.json only makes sense inside a project dir (<project>/.claude/settings.local.json).
+    # At ~/.claude/ it would only apply if Claude Code were launched from ~/ which is invalid.
     user_local = CLAUDE_DIR / "settings.local.json"
     if user_local.exists():
-        try:
-            local_data = json.loads(user_local.read_text(encoding="utf-8"))
-            local_ep = local_data.get("enabledPlugins", {})
-            if local_ep:
-                print()
-                warn(f"~/.claude/settings.local.json has {len(local_ep)} stale enabledPlugins entries (should be in settings.json or project .claude/settings.local.json)")
-                issues += len(local_ep)
-                if fix:
-                    local_data["enabledPlugins"] = {}
-                    save_json_safe(user_local, local_data)
-                    ok("  Cleared stale enabledPlugins from ~/.claude/settings.local.json")
-        except (json.JSONDecodeError, OSError):
-            pass
+        print()
+        warn("~/.claude/settings.local.json exists — this file should NOT exist at user level (only inside project dirs)")
+        issues += 1
+        if fix:
+            user_local.unlink()
+            ok("  Deleted stale ~/.claude/settings.local.json")
 
     # 5. Check known_marketplaces.json for orphaned entries (directories that don't exist)
     if KNOWN_MARKETPLACES_FILE.exists():
