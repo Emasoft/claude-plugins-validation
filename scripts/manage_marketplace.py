@@ -20,7 +20,17 @@ import subprocess
 import sys
 from typing import List
 
-from cpv_management_common import BOLD, NC, err, info
+from cpv_management_common import (
+    BOLD,
+    KNOWN_MARKETPLACES_FILE,
+    MARKETPLACES_DIR,
+    NC,
+    err,
+    info,
+    load_json_safe,
+    ok,
+    save_json_safe,
+)
 
 __all__ = [
     "_require_claude_cli",
@@ -127,8 +137,18 @@ def do_marketplace(argv: List[str]):
         if not rest:
             err("Usage: manage_marketplace remove <name>")
             sys.exit(1)
+        mp_name = rest[0]
         cmd = ["marketplace", "remove"] + rest
         rc = _run_claude_plugin(cmd, quiet=quiet)
+        # Post-cleanup: ensure known_marketplaces.json is cleaned too
+        # (Claude CLI should handle this, but belt-and-suspenders)
+        mp_dir = MARKETPLACES_DIR / mp_name
+        if not mp_dir.exists() and KNOWN_MARKETPLACES_FILE.exists():
+            km = load_json_safe(KNOWN_MARKETPLACES_FILE)
+            if km.pop(mp_name, None) is not None:
+                save_json_safe(KNOWN_MARKETPLACES_FILE, km)
+                if not quiet:
+                    ok(f"Cleaned '{mp_name}' from known_marketplaces.json")
         sys.exit(rc)
 
     elif subcmd == "list" or subcmd == "ls":

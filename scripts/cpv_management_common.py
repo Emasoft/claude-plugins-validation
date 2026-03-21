@@ -30,6 +30,7 @@ __all__ = [
     "CACHE_DIR",
     "SETTINGS_FILE",
     "INSTALLED_FILE",
+    "KNOWN_MARKETPLACES_FILE",
     "SETTINGS_TARGET",
     "C",
     "RED",
@@ -75,6 +76,8 @@ MARKETPLACES_DIR = PLUGINS_DIR / "marketplaces"
 CACHE_DIR = PLUGINS_DIR / "cache"
 SETTINGS_FILE = CLAUDE_DIR / "settings.json"
 INSTALLED_FILE = PLUGINS_DIR / "installed_plugins.json"
+# Claude Code internal marketplace registry — must be cleaned on uninstall/doctor
+KNOWN_MARKETPLACES_FILE = PLUGINS_DIR / "known_marketplaces.json"
 
 # All plugin/marketplace operations write to ~/.claude/settings.json (user-level).
 # ~/.claude/settings.local.json is NOT used — it only applies if Claude Code

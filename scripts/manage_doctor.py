@@ -28,6 +28,7 @@ from cpv_management_common import (
     CLAUDE_DIR,
     CYAN,
     GREEN,
+    KNOWN_MARKETPLACES_FILE,
     MARKETPLACES_DIR,
     NC,
     RED,
@@ -173,6 +174,37 @@ def _check_orphaned_settings(settings: dict, fix: bool = False, settings_path: P
                     local_data["enabledPlugins"] = {}
                     save_json_safe(user_local, local_data)
                     ok("  Cleared stale enabledPlugins from ~/.claude/settings.local.json")
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # 5. Check known_marketplaces.json for orphaned entries (directories that don't exist)
+    if KNOWN_MARKETPLACES_FILE.exists():
+        try:
+            km_data = json.loads(KNOWN_MARKETPLACES_FILE.read_text(encoding="utf-8"))
+            orphaned_km: list[str] = []
+            for km_name, km_cfg in list(km_data.items()):
+                source = km_cfg.get("source", {})
+                if source.get("source") == "directory":
+                    km_path = Path(source.get("path", ""))
+                    if not km_path.exists():
+                        print()
+                        warn(f"Orphaned known_marketplaces entry: '{km_name}' — directory not found: {km_path}")
+                        orphaned_km.append(km_name)
+                        issues += 1
+                else:
+                    # Check that the install location exists
+                    install_loc = km_cfg.get("installLocation", "")
+                    if install_loc and not Path(install_loc).exists():
+                        print()
+                        warn(f"Orphaned known_marketplaces entry: '{km_name}' — install location missing: {install_loc}")
+                        orphaned_km.append(km_name)
+                        issues += 1
+            if fix and orphaned_km:
+                for km_name in orphaned_km:
+                    km_data.pop(km_name, None)
+                    ok(f"  Removed orphaned known_marketplace: {km_name}")
+                save_json_safe(KNOWN_MARKETPLACES_FILE, km_data)
+                ok("  Saved cleaned known_marketplaces.json")
         except (json.JSONDecodeError, OSError):
             pass
 
