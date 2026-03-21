@@ -1,0 +1,1 @@
+No lintable source files in commit (only .claude-plugin/plugin.json, pyproject.toml). Final lint pass: CLEAN.
