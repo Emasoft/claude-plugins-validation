@@ -34,6 +34,7 @@ from cpv_management_common import (
     GREEN,
     INSTALLED_FILE,
     IS_WINDOWS,
+    KNOWN_MARKETPLACES_FILE,
     MARKETPLACES_DIR,
     NC,
     SETTINGS_TARGET,
@@ -791,6 +792,13 @@ def do_uninstall(plugin_key: str, quiet: bool = False, dry_run: bool = False):
         if not quiet:
             info(f"Marketplace '{marketplace_name}' is now empty, removing...")
         shutil.rmtree(mp_dir, ignore_errors=True)
+        # Also clean Claude Code's internal marketplace registry
+        if KNOWN_MARKETPLACES_FILE.exists():
+            km = load_json_safe(KNOWN_MARKETPLACES_FILE)
+            if km.pop(marketplace_name, None) is not None:
+                save_json_safe(KNOWN_MARKETPLACES_FILE, km)
+                if not quiet:
+                    ok(f"Removed '{marketplace_name}' from known_marketplaces.json")
         if not quiet:
             ok(f"Removed empty marketplace '{marketplace_name}'")
 
