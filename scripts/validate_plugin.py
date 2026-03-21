@@ -1180,6 +1180,23 @@ EXPECTED_GITIGNORE_CATEGORIES: list[tuple[list[str], str, str]] = [
 ]
 
 
+def _check_stale_user_settings_local(report: ValidationReport) -> None:
+    """Warn if ~/.claude/settings.local.json exists — it should not be at user level.
+
+    settings.local.json only makes sense inside a project directory
+    (<project>/.claude/settings.local.json). At ~/.claude/ it indicates a
+    leftover from buggy tooling or running Claude Code from ~/ (invalid).
+    """
+    stale = Path.home() / ".claude" / "settings.local.json"
+    if stale.exists():
+        report.warning(
+            "~/.claude/settings.local.json exists but should NOT be at user level. "
+            "This file only makes sense inside project dirs (<project>/.claude/settings.local.json). "
+            "Run /cpv-doctor --fix to delete it, or remove it manually.",
+            "~/.claude/settings.local.json",
+        )
+
+
 def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
     """Validate that the plugin has a .gitignore with essential patterns.
 
@@ -1598,6 +1615,8 @@ def main() -> int:
     validate_no_local_paths(plugin_root, report)
     validate_gitignore(plugin_root, report)
     validate_cross_platform(plugin_root, report)
+    # Check for stale ~/.claude/settings.local.json — should not exist at user level
+    _check_stale_user_settings_local(report)
     validate_md_content_references(plugin_root, report)
     validate_workflow_inline_python(plugin_root, report)
     validate_pipeline_readiness(plugin_root, report)
