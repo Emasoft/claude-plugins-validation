@@ -13,6 +13,15 @@ Security Checks Implemented:
 5. Dangerous File Detection (.env, credentials.json, etc.)
 6. Script Permission Check (executable, shebang, world-writable)
 7. Plugin-Wide Recursive Scan
+8. Prompt Injection Detection (AI-specific: malicious instructions in skills/agents)
+9. Data Exfiltration Detection (curl/wget/fetch to external URLs in hooks/scripts)
+10. Permission Escalation Detection (dangerouslySkipPermissions, broad allowedTools)
+11. Supply Chain Attack Detection (curl|sh, pip install from URL, npm from non-registry)
+12. Credential Harvesting Detection (~/.ssh/, ~/.aws/, ~/.gitconfig reads)
+13. Hook Abuse Detection (PreToolUse denying all, PostToolUse sending externally)
+14. MCP Server Abuse Detection (non-localhost servers flagged as warning)
+15. Agent Impersonation Detection (claiming to be official Claude tools)
+16. Sandbox Escape Detection (--no-verify, git config modification, hook bypass)
 """
 
 from __future__ import annotations
@@ -104,6 +113,70 @@ PATH_TRAVERSAL_PATTERNS = [
     # Windows absolute paths
     (re.compile(r"[A-Za-z]:\\"), "Windows absolute path detected"),
 ]
+
+# =============================================================================
+# AI-Specific Threat Patterns (Checks 8-16)
+# =============================================================================
+
+# Prompt injection patterns — malicious instructions in skills/agents/commands
+PROMPT_INJECTION_PATTERNS = [
+    (re.compile(r"ignore\s+(?:all\s+)?(?:previous|prior|above)\s+instructions?", re.IGNORECASE), "Prompt injection: ignore previous instructions"),
+    (re.compile(r"you\s+are\s+now\s+(?:a|an)\b", re.IGNORECASE), "Prompt injection: identity override ('you are now')"),
+    (re.compile(r"(?:forget|disregard|override)\s+(?:all\s+)?(?:your|the)\s+(?:instructions?|rules?|guidelines?|constraints?)", re.IGNORECASE), "Prompt injection: instruction override"),
+    (re.compile(r"do\s+not\s+follow\s+(?:any|the)\s+(?:previous|above|prior)\s+(?:instructions?|rules?)", re.IGNORECASE), "Prompt injection: instruction negation"),
+    (re.compile(r"(?:system|hidden)\s*(?:prompt|instruction|message)\s*:", re.IGNORECASE), "Prompt injection: fake system prompt marker"),
+    (re.compile(r"<\s*(?:system|instructions?|context)\s*>", re.IGNORECASE), "Prompt injection: fake XML system tag"),
+    (re.compile(r"\[INST\]|\[/INST\]|\[SYSTEM\]", re.IGNORECASE), "Prompt injection: fake instruction delimiters"),
+    (re.compile(r"IMPORTANT:\s*(?:ignore|override|forget|disregard)", re.IGNORECASE), "Prompt injection: IMPORTANT override"),
+]
+
+# Data exfiltration patterns — sending data to external servers
+DATA_EXFILTRATION_PATTERNS = [
+    (re.compile(r"curl\s+.*-[dX]\s+.*https?://(?!localhost|127\.0\.0\.1)", re.IGNORECASE), "Data exfiltration: curl POST/PUT to external URL"),
+    (re.compile(r"wget\s+.*--post-data.*https?://(?!localhost|127\.0\.0\.1)", re.IGNORECASE), "Data exfiltration: wget POST to external URL"),
+    (re.compile(r"fetch\s*\(\s*['\"]https?://(?!localhost|127\.0\.0\.1)", re.IGNORECASE), "Data exfiltration: fetch() to external URL"),
+    (re.compile(r"requests?\.\s*(?:post|put|patch)\s*\(\s*['\"]https?://(?!localhost|127\.0\.0\.1)", re.IGNORECASE), "Data exfiltration: Python requests POST to external URL"),
+    (re.compile(r"urllib\.\s*request\.\s*urlopen.*https?://(?!localhost|127\.0\.0\.1)"), "Data exfiltration: urllib to external URL"),
+]
+
+# Supply chain attack patterns — downloading and executing code
+SUPPLY_CHAIN_PATTERNS = [
+    (re.compile(r"curl\s+.*\|\s*(?:sh|bash|zsh|python|python3|node)\b"), "Supply chain: curl piped to interpreter"),
+    (re.compile(r"wget\s+.*\|\s*(?:sh|bash|zsh|python|python3|node)\b"), "Supply chain: wget piped to interpreter"),
+    (re.compile(r"pip\s+install\s+.*(?:https?://|git\+|--index-url\s+(?!https://pypi))"), "Supply chain: pip install from non-PyPI source"),
+    (re.compile(r"npm\s+install\s+.*(?:https?://|git\+|--registry\s+(?!https://registry\.npmjs))"), "Supply chain: npm install from non-registry source"),
+    (re.compile(r"curl\s+.*-[oO]\s+.*&&\s*(?:chmod|sh|bash|python|node)\b"), "Supply chain: curl download then execute"),
+    (re.compile(r"wget\s+.*-[oO]\s+.*&&\s*(?:chmod|sh|bash|python|node)\b"), "Supply chain: wget download then execute"),
+]
+
+# Credential harvesting patterns — reading sensitive credential files
+# Note: ~/.claude/ is EXCLUDED (legitimate for plugins)
+CREDENTIAL_HARVEST_PATTERNS = [
+    (re.compile(r"~/\.ssh/|/\.ssh/|SSH_KEY|id_rsa|id_ed25519"), "Credential access: SSH key file reference"),
+    (re.compile(r"~/\.aws/|/\.aws/|AWS_SECRET|aws_secret_access_key", re.IGNORECASE), "Credential access: AWS credentials reference"),
+    (re.compile(r"~/\.gitconfig|/\.gitconfig|GIT_TOKEN|GITHUB_TOKEN", re.IGNORECASE), "Credential access: Git credentials reference"),
+    (re.compile(r"~/\.npmrc|/\.npmrc|NPM_TOKEN|npm_token", re.IGNORECASE), "Credential access: npm credentials reference"),
+    (re.compile(r"~/\.docker/|/\.docker/config\.json|DOCKER_PASSWORD", re.IGNORECASE), "Credential access: Docker credentials reference"),
+    (re.compile(r"~/\.kube/|/\.kube/config|KUBECONFIG", re.IGNORECASE), "Credential access: Kubernetes config reference"),
+    (re.compile(r"~/\.gnupg/|/\.gnupg/|GPG_PASSPHRASE", re.IGNORECASE), "Credential access: GPG keyring reference"),
+    (re.compile(r"(?:keychain|keyring|credential.?store|password.?store)", re.IGNORECASE), "Credential access: system keystore reference"),
+]
+
+# Sandbox escape patterns — bypassing safety controls
+SANDBOX_ESCAPE_PATTERNS = [
+    (re.compile(r"--no-verify\b"), "Sandbox escape: --no-verify bypasses git hooks"),
+    (re.compile(r"git\s+config\s+.*(?:core\.hooksPath|core\.autocrlf|safe\.directory)"), "Sandbox escape: git config modification"),
+    (re.compile(r"--dangerously-skip-permissions\b"), "Permission escalation: dangerouslySkipPermissions flag"),
+    (re.compile(r"chmod\s+(?:777|a\+rwx)\b"), "Sandbox escape: chmod 777 (world-writable)"),
+    (re.compile(r"(?:disable|bypass|skip)\s*(?:all\s+)?(?:hooks?|guard|safety|protection|sandbox)", re.IGNORECASE), "Sandbox escape: safety bypass language"),
+]
+
+# Agent impersonation patterns — claiming official identity
+AGENT_IMPERSONATION_NAMES = {
+    "claude", "anthropic", "claude-code", "claude_code", "claudeai",
+    "official-claude", "anthropic-official", "claude-official",
+    "system-agent", "root-agent", "admin-agent",
+}
 
 # =============================================================================
 # Security Validation Functions
@@ -416,6 +489,327 @@ def scan_for_user_paths(content: str, file_path: str, report: ValidationReport) 
     return issues_found
 
 
+def _is_python_string_context(stripped_line: str) -> bool:
+    """Check if a line is a Python string literal, template, print, or docstring.
+
+    Used to skip false positives in generator scripts, help text, and templates.
+    """
+    # Lines that are clearly string content (quotes, f-strings, print, docstrings)
+    if stripped_line.startswith(('"""', "'''", '"', "'", "f'", 'f"', "r'", 'r"')):
+        return True
+    # Template/generator assignments
+    if any(kw in stripped_line for kw in ("print(", "cprint(", "_info(", "_warn(", "epilog", "help=", "description=")):
+        return True
+    # CI workflow template content (GitHub Actions secrets, workflow syntax)
+    if "${{" in stripped_line:
+        return True
+    return False
+
+
+def scan_for_prompt_injection(content: str, file_path: str, report: ValidationReport) -> int:
+    """Scan skill/agent/command content for prompt injection patterns (CRITICAL)."""
+    file_lower = file_path.lower()
+    # Only check files that contain instructions for the AI model
+    ai_content_files = (".md", ".mdx", ".txt")
+    if not any(file_lower.endswith(ext) for ext in ai_content_files):
+        return 0
+    # Skip test files and validator scripts
+    if is_validator_script(file_path):
+        return 0
+    file_normalized = file_lower.replace("\\", "/")
+    if "/tests/" in file_normalized or file_normalized.startswith("tests/"):
+        return 0
+
+    issues_found = 0
+    lines = content.split("\n")
+    for line_num, line in enumerate(lines, start=1):
+        for pattern, msg in PROMPT_INJECTION_PATTERNS:
+            if pattern.search(line):
+                report.critical(f"{msg}: {line.strip()[:80]}", file_path, line_num)
+                issues_found += 1
+    return issues_found
+
+
+def scan_for_data_exfiltration(content: str, file_path: str, report: ValidationReport) -> int:
+    """Scan for data exfiltration patterns (WARNING — many legitimate uses)."""
+    file_lower = file_path.lower()
+    if is_validator_script(file_path):
+        return 0
+    # Skip markdown docs — they contain code examples
+    if file_lower.endswith((".md", ".mdx", ".markdown")):
+        return 0
+    file_normalized = file_lower.replace("\\", "/")
+    if "/tests/" in file_normalized or file_normalized.startswith("tests/"):
+        return 0
+
+    issues_found = 0
+    lines = content.split("\n")
+    for line_num, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        for pattern, msg in DATA_EXFILTRATION_PATTERNS:
+            if pattern.search(line):
+                report.warning(f"{msg}: {stripped[:80]}", file_path, line_num)
+                issues_found += 1
+    return issues_found
+
+
+def scan_for_supply_chain(content: str, file_path: str, report: ValidationReport) -> int:
+    """Scan for supply chain attack patterns (CRITICAL)."""
+    file_lower = file_path.lower()
+    if is_validator_script(file_path):
+        return 0
+    if file_lower.endswith((".md", ".mdx", ".markdown")):
+        return 0
+    file_normalized = file_lower.replace("\\", "/")
+    if "/tests/" in file_normalized or file_normalized.startswith("tests/"):
+        return 0
+    is_python = file_lower.endswith(".py")
+
+    issues_found = 0
+    lines = content.split("\n")
+    for line_num, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        # Skip Python string literals (template generators, help text, install instructions)
+        if is_python and _is_python_string_context(stripped):
+            continue
+        for pattern, msg in SUPPLY_CHAIN_PATTERNS:
+            if pattern.search(line):
+                report.critical(f"{msg}: {stripped[:80]}", file_path, line_num)
+                issues_found += 1
+    return issues_found
+
+
+def scan_for_credential_harvest(content: str, file_path: str, report: ValidationReport) -> int:
+    """Scan for credential harvesting patterns (CRITICAL, except ~/.claude/ which is legitimate)."""
+    file_lower = file_path.lower()
+    if is_validator_script(file_path):
+        return 0
+    if file_lower.endswith((".md", ".mdx", ".markdown")):
+        return 0
+    file_normalized = file_lower.replace("\\", "/")
+    if "/tests/" in file_normalized or file_normalized.startswith("tests/"):
+        return 0
+    is_python = file_lower.endswith(".py")
+
+    issues_found = 0
+    lines = content.split("\n")
+    for line_num, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        # Skip Python string literals (templates, help text, CI workflows)
+        if is_python and _is_python_string_context(stripped):
+            continue
+        for pattern, msg in CREDENTIAL_HARVEST_PATTERNS:
+            if pattern.search(line):
+                report.critical(f"{msg}: {stripped[:80]}", file_path, line_num)
+                issues_found += 1
+    return issues_found
+
+
+def scan_for_sandbox_escape(content: str, file_path: str, report: ValidationReport) -> int:
+    """Scan for sandbox escape patterns."""
+    file_lower = file_path.lower()
+    if is_validator_script(file_path):
+        return 0
+    if file_lower.endswith((".md", ".mdx", ".markdown")):
+        return 0
+    file_normalized = file_lower.replace("\\", "/")
+    if "/tests/" in file_normalized or file_normalized.startswith("tests/"):
+        return 0
+    is_python = file_lower.endswith(".py")
+
+    issues_found = 0
+    lines = content.split("\n")
+    for line_num, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        # Skip Python string literals (templates, help text, generator output)
+        if is_python and _is_python_string_context(stripped):
+            continue
+        # Skip reference .py files inside skills/ (they're templates, not executable code)
+        if "/references/" in file_normalized or file_normalized.startswith("skills/"):
+            continue
+        for pattern, msg in SANDBOX_ESCAPE_PATTERNS:
+            if pattern.search(line):
+                # dangerouslySkipPermissions is valid for worktree agents — WARNING only
+                if "dangerouslySkipPermissions" in msg:
+                    report.warning(f"{msg} (valid for worktree agents, verify intent): {stripped[:80]}", file_path, line_num)
+                else:
+                    report.major(f"{msg}: {stripped[:80]}", file_path, line_num)
+                issues_found += 1
+    return issues_found
+
+
+def check_hook_abuse(plugin_path: Path, report: ValidationReport) -> int:
+    """Check hooks.json for abuse patterns (MAJOR)."""
+    hooks_file = plugin_path / "hooks" / "hooks.json"
+    if not hooks_file.exists():
+        return 0
+
+    issues_found = 0
+    try:
+        import json as _json
+        data = _json.loads(hooks_file.read_text(encoding="utf-8"))
+        hooks = data.get("hooks", data) if isinstance(data, dict) else {}
+
+        for event_name, hook_list in hooks.items():
+            if not isinstance(hook_list, list):
+                continue
+            for entry in hook_list:
+                hook_defs = entry.get("hooks", []) if isinstance(entry, dict) else []
+                for hook in hook_defs:
+                    if not isinstance(hook, dict):
+                        continue
+                    cmd = hook.get("command", "")
+                    url = hook.get("url", "")
+                    hook_type = hook.get("type", "")
+
+                    # PreToolUse hooks sending data externally
+                    if event_name == "PreToolUse" and hook_type == "http" and url:
+                        if not any(loc in url for loc in ("localhost", "127.0.0.1", "::1")):
+                            report.major(f"Hook abuse: PreToolUse HTTP hook sends to external URL: {url[:60]}", "hooks/hooks.json")
+                            issues_found += 1
+
+                    # PostToolUse hooks sending tool output externally
+                    if event_name == "PostToolUse" and hook_type == "http" and url:
+                        if not any(loc in url for loc in ("localhost", "127.0.0.1", "::1")):
+                            report.major(f"Hook abuse: PostToolUse HTTP hook may exfiltrate tool output to: {url[:60]}", "hooks/hooks.json")
+                            issues_found += 1
+
+                    # Command hooks with suspicious commands
+                    if cmd:
+                        for sc_pattern, sc_msg in SUPPLY_CHAIN_PATTERNS + DATA_EXFILTRATION_PATTERNS:
+                            if sc_pattern.search(cmd):
+                                report.critical(f"Hook abuse ({event_name}): {sc_msg} in hook command", "hooks/hooks.json")
+                                issues_found += 1
+
+                    # Excessive timeout (> 1 hour) is suspicious
+                    timeout = hook.get("timeout", 0)
+                    if isinstance(timeout, (int, float)) and timeout > 3600:
+                        report.warning(f"Hook has excessive timeout ({timeout}s) on {event_name} — may indicate long-running exfiltration", "hooks/hooks.json")
+                        issues_found += 1
+
+    except (ValueError, OSError):
+        pass
+    return issues_found
+
+
+def check_mcp_abuse(plugin_path: Path, report: ValidationReport) -> int:
+    """Check MCP config for non-localhost servers (WARNING — many valid remote MCPs)."""
+    mcp_file = plugin_path / ".mcp.json"
+    if not mcp_file.exists():
+        return 0
+
+    issues_found = 0
+    try:
+        import json as _json
+        data = _json.loads(mcp_file.read_text(encoding="utf-8"))
+        servers = data.get("mcpServers", data) if isinstance(data, dict) else {}
+
+        for name, config in servers.items():
+            if not isinstance(config, dict):
+                continue
+            # Check SSE/streamable-http transport pointing to external hosts
+            url = config.get("url", "")
+            if url and not any(loc in url for loc in ("localhost", "127.0.0.1", "::1")):
+                report.warning(f"MCP server '{name}' connects to external host: {url[:60]} (verify trust)", ".mcp.json")
+                issues_found += 1
+
+            # Check command-based servers that download/execute
+            cmd = config.get("command", "")
+            args = config.get("args", [])
+            full_cmd = f"{cmd} {' '.join(str(a) for a in args)}" if args else cmd
+            for sc_pattern, sc_msg in SUPPLY_CHAIN_PATTERNS:
+                if sc_pattern.search(full_cmd):
+                    report.critical(f"MCP server '{name}': {sc_msg}", ".mcp.json")
+                    issues_found += 1
+
+    except (ValueError, OSError):
+        pass
+    return issues_found
+
+
+def check_agent_impersonation(plugin_path: Path, report: ValidationReport) -> int:
+    """Check agent definitions for impersonation of official tools (MAJOR)."""
+    agents_dir = plugin_path / "agents"
+    if not agents_dir.is_dir():
+        return 0
+
+    issues_found = 0
+    for agent_file in agents_dir.glob("*.md"):
+        try:
+            content = agent_file.read_text(encoding="utf-8")
+            # Parse frontmatter
+            if content.startswith("---"):
+                parts = content.split("---", 2)
+                if len(parts) >= 3:
+                    frontmatter = parts[1].lower()
+                    # Check 'name' field
+                    for line in frontmatter.split("\n"):
+                        line = line.strip()
+                        if line.startswith("name:"):
+                            agent_name = line.split(":", 1)[1].strip().strip("'\"").lower()
+                            if agent_name in AGENT_IMPERSONATION_NAMES:
+                                report.major(
+                                    f"Agent impersonation: agent '{agent_name}' uses a reserved/official name",
+                                    f"agents/{agent_file.name}",
+                                )
+                                issues_found += 1
+        except (OSError, UnicodeDecodeError):
+            pass
+    return issues_found
+
+
+def check_permission_escalation(plugin_path: Path, report: ValidationReport) -> int:
+    """Check for permission escalation in plugin manifest and agent frontmatter (WARNING)."""
+    issues_found = 0
+
+    # Check plugin.json for overly broad tool permissions
+    manifest = plugin_path / ".claude-plugin" / "plugin.json"
+    if manifest.exists():
+        try:
+            import json as _json
+            data = _json.loads(manifest.read_text(encoding="utf-8"))
+            # Check if plugin requests dangerous permission modes
+            perm_mode = data.get("permissionMode", "")
+            if perm_mode in ("dangerouslySkipPermissions", "bypass"):
+                report.warning(
+                    f"Permission escalation: plugin.json requests permissionMode '{perm_mode}'",
+                    ".claude-plugin/plugin.json",
+                )
+                issues_found += 1
+        except (ValueError, OSError):
+            pass
+
+    # Check agent frontmatter for broad tool access
+    agents_dir = plugin_path / "agents"
+    if agents_dir.is_dir():
+        for agent_file in agents_dir.glob("*.md"):
+            try:
+                content = agent_file.read_text(encoding="utf-8")
+                if content.startswith("---"):
+                    parts = content.split("---", 2)
+                    if len(parts) >= 3:
+                        fm = parts[1]
+                        # Check for dangerouslySkipPermissions in agent frontmatter
+                        if "dangerouslyskippermissions" in fm.lower().replace("_", "").replace("-", ""):
+                            report.warning(
+                                "Permission escalation: agent requests dangerouslySkipPermissions (valid for worktree agents, verify intent)",
+                                f"agents/{agent_file.name}",
+                            )
+                            issues_found += 1
+            except (OSError, UnicodeDecodeError):
+                pass
+
+    return issues_found
+
+
 def check_dangerous_files(plugin_path: Path, report: ValidationReport) -> int:
     """Check for presence of dangerous files in the plugin. Returns count found."""
     issues_found = 0
@@ -501,6 +895,11 @@ def scan_all_files(plugin_path: Path, report: ValidationReport) -> dict[str, int
         "path_traversal_issues": 0,
         "secret_issues": 0,
         "user_path_issues": 0,
+        "prompt_injection_issues": 0,
+        "exfiltration_issues": 0,
+        "supply_chain_issues": 0,
+        "credential_harvest_issues": 0,
+        "sandbox_escape_issues": 0,
     }
 
     gi = get_gitignore_filter(plugin_path)
@@ -527,6 +926,12 @@ def scan_all_files(plugin_path: Path, report: ValidationReport) -> dict[str, int
                 stats["path_traversal_issues"] += scan_for_path_traversal(content, rel_path, report)
                 stats["secret_issues"] += scan_for_secrets(content, rel_path, report)
                 stats["user_path_issues"] += scan_for_user_paths(content, rel_path, report)
+                # AI-specific threat scans
+                stats["prompt_injection_issues"] += scan_for_prompt_injection(content, rel_path, report)
+                stats["exfiltration_issues"] += scan_for_data_exfiltration(content, rel_path, report)
+                stats["supply_chain_issues"] += scan_for_supply_chain(content, rel_path, report)
+                stats["credential_harvest_issues"] += scan_for_credential_harvest(content, rel_path, report)
+                stats["sandbox_escape_issues"] += scan_for_sandbox_escape(content, rel_path, report)
 
             except (OSError, PermissionError) as e:
                 report.minor(f"Cannot read file: {rel_path} ({e})")
@@ -544,13 +949,9 @@ def validate_security(plugin_path: Path) -> ValidationReport:
     """Run all security validations on a plugin directory.
 
     This function performs comprehensive security analysis including:
-    1. Injection detection (BEFORE any allowlist)
-    2. Path traversal blocking
-    3. Secret detection
-    4. Hardcoded user path detection
-    5. Dangerous file detection
-    6. Script permission checks
-    7. Plugin-wide recursive scan
+    Traditional: injection, path traversal, secrets, user paths, dangerous files, permissions
+    AI-specific: prompt injection, data exfiltration, supply chain, credential harvest,
+    sandbox escape, hook abuse, MCP abuse, agent impersonation, permission escalation
 
     Args:
         plugin_path: Path to the plugin directory
@@ -571,6 +972,8 @@ def validate_security(plugin_path: Path) -> ValidationReport:
 
     report.info(f"Starting security scan of: {plugin_path}")
 
+    # --- Traditional checks ---
+
     # Check 1: Dangerous files (quick check first)
     dangerous_count = check_dangerous_files(plugin_path, report)
     if dangerous_count == 0:
@@ -581,13 +984,13 @@ def validate_security(plugin_path: Path) -> ValidationReport:
     if permission_issues == 0:
         report.passed("All scripts have proper permissions")
 
-    # Check 3-6: Full content scan (injection, path traversal, secrets, user paths)
+    # Check 3-11: Full content scan (traditional + AI-specific)
     scan_stats = scan_all_files(plugin_path, report)
 
     # Report scan statistics
     report.info(f"Scanned {scan_stats['files_scanned']} files, skipped {scan_stats['files_skipped']} binary files")
 
-    # Add passed messages for clean categories
+    # Add passed messages for clean traditional categories
     if scan_stats["injection_issues"] == 0:
         report.passed("No injection patterns detected")
     if scan_stats["path_traversal_issues"] == 0:
@@ -596,6 +999,40 @@ def validate_security(plugin_path: Path) -> ValidationReport:
         report.passed("No secrets detected")
     if scan_stats["user_path_issues"] == 0:
         report.passed("No hardcoded user paths detected")
+
+    # --- AI-specific file-level checks ---
+
+    # Check 12: Hook abuse (external URLs, supply chain in hooks)
+    hook_issues = check_hook_abuse(plugin_path, report)
+    if hook_issues == 0:
+        report.passed("No hook abuse patterns detected")
+
+    # Check 13: MCP server abuse (non-localhost connections)
+    mcp_issues = check_mcp_abuse(plugin_path, report)
+    if mcp_issues == 0:
+        report.passed("No MCP server abuse detected")
+
+    # Check 14: Agent impersonation (claiming official names)
+    impersonation_issues = check_agent_impersonation(plugin_path, report)
+    if impersonation_issues == 0:
+        report.passed("No agent impersonation detected")
+
+    # Check 15: Permission escalation (overly broad permissions)
+    escalation_issues = check_permission_escalation(plugin_path, report)
+    if escalation_issues == 0:
+        report.passed("No permission escalation detected")
+
+    # Add passed messages for clean AI-specific categories
+    if scan_stats["prompt_injection_issues"] == 0:
+        report.passed("No prompt injection patterns detected")
+    if scan_stats["exfiltration_issues"] == 0:
+        report.passed("No data exfiltration patterns detected")
+    if scan_stats["supply_chain_issues"] == 0:
+        report.passed("No supply chain attack patterns detected")
+    if scan_stats["credential_harvest_issues"] == 0:
+        report.passed("No credential harvesting patterns detected")
+    if scan_stats["sandbox_escape_issues"] == 0:
+        report.passed("No sandbox escape patterns detected")
 
     return report
 
