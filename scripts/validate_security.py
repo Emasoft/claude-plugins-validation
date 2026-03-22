@@ -20,8 +20,8 @@ Security Checks Implemented:
 12. Credential Harvesting Detection (~/.ssh/, ~/.aws/, ~/.gitconfig reads)
 13. Hook Abuse Detection (PreToolUse denying all, PostToolUse sending externally)
 14. MCP Server Abuse Detection (non-localhost servers flagged as warning)
-15. Agent Impersonation Detection (claiming to be official Claude tools)
-16. Sandbox Escape Detection (--no-verify, git config modification, hook bypass)
+15. Sandbox Escape Detection (--no-verify, git config modification, hook bypass)
+16. cc-audit External Scanner (100+ rules via npx, optional)
 """
 
 from __future__ import annotations
@@ -174,12 +174,10 @@ SANDBOX_ESCAPE_PATTERNS = [
     (re.compile(r"(?:disable|bypass|skip)\s*(?:all\s+)?(?:hooks?|guard|safety|protection|sandbox)", re.IGNORECASE), "Sandbox escape: safety bypass language"),
 ]
 
-# Agent impersonation patterns — claiming official identity
-AGENT_IMPERSONATION_NAMES = {
-    "claude", "anthropic", "claude-code", "claude_code", "claudeai",
-    "official-claude", "anthropic-official", "claude-official",
-    "system-agent", "root-agent", "admin-agent",
-}
+# Agent impersonation — removed. Too many false positives: legitimate plugins
+# contain "claude" in names (e.g. claude-plugins-validation, claude-plugin).
+# This check would need semantic analysis to distinguish malicious impersonation
+# from legitimate naming, which is beyond what a pattern-based scanner can do.
 
 # =============================================================================
 # Security Validation Functions
@@ -738,37 +736,6 @@ def check_mcp_abuse(plugin_path: Path, report: ValidationReport) -> int:
     return issues_found
 
 
-def check_agent_impersonation(plugin_path: Path, report: ValidationReport) -> int:
-    """Check agent definitions for impersonation of official tools (MAJOR)."""
-    agents_dir = plugin_path / "agents"
-    if not agents_dir.is_dir():
-        return 0
-
-    issues_found = 0
-    for agent_file in agents_dir.glob("*.md"):
-        try:
-            content = agent_file.read_text(encoding="utf-8")
-            # Parse frontmatter
-            if content.startswith("---"):
-                parts = content.split("---", 2)
-                if len(parts) >= 3:
-                    frontmatter = parts[1].lower()
-                    # Check 'name' field
-                    for line in frontmatter.split("\n"):
-                        line = line.strip()
-                        if line.startswith("name:"):
-                            agent_name = line.split(":", 1)[1].strip().strip("'\"").lower()
-                            if agent_name in AGENT_IMPERSONATION_NAMES:
-                                report.major(
-                                    f"Agent impersonation: agent '{agent_name}' uses a reserved/official name",
-                                    f"agents/{agent_file.name}",
-                                )
-                                issues_found += 1
-        except (OSError, UnicodeDecodeError):
-            pass
-    return issues_found
-
-
 def check_permission_escalation(plugin_path: Path, report: ValidationReport) -> int:
     """Check for permission escalation in plugin manifest and agent frontmatter (WARNING)."""
     issues_found = 0
@@ -1122,12 +1089,7 @@ def validate_security(plugin_path: Path) -> ValidationReport:
     if mcp_issues == 0:
         report.passed("No MCP server abuse detected")
 
-    # Check 14: Agent impersonation (claiming official names)
-    impersonation_issues = check_agent_impersonation(plugin_path, report)
-    if impersonation_issues == 0:
-        report.passed("No agent impersonation detected")
-
-    # Check 15: Permission escalation (overly broad permissions)
+    # Check 14: Permission escalation (overly broad permissions)
     escalation_issues = check_permission_escalation(plugin_path, report)
     if escalation_issues == 0:
         report.passed("No permission escalation detected")
