@@ -52,3 +52,7 @@ node_modules/
 target/
 Cargo.lock
 .rechecker/
+# TLDR artifacts (added by rechecker)
+.tldr_session_*
+# Rechecker merge-pending notification files
+rck-*-merge-pending.md
