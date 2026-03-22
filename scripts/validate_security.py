@@ -980,11 +980,13 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
         }
 
         # Handle both possible JSON structures (array of findings or object with results key)
-        findings = []
+        findings: list = []
         if isinstance(data, list):
             findings = data
         elif isinstance(data, dict):
-            findings = data.get("results", data.get("findings", data.get("vulnerabilities", [])))
+            # Use 'or []' to guard against None — data.get() may return None for missing keys
+            raw = data.get("results") or data.get("findings") or data.get("vulnerabilities") or []
+            findings = list(raw)
 
         for finding in findings:
             if not isinstance(finding, dict):
@@ -997,7 +999,7 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
 
             cpv_level = severity_map.get(severity, "warning")
             report_fn = getattr(report, cpv_level)
-            report_fn(f"cc-audit {rule_id}: {message[:100]}", file_ref, line if isinstance(line, int) else 0)
+            report_fn(f"cc-audit {rule_id}: {str(message)[:100]}", file_ref, line if isinstance(line, int) else 0)
             issues_found += 1
 
         if issues_found == 0 and result.returncode == 0:
