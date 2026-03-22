@@ -29,8 +29,11 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import stat
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from cpv_validation_common import (
@@ -945,6 +948,113 @@ def scan_all_files(plugin_path: Path, report: ValidationReport) -> dict[str, int
 # =============================================================================
 
 
+def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
+    """Run cc-audit external scanner if available (optional, non-blocking).
+
+    Uses npx @cc-audit/cc-audit to scan for AI-specific threats with 100+ rules.
+    Output is saved to a temp JSON file to avoid context bloat, then parsed.
+    Returns the number of issues found. Returns 0 if cc-audit is not installed.
+    """
+    # Check if npx is available
+    if not shutil.which("npx"):
+        report.info("cc-audit: npx not found, skipping external audit (install Node.js to enable)")
+        return 0
+
+    issues_found = 0
+    # Write output to temp file — never floods context
+    with tempfile.NamedTemporaryFile(suffix=".json", prefix="cc-audit-", delete=False, mode="w") as tmp:
+        tmp_path = tmp.name
+
+    # Auto-generate .cc-audit.yaml if not present (cc-audit requires it)
+    config_file = plugin_path / ".cc-audit.yaml"
+    created_config = False
+    if not config_file.exists():
+        subprocess.run(
+            ["npx", "--yes", "@cc-audit/cc-audit", "init", str(plugin_path)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        created_config = config_file.exists()
+
+    try:
+        result = subprocess.run(
+            [
+                "npx", "--yes", "@cc-audit/cc-audit", "check",
+                str(plugin_path),
+                "-t", "plugin",
+                "--format", "json",
+                "--output", tmp_path,
+                "--ci",
+                "--no-telemetry",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        # Parse JSON output
+        try:
+            data = json.loads(Path(tmp_path).read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            # cc-audit may not have written valid JSON (e.g., no findings)
+            if result.returncode == 0:
+                report.passed("cc-audit: no findings (external scan clean)")
+            elif result.returncode == 2:
+                report.info(f"cc-audit scan error: {result.stderr.strip()[:100]}")
+            return 0
+
+        # Map cc-audit severity to CPV report levels
+        severity_map = {
+            "critical": "critical",
+            "high": "major",
+            "medium": "minor",
+            "low": "warning",
+        }
+
+        # Handle both possible JSON structures (array of findings or object with results key)
+        findings = []
+        if isinstance(data, list):
+            findings = data
+        elif isinstance(data, dict):
+            findings = data.get("results", data.get("findings", data.get("vulnerabilities", [])))
+
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            severity = finding.get("severity", "medium").lower()
+            rule_id = finding.get("ruleId", finding.get("rule_id", finding.get("code", "?")))
+            message = finding.get("message", finding.get("description", "unknown"))
+            file_ref = finding.get("file", finding.get("location", {}).get("file", ""))
+            line = finding.get("line", finding.get("location", {}).get("line", 0))
+
+            cpv_level = severity_map.get(severity, "warning")
+            report_fn = getattr(report, cpv_level)
+            report_fn(f"cc-audit {rule_id}: {message[:100]}", file_ref, line if isinstance(line, int) else 0)
+            issues_found += 1
+
+        if issues_found == 0 and result.returncode == 0:
+            report.passed("cc-audit: no findings (external scan clean)")
+
+    except subprocess.TimeoutExpired:
+        report.warning("cc-audit timed out after 120s — scan aborted")
+    except FileNotFoundError:
+        report.info("cc-audit: npx command failed, skipping external audit")
+    finally:
+        # Clean up temp file and auto-generated config
+        try:
+            Path(tmp_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+        if created_config:
+            try:
+                config_file.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    return issues_found
+
+
 def validate_security(plugin_path: Path) -> ValidationReport:
     """Run all security validations on a plugin directory.
 
@@ -1033,6 +1143,11 @@ def validate_security(plugin_path: Path) -> ValidationReport:
         report.passed("No credential harvesting patterns detected")
     if scan_stats["sandbox_escape_issues"] == 0:
         report.passed("No sandbox escape patterns detected")
+
+    # --- External scanner (optional) ---
+
+    # Check 16: cc-audit external scanner (100+ rules, non-blocking if unavailable)
+    check_cc_audit(plugin_path, report)
 
     return report
 
