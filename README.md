@@ -58,11 +58,11 @@ All checks run as pure Python -- no API calls, no tokens consumed, no data sent 
 
 ---
 
-# Part 1: Standalone Validation (via uvx)
+## Part 1: Standalone Validation (via uvx)
 
 > **No installation needed.** Just run the command and point it at your plugin folder.
 
-## Getting Started
+### Getting Started
 
 You need [uv](https://docs.astral.sh/uv/getting-started/installation/) installed (the fast Python package manager). Then:
 
@@ -95,7 +95,7 @@ uvx --from git+https://github.com/Emasoft/claude-plugins-validation cpv-validate
 > ```
 > Then just use: `cpv cpv-validate /path/to/plugin`
 
-## Available Validators
+### Available Validators
 
 | CLI Command | What It Checks |
 |-------------|----------------|
@@ -117,7 +117,7 @@ uvx --from git+https://github.com/Emasoft/claude-plugins-validation cpv-validate
 | `cpv-doctor` | **Health check.** Diagnoses installed plugins, settings, and marketplaces. |
 | `cpv-standardize` | **Standards.** Audits and fixes a plugin or marketplace repo to match CPV standards. |
 
-## Options
+### Options
 
 These flags work with all validators:
 
@@ -129,9 +129,9 @@ These flags work with all validators:
 | `--strict` | Treat NIT-level issues as failures too. |
 | `--marketplace-only` | Skip `plugin.json` requirement (for marketplace-only distribution). |
 
-## Reading the Results
+### Reading the Results
 
-### Severity Levels
+#### Severity Levels
 
 | Level | What It Means | Must Fix? |
 |-------|--------------|-----------|
@@ -143,7 +143,7 @@ These flags work with all validators:
 | **INFO** | Neutral observation (e.g., "found 3 skills") | No |
 | **PASSED** | Check passed successfully | No |
 
-### Exit Codes
+#### Exit Codes
 
 For use in scripts and CI/CD pipelines:
 
@@ -157,11 +157,11 @@ For use in scripts and CI/CD pipelines:
 
 ---
 
-# Part 2: Claude Code Plugin
+## Part 2: Claude Code Plugin
 
 > **For Claude Code users.** Install CPV once to get slash commands, AI agents, and plugin management tools directly inside Claude Code.
 
-## Installation
+### Installation
 
 ```bash
 # Add the Emasoft marketplace (first time only)
@@ -175,7 +175,7 @@ claude plugin install claude-plugins-validation@emasoft-plugins --scope user
 
 For development: `claude --plugin-dir ./claude-plugins-validation`
 
-## Validation Commands
+### Validation Commands
 
 Once installed, use these slash commands inside Claude Code:
 
@@ -200,11 +200,11 @@ Once installed, use these slash commands inside Claude Code:
 | `/cpv-validate-github-marketplace` | Validate a GitHub marketplace without registering (add `--audit`) |
 | `/cpv-semantic-validation` | **Deep AI analysis** using Claude opus. A-F grades for skill quality. **This is the only command that uses AI tokens.** |
 
-## Plugin Management Commands
+### Plugin Management Commands
 
 CPV also provides tools for the full plugin lifecycle:
 
-### Install, Update, Remove
+#### Install, Update, Remove
 
 | Command | What It Does |
 |---------|--------------|
@@ -213,7 +213,7 @@ CPV also provides tools for the full plugin lifecycle:
 | `/cpv-update-plugin` | Update from a new source |
 | `/cpv-manage-remote-plugins` | Install/update/remove from GitHub marketplaces |
 
-### Enable and Disable
+#### Enable and Disable
 
 | Command | What It Does |
 |---------|--------------|
@@ -222,7 +222,7 @@ CPV also provides tools for the full plugin lifecycle:
 
 Smart name resolution: use `plugin-name`, `name@marketplace`, or `name@owner/marketplace`.
 
-### Browse and Search
+#### Browse and Search
 
 | Command | What It Does |
 |---------|--------------|
@@ -232,7 +232,7 @@ Smart name resolution: use `plugin-name`, `name@marketplace`, or `name@owner/mar
 | `/cpv-manage-marketplaces` | Add, remove, list, update marketplaces |
 | `/cpv-version` | Show CPV version |
 
-### Create and Publish
+#### Create and Publish
 
 | Command | What It Does |
 |---------|--------------|
@@ -244,14 +244,14 @@ Smart name resolution: use `plugin-name`, `name@marketplace`, or `name@owner/mar
 | `/cpv-standardize` | Audit and fix a repo to match standards |
 | `/cpv-bump-version` | Bump version (patch, minor, major) |
 
-### Fix and Repair
+#### Fix and Repair
 
 | Command | What It Does |
 |---------|--------------|
 | `/cpv-fix-validation` | Auto-fix issues from a validation report |
 | `/cpv-doctor` | Health-check plugins, settings, marketplaces (`--fix` to auto-repair) |
 
-## AI Agents
+### AI Agents
 
 These agents work inside Claude Code to automate complex tasks:
 
