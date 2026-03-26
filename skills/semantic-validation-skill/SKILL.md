@@ -78,7 +78,7 @@ This produces a **Semantic Grade (A-F)**, complementary to the **Syntactic Score
 - **Run script baseline first** — the cheap syntactic check catches 90% of issues.
 - **Read only the target SKILL.md/agent .md** — not the entire plugin tree.
 - **Write full report to file** — return only grade + filepath.
-- **Prefer LLM Externalizer MCP** (`chat`, `code_task`) for file reading — save opus context for grading. Pass paths via `input_files_paths`, set `ensemble: false` for simple reads.
+- **Prefer LLM Externalizer MCP** (`chat`, `code_task`) for file reading — save opus context for grading. Pass paths via `input_files_paths`.
 
 ## Resources
 
