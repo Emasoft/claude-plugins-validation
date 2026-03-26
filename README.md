@@ -68,9 +68,6 @@ CPV validates plugins against the official Claude Code specification. If you are
 | Hooks guide | [docs.anthropic.com/en/docs/claude-code/hooks-guide](https://docs.anthropic.com/en/docs/claude-code/hooks-guide) |
 | Hooks reference | [docs.anthropic.com/en/docs/claude-code/hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) |
 | MCP (Model Context Protocol) | [docs.anthropic.com/en/docs/build-with-claude/mcp](https://docs.anthropic.com/en/docs/build-with-claude/mcp) |
-| Agent SDK overview | [docs.anthropic.com/en/docs/claude-code/sdk](https://docs.anthropic.com/en/docs/claude-code/sdk) |
-| Agent SDK -- MCP integration | [docs.anthropic.com/en/docs/claude-code/sdk/sdk-mcp](https://docs.anthropic.com/en/docs/claude-code/sdk/sdk-mcp) |
-| Agent SDK -- Subagents | [docs.anthropic.com/en/docs/claude-code/sdk/subagents](https://docs.anthropic.com/en/docs/claude-code/sdk/subagents) |
 | Claude Code release notes | [docs.anthropic.com/en/release-notes/claude-code](https://docs.anthropic.com/en/release-notes/claude-code) |
 
 ---
