@@ -42,7 +42,7 @@ uv run python scripts/validate_skill_comprehensive.py "<skill_path>" [--strict] 
 - **If validation produces >10 lines of stdout**, something is wrong — use `--report`
 - **Use MCP search tools** (grepika, serena, tldr) instead of reading entire files when you need to locate something
 - **Use WebFetch** to verify API docs or plugin spec if unsure about a validation rule
-- **Use LLM Externalizer MCP** (`mcp__plugin_llm-externalizer_llm-externalizer__*`) when available for bounded analysis tasks — analyzing reports, summarizing validation output. Pass file paths via `input_files_paths`, never paste content. Set `ensemble: false` for simple lookups.
+- **Use LLM Externalizer MCP** (`mcp__plugin_llm-externalizer_llm-externalizer__*`) when available for bounded analysis tasks — analyzing reports, summarizing validation output. Pass file paths via `input_files_paths`, never paste content.
 
 ## Examples
 

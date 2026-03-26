@@ -61,4 +61,3 @@ When LLM Externalizer MCP is available, use it to save context tokens:
 - `mcp__plugin_llm-externalizer_llm-externalizer__scan_folder` — discover all reference files in a directory
 - `mcp__plugin_llm-externalizer_llm-externalizer__check_references` — verify symbol references after applying fixes
 - Always pass file paths via `input_files_paths`, never paste content into your context
-- Set `ensemble: false` for simple lookups to save tokens
