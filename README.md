@@ -61,14 +61,8 @@ All checks run as pure Python -- no API calls, no tokens consumed, no data sent 
 
 CPV validates plugins against the official Claude Code specification. If you are building a plugin, these are the key references:
 
-| Topic | Link |
-|-------|------|
-| Claude Code overview | [docs.anthropic.com/en/docs/claude-code/overview](https://docs.anthropic.com/en/docs/claude-code/overview) |
-| Plugin system and settings | [docs.anthropic.com/en/docs/claude-code/settings](https://docs.anthropic.com/en/docs/claude-code/settings) |
-| Hooks guide | [docs.anthropic.com/en/docs/claude-code/hooks-guide](https://docs.anthropic.com/en/docs/claude-code/hooks-guide) |
-| Hooks reference | [docs.anthropic.com/en/docs/claude-code/hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) |
-| MCP (Model Context Protocol) | [docs.anthropic.com/en/docs/build-with-claude/mcp](https://docs.anthropic.com/en/docs/build-with-claude/mcp) |
-| Claude Code release notes | [docs.anthropic.com/en/release-notes/claude-code](https://docs.anthropic.com/en/release-notes/claude-code) |
+- [Discover plugins](https://code.claude.com/docs/en/discover-plugins) -- official guide to Claude Code plugins
+- [Claude Code release notes](https://docs.anthropic.com/en/release-notes/claude-code) -- latest changes and plugin updates
 
 ---
 
