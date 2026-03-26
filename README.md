@@ -16,6 +16,7 @@ Comprehensive validation and management suite for Claude Code plugins, marketpla
 
 - [Overview](#overview)
 - [Installation](#installation)
+  - [Run Without Installing (via uvx)](#run-without-installing-via-uvx)
 - [Part 1: Validation](#part-1-validation)
   - [Validation Commands](#validation-commands)
   - [How to Validate](#how-to-validate)
@@ -62,6 +63,26 @@ claude plugin install claude-plugins-validation@emasoft-plugins --scope user
 ```
 
 For development only: `claude --plugin-dir ./claude-plugins-validation`
+
+### Run Without Installing (via uvx)
+
+You can run any CPV validator directly from the GitHub repository without installing the plugin:
+
+```bash
+# Validate a plugin (main validator — orchestrates all 17 sub-validators)
+uvx --from git+https://github.com/Emasoft/claude-plugins-validation cpv-validate /path/to/plugin
+
+# Validate skills
+uvx --from git+https://github.com/Emasoft/claude-plugins-validation cpv-validate-skill /path/to/skill
+
+# Security scan
+uvx --from git+https://github.com/Emasoft/claude-plugins-validation cpv-validate-security /path/to/plugin
+
+# With options
+uvx --from git+https://github.com/Emasoft/claude-plugins-validation cpv-validate /path/to/plugin --verbose --report report.md
+```
+
+Available CLI commands: `cpv-validate`, `cpv-validate-skill`, `cpv-validate-hooks`, `cpv-validate-agents`, `cpv-validate-command`, `cpv-validate-security`, `cpv-validate-scoring`, `cpv-validate-enterprise`, `cpv-validate-marketplace`, `cpv-validate-encoding`, `cpv-validate-documentation`, `cpv-validate-mcp`, `cpv-validate-lsp`, `cpv-validate-rules`, `cpv-validate-xref`, `cpv-doctor`, `cpv-standardize`.
 
 ---
 

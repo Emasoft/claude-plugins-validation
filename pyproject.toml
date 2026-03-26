@@ -20,6 +20,28 @@ dependencies = [
     "types-pyyaml>=6.0.12",
 ]
 
+[project.scripts]
+# Main validators — usable via uvx without installing:
+#   uvx --from git+https://github.com/Emasoft/claude-plugins-validation cpv-validate /path/to/plugin
+cpv-validate = "scripts.cli:validate_plugin"
+cpv-validate-skill = "scripts.cli:validate_skill"
+cpv-validate-hooks = "scripts.cli:validate_hooks"
+cpv-validate-agents = "scripts.cli:validate_agents"
+cpv-validate-command = "scripts.cli:validate_command"
+cpv-validate-security = "scripts.cli:validate_security"
+cpv-validate-scoring = "scripts.cli:validate_scoring"
+cpv-validate-enterprise = "scripts.cli:validate_enterprise"
+cpv-validate-marketplace = "scripts.cli:validate_marketplace"
+cpv-validate-encoding = "scripts.cli:validate_encoding"
+cpv-validate-documentation = "scripts.cli:validate_documentation"
+cpv-validate-mcp = "scripts.cli:validate_mcp"
+cpv-validate-lsp = "scripts.cli:validate_lsp"
+cpv-validate-rules = "scripts.cli:validate_rules"
+cpv-validate-xref = "scripts.cli:validate_xref"
+# Management tools
+cpv-doctor = "scripts.cli:doctor"
+cpv-standardize = "scripts.cli:standardize"
+
 [tool.ruff]
 line-length = 120
 
