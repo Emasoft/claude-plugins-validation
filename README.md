@@ -25,6 +25,7 @@ There are **two ways to use CPV**. Pick the one that fits your workflow:
 ## Table of Contents
 
 - [What Does CPV Check?](#what-does-cpv-check)
+  - [Claude Code Documentation](#claude-code-documentation)
 - **[Part 1: Standalone Validation (via uvx)](#part-1-standalone-validation-via-uvx)**
   - [Getting Started](#getting-started)
   - [Available Validators](#available-validators)
@@ -56,6 +57,22 @@ CPV runs **17 specialized validators** covering **190+ rules** across every part
 
 All checks run as pure Python -- no API calls, no tokens consumed, no data sent anywhere.
 
+### Claude Code Documentation
+
+CPV validates plugins against the official Claude Code specification. If you are building a plugin, these are the key references:
+
+| Topic | Link |
+|-------|------|
+| Claude Code overview | [docs.anthropic.com/en/docs/claude-code/overview](https://docs.anthropic.com/en/docs/claude-code/overview) |
+| Plugin system and settings | [docs.anthropic.com/en/docs/claude-code/settings](https://docs.anthropic.com/en/docs/claude-code/settings) |
+| Hooks guide | [docs.anthropic.com/en/docs/claude-code/hooks-guide](https://docs.anthropic.com/en/docs/claude-code/hooks-guide) |
+| Hooks reference | [docs.anthropic.com/en/docs/claude-code/hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) |
+| MCP (Model Context Protocol) | [docs.anthropic.com/en/docs/build-with-claude/mcp](https://docs.anthropic.com/en/docs/build-with-claude/mcp) |
+| Agent SDK overview | [docs.anthropic.com/en/docs/claude-code/sdk](https://docs.anthropic.com/en/docs/claude-code/sdk) |
+| Agent SDK -- MCP integration | [docs.anthropic.com/en/docs/claude-code/sdk/sdk-mcp](https://docs.anthropic.com/en/docs/claude-code/sdk/sdk-mcp) |
+| Agent SDK -- Subagents | [docs.anthropic.com/en/docs/claude-code/sdk/subagents](https://docs.anthropic.com/en/docs/claude-code/sdk/subagents) |
+| Claude Code release notes | [docs.anthropic.com/en/release-notes/claude-code](https://docs.anthropic.com/en/release-notes/claude-code) |
+
 ---
 
 ## Part 1: Standalone Validation (via uvx)
@@ -68,30 +85,32 @@ You need [uv](https://docs.astral.sh/uv/getting-started/installation/) installed
 
 ```bash
 # Validate a plugin (runs all 17 checks)
-uvx --from git+https://github.com/Emasoft/claude-plugins-validation cpv-validate /path/to/your-plugin
+uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-validate /path/to/your-plugin
 ```
 
-That's it. `uvx` downloads CPV temporarily, runs the validation, and shows the results. Nothing is installed permanently.
+That's it. `uvx` downloads CPV temporarily into an isolated environment, runs the validation, and shows the results. Nothing is installed permanently on your system.
+
+The `--with pyyaml` flag ensures the YAML parser dependency is available. While `uvx` normally installs dependencies automatically, adding `--with` explicitly guarantees they are present.
 
 More examples:
 
 ```bash
 # Show detailed output (including checks that passed)
-uvx --from git+https://github.com/Emasoft/claude-plugins-validation cpv-validate /path/to/your-plugin --verbose
+uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-validate /path/to/your-plugin --verbose
 
 # Save a full report to a file
-uvx --from git+https://github.com/Emasoft/claude-plugins-validation cpv-validate /path/to/your-plugin --report report.md
+uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-validate /path/to/your-plugin --report report.md
 
 # Run only the security scanner
-uvx --from git+https://github.com/Emasoft/claude-plugins-validation cpv-validate-security /path/to/your-plugin
+uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-validate-security /path/to/your-plugin
 
 # Run only the skill validator
-uvx --from git+https://github.com/Emasoft/claude-plugins-validation cpv-validate-skill /path/to/your-plugin
+uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-validate-skill /path/to/your-plugin
 ```
 
-> **Tip:** The commands are long because of the GitHub URL. You can create a shell alias:
+> **Tip:** The commands are long because of the GitHub URL. Create a shell alias to shorten them:
 > ```bash
-> alias cpv='uvx --from git+https://github.com/Emasoft/claude-plugins-validation'
+> alias cpv='uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml'
 > ```
 > Then just use: `cpv cpv-validate /path/to/plugin`
 
@@ -343,10 +362,34 @@ These agents work inside Claude Code to automate complex tasks:
 
 ## Requirements
 
-- **Python 3.12** or newer
-- **uv** ([install uv](https://docs.astral.sh/uv/getting-started/installation/))
+### For standalone validation (Part 1 -- via uvx)
 
-No API keys, accounts, or cloud services needed.
+| Requirement | Why | How to Install |
+|-------------|-----|----------------|
+| **Python 3.12+** | Runtime for all validation scripts | [python.org](https://www.python.org/downloads/) or your OS package manager |
+| **uv** | Runs CPV via `uvx` without permanent installation | `curl -LsSf https://astral.sh/uv/install.sh \| sh` ([docs](https://docs.astral.sh/uv/getting-started/installation/)) |
+
+That's all you need. Python dependencies (like `pyyaml`) are installed automatically by `uvx` into a temporary environment.
+
+### For the Claude Code plugin (Part 2)
+
+| Requirement | Why | How to Install |
+|-------------|-----|----------------|
+| **Claude Code** | The AI coding tool that CPV extends | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code/overview) |
+| **Python 3.12+** | Runtime for validation scripts | [python.org](https://www.python.org/downloads/) |
+| **uv** | Runs Python scripts inside the plugin | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+
+### Optional tools (enhance some checks)
+
+These are **not required**. If missing, CPV skips the checks that need them and tells you.
+
+| Tool | What It Enables | How to Install |
+|------|----------------|----------------|
+| **Node.js / npx** | `cc-audit` external security scanner (100+ extra rules) | [nodejs.org](https://nodejs.org/) |
+| **shellcheck** | Bash script portability checks in hooks | `brew install shellcheck` or [shellcheck.net](https://www.shellcheck.net/) |
+| **gh** (GitHub CLI) | Remote plugin/marketplace validation and publishing | `brew install gh` or [cli.github.com](https://cli.github.com/) |
+
+No API keys, accounts, or cloud services needed for any validation.
 
 ## Troubleshooting
 
