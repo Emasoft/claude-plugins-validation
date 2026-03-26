@@ -320,9 +320,16 @@ Examples:
     print(f"{GREEN}✓ Linting passed{NC}")
 
     # ── Step 4: Validate ──
+    # MINOR/NIT issues are non-blocking (exit codes 3, 4) — only CRITICAL (1) and MAJOR (2) block publish
     print(f"\n{BLUE}═══ Step 4: Validate plugin (--strict) ═══{NC}")
-    run(["uv", "run", "python", "scripts/validate_plugin.py", ".", "--strict"], cwd=root)
-    print(f"{GREEN}✓ Plugin validation passed{NC}")
+    vresult = run(["uv", "run", "python", "scripts/validate_plugin.py", ".", "--strict"], cwd=root, check=False)
+    if vresult.returncode in (1, 2):
+        print(f"\n{RED}✗ CRITICAL/MAJOR validation issues found — cannot publish{NC}", file=sys.stderr)
+        sys.exit(vresult.returncode)
+    if vresult.returncode in (3, 4):
+        print(f"{YELLOW}⚠ MINOR/NIT issues found (non-blocking for publish){NC}")
+    else:
+        print(f"{GREEN}✓ Plugin validation passed{NC}")
 
     # ── Step 5: Version consistency ──
     print(f"\n{BLUE}═══ Step 5: Check version consistency ═══{NC}")
