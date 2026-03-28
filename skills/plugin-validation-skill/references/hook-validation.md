@@ -65,7 +65,7 @@ The top-level `hooks` key must be an object whose keys are event names and value
 
 ## 2. Valid Hook Events
 
-There are **23 valid hook events**:
+There are **26 valid hook events**:
 
 | Event | Has Matcher | Description |
 |-------|-------------|-------------|
@@ -92,6 +92,9 @@ There are **23 valid hook events**:
 | Elicitation | No | When MCP server requests structured input (v2.1.76, command-only) |
 | ElicitationResult | No | When user responds to MCP elicitation (v2.1.76, command-only) |
 | StopFailure | No | When turn ends due to API error — rate limit, auth failure (v2.1.78) |
+| CwdChanged | No | When working directory changes — e.g. direnv (v2.1.83) |
+| FileChanged | No | When watched files change (v2.1.83) |
+| TaskCreated | No | When a task is created via TaskCreate tool (v2.1.84) |
 
 ### Events With Matchers
 
@@ -249,6 +252,15 @@ Common tools that can be matched:
 ---
 
 ## 4. Hook Types
+
+### Common Fields (all hook types)
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| type | Yes | Hook type: "command", "http", "prompt", or "agent" |
+| matcher | No | Tool name or regex to filter which invocations trigger this hook |
+| description | No | Human-readable description of what this hook does |
+| if | No | Conditional execution using permission rule syntax (v2.1.85). Hook only fires when the condition matches. |
 
 ### Command Type
 

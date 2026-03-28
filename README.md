@@ -1,7 +1,7 @@
 # Claude Plugins Validation (CPV)
 
 <!--BADGES-START-->
-![Version](https://img.shields.io/badge/version-2.4.1-blue)
+![Version](https://img.shields.io/badge/version-2.5.0-blue)
 ![Tests](https://img.shields.io/badge/tests-1549%20passed-brightgreen)
 ![Validation](https://img.shields.io/badge/validation-0%20issues-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -111,7 +111,7 @@ uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyam
 |-------------|----------------|
 | `cpv-validate` | **Everything.** Runs all 17 validators below in sequence. Start here. |
 | `cpv-validate-skill` | **Skills.** Checks SKILL.md for frontmatter, required sections, triggering phrases, description length, token budget, and reference file integrity. 190+ rules. |
-| `cpv-validate-hooks` | **Hooks.** Validates `hooks.json` against 23 event types and 4 hook types. Checks script paths, bash portability, and environment variables. |
+| `cpv-validate-hooks` | **Hooks.** Validates `hooks.json` against 26 event types and 4 hook types. Checks script paths, bash portability, and environment variables. |
 | `cpv-validate-agents` | **Agents.** Checks agent `.md` files for frontmatter fields, naming, tool references, and markdown structure. |
 | `cpv-validate-command` | **Commands.** Checks command `.md` files for required frontmatter, valid tool names, and naming conventions. |
 | `cpv-validate-security` | **Security.** Scans for injection, path traversal, secrets, prompt injection, data exfiltration, supply chain risks, credential harvesting, hook/MCP abuse, and sandbox escape. |
@@ -193,7 +193,7 @@ Once installed, use these slash commands inside Claude Code:
 |---------|-------------------|
 | `/cpv-validate-plugin` | **Full validation** -- runs all 17 sub-validators. Start here. |
 | `/cpv-validate-skill` | Skill quality (190+ rules, Nixtla strict-mode) |
-| `/cpv-validate-hooks` | Hook configuration (23 events, 4 hook types, bash portability) |
+| `/cpv-validate-hooks` | Hook configuration (26 events, 4 hook types, bash portability) |
 | `/cpv-validate-agents` | Agent definitions (frontmatter, tools, naming) |
 | `/cpv-validate-command` | Command definitions (frontmatter, tool names, arguments) |
 | `/cpv-validate-security` | Security scan (injection, secrets, prompt injection, exfiltration) |
