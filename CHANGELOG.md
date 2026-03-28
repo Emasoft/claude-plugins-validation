@@ -2,6 +2,59 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.5.0] - 2026-03-28
+
+### Claude Code v2.1.79-v2.1.86 Alignment
+
+**New hook events** (3):
+- `CwdChanged` (v2.1.83) — fires when working directory changes (e.g. direnv)
+- `FileChanged` (v2.1.83) — fires when watched files change
+- `TaskCreated` (v2.1.84) — fires when task created via TaskCreate tool
+
+**New hook field**:
+- `if` (v2.1.85) — conditional execution using permission rule syntax
+
+**New agent frontmatter field**:
+- `initialPrompt` (v2.1.83) — auto-submit prompt when agent starts
+
+**New skill frontmatter fields** (2):
+- `effort` (v2.1.80) — effort level for skill execution
+- `paths` (v2.1.84) — YAML list of globs to restrict skill activation
+
+**New plugin environment variables** (2):
+- `CLAUDE_CODE_MCP_SERVER_NAME` (v2.1.85) — MCP server name in headersHelper scripts
+- `CLAUDE_CODE_MCP_SERVER_URL` (v2.1.85) — MCP server URL in headersHelper scripts
+
+**Other updates**:
+- Added `.jj` (Jujutsu) and `.sl` (Sapling) VCS directories to known dirs (v2.1.86)
+- Marked `TaskOutput` tool as deprecated in favor of `Read` (v2.1.83)
+- Total valid hook events: 26 (was 23)
+- Total skill frontmatter fields: 12 (was 10)
+- Total agent frontmatter fields: 21 (was 20)
+- Total plugin env vars: 8 (was 6)
+
+### uvx CLI Entry Points (v2.4.0)
+
+- Added `scripts/cli.py` and `scripts/__init__.py` for console_scripts entry points
+- 17 CLI commands available via `uvx --from git+https://github.com/Emasoft/claude-plugins-validation`
+- Commands: `cpv-validate`, `cpv-validate-skill`, `cpv-validate-hooks`, `cpv-validate-agents`, `cpv-validate-command`, `cpv-validate-security`, `cpv-validate-scoring`, `cpv-validate-enterprise`, `cpv-validate-marketplace`, `cpv-validate-encoding`, `cpv-validate-documentation`, `cpv-validate-mcp`, `cpv-validate-lsp`, `cpv-validate-rules`, `cpv-validate-xref`, `cpv-doctor`, `cpv-standardize`
+
+### LLM Externalizer v3.2.8 Alignment
+
+- Removed stale `ensemble: false` references from 4 agents and 2 skills (param removed in v3.2.7)
+- Removed stale `max_tokens` references from global CLAUDE.md and rule file (param removed in v3.2.7)
+- Added `check_against_specs` tool documentation (new in v3.2.8)
+- Updated `max_files` default from 500 to 1000, `use_gitignore` default to true
+- Updated ensemble mode docs (now profile-level, not per-call param)
+
+### README Rewrite
+
+- Restructured into two clear sections: Part 1 (standalone uvx) and Part 2 (Claude Code plugin)
+- Added detailed requirements breakdown (required vs optional tools)
+- Added Anthropic documentation links
+- Added comprehensive validator table with plain-language descriptions
+- Added `--with pyyaml` to all uvx commands
+
 ## [2.3.2] - 2026-03-20
 
 ### Validation Pipeline — Zero Issues
