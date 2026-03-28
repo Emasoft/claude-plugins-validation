@@ -42,18 +42,24 @@ from cpv_validation_common import (
 
 # Events that support matchers
 EVENTS_WITH_MATCHERS = {
-    "PreToolUse",
-    "PostToolUse",
-    "PostToolUseFailure",
-    "PermissionRequest",
-    "Notification",
-    "PreCompact",
-    "Setup",
-    "SessionStart",
-    "SessionEnd",
-    "SubagentStart",
-    "SubagentStop",
-    "ConfigChange",
+    "PreToolUse",  # matcher: tool_name
+    "PostToolUse",  # matcher: tool_name
+    "PostToolUseFailure",  # matcher: tool_name
+    "PermissionRequest",  # matcher: tool_name
+    "Notification",  # matcher: notification_type (permission_prompt, idle_prompt, auth_success, elicitation_dialog)
+    "PreCompact",  # matcher: manual, auto
+    "PostCompact",  # matcher: manual, auto (v2.1.76)
+    "Setup",  # matcher: (legacy — not in official docs as of v2.1.86)
+    "SessionStart",  # matcher: startup, resume, clear, compact
+    "SessionEnd",  # matcher: clear, resume, logout, prompt_input_exit, other
+    "SubagentStart",  # matcher: agent name (Bash, Explore, Plan, custom)
+    "SubagentStop",  # matcher: agent name
+    "ConfigChange",  # matcher: user_settings, project_settings, local_settings, policy_settings, skills
+    "StopFailure",  # matcher: rate_limit, authentication_failed, billing_error, invalid_request, server_error, max_output_tokens, unknown (v2.1.78)
+    "InstructionsLoaded",  # matcher: session_start, nested_traversal, path_glob_match, include, compact (v2.1.69)
+    "Elicitation",  # matcher: MCP server name (v2.1.76)
+    "ElicitationResult",  # matcher: MCP server name (v2.1.76)
+    "FileChanged",  # matcher: filename/basename pattern (v2.1.83)
 }
 
 # Events that do NOT support matchers (matcher field is ignored)
@@ -62,12 +68,10 @@ EVENTS_WITHOUT_MATCHERS = {
     "Stop",
     "TeammateIdle",
     "TaskCompleted",
+    "TaskCreated",  # v2.1.84
     "WorktreeCreate",
     "WorktreeRemove",
-    "InstructionsLoaded",
-    "Elicitation",  # v2.1.76 — fires for any MCP elicitation request
-    "ElicitationResult",  # v2.1.76 — fires for any elicitation response
-    "StopFailure",  # v2.1.78 — fires on API errors (rate limit, auth failure)
+    "CwdChanged",  # v2.1.83
 }
 
 # Valid hook types (v2.1.63+: "http" hooks POST JSON to a URL)
@@ -88,6 +92,9 @@ COMMAND_ONLY_EVENTS = {
     "WorktreeRemove",
     "Elicitation",  # v2.1.76
     "ElicitationResult",  # v2.1.76
+    "CwdChanged",  # v2.1.83
+    "FileChanged",  # v2.1.83
+    "TaskCreated",  # v2.1.84
 }
 
 # Common tool names for matcher validation hints
@@ -861,6 +868,7 @@ def validate_single_hook(
         "once",
         "description",
         "if",  # v2.1.85 — conditional execution using permission rule syntax
+        "shell",  # v2.1.84 — "bash" (default) or "powershell" (Windows)
     }
     for key in hook:
         if key not in known_hook_fields:

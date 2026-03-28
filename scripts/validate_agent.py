@@ -78,6 +78,7 @@ KNOWN_FRONTMATTER_FIELDS = {
 # Valid values for the 'permissionMode' field
 VALID_PERMISSION_MODES = {
     "default",  # Standard permission checking with prompts
+    "auto",  # Auto-approve all tool calls (v2.1.84)
     "acceptEdits",  # Auto-accept file edits
     "dontAsk",  # Auto-deny permission prompts (explicitly allowed tools still work)
     "bypassPermissions",  # Skip all permission checks (use with caution!)
