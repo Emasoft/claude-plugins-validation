@@ -55,6 +55,8 @@ ignore = ["E501"]  # Allow longer lines
 
 [tool.mypy]
 python_version = "3.12"
+mypy_path = "scripts"
+explicit_package_bases = true
 warn_return_any = true
 warn_unused_configs = true
 
