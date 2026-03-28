@@ -157,7 +157,7 @@ VALID_HOOK_EVENTS = {
     "SessionEnd",
     "PreCompact",
     "PostCompact",  # v2.1.76 — fires after compaction completes
-    "Setup",
+    "Setup",  # Legacy — not in official hooks docs as of v2.1.86, kept for backward compatibility
     "TeammateIdle",
     "TaskCompleted",
     "ConfigChange",
@@ -239,7 +239,7 @@ VALID_PLUGIN_ENV_VARS = {
     "CLAUDE_PLUGIN_ROOT",  # Plugin's root directory (all plugin hooks)
     "CLAUDE_PLUGIN_DATA",  # Persistent data directory that survives updates (v2.1.78)
     "CLAUDE_PROJECT_DIR",  # Project root directory (all hooks)
-    "CLAUDE_ENV_FILE",  # SessionStart/Setup only — write export statements to persist env vars
+    "CLAUDE_ENV_FILE",  # SessionStart/CwdChanged/FileChanged — write export statements to persist env vars
     "CLAUDE_CODE_REMOTE",  # Set to "true" in remote web environments; not set in local CLI
     "CLAUDE_CODE_MCP_SERVER_NAME",  # v2.1.85 — MCP server name, available in headersHelper scripts
     "CLAUDE_CODE_MCP_SERVER_URL",  # v2.1.85 — MCP server URL, available in headersHelper scripts

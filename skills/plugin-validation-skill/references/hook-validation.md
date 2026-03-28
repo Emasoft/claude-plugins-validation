@@ -87,31 +87,31 @@ There are **26 valid hook events**:
 | ConfigChange | Yes | When configuration changes |
 | WorktreeCreate | No | When a git worktree is created |
 | WorktreeRemove | No | When a git worktree is removed |
-| InstructionsLoaded | No | When CLAUDE.md or .claude/rules/*.md files are loaded (v2.1.69+) |
-| PostCompact | Yes | After conversation compaction completes (v2.1.76, command-only) |
-| Elicitation | No | When MCP server requests structured input (v2.1.76, command-only) |
-| ElicitationResult | No | When user responds to MCP elicitation (v2.1.76, command-only) |
-| StopFailure | No | When turn ends due to API error — rate limit, auth failure (v2.1.78) |
-| CwdChanged | No | When working directory changes — e.g. direnv (v2.1.83) |
-| FileChanged | No | When watched files change (v2.1.83) |
-| TaskCreated | No | When a task is created via TaskCreate tool (v2.1.84) |
+| InstructionsLoaded | Yes | When CLAUDE.md or .claude/rules/*.md files are loaded (v2.1.69+). Matchers: session_start, nested_traversal, path_glob_match, include, compact |
+| PostCompact | Yes | After conversation compaction completes (v2.1.76, command-only). Matchers: manual, auto |
+| Elicitation | Yes | When MCP server requests structured input (v2.1.76, command-only). Matcher: MCP server name |
+| ElicitationResult | Yes | When user responds to MCP elicitation (v2.1.76, command-only). Matcher: MCP server name |
+| StopFailure | Yes | When turn ends due to API error (v2.1.78). Matchers: rate_limit, authentication_failed, billing_error, invalid_request, server_error, max_output_tokens, unknown |
+| CwdChanged | No | When working directory changes — e.g. direnv (v2.1.83, command-only) |
+| FileChanged | Yes | When watched files change (v2.1.83, command-only). Matcher: filename/basename pattern |
+| TaskCreated | No | When a task is created via TaskCreate tool (v2.1.84, command-only) |
 
 ### Events With Matchers
 
 These events support tool-specific or context-specific matchers:
 
-- PreToolUse
-- PostToolUse
-- PostToolUseFailure
-- PermissionRequest
-- Notification
-- PreCompact
-- Setup
-- SessionStart
-- SessionEnd
-- SubagentStart
-- SubagentStop
-- ConfigChange
+- PreToolUse, PostToolUse, PostToolUseFailure, PermissionRequest (tool name)
+- Notification (notification_type)
+- PreCompact, PostCompact (manual, auto)
+- SessionStart (startup, resume, clear, compact)
+- SessionEnd (clear, resume, logout, prompt_input_exit, other)
+- SubagentStart, SubagentStop (agent name)
+- ConfigChange (user_settings, project_settings, local_settings, policy_settings, skills)
+- StopFailure (rate_limit, authentication_failed, billing_error, invalid_request, server_error, max_output_tokens, unknown)
+- InstructionsLoaded (session_start, nested_traversal, path_glob_match, include, compact)
+- Elicitation, ElicitationResult (MCP server name)
+- FileChanged (filename/basename pattern)
+- Setup (legacy)
 
 ### Events Without Matchers
 
@@ -119,14 +119,12 @@ These events fire globally and do not support matchers:
 
 - UserPromptSubmit
 - Stop
-- StopFailure
 - TeammateIdle
 - TaskCompleted
+- TaskCreated
 - WorktreeCreate
 - WorktreeRemove
-- InstructionsLoaded
-- Elicitation
-- ElicitationResult
+- CwdChanged
 
 ### Command-Only Events
 
@@ -144,6 +142,10 @@ These events only support hook type `"command"` or `"http"` — `"prompt"` and `
 - WorktreeRemove
 - Elicitation
 - ElicitationResult
+- CwdChanged
+- FileChanged
+- TaskCreated
+- InstructionsLoaded
 
 ### Example for Each Event
 

@@ -132,7 +132,7 @@ Only these 18 event types are valid:
 
 ### Hook Definitions
 
-- [ ] Each hook has `type` field ("command" or "prompt")
+- [ ] Each hook has `type` field ("command", "http", "prompt", or "agent")
 - [ ] Command hooks have `command` field
 - [ ] Command paths use `${CLAUDE_PLUGIN_ROOT}`
 - [ ] Prompt hooks have `prompt` field
