@@ -2,6 +2,30 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.5.2] - 2026-03-28
+
+### Deep Audit Fixes
+
+- **Hook validator VALID_ENV_VARS stale**: was missing 3 vars (CLAUDE_CODE_MCP_SERVER_NAME, CLAUDE_CODE_MCP_SERVER_URL, CLAUDE_SKILL_DIR) — now matches cpv_validation_common.py (8 total)
+- **Matcher corrections**: 5 events wrongly categorized as "no matcher" — StopFailure, InstructionsLoaded, Elicitation, ElicitationResult, FileChanged now correctly in EVENTS_WITH_MATCHERS with documented matcher patterns
+- **New command-only events**: CwdChanged, FileChanged, TaskCreated, InstructionsLoaded added to COMMAND_ONLY_EVENTS
+- **`shell` hook field**: added to known_hook_fields (bash/powershell for command hooks)
+- **`auto` permission mode**: added to VALID_PERMISSION_MODES
+- **Setup event**: marked as legacy (not in official docs since v2.1.86)
+- **CLAUDE_ENV_FILE**: updated availability to include CwdChanged/FileChanged events
+- **Version badge**: README now shows 2.5.2
+- **Reference docs**: Updated hook-validation.md, validation-checklist.md, hook-fixes.md, scoring-fixes.md with correct matcher info and 26-event counts
+
+## [2.5.1] - 2026-03-28
+
+### Consistency Fixes
+
+- Fixed README badge (2.4.1 → 2.5.0)
+- Fixed all hardcoded "23 events" references → 26 across README, hook-validation.md, validation-checklist.md, hook-fixes.md, scoring-fixes.md
+- Added 3 new events to hook-validation.md table and hook-fixes.md event list
+- Added common fields section with `if` field to hook-validation.md
+- Removed 6 stale rechecker worktrees
+
 ## [2.5.0] - 2026-03-28
 
 ### Claude Code v2.1.79-v2.1.86 Alignment

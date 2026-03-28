@@ -143,8 +143,11 @@ VALID_ENV_VARS = {
     "CLAUDE_PLUGIN_ROOT",  # Plugin hooks only
     "CLAUDE_PLUGIN_DATA",  # Persistent data directory (v2.1.78)
     "CLAUDE_PROJECT_DIR",  # All hooks
-    "CLAUDE_ENV_FILE",  # SessionStart and Setup only
+    "CLAUDE_ENV_FILE",  # SessionStart/CwdChanged/FileChanged — persist env vars
     "CLAUDE_CODE_REMOTE",  # All hooks
+    "CLAUDE_CODE_MCP_SERVER_NAME",  # v2.1.85 — MCP server name, in headersHelper scripts
+    "CLAUDE_CODE_MCP_SERVER_URL",  # v2.1.85 — MCP server URL, in headersHelper scripts
+    "CLAUDE_SKILL_DIR",  # Skill's own directory — for SKILL.md references
 }
 
 # Script extensions that should be linted
