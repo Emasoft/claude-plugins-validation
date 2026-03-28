@@ -363,6 +363,8 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
     known_dirs = {
         ".claude-plugin",
         ".git",
+        ".jj",  # Jujutsu VCS metadata (v2.1.86)
+        ".sl",  # Sapling VCS metadata (v2.1.86)
         ".github",
         "commands",
         "agents",

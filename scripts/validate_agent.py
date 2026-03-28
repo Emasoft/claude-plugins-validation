@@ -67,6 +67,7 @@ KNOWN_FRONTMATTER_FIELDS = {
     "memory",
     "background",
     "isolation",
+    "initialPrompt",  # v2.1.83 — auto-submit prompt when agent starts
     # Claude Code-specific fields (legacy/extended)
     "context",
     "agent",

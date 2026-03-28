@@ -860,6 +860,7 @@ def validate_single_hook(
         "statusMessage",
         "once",
         "description",
+        "if",  # v2.1.85 — conditional execution using permission rule syntax
     }
     for key in hook:
         if key not in known_hook_fields:

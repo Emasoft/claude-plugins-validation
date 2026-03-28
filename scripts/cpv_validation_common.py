@@ -167,6 +167,9 @@ VALID_HOOK_EVENTS = {
     "Elicitation",  # v2.1.76 — intercept MCP elicitation requests
     "ElicitationResult",  # v2.1.76 — intercept elicitation responses
     "StopFailure",  # v2.1.78 — fires when turn ends due to API error (rate limit, auth failure)
+    "CwdChanged",  # v2.1.83 — fires when working directory changes (e.g. direnv)
+    "FileChanged",  # v2.1.83 — fires when watched files change
+    "TaskCreated",  # v2.1.84 — fires when a task is created via TaskCreate tool
 }
 
 # =============================================================================
@@ -205,7 +208,7 @@ VALID_TOOLS = {
     "TaskList",
     "TaskGet",
     "TaskStop",
-    "TaskOutput",  # v2.1.71
+    "TaskOutput",  # v2.1.71 — deprecated in v2.1.83 (use Read on output file path instead)
     "ToolSearch",
     "MultiEdit",
     "Notebook",
@@ -238,6 +241,8 @@ VALID_PLUGIN_ENV_VARS = {
     "CLAUDE_PROJECT_DIR",  # Project root directory (all hooks)
     "CLAUDE_ENV_FILE",  # SessionStart/Setup only — write export statements to persist env vars
     "CLAUDE_CODE_REMOTE",  # Set to "true" in remote web environments; not set in local CLI
+    "CLAUDE_CODE_MCP_SERVER_NAME",  # v2.1.85 — MCP server name, available in headersHelper scripts
+    "CLAUDE_CODE_MCP_SERVER_URL",  # v2.1.85 — MCP server URL, available in headersHelper scripts
     "CLAUDE_SKILL_DIR",  # Skill's own directory — for skills to reference their own files in SKILL.md
 }
 
@@ -323,6 +328,8 @@ SKILL_FRONTMATTER_FIELDS = {
     "context",
     "agent",
     "hooks",
+    "effort",  # v2.1.80 — effort level for skill execution
+    "paths",  # v2.1.84 — YAML list of globs to restrict skill activation to matching files
 }
 
 
