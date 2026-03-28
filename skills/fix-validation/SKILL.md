@@ -57,7 +57,7 @@ If no matching section is found in the reference file, search by error message k
 
 When LLM Externalizer MCP is available, use it to save context tokens:
 - `mcp__plugin_llm-externalizer_llm-externalizer__chat` — analyze validation reports, summarize fix guides
-- `mcp__plugin_llm-externalizer_llm-externalizer__batch_check` — scan multiple fix guide files for relevant sections
+- `mcp__plugin_llm-externalizer_llm-externalizer__code_task` with `answer_mode=0, max_retries=3` — scan multiple fix guide files for relevant sections
 - `mcp__plugin_llm-externalizer_llm-externalizer__scan_folder` — discover all reference files in a directory
 - `mcp__plugin_llm-externalizer_llm-externalizer__check_references` — verify symbol references after applying fixes
 - Always pass file paths via `input_files_paths`, never paste content into your context
