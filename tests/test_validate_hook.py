@@ -669,11 +669,12 @@ def test_postcompact_command_only(tmp_path: Path):
 
 
 def test_elicitation_no_matchers(tmp_path: Path):
-    """Elicitation events should warn (INFO) if a matcher is provided, since matchers are ignored."""
+    """Elicitation events now support matchers (MCP server name) since v2.1.76."""
     from cpv_validation_common import ValidationReport as VReport
     from validate_hook import validate_matcher
 
     report = VReport()
     result = validate_matcher("Bash", "Elicitation", report)
     assert result is True
-    assert any("matchers are ignored" in r.message for r in report.results if r.level == "INFO")
+    # Elicitation is now in EVENTS_WITH_MATCHERS, so valid matcher should produce no warnings
+    assert not any("matchers are ignored" in r.message for r in report.results if r.level == "INFO")
