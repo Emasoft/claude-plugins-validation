@@ -826,6 +826,10 @@ def validate_metadata_field(
         )
         return
 
+    # Known top-level fields that should NOT be under metadata:
+    # If found here, warn about misplacement instead of type-mismatch
+    top_level_fields = SKILL_FRONTMATTER_FIELDS | OPENSPEC_ALLOWED_FIELDS | ENTERPRISE_OPTIONAL_FIELDS
+
     # Validate all values are strings (OpenSpec requirement)
     for key, value in metadata.items():
         if not isinstance(key, str):
@@ -834,6 +838,19 @@ def validate_metadata_field(
                 "SKILL.md",
                 category="Frontmatter",
             )
+            continue
+
+        # Detect known frontmatter fields misplaced under metadata:
+        if key in top_level_fields and key != "metadata":
+            report.warning(
+                f"'{key}' is a standard frontmatter field but is nested under 'metadata:'. "
+                f"Move it to the top level of the frontmatter for correct validation.",
+                "SKILL.md",
+                category="Frontmatter",
+            )
+            # Skip the generic string type check — the field has its own type rules at top level
+            continue
+
         if not isinstance(value, str):
             report.minor(
                 f"'metadata.{key}' value should be string for OpenSpec compliance, got {type(value).__name__}",
