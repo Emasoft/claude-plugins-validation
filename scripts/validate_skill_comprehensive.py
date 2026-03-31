@@ -1479,6 +1479,33 @@ def validate_dynamic_context(body: str, report: ValidationReport) -> None:
             category="Dynamic Context",
         )
 
+    # Check for potential !command without any backticks (user may have forgotten both)
+    # Look for patterns like "= !command args" or standalone "!command args" at line start
+    # Only flag lines that look like shell commands (start with known command words)
+    shell_command_words = {"bash", "sh", "python", "python3", "node", "npm", "npx", "uv", "pip", "git", "gh", "curl", "wget", "cat", "grep", "ruff", "mypy", "pytest", "eslint", "tsc", "cargo", "go", "make", "docker", "kubectl"}
+    for line in body_no_fences.splitlines():
+        stripped = line.strip()
+        # Pattern: "SOMETHING = !command" or line starting with "!command"
+        bang_pos = stripped.find("!")
+        if bang_pos < 0:
+            continue
+        after_bang = stripped[bang_pos + 1:].strip()
+        # Skip if backtick follows the bang (correct or partially correct syntax)
+        if after_bang.startswith("`"):
+            continue
+        # Skip markdown headings/lists that happen to contain !
+        if stripped.startswith(("#", "-", "*", ">")):
+            continue
+        # Check if the word after ! looks like a shell command
+        first_word = after_bang.split()[0].lower() if after_bang.split() else ""
+        if first_word in shell_command_words:
+            report.warning(
+                f"Possible missing backticks in dynamic context injection: '{stripped[:80]}'. "
+                "If this is meant to execute a command, use !`command` syntax (both backticks required).",
+                "SKILL.md",
+                category="Dynamic Context",
+            )
+
     # Check for ultrathink keyword
     ultrathink_matches = RE_ULTRATHINK.findall(body)
     if ultrathink_matches:
