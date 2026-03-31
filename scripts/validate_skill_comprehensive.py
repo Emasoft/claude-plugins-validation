@@ -1098,6 +1098,26 @@ def validate_effort_field(frontmatter: dict[str, Any], report: ValidationReport)
     else:
         report.passed(f"'effort' field valid: {effort_val}", "SKILL.md", category="Frontmatter")
 
+    # "max" effort requires model: opus
+    if effort_val.lower() == "max":
+        model = frontmatter.get("model", "")
+        model_str = str(model).lower() if model else ""
+        if model_str and "opus" not in model_str:
+            report.major(
+                f"effort: max requires an Opus model, but model is '{model}'. "
+                "Use effort: high for non-Opus models, or set model: opus.",
+                "SKILL.md",
+                category="Frontmatter",
+            )
+        elif not model_str:
+            report.warning(
+                "effort: max only works with Opus models. No 'model' field set — "
+                "this skill will fail if the session uses a non-Opus model. "
+                "Consider adding 'model: opus' or using effort: high.",
+                "SKILL.md",
+                category="Frontmatter",
+            )
+
 
 def validate_shell_field(frontmatter: dict[str, Any], report: ValidationReport) -> None:
     """Validate the 'shell' frontmatter field (v2.1.84)."""
