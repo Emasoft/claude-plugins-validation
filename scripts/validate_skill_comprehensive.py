@@ -75,7 +75,7 @@ from cpv_validation_common import (
 Score = Literal[0, 1, 2, 3]
 
 # --- AgentSkills OpenSpec Constants ---
-MAX_SKILL_NAME_LENGTH = 70  # Aligned with MAX_NAME_LENGTH in cpv_validation_common
+MAX_SKILL_NAME_LENGTH = 64  # Aligned with MAX_NAME_LENGTH in cpv_validation_common (official spec limit)
 MAX_DESCRIPTION_LENGTH = 1024
 MAX_COMPATIBILITY_LENGTH = 500
 
@@ -108,7 +108,7 @@ MAX_CHAR_COUNT_WARN = 4000  # Character warning threshold
 MAX_CHAR_COUNT_ERROR = 5000  # Character error threshold (hard limit)
 MAX_WORD_COUNT_WARN = 3500
 MAX_WORD_COUNT_ERROR = 5000
-MAX_DESCRIPTION_WARN = 200
+MAX_DESCRIPTION_WARN = 250  # Official Claude Code spec: descriptions truncated at 250 chars in skill listing
 MAX_FRONTMATTER_CHARS_WARN = 12000
 MAX_FRONTMATTER_CHARS_ERROR = 15000
 
@@ -1076,6 +1076,63 @@ def validate_boolean_field(
     report.passed(f"'{field_name}' field valid: {value}", "SKILL.md", category="Frontmatter")
 
 
+def validate_effort_field(frontmatter: dict[str, Any], report: ValidationReport) -> None:
+    """Validate the 'effort' frontmatter field (v2.1.80)."""
+    if "effort" not in frontmatter:
+        return
+
+    effort_val = frontmatter["effort"]
+    if not isinstance(effort_val, str):
+        report.major(f"'effort' must be a string, got {type(effort_val).__name__}", "SKILL.md", category="Frontmatter")
+        return
+
+    valid_effort_values = {"low", "medium", "high", "max"}  # "max" is Opus 4.6 only
+    if effort_val.lower() not in valid_effort_values:
+        report.major(f"Invalid 'effort' value: '{effort_val}'. Must be one of: {sorted(valid_effort_values)}", "SKILL.md", category="Frontmatter")
+    else:
+        report.passed(f"'effort' field valid: {effort_val}", "SKILL.md", category="Frontmatter")
+
+
+def validate_shell_field(frontmatter: dict[str, Any], report: ValidationReport) -> None:
+    """Validate the 'shell' frontmatter field (v2.1.84)."""
+    if "shell" not in frontmatter:
+        return
+
+    shell_val = frontmatter["shell"]
+    if not isinstance(shell_val, str):
+        report.major(f"'shell' must be a string, got {type(shell_val).__name__}", "SKILL.md", category="Frontmatter")
+        return
+
+    valid_shell_values = {"bash", "powershell"}
+    if shell_val.lower() not in valid_shell_values:
+        report.major(f"Invalid 'shell' value: '{shell_val}'. Must be one of: {sorted(valid_shell_values)}", "SKILL.md", category="Frontmatter")
+    else:
+        report.passed(f"'shell' field valid: {shell_val}", "SKILL.md", category="Frontmatter")
+
+
+def validate_paths_field(frontmatter: dict[str, Any], report: ValidationReport) -> None:
+    """Validate the 'paths' frontmatter field (v2.1.84)."""
+    if "paths" not in frontmatter:
+        return
+
+    paths_val = frontmatter["paths"]
+    # Accepts string (comma-separated) or YAML list
+    if isinstance(paths_val, str):
+        if not paths_val.strip():
+            report.major("'paths' field is empty", "SKILL.md", category="Frontmatter")
+        else:
+            report.passed(f"'paths' field valid (string): {paths_val[:60]}", "SKILL.md", category="Frontmatter")
+    elif isinstance(paths_val, list):
+        if not paths_val:
+            report.major("'paths' field is an empty list", "SKILL.md", category="Frontmatter")
+        elif not all(isinstance(p, str) for p in paths_val):
+            report.major("'paths' list must contain only strings", "SKILL.md", category="Frontmatter")
+        else:
+            report.passed(f"'paths' field valid (list of {len(paths_val)} globs)", "SKILL.md", category="Frontmatter")
+    else:
+        report.major(f"'paths' must be a string or list, got {type(paths_val).__name__}", "SKILL.md", category="Frontmatter")
+
+
 def validate_field_whitelist(
     frontmatter: dict[str, Any],
     report: ValidationReport,
@@ -1974,6 +2031,9 @@ def validate_skill(
         validate_argument_hint_field(frontmatter, report)
         validate_model_field(frontmatter, report)
         validate_hooks_field(frontmatter, report)
+        validate_effort_field(frontmatter, report)
+        validate_shell_field(frontmatter, report)
+        validate_paths_field(frontmatter, report)
 
     # Validate token budget
     validate_token_budget(content, body, report)

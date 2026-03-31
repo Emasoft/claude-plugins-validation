@@ -621,7 +621,7 @@ def validate_effort_field(frontmatter: dict[str, Any], filename: str, report: Ag
 
     rel_path = filename
     effort_val = frontmatter["effort"]
-    valid_effort_values = {"low", "medium", "high"}
+    valid_effort_values = {"low", "medium", "high", "max"}  # "max" is Opus 4.6 only
     if isinstance(effort_val, str):
         if effort_val.lower() not in valid_effort_values:
             report.major(f"Invalid 'effort' value: '{effort_val}'. Must be one of: {sorted(valid_effort_values)}", rel_path)

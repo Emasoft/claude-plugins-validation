@@ -107,24 +107,24 @@ class TestValidateComponentName:
         assert "empty" in criticals[0].message.lower()
 
     def test_invalid_too_long(self):
-        """Name of 71 chars produces MAJOR with 'exceeds 70'."""
-        # Build a valid kebab-case name that is exactly 71 chars long
-        # "a" + "-bcde" * 14 = 1 + 70 = 71 chars
-        long_name = "a" + "-bcde" * 14  # 71 chars
-        assert len(long_name) == 71
+        """Name of 65 chars produces MAJOR with 'exceeds 64'."""
+        # Build a valid kebab-case name that is exactly 65 chars long
+        # "a" + "-bcde" * 12 + "-bcd" = 1 + 60 + 4 = 65 chars
+        long_name = "a" + "-bcde" * 12 + "-bcd"
+        assert len(long_name) == 65
         report = ValidationReport()
         validate_component_name(long_name, "plugin", report)
         majors = [r for r in report.results if r.level == "MAJOR"]
         assert len(majors) >= 1
-        assert any("exceeds 70" in m.message for m in majors)
+        assert any("exceeds 64" in m.message for m in majors)
 
     def test_valid_at_max_length(self):
-        """Name of exactly 70 chars produces no MAJOR about length."""
-        # "a" + "-bcde" * 13 + "-bcd" = 1 + 65 + 4 = 70 chars
-        name_70 = "a" + "-bcde" * 13 + "-bcd"
-        assert len(name_70) == 70
+        """Name of exactly 64 chars produces no MAJOR about length."""
+        # "a" + "-bcde" * 12 + "-bc" = 1 + 60 + 3 = 64 chars
+        name_64 = "a" + "-bcde" * 12 + "-bc"
+        assert len(name_64) == 64
         report = ValidationReport()
-        validate_component_name(name_70, "plugin", report)
+        validate_component_name(name_64, "plugin", report)
         majors = [r for r in report.results if r.level == "MAJOR"]
         assert len(majors) == 0
 

@@ -269,15 +269,16 @@ class TestValidateNameFieldExtended:
         crit_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
         assert any("must be a string" in m for m in crit_msgs)
 
-    def test_name_exceeding_70_chars_reports_major(self):
-        """Name longer than 70 characters should report MAJOR."""
-        long_name = "a" + "-bcde" * 14  # 71 chars, valid kebab-case
+    def test_name_exceeding_64_chars_reports_major(self):
+        """Name longer than 64 characters should report MAJOR."""
+        long_name = "a" + "-bcde" * 12 + "-bcd"  # 65 chars, valid kebab-case
+        assert len(long_name) == 65
         frontmatter = {"name": long_name}
         report = _make_report()
         validate_name_field(frontmatter, long_name, report)
         assert report.has_major
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("exceeds 70" in m for m in major_msgs)
+        assert any("exceeds 64" in m for m in major_msgs)
 
     def test_name_differs_from_directory_reports_major(self):
         """Name that differs from directory name should report MAJOR."""
