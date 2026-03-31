@@ -6,6 +6,7 @@ description: |
   and workflow completeness — things scripts cannot check.
   Use only via /cpv-semantic-validation (explicit opt-in, uses opus).
 model: opus
+tools: Bash, Read, Glob, Grep
 skills:
   - semantic-validation-skill
 ---

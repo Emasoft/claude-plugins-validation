@@ -5,11 +5,11 @@ description: |
   Does NOT validate — only fixes issues identified by the validator agents.
   Consults fix guides in skills/fix-validation/references/ for remediation steps.
 model: sonnet
+tools: Read, Edit, Write, Bash, Glob, Grep
 skills:
   - fix-validation
   - canonical-pipeline
-  - create-plugin
-  - standardize-plugin
+  - plugin-validation-skill
 ---
 
 # Plugin Fixer Agent
