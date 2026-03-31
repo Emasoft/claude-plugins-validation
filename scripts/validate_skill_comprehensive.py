@@ -205,8 +205,14 @@ RE_ARGUMENTS_INDEX = re.compile(r"\$ARGUMENTS\[(\d+)\]")  # $ARGUMENTS[N]
 RE_SHORTHAND_ARG = re.compile(r"\$(\d+)(?!\d)")  # $N shorthand (e.g., $1, $2)
 RE_SESSION_ID_VAR = re.compile(r"\$\{CLAUDE_SESSION_ID\}")
 
-# --- Dynamic Context Injection Pattern (skills.md: `!`command``) ---
-RE_DYNAMIC_CONTEXT = re.compile(r"!\s*`[^`]+`")  # Matches `!`command``
+# --- Dynamic Context Injection Pattern (skills.md: !`command`) ---
+RE_DYNAMIC_CONTEXT = re.compile(r"!\s*`[^`]+`")  # Correct: !`command`
+
+# Broken dynamic context patterns — missing backticks
+# Matches lines like "ERRORS = !ruff check" (no backticks at all) — but NOT inside code fences
+RE_BANG_NO_BACKTICKS = re.compile(r"(?<!=\s)!\s*(?!`)([a-zA-Z][\w. /-]+)(?<!`)")
+# Matches "!`command" (missing closing backtick) or "!command`" (missing opening backtick)
+RE_BANG_ONE_BACKTICK = re.compile(r"!`[^`\n]+$|!(?!`)[^`\n]+`", re.MULTILINE)
 
 # --- Ultrathink Keyword (skills.md: enables extended thinking) ---
 RE_ULTRATHINK = re.compile(r"\bultrathink\b", re.IGNORECASE)
@@ -1439,15 +1445,36 @@ def validate_string_substitutions(body: str, report: ValidationReport) -> None:
 
 
 def validate_dynamic_context(body: str, report: ValidationReport) -> None:
-    """Validate dynamic context injection (skills.md: `!`command`` syntax).
+    """Validate dynamic context injection (!`command` syntax).
 
-    Detects usage of the dynamic context injection feature.
+    Detects correct usage and flags broken patterns where backticks are missing.
+    The correct syntax is !`command` — both backticks are required for Claude Code
+    to execute the command and inject its output before sending to the LLM.
     """
-    # Check for `!`command`` syntax
+    # Check for correct !`command` syntax
     dynamic_matches = RE_DYNAMIC_CONTEXT.findall(body)
     if dynamic_matches:
         report.info(
             f"Skill uses dynamic context injection (! syntax): {len(dynamic_matches)} occurrence(s)",
+            "SKILL.md",
+            category="Dynamic Context",
+        )
+
+    # Strip code fence blocks to avoid false positives on examples/docs
+    # Code fences contain backtick-heavy content that isn't actual skill syntax
+    body_no_fences = re.sub(r"```[\s\S]*?```", "", body)
+
+    # Check for broken pattern: !command with ONE backtick (opening or closing, but not both)
+    one_backtick_matches = RE_BANG_ONE_BACKTICK.findall(body_no_fences)
+    for match in one_backtick_matches:
+        match_stripped = match.strip()
+        # Skip if inside a markdown inline code span (already backtick-wrapped)
+        if not match_stripped:
+            continue
+        report.major(
+            f"Broken dynamic context injection — missing backtick: '{match_stripped}'. "
+            "Correct syntax: !`command` (both backticks required). "
+            "Without proper backticks, the command won't execute.",
             "SKILL.md",
             category="Dynamic Context",
         )
