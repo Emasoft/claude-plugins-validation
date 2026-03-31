@@ -1262,6 +1262,22 @@ def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
             if not covered:
                 report.major(f"Virtual environment '{dirname}/' detected (contains pyvenv.cfg) but not covered by .gitignore. Add '{dirname}/' to .gitignore.")
 
+    # Check for bundled dependency directories that should be installed at runtime
+    # in ${CLAUDE_PLUGIN_DATA} instead of shipped inside the plugin root.
+    # ${CLAUDE_PLUGIN_ROOT} is wiped on every plugin update; ${CLAUDE_PLUGIN_DATA} persists.
+    # Skip this check in development mode (.git present = source repo, not installed plugin).
+    is_dev_mode = (plugin_root / ".git").exists()
+    if not is_dev_mode:
+        bundled_dep_dirs = {"node_modules", ".venv", "venv", "vendor", "__pypackages__"}
+        for item in plugin_root.iterdir():
+            if item.is_dir() and item.name.lower() in bundled_dep_dirs:
+                report.warning(
+                    f"Bundled dependency directory '{item.name}/' found inside plugin root. "
+                    "This directory will be lost on every plugin update because ${{CLAUDE_PLUGIN_ROOT}} is replaced. "
+                    "Use a SessionStart hook to install dependencies into ${{CLAUDE_PLUGIN_DATA}} instead — "
+                    "see https://code.claude.com/docs/en/plugins-reference#persistent-data-directory",
+                )
+
     # Check that non-plugin artifacts that may exist are ignored
     # Look for actual artifacts in the tree that should be gitignored
     artifact_patterns = {
