@@ -62,7 +62,7 @@ All at `${CLAUDE_PLUGIN_ROOT}/scripts/`. Run with `uv run "${CLAUDE_PLUGIN_ROOT}
 | `manage_github_validate.py` | Validate a GitHub plugin/marketplace without installing |
 | `bump_version.py` | Bump plugin version (patch/minor/major) |
 
-## Workflow: Publish Plugin as GitHub Repo (/cpv-publish-a-plugin-as-github-repo)
+## Workflow: Publish Plugin as GitHub Repo
 
 ### THE GOLDEN RULE: FIX EVERYTHING BEFORE PUBLISHING
 
@@ -91,17 +91,14 @@ The pre-push hook runs `--strict` and blocks on CRITICAL, MAJOR, MINOR, and NIT.
     - Check env: `test -n "$MARKETPLACE_PAT"` before asking user
     - Set secret: `gh secret set MARKETPLACE_PAT --repo <owner>/<plugin> --body "$MARKETPLACE_PAT"` (MUST use `--body` flag)
 11. **Final validation** (`--strict`): MUST pass with only WARNINGs
-12. **Marketplace publish prompt**: Ask user if they want to publish to a marketplace:
-    - **Existing**: Run `/cpv-publish-a-plugin-to-a-github-marketplace <owner>/<plugin> --marketplace <owner>/<marketplace>`
-    - **New**: Run `/cpv-create-a-github-marketplace <owner>/<name>`, then publish to it
-    - **Skip**: Report results and finish
+12. **Marketplace publish prompt**: Ask user if they want to publish to a marketplace — use the `publish-to-marketplace` and `setup-github-marketplace` skills for the workflows.
 
 ## Other Workflows
 
-For **Create GitHub Marketplace**, **Publish Plugin to Marketplace**, and **New Plugin (local only)** — see the corresponding command files:
-- `/cpv-create-a-github-marketplace`
-- `/cpv-publish-a-plugin-to-a-github-marketplace`
-- `/cpv-create-local-plugin`
+For **Create GitHub Marketplace**, **Publish Plugin to Marketplace**, and **New Plugin (local only)** — consult the corresponding skills loaded in your frontmatter:
+- `setup-github-marketplace` — create a marketplace hub
+- `publish-to-marketplace` — register a plugin in a marketplace
+- `create-plugin` — scaffold a new plugin locally
 
 For enable/disable with scope, marketplace listing, and all management operations — see the **plugin-management** skill.
 

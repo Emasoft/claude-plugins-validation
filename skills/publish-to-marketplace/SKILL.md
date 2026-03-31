@@ -2,7 +2,7 @@
 name: publish-to-marketplace
 description: >
   Use when publishing a plugin to a GitHub-hosted marketplace.
-  Trigger with "publish plugin", "push to marketplace", "marketplace sync".
+  Loaded by plugin-creator agent.
 tags:
   - marketplace
   - publish
@@ -24,7 +24,7 @@ Publishes a validated Claude Code plugin to a GitHub-hosted marketplace repo. Co
 
 - Plugin repo with valid `.claude-plugin/plugin.json` (name, version, description)
 - `gh` CLI authenticated (`gh auth status`)
-- Marketplace repo exists with `marketplace.json` (see `canonical-pipeline` skill or `/cpv-create-a-github-marketplace`)
+- Marketplace repo exists with `marketplace.json` (see `canonical-pipeline` skill or use `/cpv-create` to set one up)
 - `uv` on PATH, plugin has `pyproject.toml`
 
 ## Instructions

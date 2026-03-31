@@ -1077,6 +1077,58 @@ class TestDescriptionFieldCoverage:
         assert any("second person" in r.message.lower() for r in report.results)
 
 
+class TestNonInvocableSkillDescription:
+    """Tests for user-invocable:false description requirements (Loaded by instead of Trigger with)."""
+
+    def test_user_invocable_skill_needs_trigger_with(self):
+        """User-invocable skill should require 'Trigger with' in strict mode."""
+        from validate_skill_comprehensive import validate_description_field
+
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"description": "Does things. Use when needed.", "user-invocable": True}
+        validate_description_field(frontmatter, "body", report, strict_mode=True)
+        assert any("Trigger with" in r.message for r in report.results)
+
+    def test_non_invocable_skill_needs_loaded_by(self):
+        """Non-invocable skill should require 'Loaded by' instead of 'Trigger with'."""
+        from validate_skill_comprehensive import validate_description_field
+
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"description": "Does things. Use when needed.", "user-invocable": False}
+        validate_description_field(frontmatter, "body", report, strict_mode=True)
+        # Should NOT ask for "Trigger with"
+        assert not any("Trigger with" in r.message for r in report.results)
+        # Should ask for "Loaded by" or "Used by"
+        assert any("Loaded by" in r.message or "Used by" in r.message for r in report.results)
+
+    def test_non_invocable_with_loaded_by_passes(self):
+        """Non-invocable skill with 'Loaded by' should pass the trigger check."""
+        from validate_skill_comprehensive import validate_description_field
+
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"description": "Does things. Use when needed. Loaded by my-agent.", "user-invocable": False}
+        validate_description_field(frontmatter, "body", report, strict_mode=True)
+        assert not any("Loaded by" in r.message and "MINOR" in r.level for r in report.results)
+
+    def test_non_invocable_with_used_by_passes(self):
+        """Non-invocable skill with 'Used by' should also pass the trigger check."""
+        from validate_skill_comprehensive import validate_description_field
+
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"description": "Does things. Use when needed. Used by my-agent.", "user-invocable": False}
+        validate_description_field(frontmatter, "body", report, strict_mode=True)
+        assert not any("Loaded by" in r.message and "MINOR" in r.level for r in report.results)
+
+    def test_default_invocable_uses_trigger_with_rule(self):
+        """Skill without user-invocable field (default True) should use 'Trigger with' rule."""
+        from validate_skill_comprehensive import validate_description_field
+
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"description": "Does things. Use when needed."}
+        validate_description_field(frontmatter, "body", report, strict_mode=True)
+        assert any("Trigger with" in r.message for r in report.results)
+
+
 class TestContextFieldValidation:
     """Tests for validate_context_field (lines 1049-1054, 1057-1062)."""
 

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Tests for v2.1.1 command consolidation.
+"""Tests for command consolidation (v2.8.0).
 
 Validates that:
-- New renamed/created commands have correct YAML frontmatter
+- 13 commands exist (8 direct-script + 5 agent)
+- Direct-script commands have no agent: field
+- Agent commands have the correct agent: field
 - Old obsolete commands no longer exist in commands/
+- Archived commands are in scripts_dev/commands_archive/
 - Canonical-pipeline skill has correct frontmatter
-- Total command count is 37 (down from 43)
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 COMMANDS_DIR = PROJECT_ROOT / "commands"
 SKILLS_DIR = PROJECT_ROOT / "skills"
+ARCHIVE_DIR = PROJECT_ROOT / "scripts_dev" / "commands_archive"
 
 
 def _parse_frontmatter(path: Path) -> dict | None:
@@ -32,128 +35,123 @@ def _parse_frontmatter(path: Path) -> dict | None:
     return result
 
 
-class TestNewCommandsExist:
-    """Verify new/renamed command files exist."""
+# --- Direct-script commands (no agent field) ---
 
-    def test_create_local_plugin_exists(self):
-        """cpv-create-local-plugin.md exists in commands/."""
-        assert (COMMANDS_DIR / "cpv-create-local-plugin.md").is_file()
+DIRECT_SCRIPT_COMMANDS = [
+    "cpv-validate-plugin",
+    "cpv-validate-skill",
+    "cpv-validate-github-plugin",
+    "cpv-validate-github-marketplace",
+    "cpv-doctor",
+    "cpv-list-plugins",
+    "cpv-bump-version",
+    "cpv-version",
+]
 
-    def test_create_local_marketplace_exists(self):
-        """cpv-create-local-marketplace.md exists in commands/."""
-        assert (COMMANDS_DIR / "cpv-create-local-marketplace.md").is_file()
+# --- Agent commands (with agent field) ---
 
-    def test_standardize_exists(self):
-        """cpv-standardize.md exists in commands/."""
-        assert (COMMANDS_DIR / "cpv-standardize.md").is_file()
+AGENT_COMMANDS = {
+    "cpv-validate": "plugin-validator",
+    "cpv-manage": "plugin-manager",
+    "cpv-create": "plugin-creator",
+    "cpv-fix-validation": "plugin-fixer",
+    "cpv-semantic-validation": "semantic-validator",
+}
+
+
+class TestCommandCount:
+    """Verify total command count after consolidation."""
+
+    def test_total_command_count_is_13(self):
+        """commands/ directory should contain exactly 13 .md files."""
+        md_files = list(COMMANDS_DIR.glob("*.md"))
+        assert len(md_files) == 13, f"Expected 13 commands, found {len(md_files)}: {sorted(f.name for f in md_files)}"
+
+
+class TestDirectScriptCommands:
+    """Verify direct-script commands exist and have no agent: field."""
+
+    def test_all_direct_script_commands_exist(self):
+        """All 8 direct-script commands must exist."""
+        for name in DIRECT_SCRIPT_COMMANDS:
+            assert (COMMANDS_DIR / f"{name}.md").is_file(), f"{name}.md missing"
+
+    def test_direct_script_commands_have_no_agent(self):
+        """Direct-script commands must not have an agent: field."""
+        for name in DIRECT_SCRIPT_COMMANDS:
+            fm = _parse_frontmatter(COMMANDS_DIR / f"{name}.md")
+            assert fm is not None, f"{name}.md has no frontmatter"
+            assert "agent" not in fm, f"{name}.md should not have agent: field, got '{fm.get('agent')}'"
+
+
+class TestAgentCommands:
+    """Verify agent commands exist and delegate to the correct agent."""
+
+    def test_all_agent_commands_exist(self):
+        """All 5 agent commands must exist."""
+        for name in AGENT_COMMANDS:
+            assert (COMMANDS_DIR / f"{name}.md").is_file(), f"{name}.md missing"
+
+    def test_agent_commands_have_correct_agent(self):
+        """Agent commands must have the correct agent: field."""
+        for name, expected_agent in AGENT_COMMANDS.items():
+            fm = _parse_frontmatter(COMMANDS_DIR / f"{name}.md")
+            assert fm is not None, f"{name}.md has no frontmatter"
+            assert fm.get("agent") == expected_agent, (
+                f"{name}.md: expected agent: {expected_agent}, got {fm.get('agent')}"
+            )
 
 
 class TestObsoleteCommandsRemoved:
     """Verify obsolete commands no longer exist in commands/."""
 
-    def test_setup_plugin_repo_removed(self):
-        """cpv-setup-plugin-repo.md should not exist in commands/."""
-        assert not (COMMANDS_DIR / "cpv-setup-plugin-repo.md").exists()
+    def test_old_individual_validators_removed(self):
+        """Individual validator commands should be consolidated into cpv-validate."""
+        for name in [
+            "cpv-validate-hooks", "cpv-validate-agents", "cpv-validate-command",
+            "cpv-validate-security", "cpv-validate-scoring", "cpv-validate-marketplace",
+            "cpv-validate-enterprise", "cpv-validate-mcp", "cpv-validate-lsp",
+            "cpv-validate-documentation", "cpv-validate-encoding", "cpv-validate-rules",
+            "cpv-validate-xref",
+        ]:
+            assert not (COMMANDS_DIR / f"{name}.md").exists(), f"{name}.md should be archived"
 
-    def test_setup_github_marketplace_removed(self):
-        """cpv-setup-github-marketplace.md should not exist in commands/."""
-        assert not (COMMANDS_DIR / "cpv-setup-github-marketplace.md").exists()
+    def test_old_management_commands_removed(self):
+        """Individual management commands should be consolidated into cpv-manage."""
+        for name in [
+            "cpv-install-plugin-from-local-mp", "cpv-uninstall-plugin-from-local-mp",
+            "cpv-update-plugin", "cpv-manage-remote-plugins", "cpv-enable-plugin",
+            "cpv-disable-plugin", "cpv-list-mp-plugins", "cpv-search-plugins",
+            "cpv-manage-marketplaces",
+        ]:
+            assert not (COMMANDS_DIR / f"{name}.md").exists(), f"{name}.md should be archived"
 
-    def test_publish_to_marketplace_removed(self):
-        """cpv-publish-to-marketplace.md should not exist in commands/."""
-        assert not (COMMANDS_DIR / "cpv-publish-to-marketplace.md").exists()
-
-    def test_audit_github_plugin_removed(self):
-        """cpv-audit-github-plugin.md should not exist in commands/."""
-        assert not (COMMANDS_DIR / "cpv-audit-github-plugin.md").exists()
-
-    def test_audit_security_removed(self):
-        """cpv-audit-security.md should not exist in commands/."""
-        assert not (COMMANDS_DIR / "cpv-audit-security.md").exists()
-
-    def test_standardize_marketplace_removed(self):
-        """cpv-standardize-marketplace.md should not exist in commands/."""
-        assert not (COMMANDS_DIR / "cpv-standardize-marketplace.md").exists()
-
-    def test_standardize_plugin_removed(self):
-        """cpv-standardize-plugin.md should not exist in commands/."""
-        assert not (COMMANDS_DIR / "cpv-standardize-plugin.md").exists()
-
-    def test_old_publish_as_github_repo_removed(self):
-        """cpv-publish-as-github-repo.md replaced by cpv-publish-a-plugin-as-github-repo.md."""
-        assert not (COMMANDS_DIR / "cpv-publish-as-github-repo.md").exists()
-
-    def test_old_publish_plugin_to_marketplace_removed(self):
-        """cpv-publish-plugin-to-marketplace.md replaced by cpv-publish-a-plugin-to-a-github-marketplace.md."""
-        assert not (COMMANDS_DIR / "cpv-publish-plugin-to-marketplace.md").exists()
-
-    def test_old_create_github_marketplace_removed(self):
-        """cpv-create-github-marketplace.md replaced by cpv-create-a-github-marketplace.md."""
-        assert not (COMMANDS_DIR / "cpv-create-github-marketplace.md").exists()
-
-    def test_old_install_plugin_removed(self):
-        """cpv-install-plugin.md replaced by cpv-install-plugin-from-local-mp.md."""
-        assert not (COMMANDS_DIR / "cpv-install-plugin.md").exists()
-
-    def test_old_uninstall_plugin_removed(self):
-        """cpv-uninstall-plugin.md replaced by cpv-uninstall-plugin-from-local-mp.md."""
-        assert not (COMMANDS_DIR / "cpv-uninstall-plugin.md").exists()
+    def test_old_creation_commands_removed(self):
+        """Individual creation commands should be consolidated into cpv-create."""
+        for name in [
+            "cpv-create-local-plugin", "cpv-create-local-marketplace",
+            "cpv-publish-a-plugin-as-github-repo", "cpv-create-a-github-marketplace",
+            "cpv-publish-a-plugin-to-a-github-marketplace", "cpv-standardize",
+        ]:
+            assert not (COMMANDS_DIR / f"{name}.md").exists(), f"{name}.md should be archived"
 
 
-class TestNewCommandFrontmatter:
-    """Verify new commands have correct YAML frontmatter fields."""
+class TestArchivedCommands:
+    """Verify archived commands are in scripts_dev/commands_archive/."""
 
-    def test_create_local_plugin_has_name_field(self):
-        """cpv-create-local-plugin.md frontmatter must have name: cpv-create-local-plugin."""
-        fm = _parse_frontmatter(COMMANDS_DIR / "cpv-create-local-plugin.md")
-        assert fm is not None
-        assert fm.get("name") == "cpv-create-local-plugin"
+    def test_archive_directory_exists(self):
+        """scripts_dev/commands_archive/ must exist."""
+        assert ARCHIVE_DIR.is_dir(), "scripts_dev/commands_archive/ directory missing"
 
-    def test_create_local_marketplace_has_name_field(self):
-        """cpv-create-local-marketplace.md frontmatter must have name: cpv-create-local-marketplace."""
-        fm = _parse_frontmatter(COMMANDS_DIR / "cpv-create-local-marketplace.md")
-        assert fm is not None
-        assert fm.get("name") == "cpv-create-local-marketplace"
-
-    def test_standardize_has_name_field(self):
-        """cpv-standardize.md frontmatter must have name: cpv-standardize."""
-        fm = _parse_frontmatter(COMMANDS_DIR / "cpv-standardize.md")
-        assert fm is not None
-        assert fm.get("name") == "cpv-standardize"
-
-    def test_publish_a_plugin_as_github_repo_has_name_field(self):
-        """cpv-publish-a-plugin-as-github-repo.md frontmatter must have correct name."""
-        fm = _parse_frontmatter(COMMANDS_DIR / "cpv-publish-a-plugin-as-github-repo.md")
-        assert fm is not None
-        assert fm.get("name") == "cpv-publish-a-plugin-as-github-repo"
-
-    def test_publish_a_plugin_to_a_github_marketplace_has_name_field(self):
-        """cpv-publish-a-plugin-to-a-github-marketplace.md frontmatter must have correct name."""
-        fm = _parse_frontmatter(COMMANDS_DIR / "cpv-publish-a-plugin-to-a-github-marketplace.md")
-        assert fm is not None
-        assert fm.get("name") == "cpv-publish-a-plugin-to-a-github-marketplace"
-
-    def test_create_a_github_marketplace_has_name_field(self):
-        """cpv-create-a-github-marketplace.md frontmatter must have correct name."""
-        fm = _parse_frontmatter(COMMANDS_DIR / "cpv-create-a-github-marketplace.md")
-        assert fm is not None
-        assert fm.get("name") == "cpv-create-a-github-marketplace"
-
-    def test_install_plugin_from_local_mp_has_name_field(self):
-        """cpv-install-plugin-from-local-mp.md frontmatter must have correct name."""
-        fm = _parse_frontmatter(COMMANDS_DIR / "cpv-install-plugin-from-local-mp.md")
-        assert fm is not None
-        assert fm.get("name") == "cpv-install-plugin-from-local-mp"
-
-    def test_uninstall_plugin_from_local_mp_has_name_field(self):
-        """cpv-uninstall-plugin-from-local-mp.md frontmatter must have correct name."""
-        fm = _parse_frontmatter(COMMANDS_DIR / "cpv-uninstall-plugin-from-local-mp.md")
-        assert fm is not None
-        assert fm.get("name") == "cpv-uninstall-plugin-from-local-mp"
+    def test_archived_commands_count(self):
+        """Archive should contain the 28 moved commands."""
+        if ARCHIVE_DIR.is_dir():
+            archived = list(ARCHIVE_DIR.glob("*.md"))
+            assert len(archived) >= 25, f"Expected 25+ archived commands, found {len(archived)}"
 
 
 class TestCanonicalPipelineSkill:
-    """Verify the new canonical-pipeline skill."""
+    """Verify the canonical-pipeline skill."""
 
     def test_skill_directory_exists(self):
         """skills/canonical-pipeline/ directory must exist."""
@@ -164,12 +162,3 @@ class TestCanonicalPipelineSkill:
         fm = _parse_frontmatter(SKILLS_DIR / "canonical-pipeline" / "SKILL.md")
         assert fm is not None
         assert fm.get("name") == "canonical-pipeline"
-
-
-class TestCommandCount:
-    """Verify total command count after consolidation."""
-
-    def test_total_command_count_is_38(self):
-        """commands/ directory should contain exactly 38 .md files."""
-        md_files = list(COMMANDS_DIR.glob("*.md"))
-        assert len(md_files) == 38, f"Expected 38 commands, found {len(md_files)}: {sorted(f.name for f in md_files)}"

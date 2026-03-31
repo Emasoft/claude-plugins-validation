@@ -135,6 +135,9 @@ REQUIRED_SECTIONS = [
 # --- Description Quality Patterns (Nixtla Strict Mode) ---
 RE_DESCRIPTION_USE_WHEN = re.compile(r"[Uu]se\s+when\s+", re.IGNORECASE)
 RE_DESCRIPTION_TRIGGER_WITH = re.compile(r"[Tt]rigger\s+with\s+", re.IGNORECASE)
+# Agent-facing alternatives for non-user-invocable skills
+RE_LOADED_BY = re.compile(r"[Ll]oaded\s+by\s+", re.IGNORECASE)
+RE_USED_BY = re.compile(r"[Uu]sed\s+by\s+", re.IGNORECASE)
 RE_FIRST_PERSON = re.compile(r"\b(I\s+can|I\s+will|I\s+am|I\s+help)\b", re.IGNORECASE)
 RE_SECOND_PERSON = re.compile(r"\b(You\s+can|You\s+should|You\s+will|You\s+need)\b", re.IGNORECASE)
 
@@ -648,23 +651,42 @@ def validate_description_field(
             category="Description Quality",
         )
 
+    # Determine if this skill is user-invocable (default True per spec)
+    is_user_invocable = frontmatter.get("user-invocable", True)
+
     # Nixtla strict mode quality checks
     if strict_mode:
-        # Must include "Use when..." phrase
-        if not RE_DESCRIPTION_USE_WHEN.search(desc):
-            report.major(
-                "Description must include 'Use when ...' phrase (Nixtla strict mode). Both 'Use when ...' AND 'Trigger with ...' are required.",
-                "SKILL.md",
-                category="Description Quality",
-            )
-
-        # Must include "Trigger with..." phrase
-        if not RE_DESCRIPTION_TRIGGER_WITH.search(desc):
-            report.minor(
-                "Description should include 'Trigger with ...' phrase (Nixtla strict mode). Both 'Use when ...' AND 'Trigger with ...' are required.",
-                "SKILL.md",
-                category="Description Quality",
-            )
+        if is_user_invocable:
+            # User-facing skill: requires "Use when..." and "Trigger with..."
+            if not RE_DESCRIPTION_USE_WHEN.search(desc):
+                report.major(
+                    "Description must include 'Use when ...' phrase (Nixtla strict mode). "
+                    "Both 'Use when ...' AND 'Trigger with ...' are required.",
+                    "SKILL.md",
+                    category="Description Quality",
+                )
+            if not RE_DESCRIPTION_TRIGGER_WITH.search(desc):
+                report.minor(
+                    "Description should include 'Trigger with ...' phrase (Nixtla strict mode). "
+                    "Both 'Use when ...' AND 'Trigger with ...' are required.",
+                    "SKILL.md",
+                    category="Description Quality",
+                )
+        else:
+            # Agent-only skill: requires "Use when..." and "Loaded by..." or "Used by..."
+            if not RE_DESCRIPTION_USE_WHEN.search(desc):
+                report.major(
+                    "Description must include 'Use when ...' phrase so agents know when to consult this skill.",
+                    "SKILL.md",
+                    category="Description Quality",
+                )
+            if not RE_LOADED_BY.search(desc) and not RE_USED_BY.search(desc):
+                report.minor(
+                    "Non-user-invocable skill should include 'Loaded by <agent-name>' or 'Used by <agent-name>' "
+                    "so it's clear which agent consumes this skill.",
+                    "SKILL.md",
+                    category="Description Quality",
+                )
 
         # No first person
         if RE_FIRST_PERSON.search(desc):

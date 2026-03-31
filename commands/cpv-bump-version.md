@@ -1,7 +1,6 @@
 ---
 name: cpv-bump-version
 description: Bump plugin version in plugin.json and pyproject.toml
-agent: plugin-manager
 user-invocable: true
 ---
 
