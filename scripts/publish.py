@@ -116,7 +116,8 @@ def get_current_version(plugin_root: Path) -> str | None:
         data = json.loads(plugin_json.read_text(encoding="utf-8"))
         v = data.get("version")
         return v if isinstance(v, str) else None
-    except Exception:
+    except (json.JSONDecodeError, OSError, KeyError) as e:
+        print(f"Warning: could not read version from {plugin_json}: {e}")
         return None
 
 
@@ -199,8 +200,8 @@ def check_version_consistency(plugin_root: Path) -> tuple[bool, str]:
             v = json.loads(pj.read_text(encoding="utf-8")).get("version")
             if isinstance(v, str):
                 versions["plugin.json"] = v
-        except Exception:
-            pass
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"Warning: could not read version from plugin.json: {e}")
 
     # pyproject.toml
     pp = plugin_root / "pyproject.toml"
@@ -209,8 +210,8 @@ def check_version_consistency(plugin_root: Path) -> tuple[bool, str]:
             m = re.search(r'^version\s*=\s*["\']([^"\']+)["\']', pp.read_text(encoding="utf-8"), re.MULTILINE)
             if m:
                 versions["pyproject.toml"] = m.group(1)
-        except Exception:
-            pass
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"Warning: could not read version from pyproject.toml: {e}")
 
     # Python __version__ variables
     gi = _get_gi(plugin_root)
@@ -221,8 +222,8 @@ def check_version_consistency(plugin_root: Path) -> tuple[bool, str]:
             if m:
                 rel = str(py_file.relative_to(plugin_root))
                 versions[rel] = m.group(1)
-        except Exception:
-            pass
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"Warning: could not read version from {py_file}: {e}")
 
     if not versions:
         return True, "No version sources found"
@@ -295,7 +296,7 @@ Examples:
     dirty = result.stdout.strip()
     if dirty:
         # Auto-commit uv.lock if it's the only dirty file (uv run modifies it)
-        dirty_files = {line.split()[-1] for line in dirty.splitlines() if line.strip()}
+        dirty_files = {line[3:] for line in dirty.splitlines() if line.strip()}
         if dirty_files == {"uv.lock"}:
             print(f"{YELLOW}Auto-committing uv.lock (modified by uv run){NC}")
             run(["git", "add", "uv.lock"], cwd=root)

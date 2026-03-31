@@ -129,8 +129,8 @@ def parse_transcript(path: str | Path) -> TokenUsage:
 
                 model = msg.get("model", "unknown")
                 model_counts[model] = model_counts.get(model, 0) + 1
-    except (OSError, IOError):
-        pass
+    except (OSError, IOError) as e:
+        print(f"Warning: Could not read transcript: {e}", file=sys.stderr)
 
     # Most-used model
     if model_counts:

@@ -61,7 +61,11 @@ All checks run as pure Python -- no API calls, no tokens consumed, no data sent 
 
 CPV validates plugins against the official Claude Code specification. If you are building a plugin, these are the key references:
 
-- [Discover plugins](https://code.claude.com/docs/en/discover-plugins) -- official guide to Claude Code plugins
+- [Discover plugins](https://code.claude.com/docs/en/discover-plugins) -- finding and installing plugins
+- [Plugins reference](https://code.claude.com/docs/en/plugins-reference) -- plugin.json schema, CLI commands, component specs
+- [CLI commands reference](https://code.claude.com/docs/en/plugins-reference#cli-commands-reference) -- install, uninstall, enable, disable, update
+- [Skills reference](https://code.claude.com/docs/en/skills) -- SKILL.md frontmatter, substitutions, dynamic context
+- [Hooks reference](https://code.claude.com/docs/en/hooks) -- 26 hook events, matchers, hook types
 - [Claude Code release notes](https://docs.anthropic.com/en/release-notes/claude-code) -- latest changes and plugin updates
 
 ---
@@ -173,15 +177,47 @@ For use in scripts and CI/CD pipelines:
 
 ### Installation
 
+For the full CLI commands reference, see the [official Anthropic docs](https://code.claude.com/docs/en/plugins-reference#cli-commands-reference).
+
 ```bash
 # Add the Emasoft marketplace (first time only)
 claude plugin marketplace add emasoft-plugins --url https://github.com/Emasoft/emasoft-plugins
 
-# Install CPV (--scope user makes it available in all projects)
+# Install CPV (--scope user = available in all your projects, recommended)
 claude plugin install claude-plugins-validation@emasoft-plugins --scope user
 
-# IMPORTANT: Restart Claude Code after installing
+# OR install for this project only (--scope local, gitignored)
+claude plugin install claude-plugins-validation@emasoft-plugins --scope local
+
+# IMPORTANT: Restart Claude Code after installing, or run /reload-plugins
 ```
+
+### Managing the Plugin
+
+```bash
+# Update to the latest version
+claude plugin update claude-plugins-validation@emasoft-plugins --scope user
+
+# Disable without removing
+claude plugin disable claude-plugins-validation@emasoft-plugins --scope user
+
+# Re-enable
+claude plugin enable claude-plugins-validation@emasoft-plugins --scope user
+
+# Uninstall completely
+claude plugin uninstall claude-plugins-validation@emasoft-plugins --scope user
+
+# Uninstall but keep persistent data
+claude plugin uninstall claude-plugins-validation@emasoft-plugins --scope user --keep-data
+```
+
+Replace `--scope user` with `--scope local` or `--scope project` depending on where you installed it:
+
+| Scope | Settings file | Who can use it |
+|-------|--------------|----------------|
+| `user` | `~/.claude/settings.json` | You, in all projects (default) |
+| `project` | `.claude/settings.json` | Everyone who clones the repo |
+| `local` | `.claude/settings.local.json` | You, in this project only (gitignored) |
 
 For development: `claude --plugin-dir ./claude-plugins-validation`
 

@@ -280,7 +280,8 @@ def read_plugin_meta(plugin_root: Path) -> dict:
     pj = plugin_root / ".claude-plugin" / "plugin.json"
     try:
         meta = json.loads(pj.read_text(encoding="utf-8"))
-    except Exception:
+    except (json.JSONDecodeError, OSError) as e:
+        warn(f"Could not read plugin.json: {e}")
         meta = {}
     return {
         "name": meta.get("name") or plugin_root.name,

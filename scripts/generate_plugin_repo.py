@@ -96,11 +96,13 @@ def gen_plugin_json(p: PluginParams) -> str:
             "name": p.author,
             "email": p.author_email,
         },
-        "homepage": p.github_url,
-        "repository": p.github_url,
         "license": p.license,
         "keywords": [],
     }
+    # Only include homepage/repository when github_owner is set (avoids double-slash URLs)
+    if p.github_owner:
+        manifest["homepage"] = p.github_url
+        manifest["repository"] = p.github_url
     return json.dumps(manifest, indent=2) + "\n"
 
 
@@ -238,23 +240,9 @@ def gen_readme(p: PluginParams) -> str:
         )
     else:
         badges = "<!-- Badges will appear here once github_owner is set -->"
-    return f"""# {p.name}
-
-<!--BADGES-START-->
-{badges}
-<!--BADGES-END-->
-
-{p.description}
-
-## Installation
-
-### From Marketplace
-
-```bash
-claude plugin install {p.name}@{p.marketplace}
-```
-
-### From GitHub
+    # Build GitHub-specific sections only when github_owner is set (avoids broken URLs)
+    if owner:
+        from_github = f"""### From GitHub
 
 ```bash
 gh repo clone {owner}/{repo}
@@ -274,7 +262,39 @@ Add to your Claude Code configuration:
     "https://github.com/{owner}/{repo}"
   ]
 }}
+```"""
+        marketplace_section = f"""## Marketplace
+
+This plugin is available on the [{p.marketplace} marketplace](https://github.com/{owner}/{p.marketplace})."""
+        author_section = f"""## Author
+
+**{p.author}** - [GitHub](https://github.com/{owner})"""
+    else:
+        from_github = ""
+        marketplace_section = f"""## Marketplace
+
+This plugin is available on the {p.marketplace} marketplace.""" if p.marketplace else ""
+        author_section = f"""## Author
+
+**{p.author}**"""
+
+    return f"""# {p.name}
+
+<!--BADGES-START-->
+{badges}
+<!--BADGES-END-->
+
+{p.description}
+
+## Installation
+
+### From Marketplace
+
+```bash
+claude plugin install {p.name}@{p.marketplace}
 ```
+
+{from_github}
 
 ## Uninstall
 
@@ -342,17 +362,13 @@ uv run mypy scripts/
 └── .gitignore               # Git ignore rules
 ```
 
-## Marketplace
-
-This plugin is available on the [{p.marketplace} marketplace](https://github.com/{owner}/{p.marketplace}).
+{marketplace_section}
 
 ## License
 
 This project is licensed under the {p.license} License. See [LICENSE](LICENSE) for details.
 
-## Author
-
-**{p.author}** - [GitHub](https://github.com/{owner})
+{author_section}
 """
 
 
@@ -925,8 +941,12 @@ def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
     args = ["gh", "release", "create", tag, "--title", tag, "--generate-notes"]
     if changelog_file.is_file():
         args.extend(["--notes-file", str(changelog_file)])
-    run(args, cwd=root, check=False)
-    cprint(f"  {GREEN}Release created.{NC}")
+    result = run(args, cwd=root, check=False)
+    # Check returncode before claiming success
+    if result.returncode != 0:
+        cprint(f"  {RED}Failed to create release (exit code {result.returncode}).{NC}")
+    else:
+        cprint(f"  {GREEN}Release created.{NC}")
 
 
 # -- Main ----------------------------------------------------------------------
@@ -1072,8 +1092,8 @@ exit $?
 
 def gen_ci_yml(p: PluginParams) -> str:
     """Generate .github/workflows/ci.yml — Mega-Linter + validate + test."""
-    _ = p  # unused but kept for consistent signature
-    return """name: CI
+    # Use p.python_version instead of hardcoded 3.12
+    return f"""name: CI
 
 on:
   push:
@@ -1097,7 +1117,7 @@ jobs:
       - name: Mega-Linter
         uses: oxsecurity/megalinter@v8
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{{{ secrets.GITHUB_TOKEN }}}}
           VALIDATE_ALL_CODEBASE: false
 
       - name: Upload Mega-Linter reports
@@ -1119,7 +1139,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Set up Python
-        run: uv python install 3.12
+        run: uv python install {p.python_version}
 
       - name: Install dependencies
         run: uv sync --extra dev
@@ -1140,7 +1160,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Set up Python
-        run: uv python install 3.12
+        run: uv python install {p.python_version}
 
       - name: Install dependencies
         run: uv sync --extra dev
@@ -1157,8 +1177,8 @@ jobs:
 
 def gen_release_yml(p: PluginParams) -> str:
     """Generate .github/workflows/release.yml — GitHub Release on semver tag."""
-    _ = p  # unused but kept for consistent signature
-    return """name: Release
+    # Use p.python_version instead of hardcoded 3.12
+    return f"""name: Release
 
 on:
   push:
@@ -1179,7 +1199,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Set up Python
-        run: uv python install 3.12
+        run: uv python install {p.python_version}
 
       - name: Install dependencies
         run: uv sync --extra dev
@@ -1215,7 +1235,7 @@ jobs:
           if [ -z "$PREV_TAG" ]; then
             CHANGELOG=$(git log --pretty=format:"- %s (%h)" HEAD)
           else
-            CHANGELOG=$(git log --pretty=format:"- %s (%h)" ${PREV_TAG}..HEAD)
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" $PREV_TAG..HEAD)
           fi
           echo "$CHANGELOG" > changelog.txt
           echo "changelog_file=changelog.txt" >> $GITHUB_OUTPUT
@@ -1228,14 +1248,14 @@ jobs:
             validation-report.txt
           generate_release_notes: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{{{ secrets.GITHUB_TOKEN }}}}
 """
 
 
 def gen_validate_yml(p: PluginParams) -> str:
     """Generate .github/workflows/validate.yml — CPV plugin validation only (linting is in ci.yml via Mega-Linter)."""
-    _ = p  # unused but kept for consistent signature
-    return """name: Plugin Validation
+    # Use p.python_version instead of hardcoded 3.12
+    return f"""name: Plugin Validation
 
 on:
   push:
@@ -1255,7 +1275,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Set up Python
-        run: uv python install 3.12
+        run: uv python install {p.python_version}
 
       - name: Install dependencies
         run: uv sync --extra dev
@@ -1275,7 +1295,7 @@ jobs:
         if: steps.find-validator.outputs.validator != ''
         run: |
           set +e
-          uv run python ${{ steps.find-validator.outputs.validator }} . --verbose
+          uv run python ${{{{ steps.find-validator.outputs.validator }}}} . --verbose
           exit_code=$?
           set -e
           if [ $exit_code -eq 0 ]; then
