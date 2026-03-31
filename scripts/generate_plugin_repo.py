@@ -1072,6 +1072,33 @@ if __name__ == "__main__":
 '''
 
 
+def gen_hooks_json(p: PluginParams) -> str:
+    """Generate hooks/hooks.json — SessionStart hook to install deps into ${CLAUDE_PLUGIN_DATA}.
+
+    Per official Anthropic docs, runtime dependencies should be installed into
+    ${CLAUDE_PLUGIN_DATA} (persists across plugin updates) rather than
+    ${CLAUDE_PLUGIN_ROOT} (wiped on every update).
+    """
+    _ = p  # unused but kept for consistent signature
+    return """{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "diff -q \\"${CLAUDE_PLUGIN_ROOT}/pyproject.toml\\" \\"${CLAUDE_PLUGIN_DATA}/pyproject.toml\\" >/dev/null 2>&1 || (cp \\"${CLAUDE_PLUGIN_ROOT}/pyproject.toml\\" \\"${CLAUDE_PLUGIN_DATA}/\\" && cd \\"${CLAUDE_PLUGIN_DATA}\\" && uv venv --python 3.12 -q && uv pip install -q -r \\"${CLAUDE_PLUGIN_ROOT}/pyproject.toml\\") || rm -f \\"${CLAUDE_PLUGIN_DATA}/pyproject.toml\\"",
+            "statusMessage": "Installing plugin dependencies...",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  }
+}
+"""
+
+
 def gen_pre_push_hook(p: PluginParams) -> str:
     """Generate git-hooks/pre-push — thin bash delegator to publish.py --gate."""
     _ = p  # unused but kept for consistent signature
@@ -1451,6 +1478,8 @@ def generate_all_files(p: PluginParams) -> list[tuple[str, str, bool]]:
         ("scripts/__init__.py", gen_scripts_init(p), False),
         ("scripts/publish.py", gen_publish_py(p), True),
         ("scripts/setup-hooks.py", gen_setup_hooks_py(), True),
+        # Claude Code hooks — installs deps into ${CLAUDE_PLUGIN_DATA} on SessionStart
+        ("hooks/hooks.json", gen_hooks_json(p), False),
         # Git hooks
         ("git-hooks/pre-push", gen_pre_push_hook(p), True),
         # Mega-Linter config
