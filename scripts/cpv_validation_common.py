@@ -328,8 +328,9 @@ SKILL_FRONTMATTER_FIELDS = {
     "context",
     "agent",
     "hooks",
-    "effort",  # v2.1.80 — effort level for skill execution
+    "effort",  # v2.1.80 — effort level for skill execution (low, medium, high, max)
     "paths",  # v2.1.84 — YAML list of globs to restrict skill activation to matching files
+    "shell",  # v2.1.84 — shell for !`command` blocks: "bash" (default) or "powershell"
 }
 
 
@@ -868,7 +869,7 @@ def get_skip_dirs_with_gitignore(root_path: Path, additional_skip: set[str] | No
 NAME_PATTERN = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 
 # Maximum recommended values for names and descriptions
-MAX_NAME_LENGTH = 70
+MAX_NAME_LENGTH = 64  # Official Claude Code spec: max 64 characters for skill/component names
 MAX_DESCRIPTION_LENGTH = 1024
 MIN_BODY_CHARS = 100
 MAX_BODY_WORDS = 2000
@@ -893,7 +894,7 @@ def validate_component_name(
     - Must end with a lowercase letter (no digit at end)
     - Only lowercase letters, digits, and single hyphens allowed
     - No consecutive hyphens, no underscores, no uppercase
-    - Max length: MAX_NAME_LENGTH (70) chars
+    - Max length: MAX_NAME_LENGTH (64) chars
     - For skills: frontmatter name must match directory name
 
     Args:
