@@ -4,7 +4,7 @@ description: |
   Lightweight validation agent that runs scripts and returns compact summaries.
   Does NOT fix issues or perform semantic analysis — use plugin-fixer and semantic-validator for those.
 model: sonnet
-tools: Bash, Read, Glob, Grep
+maxTurns: 50
 skills:
   - plugin-validation-skill
 ---

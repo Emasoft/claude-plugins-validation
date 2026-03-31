@@ -5,8 +5,7 @@ description: >
   pipeline, git hooks, and standard file structure. Use when user wants to create a new
   plugin, scaffold a repo, or set up a new marketplace hub.
 model: sonnet
-maxTurns: 25
-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion
+maxTurns: 50
 skills:
   - create-plugin
   - standardize-plugin
