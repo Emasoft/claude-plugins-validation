@@ -166,6 +166,8 @@ def validate_manifest(plugin_root: Path, report: ValidationReport, marketplace_o
         "mcpServers",
         "outputStyles",
         "lspServers",
+        "userConfig",  # User-configurable values prompted at enable time (v2.1.80)
+        "channels",  # Channel declarations for message injection (v2.1.85)
     }
     for key in manifest.keys():
         if key not in known_fields:
@@ -278,6 +280,7 @@ def validate_manifest(plugin_root: Path, report: ValidationReport, marketplace_o
         "agents": "./agents/",
         "skills": "./skills/",
         "hooks": "./hooks/",
+        "outputStyles": "./output-styles/",  # Also auto-discovered per official docs
     }
     for key, default_path in auto_discovered_defaults.items():
         if key in manifest:
