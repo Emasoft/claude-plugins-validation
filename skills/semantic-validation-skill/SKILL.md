@@ -6,7 +6,7 @@ tags:
   - semantic
   - quality
   - skills
-user-invocable: true
+user-invocable: false
 allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep
 ---
 

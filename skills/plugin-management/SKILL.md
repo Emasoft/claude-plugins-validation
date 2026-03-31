@@ -3,6 +3,7 @@ name: plugin-management
 description: >
   Manage Claude Code plugins: install, validate, audit, enable, disable, search, doctor.
   Use when managing plugin lifecycle. Trigger with /cpv-install-plugin or /cpv-doctor.
+user-invocable: false
 ---
 
 # Plugin Management
