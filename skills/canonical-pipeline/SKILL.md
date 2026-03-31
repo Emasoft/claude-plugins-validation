@@ -2,7 +2,7 @@
 name: canonical-pipeline
 description: >
   Standard files, CI/CD, hooks, and release pipeline for Emasoft Claude Code plugins.
-  Use when creating or auditing plugin repos. Trigger with /cpv-standardize or /cpv-create-local-plugin.
+  Use when creating or auditing plugin repos. Loaded by plugin-creator and plugin-fixer agents.
 user-invocable: false
 ---
 
@@ -20,7 +20,7 @@ Defines the standard files, workflows, hooks, and release pipeline that every Em
 
 ## Instructions
 
-1. **Create plugin repo**: Run `/cpv-create-local-plugin` or `generate_plugin_repo.py`
+1. **Create plugin repo**: Run `generate_plugin_repo.py` or use `/cpv-create`
 2. **Verify standard files**: Check all required files exist per [Detailed Standard](references/detailed-standard.md#standard-plugin-files)
 3. **Install CI/CD workflows**: Ensure `ci.yml`, `release.yml`, `validate.yml`, `notify-marketplace.yml` in `.github/workflows/`
 4. **Install pre-push hook**: `uv run python scripts/publish.py --install-hook`
@@ -58,13 +58,14 @@ A fully configured plugin repository with:
 
 **Create and publish:**
 ```
-/cpv-create-local-plugin
-/cpv-publish-a-plugin-as-github-repo ./my-plugin --owner MyGitHub
+/cpv-create
+> Choose: Create a new plugin → then Publish to GitHub
 ```
 
 **Standardize existing:**
 ```
-/cpv-standardize ./my-plugin --fix
+/cpv-create
+> Choose: Standardize an existing plugin
 ```
 
 ## Resources

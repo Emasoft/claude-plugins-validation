@@ -3,7 +3,6 @@ name: cpv-validate-skill
 description: Validate skill directories in a plugin
 allowed-tools: Read, Bash, Glob, Grep, AskUserQuestion
 argument-hint: "<skill_path_or_name> [--strict] [--openspec] [--pillars] [--verbose]"
-agent: plugin-validator
 user-invocable: true
 ---
 
@@ -158,9 +157,7 @@ Where `$SKILL_PATH` is the provided path and `$OPTIONS` are the flags passed.
 
 ## Related Commands
 
-- `/cpv-validate-plugin` - Full plugin validation (includes skills)
-- `/cpv-validate-hooks` - Hook configuration validation
-- `/cpv-validate-agents` - Agent definition validation
-- `/cpv-validate-mcp` - MCP server configuration validation
+- `/cpv-validate-plugin` — Full plugin validation (includes skills)
+- `/cpv-validate` — Interactive validation (agent asks what to validate)
 - `/cpv-fix-validation` — Fix issues from a validation report
 - `/cpv-semantic-validation` — Deep semantic analysis (uses opus)

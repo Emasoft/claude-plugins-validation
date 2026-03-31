@@ -2,7 +2,7 @@
 name: setup-github-marketplace
 description: >
   Use when creating a plugin marketplace or linking plugins to one.
-  Trigger with "set up marketplace" or "create plugin marketplace".
+  Loaded by plugin-creator agent.
 tags:
   - marketplace
   - github

@@ -2,7 +2,7 @@
 name: setup-plugin-repo
 description: >
   Create and configure Claude Code plugin GitHub repositories with CI/CD, hooks, and marketplace notification.
-  Use when setting up a new plugin repo. Trigger with /cpv-publish-a-plugin-as-github-repo.
+  Use when setting up a new plugin repo. Loaded by plugin-creator agent.
 tags:
   - plugin
   - github

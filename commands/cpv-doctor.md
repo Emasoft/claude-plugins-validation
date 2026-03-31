@@ -1,7 +1,6 @@
 ---
 name: cpv-doctor
 description: Health-check all installed Claude Code plugins, settings, and marketplaces (--fix to auto-repair)
-agent: plugin-manager
 user-invocable: true
 ---
 

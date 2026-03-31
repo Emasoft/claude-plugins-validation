@@ -251,77 +251,30 @@ The semantic validator always warns about the cost and asks for confirmation bef
 
 ### Slash Commands
 
-Agents are the recommended interface, but all operations are also available as slash commands. These are the same scripts the agents use internally.
+13 commands — 8 run scripts directly (zero AI tokens), 5 spawn the right agent.
 
-<details>
-<summary><strong>Validation Commands</strong></summary>
-
-| Command | What It Validates |
-|---------|-------------------|
-| `/cpv-validate-plugin` | **Full validation** -- runs all 17 sub-validators. Start here. |
-| `/cpv-validate-skill` | Skill quality (190+ rules, Nixtla strict-mode) |
-| `/cpv-validate-hooks` | Hook configuration (26 events, 4 hook types, bash portability) |
-| `/cpv-validate-agents` | Agent definitions (frontmatter, tools, naming) |
-| `/cpv-validate-command` | Command definitions (frontmatter, tool names, arguments) |
-| `/cpv-validate-security` | Security scan (injection, secrets, prompt injection, exfiltration) |
-| `/cpv-validate-scoring` | Quality score (weighted across 7 categories) |
-| `/cpv-validate-marketplace` | Marketplace manifest (structure, entries, field types) |
-| `/cpv-validate-enterprise` | Enterprise compliance (license, author, SPDX, tags) |
-| `/cpv-validate-mcp` | MCP server config (transport, OAuth, paths) |
-| `/cpv-validate-lsp` | LSP server config (commands, languages, patterns) |
-| `/cpv-validate-documentation` | Documentation quality (README sections, links, images) |
-| `/cpv-validate-encoding` | File encoding (UTF-8, BOM, line endings) |
-| `/cpv-validate-rules` | Rule files (structure, naming, content) |
-| `/cpv-validate-xref` | Cross-references (agent refs, versions, scripts) |
-| `/cpv-validate-github-plugin` | Validate a GitHub plugin without installing (add `--audit` for security) |
-| `/cpv-validate-github-marketplace` | Validate a GitHub marketplace without registering (add `--audit`) |
-| `/cpv-semantic-validation` | **Deep AI analysis** using Opus. A-F grades. **Uses AI tokens.** |
-
-</details>
-
-<details>
-<summary><strong>Plugin Management Commands</strong></summary>
+#### Script Commands (free — no AI tokens)
 
 | Command | What It Does |
 |---------|--------------|
-| `/cpv-install-plugin-from-local-mp` | Install from a local directory or archive |
-| `/cpv-uninstall-plugin-from-local-mp` | Remove and clean up settings |
-| `/cpv-update-plugin` | Update from a new source |
-| `/cpv-manage-remote-plugins` | Install/update/remove from GitHub marketplaces |
-| `/cpv-enable-plugin` | Turn on a plugin (`--scope user` or `--scope local`) |
-| `/cpv-disable-plugin` | Turn off without removing |
+| `/cpv-validate-plugin <path>` | **Full validation** -- runs all 17 sub-validators |
+| `/cpv-validate-skill <path>` | Skill validation (190+ rules) |
+| `/cpv-validate-github-plugin <owner/repo>` | Validate a GitHub plugin without installing |
+| `/cpv-validate-github-marketplace <owner/repo>` | Validate a GitHub marketplace without registering |
+| `/cpv-doctor` | Health-check installed plugins, settings, marketplaces |
 | `/cpv-list-plugins` | List installed plugins with version and status |
-| `/cpv-list-mp-plugins` | List plugins in a marketplace |
-| `/cpv-search-plugins` | Search by component type or text |
-| `/cpv-manage-marketplaces` | Add, remove, list, update marketplaces |
+| `/cpv-bump-version <path>` | Bump plugin version (patch, minor, major) |
 | `/cpv-version` | Show CPV version |
 
-</details>
+#### Agent Commands (interactive — uses AI tokens)
 
-<details>
-<summary><strong>Create and Publish Commands</strong></summary>
-
-| Command | What It Does |
-|---------|--------------|
-| `/cpv-create-local-plugin` | Scaffold a new plugin with all standard files |
-| `/cpv-create-local-marketplace` | Scaffold a new marketplace hub |
-| `/cpv-publish-a-plugin-as-github-repo` | Full pipeline: validate, push, set up CI/CD |
-| `/cpv-create-a-github-marketplace` | Create a GitHub marketplace with CI/CD |
-| `/cpv-publish-a-plugin-to-a-github-marketplace` | Register a plugin in a marketplace |
-| `/cpv-standardize` | Audit and fix a repo to match standards |
-| `/cpv-bump-version` | Bump version (patch, minor, major) |
-
-</details>
-
-<details>
-<summary><strong>Fix and Repair Commands</strong></summary>
-
-| Command | What It Does |
-|---------|--------------|
-| `/cpv-fix-validation` | Auto-fix issues from a validation report |
-| `/cpv-doctor` | Health-check plugins, settings, marketplaces (`--fix` to auto-repair) |
-
-</details>
+| Command | Agent | What It Does |
+|---------|-------|--------------|
+| `/cpv-validate` | plugin-validator | Interactive: asks what to validate, runs the right script |
+| `/cpv-manage` | plugin-manager | Interactive: install, update, enable, disable, search, doctor |
+| `/cpv-create` | plugin-creator | Interactive: create plugins, marketplaces, publish to GitHub |
+| `/cpv-fix-validation <report>` | plugin-fixer | Reads a validation report and fixes all issues |
+| `/cpv-semantic-validation <path>` | semantic-validator | Deep AI quality analysis (Opus, expensive, explicit opt-in) |
 
 ---
 
@@ -336,7 +289,7 @@ Agents are the recommended interface, but all operations are also available as s
 | Management scripts | 12 | Plugin lifecycle, marketplace operations, scaffolding |
 | Agents | 6 | AI-powered validation, fixing, and management |
 | Skills | 11 | Validation, management, publishing workflows |
-| Commands | 38 | Slash commands for all operations |
+| Commands | 13 | 8 direct script + 5 agent commands |
 | Tests | 1549 | Full coverage across all modules |
 
 </details>

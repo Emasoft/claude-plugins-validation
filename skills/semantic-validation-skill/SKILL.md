@@ -1,6 +1,6 @@
 ---
 name: semantic-validation-skill
-description: "Deep AI semantic validation for skills/agents. Use when checking triggering, clarity, examples. Trigger with /cpv-semantic-validation. 10x token cost."
+description: "Deep AI semantic validation for skills/agents. Use when checking triggering, clarity, examples. Loaded by semantic-validator agent. 10x token cost."
 tags:
   - validation
   - semantic

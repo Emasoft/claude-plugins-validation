@@ -11,7 +11,7 @@ Validate a marketplace hosted on GitHub by cloning it to a temporary directory a
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_github_validate.py" --marketplace <owner/repo>
 ```
 
-**Validation + security audit** (replaces the former `/cpv-audit-security` for marketplaces):
+**Validation + security audit**:
 ```bash
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_github_validate.py" --marketplace <owner/repo> --audit
 ```

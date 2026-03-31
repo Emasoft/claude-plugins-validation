@@ -11,7 +11,7 @@ Validate a plugin hosted on GitHub by cloning it to a temporary directory and ru
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_github_validate.py" --plugin <owner/repo>
 ```
 
-**Validation + security audit** (replaces the former `/cpv-audit-github-plugin`):
+**Validation + security audit**:
 ```bash
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_github_validate.py" --plugin <owner/repo> --audit
 ```

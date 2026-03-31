@@ -3,7 +3,6 @@ name: cpv-validate-plugin
 description: Run full validation on a Claude Code plugin
 allowed-tools: Read, Bash, Glob, Grep, AskUserQuestion
 argument-hint: "<plugin_path_or_name> [--verbose] [--json]"
-agent: plugin-validator
 user-invocable: true
 ---
 
@@ -181,11 +180,7 @@ uv run --with pyyaml python scripts/validate_plugin.py . $OPTIONS --report docs_
 
 ## Related Commands
 
-- `/cpv-validate-marketplace` - Marketplace validation
-- `/cpv-validate-skill` - Single skill validation
-- `/cpv-validate-hooks` - Hook-only validation
-- `/cpv-validate-agents` - Agent-only validation
-- `/cpv-validate-mcp` - MCP server validation
-- `/cpv-validate-lsp` - LSP server validation
+- `/cpv-validate` — Interactive validation (agent asks what to validate)
+- `/cpv-validate-skill` — Single skill validation
 - `/cpv-fix-validation` — Fix issues from a validation report
 - `/cpv-semantic-validation` — Deep semantic analysis (uses opus)

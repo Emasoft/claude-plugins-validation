@@ -2,7 +2,7 @@
 name: fix-validation
 description: >
   Maps CPV validation errors to fix reference files. Use when looking up remediation steps.
-  Trigger with /cpv-fix-validation.
+  Loaded by plugin-fixer agent.
 allowed-tools: Read, Edit, Write, Glob, Grep
 user-invocable: false
 ---
