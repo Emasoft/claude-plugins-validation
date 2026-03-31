@@ -280,22 +280,9 @@ def ensure_linter_installed(language: str, repo_root: Path) -> bool:
         local_eslint = repo_root / "node_modules" / ".bin" / "eslint"
         if local_eslint.exists() or shutil.which("eslint"):
             return True
-        package_json = repo_root / "package.json"
-        if package_json.exists():
-            print(f"{YELLOW}  Installing eslint...{NC}")
-            for pkg_mgr in ["bun", "npm", "pnpm"]:
-                if shutil.which(pkg_mgr):
-                    result = subprocess.run(
-                        [pkg_mgr, "install", "eslint", "--save-dev"],
-                        cwd=repo_root,
-                        capture_output=True,
-                        text=True,
-                        timeout=120,
-                    )
-                    if result.returncode == 0:
-                        print(f"{GREEN}  ✔ eslint installed via {pkg_mgr}{NC}")
-                        return True
-        print(f"{YELLOW}  ⚠ eslint not available, skipping JS/TS linting{NC}")
+        # Read-only: never auto-install into the repo (would modify package.json / node_modules)
+        pkg_mgr = next((m for m in ["bun", "npm", "pnpm"] if shutil.which(m)), "npm")
+        print(f"{YELLOW}  ⚠ eslint not found — install with: {pkg_mgr} install eslint --save-dev{NC}")
         return False
 
     elif language == "shell":

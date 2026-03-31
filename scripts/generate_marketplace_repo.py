@@ -372,7 +372,7 @@ jobs:
               break
             fi
             echo "Push failed (attempt $attempt), pulling and retrying..."
-            git pull --rebase origin main
+            git pull --rebase origin ${{ github.event.repository.default_branch }}
           done
 
       - name: Summary
@@ -759,6 +759,9 @@ def generate_marketplace_repo(
             return 1
 
     # Check target directory
+    if target_dir.exists() and not target_dir.is_dir():
+        print(f"{RED}Error:{NC} Target path exists but is not a directory: {target_dir}", file=sys.stderr)
+        return 1
     if target_dir.exists() and any(target_dir.iterdir()):
         print(f"{RED}Error:{NC} Target directory is not empty: {target_dir}", file=sys.stderr)
         return 1

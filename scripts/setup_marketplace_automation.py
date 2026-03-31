@@ -156,7 +156,8 @@ def check_plugin_notification_workflow(plugin_path: Path) -> PluginWorkflowStatu
     if workflow_path.exists():
         # Check if it still has placeholder values
         content = workflow_path.read_text(encoding="utf-8")
-        if "YOUR_GITHUB_USERNAME" in content or "YOUR_MARKETPLACE_REPO_NAME" in content:
+        content_lower = content.lower()
+        if "your_github_username" in content_lower or "your_marketplace_repo_name" in content_lower or "your-github-username" in content_lower or "your-marketplace-repo" in content_lower:
             result["needs_configuration"] = True
 
     return result

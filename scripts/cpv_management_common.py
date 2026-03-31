@@ -350,9 +350,9 @@ def _extract_tar(archive: Path, dest: Path, mode: str):
     """Extract a tar archive with security filtering."""
     with tarfile.open(archive, mode) as tf:  # type: ignore[call-overload]
         if PYTHON_VERSION >= (3, 12):
-            # Per-member extract with filter="data" (safe against path traversal)
-            for member in tf.getmembers():
-                tf.extract(member, dest, filter="data")
+            # extractall with filter="data" is safe against path traversal (Python 3.12+)
+            # NOTE: filter kwarg only works on extractall(), NOT on extract()
+            tf.extractall(dest, filter="data")
         else:
             # Manual path-traversal and symlink prevention for older Python
             # Append os.sep so /tmp/abc doesn't match /tmp/abcdef (path traversal bypass)

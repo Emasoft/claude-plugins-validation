@@ -655,7 +655,7 @@ class PipelineSetup:
 
         try:
             config = configparser.ConfigParser()
-            config.read(gitmodules)
+            config.read(gitmodules, encoding="utf-8")
 
             for section in config.sections():
                 if section.startswith("submodule "):

@@ -49,8 +49,12 @@ def main():
         print(f"ERROR: {plugin_json} not found", file=sys.stderr)
         sys.exit(1)
 
-    # Read current version
-    manifest = json.loads(plugin_json.read_text(encoding="utf-8"))
+    # Read current version — fail fast on malformed JSON
+    try:
+        manifest = json.loads(plugin_json.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        print(f"ERROR: {plugin_json} contains invalid JSON: {e}", file=sys.stderr)
+        sys.exit(1)
     current = manifest.get("version", "0.0.0")
 
     # Compute new version
