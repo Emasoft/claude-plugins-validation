@@ -6,6 +6,8 @@ description: |
   and workflow completeness — things scripts cannot check.
   Use only via /cpv-semantic-validation (explicit opt-in, uses opus).
 model: opus
+skills:
+  - semantic-validation-skill
 ---
 
 # Semantic Validator Agent

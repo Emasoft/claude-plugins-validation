@@ -3,6 +3,7 @@ name: canonical-pipeline
 description: >
   Standard files, CI/CD, hooks, and release pipeline for Emasoft Claude Code plugins.
   Use when creating or auditing plugin repos. Trigger with /cpv-standardize or /cpv-create-local-plugin.
+user-invocable: false
 ---
 
 # Canonical Plugin Pipeline Standard
