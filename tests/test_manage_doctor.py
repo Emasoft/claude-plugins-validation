@@ -80,6 +80,8 @@ def _patch_paths(monkeypatch, claude_dir: Path):
     cache_dir = plugins_dir / "cache"
     settings_file = claude_dir / "settings.json"
 
+    known_marketplaces_file = plugins_dir / "known_marketplaces.json"
+
     # Patch on both manage_doctor and cpv_management_common so all references resolve
     for mod_name in ("manage_doctor", "cpv_management_common"):
         mod = sys.modules.get(mod_name)
@@ -91,6 +93,8 @@ def _patch_paths(monkeypatch, claude_dir: Path):
             monkeypatch.setattr(mod, "CACHE_DIR", cache_dir)
             monkeypatch.setattr(mod, "SETTINGS_FILE", settings_file)
             monkeypatch.setattr(mod, "SETTINGS_TARGET", settings_file)
+            if hasattr(mod, "KNOWN_MARKETPLACES_FILE"):
+                monkeypatch.setattr(mod, "KNOWN_MARKETPLACES_FILE", known_marketplaces_file)
 
 
 # ── Valid marketplace.json template ─────────────────────────────────
