@@ -578,6 +578,18 @@ def validate_agent_file(agent_path: Path, report: ValidationReport) -> None:
     if "description" not in frontmatter:
         report.major("Missing 'description' in frontmatter", rel_path)
 
+    # Plugin agents do NOT support hooks, mcpServers, or permissionMode (per official spec)
+    # These are security restrictions — only project agents (.claude/agents/) can use them
+    plugin_agent_forbidden = {"hooks", "mcpServers", "permissionMode"}
+    for field in plugin_agent_forbidden:
+        if field in frontmatter:
+            report.major(
+                f"Plugin agent uses forbidden field '{field}'. "
+                "Plugin-shipped agents do not support hooks, mcpServers, or permissionMode for security reasons. "
+                "Only project agents in .claude/agents/ can use these fields.",
+                rel_path,
+            )
+
     # Validate TOC embedding — agent files must embed TOCs from referenced .md files
     validate_toc_embedding(content, agent_path, agent_path.parent, report)
 

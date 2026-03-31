@@ -204,6 +204,10 @@ RE_ARGUMENTS_VAR = re.compile(r"\$ARGUMENTS(?!\[)")  # $ARGUMENTS (not followed 
 RE_ARGUMENTS_INDEX = re.compile(r"\$ARGUMENTS\[(\d+)\]")  # $ARGUMENTS[N]
 RE_SHORTHAND_ARG = re.compile(r"\$(\d+)(?!\d)")  # $N shorthand (e.g., $1, $2)
 RE_SESSION_ID_VAR = re.compile(r"\$\{CLAUDE_SESSION_ID\}")
+RE_SKILL_DIR_VAR = re.compile(r"\$\{CLAUDE_SKILL_DIR\}")
+# All valid ${} substitution variables in skills
+VALID_SKILL_VARS = {"CLAUDE_SESSION_ID", "CLAUDE_SKILL_DIR", "CLAUDE_PLUGIN_ROOT", "CLAUDE_PLUGIN_DATA"}
+RE_BRACED_VAR = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")  # Matches ${ANY_VAR}
 
 # --- Dynamic Context Injection Pattern (skills.md: !`command`) ---
 RE_DYNAMIC_CONTEXT = re.compile(r"!\s*`[^`]+`")  # Correct: !`command`
@@ -1463,6 +1467,27 @@ def validate_string_substitutions(body: str, report: ValidationReport) -> None:
             category="String Substitutions",
         )
 
+    # Check for ${CLAUDE_SKILL_DIR} usage
+    skill_dir_matches = RE_SKILL_DIR_VAR.findall(body)
+    if skill_dir_matches:
+        report.info(
+            f"Skill uses ${{CLAUDE_SKILL_DIR}} ({len(skill_dir_matches)} occurrence(s))",
+            "SKILL.md",
+            category="String Substitutions",
+        )
+
+    # Check for unknown ${VAR} references — strip code fences first
+    body_no_fences = re.sub(r"```[\s\S]*?```", "", body)
+    all_braced_vars = RE_BRACED_VAR.findall(body_no_fences)
+    for var_name in all_braced_vars:
+        if var_name not in VALID_SKILL_VARS:
+            report.warning(
+                f"Unknown variable reference: ${{{var_name}}}. "
+                f"Valid skill variables: {', '.join(f'${{{v}}}' for v in sorted(VALID_SKILL_VARS))}",
+                "SKILL.md",
+                category="String Substitutions",
+            )
+
 
 def validate_dynamic_context(body: str, report: ValidationReport) -> None:
     """Validate dynamic context injection (!`command` syntax).
@@ -2108,6 +2133,35 @@ def validate_skill(
         validate_effort_field(frontmatter, report)
         validate_shell_field(frontmatter, report)
         validate_paths_field(frontmatter, report)
+
+        # Unreachable skill check: both disable-model-invocation and user-invocable:false
+        # means neither the user nor Claude can invoke this skill
+        dmi = frontmatter.get("disable-model-invocation", False)
+        ui = frontmatter.get("user-invocable", True)  # default is True per spec
+        if dmi is True and ui is False:
+            report.major(
+                "Skill is unreachable: 'disable-model-invocation: true' prevents Claude from loading it, "
+                "and 'user-invocable: false' hides it from the / menu. "
+                "No one can invoke this skill. Remove one of these flags.",
+                "SKILL.md",
+                category="Frontmatter",
+            )
+
+        # context:fork without actionable task content
+        if frontmatter.get("context") == "fork" and body.strip():
+            # Check if body has actionable verbs (steps, commands, instructions)
+            body_lower = body.lower()
+            action_indicators = ["1.", "2.", "step", "run ", "execute", "create", "build", "deploy",
+                                 "check", "fix", "find", "analyze", "generate", "implement"]
+            has_actions = any(ind in body_lower for ind in action_indicators)
+            if not has_actions:
+                report.warning(
+                    "Skill has 'context: fork' but content looks like guidelines, not an actionable task. "
+                    "Forked subagents need explicit step-by-step instructions — guidelines without a task "
+                    "will cause the subagent to return without meaningful output.",
+                    "SKILL.md",
+                    category="Frontmatter",
+                )
 
     # Validate token budget
     validate_token_budget(content, body, report)
