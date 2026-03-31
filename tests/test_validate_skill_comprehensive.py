@@ -311,6 +311,56 @@ class TestMetadataValidation:
         validate_metadata_field(frontmatter, report)
         assert any("should be string" in r.message for r in report.results)
 
+    def test_misplaced_user_invocable_bool_warns(self):
+        """user-invocable under metadata: should warn about misplacement, not type mismatch."""
+        report = ValidationReport(skill_path="test")
+        frontmatter = {
+            "metadata": {
+                "user-invocable": False,
+            }
+        }
+        validate_metadata_field(frontmatter, report)
+        # Should get a WARNING about misplacement, NOT a MINOR about string type
+        assert any("Move it to the top level" in r.message for r in report.results)
+        assert not any("should be string" in r.message for r in report.results)
+
+    def test_misplaced_user_invocable_string_warns(self):
+        """user-invocable as string under metadata: should also warn about misplacement."""
+        report = ValidationReport(skill_path="test")
+        frontmatter = {
+            "metadata": {
+                "user-invocable": "false",
+            }
+        }
+        validate_metadata_field(frontmatter, report)
+        # Should warn about misplacement regardless of value type
+        assert any("Move it to the top level" in r.message for r in report.results)
+
+    def test_misplaced_disable_model_invocation_warns(self):
+        """disable-model-invocation under metadata: should warn about misplacement."""
+        report = ValidationReport(skill_path="test")
+        frontmatter = {
+            "metadata": {
+                "disable-model-invocation": True,
+            }
+        }
+        validate_metadata_field(frontmatter, report)
+        assert any("Move it to the top level" in r.message for r in report.results)
+        assert not any("should be string" in r.message for r in report.results)
+
+    def test_custom_metadata_non_string_still_minor(self):
+        """Custom (non-standard) metadata values that aren't strings should still get MINOR."""
+        report = ValidationReport(skill_path="test")
+        frontmatter = {
+            "metadata": {
+                "custom-field": 42,
+            }
+        }
+        validate_metadata_field(frontmatter, report)
+        # Custom field should get the generic string type warning, not misplacement
+        assert any("should be string" in r.message for r in report.results)
+        assert not any("Move it to the top level" in r.message for r in report.results)
+
 
 class TestScriptsDirectoryValidation:
     """Tests for scripts directory validation."""
