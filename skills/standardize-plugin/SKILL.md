@@ -3,6 +3,7 @@ name: standardize-plugin
 description: >
   Audit and fix plugin/marketplace repos to match CPV standards.
   Use when standardizing or auditing repo structure. Trigger with /cpv-standardize.
+user-invocable: false
 ---
 
 # Standardize Plugin / Marketplace

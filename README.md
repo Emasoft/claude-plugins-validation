@@ -33,9 +33,8 @@ There are **two ways to use CPV**. Pick the one that fits your workflow:
   - [Reading the Results](#reading-the-results)
 - **[Part 2: Claude Code Plugin](#part-2-claude-code-plugin)**
   - [Installation](#installation)
-  - [Validation Commands](#validation-commands)
-  - [Plugin Management Commands](#plugin-management-commands)
-  - [AI Agents](#ai-agents)
+  - [AI Agents — The Main Interface](#ai-agents--the-main-interface)
+  - [Slash Commands](#slash-commands)
 - [For Developers](#for-developers)
 - [Requirements](#requirements)
 - [Troubleshooting](#troubleshooting)
@@ -221,9 +220,41 @@ Replace `--scope user` with `--scope local` or `--scope project` depending on wh
 
 For development: `claude --plugin-dir ./claude-plugins-validation`
 
-### Validation Commands
+### AI Agents — The Main Interface
 
-Once installed, use these slash commands inside Claude Code:
+When used as a Claude Code plugin, **agents are the primary way to interact with CPV**. Each agent is a specialized AI assistant that knows which scripts to run, which skills to consult, and how to guide you through the process. Just tell Claude what you need and the right agent takes over.
+
+| Agent | What It Does | Ask it when you want to... |
+|-------|-------------|---------------------------|
+| **plugin-validator** | Runs validation scripts and returns severity reports | "Validate my plugin", "Check if this is ready to publish" |
+| **skill-validation-agent** | Specialized skill validation (basic, strict, OpenSpec, Pillars) | "Validate this skill", "Check my SKILL.md" |
+| **plugin-fixer** | Reads a validation report and automatically fixes the issues | "Fix the validation errors", "How do I fix these issues?" |
+| **semantic-validator** | Deep AI quality analysis — catches things scripts cannot (see below) | "Check if descriptions actually match what skills do" |
+| **plugin-manager** | Full plugin lifecycle: install, update, enable, disable, search, health-check | "Install a plugin", "List my plugins", "Run doctor" |
+| **plugin-creator** | Scaffolds plugins, marketplaces, publishes to GitHub with CI/CD | "Create a new plugin", "Publish to GitHub", "Set up a marketplace" |
+
+Every agent presents a menu when invoked, asks what you need, and guides you step by step. You don't need to remember command names or flags.
+
+#### Script Validation vs. Semantic Validation
+
+CPV has two validation layers:
+
+| | Script Validation | Semantic Validation |
+|---|---|---|
+| **How** | Python scripts check structure, syntax, types, cross-references | AI agent (Opus) reads files and evaluates actual content |
+| **Cost** | Zero tokens — runs locally, instant results | ~10-50x more expensive — uses Opus with 1M context |
+| **Catches** | Missing files, wrong types, broken paths, encoding, security patterns | Wrong descriptions, unclear instructions, missing checkpoints, unrealistic examples, workflows without exit conditions |
+| **Coverage** | ~95% of real issues | The remaining ~5% that only a reader can catch |
+| **When** | Always. Run this first. | Only when script validation passes clean but something still feels wrong. |
+
+The semantic validator always warns about the cost and asks for confirmation before running. In most cases, script validation is all you need.
+
+### Slash Commands
+
+Agents are the recommended interface, but all operations are also available as slash commands. These are the same scripts the agents use internally.
+
+<details>
+<summary><strong>Validation Commands</strong></summary>
 
 | Command | What It Validates |
 |---------|-------------------|
@@ -244,13 +275,12 @@ Once installed, use these slash commands inside Claude Code:
 | `/cpv-validate-xref` | Cross-references (agent refs, versions, scripts) |
 | `/cpv-validate-github-plugin` | Validate a GitHub plugin without installing (add `--audit` for security) |
 | `/cpv-validate-github-marketplace` | Validate a GitHub marketplace without registering (add `--audit`) |
-| `/cpv-semantic-validation` | **Deep AI analysis** using Claude opus. A-F grades for skill quality. **This is the only command that uses AI tokens.** |
+| `/cpv-semantic-validation` | **Deep AI analysis** using Opus. A-F grades. **Uses AI tokens.** |
 
-### Plugin Management Commands
+</details>
 
-CPV also provides tools for the full plugin lifecycle:
-
-#### Install, Update, Remove
+<details>
+<summary><strong>Plugin Management Commands</strong></summary>
 
 | Command | What It Does |
 |---------|--------------|
@@ -258,27 +288,18 @@ CPV also provides tools for the full plugin lifecycle:
 | `/cpv-uninstall-plugin-from-local-mp` | Remove and clean up settings |
 | `/cpv-update-plugin` | Update from a new source |
 | `/cpv-manage-remote-plugins` | Install/update/remove from GitHub marketplaces |
-
-#### Enable and Disable
-
-| Command | What It Does |
-|---------|--------------|
 | `/cpv-enable-plugin` | Turn on a plugin (`--scope user` or `--scope local`) |
-| `/cpv-disable-plugin` | Turn off without removing (`--scope user` or `--scope local`) |
-
-Smart name resolution: use `plugin-name`, `name@marketplace`, or `name@owner/marketplace`.
-
-#### Browse and Search
-
-| Command | What It Does |
-|---------|--------------|
+| `/cpv-disable-plugin` | Turn off without removing |
 | `/cpv-list-plugins` | List installed plugins with version and status |
 | `/cpv-list-mp-plugins` | List plugins in a marketplace |
 | `/cpv-search-plugins` | Search by component type or text |
 | `/cpv-manage-marketplaces` | Add, remove, list, update marketplaces |
 | `/cpv-version` | Show CPV version |
 
-#### Create and Publish
+</details>
+
+<details>
+<summary><strong>Create and Publish Commands</strong></summary>
 
 | Command | What It Does |
 |---------|--------------|
@@ -290,25 +311,17 @@ Smart name resolution: use `plugin-name`, `name@marketplace`, or `name@owner/mar
 | `/cpv-standardize` | Audit and fix a repo to match standards |
 | `/cpv-bump-version` | Bump version (patch, minor, major) |
 
-#### Fix and Repair
+</details>
+
+<details>
+<summary><strong>Fix and Repair Commands</strong></summary>
 
 | Command | What It Does |
 |---------|--------------|
 | `/cpv-fix-validation` | Auto-fix issues from a validation report |
 | `/cpv-doctor` | Health-check plugins, settings, marketplaces (`--fix` to auto-repair) |
 
-### AI Agents
-
-These agents work inside Claude Code to automate complex tasks:
-
-| Agent | What It Does |
-|-------|-------------|
-| **plugin-validator** | Runs validation scripts and produces reports |
-| **skill-validation-agent** | Specialized skill validation with strict-mode |
-| **plugin-fixer** | Reads a validation report and automatically fixes the issues |
-| **semantic-validator** | Deep AI quality analysis (uses opus, explicit opt-in) |
-| **plugin-manager** | Plugin lifecycle: install, enable, disable, doctor |
-| **plugin-creator** | Scaffolds plugins and marketplaces with CI/CD |
+</details>
 
 ---
 

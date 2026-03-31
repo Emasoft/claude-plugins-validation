@@ -3,6 +3,7 @@ name: create-plugin
 description: >
   Create Claude Code plugin or marketplace repos with full CI/CD.
   Use when scaffolding a new plugin or marketplace. Trigger with /cpv-create-local-plugin or /cpv-create-local-marketplace.
+user-invocable: false
 ---
 
 # Create Plugin / Marketplace
