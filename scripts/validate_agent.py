@@ -621,31 +621,37 @@ def validate_effort_field(frontmatter: dict[str, Any], filename: str, report: Ag
 
     rel_path = filename
     effort_val = frontmatter["effort"]
-    valid_effort_values = {"low", "medium", "high", "max"}  # "max" is Opus 4.6 only
-    if isinstance(effort_val, str):
-        if effort_val.lower() not in valid_effort_values:
-            report.major(f"Invalid 'effort' value: '{effort_val}'. Must be one of: {sorted(valid_effort_values)}", rel_path)
-        else:
-            report.passed(f"Valid effort: {effort_val}", rel_path)
-            # "max" effort requires model: opus
-            if effort_val.lower() == "max":
-                model = frontmatter.get("model", "")
-                model_str = str(model).lower() if model else ""
-                if model_str and "opus" not in model_str:
-                    report.major(
-                        f"effort: max requires an Opus model, but model is '{model}'. "
-                        "Use effort: high for non-Opus models, or set model: opus.",
-                        rel_path,
-                    )
-                elif not model_str:
-                    report.warning(
-                        "effort: max only works with Opus models. No 'model' field set — "
-                        "this agent will fail if the session uses a non-Opus model. "
-                        "Consider adding 'model: opus' or using effort: high.",
-                        rel_path,
-                    )
-    else:
+    if not isinstance(effort_val, str):
         report.major(f"'effort' must be a string, got {type(effort_val).__name__}", rel_path)
+        return
+    if not effort_val.strip():
+        report.major("'effort' field cannot be empty", rel_path)
+        return
+
+    valid_effort_values = {"low", "medium", "high", "max"}  # "max" is Opus 4.6 only
+    if effort_val.lower() not in valid_effort_values:
+        report.major(f"Invalid 'effort' value: '{effort_val}'. Must be one of: {sorted(valid_effort_values)}", rel_path)
+        return
+
+    report.passed(f"Valid effort: {effort_val}", rel_path)
+
+    # "max" effort requires model: opus
+    if effort_val.lower() == "max":
+        model = frontmatter.get("model", "")
+        model_str = str(model).lower() if model else ""
+        if model_str and "opus" not in model_str:
+            report.major(
+                f"effort: max requires an Opus model, but model is '{model}'. "
+                "Use effort: high for non-Opus models, or set model: opus.",
+                rel_path,
+            )
+        elif not model_str:
+            report.warning(
+                "effort: max only works with Opus models. No 'model' field set — "
+                "this agent will fail if the session uses a non-Opus model. "
+                "Consider adding 'model: opus' or using effort: high.",
+                rel_path,
+            )
 
 
 def validate_disallowed_tools_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:

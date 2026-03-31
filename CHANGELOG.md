@@ -2,6 +2,34 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.6.4] - 2026-03-31
+
+### Official Skills Spec Alignment + Deep Code Audit
+
+**New validation rules from official skills spec:**
+- `shell` frontmatter field (bash/powershell for !`command` blocks)
+- `effort` validated for skills (was only agents) — low, medium, high, max
+- `paths` validated as string or YAML list of globs
+- `effort: max` requires Opus model (MAJOR if wrong model, WARNING if no model)
+- Unreachable skill detection: `disable-model-invocation: true` + `user-invocable: false` = MAJOR
+- `context: fork` without actionable task content = WARNING
+- Plugin agents using forbidden fields (`hooks`, `mcpServers`, `permissionMode`) = MAJOR
+- `${CLAUDE_SKILL_DIR}` recognized in string substitutions
+- Unknown `${VAR}` references flagged as WARNING
+- Broken `!`command`` backtick detection (MAJOR for one backtick, WARNING for no backticks)
+- `MAX_NAME_LENGTH` 70 → 64 chars (official spec limit)
+- `MAX_DESCRIPTION_WARN` 200 → 250 chars (official truncation point)
+- `outputStyles` added to auto-discovered defaults check
+- `userConfig` and `channels` added to known manifest fields
+
+**Deep audit fixes (v2.6.4):**
+- Empty string validation in effort/shell fields (was accepting "")
+- Null value handling in paths field (was giving confusing NoneType error)
+- Agent effort validator rewritten (was inconsistent type-check order)
+- Inline code spans now stripped in dynamic context detection (prevents false positives)
+- README badge synced with version
+- LLM Externalizer refs updated: batch_check deprecated, scan_folder defaults corrected, FILE GROUPING added
+
 ## [2.5.2] - 2026-03-28
 
 ### Deep Audit Fixes

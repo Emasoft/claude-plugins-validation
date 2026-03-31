@@ -1095,6 +1095,9 @@ def validate_effort_field(frontmatter: dict[str, Any], report: ValidationReport)
     if not isinstance(effort_val, str):
         report.major(f"'effort' must be a string, got {type(effort_val).__name__}", "SKILL.md", category="Frontmatter")
         return
+    if not effort_val.strip():
+        report.major("'effort' field cannot be empty", "SKILL.md", category="Frontmatter")
+        return
 
     valid_effort_values = {"low", "medium", "high", "max"}  # "max" is Opus 4.6 only
     if effort_val.lower() not in valid_effort_values:
@@ -1132,6 +1135,9 @@ def validate_shell_field(frontmatter: dict[str, Any], report: ValidationReport) 
     if not isinstance(shell_val, str):
         report.major(f"'shell' must be a string, got {type(shell_val).__name__}", "SKILL.md", category="Frontmatter")
         return
+    if not shell_val.strip():
+        report.major("'shell' field cannot be empty", "SKILL.md", category="Frontmatter")
+        return
 
     valid_shell_values = {"bash", "powershell"}
     if shell_val.lower() not in valid_shell_values:
@@ -1146,6 +1152,9 @@ def validate_paths_field(frontmatter: dict[str, Any], report: ValidationReport) 
         return
 
     paths_val = frontmatter["paths"]
+    if paths_val is None:
+        report.major("'paths' field cannot be null — use a glob string or YAML list", "SKILL.md", category="Frontmatter")
+        return
     # Accepts string (comma-separated) or YAML list
     if isinstance(paths_val, str):
         if not paths_val.strip():
@@ -1505,9 +1514,9 @@ def validate_dynamic_context(body: str, report: ValidationReport) -> None:
             category="Dynamic Context",
         )
 
-    # Strip code fence blocks to avoid false positives on examples/docs
-    # Code fences contain backtick-heavy content that isn't actual skill syntax
-    body_no_fences = re.sub(r"```[\s\S]*?```", "", body)
+    # Strip code fence blocks and inline code spans to avoid false positives
+    body_no_fences = re.sub(r"```[\s\S]*?```", "", body)  # fenced code blocks
+    body_no_fences = re.sub(r"`[^`\n]+`", "", body_no_fences)  # inline code spans
 
     # Check for broken pattern: !command with ONE backtick (opening or closing, but not both)
     one_backtick_matches = RE_BANG_ONE_BACKTICK.findall(body_no_fences)
