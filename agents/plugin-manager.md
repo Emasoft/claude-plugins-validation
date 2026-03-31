@@ -6,8 +6,7 @@ description: >
   plugin health, search for plugins by type, manage marketplaces, or perform bulk plugin
   operations.
 model: sonnet
-maxTurns: 20
-tools: Bash, Read, Write, Glob, Grep
+maxTurns: 50
 skills:
   - plugin-management
 ---
