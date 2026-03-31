@@ -627,6 +627,23 @@ def validate_effort_field(frontmatter: dict[str, Any], filename: str, report: Ag
             report.major(f"Invalid 'effort' value: '{effort_val}'. Must be one of: {sorted(valid_effort_values)}", rel_path)
         else:
             report.passed(f"Valid effort: {effort_val}", rel_path)
+            # "max" effort requires model: opus
+            if effort_val.lower() == "max":
+                model = frontmatter.get("model", "")
+                model_str = str(model).lower() if model else ""
+                if model_str and "opus" not in model_str:
+                    report.major(
+                        f"effort: max requires an Opus model, but model is '{model}'. "
+                        "Use effort: high for non-Opus models, or set model: opus.",
+                        rel_path,
+                    )
+                elif not model_str:
+                    report.warning(
+                        "effort: max only works with Opus models. No 'model' field set — "
+                        "this agent will fail if the session uses a non-Opus model. "
+                        "Consider adding 'model: opus' or using effort: high.",
+                        rel_path,
+                    )
     else:
         report.major(f"'effort' must be a string, got {type(effort_val).__name__}", rel_path)
 
