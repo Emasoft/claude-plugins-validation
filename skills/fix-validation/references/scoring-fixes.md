@@ -293,7 +293,7 @@ Fix issues in `hooks/hooks.json`:
 
 ### Improving hook_types (weight: 10%)
 - Use only valid event types: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, etc.
-- See `hook-fixes.md` for the full list of 26 valid event types
+- See `hook-fixes.md` for the full list of 27 valid event types
 
 ### Improving documentation (weight: 8%)
 - Add or improve `README.md`

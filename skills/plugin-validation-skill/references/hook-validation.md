@@ -65,7 +65,7 @@ The top-level `hooks` key must be an object whose keys are event names and value
 
 ## 2. Valid Hook Events
 
-There are **26 valid hook events**:
+There are **27 valid hook events**:
 
 | Event | Has Matcher | Description |
 |-------|-------------|-------------|
@@ -77,7 +77,7 @@ There are **26 valid hook events**:
 | SessionStart | Yes | At session start |
 | SessionEnd | No | At session end |
 | SubagentStart | Yes | When subagent starts |
-| SubagentStop | No | When subagent attempts to stop |
+| SubagentStop | Yes | When subagent finishes. Matcher: agent name |
 | UserPromptSubmit | No | When user submits prompt |
 | Stop | No | When agent attempts to stop |
 | PreCompact | Yes | Before conversation compaction (command-only event) |
@@ -95,12 +95,13 @@ There are **26 valid hook events**:
 | CwdChanged | No | When working directory changes — e.g. direnv (v2.1.83, command-only) |
 | FileChanged | Yes | When watched files change (v2.1.83, command-only). Matcher: filename/basename pattern |
 | TaskCreated | No | When a task is created via TaskCreate tool (v2.1.84, command-only) |
+| PermissionDenied | Yes | When auto mode classifier denies a tool call (v2.1.89). Matcher: tool name. Output: `{retry: true}` to allow model retry |
 
 ### Events With Matchers
 
 These events support tool-specific or context-specific matchers:
 
-- PreToolUse, PostToolUse, PostToolUseFailure, PermissionRequest (tool name)
+- PreToolUse, PostToolUse, PostToolUseFailure, PermissionRequest, PermissionDenied (tool name)
 - Notification (notification_type)
 - PreCompact, PostCompact (manual, auto)
 - SessionStart (startup, resume, clear, compact)

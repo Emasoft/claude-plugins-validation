@@ -60,6 +60,7 @@ EVENTS_WITH_MATCHERS = {
     "Elicitation",  # matcher: MCP server name (v2.1.76)
     "ElicitationResult",  # matcher: MCP server name (v2.1.76)
     "FileChanged",  # matcher: filename/basename pattern (v2.1.83)
+    "PermissionDenied",  # matcher: tool_name (v2.1.89) — fires when auto mode classifier denies
 }
 
 # Events that do NOT support matchers (matcher field is ignored)
