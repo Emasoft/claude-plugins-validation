@@ -120,6 +120,14 @@ COMMON_TOOL_NAMES = {
     "CronDelete",
     "CronList",
     "LSP",
+    "Skill",
+    "AskUserQuestion",
+    "PowerShell",  # v2.1.84 — Windows opt-in preview
+    "SendMessage",  # Agent teams — message teammates or resume subagents
+    "TeamCreate",  # Agent teams
+    "TeamDelete",  # Agent teams
+    "ListMcpResourcesTool",
+    "ReadMcpResourceTool",
 }
 
 # Common notification types
