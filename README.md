@@ -64,7 +64,7 @@ CPV validates plugins against the official Claude Code specification. If you are
 - [Plugins reference](https://code.claude.com/docs/en/plugins-reference) -- plugin.json schema, CLI commands, component specs
 - [CLI commands reference](https://code.claude.com/docs/en/plugins-reference#cli-commands-reference) -- install, uninstall, enable, disable, update
 - [Skills reference](https://code.claude.com/docs/en/skills) -- SKILL.md frontmatter, substitutions, dynamic context
-- [Hooks reference](https://code.claude.com/docs/en/hooks) -- 26 hook events, matchers, hook types
+- [Hooks reference](https://code.claude.com/docs/en/hooks) -- 27 hook events, matchers, hook types
 - [Claude Code release notes](https://docs.anthropic.com/en/release-notes/claude-code) -- latest changes and plugin updates
 
 ---

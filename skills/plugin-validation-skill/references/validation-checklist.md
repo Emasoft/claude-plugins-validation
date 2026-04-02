@@ -122,7 +122,7 @@ Only these 18 event types are valid:
 - [ ] `CwdChanged` (NO matcher)
 - [ ] `FileChanged` (NO matcher)
 - [ ] `TaskCreated` (NO matcher)
-- [ ] All events are from the valid set of 26 events (including CwdChanged, FileChanged, TaskCreated, StopFailure, Elicitation, ElicitationResult, PostCompact, InstructionsLoaded, TeammateIdle, TaskCompleted, ConfigChange, WorktreeCreate, WorktreeRemove)
+- [ ] All events are from the valid set of 27 events (including CwdChanged, FileChanged, TaskCreated, PermissionDenied, StopFailure, Elicitation, ElicitationResult, PostCompact, InstructionsLoaded, TeammateIdle, TaskCompleted, ConfigChange, WorktreeCreate, WorktreeRemove)
 
 ### Matcher Configuration
 

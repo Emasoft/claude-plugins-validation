@@ -170,6 +170,7 @@ VALID_HOOK_EVENTS = {
     "CwdChanged",  # v2.1.83 — fires when working directory changes (e.g. direnv)
     "FileChanged",  # v2.1.83 — fires when watched files change
     "TaskCreated",  # v2.1.84 — fires when a task is created via TaskCreate tool
+    "PermissionDenied",  # v2.1.89 — fires when auto mode classifier denies a tool call
 }
 
 # =============================================================================
@@ -195,7 +196,7 @@ VALID_TOOLS = {
     "Glob",
     "WebFetch",
     "WebSearch",
-    "Task",
+    "Task",  # Legacy alias for Agent — still accepted
     "NotebookEdit",
     "Skill",
     "AskUserQuestion",
@@ -208,7 +209,7 @@ VALID_TOOLS = {
     "TaskList",
     "TaskGet",
     "TaskStop",
-    "TaskOutput",  # v2.1.71 — deprecated in v2.1.83 (use Read on output file path instead)
+    "TaskOutput",  # v2.1.71 — deprecated (use Read on output file path instead)
     "ToolSearch",
     "MultiEdit",
     "Notebook",
@@ -219,6 +220,12 @@ VALID_TOOLS = {
     "CronList",  # v2.1.71
     "LSP",
     "Agent",
+    "PowerShell",  # v2.1.84 — Windows opt-in preview (CLAUDE_CODE_USE_POWERSHELL_TOOL=1)
+    "ListMcpResourcesTool",  # Lists MCP server resources
+    "ReadMcpResourceTool",  # Reads a specific MCP resource by URI
+    "SendMessage",  # Agent teams — message teammates or resume subagents
+    "TeamCreate",  # Agent teams — create a team
+    "TeamDelete",  # Agent teams — disband a team
 }
 
 # Valid model short names for agents (v2.1.74+: full model IDs also accepted)
