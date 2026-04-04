@@ -19,9 +19,73 @@ import json
 import os
 import re
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal
+
+# =============================================================================
+# Remote Execution Guard
+# =============================================================================
+
+
+def check_remote_execution_guard() -> None:
+    """Abort if running from a remote location without the remote_validation.py launcher.
+
+    Detects remote execution by checking if the scripts directory is inside a
+    plugin cache, uvx temp dir, or any path outside the user's working directory.
+    When detected, requires CPV_REMOTE_VALIDATION=1 (set by remote_validation.py)
+    to ensure proper environment isolation.
+    """
+    if os.environ.get("CPV_REMOTE_VALIDATION") == "1":
+        return  # Running via remote_validation.py — isolation is set up
+
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    cwd = os.getcwd()
+
+    # Detect known remote execution paths
+    remote_indicators = [
+        "/plugins/cache/",  # Claude Code plugin cache
+        "/.claude/plugins/",  # User plugin dir
+        "/uv/tools/",  # uvx temp environment
+        "/pipx/venvs/",  # pipx environment
+    ]
+
+    is_remote = any(indicator in scripts_dir for indicator in remote_indicators)
+
+    # Also detect: scripts dir is not under or above the current working directory
+    if not is_remote:
+        try:
+            # If scripts_dir and cwd share no common project root, it's remote
+            scripts_path = Path(scripts_dir).resolve()
+            cwd_path = Path(cwd).resolve()
+            is_remote = not (
+                str(scripts_path).startswith(str(cwd_path))
+                or str(cwd_path).startswith(str(scripts_path.parent))
+            )
+        except (ValueError, OSError):
+            pass
+
+    if is_remote:
+        script_name = os.path.basename(sys.argv[0])
+        print(
+            f"ERROR: {script_name} is being run from a remote location without "
+            f"the environment isolation launcher.\n\n"
+            f"When running CPV scripts remotely (from the plugin cache, via uvx, "
+            f"or from any location outside the target plugin), you MUST use "
+            f"remote_validation.py to prevent the target's local config files "
+            f"from interfering with validation.\n\n"
+            f"Instead of:\n"
+            f"  python3 {scripts_dir}/{script_name} /path/to/target\n\n"
+            f"Use:\n"
+            f"  python3 {scripts_dir}/remote_validation.py {script_name.replace('.py', '')} /path/to/target\n\n"
+            f"Or via uvx:\n"
+            f"  uvx --from git+https://github.com/Emasoft/claude-plugins-validation "
+            f"--with pyyaml cpv-remote-validate {script_name.replace('.py', '')} /path/to/target",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
 
 # =============================================================================
 # Tool Resolution: local install → remote runner fallback (via smart_exec)

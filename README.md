@@ -75,60 +75,76 @@ CPV validates plugins against the official Claude Code specification. If you are
 
 ### Getting Started
 
-You need [uv](https://docs.astral.sh/uv/getting-started/installation/) installed (the fast Python package manager). Then:
+You need [uv](https://docs.astral.sh/uv/getting-started/installation/) installed. Then:
 
 ```bash
-# Validate a plugin (runs all 17 checks)
-uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-validate /path/to/your-plugin
+# Validate a plugin (runs all 17 checks + linting)
+uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml \
+    cpv-remote-validate validate_plugin /path/to/your-plugin
 ```
 
-That's it. `uvx` downloads CPV temporarily into an isolated environment, runs the validation, and shows the results. Nothing is installed permanently on your system.
+That's it. `uvx` downloads CPV temporarily into an isolated environment, runs the validation with full environment isolation (the target plugin's local configs can't interfere), and shows results. Nothing is installed permanently.
 
-The `--with pyyaml` flag ensures the YAML parser dependency is available. While `uvx` normally installs dependencies automatically, adding `--with` explicitly guarantees they are present.
+The `--with pyyaml` flag ensures the YAML parser dependency is available.
 
-More examples:
+### The Remote Launcher
+
+`cpv-remote-validate` is the recommended way to validate external plugins. It wraps any CPV script with environment isolation so that the target plugin's local files (`pyproject.toml`, `.mypy.ini`, stale module copies) cannot interfere with validation.
 
 ```bash
-# Show detailed output (including checks that passed)
-uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-validate /path/to/your-plugin --verbose
+# Full plugin validation (short alias)
+uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml \
+    cpv-remote-validate plugin /path/to/plugin
 
-# Save a full report to a file
-uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-validate /path/to/your-plugin --report report.md
+# Save a report to a file
+uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml \
+    cpv-remote-validate plugin /path/to/plugin -o report.md
 
-# Run only the security scanner
-uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-validate-security /path/to/your-plugin
+# Validate a single skill with strict mode
+uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml \
+    cpv-remote-validate skill /path/to/skill --strict
 
-# Run only the skill validator
-uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-validate-skill /path/to/your-plugin
+# Security scan
+uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml \
+    cpv-remote-validate security /path/to/plugin
+
+# Show help and all available commands
+uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml \
+    cpv-remote-validate --help
+
+# From the CPV plugin cache (inside Claude Code):
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" plugin /path/to/plugin
 ```
 
-> **Tip:** The commands are long because of the GitHub URL. Create a shell alias to shorten them:
+> **Tip:** Create a shell alias to shorten the commands:
 > ```bash
-> alias cpv='uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml'
+> alias cpv='uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-remote-validate'
 > ```
-> Then just use: `cpv cpv-validate /path/to/plugin`
+> Then just: `cpv plugin /path/to/plugin` or `cpv skill /path/to/skill --strict`
 
-### Available Validators
+### Available Scripts
 
-| CLI Command | What It Checks |
-|-------------|----------------|
-| `cpv-validate` | **Everything.** Runs all 17 validators below in sequence. Start here. |
-| `cpv-validate-skill` | **Skills.** Checks SKILL.md for frontmatter, required sections, triggering phrases, description length, token budget, and reference file integrity. 190+ rules. |
-| `cpv-validate-hooks` | **Hooks.** Validates `hooks.json` against 26 event types and 4 hook types. Checks script paths, bash portability, and environment variables. |
-| `cpv-validate-agents` | **Agents.** Checks agent `.md` files for frontmatter fields, naming, tool references, and markdown structure. |
-| `cpv-validate-command` | **Commands.** Checks command `.md` files for required frontmatter, valid tool names, and naming conventions. |
-| `cpv-validate-security` | **Security.** Scans for injection, path traversal, secrets, prompt injection, data exfiltration, supply chain risks, credential harvesting, hook/MCP abuse, and sandbox escape. |
-| `cpv-validate-scoring` | **Quality score.** Computes a weighted score across structure, documentation, security, testing, hooks, skills, and compliance. |
-| `cpv-validate-marketplace` | **Marketplace.** Validates `marketplace.json` structure, plugin entries, source references, and field types. |
-| `cpv-validate-enterprise` | **Enterprise compliance.** Checks author info, license, SPDX identifiers, keyword tags, and organizational metadata. |
-| `cpv-validate-mcp` | **MCP servers.** Validates `.mcp.json` transport types, required fields, OAuth config, and cross-platform paths. |
-| `cpv-validate-lsp` | **LSP servers.** Checks LSP definitions for valid command paths, language identifiers, and file patterns. |
-| `cpv-validate-documentation` | **Documentation.** Checks README for required sections, working links, and image references. |
-| `cpv-validate-encoding` | **Encoding.** Verifies UTF-8, detects BOM, checks line endings, and flags binary characters in text files. |
-| `cpv-validate-rules` | **Rules.** Validates `.md` files in the `rules/` directory for structure and content. |
-| `cpv-validate-xref` | **Cross-references.** Checks agent refs, subagent types, version consistency, and that referenced files exist. |
-| `cpv-doctor` | **Health check.** Diagnoses installed plugins, settings, and marketplaces. |
-| `cpv-standardize` | **Standards.** Audits and fixes a plugin or marketplace repo to match CPV standards. |
+Any of these can be passed as the first argument to `cpv-remote-validate`. Short aliases and full script names both work.
+
+| Command | What It Checks |
+|---------|----------------|
+| `plugin` | **Everything.** Runs all 17 sub-validators + linting. Start here. |
+| `skill` | **Skills.** SKILL.md frontmatter, required sections, description quality. 190+ rules. |
+| `hook` | **Hooks.** 27 event types, 4 hook types, script paths, bash portability. |
+| `agent` | **Agents.** Frontmatter fields, naming, tools, model, skills. |
+| `command` | **Commands.** Frontmatter, tool names, arguments, naming. |
+| `security` | **Security.** Injection, path traversal, secrets, prompt injection, exfiltration. |
+| `scoring` | **Quality score.** Weighted across structure, docs, security, testing. |
+| `marketplace` | **Marketplace.** Manifest structure, plugin entries, source references. |
+| `enterprise` | **Enterprise.** Author, license, SPDX, keywords, metadata. |
+| `mcp` | **MCP.** Transport types, required fields, OAuth, paths. |
+| `lsp` | **LSP.** Command paths, language IDs, file patterns. |
+| `docs` | **Documentation.** README sections, links, images. |
+| `encoding` | **Encoding.** UTF-8, BOM, line endings, binary detection. |
+| `rules` | **Rules.** Structure and content of rules/*.md files. |
+| `xref` | **Cross-references.** Agent refs, versions, scripts. |
+| `doctor` | **Health check.** Plugins, settings, marketplaces. |
+| `lint` | **Lint only.** All 15 languages (Python, JS, Shell, Go, Rust, etc.). |
 
 ### Options
 

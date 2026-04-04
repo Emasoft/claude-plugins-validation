@@ -11,33 +11,37 @@ interfere with CPV's own scripts — while still catching real errors like missi
 imports that would break hooks and scripts at runtime.
 
 Usage:
+    # Short aliases:
+    cpv-remote-validate plugin /path/to/target
+    cpv-remote-validate skill /path/to/skill --strict
+    cpv-remote-validate agent /path/to/plugin
+    cpv-remote-validate hook /path/to/hooks.json
+    cpv-remote-validate security /path/to/plugin
+    cpv-remote-validate lint /path/to/plugin
+
+    # Save report to a file:
+    cpv-remote-validate plugin /path/to/target -o report.md
+
+    # Full script names also work:
+    cpv-remote-validate validate_plugin /path/to/target --verbose
+
     # From the CPV plugin cache:
-    python3 "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" validate_plugin /path/to/target --verbose
+    python3 "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" plugin /path/to/target
 
     # Via uvx from GitHub:
-    uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-remote-validate validate_plugin /path/to/target
-
-    # Shorthand — script name without .py extension:
-    python3 remote_validation.py validate_plugin /path/to/target
-
-What it does:
-    1. Writes a temporary mypy.ini with safe defaults (ignore-missing-imports ON,
-       but no mypy_path or explicit_package_bases that could resolve stale modules)
-    2. Sets MYPY_CONFIG_FILE to that temp file — overrides target's pyproject.toml
-    3. Strips MYPYPATH and PYTHONPATH — prevents stale module resolution
-    4. Puts CPV's scripts/ dir first on sys.path — ensures CPV's own imports win
-    5. Delegates to the requested CPV script's main()
-    6. Cleans up the temp config on exit
+    uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml \\
+        cpv-remote-validate plugin /path/to/target
 """
 
 from __future__ import annotations
 
+import argparse
 import atexit
 import os
 import sys
 import tempfile
 
-# ── Environment isolation ───────────────────────────────────────────────
+# ── Environment isolation (runs at import time) ──────────────────────────
 
 # CPV's scripts directory (where this file lives)
 _cpv_scripts_dir = os.path.dirname(os.path.abspath(__file__))
@@ -48,9 +52,6 @@ if _cpv_scripts_dir in sys.path:
 sys.path.insert(0, _cpv_scripts_dir)
 
 # 2. Write a temporary mypy config with safe remote-validation defaults.
-#    This catches real errors (missing imports that break at runtime) while
-#    preventing the target's pyproject.toml from resolving stale CPV modules
-#    via mypy_path or explicit_package_bases.
 _MYPY_REMOTE_CONFIG = """\
 [mypy]
 ignore_missing_imports = True
@@ -68,20 +69,43 @@ atexit.register(lambda: os.unlink(_tmpfile.name))
 
 os.environ["MYPY_CONFIG_FILE"] = _tmpfile.name
 
-# 3. Strip MYPYPATH — prevents stale module search paths from leaking in
+# 3. Strip MYPYPATH/PYTHONPATH — prevents stale module resolution
 os.environ.pop("MYPYPATH", None)
-
-# 4. Strip PYTHONPATH — prevents local Python modules from shadowing CPV's
 os.environ.pop("PYTHONPATH", None)
 
-# 5. Mark that we're running in remote validation mode (scripts can check this)
+# 4. Mark remote validation mode (scripts check this to skip --config-file)
 os.environ["CPV_REMOTE_VALIDATION"] = "1"
 
 
-# ── Script dispatch ─────────────────────────────────────────────────────
+# ── Script mapping ───────────────────────────────────────────────────────
 
-# Map of short names → module names (without .py)
-_SCRIPT_MAP = {
+# Short aliases → full script module names
+_ALIASES: dict[str, str] = {
+    # Short names (user-friendly)
+    "plugin": "validate_plugin",
+    "skill": "validate_skill_comprehensive",
+    "hook": "validate_hook",
+    "hooks": "validate_hook",
+    "agent": "validate_agent",
+    "agents": "validate_agent",
+    "command": "validate_command",
+    "security": "validate_security",
+    "scoring": "validate_scoring",
+    "marketplace": "validate_marketplace",
+    "enterprise": "validate_enterprise",
+    "mcp": "validate_mcp",
+    "lsp": "validate_lsp",
+    "docs": "validate_documentation",
+    "documentation": "validate_documentation",
+    "encoding": "validate_encoding",
+    "rules": "validate_rules",
+    "xref": "validate_xref",
+    "lint": "lint_files",
+    "doctor": "manage_doctor",
+    "registry": "manage_registry",
+    "github": "manage_github_validate",
+    "standardize": "standardize_plugin",
+    # Full script names (also accepted)
     "validate_plugin": "validate_plugin",
     "validate_skill": "validate_skill_comprehensive",
     "validate_skill_comprehensive": "validate_skill_comprehensive",
@@ -110,30 +134,83 @@ _SCRIPT_MAP = {
     "bump_version": "bump_version",
 }
 
+# For --help display: short alias → description
+_COMMANDS: dict[str, str] = {
+    "plugin": "Full plugin validation (all 17 checks + linting)",
+    "skill": "Skill validation (190+ rules)",
+    "hook": "Hook configuration validation (27 events, 4 types)",
+    "agent": "Agent definition validation",
+    "command": "Command definition validation",
+    "security": "Security vulnerability scan",
+    "scoring": "Quality score calculation",
+    "marketplace": "Marketplace manifest validation",
+    "enterprise": "Enterprise compliance check",
+    "mcp": "MCP server config validation",
+    "lsp": "LSP server config validation",
+    "docs": "Documentation completeness check",
+    "encoding": "File encoding validation (UTF-8, BOM, line endings)",
+    "rules": "Rules directory validation",
+    "xref": "Cross-reference validation",
+    "lint": "Lint all scripts (Python, Shell, JS, PowerShell, Go, Rust)",
+    "doctor": "Health-check installed plugins and settings",
+    "standardize": "Audit and fix plugin repo to match standards",
+}
+
 
 def main() -> int:
-    if len(sys.argv) < 2:
-        print("Usage: remote_validation.py <script_name> [args...]", file=sys.stderr)
-        print(f"\nAvailable scripts: {', '.join(sorted(_SCRIPT_MAP))}", file=sys.stderr)
-        return 1
+    # Build help text with command table
+    commands_help = "\n".join(f"  {name:<16s} {desc}" for name, desc in _COMMANDS.items())
 
-    script_name = sys.argv[1]
+    parser = argparse.ArgumentParser(
+        prog="cpv-remote-validate",
+        description="CPV Remote Validation Launcher — validate Claude Code plugins with full environment isolation.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=f"Available commands:\n{commands_help}\n\n"
+        "Examples:\n"
+        "  cpv-remote-validate plugin /path/to/plugin\n"
+        "  cpv-remote-validate skill /path/to/skill --strict\n"
+        "  cpv-remote-validate plugin /path/to/plugin -o report.md --verbose\n"
+        "  cpv-remote-validate lint /path/to/plugin\n",
+    )
+    parser.add_argument(
+        "script",
+        help="Validation command (e.g., plugin, skill, hook, security, lint)",
+    )
+    parser.add_argument(
+        "target",
+        nargs="?",
+        help="Path to the plugin, skill, or file to validate",
+    )
+    parser.add_argument(
+        "-o", "--output",
+        metavar="FILE",
+        help="Save the validation report to FILE (passed as --report to the script)",
+    )
 
-    # Strip .py extension if provided
+    # Parse only the known args — the rest are passed through to the script
+    args, extra = parser.parse_known_args()
+
+    script_name = args.script
     if script_name.endswith(".py"):
         script_name = script_name[:-3]
 
-    if script_name not in _SCRIPT_MAP:
-        print(f"Unknown script: {script_name}", file=sys.stderr)
-        print(f"Available: {', '.join(sorted(_SCRIPT_MAP))}", file=sys.stderr)
-        return 1
+    if script_name not in _ALIASES:
+        parser.error(
+            f"Unknown command: '{script_name}'\n"
+            f"Available: {', '.join(sorted(_COMMANDS))}"
+        )
 
-    module_name = _SCRIPT_MAP[script_name]
+    module_name = _ALIASES[script_name]
 
-    # Shift argv so the target script sees its own args correctly
-    sys.argv = sys.argv[1:]
-    # Replace script name with full path for argparse usage messages
-    sys.argv[0] = os.path.join(_cpv_scripts_dir, module_name + ".py")
+    # Build the argv for the target script
+    script_argv = [os.path.join(_cpv_scripts_dir, module_name + ".py")]
+    if args.target:
+        script_argv.append(args.target)
+    if args.output:
+        script_argv.extend(["--report", args.output])
+    script_argv.extend(extra)
+
+    sys.argv = script_argv
 
     # Import and run
     import importlib
