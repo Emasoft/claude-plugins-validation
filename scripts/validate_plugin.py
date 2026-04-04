@@ -38,6 +38,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -759,12 +760,12 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
     # --- Go scripts (.go) ---
     go_files = list(scripts_dir.glob("*.go"))
     if go_files:
-        go_vet_cmd = resolve_tool_command("go")
-        if go_vet_cmd:
+        go_bin = shutil.which("go")
+        if go_bin:
             for go_file in go_files:
                 try:
                     result = subprocess.run(
-                        go_vet_cmd + ["vet", str(go_file)],
+                        [go_bin, "vet", str(go_file)],
                         capture_output=True, text=True, timeout=30,
                     )
                 except subprocess.TimeoutExpired:
@@ -781,11 +782,11 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
 
     # --- Rust scripts (check for Cargo.toml in scripts/) ---
     if (scripts_dir / "Cargo.toml").exists():
-        cargo_cmd = resolve_tool_command("cargo")
-        if cargo_cmd:
+        cargo_bin = shutil.which("cargo")
+        if cargo_bin:
             try:
                 result = subprocess.run(
-                    cargo_cmd + ["check", "--manifest-path", str(scripts_dir / "Cargo.toml")],
+                    [cargo_bin, "check", "--manifest-path", str(scripts_dir / "Cargo.toml")],
                     capture_output=True, text=True, timeout=120,
                 )
             except subprocess.TimeoutExpired:
