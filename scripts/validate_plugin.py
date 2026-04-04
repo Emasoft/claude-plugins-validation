@@ -47,7 +47,6 @@ import yaml
 from cpv_validation_common import (
     COLORS,
     ValidationReport,
-    get_plugin_root,
     resolve_tool_command,
     save_report_and_print_summary,
     validate_component_name,
@@ -655,14 +654,19 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
     # Python scripts
     py_files = list(scripts_dir.glob("*.py"))
     if py_files:
+        # When running via remote_validation.py, don't use target's config files
+        # for linters — the remote launcher provides its own safe config via env vars
+        is_remote = os.environ.get("CPV_REMOTE_VALIDATION") == "1"
+
         # Ruff check - exclude E501 (line length) as it's configurable per project
         ruff_cmd = resolve_tool_command("ruff")
         if ruff_cmd:
             ruff_args = ruff_cmd + ["check", "--select", "E,F,W", "--ignore", "E501"]
-            # If pyproject.toml exists in plugin root, use it for config
-            pyproject = plugin_root / "pyproject.toml"
-            if pyproject.exists():
-                ruff_args.extend(["--config", str(pyproject)])
+            # Use target's pyproject.toml for ruff config unless running remotely
+            if not is_remote:
+                pyproject = plugin_root / "pyproject.toml"
+                if pyproject.exists():
+                    ruff_args.extend(["--config", str(pyproject)])
             ruff_args.extend([str(f) for f in py_files])
             try:
                 result = subprocess.run(
@@ -705,12 +709,10 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
         mypy_cmd = resolve_tool_command("mypy")
         if mypy_cmd:
             mypy_args = mypy_cmd + ["--ignore-missing-imports"]
-            # Only use the target's pyproject.toml for mypy config when validating
-            # CPV itself. For external plugins, the target's mypy_path setting may
-            # resolve stale copies of CPV's internal modules (cpv_validation_common),
-            # causing false errors. Use --ignore-missing-imports alone instead.
-            cpv_root = get_plugin_root()
-            if cpv_root and plugin_root.resolve() == cpv_root.resolve():
+            # When running via remote_validation.py, MYPY_CONFIG_FILE env var
+            # provides a safe config. --config-file would override it, so skip.
+            # For local runs, use the target's pyproject.toml if present.
+            if not is_remote:
                 pyproject = plugin_root / "pyproject.toml"
                 if pyproject.exists():
                     mypy_args.extend(["--config-file", str(pyproject)])
@@ -728,14 +730,8 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
             if result is not None and result.returncode == 0:
                 report.passed(f"Mypy check passed for {len(py_files)} Python files")
             elif result is not None:
-                # Filter out errors from stale CPV internal modules that may be
-                # bundled in the target plugin as older copies
-                cpv_internal_modules = {"cpv_validation_common", "cpv_management_common"}
                 for line in result.stdout.strip().split("\n"):
                     if not line or line.startswith("Success") or line.startswith("Found"):
-                        continue
-                    # Skip errors about missing attributes in CPV's own modules
-                    if any(mod in line for mod in cpv_internal_modules):
                         continue
                     report.minor(f"Mypy: {line}")
         else:
