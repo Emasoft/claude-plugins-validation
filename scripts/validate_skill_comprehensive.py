@@ -104,7 +104,7 @@ ALL_KNOWN_FIELDS = (
 
 # --- Token Budget Constants ---
 MAX_SKILL_LINES = 500  # Hard limit — MAJOR if exceeded
-MAX_CHAR_COUNT_WARN = 4000  # Character warning threshold
+MAX_CHAR_COUNT_WARN = 5000  # Character warning threshold
 MAX_CHAR_COUNT_ERROR = 5000  # Character error threshold (hard limit)
 MAX_WORD_COUNT_WARN = 3500
 MAX_WORD_COUNT_ERROR = 5000
