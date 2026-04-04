@@ -409,6 +409,31 @@ description: "Use when the user asks to refactor Python code. Applies PEP 8 form
 description: "Use when analyzing data. Trigger with /analyze-data <filepath>."
 ```
 
+### MINOR: Non-user-invocable skill should include 'Loaded by' or 'Used by'
+
+**Error message**: `Non-user-invocable skill should include 'Loaded by <agent-name>' or 'Used by <agent-name>'`
+**Severity**: MINOR
+**Source**: `validate_skill_comprehensive.py` — `validate_description_field()` (with `--strict`)
+**Root cause**: Skills with `user-invocable: false` are only loaded by agents. The **frontmatter `description` field** must say which agent loads them so it's clear who consumes the skill.
+**Fix**: Append "Loaded by <agent-name> agent." to the **`description:` field in the YAML frontmatter** — NOT to the markdown body.
+```yaml
+# WRONG — added to body (fixer agent mistake)
+---
+name: my-skill
+description: "Use when processing data."
+user-invocable: false
+---
+Loaded by data-agent
+
+# CORRECT — in the description field
+---
+name: my-skill
+description: "Use when processing data. Loaded by data-agent."
+user-invocable: false
+---
+```
+**Important**: The validator checks `RE_LOADED_BY.search(desc)` where `desc` is the frontmatter description. Adding "Loaded by" to the markdown body will NOT fix this issue.
+
 ### MAJOR: Description uses first person (strict mode)
 
 **Error message**: `Description must NOT use first person (I can / I will)`

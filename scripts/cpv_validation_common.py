@@ -2324,12 +2324,22 @@ def validate_toc_embedding(
 
         refs_checked += 1
 
-        # Check if TOC headings appear within ~50 lines after the link
+        # Check if TOC headings appear within ~100 lines after the link
+        # (large reference files can have 30+ TOC entries)
         search_start = max(0, link_line_num)
-        search_end = min(len(lines), link_line_num + 50)
+        search_end = min(len(lines), link_line_num + 100)
         nearby_text = "\n".join(lines[search_start:search_end])
 
-        embedded_count = sum(1 for heading in toc_headings if heading.lower() in nearby_text.lower())
+        # Strip inline code backticks from both sides for fuzzy matching —
+        # SKILL.md may embed headings with or without backtick formatting
+        nearby_lower = nearby_text.lower()
+        nearby_no_backticks = nearby_lower.replace("`", "")
+
+        def _heading_matches(heading: str) -> bool:
+            h = heading.lower()
+            return h in nearby_lower or h.replace("`", "") in nearby_no_backticks
+
+        embedded_count = sum(1 for heading in toc_headings if _heading_matches(heading))
 
         # All TOC headings must be embedded — partial TOCs hide content from agents
         if embedded_count == len(toc_headings):
@@ -2428,10 +2438,17 @@ def validate_toc_embedding(
 
         # Check if TOC headings appear within ~50 lines after the backtick ref
         search_start = max(0, bt_line_num)
-        search_end = min(len(lines), bt_line_num + 50)
+        search_end = min(len(lines), bt_line_num + 100)
         nearby_text = "\n".join(lines[search_start:search_end])
 
-        embedded_count = sum(1 for heading in toc_headings if heading.lower() in nearby_text.lower())
+        nearby_lower_bt = nearby_text.lower()
+        nearby_no_bt = nearby_lower_bt.replace("`", "")
+
+        def _bt_heading_matches(heading: str) -> bool:
+            h = heading.lower()
+            return h in nearby_lower_bt or h.replace("`", "") in nearby_no_bt
+
+        embedded_count = sum(1 for heading in toc_headings if _bt_heading_matches(heading))
 
         if embedded_count == len(toc_headings):
             refs_with_toc += 1
