@@ -48,6 +48,7 @@ import yaml
 from cpv_validation_common import (
     COLORS,
     ValidationReport,
+    check_remote_execution_guard,
     resolve_tool_command,
     save_report_and_print_summary,
     validate_component_name,
@@ -1588,6 +1589,8 @@ def validate_workflow_best_practices(plugin_root: Path, report: ValidationReport
 
 def main() -> int:
     """Main entry point."""
+    check_remote_execution_guard()
+
     parser = argparse.ArgumentParser(
         description="Validate a Claude Code plugin against all validation rules.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
