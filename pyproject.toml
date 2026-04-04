@@ -41,6 +41,8 @@ cpv-validate-xref = "scripts.cli:validate_xref"
 # Management tools
 cpv-doctor = "scripts.cli:doctor"
 cpv-standardize = "scripts.cli:standardize"
+# Remote validation launcher — isolated environment for validating external plugins
+cpv-remote-validate = "scripts.remote_validation:main"
 
 [tool.ruff]
 line-length = 120
