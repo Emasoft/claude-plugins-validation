@@ -47,6 +47,7 @@ import yaml
 from cpv_validation_common import (
     COLORS,
     ValidationReport,
+    get_plugin_root,
     resolve_tool_command,
     save_report_and_print_summary,
     validate_component_name,
@@ -704,10 +705,15 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
         mypy_cmd = resolve_tool_command("mypy")
         if mypy_cmd:
             mypy_args = mypy_cmd + ["--ignore-missing-imports"]
-            # If pyproject.toml exists in plugin root, use it for config
-            pyproject = plugin_root / "pyproject.toml"
-            if pyproject.exists():
-                mypy_args.extend(["--config-file", str(pyproject)])
+            # Only use the target's pyproject.toml for mypy config when validating
+            # CPV itself. For external plugins, the target's mypy_path setting may
+            # resolve stale copies of CPV's internal modules (cpv_validation_common),
+            # causing false errors. Use --ignore-missing-imports alone instead.
+            cpv_root = get_plugin_root()
+            if cpv_root and plugin_root.resolve() == cpv_root.resolve():
+                pyproject = plugin_root / "pyproject.toml"
+                if pyproject.exists():
+                    mypy_args.extend(["--config-file", str(pyproject)])
             mypy_args.extend([str(f) for f in py_files])
             try:
                 result = subprocess.run(
@@ -722,9 +728,16 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
             if result is not None and result.returncode == 0:
                 report.passed(f"Mypy check passed for {len(py_files)} Python files")
             elif result is not None:
+                # Filter out errors from stale CPV internal modules that may be
+                # bundled in the target plugin as older copies
+                cpv_internal_modules = {"cpv_validation_common", "cpv_management_common"}
                 for line in result.stdout.strip().split("\n"):
-                    if line and not line.startswith("Success"):
-                        report.minor(f"Mypy: {line}")
+                    if not line or line.startswith("Success") or line.startswith("Found"):
+                        continue
+                    # Skip errors about missing attributes in CPV's own modules
+                    if any(mod in line for mod in cpv_internal_modules):
+                        continue
+                    report.minor(f"Mypy: {line}")
         else:
             report.minor("mypy not available locally or via uvx, skipping type check")
 
