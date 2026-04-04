@@ -902,6 +902,54 @@ def _is_python_venv(dirpath: Path) -> bool:
     return False
 
 
+def validate_bin_executables(plugin_root: Path, report: ValidationReport) -> None:
+    """Validate bin/ directory — executables added to Bash tool's PATH (v2.1.91).
+
+    Files in bin/ are invokable as bare commands from the Bash tool while the
+    plugin is enabled. Files that look like executables (no extension, or script
+    extensions) must be executable. Data files, libraries, and configs are skipped.
+    """
+    bin_dir = plugin_root / "bin"
+    if not bin_dir.is_dir():
+        return
+
+    bin_files = [f for f in bin_dir.iterdir() if f.is_file()]
+    if not bin_files:
+        report.info("bin/ directory exists but is empty")
+        return
+
+    # Extensions that indicate data/library files — skip executable check
+    data_extensions = {
+        ".dll", ".so", ".dylib", ".a", ".lib", ".o", ".obj",  # Libraries
+        ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg",  # Config
+        ".txt", ".md", ".csv", ".log",  # Data/docs
+        ".pem", ".crt", ".key",  # Certificates
+        ".wasm",  # WebAssembly modules
+    }
+    # Extensions that indicate scripts — should be executable
+    script_extensions = {".sh", ".bash", ".py", ".rb", ".pl", ".js", ".ts", ".ps1"}
+
+    executable_count = 0
+    for bin_file in bin_files:
+        ext = bin_file.suffix.lower()
+        if ext in data_extensions:
+            continue  # Skip data/library files
+        # Files with no extension or script extensions should be executable
+        if ext == "" or ext in script_extensions:
+            if not os.access(bin_file, os.X_OK):
+                report.minor(
+                    f"bin/{bin_file.name} is not executable — if this is a command, "
+                    f"run: chmod +x bin/{bin_file.name}",
+                    f"bin/{bin_file.name}",
+                )
+            else:
+                executable_count += 1
+                report.passed(f"bin/{bin_file.name} is executable", f"bin/{bin_file.name}")
+
+    if executable_count > 0:
+        report.passed(f"bin/ directory: {executable_count} executable(s) found")
+
+
 def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None:
     """Validate cross-platform compatibility of plugin scripts and binaries.
 
@@ -1672,6 +1720,7 @@ def main() -> int:
     validate_hooks(plugin_root, report)
     validate_mcp(plugin_root, report)
     validate_scripts(plugin_root, report)
+    validate_bin_executables(plugin_root, report)
     validate_skills(plugin_root, report, skip_platform_checks)
     validate_rules(plugin_root, report)
     validate_readme(plugin_root, report)
