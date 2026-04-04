@@ -355,31 +355,33 @@ The semantic validator always warns about the cost and asks for confirmation bef
 
 ## Requirements
 
-### For standalone validation (Part 1 -- via uvx)
+### Required
 
 | Requirement | Why | How to Install |
 |-------------|-----|----------------|
 | **Python 3.12+** | Runtime for all validation scripts | [python.org](https://www.python.org/downloads/) or your OS package manager |
-| **uv** | Runs CPV via `uvx` without permanent installation | `curl -LsSf https://astral.sh/uv/install.sh \| sh` ([docs](https://docs.astral.sh/uv/getting-started/installation/)) |
+| **uv** | Runs CPV scripts and manages dependencies. Also provides `uvx` for running CPV from GitHub without installing | `curl -LsSf https://astral.sh/uv/install.sh \| sh` ([docs](https://docs.astral.sh/uv/getting-started/installation/)) |
+| **Claude Code** | Required for Part 2 (plugin use). Not needed for Part 1 (standalone) | [code.claude.com](https://code.claude.com) |
 
-That's all you need. Python dependencies (like `pyyaml`) are installed automatically by `uvx` into a temporary environment.
+CPV uses `uv` to run scripts (`uv run`), install Python linters (`ruff`, `mypy`) when not found locally (`uvx`), and manage the virtual environment. Python dependencies like `pyyaml` are installed automatically.
 
-### For the Claude Code plugin (Part 2)
+### Optional tools (enhance linting)
 
-| Requirement | Why | How to Install |
-|-------------|-----|----------------|
-| **Claude Code** | The AI coding tool that CPV extends | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code/overview) |
-| **Python 3.12+** | Runtime for validation scripts | [python.org](https://www.python.org/downloads/) |
-| **uv** | Runs Python scripts inside the plugin | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+CPV validates scripts in **6 languages**. For each language, it tries the local install first, then `uvx`/`npx`. If no linter is found, CPV reports what's missing and skips that check.
 
-### Optional tools (enhance some checks)
+| Language | Linter | How to Install |
+|----------|--------|----------------|
+| **Python** (.py) | ruff + mypy | Included via `uv` — always available |
+| **Shell** (.sh, .bash) | shellcheck | `brew install shellcheck` or [shellcheck.net](https://www.shellcheck.net/) |
+| **JavaScript/TypeScript** (.js, .ts) | eslint | `npm install -g eslint` or [nodejs.org](https://nodejs.org/) |
+| **PowerShell** (.ps1) | PSScriptAnalyzer | `pwsh -c 'Install-Module PSScriptAnalyzer -Scope CurrentUser'` |
+| **Go** (.go) | go vet | [go.dev/dl](https://go.dev/dl/) |
+| **Rust** (Cargo.toml) | cargo check | [rustup.rs](https://rustup.rs/) |
 
-These are **not required**. If missing, CPV skips the checks that need them and tells you.
+Other optional tools:
 
 | Tool | What It Enables | How to Install |
 |------|----------------|----------------|
-| **Node.js / npx** | `cc-audit` external security scanner (100+ extra rules) | [nodejs.org](https://nodejs.org/) |
-| **shellcheck** | Bash script portability checks in hooks | `brew install shellcheck` or [shellcheck.net](https://www.shellcheck.net/) |
 | **gh** (GitHub CLI) | Remote plugin/marketplace validation and publishing | `brew install gh` or [cli.github.com](https://cli.github.com/) |
 
 No API keys, accounts, or cloud services needed for any validation.
