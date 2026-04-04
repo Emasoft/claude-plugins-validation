@@ -56,7 +56,11 @@ from cpv_validation_common import (
     validate_toc_embedding,
 )
 from gitignore_filter import GitignoreFilter
-from validate_hook import validate_hooks as validate_hook_file
+from validate_hook import (
+    lint_bash_script,
+    lint_js_script,
+    validate_hooks as validate_hook_file,
+)
 from validate_mcp import validate_plugin_mcp
 from validate_rules import validate_rules_directory
 
@@ -644,55 +648,43 @@ def _has_shebang(path: Path) -> bool:
 
 
 def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
-    """Validate Python and shell scripts."""
+    """Validate all scripts in scripts/ — Python, Shell, JS/TS, PowerShell, Go, Rust."""
     scripts_dir = plugin_root / "scripts"
 
     if not scripts_dir.is_dir():
         report.info("No scripts/ directory found")
         return
 
-    # Python scripts
+    # When running via remote_validation.py, don't use target's config files
+    # for linters — the remote launcher provides its own safe config via env vars
+    is_remote = os.environ.get("CPV_REMOTE_VALIDATION") == "1"
+
+    # --- Python scripts (.py) ---
     py_files = list(scripts_dir.glob("*.py"))
     if py_files:
-        # When running via remote_validation.py, don't use target's config files
-        # for linters — the remote launcher provides its own safe config via env vars
-        is_remote = os.environ.get("CPV_REMOTE_VALIDATION") == "1"
-
-        # Ruff check - exclude E501 (line length) as it's configurable per project
         ruff_cmd = resolve_tool_command("ruff")
         if ruff_cmd:
-            ruff_args = ruff_cmd + ["check", "--select", "E,F,W", "--ignore", "E501"]
-            # Use target's pyproject.toml for ruff config unless running remotely
+            ruff_args = ruff_cmd + ["check", "--select", "E,F,W", "--ignore", "E501", "--output-format=concise"]
             if not is_remote:
                 pyproject = plugin_root / "pyproject.toml"
                 if pyproject.exists():
                     ruff_args.extend(["--config", str(pyproject)])
             ruff_args.extend([str(f) for f in py_files])
             try:
-                result = subprocess.run(
-                    ruff_args,
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                )
+                result = subprocess.run(ruff_args, capture_output=True, text=True, timeout=60)
             except subprocess.TimeoutExpired:
                 report.warning("Ruff timed out after 60s — skipping lint check")
                 result = None
             if result is not None and result.returncode == 0:
                 report.passed(f"Ruff check passed for {len(py_files)} Python files")
             elif result is not None:
-                # Aggregate ruff errors per-file to avoid inflating MAJOR count
-                # Ruff output format: "path/to/file.py:line:col: CODE message"
                 errors_by_file: dict[str, int] = {}
                 for ruff_line in result.stdout.strip().split("\n"):
                     if ruff_line and ":" in ruff_line:
-                        # Extract file path (first colon-separated field)
                         file_part = ruff_line.split(":")[0].strip()
                         if file_part:
                             errors_by_file[file_part] = errors_by_file.get(file_part, 0) + 1
-                total_errors = sum(errors_by_file.values())
                 for file_path_str, count in sorted(errors_by_file.items()):
-                    # Report ONE MAJOR per file, with total error count for that file
                     rel = file_path_str
                     try:
                         rel = str(Path(file_path_str).relative_to(plugin_root))
@@ -700,30 +692,20 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
                         pass
                     report.major(f"Ruff: {count} error(s) in {rel}", rel)
                 if not errors_by_file and result.stdout.strip():
-                    # Fallback: ruff output did not match expected format
-                    report.major(f"Ruff: {total_errors} error(s) across script files")
+                    report.major("Ruff: error(s) across script files")
         else:
             report.minor("ruff not available locally or via uvx, skipping Python lint check")
 
-        # Mypy check
         mypy_cmd = resolve_tool_command("mypy")
         if mypy_cmd:
             mypy_args = mypy_cmd + ["--ignore-missing-imports"]
-            # When running via remote_validation.py, MYPY_CONFIG_FILE env var
-            # provides a safe config. --config-file would override it, so skip.
-            # For local runs, use the target's pyproject.toml if present.
             if not is_remote:
                 pyproject = plugin_root / "pyproject.toml"
                 if pyproject.exists():
                     mypy_args.extend(["--config-file", str(pyproject)])
             mypy_args.extend([str(f) for f in py_files])
             try:
-                result = subprocess.run(
-                    mypy_args,
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                )
+                result = subprocess.run(mypy_args, capture_output=True, text=True, timeout=60)
             except subprocess.TimeoutExpired:
                 report.warning("Mypy timed out after 60s — skipping type check")
                 result = None
@@ -737,50 +719,86 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
         else:
             report.minor("mypy not available locally or via uvx, skipping type check")
 
-    # Shell scripts
-    sh_files = list(scripts_dir.glob("*.sh"))
-    # Resolve shellcheck once, outside the loop
-    shellcheck_cmd = resolve_tool_command("shellcheck") if sh_files else None
+    # --- Shell scripts (.sh, .bash) ---
+    sh_files = list(scripts_dir.glob("*.sh")) + list(scripts_dir.glob("*.bash"))
     for sh_file in sh_files:
         if not os.access(sh_file, os.X_OK):
-            report.major(
-                f"Shell script not executable: {sh_file.name}",
-                f"scripts/{sh_file.name}",
-            )
+            report.major(f"Shell script not executable: {sh_file.name}", f"scripts/{sh_file.name}")
         else:
             report.passed(f"Shell script executable: {sh_file.name}", f"scripts/{sh_file.name}")
+        # Delegate to validate_hook.py's lint function (shellcheck with JSON parsing)
+        lint_bash_script(sh_file, report)
 
-        # Shellcheck lint — use -x to follow source directives, inline disables are respected
-        if shellcheck_cmd:
+    # --- JavaScript/TypeScript scripts (.js, .ts, .mjs, .cjs) ---
+    js_files = [f for f in scripts_dir.iterdir() if f.is_file() and f.suffix.lower() in {".js", ".ts", ".mjs", ".cjs"}]
+    for js_file in js_files:
+        lint_js_script(js_file, report)
+
+    # --- PowerShell scripts (.ps1, .psm1) ---
+    ps_files = [f for f in scripts_dir.iterdir() if f.is_file() and f.suffix.lower() in {".ps1", ".psm1"}]
+    if ps_files:
+        pssa_cmd = resolve_tool_command("PSScriptAnalyzer")
+        if pssa_cmd:
+            for ps_file in ps_files:
+                try:
+                    result = subprocess.run(
+                        pssa_cmd + ["-Path", str(ps_file), "-Severity", "Error,Warning"],
+                        capture_output=True, text=True, timeout=30,
+                    )
+                except subprocess.TimeoutExpired:
+                    report.warning(f"PSScriptAnalyzer timed out on {ps_file.name}")
+                    continue
+                if result.returncode == 0 and not result.stdout.strip():
+                    report.passed(f"PSScriptAnalyzer passed: {ps_file.name}")
+                elif result.stdout.strip():
+                    for line in result.stdout.strip().split("\n")[:5]:
+                        report.minor(f"PSScriptAnalyzer: {line.strip()}", f"scripts/{ps_file.name}")
+        else:
+            report.info("PSScriptAnalyzer not available, skipping PowerShell lint")
+
+    # --- Go scripts (.go) ---
+    go_files = list(scripts_dir.glob("*.go"))
+    if go_files:
+        go_vet_cmd = resolve_tool_command("go")
+        if go_vet_cmd:
+            for go_file in go_files:
+                try:
+                    result = subprocess.run(
+                        go_vet_cmd + ["vet", str(go_file)],
+                        capture_output=True, text=True, timeout=30,
+                    )
+                except subprocess.TimeoutExpired:
+                    report.warning(f"go vet timed out on {go_file.name}")
+                    continue
+                if result.returncode == 0:
+                    report.passed(f"go vet passed: {go_file.name}")
+                else:
+                    for line in (result.stderr or result.stdout).strip().split("\n")[:5]:
+                        if line.strip():
+                            report.minor(f"go vet: {line.strip()}", f"scripts/{go_file.name}")
+        else:
+            report.info("go not available, skipping Go lint")
+
+    # --- Rust scripts (check for Cargo.toml in scripts/) ---
+    if (scripts_dir / "Cargo.toml").exists():
+        cargo_cmd = resolve_tool_command("cargo")
+        if cargo_cmd:
             try:
                 result = subprocess.run(
-                    shellcheck_cmd + ["-x", "-f", "json", str(sh_file)],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
+                    cargo_cmd + ["check", "--manifest-path", str(scripts_dir / "Cargo.toml")],
+                    capture_output=True, text=True, timeout=120,
                 )
             except subprocess.TimeoutExpired:
-                report.warning(f"Shellcheck timed out on {sh_file.name}")
-                continue
-            if result.returncode == 0:
-                report.passed(f"Shellcheck passed: {sh_file.name}")
-            else:
-                # Parse JSON output to report individual issues (respecting inline disables)
-                try:
-                    findings = json.loads(result.stdout) if result.stdout.strip() else []
-                except (json.JSONDecodeError, ValueError):
-                    findings = []
-                if findings:
-                    for finding in findings[:5]:
-                        code = finding.get("code", "?")
-                        msg = finding.get("message", "unknown")
-                        line = finding.get("line", 0)
-                        report.minor(f"Shellcheck SC{code} (line {line}): {msg}", f"scripts/{sh_file.name}")
-                else:
-                    report.minor(f"Shellcheck issues in {sh_file.name}", f"scripts/{sh_file.name}")
-    # Report shellcheck availability once (after loop)
-    if sh_files and not shellcheck_cmd:
-        report.minor("shellcheck not available locally or via bunx/npx, skipping shell lint")
+                report.warning("cargo check timed out")
+                result = None
+            if result is not None and result.returncode == 0:
+                report.passed("cargo check passed for Rust scripts")
+            elif result is not None:
+                for line in result.stderr.strip().split("\n")[:5]:
+                    if "error" in line.lower():
+                        report.minor(f"cargo: {line.strip()}", "scripts/Cargo.toml")
+        else:
+            report.info("cargo not available, skipping Rust lint")
 
     # Check Python scripts with shebang are executable (Unix only)
     if not IS_WINDOWS:
