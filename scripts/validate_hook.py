@@ -115,7 +115,6 @@ COMMON_TOOL_NAMES = {
     "ExitWorktree",
     "ToolSearch",
     "TaskCreate",
-    "TaskOutput",
     "CronCreate",
     "CronDelete",
     "CronList",
@@ -635,17 +634,17 @@ def validate_command_hook(
         if pkg_name and not pkg_name.startswith((".", "/", "${")):
             report.warning(f"Hook command uses {cmd_first_token} to execute remote package '{pkg_name}' — this downloads and runs code from a registry. Verify the package is trusted and consider pinning a version.")
 
-    # Validate timeout if present (Claude Code hooks use milliseconds)
+    # Validate timeout if present (Claude Code hooks use seconds; default 600 for command)
     if "timeout" in hook:
         timeout = hook["timeout"]
         if not isinstance(timeout, (int, float)):
             report.major(f"'timeout' must be a number, got {type(timeout).__name__}")
         elif timeout <= 0:
             report.major("'timeout' must be positive")
-        elif timeout > 600000:  # 10 minutes in milliseconds
-            report.warning(f"Command hook timeout is {timeout}ms ({timeout / 1000:.0f}s) — unusually long")
-        elif timeout < 100:
-            report.warning(f"Command hook timeout is {timeout}ms — very short, may cause premature timeouts")
+        elif timeout > 10000:
+            report.warning(f"Command hook timeout is {timeout}s — this looks like milliseconds. Hook timeouts are in SECONDS (default: 600 for command hooks).")
+        elif timeout > 600:
+            report.warning(f"Command hook timeout is {timeout}s — exceeds default 600s")
 
     # Check for environment variable usage
     if "CLAUDE_ENV_FILE" in command:
@@ -705,17 +704,17 @@ def validate_prompt_hook(
         if not isinstance(hook["model"], str) or not hook["model"].strip():
             report.major("Prompt hook 'model' must be a non-empty string")
 
-    # Validate timeout if present (Claude Code hooks use milliseconds)
+    # Validate timeout if present (seconds; default 30 for prompt hooks)
     if "timeout" in hook:
         timeout = hook["timeout"]
         if not isinstance(timeout, (int, float)):
             report.major(f"'timeout' must be a number, got {type(timeout).__name__}")
         elif timeout <= 0:
             report.major("'timeout' must be positive")
-        elif timeout > 600000:  # 10 minutes in milliseconds
-            report.warning(f"Prompt hook timeout is {timeout}ms ({timeout / 1000:.0f}s) — unusually long")
-        elif timeout < 100:
-            report.warning(f"Prompt hook timeout is {timeout}ms — very short, may cause premature timeouts")
+        elif timeout > 600:
+            report.warning(f"Prompt hook timeout is {timeout}s — exceeds 600s")
+        elif timeout > 10000:
+            report.warning(f"Prompt hook timeout is {timeout}s — this looks like milliseconds. Hook timeouts are in SECONDS (default: 30 for prompt hooks).")
 
     return True
 
@@ -762,15 +761,15 @@ def validate_http_hook(
         elif not all(isinstance(v, str) for v in allowed):
             report.major("HTTP hook 'allowedEnvVars' must contain only strings")
 
-    # Validate timeout if present (milliseconds)
+    # Validate timeout if present (seconds)
     if "timeout" in hook:
         timeout = hook["timeout"]
         if not isinstance(timeout, (int, float)):
             report.major(f"HTTP hook 'timeout' must be a number, got {type(timeout).__name__}")
         elif timeout <= 0:
             report.major("HTTP hook 'timeout' must be positive")
-        elif timeout > 600000:
-            report.warning(f"HTTP hook timeout is {timeout}ms ({timeout / 1000:.0f}s) — unusually long")
+        elif timeout > 600:
+            report.warning(f"HTTP hook timeout is {timeout}s — exceeds 600s")
 
     report.passed(f"HTTP hook URL: {url_stripped[:60]}")
     return True
@@ -862,6 +861,24 @@ def validate_single_hook(
             report.major(f"'once' must be a boolean, got {type(once).__name__}")
         else:
             report.info("'once' field detected (only works in skill-defined hooks)")
+
+    # Validate 'shell' field — only valid on command hooks, values: "bash" or "powershell"
+    if "shell" in hook:
+        shell_val = hook["shell"]
+        if hook_type != "command":
+            report.minor(f"'shell' field is only valid on command hooks, not '{hook_type}' hooks")
+        elif not isinstance(shell_val, str):
+            report.major(f"'shell' must be a string, got {type(shell_val).__name__}")
+        elif shell_val not in ("bash", "powershell"):
+            report.major(f"'shell' must be 'bash' or 'powershell', got '{shell_val}'")
+
+    # Validate 'if' field — only valid on tool events (PreToolUse, PostToolUse, PostToolUseFailure)
+    if "if" in hook:
+        if_val = hook["if"]
+        if not isinstance(if_val, str):
+            report.major(f"'if' must be a string (permission rule syntax), got {type(if_val).__name__}")
+        elif event_name and event_name not in {"PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest", "PermissionDenied"}:
+            report.warning(f"'if' field is designed for tool events (PreToolUse, PostToolUse, etc.), not '{event_name}'")
 
     # Check for unknown fields — warn but don't block, as custom fields
     # may be consumed by plugin scripts or external tooling
