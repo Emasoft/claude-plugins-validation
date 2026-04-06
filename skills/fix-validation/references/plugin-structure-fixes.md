@@ -1385,4 +1385,3 @@ Valid frontmatter fields: `name`, `description`, `keep-coding-instructions` (boo
 { "agent": "my-agent" }
 // Must have: agents/my-agent.md
 ```
-
