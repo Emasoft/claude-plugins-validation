@@ -106,7 +106,7 @@ ValidationReport = MarketplaceValidationReport
 # =============================================================================
 
 # Valid source types for plugins in a marketplace
-VALID_SOURCE_TYPES = {"github", "url", "npm", "pip", "git-subdir"}
+VALID_SOURCE_TYPES = {"github", "url", "npm", "git-subdir"}
 
 # Required fields in marketplace.json
 REQUIRED_MARKETPLACE_FIELDS = {"name", "owner", "plugins"}
@@ -144,7 +144,6 @@ SOURCE_REQUIRED_FIELDS = {
     "github": {"repo"},
     "url": {"url"},
     "npm": {"package"},
-    "pip": {"package"},
     "git-subdir": {"url", "path"},  # Points to a subdirectory within a git repo (v2.1.69+)
 }
 
@@ -156,6 +155,7 @@ RESERVED_MARKETPLACE_NAMES = {
     "anthropic-marketplace",
     "anthropic-plugins",
     "agent-skills",
+    "knowledge-work-plugins",
     "life-sciences",
 }
 
@@ -638,8 +638,20 @@ def validate_plugin_source(
     if not isinstance(source, dict):
         # Source can also be a string shorthand
         if isinstance(source, str):
-            # Accept relative paths (./path or ../path) as local source
-            if source.startswith("./") or source.startswith("../"):
+            # Reject path traversal (../ is blocked by Claude Code)
+            if ".." in source:
+                results.append(
+                    ValidationResult(
+                        level="CRITICAL",
+                        category="plugin",
+                        message=f"Plugin '{plugin_id}' source contains '..' (path traversal blocked by Claude Code)",
+                        file=json_path,
+                        suggestion="Use paths relative to marketplace root with ./ prefix, no parent references",
+                    )
+                )
+                return results
+            # Accept relative paths (./path) as local source
+            if source.startswith("./"):
                 # Validate that the local path exists
                 resolved = marketplace_dir / source.removeprefix("./")
                 if not resolved.exists():
@@ -854,11 +866,11 @@ def validate_local_path(
     if ".." in local_path:
         results.append(
             ValidationResult(
-                level="MINOR",
+                level="CRITICAL",
                 category="plugin",
-                message=f"Plugin '{plugin_id}' path contains '..' (path traversal)",
+                message=f"Plugin '{plugin_id}' path contains '..' (path traversal) — BLOCKED by Claude Code",
                 file=json_path,
-                suggestion="Use absolute paths or paths without parent directory references",
+                suggestion="Use paths relative to the marketplace root without parent directory references (./path)",
             )
         )
 

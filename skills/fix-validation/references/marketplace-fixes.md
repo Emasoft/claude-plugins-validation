@@ -862,6 +862,31 @@ git submodule update --init --recursive
 
 ---
 
+### 3.1b Plugin source contains '..' path traversal (CRITICAL)
+
+| Field | Value |
+|-------|-------|
+| **Script** | `validate_marketplace.py` |
+| **Severity** | CRITICAL |
+| **Message** | `Plugin '<id>' source contains '..' (path traversal blocked by Claude Code)` |
+| **Category** | `plugin` |
+
+**Root Cause:** Plugin source path uses `../` to reference a parent directory. Claude Code blocks this for security — plugins cannot reference files outside their directory.
+
+**Fix:** Move the plugin directory inside the marketplace root, or use a `github` source type:
+```json
+// WRONG — blocked by Claude Code
+{"name": "my-plugin", "source": "../shared/my-plugin"}
+
+// CORRECT — relative to marketplace root
+{"name": "my-plugin", "source": "./plugins/my-plugin"}
+
+// CORRECT — GitHub source
+{"name": "my-plugin", "source": {"source": "github", "repo": "owner/my-plugin"}}
+```
+
+---
+
 ### 3.2 Plugin has invalid source type (string)
 
 | Field | Value |
