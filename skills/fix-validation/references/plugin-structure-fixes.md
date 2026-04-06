@@ -1272,3 +1272,118 @@ These errors can appear for any text file scanned across the plugin:
    iconv -f WINDOWS-1252 -t UTF-8 <file> > <file>.tmp && mv <file>.tmp <file>
    ```
 2. Or re-save as UTF-8 from your editor.
+
+
+---
+
+## New Validations (v2.11.0+)
+
+### userConfig schema invalid
+
+| Field | Value |
+|-------|-------|
+| **Script** | `validate_plugin.py` |
+| **Severity** | MAJOR |
+| **Message** | `userConfig.KEY missing description field` or `userConfig.KEY.sensitive must be a boolean` |
+
+**Root Cause:** `userConfig` entries must have `description` (string) and optionally `sensitive` (boolean).
+
+**Fix:**
+```json
+{
+  "userConfig": {
+    "api_token": {
+      "description": "Your API authentication token",
+      "sensitive": true
+    }
+  }
+}
+```
+
+---
+
+### channels server field missing or invalid
+
+| Field | Value |
+|-------|-------|
+| **Script** | `validate_plugin.py` |
+| **Severity** | MAJOR |
+| **Message** | `channels[N] missing required server field` or `channels[N].server does not match any mcpServers key` |
+
+**Root Cause:** Each channel entry must have a `server` field that matches a key in `mcpServers`.
+
+**Fix:**
+```json
+{
+  "mcpServers": {
+    "telegram": { "command": "node", "args": ["server.js"] }
+  },
+  "channels": [
+    { "server": "telegram" }
+  ]
+}
+```
+
+---
+
+### LSP server missing required fields
+
+| Field | Value |
+|-------|-------|
+| **Script** | `validate_plugin.py` |
+| **Severity** | MAJOR |
+| **Message** | `LSP server NAME missing required command field` or `missing extensionToLanguage` |
+
+**Fix:**
+```json
+{
+  "lspServers": {
+    "go": {
+      "command": "gopls",
+      "args": ["serve"],
+      "extensionToLanguage": { ".go": "go" }
+    }
+  }
+}
+```
+
+---
+
+### Output style invalid frontmatter
+
+| Field | Value |
+|-------|-------|
+| **Script** | `validate_plugin.py` |
+| **Severity** | MINOR/MAJOR |
+| **Message** | `Output style NAME has invalid YAML` or `keep-coding-instructions must be boolean` |
+
+**Fix:**
+```yaml
+---
+name: My Style
+description: Brief description
+keep-coding-instructions: false
+---
+
+# Instructions here
+```
+
+Valid frontmatter fields: `name`, `description`, `keep-coding-instructions` (boolean).
+
+---
+
+### settings.json agent value does not match agent file
+
+| Field | Value |
+|-------|-------|
+| **Script** | `validate_plugin.py` |
+| **Severity** | MINOR |
+| **Message** | `settings.json agent value NAME does not match any agent file in agents/` |
+
+**Fix:** Ensure the `agent` value matches an actual `.md` file in your `agents/` directory:
+```json
+// settings.json
+{ "agent": "my-agent" }
+// Must have: agents/my-agent.md
+```
+

@@ -547,12 +547,12 @@ class TestValidateLocalPath:
         results = validate_local_path("plugin-dir", "myplugin", tmp_path, "mp.json")
         assert any(r.level == "MAJOR" and "missing plugin.json" in r.message for r in results)
 
-    def test_path_traversal_produces_minor(self, tmp_path):
-        """Path containing '..' must produce MINOR warning (lines 684-693)."""
+    def test_path_traversal_produces_critical(self, tmp_path):
+        """Path containing '..' must produce CRITICAL (blocked by Claude Code)."""
         from validate_marketplace import validate_local_path
 
         results = validate_local_path("../some-path", "myplugin", tmp_path, "mp.json")
-        assert any(r.level == "MINOR" and "path traversal" in r.message for r in results)
+        assert any(r.level == "CRITICAL" and "path traversal" in r.message.lower() for r in results)
 
 
 class TestValidateRepositoryUrl:
