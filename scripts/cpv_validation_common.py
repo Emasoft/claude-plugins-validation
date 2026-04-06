@@ -296,12 +296,22 @@ VALID_TOOLS = {
 VALID_MODELS = {"haiku", "sonnet", "opus", "inherit"}
 
 # Regex for full model IDs like claude-opus-4-5, claude-sonnet-4-6, claude-haiku-4-5-20251001
-_FULL_MODEL_ID_RE = re.compile(r"^claude-(?:opus|sonnet|haiku)-\d[\w.-]*$")
+# Full model IDs like claude-opus-4-6, claude-sonnet-4-6[1m], etc.
+_FULL_MODEL_ID_RE = re.compile(r"^claude-(?:opus|sonnet|haiku)-\d[\w.-]*(?:\[1m\])?$")
+
+# Short aliases with optional [1m] suffix: opus, sonnet[1m], haiku, etc.
+_SHORT_MODEL_RE = re.compile(r"^(?:haiku|sonnet|opus|inherit|default|opusplan)(?:\[1m\])?$", re.IGNORECASE)
 
 
 def is_valid_model(value: str) -> bool:
-    """Check if a model value is valid (short name or full model ID)."""
-    return value.lower() in VALID_MODELS or bool(_FULL_MODEL_ID_RE.match(value))
+    """Check if a model value is valid (short name, alias, or full model ID).
+
+    Valid formats:
+    - Short aliases: haiku, sonnet, opus, inherit, default, opusplan
+    - With 1M context: opus[1m], sonnet[1m], claude-opus-4-6[1m]
+    - Full model IDs: claude-opus-4-6, claude-sonnet-4-5-20251001
+    """
+    return bool(_SHORT_MODEL_RE.match(value)) or bool(_FULL_MODEL_ID_RE.match(value))
 
 
 # Environment variables provided by Claude Code at plugin load time

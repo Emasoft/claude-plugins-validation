@@ -278,6 +278,64 @@ def validate_manifest(plugin_root: Path, report: ValidationReport, marketplace_o
                         ".claude-plugin/plugin.json",
                     )
 
+    # Validate userConfig schema (v2.1.80): keys must be identifiers, each entry needs description
+    if "userConfig" in manifest:
+        uc = manifest["userConfig"]
+        if not isinstance(uc, dict):
+            report.major(f"'userConfig' must be an object, got {type(uc).__name__}", ".claude-plugin/plugin.json")
+        else:
+            for key, entry in uc.items():
+                if not isinstance(key, str) or not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", key):
+                    report.major(f"'userConfig' key '{key}' must be a valid identifier", ".claude-plugin/plugin.json")
+                if isinstance(entry, dict):
+                    if "description" not in entry:
+                        report.minor(f"'userConfig.{key}' missing 'description' field", ".claude-plugin/plugin.json")
+                    elif not isinstance(entry["description"], str):
+                        report.major(f"'userConfig.{key}.description' must be a string", ".claude-plugin/plugin.json")
+                    if "sensitive" in entry and not isinstance(entry["sensitive"], bool):
+                        report.major(f"'userConfig.{key}.sensitive' must be a boolean", ".claude-plugin/plugin.json")
+                else:
+                    report.major(f"'userConfig.{key}' must be an object with 'description'", ".claude-plugin/plugin.json")
+            report.passed(f"'userConfig' schema valid: {len(uc)} config(s)", ".claude-plugin/plugin.json")
+
+    # Validate channels schema (v2.1.85): server is required, must match mcpServers key
+    if "channels" in manifest:
+        ch = manifest["channels"]
+        if not isinstance(ch, list):
+            report.major(f"'channels' must be an array, got {type(ch).__name__}", ".claude-plugin/plugin.json")
+        else:
+            mcp_keys = set()
+            if "mcpServers" in manifest and isinstance(manifest["mcpServers"], dict):
+                mcp_keys = set(manifest["mcpServers"].keys())
+            for i, entry in enumerate(ch):
+                if not isinstance(entry, dict):
+                    report.major(f"'channels[{i}]' must be an object", ".claude-plugin/plugin.json")
+                    continue
+                if "server" not in entry:
+                    report.major(f"'channels[{i}]' missing required 'server' field", ".claude-plugin/plugin.json")
+                elif not isinstance(entry["server"], str):
+                    report.major(f"'channels[{i}].server' must be a string", ".claude-plugin/plugin.json")
+                elif mcp_keys and entry["server"] not in mcp_keys:
+                    report.major(
+                        f"'channels[{i}].server' = '{entry['server']}' does not match any mcpServers key",
+                        ".claude-plugin/plugin.json",
+                    )
+            if ch:
+                report.passed(f"'channels' schema valid: {len(ch)} channel(s)", ".claude-plugin/plugin.json")
+
+    # Validate lspServers required fields (command + extensionToLanguage)
+    if "lspServers" in manifest and isinstance(manifest["lspServers"], dict):
+        for name, config in manifest["lspServers"].items():
+            if isinstance(config, dict):
+                if "command" not in config:
+                    report.major(f"LSP server '{name}' missing required 'command' field", ".claude-plugin/plugin.json")
+                if "extensionToLanguage" not in config:
+                    report.major(f"LSP server '{name}' missing required 'extensionToLanguage' field", ".claude-plugin/plugin.json")
+                elif isinstance(config["extensionToLanguage"], dict):
+                    for ext in config["extensionToLanguage"]:
+                        if not ext.startswith("."):
+                            report.minor(f"LSP server '{name}' extensionToLanguage key '{ext}' should start with '.'", ".claude-plugin/plugin.json")
+
     # Claude Code auto-discovers standard directories (commands/, agents/, skills/,
     # hooks/) without needing them declared in plugin.json. Declaring the default path
     # causes Claude Code to reject the manifest as malformed — the plugin won't load.
@@ -438,6 +496,19 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
                             f"settings.json: unrecognized key '{key}' — supported plugin settings: {', '.join(sorted(recognized_keys))}",
                             "settings.json",
                         )
+                # Validate 'agent' value references a real agent file
+                if "agent" in settings_data:
+                    agent_val = settings_data["agent"]
+                    if isinstance(agent_val, str) and agent_val:
+                        agents_dir = plugin_root / "agents"
+                        agent_file = agents_dir / f"{agent_val}.md"
+                        if agents_dir.is_dir() and not agent_file.is_file():
+                            report.minor(
+                                f"settings.json 'agent' value '{agent_val}' does not match any agent file in agents/",
+                                "settings.json",
+                            )
+                    elif not isinstance(agent_val, str):
+                        report.major(f"settings.json 'agent' must be a string, got {type(agent_val).__name__}", "settings.json")
                 if not has_unrecognized:
                     report.passed("settings.json is valid", "settings.json")
                 else:
@@ -1171,6 +1242,91 @@ def validate_skills(plugin_root: Path, report: ValidationReport, skip_platform_c
             report.add(result.level, result.message, file_path, result.line)
 
 
+def validate_output_styles(plugin_root: Path, report: ValidationReport) -> None:
+    """Validate output-styles/ directory — markdown files with YAML frontmatter.
+
+    Output style files have frontmatter fields:
+    - name (string, optional — defaults to filename)
+    - description (string, optional — shown in /config picker)
+    - keep-coding-instructions (boolean, optional — default false)
+    """
+    styles_dir = plugin_root / "output-styles"
+    if not styles_dir.is_dir():
+        return
+
+    import yaml as yaml_mod
+
+    md_files = list(styles_dir.glob("*.md"))
+    if not md_files:
+        report.info("output-styles/ directory exists but has no .md files")
+        return
+
+    valid_fields = {"name", "description", "keep-coding-instructions"}
+
+    for md_file in md_files:
+        try:
+            content = md_file.read_text(encoding="utf-8")
+        except Exception as e:
+            report.major(f"Cannot read output style: {e}", f"output-styles/{md_file.name}")
+            continue
+
+        # Parse frontmatter
+        if not content.startswith("---"):
+            report.minor(
+                f"Output style '{md_file.name}' has no YAML frontmatter",
+                f"output-styles/{md_file.name}",
+            )
+            continue
+
+        parts = content.split("---", 2)
+        if len(parts) < 3:
+            report.minor(
+                f"Output style '{md_file.name}' has malformed frontmatter (missing closing ---)",
+                f"output-styles/{md_file.name}",
+            )
+            continue
+
+        try:
+            fm = yaml_mod.safe_load(parts[1])
+        except yaml_mod.YAMLError as e:
+            report.major(
+                f"Output style '{md_file.name}' has invalid YAML: {e}",
+                f"output-styles/{md_file.name}",
+            )
+            continue
+
+        if not isinstance(fm, dict):
+            fm = {}
+
+        # Validate fields
+        for key in fm:
+            if key not in valid_fields:
+                report.warning(
+                    f"Output style '{md_file.name}' has unknown field '{key}'",
+                    f"output-styles/{md_file.name}",
+                )
+
+        if "keep-coding-instructions" in fm:
+            val = fm["keep-coding-instructions"]
+            if not isinstance(val, bool):
+                report.major(
+                    f"Output style '{md_file.name}': 'keep-coding-instructions' must be boolean, got {type(val).__name__}",
+                    f"output-styles/{md_file.name}",
+                )
+
+        # Check body content exists
+        body = parts[2].strip() if len(parts) > 2 else ""
+        if not body:
+            report.minor(
+                f"Output style '{md_file.name}' has no body content (instructions)",
+                f"output-styles/{md_file.name}",
+            )
+        else:
+            report.passed(f"Output style '{md_file.name}' is valid", f"output-styles/{md_file.name}")
+
+    report.passed(f"output-styles/: {len(md_files)} style(s) found")
+
+
 def validate_readme(plugin_root: Path, report: ValidationReport) -> None:
     """Validate README.md exists and has recommended markers."""
     readme = plugin_root / "README.md"
@@ -1723,6 +1879,7 @@ def main() -> int:
     validate_bin_executables(plugin_root, report)
     validate_skills(plugin_root, report, skip_platform_checks)
     validate_rules(plugin_root, report)
+    validate_output_styles(plugin_root, report)
     validate_readme(plugin_root, report)
     validate_license(plugin_root, report)
     validate_no_local_paths(plugin_root, report)

@@ -698,6 +698,58 @@ def validate_disallowed_tools_field(frontmatter: dict[str, Any], filename: str, 
     report.passed(f"'disallowedTools' field valid: {len(tool_list)} tool(s)", filename)
 
 
+def validate_initial_prompt_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
+    """Validate the 'initialPrompt' frontmatter field.
+
+    Auto-submitted as the first user turn when this agent runs as the main
+    session agent (via --agent or the agent setting). Skills and commands
+    are processed. Prepended to any user-provided prompt.
+    """
+    if "initialPrompt" not in frontmatter:
+        return
+
+    val = frontmatter["initialPrompt"]
+    if not isinstance(val, str):
+        report.major(f"'initialPrompt' must be a string, got {type(val).__name__}", filename)
+        return
+    if not val.strip():
+        report.minor("'initialPrompt' is empty — if present, should contain a prompt", filename)
+        return
+    report.passed(f"'initialPrompt' field valid ({len(val)} chars)", filename)
+
+
+def validate_mcp_servers_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
+    """Validate the 'mcpServers' frontmatter field.
+
+    Each entry is either:
+    - A string referencing an already-configured server by name
+    - An inline definition: {server_name: {type: "stdio", command: "...", args: [...]}}
+    """
+    if "mcpServers" not in frontmatter:
+        return
+
+    val = frontmatter["mcpServers"]
+    if not isinstance(val, list):
+        report.major(f"'mcpServers' must be a list, got {type(val).__name__}", filename)
+        return
+
+    for i, entry in enumerate(val):
+        if isinstance(entry, str):
+            if not entry.strip():
+                report.minor(f"'mcpServers[{i}]' is an empty string — must be a server name", filename)
+        elif isinstance(entry, dict):
+            # Inline definition: {name: {type, command, ...}}
+            for name, config in entry.items():
+                if not isinstance(config, dict):
+                    report.major(f"'mcpServers[{i}].{name}' must be an object, got {type(config).__name__}", filename)
+                elif "command" not in config and "url" not in config:
+                    report.minor(f"'mcpServers[{i}].{name}' has no 'command' or 'url' field", filename)
+        else:
+            report.major(f"'mcpServers[{i}]' must be a string or object, got {type(entry).__name__}", filename)
+
+    report.passed(f"'mcpServers' field valid: {len(val)} server(s)", filename)
+
+
 def validate_hooks_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
     """Validate the 'hooks' frontmatter field.
 
@@ -1021,6 +1073,8 @@ def validate_agent(agent_path: Path) -> AgentValidationReport:
         validate_permission_mode_field(frontmatter, filename, report)
         validate_disallowed_tools_field(frontmatter, filename, report)
         validate_hooks_field(frontmatter, filename, report)
+        validate_initial_prompt_field(frontmatter, filename, report)
+        validate_mcp_servers_field(frontmatter, filename, report)
 
         # Validate new official fields
         validate_memory_field(frontmatter, filename, report)
