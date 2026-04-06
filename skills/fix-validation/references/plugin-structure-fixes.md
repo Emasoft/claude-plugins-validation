@@ -1273,7 +1273,6 @@ These errors can appear for any text file scanned across the plugin:
    ```
 2. Or re-save as UTF-8 from your editor.
 
-
 ---
 
 ## New Validations (v2.11.0+)
