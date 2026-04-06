@@ -58,13 +58,12 @@ class TestValidateComponentName:
         assert "CRITICAL" not in levels
         assert "MAJOR" not in levels
 
-    def test_invalid_ends_with_digit(self):
-        """Name ending with digit 'my-plugin2' produces CRITICAL with 'must not end with a digit'."""
+    def test_valid_ends_with_digit(self):
+        """Name ending with digit 'my-plugin2' is valid per AgentSkills.io spec."""
         report = ValidationReport()
         validate_component_name("my-plugin2", "plugin", report)
         criticals = [r for r in report.results if r.level == "CRITICAL"]
-        assert len(criticals) == 1
-        assert "must not end with a digit" in criticals[0].message
+        assert len(criticals) == 0
 
     def test_invalid_starts_with_digit(self):
         """Name starting with digit '2plugin' produces CRITICAL with 'must not start with a digit'."""

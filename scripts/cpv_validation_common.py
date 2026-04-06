@@ -241,8 +241,8 @@ VALID_HOOK_EVENTS = {
 # Common Constants
 # =============================================================================
 
-# Valid context values for agents and skills ("fork" renamed to "branch" in v2.1.77; "fork" still works as alias)
-VALID_CONTEXT_VALUES = {"fork", "branch"}
+# Valid context values for agents and skills. Official spec only lists "fork".
+VALID_CONTEXT_VALUES = {"fork"}
 
 # Built-in agent types provided by Claude Code
 BUILTIN_AGENT_TYPES = {"Explore", "Plan", "general-purpose"}
@@ -962,7 +962,7 @@ def validate_component_name(
     Enforces consistent naming across all component types (plugin, skill, agent,
     command, mcp-server, marketplace-plugin, reference-file):
     - Must start with a lowercase letter
-    - Must end with a lowercase letter (no digit at end)
+    - May end with a letter or digit
     - Only lowercase letters, digits, and single hyphens allowed
     - No consecutive hyphens, no underscores, no uppercase
     - Max length: MAX_NAME_LENGTH (64) chars
@@ -993,9 +993,6 @@ def validate_component_name(
             report.add("CRITICAL", f"{component_type} name '{name}' contains uppercase (use lowercase)")
         else:
             report.add("CRITICAL", f"{component_type} name '{name}' does not match naming pattern (lowercase letters, digits, hyphens; must start with letter)")
-    elif name[-1].isdigit():
-        # Pattern matched but name ends with digit — not allowed
-        report.add("CRITICAL", f"{component_type} name '{name}' must not end with a digit")
     # Directory name match (for skills: frontmatter name must equal directory name)
     if directory_name is not None and name != directory_name:
         report.add("MAJOR", f"{component_type} frontmatter name '{name}' must match directory name '{directory_name}'")
