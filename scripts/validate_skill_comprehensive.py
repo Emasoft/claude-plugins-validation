@@ -1293,6 +1293,16 @@ def validate_token_budget(content: str, body: str, report: ValidationReport) -> 
             category="Token Budget",
         )
 
+    # Line count check (spec: "Keep SKILL.md under 500 lines")
+    line_count = content.count("\n") + 1
+    if line_count > 500:
+        report.minor(
+            f"SKILL.md has {line_count} lines (recommended: under 500). "
+            "Move detailed reference material to supporting files.",
+            "SKILL.md",
+            category="Token Budget",
+        )
+
 
 def validate_required_sections(body: str, report: ValidationReport, strict_mode: bool = False) -> None:
     """Validate required sections (Nixtla strict mode)."""

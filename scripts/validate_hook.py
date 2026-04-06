@@ -862,6 +862,18 @@ def validate_single_hook(
         else:
             report.info("'once' field detected (only works in skill-defined hooks)")
 
+    # Validate 'async' field — only valid on command hooks
+    if "async" in hook:
+        async_val = hook["async"]
+        if not isinstance(async_val, bool):
+            report.major(f"'async' must be a boolean, got {type(async_val).__name__}")
+        elif hook_type != "command":
+            report.minor(f"'async' field is only valid on command hooks, not '{hook_type}' hooks")
+
+    # Validate 'model' field — only valid on prompt/agent hooks
+    if "model" in hook and hook_type not in ("prompt", "agent"):
+        report.minor(f"'model' field is only valid on prompt/agent hooks, not '{hook_type}' hooks")
+
     # Validate 'shell' field — only valid on command hooks, values: "bash" or "powershell"
     if "shell" in hook:
         shell_val = hook["shell"]
