@@ -225,6 +225,46 @@ def is_shell_like_file(file_path: str) -> bool:
     return False
 
 
+def is_ai_facing_markdown(file_path: str) -> bool:
+    """Check if a markdown file contains AI-facing content (not just documentation).
+
+    AI-facing markdown: skills, agents, commands, rules, references loaded by agents.
+    These files are part of the attack surface — their content becomes system prompts,
+    tool instructions, or agent behavior definitions that Claude executes.
+
+    Documentation markdown (README, CHANGELOG, docs/) contains examples that would
+    cause false positives and is NOT part of the attack surface.
+    """
+    file_normalized = file_path.lower().replace("\\", "/")
+
+    # Documentation files — NOT AI-facing
+    doc_files = {"readme.md", "changelog.md", "contributing.md", "security.md", "license.md"}
+    basename = file_normalized.rsplit("/", 1)[-1] if "/" in file_normalized else file_normalized
+    if basename in doc_files:
+        return False
+
+    # Documentation directories — NOT AI-facing
+    doc_dirs = {"/docs/", "/docs_dev/", "/examples/", "/samples/"}
+    if any(d in file_normalized for d in doc_dirs):
+        return False
+
+    # AI-facing directories — MUST be scanned
+    ai_dirs = {
+        "/skills/", "/agents/", "/commands/", "/rules/",
+        "/references/",  # Reference files loaded by agents
+        "/output-styles/",  # Output style instructions
+    }
+    if any(d in file_normalized for d in ai_dirs):
+        return True
+
+    # SKILL.md anywhere is AI-facing
+    if basename == "skill.md":
+        return True
+
+    # Default: treat other .md files as documentation (err on side of caution for FPs)
+    return False
+
+
 def _line_is_string_assignment(line: str) -> bool:
     """Detect Python multi-line string assignments like: VAR = '''#!/usr/bin/env python3.
 
@@ -269,8 +309,12 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
     # Python files never use backtick command substitution — backticks are RST/docstring formatting
     is_python_file = file_lower.endswith(".py")
 
-    # Skip command substitution checks for shell scripts (it's expected) and markdown/tests
-    skip_command_sub = is_shell_script or is_markdown or is_test_file
+    # Skip command substitution checks for shell scripts (expected), docs markdown, and tests
+    # AI-facing markdown (skills, agents) uses backticks for formatting — skip command-sub only
+    skip_command_sub = is_shell_script or (is_markdown and not is_ai_facing_markdown(file_path)) or is_test_file
+    # For AI-facing markdown, still skip backtick patterns (they're code formatting)
+    if is_markdown and is_ai_facing_markdown(file_path):
+        skip_command_sub = True  # Backticks in .md are always formatting
 
     for line_num, line in enumerate(lines, start=1):
         # Skip comment-only lines in shell scripts
@@ -348,12 +392,12 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
     if is_validator_script(file_path):
         return 0
 
-    # Skip path checks for markdown documentation - they contain examples
-    if file_lower.endswith((".md", ".mdx", ".markdown")):
+    # Skip path checks for documentation markdown — contains examples
+    # But scan AI-facing markdown (skills, agents, commands) — these are the attack surface
+    if file_lower.endswith((".md", ".mdx", ".markdown")) and not is_ai_facing_markdown(file_path):
         return 0
 
     # Skip path checks for test files - they contain example data
-    # Handle both absolute (/tests/) and relative (tests/) paths
     file_normalized = file_lower.replace("\\", "/")
     if "test_" in file_lower or "_test.py" in file_lower or "/tests/" in file_normalized or file_normalized.startswith("tests/"):
         return 0
@@ -428,8 +472,9 @@ def scan_for_secrets(content: str, file_path: str, report: ValidationReport) -> 
     if "test_" in file_lower or "_test.py" in file_lower or "/tests/" in file_normalized or file_normalized.startswith("tests/"):
         return 0
 
-    # Skip markdown documentation — contains example credentials for illustration
-    if file_lower.endswith((".md", ".mdx", ".markdown")):
+    # Skip documentation markdown — contains example credentials for illustration
+    # But scan AI-facing markdown (skills, agents) — secrets in system prompts are real leaks
+    if file_lower.endswith((".md", ".mdx", ".markdown")) and not is_ai_facing_markdown(file_path):
         return 0
 
     issues_found = 0
@@ -466,12 +511,12 @@ def scan_for_user_paths(content: str, file_path: str, report: ValidationReport) 
     if is_validator_script(file_path):
         return 0
 
-    # Skip markdown documentation - they contain examples
-    if file_lower.endswith((".md", ".mdx", ".markdown")):
+    # Skip documentation markdown — contains example paths
+    # But scan AI-facing markdown — hardcoded user paths in prompts break portability
+    if file_lower.endswith((".md", ".mdx", ".markdown")) and not is_ai_facing_markdown(file_path):
         return 0
 
-    # Skip test files - they contain example data
-    # Handle both absolute (/tests/) and relative (tests/) paths
+    # Skip test files
     file_normalized = file_lower.replace("\\", "/")
     if "test_" in file_lower or "_test.py" in file_lower or "/tests/" in file_normalized or file_normalized.startswith("tests/"):
         return 0
@@ -536,8 +581,9 @@ def scan_for_data_exfiltration(content: str, file_path: str, report: ValidationR
     file_lower = file_path.lower()
     if is_validator_script(file_path):
         return 0
-    # Skip markdown docs — they contain code examples
-    if file_lower.endswith((".md", ".mdx", ".markdown")):
+    # Skip documentation markdown — contains code examples
+    # But scan AI-facing markdown — exfiltration patterns in prompts are real threats
+    if file_lower.endswith((".md", ".mdx", ".markdown")) and not is_ai_facing_markdown(file_path):
         return 0
     file_normalized = file_lower.replace("\\", "/")
     if "/tests/" in file_normalized or file_normalized.startswith("tests/"):
