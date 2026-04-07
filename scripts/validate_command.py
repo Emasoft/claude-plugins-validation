@@ -48,8 +48,8 @@ from cpv_validation_common import (
 # Command-Specific Constants
 # =============================================================================
 
-# Maximum description length for commands (SHORTER than agents!)
-MAX_COMMAND_DESCRIPTION_LENGTH = 60
+# Maximum description length for commands (same as skills — truncated at 250 chars in listing)
+MAX_COMMAND_DESCRIPTION_LENGTH = 250
 
 # Minimum body content length (characters)
 MIN_COMMAND_BODY_CHARS = 100
@@ -345,13 +345,10 @@ def validate_model_field(frontmatter: dict[str, Any], filename: str, report: Com
         report.major(f"'model' must be a string, got {type(model).__name__}", filename)
         return
 
-    # v2.1.74+: accept short names AND full model IDs (claude-opus-4-6)
-    # Commands don't support 'inherit' — only sonnet, opus, haiku or full IDs
-    command_valid_models = {"sonnet", "opus", "haiku"}
-    model_lower = model.lower()
-    if model_lower not in command_valid_models and not is_valid_model(model):
+    # Accept all valid model aliases and full IDs (same as skills/agents)
+    if not is_valid_model(model):
         report.major(
-            f"Invalid 'model' value: {model}. Valid: {sorted(command_valid_models)} or full ID like claude-opus-4-6",
+            f"Invalid 'model' value: {model}. Valid: sonnet, opus, haiku, inherit, default, opusplan, or full ID like claude-opus-4-6",
             filename,
         )
         return

@@ -302,9 +302,9 @@ class TestValidateDescriptionField:
         validate_description_field({"description": "   "}, "empty.md", report)
         assert any(r.level == "MAJOR" and "cannot be empty" in r.message for r in report.results)
 
-    def test_description_exceeding_60_chars_reports_major(self):
-        """A description longer than 60 characters should produce MAJOR (line 253)."""
-        long_desc = "A" * 61
+    def test_description_exceeding_250_chars_reports_major(self):
+        """A description longer than 250 characters should produce MAJOR."""
+        long_desc = "A" * 251
         report = CommandValidationReport()
         validate_description_field({"description": long_desc}, "long.md", report)
         assert any(r.level == "MAJOR" and "exceeds" in r.message for r in report.results)

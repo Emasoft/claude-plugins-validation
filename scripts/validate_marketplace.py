@@ -342,12 +342,12 @@ def validate_marketplace_name(name: Any, json_path: str) -> list[ValidationResul
                 suggestion="Use format: my-marketplace-name",
             )
         )
-    elif name[-1].isdigit():
+    elif name[-1] == "-":
         results.append(
             ValidationResult(
                 level="CRITICAL",
                 category="manifest",
-                message=f"Marketplace name '{name}' must not end with a digit",
+                message=f"Marketplace name '{name}' must not end with a hyphen",
                 file=json_path,
             )
         )
@@ -424,12 +424,12 @@ def validate_plugin_entry(
                     suggestion="Use format: my-plugin-name",
                 )
             )
-        elif name[-1].isdigit():
+        elif name[-1] == "-":
             results.append(
                 ValidationResult(
                     level="CRITICAL",
                     category="plugin",
-                    message=f"Plugin name '{name}' must not end with a digit",
+                    message=f"Plugin name '{name}' must not end with a hyphen",
                     file=json_path,
                 )
             )
