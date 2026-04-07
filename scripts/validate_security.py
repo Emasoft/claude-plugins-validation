@@ -970,7 +970,7 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
     """
     # Check if npx is available
     if not shutil.which("npx"):
-        report.info("cc-audit: npx not found, skipping external audit (install Node.js to enable)")
+        report.warning("cc-audit: npx not found — 100+ additional security rules skipped. Install Node.js to enable: https://nodejs.org/")
         return 0
 
     issues_found = 0
@@ -1054,7 +1054,7 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
     except subprocess.TimeoutExpired:
         report.warning("cc-audit timed out after 120s — scan aborted")
     except FileNotFoundError:
-        report.info("cc-audit: npx command failed, skipping external audit")
+        report.warning("cc-audit: npx command failed — external audit skipped")
     finally:
         # Clean up temp file and auto-generated config
         try:
