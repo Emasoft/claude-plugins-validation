@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 import yaml
 
 # Project root
@@ -137,17 +139,24 @@ class TestObsoleteCommandsRemoved:
 
 
 class TestArchivedCommands:
-    """Verify archived commands are in scripts_dev/commands_archive/."""
+    """Verify archived commands are in scripts_dev/commands_archive/ (local only).
+
+    scripts_dev/ is gitignored — these tests only run locally where the
+    archive exists. In CI (clean clone), they are skipped automatically.
+    """
 
     def test_archive_directory_exists(self):
-        """scripts_dev/commands_archive/ must exist."""
-        assert ARCHIVE_DIR.is_dir(), "scripts_dev/commands_archive/ directory missing"
+        """scripts_dev/commands_archive/ must exist locally (skipped in CI)."""
+        if not ARCHIVE_DIR.is_dir():
+            pytest.skip("scripts_dev/commands_archive/ not present (gitignored, CI environment)")
+        assert ARCHIVE_DIR.is_dir()
 
     def test_archived_commands_count(self):
-        """Archive should contain the 28 moved commands."""
-        if ARCHIVE_DIR.is_dir():
-            archived = list(ARCHIVE_DIR.glob("*.md"))
-            assert len(archived) >= 25, f"Expected 25+ archived commands, found {len(archived)}"
+        """Archive should contain the 28 moved commands (skipped in CI)."""
+        if not ARCHIVE_DIR.is_dir():
+            pytest.skip("scripts_dev/commands_archive/ not present (gitignored, CI environment)")
+        archived = list(ARCHIVE_DIR.glob("*.md"))
+        assert len(archived) >= 25, f"Expected 25+ archived commands, found {len(archived)}"
 
 
 class TestCanonicalPipelineSkill:
