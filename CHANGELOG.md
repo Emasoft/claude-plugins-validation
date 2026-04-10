@@ -2,6 +2,12 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.5] - 2026-04-10
+
+### Hooks
+
+- Skip pre-push validation on tag-only pushes
+
 ## [2.12.4] - 2026-04-10
 
 ### Bug Fixes
