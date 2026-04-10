@@ -86,6 +86,79 @@ def get_repo_root() -> Path:
     return Path(result.stdout.strip())
 
 
+def _get_process_ancestry(max_depth: int = 30) -> list[tuple[int, str]]:
+    """Walk the process tree from this process up to PID 1.
+
+    Returns a list of (pid, command_line) tuples from closest ancestor to root.
+    Uses `ps` which is available on macOS, Linux, and BSD.
+    Returns empty list if the walk fails (caller treats as fail-closed).
+    """
+    ancestry: list[tuple[int, str]] = []
+    pid = os.getpid()
+    seen: set[int] = set()
+    for _ in range(max_depth):
+        if pid in seen or pid <= 0:
+            break
+        seen.add(pid)
+        try:
+            result = subprocess.run(
+                ["ps", "-p", str(pid), "-o", "ppid=,args="],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return []
+        if result.returncode != 0:
+            break
+        line = result.stdout.strip()
+        if not line:
+            break
+        parts = line.split(None, 1)
+        if not parts:
+            break
+        try:
+            ppid = int(parts[0])
+        except ValueError:
+            break
+        cmdline = parts[1] if len(parts) > 1 else ""
+        ancestry.append((pid, cmdline))
+        if ppid <= 1:
+            break
+        pid = ppid
+    return ancestry
+
+
+def _called_by_publish_py(repo_root: Path) -> bool:
+    """Check if any ancestor process is the publish.py script from this repo.
+
+    Uses process ancestry (not env vars) — env vars are trivially spoofable,
+    process ancestry is not. Walks the process tree via `ps` and verifies
+    that publish.py from THIS repository is an ancestor of the current hook
+    invocation.
+
+    The expected chain is:
+        publish.py → git push → git (pre-push hook)
+    """
+    ancestry = _get_process_ancestry()
+    if not ancestry:
+        return False
+
+    expected_path = str((repo_root / "scripts" / "publish.py").resolve())
+    expected_basename = "scripts/publish.py"
+
+    for _pid, cmdline in ancestry:
+        if "publish.py" not in cmdline:
+            continue
+        # Strict match: the absolute path of THIS repo's publish.py must be in
+        # the command line, OR the path component "scripts/publish.py" must be
+        # present (in case the cwd is repo_root and the script is invoked with
+        # a relative path like `python scripts/publish.py --patch`).
+        if expected_path in cmdline or expected_basename in cmdline:
+            return True
+    return False
+
+
 def find_python_command() -> list[str]:
     """Return the Python invocation command as a list of args.
 
@@ -178,15 +251,21 @@ def extract_version(filepath: Path) -> str | None:
 
 
 def main() -> int:
+    repo_root = get_repo_root()
+
     # ── Pipeline enforcement: only publish.py may push ──
-    if not os.environ.get("CPV_PUBLISH_PIPELINE"):
+    # Uses PROCESS ANCESTRY, not env vars. Env vars are trivially spoofable
+    # (`CPV_PUBLISH_PIPELINE=1 git push` bypasses the check); process ancestry
+    # is not. The hook walks its parent chain up to PID 1 via `ps` and requires
+    # that scripts/publish.py from THIS repo is an ancestor of the push.
+    if not _called_by_publish_py(repo_root):
         cprint(f"{RED}========================================{NC}")
         cprint(f"{RED}  BLOCKED: Direct push not allowed{NC}")
+        cprint(f"{RED}  This hook only accepts pushes initiated by{NC}")
+        cprint(f"{RED}  scripts/publish.py (verified via process ancestry).{NC}")
         cprint(f"{RED}  Use: uv run python scripts/publish.py --patch{NC}")
         cprint(f"{RED}========================================{NC}")
         return 1
-
-    repo_root = get_repo_root()
 
     cprint(f"{BLUE}========================================{NC}")
     cprint(f"{BLUE}  Pre-push Full Plugin Validation{NC}")
