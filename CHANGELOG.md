@@ -2,6 +2,12 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.6] - 2026-04-10
+
+### Hooks
+
+- Pre-push always runs full validation — never skips
+
 ## [2.12.5] - 2026-04-10
 
 ### Hooks
