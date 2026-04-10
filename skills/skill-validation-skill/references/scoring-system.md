@@ -332,9 +332,9 @@ Details:
 
 | From | To | Actions |
 |------|----|---------|
-| FAIL → CONDITIONAL_PASS | Fix CRITICAL issues (SKILL.md, frontmatter) |
-| CONDITIONAL_PASS → PASS | Fix MAJOR issues (name format, references) |
-| Low PASS → High PASS | Fix remaining MINOR, add optional elements |
+| FAIL | CONDITIONAL_PASS | Fix CRITICAL issues (SKILL.md, frontmatter) |
+| CONDITIONAL_PASS | PASS | Fix MAJOR issues (name format, references) |
+| Low PASS | High PASS | Fix remaining MINOR, add optional elements |
 
 ---
 

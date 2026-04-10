@@ -672,6 +672,20 @@ def lint_markdown(repo_root: Path, files: list[Path]) -> bool:
         print(f"{YELLOW}    markdownlint not available, skipping{NC}")
         return True
 
+    # If target doesn't have its own .markdownlint.json, use CPV's relaxed config.
+    # CPV's config disables strict-prose rules (MD013, MD033, MD040) that cause
+    # mechanical churn without affecting plugin correctness. See issue #8.
+    target_config = repo_root / ".markdownlint.json"
+    if not target_config.exists():
+        cpv_config = Path(__file__).resolve().parent.parent / ".markdownlint.json"
+        if cpv_config.is_file():
+            lint_cmd = lint_cmd + ["--config", str(cpv_config)]
+
+    # Respect .markdownlintignore if present
+    ignore_file = repo_root / ".markdownlintignore"
+    if ignore_file.is_file():
+        lint_cmd = lint_cmd + ["--ignore-path", str(ignore_file)]
+
     file_paths = [str(f) for f in files]
 
     # Read-only check (no --fix)
