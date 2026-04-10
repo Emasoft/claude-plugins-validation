@@ -2,6 +2,16 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.8] - 2026-04-10
+
+### Bug Fixes
+
+- Skip archive tests in CI (scripts_dev is gitignored)
+
+### Miscellaneous Tasks
+
+- Update uv.lock
+
 ## [2.12.7] - 2026-04-10
 
 ### Hooks
