@@ -2,6 +2,12 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.7] - 2026-04-10
+
+### Hooks
+
+- Verify publish.py via process ancestry, not env vars
+
 ## [2.12.6] - 2026-04-10
 
 ### Hooks
