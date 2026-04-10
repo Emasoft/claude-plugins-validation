@@ -204,6 +204,17 @@ def main() -> int:
     plugin_files_changed = False
     stdin_lines = sys.stdin.read().strip().splitlines()
 
+    # Detect tag-only pushes — the branch commits were already validated on
+    # the prior branch push, so re-running full validation (with a version
+    # bump check against an already-bumped remote) would fail incorrectly.
+    all_tag_refs = bool(stdin_lines) and all(
+        (line.split() or [""])[0].startswith("refs/tags/")
+        for line in stdin_lines
+    )
+    if all_tag_refs:
+        cprint(f"{GREEN}Tag-only push detected ({len(stdin_lines)} tag(s)). Branch was already validated. Skipping.{NC}")
+        return 0
+
     for line in stdin_lines:
         parts = line.split()
         if len(parts) < 4:
