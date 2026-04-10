@@ -276,7 +276,11 @@ Examples:
   %(prog)s --minor              # 1.0.0 → 1.1.0, commit, push
   %(prog)s --major              # 1.0.0 → 2.0.0, commit, push
   %(prog)s --patch --dry-run    # preview only, no changes
-  %(prog)s --patch --skip-tests # skip pytest step
+
+HARD RULE: No checks can be skipped. Every check (tests, lint, validation,
+version consistency) must pass with ZERO errors before commit and push.
+There is no --skip-tests, no --skip-lint, no --skip-validate, no --force.
+If a check fails, fix the underlying problem. Do not bypass the pipeline.
         """,
     )
     bump_group = parser.add_mutually_exclusive_group(required=True)
@@ -284,8 +288,23 @@ Examples:
     bump_group.add_argument("--minor", action="store_true", help="Bump minor version")
     bump_group.add_argument("--patch", action="store_true", help="Bump patch version")
     parser.add_argument("--dry-run", action="store_true", help="Preview without making changes")
-    parser.add_argument("--skip-tests", action="store_true", help="Skip pytest step")
     args = parser.parse_args()
+
+    # ── Hard rule enforcement: reject any environment variable that could bypass checks ──
+    _forbidden_bypass_vars = [
+        "CPV_SKIP_TESTS", "CPV_SKIP_LINT", "CPV_SKIP_VALIDATE",
+        "CPV_FORCE_PUBLISH", "CPV_BYPASS_CHECKS", "SKIP_TESTS",
+        "SKIP_LINT", "SKIP_VALIDATE", "NO_VERIFY",
+    ]
+    _bypass_attempted = [v for v in _forbidden_bypass_vars if os.environ.get(v)]
+    if _bypass_attempted:
+        print(
+            f"{RED}✗ Bypass attempt detected. These env vars are FORBIDDEN in publish:{NC}\n"
+            f"  {', '.join(_bypass_attempted)}\n"
+            f"{RED}The publish pipeline enforces every check. Fix the failures, don't skip them.{NC}",
+            file=sys.stderr,
+        )
+        return 1
 
     root = get_plugin_root()
     bump_type = "major" if args.major else "minor" if args.minor else "patch"
@@ -307,30 +326,31 @@ Examples:
             return 1
     print(f"{GREEN}✓ Working tree clean{NC}")
 
-    # ── Step 2: Tests ──
-    if not args.skip_tests:
-        print(f"\n{BLUE}═══ Step 2: Run tests ═══{NC}")
-        run(["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"], cwd=root)
-        print(f"{GREEN}✓ All tests passed{NC}")
-    else:
-        print(f"\n{YELLOW}═══ Step 2: Tests skipped (--skip-tests) ═══{NC}")
+    # ── Step 2: Tests (MANDATORY — cannot be skipped) ──
+    print(f"\n{BLUE}═══ Step 2: Run tests (mandatory) ═══{NC}")
+    run(["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"], cwd=root)
+    print(f"{GREEN}✓ All tests passed{NC}")
 
-    # ── Step 3: Lint ──
-    print(f"\n{BLUE}═══ Step 3: Lint files ═══{NC}")
+    # ── Step 3: Lint (MANDATORY — must pass with zero errors) ──
+    print(f"\n{BLUE}═══ Step 3: Lint files (mandatory) ═══{NC}")
     run(["uv", "run", "python", "scripts/lint_files.py", "."], cwd=root)
     print(f"{GREEN}✓ Linting passed{NC}")
 
-    # ── Step 4: Validate ──
-    # MINOR/NIT issues are non-blocking (exit codes 3, 4) — only CRITICAL (1) and MAJOR (2) block publish
-    print(f"\n{BLUE}═══ Step 4: Validate plugin (--strict) ═══{NC}")
+    # ── Step 4: Validate (MANDATORY — ZERO errors of any severity) ──
+    # Hard rule: publish is blocked on ANY non-zero severity: CRITICAL, MAJOR, MINOR, NIT.
+    # WARNING is advisory and does not block. No exceptions.
+    print(f"\n{BLUE}═══ Step 4: Validate plugin — ZERO errors required ═══{NC}")
     vresult = run(["uv", "run", "python", "scripts/validate_plugin.py", ".", "--strict"], cwd=root, check=False)
-    if vresult.returncode in (1, 2):
-        print(f"\n{RED}✗ CRITICAL/MAJOR validation issues found — cannot publish{NC}", file=sys.stderr)
+    if vresult.returncode != 0:
+        severity_map = {1: "CRITICAL", 2: "MAJOR", 3: "MINOR", 4: "NIT"}
+        severity = severity_map.get(vresult.returncode, f"unknown (exit {vresult.returncode})")
+        print(
+            f"\n{RED}✗ {severity} validation issues found — PUBLISH BLOCKED{NC}\n"
+            f"{RED}  Fix ALL issues before publishing. No severity level is allowed to slip through.{NC}",
+            file=sys.stderr,
+        )
         sys.exit(vresult.returncode)
-    if vresult.returncode in (3, 4):
-        print(f"{YELLOW}⚠ MINOR/NIT issues found (non-blocking for publish){NC}")
-    else:
-        print(f"{GREEN}✓ Plugin validation passed{NC}")
+    print(f"{GREEN}✓ Plugin validation passed (zero errors){NC}")
 
     # ── Step 5: Version consistency ──
     print(f"\n{BLUE}═══ Step 5: Check version consistency ═══{NC}")
