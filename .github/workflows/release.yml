@@ -11,12 +11,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
+        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
 
       - name: Set up Python
         run: uv python install 3.12
@@ -31,9 +31,9 @@ jobs:
           exit_code=$?
           set -e
           cat validation-report.txt
-          # Fail release on critical (1) or major (2) issues
-          if [ $exit_code -le 2 ] && [ $exit_code -ge 1 ]; then
-            echo "::error::Validation failed with exit code $exit_code (critical/major issues found)"
+          # Fail release on ANY non-zero severity (CRITICAL=1, MAJOR=2, MINOR=3, NIT=4)
+          if [ $exit_code -ge 1 ] && [ $exit_code -le 4 ]; then
+            echo "::error::Validation failed with exit code $exit_code"
             exit $exit_code
           fi
 
@@ -53,19 +53,16 @@ jobs:
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
 
           if [ -z "$PREV_TAG" ]; then
-            # First release - get all commits
             CHANGELOG=$(git log --pretty=format:"- %s (%h)" HEAD)
           else
-            # Get commits since previous tag
             CHANGELOG=$(git log --pretty=format:"- %s (%h)" ${PREV_TAG}..HEAD)
           fi
 
-          # Write changelog to file for multi-line output
           echo "$CHANGELOG" > changelog.txt
           echo "changelog_file=changelog.txt" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
         with:
           body_path: changelog.txt
           files: |
