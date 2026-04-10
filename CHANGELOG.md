@@ -2,6 +2,16 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.9] - 2026-04-10
+
+### Bug Fixes
+
+- Ruff isort import ordering in validate_plugin.py
+
+### Miscellaneous Tasks
+
+- Update uv.lock
+
 ## [2.12.8] - 2026-04-10
 
 ### Bug Fixes
