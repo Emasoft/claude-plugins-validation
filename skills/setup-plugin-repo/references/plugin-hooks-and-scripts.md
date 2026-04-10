@@ -222,9 +222,9 @@ Unified publish pipeline: test -> lint -> validate -> consistency -> bump -> com
 | Function | Signature | Purpose |
 |---|---|---|
 | `run` | `(cmd, cwd, *, check=True)` | Run command, stream output, fail-fast |
-| `parse_semver` | `(version: str) -> tuple | None` | Parse `X.Y.Z` into `(major, minor, patch)` |
-| `bump_semver` | `(current, bump_type) -> str | None` | Bump by `major`/`minor`/`patch` |
-| `get_current_version` | `(plugin_root) -> str | None` | Read version from `plugin.json` |
+| `parse_semver` | `(version: str) -> tuple \| None` | Parse `X.Y.Z` into `(major, minor, patch)` |
+| `bump_semver` | `(current, bump_type) -> str \| None` | Bump by `major`/`minor`/`patch` |
+| `get_current_version` | `(plugin_root) -> str \| None` | Read version from `plugin.json` |
 | `update_plugin_json` | `(root, new_ver) -> (ok, msg)` | Write version to `plugin.json` |
 | `update_pyproject_toml` | `(root, new_ver) -> (ok, msg)` | Write version to `pyproject.toml` |
 | `update_python_versions` | `(root, new_ver) -> list[(ok, msg)]` | Update `__version__` in all `.py` files |
