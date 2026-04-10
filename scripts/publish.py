@@ -21,6 +21,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -268,7 +269,7 @@ def do_bump(plugin_root: Path, new_version: str, dry_run: bool = False) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Publish pipeline: test → lint → validate → consistency → bump → commit → push",
+        description="Publish pipeline: test → lint → validate → consistency → bump → changelog → commit → tag → push → gh release",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -382,16 +383,86 @@ If a check fails, fix the underlying problem. Do not bypass the pipeline.
         print(f"\n{GREEN}✓ Dry run complete — no changes made.{NC}")
         return 0
 
-    # ── Step 7: Commit ──
-    print(f"\n{BLUE}═══ Step 7: Commit version bump ═══{NC}")
-    run(["git", "add", "-A"], cwd=root)
-    run(["git", "commit", "-m", f"chore: bump version to {new_version}"], cwd=root)
-    print(f"{GREEN}✓ Committed v{new_version}{NC}")
+    # ── Step 7: Generate CHANGELOG.md + release notes with git-cliff ──
+    print(f"\n{BLUE}═══ Step 7: Generate CHANGELOG + release notes (git-cliff) ═══{NC}")
+    cliff_bin = shutil.which("git-cliff")
+    release_notes_file: Path | None = None
+    if cliff_bin is None:
+        print(
+            f"{RED}✗ git-cliff not installed. Required for changelog and release notes.{NC}\n"
+            f"{RED}  Install: brew install git-cliff  OR  cargo install git-cliff{NC}",
+            file=sys.stderr,
+        )
+        return 1
+    cliff_toml = root / "cliff.toml"
+    if not cliff_toml.is_file():
+        print(f"{RED}✗ cliff.toml not found. Required for changelog generation.{NC}", file=sys.stderr)
+        return 1
 
-    # ── Step 8: Push ──
-    print(f"\n{BLUE}═══ Step 8: Push to origin ═══{NC}")
+    tag_name = f"v{new_version}"
+
+    # Regenerate full CHANGELOG.md — git-cliff reads all git history + cliff.toml config.
+    # Using --tag <new> tells git-cliff to label unreleased commits with the new tag.
+    run([cliff_bin, "--tag", tag_name, "-o", "CHANGELOG.md"], cwd=root)
+    print(f"{GREEN}✓ CHANGELOG.md regenerated with {tag_name}{NC}")
+
+    # Extract release notes for just the new version (for gh release)
+    release_notes_file = root / "reports_dev" / f"release-notes-{new_version}.md"
+    release_notes_file.parent.mkdir(parents=True, exist_ok=True)
+    run(
+        [
+            cliff_bin, "--unreleased", "--tag", tag_name,
+            "--strip", "all", "-o", str(release_notes_file),
+        ],
+        cwd=root,
+    )
+    print(f"{GREEN}✓ Release notes extracted to {release_notes_file.relative_to(root)}{NC}")
+
+    # ── Step 8: Commit version bump + CHANGELOG ──
+    print(f"\n{BLUE}═══ Step 8: Commit version bump + changelog ═══{NC}")
+    run(["git", "add", "-A"], cwd=root)
+    run(["git", "commit", "-m", f"chore(release): {tag_name}"], cwd=root)
+    print(f"{GREEN}✓ Committed {tag_name}{NC}")
+
+    # ── Step 9: Create annotated git tag ──
+    print(f"\n{BLUE}═══ Step 9: Create git tag {tag_name} ═══{NC}")
+    run(["git", "tag", "-a", tag_name, "-m", f"Release {tag_name}"], cwd=root)
+    print(f"{GREEN}✓ Tag {tag_name} created{NC}")
+
+    # ── Step 10: Push branch + tags ──
+    print(f"\n{BLUE}═══ Step 10: Push to origin (branch + tags) ═══{NC}")
     os.environ["CPV_PUBLISH_PIPELINE"] = "1"
     run(["git", "push", "origin", "HEAD"], cwd=root)
+    run(["git", "push", "origin", tag_name], cwd=root)
+    print(f"{GREEN}✓ Pushed branch and tag {tag_name}{NC}")
+
+    # ── Step 11: Create GitHub release with notes ──
+    print(f"\n{BLUE}═══ Step 11: Create GitHub release ═══{NC}")
+    gh_bin = shutil.which("gh")
+    if gh_bin is None:
+        print(
+            f"{YELLOW}⚠ gh CLI not installed. Tag pushed but GitHub release not created.{NC}\n"
+            f"{YELLOW}  Install: brew install gh{NC}",
+            file=sys.stderr,
+        )
+    else:
+        gh_result = run(
+            [
+                gh_bin, "release", "create", tag_name,
+                "--title", f"Release {tag_name}",
+                "--notes-file", str(release_notes_file),
+            ],
+            cwd=root,
+            check=False,
+        )
+        if gh_result.returncode == 0:
+            print(f"{GREEN}✓ GitHub release {tag_name} published{NC}")
+        else:
+            print(
+                f"{YELLOW}⚠ gh release failed (tag is already pushed — you can create release manually){NC}",
+                file=sys.stderr,
+            )
+
     print(f"\n{GREEN}✓ Published v{new_version}{NC}")
 
     return 0
