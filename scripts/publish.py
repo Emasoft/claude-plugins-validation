@@ -430,8 +430,9 @@ If a check fails, fix the underlying problem. Do not bypass the pipeline.
     print(f"{GREEN}✓ Tag {tag_name} created{NC}")
 
     # ── Step 10: Push branch + tags ──
+    # The pre-push hook verifies publish.py is in the process ancestry
+    # (not via env var — that would be trivially spoofable).
     print(f"\n{BLUE}═══ Step 10: Push to origin (branch + tags) ═══{NC}")
-    os.environ["CPV_PUBLISH_PIPELINE"] = "1"
     run(["git", "push", "origin", "HEAD"], cwd=root)
     run(["git", "push", "origin", tag_name], cwd=root)
     print(f"{GREEN}✓ Pushed branch and tag {tag_name}{NC}")
