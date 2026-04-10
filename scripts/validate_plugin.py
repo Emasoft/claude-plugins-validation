@@ -61,6 +61,8 @@ from gitignore_filter import GitignoreFilter
 from validate_hook import (
     lint_bash_script,
     lint_js_script,
+)
+from validate_hook import (
     validate_hooks as validate_hook_file,
 )
 from validate_mcp import validate_plugin_mcp
