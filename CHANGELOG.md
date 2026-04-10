@@ -2,6 +2,13 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.10] - 2026-04-10
+
+### Miscellaneous Tasks
+
+- Upgrade actions to Node.js 24 compatible versions
+- Update uv.lock
+
 ## [2.12.9] - 2026-04-10
 
 ### Bug Fixes
