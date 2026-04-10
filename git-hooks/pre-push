@@ -201,19 +201,26 @@ def main() -> int:
     cprint("")
 
     # Read stdin lines: each line is LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA
-    plugin_files_changed = False
     stdin_lines = sys.stdin.read().strip().splitlines()
 
-    # Detect tag-only pushes — the branch commits were already validated on
-    # the prior branch push, so re-running full validation (with a version
-    # bump check against an already-bumped remote) would fail incorrectly.
-    all_tag_refs = bool(stdin_lines) and all(
-        (line.split() or [""])[0].startswith("refs/tags/")
-        for line in stdin_lines
-    )
-    if all_tag_refs:
-        cprint(f"{GREEN}Tag-only push detected ({len(stdin_lines)} tag(s)). Branch was already validated. Skipping.{NC}")
-        return 0
+    # Classify refs being pushed: branches and/or tags
+    branch_refs: list[str] = []
+    tag_refs: list[str] = []
+    for line in stdin_lines:
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        local_ref = parts[0]
+        if local_ref.startswith("refs/tags/"):
+            tag_refs.append(local_ref[len("refs/tags/"):])
+        elif local_ref.startswith("refs/heads/"):
+            branch_refs.append(local_ref[len("refs/heads/"):])
+
+    tag_only_push = bool(tag_refs) and not branch_refs
+    if tag_only_push:
+        cprint(f"{BLUE}Tag push detected: {', '.join(tag_refs)}{NC}")
+    elif branch_refs:
+        cprint(f"{BLUE}Branch push detected: {', '.join(branch_refs)}{NC}")
 
     for line in stdin_lines:
         parts = line.split()
@@ -222,37 +229,49 @@ def main() -> int:
         _local_ref, local_sha, _remote_ref, remote_sha = parts[:4]
 
         if local_sha == ZERO_SHA:
-            # Branch deletion -- skip validation
-            cprint(f"{GREEN}Branch deletion detected. No validation needed.{NC}")
+            # Branch/tag deletion — no validation needed for destructive ops
+            cprint(f"{GREEN}Ref deletion detected. No validation needed.{NC}")
             continue
 
-        changed_files = get_changed_files(local_sha, remote_sha)
-
-        for filepath in changed_files:
-            if file_matches_plugin_patterns(filepath):
-                plugin_files_changed = True
-                break
-
-    # If stdin was empty or only deletions, nothing to validate
-    if not plugin_files_changed:
-        cprint(f"{GREEN}No plugin files changed. Skipping full validation.{NC}")
-        return 0
+    # Full validation ALWAYS runs. No bypass based on file patterns or ref type.
+    # The lint/test/validate steps are mandatory for every push (branch OR tag).
 
     # --- Version bump enforcement ---
-    # Block push if local version is not greater than remote version
+    # Block push if local version is not greater than remote version.
+    # For tag-only pushes, verify that the tag name matches the local version
+    # (publish.py pushes the branch first, then the tag; at tag-push time the
+    # remote master is already at the new version, so the "strictly greater"
+    # rule would fail. Instead, verify tag name == local version).
     cprint(f"{BLUE}Checking version bump...{NC}")
 
     local_version = extract_version(repo_root / ".claude-plugin" / "plugin.json")
     if local_version:
-        # Get remote version from origin
-        try:
-            remote_result = subprocess.run(
-                ["git", "show", "origin/master:.claude-plugin/plugin.json"],
-                capture_output=True,
-                text=True,
-                cwd=str(repo_root),
-            )
-            if remote_result.returncode == 0:
+        if tag_only_push:
+            # For tag pushes: every pushed tag must match "v<local_version>"
+            expected_tag = f"v{local_version}"
+            mismatched = [t for t in tag_refs if t != expected_tag]
+            if mismatched:
+                cprint(f"{RED}========================================{NC}")
+                cprint(f"{RED}  BLOCKED: Tag name does not match plugin version!{NC}")
+                cprint(f"{RED}  Pushed tag(s): {', '.join(mismatched)}{NC}")
+                cprint(f"{RED}  Expected: {expected_tag}{NC}")
+                cprint(f"{RED}  Run: uv run python scripts/publish.py --patch{NC}")
+                cprint(f"{RED}========================================{NC}")
+                return 1
+            cprint(f"{GREEN}Tag matches local version: {expected_tag}{NC}")
+        else:
+            # For branch pushes: local version must be strictly greater than remote.
+            try:
+                remote_result = subprocess.run(
+                    ["git", "show", "origin/master:.claude-plugin/plugin.json"],
+                    capture_output=True,
+                    text=True,
+                    cwd=str(repo_root),
+                )
+            except (OSError, subprocess.SubprocessError):
+                remote_result = None
+
+            if remote_result is not None and remote_result.returncode == 0:
                 remote_version = json.loads(remote_result.stdout).get("version")
                 if remote_version and local_version == remote_version:
                     cprint(f"{RED}========================================{NC}")
@@ -268,9 +287,6 @@ def main() -> int:
             else:
                 # Remote branch or file doesn't exist yet — first push, allow
                 cprint(f"{GREEN}Version: {local_version} (first push){NC}")
-        except Exception:
-            # Git command failed — don't block on this, proceed to validation
-            cprint(f"{YELLOW}Could not check remote version — proceeding{NC}")
     else:
         cprint(f"{YELLOW}No local version found — skipping version check{NC}")
 
