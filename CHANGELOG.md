@@ -2,6 +2,12 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.16] - 2026-04-12
+
+### Features
+
+- Opinionated two-layout architecture + restructure recommendation
+
 ## [2.12.15] - 2026-04-12
 
 ### Features
