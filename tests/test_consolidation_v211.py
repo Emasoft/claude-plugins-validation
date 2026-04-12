@@ -2,7 +2,8 @@
 """Tests for command consolidation (v2.8.0).
 
 Validates that:
-- 13 commands exist (8 direct-script + 5 agent)
+- 16 commands exist (8 direct-script + 6 agent + 2 v2.12.13 additions).
+  Originally 13 after consolidation (8 direct-script + 5 agent).
 - Direct-script commands have no agent: field
 - Agent commands have the correct agent: field
 - Old obsolete commands no longer exist in commands/
@@ -57,6 +58,7 @@ AGENT_COMMANDS = {
     "cpv-manage": "plugin-manager",
     "cpv-create": "plugin-creator",
     "cpv-fix-validation": "plugin-fixer",
+    "cpv-fix-marketplace-validation": "marketplace-fixer",
     "cpv-semantic-validation": "semantic-validator",
 }
 
@@ -64,14 +66,15 @@ AGENT_COMMANDS = {
 class TestCommandCount:
     """Verify total command count after consolidation."""
 
-    def test_total_command_count_is_15(self):
-        """commands/ directory should contain exactly 15 .md files.
+    def test_total_command_count_is_16(self):
+        """commands/ directory should contain exactly 16 .md files.
 
         Originally 13 after consolidation (8 direct + 5 agent).
         v2.12.13 added: cpv-link-plugin, cpv-validate-settings-marketplace.
+        v2.12.x split: cpv-fix-marketplace-validation (routes to marketplace-fixer).
         """
         md_files = list(COMMANDS_DIR.glob("*.md"))
-        assert len(md_files) == 15, f"Expected 15 commands, found {len(md_files)}: {sorted(f.name for f in md_files)}"
+        assert len(md_files) == 16, f"Expected 16 commands, found {len(md_files)}: {sorted(f.name for f in md_files)}"
 
 
 class TestDirectScriptCommands:
@@ -94,7 +97,7 @@ class TestAgentCommands:
     """Verify agent commands exist and delegate to the correct agent."""
 
     def test_all_agent_commands_exist(self):
-        """All 5 agent commands must exist."""
+        """All 6 agent commands must exist."""
         for name in AGENT_COMMANDS:
             assert (COMMANDS_DIR / f"{name}.md").is_file(), f"{name}.md missing"
 

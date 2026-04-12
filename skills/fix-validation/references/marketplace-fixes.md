@@ -12,6 +12,7 @@ Comprehensive remediation guide for all issues detected by `validate_marketplace
 - [6. Version Sync Issues](#6-version-sync-issues)
 - [7. Secret Configuration Issues](#7-secret-configuration-issues)
 - [8. GitHub Deployment Issues](#8-github-deployment-issues)
+- [9. Architecture / Marketplace Layout Migration](#9-architecture--marketplace-layout-migration)
 
 ---
 
@@ -2110,6 +2111,299 @@ graph LR
 **Root Cause:** The README lacks both an installation heading and any mention of `claude plugin`, `marketplace add`, or `install` keywords.
 
 **Fix:** Add an Installation section with the actual commands users need.
+
+---
+
+## 9. Architecture / Marketplace Layout Migration
+
+`validate_marketplace.py::_recommend_cpv_restructure` emits a single `WARNING` with `category="architecture"` when a Layout-B marketplace (nested plugins via `source: "./path"` or `{"source": "directory", "path": ...}`) has at least 3 of the 7 non-CPV signals listed below. Each subsection covers the **mechanical** per-signal fix — the minimum work to make CPV stop flagging that specific signal without doing a full layout migration.
+
+For a full interactive Layout A (hub-and-spoke: split each plugin into its own repo) or Layout B (nested with full CPV discipline) migration, use [`skills/migrate-marketplace-architecture/`](../../migrate-marketplace-architecture/SKILL.md). That skill owns the large-scale conversion workflow with user prompts, git subtree splitting, and repo creation.
+
+The trigger threshold is **≥3 of 7 signals** — applying mechanical fixes until you drop below 3 is sufficient to silence the warning, but fixing all 7 is the recommended baseline for any marketplace you intend to publish.
+
+---
+
+### 9.1 Signal 1: No git tags
+
+**Why CPV flags it**: users consuming this marketplace can only track `main@HEAD`. If a bad commit lands, everyone who refreshes the marketplace inherits it immediately with no way to pin or roll back.
+
+**What the non-CPV pattern looks like**:
+```bash
+$ git -C /path/to/marketplace tag -l
+(empty output)
+```
+
+**Mechanical fix** (tag the current state so users can at least pin to v0.1.0):
+1. Decide on a starting version (typically `v0.1.0` or `v1.0.0`).
+2. Tag the current HEAD:
+   ```bash
+   git tag -a v0.1.0 -m "Initial release"
+   git push origin v0.1.0
+   ```
+3. From now on, every release should get its own tag. Wire this into `scripts/publish.py` (see §9.5) so tags are created automatically on version bumps.
+
+---
+
+### 9.2 Signal 2: No `CHANGELOG.md` at repo root
+
+**Why CPV flags it**: users have no way to see what changed between versions without reading raw commit history. Contributors cannot write meaningful release notes because nothing aggregates them. Security-relevant fixes get buried in merge commits.
+
+**What the non-CPV pattern looks like**:
+```bash
+$ ls CHANGELOG*
+ls: CHANGELOG*: No such file or directory
+```
+
+**Mechanical fix** — generate and commit a starter changelog:
+1. Install git-cliff: `cargo install git-cliff` or download from [releases](https://github.com/orhun/git-cliff/releases).
+2. Create a minimal `cliff.toml` (see §9.3).
+3. Generate the changelog from your git history:
+   ```bash
+   git-cliff --output CHANGELOG.md
+   ```
+4. Commit:
+   ```bash
+   git add CHANGELOG.md
+   git commit -m "docs: add initial CHANGELOG.md"
+   ```
+
+From now on, `scripts/publish.py` (see §9.5) should regenerate `CHANGELOG.md` on every release bump.
+
+---
+
+### 9.3 Signal 3: No `cliff.toml` (git-cliff configuration)
+
+**Why CPV flags it**: without a `cliff.toml`, there is no reproducible changelog template. Release notes get written by hand (or not at all), leading to inconsistent quality and missed changes.
+
+**What the non-CPV pattern looks like**:
+```bash
+$ ls cliff.toml
+ls: cliff.toml: No such file or directory
+```
+
+**Mechanical fix** — drop CPV's canonical `cliff.toml` at the marketplace root:
+1. Copy the template from any CPV-managed plugin (for example `skills/canonical-pipeline/references/cliff.toml`) or start from the [git-cliff docs](https://git-cliff.org/docs/configuration).
+2. Minimum content — conventional-commit groupings:
+   ```toml
+   [changelog]
+   header = "# Changelog\n\nAll notable changes to this project will be documented in this file.\n"
+   body = """
+   {% for group, commits in commits | group_by(attribute="group") %}
+       ### {{ group | upper_first }}
+       {% for commit in commits %}
+           - {{ commit.message | upper_first }}
+       {% endfor %}
+   {% endfor %}
+   """
+   trim = true
+
+   [git]
+   conventional_commits = true
+   filter_unconventional = true
+   commit_parsers = [
+     { message = "^feat", group = "Features" },
+     { message = "^fix", group = "Bug Fixes" },
+     { message = "^docs", group = "Documentation" },
+     { message = "^refactor", group = "Refactoring" },
+     { message = "^test", group = "Tests" },
+     { message = "^chore", group = "Chores" },
+   ]
+   ```
+3. Commit:
+   ```bash
+   git add cliff.toml
+   git commit -m "chore: add git-cliff configuration"
+   ```
+4. Regenerate the changelog with the new template: `git-cliff --output CHANGELOG.md`.
+
+---
+
+### 9.4 Signal 4: No `.github/workflows/` (no automated validation)
+
+**Why CPV flags it**: every PR that lands is reviewed by hand. Broken plugin manifests, stale version drift, missing `.claude-plugin/plugin.json` files, and security issues slip through. The only defence is maintainer attention, which does not scale.
+
+**What the non-CPV pattern looks like**:
+```bash
+$ ls .github/workflows/*.yml 2>&1
+ls: .github/workflows/*.yml: No such file or directory
+```
+
+**Mechanical fix** — add a minimal validation workflow:
+1. Create `.github/workflows/validate.yml`:
+   ```yaml
+   name: Validate
+   on:
+     push:
+       branches: [main]
+     pull_request:
+
+   jobs:
+     validate:
+       runs-on: ubuntu-latest
+       steps:
+         - uses: actions/checkout@v4
+           with:
+             submodules: recursive
+         - uses: astral-sh/setup-uv@v3
+         - name: Validate marketplace
+           run: uvx claude-plugins-validation cpv-validate-marketplace .
+         - name: Validate each plugin (Layout B)
+           run: |
+             for plugin in $(find . -maxdepth 3 -name plugin.json -path '*/.claude-plugin/*'); do
+               dir=$(dirname $(dirname $plugin))
+               uvx claude-plugins-validation cpv-validate-plugin "$dir"
+             done
+   ```
+2. Commit:
+   ```bash
+   mkdir -p .github/workflows
+   git add .github/workflows/validate.yml
+   git commit -m "ci: add marketplace validation workflow"
+   git push
+   ```
+3. Watch the first run on GitHub. Fix any failures surfaced by CPV before merging further changes.
+
+For a more complete CI setup (linting, mypy, pytest, release automation), see [`skills/canonical-pipeline/`](../../canonical-pipeline/SKILL.md).
+
+---
+
+### 9.5 Signal 5: No `scripts/publish.py` for atomic tagged releases
+
+**Why CPV flags it**: version bumps happen as ad-hoc commits, often forgetting to update both the marketplace manifest AND the nested `plugin.json`. Drift bugs are common.
+
+**What the non-CPV pattern looks like**:
+```bash
+$ ls scripts/publish.py publish.py 2>&1
+ls: scripts/publish.py publish.py: No such file or directory
+```
+
+**Mechanical fix** — add a minimal `publish.py` that performs the version-bump + changelog + commit + tag pipeline:
+1. Create `scripts/publish.py`:
+   ```python
+   #!/usr/bin/env python3
+   """Minimal publish pipeline: bump version -> regen changelog -> commit -> tag -> push."""
+   from __future__ import annotations
+
+   import argparse
+   import json
+   import subprocess
+   import sys
+   from pathlib import Path
+
+   def bump(current: str, part: str) -> str:
+       major, minor, patch = map(int, current.split("."))
+       if part == "major":
+           return f"{major + 1}.0.0"
+       if part == "minor":
+           return f"{major}.{minor + 1}.0"
+       return f"{major}.{minor}.{patch + 1}"
+
+   def main() -> int:
+       parser = argparse.ArgumentParser()
+       parser.add_argument("--patch", action="store_const", const="patch", dest="part")
+       parser.add_argument("--minor", action="store_const", const="minor", dest="part")
+       parser.add_argument("--major", action="store_const", const="major", dest="part")
+       args = parser.parse_args()
+       if not args.part:
+           parser.error("specify --patch / --minor / --major")
+
+       root = Path(__file__).parent.parent
+       mp = root / "marketplace.json"
+       data = json.loads(mp.read_text())
+       old = data.get("metadata", {}).get("version", "0.0.0")
+       new = bump(old, args.part)
+       data.setdefault("metadata", {})["version"] = new
+       mp.write_text(json.dumps(data, indent=2) + "\n")
+
+       subprocess.run(["git-cliff", "--tag", f"v{new}", "--output", "CHANGELOG.md"], check=True, cwd=root)
+       subprocess.run(["git", "add", "marketplace.json", "CHANGELOG.md"], check=True, cwd=root)
+       subprocess.run(["git", "commit", "-m", f"chore: release v{new}"], check=True, cwd=root)
+       subprocess.run(["git", "tag", "-a", f"v{new}", "-m", f"Release v{new}"], check=True, cwd=root)
+       subprocess.run(["git", "push", "origin", "HEAD", "--tags"], check=True, cwd=root)
+       return 0
+
+   if __name__ == "__main__":
+       sys.exit(main())
+   ```
+2. Make it executable and commit:
+   ```bash
+   chmod +x scripts/publish.py
+   git add scripts/publish.py
+   git commit -m "chore: add minimal publish pipeline"
+   ```
+
+For a production-grade `publish.py` with lint/test/validate gates, pre-push hook integration, and GitHub Release creation, see [`skills/canonical-pipeline/`](../../canonical-pipeline/SKILL.md).
+
+---
+
+### 9.6 Signal 6: Mixed authorship across plugin entries
+
+**Why CPV flags it**: a community monorepo aggregates plugins from multiple authors into one repo, mixing their release cadences, code quality, security postures, and license terms. Users installing one plugin inherit the blast radius of all the others.
+
+**What the non-CPV pattern looks like**:
+```json
+{
+  "plugins": [
+    { "name": "plugin-a", "author": { "name": "Alice" }, ... },
+    { "name": "plugin-b", "author": { "name": "Bob" }, ... },
+    { "name": "plugin-c", "author": { "name": "Carol" }, ... }
+  ]
+}
+```
+
+**Mechanical fix** — there are two options:
+
+**Option A: unify authorship** (you are genuinely taking ownership of all plugins):
+1. Edit `marketplace.json` and set every plugin's `author` to the same value:
+   ```json
+   "author": { "name": "Emasoft", "email": "713559+Emasoft@users.noreply.github.com" }
+   ```
+2. If the original author credit matters, move it into the plugin's own `README.md` under an "Attribution" heading instead of `marketplace.json`.
+3. Commit: `git add marketplace.json && git commit -m "chore: consolidate authorship under single maintainer"`
+
+**Option B: split the marketplace** (you only want to publish your own work):
+1. Remove plugins authored by other people from `marketplace.json`.
+2. Tell their authors to publish independently — they can use [`skills/setup-plugin-repo/`](../../setup-plugin-repo/SKILL.md) for their own repos.
+3. Commit the pruned `marketplace.json`.
+
+For interactive Layout A migration (split each plugin into a separate repo automatically), use the `migrate-marketplace-architecture` skill.
+
+---
+
+### 9.7 Signal 7: Plugin versions drift wildly (>3 distinct major.minor)
+
+**Why CPV flags it**: independent per-plugin cadences inside a single repo give you the downsides of both layouts — one atomic tag does not reflect any individual plugin's version (users can't pin), but plugins still share git history, CI, and release ceremony (per-plugin issues can't be isolated).
+
+**What the non-CPV pattern looks like**:
+```json
+{
+  "plugins": [
+    { "name": "plugin-a", "version": "1.0.0" },
+    { "name": "plugin-b", "version": "2.5.0" },
+    { "name": "plugin-c", "version": "0.3.0" },
+    { "name": "plugin-d", "version": "4.1.0" }
+  ]
+}
+```
+
+(4 distinct `major.minor` pairs: 1.0, 2.5, 0.3, 4.1 — above the 3-drift threshold.)
+
+**Mechanical fix** — there are two options:
+
+**Option A: consolidate versions** (recommended — release the whole marketplace atomically):
+1. Pick a single new version (e.g. `1.0.0` or the highest existing version).
+2. Update **every** `plugins[*].version` in `marketplace.json` to that same value.
+3. Also update each plugin's own `.claude-plugin/plugin.json` `version` field to match.
+4. Bump with `scripts/publish.py --minor` (or `--major`) to tag and push in one atomic commit.
+5. After this step, signal 7 will no longer trigger because there will be exactly 1 distinct `major.minor` pair.
+
+**Option B: split into per-plugin repos** (Layout A):
+1. Use `git subtree split` to extract each plugin into its own repo.
+2. Use the `migrate-marketplace-architecture` skill for the full interactive migration.
+3. Update `marketplace.json` to reference each plugin via `{ "source": { "source": "github", "repo": "owner/plugin-a" } }`.
+
+See `skills/migrate-marketplace-architecture/` for the full Layout A / Layout B migration procedures — this section only covers the simpler mechanical fixes.
 
 ---
 

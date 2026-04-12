@@ -640,6 +640,134 @@ root cause, and step-by-step fix instructions.
    ---
    ```
 
+### MAJOR: Plugin-shipped agent has forbidden field
+
+**Error message**: `Field '<hooks|mcpServers|permissionMode>' is not supported for plugin-shipped agents`
+**Severity**: MAJOR
+**File**: `agents/<filename>.md`
+**Source**: `cpv_validation_common.validate_plugin_shipped_restrictions()` — called from `validate_agent.py` and `validate_plugin.py`
+**Root cause**: Per the plugins-reference security rule: "For security reasons, `hooks`, `mcpServers`, and `permissionMode` are not supported for plugin-shipped agents." These fields only make sense for user-defined agents where the user has explicit control over what runs.
+
+The three forbidden fields are:
+- `hooks` — would let an agent install its own hook handlers
+- `mcpServers` — would let an agent launch arbitrary MCP servers
+- `permissionMode` — would let an agent change its own permission posture (e.g., `dangerouslySkipPermissions`)
+
+**Fix**: Remove the forbidden field from the agent's frontmatter:
+```markdown
+---
+name: my-agent
+description: ...
+# REMOVE all of these from plugin-shipped agents:
+# hooks: ...
+# mcpServers: ...
+# permissionMode: ...
+---
+```
+
+If the agent genuinely needs one of these capabilities, it should NOT be shipped inside a plugin — move it to `~/.claude/agents/` where the user installs it manually.
+
+### Monitor tool acceptance (v2.1.98)
+
+**Error message**: (no error — Monitor is now a valid tool name as of v2.1.98)
+**Severity**: INFO (not flagged)
+**Source**: `cpv_validation_common.VALID_TOOLS`
+
+The `Monitor` tool runs a command in the background and feeds each output line to Claude. It uses the same permission semantics as `Bash` (runs arbitrary shell commands). As of v2.1.98, `Monitor` is recognised in agent `tools:` lists alongside `Bash`, `Read`, `Edit`, and the rest of the standard tool names.
+
+**Strict-mode restriction** (applies to skills only — see [skill-fixes.md](skill-fixes.md) §3): unscoped `Monitor` is forbidden in strict mode, just like unscoped `Bash`. Use scoped forms:
+```yaml
+allowed-tools:
+  - Monitor(git:*)
+  - Monitor(npm:run:*)
+```
+
+### WARNING: TaskOutput tool is deprecated
+
+**Error message**: `Tool 'TaskOutput' is deprecated — prefer Read on the task's output file path`
+**Severity**: WARNING
+**File**: `agents/<filename>.md` or `skills/*/SKILL.md`
+**Source**: `validate_agent.py` and `validate_skill_comprehensive.py`
+**Root cause**: `TaskOutput` was introduced in v2.1.71 but has since been deprecated. Agents and skills should read the task's output file path directly with `Read` instead.
+
+**Fix**:
+```yaml
+# WRONG — uses deprecated TaskOutput
+tools: [Read, TaskOutput]
+
+# RIGHT — use Read on the output file path
+tools: [Read]
+```
+
+Read the task's output file path from whichever agent/tool exposed it, then use `Read` to pull the contents. This works across all tool chains and does not bind you to a deprecated tool name.
+
+### WARNING: Task tool was renamed to Agent in v2.1.63
+
+**Error message**: `Tool 'Task' was renamed to 'Agent' in v2.1.63; 'Task' still works as an alias`
+**Severity**: WARNING
+**File**: `agents/<filename>.md` or `skills/*/SKILL.md`
+**Source**: `validate_agent.py` and `validate_skill_comprehensive.py`
+**Root cause**: The tool formerly known as `Task` is now called `Agent`. Both names still work — `Task` is an alias.
+
+**Fix**: Update to the new name when you touch the file next:
+```yaml
+# Before (still works):
+tools: [Read, Task]
+
+# After (recommended):
+tools: [Read, Agent]
+```
+
+### WARNING: Legacy tool not in current tools-reference spec
+
+**Error message**: `Tool '<TodoRead|Notebook|MultiEdit>' is not in the current tools-reference spec. Verify existence before shipping.`
+**Severity**: WARNING
+**Source**: `validate_agent.py` and `validate_skill_comprehensive.py`
+**Root cause**: `TodoRead`, `Notebook`, and `MultiEdit` are legacy tool names that are no longer listed in the canonical `tools-reference`. They may still work on older Claude Code builds but should not be relied upon for new plugins.
+
+**Fix**:
+- `TodoRead` → use `TaskList` or `TaskGet`
+- `Notebook` → use `NotebookEdit`
+- `MultiEdit` → use `Edit` (current `Edit` tool supports one surgical change per call; for multiple changes, call `Edit` multiple times)
+
+### WARNING: Legacy agent frontmatter fields
+
+**Error message**: `Field '<capabilities|context|agent|user-invocable|system-prompt>' is legacy and may not be honored`
+**Severity**: WARNING
+**File**: `agents/<filename>.md`
+**Source**: `validate_agent.py`
+**Root cause**: The following fields are accepted but not part of the current agent spec as of v2.8.2+:
+- `capabilities` — superseded by `tools`
+- `context` — only meaningful in some enterprise configurations
+- `agent` — meaningful only with `context: fork`
+- `user-invocable` — meaningful only on skills (via `disable-model-invocation`)
+- `system-prompt` — agents use the markdown body as their system prompt; this field is redundant
+
+**Fix**: Remove these fields unless you have a specific reason to keep them. If CPV reports them as WARNINGs you are free to leave them in place — they will not cause validation to fail — but newer plugins should avoid them.
+
+### submodule detection INFO
+
+**Error message**: `Plugin is a submodule of <parent path>. Parent repo CI will not run this plugin's pipeline automatically.`
+**Severity**: INFO
+**Source**: `validate_plugin.py::validate_submodule_containment()`
+**Root cause**: The plugin lives inside a parent repository as a git submodule. Parent repos do NOT run their submodules' CI automatically — the plugin's own release pipeline must be triggered independently.
+
+**Fix**: This is informational only. No action is required. However, you should know:
+- `git push` inside the submodule updates the submodule repo, NOT the parent repo's reference to it.
+- The parent repo still points at the previous submodule commit until you explicitly `git submodule update --remote` and commit that change in the parent.
+- The plugin's own CI (release pipeline, validation, publish) must be configured and triggered separately from the parent's CI.
+
+If you want the parent repo to pick up submodule changes automatically, configure a repository_dispatch workflow — see `scripts/notify-marketplace.yml` template in canonical-pipeline.
+
+### language detection INFO
+
+**Error message**: `Detected project languages: <summary>` or `No language markers detected (pyproject.toml, package.json, Cargo.toml, etc.)`
+**Severity**: INFO
+**Source**: `validate_plugin.py::validate_project_languages()`
+**Root cause**: Informational — the validator lists which languages it detected in the plugin based on marker files (`pyproject.toml`, `package.json`, `Cargo.toml`, `go.mod`, etc.). This is used to decide which linters to run.
+
+**Fix**: No action required. If a language you use is missing from the summary, add the canonical marker file so CPV can find it (e.g., `pyproject.toml` for Python, `go.mod` for Go).
+
 ---
 
 ## 5. Hook Configuration Issues
