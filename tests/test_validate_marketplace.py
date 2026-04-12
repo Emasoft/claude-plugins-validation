@@ -942,6 +942,124 @@ class TestValidateMarketplaceIntegration:
         ]
         assert not source_type_issues, f"Shorthand './path' must be accepted, got: {[r.message for r in source_type_issues]}"
 
+    def test_recommend_restructure_fires_on_wshobson_style_marketplace(self, tmp_path):
+        """A nested-monorepo marketplace with no tags/CHANGELOG/CI/publish.py and
+        mixed authorship must trigger the architecture WARNING recommending
+        migration to Layout A or Layout B with full release ceremony.
+        """
+        from validate_marketplace import validate_marketplace
+
+        # Build a marketplace with 4 nested plugins, 3 different authors, 4
+        # different major.minor versions, and NO tags/CHANGELOG/CI/publish.py.
+        plugins_dir = tmp_path / "plugins"
+        plugins_dir.mkdir()
+        specs = [
+            ("plugin-a", "1.0.0", "Alice"),
+            ("plugin-b", "1.5.0", "Bob"),
+            ("plugin-c", "2.3.0", "Alice"),
+            ("plugin-d", "0.7.0", "Charlie"),
+        ]
+        for name, version, author_name in specs:
+            pdir = plugins_dir / name
+            pdir.mkdir()
+            (pdir / ".claude-plugin").mkdir()
+            (pdir / ".claude-plugin" / "plugin.json").write_text(
+                json.dumps({"name": name, "version": version})
+            )
+
+        mp = tmp_path / "marketplace.json"
+        mp.write_text(
+            json.dumps(
+                {
+                    "name": "community-monorepo",
+                    "owner": {"name": "Lead Maintainer"},
+                    "plugins": [
+                        {
+                            "name": name,
+                            "source": f"./plugins/{name}",
+                            "version": version,
+                            "author": {"name": author_name},
+                        }
+                        for name, version, author_name in specs
+                    ],
+                }
+            )
+        )
+        # Intentionally NO:
+        #   - .github/workflows/
+        #   - scripts/publish.py
+        #   - CHANGELOG.md
+        #   - cliff.toml
+        #   - git tags (no git init)
+
+        report = validate_marketplace(tmp_path)
+        arch_warnings = [
+            r
+            for r in report.results
+            if r.category == "architecture"
+            and "nested monorepo" in (r.message or "")
+        ]
+        assert len(arch_warnings) >= 1, (
+            "Expected a CPV architecture warning for the wshobson-style pattern. "
+            f"Categories present: {[r.category for r in report.results]}"
+        )
+        # The warning should mention at least 3 of the 7 problem signals
+        warning_msg = arch_warnings[0].message or ""
+        assert "no CHANGELOG" in warning_msg
+        assert "mixed authorship" in warning_msg or "different authors" in warning_msg
+        assert "Layout A" in warning_msg and "Layout B" in warning_msg
+
+    def test_recommend_restructure_does_not_fire_on_clean_layout_b(self, tmp_path):
+        """A clean Layout B marketplace with CI, CHANGELOG, cliff.toml, and single
+        author must NOT trigger the architecture warning.
+        """
+        from validate_marketplace import validate_marketplace
+
+        plugins_dir = tmp_path / "plugins"
+        plugins_dir.mkdir()
+        for name in ["alpha", "beta", "gamma"]:
+            pdir = plugins_dir / name
+            pdir.mkdir()
+            (pdir / ".claude-plugin").mkdir()
+            (pdir / ".claude-plugin" / "plugin.json").write_text(
+                json.dumps({"name": name, "version": "1.0.0"})
+            )
+
+        # Add all the discipline-enforcing pieces
+        (tmp_path / "CHANGELOG.md").write_text("# Changelog\n\n## [1.0.0]\n")
+        (tmp_path / "cliff.toml").write_text("[changelog]\n")
+        (tmp_path / "scripts").mkdir()
+        (tmp_path / "scripts" / "publish.py").write_text("#!/usr/bin/env python3\n")
+        wf_dir = tmp_path / ".github" / "workflows"
+        wf_dir.mkdir(parents=True)
+        (wf_dir / "validate.yml").write_text("name: Validate\non: push\n")
+
+        mp = tmp_path / "marketplace.json"
+        mp.write_text(
+            json.dumps(
+                {
+                    "name": "clean-mkt",
+                    "owner": {"name": "Solo Dev"},
+                    "plugins": [
+                        {
+                            "name": n,
+                            "source": f"./plugins/{n}",
+                            "version": "1.0.0",
+                            "author": {"name": "Solo Dev"},
+                        }
+                        for n in ["alpha", "beta", "gamma"]
+                    ],
+                }
+            )
+        )
+
+        report = validate_marketplace(tmp_path)
+        arch_warnings = [r for r in report.results if r.category == "architecture"]
+        assert not arch_warnings, (
+            f"Clean Layout B should not trigger architecture warnings, got: "
+            f"{[r.message[:100] for r in arch_warnings]}"
+        )
+
     def test_layout_a_github_source_still_works(self, tmp_path):
         """Layout A: github source must still validate without needing a local directory."""
         from validate_marketplace import validate_marketplace

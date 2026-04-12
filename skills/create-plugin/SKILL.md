@@ -97,7 +97,7 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/generate_marketplace_repo.py" /tmp/my-mkt 
 - [v2.1.80+ Plugin Features](references/v2-1-80-features.md)
   > Monitor tool · userConfig (plugin.json) · channels (plugin.json) · CLAUDE_PLUGIN_OPTION_<KEY> env vars · Inline marketplace (settings.json) · managed-settings.d/ drop-in directory · Plugin skill `name` field (v2.1.98)
 - [Marketplace Layouts](references/marketplace-layouts.md)
-  > Overview · Layout A — Hub-and-Spoke (separate repos) · Layout B — Nested single-repo (monorepo) · How Claude Code updates plugins in each layout · When to choose which · Refactoring between layouts · Agent behavior summary
+  > Overview · Layout A — Hub-and-Spoke (separate repos) · Layout B — Nested single-repo (monorepo) · How Claude Code updates plugins in each layout · When to choose which · Rich metadata fields (author, homepage, license, category) · Why CPV does not use git-subdir · Encountering a non-CPV marketplace · Refactoring between layouts · Agent behavior summary
 
 ## Token Optimization
 
