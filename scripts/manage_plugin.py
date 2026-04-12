@@ -566,6 +566,7 @@ def do_install(
     quiet: bool = False,
     plugin_dir: Optional[str] = None,
     follow_symlinks: bool = False,
+    dev_link: bool = False,
 ):
     if dry_run and not quiet:
         info("DRY RUN — no files will be modified")
@@ -714,9 +715,37 @@ def do_install(
                 print(f"\n  {CYAN}Run without --dry-run to install.{NC}")
             return
 
-        # Copy plugin to marketplace
+        # Copy plugin to marketplace (or symlink in --dev-link mode)
         skipped_symlinks: List[Path] = []
-        if is_directory:
+        if dev_link:
+            if not is_directory:
+                err("--dev-link requires a directory source, not an archive.")
+                sys.exit(1)
+            dest_plugin_dir.parent.mkdir(parents=True, exist_ok=True)
+            # Create directory symlink pointing at the live source
+            try:
+                os.symlink(plugin_root.resolve(), dest_plugin_dir, target_is_directory=True)
+            except OSError as e:
+                err(f"Failed to create dev-link symlink: {e}")
+                if os.name == "nt":
+                    err("On Windows, dev-link requires Developer Mode or admin privileges.")
+                sys.exit(1)
+            # Sentinel file — marks this as a dev-link so uninstall/update handle it specially
+            sentinel = mp_dir / "plugins" / f".cpv-devlink-{plugin_name}.json"
+            sentinel.write_text(
+                json.dumps(
+                    {
+                        "source_path": str(plugin_root.resolve()),
+                        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        "installer_version": TOOL_VERSION,
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            if not quiet:
+                ok(f"Dev-linked plugin via symlink -> {plugin_root.resolve()}")
+        elif is_directory:
             _copy_plugin_from_dir(
                 plugin_root,
                 dest_plugin_dir,
@@ -730,7 +759,8 @@ def do_install(
         else:
             dest_plugin_dir.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(plugin_root, dest_plugin_dir, symlinks=not follow_symlinks)
-        _fix_permissions(dest_plugin_dir)
+        if not dev_link:
+            _fix_permissions(dest_plugin_dir)
         if not quiet:
             if is_directory:
                 ok("Plugin copied to marketplace (respecting .gitignore)")
@@ -859,14 +889,27 @@ def do_uninstall(plugin_key: str, quiet: bool = False, dry_run: bool = False):
     if not quiet:
         info(f"Uninstalling {plugin_name} from marketplace {marketplace_name}...")
 
-    if plug_dir.exists():
+    # Check for --dev-link sentinel; if present, unlink only (don't rm the live source)
+    sentinel = mp_dir / "plugins" / f".cpv-devlink-{plugin_name}.json"
+    is_devlink = sentinel.exists() or (plug_dir.exists() and plug_dir.is_symlink())
+
+    if plug_dir.exists() or plug_dir.is_symlink():
         try:
-            shutil.rmtree(plug_dir)
+            if is_devlink:
+                # Unlink the symlink only — preserve the live source tree
+                if plug_dir.is_symlink():
+                    plug_dir.unlink()
+                if sentinel.exists():
+                    sentinel.unlink()
+                if not quiet:
+                    ok("Unlinked dev-link symlink (source tree preserved)")
+            else:
+                shutil.rmtree(plug_dir)
+                if not quiet:
+                    ok("Removed plugin directory")
         except OSError as e:
             err(f"Failed to remove plugin directory: {e}")
             sys.exit(1)
-        if not quiet:
-            ok("Removed plugin directory")
     else:
         warn(f"Plugin directory not found: {plug_dir}")
 
@@ -1224,6 +1267,90 @@ def do_update(
         info(f"Updated from v{old_version} -> v{meta['version']}")
 
 
+# ── Link plugin to an existing marketplace.json ────────────
+
+
+def do_link_plugin(
+    marketplace_path: str,
+    plugin_spec: str,
+    dry_run: bool = False,
+    quiet: bool = False,
+) -> None:
+    """Append a plugin entry to an existing marketplace.json.
+
+    plugin_spec forms:
+      - ./path/to/plugin  (relative local path)
+      - /abs/path         (absolute local path -> converted to relative)
+      - owner/repo        (GitHub source)
+    """
+    mkt_root = Path(marketplace_path).resolve()
+    mkt_json = mkt_root / ".claude-plugin" / "marketplace.json"
+    if not mkt_json.exists():
+        mkt_json_alt = mkt_root / "marketplace.json"
+        if mkt_json_alt.exists():
+            mkt_json = mkt_json_alt
+        else:
+            err(f"marketplace.json not found at {mkt_json}")
+            sys.exit(1)
+
+    mj = load_json_safe(mkt_json)
+    plugins_list = mj.setdefault("plugins", [])
+
+    # Resolve plugin_spec → source entry
+    entry: dict
+    if "/" in plugin_spec and not plugin_spec.startswith(("./", "/", "../")):
+        # owner/repo form
+        if plugin_spec.count("/") != 1:
+            err(f"Invalid github spec '{plugin_spec}' — expected owner/repo")
+            sys.exit(1)
+        _owner, repo_name = plugin_spec.split("/", 1)
+        entry = {
+            "name": repo_name,
+            "source": {"source": "github", "repo": plugin_spec},
+        }
+    else:
+        # Local path form
+        src = Path(plugin_spec).resolve()
+        if not src.exists():
+            err(f"Local plugin path not found: {src}")
+            sys.exit(1)
+        plug_json = src / ".claude-plugin" / "plugin.json"
+        if not plug_json.exists():
+            err(f"plugin.json not found at {plug_json}")
+            sys.exit(1)
+        pmeta = load_json_safe(plug_json)
+        pname = pmeta.get("name")
+        if not pname:
+            err(f"plugin.json at {plug_json} has no 'name' field")
+            sys.exit(1)
+        try:
+            rel = src.relative_to(mkt_root)
+            rel_str = f"./{rel}"
+        except ValueError:
+            rel_str = str(src)
+        entry = {
+            "name": pname,
+            "description": pmeta.get("description", ""),
+            "version": pmeta.get("version", ""),
+            "source": rel_str,
+        }
+
+    existing_names = {p.get("name") for p in plugins_list}
+    if entry["name"] in existing_names:
+        warn(f"Plugin '{entry['name']}' already in marketplace — replacing entry")
+        plugins_list[:] = [p for p in plugins_list if p.get("name") != entry["name"]]
+    plugins_list.append(entry)
+
+    if dry_run:
+        if not quiet:
+            info(f"DRY RUN — would append: {json.dumps(entry, indent=2)}")
+        return
+
+    save_json_safe(mkt_json, mj, dry_run=False)
+    if not quiet:
+        ok(f"Linked '{entry['name']}' into marketplace at {mkt_json}")
+
+
 # ── CLI entry point ───────────────────────────────────────
 
 
@@ -1253,11 +1380,26 @@ def main():
         action="store_true",
         help="Follow symlinks and copy their target contents (default: skip symlinks with a warning)",
     )
+    parser.add_argument(
+        "--dev-link",
+        action="store_true",
+        help="Create a symlink from the marketplace dir to the live source (dev mode, reflects edits)",
+    )
+    parser.add_argument(
+        "--link-plugin",
+        nargs=2,
+        metavar=("MARKETPLACE_PATH", "PLUGIN_SPEC"),
+        help="Append a plugin entry to an existing marketplace.json (PLUGIN_SPEC is ./path OR owner/repo)",
+    )
     parser.add_argument("--version", action="store_true", help="Show version")
     args = parser.parse_args()
 
     if args.version:
         print(f"manage_plugin.py v{TOOL_VERSION}")
+        return
+    if args.link_plugin:
+        mkt_path_arg, plug_spec = args.link_plugin
+        do_link_plugin(mkt_path_arg, plug_spec, dry_run=args.dry_run, quiet=args.quiet)
         return
     if args.uninstall:
         do_uninstall(args.uninstall, quiet=args.quiet, dry_run=args.dry_run)
@@ -1287,6 +1429,7 @@ def main():
             quiet=args.quiet,
             plugin_dir=args.plugin_dir,
             follow_symlinks=args.follow_symlinks,
+            dev_link=args.dev_link,
         )
     else:
         parser.print_help()
