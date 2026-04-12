@@ -2,6 +2,16 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.12] - 2026-04-12
+
+### Bug Fixes
+
+- Audit findings + legacy warnings + marketplace schema drift + fixer hints
+
+### Documentation
+
+- Add 5 TRDDs for deferred workflow improvements
+
 ## [2.12.11] - 2026-04-12
 
 ### Features
