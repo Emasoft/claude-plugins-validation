@@ -56,6 +56,9 @@ NC = "\033[0m" if _USE_COLOR else ""
 # =============================================================================
 
 
+VALID_LANGUAGES = {"python", "js", "ts", "rust", "go", "deno"}
+
+
 @dataclass
 class PluginParams:
     """All parameters needed to scaffold a plugin repository."""
@@ -69,6 +72,7 @@ class PluginParams:
     github_owner: str = ""
     marketplace: str = ""
     version: str = "0.1.0"
+    language: str = "python"  # One of VALID_LANGUAGES
 
     @property
     def repo_name(self) -> str:
@@ -79,6 +83,94 @@ class PluginParams:
     def github_url(self) -> str:
         """Full GitHub URL for the plugin."""
         return f"https://github.com/{self.github_owner}/{self.repo_name}"
+
+
+# =============================================================================
+# LANGUAGE-SPECIFIC MANIFEST GENERATORS
+# =============================================================================
+
+
+def gen_package_json(p: PluginParams) -> str:
+    """Generate package.json for JS/TS plugins."""
+    dev_deps: dict[str, str] = {"eslint": "^9.0.0"}
+    if p.language == "ts":
+        dev_deps["typescript"] = "^5.0.0"
+    manifest: dict[str, object] = {
+        "name": p.name,
+        "version": p.version,
+        "description": p.description,
+        "author": f"{p.author} <{p.author_email}>",
+        "license": p.license,
+        "type": "module",
+        "scripts": {
+            "lint": "eslint scripts/" if p.language == "js" else "eslint scripts/ && tsc --noEmit",
+            "test": "vitest run",
+        },
+        "devDependencies": dev_deps,
+    }
+    if p.github_owner:
+        manifest["homepage"] = p.github_url
+        manifest["repository"] = {"type": "git", "url": f"{p.github_url}.git"}
+    return json.dumps(manifest, indent=2) + "\n"
+
+
+def gen_tsconfig_json() -> str:
+    """Generate tsconfig.json for TypeScript plugins."""
+    return json.dumps(
+        {
+            "compilerOptions": {
+                "target": "ES2022",
+                "module": "ESNext",
+                "moduleResolution": "bundler",
+                "strict": True,
+                "esModuleInterop": True,
+                "skipLibCheck": True,
+                "noEmit": True,
+            },
+            "include": ["scripts/**/*.ts"],
+        },
+        indent=2,
+    ) + "\n"
+
+
+def gen_cargo_toml(p: PluginParams) -> str:
+    """Generate Cargo.toml for Rust plugins."""
+    return f"""[package]
+name = "{p.name}"
+version = "{p.version}"
+edition = "2021"
+authors = ["{p.author} <{p.author_email}>"]
+description = "{p.description}"
+license = "{p.license}"
+
+[dependencies]
+"""
+
+
+def gen_go_mod(p: PluginParams) -> str:
+    """Generate go.mod for Go plugins."""
+    module = f"github.com/{p.github_owner}/{p.repo_name}" if p.github_owner else p.name
+    return f"""module {module}
+
+go 1.22
+"""
+
+
+def gen_deno_json(p: PluginParams) -> str:
+    """Generate deno.json for Deno plugins."""
+    return json.dumps(
+        {
+            "name": f"@{p.github_owner or 'local'}/{p.name}",
+            "version": p.version,
+            "exports": "./scripts/mod.ts",
+            "tasks": {
+                "lint": "deno lint scripts/",
+                "test": "deno test",
+                "fmt": "deno fmt scripts/",
+            },
+        },
+        indent=2,
+    ) + "\n"
 
 
 # =============================================================================
@@ -1465,34 +1557,94 @@ def generate_all_files(p: PluginParams) -> list[tuple[str, str, bool]]:
     files: list[tuple[str, str, bool]] = [
         # Manifest
         (".claude-plugin/plugin.json", gen_plugin_json(p), False),
-        # Project config
-        ("pyproject.toml", gen_pyproject_toml(p), False),
-        (".python-version", gen_python_version(p), False),
         (".gitignore", gen_gitignore(p), False),
+    ]
+    # Language-specific project config
+    if p.language == "python":
+        files.extend([
+            ("pyproject.toml", gen_pyproject_toml(p), False),
+            (".python-version", gen_python_version(p), False),
+        ])
+    elif p.language in ("js", "ts"):
+        files.append(("package.json", gen_package_json(p), False))
+        if p.language == "ts":
+            files.append(("tsconfig.json", gen_tsconfig_json(), False))
+    elif p.language == "rust":
+        files.append(("Cargo.toml", gen_cargo_toml(p), False))
+    elif p.language == "go":
+        files.append(("go.mod", gen_go_mod(p), False))
+    elif p.language == "deno":
+        files.append(("deno.json", gen_deno_json(p), False))
+    files.extend([
         # Documentation
         ("README.md", gen_readme(p), False),
         ("LICENSE", gen_license_mit(p), False),
         # Changelog config
         ("cliff.toml", gen_cliff_toml(p), False),
-        # Scripts
-        ("scripts/__init__.py", gen_scripts_init(p), False),
-        ("scripts/publish.py", gen_publish_py(p), True),
-        ("scripts/setup-hooks.py", gen_setup_hooks_py(), True),
-        # Claude Code hooks — installs deps into ${CLAUDE_PLUGIN_DATA} on SessionStart
-        ("hooks/hooks.json", gen_hooks_json(p), False),
-        # Git hooks
-        ("git-hooks/pre-push", gen_pre_push_hook(p), True),
-        # Mega-Linter config
-        (".mega-linter.yml", gen_mega_linter_yml(p), False),
-        # CI/CD workflows
-        (".github/workflows/ci.yml", gen_ci_yml(p), False),
-        (".github/workflows/release.yml", gen_release_yml(p), False),
-        (".github/workflows/validate.yml", gen_validate_yml(p), False),
-        (".github/workflows/notify-marketplace.yml", gen_notify_marketplace_yml(p), False),
-        # Test suite placeholder
-        ("tests/__init__.py", gen_tests_init(), False),
-    ]
+    ])
+    # Python-specific scripts + CI/CD — only emitted for python language for now.
+    # Non-python plugins get a minimal scaffold and must provide their own CI.
+    if p.language == "python":
+        files.extend([
+            ("scripts/__init__.py", gen_scripts_init(p), False),
+            ("scripts/publish.py", gen_publish_py(p), True),
+            ("scripts/setup-hooks.py", gen_setup_hooks_py(), True),
+            ("hooks/hooks.json", gen_hooks_json(p), False),
+            ("git-hooks/pre-push", gen_pre_push_hook(p), True),
+            (".mega-linter.yml", gen_mega_linter_yml(p), False),
+            (".github/workflows/ci.yml", gen_ci_yml(p), False),
+            (".github/workflows/release.yml", gen_release_yml(p), False),
+            (".github/workflows/validate.yml", gen_validate_yml(p), False),
+            (".github/workflows/notify-marketplace.yml", gen_notify_marketplace_yml(p), False),
+            ("tests/__init__.py", gen_tests_init(), False),
+        ])
+    else:
+        # Minimal non-python scaffold — leaves CI/publish to the plugin author,
+        # but ships a README section explaining the expected commands.
+        files.append((
+            f"LANGUAGE-{p.language.upper()}-TODO.md",
+            gen_language_todo(p),
+            False,
+        ))
     return files
+
+
+def gen_language_todo(p: PluginParams) -> str:
+    """Generate a TODO note for non-python plugins explaining what to add."""
+    return f"""# TODO: Wire up CI/CD for `{p.language}` plugin
+
+This plugin was scaffolded with `--language {p.language}`. CPV's Python
+scaffold (pyproject.toml, pytest, ruff, publish.py, pre-push hook) was
+skipped because it does not apply to your language.
+
+## What you still need to add
+
+1. A lint command (e.g. `eslint`, `cargo clippy`, `golangci-lint`, `deno lint`)
+2. A test runner (e.g. `vitest`, `cargo test`, `go test`, `deno test`)
+3. A publish/release script that bumps the version in both `plugin.json` AND
+   your language manifest (`package.json`, `Cargo.toml`, `go.mod`, `deno.json`)
+4. A pre-push git hook that runs lint + tests + CPV validation before pushing
+5. GitHub Actions workflows for CI + release
+
+## CPV validates all plugins regardless of language
+
+You can still run `validate_plugin.py` against this plugin — it will check:
+- plugin.json manifest
+- commands/, agents/, skills/, hooks/ structure
+- No hardcoded secrets or personal paths
+- Cross-references in all .md files
+
+Run this from the CPV plugin directory:
+```bash
+uv run python scripts/validate_plugin.py {p.name} --strict
+```
+
+## Monitor, userConfig, channels, CLAUDE_PLUGIN_OPTION_*
+
+All v2.1.80+ plugin features work regardless of language.
+See `skills/canonical-pipeline/references/v2-1-80-features.md` in the CPV
+plugin for schemas and examples.
+"""
 
 
 # =============================================================================
@@ -1586,6 +1738,12 @@ Examples:
     parser.add_argument("--github-owner", default="", help="GitHub account or organization name")
     parser.add_argument("--marketplace", default="", help="Marketplace name for install commands")
     parser.add_argument("--version", default="0.1.0", help="Initial version (default: 0.1.0)")
+    parser.add_argument(
+        "--language",
+        choices=sorted(VALID_LANGUAGES),
+        default="python",
+        help="Plugin language (default: python). Non-python emits a minimal scaffold.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Preview files without writing")
 
     args = parser.parse_args()
@@ -1601,6 +1759,7 @@ Examples:
         github_owner=args.github_owner,
         marketplace=args.marketplace,
         version=args.version,
+        language=args.language,
     )
 
     target = args.target_dir.resolve()

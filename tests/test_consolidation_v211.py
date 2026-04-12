@@ -64,10 +64,14 @@ AGENT_COMMANDS = {
 class TestCommandCount:
     """Verify total command count after consolidation."""
 
-    def test_total_command_count_is_13(self):
-        """commands/ directory should contain exactly 13 .md files."""
+    def test_total_command_count_is_15(self):
+        """commands/ directory should contain exactly 15 .md files.
+
+        Originally 13 after consolidation (8 direct + 5 agent).
+        v2.12.13 added: cpv-link-plugin, cpv-validate-settings-marketplace.
+        """
         md_files = list(COMMANDS_DIR.glob("*.md"))
-        assert len(md_files) == 13, f"Expected 13 commands, found {len(md_files)}: {sorted(f.name for f in md_files)}"
+        assert len(md_files) == 15, f"Expected 15 commands, found {len(md_files)}: {sorted(f.name for f in md_files)}"
 
 
 class TestDirectScriptCommands:
