@@ -284,6 +284,7 @@ VALID_TOOLS = {
     "CronList",  # v2.1.71
     "LSP",
     "Agent",
+    "Monitor",  # v2.1.98 — run command in background, feed each output line to Claude (same permissions as Bash)
     "PowerShell",  # v2.1.84 — Windows opt-in preview (CLAUDE_CODE_USE_POWERSHELL_TOOL=1)
     "ListMcpResourcesTool",  # Lists MCP server resources
     "ReadMcpResourceTool",  # Reads a specific MCP resource by URI
@@ -325,7 +326,23 @@ VALID_PLUGIN_ENV_VARS = {
     "CLAUDE_CODE_MCP_SERVER_NAME",  # v2.1.85 — MCP server name, available in headersHelper scripts
     "CLAUDE_CODE_MCP_SERVER_URL",  # v2.1.85 — MCP server URL, available in headersHelper scripts
     "CLAUDE_SKILL_DIR",  # Skill's own directory — for skills to reference their own files in SKILL.md
+    "CLAUDE_SESSION_ID",  # Current session ID (skills.md — string substitution)
+    "CLAUDECODE",  # Set to "1" in shells spawned by Claude Code (env-vars.md)
+    "TRACEPARENT",  # W3C trace context propagated to Bash/PowerShell subprocesses when tracing active (monitoring-usage.md)
 }
+
+# Env var name pattern matching for dynamic plugin env vars
+# CLAUDE_PLUGIN_OPTION_<KEY> — exported for each userConfig key in plugin.json (v2.1.98)
+PLUGIN_ENV_VAR_PATTERNS = (
+    re.compile(r"^CLAUDE_PLUGIN_OPTION_[A-Z][A-Z0-9_]*$"),
+)
+
+
+def is_valid_plugin_env_var(name: str) -> bool:
+    """Check if an env var name is a recognized plugin env var (exact or pattern match)."""
+    if name in VALID_PLUGIN_ENV_VARS:
+        return True
+    return any(p.match(name) for p in PLUGIN_ENV_VAR_PATTERNS)
 
 # Directories to skip when scanning (cache dirs, hidden dirs, etc.)
 SKIP_DIRS = {

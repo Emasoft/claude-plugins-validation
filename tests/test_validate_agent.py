@@ -1016,3 +1016,137 @@ class TestValidateModelFieldFullIds:
         report = AgentValidationReport()
         validate_model_field({"model": "claude-sonnet-4-6"}, "agent.md", report)
         assert not report.has_major
+
+
+# ---------------------------------------------------------------------------
+# Plugin-shipped agent restrictions (plugins-reference.md)
+# ---------------------------------------------------------------------------
+
+
+class TestPluginShippedAgentRestrictions:
+    """Tests for plugin-shipped agent field restrictions.
+
+    Per plugins-reference.md: hooks, mcpServers, and permissionMode are not
+    supported for plugin-shipped agents for security reasons.
+    """
+
+    def _make_plugin_agent(self, tmp_path: Path, frontmatter_yaml: str) -> Path:
+        """Create a plugin-shaped directory tree with an agent file and return its path."""
+        plugin_root = tmp_path / "my-plugin"
+        (plugin_root / ".claude-plugin").mkdir(parents=True)
+        (plugin_root / ".claude-plugin" / "plugin.json").write_text(
+            '{"name": "my-plugin", "version": "0.1.0"}',
+            encoding="utf-8",
+        )
+        agents_dir = plugin_root / "agents"
+        agents_dir.mkdir()
+        agent_file = agents_dir / "test-agent.md"
+        body = (
+            "\n\n# Test Agent\n\nThis agent is used for plugin-shipped restriction tests. "
+            "It contains a sufficiently long body with real content so that body-content "
+            "validation passes without flagging minimum-length issues.\n\n"
+            "<example>\nuser: Do a thing\nassistant: I will do the thing.\n"
+            "<commentary>This example demonstrates the agent's purpose.</commentary>\n"
+            "</example>\n\n<example>\nuser: Do another thing\n"
+            "assistant: I will do the other thing.\n"
+            "<commentary>Second example.</commentary>\n</example>\n"
+        )
+        agent_file.write_text(f"---\n{frontmatter_yaml}---\n{body}", encoding="utf-8")
+        return agent_file
+
+    def test_plugin_agent_with_hooks_reports_major(self, tmp_path: Path):
+        """validate_agent reports MAJOR when a plugin-shipped agent defines 'hooks'."""
+        fm = (
+            "name: test-agent\n"
+            "description: Use when testing plugin-shipped restrictions to ensure forbidden fields are flagged.\n"
+            "hooks:\n"
+            "  PreToolUse:\n"
+            "    - type: command\n"
+            "      command: echo hi\n"
+        )
+        agent_file = self._make_plugin_agent(tmp_path, fm)
+        report = validate_agent(agent_file)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("'hooks' is not supported for plugin-shipped agents" in m for m in major_msgs)
+
+    def test_plugin_agent_with_mcp_servers_reports_major(self, tmp_path: Path):
+        """validate_agent reports MAJOR when a plugin-shipped agent defines 'mcpServers'."""
+        fm = (
+            "name: test-agent\n"
+            "description: Use when testing plugin-shipped restrictions to ensure forbidden fields are flagged.\n"
+            "mcpServers:\n"
+            "  - serena\n"
+        )
+        agent_file = self._make_plugin_agent(tmp_path, fm)
+        report = validate_agent(agent_file)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("'mcpServers' is not supported for plugin-shipped agents" in m for m in major_msgs)
+
+    def test_plugin_agent_with_permission_mode_reports_major(self, tmp_path: Path):
+        """validate_agent reports MAJOR when a plugin-shipped agent defines 'permissionMode'."""
+        fm = (
+            "name: test-agent\n"
+            "description: Use when testing plugin-shipped restrictions to ensure forbidden fields are flagged.\n"
+            "permissionMode: acceptEdits\n"
+        )
+        agent_file = self._make_plugin_agent(tmp_path, fm)
+        report = validate_agent(agent_file)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("'permissionMode' is not supported for plugin-shipped agents" in m for m in major_msgs)
+
+    def test_standalone_agent_with_hooks_is_allowed(self, tmp_path: Path):
+        """validate_agent does NOT flag hooks for a non-plugin (standalone) agent file."""
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        agent_file = agents_dir / "standalone.md"
+        body = (
+            "\n\n# Standalone Agent\n\nThis agent lives outside of any plugin directory "
+            "so the plugin-shipped restrictions must not apply. The body has enough real "
+            "content for body validation to pass without minimum-length warnings.\n\n"
+            "<example>\nuser: Do a thing\nassistant: I will do the thing.\n"
+            "<commentary>Example one.</commentary>\n</example>\n\n"
+            "<example>\nuser: Do another\nassistant: Done.\n"
+            "<commentary>Example two.</commentary>\n</example>\n"
+        )
+        fm = (
+            "name: standalone\n"
+            "description: Use when testing that standalone agents can define hooks freely.\n"
+            "hooks:\n"
+            "  PreToolUse:\n"
+            "    - type: command\n"
+            "      command: echo hi\n"
+        )
+        agent_file.write_text(f"---\n{fm}---\n{body}", encoding="utf-8")
+        report = validate_agent(agent_file)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not any("not supported for plugin-shipped agents" in m for m in major_msgs)
+
+
+# ---------------------------------------------------------------------------
+# Deprecation warnings: TaskOutput and Task tools
+# ---------------------------------------------------------------------------
+
+
+class TestDeprecatedToolWarnings:
+    """Tests for deprecation warnings on renamed/deprecated tool names."""
+
+    def test_task_output_emits_warning(self):
+        """validate_tools_field emits WARNING for the deprecated TaskOutput tool."""
+        report = AgentValidationReport()
+        validate_tools_field({"tools": ["Read", "TaskOutput"]}, "agent.md", report)
+        warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
+        assert any("TaskOutput" in m and "deprecated" in m for m in warning_msgs)
+
+    def test_task_emits_rename_warning(self):
+        """validate_tools_field emits WARNING when the renamed Task tool is still used."""
+        report = AgentValidationReport()
+        validate_tools_field({"tools": ["Read", "Task"]}, "agent.md", report)
+        warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
+        assert any("Task" in m and "renamed to 'Agent'" in m for m in warning_msgs)
+
+    def test_agent_tool_emits_no_warning(self):
+        """validate_tools_field does NOT emit deprecation warnings for the new Agent tool."""
+        report = AgentValidationReport()
+        validate_tools_field({"tools": ["Read", "Agent"]}, "agent.md", report)
+        warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
+        assert not any("deprecated" in m or "renamed" in m for m in warning_msgs)

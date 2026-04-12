@@ -107,6 +107,36 @@ PLACEHOLDER_PATTERNS = [
     re.compile(r"\[.*FILL.*\]", re.IGNORECASE),
 ]
 
+# Fields forbidden in plugin-shipped agents for security reasons.
+# Per plugins-reference.md: "For security reasons, `hooks`, `mcpServers`,
+# and `permissionMode` are not supported for plugin-shipped agents."
+PLUGIN_SHIPPED_AGENT_FORBIDDEN_FIELDS = ("hooks", "mcpServers", "permissionMode")
+
+
+def is_plugin_shipped_agent(agent_path: Path) -> bool:
+    """Return True if the agent file is shipped inside a Claude Code plugin.
+
+    Heuristic: walk up from the agent file looking for a plugin manifest
+    (`.claude-plugin/plugin.json` or a bare `plugin.json`) within 4 parent
+    directories. This covers both `<plugin>/agents/foo.md` and
+    `<plugin>/agents/subdir/foo.md`.
+    """
+    try:
+        agent_path = agent_path.resolve()
+    except OSError:
+        return False
+
+    current = agent_path.parent
+    for _ in range(4):
+        if (current / ".claude-plugin" / "plugin.json").is_file():
+            return True
+        if (current / "plugin.json").is_file():
+            return True
+        if current.parent == current:
+            break
+        current = current.parent
+    return False
+
 
 @dataclass
 class AgentValidationReport(ValidationReport):
@@ -296,7 +326,47 @@ def validate_tools_field(frontmatter: dict[str, Any], filename: str, report: Age
             filename,
         )
 
+    # Deprecation warnings for renamed/soft-deprecated tools
+    # (kept in VALID_TOOLS — these are still accepted as aliases).
+    for tool in tool_list:
+        base_tool = tool.split("(")[0].strip()
+        if base_tool == "TaskOutput":
+            report.warning(
+                "Tool 'TaskOutput' is deprecated — prefer Read on the task's output file path",
+                filename,
+            )
+        elif base_tool == "Task":
+            report.warning(
+                "Tool 'Task' was renamed to 'Agent' in v2.1.63; 'Task' still works as an alias",
+                filename,
+            )
+
     report.passed(f"'tools' field valid: {len(tool_list)} tool(s)", filename)
+
+
+def validate_plugin_shipped_restrictions(
+    frontmatter: dict[str, Any],
+    filename: str,
+    report: AgentValidationReport,
+    is_plugin_shipped: bool,
+) -> None:
+    """Flag fields forbidden in plugin-shipped agents.
+
+    Per plugins-reference.md: "For security reasons, `hooks`, `mcpServers`,
+    and `permissionMode` are not supported for plugin-shipped agents."
+    Non-plugin agents (user/project) can use all three.
+    """
+    if not is_plugin_shipped:
+        return
+
+    for field in PLUGIN_SHIPPED_AGENT_FORBIDDEN_FIELDS:
+        if field in frontmatter:
+            report.major(
+                f"Field '{field}' is not supported for plugin-shipped agents "
+                "(security restriction per plugins-reference.md). "
+                "Remove it from the frontmatter — it only works in user/project agents.",
+                filename,
+            )
 
 
 def validate_model_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
@@ -1085,6 +1155,12 @@ def validate_agent(agent_path: Path) -> AgentValidationReport:
 
         # Cross-field validations
         validate_task_tool_prohibition(frontmatter, filename, report)
+
+        # Plugin-shipped agent field restrictions
+        # (hooks, mcpServers, permissionMode are forbidden when shipped in a plugin)
+        # Detect whether this agent file is inside a plugin directory.
+        plugin_shipped = is_plugin_shipped_agent(agent_path)
+        validate_plugin_shipped_restrictions(frontmatter, filename, report, plugin_shipped)
 
     # Validate body content
     validate_body_content(content, filename, report)

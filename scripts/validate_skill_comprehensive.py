@@ -810,6 +810,20 @@ def validate_allowed_tools_field(
                 "SKILL.md",
                 category="Frontmatter",
             )
+        # Deprecation warnings for renamed/soft-deprecated tools
+        # (kept in VALID_TOOLS — these are still accepted as aliases).
+        if base_tool == "TaskOutput":
+            report.warning(
+                "Tool 'TaskOutput' is deprecated — prefer Read on the task's output file path",
+                "SKILL.md",
+                category="Frontmatter",
+            )
+        elif base_tool == "Task":
+            report.warning(
+                "Tool 'Task' was renamed to 'Agent' in v2.1.63; 'Task' still works as an alias",
+                "SKILL.md",
+                category="Frontmatter",
+            )
 
     # Nixtla strict mode: forbid unscoped Bash
     if strict_mode and "Bash" in tool_list:
