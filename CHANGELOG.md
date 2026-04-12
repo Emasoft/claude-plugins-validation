@@ -2,6 +2,16 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.15] - 2026-04-12
+
+### Features
+
+- Marketplace validator supports both Layout A and Layout B
+
+### Miscellaneous Tasks
+
+- Sync uv.lock
+
 ## [2.12.14] - 2026-04-12
 
 ### Features
