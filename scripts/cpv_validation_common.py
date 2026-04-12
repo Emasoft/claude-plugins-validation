@@ -221,7 +221,7 @@ VALID_HOOK_EVENTS = {
     "SessionEnd",
     "PreCompact",
     "PostCompact",  # v2.1.76 — fires after compaction completes
-    "Setup",  # Legacy — not in official hooks docs as of v2.1.86, kept for backward compatibility
+    "Setup",  # [legacy — emits WARNING] not in official hooks spec as of v2.1.98, kept for backward compatibility
     "TeammateIdle",
     "TaskCompleted",
     "ConfigChange",
@@ -275,9 +275,9 @@ VALID_TOOLS = {
     "TaskStop",
     "TaskOutput",  # v2.1.71 — deprecated (use Read on output file path instead)
     "ToolSearch",
-    "MultiEdit",
-    "Notebook",
-    "TodoRead",
+    "MultiEdit",  # [legacy — emits WARNING] not in current tools-reference spec
+    "Notebook",  # [legacy — emits WARNING] not in current tools-reference spec
+    "TodoRead",  # [legacy — emits WARNING] not in current tools-reference spec
     "TodoWrite",
     "CronCreate",  # v2.1.71
     "CronDelete",  # v2.1.71
@@ -343,6 +343,73 @@ def is_valid_plugin_env_var(name: str) -> bool:
     if name in VALID_PLUGIN_ENV_VARS:
         return True
     return any(p.match(name) for p in PLUGIN_ENV_VAR_PATTERNS)
+
+
+# =============================================================================
+# Plugin-shipped agent restrictions
+# =============================================================================
+
+# Fields forbidden in plugin-shipped agents for security reasons.
+# Per plugins-reference.md: "For security reasons, `hooks`, `mcpServers`,
+# and `permissionMode` are not supported for plugin-shipped agents."
+PLUGIN_SHIPPED_AGENT_FORBIDDEN_FIELDS: tuple[str, ...] = (
+    "hooks",
+    "mcpServers",
+    "permissionMode",
+)
+
+
+def is_plugin_shipped_agent(agent_path: Path) -> bool:
+    """Return True if the agent file is shipped inside a Claude Code plugin.
+
+    Heuristic: walk up from the agent file looking for the canonical plugin
+    manifest `.claude-plugin/plugin.json` within 4 parent directories. This
+    covers both `<plugin>/agents/foo.md` and `<plugin>/agents/subdir/foo.md`.
+
+    Note: only `.claude-plugin/plugin.json` is accepted. A bare `plugin.json`
+    at any level is NOT treated as a plugin manifest (that would produce
+    false positives for unrelated projects that happen to contain a file
+    named `plugin.json`, e.g. Node.js plugin configs).
+    """
+    try:
+        agent_path = agent_path.resolve()
+    except OSError:
+        return False
+
+    current = agent_path.parent
+    for _ in range(4):
+        if (current / ".claude-plugin" / "plugin.json").is_file():
+            return True
+        if current.parent == current:
+            break
+        current = current.parent
+    return False
+
+
+def validate_plugin_shipped_restrictions(
+    frontmatter: dict[str, Any],
+    filename: str,
+    report: ValidationReport,
+    is_plugin_shipped: bool,
+) -> None:
+    """Flag fields forbidden in plugin-shipped agents.
+
+    Per plugins-reference.md: "For security reasons, `hooks`, `mcpServers`,
+    and `permissionMode` are not supported for plugin-shipped agents."
+    Non-plugin agents (user/project) can use all three.
+    """
+    if not is_plugin_shipped:
+        return
+
+    for field_name in PLUGIN_SHIPPED_AGENT_FORBIDDEN_FIELDS:
+        if field_name in frontmatter:
+            report.major(
+                f"Field '{field_name}' is not supported for plugin-shipped agents "
+                "(security restriction per plugins-reference.md). "
+                "Remove it from the frontmatter — it only works in user/project agents.",
+                filename,
+            )
+
 
 # Directories to skip when scanning (cache dirs, hidden dirs, etc.)
 SKIP_DIRS = {
@@ -1742,6 +1809,52 @@ def print_results_by_level(report: ValidationReport, verbose: bool = False) -> N
                     print(f"  {format_result(result)}")
 
 
+def _print_fixer_recommendation(report: ValidationReport, report_path: Path | None) -> None:
+    """Print a prominent recommendation to run the CPV fixer when fixable issues exist.
+
+    Only prints when at least one CRITICAL/MAJOR/MINOR/NIT issue is present.
+    Does NOT print on clean runs or on WARNING-only runs.
+    Strips ANSI colors when stdout is not a TTY.
+    """
+    counts = report.count_by_level()
+    fixable_total = (
+        counts.get("CRITICAL", 0)
+        + counts.get("MAJOR", 0)
+        + counts.get("MINOR", 0)
+        + counts.get("NIT", 0)
+    )
+    if fixable_total == 0:
+        return
+
+    # Suppress ANSI codes when stdout is not a TTY (e.g., piped or captured).
+    use_color = bool(getattr(sys.stdout, "isatty", lambda: False)())
+    yellow = COLORS["MAJOR"] if use_color else ""
+    bold = COLORS["BOLD"] if use_color else ""
+    reset = COLORS["RESET"] if use_color else ""
+    dim = COLORS["DIM"] if use_color else ""
+
+    border = "=" * 60  # Fits comfortably in 80-col terminals.
+    report_display = str(report_path) if report_path else "(no report file written)"
+    report_arg = str(report_path) if report_path else "<path-to-report.json>"
+
+    print()
+    print(f"{yellow}{border}{reset}")
+    print(f"{yellow}{bold} TO FIX THESE ISSUES AUTOMATICALLY:{reset}")
+    print(f"{yellow}{border}{reset}")
+    print(" Option 1 (recommended): Invoke the CPV fixer agent")
+    print("   Run this in Claude Code:")
+    print(f"     {bold}/cpv-fix-validation {report_arg}{reset}")
+    print()
+    print(" Option 2: Use the fix-validation skill directly")
+    print(f"{dim}   The plugin-fixer agent loads the fix-validation skill,{reset}")
+    print(f"{dim}   which maps each error type to a remediation guide in{reset}")
+    print(f"{dim}   skills/fix-validation/references/.{reset}")
+    print()
+    print(" Report file (JSON):")
+    print(f"   {report_display}")
+    print(f"{yellow}{border}{reset}")
+
+
 def print_compact_summary(report: ValidationReport, title: str, report_path: Path | None = None, plugin_path: Path | str | None = None) -> None:
     """Print a concise summary: counts by severity + verdict."""
     counts = report.count_by_level()
@@ -1773,6 +1886,10 @@ def print_compact_summary(report: ValidationReport, title: str, report_path: Pat
         print(f"  Plugin: {plugin_path}")
     if report_path:
         print(f"  Report: {report_path}")
+
+    # If there are any fixable issues, point the user at the fixer agent/skill.
+    # This block is skipped on clean runs (0 issues) and on WARNING-only runs.
+    _print_fixer_recommendation(report, report_path)
 
 
 def save_report_and_print_summary(

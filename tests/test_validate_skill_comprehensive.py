@@ -201,6 +201,38 @@ class TestAllowedToolsValidation:
         validate_allowed_tools_field(frontmatter, report)
         assert not report.has_critical
 
+    def test_task_output_emits_deprecation_warning(self):
+        """A skill requesting the deprecated TaskOutput tool gets a WARNING."""
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"allowed-tools": "Read, TaskOutput"}
+        validate_allowed_tools_field(frontmatter, report)
+        warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
+        assert any("TaskOutput" in m and "deprecated" in m for m in warning_msgs)
+
+    def test_task_tool_emits_rename_warning_in_skill(self):
+        """A skill still using the legacy Task tool name gets a rename WARNING."""
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"allowed-tools": "Read, Task"}
+        validate_allowed_tools_field(frontmatter, report)
+        warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
+        assert any("Task" in m and "renamed to 'Agent'" in m for m in warning_msgs)
+
+    def test_monitor_unscoped_forbidden_in_strict_mode(self):
+        """Strict mode forbids unscoped Monitor (same semantics as Bash)."""
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"allowed-tools": "Read, Monitor"}
+        validate_allowed_tools_field(frontmatter, report, strict_mode=True)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("Unscoped 'Monitor' forbidden" in m for m in major_msgs)
+
+    def test_monitor_scoped_allowed_in_strict_mode(self):
+        """Scoped Monitor(...) is allowed even in strict mode."""
+        report = ValidationReport(skill_path="test")
+        frontmatter = {"allowed-tools": "Read, Monitor(npm:*)"}
+        validate_allowed_tools_field(frontmatter, report, strict_mode=True)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not any("Unscoped 'Monitor' forbidden" in m for m in major_msgs)
+
 
 class TestMCPToolReferenceValidation:
     """Tests for MCP tool reference format validation."""

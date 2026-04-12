@@ -55,6 +55,7 @@ from cpv_validation_common import (
     validate_md_file_paths,
     validate_md_urls,
     validate_no_absolute_paths,
+    validate_plugin_shipped_restrictions,
     validate_toc_embedding,
 )
 from gitignore_filter import GitignoreFilter
@@ -469,6 +470,7 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         "out",
         "target",
         "output-styles",
+        "design",  # TRDD design docs (design/tasks/)
     }
     # Also skip hidden dirs and _dev dirs
     for item in plugin_root.iterdir():
@@ -657,17 +659,11 @@ def validate_agent_file(agent_path: Path, report: ValidationReport) -> None:
     if "description" not in frontmatter:
         report.major("Missing 'description' in frontmatter", rel_path)
 
-    # Plugin agents do NOT support hooks, mcpServers, or permissionMode (per official spec)
-    # These are security restrictions — only project agents (.claude/agents/) can use them
-    plugin_agent_forbidden = {"hooks", "mcpServers", "permissionMode"}
-    for field in plugin_agent_forbidden:
-        if field in frontmatter:
-            report.major(
-                f"Plugin agent uses forbidden field '{field}'. "
-                "Plugin-shipped agents do not support hooks, mcpServers, or permissionMode for security reasons. "
-                "Only project agents in .claude/agents/ can use these fields.",
-                rel_path,
-            )
+    # Plugin agents do NOT support hooks, mcpServers, or permissionMode (per official spec).
+    # These are security restrictions — only project agents (.claude/agents/) can use them.
+    # Uses the shared helper from cpv_validation_common so validate_agent.py and this
+    # orchestrator call path emit identical messages.
+    validate_plugin_shipped_restrictions(frontmatter, rel_path, report, is_plugin_shipped=True)
 
     # Validate TOC embedding — agent files must embed TOCs from referenced .md files
     validate_toc_embedding(content, agent_path, agent_path.parent, report)
@@ -1644,6 +1640,10 @@ def print_results(report: ValidationReport, verbose: bool = False) -> None:
     print(f"SUMMARY: CRITICAL={counts['CRITICAL']} MAJOR={counts['MAJOR']} MINOR={counts['MINOR']} NIT={counts['NIT']} WARNING={counts['WARNING']}")
 
     print()
+
+    # If there are any fixable issues, point the user at the fixer agent/skill.
+    from cpv_validation_common import _print_fixer_recommendation
+    _print_fixer_recommendation(report, None)
 
 
 def print_json(report: ValidationReport) -> None:

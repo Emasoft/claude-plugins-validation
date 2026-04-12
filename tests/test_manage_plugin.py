@@ -270,6 +270,52 @@ class TestCopyPluginFromDir:
         assert (dest / "real.py").exists()
         assert not (dest / "link.py").exists()
 
+    def test_copy_records_skipped_symlinks(self, tmp_path):
+        """When a collector list is passed, every skipped symlink is recorded."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "real.py").write_text("real", encoding="utf-8")
+        link = src / "link.py"
+        link.symlink_to(src / "real.py")
+        dest = tmp_path / "dest"
+        skipped: list = []
+        mp._copy_plugin_from_dir(src, dest, skipped_symlinks=skipped)
+        assert skipped == [link]
+
+    def test_copy_follow_symlinks_includes_target(self, tmp_path):
+        """With follow_symlinks=True the target contents are copied in place of the link."""
+        real_file = tmp_path / "outside" / "real.py"
+        real_file.parent.mkdir()
+        real_file.write_text("real", encoding="utf-8")
+        src = tmp_path / "src"
+        src.mkdir()
+        link = src / "link.py"
+        link.symlink_to(real_file)
+        dest = tmp_path / "dest"
+        skipped: list = []
+        mp._copy_plugin_from_dir(
+            src, dest, follow_symlinks=True, skipped_symlinks=skipped
+        )
+        assert (dest / "link.py").exists()
+        assert (dest / "link.py").read_text(encoding="utf-8") == "real"
+        # Working symlinks should NOT land in the skipped list when followed.
+        assert skipped == []
+
+    def test_copy_follow_symlinks_directory(self, tmp_path):
+        """Following a directory symlink copies its contents into the dest."""
+        real_dir = tmp_path / "outside" / "libs"
+        real_dir.mkdir(parents=True)
+        (real_dir / "util.py").write_text("util", encoding="utf-8")
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "main.py").write_text("main", encoding="utf-8")
+        link = src / "libs"
+        link.symlink_to(real_dir)
+        dest = tmp_path / "dest"
+        mp._copy_plugin_from_dir(src, dest, follow_symlinks=True)
+        assert (dest / "main.py").exists()
+        assert (dest / "libs" / "util.py").exists()
+
 
 # ── Tests: find_plugin_root ──────────────────────────────────
 
@@ -306,6 +352,26 @@ class TestFindPluginRoot:
         (cp / "marketplace.json").write_text('{"name":"market"}', encoding="utf-8")
         found = mp.find_plugin_root(tmp_path)
         assert found is None
+
+    def test_find_plugin_root_single_plugin(self, tmp_path):
+        """Exactly one plugin under the search dir returns that plugin root."""
+        plugin = _make_plugin_dir(tmp_path, "only-plugin")
+        found = mp.find_plugin_root(tmp_path)
+        assert found == plugin
+
+    def test_find_plugin_root_multiple_plugins(self, tmp_path):
+        """Multiple plugin.json files trigger MultiplePluginsFoundError with all paths."""
+        a = _make_plugin_dir(tmp_path, "alpha")
+        b = _make_plugin_dir(tmp_path, "beta")
+        with pytest.raises(mp.MultiplePluginsFoundError) as excinfo:
+            mp.find_plugin_root(tmp_path)
+        found = set(excinfo.value.plugin_roots)
+        assert found == {a, b}
+        # The error message must list every discovered plugin root so the
+        # user can pick one with --plugin-dir.
+        msg = str(excinfo.value)
+        assert str(a) in msg
+        assert str(b) in msg
 
 
 # ── Tests: read_plugin_meta ──────────────────────────────────
@@ -629,6 +695,71 @@ class TestDoInstall:
         mp.do_install(str(source), "market", dry_run=True, quiet=True)
         assert not (mp_dir / "market" / "plugins" / "dry-plugin").exists()
         assert not settings_file.exists()
+
+    @patch.object(mp, "_run_cpv_validation", return_value=([], [], True))
+    def test_install_monorepo_requires_plugin_dir(self, mock_val, tmp_path, monkeypatch):
+        """Installing from a directory that holds two plugin.json files exits with a helpful error."""
+        self._setup_env(tmp_path, monkeypatch)
+        mono = tmp_path / "mono"
+        mono.mkdir()
+        _make_plugin_dir(mono, "alpha")
+        _make_plugin_dir(mono, "beta")
+        with pytest.raises(SystemExit):
+            mp.do_install(str(mono), "market", force=True, quiet=True)
+
+    @patch.object(mp, "_run_cpv_validation", return_value=([], [], True))
+    def test_install_monorepo_plugin_dir_selects_one(self, mock_val, tmp_path, monkeypatch):
+        """Passing --plugin-dir resolves the ambiguity and installs the chosen plugin."""
+        mp_dir, settings_file, installed_file = self._setup_env(tmp_path, monkeypatch)
+        mono = tmp_path / "mono"
+        mono.mkdir()
+        _make_plugin_dir(mono, "alpha")
+        beta = _make_plugin_dir(mono, "beta")
+        mp.do_install(
+            str(mono), "market", force=True, quiet=True, plugin_dir=str(beta)
+        )
+        assert (mp_dir / "market" / "plugins" / "beta").exists()
+        assert not (mp_dir / "market" / "plugins" / "alpha").exists()
+
+    @patch.object(mp, "_run_cpv_validation", return_value=([], [], True))
+    def test_install_warns_on_symlinks(self, mock_val, tmp_path, monkeypatch, capsys):
+        """A skipped symlink during install produces a warning listing every skipped path."""
+        mp_dir, _, _ = self._setup_env(tmp_path, monkeypatch)
+        source = _make_plugin_dir(tmp_path / "source", "linky")
+        real_file = tmp_path / "outside.txt"
+        real_file.write_text("payload", encoding="utf-8")
+        link = source / "linked.txt"
+        link.symlink_to(real_file)
+        # quiet=False so the warning actually prints
+        mp.do_install(str(source), "market", force=True, quiet=False)
+        captured = capsys.readouterr()
+        combined = captured.out + captured.err
+        # The link must not end up in the destination, but the install itself
+        # must still succeed — symlink handling is a warning, not a failure.
+        dest = mp_dir / "market" / "plugins" / "linky"
+        assert dest.exists()
+        assert not (dest / "linked.txt").exists()
+        # The warning must call out how many links were skipped, mention the
+        # path so users can find them, and tell them how to opt in.
+        assert "Skipped 1 symlink" in combined
+        assert str(link) in combined
+        assert "--follow-symlinks" in combined
+
+    @patch.object(mp, "_run_cpv_validation", return_value=([], [], True))
+    def test_install_follow_symlinks_includes_target(self, mock_val, tmp_path, monkeypatch):
+        """With --follow-symlinks the symlink target's contents end up in the installed plugin."""
+        mp_dir, _, _ = self._setup_env(tmp_path, monkeypatch)
+        source = _make_plugin_dir(tmp_path / "source", "linky2")
+        real_file = tmp_path / "outside.txt"
+        real_file.write_text("payload", encoding="utf-8")
+        link = source / "linked.txt"
+        link.symlink_to(real_file)
+        mp.do_install(
+            str(source), "market", force=True, quiet=True, follow_symlinks=True
+        )
+        dest = mp_dir / "market" / "plugins" / "linky2"
+        assert (dest / "linked.txt").exists()
+        assert (dest / "linked.txt").read_text(encoding="utf-8") == "payload"
 
 
 # ── Tests: do_uninstall ──────────────────────────────────────
