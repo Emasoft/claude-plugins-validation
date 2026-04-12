@@ -21,6 +21,15 @@ user-invocable: false
 
 Automates creation and configuration of a GitHub-based marketplace repository for Claude Code plugins. Handles CI/CD pipeline setup, batch plugin linking, and cross-marketplace migration.
 
+## Marketplace layout
+
+CPV supports TWO marketplace layouts and the agent must be fluent in both:
+
+- **Layout A (hub-and-spoke)**: separate repos per plugin, marketplace holds only `marketplace.json`. Entries: `{"source": "github", "repo": "owner/name"}`. Preferred default.
+- **Layout B (nested single-repo)**: plugins as subdirectories inside the marketplace repo. Entries: `"./plugins/<name>"`. Also fully supported.
+
+Both layouts make plugins installable and updatable by Claude Code. The agent defaults to suggesting Layout A for new marketplaces but must follow the user's preference without argument. Full guide, version-update flows for each layout, refactor procedures in both directions, and agent behavior matrix in [marketplace-layouts.md](references/marketplace-layouts.md).
+
 ## Prerequisites
 
 - **GitHub CLI** (`gh`) authenticated with `repo`, `workflow`, `admin:repo_hook` scopes
@@ -64,6 +73,8 @@ See [Marketplace Setup Guide](references/marketplace-setup-guide.md) for detaile
 
 ## Resources
 
+- [Marketplace Layouts](references/marketplace-layouts.md)
+  > Overview · Layout A — Hub-and-Spoke (separate repos) · Layout B — Nested single-repo (monorepo) · How Claude Code updates plugins in each layout · When to choose which · Refactoring between layouts · Agent behavior summary
 - [Workflow Templates](references/workflow-templates.md)
   > Placeholder Reference · validate.yml (Marketplace CI) · update-submodules.yml (Dispatch Receiver) · notify-marketplace.yml.template (Plugin Side)
 - [Script Templates](references/script-templates.md)
@@ -76,8 +87,6 @@ See [Marketplace Setup Guide](references/marketplace-setup-guide.md) for detaile
 ## Compiling Templates
 
 Replace `<placeholder-for-...>` tokens with user values; verify with `grep -r 'placeholder-for-'`. For README, use generate-readme.py (script-templates — see Resources).
-
-Only the hub-and-spoke architecture (1 marketplace repo + N independent plugin repos) is supported. Each plugin MUST have its own GitHub repo because: plugins version independently from the marketplace; contributors can fork/clone a single plugin without pulling the whole marketplace; PRs stay isolated to each plugin's repo; and embedding plugins via Git subtrees/worktrees creates merge conflicts and scaling problems. Decline alternative structures politely and explain the rationale.
 
 ## Token Optimization
 
