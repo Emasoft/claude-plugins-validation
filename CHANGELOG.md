@@ -2,6 +2,13 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.13] - 2026-04-12
+
+### Features
+
+- Phase-1 TRDD deliverables (4 of 6 complete)
+- Phase-2 TRDD deliverables — dev-link, link-plugin, multi-language generator
+
 ## [2.12.12] - 2026-04-12
 
 ### Bug Fixes
