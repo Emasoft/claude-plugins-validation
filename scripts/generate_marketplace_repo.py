@@ -167,6 +167,112 @@ After uninstalling, restart Claude Code for changes to take effect.
 """
 
 
+def _readme_local(
+    name: str,
+    description: str,
+    plugins: list[dict],
+) -> str:
+    """Generate a LOCAL-only README without badges or GitHub install hints.
+
+    Local marketplaces are never pushed to GitHub, so every command is wired
+    to an absolute filesystem path. The reader should be able to copy-paste
+    the `claude plugin marketplace add` line directly.
+    """
+    # Build the plugin table rows. Plugin entries in local marketplaces use
+    # relative-path `source` strings (e.g. "./plugins/foo"), so there is no
+    # repo URL to link to — show the plain name instead.
+    rows = []
+    for p in plugins:
+        pname = p["name"]
+        source = p.get("source", "")
+        if isinstance(source, dict):
+            src_display = source.get("repo") or source.get("path") or "(unknown)"
+        else:
+            src_display = str(source)
+        desc = p.get("description", "")
+        install_cmd = f"`claude plugin install {pname}@{name}`"
+        rows.append(f"| {pname} | {desc} | `{src_display}` | {install_cmd} |")
+
+    plugin_table = "\n".join(rows) if rows else "| (no plugins yet) | | | |"
+
+    return f"""# {name} (local marketplace)
+
+{description}
+
+> This is a **local-only** Claude Code marketplace. It lives entirely on
+> your filesystem — no GitHub repo, no CI, no workflows.
+
+## Plugins
+
+| Plugin | Description | Source | Install |
+|--------|-------------|--------|---------|
+{plugin_table}
+
+## Adding this marketplace to Claude Code
+
+```bash
+claude plugin marketplace add /absolute/path/to/this/directory
+```
+
+Replace `/absolute/path/to/this/directory` with the real absolute path to
+this marketplace folder (the directory that contains `.claude-plugin/`).
+
+Restart Claude Code after adding the marketplace for it to take effect.
+
+## Adding plugins
+
+Local marketplaces support two plugin source formats:
+
+1. **Relative filesystem path** (recommended for local dev):
+   ```json
+   {{ "source": "./plugins/my-plugin" }}
+   ```
+   The path is resolved relative to the marketplace root.
+
+2. **GitHub source** (mixed local+github marketplaces):
+   ```json
+   {{ "source": {{ "source": "github", "repo": "owner/repo" }} }}
+   ```
+
+You can also use the dev-link mode to symlink a plugin source directory
+into `~/.claude/plugins/marketplaces/{name}/plugins/<plugin>/` so edits in
+the source tree take effect without reinstalling:
+
+```bash
+uv run manage_plugin.py --dev-link /path/to/plugin-source {name}
+```
+
+## Installing Plugins
+
+```bash
+# List available plugins
+claude plugin search @{name}
+
+# Install a specific plugin
+claude plugin install <plugin-name>@{name}
+```
+
+## Uninstall
+
+```bash
+# Remove a single plugin
+claude plugin uninstall <plugin-name>@{name}
+
+# Remove the marketplace itself
+claude plugin marketplace remove /absolute/path/to/this/directory
+```
+
+After uninstalling, restart Claude Code for changes to take effect.
+
+## Notes
+
+- No `.github/workflows/` — this marketplace has no CI.
+- No badges — nothing to badge when there is no remote.
+- The `.githooks/pre-push` validator still runs if you decide to `git init`
+  this folder; it accepts both GitHub-style and local-path plugin sources.
+"""
+
+
 def _gitignore() -> str:
     """Generate the .gitignore file."""
     return """# OS
@@ -578,13 +684,66 @@ sort_commits = "oldest"
 """
 
 
-def _pre_push_hook() -> str:
-    """Generate .githooks/pre-push that validates marketplace.json."""
-    return """#!/usr/bin/env python3
-\"\"\"pre-push hook - Validates marketplace.json before push.
+def _pre_push_hook(local: bool = False) -> str:
+    """Generate .githooks/pre-push that validates marketplace.json.
+
+    When ``local=True`` the emitted hook accepts both GitHub-style sources
+    ({"source": "github", "repo": "..."}) AND local-path sources (relative
+    path strings like "./plugins/foo"). Local marketplaces would otherwise
+    fail the hub-and-spoke check at line 647-648 of the strict version.
+    """
+    if local:
+        # Local marketplaces allow both dict-form GitHub sources and relative
+        # path-string sources. A relative path means the plugin ships inside
+        # the marketplace tree (or dev-linked via manage_plugin --dev-link).
+        source_check_body = """        source = p.get("source")
+        if not source:
+            errors.append(f"Plugin '{pname}': missing source")
+        elif isinstance(source, dict):
+            src_type = source.get("source")
+            if src_type not in ("github", "git-subdir", "url", "npm"):
+                errors.append(
+                    f"Plugin '{pname}': source.source must be "
+                    f"'github'|'git-subdir'|'url'|'npm' (got {src_type!r})"
+                )
+            if src_type == "github":
+                repo = source.get("repo", "")
+                if not repo or "/" not in repo:
+                    errors.append(f"Plugin '{pname}': github source needs repo owner/repo")
+        elif isinstance(source, str):
+            # Relative path source — marketplace must ship the plugin dir.
+            if source.startswith("/") or ".." in source.split("/"):
+                errors.append(
+                    f"Plugin '{pname}': local path source must be relative and stay "
+                    f"inside the marketplace tree (no leading '/' or '..')"
+                )
+        else:
+            errors.append(
+                f"Plugin '{pname}': source must be an object or a relative path string"
+            )"""
+    else:
+        source_check_body = """        source = p.get("source")
+        if not source:
+            errors.append(f"Plugin '{pname}': missing source")
+        elif isinstance(source, dict):
+            if source.get("source") != "github":
+                errors.append(f"Plugin '{pname}': source.source must be 'github'")
+            if not source.get("repo"):
+                errors.append(f"Plugin '{pname}': source.repo is required")
+            elif "/" not in source.get("repo", ""):
+                errors.append(f"Plugin '{pname}': source.repo must be owner/repo format")
+        else:
+            errors.append(f"Plugin '{pname}': source must be an object (hub-and-spoke)")"""
+
+    mode_label = "local" if local else "hub-and-spoke"
+
+    return f"""#!/usr/bin/env python3
+\"\"\"pre-push hook - Validates marketplace.json before push ({mode_label} mode).
 
 Ensures marketplace.json is valid JSON with required fields and all plugin
-entries have proper source objects with the hub-and-spoke format.
+entries have proper source values. In local mode, relative path strings
+and GitHub-style dict sources are both accepted. In hub-and-spoke mode,
+only GitHub-style dict sources are accepted.
 
 Install:
     git config core.hooksPath .githooks
@@ -614,7 +773,7 @@ def validate_marketplace_json(repo_root: Path) -> tuple[bool, list[str]]:
         with open(mj_path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except json.JSONDecodeError as e:
-        errors.append(f"marketplace.json is not valid JSON: {e}")
+        errors.append(f"marketplace.json is not valid JSON: {{e}}")
         return False, errors
 
     # Required top-level fields
@@ -622,7 +781,7 @@ def validate_marketplace_json(repo_root: Path) -> tuple[bool, list[str]]:
         errors.append("Missing required field: name")
     if not data.get("owner"):
         errors.append("Missing required field: owner")
-    elif not data.get("owner", {}).get("name"):
+    elif not data.get("owner", {{}}).get("name"):
         errors.append("Missing required field: owner.name")
     if "plugins" not in data:
         errors.append("Missing required field: plugins")
@@ -630,28 +789,17 @@ def validate_marketplace_json(repo_root: Path) -> tuple[bool, list[str]]:
     # Validate each plugin entry
     seen_names: set[str] = set()
     for i, p in enumerate(data.get("plugins", [])):
-        pname = p.get("name", f"(entry {i})")
+        pname = p.get("name", f"(entry {{i}})")
 
         if not p.get("name"):
-            errors.append(f"Plugin entry {i}: missing name")
+            errors.append(f"Plugin entry {{i}}: missing name")
             continue
 
         if pname in seen_names:
-            errors.append(f"Plugin '{pname}': duplicate name")
+            errors.append(f"Plugin '{{pname}}': duplicate name")
         seen_names.add(pname)
 
-        source = p.get("source")
-        if not source:
-            errors.append(f"Plugin '{pname}': missing source")
-        elif isinstance(source, dict):
-            if source.get("source") != "github":
-                errors.append(f"Plugin '{pname}': source.source must be 'github'")
-            if not source.get("repo"):
-                errors.append(f"Plugin '{pname}': source.repo is required")
-            elif "/" not in source.get("repo", ""):
-                errors.append(f"Plugin '{pname}': source.repo must be owner/repo format")
-        else:
-            errors.append(f"Plugin '{pname}': source must be an object (hub-and-spoke)")
+{source_check_body}
 
     return len(errors) == 0, errors
 
@@ -659,18 +807,18 @@ def validate_marketplace_json(repo_root: Path) -> tuple[bool, list[str]]:
 def main() -> int:
     \"\"\"Run pre-push validation.\"\"\"
     repo_root = Path(__file__).resolve().parent.parent
-    print("Running pre-push marketplace validation...")
+    print("Running pre-push marketplace validation ({mode_label} mode)...")
 
     passed, errors = validate_marketplace_json(repo_root)
 
     if passed:
-        print(f"{GREEN}Marketplace validation passed{NC}")
+        print(f"{{GREEN}}Marketplace validation passed{{NC}}")
         return 0
 
-    print(f"{RED}Marketplace validation FAILED:{NC}")
+    print(f"{{RED}}Marketplace validation FAILED:{{NC}}")
     for err in errors:
-        print(f"  - {err}")
-    print(f"\\n{RED}Push blocked. Fix the issues above.{NC}")
+        print(f"  - {{err}}")
+    print(f"\\n{{RED}}Push blocked. Fix the issues above.{{NC}}")
     return 1
 
 
