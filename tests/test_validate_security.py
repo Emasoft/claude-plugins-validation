@@ -34,6 +34,7 @@ from validate_security import (  # noqa: E402
     scan_for_path_traversal,
     scan_for_secrets,
     scan_for_user_paths,
+    scan_ide_config_files,
     validate_security,
 )
 
@@ -490,3 +491,254 @@ class TestMainCLI:
         assert exit_code == 0
         # Verbose output should contain some text (not JSON)
         assert len(captured.out) > 0, "Verbose mode should produce text output"
+
+
+# =====================================================================
+# IDE Configuration File Secret Scanning (TRDD-8ccb9337)
+# =====================================================================
+#
+# IDE config directories (.vscode, .idea, .cursor, .zed) are hidden and
+# scan_all_files skips them because gi.walk() defaults to skip_hidden=True.
+# scan_ide_config_files walks them explicitly and reuses the existing
+# SECRET_PATTERNS suite via scan_for_secrets.
+#
+# Fixture plugins live entirely under tmp_path — we never touch real IDE
+# configs. Tokens below are fabricated but match the SECRET_PATTERNS regexes.
+
+
+class TestScanIdeConfigFiles:
+    """Tests for scan_ide_config_files — secrets in .vscode/.idea/.cursor/.zed configs."""
+
+    def test_vscode_settings_json_with_openai_key_triggers_critical(self, tmp_path):
+        """scan_ide_config_files should flag an OpenAI-style sk- API key in .vscode/settings.json."""
+        plugin_dir = tmp_path / "ide-vscode-plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
+
+        vscode_dir = plugin_dir / ".vscode"
+        vscode_dir.mkdir()
+        # Valid JSON shape that a user might commit if they forgot to use env vars.
+        # The sk- pattern needs >=20 alphanumeric chars after sk- to match.
+        settings_json = (
+            "{\n"
+            '    "terminal.integrated.env.osx": {\n'
+            '        "OPENAI_API_KEY": "sk-proj1234567890abcdefghijk"\n'
+            "    }\n"
+            "}\n"
+        )
+        (vscode_dir / "settings.json").write_text(settings_json)
+
+        report = ValidationReport()
+        stats = scan_ide_config_files(plugin_dir, report)
+
+        assert stats["files_scanned"] == 1, (
+            f"Expected to scan exactly .vscode/settings.json, got {stats['files_scanned']}"
+        )
+        assert stats["secret_issues"] >= 1, (
+            f"Expected at least 1 secret finding, got {stats['secret_issues']}"
+        )
+        critical = [r for r in report.results if r.level == "CRITICAL"]
+        assert len(critical) >= 1, "Expected CRITICAL finding for OpenAI key in .vscode/settings.json"
+        # The finding must point at the .vscode/settings.json path, not some other file
+        assert any(".vscode/settings.json" in (r.file or "") for r in critical), (
+            f"CRITICAL finding file_path should mention .vscode/settings.json, got: "
+            f"{[r.file for r in critical]}"
+        )
+
+    def test_cursor_mcp_json_with_anthropic_key_triggers_critical(self, tmp_path):
+        """scan_ide_config_files should flag an Anthropic sk-ant- key in .cursor/mcp.json."""
+        plugin_dir = tmp_path / "ide-cursor-plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
+
+        cursor_dir = plugin_dir / ".cursor"
+        cursor_dir.mkdir()
+        # Anthropic pattern requires sk-ant- + 80+ alphanumeric/dash/underscore chars.
+        # Construct exactly 80 chars after the prefix.
+        fake_ant_key = (
+            "sk-ant-api03-"
+            "abcdefghijklmnopqrstuvwxyz"
+            "0123456789"
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            "0123456789ab"  # 6 + 26 + 10 + 26 + 12 = 80 chars after sk-ant-
+        )
+        mcp_json = (
+            "{\n"
+            '  "mcpServers": {\n'
+            '    "anthropic": {\n'
+            '      "env": {\n'
+            f'        "ANTHROPIC_API_KEY": "{fake_ant_key}"\n'
+            "      }\n"
+            "    }\n"
+            "  }\n"
+            "}\n"
+        )
+        (cursor_dir / "mcp.json").write_text(mcp_json)
+
+        report = ValidationReport()
+        stats = scan_ide_config_files(plugin_dir, report)
+
+        assert stats["files_scanned"] == 1, (
+            f"Expected to scan exactly .cursor/mcp.json, got {stats['files_scanned']}"
+        )
+        assert stats["secret_issues"] >= 1, (
+            f"Expected at least 1 secret finding in .cursor/mcp.json, got {stats['secret_issues']}"
+        )
+        critical = [r for r in report.results if r.level == "CRITICAL"]
+        assert any(".cursor/mcp.json" in (r.file or "") for r in critical), (
+            f"CRITICAL finding should mention .cursor/mcp.json, got: {[r.file for r in critical]}"
+        )
+        # Specifically the Anthropic pattern should have fired
+        assert any("Anthropic" in r.message for r in critical), (
+            f"Expected Anthropic API Key detection, got: {[r.message for r in critical]}"
+        )
+
+    def test_idea_workspace_xml_with_github_token_triggers_critical(self, tmp_path):
+        """scan_ide_config_files should flag a ghp_ GitHub PAT in .idea/workspace.xml."""
+        plugin_dir = tmp_path / "ide-idea-plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
+
+        idea_dir = plugin_dir / ".idea"
+        idea_dir.mkdir()
+        # JetBrains workspace.xml often stores env vars inline. A ghp_ token with
+        # exactly 36 alphanumeric chars matches the SECRET_PATTERNS regex.
+        workspace_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<project version="4">\n'
+            '  <component name="RunManager">\n'
+            '    <configuration name="deploy">\n'
+            '      <envs>\n'
+            '        <env name="GITHUB_TOKEN" value="ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234" />\n'
+            '      </envs>\n'
+            '    </configuration>\n'
+            '  </component>\n'
+            '</project>\n'
+        )
+        (idea_dir / "workspace.xml").write_text(workspace_xml)
+
+        report = ValidationReport()
+        stats = scan_ide_config_files(plugin_dir, report)
+
+        # Both the literal path and the .idea/*.xml glob point at workspace.xml,
+        # but the seen-set dedupes so it should be scanned exactly once.
+        assert stats["files_scanned"] == 1, (
+            f"Expected to scan .idea/workspace.xml exactly once (dedupe), got {stats['files_scanned']}"
+        )
+        assert stats["secret_issues"] >= 1
+        critical = [r for r in report.results if r.level == "CRITICAL"]
+        assert any("GitHub" in r.message for r in critical), (
+            f"Expected GitHub token detection, got: {[r.message for r in critical]}"
+        )
+        assert any(".idea/workspace.xml" in (r.file or "") for r in critical)
+
+    def test_gitignored_ide_config_is_skipped(self, tmp_path):
+        """scan_ide_config_files should skip gitignored IDE config files — they are not shipped."""
+        plugin_dir = tmp_path / "ide-gitignored-plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
+
+        # .gitignore excludes the entire .vscode/ directory — anything inside
+        # is local-only and should not be flagged.
+        (plugin_dir / ".gitignore").write_text(".vscode/\n")
+
+        vscode_dir = plugin_dir / ".vscode"
+        vscode_dir.mkdir()
+        # A clearly real-looking token — must still be ignored because of .gitignore.
+        (vscode_dir / "settings.json").write_text(
+            '{\n  "GITHUB_TOKEN": "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234"\n}\n'
+        )
+
+        report = ValidationReport()
+        stats = scan_ide_config_files(plugin_dir, report)
+
+        assert stats["secret_issues"] == 0, (
+            f"Gitignored IDE config should not produce findings, got {stats['secret_issues']}"
+        )
+        assert stats["files_scanned"] == 0, (
+            f"Gitignored file should not be counted as scanned, got {stats['files_scanned']}"
+        )
+        assert stats["files_skipped"] >= 1, "Gitignored file should be counted as skipped"
+        critical = [r for r in report.results if r.level == "CRITICAL"]
+        assert not any(".vscode/settings.json" in (r.file or "") for r in critical), (
+            "Gitignored .vscode/settings.json should never produce a CRITICAL finding"
+        )
+
+    def test_clean_ide_configs_produce_no_findings(self, tmp_path):
+        """scan_ide_config_files should report zero issues when IDE configs contain no secrets."""
+        plugin_dir = tmp_path / "ide-clean-plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
+
+        # Populate every supported IDE config path with benign content that
+        # references env vars (not literal secrets) — the recommended pattern.
+        vscode_dir = plugin_dir / ".vscode"
+        vscode_dir.mkdir()
+        (vscode_dir / "settings.json").write_text(
+            '{\n  "editor.tabSize": 4,\n  "terminal.integrated.env.osx": {\n'
+            '    "OPENAI_API_KEY": "${env:OPENAI_API_KEY}"\n  }\n}\n'
+        )
+        (vscode_dir / "tasks.json").write_text(
+            '{\n  "version": "2.0.0",\n  "tasks": [\n    {\n      "label": "run",\n'
+            '      "type": "shell",\n      "command": "python main.py"\n    }\n  ]\n}\n'
+        )
+        (vscode_dir / "launch.json").write_text(
+            '{\n  "version": "0.2.0",\n  "configurations": []\n}\n'
+        )
+
+        cursor_dir = plugin_dir / ".cursor"
+        cursor_dir.mkdir()
+        (cursor_dir / "mcp.json").write_text(
+            '{\n  "mcpServers": {\n    "local": {\n      "command": "node",\n'
+            '      "args": ["server.js"]\n    }\n  }\n}\n'
+        )
+        (cursor_dir / "settings.json").write_text('{\n  "theme": "dark"\n}\n')
+
+        zed_dir = plugin_dir / ".zed"
+        zed_dir.mkdir()
+        (zed_dir / "settings.json").write_text('{\n  "theme": "One Dark"\n}\n')
+        (zed_dir / "tasks.json").write_text('[\n  {"label": "build", "command": "make"}\n]\n')
+
+        report = ValidationReport()
+        stats = scan_ide_config_files(plugin_dir, report)
+
+        # At least the 7 files we wrote should be scanned (no .idea/ in this fixture).
+        assert stats["files_scanned"] == 7, (
+            f"Expected to scan exactly 7 IDE config files, got {stats['files_scanned']}"
+        )
+        assert stats["secret_issues"] == 0, (
+            f"Clean IDE configs should produce zero secret findings, got {stats['secret_issues']}. "
+            f"Unexpected findings: {[r.message for r in report.results if r.level == 'CRITICAL']}"
+        )
+        critical = [r for r in report.results if r.level == "CRITICAL"]
+        assert len(critical) == 0, (
+            f"Clean IDE configs should produce zero CRITICAL findings, got: "
+            f"{[r.message for r in critical]}"
+        )
+
+    def test_validate_security_integration_flags_vscode_secret(self, tmp_path):
+        """validate_security full pipeline should catch a secret in .vscode/settings.json end-to-end."""
+        plugin_dir = tmp_path / "ide-integration-plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
+        # Minimal valid plugin manifest so validate_security proceeds normally.
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "ide-test", "version": "1.0.0", "description": "x"})
+        )
+
+        vscode_dir = plugin_dir / ".vscode"
+        vscode_dir.mkdir()
+        # Use an AWS access key — unambiguous CRITICAL regex with no false positives
+        # against clean code, and not in KNOWN_EXAMPLE_SECRETS.
+        (vscode_dir / "settings.json").write_text(
+            '{\n  "terminal.integrated.env.osx": {\n'
+            '    "AWS_ACCESS_KEY_ID": "AKIA44QH8DHBFAKEKEY1"\n  }\n}\n'
+        )
+
+        report = validate_security(plugin_dir)
+
+        critical = [r for r in report.results if r.level == "CRITICAL"]
+        assert any(".vscode/settings.json" in (r.file or "") for r in critical), (
+            f"validate_security should surface the AWS key in .vscode/settings.json as CRITICAL. "
+            f"All CRITICAL findings: {[(r.message, r.file) for r in critical]}"
+        )

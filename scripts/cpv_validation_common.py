@@ -250,6 +250,38 @@ BUILTIN_AGENT_TYPES = {"Explore", "Plan", "general-purpose"}
 # Semantic version pattern for marketplace version fields
 SEMVER_PATTERN = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?(\+[a-zA-Z0-9.]+)?$")
 
+# =============================================================================
+# settings.json::extraKnownMarketplaces source types (v2.1.80+)
+#
+# NOTE: These are MARKETPLACE-level sources used inside
+#     settings.json -> extraKnownMarketplaces -> <name> -> source
+# They are DIFFERENT from the per-plugin sources allowed inside a
+# marketplace.json file (see validate_marketplace.py::VALID_SOURCE_TYPES).
+# The "settings" source is only valid here — it lets a user declare an
+# inline marketplace with its plugin list embedded directly in settings.json.
+# =============================================================================
+VALID_SETTINGS_SOURCE_TYPES = {
+    "github",
+    "url",
+    "git-subdir",
+    "npm",
+    "settings",  # inline marketplace defined in same settings.json
+    "git",  # generic git URL (less common than github)
+    "directory",  # dev-only: local filesystem path
+}
+
+# Required fields per settings-level source type.
+# Each set is the minimum set of keys the source object MUST contain.
+SETTINGS_SOURCE_REQUIRED_FIELDS: dict[str, set[str]] = {
+    "github": {"repo"},
+    "url": {"url"},
+    "git-subdir": {"url", "path"},
+    "npm": {"package"},
+    "settings": {"name", "plugins"},
+    "git": {"url"},
+    "directory": {"path"},
+}
+
 # Valid tool names for Claude Code agents
 VALID_TOOLS = {
     "Read",

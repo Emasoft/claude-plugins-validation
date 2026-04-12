@@ -4,7 +4,7 @@
 **Filename:** `design/tasks/TRDD-e2b17a61-e6f0-4bff-ac9e-feb3a7cd046b-settings-json-marketplace-validator.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
 
-**Status:** Not started
+**Status:** In progress
 
 ## Context
 

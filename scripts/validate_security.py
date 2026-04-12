@@ -957,6 +957,99 @@ def scan_all_files(plugin_path: Path, report: ValidationReport) -> dict[str, int
 
 
 # =============================================================================
+# IDE Configuration File Scanner
+# =============================================================================
+
+# IDE-specific configuration files that commonly leak secrets.
+# gi.walk() defaults to skip_hidden=True, so dot-prefixed directories like
+# .vscode, .idea, .cursor, .zed are NEVER visited by scan_all_files. We must
+# scan them explicitly here. Entries may be literal file paths or glob
+# patterns (e.g. ".idea/*.xml").
+IDE_CONFIG_PATHS: tuple[str, ...] = (
+    ".vscode/settings.json",
+    ".vscode/tasks.json",
+    ".vscode/launch.json",
+    ".idea/workspace.xml",
+    ".idea/*.xml",
+    ".cursor/mcp.json",
+    ".cursor/settings.json",
+    ".zed/settings.json",
+    ".zed/tasks.json",
+)
+
+
+def scan_ide_config_files(plugin_path: Path, report: ValidationReport) -> dict[str, int]:
+    """Scan IDE configuration files for secrets.
+
+    IDE config directories (.vscode, .idea, .cursor, .zed) are hidden and
+    therefore skipped by the default gi.walk() used in scan_all_files. This
+    function walks them explicitly and runs the existing SECRET_PATTERNS regex
+    suite via scan_for_secrets — matching the severity used for other secret
+    leaks (CRITICAL).
+
+    Respects .gitignore: if a matched IDE config file is gitignored, it is
+    skipped (gitignored secrets are not shipped to git / the marketplace).
+
+    Args:
+        plugin_path: Plugin root directory
+        report: ValidationReport to append findings to
+
+    Returns:
+        Dict with keys: files_scanned, files_skipped, secret_issues
+    """
+    stats = {"files_scanned": 0, "files_skipped": 0, "secret_issues": 0}
+
+    gi = get_gitignore_filter(plugin_path)
+    # Deduplicate — glob patterns can overlap with literal filenames
+    # (e.g. ".idea/*.xml" matches ".idea/workspace.xml").
+    seen: set[Path] = set()
+
+    for entry in IDE_CONFIG_PATHS:
+        # Path.glob handles both literal paths (returning 0 or 1 match) and
+        # glob patterns (returning any matches). Using glob() uniformly keeps
+        # the iteration logic simple.
+        for match in plugin_path.glob(entry):
+            if not match.is_file():
+                continue
+            resolved = match.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+
+            # Skip gitignored files — secrets in gitignored files are not
+            # shipped, so flagging them would only create noise.
+            if gi.is_ignored(match):
+                stats["files_skipped"] += 1
+                continue
+
+            # Skip binary files defensively (XML/JSON should always be text,
+            # but e.g. .idea/ may contain non-config files if the glob widens).
+            if is_binary_file(match):
+                stats["files_skipped"] += 1
+                continue
+
+            try:
+                with open(match, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read()
+            except (OSError, PermissionError) as e:
+                rel_path_err = str(match.relative_to(plugin_path))
+                report.minor(f"Cannot read IDE config file: {rel_path_err} ({e})")
+                stats["files_skipped"] += 1
+                continue
+
+            rel_path = str(match.relative_to(plugin_path))
+            stats["files_scanned"] += 1
+
+            # Re-use the existing secret regex suite. scan_for_secrets skips
+            # validator scripts and test files, and non-AI markdown — none of
+            # those guards apply to IDE config paths (.json/.xml), so the
+            # suite runs the regexes against the file content directly.
+            stats["secret_issues"] += scan_for_secrets(content, rel_path, report)
+
+    return stats
+
+
+# =============================================================================
 # Main Validation Function
 # =============================================================================
 
@@ -1112,8 +1205,19 @@ def validate_security(plugin_path: Path) -> ValidationReport:
     # Check 3-11: Full content scan (traditional + AI-specific)
     scan_stats = scan_all_files(plugin_path, report)
 
+    # Check 3b: IDE config files (.vscode, .idea, .cursor, .zed).
+    # These live in hidden directories that gi.walk() skips by default, so
+    # scan_all_files never sees them. Running a targeted pass ensures API
+    # keys / tokens leaked into IDE task runners or MCP configs are caught.
+    ide_stats = scan_ide_config_files(plugin_path, report)
+    scan_stats["secret_issues"] += ide_stats["secret_issues"]
+
     # Report scan statistics
-    report.info(f"Scanned {scan_stats['files_scanned']} files, skipped {scan_stats['files_skipped']} binary files")
+    report.info(
+        f"Scanned {scan_stats['files_scanned']} files, "
+        f"skipped {scan_stats['files_skipped']} binary files "
+        f"(IDE config: {ide_stats['files_scanned']} scanned, {ide_stats['files_skipped']} skipped)"
+    )
 
     # Add passed messages for clean traditional categories
     if scan_stats["injection_issues"] == 0:

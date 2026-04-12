@@ -58,6 +58,8 @@ from cpv_validation_common import (
     validate_plugin_shipped_restrictions,
     validate_toc_embedding,
 )
+from detect_language import detect_languages
+from detect_lockfiles import detect_lockfiles
 from gitignore_filter import GitignoreFilter
 from validate_hook import (
     lint_bash_script,
@@ -490,8 +492,9 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
             if not isinstance(settings_data, dict):
                 report.major("settings.json: root must be a JSON object", "settings.json")
             else:
-                # Only "agent" is a recognized plugin setting key
-                recognized_keys = {"agent"}
+                # "agent" is the primary plugin-level setting; "extraKnownMarketplaces"
+                # is the v2.1.80 inline-marketplace declaration validated separately below.
+                recognized_keys = {"agent", "extraKnownMarketplaces"}
                 has_unrecognized = False
                 for key in settings_data:
                     if key not in recognized_keys:
@@ -513,6 +516,14 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
                             )
                     elif not isinstance(agent_val, str):
                         report.major(f"settings.json 'agent' must be a string, got {type(agent_val).__name__}", "settings.json")
+                # v2.1.80+: validate extraKnownMarketplaces block by delegating to the
+                # dedicated settings-marketplace validator. Results are merged into this
+                # plugin report so all findings land in a single report.
+                if "extraKnownMarketplaces" in settings_data:
+                    from validate_settings_marketplace import validate_settings_marketplace_file
+
+                    sm_report = validate_settings_marketplace_file(settings_path)
+                    report.merge(sm_report)
                 if not has_unrecognized:
                     report.passed("settings.json is valid", "settings.json")
                 else:
@@ -1793,6 +1804,210 @@ def validate_workflow_best_practices(plugin_root: Path, report: ValidationReport
             report.nit(f"{rel}: uses 'actions/checkout' without version pin — pin to '@v4' or similar", rel)
 
 
+# =============================================================================
+# Submodule + Language + Lockfile Detection (TRDD-79638eb6)
+# =============================================================================
+
+
+def is_plugin_in_submodule(plugin_root: Path) -> Path | None:
+    """Detect if plugin_root is registered as a git submodule of a parent repo.
+
+    Walks up the parent chain from plugin_root looking for any ancestor
+    directory that contains a .gitmodules file AND references this plugin's
+    relative path as a submodule target.
+
+    Why this matters: when a plugin lives inside a parent repo as a submodule,
+    the parent repo's CI will not run the plugin's own workflows automatically
+    — the plugin must be released/validated independently. Users are often
+    surprised by this.
+
+    Args:
+        plugin_root: Absolute path to the plugin directory.
+
+    Returns:
+        Path to the parent repo root if the plugin is a submodule, else None.
+        The returned path is the directory containing .gitmodules that lists
+        this plugin.
+    """
+    try:
+        plugin_abs = plugin_root.resolve()
+    except OSError:
+        return None
+
+    # Walk up the parent chain. Stop at filesystem root.
+    current = plugin_abs.parent
+    while True:
+        gitmodules = current / ".gitmodules"
+        if gitmodules.is_file():
+            try:
+                content = gitmodules.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                content = ""
+            # Collect every "path = <relative>" entry in the .gitmodules file.
+            # A submodule section looks like:
+            #     [submodule "some-name"]
+            #         path = some/rel/path
+            #         url = https://...
+            submodule_paths: list[str] = []
+            for line in content.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("path") and "=" in stripped:
+                    _, _, val = stripped.partition("=")
+                    submodule_paths.append(val.strip())
+
+            # Compute plugin_abs relative to the candidate parent dir, in POSIX form.
+            try:
+                rel = plugin_abs.relative_to(current)
+            except ValueError:
+                rel = None
+
+            if rel is not None:
+                rel_posix = rel.as_posix()
+                if rel_posix in submodule_paths:
+                    return current
+
+        # Stop at filesystem root — current.parent == current means we've bottomed out.
+        if current.parent == current:
+            return None
+        current = current.parent
+
+
+def validate_submodule_containment(plugin_root: Path, report: ValidationReport) -> None:
+    """Emit INFO when the plugin lives inside a parent repo as a git submodule.
+
+    Parent repos do not run their submodules' CI — users need to know they
+    must trigger the plugin's own release pipeline independently.
+    """
+    parent = is_plugin_in_submodule(plugin_root)
+    if parent is None:
+        return
+    try:
+        parent_display = str(parent)
+    except Exception:
+        parent_display = "<parent>"
+    report.info(
+        f"Plugin is a submodule of {parent_display}. "
+        "Parent repo CI will not run this plugin's pipeline automatically."
+    )
+
+
+def validate_project_languages(plugin_root: Path, report: ValidationReport) -> dict[str, Path]:
+    """Detect and report which languages the plugin uses.
+
+    Emits a single INFO line listing all detected languages. The caller can
+    use the returned dict to pick which linters/toolchains to invoke.
+
+    Returns:
+        Mapping of language -> marker file path (may be empty).
+    """
+    langs = detect_languages(plugin_root)
+    if not langs:
+        report.info("No language markers detected (pyproject.toml, package.json, Cargo.toml, etc.)")
+        return langs
+    names = sorted(langs.keys())
+    # Build a concise one-line summary for the report
+    summary = ", ".join(f"{name} ({langs[name].name})" for name in names)
+    report.info(f"Detected project languages: {summary}")
+    return langs
+
+
+def validate_lockfiles(plugin_root: Path, report: ValidationReport, detected_languages: dict[str, Path]) -> None:
+    """Scan for known lockfiles and flag orphan lockfiles or gitignored lockfiles.
+
+    Emits:
+        - NIT: lockfile present but its language was not detected (orphan).
+               Usually means a config file was removed but the lockfile was left
+               behind, or the plugin inherited a lockfile from a parent repo.
+        - WARNING: lockfile present but listed in .gitignore. This defeats the
+                   purpose of a lockfile — CI will reinstall with unpinned deps
+                   and drift from whatever the developer tested.
+
+    Args:
+        plugin_root: Plugin directory.
+        report: Where to record findings.
+        detected_languages: Output from detect_languages() — used to determine
+            whether each lockfile has a matching detected language.
+    """
+    lockfiles = detect_lockfiles(plugin_root)
+    if not lockfiles:
+        return
+
+    # Parse the .gitignore so we can detect lockfiles that are being filtered
+    # out before they reach CI. Use the project-local filter to pick up nested
+    # rules as well (it handles walking up to find parent .gitignores).
+    gitignore_path = plugin_root / ".gitignore"
+    ignored_patterns: list[str] = []
+    if gitignore_path.is_file():
+        try:
+            gi_content = gitignore_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            gi_content = ""
+        for line in gi_content.splitlines():
+            s = line.strip()
+            if s and not s.startswith("#"):
+                ignored_patterns.append(s)
+
+    for lockfile_name, language in sorted(lockfiles.items()):
+        rel = lockfile_name
+        # Orphan check: lockfile present but no manifest for its language.
+        # "js" and "ts" share the same lockfiles — a TypeScript project with
+        # only .ts files would still register "ts" (not "js") but its
+        # package-lock.json is not orphaned. Treat "js" lockfiles as matched
+        # when either "js" or "ts" is detected.
+        matched = False
+        if language in detected_languages:
+            matched = True
+        elif language == "js" and "ts" in detected_languages:
+            matched = True
+        if not matched:
+            report.nit(
+                f"Lockfile {lockfile_name} present but no {language} project detected — "
+                "orphan lockfile (leftover from a removed toolchain?)",
+                rel,
+            )
+            # Still check gitignore status below — both can fire for the same lockfile.
+
+        # Gitignore check: an ignored lockfile will not ship to CI.
+        # Use a conservative substring / exact match — we only compare the
+        # filename against each active .gitignore entry. Patterns like
+        # "*.lock" or "lockfiles/" also match.
+        if _lockfile_is_gitignored(lockfile_name, ignored_patterns):
+            report.warning(
+                f"Lockfile {lockfile_name} is listed in .gitignore — CI will install "
+                "with unpinned deps and drift from tested versions",
+                rel,
+            )
+
+
+def _lockfile_is_gitignored(lockfile_name: str, patterns: list[str]) -> bool:
+    """Cheap check: does any active .gitignore pattern match this lockfile name?
+
+    Uses exact match, substring match, and trivial wildcard expansion. This
+    intentionally mirrors the common .gitignore patterns a user would write
+    for a lockfile (`uv.lock`, `*.lock`, `/Cargo.lock`) rather than
+    implementing the full gitignore grammar.
+    """
+    import fnmatch
+    lower_name = lockfile_name.lower()
+    for pat in patterns:
+        # Strip leading slash — anchored pattern, still a basename match
+        candidate = pat.lstrip("/")
+        if not candidate:
+            continue
+        # Direct exact match
+        if candidate == lockfile_name:
+            return True
+        # Case-insensitive direct match
+        if candidate.lower() == lower_name:
+            return True
+        # fnmatch glob support (covers *.lock, *lock*, etc.)
+        if fnmatch.fnmatch(lockfile_name, candidate):
+            return True
+        if fnmatch.fnmatch(lower_name, candidate.lower()):
+            return True
+    return False
+
+
 def main() -> int:
     """Main entry point."""
     check_remote_execution_guard()
@@ -1893,6 +2108,10 @@ def main() -> int:
     validate_workflow_inline_python(plugin_root, report)
     validate_pipeline_readiness(plugin_root, report)
     validate_workflow_best_practices(plugin_root, report)
+    # Submodule + language + lockfile detection (TRDD-79638eb6)
+    validate_submodule_containment(plugin_root, report)
+    detected_languages = validate_project_languages(plugin_root, report)
+    validate_lockfiles(plugin_root, report, detected_languages)
 
     # Output
     if args.json:
