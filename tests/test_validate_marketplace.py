@@ -874,6 +874,101 @@ class TestValidateMarketplaceIntegration:
         critical = [r for r in report.results if r.level == "CRITICAL"]
         assert len(critical) == 0, f"Unexpected CRITICAL issues: {[r.message for r in critical]}"
 
+    def test_layout_b_directory_source_type_is_accepted(self, tmp_path):
+        """A marketplace entry with {"source": "directory", "path": "./plugins/foo"} must be valid."""
+        from validate_marketplace import validate_marketplace
+
+        # Create a nested plugin under plugins/my-plugin
+        plugins_dir = tmp_path / "plugins"
+        plugins_dir.mkdir()
+        plug = plugins_dir / "my-plugin"
+        plug.mkdir()
+        (plug / ".claude-plugin").mkdir()
+        (plug / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "my-plugin", "version": "0.1.0"}))
+        (plug / "README.md").write_text("# My Plugin\n")
+
+        # marketplace.json uses the object form with source.source=directory
+        mp = tmp_path / "marketplace.json"
+        mp.write_text(
+            json.dumps(
+                {
+                    "name": "my-marketplace",
+                    "owner": {"name": "test-owner"},
+                    "plugins": [
+                        {
+                            "name": "my-plugin",
+                            "source": {"source": "directory", "path": "./plugins/my-plugin"},
+                            "version": "0.1.0",
+                        }
+                    ],
+                }
+            )
+        )
+
+        report = validate_marketplace(tmp_path)
+        critical_and_major = [r for r in report.results if r.level in ("CRITICAL", "MAJOR")]
+        # No critical issues from the directory source type itself — the nested plugin may have
+        # MAJOR findings (e.g., missing README sections), but the source type must be accepted.
+        source_type_issues = [
+            r for r in critical_and_major if "invalid source type" in r.message.lower()
+        ]
+        assert not source_type_issues, (
+            f"'directory' should be a valid source type, got: {[r.message for r in source_type_issues]}"
+        )
+
+    def test_layout_b_string_source_shorthand_is_accepted(self, tmp_path):
+        """A marketplace entry with source: './plugins/foo' (shorthand) must be valid for Layout B."""
+        from validate_marketplace import validate_marketplace
+
+        plug = tmp_path / "plugins" / "bar"
+        plug.mkdir(parents=True)
+        (plug / ".claude-plugin").mkdir()
+        (plug / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "bar", "version": "0.1.0"}))
+
+        mp = tmp_path / "marketplace.json"
+        mp.write_text(
+            json.dumps(
+                {
+                    "name": "my-marketplace",
+                    "owner": {"name": "test-owner"},
+                    "plugins": [{"name": "bar", "source": "./plugins/bar", "version": "0.1.0"}],
+                }
+            )
+        )
+
+        report = validate_marketplace(tmp_path)
+        source_type_issues = [
+            r for r in report.results if "invalid source type" in (r.message or "").lower()
+        ]
+        assert not source_type_issues, f"Shorthand './path' must be accepted, got: {[r.message for r in source_type_issues]}"
+
+    def test_layout_a_github_source_still_works(self, tmp_path):
+        """Layout A: github source must still validate without needing a local directory."""
+        from validate_marketplace import validate_marketplace
+
+        mp = tmp_path / "marketplace.json"
+        mp.write_text(
+            json.dumps(
+                {
+                    "name": "my-marketplace",
+                    "owner": {"name": "test-owner"},
+                    "plugins": [
+                        {
+                            "name": "remote-plugin",
+                            "source": {"source": "github", "repo": "owner/remote-plugin"},
+                            "version": "1.0.0",
+                        }
+                    ],
+                }
+            )
+        )
+
+        report = validate_marketplace(tmp_path)
+        source_type_issues = [
+            r for r in report.results if "invalid source type" in (r.message or "").lower()
+        ]
+        assert not source_type_issues, f"'github' must be valid, got: {[r.message for r in source_type_issues]}"
+
     def test_marketplace_with_owner_not_object(self, tmp_path):
         """Owner field that is not an object must produce MAJOR (lines 1652-1658)."""
         from validate_marketplace import validate_marketplace

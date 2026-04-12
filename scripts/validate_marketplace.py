@@ -110,7 +110,10 @@ ValidationReport = MarketplaceValidationReport
 # settings.json → extraKnownMarketplaces → <name> → source, NEVER inside a plugin's
 # per-plugin source in marketplace.json. A separate validator for
 # settings.json::extraKnownMarketplaces is tracked as future work (see TRDD).
-VALID_SOURCE_TYPES = {"github", "url", "npm", "git-subdir"}
+# "directory" is a Layout-B source for nested plugins inside the marketplace repo:
+# {"source": {"source": "directory", "path": "./plugins/my-plugin"}}
+# Equivalent to the shorthand form "./plugins/my-plugin" as a plain string.
+VALID_SOURCE_TYPES = {"github", "url", "npm", "git-subdir", "directory"}
 
 # Required fields in marketplace.json
 REQUIRED_MARKETPLACE_FIELDS = {"name", "owner", "plugins"}
@@ -149,6 +152,7 @@ SOURCE_REQUIRED_FIELDS = {
     "url": {"url"},
     "npm": {"package"},
     "git-subdir": {"url", "path"},  # Points to a subdirectory within a git repo (v2.1.69+)
+    "directory": {"path"},  # Layout B: nested plugin inside marketplace repo
 }
 
 # Reserved marketplace names that cannot be used
@@ -629,6 +633,77 @@ def validate_plugin_entry(
     return results
 
 
+def _validate_nested_plugin(
+    nested_root: Path,
+    plugin_id: str,
+    json_path: str,
+) -> list[ValidationResult]:
+    """Recursively run validate_plugin.py on a Layout-B nested plugin.
+
+    Invokes validate_plugin.py as a subprocess (--json) and re-emits each
+    finding as a marketplace-level ValidationResult prefixed with the nested
+    plugin ID so the user knows which nested plugin the finding came from.
+
+    The subprocess approach avoids brittle cross-module imports and also
+    isolates any sys.exit() calls inside the plugin validator.
+    """
+    scripts_dir = Path(__file__).resolve().parent
+    validator = scripts_dir / "validate_plugin.py"
+    if not validator.exists():
+        return []
+
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(validator), str(nested_root), "--json"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        data = json.loads(proc.stdout)
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError) as e:
+        return [
+            ValidationResult(
+                level="WARNING",
+                category="plugin",
+                message=f"Nested plugin '{plugin_id}' could not be validated recursively: {e}",
+                file=json_path,
+                suggestion=f"Run 'uv run python scripts/validate_plugin.py {nested_root}' to diagnose",
+            )
+        ]
+
+    translated: list[ValidationResult] = []
+    valid_levels: set[str] = {"CRITICAL", "MAJOR", "MINOR", "NIT", "WARNING", "INFO", "PASSED"}
+    for r in data.get("results", []):
+        level_raw = r.get("level", "INFO")
+        # Skip PASSED/INFO to keep the marketplace report focused on actionable issues
+        if level_raw in ("PASSED", "INFO") or level_raw not in valid_levels:
+            continue
+        # Cast to Level Literal via assignment-narrowing
+        level: Level = "INFO"
+        if level_raw == "CRITICAL":
+            level = "CRITICAL"
+        elif level_raw == "MAJOR":
+            level = "MAJOR"
+        elif level_raw == "MINOR":
+            level = "MINOR"
+        elif level_raw == "NIT":
+            level = "NIT"
+        elif level_raw == "WARNING":
+            level = "WARNING"
+        translated.append(
+            ValidationResult(
+                level=level,
+                category="plugin",
+                message=f"[nested '{plugin_id}'] {r.get('message', '')}",
+                file=r.get("file") or str(nested_root),
+                line=r.get("line"),
+                suggestion=r.get("suggestion"),
+            )
+        )
+    return translated
+
+
 def validate_plugin_source(
     plugin: dict[str, Any],
     plugin_id: str,
@@ -654,7 +729,7 @@ def validate_plugin_source(
                     )
                 )
                 return results
-            # Accept relative paths (./path) as local source
+            # Accept relative paths (./path) as local source — Layout B nested plugin
             if source.startswith("./"):
                 # Validate that the local path exists
                 resolved = marketplace_dir / source.removeprefix("./")
@@ -668,6 +743,9 @@ def validate_plugin_source(
                             suggestion="Ensure the plugin directory exists at the specified path",
                         )
                     )
+                else:
+                    # Layout B: recursively validate the nested plugin
+                    results.extend(_validate_nested_plugin(resolved, plugin_id, json_path))
             elif source not in VALID_SOURCE_TYPES:
                 results.append(
                     ValidationResult(
@@ -783,6 +861,24 @@ def validate_plugin_source(
                         ),
                     )
                 )
+
+        # Layout B via object form: {"source": "directory", "path": "./plugins/..."}
+        # Recursively validate the nested plugin.
+        if source_type == "directory":
+            path_val = source.get("path")
+            if isinstance(path_val, str) and not path_val.startswith("/") and ".." not in path_val:
+                nested_root = marketplace_dir / path_val.removeprefix("./")
+                if nested_root.exists() and nested_root.is_dir():
+                    results.extend(_validate_nested_plugin(nested_root, plugin_id, json_path))
+                else:
+                    results.append(
+                        ValidationResult(
+                            level="MAJOR",
+                            category="plugin",
+                            message=f"Plugin '{plugin_id}' directory source path does not exist: {nested_root}",
+                            file=json_path,
+                        )
+                    )
 
     return results
 
