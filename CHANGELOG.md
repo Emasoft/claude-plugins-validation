@@ -2,6 +2,12 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.11] - 2026-04-12
+
+### Features
+
+- Align validators with Claude Code v2.1.98 spec
+
 ## [2.12.10] - 2026-04-10
 
 ### Miscellaneous Tasks
