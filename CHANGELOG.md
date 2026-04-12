@@ -2,6 +2,12 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.17] - 2026-04-12
+
+### Features
+
+- Separate marketplace fixer from plugin fixer + split error indexes
+
 ## [2.12.16] - 2026-04-12
 
 ### Features
