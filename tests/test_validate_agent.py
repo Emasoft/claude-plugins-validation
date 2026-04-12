@@ -1,16 +1,10 @@
 #!/usr/bin/env python3
 """Tests for validate_agent.py.
 
-Tests the agent validation functions:
-- parse_frontmatter: YAML frontmatter parsing from markdown content
-- validate_frontmatter_exists: frontmatter presence and structure check
-- validate_name_field: name field format, kebab-case, length
-- validate_agent: full agent file validation pipeline
-- validate_agents_directory: directory-level batch validation
-- validate_tools_field: tools list/string parsing and known tool check
-- validate_example_blocks: example block counting and structure
-
-Coverage: 10 tests covering 7 functions with realistic agent content.
+Tests the agent validation functions across the full agent validation pipeline,
+including frontmatter parsing, field-level validators, body/example/security
+checks, plugin-shipped agent restrictions, and deprecation warnings for
+renamed/legacy tool names.
 """
 
 from __future__ import annotations
@@ -23,6 +17,12 @@ scripts_dir = Path(__file__).parent.parent / "scripts"
 if str(scripts_dir) not in sys.path:
     sys.path.insert(0, str(scripts_dir))
 
+from cpv_validation_common import (  # noqa: E402
+    PLUGIN_SHIPPED_AGENT_FORBIDDEN_FIELDS,
+    ValidationReport,
+    is_plugin_shipped_agent,
+    validate_plugin_shipped_restrictions,
+)
 from validate_agent import (  # noqa: E402
     AgentValidationReport,
     parse_frontmatter,
@@ -1150,3 +1150,131 @@ class TestDeprecatedToolWarnings:
         validate_tools_field({"tools": ["Read", "Agent"]}, "agent.md", report)
         warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
         assert not any("deprecated" in m or "renamed" in m for m in warning_msgs)
+
+
+# ---------------------------------------------------------------------------
+# Direct unit tests for the shared plugin-shipped helpers
+# (is_plugin_shipped_agent, validate_plugin_shipped_restrictions)
+# ---------------------------------------------------------------------------
+
+
+class TestIsPluginShippedAgent:
+    """Direct unit tests for is_plugin_shipped_agent heuristic."""
+
+    def test_ancestor_with_claude_plugin_manifest_returns_true(self, tmp_path: Path):
+        """Walking up from an agent file finds .claude-plugin/plugin.json in an ancestor."""
+        plugin_root = tmp_path / "my-plugin"
+        (plugin_root / ".claude-plugin").mkdir(parents=True)
+        (plugin_root / ".claude-plugin" / "plugin.json").write_text(
+            '{"name": "my-plugin", "version": "0.1.0"}',
+            encoding="utf-8",
+        )
+        agents_dir = plugin_root / "agents"
+        agents_dir.mkdir()
+        agent_file = agents_dir / "agent.md"
+        agent_file.write_text("---\nname: x\n---\n# x\n", encoding="utf-8")
+
+        assert is_plugin_shipped_agent(agent_file) is True
+
+    def test_nested_agent_inside_plugin_returns_true(self, tmp_path: Path):
+        """Agents under plugin/agents/subdir/ still get detected."""
+        plugin_root = tmp_path / "nested-plugin"
+        (plugin_root / ".claude-plugin").mkdir(parents=True)
+        (plugin_root / ".claude-plugin" / "plugin.json").write_text(
+            '{"name": "nested-plugin", "version": "0.1.0"}',
+            encoding="utf-8",
+        )
+        subdir = plugin_root / "agents" / "sub"
+        subdir.mkdir(parents=True)
+        agent_file = subdir / "agent.md"
+        agent_file.write_text("---\nname: x\n---\n# x\n", encoding="utf-8")
+
+        assert is_plugin_shipped_agent(agent_file) is True
+
+    def test_non_plugin_ancestor_returns_false(self, tmp_path: Path):
+        """Standalone agent files outside any plugin return False."""
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        agent_file = agents_dir / "standalone.md"
+        agent_file.write_text("---\nname: x\n---\n# x\n", encoding="utf-8")
+
+        assert is_plugin_shipped_agent(agent_file) is False
+
+    def test_bare_plugin_json_is_not_a_false_positive(self, tmp_path: Path):
+        """A bare `plugin.json` in a parent directory must NOT trigger detection.
+
+        This guards against false positives from unrelated projects (e.g. Node
+        projects with their own plugin.json) per audit item M6.
+        """
+        fake_root = tmp_path / "not-a-plugin"
+        fake_root.mkdir()
+        # Drop a bare plugin.json NOT inside .claude-plugin/
+        (fake_root / "plugin.json").write_text(
+            '{"name": "something-else"}',
+            encoding="utf-8",
+        )
+        agents_dir = fake_root / "agents"
+        agents_dir.mkdir()
+        agent_file = agents_dir / "agent.md"
+        agent_file.write_text("---\nname: x\n---\n# x\n", encoding="utf-8")
+
+        assert is_plugin_shipped_agent(agent_file) is False
+
+    def test_walk_hitting_filesystem_root_returns_false(self, tmp_path: Path):
+        """The walk terminates at filesystem root without error and returns False."""
+        # Very deep path with no plugin manifest anywhere in any ancestor.
+        deep = tmp_path / "a" / "b" / "c" / "d" / "e"
+        deep.mkdir(parents=True)
+        agent_file = deep / "agent.md"
+        agent_file.write_text("---\nname: x\n---\n# x\n", encoding="utf-8")
+
+        assert is_plugin_shipped_agent(agent_file) is False
+
+
+class TestValidatePluginShippedRestrictionsUnit:
+    """Direct unit tests for validate_plugin_shipped_restrictions."""
+
+    def test_is_plugin_shipped_false_never_flags(self):
+        """When is_plugin_shipped=False, no MAJOR is emitted even if forbidden fields exist."""
+        report = ValidationReport()
+        frontmatter = {
+            "name": "x",
+            "hooks": {"PreToolUse": []},
+            "mcpServers": ["foo"],
+            "permissionMode": "acceptEdits",
+        }
+        validate_plugin_shipped_restrictions(frontmatter, "agent.md", report, is_plugin_shipped=False)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert major_msgs == []
+
+    def test_is_plugin_shipped_true_flags_every_forbidden_field(self):
+        """Every forbidden field present gets its own MAJOR entry."""
+        report = ValidationReport()
+        frontmatter = {
+            "name": "x",
+            "hooks": {"PreToolUse": []},
+            "mcpServers": ["foo"],
+            "permissionMode": "acceptEdits",
+        }
+        validate_plugin_shipped_restrictions(frontmatter, "agent.md", report, is_plugin_shipped=True)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        for field in PLUGIN_SHIPPED_AGENT_FORBIDDEN_FIELDS:
+            assert any(f"'{field}' is not supported for plugin-shipped agents" in m for m in major_msgs)
+
+
+# ---------------------------------------------------------------------------
+# Monitor tool acceptance (audit item Mi6)
+# ---------------------------------------------------------------------------
+
+
+class TestMonitorToolValidation:
+    """Tests that the v2.1.98 Monitor tool is recognized by validate_tools_field."""
+
+    def test_monitor_tool_passes_validation(self):
+        """`tools: [Monitor]` passes without MAJOR/unknown-tool errors."""
+        report = AgentValidationReport()
+        validate_tools_field({"tools": ["Read", "Monitor"]}, "agent.md", report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        info_msgs = [r.message for r in report.results if r.level == "INFO"]
+        assert not any("Monitor" in m for m in major_msgs)
+        assert not any("Unknown tool 'Monitor'" in m for m in info_msgs)

@@ -146,17 +146,10 @@ SETUP_TRIGGERS = {"init", "maintenance"}
 # SessionStart source types
 SESSION_START_SOURCES = {"startup", "resume", "clear", "compact"}
 
-# Environment variables available in hooks
-VALID_ENV_VARS = {
-    "CLAUDE_PLUGIN_ROOT",  # Plugin hooks only
-    "CLAUDE_PLUGIN_DATA",  # Persistent data directory (v2.1.78)
-    "CLAUDE_PROJECT_DIR",  # All hooks
-    "CLAUDE_ENV_FILE",  # SessionStart/CwdChanged/FileChanged — persist env vars
-    "CLAUDE_CODE_REMOTE",  # All hooks
-    "CLAUDE_CODE_MCP_SERVER_NAME",  # v2.1.85 — MCP server name, in headersHelper scripts
-    "CLAUDE_CODE_MCP_SERVER_URL",  # v2.1.85 — MCP server URL, in headersHelper scripts
-    "CLAUDE_SKILL_DIR",  # Skill's own directory — for SKILL.md references
-}
+# Environment variables available in hooks are sourced from
+# cpv_validation_common.VALID_PLUGIN_ENV_VARS + is_valid_plugin_env_var
+# (which also accepts the dynamic CLAUDE_PLUGIN_OPTION_<KEY> pattern).
+# Do NOT maintain a local copy here — it will diverge.
 
 # Script extensions that should be linted
 LINTABLE_EXTENSIONS = {
@@ -242,6 +235,12 @@ def validate_event_name(event_name: str, report: ValidationReport) -> bool:
         else:
             report.critical(f"Unknown hook event: '{event_name}'. Valid events: {sorted(VALID_HOOK_EVENTS)}")
         return False
+    # Legacy/extended events — still accepted but nudge users toward the current spec.
+    if event_name == "Setup":
+        report.warning(
+            "Hook event 'Setup' is not in the current official spec (as of Claude Code v2.1.98). "
+            "It may be legacy or deprecated. Verify intent; remove if unused."
+        )
     return True
 
 

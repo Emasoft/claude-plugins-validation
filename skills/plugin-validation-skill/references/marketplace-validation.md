@@ -146,8 +146,8 @@ The following marketplace names are reserved and will be rejected by the validat
       "version": "2.1.0",
       "description": "Automatic code formatting",
       "source": {
-        "type": "git",
-        "repository": "https://github.com/org/code-formatter"
+        "source": "github",
+        "repo": "org/code-formatter"
       },
       "tags": ["formatting", "code-quality"]
     },
@@ -206,9 +206,9 @@ The following marketplace names are reserved and will be rejected by the validat
   "version": "1.0.0",
   "description": "Does something useful",
   "source": {
-    "type": "git",
-    "repository": "https://github.com/user/my-plugin",
-    "branch": "main"
+    "source": "github",
+    "repo": "user/my-plugin",
+    "ref": "main"
   },
   "homepage": "https://example.com/my-plugin",
   "license": "MIT",
@@ -228,67 +228,67 @@ The following marketplace names are reserved and will be rejected by the validat
 
 ## 4. Source Types
 
-### git Source
+The `source` field can be either:
+- A **string path** (e.g. `"./my-plugin"`) for local plugin subdirectories, OR
+- An **object** with a `source` key (the discriminator) that identifies one of the five valid source types.
 
-Clone from Git repository:
+**Valid source types** (from `VALID_SOURCE_TYPES` in `scripts/validate_marketplace.py`):
+
+| Type | Purpose |
+|------|---------|
+| `github` | Plugin hosted in its own GitHub repository |
+| `url` | Plugin distributed as a downloadable tarball |
+| `npm` | Plugin published to the npm registry |
+| `git-subdir` | Plugin lives in a subdirectory of a git repository (Claude Code 2.1.69+) |
+| `settings` | Inline marketplace declared in user settings (Claude Code 2.1.80+) |
+
+> **NOTE:** The discriminator key inside the source object is `source`, not `type`. Writing `{"type": "github", ...}` produces a MAJOR validation error.
+
+### String-path Source (local)
+
+Reference a local plugin subdirectory (the most common case for hub-and-spoke monorepos):
+
+```json
+{
+  "name": "my-plugin",
+  "source": "./plugins/my-plugin"
+}
+```
+
+Any path starting with `./` is treated as a local source; the validator checks the directory exists. Local plugins MUST use this string form — wrapping them in `{"source": "github", ...}` is a CRITICAL error if the plugin exists locally as a submodule.
+
+### github Source
+
+Clone from a GitHub repository:
 
 ```json
 {
   "name": "my-plugin",
   "source": {
-    "type": "git",
-    "repository": "https://github.com/user/my-plugin"
+    "source": "github",
+    "repo": "user/my-plugin"
   }
 }
 ```
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| type | Yes | `"git"` |
-| repository | Yes | Git clone URL |
-| branch | No | Branch to clone (default: main) |
-| tag | No | Specific tag to clone |
-| sha | No | Full 40-character commit SHA (short SHAs are not accepted) |
+| source | Yes | `"github"` |
+| repo | Yes | Repository slug in `owner/repo` format |
+| ref | No | Branch or tag name (default: default branch) |
+| sha | No | Full 40-character commit SHA (short SHAs are rejected) |
 
-> **SHA Validation:** When providing a `sha` or `commit` field, it must be exactly 40 hexadecimal characters (the full SHA-1 hash). Short SHAs (e.g. 7 or 12 characters) are rejected by the validator.
-
-### local Source
-
-Reference local plugin directory:
-
-```json
-{
-  "name": "my-plugin",
-  "source": {
-    "type": "local"
-  },
-  "path": "./plugins/my-plugin"
-}
-```
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| type | Yes | `"local"` |
-| path | Yes | Path to plugin directory |
-
-Or shorthand:
-
-```json
-{
-  "name": "my-plugin",
-  "path": "./plugins/my-plugin"
-}
-```
+> **SHA Validation:** When providing a `sha` field, it must be exactly 40 hexadecimal characters (the full SHA-1 hash). Short SHAs (e.g. 7 or 12 characters) are rejected by the validator.
 
 ### npm Source
 
-Install from npm registry:
+Install from the npm registry:
 
 ```json
 {
   "name": "my-plugin",
   "source": {
-    "type": "npm",
+    "source": "npm",
     "package": "@org/claude-plugin"
   }
 }
@@ -296,50 +296,19 @@ Install from npm registry:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| type | Yes | `"npm"` |
+| source | Yes | `"npm"` |
 | package | Yes | npm package name |
 | version | No | Specific version or range |
 
-### pip Source
-
-Install from PyPI or a custom Python package index:
-
-```json
-{
-  "name": "my-plugin",
-  "source": {
-    "type": "pip",
-    "package": "claude-plugin-mypackage"
-  }
-}
-```
-
-```json
-{
-  "name": "my-plugin",
-  "source": {
-    "type": "pip",
-    "package": "claude-plugin-mypackage",
-    "index-url": "https://pypi.example.com/simple/"
-  }
-}
-```
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| type | Yes | `"pip"` |
-| package | Yes | PyPI package name |
-| index-url | No | Custom PyPI index URL (defaults to https://pypi.org) |
-
 ### url Source
 
-Download from URL:
+Download from a URL (typically a tarball):
 
 ```json
 {
   "name": "my-plugin",
   "source": {
-    "type": "url",
+    "source": "url",
     "url": "https://example.com/plugins/my-plugin.tar.gz"
   }
 }
@@ -347,7 +316,7 @@ Download from URL:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| type | Yes | `"url"` |
+| source | Yes | `"url"` |
 | url | Yes | Download URL |
 
 ### git-subdir Source
@@ -358,20 +327,32 @@ Reference a subdirectory within a git repository (added in Claude Code 2.1.69):
 {
   "name": "my-plugin",
   "source": {
-    "type": "git-subdir",
-    "repo": "https://github.com/user/monorepo",
-    "subdir": "packages/my-plugin"
+    "source": "git-subdir",
+    "url": "https://github.com/user/monorepo",
+    "path": "packages/my-plugin"
   }
 }
 ```
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| type | Yes | `"git-subdir"` |
-| repo | Yes | Git repository URL |
-| subdir | Yes | Subdirectory path within the repo |
+| source | Yes | `"git-subdir"` |
+| url | Yes | Git repository URL |
+| path | Yes | Subdirectory path within the repo |
+| ref | No | Branch or tag name |
+| sha | No | Full 40-character commit SHA |
 
 Use this when a plugin lives inside a larger monorepo rather than being the entire repository.
+
+### settings Source
+
+Inline marketplace declared in user settings (Claude Code 2.1.80+). Rarely used at the `marketplace.json` level — see the plugins reference for the settings-based marketplace format.
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| source | Yes | `"settings"` |
+| name | Yes | Inline marketplace name |
+| plugins | Yes | Array of plugin entries |
 
 ---
 
@@ -631,14 +612,12 @@ my-marketplace/               # Main marketplace git repo
    git commit -m "Add plugin-a as submodule"
    ```
 
-3. **Update marketplace.json to use git source**:
+3. **Update marketplace.json with a LOCAL string-path source** (the plugin is a submodule so it exists locally — use `"./plugin-a"`, NOT a github object. The validator will flag the github object form with a warning when it detects a `.git` submodule marker):
    ```json
    {
      "name": "plugin-a",
-     "source": {
-       "type": "git",
-       "repository": "https://github.com/user/plugin-a"
-     }
+     "source": "./plugin-a",
+     "repository": "https://github.com/user/plugin-a"
    }
    ```
 
@@ -766,14 +745,14 @@ git submodule update --init --recursive
 }
 ```
 
-### Error: Short SHA in git source
+### Error: Short SHA in github source
 
 **Wrong:**
 ```json
 {
   "source": {
-    "type": "git",
-    "repository": "https://github.com/user/repo",
+    "source": "github",
+    "repo": "user/repo",
     "sha": "a1b2c3d"
   }
 }
@@ -783,8 +762,8 @@ git submodule update --init --recursive
 ```json
 {
   "source": {
-    "type": "git",
-    "repository": "https://github.com/user/repo",
+    "source": "github",
+    "repo": "user/repo",
     "sha": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
   }
 }
@@ -883,27 +862,43 @@ my-plugin/
 
 **Wrong:**
 ```json
-{"source": {"type": "svn"}}
+{"source": {"source": "svn"}}
 ```
 
-**Valid types:** git, git-subdir, local, npm, pip, url
+**Valid types:** `github`, `url`, `npm`, `git-subdir`, `settings` (plus string-path local sources starting with `./`).
 
-### Error: Git Source Missing Repository
+### Error: Wrong Discriminator Key (`type` instead of `source`)
 
 **Wrong:**
 ```json
-{"source": {"type": "git"}}
+{"source": {"type": "github", "repo": "user/repo"}}
+```
+
+**Correct:**
+```json
+{"source": {"source": "github", "repo": "user/repo"}}
+```
+
+Inside the source object, the discriminator key is `source`, not `type`.
+
+### Error: github Source Missing repo
+
+**Wrong:**
+```json
+{"source": {"source": "github"}}
 ```
 
 **Correct:**
 ```json
 {
   "source": {
-    "type": "git",
-    "repository": "https://github.com/user/repo"
+    "source": "github",
+    "repo": "user/repo"
   }
 }
 ```
+
+The `repo` field is required for `github` sources and must be in `owner/repo` format.
 
 ### CRITICAL: Invalid Source Schema for Local Plugins
 
@@ -912,7 +907,7 @@ my-plugin/
 ✘ Failed to add marketplace: Invalid schema: plugins.0.source: Invalid input
 ```
 
-**Cause:** Using `source: { "type": "git", "repository": "..." }` for plugins that exist as local directories in the marketplace.
+**Cause:** Using `source: { "source": "github", "repo": "..." }` for plugins that exist as local directories (or git submodules) in the marketplace.
 
 **Wrong (local marketplace with local plugin subdirectories):**
 ```json
@@ -921,8 +916,8 @@ my-plugin/
     {
       "name": "my-plugin",
       "source": {
-        "type": "git",
-        "repository": "https://github.com/user/my-plugin"
+        "source": "github",
+        "repo": "user/my-plugin"
       },
       "repository": "https://github.com/user/my-plugin"
     }
@@ -947,7 +942,8 @@ my-plugin/
 - For **local marketplaces** where plugins are subdirectories (or git submodules), use **string path** for `source`
 - The `source` field is for **where Claude Code finds the plugin** - use local paths for local directories
 - The `repository` field (at plugin level) is for **reference only** - the remote URL for documentation/updates
-- Claude Code's schema validation is strict: `source: { type: "git", ... }` is NOT valid when the plugin exists locally
+- Claude Code's schema validation is strict: `source: { "source": "github", ... }` is NOT valid when the plugin exists locally as a submodule
+- Inside the source object the discriminator key is `source`, not `type`. Writing `{"type": "github", ...}` is a MAJOR validation error.
 
 **When to use each format:**
 
@@ -955,10 +951,10 @@ my-plugin/
 |----------|---------------|---------|
 | Plugin as local subdirectory | String path | `"./my-plugin"` |
 | Plugin as git submodule | String path | `"./my-plugin"` |
-| Plugin cloned from remote | Object with type: git | `{"type": "git", "repository": "..."}` |
-| Plugin in monorepo subdir | Object with type: git-subdir | `{"type": "git-subdir", "repo": "...", "subdir": "..."}` |
-| Plugin from npm | Object with type: npm | `{"type": "npm", "package": "..."}` |
-| Plugin from PyPI | Object with type: pip | `{"type": "pip", "package": "claude-plugin-x"}` |
+| Plugin from GitHub | Object with `source: github` | `{"source": "github", "repo": "owner/repo"}` |
+| Plugin in monorepo subdir | Object with `source: git-subdir` | `{"source": "git-subdir", "url": "https://...", "path": "packages/my-plugin"}` |
+| Plugin from npm | Object with `source: npm` | `{"source": "npm", "package": "@org/plugin"}` |
+| Plugin from URL (tarball) | Object with `source: url` | `{"source": "url", "url": "https://.../plugin.tar.gz"}` |
 
 ---
 

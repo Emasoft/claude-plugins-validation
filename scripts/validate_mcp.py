@@ -37,6 +37,7 @@ from cpv_validation_common import (
     COLORS,
     VALID_PLUGIN_ENV_VARS,
     ValidationReport,
+    is_valid_plugin_env_var,
     save_report_and_print_summary,
     validate_component_name,
 )
@@ -103,7 +104,7 @@ def validate_env_var_syntax(value: str, report: ValidationReport, context: str) 
             default = match.group(2)
 
             # Warn about required env vars without defaults (excluding plugin vars)
-            if default is None and var_name not in PLUGIN_ENV_VARS:
+            if default is None and not is_valid_plugin_env_var(var_name):
                 report.info(f"Env var ${{{var_name}}} has no default value in {context} - config will fail if not set")
 
 

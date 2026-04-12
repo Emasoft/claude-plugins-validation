@@ -41,9 +41,11 @@ from cpv_validation_common import (
     VALID_TOOLS,
     ValidationReport,
     check_utf8_encoding,
+    is_plugin_shipped_agent,
     is_valid_model,
     save_report_and_print_summary,
     validate_component_name,
+    validate_plugin_shipped_restrictions,
 )
 
 # Known frontmatter fields per official docs (agent-specific)
@@ -60,7 +62,7 @@ KNOWN_FRONTMATTER_FIELDS = {
     "skills",
     "hooks",
     "color",
-    "capabilities",
+    "capabilities",  # [legacy — emits WARNING] not in current sub-agents spec (v2.1.98)
     "effort",
     "maxTurns",
     "mcpServers",
@@ -68,11 +70,11 @@ KNOWN_FRONTMATTER_FIELDS = {
     "background",
     "isolation",
     "initialPrompt",  # v2.1.83 — auto-submit prompt when agent starts
-    # Claude Code-specific fields (legacy/extended)
-    "context",
-    "agent",
-    "user-invocable",
-    "system-prompt",
+    # Claude Code-specific fields (legacy/extended — all emit WARNING when present)
+    "context",  # [legacy — emits WARNING] not in current sub-agents spec (v2.1.98)
+    "agent",  # [legacy — emits WARNING] not in current sub-agents spec (v2.1.98)
+    "user-invocable",  # [legacy — emits WARNING] not in current sub-agents spec (v2.1.98)
+    "system-prompt",  # [legacy — emits WARNING] not in current sub-agents spec (v2.1.98)
 }
 
 # Valid values for the 'permissionMode' field
@@ -107,35 +109,10 @@ PLACEHOLDER_PATTERNS = [
     re.compile(r"\[.*FILL.*\]", re.IGNORECASE),
 ]
 
-# Fields forbidden in plugin-shipped agents for security reasons.
-# Per plugins-reference.md: "For security reasons, `hooks`, `mcpServers`,
-# and `permissionMode` are not supported for plugin-shipped agents."
-PLUGIN_SHIPPED_AGENT_FORBIDDEN_FIELDS = ("hooks", "mcpServers", "permissionMode")
-
-
-def is_plugin_shipped_agent(agent_path: Path) -> bool:
-    """Return True if the agent file is shipped inside a Claude Code plugin.
-
-    Heuristic: walk up from the agent file looking for a plugin manifest
-    (`.claude-plugin/plugin.json` or a bare `plugin.json`) within 4 parent
-    directories. This covers both `<plugin>/agents/foo.md` and
-    `<plugin>/agents/subdir/foo.md`.
-    """
-    try:
-        agent_path = agent_path.resolve()
-    except OSError:
-        return False
-
-    current = agent_path.parent
-    for _ in range(4):
-        if (current / ".claude-plugin" / "plugin.json").is_file():
-            return True
-        if (current / "plugin.json").is_file():
-            return True
-        if current.parent == current:
-            break
-        current = current.parent
-    return False
+# PLUGIN_SHIPPED_AGENT_FORBIDDEN_FIELDS, is_plugin_shipped_agent, and
+# validate_plugin_shipped_restrictions now live in cpv_validation_common so
+# that validate_plugin.py and validate_agent.py call a single implementation
+# with identical messages.
 
 
 @dataclass
@@ -340,33 +317,14 @@ def validate_tools_field(frontmatter: dict[str, Any], filename: str, report: Age
                 "Tool 'Task' was renamed to 'Agent' in v2.1.63; 'Task' still works as an alias",
                 filename,
             )
-
-    report.passed(f"'tools' field valid: {len(tool_list)} tool(s)", filename)
-
-
-def validate_plugin_shipped_restrictions(
-    frontmatter: dict[str, Any],
-    filename: str,
-    report: AgentValidationReport,
-    is_plugin_shipped: bool,
-) -> None:
-    """Flag fields forbidden in plugin-shipped agents.
-
-    Per plugins-reference.md: "For security reasons, `hooks`, `mcpServers`,
-    and `permissionMode` are not supported for plugin-shipped agents."
-    Non-plugin agents (user/project) can use all three.
-    """
-    if not is_plugin_shipped:
-        return
-
-    for field in PLUGIN_SHIPPED_AGENT_FORBIDDEN_FIELDS:
-        if field in frontmatter:
-            report.major(
-                f"Field '{field}' is not supported for plugin-shipped agents "
-                "(security restriction per plugins-reference.md). "
-                "Remove it from the frontmatter — it only works in user/project agents.",
+        elif base_tool in ("TodoRead", "Notebook", "MultiEdit"):
+            report.warning(
+                f"Tool '{base_tool}' is not in the current tools-reference spec. "
+                "Verify existence before shipping.",
                 filename,
             )
+
+    report.passed(f"'tools' field valid: {len(tool_list)} tool(s)", filename)
 
 
 def validate_model_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
@@ -420,6 +378,13 @@ def validate_capabilities_field(frontmatter: dict[str, Any], filename: str, repo
     if "capabilities" not in frontmatter:
         return
 
+    # Legacy/extended field — not in the current sub-agents spec.
+    report.warning(
+        "Field 'capabilities' is not in the current sub-agents spec (v2.1.98). "
+        "It may be legacy/extended. Verify it still works with your installed Claude Code version.",
+        filename,
+    )
+
     caps = frontmatter["capabilities"]
 
     if not isinstance(caps, list):
@@ -449,6 +414,13 @@ def validate_context_field(frontmatter: dict[str, Any], filename: str, report: A
         # context is optional - missing is fine
         return
 
+    # Legacy/extended field — not in the current sub-agents spec.
+    report.warning(
+        "Field 'context' is not in the current sub-agents spec (v2.1.98). "
+        "It may be legacy/extended. Verify it still works with your installed Claude Code version.",
+        filename,
+    )
+
     context = frontmatter["context"]
 
     if not isinstance(context, str):
@@ -476,6 +448,13 @@ def validate_agent_field(frontmatter: dict[str, Any], filename: str, report: Age
         # agent field is optional
         return
 
+    # Legacy/extended field — not in the current sub-agents spec.
+    report.warning(
+        "Field 'agent' is not in the current sub-agents spec (v2.1.98). "
+        "It may be legacy/extended. Verify it still works with your installed Claude Code version.",
+        filename,
+    )
+
     agent = frontmatter["agent"]
 
     if not isinstance(agent, str):
@@ -499,6 +478,13 @@ def validate_user_invocable_field(frontmatter: dict[str, Any], filename: str, re
     if "user-invocable" not in frontmatter:
         # user-invocable is optional
         return
+
+    # Legacy/extended field — not in the current sub-agents spec.
+    report.warning(
+        "Field 'user-invocable' is not in the current sub-agents spec (v2.1.98). "
+        "It may be legacy/extended. Verify it still works with your installed Claude Code version.",
+        filename,
+    )
 
     value = frontmatter["user-invocable"]
 
@@ -524,6 +510,13 @@ def validate_system_prompt_field(frontmatter: dict[str, Any], filename: str, rep
     if "system-prompt" not in frontmatter:
         # system-prompt is optional
         return
+
+    # Legacy/extended field — not in the current sub-agents spec.
+    report.warning(
+        "Field 'system-prompt' is not in the current sub-agents spec (v2.1.98). "
+        "It may be legacy/extended. Verify it still works with your installed Claude Code version.",
+        filename,
+    )
 
     prompt = frontmatter["system-prompt"]
 

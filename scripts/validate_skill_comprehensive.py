@@ -52,8 +52,10 @@ from cpv_validation_common import (
     SKILL_FRONTMATTER_FIELDS,
     VALID_CONTEXT_VALUES,
     VALID_HOOK_EVENTS,
+    VALID_PLUGIN_ENV_VARS,
     VALID_TOOLS,
     Level,
+    is_valid_plugin_env_var,
     save_report_and_print_summary,
     validate_component_name,
     validate_toc_embedding,
@@ -208,8 +210,9 @@ RE_ARGUMENTS_INDEX = re.compile(r"\$ARGUMENTS\[(\d+)\]")  # $ARGUMENTS[N]
 RE_SHORTHAND_ARG = re.compile(r"\$(\d+)(?!\d)")  # $N shorthand (e.g., $1, $2)
 RE_SESSION_ID_VAR = re.compile(r"\$\{CLAUDE_SESSION_ID\}")
 RE_SKILL_DIR_VAR = re.compile(r"\$\{CLAUDE_SKILL_DIR\}")
-# All valid ${} substitution variables in skills
-VALID_SKILL_VARS = {"CLAUDE_SESSION_ID", "CLAUDE_SKILL_DIR", "CLAUDE_PLUGIN_ROOT", "CLAUDE_PLUGIN_DATA"}
+# Valid ${} substitution variables in skills are resolved via
+# cpv_validation_common.is_valid_plugin_env_var (handles both the fixed
+# VALID_PLUGIN_ENV_VARS set and the dynamic CLAUDE_PLUGIN_OPTION_<KEY> pattern).
 RE_BRACED_VAR = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")  # Matches ${ANY_VAR}
 
 # --- Dynamic Context Injection Pattern (skills.md: !`command`) ---
@@ -824,14 +827,26 @@ def validate_allowed_tools_field(
                 "SKILL.md",
                 category="Frontmatter",
             )
+        elif base_tool in ("TodoRead", "Notebook", "MultiEdit"):
+            report.warning(
+                f"Tool '{base_tool}' is not in the current tools-reference spec. "
+                "Verify existence before shipping.",
+                "SKILL.md",
+                category="Frontmatter",
+            )
 
-    # Nixtla strict mode: forbid unscoped Bash
-    if strict_mode and "Bash" in tool_list:
-        report.major(
-            "Unscoped 'Bash' forbidden in strict mode - use scoped Bash(git:*) or Bash(npm:*)",
-            "SKILL.md",
-            category="Frontmatter",
-        )
+    # Nixtla strict mode: forbid unscoped Bash and Monitor.
+    # Monitor uses the same permission semantics as Bash (it runs a background
+    # command and feeds output lines to Claude), so the same restriction applies.
+    if strict_mode:
+        for unscoped_tool in ("Bash", "Monitor"):
+            if unscoped_tool in tool_list:
+                report.major(
+                    f"Unscoped '{unscoped_tool}' forbidden in strict mode - "
+                    f"use scoped {unscoped_tool}(git:*) or {unscoped_tool}(npm:*)",
+                    "SKILL.md",
+                    category="Frontmatter",
+                )
 
     # Over-permissioning advisory — not blocking
     if len(tool_list) > 10:
@@ -1548,14 +1563,17 @@ def validate_string_substitutions(body: str, report: ValidationReport) -> None:
             category="String Substitutions",
         )
 
-    # Check for unknown ${VAR} references — strip code fences first
+    # Check for unknown ${VAR} references — strip code fences first.
+    # Uses is_valid_plugin_env_var so that both the canonical env vars and the
+    # dynamic CLAUDE_PLUGIN_OPTION_<KEY> pattern (v2.1.98) are accepted.
     body_no_fences = re.sub(r"```[\s\S]*?```", "", body)
     all_braced_vars = RE_BRACED_VAR.findall(body_no_fences)
     for var_name in all_braced_vars:
-        if var_name not in VALID_SKILL_VARS:
+        if not is_valid_plugin_env_var(var_name):
             report.warning(
                 f"Unknown variable reference: ${{{var_name}}}. "
-                f"Valid skill variables: {', '.join(f'${{{v}}}' for v in sorted(VALID_SKILL_VARS))}",
+                f"Valid skill variables: {', '.join(f'${{{v}}}' for v in sorted(VALID_PLUGIN_ENV_VARS))} "
+                "(or any CLAUDE_PLUGIN_OPTION_<KEY>)",
                 "SKILL.md",
                 category="String Substitutions",
             )

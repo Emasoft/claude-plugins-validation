@@ -311,24 +311,26 @@ uv run python scripts/validate_mcp.py /path/to/plugin
 |----------|--------|---------|
 | Plugin as local subdirectory | String path | `"source": "./my-plugin"` |
 | Plugin as git submodule | String path | `"source": "./my-plugin"` |
-| Plugin from remote git | Object | `"source": {"type": "github", "repo": "..."}` |
-| Plugin from git subdirectory | Object | `"source": {"type": "git-subdir", "repo": "...", "subdir": "..."}` |
-| Plugin from npm | Object | `"source": {"type": "npm", "package": "..."}` |
-| Plugin from URL | Object | `"source": {"type": "url", "url": "..."}` |
+| Plugin from remote git | Object | `"source": {"source": "github", "repo": "owner/repo"}` |
+| Plugin from git subdirectory | Object | `"source": {"source": "git-subdir", "url": "https://...", "path": "plugins/my-plugin"}` |
+| Plugin from npm | Object | `"source": {"source": "npm", "package": "@org/plugin"}` |
+| Plugin from URL | Object | `"source": {"source": "url", "url": "https://.../plugin.tar.gz"}` |
+
+**Note:** Inside the source object the discriminator key is `source` (not `type`). Valid values: `github`, `url`, `npm`, `git-subdir`, `settings`.
 
 ### **CRITICAL: Git Submodules / Local Plugins**
 
-- [ ] **Local plugins use STRING PATH source, NOT git object**
+- [ ] **Local plugins use STRING PATH source, NOT object**
 - [ ] If plugin directory exists locally, source MUST be `"./plugin-name"`
-- [ ] If source is `{"type": "git", ...}` but plugin exists locally → **CRITICAL ERROR**
-- [ ] Use `repository` field at plugin level for documentation only
+- [ ] If source is `{"source": "github", ...}` but plugin exists locally as a git submodule → **CRITICAL ERROR**
+- [ ] Use `repository` field at plugin level for documentation only (metadata, not source)
 
 **WRONG (local marketplace with local plugin subdirectories):**
 ```json
 {
   "source": {
-    "type": "git",
-    "repository": "https://github.com/user/plugin"
+    "source": "github",
+    "repo": "user/plugin"
   }
 }
 ```
@@ -341,12 +343,12 @@ uv run python scripts/validate_mcp.py /path/to/plugin
 }
 ```
 
-### Git Source Validation (When Using Remote Git)
+### GitHub Source Validation (When Using Remote `github` Source)
 
-- [ ] `type` is `"git"`
-- [ ] `repository` is valid git URL
-- [ ] `branch` is valid branch name (if present)
-- [ ] `tag` is valid tag (if present)
+- [ ] `source.source` is `"github"`
+- [ ] `source.repo` is in `owner/repo` format
+- [ ] `source.ref` is a valid branch/tag name (if present)
+- [ ] `source.sha` is a 40-character hex string (if present)
 
 ### Local Source Validation
 

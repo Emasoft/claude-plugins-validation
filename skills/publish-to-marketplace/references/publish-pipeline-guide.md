@@ -244,7 +244,7 @@ When a plugin is linked to the marketplace, its entry in `marketplace.json` look
       "version": "1.0.0",
       "description": "<placeholder-for-plugin-description>",
       "source": {
-        "type": "github",
+        "source": "github",
         "repo": "<placeholder-for-github-repo-owner>/<placeholder-for-plugin-name>"
       },
       "tags": ["validation", "quality"],
@@ -261,7 +261,7 @@ When a plugin is linked to the marketplace, its entry in `marketplace.json` look
 | `name` | Plugin name (must match `plugin.json`) |
 | `version` | Current semver (auto-updated by dispatch chain) |
 | `description` | One-line description |
-| `source.type` | `"github"` |
+| `source.source` | `"github"` |
 | `source.repo` | `"owner/repo-name"` |
 
 ### Optional Fields

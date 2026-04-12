@@ -105,8 +105,12 @@ ValidationReport = MarketplaceValidationReport
 # Constants
 # =============================================================================
 
-# Valid source types for plugins in a marketplace
-VALID_SOURCE_TYPES = {"github", "url", "npm", "git-subdir", "settings"}
+# Valid source types for plugins in a marketplace.json file.
+# Note: the v2.1.80 "settings" source type is a MARKETPLACE-level source used inside
+# settings.json → extraKnownMarketplaces → <name> → source, NEVER inside a plugin's
+# per-plugin source in marketplace.json. A separate validator for
+# settings.json::extraKnownMarketplaces is tracked as future work (see TRDD).
+VALID_SOURCE_TYPES = {"github", "url", "npm", "git-subdir"}
 
 # Required fields in marketplace.json
 REQUIRED_MARKETPLACE_FIELDS = {"name", "owner", "plugins"}
@@ -145,7 +149,6 @@ SOURCE_REQUIRED_FIELDS = {
     "url": {"url"},
     "npm": {"package"},
     "git-subdir": {"url", "path"},  # Points to a subdirectory within a git repo (v2.1.69+)
-    "settings": {"name", "plugins"},  # Inline marketplace declared in settings (v2.1.80)
 }
 
 # Reserved marketplace names that cannot be used

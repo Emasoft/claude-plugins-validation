@@ -254,11 +254,11 @@ The `source` field format depends on how the plugin is distributed:
 | Scenario | source Format | Example |
 |----------|---------------|---------|
 | Plugin as local subdirectory | String path | `"./my-plugin"` |
-| Plugin from GitHub (hub-and-spoke) | Object | `{"type": "github", "owner": "acme", "repo": "plugin-name"}` |
-| Plugin cloned from remote | Object | `{"type": "git", "repository": "https://..."}` |
-| Plugin from npm | Object | `{"type": "npm", "package": "@org/plugin"}` |
-| Plugin from PyPI | Object | `{"type": "pip", "package": "claude-plugin-x"}` |
-| Plugin from URL | Object | `{"type": "url", "url": "https://...plugin.tar.gz"}` |
+| Plugin from GitHub (hub-and-spoke) | Object | `{"source": "github", "repo": "acme/plugin-name"}` |
+| Plugin in a git subdirectory | Object | `{"source": "git-subdir", "url": "https://...", "path": "plugins/my-plugin"}` |
+| Plugin from npm | Object | `{"source": "npm", "package": "@org/plugin"}` |
+| Plugin from URL (tarball) | Object | `{"source": "url", "url": "https://...plugin.tar.gz"}` |
+| Inline marketplace (in settings) | Object | `{"source": "settings", "name": "...", "plugins": [...]}` |
 
 **Critical:** For hub-and-spoke marketplaces, plugins are registered in `marketplace.json` with GitHub source configuration. The marketplace uses `gh api` to fetch plugin metadata and versions from their source repositories -- no Git submodules are needed.
 

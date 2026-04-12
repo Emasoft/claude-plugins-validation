@@ -52,7 +52,7 @@ See [Configuring MARKETPLACE_PAT Secret](#configuring-marketplace_pat-secret) be
 
 ### Step 4: Add the Plugin Entry to marketplace.json
 
-The marketplace does not use git submodules. Instead, plugins are registered as entries in `.claude-plugin/marketplace.json` with `source.type: "github"`. Fetch the plugin metadata via the GitHub API and add it to the marketplace.
+The marketplace does not use git submodules. Instead, plugins are registered as entries in `.claude-plugin/marketplace.json` with `source.source: "github"`. Fetch the plugin metadata via the GitHub API and add it to the marketplace.
 
 ```bash
 # Navigate to the marketplace repository
@@ -69,9 +69,8 @@ jq '.plugins += [{
   "version": "1.0.0",
   "description": "Plugin description here",
   "source": {
-    "type": "github",
-    "owner": "OWNER",
-    "repo": "PLUGIN-REPO"
+    "source": "github",
+    "repo": "OWNER/PLUGIN-REPO"
   }
 }]' .claude-plugin/marketplace.json > tmp.json && mv tmp.json .claude-plugin/marketplace.json
 ```
@@ -524,12 +523,12 @@ for PLUGIN in "${PLUGINS[@]}"; do
 
   # 2. Add plugin entry to marketplace.json
   jq --arg name "$NAME" --arg ver "$VERSION" --arg desc "$DESCRIPTION" \
-     --arg owner "$OWNER_NAME" --arg repo "$NAME" \
+     --arg repo "$OWNER_NAME/$NAME" \
     '.plugins += [{
       "name": $name,
       "version": $ver,
       "description": $desc,
-      "source": {"type": "github", "owner": $owner, "repo": $repo}
+      "source": {"source": "github", "repo": $repo}
     }]' .claude-plugin/marketplace.json > tmp.json && mv tmp.json .claude-plugin/marketplace.json
 
   # 3. Set MARKETPLACE_PAT secret on the plugin repo

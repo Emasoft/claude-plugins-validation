@@ -169,8 +169,8 @@ for PLUGIN in "${PLUGINS[@]}"; do
     -q '.content' | base64 --decode)
   VERSION=$(echo "$PLUGIN_JSON" | jq -r '.version // "0.0.0"')
   DESCRIPTION=$(echo "$PLUGIN_JSON" | jq -r '.description // ""')
-  jq --arg name "$PLUGIN" --arg version "$VERSION" --arg desc "$DESCRIPTION" --arg owner "$OWNER" \
-     '.plugins += [{"name": $name, "source": {"type": "github", "owner": $owner, "repo": $name}, "version": $version, "description": $desc}]' \
+  jq --arg name "$PLUGIN" --arg version "$VERSION" --arg desc "$DESCRIPTION" --arg repo "$OWNER/$PLUGIN" \
+     '.plugins += [{"name": $name, "source": {"source": "github", "repo": $repo}, "version": $version, "description": $desc}]' \
      .claude-plugin/marketplace.json > tmp.json && mv tmp.json .claude-plugin/marketplace.json
 done
 ```

@@ -33,7 +33,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from cpv_validation_common import COLORS, VALID_PLUGIN_ENV_VARS, ValidationReport, save_report_and_print_summary
+from cpv_validation_common import (
+    COLORS,
+    VALID_PLUGIN_ENV_VARS,
+    ValidationReport,
+    is_valid_plugin_env_var,
+    save_report_and_print_summary,
+)
 
 # Known LSP server configuration fields
 KNOWN_LSP_FIELDS = {
@@ -99,7 +105,7 @@ def validate_env_var_syntax(value: str, report: ValidationReport, context: str) 
             var_name = match.group(1)
             default = match.group(2)
 
-            if default is None and var_name not in PLUGIN_ENV_VARS:
+            if default is None and not is_valid_plugin_env_var(var_name):
                 report.info(f"Env var ${{{var_name}}} has no default value in {context}")
 
 
