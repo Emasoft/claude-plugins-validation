@@ -74,7 +74,7 @@ See [Marketplace Setup Guide](references/marketplace-setup-guide.md) for detaile
 ## Resources
 
 - [Marketplace Layouts](references/marketplace-layouts.md)
-  > Overview · Layout A — Hub-and-Spoke (separate repos) · Layout B — Nested single-repo (monorepo) · How Claude Code updates plugins in each layout · When to choose which · Refactoring between layouts · Agent behavior summary
+  > Overview · Layout A — Hub-and-Spoke (separate repos) · Layout B — Nested single-repo (monorepo) · How Claude Code updates plugins in each layout · When to choose which · Rich metadata fields (author, homepage, license, category) · Why CPV does not use git-subdir · Encountering a non-CPV marketplace · Refactoring between layouts · Agent behavior summary
 - [Workflow Templates](references/workflow-templates.md)
   > Placeholder Reference · validate.yml (Marketplace CI) · update-submodules.yml (Dispatch Receiver) · notify-marketplace.yml.template (Plugin Side)
 - [Script Templates](references/script-templates.md)

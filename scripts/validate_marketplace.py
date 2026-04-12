@@ -2064,7 +2064,152 @@ def validate_marketplace(marketplace_path: Path) -> ValidationReport:
             file=json_path,
         )
 
+    # Recommend restructuring when the marketplace looks like a wshobson-style
+    # "nested monorepo with no release ceremony" — structurally valid Layout B
+    # but missing every discipline-enforcing piece CPV expects.
+    report.results.extend(
+        _recommend_cpv_restructure(marketplace_dir, data, json_path)
+    )
+
     return report
+
+
+def _recommend_cpv_restructure(
+    marketplace_dir: Path,
+    data: dict[str, Any],
+    json_path: str,
+) -> list[ValidationResult]:
+    """Detect non-CPV marketplace patterns and recommend migration to Layout A or B.
+
+    Triggered when a marketplace is structurally valid but lacks CPV's
+    discipline-enforcing pieces: no git tags, no CHANGELOG.md, no CI workflows,
+    and/or mixed authorship across plugin entries. These are the hallmarks of
+    a community-style nested monorepo (wshobson/agents being the canonical
+    example) and CPV's recommendation is always to migrate to a clean Layout A
+    or a clean Layout B with full release ceremony.
+    """
+    results: list[ValidationResult] = []
+    plugins = data.get("plugins", [])
+    if not isinstance(plugins, list) or len(plugins) < 2:
+        return results
+
+    # Only trigger this check for Layout-B-shaped marketplaces (nested plugins)
+    nested_count = 0
+    for p in plugins:
+        if not isinstance(p, dict):
+            continue
+        src = p.get("source")
+        if isinstance(src, str) and src.startswith("./"):
+            nested_count += 1
+        elif isinstance(src, dict) and src.get("source") == "directory":
+            nested_count += 1
+    if nested_count < 2:
+        return results
+
+    # Collect signals
+    problems: list[str] = []
+
+    # Signal 1: no git tags
+    try:
+        tag_check = subprocess.run(
+            ["git", "-C", str(marketplace_dir), "tag", "-l"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if tag_check.returncode == 0 and not tag_check.stdout.strip():
+            problems.append("no git tags — no way for users to pin a stable release")
+    except (subprocess.TimeoutExpired, OSError, FileNotFoundError):
+        pass
+
+    # Signal 2: no CHANGELOG
+    changelog_candidates = [
+        marketplace_dir / "CHANGELOG.md",
+        marketplace_dir / "CHANGELOG",
+        marketplace_dir / "changelog.md",
+    ]
+    if not any(c.exists() for c in changelog_candidates):
+        problems.append("no CHANGELOG.md at repo root")
+
+    # Signal 3: no cliff.toml
+    if not (marketplace_dir / "cliff.toml").exists():
+        problems.append("no cliff.toml (git-cliff changelog generator config)")
+
+    # Signal 4: no CI workflows
+    workflows_dir = marketplace_dir / ".github" / "workflows"
+    has_ci = workflows_dir.exists() and any(workflows_dir.glob("*.yml"))
+    if not has_ci:
+        problems.append("no .github/workflows/ with a validate-plugins CI workflow")
+
+    # Signal 5: no publish script
+    publish_candidates = [
+        marketplace_dir / "scripts" / "publish.py",
+        marketplace_dir / "publish.py",
+    ]
+    if not any(c.exists() for c in publish_candidates):
+        problems.append("no scripts/publish.py for atomic tagged releases")
+
+    # Signal 6: mixed authorship across plugin entries
+    authors: set[str] = set()
+    for p in plugins:
+        if not isinstance(p, dict):
+            continue
+        author = p.get("author")
+        if isinstance(author, dict):
+            name = author.get("name")
+            if isinstance(name, str):
+                authors.add(name.strip().lower())
+        elif isinstance(author, str):
+            authors.add(author.strip().lower())
+    if len(authors) > 1:
+        problems.append(
+            f"mixed authorship across {len(authors)} different authors — CPV is a single-author workflow"
+        )
+
+    # Signal 7: plugin versions drift wildly (>3 distinct major.minor across entries)
+    versions: set[str] = set()
+    for p in plugins:
+        if not isinstance(p, dict):
+            continue
+        v = p.get("version")
+        if isinstance(v, str) and re.match(r"^\d+\.\d+", v):
+            versions.add(".".join(v.split(".")[:2]))
+    if len(versions) > 3:
+        problems.append(
+            f"plugins are at {len(versions)} different major.minor versions — suggests independent per-plugin cadences instead of atomic releases"
+        )
+
+    # If at least 3 signals are present, emit the recommendation
+    if len(problems) >= 3:
+        msg_lines = [
+            "This marketplace matches the 'community nested monorepo' anti-pattern CPV discourages. Issues detected:",
+        ]
+        for i, p in enumerate(problems, 1):
+            msg_lines.append(f"  {i}. {p}")
+        msg_lines.append("")
+        msg_lines.append(
+            "CPV recommends migrating to one of its two clean layouts:"
+        )
+        msg_lines.append(
+            "  • Layout A (hub-and-spoke): git subtree split each plugin to its own repo, tag independently, reference via {source: 'github', repo: ...}."
+        )
+        msg_lines.append(
+            "  • Layout B (nested, CPV-discipline): keep the nested layout but add CI workflows running validate_plugin.py on every subfolder, a scripts/publish.py + cliff.toml, a CHANGELOG.md at root, and tag the marketplace repo atomically on each release."
+        )
+        msg_lines.append(
+            "See skills/create-plugin/references/marketplace-layouts.md for the full migration procedure."
+        )
+        results.append(
+            ValidationResult(
+                level="WARNING",
+                category="architecture",
+                message="\n".join(msg_lines),
+                file=json_path,
+                suggestion="Run the plugin-creator agent (/cpv-create) and ask it to migrate this marketplace to Layout A or Layout B.",
+            )
+        )
+    return results
 
 
 # =============================================================================
