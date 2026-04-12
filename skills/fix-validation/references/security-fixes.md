@@ -10,6 +10,7 @@
 - [6. Dangerous File Issues](#6-dangerous-file-issues)
 - [7. Script Permission Issues](#7-script-permission-issues)
 - [8. File Read Issues](#8-file-read-issues)
+- [9. IDE Config Secret Scan](#9-ide-config-secret-scan)
 
 Comprehensive remediation guide for all issues detected by `validate_security.py`.
 
@@ -300,3 +301,91 @@ Comprehensive remediation guide for all issues detected by `validate_security.py
 1. Check file permissions: `ls -la {rel_path}`.
 2. Ensure the file is readable by the current user.
 3. Verify the file is not corrupted.
+
+---
+
+## 9. IDE Config Secret Scan
+
+Added in the recent security-validator refactor. Because `.vscode/`, `.idea/`, `.cursor/`, and `.zed/` are hidden directories, the default recursive `gi.walk()` used by `scan_all_files()` skips them. `scan_ide_config_files()` walks these directories explicitly and runs the same secret-detection regex suite (`scan_for_secrets()`) that is used on other text files.
+
+The validator scans the following paths:
+
+- `.vscode/settings.json`
+- `.vscode/tasks.json`
+- `.vscode/launch.json`
+- `.idea/workspace.xml`
+- `.idea/*.xml`
+- `.cursor/mcp.json`
+- `.cursor/settings.json`
+- `.zed/settings.json`
+- `.zed/tasks.json`
+
+Findings use the **same severity** as secrets found elsewhere in the plugin — typically `CRITICAL` for hardcoded API keys, tokens, and passwords. Gitignored files are skipped (secrets in gitignored files are not shipped), and binary files are skipped defensively.
+
+### [CRITICAL] <secret_type> detected in IDE config file
+
+**Source**: `validate_security.py` — `scan_ide_config_files()` → `scan_for_secrets()`
+
+**What it means**: An API key, private key, OAuth token, password, or similar secret was found inside an IDE configuration file that is **not gitignored**. Because these files are hidden, a previous version of the validator would have missed them entirely — they are now scanned to catch the common mistake of committing editor tasks that include hardcoded credentials.
+
+**How to fix**:
+1. Remove the hardcoded secret from the IDE config file.
+2. Move it to an environment variable referenced via `${VAR}` or `$VAR`:
+   ```json
+   // .vscode/tasks.json — WRONG
+   {
+     "tasks": [{
+       "label": "Deploy",
+       "command": "deploy --token sk-ant-api03-XXXXX..."
+     }]
+   }
+
+   // .vscode/tasks.json — RIGHT
+   {
+     "tasks": [{
+       "label": "Deploy",
+       "command": "deploy --token ${env:DEPLOY_TOKEN}"
+     }]
+   }
+   ```
+3. Add the IDE config file (or the whole directory) to `.gitignore` if it must contain machine-local paths or tokens:
+   ```gitignore
+   # .gitignore
+   .vscode/tasks.json
+   .idea/workspace.xml
+   ```
+4. If the secret was already committed, **rotate the secret** — assume it is compromised. Use `git filter-repo` or GitHub's [secret scanning](https://docs.github.com/en/code-security/secret-scanning/about-secret-scanning) to clean the git history.
+5. Re-run the security validator: `uv run python scripts/validate_security.py <plugin>`.
+
+### [MINOR] Cannot read IDE config file: {rel_path} ({error})
+
+**Source**: `validate_security.py` — `scan_ide_config_files()`
+
+**What it means**: An IDE config file was found but could not be read. This is rare — IDE config files should always be readable text.
+
+**How to fix**:
+1. Check permissions: `ls -la .vscode/settings.json`.
+2. Ensure the file is not corrupted or binary.
+3. If the file should not be scanned, add it to `.gitignore` so it is skipped.
+
+### AI-Facing Markdown Injection Scanning
+
+`scan_for_injection()`, `scan_for_secrets()`, `scan_for_user_paths()`, and the prompt-injection / hook-abuse / frontmatter-abuse scanners **do scan** AI-facing markdown files (skills, agents, commands, rules, references loaded by agents). They **skip** non-AI documentation markdown (README.md, CHANGELOG.md, generic `docs/` files) to avoid false positives on legitimate code snippets.
+
+The `is_ai_facing_markdown()` helper classifies a markdown file based on its path:
+
+- **AI-facing** (scanned): anything under `skills/`, `agents/`, `commands/`, `rules/`, `references/`, or any file named `SKILL.md`
+- **Not AI-facing** (skipped): README.md, CHANGELOG.md, LICENSE, CONTRIBUTING.md, docs/, any markdown outside the directories above
+
+If you see a CRITICAL or MAJOR secret/injection finding on a skill or agent markdown file, treat it as a **real** finding — the content is shipped into prompts that Claude will execute. If you see one on a README, it is still a real finding even though it is filtered from many checks — remove the hardcoded secret / path regardless of file type.
+
+### cc-audit Integration (100+ External Rules)
+
+`check_cc_audit()` optionally runs the external `cc-audit` scanner via `npx` when it is available. It adds 100+ additional rules beyond CPV's own checks. Failure modes:
+
+- **WARNING**: `cc-audit: npx not found — 100+ additional rules skipped` — install Node.js to enable the scan.
+- **WARNING**: `cc-audit timed out after 120s` — the scan is slow on very large plugins; consider splitting the plugin or waiving the check.
+- **WARNING**: `cc-audit: npx command failed — external audit skipped` — check `npx @anthropic-ai/cc-audit` manually to see what failed.
+- **INFO**: `cc-audit scan error: ...` — informational, the scan did not complete cleanly but CPV's own checks still ran.
+
+These are all non-blocking — cc-audit is an optional layer on top of CPV's built-in security checks. If you want its additional coverage, ensure `npx` and network access are available in the environment.

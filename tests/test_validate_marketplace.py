@@ -1005,9 +1005,12 @@ class TestValidateMarketplaceIntegration:
         )
         # The warning should mention at least 3 of the 7 problem signals
         warning_msg = arch_warnings[0].message or ""
-        assert "no CHANGELOG" in warning_msg
-        assert "mixed authorship" in warning_msg or "different authors" in warning_msg
+        assert "CHANGELOG" in warning_msg
+        assert "Mixed authorship" in warning_msg or "different authors" in warning_msg
         assert "Layout A" in warning_msg and "Layout B" in warning_msg
+        # New format: each signal ships title + why-it-hurts + cpv-approach lines
+        assert "Why it hurts" in warning_msg
+        assert "CPV's approach" in warning_msg
 
     def test_recommend_restructure_does_not_fire_on_clean_layout_b(self, tmp_path):
         """A clean Layout B marketplace with CI, CHANGELOG, cliff.toml, and single
