@@ -40,24 +40,58 @@ for "debugging" — use `printf '%s\n' "${#MARKETPLACE_PAT}"` instead.
 
 ### Step 2: If the token IS set — push it to both repos non-interactively
 
-```bash
-# Silence xtrace around the secret set calls in case `set -x` is active
-set +x
-gh secret set MARKETPLACE_PAT \
-  --repo "<PLUGIN_OWNER>/<PLUGIN_REPO>" \
-  --body "$MARKETPLACE_PAT" >/dev/null
+**Preferred: use the dedicated helper script.** `scripts/set_marketplace_pat.py`
+enforces the correct `gh secret set --body "$VALUE"` form, never prints the
+token (so it cannot leak into Claude Code transcripts, shell history, or log
+files), validates repo arguments, rejects malformed PATs (whitespace /
+newlines from copy-paste), and runs verification automatically.
 
-gh secret set MARKETPLACE_PAT \
-  --repo "<MARKETPLACE_OWNER>/<MARKETPLACE_REPO>" \
-  --body "$MARKETPLACE_PAT" >/dev/null
+```bash
+# One call, both repos, atomic — this is the canonical form
+uv run python scripts/set_marketplace_pat.py \
+  "<PLUGIN_OWNER>/<PLUGIN_REPO>" \
+  "<MARKETPLACE_OWNER>/<MARKETPLACE_REPO>"
+
+# Verification without exposing the value
+uv run python scripts/set_marketplace_pat.py --verify-only \
+  "<PLUGIN_OWNER>/<PLUGIN_REPO>" \
+  "<MARKETPLACE_OWNER>/<MARKETPLACE_REPO>"
+```
+
+#### Manual fallback — `gh secret set --body`
+
+If (and only if) the helper script is unavailable (e.g., setting a *different*
+secret name, or working outside the CPV repo), the only correct manual form
+uses the `--body` / `-b` flag to pass the value directly as an argument:
+
+```bash
+# Silence xtrace in case `set -x` is active so the value is not traced
+set +x
+gh secret set MARKETPLACE_PAT --repo "<PLUGIN_OWNER>/<PLUGIN_REPO>"      --body "$MARKETPLACE_PAT" >/dev/null
+gh secret set MARKETPLACE_PAT --repo "<MARKETPLACE_OWNER>/<MARKETPLACE_REPO>" --body "$MARKETPLACE_PAT" >/dev/null
 set -x 2>/dev/null || true
 
-# Verify WITHOUT exposing the value
-gh secret list --repo "<PLUGIN_OWNER>/<PLUGIN_REPO>"      | grep -q '^MARKETPLACE_PAT' \
-  && echo "plugin repo:      MARKETPLACE_PAT present"
-gh secret list --repo "<MARKETPLACE_OWNER>/<MARKETPLACE_REPO>" | grep -q '^MARKETPLACE_PAT' \
-  && echo "marketplace repo: MARKETPLACE_PAT present"
+# Verify (names only, never the value)
+gh secret list --repo "<PLUGIN_OWNER>/<PLUGIN_REPO>"      | grep -q '^MARKETPLACE_PAT' && echo "plugin:      present"
+gh secret list --repo "<MARKETPLACE_OWNER>/<MARKETPLACE_REPO>" | grep -q '^MARKETPLACE_PAT' && echo "marketplace: present"
 ```
+
+`-b` is the short form; `--body` is the long form — they are identical. Both
+take the value as an argv parameter, which keeps the token out of stdin and
+out of the shell's history expansion.
+
+**Forbidden patterns** — these are WRONG and cause real outages. Reject them
+on sight and do not emit them yourself:
+
+- `echo "$MARKETPLACE_PAT" | gh secret set ...` — the pipe adds a trailing
+  newline that gets stored inside the secret. The receiving repo then sends
+  a malformed Authorization header at push time → `Bad credentials` / 401.
+- `gh secret set MARKETPLACE_PAT <<< "$MARKETPLACE_PAT"` — here-string also
+  appends a newline on most shells; same failure mode.
+- `printf "$MARKETPLACE_PAT" | gh secret set ...` — same category; even if
+  `printf` avoids the newline, stdin-driven `gh secret set` is still fragile.
+- Any invocation that writes the token value to stdout, stderr, a log file,
+  the git fix log, or the Claude Code conversation transcript.
 
 If both verification lines print, the auto-detection path is complete.
 Skip sections "Creating the PAT" and "Storing the Secret" below and jump

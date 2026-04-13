@@ -154,17 +154,18 @@ migrator's sequence.
 
 For each extracted plugin repo at `<owner>/<plugin-repo>`:
 
-1. **Check the shell env for a PAT** and set the marketplace secret if present,
-   otherwise guide the user through creating one (see
-   `../../../setup-marketplace-auto-notification/references/pat-secret-setup.md`
-   for the full PAT creation procedure, including token scopes and auto-detect):
+1. **Check the shell env for a PAT** and set the marketplace secret via the
+   dedicated helper script — **never improvise `gh secret set`**. The helper
+   reads `$MARKETPLACE_PAT` from the environment, calls the only correct form
+   (`gh secret set NAME --repo OWNER/REPO --body "$VALUE"` — equivalent to
+   `-b`), never prints the token value (so it will never appear in the Claude
+   transcript, shell history, or log files), and verifies the secret
+   afterwards.
 
    ```bash
    if [ -n "${MARKETPLACE_PAT:-}" ]; then
      echo "reusing env PAT (${#MARKETPLACE_PAT} chars)"
-     gh secret set MARKETPLACE_PAT \
-       --repo "<owner>/<plugin-repo>" \
-       --body "$MARKETPLACE_PAT"
+     uv run python scripts/set_marketplace_pat.py "<owner>/<plugin-repo>"
    else
      echo "MARKETPLACE_PAT not set — see pat-secret-setup.md"
      # Walk the user through creating a classic PAT with `repo` scope,
@@ -172,6 +173,26 @@ For each extracted plugin repo at `<owner>/<plugin-repo>`:
      exit 1
    fi
    ```
+
+   **Manual fallback** (only if the helper is unavailable): the only correct
+   form of `gh secret set` uses the `--body` (or short `-b`) flag to pass the
+   value as a command-line argument, never via stdin or a pipe:
+
+   ```bash
+   set +x  # silence xtrace around the secret set call
+   gh secret set MARKETPLACE_PAT --repo "<owner>/<plugin-repo>" --body "$MARKETPLACE_PAT" >/dev/null
+   set -x 2>/dev/null || true
+   ```
+
+   **FORBIDDEN patterns** — reject these on sight, do not emit them:
+   - `echo "$MARKETPLACE_PAT" | gh secret set ...` (trailing newline → 401)
+   - `gh secret set MARKETPLACE_PAT <<< "$MARKETPLACE_PAT"` (same problem)
+   - `printf "$MARKETPLACE_PAT" | gh secret set ...` (same category)
+   - Any form that would cause the PAT to appear in the shell history, log
+     files, stdout, stderr, or Claude's conversation transcript.
+
+   Full PAT creation procedure (token scopes, auto-detect, rotation) lives in
+   `../../../setup-marketplace-auto-notification/references/pat-secret-setup.md`.
 
 2. **Scaffold `.github/workflows/notify-marketplace.yml`** on the plugin repo
    using the template at
@@ -188,12 +209,10 @@ For each extracted plugin repo at `<owner>/<plugin-repo>`:
    git push origin main
    ```
 
-4. **Verify the secret** is set on the plugin repo:
+4. **Verify the secret** is set on the plugin repo using the helper:
 
    ```bash
-   gh secret list --repo "<owner>/<plugin-repo>" \
-     | grep -q MARKETPLACE_PAT \
-     || { echo "ERROR: MARKETPLACE_PAT not found"; exit 1; }
+   uv run python scripts/set_marketplace_pat.py --verify-only "<owner>/<plugin-repo>"
    ```
 
 5. **Trigger a dry-run** to confirm the dispatch fires. Push a no-op commit
