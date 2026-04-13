@@ -2,6 +2,12 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.18] - 2026-04-13
+
+### Documentation
+
+- Update README for v2.12.17 agent/skill/command separation
+
 ## [2.12.17] - 2026-04-12
 
 ### Features
