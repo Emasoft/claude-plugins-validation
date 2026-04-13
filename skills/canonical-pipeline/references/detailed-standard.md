@@ -58,7 +58,7 @@ uv run python scripts/publish.py --gate
 The `--gate` mode runs 4 quality gates:
 1. **Version bump check**: blocks if local version matches remote (forces semver bump)
 2. **Lint**: `uv run ruff check scripts/` (Python) or `npx eslint src/` (JS/TS)
-3. **Validate plugin**: `uv run scripts/validate_plugin.py . --strict` (blocks on CRITICAL/MAJOR/MINOR/NIT)
+3. **Validate plugin** (remote CPV from GitHub, no local vendoring): `uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-remote-validate plugin . --strict` (blocks on CRITICAL/MAJOR/MINOR/NIT)
 4. **Tests**: `uv run pytest tests/ -q` (Python) or `npx jest` (JS/TS)
 
 ### Setup

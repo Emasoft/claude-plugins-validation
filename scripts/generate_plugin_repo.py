@@ -1414,11 +1414,16 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
-      - name: Validate plugin
+      - name: Validate plugin (remote CPV)
+        # Fetches the current CPV validator from GitHub via uvx so downstream
+        # plugins don't need to vendor scripts/validate_plugin.py. Matches
+        # what scripts/publish.py runs locally so CI and the local gate agree.
+        # Issue #11: do NOT call local scripts/validate_plugin.py — it does
+        # not exist in scaffolded downstream plugins.
         run: |
-          if [ -f "scripts/validate_plugin.py" ]; then
-            uv run python scripts/validate_plugin.py . --verbose
-          fi
+          uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
+              --with pyyaml \
+              cpv-remote-validate plugin . --strict
 
   test:
     name: Tests
@@ -1474,15 +1479,23 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
-      - name: Run full plugin validation
+      - name: Run full plugin validation (remote CPV, --strict)
+        # Fetches CPV from GitHub so downstream plugins do not need to vendor
+        # scripts/validate_plugin.py. Matches publish.py's local gate and the
+        # CI validate job. --strict blocks on CRITICAL/MAJOR/MINOR/NIT (exit
+        # codes 1-4); WARNING (exit 5+) is advisory only.
+        # Issue #11: removed local scripts/validate_plugin.py invocation.
         run: |
           set +e
-          uv run python scripts/validate_plugin.py . --verbose > validation-report.txt 2>&1
+          uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
+              --with pyyaml \
+              cpv-remote-validate plugin . --strict \
+              > validation-report.txt 2>&1
           exit_code=$?
           set -e
           cat validation-report.txt
-          if [ $exit_code -le 2 ] && [ $exit_code -ge 1 ]; then
-            echo "::error::Validation failed with exit code $exit_code (critical/major issues found)"
+          if [ $exit_code -ge 1 ] && [ $exit_code -le 4 ]; then
+            echo "::error::Validation failed with exit code $exit_code (CRITICAL/MAJOR/MINOR/NIT found)"
             exit $exit_code
           fi
 
@@ -1550,29 +1563,25 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
-      - name: Find validator
-        id: find-validator
-        run: |
-          if [ -f "scripts/validate_plugin.py" ]; then
-            echo "validator=scripts/validate_plugin.py" >> $GITHUB_OUTPUT
-          elif [ -f "claude-plugins-validation/scripts/validate_plugin.py" ]; then
-            echo "validator=claude-plugins-validation/scripts/validate_plugin.py" >> $GITHUB_OUTPUT
-          else
-            echo "validator=" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Validate plugin
-        if: steps.find-validator.outputs.validator != ''
+      - name: Validate plugin (remote CPV, --strict)
+        # Fetches CPV from GitHub via uvx so downstream plugins do not need
+        # to vendor scripts/validate_plugin.py. Matches publish.py's local
+        # gate so CI and local gate agree. Issue #11.
         run: |
           set +e
-          uv run python ${{{{ steps.find-validator.outputs.validator }}}} . --verbose
+          uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
+              --with pyyaml \
+              cpv-remote-validate plugin . --strict
           exit_code=$?
           set -e
           if [ $exit_code -eq 0 ]; then
             echo "Validation passed"
             exit 0
+          elif [ $exit_code -ge 5 ]; then
+            echo "Only WARNING-level findings (exit $exit_code) — advisory, not blocking"
+            exit 0
           else
-            echo "Validation failed (exit code: $exit_code)"
+            echo "Validation failed (exit $exit_code: CRITICAL/MAJOR/MINOR/NIT)"
             exit $exit_code
           fi
 """
@@ -1787,16 +1796,19 @@ skipped because it does not apply to your language.
 
 ## CPV validates all plugins regardless of language
 
-You can still run `validate_plugin.py` against this plugin — it will check:
+You can validate this plugin against the current CPV ruleset from anywhere
+using `uvx` — no need to clone or install CPV:
+
+```bash
+uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml \\
+    cpv-remote-validate plugin . --strict
+```
+
+CPV checks:
 - plugin.json manifest
 - commands/, agents/, skills/, hooks/ structure
 - No hardcoded secrets or personal paths
 - Cross-references in all .md files
-
-Run this from the CPV plugin directory:
-```bash
-uv run python scripts/validate_plugin.py {p.name} --strict
-```
 
 ## Monitor, userConfig, channels, CLAUDE_PLUGIN_OPTION_*
 

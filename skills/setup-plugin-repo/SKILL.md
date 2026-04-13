@@ -20,9 +20,13 @@ Creates a Claude Code plugin GitHub repo with CI/CD, git hooks, and marketplace 
 
 ## Prerequisites
 
-- `gh` CLI authenticated, `git` and `uv` on PATH
-- CPV validator at `scripts/validate_plugin.py`
+- `gh` CLI authenticated, `git`, `uv`, and `uvx` on PATH
 - GitHub PAT with `repo` scope (optional, for marketplace)
+
+Note: the CPV validator is fetched remotely from GitHub via `uvx`. Downstream
+plugins do NOT vendor `scripts/validate_plugin.py` — the canonical pipeline
+runs `cpv-remote-validate plugin . --strict` which pulls the current CPV
+release automatically.
 
 ## Instructions
 
@@ -30,8 +34,8 @@ Creates a Claude Code plugin GitHub repo with CI/CD, git hooks, and marketplace 
 2. **Initialize plugin**: create standard files from plugin-repo-templates (see Resources)
 3. **Install workflows**: from plugin-workflows (see Resources) copy `ci.yml`, `release.yml`, `validate.yml`, `notify-marketplace.yml` to `.github/workflows/`
 4. **Install git hooks**: run `uv run python scripts/publish.py --install-hook` (sets `core.hooksPath` to `git-hooks`)
-5. **Configure marketplace**: `gh secret set MARKETPLACE_PAT --repo <owner>/<repo> --body "$PAT"` (skip if declined)
-6. **Validate**: `uv run --with pyyaml python scripts/validate_plugin.py .` — fix ALL non-WARNING issues
+5. **Configure marketplace**: `uv run python scripts/set_marketplace_pat.py <owner>/<repo>` (skip if declined — see setup-marketplace-auto-notification)
+6. **Validate** (remote CPV from GitHub): `uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-remote-validate plugin . --strict` — fix ALL non-WARNING issues
 7. **Commit and push**: stage all, commit "Initial plugin scaffold", push to `main`
 
 Copy this checklist and track your progress:
