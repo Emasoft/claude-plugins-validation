@@ -2,6 +2,16 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.29] - 2026-04-13
+
+### Bug Fixes
+
+- **version-gate:** Auto-detect origin/HEAD instead of hardcoding main/master
+
+### Miscellaneous Tasks
+
+- Update uv.lock
+
 ## [2.12.28] - 2026-04-13
 
 ### Bug Fixes
