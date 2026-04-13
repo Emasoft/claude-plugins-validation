@@ -840,3 +840,141 @@ class TestValidateCrossPlatformExtended:
         validate_cross_platform(plugin_dir, report)
         warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
         assert any("missing for" in m for m in warning_msgs)
+
+
+class TestValidateUserConfig:
+    """Tests for userConfig schema validation (issue #9: title/type/default checks)."""
+
+    @staticmethod
+    def _run(tmp_path: Path, user_config: dict) -> ValidationReport:
+        plugin_dir = tmp_path / "uc-plugin"
+        plugin_dir.mkdir()
+        manifest = {
+            "name": "uc-plugin",
+            "version": "1.0.0",
+            "description": "test",
+            "userConfig": user_config,
+        }
+        (plugin_dir / ".claude-plugin").mkdir()
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest))
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        return report
+
+    def test_userconfig_missing_title_reports_major(self, tmp_path):
+        """Issue #9: missing title field must be flagged as MAJOR (runtime rejects at install)."""
+        report = self._run(tmp_path, {"MY_OPT": {"type": "number", "default": 10000, "description": "test"}})
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("missing required 'title'" in m for m in majors), majors
+
+    def test_userconfig_title_must_be_string(self, tmp_path):
+        """userConfig.<key>.title with non-string value must be flagged as MAJOR."""
+        report = self._run(tmp_path, {"MY_OPT": {"title": 42, "description": "x"}})
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("title' must be a string" in m for m in majors), majors
+
+    def test_userconfig_invalid_type_reports_major(self, tmp_path):
+        """userConfig.<key>.type with an unknown value must be flagged as MAJOR."""
+        report = self._run(
+            tmp_path,
+            {"MY_OPT": {"title": "Opt", "description": "x", "type": "potato"}},
+        )
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("type' must be one of" in m and "potato" in m for m in majors), majors
+
+    def test_userconfig_default_type_mismatch_reports_major(self, tmp_path):
+        """When type='number' but default is a string, validator must flag the mismatch."""
+        report = self._run(
+            tmp_path,
+            {"MY_OPT": {"title": "Opt", "description": "x", "type": "number", "default": "not-a-number"}},
+        )
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("does not match declared type (number)" in m for m in majors), majors
+
+    def test_userconfig_complete_entry_passes(self, tmp_path):
+        """A userConfig entry with title, description, type, and matching default must pass."""
+        report = self._run(
+            tmp_path,
+            {"MY_OPT": {"title": "Opt", "description": "x", "type": "number", "default": 100}},
+        )
+        majors = [r.message for r in report.results if r.level == "MAJOR" and "userConfig" in (r.message or "")]
+        assert majors == [], majors
+
+    def test_userconfig_boolean_default_not_accepted_for_number(self, tmp_path):
+        """bool is a Python int subclass, but type='number' must reject bool defaults."""
+        report = self._run(
+            tmp_path,
+            {"MY_OPT": {"title": "Opt", "description": "x", "type": "number", "default": True}},
+        )
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("does not match declared type (number)" in m for m in majors), majors
+
+
+class TestBinShebangScriptDetection:
+    """Issue #9 secondary: bin/ extensionless executable with shebang must NOT be flagged as binary."""
+
+    def test_bin_extensionless_python_script_not_treated_as_binary(self, tmp_path):
+        """A portable Python script in bin/ (no extension, has shebang) should not appear in binary_files."""
+        import os as _os
+
+        plugin_dir = tmp_path / "shebang-script-plugin"
+        plugin_dir.mkdir()
+        bin_dir = plugin_dir / "bin"
+        bin_dir.mkdir()
+        script = bin_dir / "mytool"
+        script.write_text("#!/usr/bin/env python3\nprint('hi')\n")
+        _os.chmod(script, 0o755)
+        report = ValidationReport()
+        validate_cross_platform(plugin_dir, report)
+        # Should not produce the "binary file(s) without platform identifiers" warning
+        warnings = [r.message for r in report.results if r.level == "WARNING"]
+        assert not any("without platform identifiers" in w for w in warnings), warnings
+        infos = [r.message for r in report.results if r.level == "INFO"]
+        assert not any("compiled binary file" in i for i in infos), infos
+
+    def test_bin_extensionless_no_shebang_still_treated_as_binary(self, tmp_path):
+        """Genuine extensionless executables (no shebang) still flagged for missing platform id."""
+        import os as _os
+
+        plugin_dir = tmp_path / "binary-plugin"
+        plugin_dir.mkdir()
+        bin_dir = plugin_dir / "bin"
+        bin_dir.mkdir()
+        binary = bin_dir / "compiledtool"
+        binary.write_bytes(b"\x7fELF\x02\x01\x01\x00")  # ELF magic, no shebang
+        _os.chmod(binary, 0o755)
+        report = ValidationReport()
+        validate_cross_platform(plugin_dir, report)
+        warnings = [r.message for r in report.results if r.level == "WARNING"]
+        assert any("without platform identifiers" in w for w in warnings), warnings
+
+
+class TestShPortableFallback:
+    """Issue #9 secondary: .sh script with .py/.ps1 fallback in same dir should not WARN."""
+
+    def test_sh_with_py_fallback_demotes_warning_to_info(self, tmp_path):
+        """install.sh + install.py in same dir → INFO, not WARNING."""
+        plugin_dir = tmp_path / "fallback-plugin"
+        plugin_dir.mkdir()
+        scripts_dir = plugin_dir / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "install.sh").write_text("#!/usr/bin/env bash\necho hi\n")
+        (scripts_dir / "install.py").write_text("#!/usr/bin/env python3\nprint('hi')\n")
+        report = ValidationReport()
+        validate_cross_platform(plugin_dir, report)
+        sh_warnings = [r.message for r in report.results if r.level == "WARNING" and "Bash/Shell" in r.message]
+        assert sh_warnings == [], sh_warnings
+        sh_infos = [r.message for r in report.results if r.level == "INFO" and "portable fallback" in r.message]
+        assert sh_infos, "Expected an INFO message about portable fallback"
+
+    def test_sh_without_fallback_still_warns(self, tmp_path):
+        """install.sh alone in a dir → WARNING (existing behavior preserved)."""
+        plugin_dir = tmp_path / "no-fallback-plugin"
+        plugin_dir.mkdir()
+        scripts_dir = plugin_dir / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "install.sh").write_text("#!/usr/bin/env bash\necho hi\n")
+        report = ValidationReport()
+        validate_cross_platform(plugin_dir, report)
+        sh_warnings = [r.message for r in report.results if r.level == "WARNING" and "Bash/Shell" in r.message]
+        assert sh_warnings, "Expected WARNING for unaccompanied .sh script"

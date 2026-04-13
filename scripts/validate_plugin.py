@@ -285,7 +285,20 @@ def validate_manifest(
                         ".claude-plugin/plugin.json",
                     )
 
-    # Validate userConfig schema (v2.1.80): keys must be identifiers, each entry needs description
+    # Validate userConfig schema (v2.1.80): keys must be identifiers, each entry needs title + description.
+    # Claude Code's runtime validator enforces 'title' as REQUIRED — issue #9 documented a v1.7.0
+    # release of token-reporter that passed CPV but failed at install with:
+    #   userConfig.<key>.title: Invalid input: expected string, received undefined
+    # Mirror the runtime schema strictly to catch this at validation time.
+    USERCONFIG_VALID_TYPES = {"string", "number", "integer", "boolean", "array", "object"}
+    USERCONFIG_TYPE_TO_PYTHON: dict[str, tuple[type, ...]] = {
+        "string": (str,),
+        "number": (int, float),
+        "integer": (int,),
+        "boolean": (bool,),
+        "array": (list,),
+        "object": (dict,),
+    }
     if "userConfig" in manifest:
         uc = manifest["userConfig"]
         if not isinstance(uc, dict):
@@ -294,17 +307,62 @@ def validate_manifest(
             for key, entry in uc.items():
                 if not isinstance(key, str) or not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", key):
                     report.major(f"'userConfig' key '{key}' must be a valid identifier", ".claude-plugin/plugin.json")
-                if isinstance(entry, dict):
-                    if "description" not in entry:
-                        report.minor(f"'userConfig.{key}' missing 'description' field", ".claude-plugin/plugin.json")
-                    elif not isinstance(entry["description"], str):
-                        report.major(f"'userConfig.{key}.description' must be a string", ".claude-plugin/plugin.json")
-                    if "sensitive" in entry and not isinstance(entry["sensitive"], bool):
-                        report.major(f"'userConfig.{key}.sensitive' must be a boolean", ".claude-plugin/plugin.json")
-                else:
+                if not isinstance(entry, dict):
                     report.major(
-                        f"'userConfig.{key}' must be an object with 'description'", ".claude-plugin/plugin.json"
+                        f"'userConfig.{key}' must be an object with 'title' and 'description'",
+                        ".claude-plugin/plugin.json",
                     )
+                    continue
+                # title (REQUIRED — runtime rejects the manifest at install time without it)
+                if "title" not in entry:
+                    report.major(
+                        f"'userConfig.{key}' missing required 'title' field — Claude Code runtime "
+                        f"rejects this at install time",
+                        ".claude-plugin/plugin.json",
+                    )
+                elif not isinstance(entry["title"], str):
+                    report.major(
+                        f"'userConfig.{key}.title' must be a string, got {type(entry['title']).__name__}",
+                        ".claude-plugin/plugin.json",
+                    )
+                # description (recommended)
+                if "description" not in entry:
+                    report.minor(f"'userConfig.{key}' missing 'description' field", ".claude-plugin/plugin.json")
+                elif not isinstance(entry["description"], str):
+                    report.major(f"'userConfig.{key}.description' must be a string", ".claude-plugin/plugin.json")
+                # type (optional, but if present must be valid)
+                declared_type: str | None = None
+                if "type" in entry:
+                    if not isinstance(entry["type"], str):
+                        report.major(
+                            f"'userConfig.{key}.type' must be a string, got {type(entry['type']).__name__}",
+                            ".claude-plugin/plugin.json",
+                        )
+                    elif entry["type"] not in USERCONFIG_VALID_TYPES:
+                        report.major(
+                            f"'userConfig.{key}.type' must be one of "
+                            f"{sorted(USERCONFIG_VALID_TYPES)}, got {entry['type']!r}",
+                            ".claude-plugin/plugin.json",
+                        )
+                    else:
+                        declared_type = entry["type"]
+                # default (optional, but if both type and default present, types must match)
+                if "default" in entry and declared_type is not None:
+                    expected_py_types = USERCONFIG_TYPE_TO_PYTHON.get(declared_type, ())
+                    default_value = entry["default"]
+                    # bool is a subclass of int — exclude when checking number/integer
+                    is_match = isinstance(default_value, expected_py_types)
+                    if declared_type in ("number", "integer") and isinstance(default_value, bool):
+                        is_match = False
+                    if not is_match:
+                        report.major(
+                            f"'userConfig.{key}.default' type ({type(default_value).__name__}) "
+                            f"does not match declared type ({declared_type})",
+                            ".claude-plugin/plugin.json",
+                        )
+                # sensitive (optional, must be bool)
+                if "sensitive" in entry and not isinstance(entry["sensitive"], bool):
+                    report.major(f"'userConfig.{key}.sensitive' must be a boolean", ".claude-plugin/plugin.json")
             report.passed(f"'userConfig' schema valid: {len(uc)} config(s)", ".claude-plugin/plugin.json")
 
     # Validate channels schema (v2.1.85): server is required, must match mcpServers key
@@ -995,6 +1053,34 @@ RECOMMENDED_PLATFORMS = {
     "Linux x86_64",
 }
 
+# Shebang interpreters that mark a file as an interpreted script rather than a compiled binary.
+# Matches `#!/usr/bin/env python3`, `#!/bin/bash`, `#!/usr/bin/python3.12`, etc.
+# `\b(name)[\d.]*` allows versioned interpreters like python3 / python3.12 / node18.
+_SCRIPT_SHEBANG_RE = re.compile(
+    r"^#!.*\b(python|bash|sh|node|deno|ruby|perl|pwsh|fish|zsh|tclsh)[\d.]*\b"
+)
+
+
+def _file_has_script_shebang(path: Path) -> bool:
+    """Return True if the file starts with a shebang pointing at a known interpreter.
+
+    Used to distinguish portable extensionless scripts (e.g. ``bin/my-tool``
+    starting with ``#!/usr/bin/env python3``) from genuine compiled binaries
+    that happen to lack an extension.
+    """
+    try:
+        with path.open("rb") as fh:
+            head = fh.read(256)
+    except (OSError, PermissionError):
+        return False
+    if not head.startswith(b"#!"):
+        return False
+    try:
+        first_line = head.split(b"\n", 1)[0].decode("utf-8", errors="replace")
+    except Exception:
+        return False
+    return bool(_SCRIPT_SHEBANG_RE.match(first_line))
+
 
 def _is_python_venv(dirpath: Path) -> bool:
     """Detect Python virtual environments by structural markers, not name.
@@ -1139,18 +1225,44 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
                 compiled_source_files.setdefault(lang_name, []).append(rel_path)
 
     # --- 1. Report platform-specific interpreted scripts ---
+    # When a script has a portable fallback in the same directory (same stem with a
+    # cross-platform extension, e.g. install.sh + install.py + install.ps1), demote
+    # the warning to INFO since the user has covered the gap. This avoids the surprise
+    # of getting a warning for portable POSIX shell scripts that ship alongside Python
+    # or PowerShell wrappers.
+    def _has_portable_fallback(rel_path: str, all_paths: list[str]) -> bool:
+        p = Path(rel_path)
+        stem = p.stem
+        parent = str(p.parent)
+        fallback_extensions = {".py", ".js", ".ts", ".rb", ".ps1"}
+        for other in all_paths:
+            op = Path(other)
+            if op == p:
+                continue
+            if str(op.parent) == parent and op.stem == stem and op.suffix.lower() in fallback_extensions:
+                return True
+        return False
+
     if platform_specific_scripts:
         for ext, paths in platform_specific_scripts.items():
             lang_name, platforms, note = SCRIPT_PLATFORM_MAP[ext]
-            if platforms:
-                platforms_str = ", ".join(sorted(platforms))
-                report.warning(
-                    f"Found {len(paths)} {lang_name} script(s) ({ext}) — only natively available on {platforms_str}. {note}. Consider providing cross-platform alternatives or documenting requirements.",
+            covered_paths = [p for p in paths if _has_portable_fallback(p, all_files)]
+            uncovered_paths = [p for p in paths if p not in covered_paths]
+            if covered_paths:
+                report.info(
+                    f"Found {len(covered_paths)} {lang_name} script(s) ({ext}) with portable fallback "
+                    f"(.py/.ps1/etc.) in the same directory — cross-platform coverage already in place."
                 )
-            else:
-                report.warning(
-                    f"Found {len(paths)} {lang_name} script(s) ({ext}) — {note}. Consider providing cross-platform alternatives.",
-                )
+            if uncovered_paths:
+                if platforms:
+                    platforms_str = ", ".join(sorted(platforms))
+                    report.warning(
+                        f"Found {len(uncovered_paths)} {lang_name} script(s) ({ext}) — only natively available on {platforms_str}. {note}. Consider providing cross-platform alternatives or documenting requirements.",
+                    )
+                else:
+                    report.warning(
+                        f"Found {len(uncovered_paths)} {lang_name} script(s) ({ext}) — {note}. Consider providing cross-platform alternatives.",
+                    )
     else:
         has_scripts = any(
             any(f.endswith(ext) for ext in CROSSPLATFORM_EXTENSIONS)
@@ -1240,6 +1352,11 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
                     break
             else:
                 if not item.suffix and os.access(item, os.X_OK):
+                    # Skip portable interpreted scripts (Python/Bash/Node/etc.) — they have a
+                    # shebang and run on every platform without compilation. Treating them as
+                    # compiled binaries produces false-positive "missing platform suffix" warnings.
+                    if _file_has_script_shebang(item):
+                        continue
                     binary_files.append(rel_path)
                     base_names.add(name)
                 elif item.suffix == ".exe":
