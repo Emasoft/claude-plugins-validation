@@ -333,7 +333,23 @@ llm_externalizer_output/
 
 
 def _validate_workflow() -> str:
-    """Generate .github/workflows/validate.yml for marketplace CI."""
+    """Generate .github/workflows/validate.yml for marketplace CI.
+
+    Runs the official CPV marketplace validator via `uvx cpv-remote-validate
+    marketplace . --strict`, fetched live from GitHub. Supports BOTH layouts:
+
+    - Layout A (hub-and-spoke): `cpv-remote-validate marketplace . --strict`
+      is sufficient — it validates marketplace.json plus the pipeline wiring.
+    - Layout B (nested plugins under `plugins/<name>/`): after the marketplace
+      pass, iterates over every subdirectory of `plugins/` and runs
+      `cpv-remote-validate plugin <subdir> --strict` against each one, so a
+      broken nested plugin blocks the marketplace CI the same way it blocks
+      the per-plugin CI.
+
+    Both invocations use the same github+uvx pattern used by every other
+    CPV template (see scripts/generate_plugin_repo.py ci.yml / release.yml /
+    validate.yml), so the rules and the CPV version stay in sync.
+    """
     return """name: Marketplace Validation
 
 on:
@@ -344,76 +360,100 @@ on:
 
 jobs:
   validate:
+    name: Validate marketplace (+ nested plugins if Layout B)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
       - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+        run: uv python install 3.12
 
-      - name: Validate marketplace structure
+      - name: Validate marketplace (remote CPV, --strict)
+        # Fetches the current CPV marketplace validator from GitHub. Blocks
+        # on CRITICAL(1)/MAJOR(2)/MINOR(3)/NIT(4); WARNING(5+) is advisory.
+        # Works for BOTH Layout A and Layout B marketplaces.
         run: |
-          echo "=== Validating Marketplace Structure ==="
-
-          # Check marketplace.json exists and is valid JSON
-          if [ -f ".claude-plugin/marketplace.json" ]; then
-            echo "OK marketplace.json exists"
-            python -c "import json; json.load(open('.claude-plugin/marketplace.json'))" && echo "OK marketplace.json is valid JSON"
+          set +e
+          uvx --from git+https://github.com/Emasoft/claude-plugins-validation \\
+              --with pyyaml \\
+              cpv-remote-validate marketplace . --strict
+          exit_code=$?
+          set -e
+          if [ $exit_code -eq 0 ]; then
+            echo "Marketplace validation passed"
+          elif [ $exit_code -ge 5 ]; then
+            echo "Only WARNING findings (exit $exit_code) — advisory, not blocking"
           else
-            echo "FAIL marketplace.json not found"
+            echo "::error::Marketplace validation failed with exit $exit_code (CRITICAL/MAJOR/MINOR/NIT)"
+            exit $exit_code
+          fi
+
+      - name: Detect Layout B (nested plugins)
+        id: layout
+        run: |
+          if [ -d "plugins" ] && find plugins -mindepth 2 -maxdepth 2 -name plugin.json -path '*/.claude-plugin/plugin.json' -print -quit | grep -q .; then
+            echo "is_layout_b=true" >> $GITHUB_OUTPUT
+            echo "Layout B detected — plugins nested under plugins/"
+          else
+            echo "is_layout_b=false" >> $GITHUB_OUTPUT
+            echo "Layout A (or no nested plugins) — skipping per-plugin validation"
+          fi
+
+      - name: Validate each nested plugin (Layout B, remote CPV, --strict)
+        # For Layout B marketplaces every subdirectory under plugins/ must
+        # pass the full plugin validator — broken nested plugins block the
+        # marketplace CI the same way they block a per-plugin CI.
+        if: steps.layout.outputs.is_layout_b == 'true'
+        run: |
+          set -e
+          failed=0
+          for plugin_dir in plugins/*/; do
+            plugin_dir=${plugin_dir%/}
+            [ -d "$plugin_dir" ] || continue
+            [ -f "$plugin_dir/.claude-plugin/plugin.json" ] || continue
+            echo ""
+            echo "=== Validating $plugin_dir ==="
+            set +e
+            uvx --from git+https://github.com/Emasoft/claude-plugins-validation \\
+                --with pyyaml \\
+                cpv-remote-validate plugin "$plugin_dir" --strict
+            rc=$?
+            set -e
+            if [ $rc -eq 0 ]; then
+              echo "$plugin_dir: passed"
+            elif [ $rc -ge 5 ]; then
+              echo "$plugin_dir: WARNING only (advisory)"
+            else
+              echo "::error::$plugin_dir failed validation (exit $rc)"
+              failed=$((failed + 1))
+            fi
+          done
+          if [ $failed -gt 0 ]; then
+            echo "::error::$failed nested plugin(s) failed validation"
             exit 1
           fi
 
-          # Validate all plugin entries have required fields and valid sources.
-          #
-          # IMPORTANT: This is inline Python inside a YAML double-quoted shell string.
-          # Shell quoting rules apply -- the shell strips inner double quotes before
-          # Python sees the code. Therefore:
-          #   - NEVER use dict["key"] inside f-strings (shell eats the quotes)
-          #   - ALWAYS extract dict values into local variables first
-          #   - Use only single quotes inside f-strings
-          python3 -c "
-          import json, sys
-          with open('.claude-plugin/marketplace.json') as f:
-              data = json.load(f)
-          if not data.get('name'):
-              print('FAIL: missing marketplace name')
-              sys.exit(1)
-          plugins = data.get('plugins', [])
-          for p in plugins:
-              name = p.get('name', '?')
-              if not p.get('name'):
-                  print(f'FAIL: plugin entry missing name')
-                  sys.exit(1)
-              source = p.get('source')
-              if not source:
-                  print(f'FAIL: plugin {name} missing source')
-                  sys.exit(1)
-              if isinstance(source, dict):
-                  src_type = source.get('source')
-                  repo = source.get('repo', '')
-                  if src_type == 'github' and repo:
-                      print(f'OK {name}: GitHub source -> {repo}')
-                  else:
-                      print(f'FAIL: plugin {name} invalid source object (needs source+repo)')
-                      sys.exit(1)
-              else:
-                  print(f'FAIL: plugin {name} invalid source type (must be object)')
-                  sys.exit(1)
-          print(f'')
-          print(f'=== All {len(plugins)} plugin entries validated ===')
-          "
-
-      - name: Lint marketplace scripts
+      - name: Validate marketplace pipeline wiring (remote CPV)
+        # Also run the marketplace_pipeline validator to check publish.py,
+        # cliff.toml, CI workflows, tag discipline, and secrets. Advisory if
+        # the marketplace does not ship a CPV pipeline yet.
         run: |
-          echo "=== Linting marketplace scripts ==="
-          pip install ruff
-          if [ -d "scripts" ]; then
-            ruff check scripts/ --select=E,F,W --ignore=E501 || echo "WARNING Some lint warnings (non-blocking)"
+          set +e
+          uvx --from git+https://github.com/Emasoft/claude-plugins-validation \\
+              --with pyyaml \\
+              cpv-remote-validate validate_marketplace_pipeline . --strict
+          exit_code=$?
+          set -e
+          if [ $exit_code -eq 0 ]; then
+            echo "Marketplace pipeline validation passed"
+          elif [ $exit_code -ge 5 ]; then
+            echo "Only WARNING findings (advisory, not blocking)"
           else
-            echo "No scripts/ directory to lint"
+            echo "::error::Marketplace pipeline validation failed (exit $exit_code)"
+            exit $exit_code
           fi
 """
 

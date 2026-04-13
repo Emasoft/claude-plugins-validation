@@ -38,7 +38,7 @@ Both layouts make plugins installable and updatable by Claude Code. The agent de
 1. Create the marketplace repo and initialize `marketplace.json`
 2. Install CI/CD workflow templates and sync scripts
 3. Link plugins by fetching metadata and installing notification workflows
-4. Validate the full setup with `validate_marketplace.py`
+4. Validate with `uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-remote-validate marketplace . --strict` (remote CPV — no vendoring, no drift)
 
 Copy this checklist and track your progress:
 
