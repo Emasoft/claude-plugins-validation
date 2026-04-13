@@ -24,7 +24,8 @@ Defines the standard files, workflows, hooks, and release pipeline that every Em
 2. **Verify standard files**: Check all required files exist per [Detailed Standard](references/detailed-standard.md#standard-plugin-files)
 3. **Install CI/CD workflows**: Ensure `ci.yml`, `release.yml`, `validate.yml`, `notify-marketplace.yml` in `.github/workflows/`
 4. **Install pre-push hook**: `uv run python scripts/publish.py --install-hook`
-5. **Validate**: `uv run --with pyyaml python scripts/validate_plugin.py . --strict`
+5. **Validate** (from any directory — fetches CPV from GitHub, no local vendoring):
+   `uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-remote-validate plugin . --strict`
 6. **Fix ALL issues**: CRITICAL, MAJOR, MINOR, NIT must be resolved — only WARNINGs may remain
 7. **Commit and push**: The pre-push hook enforces 4 gates (version bump, lint, validate, tests)
 

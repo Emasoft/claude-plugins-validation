@@ -44,8 +44,14 @@ jobs:
       - name: Lint all source files (read-only)
         run: uv run python scripts/lint_files.py .
 
-      - name: Run plugin validation
-        run: uv run python scripts/validate_plugin.py .
+      - name: Run plugin validation (remote CPV, strict)
+        # Fetches CPV from GitHub via uvx — downstream plugins don't vendor
+        # the validator. Matches what publish.py runs locally so CI and the
+        # local gate never disagree. Issue #11.
+        run: |
+          uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
+              --with pyyaml \
+              cpv-remote-validate plugin . --strict
 
       - name: Run tests
         run: uv run pytest tests/ -v
@@ -84,16 +90,20 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Run full plugin validation
+      - name: Run full plugin validation (remote CPV, --strict)
+        # Fetches CPV from GitHub — downstream plugins don't vendor the validator.
+        # --strict blocks on CRITICAL(1)/MAJOR(2)/MINOR(3)/NIT(4); WARNING(5+) advisory.
         run: |
           set +e
-          uv run python scripts/validate_plugin.py . --verbose > validation-report.txt 2>&1
+          uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
+              --with pyyaml \
+              cpv-remote-validate plugin . --strict \
+              > validation-report.txt 2>&1
           exit_code=$?
           set -e
           cat validation-report.txt
-          # Fail release on critical (1) or major (2) issues
-          if [ $exit_code -le 2 ] && [ $exit_code -ge 1 ]; then
-            echo "::error::Validation failed with exit code $exit_code (critical/major issues found)"
+          if [ $exit_code -ge 1 ] && [ $exit_code -le 4 ]; then
+            echo "::error::Validation failed with exit code $exit_code (CRITICAL/MAJOR/MINOR/NIT)"
             exit $exit_code
           fi
 
@@ -168,34 +178,28 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Find validator
-        id: find-validator
-        run: |
-          if [ -f "scripts/validate_plugin.py" ]; then
-            echo "validator=scripts/validate_plugin.py" >> $GITHUB_OUTPUT
-          elif [ -f "<placeholder-for-validation-submodule-path>/scripts/validate_plugin.py" ]; then
-            echo "validator=<placeholder-for-validation-submodule-path>/scripts/validate_plugin.py" >> $GITHUB_OUTPUT
-          else
-            echo "validator=" >> $GITHUB_OUTPUT
-          fi
-
       - name: Lint all source files (read-only)
         run: uv run python scripts/lint_files.py .
 
-      - name: Validate plugin(s)
-        if: steps.find-validator.outputs.validator != ''
+      - name: Validate plugin (remote CPV, --strict)
+        # Issue #11: CI no longer depends on a local scripts/validate_plugin.py
+        # or a submodule. uvx fetches the current CPV release from GitHub
+        # for every run so the ruleset stays in sync with upstream.
         run: |
-          set +e  # Don't exit on error - we need to capture exit code
-          uv run python ${{ steps.find-validator.outputs.validator }} . --verbose
+          set +e
+          uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
+              --with pyyaml \
+              cpv-remote-validate plugin . --strict
           exit_code=$?
-          set -e  # Re-enable exit on error
-          # Exit codes: 0=pass, 1=critical, 2=major, 3=minor
-          # Strict mode: ALL non-zero exit codes block
+          set -e
           if [ $exit_code -eq 0 ]; then
             echo "Validation passed"
             exit 0
+          elif [ $exit_code -ge 5 ]; then
+            echo "Only WARNING findings (exit $exit_code) — advisory, not blocking"
+            exit 0
           else
-            echo "Validation failed (exit code: $exit_code)"
+            echo "Validation failed (exit $exit_code: CRITICAL/MAJOR/MINOR/NIT)"
             exit $exit_code
           fi
 
