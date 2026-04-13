@@ -1515,10 +1515,14 @@ Exit Codes:
         return EXIT_MINOR
 
     # Verify content type — marketplace directory must contain marketplace.json
-    if not (marketplace_path / "marketplace.json").exists():
+    # Check both canonical locations (root and .claude-plugin/)
+    if not (marketplace_path / "marketplace.json").exists() and not (
+        marketplace_path / ".claude-plugin" / "marketplace.json"
+    ).exists():
         print(
             f"Error: No marketplace.json found at {marketplace_path}\n"
-            f"Expected a marketplace directory with marketplace.json.",
+            f"Expected a marketplace directory with marketplace.json "
+            f"(either at root or under .claude-plugin/).",
             file=sys.stderr,
         )
         return EXIT_MINOR
