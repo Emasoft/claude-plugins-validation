@@ -2,6 +2,12 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.25] - 2026-04-13
+
+### Bug Fixes
+
+- **scaffold:** Enforce the cornerstone rule in generated publish.py templates
+
 ## [2.12.24] - 2026-04-13
 
 ### Miscellaneous Tasks
