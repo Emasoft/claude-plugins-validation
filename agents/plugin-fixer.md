@@ -88,6 +88,26 @@ Marketplace-level CI/CD (marketplace workflow files, auto-notification receivers
 - **ALWAYS write fix log** to `docs_dev/fix-log_<name>_YYYYMMDD.md` — return only summary to caller.
 - **After fixing**, return a one-line summary, not the full fix log.
 
+## CRITICAL: Never improvise `gh secret set`
+
+If any fix requires touching the `MARKETPLACE_PAT` secret (rare for plugin-scope fixes — usually routed to marketplace-fixer), **always use the helper script** `scripts/set_marketplace_pat.py`. The helper never prints the token value, so it cannot leak into the Claude transcript, shell history, or log files.
+
+```bash
+uv run python scripts/set_marketplace_pat.py OWNER/repo-a OWNER/repo-b
+```
+
+**Manual fallback** (only if the helper is unavailable): the only correct `gh secret set` form passes the value through the `--body` / `-b` flag — never through stdin or a pipe:
+
+```bash
+gh secret set MARKETPLACE_PAT --repo OWNER/REPO --body "$MARKETPLACE_PAT" >/dev/null
+```
+
+Reject these forbidden forms on sight (they all inject a trailing newline into the stored secret → `Bad credentials` / 401 at push time):
+- `echo "$MARKETPLACE_PAT" | gh secret set ...`
+- `gh secret set MARKETPLACE_PAT <<< "$MARKETPLACE_PAT"`
+- `printf "$MARKETPLACE_PAT" | gh secret set ...`
+- stdin-driven `gh secret set` without `--body`/`-b`
+
 ## Token Budget
 
 - **NEVER spawn sub-agents** — you are a leaf agent

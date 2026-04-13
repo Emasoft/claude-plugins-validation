@@ -34,24 +34,28 @@ plugin/marketplace pair with placeholder substitution only.
 
 ## Instructions
 
-1. **Check env for `MARKETPLACE_PAT`** first. If set, reuse it and skip
-   manual PAT creation. If unset, walk the user through creating one and
-   exporting it. Never echo the value — use `${#VAR}` for length checks.
-2. Run `gh secret set MARKETPLACE_PAT --body "$MARKETPLACE_PAT"` against
-   both repos. Verify with `gh secret list`, not by printing the value.
+1. **Check env for `MARKETPLACE_PAT`** first (length only — never print the
+   value). If unset, walk the user through creating one and exporting it.
+2. **Set the secret via `scripts/set_marketplace_pat.py`** — never improvise
+   `gh secret set`. Full rules and the forbidden-patterns list in
+   [pat-secret-setup.md](references/pat-secret-setup.md).
+   ```bash
+   uv run python scripts/set_marketplace_pat.py <plugin> <marketplace>
+   uv run python scripts/set_marketplace_pat.py --verify-only <plugin> <marketplace>
+   ```
 3. Install `notify-marketplace.yml` on the plugin repo from the template.
 4. Verify the marketplace receiver exists on its default branch — create
    it from `receiver-workflow-template.md` if missing.
-5. Dry run the chain without cutting a real release.
-6. Verify end to end: plugin run → marketplace run → `marketplace.json`
+5. Dry-run the chain without cutting a real release.
+6. Verify end-to-end: plugin run → marketplace run → `marketplace.json`
    bumped → Claude Code refresh sees the new version.
 
 Copy this checklist and track your progress:
 
 - [ ] Check env for `MARKETPLACE_PAT`
 - [ ] If absent, create PAT and export it
-- [ ] Run `gh secret set` using the env var
-- [ ] Verify secret exists
+- [ ] Run `scripts/set_marketplace_pat.py` (NEVER improvise `gh secret set`)
+- [ ] Verify secret exists via `--verify-only`
 - [ ] Scaffold `notify-marketplace.yml`
 - [ ] Verify marketplace receiver exists
 - [ ] Dry-run end-to-end
@@ -80,13 +84,11 @@ Copy this checklist and track your progress:
 Plugin `claude-plugins-validation` → marketplace `Emasoft/emasoft-plugins`:
 
 ```bash
-# Auto-detect: reuse shell env token if already set
 [ -n "${MARKETPLACE_PAT:-}" ] && echo "reusing (${#MARKETPLACE_PAT} chars)"
-gh secret set MARKETPLACE_PAT --repo Emasoft/claude-plugins-validation --body "$MARKETPLACE_PAT"
-gh secret set MARKETPLACE_PAT --repo Emasoft/emasoft-plugins           --body "$MARKETPLACE_PAT"
-gh secret list --repo Emasoft/emasoft-plugins | grep MARKETPLACE_PAT
-# Then copy references/notify-workflow-template.md -> .github/workflows/notify-marketplace.yml,
-# set MARKETPLACE_OWNER=Emasoft, MARKETPLACE_REPO=emasoft-plugins, commit, push.
+uv run python scripts/set_marketplace_pat.py \
+  Emasoft/claude-plugins-validation Emasoft/emasoft-plugins
+# Copy references/notify-workflow-template.md → .github/workflows/notify-marketplace.yml,
+# fill MARKETPLACE_OWNER/MARKETPLACE_REPO, commit, push.
 ```
 
 Any plugin-file push on default branch dispatches `plugin-updated`; the

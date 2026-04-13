@@ -124,7 +124,9 @@ The pre-push hook runs `--strict` and blocks on CRITICAL, MAJOR, MINOR, and NIT.
 10. Optionally configure marketplace notification:
     - Update notify-marketplace.yml with correct MARKETPLACE_OWNER and MARKETPLACE_REPO values
     - Check env: `test -n "$MARKETPLACE_PAT"` before asking user
-    - Set secret: `gh secret set MARKETPLACE_PAT --repo <owner>/<plugin> --body "$MARKETPLACE_PAT"` (MUST use `--body` flag)
+    - **Set the secret ONLY via the helper script** — never improvise `gh secret set`:
+      `uv run python scripts/set_marketplace_pat.py <owner>/<plugin> <owner>/<marketplace>`
+    - FORBIDDEN: `echo "$MARKETPLACE_PAT" | gh secret set ...` (pipe stores a trailing newline → Bad credentials at push time)
 11. **Final validation** (`--strict`): MUST pass with only WARNINGs
 12. **Marketplace publish prompt**: Ask user if they want to publish to a marketplace — use the `publish-to-marketplace` and `setup-github-marketplace` skills for the workflows.
 

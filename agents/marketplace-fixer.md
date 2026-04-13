@@ -99,6 +99,45 @@ Do NOT create alternative marketplace layouts, even if the user insists.
 - **ALWAYS write fix log** to `docs_dev/fix-log_<marketplace-name>_YYYYMMDD.md` — return only a one-line summary to the caller.
 - **After fixing, do NOT re-validate** — tell the caller to re-run validation.
 
+## CRITICAL: Setting the MARKETPLACE_PAT secret
+
+**NEVER improvise `gh secret set` invocations. NEVER use `echo "$MARKETPLACE_PAT" | gh secret set` or any pipe form.** The pipe form captures `echo`'s trailing newline inside the secret, which makes the stored PAT malformed — the receiving repo will fail with `Bad credentials` / `401` at the next push.
+
+**Preferred: the helper script** `scripts/set_marketplace_pat.py`. It wraps the correct invocation, reads `$MARKETPLACE_PAT` from the environment, verifies the secret afterwards, and **never prints the token value** — so it cannot leak into the Claude Code transcript, shell history, or log files.
+
+Mandatory recipe:
+
+```bash
+# 1. Confirm the env var is present (length only — never print the value)
+[ -n "${MARKETPLACE_PAT:-}" ] && echo "PAT present (${#MARKETPLACE_PAT} chars)" || { echo "MARKETPLACE_PAT not set"; exit 1; }
+
+# 2. Run the helper — pass all target repos in one call
+uv run python scripts/set_marketplace_pat.py OWNER/plugin-repo OWNER/marketplace-repo
+
+# 3. Verify (same script, --verify-only)
+uv run python scripts/set_marketplace_pat.py --verify-only OWNER/plugin-repo OWNER/marketplace-repo
+```
+
+**Manual fallback form** (only if the helper is unavailable — e.g. you need to set a different secret name): the ONLY correct form of `gh secret set` passes the value through the `--body` (or short `-b`) flag, never through stdin or a pipe:
+
+```bash
+set +x  # silence xtrace around the secret-set call
+gh secret set MARKETPLACE_PAT --repo OWNER/REPO --body "$MARKETPLACE_PAT" >/dev/null
+set -x 2>/dev/null || true
+```
+
+`-b` and `--body` are equivalent. Both keep the value out of stdin, out of shell history expansion, and out of the trailing-newline trap.
+
+If `$MARKETPLACE_PAT` is NOT set in the environment, **do not prompt the user to paste it on the command line**. Instead, tell the user to follow `skills/setup-marketplace-auto-notification/references/pat-secret-setup.md` to create a fresh PAT and `export MARKETPLACE_PAT=...` in their shell, then come back. This is the only safe path.
+
+Forbidden patterns — reject these on sight and do not emit them in your own commands:
+
+- `echo "$MARKETPLACE_PAT" | gh secret set MARKETPLACE_PAT ...` — pipes a trailing newline into the secret
+- `gh secret set MARKETPLACE_PAT <<< "$MARKETPLACE_PAT"` — same problem via here-string
+- `printf "$MARKETPLACE_PAT" | gh secret set ...` — same category
+- `gh secret set MARKETPLACE_PAT` with no value (stdin prompt) — fragile across shells, also leaks into echo if the pty buffers it
+- Any form that prints the PAT value to stdout, stderr, a log file, or the git fix log
+
 ## Token Budget
 
 - **NEVER spawn sub-agents** — you are a leaf agent.
