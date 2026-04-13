@@ -28,7 +28,7 @@ There are **two ways to use CPV**. Pick the one that fits your workflow:
   - [Claude Code Documentation](#claude-code-documentation)
 - **[Part 1: Standalone Validation (via uvx)](#part-1-standalone-validation-via-uvx)**
   - [Getting Started](#getting-started)
-  - [Available Validators](#available-validators)
+  - [Available Scripts](#available-scripts)
   - [Options](#options)
   - [Reading the Results](#reading-the-results)
 - **[Part 2: Claude Code Plugin](#part-2-claude-code-plugin)**
@@ -43,7 +43,7 @@ There are **two ways to use CPV**. Pick the one that fits your workflow:
 
 ## What Does CPV Check?
 
-CPV runs **17 specialized validators** covering **190+ rules** across every part of a Claude Code plugin:
+CPV runs **18 specialized validators** covering **190+ rules** across every part of a Claude Code plugin (15 plugin validators + 3 marketplace validators):
 
 | Area | Examples of what CPV catches |
 |------|------------------------------|
@@ -78,7 +78,7 @@ CPV validates plugins against the official Claude Code specification. If you are
 You need [uv](https://docs.astral.sh/uv/getting-started/installation/) installed. Then:
 
 ```bash
-# Validate a plugin (runs all 17 checks + linting)
+# Validate a plugin (runs all 18 checks + linting)
 uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml \
     cpv-remote-validate validate_plugin /path/to/your-plugin
 ```
@@ -128,14 +128,15 @@ Any of these can be passed as the first argument to `cpv-remote-validate`. Short
 
 | Command | What It Checks |
 |---------|----------------|
-| `plugin` | **Everything.** Runs all 17 sub-validators + linting. Start here. |
+| `plugin` | **Everything.** Runs all 18 sub-validators + linting. Start here. |
 | `skill` | **Skills.** SKILL.md frontmatter, required sections, description quality. 190+ rules. |
 | `hook` | **Hooks.** 27 event types, 4 hook types, script paths, bash portability. |
 | `agent` | **Agents.** Frontmatter fields, naming, tools, model, skills. |
 | `command` | **Commands.** Frontmatter, tool names, arguments, naming. |
 | `security` | **Security.** Injection, path traversal, secrets, prompt injection, exfiltration. |
 | `scoring` | **Quality score.** Weighted across structure, docs, security, testing. |
-| `marketplace` | **Marketplace.** Manifest structure, plugin entries, source references. |
+| `marketplace` | **Marketplace.** Manifest structure, plugin entries, source references. Supports Layout A (hub-and-spoke) and Layout B (nested). |
+| `settings-marketplace` | **Inline marketplace in settings.** Validates `marketplaces` entries embedded in Claude Code settings files. |
 | `enterprise` | **Enterprise.** Author, license, SPDX, keywords, metadata. |
 | `mcp` | **MCP.** Transport types, required fields, OAuth, paths. |
 | `lsp` | **LSP.** Command paths, language IDs, file patterns. |
@@ -244,12 +245,35 @@ When used as a Claude Code plugin, **agents are the primary way to interact with
 |-------|-------------|---------------------------|
 | **plugin-validator** | Runs validation scripts and returns severity reports | "Validate my plugin", "Check if this is ready to publish" |
 | **skill-validation-agent** | Specialized skill validation (basic, strict, OpenSpec, Pillars) | "Validate this skill", "Check my SKILL.md" |
-| **plugin-fixer** | Reads a validation report and automatically fixes the issues | "Fix the validation errors", "How do I fix these issues?" |
+| **plugin-fixer** | Fixes **plugin** validation errors (mechanical per-error remediation) | "Fix the validation errors in my plugin", "Fix this plugin.json report" |
+| **marketplace-fixer** | Fixes **marketplace** validation errors *and* runs interactive architectural migrations between Layout A and Layout B | "Fix the marketplace errors", "Migrate my marketplace to the nested layout" |
 | **semantic-validator** | Deep AI quality analysis — catches things scripts cannot (see below) | "Check if descriptions actually match what skills do" |
 | **plugin-manager** | Full plugin lifecycle: install, update, enable, disable, search, health-check | "Install a plugin", "List my plugins", "Run doctor" |
 | **plugin-creator** | Scaffolds plugins, marketplaces, publishes to GitHub with CI/CD | "Create a new plugin", "Publish to GitHub", "Set up a marketplace" |
 
 Every agent presents a menu when invoked, asks what you need, and guides you step by step. You don't need to remember command names or flags.
+
+#### Separation of Concerns: Plugins vs. Marketplaces
+
+CPV treats **plugins** and **marketplaces** as two distinct concerns with dedicated validators, fix agents, and error indexes. This avoids the kitchen-sink fixer problem where one agent tries to reason about both an individual plugin's `plugin.json` and a marketplace's `marketplace.json` + release pipeline at the same time.
+
+| Concern | Validators | Fix agent | Error index |
+|---------|------------|-----------|-------------|
+| Plugin | `validate_plugin.py` (orchestrator) + 14 component sub-validators (hook, skill, agent, command, mcp, lsp, security, scoring, enterprise, docs, encoding, rules, xref, skill-basic) | `plugin-fixer` | [`skills/fix-validation/references/plugin-error-index.md`](skills/fix-validation/references/plugin-error-index.md) |
+| Marketplace | `validate_marketplace.py`, `validate_marketplace_pipeline.py`, `validate_settings_marketplace.py` | `marketplace-fixer` | [`skills/fix-validation/references/marketplace-error-index.md`](skills/fix-validation/references/marketplace-error-index.md) |
+
+**Mechanical fixes vs. architectural migrations.** The `fix-validation` and `fix-marketplace-validation` skills do **mechanical per-error remediation** — one rule, one fix, minimal user input. The separate `migrate-marketplace-architecture` skill (loaded by `marketplace-fixer`) does **interactive architectural conversion** with extensive `AskUserQuestion` prompts: it walks you through converting a Layout A hub-and-spoke marketplace into a Layout B nested single-repo marketplace or vice versa, including publish pipeline, CI, and CHANGELOG restructuring.
+
+#### Supported Marketplace Layouts
+
+CPV validates and supports two marketplace layouts — both are first-class:
+
+| Layout | Shape | When to use |
+|--------|-------|-------------|
+| **Layout A — Hub and spoke** | One marketplace repo that references plugins living in **separate GitHub repos** (one repo per plugin). | Multiple authors, plugins from different organizations, plugins with independent release cadences. |
+| **Layout B — Nested single-repo** | One marketplace repo that contains **all its plugins as subdirectories**, with a single author and full CPV release discipline: `publish.py`, `cliff.toml`, `CHANGELOG.md`, CI, single-version bumps. | Single author, atomic cross-plugin releases, unified CI pipeline. |
+
+Full layout specifications and decision criteria: [`skills/create-plugin/references/marketplace-layouts.md`](skills/create-plugin/references/marketplace-layouts.md).
 
 #### Script Validation vs. Semantic Validation
 
@@ -267,13 +291,13 @@ The semantic validator always warns about the cost and asks for confirmation bef
 
 ### Slash Commands
 
-13 commands — 8 run scripts directly (zero AI tokens), 5 spawn the right agent.
+16 commands — 8 run scripts directly (zero AI tokens), 6 spawn an agent, 2 are specialized utility scripts.
 
 #### Script Commands (free — no AI tokens)
 
 | Command | What It Does |
 |---------|--------------|
-| `/cpv-validate-plugin <path>` | **Full validation** -- runs all 17 sub-validators |
+| `/cpv-validate-plugin <path>` | **Full validation** -- runs all 18 sub-validators |
 | `/cpv-validate-skill <path>` | Skill validation (190+ rules) |
 | `/cpv-validate-github-plugin <owner/repo>` | Validate a GitHub plugin without installing |
 | `/cpv-validate-github-marketplace <owner/repo>` | Validate a GitHub marketplace without registering |
@@ -289,8 +313,16 @@ The semantic validator always warns about the cost and asks for confirmation bef
 | `/cpv-validate` | plugin-validator | Interactive: asks what to validate, runs the right script |
 | `/cpv-manage` | plugin-manager | Interactive: install, update, enable, disable, search, doctor |
 | `/cpv-create` | plugin-creator | Interactive: create plugins, marketplaces, publish to GitHub |
-| `/cpv-fix-validation <report>` | plugin-fixer | Reads a validation report and fixes all issues |
+| `/cpv-fix-validation <report>` | plugin-fixer | Fixes **plugin** validation issues from a report |
+| `/cpv-fix-marketplace-validation <report>` | marketplace-fixer | Fixes **marketplace** validation issues and runs architectural migrations |
 | `/cpv-semantic-validation <path>` | semantic-validator | Deep AI quality analysis (Opus, expensive, explicit opt-in) |
+
+#### Specialized Utility Commands
+
+| Command | What It Does |
+|---------|--------------|
+| `/cpv-link-plugin <path>` | Link a local plugin directory into Claude Code for live development |
+| `/cpv-validate-settings-marketplace <path>` | Validate inline `marketplaces` entries embedded in a settings file |
 
 ---
 
@@ -301,12 +333,12 @@ The semantic validator always warns about the cost and asks for confirmation bef
 
 | Category | Count | Description |
 |----------|-------|-------------|
-| Validation scripts | 17 | Python validators covering all plugin components |
+| Validation scripts | 18 | Python validators (15 plugin + 3 marketplace) covering all plugin and marketplace components |
 | Management scripts | 12 | Plugin lifecycle, marketplace operations, scaffolding |
-| Agents | 6 | AI-powered validation, fixing, and management |
-| Skills | 11 | Validation, management, publishing workflows |
-| Commands | 13 | 8 direct script + 5 agent commands |
-| Tests | 1549 | Full coverage across all modules |
+| Agents | 7 | AI-powered validation, fixing, and management |
+| Skills | 13 | Validation, management, publishing, and fix/migration workflows |
+| Commands | 16 | 8 direct script + 6 agent-backed + 2 specialized utility commands |
+| Tests | 1594 | Full coverage across all modules |
 
 </details>
 
@@ -315,14 +347,16 @@ The semantic validator always warns about the cost and asks for confirmation bef
 
 | Script | Purpose |
 |--------|---------|
-| `validate_plugin.py` | Main orchestrator -- runs all 17 sub-validators |
+| `validate_plugin.py` | Main orchestrator -- runs all 18 sub-validators |
 | `validate_skill_comprehensive.py` | Comprehensive skill validator (190+ rules) |
 | `validate_hook.py` | Hook configuration validator |
 | `validate_agent.py` | Agent definition validator |
 | `validate_command.py` | Command definition validator |
 | `validate_mcp.py` | MCP server config validator |
 | `validate_lsp.py` | LSP server config validator |
-| `validate_marketplace.py` | Marketplace manifest validator |
+| `validate_marketplace.py` | Marketplace manifest validator (supports Layout A and Layout B) |
+| `validate_marketplace_pipeline.py` | Marketplace release pipeline validator (publish.py, CI, CHANGELOG) |
+| `validate_settings_marketplace.py` | Inline marketplace-in-settings validator |
 | `validate_security.py` | Security vulnerability scanner |
 | `validate_scoring.py` | Quality score calculator |
 | `validate_enterprise.py` | Enterprise compliance validator |
@@ -331,7 +365,6 @@ The semantic validator always warns about the cost and asks for confirmation bef
 | `validate_rules.py` | Rules directory validator |
 | `validate_xref.py` | Cross-reference validator |
 | `validate_skill.py` | Basic skill validator |
-| `validate_marketplace_pipeline.py` | Marketplace pipeline validator |
 
 </details>
 
