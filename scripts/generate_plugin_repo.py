@@ -582,18 +582,21 @@ def gen_publish_py(p: PluginParams) -> str:
     """Generate scripts/publish.py — unified publish pipeline with --gate mode."""
     _ = p  # unused but kept for consistent signature
     return r'''#!/usr/bin/env python3
-"""Unified publish pipeline: lint -> validate -> test -> bump -> badge -> changelog -> commit -> push.
+"""Unified publish pipeline: bypass-guard -> lint -> validate (remote CPV) -> test -> bump -> badge -> changelog -> commit -> push -> release.
 
 Modes:
-  --gate           Pre-push gate: lint + validate + tests only (no bump/push).
-                   Called by git-hooks/pre-push automatically.
+  --gate           Pre-push gate: orchestrator check + lint + validate + tests
+                   only (no bump/push). Called by git-hooks/pre-push automatically.
   --install-hook   Install git-hooks/pre-push into .git/hooks/ and set core.hooksPath.
-  --patch/--minor/--major  Full release pipeline (12 stages).
+  --patch/--minor/--major  Full release pipeline (10 stages, fail-fast).
 
-Pipeline stages (all fail-fast — any failure aborts):
+Pipeline stages (all fail-fast — any non-zero exit aborts):
+   0. Bypass guard — reject CPV_SKIP_*, SKIP_*, NO_VERIFY env vars
    1. Check working tree is clean
    2. Lint files (ruff)
-   3. Validate plugin (validate_plugin.py --strict)
+   3. Validate plugin (uvx cpv-remote-validate plugin . --strict — fetches
+      the canonical CPV validator from GitHub so this plugin never vendors
+      a local copy and never drifts from upstream rules)
    4. Run tests (pytest)
    5. Check version consistency across all sources
    6. Bump version in plugin.json, pyproject.toml, and __version__ vars
@@ -605,9 +608,9 @@ Pipeline stages (all fail-fast — any failure aborts):
 Gate stages (--gate mode, called by pre-push hook):
    G0. Orchestrator check — direct `git push` is blocked; only publish.py
        may initiate a push (verified via process ancestry, NOT env vars).
-   G1. Version bump check (local vs remote)
+   G1. Version bump check (local vs remote, auto-detects origin/HEAD)
    G2. Lint (ruff)
-   G3. Validate (--strict, blocks on CRITICAL/MAJOR/MINOR/NIT)
+   G3. Validate (uvx cpv-remote-validate plugin . --strict)
    G4. Tests (pytest)
 
 Usage:
@@ -1152,23 +1155,47 @@ def stage_bump(root: Path, new_ver: str, dry_run: bool) -> None:
     cprint(f"  {GREEN}Version bumped to {new_ver}.{NC}")
 
 def stage_update_badges(root: Path, old_ver: str, new_ver: str, dry_run: bool) -> None:
-    """Step 7: Replace version badge in README.md."""
+    """Step 7: Replace version badge in README.md.
+
+    Strategy:
+      1. Try exact-string substitution `version-<old>-blue` → `version-<new>-blue`
+      2. If the exact old version is not present, fall back to a regex that
+         matches ANY `version-X.Y.Z-blue` pattern (handles drift from a hand-edit
+         or a missed release). Prevents the "stale forever" trap that bit CPV
+         itself when its README badge fell 20 releases behind.
+      3. Emit a WARNING (not silent skip) when no badge is found at all so the
+         author notices the README has no shields.io version badge to update.
+    """
     cprint(f"\n{BOLD}[7/10] Updating README badge...{NC}")
     readme = root / "README.md"
     if not readme.exists():
-        cprint(f"  {YELLOW}No README.md — skipping badge update.{NC}")
+        cprint(f"  {YELLOW}WARNING: no README.md — skipping badge update.{NC}")
         return
     content = readme.read_text(encoding="utf-8")
     old_badge = f"version-{old_ver}-blue"
     new_badge = f"version-{new_ver}-blue"
-    if old_badge not in content:
-        cprint(f"  {YELLOW}Version badge not found in README.md, skipping.{NC}")
+
+    if old_badge in content:
+        if dry_run:
+            cprint(f"  Would update badge (exact match): {old_badge} -> {new_badge}")
+            return
+        readme.write_text(content.replace(old_badge, new_badge, 1), encoding="utf-8")
+        cprint(f"  {GREEN}Updated README badge: {old_ver} -> {new_ver}{NC}")
         return
+
+    # Fallback: regex match on any version-X.Y.Z-blue pattern
+    badge_re = re.compile(r"version-\d+\.\d+\.\d+-blue")
+    match = badge_re.search(content)
+    if match is None:
+        cprint(f"  {YELLOW}WARNING: no version-X.Y.Z-blue badge found in README.md.{NC}")
+        cprint(f"  {YELLOW}Add a shields.io badge so future releases can update it automatically.{NC}")
+        return
+    found = match.group(0)
     if dry_run:
-        cprint(f"  Would update badge: {old_badge} -> {new_badge}")
+        cprint(f"  Would update badge (regex match): {found} -> {new_badge}")
         return
-    readme.write_text(content.replace(old_badge, new_badge, 1), encoding="utf-8")
-    cprint(f"  {GREEN}Updated README badge: {old_ver} -> {new_ver}{NC}")
+    readme.write_text(badge_re.sub(new_badge, content, count=1), encoding="utf-8")
+    cprint(f"  {GREEN}Updated README badge (was {found}, now {new_badge}){NC}")
 
 def stage_changelog(root: Path, dry_run: bool) -> None:
     """Step 8: Generate changelog with git-cliff."""
