@@ -905,10 +905,14 @@ def stage_bump(plugin_root: Path, bump_type: str, dry_run: bool) -> tuple[int, s
 def stage_update_readme_badge(plugin_root: Path, old_version: str, new_version: str, dry_run: bool) -> None:
     """Part of Gate 8: update the README.md version badge in-place.
 
-    Looks for the shields.io badge pattern `version-<old>-blue` and replaces
-    the version segment with the new value. Silent no-op when README.md
-    does not exist or the badge is not present — this is a convenience
-    stage, not a hard gate.
+    Two-stage match strategy:
+      1. Exact-string substitution `version-<old>-blue` → `version-<new>-blue`
+      2. Regex fallback `version-\\d+\\.\\d+\\.\\d+-blue` for any drifted badge
+
+    The fallback prevents the same "stale forever" trap that bit CPV's own
+    README (the badge said 2.6.4 while real version was 2.12.25 — 20 releases
+    of silent skip). When neither match succeeds, prints a WARNING (not a
+    silent skip) so the author notices the README has no badge to update.
     """
     readme = plugin_root / "README.md"
     if not readme.is_file():
@@ -916,14 +920,30 @@ def stage_update_readme_badge(plugin_root: Path, old_version: str, new_version: 
     content = readme.read_text(encoding="utf-8")
     old_badge = f"version-{old_version}-blue"
     new_badge = f"version-{new_version}-blue"
-    if old_badge not in content:
-        print(f"  {YELLOW}(README version badge not found — skipping badge update){NC}")
+
+    if old_badge in content:
+        if dry_run:
+            print(f"  Would update README badge (exact): {old_badge} → {new_badge}")
+            return
+        readme.write_text(content.replace(old_badge, new_badge, 1), encoding="utf-8")
+        print(f"  {GREEN}✓ Updated README version badge{NC}")
         return
+
+    # Regex fallback: catch any drifted version badge
+    badge_re = re.compile(r"version-\d+\.\d+\.\d+-blue")
+    match = badge_re.search(content)
+    if match is None:
+        print(
+            f"  {YELLOW}WARNING: no version-X.Y.Z-blue badge found in README.md — "
+            f"add a shields.io badge so future releases can update it automatically{NC}"
+        )
+        return
+    found = match.group(0)
     if dry_run:
-        print(f"  Would update README badge: {old_badge} → {new_badge}")
+        print(f"  Would update README badge (regex): {found} → {new_badge}")
         return
-    readme.write_text(content.replace(old_badge, new_badge, 1), encoding="utf-8")
-    print(f"  {GREEN}✓ Updated README version badge{NC}")
+    readme.write_text(badge_re.sub(new_badge, content, count=1), encoding="utf-8")
+    print(f"  {GREEN}✓ Updated README version badge (was {found}, now {new_badge}){NC}")
 
 
 def stage_changelog(plugin_root: Path, tag_name: str, new_version: str) -> tuple[int, Path | None]:

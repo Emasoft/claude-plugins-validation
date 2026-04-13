@@ -2,7 +2,9 @@
 name: plugin-fixer
 description: |
   Fix agent that reads validation report files and applies fixes one by one.
-  Does NOT validate — only fixes issues identified by the validator agents.
+  Does NOT run validators — only fixes issues identified by the validator
+  agents. Loads plugin-validation-skill purely as a reference for what valid
+  plugin structure looks like, NOT to re-validate.
   Consults fix guides in skills/fix-validation/references/ for remediation steps.
 model: sonnet
 maxTurns: 50
