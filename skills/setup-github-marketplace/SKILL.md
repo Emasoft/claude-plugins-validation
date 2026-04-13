@@ -10,8 +10,6 @@ tags:
   - automation
   - setup
 allowed-tools: Read, Bash(git:*,gh:*,python:*,uv:*), Write, Edit, Glob, Grep, AskUserQuestion
-agent: plugin-creator
-context: fork
 user-invocable: false
 ---
 

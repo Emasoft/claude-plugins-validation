@@ -199,7 +199,9 @@ def validate_mcp_server(
                 cmd_args = config.get("args", [])
                 pkg_name = cmd_args[0] if cmd_args and isinstance(cmd_args[0], str) else None
                 if pkg_name and not pkg_name.startswith((".", "/", "${")):
-                    report.warning(f"Server {server_name} uses {command} to execute remote package '{pkg_name}' — this downloads and runs code from a registry. Verify the package is trusted and consider pinning a version.")
+                    report.warning(
+                        f"Server {server_name} uses {command} to execute remote package '{pkg_name}' — this downloads and runs code from a registry. Verify the package is trusted and consider pinning a version."
+                    )
 
         # Warn about url field ignored for stdio transport
         if "url" in config and transport == "stdio":
@@ -233,9 +235,13 @@ def validate_mcp_server(
                     )
                 )
                 if not is_localhost:
-                    report.warning(f"Server {server_name} connects to remote URL '{url}' — remote MCP servers can access tool results and conversation data. Ensure the server is trusted and uses HTTPS.")
+                    report.warning(
+                        f"Server {server_name} connects to remote URL '{url}' — remote MCP servers can access tool results and conversation data. Ensure the server is trusted and uses HTTPS."
+                    )
                     if url.startswith("http://") and not is_localhost:
-                        report.major(f"Server {server_name} uses unencrypted HTTP for remote server — use HTTPS to protect data in transit.")
+                        report.major(
+                            f"Server {server_name} uses unencrypted HTTP for remote server — use HTTPS to protect data in transit."
+                        )
 
         # SSE is deprecated
         if transport == "sse":
@@ -297,7 +303,9 @@ def validate_mcp_server(
                     # Warn about hardcoded credentials
                     if key.lower() in ("authorization", "x-api-key", "api-key"):
                         if "${" not in value:
-                            report.major(f"Server {server_name} has hardcoded credential in headers[{key}] - use environment variables")
+                            report.major(
+                                f"Server {server_name} has hardcoded credential in headers[{key}] - use environment variables"
+                            )
 
     # Validate timeout field
     if "timeout" in config:
@@ -527,7 +535,9 @@ def main() -> int:
     parser.add_argument("--verbose", "-v", action="store_true", help="Show all results")
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
     parser.add_argument("--json", action="store_true", help="Output as JSON")
-    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
+    parser.add_argument(
+        "--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout"
+    )
     parser.add_argument(
         "path",
         nargs="?",
@@ -590,7 +600,9 @@ def main() -> int:
         print(json.dumps(output, indent=2))
     else:
         if args.report:
-            save_report_and_print_summary(report, Path(args.report), "MCP Validation", print_results, args.verbose, plugin_path=args.path)
+            save_report_and_print_summary(
+                report, Path(args.report), "MCP Validation", print_results, args.verbose, plugin_path=args.path
+            )
         else:
             print_results(report, args.verbose)
 

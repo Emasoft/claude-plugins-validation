@@ -165,7 +165,9 @@ def validate_marketplace_json(marketplace_dir: Path) -> tuple[dict | None, list[
         seen_names: set[str] = set()
         for i, plugin in enumerate(plugins):
             if not isinstance(plugin, dict):
-                findings.append(Finding(SEVERITY_ERROR, f"Plugin entry {i}: expected object, got {type(plugin).__name__}"))
+                findings.append(
+                    Finding(SEVERITY_ERROR, f"Plugin entry {i}: expected object, got {type(plugin).__name__}")
+                )
                 continue
             pname = plugin.get("name", f"(entry {i})")
 
@@ -187,7 +189,7 @@ def validate_marketplace_json(marketplace_dir: Path) -> tuple[dict | None, list[
                     Finding(
                         SEVERITY_ERROR,
                         f"Plugin '{pname}': source is a local path string '{source}' "
-                        f"-- marketplaces must use {{\"source\": \"github\", \"repo\": \"owner/repo\"}}",
+                        f'-- marketplaces must use {{"source": "github", "repo": "owner/repo"}}',
                     )
                 )
             elif isinstance(source, dict):

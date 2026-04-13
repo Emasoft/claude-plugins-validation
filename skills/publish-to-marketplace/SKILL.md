@@ -9,8 +9,6 @@ tags:
   - ci-cd
   - plugin
 allowed-tools: Read, Bash(git:*,gh:*,uv:*), Write, Edit, Glob, Grep, AskUserQuestion
-agent: plugin-creator
-context: fork
 user-invocable: false
 ---
 

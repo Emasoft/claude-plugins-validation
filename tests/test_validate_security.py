@@ -534,15 +534,12 @@ class TestScanIdeConfigFiles:
         assert stats["files_scanned"] == 1, (
             f"Expected to scan exactly .vscode/settings.json, got {stats['files_scanned']}"
         )
-        assert stats["secret_issues"] >= 1, (
-            f"Expected at least 1 secret finding, got {stats['secret_issues']}"
-        )
+        assert stats["secret_issues"] >= 1, f"Expected at least 1 secret finding, got {stats['secret_issues']}"
         critical = [r for r in report.results if r.level == "CRITICAL"]
         assert len(critical) >= 1, "Expected CRITICAL finding for OpenAI key in .vscode/settings.json"
         # The finding must point at the .vscode/settings.json path, not some other file
         assert any(".vscode/settings.json" in (r.file or "") for r in critical), (
-            f"CRITICAL finding file_path should mention .vscode/settings.json, got: "
-            f"{[r.file for r in critical]}"
+            f"CRITICAL finding file_path should mention .vscode/settings.json, got: {[r.file for r in critical]}"
         )
 
     def test_cursor_mcp_json_with_anthropic_key_triggers_critical(self, tmp_path):
@@ -578,9 +575,7 @@ class TestScanIdeConfigFiles:
         report = ValidationReport()
         stats = scan_ide_config_files(plugin_dir, report)
 
-        assert stats["files_scanned"] == 1, (
-            f"Expected to scan exactly .cursor/mcp.json, got {stats['files_scanned']}"
-        )
+        assert stats["files_scanned"] == 1, f"Expected to scan exactly .cursor/mcp.json, got {stats['files_scanned']}"
         assert stats["secret_issues"] >= 1, (
             f"Expected at least 1 secret finding in .cursor/mcp.json, got {stats['secret_issues']}"
         )
@@ -608,12 +603,12 @@ class TestScanIdeConfigFiles:
             '<project version="4">\n'
             '  <component name="RunManager">\n'
             '    <configuration name="deploy">\n'
-            '      <envs>\n'
+            "      <envs>\n"
             '        <env name="GITHUB_TOKEN" value="ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234" />\n'
-            '      </envs>\n'
-            '    </configuration>\n'
-            '  </component>\n'
-            '</project>\n'
+            "      </envs>\n"
+            "    </configuration>\n"
+            "  </component>\n"
+            "</project>\n"
         )
         (idea_dir / "workspace.xml").write_text(workspace_xml)
 
@@ -682,9 +677,7 @@ class TestScanIdeConfigFiles:
             '{\n  "version": "2.0.0",\n  "tasks": [\n    {\n      "label": "run",\n'
             '      "type": "shell",\n      "command": "python main.py"\n    }\n  ]\n}\n'
         )
-        (vscode_dir / "launch.json").write_text(
-            '{\n  "version": "0.2.0",\n  "configurations": []\n}\n'
-        )
+        (vscode_dir / "launch.json").write_text('{\n  "version": "0.2.0",\n  "configurations": []\n}\n')
 
         cursor_dir = plugin_dir / ".cursor"
         cursor_dir.mkdir()
@@ -703,17 +696,14 @@ class TestScanIdeConfigFiles:
         stats = scan_ide_config_files(plugin_dir, report)
 
         # At least the 7 files we wrote should be scanned (no .idea/ in this fixture).
-        assert stats["files_scanned"] == 7, (
-            f"Expected to scan exactly 7 IDE config files, got {stats['files_scanned']}"
-        )
+        assert stats["files_scanned"] == 7, f"Expected to scan exactly 7 IDE config files, got {stats['files_scanned']}"
         assert stats["secret_issues"] == 0, (
             f"Clean IDE configs should produce zero secret findings, got {stats['secret_issues']}. "
             f"Unexpected findings: {[r.message for r in report.results if r.level == 'CRITICAL']}"
         )
         critical = [r for r in report.results if r.level == "CRITICAL"]
         assert len(critical) == 0, (
-            f"Clean IDE configs should produce zero CRITICAL findings, got: "
-            f"{[r.message for r in critical]}"
+            f"Clean IDE configs should produce zero CRITICAL findings, got: {[r.message for r in critical]}"
         )
 
     def test_validate_security_integration_flags_vscode_secret(self, tmp_path):
@@ -731,8 +721,7 @@ class TestScanIdeConfigFiles:
         # Use an AWS access key — unambiguous CRITICAL regex with no false positives
         # against clean code, and not in KNOWN_EXAMPLE_SECRETS.
         (vscode_dir / "settings.json").write_text(
-            '{\n  "terminal.integrated.env.osx": {\n'
-            '    "AWS_ACCESS_KEY_ID": "AKIA44QH8DHBFAKEKEY1"\n  }\n}\n'
+            '{\n  "terminal.integrated.env.osx": {\n    "AWS_ACCESS_KEY_ID": "AKIA44QH8DHBFAKEKEY1"\n  }\n}\n'
         )
 
         report = validate_security(plugin_dir)

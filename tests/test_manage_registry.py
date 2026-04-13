@@ -24,13 +24,12 @@ from pathlib import Path
 # Add scripts directory to path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-import pytest  # noqa: E402
-
 import manage_registry  # noqa: E402
+import pytest  # noqa: E402
 from manage_registry import (  # noqa: E402
     _detect_components,
-    _format_components,
     _find_marketplace_json,
+    _format_components,
     _get_marketplace_owner,
     _load_enabled_plugins,
     _resolve_marketplace_name,
@@ -396,7 +395,15 @@ class TestDoSearch:
 # ── Helper for marketplace tests ──────────────────────────
 
 
-def _make_marketplace_json(base_dir: Path, mp_name: str, *, location: str = ".claude-plugin", plugins: list | None = None, name: str | None = None, version: str = "1.0.0") -> Path:
+def _make_marketplace_json(
+    base_dir: Path,
+    mp_name: str,
+    *,
+    location: str = ".claude-plugin",
+    plugins: list | None = None,
+    name: str | None = None,
+    version: str = "1.0.0",
+) -> Path:
     """Create a marketplace.json file at the specified location inside a marketplace dir.
 
     Args:
@@ -427,7 +434,9 @@ def _make_marketplace_json(base_dir: Path, mp_name: str, *, location: str = ".cl
     return mj_path
 
 
-def _make_settings_with_marketplace(path: Path, mp_name: str, source: dict, *, enabled_plugins: dict | None = None) -> Path:
+def _make_settings_with_marketplace(
+    path: Path, mp_name: str, source: dict, *, enabled_plugins: dict | None = None
+) -> Path:
     """Create a settings JSON file with extraKnownMarketplaces and optional enabledPlugins."""
     data: dict = {"extraKnownMarketplaces": {mp_name: {"source": source}}}
     if enabled_plugins is not None:
@@ -531,7 +540,9 @@ class TestLoadEnabledPlugins:
     def test_user_level_status_from_settings_file(self, tmp_path, monkeypatch):
         """_load_enabled_plugins reads user-level enabled status from SETTINGS_FILE."""
         user_settings = tmp_path / "settings.json"
-        user_settings.write_text(json.dumps({"enabledPlugins": {"plug-a@mkt": True, "plug-b@mkt": False}}), encoding="utf-8")
+        user_settings.write_text(
+            json.dumps({"enabledPlugins": {"plug-a@mkt": True, "plug-b@mkt": False}}), encoding="utf-8"
+        )
         monkeypatch.setattr(manage_registry, "SETTINGS_FILE", user_settings)
         # No project settings — monkeypatch cwd to a dir without .claude/
         monkeypatch.chdir(tmp_path)

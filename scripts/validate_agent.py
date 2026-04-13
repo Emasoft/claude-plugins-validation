@@ -319,8 +319,7 @@ def validate_tools_field(frontmatter: dict[str, Any], filename: str, report: Age
             )
         elif base_tool in ("TodoRead", "Notebook", "MultiEdit"):
             report.warning(
-                f"Tool '{base_tool}' is not in the current tools-reference spec. "
-                "Verify existence before shipping.",
+                f"Tool '{base_tool}' is not in the current tools-reference spec. Verify existence before shipping.",
                 filename,
             )
 
@@ -1070,7 +1069,11 @@ def validate_security(content: str, filename: str, report: AgentValidationReport
 
     # Check for ${CLAUDE_PLUGIN_ROOT} or ${CLAUDE_PLUGIN_DATA} usage (good practice)
     if "/scripts/" in content or "\\scripts\\" in content:
-        if "${CLAUDE_PLUGIN_ROOT}" not in content and "$CLAUDE_PLUGIN_ROOT" not in content and "${CLAUDE_PLUGIN_DATA}" not in content:
+        if (
+            "${CLAUDE_PLUGIN_ROOT}" not in content
+            and "$CLAUDE_PLUGIN_ROOT" not in content
+            and "${CLAUDE_PLUGIN_DATA}" not in content
+        ):
             report.info(
                 "Consider using ${CLAUDE_PLUGIN_ROOT} or ${CLAUDE_PLUGIN_DATA} for plugin-relative paths",
                 filename,
@@ -1285,7 +1288,9 @@ def main() -> int:
         help="Show all results including passed checks",
     )
     parser.add_argument("--json", action="store_true", help="Output as JSON")
-    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
+    parser.add_argument(
+        "--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout"
+    )
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
     args = parser.parse_args()
 
@@ -1327,7 +1332,9 @@ def main() -> int:
                             "info": sum(1 for x in r.results if x.level == "INFO"),
                             "passed": sum(1 for x in r.results if x.level == "PASSED"),
                         },
-                        "results": [{"level": x.level, "message": x.message, "file": x.file, "line": x.line} for x in r.results],
+                        "results": [
+                            {"level": x.level, "message": x.message, "file": x.file, "line": x.line} for x in r.results
+                        ],
                     }
                     for r in reports
                 ],

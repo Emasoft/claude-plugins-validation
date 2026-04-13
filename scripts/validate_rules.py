@@ -436,7 +436,9 @@ def main() -> int:
         print_json(report)
     else:
         if args.report:
-            save_report_and_print_summary(report, Path(args.report), "Rules Validation", print_results, args.verbose, plugin_path=args.path)
+            save_report_and_print_summary(
+                report, Path(args.report), "Rules Validation", print_results, args.verbose, plugin_path=args.path
+            )
         else:
             print_results(report, args.verbose)
 

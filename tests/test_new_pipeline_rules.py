@@ -47,14 +47,29 @@ from validate_xref import (  # noqa: E402
 # =============================================================================
 
 
-def _make_plugin(tmp_path: Path, *, gitignore: str | None = None, readme: str | None = None, extra_files: dict[str, str] | None = None) -> Path:
+def _make_plugin(
+    tmp_path: Path,
+    *,
+    gitignore: str | None = None,
+    readme: str | None = None,
+    extra_files: dict[str, str] | None = None,
+) -> Path:
     """Create a minimal plugin directory with optional overrides."""
     plugin = tmp_path / "test-plugin"
     plugin.mkdir()
     # .claude-plugin/plugin.json
     cp = plugin / ".claude-plugin"
     cp.mkdir()
-    (cp / "plugin.json").write_text(json.dumps({"name": "test-plugin", "version": "1.0.0", "description": "Test", "author": {"name": "A", "email": "a@b.c"}}))
+    (cp / "plugin.json").write_text(
+        json.dumps(
+            {
+                "name": "test-plugin",
+                "version": "1.0.0",
+                "description": "Test",
+                "author": {"name": "A", "email": "a@b.c"},
+            }
+        )
+    )
     # commands/ for minimal content
     (plugin / "commands").mkdir()
     if gitignore is not None:
@@ -103,7 +118,9 @@ class TestPipelineReadiness:
 
     def test_publish_py_detected(self, tmp_path):
         """scripts/publish.py presence reports PASSED."""
-        plugin = _make_plugin(tmp_path, extra_files={"scripts/publish.py": "#!/usr/bin/env python3\nprint('publish')\n"})
+        plugin = _make_plugin(
+            tmp_path, extra_files={"scripts/publish.py": "#!/usr/bin/env python3\nprint('publish')\n"}
+        )
         report = ValidationReport()
         validate_pipeline_readiness(plugin, report)
         msgs = [r.message for r in report.results if r.level == "PASSED"]
@@ -127,7 +144,12 @@ class TestPipelineReadiness:
 
     def test_workflow_directory_detected(self, tmp_path):
         """Presence of .github/workflows/*.yml reports PASSED."""
-        plugin = _make_plugin(tmp_path, extra_files={".github/workflows/ci.yml": "name: CI\non:\n  push:\njobs:\n  test:\n    runs-on: ubuntu-latest\n"})
+        plugin = _make_plugin(
+            tmp_path,
+            extra_files={
+                ".github/workflows/ci.yml": "name: CI\non:\n  push:\njobs:\n  test:\n    runs-on: ubuntu-latest\n"
+            },
+        )
         report = ValidationReport()
         validate_pipeline_readiness(plugin, report)
         msgs = [r.message for r in report.results if r.level == "PASSED"]
@@ -152,7 +174,12 @@ class TestNotifyMarketplace:
 
     def test_notify_marketplace_yml_detected(self, tmp_path):
         """notify-marketplace.yml detected reports PASSED."""
-        plugin = _make_plugin(tmp_path, extra_files={".github/workflows/notify-marketplace.yml": "name: Notify\non:\n  push:\njobs:\n  test:\n    runs-on: ubuntu-latest\n"})
+        plugin = _make_plugin(
+            tmp_path,
+            extra_files={
+                ".github/workflows/notify-marketplace.yml": "name: Notify\non:\n  push:\njobs:\n  test:\n    runs-on: ubuntu-latest\n"
+            },
+        )
         report = ValidationReport()
         validate_pipeline_readiness(plugin, report)
         msgs = [r.message for r in report.results if r.level == "PASSED"]
@@ -160,7 +187,12 @@ class TestNotifyMarketplace:
 
     def test_notify_yml_detected(self, tmp_path):
         """notify.yml variant detected reports PASSED."""
-        plugin = _make_plugin(tmp_path, extra_files={".github/workflows/notify.yml": "name: Notify\non:\n  push:\njobs:\n  test:\n    runs-on: ubuntu-latest\n"})
+        plugin = _make_plugin(
+            tmp_path,
+            extra_files={
+                ".github/workflows/notify.yml": "name: Notify\non:\n  push:\njobs:\n  test:\n    runs-on: ubuntu-latest\n"
+            },
+        )
         report = ValidationReport()
         validate_pipeline_readiness(plugin, report)
         msgs = [r.message for r in report.results if r.level == "PASSED"]
@@ -168,7 +200,12 @@ class TestNotifyMarketplace:
 
     def test_marketplace_notify_yml_detected(self, tmp_path):
         """marketplace-notify.yml variant detected reports PASSED."""
-        plugin = _make_plugin(tmp_path, extra_files={".github/workflows/marketplace-notify.yml": "name: Notify\non:\n  push:\njobs:\n  test:\n    runs-on: ubuntu-latest\n"})
+        plugin = _make_plugin(
+            tmp_path,
+            extra_files={
+                ".github/workflows/marketplace-notify.yml": "name: Notify\non:\n  push:\njobs:\n  test:\n    runs-on: ubuntu-latest\n"
+            },
+        )
         report = ValidationReport()
         validate_pipeline_readiness(plugin, report)
         msgs = [r.message for r in report.results if r.level == "PASSED"]
@@ -176,7 +213,12 @@ class TestNotifyMarketplace:
 
     def test_no_notify_workflow_warns(self, tmp_path):
         """Missing notify-marketplace.yml warns when workflows dir exists."""
-        plugin = _make_plugin(tmp_path, extra_files={".github/workflows/ci.yml": "name: CI\non:\n  push:\njobs:\n  test:\n    runs-on: ubuntu-latest\n"})
+        plugin = _make_plugin(
+            tmp_path,
+            extra_files={
+                ".github/workflows/ci.yml": "name: CI\non:\n  push:\njobs:\n  test:\n    runs-on: ubuntu-latest\n"
+            },
+        )
         report = ValidationReport()
         validate_pipeline_readiness(plugin, report)
         msgs = [r.message for r in report.results if r.level == "WARNING"]
@@ -193,7 +235,12 @@ class TestWorkflowBestPractices:
 
     def test_uvx_warning_for_pip_install_system(self, tmp_path):
         """Workflow using 'uv pip install --system' reports NIT."""
-        plugin = _make_plugin(tmp_path, extra_files={".github/workflows/ci.yml": "name: CI\non:\n  push:\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: uv pip install --system ruff\n"})
+        plugin = _make_plugin(
+            tmp_path,
+            extra_files={
+                ".github/workflows/ci.yml": "name: CI\non:\n  push:\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: uv pip install --system ruff\n"
+            },
+        )
         report = ValidationReport()
         validate_workflow_best_practices(plugin, report)
         msgs = [r.message for r in report.results if r.level == "NIT"]

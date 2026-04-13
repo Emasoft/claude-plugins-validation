@@ -74,9 +74,7 @@ class MultiplePluginsFoundError(Exception):
     def __init__(self, plugin_roots: List[Path]):
         self.plugin_roots = plugin_roots
         joined = "\n  ".join(str(p) for p in plugin_roots)
-        super().__init__(
-            f"Multiple plugins found in the source directory:\n  {joined}"
-        )
+        super().__init__(f"Multiple plugins found in the source directory:\n  {joined}")
 
 
 # ── Gitignore handling ────────────────────────────────────
@@ -135,11 +133,7 @@ def _gitignore_pattern_to_re(pattern: str) -> Tuple[Optional[re.Pattern], bool]:
                 j += 1
             while j < len(pattern) and pattern[j] != "]":
                 j += 1
-            parts.append(
-                pattern[i : j + 1].replace("!", "^", 1)
-                if "!" in pattern[i : j + 1]
-                else pattern[i : j + 1]
-            )
+            parts.append(pattern[i : j + 1].replace("!", "^", 1) if "!" in pattern[i : j + 1] else pattern[i : j + 1])
             i = j + 1
             continue
         else:
@@ -217,6 +211,7 @@ def _build_gitignore_matcher(plugin_dir: Path) -> Callable[[Path], bool]:
         return _is_ignored_git
 
     if not gitignore_path.exists() and not has_git:
+
         def _is_ignored_minimal(path: Path) -> bool:
             rel_str = str(path.relative_to(plugin_dir))
             return _is_git_metadata(rel_str)
@@ -288,9 +283,7 @@ def _copy_plugin_from_dir(
                 continue
             dest_item = dest / item.name
             if target.is_dir():
-                _copy_plugin_from_dir(
-                    target, dest_item, ignore_fn, follow_symlinks, skipped_symlinks
-                )
+                _copy_plugin_from_dir(target, dest_item, ignore_fn, follow_symlinks, skipped_symlinks)
                 if dest_item.exists():
                     if not copied_any:
                         dest.mkdir(parents=True, exist_ok=True)
@@ -303,9 +296,7 @@ def _copy_plugin_from_dir(
             continue
         dest_item = dest / item.name
         if item.is_dir():
-            _copy_plugin_from_dir(
-                item, dest_item, ignore_fn, follow_symlinks, skipped_symlinks
-            )
+            _copy_plugin_from_dir(item, dest_item, ignore_fn, follow_symlinks, skipped_symlinks)
             if dest_item.exists():
                 if not copied_any:
                     dest.mkdir(parents=True, exist_ok=True)
@@ -519,9 +510,7 @@ def _run_cpv_validation(plugin_root: Path, quiet: bool = False) -> Tuple[List[st
 # ── Lifecycle: Install ────────────────────────────────────
 
 
-def _resolve_plugin_root(
-    search_dir: Path, plugin_dir: Optional[str], context_label: str
-) -> Path:
+def _resolve_plugin_root(search_dir: Path, plugin_dir: Optional[str], context_label: str) -> Path:
     """Pick the plugin root from search_dir, respecting an explicit --plugin-dir.
 
     - If plugin_dir is given, that path (absolute or relative to search_dir) is
@@ -1363,9 +1352,15 @@ def main():
     parser.add_argument("--uninstall", type=str, help="Uninstall plugin (name@marketplace)")
     parser.add_argument("--update", action="store_true", help="Update instead of install")
     parser.add_argument("--enable", type=str, help="Enable plugin (name, name@marketplace, or name@owner/marketplace)")
-    parser.add_argument("--disable", type=str, help="Disable plugin (name, name@marketplace, or name@owner/marketplace)")
-    parser.add_argument("--scope", choices=["user", "local"], default="user",
-                        help="'user' (default) = ~/.claude/settings.json, 'local' = <project>/.claude/settings.local.json")
+    parser.add_argument(
+        "--disable", type=str, help="Disable plugin (name, name@marketplace, or name@owner/marketplace)"
+    )
+    parser.add_argument(
+        "--scope",
+        choices=["user", "local"],
+        default="user",
+        help="'user' (default) = ~/.claude/settings.json, 'local' = <project>/.claude/settings.local.json",
+    )
     parser.add_argument("--force", "-f", action="store_true", help="Force install despite errors")
     parser.add_argument("--dry-run", "-n", action="store_true", help="Preview without changes")
     parser.add_argument("--quiet", "-q", action="store_true", help="Minimal output")

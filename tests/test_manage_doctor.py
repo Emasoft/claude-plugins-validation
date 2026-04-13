@@ -51,7 +51,9 @@ def _make_settings(claude_dir: Path, data: dict, filename: str = "settings.json"
     return sf
 
 
-def _make_marketplace(marketplaces_dir: Path, mp_name: str, marketplace_json: dict, plugins: dict | None = None) -> Path:
+def _make_marketplace(
+    marketplaces_dir: Path, mp_name: str, marketplace_json: dict, plugins: dict | None = None
+) -> Path:
     """Create a marketplace directory with marketplace.json and optional plugin subdirs.
 
     plugins: dict mapping plugin_name -> plugin.json dict (or None for no plugin.json).
@@ -275,7 +277,12 @@ class TestDoDoctor:
             claude_dir,
             {
                 "extraKnownMarketplaces": {
-                    "my-test-marketplace": {"source": {"source": "directory", "path": _portable_path(claude_dir / "plugins" / "marketplaces" / "my-test-marketplace")}},
+                    "my-test-marketplace": {
+                        "source": {
+                            "source": "directory",
+                            "path": _portable_path(claude_dir / "plugins" / "marketplaces" / "my-test-marketplace"),
+                        }
+                    },
                 },
                 "enabledPlugins": {
                     "test-plugin@my-test-marketplace": True,
@@ -581,7 +588,10 @@ class TestDoDoctor:
             stdout="",
             stderr="CRITICAL: Missing required field\nMAJOR: Bad structure\n",
         )
-        with patch("manage_doctor.shutil.which", return_value=None), patch("manage_doctor.subprocess.run", return_value=mock_vresult):
+        with (
+            patch("manage_doctor.shutil.which", return_value=None),
+            patch("manage_doctor.subprocess.run", return_value=mock_vresult),
+        ):
             do_doctor(verbose=True)
 
         out = capsys.readouterr().out
@@ -725,7 +735,10 @@ class TestDoDoctor:
             stderr="Not authenticated\n",
         )
 
-        with patch("manage_doctor.shutil.which", return_value="/usr/local/bin/claude"), patch("manage_doctor.subprocess.run", return_value=auth_result):
+        with (
+            patch("manage_doctor.shutil.which", return_value="/usr/local/bin/claude"),
+            patch("manage_doctor.subprocess.run", return_value=auth_result),
+        ):
             do_doctor()
 
         out = capsys.readouterr().out

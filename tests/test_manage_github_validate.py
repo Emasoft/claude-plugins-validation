@@ -209,14 +209,18 @@ class TestHighLevelOrchestrators:
         assert rc == 0
         # Verify it uses validate_marketplace.py, not validate_plugin.py
         call_args = mock_validate.call_args
-        assert call_args[1].get("script_name", call_args[0][1] if len(call_args[0]) > 1 else None) == "validate_marketplace.py" or "validate_marketplace.py" in str(call_args)
+        assert call_args[1].get(
+            "script_name", call_args[0][1] if len(call_args[0]) > 1 else None
+        ) == "validate_marketplace.py" or "validate_marketplace.py" in str(call_args)
 
     @patch("manage_github_validate.shutil.rmtree")
     @patch("manage_github_validate._run_cpv_validate", return_value=0)
     @patch("manage_github_validate._run_skill_audit", return_value=0)
     @patch("manage_github_validate._clone_repo", return_value=True)
     @patch("manage_github_validate.tempfile.mkdtemp", return_value="/tmp/cpv-audit-12345")
-    def test_audit_github_plugin_returns_max_exit_code(self, mock_mkdtemp, mock_clone, mock_audit, mock_validate, mock_rmtree):
+    def test_audit_github_plugin_returns_max_exit_code(
+        self, mock_mkdtemp, mock_clone, mock_audit, mock_validate, mock_rmtree
+    ):
         """audit_github_plugin() returns max(audit_rc, validate_rc) on success."""
         rc = audit_github_plugin("anthropics/my-plugin")
         assert rc == 0
@@ -226,7 +230,9 @@ class TestHighLevelOrchestrators:
     @patch("manage_github_validate._run_skill_audit", return_value=2)
     @patch("manage_github_validate._clone_repo", return_value=True)
     @patch("manage_github_validate.tempfile.mkdtemp", return_value="/tmp/cpv-audit-12345")
-    def test_audit_github_plugin_worst_exit_code(self, mock_mkdtemp, mock_clone, mock_audit, mock_validate, mock_rmtree):
+    def test_audit_github_plugin_worst_exit_code(
+        self, mock_mkdtemp, mock_clone, mock_audit, mock_validate, mock_rmtree
+    ):
         """audit_github_plugin() returns worst exit code when audit fails but validation passes."""
         rc = audit_github_plugin("anthropics/my-plugin")
         assert rc == 2
@@ -236,7 +242,9 @@ class TestHighLevelOrchestrators:
     @patch("manage_github_validate._run_skill_audit", return_value=0)
     @patch("manage_github_validate._clone_repo", return_value=True)
     @patch("manage_github_validate.tempfile.mkdtemp", return_value="/tmp/cpv-audit-mkt-12345")
-    def test_audit_github_marketplace_worst_exit_code(self, mock_mkdtemp, mock_clone, mock_audit, mock_validate, mock_rmtree):
+    def test_audit_github_marketplace_worst_exit_code(
+        self, mock_mkdtemp, mock_clone, mock_audit, mock_validate, mock_rmtree
+    ):
         """audit_github_marketplace() returns worst exit code when validate fails but audit passes."""
         rc = audit_github_marketplace("anthropics/my-marketplace")
         assert rc == 1

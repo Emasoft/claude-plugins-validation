@@ -8,6 +8,7 @@
 - [Scaffold validate.yml](#scaffold-validateyml)
 - [Generate CHANGELOG.md](#generate-changelogmd)
 - [Consolidate Authorship](#consolidate-authorship)
+- [Why Layout B Does Not Need Auto-Notification](#why-layout-b-does-not-need-auto-notification)
 - [Preserve Guest Contributors](#preserve-guest-contributors)
 - [Single Atomic Commit](#single-atomic-commit)
 - [Tag the Marketplace](#tag-the-marketplace)
@@ -158,6 +159,58 @@ done
 Never rewrite any field other than `author` during this step — consolidation
 is about authorship only. Category, license, homepage changes belong to the
 interrogation playbook and its per-plugin questions.
+
+## Why Layout B Does Not Need Auto-Notification
+
+Layout A plugins live in their own GitHub repos, so after each release they
+must cross a repository boundary to tell the marketplace a new version exists.
+That is the job of the `setup-marketplace-auto-notification` skill — PAT,
+`repository_dispatch`, and a receiver workflow.
+
+Layout B has no repository boundary to cross. The marketplace repo contains
+every plugin as a subfolder under `plugins/<name>/`, and each CPV release:
+
+- bumps every `plugins/*/.claude-plugin/plugin.json::version` in lockstep,
+- bumps `.claude-plugin/marketplace.json::metadata.version`,
+- writes `CHANGELOG.md`,
+- creates ONE commit,
+- tags the whole repo atomically at `v<new-version>`.
+
+Because Claude Code sees plugin version changes through the marketplace's own
+refresh of `marketplace.json`, there is no second repo to dispatch to. Every
+plugin update rides the marketplace's own tag push.
+
+Consequences for Layout B:
+
+- **No PAT required.** `MARKETPLACE_PAT` is not used by Layout B. The env var
+  can be unset and the migration still completes. The
+  `setup-marketplace-auto-notification` skill is NOT loaded for Layout B
+  migrations.
+- **No notify workflow per plugin.** Do not scaffold
+  `.github/workflows/notify-marketplace.yml` under any `plugins/<name>/`
+  subfolder — it has nowhere to dispatch to.
+- **No cross-repo receiver.** The marketplace does not need
+  `.github/workflows/update-plugin-version.yml` because the commit that bumps
+  `marketplace.json` is the same commit that bumps the plugin manifests.
+- **One CI workflow.** `.github/workflows/validate.yml` at the repo root is
+  the only workflow — it validates every plugin and the marketplace on every
+  push and pull request.
+
+### If the user later converts Layout B to Layout A
+
+Layout B is a stable terminal state, but a user may later decide to split the
+monorepo into standalone plugin repos. At that point:
+
+1. Run the pre-migration audit again with Layout A as the target.
+2. Follow `layout-a-migration.md` top-to-bottom, including the new
+   **Per-Plugin Auto-Notify Setup** step.
+3. Install the marketplace receiver workflow from
+   `../../../setup-marketplace-auto-notification/references/receiver-workflow-template.md`
+   on the (now-emptied) marketplace repo.
+4. Create and distribute a `MARKETPLACE_PAT` to every new plugin repo.
+
+Until that happens, `MARKETPLACE_PAT` is genuinely unnecessary and attempts
+to wire it in are no-ops.
 
 ## Preserve Guest Contributors
 

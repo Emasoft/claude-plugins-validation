@@ -42,9 +42,7 @@ def do_remote(argv: List[str]):
 
     if subcmd == "install" or subcmd == "i":
         if not rest:
-            err(
-                "Usage: manage_remote.py install <plugin[@marketplace]> [--scope <scope>]"
-            )
+            err("Usage: manage_remote.py install <plugin[@marketplace]> [--scope <scope>]")
             sys.exit(1)
         cmd = ["install"] + rest
         rc = _run_claude_plugin(cmd, quiet=quiet)
@@ -52,9 +50,7 @@ def do_remote(argv: List[str]):
 
     elif subcmd == "update":
         if not rest:
-            err(
-                "Usage: manage_remote.py update <plugin[@marketplace]> [--scope <scope>]"
-            )
+            err("Usage: manage_remote.py update <plugin[@marketplace]> [--scope <scope>]")
             sys.exit(1)
         cmd = ["update"] + rest
         rc = _run_claude_plugin(cmd, quiet=quiet)
@@ -62,9 +58,7 @@ def do_remote(argv: List[str]):
 
     elif subcmd == "uninstall" or subcmd == "remove" or subcmd == "rm":
         if not rest:
-            err(
-                "Usage: manage_remote.py uninstall <plugin[@marketplace]> [--scope <scope>]"
-            )
+            err("Usage: manage_remote.py uninstall <plugin[@marketplace]> [--scope <scope>]")
             sys.exit(1)
         cmd = ["uninstall"] + rest
         rc = _run_claude_plugin(cmd, quiet=quiet)
@@ -77,9 +71,7 @@ def do_remote(argv: List[str]):
 
     elif subcmd == "enable":
         if not rest:
-            err(
-                "Usage: manage_remote.py enable <plugin[@marketplace]> [--scope <scope>]"
-            )
+            err("Usage: manage_remote.py enable <plugin[@marketplace]> [--scope <scope>]")
             sys.exit(1)
         cmd = ["enable"] + rest
         rc = _run_claude_plugin(cmd, quiet=quiet)
@@ -87,9 +79,7 @@ def do_remote(argv: List[str]):
 
     elif subcmd == "disable":
         if not rest:
-            err(
-                "Usage: manage_remote.py disable <plugin[@marketplace]> [--scope <scope>]"
-            )
+            err("Usage: manage_remote.py disable <plugin[@marketplace]> [--scope <scope>]")
             sys.exit(1)
         cmd = ["disable"] + rest
         rc = _run_claude_plugin(cmd, quiet=quiet)

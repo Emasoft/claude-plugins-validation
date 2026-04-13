@@ -470,7 +470,9 @@ def main() -> int:
     parser.add_argument("--verbose", "-v", action="store_true", help="Show all results")
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
-    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
+    parser.add_argument(
+        "--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout"
+    )
     parser.add_argument(
         "path",
         nargs="?",
@@ -533,7 +535,9 @@ def main() -> int:
         print(json.dumps(output, indent=2))
     else:
         if args.report:
-            save_report_and_print_summary(report, Path(args.report), "LSP Validation", print_results, args.verbose, plugin_path=args.path)
+            save_report_and_print_summary(
+                report, Path(args.report), "LSP Validation", print_results, args.verbose, plugin_path=args.path
+            )
         else:
             print_results(report, args.verbose)
 

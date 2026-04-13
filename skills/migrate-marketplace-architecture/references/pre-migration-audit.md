@@ -9,7 +9,8 @@
 - [Name Collision Detection](#5-name-collision-detection)
 - [Disk Space Check](#6-disk-space-check)
 - [GitHub Auth Check](#7-github-auth-check)
-- [Audit Report Format](#8-audit-report-format)
+- [MARKETPLACE_PAT Env Check](#8-marketplace_pat-env-check)
+- [Audit Report Format](#9-audit-report-format)
 
 ---
 
@@ -127,7 +128,42 @@ Layout B and a BLOCKER for Layout A.
 gh auth status 2>&1 | grep -q "Logged in" || echo "BLOCKER: gh not authenticated"
 ```
 
-## 8. Audit Report Format
+## 8. MARKETPLACE_PAT Env Check
+
+**Applies to**: Layout A only. Skip for Layout B — see
+[Why Layout B Does Not Need Auto-Notification](layout-b-discipline.md#why-layout-b-does-not-need-auto-notification).
+
+**Check**: Is `MARKETPLACE_PAT` set in the current shell environment? Every
+new plugin repo created by Layout A must receive this secret so its
+`notify-marketplace.yml` workflow can fire `repository_dispatch` at the
+marketplace repo. The value itself is never echoed — only its length is
+inspected for the audit report:
+
+```bash
+if [ -n "${MARKETPLACE_PAT:-}" ]; then
+  echo "MARKETPLACE_PAT present (${#MARKETPLACE_PAT} chars)"
+else
+  echo "WARNING: MARKETPLACE_PAT not set — user will be prompted during per-plugin auto-notify setup"
+fi
+```
+
+**Rule**: This is a **WARNING**, not a BLOCKER. The migration can still begin
+without the PAT, but the user will be interrupted during the
+[Per-Plugin Auto-Notify Setup](layout-a-migration.md#per-plugin-auto-notify-setup)
+step of `layout-a-migration.md` to create one and re-export it. Warning the
+user up-front gives them time to create the token BEFORE the migration starts,
+avoiding a mid-flight context switch.
+
+**User guidance**: If absent, point the user at
+`skills/setup-marketplace-auto-notification/references/pat-secret-setup.md`
+for the full creation procedure (classic PAT with `repo` scope, or a
+fine-grained PAT with cross-repo `contents:write` + `actions:write`).
+
+**Security note**: Never echo `$MARKETPLACE_PAT` into logs or the audit
+report. The audit report records only "present"/"absent" and the length in
+characters — never the value or any prefix.
+
+## 9. Audit Report Format
 
 The audit writes `docs_dev/pre-migration-audit_<timestamp>.md` containing:
 

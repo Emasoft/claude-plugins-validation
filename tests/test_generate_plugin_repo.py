@@ -372,7 +372,9 @@ class TestGeneratedRepoValidation:
         target = self._generate_and_validate(tmp_path)
         report = ValidationReport()
         validate_structure(target, report)
-        assert not report.has_critical, f"Generated plugin has CRITICAL structure issues: {[r.message for r in report.results if r.level == 'CRITICAL']}"
+        assert not report.has_critical, (
+            f"Generated plugin has CRITICAL structure issues: {[r.message for r in report.results if r.level == 'CRITICAL']}"
+        )
 
     def test_generated_pipeline_readiness_passes(self, tmp_path):
         """Generated plugin passes pipeline readiness checks."""

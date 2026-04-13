@@ -99,9 +99,7 @@ def _enable_ansi_windows():
         handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
         mode = ctypes.c_ulong()
         kernel32.GetConsoleMode(handle, ctypes.byref(mode))
-        kernel32.SetConsoleMode(
-            handle, mode.value | 0x0004
-        )  # ENABLE_VIRTUAL_TERMINAL_PROCESSING
+        kernel32.SetConsoleMode(handle, mode.value | 0x0004)  # ENABLE_VIRTUAL_TERMINAL_PROCESSING
     except Exception:
         pass
 
@@ -364,13 +362,9 @@ def _extract_tar(archive: Path, dest: Path, mode: str):
                     sys.exit(1)
                 # Block symlinks pointing outside dest
                 if member.issym() or member.islnk():
-                    link_target = os.path.normpath(
-                        os.path.join(os.path.dirname(member.name), member.linkname)
-                    )
+                    link_target = os.path.normpath(os.path.join(os.path.dirname(member.name), member.linkname))
                     if link_target.startswith("..") or os.path.isabs(link_target):
-                        err(
-                            f"Refusing to extract symlink escaping archive: {member.name} -> {member.linkname}"
-                        )
+                        err(f"Refusing to extract symlink escaping archive: {member.name} -> {member.linkname}")
                         sys.exit(1)
                 # Verify resolved path stays within dest
                 target = (dest / member_path).resolve()
@@ -391,9 +385,7 @@ def _validate_safe_name(name: str, label: str) -> str:
         err(f"Empty {label} name.")
         sys.exit(1)
     if ".." in name or "/" in name or "\\" in name or "\0" in name:
-        err(
-            f"Invalid {label} name: '{name}' — must not contain path separators or '..'"
-        )
+        err(f"Invalid {label} name: '{name}' — must not contain path separators or '..'")
         sys.exit(1)
     if name.startswith(".") or name.startswith("-"):
         err(f"Invalid {label} name: '{name}' — must not start with '.' or '-'")

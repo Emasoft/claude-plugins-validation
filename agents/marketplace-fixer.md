@@ -5,13 +5,15 @@ description: |
   Receives a validation report file path from validate_marketplace.py or validate_marketplace_pipeline.py
   and applies fixes or performs interactive architectural migration. Does NOT validate — only fixes.
   Use proactively when a marketplace report contains CRITICAL/MAJOR/MINOR findings or an
-  architecture-category signal. Loads fix-marketplace-validation for mechanical fixes and
-  migrate-marketplace-architecture for Layout A/B conversions.
+  architecture-category signal. Loads fix-marketplace-validation for mechanical fixes,
+  migrate-marketplace-architecture for Layout A/B conversions, and
+  setup-marketplace-auto-notification for per-plugin auto-notify chains during Layout A migrations.
 model: sonnet
 maxTurns: 50
 skills:
   - fix-marketplace-validation
   - migrate-marketplace-architecture
+  - setup-marketplace-auto-notification
   - canonical-pipeline
 ---
 

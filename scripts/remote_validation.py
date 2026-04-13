@@ -60,9 +60,7 @@ warn_unused_configs = False
 disable_error_code = no-any-return, import-untyped
 """
 
-_tmpfile = tempfile.NamedTemporaryFile(
-    mode="w", suffix=".ini", prefix="cpv_mypy_", delete=False
-)
+_tmpfile = tempfile.NamedTemporaryFile(mode="w", suffix=".ini", prefix="cpv_mypy_", delete=False)
 _tmpfile.write(_MYPY_REMOTE_CONFIG)
 _tmpfile.close()
 atexit.register(lambda: os.unlink(_tmpfile.name))
@@ -182,7 +180,8 @@ def main() -> int:
         help="Path to the plugin, skill, or file to validate",
     )
     parser.add_argument(
-        "-o", "--output",
+        "-o",
+        "--output",
         metavar="FILE",
         help="Save the validation report to FILE (passed as --report to the script)",
     )
@@ -195,10 +194,7 @@ def main() -> int:
         script_name = script_name[:-3]
 
     if script_name not in _ALIASES:
-        parser.error(
-            f"Unknown command: '{script_name}'\n"
-            f"Available: {', '.join(sorted(_COMMANDS))}"
-        )
+        parser.error(f"Unknown command: '{script_name}'\nAvailable: {', '.join(sorted(_COMMANDS))}")
 
     module_name = _ALIASES[script_name]
 

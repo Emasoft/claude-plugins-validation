@@ -543,7 +543,9 @@ Exit Codes:
             print_report_summary(report, "Encoding Validation Report")
             print_results_by_level(report, verbose=verbose)
 
-        save_report_and_print_summary(report, Path(args.report), "Encoding Validation", _print_full, args.verbose, plugin_path=args.plugin_path)
+        save_report_and_print_summary(
+            report, Path(args.report), "Encoding Validation", _print_full, args.verbose, plugin_path=args.plugin_path
+        )
     else:
         print_results_by_level(report, verbose=args.verbose)
         print_report_summary(report, title=f"Encoding Validation: {plugin_path.name}")

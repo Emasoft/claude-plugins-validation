@@ -372,6 +372,7 @@ def _extract_dist_name(requirement: str) -> str:
         "numpy (>=1.24); python_version>='3.10'" -> "numpy"
     """
     import re as _re
+
     # Strip environment markers (anything after ';')
     req = requirement.split(";", 1)[0]
     # Strip extras like [async]
@@ -411,8 +412,11 @@ def _scan_python_imports(plugin_path: Path, directories: tuple[str, ...] = ("scr
     detection; false positives from inline strings are harmless.
     """
     import re as _re
+
     found: set[str] = set()
-    import_re = _re.compile(r"^\s*(?:from\s+([A-Za-z_][\w\.]*)|import\s+([A-Za-z_][\w\.]*(?:\s*,\s*[A-Za-z_][\w\.]*)*))", _re.MULTILINE)
+    import_re = _re.compile(
+        r"^\s*(?:from\s+([A-Za-z_][\w\.]*)|import\s+([A-Za-z_][\w\.]*(?:\s*,\s*[A-Za-z_][\w\.]*)*))", _re.MULTILINE
+    )
 
     for subdir in directories:
         d = plugin_path / subdir
@@ -566,7 +570,9 @@ def print_audit_report(results: list[AuditItem], plugin_path: Path) -> None:
     if total_issues == 0:
         print(f"  {GREEN}{BOLD}All {total} checks passed.{NC}\n")
     else:
-        print(f"  {BOLD}Result:{NC} {GREEN}{total_pass} passed{NC}, {YELLOW}{total_issues} issues{NC} / {total} checks\n")
+        print(
+            f"  {BOLD}Result:{NC} {GREEN}{total_pass} passed{NC}, {YELLOW}{total_issues} issues{NC} / {total} checks\n"
+        )
 
 
 def save_report_to_file(results: list[AuditItem], plugin_path: Path, report_path: Path) -> None:
@@ -689,7 +695,9 @@ _EXECUTABLE_FILES: set[str] = {
 }
 
 
-def fix_missing_files(plugin_path: Path, results: list[AuditItem], dry_run: bool = False, marketplace: str | None = None) -> list[str]:
+def fix_missing_files(
+    plugin_path: Path, results: list[AuditItem], dry_run: bool = False, marketplace: str | None = None
+) -> list[str]:
     """Generate missing standard files using templates from generate_plugin_repo.
 
     Only creates files that do not already exist. Never overwrites existing files.
@@ -744,8 +752,10 @@ def fix_missing_files(plugin_path: Path, results: list[AuditItem], dry_run: bool
         is_executable = rel_path in _EXECUTABLE_FILES
 
         if dry_run:
-            print(f"  {BLUE}[dry-run]{NC} Would create {file_path} ({len(content)} bytes)"
-                  f"{' [exec]' if is_executable else ''}")
+            print(
+                f"  {BLUE}[dry-run]{NC} Would create {file_path} ({len(content)} bytes)"
+                f"{' [exec]' if is_executable else ''}"
+            )
             created.append(str(file_path))
             continue
 
@@ -831,7 +841,11 @@ Examples:
     parser.add_argument("--fix", action="store_true", help="Generate missing standard files from templates")
     parser.add_argument("--dry-run", action="store_true", help="Show what --fix would do without writing files")
     parser.add_argument("--report", type=Path, default=None, help="Save audit report to this file path")
-    parser.add_argument("--marketplace", type=str, help="Marketplace owner/repo for notify-marketplace.yml (e.g., Emasoft/emasoft-plugins)")
+    parser.add_argument(
+        "--marketplace",
+        type=str,
+        help="Marketplace owner/repo for notify-marketplace.yml (e.g., Emasoft/emasoft-plugins)",
+    )
     parser.add_argument("--validate", action="store_true", help="Also run validate_plugin.py for full validation")
 
     args = parser.parse_args()
