@@ -897,7 +897,33 @@ def stage_bump(plugin_root: Path, bump_type: str, dry_run: bool) -> tuple[int, s
         print(f"{RED}✗ Version bump failed{NC}", file=sys.stderr)
         return 1, None
     print(f"{GREEN}✓ Version bumped to {new_version}{NC}")
+    # Also update the README version badge in-place so it never drifts.
+    stage_update_readme_badge(plugin_root, current, new_version, dry_run)
     return 0, new_version
+
+
+def stage_update_readme_badge(plugin_root: Path, old_version: str, new_version: str, dry_run: bool) -> None:
+    """Part of Gate 8: update the README.md version badge in-place.
+
+    Looks for the shields.io badge pattern `version-<old>-blue` and replaces
+    the version segment with the new value. Silent no-op when README.md
+    does not exist or the badge is not present — this is a convenience
+    stage, not a hard gate.
+    """
+    readme = plugin_root / "README.md"
+    if not readme.is_file():
+        return
+    content = readme.read_text(encoding="utf-8")
+    old_badge = f"version-{old_version}-blue"
+    new_badge = f"version-{new_version}-blue"
+    if old_badge not in content:
+        print(f"  {YELLOW}(README version badge not found — skipping badge update){NC}")
+        return
+    if dry_run:
+        print(f"  Would update README badge: {old_badge} → {new_badge}")
+        return
+    readme.write_text(content.replace(old_badge, new_badge, 1), encoding="utf-8")
+    print(f"  {GREEN}✓ Updated README version badge{NC}")
 
 
 def stage_changelog(plugin_root: Path, tag_name: str, new_version: str) -> tuple[int, Path | None]:
@@ -1037,12 +1063,12 @@ Examples:
     bump_type = "major" if args.major else "minor" if args.minor else "patch"
 
     # ── Gates 1-7: preflight (tests, lint, validate, marketplace-reg, consistency) ──
-    for stage, stage_name in [
-        (lambda: stage_check_working_tree(root), "working-tree"),
-        (lambda: stage_run_tests(root), "tests"),
-        (lambda: stage_run_lint(root), "lint"),
-        (lambda: stage_validate_plugin(root), "validate-plugin"),
-    ]:
+    for stage in (
+        lambda: stage_check_working_tree(root),
+        lambda: stage_run_tests(root),
+        lambda: stage_run_lint(root),
+        lambda: stage_validate_plugin(root),
+    ):
         rc = stage()
         if rc != 0:
             return rc
