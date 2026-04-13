@@ -603,6 +603,8 @@ Pipeline stages (all fail-fast — any failure aborts):
   10. Create GitHub release (gh CLI)
 
 Gate stages (--gate mode, called by pre-push hook):
+   G0. Orchestrator check — direct `git push` is blocked; only publish.py
+       may initiate a push (verified via process ancestry, NOT env vars).
    G1. Version bump check (local vs remote)
    G2. Lint (ruff)
    G3. Validate (--strict, blocks on CRITICAL/MAJOR/MINOR/NIT)
@@ -615,7 +617,11 @@ Usage:
     uv run python scripts/publish.py --minor
     uv run python scripts/publish.py --major
     uv run python scripts/publish.py --patch --dry-run
-    uv run python scripts/publish.py --patch --skip-tests
+
+Cornerstone rule: a plugin CANNOT be pushed unless validation passes with
+0 issues (WARNING allowed). There are no exceptions and no bypass flags.
+Every push is blocked unless scripts/publish.py orchestrates it end-to-end
+AND stage_validate / stage_tests / stage_lint all succeed.
 """
 
 import argparse
@@ -840,12 +846,99 @@ def install_hook(root: Path) -> int:
 
 # -- Gate mode (pre-push quality checks) --------------------------------------
 
+def _get_process_ancestry(max_depth: int = 30) -> list[tuple[int, str]]:
+    """Walk parent processes via ps(1). Returns [(pid, cmdline), ...] closest-first.
+
+    Used by the orchestrator check to verify that scripts/publish.py is an
+    ancestor of the current pre-push gate invocation. Process ancestry is
+    non-spoofable (unlike env vars, which a user could set with
+    `CPV_PIPELINE=1 git push`).
+    """
+    ancestry: list[tuple[int, str]] = []
+    pid = os.getpid()
+    seen: set[int] = set()
+    for _ in range(max_depth):
+        if pid in seen or pid <= 0:
+            break
+        seen.add(pid)
+        try:
+            r = subprocess.run(
+                ["ps", "-p", str(pid), "-o", "ppid=,args="],
+                capture_output=True, text=True, timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return []
+        if r.returncode != 0:
+            break
+        line = r.stdout.strip()
+        if not line:
+            break
+        parts = line.split(None, 1)
+        if not parts:
+            break
+        try:
+            ppid = int(parts[0])
+        except ValueError:
+            break
+        cmdline = parts[1] if len(parts) > 1 else ""
+        ancestry.append((pid, cmdline))
+        if ppid <= 1:
+            break
+        pid = ppid
+    return ancestry
+
+
+def _called_by_publish_orchestrator(root: Path) -> bool:
+    """Verify that scripts/publish.py (in publish mode, NOT --gate) is an ancestor.
+
+    Expected chain for an orchestrated push:
+        publish.py --patch|--minor|--major   (orchestrator)
+          └─ git push
+              └─ git (runs pre-push hook)
+                  └─ sh (hook script)
+                      └─ publish.py --gate   (this process)
+
+    Walk the parent chain. At least one ancestor must be scripts/publish.py
+    WITHOUT the --gate flag (that is, a publish orchestrator — not our own
+    gate-mode re-entry).
+    """
+    expected_abs = str((root / "scripts" / "publish.py").resolve())
+    expected_rel = "scripts/publish.py"
+    for _pid, cmdline in _get_process_ancestry():
+        if "publish.py" not in cmdline:
+            continue
+        if "--gate" in cmdline:
+            continue
+        if expected_abs in cmdline or expected_rel in cmdline:
+            return True
+    return False
+
+
 def run_gate(root: Path) -> int:
     """Pre-push gate: blocks on any quality issue. Returns 0 if clean."""
     cprint(f"\n{BOLD}Pre-push gate checks{NC}\n")
 
+    # Gate 0: Orchestrator check — only publish.py may trigger a push.
+    # Prevents a user from running `git push` directly and bypassing the
+    # version-bump / changelog / tag / release pipeline. Uses process
+    # ancestry (non-spoofable), NOT env vars.
+    cprint(f"{BLUE}[G0] Checking push orchestrator...{NC}")
+    if not _called_by_publish_orchestrator(root):
+        cprint("")
+        cprint(f"  {RED}========================================{NC}")
+        cprint(f"  {RED}  BLOCKED: Direct push not allowed{NC}")
+        cprint(f"  {RED}  This pre-push hook only accepts pushes{NC}")
+        cprint(f"  {RED}  initiated by scripts/publish.py.{NC}")
+        cprint(f"  {RED}  Run one of:{NC}")
+        cprint(f"  {RED}    uv run python scripts/publish.py --patch{NC}")
+        cprint(f"  {RED}    uv run python scripts/publish.py --minor{NC}")
+        cprint(f"  {RED}    uv run python scripts/publish.py --major{NC}")
+        cprint(f"  {RED}========================================{NC}")
+        return 1
+    cprint(f"  {GREEN}Orchestrated by publish.py.{NC}")
+
     # Gate 1: Version bump check — local vs remote
-    cprint(f"{BLUE}[G1] Checking version bump...{NC}")
+    cprint(f"\n{BLUE}[G1] Checking version bump...{NC}")
     local_ver = get_current_version(root)
     if local_ver:
         try:
@@ -861,62 +954,84 @@ def run_gate(root: Path) -> int:
         except Exception:
             cprint(f"  {YELLOW}Could not check remote version (new repo?){NC}")
 
-    # Gate 2: Lint with ruff directly
+    # Gate 2: Lint with ruff. MANDATORY — missing scripts/ dir is a BLOCK.
     cprint(f"\n{BLUE}[G2] Linting...{NC}")
     scripts_dir = root / "scripts"
-    if scripts_dir.is_dir():
-        lint_result = subprocess.run(
-            ["uv", "run", "ruff", "check", "scripts/"],
-            cwd=str(root), timeout=120)
-        if lint_result.returncode != 0:
-            cprint(f"  {RED}BLOCKED: Lint issues found{NC}")
-            return 1
-        cprint(f"  {GREEN}Lint passed.{NC}")
-    else:
-        cprint(f"  {YELLOW}No scripts/ directory — skipping lint.{NC}")
+    if not scripts_dir.is_dir():
+        cprint(f"  {RED}BLOCKED: scripts/ directory missing — cannot lint.{NC}")
+        return 1
+    lint_result = subprocess.run(
+        ["uv", "run", "ruff", "check", "scripts/"],
+        cwd=str(root), timeout=120)
+    if lint_result.returncode != 0:
+        cprint(f"  {RED}BLOCKED: Lint issues found{NC}")
+        return 1
+    cprint(f"  {GREEN}Lint passed.{NC}")
 
-    # Gate 3: Validate plugin (--strict, blocks on CRITICAL/MAJOR/MINOR/NIT)
-    cprint(f"\n{BLUE}[G3] Validating plugin...{NC}")
-    validator = root / "scripts" / "validate_plugin.py"
-    if validator.is_file():
-        ve = subprocess.run(
-            ["uv", "run", "python", str(validator), ".", "--strict"],
-            cwd=str(root), timeout=180).returncode
-        # Exit codes: 0=pass, 1=CRITICAL, 2=MAJOR, 3=MINOR, 4=NIT, 5+=WARNING
-        if ve != 0 and ve < 5:
-            labels = {1: "CRITICAL", 2: "MAJOR", 3: "MINOR", 4: "NIT"}
-            cprint(f"  {RED}BLOCKED: {labels.get(ve, f'exit {ve}')} issues found{NC}")
-            return 1
-        cprint(f"  {GREEN}Validation passed.{NC}")
-    else:
-        cprint(f"  {YELLOW}No validate_plugin.py — skipping.{NC}")
+    # Gate 3: Validate via REMOTE CPV validator. MANDATORY — no skip, no exceptions.
+    # CORNERSTONE: a plugin cannot be pushed unless validation passes with 0
+    # blocking issues (WARNING allowed). The validator is ALWAYS fetched from
+    # GitHub so a tampered local copy cannot weaken the rules.
+    cprint(f"\n{BLUE}[G3] Validating plugin (remote CPV)...{NC}")
+    if not shutil.which("uvx"):
+        cprint(f"  {RED}BLOCKED: uvx not found on PATH.{NC}")
+        return 1
+    ve = subprocess.run(
+        ["uvx", "--from",
+         "git+https://github.com/Emasoft/claude-plugins-validation",
+         "--with", "pyyaml",
+         "cpv-remote-validate", "plugin", ".", "--strict"],
+        cwd=str(root), timeout=600).returncode
+    # Exit codes: 0=pass, 1=CRITICAL, 2=MAJOR, 3=MINOR, 4=NIT, 5+=WARNING
+    if ve != 0 and ve < 5:
+        labels = {1: "CRITICAL", 2: "MAJOR", 3: "MINOR", 4: "NIT"}
+        cprint(f"  {RED}BLOCKED: {labels.get(ve, f'exit {ve}')} issues found{NC}")
+        return 1
+    cprint(f"  {GREEN}Validation passed (0 blocking issues).{NC}")
 
-    # Gate 4: Tests
+    # Gate 4: Tests. MANDATORY — missing tests/ dir or zero tests is a BLOCK.
     cprint(f"\n{BLUE}[G4] Running tests...{NC}")
     test_dir = root / "tests"
-    if test_dir.is_dir() and any(test_dir.glob("test_*.py")):
-        try:
-            te = subprocess.run(
-                ["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"],
-                cwd=str(root), timeout=300).returncode
-        except subprocess.TimeoutExpired:
-            cprint(f"  {YELLOW}Tests timed out after 300s, skipping.{NC}")
-            te = 0
-        if te == 5:
-            cprint(f"  {YELLOW}No tests collected — skipping.{NC}")
-        elif te != 0:
-            cprint(f"  {RED}BLOCKED: Tests failed{NC}")
-            return 1
-        else:
-            cprint(f"  {GREEN}Tests passed.{NC}")
-    else:
-        cprint(f"  {YELLOW}No test files found — skipping.{NC}")
+    if not (test_dir.is_dir() and any(test_dir.glob("test_*.py"))):
+        cprint(f"  {RED}BLOCKED: tests/ directory missing or empty.{NC}")
+        cprint(f"  {RED}Every CPV plugin MUST ship tests.{NC}")
+        return 1
+    try:
+        te = subprocess.run(
+            ["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"],
+            cwd=str(root), timeout=300).returncode
+    except subprocess.TimeoutExpired:
+        cprint(f"  {RED}BLOCKED: Tests timed out after 300s.{NC}")
+        return 1
+    if te == 5:
+        cprint(f"  {RED}BLOCKED: pytest collected 0 tests.{NC}")
+        return 1
+    if te != 0:
+        cprint(f"  {RED}BLOCKED: Tests failed{NC}")
+        return 1
+    cprint(f"  {GREEN}Tests passed.{NC}")
 
     cprint(f"\n{GREEN}{BOLD}All gates passed.{NC}")
     return 0
 
 
 # -- Pipeline stages -----------------------------------------------------------
+
+def stage_bypass_guard() -> None:
+    """Step 0: Reject any env var that could bypass a check. No exceptions."""
+    cprint(f"\n{BOLD}[0/10] Checking for bypass attempts...{NC}")
+    forbidden = [
+        "CPV_SKIP_TESTS", "CPV_SKIP_LINT", "CPV_SKIP_VALIDATE",
+        "CPV_FORCE_PUBLISH", "CPV_BYPASS_CHECKS",
+        "SKIP_TESTS", "SKIP_LINT", "SKIP_VALIDATE", "NO_VERIFY",
+    ]
+    attempted = [v for v in forbidden if os.environ.get(v)]
+    if attempted:
+        cprint(f"  {RED}BLOCKED: forbidden env vars set: {', '.join(attempted)}{NC}")
+        cprint(f"  {RED}The publish pipeline enforces every check. "
+               f"Fix failures, do not skip them.{NC}")
+        sys.exit(1)
+    cprint(f"  {GREEN}No bypass vars set.{NC}")
 
 def stage_check_clean(root: Path) -> None:
     """Step 1: Working tree must be clean."""
@@ -929,37 +1044,60 @@ def stage_check_clean(root: Path) -> None:
     cprint(f"  {GREEN}Clean.{NC}")
 
 def stage_lint(root: Path) -> None:
-    """Step 2: Lint with ruff."""
+    """Step 2: Lint with ruff. MANDATORY — no skip."""
     cprint(f"\n{BOLD}[2/10] Linting...{NC}")
+    scripts_dir = root / "scripts"
+    if not scripts_dir.is_dir():
+        cprint(f"  {RED}BLOCKED: scripts/ directory missing — cannot lint.{NC}")
+        sys.exit(1)
     run(["uv", "run", "ruff", "check", "scripts/"], cwd=root)
     cprint(f"  {GREEN}Lint passed.{NC}")
 
 def stage_validate(root: Path) -> None:
-    """Step 3: Validate plugin structure."""
-    cprint(f"\n{BOLD}[3/10] Validating plugin...{NC}")
-    validator = root / "scripts" / "validate_plugin.py"
-    if not validator.is_file():
-        cprint(f"  {YELLOW}No validate_plugin.py — skipping.{NC}")
-        return
-    run(["uv", "run", "python", str(validator), ".", "--strict"], cwd=root)
-    cprint(f"  {GREEN}Validation passed.{NC}")
+    """Step 3: Validate plugin via REMOTE CPV validator. MANDATORY — no skip.
+
+    Cornerstone rule: a plugin cannot be pushed unless validation passes
+    with 0 issues (WARNING allowed). The validator is ALWAYS fetched from
+    GitHub (git+https://github.com/Emasoft/claude-plugins-validation) via
+    uvx so a local tampered copy cannot weaken the rules. No exceptions.
+    """
+    cprint(f"\n{BOLD}[3/10] Validating plugin (remote CPV)...{NC}")
+    if not shutil.which("uvx"):
+        cprint(f"  {RED}BLOCKED: uvx not found on PATH.{NC}")
+        cprint(f"  {RED}Install via: brew install uv  or  pip install uv{NC}")
+        sys.exit(1)
+    # Fetch CPV from GitHub and run validate_plugin remotely. --strict blocks
+    # on CRITICAL(1), MAJOR(2), MINOR(3), NIT(4); WARNING(5+) passes.
+    run([
+        "uvx", "--from",
+        "git+https://github.com/Emasoft/claude-plugins-validation",
+        "--with", "pyyaml",
+        "cpv-remote-validate", "plugin", ".", "--strict",
+    ], cwd=root)
+    cprint(f"  {GREEN}Validation passed (0 blocking issues).{NC}")
 
 def stage_tests(root: Path) -> None:
-    """Step 4: Run pytest."""
+    """Step 4: Run pytest. MANDATORY — no skip, no exceptions.
+
+    Cornerstone rule: failing tests block the push. Missing tests/ directory
+    is a scaffolding bug and must be fixed, not bypassed.
+    """
     cprint(f"\n{BOLD}[4/10] Running tests...{NC}")
     test_dir = root / "tests"
     if not test_dir.is_dir():
-        cprint(f"  {YELLOW}No tests/ directory — skipping.{NC}")
-        return
-    # pytest exit code 5 = no tests collected, which is OK for fresh plugins
+        cprint(f"  {RED}BLOCKED: tests/ directory missing.{NC}")
+        cprint(f"  {RED}Every CPV plugin MUST ship a tests/ directory.{NC}")
+        sys.exit(1)
     r = run(["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"], cwd=root, check=False)
     if r.returncode == 5:
-        cprint(f"  {YELLOW}No tests collected — skipping.{NC}")
-    elif r.returncode != 0:
-        cprint(f"  {RED}Tests failed (exit {r.returncode}).{NC}")
+        # pytest exit 5 = no tests collected. This is ALSO a block — no exceptions.
+        cprint(f"  {RED}BLOCKED: pytest collected 0 tests.{NC}")
+        cprint(f"  {RED}Every CPV plugin MUST ship at least one test.{NC}")
+        sys.exit(1)
+    if r.returncode != 0:
+        cprint(f"  {RED}BLOCKED: tests failed (exit {r.returncode}).{NC}")
         sys.exit(r.returncode)
-    else:
-        cprint(f"  {GREEN}Tests passed.{NC}")
+    cprint(f"  {GREEN}Tests passed.{NC}")
 
 def stage_consistency(root: Path) -> None:
     """Step 5: Check version consistency."""
@@ -1071,7 +1209,9 @@ def main() -> int:
     mode_group.add_argument("--major", action="store_const", dest="bump", const="major",
                             help="Bump major version and publish")
     parser.add_argument("--dry-run", action="store_true", help="Preview only, no changes")
-    parser.add_argument("--skip-tests", action="store_true", help="Skip pytest step")
+    # NOTE: --skip-tests was intentionally removed. The cornerstone rule is that
+    # every CPV plugin MUST pass validation with 0 issues (WARNING allowed) before
+    # any push. Skipping tests would bypass that guarantee — there are no exceptions.
     args = parser.parse_args()
 
     root = get_repo_root()
@@ -1099,11 +1239,12 @@ def main() -> int:
     if args.dry_run:
         cprint(f"{YELLOW}(dry-run mode — no changes will be made){NC}")
 
+    # Gate 0: reject bypass attempts BEFORE running any other stage.
+    stage_bypass_guard()
     stage_check_clean(root)
     stage_lint(root)
     stage_validate(root)
-    if not args.skip_tests:
-        stage_tests(root)
+    stage_tests(root)  # MANDATORY — no skip flag, no exceptions
     stage_consistency(root)
     stage_bump(root, new_ver, args.dry_run)
     stage_update_badges(root, current, new_ver, args.dry_run)
