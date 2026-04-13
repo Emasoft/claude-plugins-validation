@@ -255,8 +255,15 @@ uv run python scripts/publish.py --patch              # 1.0.0 -> 1.0.1
 uv run python scripts/publish.py --minor              # 1.0.0 -> 1.1.0
 uv run python scripts/publish.py --major              # 1.0.0 -> 2.0.0
 uv run python scripts/publish.py --patch --dry-run    # preview only
-uv run python scripts/publish.py --patch --skip-tests # skip pytest
+uv run python scripts/publish.py --gate               # run the pre-push gate
+uv run python scripts/publish.py --install-hook       # wire git-hooks/pre-push
 ```
+
+**CORNERSTONE RULE**: there is no `--skip-tests`, no `--skip-lint`, no
+`--skip-validate`, no `--force`, and no environment-variable bypass (see
+`stage_bypass_guard`). Every test and every gate is mandatory. The only
+severity that does not block a push is `WARNING`. If a gate fails, fix the
+underlying problem — do not look for a way around it.
 
 **Dependencies:** Requires `gitignore-filter` (`uv add gitignore-filter`) for scanning
 Python files while respecting `.gitignore`. If your project does not use `__version__`

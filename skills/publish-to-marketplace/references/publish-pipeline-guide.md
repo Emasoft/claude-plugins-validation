@@ -170,20 +170,33 @@ uv run python scripts/publish.py --patch              # 1.0.0 -> 1.0.1
 uv run python scripts/publish.py --minor              # 1.0.0 -> 1.1.0
 uv run python scripts/publish.py --major              # 1.0.0 -> 2.0.0
 uv run python scripts/publish.py --patch --dry-run    # preview only
-uv run python scripts/publish.py --patch --skip-tests # skip pytest
+uv run python scripts/publish.py --gate               # pre-push gate (G0-G4)
+uv run python scripts/publish.py --install-hook       # wire git-hooks/pre-push
 ```
 
-### Pipeline Stages (all fail-fast)
+**CORNERSTONE RULE**: there is no `--skip-tests`, no `--skip-lint`, no
+`--skip-validate`, no `--force`, and no environment-variable bypass. Every
+test, every lint pass, and every validation run is mandatory. Only `WARNING`
+severity does not block a push. If a gate fails, fix the underlying problem.
+
+### Pipeline Stages (the 10-stage template pipeline)
+
+The generated `publish.py` runs these stages in order. Every stage is
+fail-fast — any non-zero exit aborts the pipeline.
 
 ```
+Step 0: Bypass guard           reject CPV_SKIP_*, SKIP_*, NO_VERIFY env vars
 Step 1: Check working tree     git status --porcelain (must be clean)
-Step 2: Run tests              uv run pytest tests/ -x -q --tb=short
-Step 3: Lint files             uv run python scripts/<lint-script> .
-Step 4: Validate plugin        uv run python scripts/<validate-script> . --strict
-Step 5: Version consistency    All version sources must match
-Step 6: Bump version           Updates plugin.json, pyproject.toml, __version__
-Step 7: Commit                 git add -A && git commit -m "chore: bump version to X.Y.Z"
-Step 8: Push                   git push origin HEAD
+Step 2: Lint                   uv run ruff check scripts/
+Step 3: Validate plugin        uvx cpv-remote-validate plugin . --strict (remote CPV)
+Step 4: Tests                  uv run pytest tests/ -x -q --tb=short
+Step 5: Version consistency    plugin.json / pyproject.toml / __version__ must match
+Step 6: Bump version           updates plugin.json, pyproject.toml, __version__
+Step 7: Update README badge    replace version-X.Y.Z-blue shields.io badge
+Step 8: Generate changelog     git-cliff -o CHANGELOG.md
+Step 9: Commit + tag + push    (direct push is blocked by the pre-push hook
+                                unless publish.py is in the ancestry chain)
+Step 10: GitHub release        gh release create with notes
 ```
 
 ### Version Update Targets
