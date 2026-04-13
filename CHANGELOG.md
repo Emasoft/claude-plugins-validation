@@ -2,6 +2,12 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.31] - 2026-04-13
+
+### Documentation
+
+- Refresh README tests count 1639 → 1667 after Gate 6 + bump_version tests
+
 ## [2.12.30] - 2026-04-13
 
 ### Bug Fixes

@@ -1,7 +1,7 @@
 # Claude Plugins Validation (CPV)
 
 <!--BADGES-START-->
-![Version](https://img.shields.io/badge/version-2.12.30-blue)
+![Version](https://img.shields.io/badge/version-2.12.31-blue)
 ![Tests](https://img.shields.io/badge/tests-1667%20passed-brightgreen)
 ![Validation](https://img.shields.io/badge/validation-0%20issues-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
