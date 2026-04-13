@@ -2,6 +2,12 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.19] - 2026-04-13
+
+### Features
+
+- Add setup-marketplace-auto-notification skill
+
 ## [2.12.18] - 2026-04-13
 
 ### Documentation
