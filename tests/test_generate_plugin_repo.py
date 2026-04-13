@@ -486,3 +486,106 @@ class TestPublishPyCornerstoneRule:
         assert "Cornerstone rule" in src
         assert "0 issues (WARNING allowed)" in src
         assert "no exceptions" in src.lower()
+
+
+class TestPublishPyMarketplaceRegistration:
+    """Verify the template's marketplace-registration gate (parity with CPV's own Gate 6).
+
+    Audit MAJOR #3: the scaffolded template was missing the marketplace
+    registration check that CPV's own publish.py runs as Gate 6. Without
+    this stage, downstream plugins could publish without verifying that
+    they are wired to their marketplace — breaking the auto-update chain
+    silently. This test class pins the contract so the gate stays in place.
+    """
+
+    @staticmethod
+    def _src() -> str:
+        from generate_plugin_repo import PluginParams, gen_publish_py  # noqa: E402
+
+        params = PluginParams(
+            name="mkt-reg-test",
+            description="test",
+            author="Emasoft",
+            author_email="t@e.com",
+        )
+        return gen_publish_py(params)
+
+    def test_stage_function_present(self):
+        """gen_publish_py must define stage_marketplace_registration."""
+        src = self._src()
+        assert "def stage_marketplace_registration" in src
+
+    def test_layout_helpers_present(self):
+        """All four layout helpers must be defined in the template."""
+        src = self._src()
+        assert "def _detect_layout" in src
+        assert "def _find_parent_marketplace" in src
+        assert "def _gh_secret_exists" in src
+        assert "def _fetch_remote_marketplace_json" in src
+        assert "def _remote_has_receiver_workflow" in src
+        assert "def _plugin_in_remote_marketplace" in src
+        assert "def _read_plugin_name" in src
+        assert "def _current_repo_slug" in src
+
+    def test_stage_called_from_main(self):
+        """stage_marketplace_registration must be wired into the main pipeline."""
+        src = self._src()
+        # The pipeline should call it somewhere between stage_tests and stage_consistency
+        assert "stage_marketplace_registration(root)" in src
+
+    def test_stage_runs_after_tests_before_bump(self):
+        """Marketplace registration must run AFTER tests pass and BEFORE version bump.
+
+        Rationale: don't waste a bump on a misconfigured marketplace, but also
+        don't run network calls until the local checks (tests) are passing.
+        """
+        src = self._src()
+        tests_idx = src.find("stage_tests(root)")
+        mkt_idx = src.find("stage_marketplace_registration(root)")
+        bump_idx = src.find("stage_bump(root,")
+        assert tests_idx < mkt_idx < bump_idx, (
+            f"Wrong order: tests={tests_idx}, mkt={mkt_idx}, bump={bump_idx}"
+        )
+
+    def test_layout_a_logic_present(self):
+        """Layout A check must verify notify workflow + secret + remote registration."""
+        src = self._src()
+        a_block = src.split("def stage_marketplace_registration")[1].split("def stage_consistency")[0]
+        assert "Layout A detected" in a_block
+        assert "MARKETPLACE_PAT" in a_block
+        assert "notify-marketplace.yml" in a_block
+        assert "set_marketplace_pat.py" in a_block  # references the helper script
+        assert "_fetch_remote_marketplace_json" in a_block
+        assert "_remote_has_receiver_workflow" in a_block
+
+    def test_layout_b_logic_present(self):
+        """Layout B check must reject running from nested folder."""
+        src = self._src()
+        b_block = src.split("def stage_marketplace_registration")[1].split("def stage_consistency")[0]
+        assert "Layout B detected" in b_block
+        assert "marketplace_root" in b_block
+        # The 'must run from marketplace root' rule
+        assert "MARKETPLACE root" in b_block
+
+    def test_no_marketplace_emits_warning_not_block(self):
+        """When no marketplace wiring, emit WARNING (not block) so first-release plugins work."""
+        src = self._src()
+        block = src.split("def stage_marketplace_registration")[1].split("def stage_consistency")[0]
+        assert "standalone/experimental mode" in block
+        assert "WARNING" in block
+
+    def test_docstring_mentions_marketplace_registration(self):
+        """Module docstring must mention the new stage in the pipeline list."""
+        src = self._src()
+        assert "Marketplace-registration check" in src
+
+    def test_stages_renumbered_to_eleven(self):
+        """The pipeline must show 11 numbered steps (was 10 before adding Gate 6)."""
+        src = self._src()
+        # At least one stage label must reference [N/11]
+        assert "/11]" in src
+        # The old 10-step labels must all be gone from the code (docstring is fine)
+        # Look for cprint calls with the old format only
+        for stale in ("[1/10]", "[2/10]", "[3/10]", "[4/10]", "[5/10]", "[6/10]",
+                      "[7/10]", "[8/10]", "[9/10]", "[10/10]"):
+            assert stale not in src, f"Stale stage label {stale} still in template"
