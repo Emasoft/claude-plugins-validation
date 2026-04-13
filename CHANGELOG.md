@@ -2,6 +2,12 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.22] - 2026-04-13
+
+### Documentation
+
+- Fix 16 stale references found by audit sweep
+
 ## [2.12.21] - 2026-04-13
 
 ### Bug Fixes
