@@ -2,6 +2,13 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.26] - 2026-04-13
+
+### Bug Fixes
+
+- **publish,readme:** Stop version-badge drift + refresh stats
+- **pat:** Add set_marketplace_pat.py helper — eliminate echo-pipe improvisation
+
 ## [2.12.25] - 2026-04-13
 
 ### Bug Fixes
