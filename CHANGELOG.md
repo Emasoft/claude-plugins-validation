@@ -2,6 +2,12 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.27] - 2026-04-13
+
+### Bug Fixes
+
+- **ci-template:** Use cpv-remote-validate in scaffolded ci.yml/release.yml/validate.yml ([#11](https://github.com/Emasoft/claude-plugins-validation/issues/11))
+
 ## [2.12.26] - 2026-04-13
 
 ### Bug Fixes
