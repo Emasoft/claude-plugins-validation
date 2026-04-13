@@ -2,6 +2,13 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.30] - 2026-04-13
+
+### Bug Fixes
+
+- **audit-cleanup:** Drift-proof bump_version + badge regex fallback + doc sync
+- **template:** Port marketplace-registration check to scaffolded publish.py (audit MAJOR #3)
+
 ## [2.12.29] - 2026-04-13
 
 ### Bug Fixes
