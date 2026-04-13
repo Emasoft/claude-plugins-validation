@@ -1156,6 +1156,8 @@ class ValidationResult:
         phase: Optional validation phase (structure, semantic, security, cross-reference)
         fixable: Whether this issue can be auto-fixed
         fix_id: Identifier for the fix function (if fixable)
+        category: Optional sub-category tag (e.g., "manifest", "architecture", "plugin")
+        suggestion: Optional remediation hint shown alongside the message
     """
 
     level: Level
@@ -1165,6 +1167,8 @@ class ValidationResult:
     phase: str | None = None
     fixable: bool = False
     fix_id: str | None = None
+    category: str = ""
+    suggestion: str | None = None
 
     def to_dict(self) -> dict[str, str | int | bool | None]:
         """Convert to dictionary for JSON serialization."""
@@ -1179,6 +1183,10 @@ class ValidationResult:
             result["fixable"] = self.fixable
             if self.fix_id:
                 result["fix_id"] = self.fix_id
+        if self.category:
+            result["category"] = self.category
+        if self.suggestion is not None:
+            result["suggestion"] = self.suggestion
         return result
 
 

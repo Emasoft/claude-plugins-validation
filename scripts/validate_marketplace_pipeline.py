@@ -618,7 +618,10 @@ def validate_marketplace_structure(
             3.0,
         )
 
-    return marketplace_data if marketplace_data else None
+    if not marketplace_data:
+        return None
+    assert isinstance(marketplace_data, dict)
+    return marketplace_data
 
 
 # =============================================================================

@@ -206,9 +206,11 @@ class TestEncodingValidationReportToDict:
         report.stats["bom_issues"] = 1
         result = report.to_dict()
         assert "encoding_stats" in result
-        assert result["encoding_stats"]["utf8_issues"] == 2
-        assert result["encoding_stats"]["bom_issues"] == 1
-        assert result["encoding_stats"]["files_scanned"] == 0
+        stats = result["encoding_stats"]
+        assert isinstance(stats, dict)
+        assert stats["utf8_issues"] == 2
+        assert stats["bom_issues"] == 1
+        assert stats["files_scanned"] == 0
 
 
 class TestIsBinaryFile:

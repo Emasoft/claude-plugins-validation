@@ -2,7 +2,7 @@
 name: migrate-marketplace-architecture
 description: >
   Convert a non-CPV marketplace to Layout A (hub-and-spoke) or Layout B (nested-with-discipline).
-  Use when migrating marketplace architecture. Loaded by plugin-fixer agent.
+  Use when migrating marketplace architecture. Loaded by marketplace-fixer agent.
 tags:
   - marketplace
   - migration

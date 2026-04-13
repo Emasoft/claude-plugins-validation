@@ -2,7 +2,7 @@
 name: canonical-pipeline
 description: >
   Standard files, CI/CD, hooks, and release pipeline for Emasoft Claude Code plugins.
-  Use when creating or auditing plugin repos. Loaded by plugin-creator and plugin-fixer agents.
+  Use when creating or auditing plugin repos. Loaded by plugin-creator, plugin-fixer, and marketplace-fixer agents.
 user-invocable: false
 ---
 

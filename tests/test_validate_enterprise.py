@@ -216,11 +216,15 @@ class TestReportToDict:
         assert d["compliant_skills"] == 1
         assert d["total_agents"] == 1
         assert d["compliant_agents"] == 1
-        assert len(d["skill_results"]) == 1
-        assert d["skill_results"][0]["skill_name"] == "s1"
-        assert d["skill_results"][0]["is_compliant"] is True
-        assert len(d["agent_results"]) == 1
-        assert d["agent_results"][0]["agent_name"] == "a1"
+        skill_results = d["skill_results"]
+        assert isinstance(skill_results, list)
+        assert len(skill_results) == 1
+        assert skill_results[0]["skill_name"] == "s1"
+        assert skill_results[0]["is_compliant"] is True
+        agent_results = d["agent_results"]
+        assert isinstance(agent_results, list)
+        assert len(agent_results) == 1
+        assert agent_results[0]["agent_name"] == "a1"
 
 
 class TestValidateRequiredMetadataEdgeCases:

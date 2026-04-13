@@ -377,7 +377,9 @@ def test_detect_layout_identifies_layout_b(tmp_path):
     mkt_root, nested = _make_marketplace_root(tmp_path, plugin_name="nested-plugin")
     layout, details = publish.detect_layout(nested)
     assert layout == "B"
-    assert Path(details["marketplace_root"]).resolve() == mkt_root.resolve()
+    mkt_root_from_details = details["marketplace_root"]
+    assert mkt_root_from_details is not None
+    assert Path(mkt_root_from_details).resolve() == mkt_root.resolve()
     assert details["plugin_name"] == "nested-plugin"
 
 

@@ -2,7 +2,7 @@
 name: plugin-management
 description: >
   Manage Claude Code plugins: install, validate, audit, enable, disable, search, doctor.
-  Use when managing plugin lifecycle. Loaded by plugin-manager agent.
+  Use when managing plugin lifecycle. Loaded by plugin-manager and plugin-creator agents.
 user-invocable: false
 ---
 
