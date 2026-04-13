@@ -2,6 +2,16 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.23] - 2026-04-13
+
+### Bug Fixes
+
+- **validate_plugin:** Close userConfig schema gap + bin/.sh false positives ([#9](https://github.com/Emasoft/claude-plugins-validation/issues/9))
+
+### Miscellaneous Tasks
+
+- Update uv.lock
+
 ## [2.12.22] - 2026-04-13
 
 ### Documentation
