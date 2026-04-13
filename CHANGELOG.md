@@ -2,6 +2,12 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.20] - 2026-04-13
+
+### Features
+
+- Harden publish.py + align plugin templates with PSS architecture
+
 ## [2.12.19] - 2026-04-13
 
 ### Features
