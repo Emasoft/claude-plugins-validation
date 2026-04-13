@@ -340,32 +340,61 @@ def main() -> int:
             cprint(f"{GREEN}Tag matches local version: {expected_tag}{NC}")
         else:
             # For branch pushes: local version must be strictly greater than remote.
+            # Resolve origin/HEAD dynamically so this works on main OR master
+            # default branches (audit finding v2.12.27 MAJOR #5).
+            candidate_refs: list[str] = []
             try:
-                remote_result = subprocess.run(
-                    ["git", "show", "origin/master:.claude-plugin/plugin.json"],
+                sym = subprocess.run(
+                    ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
                     capture_output=True,
                     text=True,
                     cwd=str(repo_root),
+                    timeout=10,
                 )
+                if sym.returncode == 0 and sym.stdout.strip():
+                    branch = sym.stdout.strip().split("/")[-1]
+                    candidate_refs.append(f"origin/{branch}")
             except (OSError, subprocess.SubprocessError):
-                remote_result = None
+                pass
+            for fallback in ("origin/main", "origin/master"):
+                if fallback not in candidate_refs:
+                    candidate_refs.append(fallback)
 
-            if remote_result is not None and remote_result.returncode == 0:
-                remote_version = json.loads(remote_result.stdout).get("version")
-                if remote_version and local_version == remote_version:
-                    cprint(f"{RED}========================================{NC}")
-                    cprint(f"{RED}  BLOCKED: Version not bumped!{NC}")
-                    cprint(f"{RED}  Local: {local_version}  Remote: {remote_version}{NC}")
-                    cprint(f"{RED}  Run: uv run python scripts/publish.py --patch{NC}")
-                    cprint(f"{RED}========================================{NC}")
-                    return 1
-                elif remote_version:
-                    cprint(f"{GREEN}Version bump OK: {remote_version} → {local_version}{NC}")
-                else:
-                    cprint(f"{GREEN}Version: {local_version} (no remote version to compare){NC}")
+            remote_version: str | None = None
+            matched_ref: str | None = None
+            for ref in candidate_refs:
+                try:
+                    remote_result = subprocess.run(
+                        ["git", "show", f"{ref}:.claude-plugin/plugin.json"],
+                        capture_output=True,
+                        text=True,
+                        cwd=str(repo_root),
+                        timeout=10,
+                    )
+                except (OSError, subprocess.SubprocessError):
+                    continue
+                if remote_result.returncode == 0 and remote_result.stdout:
+                    try:
+                        rv = json.loads(remote_result.stdout).get("version")
+                        if isinstance(rv, str):
+                            remote_version = rv
+                            matched_ref = ref
+                            break
+                    except json.JSONDecodeError:
+                        continue
+
+            if remote_version is None:
+                # No remote plugin.json on any candidate branch — first push.
+                cprint(f"{GREEN}Version: {local_version} (first push, no remote plugin.json){NC}")
+            elif local_version == remote_version:
+                cprint(f"{RED}========================================{NC}")
+                cprint(f"{RED}  BLOCKED: Version not bumped!{NC}")
+                cprint(f"{RED}  Local: {local_version}  {matched_ref}: {remote_version}{NC}")
+                cprint(f"{RED}  Run: uv run python scripts/publish.py --patch{NC}")
+                cprint(f"{RED}========================================{NC}")
+                return 1
             else:
-                # Remote branch or file doesn't exist yet — first push, allow
-                cprint(f"{GREEN}Version: {local_version} (first push){NC}")
+                cprint(f"{GREEN}Version bump OK: {remote_version} → {local_version} (via {matched_ref}){NC}")
     else:
         cprint(f"{YELLOW}No local version found — skipping version check{NC}")
 

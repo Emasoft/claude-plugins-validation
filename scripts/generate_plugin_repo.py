@@ -938,21 +938,55 @@ def run_gate(root: Path) -> int:
     cprint(f"  {GREEN}Orchestrated by publish.py.{NC}")
 
     # Gate 1: Version bump check — local vs remote
+    # Resolves origin/HEAD dynamically so the gate works on both `main` and
+    # `master` default branches (and any other name). If none of the
+    # candidates return a remote plugin.json, it's a first push and we allow.
     cprint(f"\n{BLUE}[G1] Checking version bump...{NC}")
     local_ver = get_current_version(root)
     if local_ver:
+        # Try origin/HEAD first (most reliable), then explicit main/master
+        candidates: list[str] = []
         try:
-            r = subprocess.run(
-                ["git", "show", "origin/main:.claude-plugin/plugin.json"],
-                capture_output=True, text=True, cwd=str(root))
-            if r.returncode == 0:
-                remote_ver = json.loads(r.stdout).get("version")
-                if remote_ver and local_ver == remote_ver:
-                    cprint(f"  {RED}BLOCKED: Version not bumped ({local_ver}){NC}")
-                    return 1
-                cprint(f"  {GREEN}Version bump OK: {remote_ver} -> {local_ver}{NC}")
-        except Exception:
-            cprint(f"  {YELLOW}Could not check remote version (new repo?){NC}")
+            sym = subprocess.run(
+                ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
+                capture_output=True, text=True, cwd=str(root), timeout=10,
+            )
+            if sym.returncode == 0 and sym.stdout.strip():
+                # Output looks like "refs/remotes/origin/main"
+                branch = sym.stdout.strip().split("/")[-1]
+                candidates.append(f"origin/{branch}")
+        except (OSError, subprocess.SubprocessError):
+            pass
+        for fallback in ("origin/main", "origin/master"):
+            if fallback not in candidates:
+                candidates.append(fallback)
+        remote_ver: str | None = None
+        matched_ref: str | None = None
+        for ref in candidates:
+            try:
+                r = subprocess.run(
+                    ["git", "show", f"{ref}:.claude-plugin/plugin.json"],
+                    capture_output=True, text=True, cwd=str(root), timeout=10,
+                )
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if r.returncode == 0 and r.stdout:
+                try:
+                    data = json.loads(r.stdout)
+                    rv = data.get("version")
+                    if isinstance(rv, str):
+                        remote_ver = rv
+                        matched_ref = ref
+                        break
+                except json.JSONDecodeError:
+                    continue
+        if remote_ver is None:
+            cprint(f"  {YELLOW}No remote plugin.json found (first push?) — skipping version-bump check.{NC}")
+        elif local_ver == remote_ver:
+            cprint(f"  {RED}BLOCKED: Version not bumped — local {local_ver} == {matched_ref} {remote_ver}{NC}")
+            return 1
+        else:
+            cprint(f"  {GREEN}Version bump OK: {remote_ver} → {local_ver} (via {matched_ref}){NC}")
 
     # Gate 2: Lint with ruff. MANDATORY — missing scripts/ dir is a BLOCK.
     cprint(f"\n{BLUE}[G2] Linting...{NC}")
