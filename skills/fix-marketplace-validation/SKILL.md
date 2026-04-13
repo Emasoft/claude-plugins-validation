@@ -27,8 +27,8 @@ This skill is scoped to **mechanical per-error fixes**. For architectural migrat
 2. **Screen for architecture findings first.** If any finding has `category: architecture`, stop and delegate to `migrate-marketplace-architecture`. Mechanical fixes cannot repair architectural issues.
 3. For each remaining mechanical finding, consult `marketplace-error-index.md` — the primary lookup covering both `validate_marketplace.py` (structure, plugin entries, source types, submodules) and `validate_marketplace_pipeline.py` (publish.py, cliff.toml, CI workflow, tagging, secrets).
 4. Jump from the index entry to the specific section in the detailed guide:
-   - `marketplace-fixes.md` — issues from `validate_marketplace.py`
-   - `pipeline-fixes.md` — issues from `validate_marketplace_pipeline.py`
+   - `marketplace-fixes.md` §1-4 — issues from `validate_marketplace.py` (structure, entries, sources, submodules)
+   - `marketplace-fixes.md` §5-8 — issues from `validate_marketplace_pipeline.py` (publish.py, cliff.toml, CI workflow, tags, secrets)
 5. Apply the fix using Edit following the guide's step-by-step instructions. Never improvise structural changes.
 
 Copy this checklist and track your progress:
@@ -52,7 +52,7 @@ The fixer agent uses this index to locate the correct fix guide, then applies th
 
 ## Error Handling
 
-If no matching section is found for an error message, search by error-message keywords in `marketplace-fixes.md` or `pipeline-fixes.md`. If a guide is missing a section for the error (gap), report it in the fix log and continue with the next finding. Do NOT guess at the fix — report gaps upward so guides can be updated.
+If no matching section is found for an error message, search by error-message keywords in `marketplace-fixes.md` (sections §1-4 cover `validate_marketplace.py`; §5-8 cover `validate_marketplace_pipeline.py`). If a guide is missing a section for the error (gap), report it in the fix log and continue with the next finding. Do NOT guess at the fix — report gaps upward so guides can be updated.
 
 ## Examples
 
@@ -60,18 +60,14 @@ If no matching section is found for an error message, search by error-message ke
 **Output:** marketplace-error-index → `validate_marketplace.py` → marketplace-fixes §1 → create file with required structure.
 
 **Input:** `[MINOR] cliff.toml missing keepachangelog template`
-**Output:** marketplace-error-index → `validate_marketplace_pipeline.py` → pipeline-fixes → scaffold cliff.toml with the canonical template.
+**Output:** marketplace-error-index → `validate_marketplace_pipeline.py` → marketplace-fixes §5 → scaffold cliff.toml with the canonical template.
 
 ## Resources
 
-- [README (transition note + canonical fix guide locations)](references/README.md)
+- [README (transition stub with guide locations)](references/README.md)
   > Purpose · Transition note · Canonical fix guide locations · Marketplace Error Index · Marketplace Fixes · Pipeline Fixes
 
-Guides referenced by name (not linked — the split task will move canonical copies under this skill's own `references/`):
-
-- `marketplace-error-index.md` — marketplace-scope error-to-fix mapping
-- `marketplace-fixes.md` — detailed fixes for `validate_marketplace.py`
-- `pipeline-fixes.md` — detailed fixes for `validate_marketplace_pipeline.py`
+During the transition, the canonical marketplace fix guides live under `skills/fix-validation/references/` (`marketplace-error-index.md` and `marketplace-fixes.md` §1-8). A follow-up task will physically move them under this skill's own `references/` directory.
 
 ## Token Optimization
 

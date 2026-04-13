@@ -98,7 +98,7 @@ Each fix guide section tells you:
 - What the non-CPV pattern looks like
 - How to fix the signal **mechanically** if you do NOT want a full migration
 
-For a full interactive Layout A (hub-and-spoke: git subtree split each plugin to its own repo) or Layout B (nested with CPV discipline) migration, use the `migrate-marketplace-architecture` skill invoked by the `plugin-fixer` agent. The per-warning mechanical fixes in marketplace-fixes §9 handle the simpler case where you just want to bring an existing layout into compliance without moving repositories around.
+For a full interactive Layout A (hub-and-spoke: git subtree split each plugin to its own repo) or Layout B (nested with CPV discipline) migration, use the `migrate-marketplace-architecture` skill invoked by the `marketplace-fixer` agent. The per-warning mechanical fixes in marketplace-fixes §9 handle the simpler case where you just want to bring an existing layout into compliance without moving repositories around.
 
 Trigger condition recap (from `validate_marketplace.py::_recommend_cpv_restructure`):
 
@@ -108,4 +108,4 @@ Trigger condition recap (from `validate_marketplace.py::_recommend_cpv_restructu
 
 The message text itself points users at:
 - `skills/create-plugin/references/marketplace-layouts.md` for manual migration
-- The `plugin-fixer` agent with `/cpv-fix-validation <report.json>` for automated conversion
+- The `marketplace-fixer` agent with `/cpv-fix-marketplace-validation <report.json>` for automated conversion

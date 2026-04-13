@@ -87,4 +87,4 @@ Never force-push or rewrite history. Forward-only commits.
   > Pre-Flight Checks · Per-Plugin Subtree Split · Per-Plugin Repo Creation · CPV Canonicalization · Per-Plugin Tagging · Per-Plugin Auto-Notify Setup · Marketplace.json Rewrite · Cleanup Commit · Verification · Rollback Recipe
 - [Layout B Discipline](references/layout-b-discipline.md)
   > Pre-Flight Checks · Scaffold publish.py · Scaffold cliff.toml · Scaffold validate.yml · Generate CHANGELOG.md · Consolidate Authorship · Why Layout B Does Not Need Auto-Notification · Preserve Guest Contributors · Single Atomic Commit · Tag the Marketplace · Verification · Rollback Recipe
-- **Sibling skill**: `setup-marketplace-auto-notification` (loaded by plugin-fixer agent; wires per-plugin notify chain during Layout A migrations)
+- **Sibling skill**: `setup-marketplace-auto-notification` (loaded by plugin-creator and marketplace-fixer agents; wires per-plugin notify chain during Layout A migrations)

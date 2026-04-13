@@ -227,7 +227,7 @@ Recommendations are automatically generated from category scores. They appear in
 **How to fix**:
 1. Run the relevant validator directly with `--verbose` to see the exact critical messages.
 2. Use the dedicated fix reference for that validator:
-   - `security` → `skills/fix-validation/references/` (security issues)
+   - `security` → `security-fixes.md`
    - `schema_compliance` → `plugin-structure-fixes.md`
    - `matcher_validity` → `hook-fixes.md`
    - `script_existence` → `hook-fixes.md`

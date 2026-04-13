@@ -25,7 +25,7 @@ Validates Claude Code plugins against 190+ structural and quality rules covering
    uv run python scripts/validate_plugin.py /path/to/plugin --report docs_dev/validate_plugin_YYYYMMDD.md
    ```
 3. Review compact summary (always use `--report` to save details to file)
-4. Fix issues: CRITICAL > MAJOR > MINOR (use `/cpv-fix-validation <report_path>`)
+4. Fix issues: CRITICAL > MAJOR > MINOR (use `/cpv-fix-validation <report_path>` for plugin reports, `/cpv-fix-marketplace-validation <report_path>` for marketplace reports)
 5. Re-run until exit code 0
 
 ## Output
