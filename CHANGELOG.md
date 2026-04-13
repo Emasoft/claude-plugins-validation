@@ -2,6 +2,13 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.21] - 2026-04-13
+
+### Bug Fixes
+
+- Enforce agent-first architecture invariants + fix all type errors
+- Validate_marketplace_pipeline CLI accepts .claude-plugin/marketplace.json
+
 ## [2.12.20] - 2026-04-13
 
 ### Features
