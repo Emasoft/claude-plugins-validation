@@ -2,6 +2,12 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.28] - 2026-04-13
+
+### Bug Fixes
+
+- **marketplace-ci:** Use remote CPV + Layout B nested plugin validation
+
 ## [2.12.27] - 2026-04-13
 
 ### Bug Fixes
