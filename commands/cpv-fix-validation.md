@@ -1,6 +1,6 @@
 ---
 name: cpv-fix-validation
-description: Fix issues from a validation report file
+description: Fix issues from a PLUGIN validation report file (marketplace reports use /cpv-fix-marketplace-validation)
 allowed-tools: Read, Bash, Glob, Grep, Write, Edit, AskUserQuestion
 argument-hint: "<report_file_path>"
 agent: plugin-fixer
@@ -9,7 +9,7 @@ user-invocable: true
 
 # /cpv-fix-validation Command
 
-Reads a validation report file and fixes the issues it contains, one by one, in priority order.
+Reads a **plugin** validation report file and fixes the issues it contains, one by one, in priority order. Marketplace validation reports (from `validate_marketplace.py` or `validate_marketplace_pipeline.py`) must be routed to `/cpv-fix-marketplace-validation` instead.
 
 ## Usage
 
@@ -47,4 +47,5 @@ Reads a validation report file and fixes the issues it contains, one by one, in 
 
 - `/cpv-validate-plugin` — Generate a plugin validation report
 - `/cpv-validate-skill` — Generate a skill validation report
+- `/cpv-fix-marketplace-validation` — Fix issues in a MARKETPLACE validation report (and run architectural migrations)
 - `/cpv-semantic-validation` — Deep semantic analysis

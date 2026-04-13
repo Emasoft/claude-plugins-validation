@@ -83,7 +83,7 @@ uv run python scripts/lint_files.py /path/to/plugin --report docs_dev/lint_YYYYM
 - **ALWAYS use `--report`** — saves full output to file, prints only compact summary to stdout
 - **NEVER read the report file** — provide the path to the user
 - **NEVER read source files** — the scripts do the reading
-- **NEVER fix issues** — tell the user to run `/cpv-fix-validation <report_path>`
+- **NEVER fix issues** — tell the user to run `/cpv-fix-validation <report_path>` for plugin reports, or `/cpv-fix-marketplace-validation <report_path>` for marketplace reports
 - **NEVER do semantic analysis** — tell the user to run `/cpv-semantic-validation <path>`
 - **Return 3 lines max**: verdict, severity counts, report file path
 - **Syntactic only** — for Semantic Grading (A-F), direct user to `/cpv-semantic-validation`
@@ -110,4 +110,9 @@ Plugin Validation: FAIL (major)
 <example>
 user: Can you fix the issues?
 assistant: Run `/cpv-fix-validation docs_dev/validate_my-plugin_20260306.md` to fix the issues from that report.
+</example>
+
+<example>
+user: Can you fix the marketplace issues?
+assistant: Run `/cpv-fix-marketplace-validation docs_dev/validate_marketplace_my-hub_20260412.md` to fix the issues from that marketplace report (marketplace reports must go to the marketplace-fixer agent, not the plugin-fixer).
 </example>

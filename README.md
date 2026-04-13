@@ -336,9 +336,9 @@ The semantic validator always warns about the cost and asks for confirmation bef
 | Validation scripts | 18 | Python validators (15 plugin + 3 marketplace) covering all plugin and marketplace components |
 | Management scripts | 12 | Plugin lifecycle, marketplace operations, scaffolding |
 | Agents | 7 | AI-powered validation, fixing, and management |
-| Skills | 13 | Validation, management, publishing, and fix/migration workflows |
+| Skills | 14 | Validation, management, publishing, fix, migration, and auto-notify workflows |
 | Commands | 16 | 8 direct script + 6 agent-backed + 2 specialized utility commands |
-| Tests | 1594 | Full coverage across all modules |
+| Tests | 1621 | Full coverage across all modules |
 
 </details>
 
