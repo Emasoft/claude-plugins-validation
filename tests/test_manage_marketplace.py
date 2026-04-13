@@ -81,9 +81,15 @@ class TestNormalizeGithubSource:
     def test_https_url_with_query_fragment_and_subpath(self):
         """HTTPS URL with query string, fragment, trailing slash, and subpath are all handled."""
         # Query + fragment stripped
-        assert _normalize_github_source("https://github.com/anthropics/claude-plugins?tab=repos#readme") == "anthropics/claude-plugins"
+        assert (
+            _normalize_github_source("https://github.com/anthropics/claude-plugins?tab=repos#readme")
+            == "anthropics/claude-plugins"
+        )
         # Subpath after repo stripped
-        assert _normalize_github_source("https://github.com/anthropics/claude-plugins/tree/main/scripts") == "anthropics/claude-plugins"
+        assert (
+            _normalize_github_source("https://github.com/anthropics/claude-plugins/tree/main/scripts")
+            == "anthropics/claude-plugins"
+        )
         # Trailing slash stripped
         assert _normalize_github_source("https://github.com/anthropics/claude-plugins/") == "anthropics/claude-plugins"
 
@@ -151,7 +157,9 @@ class TestRunClaudePlugin:
     def test_env_strips_claudecode_vars(self, mock_which, mock_run):
         """Environment passed to subprocess excludes CLAUDECODE and CLAUDE_CODE_ENTRYPOINT."""
         mock_run.return_value = MagicMock(returncode=0)
-        with patch.dict("os.environ", {"CLAUDECODE": "1", "CLAUDE_CODE_ENTRYPOINT": "agent", "HOME": "/home/user"}, clear=False):
+        with patch.dict(
+            "os.environ", {"CLAUDECODE": "1", "CLAUDE_CODE_ENTRYPOINT": "agent", "HOME": "/home/user"}, clear=False
+        ):
             _run_claude_plugin(["marketplace", "list"], quiet=True)
         env = mock_run.call_args[1]["env"]
         assert "CLAUDECODE" not in env

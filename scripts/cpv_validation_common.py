@@ -60,8 +60,7 @@ def check_remote_execution_guard() -> None:
             scripts_path = Path(scripts_dir).resolve()
             cwd_path = Path(cwd).resolve()
             is_remote = not (
-                str(scripts_path).startswith(str(cwd_path))
-                or str(cwd_path).startswith(str(scripts_path.parent))
+                str(scripts_path).startswith(str(cwd_path)) or str(cwd_path).startswith(str(scripts_path.parent))
             )
         except (ValueError, OSError):
             pass
@@ -365,9 +364,7 @@ VALID_PLUGIN_ENV_VARS = {
 
 # Env var name pattern matching for dynamic plugin env vars
 # CLAUDE_PLUGIN_OPTION_<KEY> — exported for each userConfig key in plugin.json (v2.1.98)
-PLUGIN_ENV_VAR_PATTERNS = (
-    re.compile(r"^CLAUDE_PLUGIN_OPTION_[A-Z][A-Z0-9_]*$"),
-)
+PLUGIN_ENV_VAR_PATTERNS = (re.compile(r"^CLAUDE_PLUGIN_OPTION_[A-Z][A-Z0-9_]*$"),)
 
 
 def is_valid_plugin_env_var(name: str) -> bool:
@@ -684,7 +681,18 @@ ALLOWED_DOC_PATH_PREFIXES = {
 _SYSTEM_BINARY_PREFIXES = ("/usr/bin/", "/usr/local/bin/", "/opt/homebrew/bin/", "/bin/", "/sbin/", "/usr/sbin/")
 
 # Directories typically gitignored — backtick path checker skips these (runtime artifacts)
-_GITIGNORED_DIR_PATTERNS = ("_dev/", "llm_externalizer_output/", "megalinter-reports/", ".venv/", "node_modules/", "dist/", "build/", "__pycache__/", ".pytest_cache/", ".ruff_cache/")
+_GITIGNORED_DIR_PATTERNS = (
+    "_dev/",
+    "llm_externalizer_output/",
+    "megalinter-reports/",
+    ".venv/",
+    "node_modules/",
+    "dist/",
+    "build/",
+    "__pycache__/",
+    ".pytest_cache/",
+    ".ruff_cache/",
+)
 
 # Files that should never be in a plugin
 DANGEROUS_FILES = {
@@ -982,7 +990,11 @@ def is_path_gitignored(rel_path: str, patterns: list[str]) -> bool:
             if pattern.startswith("**/"):
                 # **/foo matches foo at any depth
                 suffix = pattern[3:]  # e.g., "dist" from "**/dist"
-                if fnmatch.fnmatch(rel_path, suffix) or fnmatch.fnmatch(rel_path, f"*/{suffix}") or f"/{suffix}" in f"/{rel_path}":
+                if (
+                    fnmatch.fnmatch(rel_path, suffix)
+                    or fnmatch.fnmatch(rel_path, f"*/{suffix}")
+                    or f"/{suffix}" in f"/{rel_path}"
+                ):
                     return True
                 continue
             elif pattern.endswith("/**"):
@@ -1118,7 +1130,10 @@ def validate_component_name(
         elif any(c.isupper() for c in name):
             report.add("CRITICAL", f"{component_type} name '{name}' contains uppercase (use lowercase)")
         else:
-            report.add("CRITICAL", f"{component_type} name '{name}' does not match naming pattern (lowercase letters, digits, hyphens; must start with letter)")
+            report.add(
+                "CRITICAL",
+                f"{component_type} name '{name}' does not match naming pattern (lowercase letters, digits, hyphens; must start with letter)",
+            )
     # Directory name match (for skills: frontmatter name must equal directory name)
     if directory_name is not None and name != directory_name:
         report.add("MAJOR", f"{component_type} frontmatter name '{name}' must match directory name '{directory_name}'")
@@ -1849,12 +1864,7 @@ def _print_fixer_recommendation(report: ValidationReport, report_path: Path | No
     Strips ANSI colors when stdout is not a TTY.
     """
     counts = report.count_by_level()
-    fixable_total = (
-        counts.get("CRITICAL", 0)
-        + counts.get("MAJOR", 0)
-        + counts.get("MINOR", 0)
-        + counts.get("NIT", 0)
-    )
+    fixable_total = counts.get("CRITICAL", 0) + counts.get("MAJOR", 0) + counts.get("MINOR", 0) + counts.get("NIT", 0)
     if fixable_total == 0:
         return
 
@@ -1887,7 +1897,9 @@ def _print_fixer_recommendation(report: ValidationReport, report_path: Path | No
     print(f"{yellow}{border}{reset}")
 
 
-def print_compact_summary(report: ValidationReport, title: str, report_path: Path | None = None, plugin_path: Path | str | None = None) -> None:
+def print_compact_summary(
+    report: ValidationReport, title: str, report_path: Path | None = None, plugin_path: Path | str | None = None
+) -> None:
     """Print a concise summary: counts by severity + verdict."""
     counts = report.count_by_level()
     exit_code = report.exit_code
@@ -2708,13 +2720,18 @@ def validate_md_file_paths(
         if re.search(r"[?!\\^|+\[\]]", path):
             return True
         # Shell commands: chmod, ls, cat, shellcheck, ruff, mypy, npx, etc.
-        if re.match(r"^(chmod|ls|cat|mkdir|rm|cp|mv|git|uv|pip|npm|bun|curl|wget|shellcheck|ruff|mypy|npx|deno|node|python|python3)\s", path):
+        if re.match(
+            r"^(chmod|ls|cat|mkdir|rm|cp|mv|git|uv|pip|npm|bun|curl|wget|shellcheck|ruff|mypy|npx|deno|node|python|python3)\s",
+            path,
+        ):
             return True
         # Paths starting with ~ (user home dir references in docs)
         if path.startswith("~"):
             return True
         # Generic example paths used in documentation (other-file, subfolder/file, docs_dev/, etc.)
-        if re.match(r"^\.\./(other|example|some)", path) or re.match(r"^(subfolder|subdir|folder|other|docs_dev|scripts_dev|tests_dev)/", path):
+        if re.match(r"^\.\./(other|example|some)", path) or re.match(
+            r"^(subfolder|subdir|folder|other|docs_dev|scripts_dev|tests_dev)/", path
+        ):
             return True
         # Example filenames commonly used in documentation (foo, bar, run, test, etc.)
         basename = path.rsplit("/", 1)[-1].split(".")[0] if "/" in path else ""
@@ -2722,7 +2739,9 @@ def validate_md_file_paths(
             return True
         # Paths referencing common config files that may not exist in this plugin
         # but are referenced as documentation examples
-        if re.match(r"^\.?/?\.(vscode|docker|github|claude)/", path) or re.match(r"^\./(vscode|docker|github|claude)/", path):
+        if re.match(r"^\.?/?\.(vscode|docker|github|claude)/", path) or re.match(
+            r"^\./(vscode|docker|github|claude)/", path
+        ):
             return True
         return False
 
@@ -2995,7 +3014,9 @@ def validate_md_urls(
         if len(raw_url) < 12 or raw_url in ("http://", "https://", "http://`", "https://`"):
             continue
         # Skip template URLs with placeholders, generic owner/repo patterns, and ellipsis
-        if re.search(r"[{}<>]|\$\w|placeholder|your-|example\.com|/owner/|/OWNER/|/user/|/USER/|\.\.\.", raw_url, re.IGNORECASE):
+        if re.search(
+            r"[{}<>]|\$\w|placeholder|your-|example\.com|/owner/|/OWNER/|/user/|/USER/|\.\.\.", raw_url, re.IGNORECASE
+        ):
             continue
 
         # Skip known-skippable domains before sanitization

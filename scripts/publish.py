@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unified publish pipeline: test → lint → validate → consistency-check → bump → commit → push.
+"""Unified publish pipeline: test → lint → validate → marketplace-registration → bump → commit → push.
 
 Absorbs all logic from bump_version.py and check_version_consistency.py into a single script.
 
@@ -7,12 +7,19 @@ Usage:
   uv run python scripts/publish.py --patch            # bump patch and publish
   uv run python scripts/publish.py --minor            # bump minor and publish
   uv run python scripts/publish.py --major            # bump major and publish
-  uv run python scripts/publish.py --patch --dry-run   # preview only
-  uv run python scripts/publish.py --patch --skip-tests # skip pytest
+  uv run python scripts/publish.py --patch --dry-run  # preview only, no changes
+  uv run python scripts/publish.py --print-gates      # print gate list and exit
+
+HARD RULE: No checks can be skipped. There are no --skip-* flags, no env
+var bypasses, no --force. Every gate must pass before any version bump,
+tag, push, or GitHub release is performed. Publish is blocked on ANY
+CRITICAL, MAJOR, MINOR, or NIT severity finding. WARNING is advisory only.
 
 Exit codes:
     0 - Success
-    1 - Any step failed (fail-fast)
+    1 - Preflight, tests, lint, version-consistency, marketplace-registration,
+        bump, changelog, commit, tag, or push failed (fail-fast)
+    1-4 - Plugin validation severity (1=CRITICAL, 2=MAJOR, 3=MINOR, 4=NIT)
 """
 
 from __future__ import annotations
@@ -44,6 +51,7 @@ def _get_gi(plugin_root: Path):  # noqa: ANN202
     key = str(plugin_root.resolve())
     if key not in _gi_cache:
         from gitignore_filter import GitignoreFilter
+
         _gi_cache[key] = GitignoreFilter(plugin_root)
     return _gi_cache[key]
 
@@ -264,181 +272,689 @@ def do_bump(plugin_root: Path, new_version: str, dry_run: bool = False) -> bool:
     return errors == 0
 
 
-# ── Main pipeline ────────────────────────────────────────────────────────────
+# ── Gate list for --print-gates and --help ──────────────────────────────────
+
+GATES: list[tuple[str, str]] = [
+    ("Gate 0", "Bypass-var rejection (CPV_SKIP_*, SKIP_*, NO_VERIFY)"),
+    ("Gate 1", "Clean working tree (git status --porcelain)"),
+    ("Gate 2", "Tests (uv run pytest tests/ -x)"),
+    ("Gate 3", "Lint (uv run python scripts/lint_files.py .)"),
+    (
+        "Gate 4",
+        "Plugin validation (validate_plugin.py --strict) — blocks on CRITICAL/MAJOR/MINOR/NIT; WARNING advisory only",
+    ),
+    ("Gate 5", "Marketplace validation (validate_marketplace.py --strict) — Layout B only"),
+    ("Gate 6", "Marketplace-registration check — verifies plugin is wired to its marketplace"),
+    ("Gate 7", "Version consistency (plugin.json / pyproject.toml / __version__)"),
+    ("Gate 8", "Bump version (major|minor|patch)"),
+    ("Gate 9", "Generate CHANGELOG.md + release notes (git-cliff)"),
+    ("Gate 10", "Commit bump + changelog"),
+    ("Gate 11", "Create annotated git tag vX.Y.Z"),
+    ("Gate 12", "Push branch + tag to origin"),
+    ("Gate 13", "Create GitHub release with notes (gh release create)"),
+]
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Publish pipeline: test → lint → validate → consistency → bump → changelog → commit → tag → push → gh release",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  %(prog)s --patch              # 1.0.0 → 1.0.1, commit, push
-  %(prog)s --minor              # 1.0.0 → 1.1.0, commit, push
-  %(prog)s --major              # 1.0.0 → 2.0.0, commit, push
-  %(prog)s --patch --dry-run    # preview only, no changes
-
-HARD RULE: No checks can be skipped. Every check (tests, lint, validation,
-version consistency) must pass with ZERO errors before commit and push.
-There is no --skip-tests, no --skip-lint, no --skip-validate, no --force.
-If a check fails, fix the underlying problem. Do not bypass the pipeline.
-        """,
+def print_gates() -> None:
+    """Print the list of gates in order so users see exactly what will run."""
+    print(f"{BLUE}Publish pipeline gates (all mandatory, fail-fast):{NC}")
+    for name, desc in GATES:
+        print(f"  {GREEN}{name}{NC}: {desc}")
+    print(
+        f"\n{YELLOW}Hard rule: no --skip-* flags, no env var bypasses, no --force.{NC}\n"
+        f"{YELLOW}WARNING is the only severity that does not block.{NC}"
     )
-    bump_group = parser.add_mutually_exclusive_group(required=True)
-    bump_group.add_argument("--major", action="store_true", help="Bump major version")
-    bump_group.add_argument("--minor", action="store_true", help="Bump minor version")
-    bump_group.add_argument("--patch", action="store_true", help="Bump patch version")
-    parser.add_argument("--dry-run", action="store_true", help="Preview without making changes")
-    args = parser.parse_args()
 
-    # ── Hard rule enforcement: reject any environment variable that could bypass checks ──
-    _forbidden_bypass_vars = [
-        "CPV_SKIP_TESTS", "CPV_SKIP_LINT", "CPV_SKIP_VALIDATE",
-        "CPV_FORCE_PUBLISH", "CPV_BYPASS_CHECKS", "SKIP_TESTS",
-        "SKIP_LINT", "SKIP_VALIDATE", "NO_VERIFY",
+
+# ── Layout detection and marketplace-registration check (Task 2) ─────────────
+
+
+def find_parent_marketplace(plugin_root: Path) -> Path | None:
+    """Walk up from plugin root looking for a parent marketplace.json.
+
+    Returns the path to the marketplace repo root (the dir containing
+    .claude-plugin/marketplace.json), or None if no parent marketplace found.
+    Only returns a match if plugin_root is actually nested under plugins/<name>/
+    of the marketplace repo (Layout B signature).
+    """
+    current = plugin_root.resolve().parent
+    while current != current.parent:
+        mp_json = current / ".claude-plugin" / "marketplace.json"
+        if mp_json.is_file():
+            # Confirm plugin_root is under <current>/plugins/<name>/
+            try:
+                rel = plugin_root.resolve().relative_to(current)
+                parts = rel.parts
+                if len(parts) >= 2 and parts[0] == "plugins":
+                    return current
+            except ValueError:
+                pass
+            return None
+        current = current.parent
+    return None
+
+
+def detect_layout(plugin_root: Path) -> tuple[str, dict[str, str | Path | None]]:
+    """Detect whether this repo is Layout A (standalone plugin), Layout B (nested),
+    or 'none' (no marketplace wiring).
+
+    Returns (layout, details) where layout is one of 'A', 'B', 'none' and
+    details is a dict with layout-specific fields used by the check stage.
+    """
+    # Layout B check first: a plugin nested inside a marketplace repo
+    parent_mp = find_parent_marketplace(plugin_root)
+    if parent_mp is not None:
+        plugin_name = plugin_root.name
+        return "B", {"marketplace_root": parent_mp, "plugin_name": plugin_name}
+
+    # Layout A check: standalone plugin that may reference a remote marketplace
+    notify_wf = plugin_root / ".github" / "workflows" / "notify-marketplace.yml"
+    if notify_wf.is_file():
+        mkt_owner, mkt_repo = _parse_notify_workflow(notify_wf)
+        if mkt_owner and mkt_repo:
+            return "A", {"notify_workflow": notify_wf, "mkt_owner": mkt_owner, "mkt_repo": mkt_repo}
+        return "A", {"notify_workflow": notify_wf, "mkt_owner": None, "mkt_repo": None}
+
+    return "none", {}
+
+
+def _parse_notify_workflow(path: Path) -> tuple[str | None, str | None]:
+    """Extract MARKETPLACE_OWNER and MARKETPLACE_REPO from a notify-marketplace.yml.
+
+    The workflow is small and well-known — we grep for two lines rather than
+    pulling a YAML dep. Returns (owner, repo) or (None, None) if not found.
+    """
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        return None, None
+    m_owner = re.search(r"^\s*MARKETPLACE_OWNER:\s*['\"]?([^'\"\s]+)['\"]?\s*$", content, re.MULTILINE)
+    m_repo = re.search(r"^\s*MARKETPLACE_REPO:\s*['\"]?([^'\"\s]+)['\"]?\s*$", content, re.MULTILINE)
+    owner = m_owner.group(1) if m_owner else None
+    repo = m_repo.group(1) if m_repo else None
+    return owner, repo
+
+
+def _gh_secret_exists(
+    plugin_root: Path,
+    secret_name: str,
+    *,
+    gh_bin: str | None = None,
+) -> bool:
+    """Check whether a GitHub secret with the given name is configured on this repo.
+
+    Uses `gh secret list --repo <owner>/<repo>` or just `gh secret list` from
+    within the repo; parses the output to check for the secret name. We never
+    attempt to read the secret value itself — that would be impossible anyway.
+    """
+    if gh_bin is None:
+        gh_bin = shutil.which("gh") or "gh"
+    result = subprocess.run(
+        [gh_bin, "secret", "list"],
+        cwd=plugin_root,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if result.returncode != 0:
+        return False
+    for line in result.stdout.splitlines():
+        # `gh secret list` prints "SECRET_NAME\tUPDATED_AT" (tab-separated).
+        first = line.split("\t", 1)[0].strip()
+        if first == secret_name:
+            return True
+    return False
+
+
+def _fetch_remote_marketplace_json(
+    mkt_owner: str,
+    mkt_repo: str,
+    *,
+    gh_bin: str | None = None,
+) -> dict | None:
+    """Fetch the remote marketplace.json using gh api. Returns parsed dict or None."""
+    if gh_bin is None:
+        gh_bin = shutil.which("gh") or "gh"
+    result = subprocess.run(
+        [
+            gh_bin,
+            "api",
+            f"repos/{mkt_owner}/{mkt_repo}/contents/.claude-plugin/marketplace.json",
+            "-H",
+            "Accept: application/vnd.github.raw+json",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def _remote_has_receiver_workflow(
+    mkt_owner: str,
+    mkt_repo: str,
+    *,
+    gh_bin: str | None = None,
+) -> bool:
+    """Check whether the remote marketplace repo has a workflow with repository_dispatch."""
+    if gh_bin is None:
+        gh_bin = shutil.which("gh") or "gh"
+    # List the workflow dir
+    result = subprocess.run(
+        [gh_bin, "api", f"repos/{mkt_owner}/{mkt_repo}/contents/.github/workflows"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if result.returncode != 0:
+        return False
+    try:
+        entries = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(entries, list):
+        return False
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name", "")
+        if not isinstance(name, str) or not name.endswith((".yml", ".yaml")):
+            continue
+        file_result = subprocess.run(
+            [
+                gh_bin,
+                "api",
+                f"repos/{mkt_owner}/{mkt_repo}/contents/.github/workflows/{name}",
+                "-H",
+                "Accept: application/vnd.github.raw+json",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if file_result.returncode == 0 and "repository_dispatch" in file_result.stdout:
+            return True
+    return False
+
+
+def _plugin_in_remote_marketplace(mkt_json: dict, plugin_name: str, expected_repo: str | None) -> bool:
+    """Return True if marketplace.json lists plugin_name with github source pointing at expected_repo.
+
+    If expected_repo is None, accept any github source entry matching plugin_name.
+    """
+    plugins = mkt_json.get("plugins")
+    if not isinstance(plugins, list):
+        return False
+    for entry in plugins:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("name") != plugin_name:
+            continue
+        source = entry.get("source")
+        if isinstance(source, dict):
+            if source.get("source") != "github" and source.get("type") != "github":
+                continue
+            repo = source.get("repo")
+            if expected_repo is None or repo == expected_repo:
+                return True
+        elif isinstance(source, str):
+            # Bare directory source like "./plugins/foo"
+            continue
+    return False
+
+
+def _current_repo_slug(plugin_root: Path) -> str | None:
+    """Return the owner/repo slug for the current git origin, or None."""
+    result = subprocess.run(
+        ["git", "remote", "get-url", "origin"],
+        cwd=plugin_root,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        return None
+    url = result.stdout.strip()
+    # Match both SSH (git@github.com:owner/repo.git) and HTTPS (https://github.com/owner/repo.git)
+    m = re.search(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?$", url)
+    if not m:
+        return None
+    return f"{m.group(1)}/{m.group(2)}"
+
+
+# ── Pipeline stages — each returns 0 on success, non-zero on failure ─────────
+
+
+def stage_bypass_guard() -> int:
+    """Gate 0: reject any env var that could bypass checks."""
+    forbidden = [
+        "CPV_SKIP_TESTS",
+        "CPV_SKIP_LINT",
+        "CPV_SKIP_VALIDATE",
+        "CPV_FORCE_PUBLISH",
+        "CPV_BYPASS_CHECKS",
+        "SKIP_TESTS",
+        "SKIP_LINT",
+        "SKIP_VALIDATE",
+        "NO_VERIFY",
     ]
-    _bypass_attempted = [v for v in _forbidden_bypass_vars if os.environ.get(v)]
-    if _bypass_attempted:
+    attempted = [v for v in forbidden if os.environ.get(v)]
+    if attempted:
         print(
             f"{RED}✗ Bypass attempt detected. These env vars are FORBIDDEN in publish:{NC}\n"
-            f"  {', '.join(_bypass_attempted)}\n"
+            f"  {', '.join(attempted)}\n"
             f"{RED}The publish pipeline enforces every check. Fix the failures, don't skip them.{NC}",
             file=sys.stderr,
         )
         return 1
+    return 0
 
-    root = get_plugin_root()
-    bump_type = "major" if args.major else "minor" if args.minor else "patch"
 
-    # ── Step 1: Clean working tree ──
-    print(f"\n{BLUE}═══ Step 1: Check working tree ═══{NC}")
-    result = run(["git", "status", "--porcelain"], cwd=root, check=False)
+def stage_check_working_tree(plugin_root: Path) -> int:
+    """Gate 1: clean working tree check. Auto-commits uv.lock if only diff."""
+    print(f"\n{BLUE}═══ Gate 1: Check working tree ═══{NC}")
+    result = run(["git", "status", "--porcelain"], cwd=plugin_root, check=False)
     dirty = result.stdout.strip()
     if dirty:
-        # Auto-commit uv.lock if it's the only dirty file (uv run modifies it)
         dirty_files = {line[3:] for line in dirty.splitlines() if line.strip()}
         if dirty_files == {"uv.lock"}:
             print(f"{YELLOW}Auto-committing uv.lock (modified by uv run){NC}")
-            run(["git", "add", "uv.lock"], cwd=root)
-            run(["git", "commit", "-m", "chore: update uv.lock"], cwd=root)
+            run(["git", "add", "uv.lock"], cwd=plugin_root)
+            run(["git", "commit", "-m", "chore: update uv.lock"], cwd=plugin_root)
         else:
             print(f"{RED}✗ Uncommitted changes detected. Commit or stash first.{NC}", file=sys.stderr)
             print(dirty)
             return 1
     print(f"{GREEN}✓ Working tree clean{NC}")
+    return 0
 
-    # ── Step 2: Tests (MANDATORY — cannot be skipped) ──
-    print(f"\n{BLUE}═══ Step 2: Run tests (mandatory) ═══{NC}")
-    run(["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"], cwd=root)
+
+def stage_run_tests(plugin_root: Path) -> int:
+    """Gate 2: run tests — mandatory, cannot be skipped."""
+    print(f"\n{BLUE}═══ Gate 2: Run tests (mandatory) ═══{NC}")
+    run(["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"], cwd=plugin_root)
     print(f"{GREEN}✓ All tests passed{NC}")
+    return 0
 
-    # ── Step 3: Lint (MANDATORY — must pass with zero errors) ──
-    print(f"\n{BLUE}═══ Step 3: Lint files (mandatory) ═══{NC}")
-    run(["uv", "run", "python", "scripts/lint_files.py", "."], cwd=root)
+
+def stage_run_lint(plugin_root: Path) -> int:
+    """Gate 3: run lint — mandatory, must pass with zero errors."""
+    print(f"\n{BLUE}═══ Gate 3: Lint files (mandatory) ═══{NC}")
+    run(["uv", "run", "python", "scripts/lint_files.py", "."], cwd=plugin_root)
     print(f"{GREEN}✓ Linting passed{NC}")
+    return 0
 
-    # ── Step 4: Validate (MANDATORY — ZERO errors of any severity) ──
-    # Hard rule: publish is blocked on ANY non-zero severity: CRITICAL, MAJOR, MINOR, NIT.
-    # WARNING is advisory and does not block. No exceptions.
-    print(f"\n{BLUE}═══ Step 4: Validate plugin — ZERO errors required ═══{NC}")
-    vresult = run(["uv", "run", "python", "scripts/validate_plugin.py", ".", "--strict"], cwd=root, check=False)
+
+def stage_validate_plugin(plugin_root: Path) -> int:
+    """Gate 4: validate plugin in strict mode — blocks on ANY CRITICAL/MAJOR/MINOR/NIT.
+
+    WARNING (exit code 0 with warning output) is advisory and does not block.
+    Returns the validator's exit code directly (1-4 severity or 0 success).
+    """
+    print(f"\n{BLUE}═══ Gate 4: Validate plugin — ZERO errors required ═══{NC}")
+    vresult = run(
+        ["uv", "run", "python", "scripts/validate_plugin.py", ".", "--strict"],
+        cwd=plugin_root,
+        check=False,
+    )
     if vresult.returncode != 0:
         severity_map = {1: "CRITICAL", 2: "MAJOR", 3: "MINOR", 4: "NIT"}
         severity = severity_map.get(vresult.returncode, f"unknown (exit {vresult.returncode})")
         print(
             f"\n{RED}✗ {severity} validation issues found — PUBLISH BLOCKED{NC}\n"
-            f"{RED}  Fix ALL issues before publishing. No severity level is allowed to slip through.{NC}",
+            f"{RED}  Fix ALL issues before publishing. No severity level is allowed to slip through.{NC}\n"
+            f"{RED}  Fix command: uv run python scripts/validate_plugin.py . --strict{NC}",
             file=sys.stderr,
         )
-        sys.exit(vresult.returncode)
+        return vresult.returncode
     print(f"{GREEN}✓ Plugin validation passed (zero errors){NC}")
+    return 0
 
-    # ── Step 5: Version consistency ──
-    print(f"\n{BLUE}═══ Step 5: Check version consistency ═══{NC}")
-    ok, msg = check_version_consistency(root)
+
+def stage_validate_marketplace(plugin_root: Path, layout: str) -> int:
+    """Gate 5: validate marketplace in strict mode — only runs for Layout B.
+
+    For Layout B, publish.py runs at the marketplace repo root, and the parent
+    marketplace.json must also validate cleanly. For Layout A (standalone plugin),
+    there is no local marketplace to validate so this gate is a no-op.
+    """
+    print(f"\n{BLUE}═══ Gate 5: Marketplace validation ═══{NC}")
+    if layout != "B":
+        print(f"  (skipped — not a marketplace repo, layout={layout})")
+        print(f"{GREEN}✓ Marketplace validation not applicable{NC}")
+        return 0
+    vresult = run(
+        ["uv", "run", "python", "scripts/validate_marketplace.py", ".", "--strict"],
+        cwd=plugin_root,
+        check=False,
+    )
+    if vresult.returncode != 0:
+        severity_map = {1: "CRITICAL", 2: "MAJOR", 3: "MINOR", 4: "NIT"}
+        severity = severity_map.get(vresult.returncode, f"unknown (exit {vresult.returncode})")
+        print(
+            f"\n{RED}✗ {severity} marketplace validation issues found — PUBLISH BLOCKED{NC}\n"
+            f"{RED}  Fix command: uv run python scripts/validate_marketplace.py . --strict{NC}",
+            file=sys.stderr,
+        )
+        return vresult.returncode
+    print(f"{GREEN}✓ Marketplace validation passed (zero errors){NC}")
+    return 0
+
+
+def stage_marketplace_registration_check(plugin_root: Path) -> int:
+    """Gate 6: verify the plugin is wired to its marketplace for auto-updates.
+
+    Layout A (standalone plugin referencing a remote marketplace):
+      - .github/workflows/notify-marketplace.yml exists and parses
+      - MARKETPLACE_PAT secret is configured on this repo
+      - Remote marketplace lists this plugin with a github source
+      - Remote marketplace has a workflow with repository_dispatch trigger
+
+    Layout B (nested plugin inside a marketplace repo):
+      - publish.py is running at the marketplace repo root, not the nested subfolder
+      - Parent marketplace.json lists this plugin
+      - Parent marketplace.json entry version matches (or will match after bump)
+
+    No-marketplace mode: emits a WARNING (not an error) and proceeds — this is
+    valid for first releases or experimental standalone plugins.
+
+    Returns 0 on success (including WARNING mode), 1 on any hard failure.
+    """
+    print(f"\n{BLUE}═══ Gate 6: Marketplace-registration check ═══{NC}")
+    layout, details = detect_layout(plugin_root)
+
+    if layout == "none":
+        print(
+            f"{YELLOW}⚠ WARNING: no marketplace registration found for this plugin.{NC}\n"
+            f"{YELLOW}  If you intend to publish this plugin to a marketplace, run the{NC}\n"
+            f"{YELLOW}  setup-marketplace-auto-notification skill to wire up auto-updates.{NC}\n"
+            f"{YELLOW}  Allowing release to proceed (standalone/experimental mode).{NC}"
+        )
+        return 0
+
+    if layout == "A":
+        return _check_layout_a(plugin_root, details)
+
+    if layout == "B":
+        return _check_layout_b(plugin_root, details)
+
+    print(f"{RED}✗ Unknown layout '{layout}' — cannot verify marketplace registration{NC}", file=sys.stderr)
+    return 1
+
+
+def _check_layout_a(plugin_root: Path, details: dict) -> int:
+    """Layout A verification: standalone plugin + remote marketplace."""
+    print("  Layout A detected (standalone plugin repo)")
+    notify_wf_raw = details.get("notify_workflow")
+    mkt_owner_raw = details.get("mkt_owner")
+    mkt_repo_raw = details.get("mkt_repo")
+    # Narrow types for mypy — details is a loosely-typed dict from detect_layout
+    notify_wf: Path | None = notify_wf_raw if isinstance(notify_wf_raw, Path) else None
+    mkt_owner: str | None = mkt_owner_raw if isinstance(mkt_owner_raw, str) else None
+    mkt_repo: str | None = mkt_repo_raw if isinstance(mkt_repo_raw, str) else None
+
+    # 1. Notify workflow must exist (already checked by detect_layout)
+    if notify_wf is None or not notify_wf.is_file():
+        print(
+            f"{RED}✗ .github/workflows/notify-marketplace.yml missing.{NC}\n"
+            f"{RED}  Fix: run the setup-marketplace-auto-notification skill to generate it.{NC}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # 2. Workflow must reference a real marketplace
+    if not mkt_owner or not mkt_repo:
+        print(
+            f"{RED}✗ notify-marketplace.yml does not define MARKETPLACE_OWNER/MARKETPLACE_REPO.{NC}\n"
+            f"{RED}  Fix: edit .github/workflows/notify-marketplace.yml or re-run{NC}\n"
+            f"{RED}  the setup-marketplace-auto-notification skill.{NC}",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"  target marketplace: {mkt_owner}/{mkt_repo}")
+
+    gh_bin = shutil.which("gh")
+    if gh_bin is None:
+        print(
+            f"{RED}✗ gh CLI not installed — cannot verify MARKETPLACE_PAT or remote marketplace.{NC}\n"
+            f"{RED}  Install: brew install gh{NC}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # 3. MARKETPLACE_PAT secret must exist on this repo (value is never read)
+    if not _gh_secret_exists(plugin_root, "MARKETPLACE_PAT", gh_bin=gh_bin):
+        print(
+            f"{RED}✗ MARKETPLACE_PAT secret is not configured on this plugin repo.{NC}\n"
+            f"{RED}  Fix: gh secret set MARKETPLACE_PAT  (value: a PAT with 'repo' scope){NC}\n"
+            f"{RED}  Then re-run publish. See skill: setup-marketplace-auto-notification.{NC}",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"  {GREEN}✓ MARKETPLACE_PAT secret configured{NC}")
+
+    # 4. Plugin must be registered in the remote marketplace.json
+    mkt_json = _fetch_remote_marketplace_json(mkt_owner, mkt_repo, gh_bin=gh_bin)
+    if mkt_json is None:
+        print(
+            f"{RED}✗ Could not fetch marketplace.json from {mkt_owner}/{mkt_repo}.{NC}\n"
+            f"{RED}  Fix: verify the marketplace repo exists and has .claude-plugin/marketplace.json{NC}\n"
+            f"{RED}  Fix command: gh api repos/{mkt_owner}/{mkt_repo}/contents/.claude-plugin/marketplace.json{NC}",
+            file=sys.stderr,
+        )
+        return 1
+    plugin_name = _read_plugin_name(plugin_root)
+    current_slug = _current_repo_slug(plugin_root)
+    if not _plugin_in_remote_marketplace(mkt_json, plugin_name, current_slug):
+        print(
+            f"{RED}✗ Plugin '{plugin_name}' not registered in {mkt_owner}/{mkt_repo}/.claude-plugin/marketplace.json{NC}\n"
+            f"{RED}  with a github source entry for {current_slug}.{NC}\n"
+            f"{RED}  Fix: add an entry to the remote marketplace.json with:{NC}\n"
+            f'{RED}    {{"name": "{plugin_name}", "source": {{"source": "github", "repo": "{current_slug}"}}}}{NC}\n'
+            f"{RED}  See skill: setup-marketplace-auto-notification{NC}",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"  {GREEN}✓ Plugin registered in remote marketplace.json{NC}")
+
+    # 5. Remote marketplace must have a receiver workflow
+    if not _remote_has_receiver_workflow(mkt_owner, mkt_repo, gh_bin=gh_bin):
+        print(
+            f"{RED}✗ Remote marketplace {mkt_owner}/{mkt_repo} has no workflow with{NC}\n"
+            f"{RED}  a 'repository_dispatch' trigger. The notify-marketplace.yml event{NC}\n"
+            f"{RED}  will arrive with nothing listening.{NC}\n"
+            f"{RED}  Fix: add a workflow in the marketplace repo with:{NC}\n"
+            f"{RED}    on: repository_dispatch: types: [plugin-updated]{NC}\n"
+            f"{RED}  See skill: setup-marketplace-auto-notification{NC}",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"  {GREEN}✓ Remote marketplace has receiver workflow{NC}")
+    print(f"{GREEN}✓ Layout A marketplace registration verified{NC}")
+    return 0
+
+
+def _check_layout_b(plugin_root: Path, details: dict) -> int:
+    """Layout B verification: nested plugin inside a marketplace repo.
+
+    Because Layout B uses atomic marketplace tagging, publish.py must run at the
+    MARKETPLACE repo root, not at the nested plugin subfolder. Bumping a nested
+    plugin independently would break the marketplace version invariant.
+    """
+    print("  Layout B detected (nested plugin under marketplace repo)")
+    marketplace_root_raw = details.get("marketplace_root")
+    plugin_name_raw = details.get("plugin_name")
+    # Narrow types for mypy
+    marketplace_root: Path | None = marketplace_root_raw if isinstance(marketplace_root_raw, Path) else None
+    plugin_name: str = plugin_name_raw if isinstance(plugin_name_raw, str) else plugin_root.name
+    if marketplace_root is None:
+        print(
+            f"{RED}✗ Layout B detected but marketplace_root missing from details dict.{NC}\n"
+            f"{RED}  Reference: skills/create-plugin/references/marketplace-layouts.md{NC}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # 1. Reject running at nested-plugin level
+    if plugin_root.resolve() != marketplace_root.resolve():
+        print(
+            f"{RED}✗ This is a Layout B nested plugin. publish.py must be run at the{NC}\n"
+            f"{RED}  MARKETPLACE repo root, not the nested plugin subfolder.{NC}\n"
+            f"{RED}  Bumping a nested plugin independently breaks the atomic marketplace tag.{NC}\n"
+            f"{RED}  Fix: cd {marketplace_root} && uv run python scripts/publish.py --patch{NC}\n"
+            f"{RED}  Reference: skills/create-plugin/references/marketplace-layouts.md{NC}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # 2. Parent marketplace.json must list this plugin
+    mp_json_path = marketplace_root / ".claude-plugin" / "marketplace.json"
+    try:
+        mp_data = json.loads(mp_json_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        print(
+            f"{RED}✗ Could not read {mp_json_path}: {e}{NC}\n"
+            f"{RED}  Reference: skills/create-plugin/references/marketplace-layouts.md{NC}",
+            file=sys.stderr,
+        )
+        return 1
+    entries = mp_data.get("plugins") if isinstance(mp_data, dict) else None
+    if not isinstance(entries, list):
+        print(
+            f"{RED}✗ marketplace.json has no 'plugins' array.{NC}\n"
+            f"{RED}  Reference: skills/create-plugin/references/marketplace-layouts.md{NC}",
+            file=sys.stderr,
+        )
+        return 1
+
+    registered = False
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("name") == plugin_name:
+            registered = True
+            break
+    if not registered:
+        print(
+            f"{RED}✗ Plugin '{plugin_name}' is not registered in {mp_json_path}.{NC}\n"
+            f"{RED}  Fix: add an entry like:{NC}\n"
+            f'{RED}    {{"name": "{plugin_name}", "source": "./plugins/{plugin_name}"}}{NC}\n'
+            f"{RED}  Reference: skills/create-plugin/references/marketplace-layouts.md{NC}",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"  {GREEN}✓ Plugin '{plugin_name}' registered in parent marketplace.json{NC}")
+    print(f"{GREEN}✓ Layout B marketplace registration verified{NC}")
+    return 0
+
+
+def _read_plugin_name(plugin_root: Path) -> str:
+    """Read plugin name from .claude-plugin/plugin.json (falls back to dir name)."""
+    pj = plugin_root / ".claude-plugin" / "plugin.json"
+    if pj.exists():
+        try:
+            data = json.loads(pj.read_text(encoding="utf-8"))
+            name = data.get("name")
+            if isinstance(name, str) and name:
+                return name
+        except (OSError, json.JSONDecodeError):
+            pass
+    return plugin_root.name
+
+
+def stage_version_consistency(plugin_root: Path) -> int:
+    """Gate 7: version consistency across plugin.json, pyproject.toml, __version__."""
+    print(f"\n{BLUE}═══ Gate 7: Check version consistency ═══{NC}")
+    ok, msg = check_version_consistency(plugin_root)
     print(f"  {msg}")
     if not ok:
         print(f"{RED}✗ Fix version mismatches before publishing.{NC}", file=sys.stderr)
         return 1
     print(f"{GREEN}✓ Version consistency OK{NC}")
+    return 0
 
-    # ── Step 6: Bump version ──
-    current = get_current_version(root)
+
+def stage_bump(plugin_root: Path, bump_type: str, dry_run: bool) -> tuple[int, str | None]:
+    """Gate 8: bump version across all files. Returns (exit_code, new_version)."""
+    current = get_current_version(plugin_root)
     if current is None:
         print(f"{RED}✗ Cannot read current version from plugin.json{NC}", file=sys.stderr)
-        return 1
-
+        return 1, None
     new_version = bump_semver(current, bump_type)
     if new_version is None:
         print(f"{RED}✗ Current version '{current}' is not valid semver{NC}", file=sys.stderr)
-        return 1
-
-    print(f"\n{BLUE}═══ Step 6: Bump version ({bump_type}: {current} → {new_version}) ═══{NC}")
-    if not do_bump(root, new_version, dry_run=args.dry_run):
+        return 1, None
+    print(f"\n{BLUE}═══ Gate 8: Bump version ({bump_type}: {current} → {new_version}) ═══{NC}")
+    if not do_bump(plugin_root, new_version, dry_run=dry_run):
         print(f"{RED}✗ Version bump failed{NC}", file=sys.stderr)
-        return 1
+        return 1, None
     print(f"{GREEN}✓ Version bumped to {new_version}{NC}")
+    return 0, new_version
 
-    if args.dry_run:
-        print(f"\n{GREEN}✓ Dry run complete — no changes made.{NC}")
-        return 0
 
-    # ── Step 7: Generate CHANGELOG.md + release notes with git-cliff ──
-    print(f"\n{BLUE}═══ Step 7: Generate CHANGELOG + release notes (git-cliff) ═══{NC}")
+def stage_changelog(plugin_root: Path, tag_name: str, new_version: str) -> tuple[int, Path | None]:
+    """Gate 9: generate CHANGELOG.md and extract release notes via git-cliff."""
+    print(f"\n{BLUE}═══ Gate 9: Generate CHANGELOG + release notes (git-cliff) ═══{NC}")
     cliff_bin = shutil.which("git-cliff")
-    release_notes_file: Path | None = None
     if cliff_bin is None:
         print(
             f"{RED}✗ git-cliff not installed. Required for changelog and release notes.{NC}\n"
             f"{RED}  Install: brew install git-cliff  OR  cargo install git-cliff{NC}",
             file=sys.stderr,
         )
-        return 1
-    cliff_toml = root / "cliff.toml"
+        return 1, None
+    cliff_toml = plugin_root / "cliff.toml"
     if not cliff_toml.is_file():
         print(f"{RED}✗ cliff.toml not found. Required for changelog generation.{NC}", file=sys.stderr)
-        return 1
-
-    tag_name = f"v{new_version}"
-
-    # Regenerate full CHANGELOG.md — git-cliff reads all git history + cliff.toml config.
-    # Using --tag <new> tells git-cliff to label unreleased commits with the new tag.
-    run([cliff_bin, "--tag", tag_name, "-o", "CHANGELOG.md"], cwd=root)
+        return 1, None
+    run([cliff_bin, "--tag", tag_name, "-o", "CHANGELOG.md"], cwd=plugin_root)
     print(f"{GREEN}✓ CHANGELOG.md regenerated with {tag_name}{NC}")
-
-    # Extract release notes for just the new version (for gh release)
-    release_notes_file = root / "reports_dev" / f"release-notes-{new_version}.md"
+    release_notes_file = plugin_root / "reports_dev" / f"release-notes-{new_version}.md"
     release_notes_file.parent.mkdir(parents=True, exist_ok=True)
     run(
         [
-            cliff_bin, "--unreleased", "--tag", tag_name,
-            "--strip", "all", "-o", str(release_notes_file),
+            cliff_bin,
+            "--unreleased",
+            "--tag",
+            tag_name,
+            "--strip",
+            "all",
+            "-o",
+            str(release_notes_file),
         ],
-        cwd=root,
+        cwd=plugin_root,
     )
-    print(f"{GREEN}✓ Release notes extracted to {release_notes_file.relative_to(root)}{NC}")
+    print(f"{GREEN}✓ Release notes extracted to {release_notes_file.relative_to(plugin_root)}{NC}")
+    return 0, release_notes_file
 
-    # ── Step 8: Commit version bump + CHANGELOG ──
-    print(f"\n{BLUE}═══ Step 8: Commit version bump + changelog ═══{NC}")
-    run(["git", "add", "-A"], cwd=root)
-    run(["git", "commit", "-m", f"chore(release): {tag_name}"], cwd=root)
+
+def stage_commit_tag_push(plugin_root: Path, tag_name: str) -> int:
+    """Gates 10-12: commit, tag, push."""
+    print(f"\n{BLUE}═══ Gate 10: Commit version bump + changelog ═══{NC}")
+    run(["git", "add", "-A"], cwd=plugin_root)
+    run(["git", "commit", "-m", f"chore(release): {tag_name}"], cwd=plugin_root)
     print(f"{GREEN}✓ Committed {tag_name}{NC}")
-
-    # ── Step 9: Create annotated git tag ──
-    print(f"\n{BLUE}═══ Step 9: Create git tag {tag_name} ═══{NC}")
-    run(["git", "tag", "-a", tag_name, "-m", f"Release {tag_name}"], cwd=root)
+    print(f"\n{BLUE}═══ Gate 11: Create git tag {tag_name} ═══{NC}")
+    run(["git", "tag", "-a", tag_name, "-m", f"Release {tag_name}"], cwd=plugin_root)
     print(f"{GREEN}✓ Tag {tag_name} created{NC}")
-
-    # ── Step 10: Push branch + tags ──
-    # The pre-push hook verifies publish.py is in the process ancestry
-    # (not via env var — that would be trivially spoofable).
-    print(f"\n{BLUE}═══ Step 10: Push to origin (branch + tags) ═══{NC}")
-    run(["git", "push", "origin", "HEAD"], cwd=root)
-    run(["git", "push", "origin", tag_name], cwd=root)
+    print(f"\n{BLUE}═══ Gate 12: Push to origin (branch + tags) ═══{NC}")
+    run(["git", "push", "origin", "HEAD"], cwd=plugin_root)
+    run(["git", "push", "origin", tag_name], cwd=plugin_root)
     print(f"{GREEN}✓ Pushed branch and tag {tag_name}{NC}")
+    return 0
 
-    # ── Step 11: Create GitHub release with notes ──
-    print(f"\n{BLUE}═══ Step 11: Create GitHub release ═══{NC}")
+
+def stage_github_release(plugin_root: Path, tag_name: str, release_notes_file: Path) -> int:
+    """Gate 13: create GitHub release with notes. Warns (not errors) if gh missing."""
+    print(f"\n{BLUE}═══ Gate 13: Create GitHub release ═══{NC}")
     gh_bin = shutil.which("gh")
     if gh_bin is None:
         print(
@@ -446,26 +962,131 @@ If a check fails, fix the underlying problem. Do not bypass the pipeline.
             f"{YELLOW}  Install: brew install gh{NC}",
             file=sys.stderr,
         )
+        return 0
+    gh_result = run(
+        [
+            gh_bin,
+            "release",
+            "create",
+            tag_name,
+            "--title",
+            f"Release {tag_name}",
+            "--notes-file",
+            str(release_notes_file),
+        ],
+        cwd=plugin_root,
+        check=False,
+    )
+    if gh_result.returncode == 0:
+        print(f"{GREEN}✓ GitHub release {tag_name} published{NC}")
     else:
-        gh_result = run(
-            [
-                gh_bin, "release", "create", tag_name,
-                "--title", f"Release {tag_name}",
-                "--notes-file", str(release_notes_file),
-            ],
-            cwd=root,
-            check=False,
+        print(
+            f"{YELLOW}⚠ gh release failed (tag is already pushed — you can create release manually){NC}",
+            file=sys.stderr,
         )
-        if gh_result.returncode == 0:
-            print(f"{GREEN}✓ GitHub release {tag_name} published{NC}")
-        else:
-            print(
-                f"{YELLOW}⚠ gh release failed (tag is already pushed — you can create release manually){NC}",
-                file=sys.stderr,
-            )
+    return 0
+
+
+# ── Main pipeline orchestrator ────────────────────────────────────────────────
+
+
+def main() -> int:
+    gate_summary = "\n".join(f"  {name}: {desc}" for name, desc in GATES)
+    parser = argparse.ArgumentParser(
+        description="Publish pipeline: 14-gate fail-fast release (bypass-proof)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=f"""
+Gates (all mandatory, run in order):
+{gate_summary}
+
+HARD RULE: No checks can be skipped. Every gate must pass with ZERO
+CRITICAL/MAJOR/MINOR/NIT findings before the version is bumped, committed,
+tagged, pushed, or released. There is no --skip-tests, no --skip-lint, no
+--skip-validate, no --force. WARNING is the only allowed severity and does
+not block. If a gate fails, fix the underlying problem — don't bypass.
+
+Examples:
+  %(prog)s --patch              # 1.0.0 → 1.0.1, full pipeline
+  %(prog)s --minor              # 1.0.0 → 1.1.0, full pipeline
+  %(prog)s --major              # 1.0.0 → 2.0.0, full pipeline
+  %(prog)s --patch --dry-run    # preview only, stops before bump commit
+  %(prog)s --print-gates        # print gate list and exit
+        """,
+    )
+    bump_group = parser.add_mutually_exclusive_group()
+    bump_group.add_argument("--major", action="store_true", help="Bump major version")
+    bump_group.add_argument("--minor", action="store_true", help="Bump minor version")
+    bump_group.add_argument("--patch", action="store_true", help="Bump patch version")
+    parser.add_argument("--dry-run", action="store_true", help="Preview without making changes")
+    parser.add_argument("--print-gates", action="store_true", help="Print gate list and exit")
+    args = parser.parse_args()
+
+    if args.print_gates:
+        print_gates()
+        return 0
+
+    if not (args.major or args.minor or args.patch):
+        parser.error("one of --major, --minor, or --patch is required (or use --print-gates)")
+
+    # ── Gate 0: bypass guard ──
+    rc = stage_bypass_guard()
+    if rc != 0:
+        return rc
+
+    root = get_plugin_root()
+    bump_type = "major" if args.major else "minor" if args.minor else "patch"
+
+    # ── Gates 1-7: preflight (tests, lint, validate, marketplace-reg, consistency) ──
+    for stage, stage_name in [
+        (lambda: stage_check_working_tree(root), "working-tree"),
+        (lambda: stage_run_tests(root), "tests"),
+        (lambda: stage_run_lint(root), "lint"),
+        (lambda: stage_validate_plugin(root), "validate-plugin"),
+    ]:
+        rc = stage()
+        if rc != 0:
+            return rc
+
+    layout, _ = detect_layout(root)
+    rc = stage_validate_marketplace(root, layout)
+    if rc != 0:
+        return rc
+
+    rc = stage_marketplace_registration_check(root)
+    if rc != 0:
+        return rc
+
+    rc = stage_version_consistency(root)
+    if rc != 0:
+        return rc
+
+    # ── Gate 8: bump ──
+    rc, new_version = stage_bump(root, bump_type, args.dry_run)
+    if rc != 0 or new_version is None:
+        # Narrowing for mypy: stage_bump returns (0, str) or (nonzero, None).
+        # The second branch catches the defensive case where rc is 0 but
+        # new_version is None — should never happen, but fail-fast if it does.
+        return rc if rc != 0 else 1
+    if args.dry_run:
+        print(f"\n{GREEN}✓ Dry run complete — no changes made.{NC}")
+        return 0
+
+    tag_name = f"v{new_version}"
+
+    # ── Gates 9-13: changelog, commit, tag, push, release ──
+    rc, release_notes_file = stage_changelog(root, tag_name, new_version)
+    if rc != 0 or release_notes_file is None:
+        return rc
+
+    rc = stage_commit_tag_push(root, tag_name)
+    if rc != 0:
+        return rc
+
+    rc = stage_github_release(root, tag_name, release_notes_file)
+    if rc != 0:
+        return rc
 
     print(f"\n{GREEN}✓ Published v{new_version}{NC}")
-
     return 0
 
 

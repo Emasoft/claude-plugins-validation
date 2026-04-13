@@ -51,7 +51,6 @@ __all__ = [
 ]
 
 
-
 # read_plugin_meta, _portable_path, _run_cpv_validation imported from manage_plugin
 
 
@@ -67,11 +66,7 @@ def _run_claude_validate(target_path: Path) -> Tuple[List[str], List[str]]:
     if not claude_bin:
         return errors, warnings
     # Strip env vars that prevent claude from running inside another claude instance
-    env = {
-        k: v
-        for k, v in os.environ.items()
-        if k not in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")
-    }
+    env = {k: v for k, v in os.environ.items() if k not in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")}
     try:
         result = subprocess.run(
             [claude_bin, "plugin", "validate", str(target_path)],
@@ -164,7 +159,9 @@ def _check_orphaned_settings(settings: dict, fix: bool = False, settings_path: P
     user_local = CLAUDE_DIR / "settings.local.json"
     if user_local.exists():
         print()
-        warn("~/.claude/settings.local.json exists — this file should NOT exist at user level (only inside project dirs)")
+        warn(
+            "~/.claude/settings.local.json exists — this file should NOT exist at user level (only inside project dirs)"
+        )
         issues += 1
         if fix:
             user_local.unlink()
@@ -189,7 +186,9 @@ def _check_orphaned_settings(settings: dict, fix: bool = False, settings_path: P
                     install_loc = km_cfg.get("installLocation", "")
                     if install_loc and not Path(install_loc).exists():
                         print()
-                        warn(f"Orphaned known_marketplaces entry: '{km_name}' — install location missing: {install_loc}")
+                        warn(
+                            f"Orphaned known_marketplaces entry: '{km_name}' — install location missing: {install_loc}"
+                        )
                         orphaned_km.append(km_name)
                         issues += 1
             if fix and orphaned_km:
@@ -243,9 +242,7 @@ def do_doctor(verbose: bool = False, fix: bool = False):
                 else:
                     ok("Claude CLI: auth status OK")
             else:
-                warn(
-                    "Claude CLI: not authenticated — marketplace/remote commands will fail"
-                )
+                warn("Claude CLI: not authenticated — marketplace/remote commands will fail")
                 issues += 1
         except (subprocess.TimeoutExpired, OSError):
             info("Claude CLI: auth status check skipped (timeout or error)")
@@ -335,32 +332,21 @@ def do_doctor(verbose: bool = False, fix: bool = False):
                 "life-sciences",
             }
             if mp_json_name in reserved_names:
-                err(
-                    f"  marketplace.json: name '{mp_json_name}' is reserved by Anthropic"
-                )
+                err(f"  marketplace.json: name '{mp_json_name}' is reserved by Anthropic")
                 issues += 1
                 mj_valid = False
             # Impersonation patterns (contains "official" + "anthropic"/"claude")
             lower_name = mp_json_name.lower()
-            if "official" in lower_name and (
-                "anthropic" in lower_name or "claude" in lower_name
-            ):
-                err(
-                    f"  marketplace.json: name '{mp_json_name}' impersonates an official marketplace"
-                )
+            if "official" in lower_name and ("anthropic" in lower_name or "claude" in lower_name):
+                err(f"  marketplace.json: name '{mp_json_name}' impersonates an official marketplace")
                 issues += 1
                 mj_valid = False
             # Kebab-case: lowercase letters, digits, hyphens only
             if not re.match(r"^[a-z0-9]+(-[a-z0-9]+)*$", mp_json_name):
-                warn(
-                    f"  marketplace.json: name '{mp_json_name}' should be kebab-case "
-                    "(lowercase, hyphens, no spaces)"
-                )
+                warn(f"  marketplace.json: name '{mp_json_name}' should be kebab-case (lowercase, hyphens, no spaces)")
                 issues += 1
         if not isinstance(mj.get("owner"), dict) or not mj["owner"].get("name"):
-            err(
-                '  marketplace.json: missing or invalid \'owner\' field (must be {"name": "..."})'
-            )
+            err('  marketplace.json: missing or invalid \'owner\' field (must be {"name": "..."})')
             issues += 1
             mj_valid = False
         # metadata is optional per the Anthropic spec, but description is recommended
@@ -412,16 +398,12 @@ def do_doctor(verbose: bool = False, fix: bool = False):
             else:
                 # Duplicate name check
                 if p_entry["name"] in seen_plugin_names:
-                    err(
-                        f"  marketplace.json: duplicate plugin name '{p_entry['name']}'"
-                    )
+                    err(f"  marketplace.json: duplicate plugin name '{p_entry['name']}'")
                     issues += 1
                 seen_plugin_names.add(p_entry["name"])
                 # Kebab-case check for plugin names
                 if not re.match(r"^[a-z0-9]+(-[a-z0-9]+)*$", p_entry["name"]):
-                    warn(
-                        f"  marketplace.json: plugin name '{p_entry['name']}' should be kebab-case"
-                    )
+                    warn(f"  marketplace.json: plugin name '{p_entry['name']}' should be kebab-case")
                     issues += 1
             p_src = p_entry.get("source")
             if not p_src:
@@ -431,8 +413,7 @@ def do_doctor(verbose: bool = False, fix: bool = False):
                 # Relative path source — must start with "./" and not contain ".."
                 if not p_src.startswith("./"):
                     warn(
-                        f"  marketplace.json: plugin '{p_name_display}' relative source "
-                        f"'{p_src}' must start with './'"
+                        f"  marketplace.json: plugin '{p_name_display}' relative source '{p_src}' must start with './'"
                     )
                     issues += 1
                 if ".." in p_src:
@@ -444,10 +425,7 @@ def do_doctor(verbose: bool = False, fix: bool = False):
             elif isinstance(p_src, dict):
                 src_type = p_src.get("source", "")
                 if not src_type:
-                    warn(
-                        f"  marketplace.json: plugin '{p_name_display}' source object "
-                        "missing 'source' type field"
-                    )
+                    warn(f"  marketplace.json: plugin '{p_name_display}' source object missing 'source' type field")
                     issues += 1
                 elif src_type not in valid_source_types:
                     warn(
@@ -473,16 +451,12 @@ def do_doctor(verbose: bool = False, fix: bool = False):
             registered_path = ekm[mp_name].get("source", {}).get("path", "")
             actual_path = _portable_path(mp_dir)
             if registered_path and registered_path != actual_path:
-                warn(
-                    f"  Path mismatch in settings: registered='{registered_path}' actual='{actual_path}'"
-                )
+                warn(f"  Path mismatch in settings: registered='{registered_path}' actual='{actual_path}'")
                 issues += 1
             else:
                 ok("  Registered in settings")
         else:
-            info(
-                "  Not in extraKnownMarketplaces (may be loaded via '/plugin marketplace add')"
-            )
+            info("  Not in extraKnownMarketplaces (may be loaded via '/plugin marketplace add')")
 
         # Run Claude CLI built-in marketplace validation
         cv_errors, cv_warnings = _run_claude_validate(mp_dir)
@@ -502,10 +476,7 @@ def do_doctor(verbose: bool = False, fix: bool = False):
             # Check if plugins are at the marketplace root (source: "./" pattern)
             has_root_plugins = any(
                 isinstance(p.get("source"), str)
-                and (
-                    p.get("source") == "./"
-                    or not p.get("source", "").startswith("./plugins/")
-                )
+                and (p.get("source") == "./" or not p.get("source", "").startswith("./plugins/"))
                 for p in mj.get("plugins", [])
                 if isinstance(p, dict)
             )
@@ -515,9 +486,7 @@ def do_doctor(verbose: bool = False, fix: bool = False):
             else:
                 continue
 
-        declared_plugins = {
-            p.get("name") for p in mj.get("plugins", []) if isinstance(p, dict)
-        }
+        declared_plugins = {p.get("name") for p in mj.get("plugins", []) if isinstance(p, dict)}
 
         # Resolve actual plugin directories from marketplace.json source paths
         # rather than blindly scanning all subdirectories (avoids false positives
@@ -582,9 +551,7 @@ def do_doctor(verbose: bool = False, fix: bool = False):
                 else f"{CYAN}managed by Claude Code{NC}"
             )
 
-            print(
-                f"    {meta['name']} v{meta['version']}  [{en_str}]  [{', '.join(status_parts)}]"
-            )
+            print(f"    {meta['name']} v{meta['version']}  [{en_str}]  [{', '.join(status_parts)}]")
 
             # Show full validation details in verbose mode
             if verbose and (v_errors or v_warnings):
@@ -596,9 +563,7 @@ def do_doctor(verbose: bool = False, fix: bool = False):
 
             # Check if declared in marketplace.json
             if meta["name"] not in declared_plugins:
-                warn(
-                    "    Not listed in marketplace.json — may not be discovered by Claude Code"
-                )
+                warn("    Not listed in marketplace.json — may not be discovered by Claude Code")
                 issues += 1
 
     # 6. Check for orphaned entries in settings

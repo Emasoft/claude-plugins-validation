@@ -634,7 +634,9 @@ class TestBacktickRefDetection:
         validate_toc_embedding(skill_content, skill_path, tmp_path, report)
 
         minors = [r for r in report.results if r.level == "MINOR"]
-        assert len(minors) == 2, f"Expected 2 MINORs (format + TOC), got {len(minors)}: {[m.message[:60] for m in minors]}"
+        assert len(minors) == 2, (
+            f"Expected 2 MINORs (format + TOC), got {len(minors)}: {[m.message[:60] for m in minors]}"
+        )
         assert any("backtick" in m.message.lower() for m in minors)
         assert any("0/3 TOC headings" in m.message for m in minors)
 
@@ -672,9 +674,7 @@ class TestBacktickRefDetection:
         ref_dir.mkdir()
         self._make_ref_with_toc(ref_dir, "api-guide.md")
 
-        skill_content = (
-            "# Skill\n\n```markdown\nSee `references/api-guide.md` for details.\n```\n\nDone.\n"
-        )
+        skill_content = "# Skill\n\n```markdown\nSee `references/api-guide.md` for details.\n```\n\nDone.\n"
         skill_path = tmp_path / "SKILL.md"
         skill_path.write_text(skill_content)
 
@@ -762,12 +762,7 @@ class TestBacktickRefDetection:
         ref_dir.mkdir()
         self._make_ref_with_toc(ref_dir, "api-guide.md")
 
-        skill_content = (
-            "# Skill\n\n"
-            "See `references/api-guide.md` for details.\n"
-            "- Alpha\n- Beta\n- Gamma\n\n"
-            "Done.\n"
-        )
+        skill_content = "# Skill\n\nSee `references/api-guide.md` for details.\n- Alpha\n- Beta\n- Gamma\n\nDone.\n"
         skill_path = tmp_path / "SKILL.md"
         skill_path.write_text(skill_content)
 
@@ -787,9 +782,7 @@ class TestBacktickRefDetection:
         ref_dir.mkdir()
         self._make_ref_with_toc(ref_dir, "api-guide.md")
 
-        skill_content = (
-            "# Skill\n\n~~~\nSee `references/api-guide.md` here.\n~~~\n\nDone.\n"
-        )
+        skill_content = "# Skill\n\n~~~\nSee `references/api-guide.md` here.\n~~~\n\nDone.\n"
         skill_path = tmp_path / "SKILL.md"
         skill_path.write_text(skill_content)
 

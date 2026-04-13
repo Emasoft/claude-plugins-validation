@@ -7,6 +7,7 @@
 - [Per-Plugin Repo Creation](#per-plugin-repo-creation)
 - [CPV Canonicalization](#cpv-canonicalization)
 - [Per-Plugin Tagging](#per-plugin-tagging)
+- [Per-Plugin Auto-Notify Setup](#per-plugin-auto-notify-setup)
 - [Marketplace.json Rewrite](#marketplacejson-rewrite)
 - [Cleanup Commit](#cleanup-commit)
 - [Verification](#verification)
@@ -139,6 +140,73 @@ git commit -m "chore: add CPV canonical files"
 git tag "v$version" -m "Migrated from $original_marketplace at v$version"
 git push origin main --tags
 ```
+
+## Per-Plugin Auto-Notify Setup
+
+After tagging, every new plugin repo must be wired to notify the migrated
+marketplace via `repository_dispatch` so Claude Code auto-picks up future
+releases. This is Layout A-specific — skip entirely for Layout B.
+
+Do NOT inline the workflow templates here — they live under
+`skills/setup-marketplace-auto-notification/references/` and that skill is the
+canonical source of truth. This section only describes the per-plugin
+migrator's sequence.
+
+For each extracted plugin repo at `<owner>/<plugin-repo>`:
+
+1. **Check the shell env for a PAT** and set the marketplace secret if present,
+   otherwise guide the user through creating one (see
+   `../../../setup-marketplace-auto-notification/references/pat-secret-setup.md`
+   for the full PAT creation procedure, including token scopes and auto-detect):
+
+   ```bash
+   if [ -n "${MARKETPLACE_PAT:-}" ]; then
+     echo "reusing env PAT (${#MARKETPLACE_PAT} chars)"
+     gh secret set MARKETPLACE_PAT \
+       --repo "<owner>/<plugin-repo>" \
+       --body "$MARKETPLACE_PAT"
+   else
+     echo "MARKETPLACE_PAT not set — see pat-secret-setup.md"
+     # Walk the user through creating a classic PAT with `repo` scope,
+     # exporting it, and re-running this step. Never echo the value.
+     exit 1
+   fi
+   ```
+
+2. **Scaffold `.github/workflows/notify-marketplace.yml`** on the plugin repo
+   using the template at
+   `../../../setup-marketplace-auto-notification/references/notify-workflow-template.md`
+   with the marketplace owner/repo substituted for the `MARKETPLACE_OWNER` /
+   `MARKETPLACE_REPO` placeholders.
+
+3. **Commit and push** the new workflow to the plugin's default branch:
+
+   ```bash
+   cd "/tmp/$name"
+   git add .github/workflows/notify-marketplace.yml
+   git commit -m "ci: add marketplace auto-notify workflow"
+   git push origin main
+   ```
+
+4. **Verify the secret** is set on the plugin repo:
+
+   ```bash
+   gh secret list --repo "<owner>/<plugin-repo>" \
+     | grep -q MARKETPLACE_PAT \
+     || { echo "ERROR: MARKETPLACE_PAT not found"; exit 1; }
+   ```
+
+5. **Trigger a dry-run** to confirm the dispatch fires. Push a no-op commit
+   (e.g., a whitespace change in `README.md`) and watch the workflow run via
+   `gh run list --repo "<owner>/<plugin-repo>" --workflow notify-marketplace.yml --limit 1`.
+   Abort the migration if the dispatch step fails — it usually means the PAT
+   lacks cross-repo `repo` scope.
+
+The marketplace repo must also have the receiver workflow installed once
+(not per-plugin). See
+`../../../setup-marketplace-auto-notification/references/receiver-workflow-template.md`
+for the Layout A receiver. If that receiver is not yet present, install it
+BEFORE wiring the first plugin.
 
 ## Marketplace.json Rewrite
 

@@ -922,7 +922,14 @@ Exit codes:
     if args.json:
         print_json(report)
     elif args.report:
-        save_report_and_print_summary(report, Path(args.report), "Enterprise Validation", print_results, args.verbose, plugin_path=args.plugin_path)
+        save_report_and_print_summary(
+            report,
+            Path(args.report),
+            "Enterprise Validation",
+            print_results,
+            args.verbose,
+            plugin_path=args.plugin_path,
+        )
     else:
         print_results(report, args.verbose)
 

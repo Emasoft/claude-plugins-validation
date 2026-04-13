@@ -53,11 +53,13 @@ def test_valid_github_source_passes(tmp_path: Path):
         },
     )
     report = validate_settings_marketplace_file(settings_path)
-    assert not report.has_critical, f"unexpected CRITICAL: {[r.message for r in report.results if r.level == 'CRITICAL']}"
+    assert not report.has_critical, (
+        f"unexpected CRITICAL: {[r.message for r in report.results if r.level == 'CRITICAL']}"
+    )
     assert not report.has_major, f"unexpected MAJOR: {[r.message for r in report.results if r.level == 'MAJOR']}"
-    assert any(
-        r.level == "PASSED" and "github source valid" in r.message for r in report.results
-    ), "expected a PASSED result confirming the github source"
+    assert any(r.level == "PASSED" and "github source valid" in r.message for r in report.results), (
+        "expected a PASSED result confirming the github source"
+    )
 
 
 def test_valid_inline_settings_source_with_plugins(tmp_path: Path):
@@ -80,24 +82,20 @@ def test_valid_inline_settings_source_with_plugins(tmp_path: Path):
         },
     )
     report = validate_settings_marketplace_file(settings_path)
-    assert not report.has_critical, f"unexpected CRITICAL: {[r.message for r in report.results if r.level == 'CRITICAL']}"
+    assert not report.has_critical, (
+        f"unexpected CRITICAL: {[r.message for r in report.results if r.level == 'CRITICAL']}"
+    )
     assert not report.has_major, f"unexpected MAJOR: {[r.message for r in report.results if r.level == 'MAJOR']}"
-    assert any(
-        r.level == "PASSED" and "inline settings source" in r.message for r in report.results
-    ), "expected a PASSED result confirming the inline settings source"
+    assert any(r.level == "PASSED" and "inline settings source" in r.message for r in report.results), (
+        "expected a PASSED result confirming the inline settings source"
+    )
 
 
 def test_unknown_source_type_is_major(tmp_path: Path):
     """An unknown source type (e.g., 'quantum') produces a MAJOR finding."""
     settings_path = _write_settings(
         tmp_path,
-        {
-            EXTRA_KNOWN_MARKETPLACES_KEY: {
-                "weird-marketplace": {
-                    "source": {"source": "quantum", "data": "irrelevant"}
-                }
-            }
-        },
+        {EXTRA_KNOWN_MARKETPLACES_KEY: {"weird-marketplace": {"source": {"source": "quantum", "data": "irrelevant"}}}},
     )
     report = validate_settings_marketplace_file(settings_path)
     assert report.has_major, "expected MAJOR for unknown source type"
@@ -119,12 +117,8 @@ def test_missing_required_fields_per_source_type(tmp_path: Path):
         {
             EXTRA_KNOWN_MARKETPLACES_KEY: {
                 "github-missing-repo": {"source": {"source": "github"}},
-                "gitsub-missing-path": {
-                    "source": {"source": "git-subdir", "url": "https://github.com/foo/bar.git"}
-                },
-                "settings-missing-plugins": {
-                    "source": {"source": "settings", "name": "settings-missing-plugins"}
-                },
+                "gitsub-missing-path": {"source": {"source": "git-subdir", "url": "https://github.com/foo/bar.git"}},
+                "settings-missing-plugins": {"source": {"source": "settings", "name": "settings-missing-plugins"}},
             }
         },
     )
@@ -156,10 +150,9 @@ def test_no_extra_known_marketplaces_key_passes(tmp_path: Path):
     assert not report.has_critical
     assert not report.has_major
     assert not report.has_minor
-    assert any(
-        r.level == "PASSED" and "no 'extraKnownMarketplaces' block" in r.message
-        for r in report.results
-    ), "expected a PASSED result stating the block is absent"
+    assert any(r.level == "PASSED" and "no 'extraKnownMarketplaces' block" in r.message for r in report.results), (
+        "expected a PASSED result stating the block is absent"
+    )
 
 
 def test_inline_plugin_missing_name_and_source_is_major(tmp_path: Path):
@@ -214,18 +207,16 @@ def test_directory_source_emits_warning(tmp_path: Path):
         tmp_path,
         {
             EXTRA_KNOWN_MARKETPLACES_KEY: {
-                "local-dev": {
-                    "source": {"source": "directory", "path": "/Users/me/local-marketplace"}
-                }
+                "local-dev": {"source": {"source": "directory", "path": "/Users/me/local-marketplace"}}
             }
         },
     )
     report = validate_settings_marketplace_file(settings_path)
     assert not report.has_critical
     assert not report.has_major
-    assert any(
-        r.level == "WARNING" and "directory source" in r.message for r in report.results
-    ), "expected a WARNING about directory-source portability"
+    assert any(r.level == "WARNING" and "directory source" in r.message for r in report.results), (
+        "expected a WARNING about directory-source portability"
+    )
 
 
 def test_validate_source_object_direct_call_for_npm():

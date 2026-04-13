@@ -1646,7 +1646,9 @@ class TestAllowedToolsEdgeCases:
     def test_many_tools_warns_overpermission(self):
         """More than 10 tools should generate over-permissioning warning."""
         report = ValidationReport(skill_path="test")
-        frontmatter = {"allowed-tools": "Read, Write, Edit, Bash, Grep, Glob, WebFetch, WebSearch, Task, AskUserQuestion, NotebookEdit"}
+        frontmatter = {
+            "allowed-tools": "Read, Write, Edit, Bash, Grep, Glob, WebFetch, WebSearch, Task, AskUserQuestion, NotebookEdit"
+        }
         validate_allowed_tools_field(frontmatter, report)
         assert any("Many tools" in r.message for r in report.results)
 
@@ -1676,7 +1678,9 @@ class TestV170ToolCountSeverity:
     def test_many_tools_is_warning_not_minor(self):
         """11 tools should produce a WARNING-level 'Many tools permitted' result, not MINOR."""
         report = ValidationReport(skill_path="test")
-        frontmatter = {"allowed-tools": "Read, Write, Edit, Bash, Glob, Grep, Agent, WebFetch, WebSearch, Task, AskUserQuestion"}
+        frontmatter = {
+            "allowed-tools": "Read, Write, Edit, Bash, Glob, Grep, Agent, WebFetch, WebSearch, Task, AskUserQuestion"
+        }
         validate_allowed_tools_field(frontmatter, report)
         many_tools_results = [r for r in report.results if "Many tools permitted" in r.message]
         assert len(many_tools_results) == 1, "Expected exactly one 'Many tools permitted' result"

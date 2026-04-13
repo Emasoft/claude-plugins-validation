@@ -829,8 +829,7 @@ def validate_allowed_tools_field(
             )
         elif base_tool in ("TodoRead", "Notebook", "MultiEdit"):
             report.warning(
-                f"Tool '{base_tool}' is not in the current tools-reference spec. "
-                "Verify existence before shipping.",
+                f"Tool '{base_tool}' is not in the current tools-reference spec. Verify existence before shipping.",
                 "SKILL.md",
                 category="Frontmatter",
             )
@@ -1169,7 +1168,11 @@ def validate_effort_field(frontmatter: dict[str, Any], report: ValidationReport)
 
     valid_effort_values = {"low", "medium", "high", "max"}  # "max" is Opus 4.6 only
     if effort_val.lower() not in valid_effort_values:
-        report.major(f"Invalid 'effort' value: '{effort_val}'. Must be one of: {sorted(valid_effort_values)}", "SKILL.md", category="Frontmatter")
+        report.major(
+            f"Invalid 'effort' value: '{effort_val}'. Must be one of: {sorted(valid_effort_values)}",
+            "SKILL.md",
+            category="Frontmatter",
+        )
     else:
         report.passed(f"'effort' field valid: {effort_val}", "SKILL.md", category="Frontmatter")
 
@@ -1209,7 +1212,11 @@ def validate_shell_field(frontmatter: dict[str, Any], report: ValidationReport) 
 
     valid_shell_values = {"bash", "powershell"}
     if shell_val.lower() not in valid_shell_values:
-        report.major(f"Invalid 'shell' value: '{shell_val}'. Must be one of: {sorted(valid_shell_values)}", "SKILL.md", category="Frontmatter")
+        report.major(
+            f"Invalid 'shell' value: '{shell_val}'. Must be one of: {sorted(valid_shell_values)}",
+            "SKILL.md",
+            category="Frontmatter",
+        )
     else:
         report.passed(f"'shell' field valid: {shell_val}", "SKILL.md", category="Frontmatter")
 
@@ -1221,7 +1228,9 @@ def validate_paths_field(frontmatter: dict[str, Any], report: ValidationReport) 
 
     paths_val = frontmatter["paths"]
     if paths_val is None:
-        report.major("'paths' field cannot be null — use a glob string or YAML list", "SKILL.md", category="Frontmatter")
+        report.major(
+            "'paths' field cannot be null — use a glob string or YAML list", "SKILL.md", category="Frontmatter"
+        )
         return
     # Accepts string (comma-separated) or YAML list
     if isinstance(paths_val, str):
@@ -1237,7 +1246,9 @@ def validate_paths_field(frontmatter: dict[str, Any], report: ValidationReport) 
         else:
             report.passed(f"'paths' field valid (list of {len(paths_val)} globs)", "SKILL.md", category="Frontmatter")
     else:
-        report.major(f"'paths' must be a string or list, got {type(paths_val).__name__}", "SKILL.md", category="Frontmatter")
+        report.major(
+            f"'paths' must be a string or list, got {type(paths_val).__name__}", "SKILL.md", category="Frontmatter"
+        )
 
 
 def validate_field_whitelist(
@@ -1617,14 +1628,40 @@ def validate_dynamic_context(body: str, report: ValidationReport) -> None:
     # Check for potential !command without any backticks (user may have forgotten both)
     # Look for patterns like "= !command args" or standalone "!command args" at line start
     # Only flag lines that look like shell commands (start with known command words)
-    shell_command_words = {"bash", "sh", "python", "python3", "node", "npm", "npx", "uv", "pip", "git", "gh", "curl", "wget", "cat", "grep", "ruff", "mypy", "pytest", "eslint", "tsc", "cargo", "go", "make", "docker", "kubectl"}
+    shell_command_words = {
+        "bash",
+        "sh",
+        "python",
+        "python3",
+        "node",
+        "npm",
+        "npx",
+        "uv",
+        "pip",
+        "git",
+        "gh",
+        "curl",
+        "wget",
+        "cat",
+        "grep",
+        "ruff",
+        "mypy",
+        "pytest",
+        "eslint",
+        "tsc",
+        "cargo",
+        "go",
+        "make",
+        "docker",
+        "kubectl",
+    }
     for line in body_no_fences.splitlines():
         stripped = line.strip()
         # Pattern: "SOMETHING = !command" or line starting with "!command"
         bang_pos = stripped.find("!")
         if bang_pos < 0:
             continue
-        after_bang = stripped[bang_pos + 1:].strip()
+        after_bang = stripped[bang_pos + 1 :].strip()
         # Skip if backtick follows the bang (correct or partially correct syntax)
         if after_bang.startswith("`"):
             continue
@@ -2241,8 +2278,22 @@ def validate_skill(
         if frontmatter.get("context") == "fork" and body.strip():
             # Check if body has actionable verbs (steps, commands, instructions)
             body_lower = body.lower()
-            action_indicators = ["1.", "2.", "step", "run ", "execute", "create", "build", "deploy",
-                                 "check", "fix", "find", "analyze", "generate", "implement"]
+            action_indicators = [
+                "1.",
+                "2.",
+                "step",
+                "run ",
+                "execute",
+                "create",
+                "build",
+                "deploy",
+                "check",
+                "fix",
+                "find",
+                "analyze",
+                "generate",
+                "implement",
+            ]
             has_actions = any(ind in body_lower for ind in action_indicators)
             if not has_actions:
                 report.warning(
@@ -2478,7 +2529,11 @@ def main() -> int:
         print_json(report)
     elif args.report:
         save_report_and_print_summary(
-            report, Path(args.report), "Comprehensive Skill Validation", print_results, args.verbose,
+            report,
+            Path(args.report),
+            "Comprehensive Skill Validation",
+            print_results,
+            args.verbose,
             plugin_path=args.skill_path,
         )
     else:

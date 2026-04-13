@@ -269,11 +269,11 @@ class PipelineValidationReport:
         """Return appropriate exit code based on score."""
         score = self.total_score
         if score >= 90:
-            return EXIT_OK       # A grade — pipeline healthy
+            return EXIT_OK  # A grade — pipeline healthy
         elif score >= 70:
-            return EXIT_MINOR    # B or C grade — minor gaps
+            return EXIT_MINOR  # B or C grade — minor gaps
         elif score >= 60:
-            return EXIT_MAJOR    # D grade — manual updates required
+            return EXIT_MAJOR  # D grade — manual updates required
         else:
             return EXIT_CRITICAL  # F grade — pipeline broken
 

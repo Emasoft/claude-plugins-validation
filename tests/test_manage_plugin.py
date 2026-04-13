@@ -39,7 +39,9 @@ import manage_plugin as mp  # noqa: E402
 # ── Helpers ──────────────────────────────────────────────────
 
 
-def _make_plugin_dir(root: Path, name: str = "test-plugin", version: str = "1.0.0", description: str = "A test plugin") -> Path:
+def _make_plugin_dir(
+    root: Path, name: str = "test-plugin", version: str = "1.0.0", description: str = "A test plugin"
+) -> Path:
     """Create a minimal valid plugin directory structure under *root*."""
     plugin_dir = root / name
     cp_dir = plugin_dir / ".claude-plugin"
@@ -293,9 +295,7 @@ class TestCopyPluginFromDir:
         link.symlink_to(real_file)
         dest = tmp_path / "dest"
         skipped: list = []
-        mp._copy_plugin_from_dir(
-            src, dest, follow_symlinks=True, skipped_symlinks=skipped
-        )
+        mp._copy_plugin_from_dir(src, dest, follow_symlinks=True, skipped_symlinks=skipped)
         assert (dest / "link.py").exists()
         assert (dest / "link.py").read_text(encoding="utf-8") == "real"
         # Working symlinks should NOT land in the skipped list when followed.
@@ -602,7 +602,15 @@ class TestLoadInstalledPlugins:
         data = {
             "version": 2,
             "plugins": {
-                "test@market": [{"scope": "user", "version": "1.0.0", "installedAt": "2025-01-01T00:00:00Z", "lastUpdated": "2025-01-01T00:00:00Z", "installPath": "/path/to/plugin"}],
+                "test@market": [
+                    {
+                        "scope": "user",
+                        "version": "1.0.0",
+                        "installedAt": "2025-01-01T00:00:00Z",
+                        "lastUpdated": "2025-01-01T00:00:00Z",
+                        "installPath": "/path/to/plugin",
+                    }
+                ],
             },
         }
         installed_file.write_text(json.dumps(data), encoding="utf-8")
@@ -715,9 +723,7 @@ class TestDoInstall:
         mono.mkdir()
         _make_plugin_dir(mono, "alpha")
         beta = _make_plugin_dir(mono, "beta")
-        mp.do_install(
-            str(mono), "market", force=True, quiet=True, plugin_dir=str(beta)
-        )
+        mp.do_install(str(mono), "market", force=True, quiet=True, plugin_dir=str(beta))
         assert (mp_dir / "market" / "plugins" / "beta").exists()
         assert not (mp_dir / "market" / "plugins" / "alpha").exists()
 
@@ -754,9 +760,7 @@ class TestDoInstall:
         real_file.write_text("payload", encoding="utf-8")
         link = source / "linked.txt"
         link.symlink_to(real_file)
-        mp.do_install(
-            str(source), "market", force=True, quiet=True, follow_symlinks=True
-        )
+        mp.do_install(str(source), "market", force=True, quiet=True, follow_symlinks=True)
         dest = mp_dir / "market" / "plugins" / "linky2"
         assert (dest / "linked.txt").exists()
         assert (dest / "linked.txt").read_text(encoding="utf-8") == "payload"
@@ -774,10 +778,16 @@ class TestDoUninstall:
         plug_dir = mp_dir / marketplace / "plugins" / plugin_name
         plug_dir.mkdir(parents=True)
         (plug_dir / "README.md").write_text("content", encoding="utf-8")
-        _make_marketplace(mp_dir / marketplace, marketplace, [{"name": plugin_name, "version": "1.0.0", "source": f"./plugins/{plugin_name}"}])
+        _make_marketplace(
+            mp_dir / marketplace,
+            marketplace,
+            [{"name": plugin_name, "version": "1.0.0", "source": f"./plugins/{plugin_name}"}],
+        )
         settings_file = tmp_path / "settings.local.json"
         settings = {
-            "extraKnownMarketplaces": {marketplace: {"source": {"source": "directory", "path": str(mp_dir / marketplace)}}},
+            "extraKnownMarketplaces": {
+                marketplace: {"source": {"source": "directory", "path": str(mp_dir / marketplace)}}
+            },
             "enabledPlugins": {f"{plugin_name}@{marketplace}": True},
         }
         settings_file.write_text(json.dumps(settings), encoding="utf-8")
@@ -945,7 +955,9 @@ class TestDoUpdate:
         meta = {"name": "my-plugin", "version": "1.0.0", "description": "Old version"}
         (cp / "plugin.json").write_text(json.dumps(meta), encoding="utf-8")
         (plug_dir / "README.md").write_text("# Old", encoding="utf-8")
-        _make_marketplace(mp_dir / "market", "market", [{"name": "my-plugin", "version": "1.0.0", "source": "./plugins/my-plugin"}])
+        _make_marketplace(
+            mp_dir / "market", "market", [{"name": "my-plugin", "version": "1.0.0", "source": "./plugins/my-plugin"}]
+        )
         settings_file = tmp_path / "settings.local.json"
         settings = {
             "extraKnownMarketplaces": {"market": {"source": {"source": "directory", "path": str(mp_dir / "market")}}},
@@ -1038,7 +1050,6 @@ class TestCollectAllPluginKeys:
         monkeypatch.chdir(tmp_path)
         result = mp._collect_all_plugin_keys()
         assert result == {}
-
 
 
 # ── Tests: _resolve_plugin_key ───────────────────────────────
@@ -1139,5 +1150,3 @@ class TestVerifyPluginInstalled:
         monkeypatch.setattr(mp, "MARKETPLACES_DIR", mp_dir)
         monkeypatch.chdir(tmp_path)
         assert mp._verify_plugin_installed("ghost@nowhere") is False
-
-

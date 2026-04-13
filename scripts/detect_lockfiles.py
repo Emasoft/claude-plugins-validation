@@ -86,6 +86,7 @@ def find_lockfile_path(plugin_root: Path, lockfile_name: str) -> Path | None:
 def main() -> int:
     """CLI entry point — prints lockfiles found in a given plugin path."""
     import argparse
+
     parser = argparse.ArgumentParser(description="Detect lockfiles in a plugin.")
     parser.add_argument("path", nargs="?", default=".", help="Plugin root path")
     args = parser.parse_args()
@@ -109,4 +110,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(main())

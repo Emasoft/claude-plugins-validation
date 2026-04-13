@@ -80,19 +80,13 @@ def do_list():
             # Effective status: local overrides user if set
             effective = statuses.get("local") if statuses.get("local") is not None else statuses.get("user")
             status = (
-                f"{GREEN}enabled{NC}"
-                if effective is True
-                else f"{YELLOW}disabled{NC}"
-                if effective is False
-                else ""
+                f"{GREEN}enabled{NC}" if effective is True else f"{YELLOW}disabled{NC}" if effective is False else ""
             )
 
             components = _detect_components(plug_dir)
             comp_str = _format_components(components)
 
-            print(
-                f"  {GREEN}{meta['name']}{NC}@{mp_name}  v{meta['version']}  {status}{comp_str}"
-            )
+            print(f"  {GREEN}{meta['name']}{NC}@{mp_name}  v{meta['version']}  {status}{comp_str}")
             if meta["description"]:
                 print(f"    {meta['description']}")
             print(f"    {CYAN}{plug_dir}{NC}")
@@ -218,27 +212,15 @@ def do_search(query: str):
             info(f"No plugins matching: {query}")
         return
 
-    label = (
-        f"with {BOLD}{query_lower}{NC}"
-        if is_type_filter
-        else f"matching {BOLD}{query}{NC}"
-    )
+    label = f"with {BOLD}{query_lower}{NC}" if is_type_filter else f"matching {BOLD}{query}{NC}"
     print(f"{BOLD}Plugins {label}:{NC}  ({len(matches)} found)")
     print()
 
     for meta, mp_name, plug_dir, components, effective in matches:
-        status = (
-            f"{GREEN}enabled{NC}"
-            if effective is True
-            else f"{YELLOW}disabled{NC}"
-            if effective is False
-            else ""
-        )
+        status = f"{GREEN}enabled{NC}" if effective is True else f"{YELLOW}disabled{NC}" if effective is False else ""
         comp_str = _format_components(components)
 
-        print(
-            f"  {GREEN}{meta['name']}{NC}@{mp_name}  v{meta['version']}  {status}{comp_str}"
-        )
+        print(f"  {GREEN}{meta['name']}{NC}@{mp_name}  v{meta['version']}  {status}{comp_str}")
         if meta.get("description"):
             print(f"    {meta['description']}")
         print(f"    {CYAN}{plug_dir}{NC}")

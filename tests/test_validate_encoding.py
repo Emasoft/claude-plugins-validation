@@ -27,6 +27,7 @@ scripts_dir = Path(__file__).parent.parent / "scripts"
 if str(scripts_dir) not in sys.path:
     sys.path.insert(0, str(scripts_dir))
 
+from cpv_validation_common import should_skip_directory
 from validate_encoding import (
     EncodingValidationReport,
     check_bom,
@@ -40,7 +41,6 @@ from validate_encoding import (
     validate_encoding,
     validate_file,
 )
-from cpv_validation_common import should_skip_directory
 
 
 class TestCheckUtf8Encoding:

@@ -1,0 +1,456 @@
+"""Tests for scripts/publish.py — the 14-gate publish pipeline.
+
+Coverage:
+- stage_validate_plugin blocks on CRITICAL/MAJOR/MINOR/NIT (4 tests)
+- stage_validate_plugin allows WARNING (exit 0) to pass through (1 test)
+- detect_layout() + stage_marketplace_registration_check for Layout A/B/none
+  - Layout A missing notify-marketplace.yml → aborts
+  - Layout A missing MARKETPLACE_PAT → aborts
+  - Layout A missing plugin in remote mkt → aborts
+  - Layout A missing receiver workflow → aborts
+  - Layout B not at marketplace root → aborts
+  - No-marketplace mode → WARNING + proceed
+
+All `gh`/`git`/`subprocess` calls are stubbed via monkeypatch so the tests
+never hit GitHub or modify the working tree.
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+# Make scripts/ importable
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+
+import publish  # noqa: E402
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def _make_plugin_root(tmp_path: Path, name: str = "my-plugin", version: str = "1.0.0") -> Path:
+    """Create a minimal Layout A plugin root with plugin.json and a notify workflow."""
+    root = tmp_path / name
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps({"name": name, "version": version, "description": "x", "author": {"name": "t", "email": "t@e.com"}}),
+        encoding="utf-8",
+    )
+    return root
+
+
+def _make_notify_workflow(plugin_root: Path, owner: str = "Alice", repo: str = "mkt") -> Path:
+    """Write a minimal notify-marketplace.yml with the given MARKETPLACE_OWNER/REPO."""
+    wf_dir = plugin_root / ".github" / "workflows"
+    wf_dir.mkdir(parents=True, exist_ok=True)
+    wf = wf_dir / "notify-marketplace.yml"
+    wf.write_text(
+        f"""name: Notify Marketplace
+on:
+  push:
+    branches: [main]
+env:
+  MARKETPLACE_OWNER: '{owner}'
+  MARKETPLACE_REPO: '{repo}'
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: x
+        run: echo x
+""",
+        encoding="utf-8",
+    )
+    return wf
+
+
+def _make_marketplace_root(tmp_path: Path, plugin_name: str = "nested-plugin") -> tuple[Path, Path]:
+    """Create a Layout B marketplace root with one nested plugin. Returns (mkt_root, nested_plugin_root)."""
+    mkt_root = tmp_path / "my-marketplace"
+    (mkt_root / ".claude-plugin").mkdir(parents=True)
+    (mkt_root / ".claude-plugin" / "marketplace.json").write_text(
+        json.dumps(
+            {
+                "name": "my-marketplace",
+                "owner": {"name": "Alice", "email": "a@e.com"},
+                "plugins": [{"name": plugin_name, "source": f"./plugins/{plugin_name}"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    nested = mkt_root / "plugins" / plugin_name
+    (nested / ".claude-plugin").mkdir(parents=True)
+    (nested / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps(
+            {"name": plugin_name, "version": "1.0.0", "description": "x", "author": {"name": "t", "email": "t@e.com"}}
+        ),
+        encoding="utf-8",
+    )
+    return mkt_root, nested
+
+
+def _completed(returncode: int = 0, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess:
+    """Build a fake CompletedProcess for monkeypatching subprocess.run."""
+    return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+# ── stage_validate_plugin tests ──────────────────────────────────────────────
+
+
+def test_publish_blocks_on_critical_finding(monkeypatch, tmp_path, capsys):
+    """Gate 4 aborts on CRITICAL (exit 1) before any bump happens."""
+    root = _make_plugin_root(tmp_path)
+
+    def fake_run(cmd, cwd, *, check=True, **kwargs):
+        # Any call to validate_plugin returns code 1 (CRITICAL)
+        if any("validate_plugin.py" in str(part) for part in cmd):
+            return _completed(returncode=1)
+        return _completed(returncode=0)
+
+    monkeypatch.setattr(publish, "run", fake_run)
+    rc = publish.stage_validate_plugin(root)
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "CRITICAL" in err
+    assert "PUBLISH BLOCKED" in err
+
+
+def test_publish_blocks_on_major_finding(monkeypatch, tmp_path, capsys):
+    """Gate 4 aborts on MAJOR (exit 2)."""
+    root = _make_plugin_root(tmp_path)
+
+    def fake_run(cmd, cwd, *, check=True, **kwargs):
+        if any("validate_plugin.py" in str(part) for part in cmd):
+            return _completed(returncode=2)
+        return _completed(returncode=0)
+
+    monkeypatch.setattr(publish, "run", fake_run)
+    rc = publish.stage_validate_plugin(root)
+    assert rc == 2
+    assert "MAJOR" in capsys.readouterr().err
+
+
+def test_publish_blocks_on_minor_finding(monkeypatch, tmp_path, capsys):
+    """Gate 4 aborts on MINOR (exit 3)."""
+    root = _make_plugin_root(tmp_path)
+
+    def fake_run(cmd, cwd, *, check=True, **kwargs):
+        if any("validate_plugin.py" in str(part) for part in cmd):
+            return _completed(returncode=3)
+        return _completed(returncode=0)
+
+    monkeypatch.setattr(publish, "run", fake_run)
+    rc = publish.stage_validate_plugin(root)
+    assert rc == 3
+    assert "MINOR" in capsys.readouterr().err
+
+
+def test_publish_blocks_on_nit_finding(monkeypatch, tmp_path, capsys):
+    """Gate 4 aborts on NIT (exit 4) — NIT is still a hard block, not advisory."""
+    root = _make_plugin_root(tmp_path)
+
+    def fake_run(cmd, cwd, *, check=True, **kwargs):
+        if any("validate_plugin.py" in str(part) for part in cmd):
+            return _completed(returncode=4)
+        return _completed(returncode=0)
+
+    monkeypatch.setattr(publish, "run", fake_run)
+    rc = publish.stage_validate_plugin(root)
+    assert rc == 4
+    assert "NIT" in capsys.readouterr().err
+
+
+def test_publish_allows_warning_only(monkeypatch, tmp_path, capsys):
+    """Gate 4 passes when validator returns 0 (WARNING is advisory only, not a block)."""
+    root = _make_plugin_root(tmp_path)
+
+    def fake_run(cmd, cwd, *, check=True, **kwargs):
+        # WARNINGs still yield exit 0 under --strict
+        return _completed(returncode=0, stdout="WARNING: advisory only")
+
+    monkeypatch.setattr(publish, "run", fake_run)
+    rc = publish.stage_validate_plugin(root)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Plugin validation passed" in out
+
+
+# ── Marketplace-registration tests (Task 2) ──────────────────────────────────
+
+
+def test_marketplace_registration_no_marketplace_mode(monkeypatch, tmp_path, capsys):
+    """No notify workflow + no parent marketplace → WARNING mode, proceed (rc=0)."""
+    root = _make_plugin_root(tmp_path)
+    # No workflow, no parent marketplace — should emit WARNING and return 0
+    rc = publish.stage_marketplace_registration_check(root)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "WARNING" in out
+    assert "setup-marketplace-auto-notification" in out
+
+
+def test_marketplace_registration_layout_a_missing_notify_workflow(monkeypatch, tmp_path, capsys):
+    """Layout A without notify-marketplace.yml is treated as no-marketplace mode → WARNING, not abort.
+
+    (Layout detection requires notify-marketplace.yml to claim Layout A. Without it,
+    and without a parent marketplace.json, the plugin is in 'none' mode.)
+    """
+    root = _make_plugin_root(tmp_path)
+    # Do NOT create notify-marketplace.yml
+    rc = publish.stage_marketplace_registration_check(root)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "WARNING" in out
+    assert "no marketplace registration found" in out
+
+
+def test_marketplace_registration_layout_a_notify_workflow_missing_env_vars(monkeypatch, tmp_path, capsys):
+    """Layout A with notify-marketplace.yml but no MARKETPLACE_OWNER/REPO should abort."""
+    root = _make_plugin_root(tmp_path)
+    wf_dir = root / ".github" / "workflows"
+    wf_dir.mkdir(parents=True)
+    (wf_dir / "notify-marketplace.yml").write_text("name: broken\non: push\njobs: {}\n", encoding="utf-8")
+    # Must not hit gh CLI for this path — we fail before that
+    rc = publish.stage_marketplace_registration_check(root)
+    # Either layout = 'A' with None owner → aborts with error
+    # OR layout = 'A' and owner/repo not found → aborts
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "MARKETPLACE_OWNER" in err or "notify-marketplace.yml" in err
+
+
+def test_marketplace_registration_layout_a_missing_pat_secret(monkeypatch, tmp_path, capsys):
+    """Layout A: notify workflow present, but `gh secret list` returns nothing → abort."""
+    root = _make_plugin_root(tmp_path)
+    _make_notify_workflow(root, owner="Alice", repo="mkt")
+
+    # Stub shutil.which to pretend gh is installed
+    monkeypatch.setattr(publish.shutil, "which", lambda name: "/usr/bin/gh" if name == "gh" else None)
+
+    # Stub _gh_secret_exists to return False (no MARKETPLACE_PAT)
+    monkeypatch.setattr(publish, "_gh_secret_exists", lambda pr, name, gh_bin=None: False)
+
+    rc = publish.stage_marketplace_registration_check(root)
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "MARKETPLACE_PAT" in err
+    assert "setup-marketplace-auto-notification" in err
+
+
+def test_marketplace_registration_layout_a_plugin_not_in_remote_mkt(monkeypatch, tmp_path, capsys):
+    """Layout A: secret exists but plugin is missing from remote marketplace.json → abort."""
+    root = _make_plugin_root(tmp_path, name="my-plugin")
+    _make_notify_workflow(root, owner="Alice", repo="mkt")
+
+    monkeypatch.setattr(publish.shutil, "which", lambda name: "/usr/bin/gh" if name == "gh" else None)
+    monkeypatch.setattr(publish, "_gh_secret_exists", lambda pr, name, gh_bin=None: True)
+    # Remote marketplace.json does NOT list 'my-plugin'
+    monkeypatch.setattr(
+        publish,
+        "_fetch_remote_marketplace_json",
+        lambda owner, repo, gh_bin=None: {
+            "name": "mkt",
+            "owner": {"name": "Alice"},
+            "plugins": [{"name": "other-plugin", "source": {"source": "github", "repo": "Alice/other-plugin"}}],
+        },
+    )
+    monkeypatch.setattr(publish, "_current_repo_slug", lambda pr: "Alice/my-plugin")
+
+    rc = publish.stage_marketplace_registration_check(root)
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "not registered" in err
+    assert "my-plugin" in err
+
+
+def test_marketplace_registration_layout_a_missing_receiver_workflow(monkeypatch, tmp_path, capsys):
+    """Layout A: plugin is registered but remote has no repository_dispatch workflow → abort."""
+    root = _make_plugin_root(tmp_path, name="my-plugin")
+    _make_notify_workflow(root, owner="Alice", repo="mkt")
+
+    monkeypatch.setattr(publish.shutil, "which", lambda name: "/usr/bin/gh" if name == "gh" else None)
+    monkeypatch.setattr(publish, "_gh_secret_exists", lambda pr, name, gh_bin=None: True)
+    monkeypatch.setattr(
+        publish,
+        "_fetch_remote_marketplace_json",
+        lambda owner, repo, gh_bin=None: {
+            "plugins": [{"name": "my-plugin", "source": {"source": "github", "repo": "Alice/my-plugin"}}],
+        },
+    )
+    monkeypatch.setattr(publish, "_current_repo_slug", lambda pr: "Alice/my-plugin")
+    # No receiver workflow in remote
+    monkeypatch.setattr(publish, "_remote_has_receiver_workflow", lambda owner, repo, gh_bin=None: False)
+
+    rc = publish.stage_marketplace_registration_check(root)
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "repository_dispatch" in err
+
+
+def test_marketplace_registration_layout_a_all_checks_pass(monkeypatch, tmp_path, capsys):
+    """Layout A: all checks pass → rc=0."""
+    root = _make_plugin_root(tmp_path, name="my-plugin")
+    _make_notify_workflow(root, owner="Alice", repo="mkt")
+
+    monkeypatch.setattr(publish.shutil, "which", lambda name: "/usr/bin/gh" if name == "gh" else None)
+    monkeypatch.setattr(publish, "_gh_secret_exists", lambda pr, name, gh_bin=None: True)
+    monkeypatch.setattr(
+        publish,
+        "_fetch_remote_marketplace_json",
+        lambda owner, repo, gh_bin=None: {
+            "plugins": [{"name": "my-plugin", "source": {"source": "github", "repo": "Alice/my-plugin"}}],
+        },
+    )
+    monkeypatch.setattr(publish, "_current_repo_slug", lambda pr: "Alice/my-plugin")
+    monkeypatch.setattr(publish, "_remote_has_receiver_workflow", lambda owner, repo, gh_bin=None: True)
+
+    rc = publish.stage_marketplace_registration_check(root)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Layout A marketplace registration verified" in out
+
+
+def test_marketplace_registration_layout_b_not_at_marketplace_root(monkeypatch, tmp_path, capsys):
+    """Layout B: publish.py running inside plugins/<name>/ subfolder aborts.
+
+    Bumping a nested plugin independently would break the atomic marketplace tag.
+    """
+    mkt_root, nested = _make_marketplace_root(tmp_path, plugin_name="nested-plugin")
+    # publish.py is running at the nested plugin subfolder — should abort
+    rc = publish.stage_marketplace_registration_check(nested)
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "Layout B" in err
+    assert "MARKETPLACE repo root" in err
+    assert "marketplace-layouts.md" in err
+
+
+def test_marketplace_registration_layout_b_at_marketplace_root_success(monkeypatch, tmp_path, capsys):
+    """Layout B: publish.py running at marketplace root with registered plugin → rc=0.
+
+    Note: when publish.py is invoked at the marketplace root, the marketplace
+    itself is not a plugin — detect_layout returns 'none' and we land in
+    the no-marketplace WARNING path. (Actual marketplace releases go through
+    validate_marketplace.py at Gate 5; the nested plugins are validated
+    individually by the marketplace's own CI.)
+    """
+    mkt_root, _ = _make_marketplace_root(tmp_path, plugin_name="nested-plugin")
+    # Add a plugin.json at the marketplace root itself so detect_layout
+    # sees this as a plugin-with-marketplace-root combo. We simulate the
+    # Layout B scenario where the marketplace root IS the plugin repo being released.
+    (mkt_root / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps(
+            {
+                "name": "my-marketplace",
+                "version": "1.0.0",
+                "description": "x",
+                "author": {"name": "t", "email": "t@e.com"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = publish.stage_marketplace_registration_check(mkt_root)
+    # At the marketplace root with no notify workflow and no *parent* marketplace,
+    # we land in no-marketplace WARNING mode (rc=0) — this is expected for the
+    # marketplace repo itself, which uses validate_marketplace.py at Gate 5.
+    assert rc == 0
+    out = capsys.readouterr().out
+    # Marketplace root without a parent marketplace = no-marketplace mode
+    assert "WARNING" in out or "verified" in out
+
+
+def test_detect_layout_identifies_layout_a(tmp_path):
+    """detect_layout returns 'A' when plugin has a notify-marketplace.yml."""
+    root = _make_plugin_root(tmp_path)
+    _make_notify_workflow(root, owner="Alice", repo="mkt")
+    layout, details = publish.detect_layout(root)
+    assert layout == "A"
+    assert details["mkt_owner"] == "Alice"
+    assert details["mkt_repo"] == "mkt"
+
+
+def test_detect_layout_identifies_layout_b(tmp_path):
+    """detect_layout returns 'B' when plugin is nested under plugins/<name>/ of a marketplace repo."""
+    mkt_root, nested = _make_marketplace_root(tmp_path, plugin_name="nested-plugin")
+    layout, details = publish.detect_layout(nested)
+    assert layout == "B"
+    assert Path(details["marketplace_root"]).resolve() == mkt_root.resolve()
+    assert details["plugin_name"] == "nested-plugin"
+
+
+def test_detect_layout_returns_none_for_standalone(tmp_path):
+    """detect_layout returns 'none' when plugin has no marketplace wiring."""
+    root = _make_plugin_root(tmp_path)
+    layout, details = publish.detect_layout(root)
+    assert layout == "none"
+
+
+def test_parse_notify_workflow_extracts_owner_repo(tmp_path):
+    """_parse_notify_workflow pulls MARKETPLACE_OWNER and MARKETPLACE_REPO from YAML."""
+    root = _make_plugin_root(tmp_path)
+    wf = _make_notify_workflow(root, owner="Bob", repo="my-market")
+    owner, repo = publish._parse_notify_workflow(wf)
+    assert owner == "Bob"
+    assert repo == "my-market"
+
+
+def test_plugin_in_remote_marketplace_matches_github_source():
+    """_plugin_in_remote_marketplace returns True for a matching github source entry."""
+    mkt_json = {
+        "plugins": [
+            {"name": "foo", "source": {"source": "github", "repo": "Alice/foo"}},
+            {"name": "bar", "source": {"source": "github", "repo": "Alice/bar"}},
+        ]
+    }
+    assert publish._plugin_in_remote_marketplace(mkt_json, "foo", "Alice/foo") is True
+    assert publish._plugin_in_remote_marketplace(mkt_json, "bar", "Alice/bar") is True
+    assert publish._plugin_in_remote_marketplace(mkt_json, "baz", "Alice/baz") is False
+
+
+def test_plugin_in_remote_marketplace_rejects_wrong_repo():
+    """Returns False if the plugin name matches but repo slug doesn't."""
+    mkt_json = {"plugins": [{"name": "foo", "source": {"source": "github", "repo": "Alice/foo"}}]}
+    assert publish._plugin_in_remote_marketplace(mkt_json, "foo", "Bob/foo") is False
+
+
+# ── Bypass guard test ────────────────────────────────────────────────────────
+
+
+def test_bypass_guard_rejects_forbidden_env_vars(monkeypatch, capsys):
+    """Gate 0 aborts when any CPV_SKIP_* or SKIP_* env var is set."""
+    monkeypatch.setenv("CPV_SKIP_TESTS", "1")
+    rc = publish.stage_bypass_guard()
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "Bypass attempt detected" in err
+    assert "CPV_SKIP_TESTS" in err
+
+
+def test_bypass_guard_passes_with_clean_env(monkeypatch):
+    """Gate 0 passes when no bypass env vars are set."""
+    for v in [
+        "CPV_SKIP_TESTS",
+        "CPV_SKIP_LINT",
+        "CPV_SKIP_VALIDATE",
+        "CPV_FORCE_PUBLISH",
+        "CPV_BYPASS_CHECKS",
+        "SKIP_TESTS",
+        "SKIP_LINT",
+        "SKIP_VALIDATE",
+        "NO_VERIFY",
+    ]:
+        monkeypatch.delenv(v, raising=False)
+    rc = publish.stage_bypass_guard()
+    assert rc == 0
+
+
+def test_print_gates_lists_all_14_gates(capsys):
+    """print_gates prints all gates (0-13) with descriptions."""
+    publish.print_gates()
+    out = capsys.readouterr().out
+    for i in range(14):
+        assert f"Gate {i}:" in out
+    assert "WARNING is the only severity" in out

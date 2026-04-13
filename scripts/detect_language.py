@@ -74,11 +74,31 @@ def _has_any_source_file(plugin_root: Path, suffix: str, limit: int = 500) -> Pa
     # Skip common non-source dirs that can bloat scans and would not contain
     # project-owned source files (vendored deps, build artifacts, etc.).
     skip_dirs = {
-        ".git", "node_modules", ".venv", "venv", "__pycache__", "dist",
-        "build", "target", ".pytest_cache", ".ruff_cache", ".mypy_cache",
-        ".tldr", ".claude", "reports_dev", "docs_dev", "scripts_dev",
-        "samples_dev", "examples_dev", "tests_dev", "downloads_dev",
-        "libs_dev", "builds_dev", "vendor", ".idea", ".vscode",
+        ".git",
+        "node_modules",
+        ".venv",
+        "venv",
+        "__pycache__",
+        "dist",
+        "build",
+        "target",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".mypy_cache",
+        ".tldr",
+        ".claude",
+        "reports_dev",
+        "docs_dev",
+        "scripts_dev",
+        "samples_dev",
+        "examples_dev",
+        "tests_dev",
+        "downloads_dev",
+        "libs_dev",
+        "builds_dev",
+        "vendor",
+        ".idea",
+        ".vscode",
     }
     count = 0
     for path in plugin_root.rglob(f"*{suffix}"):
@@ -235,6 +255,7 @@ def detect_languages(plugin_root: Path) -> dict[str, Path]:
 def main() -> int:
     """CLI entry point — prints detected languages for a given plugin path."""
     import argparse
+
     parser = argparse.ArgumentParser(description="Detect languages used by a plugin.")
     parser.add_argument("path", nargs="?", default=".", help="Plugin root path")
     args = parser.parse_args()
@@ -262,4 +283,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(main())

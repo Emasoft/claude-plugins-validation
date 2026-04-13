@@ -60,11 +60,7 @@ def _run_claude_plugin(args: List[str], quiet: bool = False) -> int:
     if not quiet:
         info(f"Running: claude plugin {' '.join(args)}")
     # Remove env vars that prevent claude from running inside another claude instance
-    env = {
-        k: v
-        for k, v in os.environ.items()
-        if k not in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")
-    }
+    env = {k: v for k, v in os.environ.items() if k not in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")}
     try:
         result = subprocess.run(cmd, env=env, timeout=300)
         return result.returncode
@@ -121,9 +117,7 @@ def do_marketplace(argv: List[str]):
 
     if subcmd == "add":
         if not rest:
-            err(
-                "Usage: manage_marketplace add <source> [--scope <scope>] [--sparse <paths>...]"
-            )
+            err("Usage: manage_marketplace add <source> [--scope <scope>] [--sparse <paths>...]")
             sys.exit(1)
         # Normalize the source (first positional arg) — accept any GitHub URL form
         normalized = _normalize_github_source(rest[0])

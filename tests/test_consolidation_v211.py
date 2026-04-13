@@ -16,7 +16,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 import yaml
 
 # Project root
@@ -117,10 +116,18 @@ class TestObsoleteCommandsRemoved:
     def test_old_individual_validators_removed(self):
         """Individual validator commands should be consolidated into cpv-validate."""
         for name in [
-            "cpv-validate-hooks", "cpv-validate-agents", "cpv-validate-command",
-            "cpv-validate-security", "cpv-validate-scoring", "cpv-validate-marketplace",
-            "cpv-validate-enterprise", "cpv-validate-mcp", "cpv-validate-lsp",
-            "cpv-validate-documentation", "cpv-validate-encoding", "cpv-validate-rules",
+            "cpv-validate-hooks",
+            "cpv-validate-agents",
+            "cpv-validate-command",
+            "cpv-validate-security",
+            "cpv-validate-scoring",
+            "cpv-validate-marketplace",
+            "cpv-validate-enterprise",
+            "cpv-validate-mcp",
+            "cpv-validate-lsp",
+            "cpv-validate-documentation",
+            "cpv-validate-encoding",
+            "cpv-validate-rules",
             "cpv-validate-xref",
         ]:
             assert not (COMMANDS_DIR / f"{name}.md").exists(), f"{name}.md should be archived"
@@ -128,9 +135,14 @@ class TestObsoleteCommandsRemoved:
     def test_old_management_commands_removed(self):
         """Individual management commands should be consolidated into cpv-manage."""
         for name in [
-            "cpv-install-plugin-from-local-mp", "cpv-uninstall-plugin-from-local-mp",
-            "cpv-update-plugin", "cpv-manage-remote-plugins", "cpv-enable-plugin",
-            "cpv-disable-plugin", "cpv-list-mp-plugins", "cpv-search-plugins",
+            "cpv-install-plugin-from-local-mp",
+            "cpv-uninstall-plugin-from-local-mp",
+            "cpv-update-plugin",
+            "cpv-manage-remote-plugins",
+            "cpv-enable-plugin",
+            "cpv-disable-plugin",
+            "cpv-list-mp-plugins",
+            "cpv-search-plugins",
             "cpv-manage-marketplaces",
         ]:
             assert not (COMMANDS_DIR / f"{name}.md").exists(), f"{name}.md should be archived"
@@ -138,9 +150,12 @@ class TestObsoleteCommandsRemoved:
     def test_old_creation_commands_removed(self):
         """Individual creation commands should be consolidated into cpv-create."""
         for name in [
-            "cpv-create-local-plugin", "cpv-create-local-marketplace",
-            "cpv-publish-a-plugin-as-github-repo", "cpv-create-a-github-marketplace",
-            "cpv-publish-a-plugin-to-a-github-marketplace", "cpv-standardize",
+            "cpv-create-local-plugin",
+            "cpv-create-local-marketplace",
+            "cpv-publish-a-plugin-as-github-repo",
+            "cpv-create-a-github-marketplace",
+            "cpv-publish-a-plugin-to-a-github-marketplace",
+            "cpv-standardize",
         ]:
             assert not (COMMANDS_DIR / f"{name}.md").exists(), f"{name}.md should be archived"
 

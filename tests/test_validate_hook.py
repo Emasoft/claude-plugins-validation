@@ -360,7 +360,9 @@ def test_validate_single_hook_async_on_non_command(tmp_path: Path):
     report = HookValidationReport()
     validate_single_hook({"type": "prompt", "prompt": "Review this", "async": True}, "Stop", tmp_path, report)
     assert any(
-        "'async: true' is only supported on 'command' or 'http'" in r.message for r in report.results if r.level == "MAJOR"
+        "'async: true' is only supported on 'command' or 'http'" in r.message
+        for r in report.results
+        if r.level == "MAJOR"
     )
 
 
@@ -536,18 +538,12 @@ def test_validate_command_hook_non_string_command(tmp_path: Path):
 def test_new_hook_events_accepted(tmp_path: Path):
     """PostCompact, Elicitation, and ElicitationResult are accepted as valid hook events."""
     for event in ("PostCompact", "Elicitation", "ElicitationResult"):
-        hooks_data = {
-            "hooks": {
-                event: [{"hooks": [{"type": "command", "command": "echo ok"}]}]
-            }
-        }
+        hooks_data = {"hooks": {event: [{"hooks": [{"type": "command", "command": "echo ok"}]}]}}
         hooks_file = tmp_path / f"hooks_{event}.json"
         hooks_file.write_text(json.dumps(hooks_data))
         report = validate_hooks(hooks_file, plugin_root=tmp_path)
         assert not any(
-            "Unknown hook event" in r.message and event in r.message
-            for r in report.results
-            if r.level == "CRITICAL"
+            "Unknown hook event" in r.message and event in r.message for r in report.results if r.level == "CRITICAL"
         ), f"Event {event} should be accepted but was rejected"
 
 
@@ -586,9 +582,7 @@ def test_http_hook_bad_url_format(tmp_path: Path):
 
     report = ValidationReport()
     validate_http_hook({"type": "http", "url": "ftp://example.com/hook"}, "PreToolUse", report)
-    assert any(
-        "should start with http://" in r.message for r in report.results if r.level == "MAJOR"
-    )
+    assert any("should start with http://" in r.message for r in report.results if r.level == "MAJOR")
 
 
 def test_http_hook_headers_validation(tmp_path: Path):
@@ -621,13 +615,7 @@ def test_http_hook_headers_validation(tmp_path: Path):
 
 def test_http_hook_in_command_only_event(tmp_path: Path):
     """HTTP hooks should be allowed in command-only events like SessionStart."""
-    hooks_data = {
-        "hooks": {
-            "SessionStart": [
-                {"hooks": [{"type": "http", "url": "https://example.com/on-start"}]}
-            ]
-        }
-    }
+    hooks_data = {"hooks": {"SessionStart": [{"hooks": [{"type": "http", "url": "https://example.com/on-start"}]}]}}
     hooks_file = tmp_path / "hooks.json"
     hooks_file.write_text(json.dumps(hooks_data))
     report = validate_hooks(hooks_file, plugin_root=tmp_path)
@@ -649,9 +637,7 @@ def test_http_hook_no_unknown_field_warnings(tmp_path: Path):
     }
     r = HookValidationReport()
     validate_single_hook(hook, "PreToolUse", tmp_path, r)
-    unknown_warnings = [
-        res for res in r.results if res.level == "WARNING" and "Unknown hook field" in res.message
-    ]
+    unknown_warnings = [res for res in r.results if res.level == "WARNING" and "Unknown hook field" in res.message]
     assert len(unknown_warnings) == 0, f"Unexpected unknown-field warnings: {unknown_warnings}"
 
 
@@ -662,9 +648,7 @@ def test_postcompact_command_only(tmp_path: Path):
         r = HookValidationReport()
         validate_single_hook(hook, "PostCompact", tmp_path, r)
         assert any(
-            "only supports 'command' or 'http'" in res.message
-            for res in r.results
-            if res.level == "CRITICAL"
+            "only supports 'command' or 'http'" in res.message for res in r.results if res.level == "CRITICAL"
         ), f"PostCompact should reject '{bad_type}' hooks"
 
 

@@ -80,7 +80,9 @@ IS_WINDOWS = platform.system() == "Windows"
 _gi: GitignoreFilter | None = None
 
 
-def validate_manifest(plugin_root: Path, report: ValidationReport, marketplace_only: bool = False) -> dict[str, Any] | None:
+def validate_manifest(
+    plugin_root: Path, report: ValidationReport, marketplace_only: bool = False
+) -> dict[str, Any] | None:
     """Validate plugin.json manifest.
 
     Args:
@@ -300,7 +302,9 @@ def validate_manifest(plugin_root: Path, report: ValidationReport, marketplace_o
                     if "sensitive" in entry and not isinstance(entry["sensitive"], bool):
                         report.major(f"'userConfig.{key}.sensitive' must be a boolean", ".claude-plugin/plugin.json")
                 else:
-                    report.major(f"'userConfig.{key}' must be an object with 'description'", ".claude-plugin/plugin.json")
+                    report.major(
+                        f"'userConfig.{key}' must be an object with 'description'", ".claude-plugin/plugin.json"
+                    )
             report.passed(f"'userConfig' schema valid: {len(uc)} config(s)", ".claude-plugin/plugin.json")
 
     # Validate channels schema (v2.1.85): server is required, must match mcpServers key
@@ -335,11 +339,17 @@ def validate_manifest(plugin_root: Path, report: ValidationReport, marketplace_o
                 if "command" not in config:
                     report.major(f"LSP server '{name}' missing required 'command' field", ".claude-plugin/plugin.json")
                 if "extensionToLanguage" not in config:
-                    report.major(f"LSP server '{name}' missing required 'extensionToLanguage' field", ".claude-plugin/plugin.json")
+                    report.major(
+                        f"LSP server '{name}' missing required 'extensionToLanguage' field",
+                        ".claude-plugin/plugin.json",
+                    )
                 elif isinstance(config["extensionToLanguage"], dict):
                     for ext in config["extensionToLanguage"]:
                         if not ext.startswith("."):
-                            report.minor(f"LSP server '{name}' extensionToLanguage key '{ext}' should start with '.'", ".claude-plugin/plugin.json")
+                            report.minor(
+                                f"LSP server '{name}' extensionToLanguage key '{ext}' should start with '.'",
+                                ".claude-plugin/plugin.json",
+                            )
 
     # Claude Code auto-discovers standard directories (commands/, agents/, skills/,
     # hooks/) without needing them declared in plugin.json. Declaring the default path
@@ -482,7 +492,9 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         if dirname.startswith(".") or dirname.endswith("_dev"):
             continue
         if dirname.lower() not in known_dirs:
-            report.warning(f"Non-standard directory '{dirname}/' — not part of the plugin spec. If needed by plugin scripts, consider documenting its purpose in README.")
+            report.warning(
+                f"Non-standard directory '{dirname}/' — not part of the plugin spec. If needed by plugin scripts, consider documenting its purpose in README."
+            )
 
     # Validate plugin-shipped settings.json if present
     settings_path = plugin_root / "settings.json"
@@ -515,7 +527,9 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
                                 "settings.json",
                             )
                     elif not isinstance(agent_val, str):
-                        report.major(f"settings.json 'agent' must be a string, got {type(agent_val).__name__}", "settings.json")
+                        report.major(
+                            f"settings.json 'agent' must be a string, got {type(agent_val).__name__}", "settings.json"
+                        )
                 # v2.1.80+: validate extraKnownMarketplaces block by delegating to the
                 # dedicated settings-marketplace validator. Results are merged into this
                 # plugin report so all findings land in a single report.
@@ -534,7 +548,9 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
     # Check that plugin has at least some actual content beyond just a manifest
     content_indicators = ["commands", "skills", "agents", "hooks", "scripts", "output-styles"]
     file_indicators = [".mcp.json", ".lsp.json"]
-    has_content = any((plugin_root / d).is_dir() for d in content_indicators) or any((plugin_root / f).exists() for f in file_indicators)
+    has_content = any((plugin_root / d).is_dir() for d in content_indicators) or any(
+        (plugin_root / f).exists() for f in file_indicators
+    )
     if not has_content:
         report.major(
             "Plugin has a manifest but no content — expected at least one of: commands/, skills/, agents/, hooks/, scripts/, .mcp.json, or .lsp.json",
@@ -825,7 +841,9 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
                 try:
                     result = subprocess.run(
                         pssa_cmd + ["-Path", str(ps_file), "-Severity", "Error,Warning"],
-                        capture_output=True, text=True, timeout=30,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
                     )
                 except subprocess.TimeoutExpired:
                     report.warning(f"PSScriptAnalyzer timed out on {ps_file.name}")
@@ -847,7 +865,9 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
                 try:
                     result = subprocess.run(
                         [go_bin, "vet", str(go_file)],
-                        capture_output=True, text=True, timeout=30,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
                     )
                 except subprocess.TimeoutExpired:
                     report.warning(f"go vet timed out on {go_file.name}")
@@ -868,7 +888,9 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
             try:
                 result = subprocess.run(
                     [cargo_bin, "check", "--manifest-path", str(scripts_dir / "Cargo.toml")],
-                    capture_output=True, text=True, timeout=120,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
                 )
             except subprocess.TimeoutExpired:
                 report.warning("cargo check timed out")
@@ -887,12 +909,22 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
         if scripts_dir.is_dir():
             for py_file in scripts_dir.glob("*.py"):
                 if _has_shebang(py_file) and not os.access(py_file, os.X_OK):
-                    report.warning(f"scripts/{py_file.name} has shebang but is not executable — run: chmod +x scripts/{py_file.name}", f"scripts/{py_file.name}")
+                    report.warning(
+                        f"scripts/{py_file.name} has shebang but is not executable — run: chmod +x scripts/{py_file.name}",
+                        f"scripts/{py_file.name}",
+                    )
 
     # Check shebangs on script files — scripts without shebangs may not run cross-platform
     shebang_extensions = {".py", ".sh", ".bash", ".rb", ".pl", ".php"}
     # __init__.py and _-prefixed files are module markers/internal modules — never need shebangs
-    all_scripts = [f for f in scripts_dir.iterdir() if f.is_file() and f.suffix.lower() in shebang_extensions and f.name != "__init__.py" and not f.stem.startswith("_")]
+    all_scripts = [
+        f
+        for f in scripts_dir.iterdir()
+        if f.is_file()
+        and f.suffix.lower() in shebang_extensions
+        and f.name != "__init__.py"
+        and not f.stem.startswith("_")
+    ]
     scripts_missing_shebang = []
     for script in all_scripts:
         try:
@@ -1000,10 +1032,26 @@ def validate_bin_executables(plugin_root: Path, report: ValidationReport) -> Non
 
     # Extensions that indicate data/library files — skip executable check
     data_extensions = {
-        ".dll", ".so", ".dylib", ".a", ".lib", ".o", ".obj",  # Libraries
-        ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg",  # Config
-        ".txt", ".md", ".csv", ".log",  # Data/docs
-        ".pem", ".crt", ".key",  # Certificates
+        ".dll",
+        ".so",
+        ".dylib",
+        ".a",
+        ".lib",
+        ".o",
+        ".obj",  # Libraries
+        ".json",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".ini",
+        ".cfg",  # Config
+        ".txt",
+        ".md",
+        ".csv",
+        ".log",  # Data/docs
+        ".pem",
+        ".crt",
+        ".key",  # Certificates
         ".wasm",  # WebAssembly modules
     }
     # Extensions that indicate scripts — should be executable
@@ -1018,8 +1066,7 @@ def validate_bin_executables(plugin_root: Path, report: ValidationReport) -> Non
         if ext == "" or ext in script_extensions:
             if not os.access(bin_file, os.X_OK):
                 report.minor(
-                    f"bin/{bin_file.name} is not executable — if this is a command, "
-                    f"run: chmod +x bin/{bin_file.name}",
+                    f"bin/{bin_file.name} is not executable — if this is a command, run: chmod +x bin/{bin_file.name}",
                     f"bin/{bin_file.name}",
                 )
             else:
@@ -1072,7 +1119,11 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
     for dirpath, dirnames, filenames in _gi.walk(plugin_root, skip_dirs=skip_dirs) if _gi else os.walk(plugin_root):
         if not _gi:
             # Fallback filtering when gitignore filter not initialized
-            dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in skip_dirs and not _is_python_venv(Path(dirpath) / d)]
+            dirnames[:] = [
+                d
+                for d in dirnames
+                if not d.startswith(".") and d not in skip_dirs and not _is_python_venv(Path(dirpath) / d)
+            ]
         rel_dir = Path(dirpath).relative_to(plugin_root)
 
         for filename in filenames:
@@ -1101,7 +1152,11 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
                     f"Found {len(paths)} {lang_name} script(s) ({ext}) — {note}. Consider providing cross-platform alternatives.",
                 )
     else:
-        has_scripts = any(any(f.endswith(ext) for ext in CROSSPLATFORM_EXTENSIONS) for _, _, files in (_gi.walk(plugin_root, skip_dirs=skip_dirs) if _gi else os.walk(plugin_root)) for f in files)
+        has_scripts = any(
+            any(f.endswith(ext) for ext in CROSSPLATFORM_EXTENSIONS)
+            for _, _, files in (_gi.walk(plugin_root, skip_dirs=skip_dirs) if _gi else os.walk(plugin_root))
+            for f in files
+        )
         if has_scripts:
             report.passed("All scripts use cross-platform languages")
 
@@ -1141,9 +1196,13 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
             if has_bin:
                 report.info(f"Found {len(source_paths)} {lang_name} source file(s) with compiled binaries in bin/")
             elif has_build_system or has_build_script:
-                report.warning(f"Found {len(source_paths)} {lang_name} source file(s) with build system but no pre-compiled binaries in bin/. Users will need to compile before use.")
+                report.warning(
+                    f"Found {len(source_paths)} {lang_name} source file(s) with build system but no pre-compiled binaries in bin/. Users will need to compile before use."
+                )
             else:
-                report.major(f"Found {len(source_paths)} {lang_name} source file(s) but no compiled binaries in bin/ and no build script (build.sh, install.sh, Makefile, etc.). Provide pre-compiled binaries or a build/install script.")
+                report.major(
+                    f"Found {len(source_paths)} {lang_name} source file(s) but no compiled binaries in bin/ and no build script (build.sh, install.sh, Makefile, etc.). Provide pre-compiled binaries or a build/install script."
+                )
 
     # --- 3. Check compiled binaries platform coverage ---
     # Search for bin/ directories recursively, skip gitignored paths
@@ -1203,11 +1262,15 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
         missing = RECOMMENDED_PLATFORMS - detected_platforms
         if missing:
             missing_str = ", ".join(sorted(missing))
-            report.warning(f"Compiled binaries missing for: {missing_str}. Detected platforms: {', '.join(sorted(detected_platforms))}. Consider providing binaries for all major platforms.")
+            report.warning(
+                f"Compiled binaries missing for: {missing_str}. Detected platforms: {', '.join(sorted(detected_platforms))}. Consider providing binaries for all major platforms."
+            )
         else:
             report.passed(f"Compiled binaries cover recommended platforms: {', '.join(sorted(detected_platforms))}")
     else:
-        report.warning(f"Found {len(binary_files)} binary file(s) without platform identifiers in filename. Use naming convention like 'tool-darwin-arm64', 'tool-linux-amd64', 'tool-windows-amd64.exe' for multi-platform support.")
+        report.warning(
+            f"Found {len(binary_files)} binary file(s) without platform identifiers in filename. Use naming convention like 'tool-darwin-arm64', 'tool-linux-amd64', 'tool-windows-amd64.exe' for multi-platform support."
+        )
 
 
 def validate_skills(plugin_root: Path, report: ValidationReport, skip_platform_checks: list[str] | None = None) -> None:
@@ -1465,7 +1528,9 @@ def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
     gitignore_path = plugin_root / ".gitignore"
 
     if not gitignore_path.exists():
-        report.major("No .gitignore file found — cache files, build artifacts, and secrets may be accidentally included in the plugin")
+        report.major(
+            "No .gitignore file found — cache files, build artifacts, and secrets may be accidentally included in the plugin"
+        )
         return
 
     try:
@@ -1493,7 +1558,9 @@ def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
     # Check for common anti-patterns in .gitignore
     # Ignoring the entire plugin source is almost certainly wrong
     if "*.py" in lines or "*.js" in lines or "*.ts" in lines:
-        report.major(".gitignore ignores all source files (*.py, *.js, or *.ts) — this will exclude plugin code from distribution")
+        report.major(
+            ".gitignore ignores all source files (*.py, *.js, or *.ts) — this will exclude plugin code from distribution"
+        )
 
     # Scan for actual venv directories by structure (any name, not just .venv/venv)
     for item in plugin_root.iterdir():
@@ -1502,7 +1569,9 @@ def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
             # Check if this specific directory is covered by .gitignore
             covered = any(dirname.lower() in line.lower() for line in lines)
             if not covered:
-                report.major(f"Virtual environment '{dirname}/' detected (contains pyvenv.cfg) but not covered by .gitignore. Add '{dirname}/' to .gitignore.")
+                report.major(
+                    f"Virtual environment '{dirname}/' detected (contains pyvenv.cfg) but not covered by .gitignore. Add '{dirname}/' to .gitignore."
+                )
 
     # Check for bundled dependency directories that should be installed at runtime
     # in ${CLAUDE_PLUGIN_DATA} instead of shipped inside the plugin root.
@@ -1648,12 +1717,15 @@ def print_results(report: ValidationReport, verbose: bool = False) -> None:
         print(f"{colors['MINOR']}! MINOR issues found - may affect UX{colors['RESET']}")
 
     # Machine-readable summary for CI/CD parsing
-    print(f"SUMMARY: CRITICAL={counts['CRITICAL']} MAJOR={counts['MAJOR']} MINOR={counts['MINOR']} NIT={counts['NIT']} WARNING={counts['WARNING']}")
+    print(
+        f"SUMMARY: CRITICAL={counts['CRITICAL']} MAJOR={counts['MAJOR']} MINOR={counts['MINOR']} NIT={counts['NIT']} WARNING={counts['WARNING']}"
+    )
 
     print()
 
     # If there are any fixable issues, point the user at the fixer agent/skill.
     from cpv_validation_common import _print_fixer_recommendation
+
     _print_fixer_recommendation(report, None)
 
 
@@ -1740,7 +1812,9 @@ def validate_md_content_references(plugin_root: Path, report: ValidationReport) 
         # not this plugin. Backtick paths there are documentation examples.
         is_reference_doc = "/references/" in str(md_file) or "/commands/" in str(md_file)
         # Validate file path references
-        validate_md_file_paths(md_file, plugin_root, report, skip_patterns=skip_patterns, is_reference_doc=is_reference_doc)
+        validate_md_file_paths(
+            md_file, plugin_root, report, skip_patterns=skip_patterns, is_reference_doc=is_reference_doc
+        )
         # Validate URLs
         validate_md_urls(md_file, plugin_root, report, url_cache=url_cache)
 
@@ -1755,7 +1829,9 @@ def validate_pipeline_readiness(plugin_root: Path, report: ValidationReport) -> 
     if any(p.exists() for p in hook_paths):
         report.passed("Pre-push hook found")
     else:
-        report.minor("No pre-push hook found (.githooks/pre-push or git-hooks/pre-push) — recommended for quality gates")
+        report.minor(
+            "No pre-push hook found (.githooks/pre-push or git-hooks/pre-push) — recommended for quality gates"
+        )
 
     # Publish script
     if (plugin_root / "scripts" / "publish.py").exists():
@@ -1886,8 +1962,7 @@ def validate_submodule_containment(plugin_root: Path, report: ValidationReport) 
     except Exception:
         parent_display = "<parent>"
     report.info(
-        f"Plugin is a submodule of {parent_display}. "
-        "Parent repo CI will not run this plugin's pipeline automatically."
+        f"Plugin is a submodule of {parent_display}. Parent repo CI will not run this plugin's pipeline automatically."
     )
 
 
@@ -1988,6 +2063,7 @@ def _lockfile_is_gitignored(lockfile_name: str, patterns: list[str]) -> bool:
     implementing the full gitignore grammar.
     """
     import fnmatch
+
     lower_name = lockfile_name.lower()
     for pat in patterns:
         # Strip leading slash — anchored pattern, still a basename match
@@ -2037,7 +2113,9 @@ def main() -> int:
     )
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
     parser.add_argument("--no-color", action="store_true", help="Disable ANSI color codes in output")
-    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
+    parser.add_argument(
+        "--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout"
+    )
     parser.add_argument("path", nargs="?", help="Plugin root path (default: parent of scripts/)")
     args = parser.parse_args()
 
@@ -2118,7 +2196,9 @@ def main() -> int:
         print_json(report)
     else:
         if args.report:
-            save_report_and_print_summary(report, Path(args.report), "Plugin Validation", print_results, args.verbose, plugin_path=args.path)
+            save_report_and_print_summary(
+                report, Path(args.report), "Plugin Validation", print_results, args.verbose, plugin_path=args.path
+            )
         else:
             print_results(report, args.verbose)
 

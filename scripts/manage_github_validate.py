@@ -39,7 +39,9 @@ def _clone_repo(repo: str, dest: Path) -> bool:
     info(f"Cloning {repo}...")
     result = subprocess.run(
         [gh_bin, "repo", "clone", repo, str(dest), "--", "--depth", "1", "--quiet"],
-        capture_output=True, text=True, timeout=120,
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     if result.returncode != 0:
         err(f"Failed to clone {repo}: {result.stderr.strip()}")

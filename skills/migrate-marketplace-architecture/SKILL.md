@@ -8,8 +8,6 @@ tags:
   - migration
   - architecture
 allowed-tools: Read, Write, Edit, Bash(git:*,gh:*,uv:*,jq:*), Glob, Grep, AskUserQuestion
-agent: plugin-fixer
-context: fork
 user-invocable: false
 ---
 
@@ -17,7 +15,7 @@ user-invocable: false
 
 ## Overview
 
-Converts a non-CPV marketplace into Layout A (one GitHub repo per plugin) or Layout B (nested layout plus CPV discipline files). Preserves per-plugin git history and records every decision in a migration log.
+Converts a non-CPV marketplace to Layout A (one GitHub repo per plugin) or Layout B (nested plus discipline). Preserves per-plugin git history and logs every decision.
 
 ## Prerequisites
 
@@ -28,19 +26,21 @@ Converts a non-CPV marketplace into Layout A (one GitHub repo per plugin) or Lay
 
 ## Instructions
 
-Separate from `fix-validation`: full architectural migration with extensive `AskUserQuestion` interaction. Loaded only on an `architecture` finding or explicit user request.
+Full architectural migration with extensive `AskUserQuestion` interaction. Loaded only on an `architecture` finding or explicit user request.
 
-1. **Run the pre-migration audit** — see [pre-migration-audit](references/pre-migration-audit.md). Collect plugin inventory, detect name collisions, verify disk space and gh auth. Verdict must be READY before any migration command runs.
+1. **Pre-migration audit** — see [pre-migration-audit](references/pre-migration-audit.md). Collect plugin inventory, detect collisions, verify disk and gh auth. Verdict must be READY.
 
-2. **Interrogate the user** — see [interrogation-playbook](references/interrogation-playbook.md) for every `AskUserQuestion` prompt. Target layout is ALWAYS the first question; never pick for the user.
+2. **Interrogate the user** — see [interrogation-playbook](references/interrogation-playbook.md). Target layout is ALWAYS the first question; never pick for the user.
 
-3. **Execute the chosen migration**:
-   - **Layout A** — see [layout-a-migration](references/layout-a-migration.md) for the hub-and-spoke procedure.
-   - **Layout B** — see [layout-b-discipline](references/layout-b-discipline.md) for the nested-with-discipline procedure.
+3. **Execute the migration**:
+   - **Layout A** — [layout-a-migration](references/layout-a-migration.md) (hub-and-spoke).
+   - **Layout B** — [layout-b-discipline](references/layout-b-discipline.md) (nested).
 
-4. **Verify** with `validate_marketplace.py --strict` on the migrated marketplace and `validate_plugin.py --strict` on every new or canonicalized plugin. Fix every non-WARNING finding.
+4. **Wire auto-notification (Layout A only)** — for every new plugin repo, configure the auto-notify chain via the `setup-marketplace-auto-notification` skill: `pat-secret-setup.md` (env-var auto-detect), `notify-workflow-template.md`, `receiver-workflow-template.md`. Repeat per plugin. Layout B tags atomically and does NOT need cross-repo notification.
 
-5. **Write the migration log** at `docs_dev/migration-log_<marketplace>_<date>.md` recording every decision and command.
+5. **Verify** with `validate_marketplace.py --strict` and `validate_plugin.py --strict` on every new plugin. Fix every non-WARNING finding.
+
+6. **Write the migration log** at `docs_dev/migration-log_<marketplace>_<date>.md`.
 
 Copy this checklist and track your progress:
 
@@ -48,52 +48,43 @@ Copy this checklist and track your progress:
 - [ ] Interrogation answers recorded
 - [ ] Target layout selected (A or B)
 - [ ] Layout migration executed
+- [ ] Auto-notification wired for each new plugin repo (Layout A only)
 - [ ] `validate_marketplace.py --strict` passes
 - [ ] Every plugin validates
 - [ ] Migration log written
 
 ## Output
 
-- **Layout A**: N new plugin repos + cleaned marketplace repo (github sources, `plugins/*` removed, tagged at next patch).
-- **Layout B**: same repo with `scripts/publish.py`, `cliff.toml`, CI workflow, `CHANGELOG.md`, optional `CONTRIBUTORS.md`, one atomic commit tagged at current version.
-- Plus `docs_dev/migration-log_<marketplace>_<date>.md`.
+- **Layout A**: N plugin repos + cleaned marketplace (github sources, `plugins/*` removed, tagged). Each repo wired for auto-notify.
+- **Layout B**: same repo with `publish.py`, `cliff.toml`, CI, `CHANGELOG.md`, `CONTRIBUTORS.md` (optional), one atomic commit tagged.
+- `docs_dev/migration-log_<marketplace>_<date>.md`.
 
 ## Error Handling
 
 | Error | Resolution |
 |-------|------------|
-| `gh auth status` fails | BLOCKER for Layout A — run `gh auth login`, re-audit. Layout B still possible. |
-| Working tree dirty | BLOCKER — ask the user to commit or stash, then re-audit. |
-| Name collision on GitHub | Ask via `AskUserQuestion`: rename, skip, or abort. |
-| User cancels mid-flow | Write the partial log and exit cleanly. Never leave orphan branches. |
-| Validation still INVALID | Read the report, fix each finding, re-run the specific validator. |
+| `gh auth status` fails | BLOCKER for Layout A — run `gh auth login`, re-audit. |
+| Working tree dirty | BLOCKER — commit or stash, re-audit. |
+| Name collision on GitHub | `AskUserQuestion`: rename, skip, or abort. |
+| User cancels mid-flow | Write partial log, exit cleanly. No orphan branches. |
+| Validation still INVALID | Fix each finding, re-run the validator. |
 
-Never force-push or rewrite history. All changes are forward-only commits.
+Never force-push or rewrite history. Forward-only commits.
 
 ## Examples
 
-**Input:** A marketplace with 5 nested plugins, no git tags, no CHANGELOG, three different authors.
-
-**Output (Layout A):** 5 new standalone repos + cleaned marketplace.
-
-**Output (Layout B):** Same repo with CPV discipline files added and authors consolidated.
-
-Final verification (both layouts):
-
-```bash
-uv run --with pyyaml python scripts/validate_marketplace.py . --strict
-for d in plugins/*/; do
-  uv run --with pyyaml python scripts/validate_plugin.py "$d" --strict
-done
-```
+**Input:** 5 nested plugins, no git tags, mixed authors.
+**Output (A):** 5 standalone repos + cleaned marketplace + per-repo notify chains.
+**Output (B):** Same repo with CPV discipline files and consolidated authors.
 
 ## Resources
 
 - [Pre-Migration Audit](references/pre-migration-audit.md)
-  > Working Tree Cleanliness · Plugin Inventory Collection · Plugin Manifest Validation · Already-Migrated Detection · Name Collision Detection · Disk Space Check · GitHub Auth Check · Audit Report Format
+  > Working Tree Cleanliness · Plugin Inventory Collection · Plugin Manifest Validation · Already-Migrated Detection · Name Collision Detection · Disk Space Check · GitHub Auth Check · MARKETPLACE_PAT Env Check · Audit Report Format
 - [Interrogation Playbook](references/interrogation-playbook.md)
   > Purpose · Target layout selection · GitHub owner and visibility (Layout A only) · Primary author consolidation (Layout B only) · Per-plugin metadata · Guest contributor handling · Final confirmation
 - [Layout A Migration](references/layout-a-migration.md)
-  > Pre-Flight Checks · Per-Plugin Subtree Split · Per-Plugin Repo Creation · CPV Canonicalization · Per-Plugin Tagging · Marketplace.json Rewrite · Cleanup Commit · Verification · Rollback Recipe
+  > Pre-Flight Checks · Per-Plugin Subtree Split · Per-Plugin Repo Creation · CPV Canonicalization · Per-Plugin Tagging · Per-Plugin Auto-Notify Setup · Marketplace.json Rewrite · Cleanup Commit · Verification · Rollback Recipe
 - [Layout B Discipline](references/layout-b-discipline.md)
-  > Pre-Flight Checks · Scaffold publish.py · Scaffold cliff.toml · Scaffold validate.yml · Generate CHANGELOG.md · Consolidate Authorship · Preserve Guest Contributors · Single Atomic Commit · Tag the Marketplace · Verification · Rollback Recipe
+  > Pre-Flight Checks · Scaffold publish.py · Scaffold cliff.toml · Scaffold validate.yml · Generate CHANGELOG.md · Consolidate Authorship · Why Layout B Does Not Need Auto-Notification · Preserve Guest Contributors · Single Atomic Commit · Tag the Marketplace · Verification · Rollback Recipe
+- **Sibling skill**: `setup-marketplace-auto-notification` (loaded by plugin-fixer agent; wires per-plugin notify chain during Layout A migrations)

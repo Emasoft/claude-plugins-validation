@@ -857,7 +857,11 @@ def main() -> int:
     else:
         if args.report:
             save_report_and_print_summary(
-                report, Path(args.report), "Documentation Validation", print_results, args.verbose,
+                report,
+                Path(args.report),
+                "Documentation Validation",
+                print_results,
+                args.verbose,
                 plugin_path=args.plugin_path,
             )
         else:

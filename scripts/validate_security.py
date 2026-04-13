@@ -110,7 +110,9 @@ PATH_TRAVERSAL_PATTERNS = [
     (re.compile(r"\.\.\\"), "Path traversal ..\\ detected"),
     # Absolute paths (except environment variable placeholders)
     (
-        re.compile(r"(?<!\$\{CLAUDE_PLUGIN_ROOT\})(?<!\$\{CLAUDE_PLUGIN_DATA\})(?<!\$\{CLAUDE_PROJECT_DIR\})(?<![\w$\{])/(?:usr|etc|var|tmp|opt|bin|sbin|lib|root)/"),
+        re.compile(
+            r"(?<!\$\{CLAUDE_PLUGIN_ROOT\})(?<!\$\{CLAUDE_PLUGIN_DATA\})(?<!\$\{CLAUDE_PROJECT_DIR\})(?<![\w$\{])/(?:usr|etc|var|tmp|opt|bin|sbin|lib|root)/"
+        ),
         "Absolute Unix system path detected",
     ),
     # Windows absolute paths
@@ -123,55 +125,126 @@ PATH_TRAVERSAL_PATTERNS = [
 
 # Prompt injection patterns — malicious instructions in skills/agents/commands
 PROMPT_INJECTION_PATTERNS = [
-    (re.compile(r"ignore\s+(?:all\s+)?(?:previous|prior|above)\s+instructions?", re.IGNORECASE), "Prompt injection: ignore previous instructions"),
+    (
+        re.compile(r"ignore\s+(?:all\s+)?(?:previous|prior|above)\s+instructions?", re.IGNORECASE),
+        "Prompt injection: ignore previous instructions",
+    ),
     (re.compile(r"you\s+are\s+now\s+(?:a|an)\b", re.IGNORECASE), "Prompt injection: identity override ('you are now')"),
-    (re.compile(r"(?:forget|disregard|override)\s+(?:all\s+)?(?:your|the)\s+(?:instructions?|rules?|guidelines?|constraints?)", re.IGNORECASE), "Prompt injection: instruction override"),
-    (re.compile(r"do\s+not\s+follow\s+(?:any|the)\s+(?:previous|above|prior)\s+(?:instructions?|rules?)", re.IGNORECASE), "Prompt injection: instruction negation"),
-    (re.compile(r"(?:system|hidden)\s*(?:prompt|instruction|message)\s*:", re.IGNORECASE), "Prompt injection: fake system prompt marker"),
+    (
+        re.compile(
+            r"(?:forget|disregard|override)\s+(?:all\s+)?(?:your|the)\s+(?:instructions?|rules?|guidelines?|constraints?)",
+            re.IGNORECASE,
+        ),
+        "Prompt injection: instruction override",
+    ),
+    (
+        re.compile(
+            r"do\s+not\s+follow\s+(?:any|the)\s+(?:previous|above|prior)\s+(?:instructions?|rules?)", re.IGNORECASE
+        ),
+        "Prompt injection: instruction negation",
+    ),
+    (
+        re.compile(r"(?:system|hidden)\s*(?:prompt|instruction|message)\s*:", re.IGNORECASE),
+        "Prompt injection: fake system prompt marker",
+    ),
     (re.compile(r"<\s*(?:system|instructions?|context)\s*>", re.IGNORECASE), "Prompt injection: fake XML system tag"),
     (re.compile(r"\[INST\]|\[/INST\]|\[SYSTEM\]", re.IGNORECASE), "Prompt injection: fake instruction delimiters"),
-    (re.compile(r"IMPORTANT:\s*(?:ignore|override|forget|disregard)", re.IGNORECASE), "Prompt injection: IMPORTANT override"),
+    (
+        re.compile(r"IMPORTANT:\s*(?:ignore|override|forget|disregard)", re.IGNORECASE),
+        "Prompt injection: IMPORTANT override",
+    ),
 ]
 
 # Data exfiltration patterns — sending data to external servers
 DATA_EXFILTRATION_PATTERNS = [
-    (re.compile(r"curl\s+.*-[dX]\s+.*https?://(?!localhost|127\.0\.0\.1)", re.IGNORECASE), "Data exfiltration: curl POST/PUT to external URL"),
-    (re.compile(r"wget\s+.*--post-data.*https?://(?!localhost|127\.0\.0\.1)", re.IGNORECASE), "Data exfiltration: wget POST to external URL"),
-    (re.compile(r"fetch\s*\(\s*['\"]https?://(?!localhost|127\.0\.0\.1)", re.IGNORECASE), "Data exfiltration: fetch() to external URL"),
-    (re.compile(r"requests?\.\s*(?:post|put|patch)\s*\(\s*['\"]https?://(?!localhost|127\.0\.0\.1)", re.IGNORECASE), "Data exfiltration: Python requests POST to external URL"),
-    (re.compile(r"urllib\.\s*request\.\s*urlopen.*https?://(?!localhost|127\.0\.0\.1)"), "Data exfiltration: urllib to external URL"),
+    (
+        re.compile(r"curl\s+.*-[dX]\s+.*https?://(?!localhost|127\.0\.0\.1)", re.IGNORECASE),
+        "Data exfiltration: curl POST/PUT to external URL",
+    ),
+    (
+        re.compile(r"wget\s+.*--post-data.*https?://(?!localhost|127\.0\.0\.1)", re.IGNORECASE),
+        "Data exfiltration: wget POST to external URL",
+    ),
+    (
+        re.compile(r"fetch\s*\(\s*['\"]https?://(?!localhost|127\.0\.0\.1)", re.IGNORECASE),
+        "Data exfiltration: fetch() to external URL",
+    ),
+    (
+        re.compile(r"requests?\.\s*(?:post|put|patch)\s*\(\s*['\"]https?://(?!localhost|127\.0\.0\.1)", re.IGNORECASE),
+        "Data exfiltration: Python requests POST to external URL",
+    ),
+    (
+        re.compile(r"urllib\.\s*request\.\s*urlopen.*https?://(?!localhost|127\.0\.0\.1)"),
+        "Data exfiltration: urllib to external URL",
+    ),
 ]
 
 # Supply chain attack patterns — downloading and executing code
 SUPPLY_CHAIN_PATTERNS = [
     (re.compile(r"curl\s+.*\|\s*(?:sh|bash|zsh|python|python3|node)\b"), "Supply chain: curl piped to interpreter"),
     (re.compile(r"wget\s+.*\|\s*(?:sh|bash|zsh|python|python3|node)\b"), "Supply chain: wget piped to interpreter"),
-    (re.compile(r"pip\s+install\s+.*(?:https?://|git\+|--index-url\s+(?!https://pypi))"), "Supply chain: pip install from non-PyPI source"),
-    (re.compile(r"npm\s+install\s+.*(?:https?://|git\+|--registry\s+(?!https://registry\.npmjs))"), "Supply chain: npm install from non-registry source"),
-    (re.compile(r"curl\s+.*-[oO]\s+.*&&\s*(?:chmod|sh|bash|python|node)\b"), "Supply chain: curl download then execute"),
-    (re.compile(r"wget\s+.*-[oO]\s+.*&&\s*(?:chmod|sh|bash|python|node)\b"), "Supply chain: wget download then execute"),
+    (
+        re.compile(r"pip\s+install\s+.*(?:https?://|git\+|--index-url\s+(?!https://pypi))"),
+        "Supply chain: pip install from non-PyPI source",
+    ),
+    (
+        re.compile(r"npm\s+install\s+.*(?:https?://|git\+|--registry\s+(?!https://registry\.npmjs))"),
+        "Supply chain: npm install from non-registry source",
+    ),
+    (
+        re.compile(r"curl\s+.*-[oO]\s+.*&&\s*(?:chmod|sh|bash|python|node)\b"),
+        "Supply chain: curl download then execute",
+    ),
+    (
+        re.compile(r"wget\s+.*-[oO]\s+.*&&\s*(?:chmod|sh|bash|python|node)\b"),
+        "Supply chain: wget download then execute",
+    ),
 ]
 
 # Credential harvesting patterns — reading sensitive credential files
 # Note: ~/.claude/ is EXCLUDED (legitimate for plugins)
 CREDENTIAL_HARVEST_PATTERNS = [
     (re.compile(r"~/\.ssh/|/\.ssh/|SSH_KEY|id_rsa|id_ed25519"), "Credential access: SSH key file reference"),
-    (re.compile(r"~/\.aws/|/\.aws/|AWS_SECRET|aws_secret_access_key", re.IGNORECASE), "Credential access: AWS credentials reference"),
-    (re.compile(r"~/\.gitconfig|/\.gitconfig|GIT_TOKEN|GITHUB_TOKEN", re.IGNORECASE), "Credential access: Git credentials reference"),
-    (re.compile(r"~/\.npmrc|/\.npmrc|NPM_TOKEN|npm_token", re.IGNORECASE), "Credential access: npm credentials reference"),
-    (re.compile(r"~/\.docker/|/\.docker/config\.json|DOCKER_PASSWORD", re.IGNORECASE), "Credential access: Docker credentials reference"),
-    (re.compile(r"~/\.kube/|/\.kube/config|KUBECONFIG", re.IGNORECASE), "Credential access: Kubernetes config reference"),
+    (
+        re.compile(r"~/\.aws/|/\.aws/|AWS_SECRET|aws_secret_access_key", re.IGNORECASE),
+        "Credential access: AWS credentials reference",
+    ),
+    (
+        re.compile(r"~/\.gitconfig|/\.gitconfig|GIT_TOKEN|GITHUB_TOKEN", re.IGNORECASE),
+        "Credential access: Git credentials reference",
+    ),
+    (
+        re.compile(r"~/\.npmrc|/\.npmrc|NPM_TOKEN|npm_token", re.IGNORECASE),
+        "Credential access: npm credentials reference",
+    ),
+    (
+        re.compile(r"~/\.docker/|/\.docker/config\.json|DOCKER_PASSWORD", re.IGNORECASE),
+        "Credential access: Docker credentials reference",
+    ),
+    (
+        re.compile(r"~/\.kube/|/\.kube/config|KUBECONFIG", re.IGNORECASE),
+        "Credential access: Kubernetes config reference",
+    ),
     (re.compile(r"~/\.gnupg/|/\.gnupg/|GPG_PASSPHRASE", re.IGNORECASE), "Credential access: GPG keyring reference"),
-    (re.compile(r"(?:keychain|keyring|credential.?store|password.?store)", re.IGNORECASE), "Credential access: system keystore reference"),
+    (
+        re.compile(r"(?:keychain|keyring|credential.?store|password.?store)", re.IGNORECASE),
+        "Credential access: system keystore reference",
+    ),
 ]
 
 # Sandbox escape patterns — bypassing safety controls
 SANDBOX_ESCAPE_PATTERNS = [
     (re.compile(r"--no-verify\b"), "Sandbox escape: --no-verify bypasses git hooks"),
-    (re.compile(r"git\s+config\s+.*(?:core\.hooksPath|core\.autocrlf|safe\.directory)"), "Sandbox escape: git config modification"),
+    (
+        re.compile(r"git\s+config\s+.*(?:core\.hooksPath|core\.autocrlf|safe\.directory)"),
+        "Sandbox escape: git config modification",
+    ),
     (re.compile(r"--dangerously-skip-permissions\b"), "Permission escalation: dangerouslySkipPermissions flag"),
     (re.compile(r"chmod\s+(?:777|a\+rwx)\b"), "Sandbox escape: chmod 777 (world-writable)"),
-    (re.compile(r"(?:disable|bypass|skip)\s*(?:all\s+)?(?:hooks?|guard|safety|protection|sandbox)", re.IGNORECASE), "Sandbox escape: safety bypass language"),
+    (
+        re.compile(r"(?:disable|bypass|skip)\s*(?:all\s+)?(?:hooks?|guard|safety|protection|sandbox)", re.IGNORECASE),
+        "Sandbox escape: safety bypass language",
+    ),
 ]
 
 # Agent impersonation — removed. Too many false positives: legitimate plugins
@@ -250,7 +323,10 @@ def is_ai_facing_markdown(file_path: str) -> bool:
 
     # AI-facing directories — MUST be scanned
     ai_dirs = {
-        "/skills/", "/agents/", "/commands/", "/rules/",
+        "/skills/",
+        "/agents/",
+        "/commands/",
+        "/rules/",
         "/references/",  # Reference files loaded by agents
         "/output-styles/",  # Output style instructions
     }
@@ -297,7 +373,14 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
     # Determine if file is a test file - test files often have mock/example content
     # Handle both absolute (/tests/) and relative (tests/) paths, plus conftest.py
     file_normalized = file_lower.replace("\\", "/")
-    is_test_file = "test_" in file_lower or "_test.py" in file_lower or "/tests/" in file_normalized or file_normalized.startswith("tests/") or "/conftest.py" in file_normalized or file_normalized == "conftest.py"
+    is_test_file = (
+        "test_" in file_lower
+        or "_test.py" in file_lower
+        or "/tests/" in file_normalized
+        or file_normalized.startswith("tests/")
+        or "/conftest.py" in file_normalized
+        or file_normalized == "conftest.py"
+    )
 
     # Determine if file is a validator script - they contain intentional patterns
     is_validator = is_validator_script(file_path)
@@ -399,7 +482,12 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
 
     # Skip path checks for test files - they contain example data
     file_normalized = file_lower.replace("\\", "/")
-    if "test_" in file_lower or "_test.py" in file_lower or "/tests/" in file_normalized or file_normalized.startswith("tests/"):
+    if (
+        "test_" in file_lower
+        or "_test.py" in file_lower
+        or "/tests/" in file_normalized
+        or file_normalized.startswith("tests/")
+    ):
         return 0
 
     for line_num, line in enumerate(lines, start=1):
@@ -449,7 +537,12 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
                         continue
                     # Skip absolute Unix paths in Python string literals
                     # (e.g. help text mentioning shebangs or system bin directories)
-                    if "Absolute Unix" in msg and ("#!/" in line or "help" in stripped.lower() or "epilog" in stripped.lower() or stripped.startswith(("'", '"', "f'", 'f"', "r'", 'r"'))):
+                    if "Absolute Unix" in msg and (
+                        "#!/" in line
+                        or "help" in stripped.lower()
+                        or "epilog" in stripped.lower()
+                        or stripped.startswith(("'", '"', "f'", 'f"', "r'", 'r"'))
+                    ):
                         continue
 
                 report.critical(f"{msg}: {line.strip()[:80]}", file_path, line_num)
@@ -469,7 +562,12 @@ def scan_for_secrets(content: str, file_path: str, report: ValidationReport) -> 
     # Skip test files — they contain intentional example/mock secrets
     # Handle both absolute (/tests/) and relative (tests/) paths
     file_normalized = file_lower.replace("\\", "/")
-    if "test_" in file_lower or "_test.py" in file_lower or "/tests/" in file_normalized or file_normalized.startswith("tests/"):
+    if (
+        "test_" in file_lower
+        or "_test.py" in file_lower
+        or "/tests/" in file_normalized
+        or file_normalized.startswith("tests/")
+    ):
         return 0
 
     # Skip documentation markdown — contains example credentials for illustration
@@ -518,7 +616,12 @@ def scan_for_user_paths(content: str, file_path: str, report: ValidationReport) 
 
     # Skip test files
     file_normalized = file_lower.replace("\\", "/")
-    if "test_" in file_lower or "_test.py" in file_lower or "/tests/" in file_normalized or file_normalized.startswith("tests/"):
+    if (
+        "test_" in file_lower
+        or "_test.py" in file_lower
+        or "/tests/" in file_normalized
+        or file_normalized.startswith("tests/")
+    ):
         return 0
 
     for line_num, line in enumerate(lines, start=1):
@@ -686,7 +789,9 @@ def scan_for_sandbox_escape(content: str, file_path: str, report: ValidationRepo
             if pattern.search(line):
                 # dangerouslySkipPermissions is valid for worktree agents — WARNING only
                 if "dangerouslySkipPermissions" in msg:
-                    report.warning(f"{msg} (valid for worktree agents, verify intent): {stripped[:80]}", file_path, line_num)
+                    report.warning(
+                        f"{msg} (valid for worktree agents, verify intent): {stripped[:80]}", file_path, line_num
+                    )
                 else:
                     report.major(f"{msg}: {stripped[:80]}", file_path, line_num)
                 issues_found += 1
@@ -702,6 +807,7 @@ def check_hook_abuse(plugin_path: Path, report: ValidationReport) -> int:
     issues_found = 0
     try:
         import json as _json
+
         data = _json.loads(hooks_file.read_text(encoding="utf-8"))
         hooks = data.get("hooks", data) if isinstance(data, dict) else {}
 
@@ -720,26 +826,37 @@ def check_hook_abuse(plugin_path: Path, report: ValidationReport) -> int:
                     # PreToolUse hooks sending data externally
                     if event_name == "PreToolUse" and hook_type == "http" and url:
                         if not any(loc in url for loc in ("localhost", "127.0.0.1", "::1")):
-                            report.major(f"Hook abuse: PreToolUse HTTP hook sends to external URL: {url[:60]}", "hooks/hooks.json")
+                            report.major(
+                                f"Hook abuse: PreToolUse HTTP hook sends to external URL: {url[:60]}",
+                                "hooks/hooks.json",
+                            )
                             issues_found += 1
 
                     # PostToolUse hooks sending tool output externally
                     if event_name == "PostToolUse" and hook_type == "http" and url:
                         if not any(loc in url for loc in ("localhost", "127.0.0.1", "::1")):
-                            report.major(f"Hook abuse: PostToolUse HTTP hook may exfiltrate tool output to: {url[:60]}", "hooks/hooks.json")
+                            report.major(
+                                f"Hook abuse: PostToolUse HTTP hook may exfiltrate tool output to: {url[:60]}",
+                                "hooks/hooks.json",
+                            )
                             issues_found += 1
 
                     # Command hooks with suspicious commands
                     if cmd:
                         for sc_pattern, sc_msg in SUPPLY_CHAIN_PATTERNS + DATA_EXFILTRATION_PATTERNS:
                             if sc_pattern.search(cmd):
-                                report.critical(f"Hook abuse ({event_name}): {sc_msg} in hook command", "hooks/hooks.json")
+                                report.critical(
+                                    f"Hook abuse ({event_name}): {sc_msg} in hook command", "hooks/hooks.json"
+                                )
                                 issues_found += 1
 
                     # Excessive timeout (> 1 hour) is suspicious
                     timeout = hook.get("timeout", 0)
                     if isinstance(timeout, (int, float)) and timeout > 3600:
-                        report.warning(f"Hook has excessive timeout ({timeout}s) on {event_name} — may indicate long-running exfiltration", "hooks/hooks.json")
+                        report.warning(
+                            f"Hook has excessive timeout ({timeout}s) on {event_name} — may indicate long-running exfiltration",
+                            "hooks/hooks.json",
+                        )
                         issues_found += 1
 
     except (ValueError, OSError):
@@ -756,6 +873,7 @@ def check_mcp_abuse(plugin_path: Path, report: ValidationReport) -> int:
     issues_found = 0
     try:
         import json as _json
+
         data = _json.loads(mcp_file.read_text(encoding="utf-8"))
         servers = data.get("mcpServers", data) if isinstance(data, dict) else {}
 
@@ -791,6 +909,7 @@ def check_permission_escalation(plugin_path: Path, report: ValidationReport) -> 
     if manifest.exists():
         try:
             import json as _json
+
             data = _json.loads(manifest.read_text(encoding="utf-8"))
             # Check if plugin requests dangerous permission modes
             perm_mode = data.get("permissionMode", "")
@@ -1063,7 +1182,9 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
     """
     # Check if npx is available
     if not shutil.which("npx"):
-        report.warning("cc-audit: npx not found — 100+ additional security rules skipped. Install Node.js to enable: https://nodejs.org/")
+        report.warning(
+            "cc-audit: npx not found — 100+ additional security rules skipped. Install Node.js to enable: https://nodejs.org/"
+        )
         return 0
 
     issues_found = 0
@@ -1086,11 +1207,17 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
     try:
         result = subprocess.run(
             [
-                "npx", "--yes", "@cc-audit/cc-audit", "check",
+                "npx",
+                "--yes",
+                "@cc-audit/cc-audit",
+                "check",
                 str(plugin_path),
-                "-t", "plugin",
-                "--format", "json",
-                "--output", tmp_path,
+                "-t",
+                "plugin",
+                "--format",
+                "json",
+                "--output",
+                tmp_path,
                 "--ci",
                 "--no-telemetry",
             ],
@@ -1297,7 +1424,9 @@ Exit Codes:
     parser.add_argument("-v", "--verbose", action="store_true", help="Show all results including INFO and PASSED")
     parser.add_argument("--json", action="store_true", help="Output results as JSON")
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
-    parser.add_argument("--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout")
+    parser.add_argument(
+        "--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout"
+    )
 
     args = parser.parse_args()
 
@@ -1329,7 +1458,9 @@ Exit Codes:
             print_report_summary(report, "Security Validation Report")
             print_results_by_level(report, verbose=verbose)
 
-        save_report_and_print_summary(report, Path(args.report), "Security Validation", _print_full, args.verbose, plugin_path=args.plugin_path)
+        save_report_and_print_summary(
+            report, Path(args.report), "Security Validation", _print_full, args.verbose, plugin_path=args.plugin_path
+        )
     else:
         print_results_by_level(report, verbose=args.verbose)
         print_report_summary(report, title=f"Security Validation: {plugin_path.name}")

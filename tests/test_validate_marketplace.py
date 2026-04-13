@@ -909,9 +909,7 @@ class TestValidateMarketplaceIntegration:
         critical_and_major = [r for r in report.results if r.level in ("CRITICAL", "MAJOR")]
         # No critical issues from the directory source type itself — the nested plugin may have
         # MAJOR findings (e.g., missing README sections), but the source type must be accepted.
-        source_type_issues = [
-            r for r in critical_and_major if "invalid source type" in r.message.lower()
-        ]
+        source_type_issues = [r for r in critical_and_major if "invalid source type" in r.message.lower()]
         assert not source_type_issues, (
             f"'directory' should be a valid source type, got: {[r.message for r in source_type_issues]}"
         )
@@ -937,10 +935,10 @@ class TestValidateMarketplaceIntegration:
         )
 
         report = validate_marketplace(tmp_path)
-        source_type_issues = [
-            r for r in report.results if "invalid source type" in (r.message or "").lower()
-        ]
-        assert not source_type_issues, f"Shorthand './path' must be accepted, got: {[r.message for r in source_type_issues]}"
+        source_type_issues = [r for r in report.results if "invalid source type" in (r.message or "").lower()]
+        assert not source_type_issues, (
+            f"Shorthand './path' must be accepted, got: {[r.message for r in source_type_issues]}"
+        )
 
     def test_recommend_restructure_fires_on_wshobson_style_marketplace(self, tmp_path):
         """A nested-monorepo marketplace with no tags/CHANGELOG/CI/publish.py and
@@ -963,9 +961,7 @@ class TestValidateMarketplaceIntegration:
             pdir = plugins_dir / name
             pdir.mkdir()
             (pdir / ".claude-plugin").mkdir()
-            (pdir / ".claude-plugin" / "plugin.json").write_text(
-                json.dumps({"name": name, "version": version})
-            )
+            (pdir / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": name, "version": version}))
 
         mp = tmp_path / "marketplace.json"
         mp.write_text(
@@ -994,10 +990,7 @@ class TestValidateMarketplaceIntegration:
 
         report = validate_marketplace(tmp_path)
         arch_warnings = [
-            r
-            for r in report.results
-            if r.category == "architecture"
-            and "nested monorepo" in (r.message or "")
+            r for r in report.results if r.category == "architecture" and "nested monorepo" in (r.message or "")
         ]
         assert len(arch_warnings) >= 1, (
             "Expected a CPV architecture warning for the wshobson-style pattern. "
@@ -1024,9 +1017,7 @@ class TestValidateMarketplaceIntegration:
             pdir = plugins_dir / name
             pdir.mkdir()
             (pdir / ".claude-plugin").mkdir()
-            (pdir / ".claude-plugin" / "plugin.json").write_text(
-                json.dumps({"name": name, "version": "1.0.0"})
-            )
+            (pdir / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": name, "version": "1.0.0"}))
 
         # Add all the discipline-enforcing pieces
         (tmp_path / "CHANGELOG.md").write_text("# Changelog\n\n## [1.0.0]\n")
@@ -1059,8 +1050,7 @@ class TestValidateMarketplaceIntegration:
         report = validate_marketplace(tmp_path)
         arch_warnings = [r for r in report.results if r.category == "architecture"]
         assert not arch_warnings, (
-            f"Clean Layout B should not trigger architecture warnings, got: "
-            f"{[r.message[:100] for r in arch_warnings]}"
+            f"Clean Layout B should not trigger architecture warnings, got: {[r.message[:100] for r in arch_warnings]}"
         )
 
     def test_layout_a_github_source_still_works(self, tmp_path):
@@ -1085,9 +1075,7 @@ class TestValidateMarketplaceIntegration:
         )
 
         report = validate_marketplace(tmp_path)
-        source_type_issues = [
-            r for r in report.results if "invalid source type" in (r.message or "").lower()
-        ]
+        source_type_issues = [r for r in report.results if "invalid source type" in (r.message or "").lower()]
         assert not source_type_issues, f"'github' must be valid, got: {[r.message for r in source_type_issues]}"
 
     def test_marketplace_with_owner_not_object(self, tmp_path):

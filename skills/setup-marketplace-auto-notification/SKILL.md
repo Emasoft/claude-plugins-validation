@@ -11,8 +11,6 @@ tags:
   - github-actions
   - release
 allowed-tools: Read, Write, Edit, Bash(gh:*,git:*,jq:*,yq:*), Glob, Grep, AskUserQuestion
-agent: plugin-creator
-context: fork
 user-invocable: false
 ---
 

@@ -2067,9 +2067,7 @@ def validate_marketplace(marketplace_path: Path) -> ValidationReport:
     # Recommend restructuring when the marketplace looks like a wshobson-style
     # "nested monorepo with no release ceremony" — structurally valid Layout B
     # but missing every discipline-enforcing piece CPV expects.
-    report.results.extend(
-        _recommend_cpv_restructure(marketplace_dir, data, json_path)
-    )
+    report.results.extend(_recommend_cpv_restructure(marketplace_dir, data, json_path))
 
     return report
 
@@ -2119,15 +2117,17 @@ def _recommend_cpv_restructure(
             check=False,
         )
         if tag_check.returncode == 0 and not tag_check.stdout.strip():
-            problems.append((
-                "No git tags",
-                "Users consuming this marketplace can only track main@HEAD. "
-                "If a bad commit lands, everyone who refreshes the marketplace gets it "
-                "immediately with no way to pin or roll back to a known-good state.",
-                "CPV tags the marketplace repo atomically on every release via "
-                "`scripts/publish.py`. Users can pin to a specific tag, and "
-                "`git revert` plus a new patch tag give instant rollback.",
-            ))
+            problems.append(
+                (
+                    "No git tags",
+                    "Users consuming this marketplace can only track main@HEAD. "
+                    "If a bad commit lands, everyone who refreshes the marketplace gets it "
+                    "immediately with no way to pin or roll back to a known-good state.",
+                    "CPV tags the marketplace repo atomically on every release via "
+                    "`scripts/publish.py`. Users can pin to a specific tag, and "
+                    "`git revert` plus a new patch tag give instant rollback.",
+                )
+            )
     except (subprocess.TimeoutExpired, OSError, FileNotFoundError):
         pass
 
@@ -2138,46 +2138,52 @@ def _recommend_cpv_restructure(
         marketplace_dir / "changelog.md",
     ]
     if not any(c.exists() for c in changelog_candidates):
-        problems.append((
-            "No CHANGELOG.md at repo root",
-            "Users have no way to see what changed between versions without "
-            "reading raw commit history. Contributors cannot write meaningful "
-            "release notes because nothing aggregates them. Security-relevant "
-            "fixes get buried in merge commits.",
-            "CPV generates `CHANGELOG.md` automatically at every release via "
-            "git-cliff (`cliff.toml`), parsing conventional-commit messages into "
-            "grouped sections (feat/fix/docs/etc). The changelog lives in-repo "
-            "so `gh release view vX.Y.Z` shows the release notes directly.",
-        ))
+        problems.append(
+            (
+                "No CHANGELOG.md at repo root",
+                "Users have no way to see what changed between versions without "
+                "reading raw commit history. Contributors cannot write meaningful "
+                "release notes because nothing aggregates them. Security-relevant "
+                "fixes get buried in merge commits.",
+                "CPV generates `CHANGELOG.md` automatically at every release via "
+                "git-cliff (`cliff.toml`), parsing conventional-commit messages into "
+                "grouped sections (feat/fix/docs/etc). The changelog lives in-repo "
+                "so `gh release view vX.Y.Z` shows the release notes directly.",
+            )
+        )
 
     # Signal 3: no cliff.toml
     if not (marketplace_dir / "cliff.toml").exists():
-        problems.append((
-            "No cliff.toml (git-cliff configuration)",
-            "Without a cliff.toml, there is no reproducible changelog template. "
-            "Release notes get written by hand (or not at all), leading to "
-            "inconsistent quality and missed changes.",
-            "CPV ships a canonical `cliff.toml` with groupings for feat/fix/docs/"
-            "refactor/test/chore. `scripts/publish.py` invokes git-cliff during "
-            "the release step, so the changelog is always current with zero "
-            "manual effort.",
-        ))
+        problems.append(
+            (
+                "No cliff.toml (git-cliff configuration)",
+                "Without a cliff.toml, there is no reproducible changelog template. "
+                "Release notes get written by hand (or not at all), leading to "
+                "inconsistent quality and missed changes.",
+                "CPV ships a canonical `cliff.toml` with groupings for feat/fix/docs/"
+                "refactor/test/chore. `scripts/publish.py` invokes git-cliff during "
+                "the release step, so the changelog is always current with zero "
+                "manual effort.",
+            )
+        )
 
     # Signal 4: no CI workflows
     workflows_dir = marketplace_dir / ".github" / "workflows"
     has_ci = workflows_dir.exists() and any(workflows_dir.glob("*.yml"))
     if not has_ci:
-        problems.append((
-            "No .github/workflows/ — no automated validation",
-            "Every PR that lands is reviewed by hand. Broken plugin manifests, "
-            "stale version drift, missing `.claude-plugin/plugin.json` files, "
-            "and security issues slip through. The only defence is maintainer "
-            "attention, which does not scale.",
-            "CPV ships a `validate.yml` workflow that runs `validate_plugin.py` "
-            "on every subfolder (Layout B) or on the marketplace root (Layout A), "
-            "plus `ruff`, `mypy`, and `pytest`. PRs that break anything fail CI "
-            "before merge. The pre-push hook runs the same checks locally.",
-        ))
+        problems.append(
+            (
+                "No .github/workflows/ — no automated validation",
+                "Every PR that lands is reviewed by hand. Broken plugin manifests, "
+                "stale version drift, missing `.claude-plugin/plugin.json` files, "
+                "and security issues slip through. The only defence is maintainer "
+                "attention, which does not scale.",
+                "CPV ships a `validate.yml` workflow that runs `validate_plugin.py` "
+                "on every subfolder (Layout B) or on the marketplace root (Layout A), "
+                "plus `ruff`, `mypy`, and `pytest`. PRs that break anything fail CI "
+                "before merge. The pre-push hook runs the same checks locally.",
+            )
+        )
 
     # Signal 5: no publish script
     publish_candidates = [
@@ -2185,17 +2191,19 @@ def _recommend_cpv_restructure(
         marketplace_dir / "publish.py",
     ]
     if not any(c.exists() for c in publish_candidates):
-        problems.append((
-            "No scripts/publish.py for atomic tagged releases",
-            "Version bumps happen as ad-hoc commits, often forgetting to update "
-            "both the marketplace manifest AND the nested plugin.json. Drift bugs "
-            "are common (wshobson's commit 8203fe11 is a real-world example of "
-            "this exact drift being fixed manually).",
-            "CPV's `scripts/publish.py` performs a gated pipeline: lint → test → "
-            "validate → version bump → CHANGELOG regen → commit → tag → push → "
-            "GitHub release. It updates plugin.json and marketplace.json in one "
-            "atomic commit, eliminating drift by construction.",
-        ))
+        problems.append(
+            (
+                "No scripts/publish.py for atomic tagged releases",
+                "Version bumps happen as ad-hoc commits, often forgetting to update "
+                "both the marketplace manifest AND the nested plugin.json. Drift bugs "
+                "are common (wshobson's commit 8203fe11 is a real-world example of "
+                "this exact drift being fixed manually).",
+                "CPV's `scripts/publish.py` performs a gated pipeline: lint → test → "
+                "validate → version bump → CHANGELOG regen → commit → tag → push → "
+                "GitHub release. It updates plugin.json and marketplace.json in one "
+                "atomic commit, eliminating drift by construction.",
+            )
+        )
 
     # Signal 6: mixed authorship across plugin entries
     authors: set[str] = set()
@@ -2210,21 +2218,23 @@ def _recommend_cpv_restructure(
         elif isinstance(author, str):
             authors.add(author.strip().lower())
     if len(authors) > 1:
-        problems.append((
-            f"Mixed authorship across {len(authors)} different authors",
-            "A community monorepo aggregates plugins from multiple authors into "
-            "one repo, mixing their release cadences, code quality, security "
-            "postures, and license terms. Users installing one plugin inherit "
-            "the blast radius of all the others. Review responsibility is "
-            "diffuse and broken plugins rot in place because no single owner "
-            "feels responsible.",
-            "CPV is a single-author workflow: one user publishes all the "
-            "plugins they maintain, with a consistent quality bar. If you want "
-            "to showcase a guest contributor's work, fork their plugin into "
-            "your own repo (Layout A) or copy it into your monorepo with "
-            "attribution (Layout B). Either way, YOU own the release and "
-            "YOU review the code.",
-        ))
+        problems.append(
+            (
+                f"Mixed authorship across {len(authors)} different authors",
+                "A community monorepo aggregates plugins from multiple authors into "
+                "one repo, mixing their release cadences, code quality, security "
+                "postures, and license terms. Users installing one plugin inherit "
+                "the blast radius of all the others. Review responsibility is "
+                "diffuse and broken plugins rot in place because no single owner "
+                "feels responsible.",
+                "CPV is a single-author workflow: one user publishes all the "
+                "plugins they maintain, with a consistent quality bar. If you want "
+                "to showcase a guest contributor's work, fork their plugin into "
+                "your own repo (Layout A) or copy it into your monorepo with "
+                "attribution (Layout B). Either way, YOU own the release and "
+                "YOU review the code.",
+            )
+        )
 
     # Signal 7: plugin versions drift wildly (>3 distinct major.minor across entries)
     versions: set[str] = set()
@@ -2235,19 +2245,21 @@ def _recommend_cpv_restructure(
         if isinstance(v, str) and re.match(r"^\d+\.\d+", v):
             versions.add(".".join(v.split(".")[:2]))
     if len(versions) > 3:
-        problems.append((
-            f"Plugins are at {len(versions)} different major.minor versions",
-            "Independent per-plugin cadences inside a single repo give you "
-            "the downsides of both layouts: one atomic tag does not reflect "
-            "any individual plugin's version (so users can't pin), but plugins "
-            "still share the same git history, CI, and release ceremony (so "
-            "per-plugin issues can't be isolated). The worst of both worlds.",
-            "CPV's Layout A gives every plugin its own repo, its own tags, and "
-            "its own independent version cadence — each plugin can release "
-            "whenever it's ready. CPV's Layout B bumps ALL plugins together "
-            "in lock-step: one repo tag = one coherent snapshot. Pick one; "
-            "don't mix them.",
-        ))
+        problems.append(
+            (
+                f"Plugins are at {len(versions)} different major.minor versions",
+                "Independent per-plugin cadences inside a single repo give you "
+                "the downsides of both layouts: one atomic tag does not reflect "
+                "any individual plugin's version (so users can't pin), but plugins "
+                "still share the same git history, CI, and release ceremony (so "
+                "per-plugin issues can't be isolated). The worst of both worlds.",
+                "CPV's Layout A gives every plugin its own repo, its own tags, and "
+                "its own independent version cadence — each plugin can release "
+                "whenever it's ready. CPV's Layout B bumps ALL plugins together "
+                "in lock-step: one repo tag = one coherent snapshot. Pick one; "
+                "don't mix them.",
+            )
+        )
 
     # If at least 3 signals are present, emit the recommendation
     if len(problems) >= 3:
@@ -2276,12 +2288,8 @@ def _recommend_cpv_restructure(
             "Best when all plugins are tightly coupled and released together."
         )
         msg_lines.append("")
-        msg_lines.append(
-            "TO CONVERT THIS MARKETPLACE AUTOMATICALLY:"
-        )
-        msg_lines.append(
-            "  Run the plugin-fixer agent: /cpv-fix-validation <report.json>"
-        )
+        msg_lines.append("TO CONVERT THIS MARKETPLACE AUTOMATICALLY:")
+        msg_lines.append("  Run the plugin-fixer agent: /cpv-fix-validation <report.json>")
         msg_lines.append(
             "  When it sees an 'architecture' finding of this type, it will "
             "ask which layout you want and perform the conversion: for Layout A, "
@@ -2445,7 +2453,11 @@ Examples:
     early_error = None
     if not marketplace_path.exists():
         early_error = f"Error: {marketplace_path} does not exist"
-    elif marketplace_path.is_dir() and not (marketplace_path / "marketplace.json").exists() and not (marketplace_path / ".claude-plugin" / "marketplace.json").exists():
+    elif (
+        marketplace_path.is_dir()
+        and not (marketplace_path / "marketplace.json").exists()
+        and not (marketplace_path / ".claude-plugin" / "marketplace.json").exists()
+    ):
         early_error = f"Error: No marketplace.json found at {marketplace_path}. Expected marketplace.json at root or in .claude-plugin/"
     elif marketplace_path.is_file() and marketplace_path.name != "marketplace.json":
         early_error = f"Error: {marketplace_path} is not a marketplace.json file"

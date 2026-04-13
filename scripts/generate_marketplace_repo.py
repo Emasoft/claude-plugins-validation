@@ -978,7 +978,7 @@ def generate_marketplace_repo(
     print()
     print("To add more plugins later:")
     print("  Edit .claude-plugin/marketplace.json and add entries to the plugins array.")
-    print("  Each plugin source MUST be: {\"source\": \"github\", \"repo\": \"owner/repo\"}")
+    print('  Each plugin source MUST be: {"source": "github", "repo": "owner/repo"}')
     print("  Then push -- the update-catalog workflow will regenerate README.md.")
     return 0
 
