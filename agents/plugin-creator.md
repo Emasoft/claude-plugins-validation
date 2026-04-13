@@ -14,6 +14,7 @@ skills:
   - plugin-management
   - setup-plugin-repo
   - setup-github-marketplace
+  - setup-marketplace-auto-notification
   - publish-to-marketplace
 ---
 
