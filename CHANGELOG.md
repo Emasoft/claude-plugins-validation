@@ -2,6 +2,13 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.12.24] - 2026-04-13
+
+### Miscellaneous Tasks
+
+- Bump softprops/action-gh-release to v3.0.0 (Node 24 runtime)
+- Update uv.lock
+
 ## [2.12.23] - 2026-04-13
 
 ### Bug Fixes
