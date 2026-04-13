@@ -49,10 +49,11 @@ from cpv_validation_common import (
 
 @dataclass
 class MarketplaceValidationResult(BaseValidationResult):
-    """Extended validation result with marketplace-specific fields."""
+    """Marketplace validation result.
 
-    category: str = ""
-    suggestion: str | None = None
+    Inherits `category` and `suggestion` fields from the canonical base class.
+    Provides legacy property aliases (`file_path`, `line_number`).
+    """
 
     @property
     def file_path(self) -> str | None:

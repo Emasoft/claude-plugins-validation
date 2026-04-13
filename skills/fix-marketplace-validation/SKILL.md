@@ -4,10 +4,8 @@ description: >
   Maps marketplace validation errors to fix reference files. Loaded by marketplace-fixer agent.
   Use when a marketplace validation report has CRITICAL/MAJOR/MINOR/NIT findings from
   validate_marketplace.py or validate_marketplace_pipeline.py.
-agent: marketplace-fixer
-context: fork
-user-invocable: false
 allowed-tools: Read, Edit, Bash(git:*,gh:*,jq:*,uv:*), Glob, Grep
+user-invocable: false
 ---
 
 # Fix Marketplace Validation — Error-to-Fix Index

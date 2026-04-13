@@ -10,7 +10,6 @@ skills:
   - fix-validation
   - canonical-pipeline
   - plugin-validation-skill
-  - migrate-marketplace-architecture
 ---
 
 # Plugin Fixer Agent
@@ -52,51 +51,31 @@ You receive a **report file path** (e.g., `docs_dev/validate_plugin_20260306.md`
 
 ## Fix Guides
 
-The `fix-validation` skill (loaded via frontmatter) provides two split error-to-fix indexes in `skills/fix-validation/references/`. Choose the index based on which validator produced the report:
+The `fix-validation` skill (loaded via frontmatter) provides `skills/fix-validation/references/plugin-error-index.md` — the per-error fix guide for plugin-level validators (`validate_plugin.py`, `validate_skill*.py`, `validate_hook.py`, `validate_agent.py`, `validate_command.py`, `validate_mcp.py`, `validate_lsp.py`, `validate_security.py`, `validate_rules.py`, `validate_xref.py`, `validate_settings_marketplace.py`, `validate_documentation.py`, `validate_encoding.py`, `validate_enterprise.py`, `validate_scoring.py`).
 
-| Index file | Validators covered |
-|------------|-------------------|
-| `plugin-error-index.md` | `validate_plugin.py`, `validate_skill*.py`, `validate_hook.py`, `validate_agent.py`, `validate_command.py`, `validate_mcp.py`, `validate_lsp.py`, `validate_security.py`, `validate_rules.py`, `validate_xref.py`, `validate_settings_marketplace.py`, `validate_documentation.py`, `validate_encoding.py`, `validate_enterprise.py`, `validate_scoring.py` |
-| `marketplace-error-index.md` | `validate_marketplace.py`, `validate_marketplace_pipeline.py` |
+Read only the relevant section of the index, then open the specific fix reference file it points to. Never load entire reference files.
 
-Read only the relevant index section, then open the specific fix reference file it points to. Never load entire reference files.
+For marketplace-level validators (`validate_marketplace.py`, `validate_marketplace_pipeline.py`), see the **Workflow Routing** section below — those reports must be handed to the marketplace-fixer agent.
 
 ## Workflow Routing
 
+This agent fixes **plugin-level** issues only. It does NOT handle marketplace fixes or architectural migrations.
+
 Route each finding based on its type:
 
-- **Mechanical fixes** (CRITICAL/MAJOR/MINOR/NIT on individual files — missing fields, malformed JSON, typos, encoding issues, stale references, missing hooks) → use the `fix-validation` skill with the appropriate split index (plugin vs marketplace) and apply Edit operations per the fix guide.
-- **Architectural migrations** (any finding with `category: architecture` from `validate_marketplace.py`, OR an explicit user request to convert a marketplace layout) → hand off to the `migrate-marketplace-architecture` skill. That skill requires extensive `AskUserQuestion` interaction to choose between Layout A and Layout B and gather authorship/versioning preferences. **Do NOT proceed with a migration without first collecting the user's preferences** — architectural changes are irreversible in practice and must be user-directed.
+- **Plugin mechanical fixes** (CRITICAL/MAJOR/MINOR/NIT on individual plugin files — missing fields, malformed JSON, typos, encoding issues, stale references, missing hooks, plugin metadata) → use the `fix-validation` skill and apply Edit operations per the fix guide.
+- **Marketplace findings** (any report from `validate_marketplace.py` or `validate_marketplace_pipeline.py`, or any finding with `category: architecture`) → **stop and redirect the user to the marketplace-fixer agent**:
+  > "This report contains marketplace-level findings. I only fix plugin issues. Please invoke the **marketplace-fixer** agent instead (via `/cpv-fix-marketplace-validation <report>`). That agent handles mechanical marketplace fixes AND architectural migrations (Layout A ↔ Layout B conversion) with full interactive interrogation."
+
+Do NOT attempt to fix marketplace issues or run migrations from this agent — those are owned by marketplace-fixer.
 
 ## Pipeline Infrastructure
 
-For issues involving CI/CD workflows, git hooks, publish scripts, or marketplace configuration:
+For plugin-level issues involving CI/CD workflows, git hooks, or publish scripts:
 - **Plugin repo issues** → consult `canonical-pipeline` skill for standard files, workflows, and hooks
 - **Compiled binary issues** → consult `canonical-pipeline` skill's binary plugins section for cross-compilation targets
-- **Marketplace issues** → consult `canonical-pipeline` skill's marketplace standard section
 
-## Marketplace Structure Policy — Two Layouts, Convertible
-
-CPV supports exactly two marketplace layouts. This agent must be fluent in both AND must be able to convert from one to the other (or from a non-CPV pattern into either one).
-
-- **Layout A (hub-and-spoke)**: one marketplace repo + N independent plugin repos. Each plugin has its own git, versions, tags, CHANGELOG, CI, releases. `marketplace.json` entries use `{"source": "github", "repo": "owner/name"}`.
-- **Layout B (nested single-repo)**: one marketplace repo containing all plugins as subfolders under `plugins/<name>/`. Each subfolder has its own `.claude-plugin/plugin.json` with a `version`. The marketplace repo has ONE `scripts/publish.py`, ONE `cliff.toml`, ONE aggregated `CHANGELOG.md`, ONE shared CI workflow running `validate_plugin.py` on every subfolder, and ONE atomic tag per release.
-
-CPV does NOT support hybrid layouts, community monorepos, mixed-authorship repos, or the `git-subdir` source type for plugin entries. If you see any of these patterns, they are repairable — see the conversion section below.
-
-### Converting an architecture-category finding
-
-When the report contains a `category: architecture` finding (emitted by `validate_marketplace.py::_recommend_cpv_restructure`), the marketplace matches the "community nested monorepo" anti-pattern and can be auto-converted — but this is **not a mechanical fix**. Hand off to the `migrate-marketplace-architecture` skill (loaded via frontmatter).
-
-That skill owns the full conversion procedure: parsing the architecture signals, asking the user to choose Layout A vs Layout B via `AskUserQuestion`, the git-subtree-split sequence for Layout A, the scaffold sequence for Layout B, authorship consolidation, tagging, and atomic commits. Do not re-implement any of it here, and do not start the migration without first invoking that skill.
-
-### When the user asks for a pattern CPV does not support
-
-If the user asks for a mixed layout, git-subdir, or a community monorepo, politely decline and offer Layout A or Layout B instead:
-
-> "CPV supports exactly two layouts: A (hub-and-spoke) and B (nested single-repo, with full release ceremony). Mixed layouts give you the downsides of both without the benefits of either. Can I scaffold a clean Layout A or Layout B instead?"
-
-Do NOT create alternative marketplace layouts, even if the user insists. Offer to explain the rationale from `skills/create-plugin/references/marketplace-layouts.md` (the "Why CPV does not use git-subdir" and "Encountering a non-CPV marketplace" sections) instead.
+Marketplace-level CI/CD (marketplace workflow files, auto-notification receivers, registration checks) is owned by the **marketplace-fixer** agent.
 
 ## Rules
 

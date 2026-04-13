@@ -296,10 +296,10 @@ class ComprehensiveValidationResult(BaseValidationResult):
     """Extended validation result with category and scoring.
 
     Extends the canonical ValidationResult (which has level, message, file, line,
-    phase, fixable, fix_id) with category grouping and multi-scale scoring.
+    phase, fixable, fix_id, category, suggestion) with multi-scale scoring.
+    `category` is inherited from the base class (default "").
     """
 
-    category: str | None = None  # For grouping in reports
     score: int = 0  # 0-3 multi-scale score (0=missing, 1=inadequate, 2=adequate, 3=excellent)
 
 
@@ -349,7 +349,7 @@ class ComprehensiveSkillReport(BaseValidationReport):
             phase=phase,
             fixable=fixable,
             fix_id=fix_id,
-            category=category,
+            category=category or "",
             score=score,
         )
         self.results.append(result)

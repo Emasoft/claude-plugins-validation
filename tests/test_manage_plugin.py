@@ -124,14 +124,17 @@ class TestGitignorePatternToRe:
         assert regex is not None
         regex2, neg2 = mp._gitignore_pattern_to_re("src/build")
         assert neg2 is False
+        assert regex2 is not None
         assert regex2.pattern.startswith("^")
 
     def test_question_mark_and_bracket(self):
         """? matches one char; [abc] character class works."""
         regex, _ = mp._gitignore_pattern_to_re("file?.txt")
+        assert regex is not None
         assert regex.search("fileA.txt")
         assert not regex.search("file.txt")
         regex2, _ = mp._gitignore_pattern_to_re("[abc].txt")
+        assert regex2 is not None
         assert regex2.search("a.txt")
         assert not regex2.search("d.txt")
 

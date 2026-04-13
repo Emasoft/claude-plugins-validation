@@ -175,7 +175,9 @@ class TestCommandValidationReportToDict:
         d = report.to_dict()
         assert d["command_path"] == "/some/path/cmd.md"
         assert "results" in d
-        assert len(d["results"]) == 2
+        results = d["results"]
+        assert isinstance(results, list)
+        assert len(results) == 2
 
 
 class TestParseFrontmatterEdgeCases:
