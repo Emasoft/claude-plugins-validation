@@ -360,7 +360,7 @@ on:
 
 jobs:
   validate:
-    name: Validate marketplace (+ nested plugins if Layout B)
+    name: Validate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
