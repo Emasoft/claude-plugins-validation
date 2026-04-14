@@ -1,0 +1,74 @@
+# Bot auto-merge — automation layer on top of the cpv-branch-rules ruleset.
+#
+# WHY THIS EXISTS
+# ---------------
+# The repository's branch protection ruleset (id 15066843, applied via
+# `cpv-setup-branch-rules`) requires every PR to master to pass the three
+# CI checks (Lint, Validate, Test) before it can be merged. That rule is
+# enforced server-side and applies to humans AND bots equally — including
+# dependabot, which therefore CANNOT push directly to master.
+#
+# Without automation, every dependabot PR would need a human to click
+# "Merge" once the checks go green. That is fine for occasional manual
+# review of major version bumps but tedious for routine patch/minor
+# updates.
+#
+# This workflow closes that gap: when a trusted bot opens a PR, the job
+# enables GitHub's native auto-merge on the PR. The merge is QUEUED — it
+# does NOT bypass any gate. GitHub itself waits for every required status
+# check (Lint / Validate / Test) and only then performs the squash merge.
+# If any check fails, the PR stays open and the merge is not performed —
+# the user can then decide whether to intervene or close the PR.
+#
+# The result is exactly the requested behaviour:
+#
+#   bot pushes change → CI runs → if green, merged; if red, blocked.
+#
+# Branch protection is preserved at full strength. The auto-merge job is
+# a cheap orchestrator that never touches the code.
+#
+# SECURITY NOTES
+# --------------
+# - Restricted to a hardcoded allowlist of trusted bot logins. Random
+#   bots cannot trigger the auto-merge path even if they obtain push
+#   access to a fork.
+# - Uses the default ``GITHUB_TOKEN`` with explicit scopes — no PAT, no
+#   long-lived secret. Dependabot PRs run with read-only tokens by
+#   default, so we set ``permissions:`` at the workflow level to grant
+#   ``pull-requests: write`` and ``contents: write`` (sufficient for
+#   ``gh pr merge --auto`` and nothing more).
+# - The job NEVER checks out the PR's code, so the bot author cannot
+#   exfiltrate secrets via a malicious workflow file in the PR.
+# - The merge mode is ``--squash`` so the bot's intermediate commits
+#   collapse into one well-formed commit on master, preserving git-cliff
+#   conventional-commit changelog generation.
+
+name: Bot Auto-Merge
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  enable-auto-merge:
+    name: Enable auto-merge for trusted bot PRs
+    runs-on: ubuntu-latest
+    # Allowlist of trusted bot logins. Add new bots here as needed —
+    # never expand to a wildcard / "any bot" check, because forks can
+    # impersonate arbitrary user-supplied actor names on workflow runs
+    # initiated from PRs.
+    if: >-
+      contains(fromJSON('[
+        "dependabot[bot]"
+      ]'), github.actor)
+    steps:
+      - name: Enable auto-merge (squash) on the PR
+        run: |
+          gh pr merge --auto --squash --delete-branch "${PR_URL}"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
