@@ -9,7 +9,10 @@ Create or update the `cpv-branch-rules` ruleset on the target repo so that CI mu
 
 ## What the ruleset enforces
 
-- **Required status checks**: `CI / Lint`, `CI / Validate`, `CI / Test` must all pass
+- **Required status checks** (auto-detected from repo type):
+  - **plugin repos**: `CI / Lint`, `CI / Validate`, `CI / Test` (from the consolidated `ci.yml`)
+  - **marketplace repos**: `Marketplace Validation / Validate` (from `validate.yml`)
+  - Override either with `--check-context <name>` (repeatable)
 - **Block deletion**: the default branch cannot be deleted
 - **Block force-push**: non-fast-forward pushes rejected
 - **Require PR**: every change goes through a pull request (but **no** manual approval required by default)

@@ -44,7 +44,7 @@ A fully configured plugin repository with:
 - Plugin manifest (`plugin.json`) and project config
 - CI/CD workflows for lint, validate, test, release, and marketplace notification
 - Pre-push hook running `publish.py --gate` (4-gate quality enforcement)
-- 10-stage release pipeline via `publish.py --patch/--minor/--major`
+- 11-stage release pipeline via `publish.py` (auto-bump via git-cliff; `--patch`/`--minor`/`--major` override the auto-detection)
 
 ## Error Handling
 

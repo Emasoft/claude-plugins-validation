@@ -186,6 +186,44 @@ def default_check_contexts_for(repo_type: str) -> list[str]:
     return DEFAULT_PLUGIN_CHECK_CONTEXTS[:]
 
 
+def fetch_latest_check_contexts(owner: str, repo: str) -> list[str]:
+    """Return check contexts actually reported on the target repo's default branch.
+
+    Queries `/repos/{owner}/{repo}/commits/HEAD/check-runs` and extracts the
+    distinct check-run names. The names returned by that endpoint already
+    match the 'workflow_name / job_name' format that the ruleset
+    required_status_checks rule expects.
+
+    Returns an empty list when:
+      - no check-runs have reported yet (fresh repo, pre-first-CI)
+      - the API call fails or the response shape is unexpected
+      - the gh token lacks the checks:read scope on the repo
+
+    The caller is expected to fall back to detection-based defaults in
+    those cases. This query is purely a safety net that rescues existing
+    repos whose workflow shape pre-dates the consolidation (so the
+    hardcoded defaults from default_check_contexts_for may not match).
+    """
+    result = run(
+        [
+            "gh",
+            "api",
+            f"repos/{owner}/{repo}/commits/HEAD/check-runs",
+            "--jq",
+            ".check_runs[].name",
+        ],
+        check=False,
+    )
+    if result.returncode != 0:
+        return []
+    names: list[str] = []
+    for line in result.stdout.splitlines():
+        name = line.strip()
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
 # ── Ruleset operations ────────────────────────────────────────────────────
 
 @dataclass
@@ -515,20 +553,47 @@ def main() -> int:
     if args.list_apps:
         return cmd_list_apps(owner, repo)
 
-    # Pick default check contexts based on detected repo type. User-supplied
-    # --check-context flags always win.
+    # Pick default check contexts. User-supplied --check-context flags always
+    # win. Otherwise use the hardcoded defaults from detect_repo_type().
+    #
+    # Note: we intentionally do NOT use the live check-runs reported by
+    # `gh api /commits/HEAD/check-runs` as authoritative, because:
+    #   1. On a fresh repo, no check-runs exist yet
+    #   2. Check-run *names* and ruleset *contexts* aren't always the same
+    #      (a multi-job workflow can report check-runs as bare job names on
+    #      the API while the ruleset requires `workflow_name / job_name`)
+    #   3. Stale workflows (e.g. Dependabot runs on main) pollute the name
+    #      list with contexts that have nothing to do with CI validation
+    # For dry-runs we print the live check-run names as a diagnostic so the
+    # user can sanity-check that the hardcoded defaults match their actual CI.
     if args.check_context:
         check_contexts = args.check_context
-        repo_type_for_display = "user-specified"
+        sys.stderr.write(
+            f"Using user-specified check contexts: {', '.join(check_contexts)}\n"
+        )
     else:
         repo_type = detect_repo_type(owner, repo)
         check_contexts = default_check_contexts_for(repo_type)
-        repo_type_for_display = repo_type
         sys.stderr.write(
             f"Detected repo type: {repo_type} "
             f"(defaults: {', '.join(check_contexts)})\n"
         )
-    _ = repo_type_for_display  # reserved for future --verbose output
+        if args.dry_run:
+            live = fetch_latest_check_contexts(owner, repo)
+            if live:
+                sys.stderr.write(
+                    f"  For reference, check-runs currently reported on HEAD: "
+                    f"{', '.join(live)}\n"
+                )
+                sys.stderr.write(
+                    "  If these differ from the defaults above, pass "
+                    "--check-context explicitly for each name you actually need.\n"
+                )
+            else:
+                sys.stderr.write(
+                    "  No check-runs reported on HEAD yet — the first CI run "
+                    "must complete before the ruleset can be enforced.\n"
+                )
 
     # Fetch CPV-managed ruleset (if any) — update in place to preserve history
     existing = fetch_existing_ruleset(owner, repo)
