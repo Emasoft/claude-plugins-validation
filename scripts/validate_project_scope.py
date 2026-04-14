@@ -52,6 +52,15 @@ Security invariants preserved by this module (see aegis audit):
 - All parse-error messages use ``type(exc).__name__`` only, never
   ``str(exc)`` (avoids leaking file contents).
 
+This validator is a **single-shot, single-threaded** offline tool. The
+``exists()`` → ``read_text()`` sequence in each helper is a benign TOCTOU
+window: an attacker who can swap files mid-run already controls the
+validation outcome by virtue of owning the project tree. The reported
+findings reflect the file state at read time, which may not match later
+state — that is intentional and acceptable for an ad-hoc validator
+(aegis INFO-1). Do not call these helpers from a background worker or a
+long-running service without first adding a locking layer.
+
 Exit codes follow the CPV convention:
 
 - 0: no blocking issues
