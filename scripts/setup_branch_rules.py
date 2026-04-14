@@ -53,11 +53,25 @@ from dataclasses import dataclass
 
 # Status check contexts emitted by the consolidated CI workflow (ci.yml).
 # Format: "<workflow_name> / <job_display_name>"
-DEFAULT_CHECK_CONTEXTS: list[str] = [
+#
+# Plugin repos emit three checks from the three parallel jobs in ci.yml.
+# Marketplace repos emit a single check from the one validate job in
+# validate.yml (different workflow because marketplaces don't run pytest or
+# lint — they only validate marketplace.json + nested plugin wiring).
+#
+# The script auto-detects which shape the target repo is via detect_repo_type()
+# and picks the right default list. User-provided --check-context flags
+# override both defaults.
+DEFAULT_PLUGIN_CHECK_CONTEXTS: list[str] = [
     "CI / Lint",
     "CI / Validate",
     "CI / Test",
 ]
+DEFAULT_MARKETPLACE_CHECK_CONTEXTS: list[str] = [
+    "Marketplace Validation / Validate",
+]
+# Back-compat alias for tests written against the pre-split name.
+DEFAULT_CHECK_CONTEXTS = DEFAULT_PLUGIN_CHECK_CONTEXTS
 
 # Well-known GitHub App IDs that CPV considers trusted by default. These are
 # the apps that should bypass the PR review requirement so routine bot PRs
@@ -135,6 +149,41 @@ def parse_repo_slug(slug: str) -> tuple[str, str]:
     if not owner or not repo:
         raise SystemExit(f"ERROR: repo slug must be OWNER/REPO, got '{slug}'")
     return owner, repo
+
+
+def detect_repo_type(owner: str, repo: str) -> str:
+    """Probe a GitHub repo for a plugin.json / marketplace.json manifest.
+
+    Returns:
+        "plugin"      — if .claude-plugin/plugin.json exists on the default branch
+        "marketplace" — if .claude-plugin/marketplace.json exists on the default branch
+        "unknown"     — neither found, or the repo is not reachable
+
+    The script uses this to pick the right default set of check contexts. Users
+    can always override with --check-context so detection failures are
+    recoverable without editing the script.
+    """
+    plugin_probe = run(
+        ["gh", "api", f"repos/{owner}/{repo}/contents/.claude-plugin/plugin.json"],
+        check=False,
+    )
+    if plugin_probe.returncode == 0:
+        return "plugin"
+    marketplace_probe = run(
+        ["gh", "api", f"repos/{owner}/{repo}/contents/.claude-plugin/marketplace.json"],
+        check=False,
+    )
+    if marketplace_probe.returncode == 0:
+        return "marketplace"
+    return "unknown"
+
+
+def default_check_contexts_for(repo_type: str) -> list[str]:
+    """Return the default required check contexts for the given repo type."""
+    if repo_type == "marketplace":
+        return DEFAULT_MARKETPLACE_CHECK_CONTEXTS[:]
+    # plugin or unknown — default to plugin (the common case)
+    return DEFAULT_PLUGIN_CHECK_CONTEXTS[:]
 
 
 # ── Ruleset operations ────────────────────────────────────────────────────
@@ -464,7 +513,20 @@ def main() -> int:
     if args.list_apps:
         return cmd_list_apps(owner, repo)
 
-    check_contexts = args.check_context or DEFAULT_CHECK_CONTEXTS[:]
+    # Pick default check contexts based on detected repo type. User-supplied
+    # --check-context flags always win.
+    if args.check_context:
+        check_contexts = args.check_context
+        repo_type_for_display = "user-specified"
+    else:
+        repo_type = detect_repo_type(owner, repo)
+        check_contexts = default_check_contexts_for(repo_type)
+        repo_type_for_display = repo_type
+        sys.stderr.write(
+            f"Detected repo type: {repo_type} "
+            f"(defaults: {', '.join(check_contexts)})\n"
+        )
+    _ = repo_type_for_display  # reserved for future --verbose output
 
     # Fetch CPV-managed ruleset (if any) — update in place to preserve history
     existing = fetch_existing_ruleset(owner, repo)

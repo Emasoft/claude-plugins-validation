@@ -583,10 +583,15 @@ def gen_publish_py(p: PluginParams) -> str:
 """Unified publish pipeline: bypass-guard -> lint -> validate (remote CPV) -> test -> bump -> badge -> changelog -> commit -> push -> release.
 
 Modes:
-  --gate           Pre-push gate: orchestrator check + lint + validate + tests
-                   only (no bump/push). Called by git-hooks/pre-push automatically.
-  --install-hook   Install git-hooks/pre-push into .git/hooks/ and set core.hooksPath.
-  --patch/--minor/--major  Full release pipeline (10 stages, fail-fast).
+  --gate                  Pre-push gate: orchestrator check + lint + validate + tests
+                          only (no bump/push). Called by git-hooks/pre-push automatically.
+  --install-hook          Install git-hooks/pre-push into .git/hooks/ and set core.hooksPath.
+  --install-branch-rules  Apply the cpv-branch-rules GitHub ruleset to the origin
+                          (server-side CI enforcement — run once after first push).
+  (no flag)               Full release pipeline (11 stages, fail-fast). The bump type
+                          is AUTO-DETECTED via `git-cliff --bumped-version` from the
+                          conventional commits on HEAD.
+  --patch/--minor/--major Force a specific bump type (overrides auto-detection).
 
 Pipeline stages (all fail-fast — any non-zero exit aborts):
    0. Bypass guard — reject CPV_SKIP_*, SKIP_*, NO_VERIFY env vars
@@ -615,12 +620,14 @@ Gate stages (--gate mode, called by pre-push hook):
    G4. Tests (pytest)
 
 Usage:
+    uv run python scripts/publish.py                      # auto-bump from git-cliff
     uv run python scripts/publish.py --gate
     uv run python scripts/publish.py --install-hook
-    uv run python scripts/publish.py --patch
-    uv run python scripts/publish.py --minor
-    uv run python scripts/publish.py --major
-    uv run python scripts/publish.py --patch --dry-run
+    uv run python scripts/publish.py --install-branch-rules
+    uv run python scripts/publish.py --patch              # force patch
+    uv run python scripts/publish.py --minor              # force minor
+    uv run python scripts/publish.py --major              # force major
+    uv run python scripts/publish.py --dry-run            # preview (auto-bump)
 
 Cornerstone rule: a plugin CANNOT be pushed unless validation passes with
 0 issues (WARNING allowed). There are no exceptions and no bypass flags.
@@ -826,7 +833,7 @@ def do_bump(root: Path, new_ver: str, dry_run: bool = False) -> bool:
 
 def install_hook(root: Path) -> int:
     """Copy git-hooks/pre-push to .git/hooks/pre-push and set core.hooksPath."""
-    cprint(f"\n{BOLD}Installing git hooks...{NC}")
+    cprint(f"\\n{BOLD}Installing git hooks...{NC}")
     source = root / "git-hooks" / "pre-push"
     if not source.is_file():
         cprint(f"  {RED}git-hooks/pre-push not found{NC}")
@@ -845,6 +852,76 @@ def install_hook(root: Path) -> int:
     subprocess.run(["git", "config", "core.hooksPath", "git-hooks"],
                    cwd=str(root), check=False)
     cprint(f"  {GREEN}Set git config core.hooksPath = git-hooks{NC}")
+    return 0
+
+
+def _get_origin_slug(root: Path) -> str | None:
+    """Return OWNER/REPO parsed from the current repo's origin remote, or None."""
+    try:
+        r = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            capture_output=True, text=True, cwd=str(root), check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0 or not r.stdout.strip():
+        return None
+    url = r.stdout.strip()
+    # Handle git@github.com:OWNER/REPO.git and https://github.com/OWNER/REPO.git
+    if url.startswith("git@"):
+        _, _, path = url.partition(":")
+    elif "//" in url:
+        _, _, path = url.partition("//")
+        # path is now "github.com/OWNER/REPO.git"
+        path = path.split("/", 1)[1] if "/" in path else ""
+    else:
+        return None
+    if path.endswith(".git"):
+        path = path[:-4]
+    parts = path.strip("/").split("/")
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        return None
+    return f"{parts[0]}/{parts[1]}"
+
+
+def install_branch_rules(root: Path) -> int:
+    """Apply the cpv-branch-rules ruleset to the repo's GitHub origin.
+
+    Auto-detects the OWNER/REPO slug from `git config remote.origin.url` and
+    shells out to `uvx cpv-setup-branch-rules` so downstream plugins do not
+    need to vendor setup_branch_rules.py locally. This is the server-side
+    gate that enforces CI as a required status check — the local pre-push
+    hook alone is bypassable with `git push --no-verify`, but a ruleset is
+    enforced by GitHub itself.
+    """
+    cprint(f"\\n{BOLD}Installing branch-protection ruleset...{NC}")
+    slug = _get_origin_slug(root)
+    if slug is None:
+        cprint(f"  {RED}Could not read origin remote URL — skipping.{NC}")
+        cprint(f"  {YELLOW}Set `git remote add origin <url>` first, then retry.{NC}")
+        return 1
+    cprint(f"  Target repo: {slug}")
+    try:
+        r = subprocess.run(
+            [
+                "uvx",
+                "--from",
+                "git+https://github.com/Emasoft/claude-plugins-validation",
+                "--with",
+                "pyyaml",
+                "cpv-setup-branch-rules",
+                slug,
+            ],
+            cwd=str(root),
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        cprint(f"  {RED}uvx call failed: {exc}{NC}")
+        return 1
+    if r.returncode != 0:
+        cprint(f"  {RED}cpv-setup-branch-rules exited with code {r.returncode}{NC}")
+        return r.returncode
+    cprint(f"  {GREEN}Branch rules applied to {slug}.{NC}")
     return 0
 
 
@@ -1445,6 +1522,60 @@ def stage_update_badges(root: Path, old_ver: str, new_ver: str, dry_run: bool) -
     readme.write_text(badge_re.sub(new_badge, content, count=1), encoding="utf-8")
     cprint(f"  {GREEN}Updated README badge (was {found}, now {new_badge}){NC}")
 
+def detect_bump_type(root: Path) -> str:
+    """Auto-detect the next bump type from conventional commits via git-cliff.
+
+    Runs `git-cliff --bumped-version` and compares the predicted version to
+    the current one to determine major/minor/patch. Falls back to 'patch' on
+    any failure (git-cliff missing, repo empty, parse error) so the cornerstone
+    rule — every push is a bump — is never violated.
+
+    Conventional commit mapping (git-cliff defaults):
+      feat:                 -> minor
+      fix:/perf:/refactor:  -> patch
+      BREAKING CHANGE / !   -> major
+    """
+    cliff_bin = shutil.which("git-cliff")
+    if cliff_bin is None:
+        cprint(f"{YELLOW}git-cliff not installed — auto-bump falls back to 'patch'.{NC}")
+        return "patch"
+    current = get_current_version(root)
+    if not current:
+        cprint(f"{YELLOW}Cannot read current version for auto-bump — falling back to 'patch'.{NC}")
+        return "patch"
+    try:
+        r = subprocess.run(
+            [cliff_bin, "--bumped-version"],
+            capture_output=True,
+            text=True,
+            cwd=str(root),
+            check=False,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "patch"
+    if r.returncode != 0:
+        return "patch"
+    out = r.stdout.strip().splitlines()[-1] if r.stdout.strip() else ""
+    bumped = out.lstrip("v").strip()
+    if not bumped or bumped == current:
+        return "patch"
+    try:
+        cur = [int(p) for p in current.split(".")[:3]]
+        nxt = [int(p) for p in bumped.split(".")[:3]]
+        while len(cur) < 3:
+            cur.append(0)
+        while len(nxt) < 3:
+            nxt.append(0)
+    except ValueError:
+        return "patch"
+    if nxt[0] > cur[0]:
+        return "major"
+    if nxt[1] > cur[1]:
+        return "minor"
+    return "patch"
+
+
 def stage_changelog(root: Path, dry_run: bool) -> None:
     """Step 8: Generate changelog with git-cliff."""
     cprint(f"\n{BOLD}[9/11] Generating changelog...{NC}")
@@ -1505,18 +1636,25 @@ def main() -> int:
         description="Unified publish pipeline for Claude Code plugins.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    # Mutually exclusive: --gate / --install-hook / --patch/--minor/--major
-    mode_group = parser.add_mutually_exclusive_group(required=True)
+    # Mutually exclusive modes: side-modes (--gate / --install-hook /
+    # --install-branch-rules) are distinct entry points; --patch/--minor/--major
+    # are OPTIONAL overrides for the auto-bump default. Calling publish.py with
+    # no flags runs the full publish pipeline with an auto-detected bump type.
+    mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument("--gate", action="store_true",
                             help="Pre-push gate mode: lint + validate + tests only (no bump/push)")
     mode_group.add_argument("--install-hook", action="store_true",
                             help="Install pre-push hook into .git/hooks/ and set core.hooksPath")
+    mode_group.add_argument("--install-branch-rules", action="store_true",
+                            dest="install_branch_rules",
+                            help="Apply the cpv-branch-rules ruleset to the GitHub origin "
+                                 "(enforces CI as a required status check — the server-side gate)")
     mode_group.add_argument("--patch", action="store_const", dest="bump", const="patch",
-                            help="Bump patch version and publish")
+                            help="Force a patch bump (override auto-detection)")
     mode_group.add_argument("--minor", action="store_const", dest="bump", const="minor",
-                            help="Bump minor version and publish")
+                            help="Force a minor bump (override auto-detection)")
     mode_group.add_argument("--major", action="store_const", dest="bump", const="major",
-                            help="Bump major version and publish")
+                            help="Force a major bump (override auto-detection)")
     parser.add_argument("--dry-run", action="store_true", help="Preview only, no changes")
     # NOTE: --skip-tests was intentionally removed. The cornerstone rule is that
     # every CPV plugin MUST pass validation with 0 issues (WARNING allowed) before
@@ -1529,17 +1667,28 @@ def main() -> int:
     if args.install_hook:
         return install_hook(root)
 
+    # --install-branch-rules mode: apply the server-side GitHub ruleset
+    if args.install_branch_rules:
+        return install_branch_rules(root)
+
     # --gate mode: run quality checks only (called by pre-push hook)
     if args.gate:
         return run_gate(root)
 
-    # Full publish pipeline (--patch/--minor/--major)
+    # Full publish pipeline — auto-detect bump type unless user forced one.
     current = get_current_version(root)
     if not current:
         cprint(f"{RED}Cannot read version from .claude-plugin/plugin.json{NC}")
         return 1
 
-    new_ver = bump_semver(current, args.bump)
+    if args.bump is None:
+        bump_type = detect_bump_type(root)
+        cprint(f"{BLUE}Bump type: {bump_type} (auto-detected from git-cliff){NC}")
+    else:
+        bump_type = args.bump
+        cprint(f"{BLUE}Bump type: {bump_type} (forced via --{bump_type}){NC}")
+
+    new_ver = bump_semver(current, bump_type)
     if not new_ver:
         cprint(f"{RED}Cannot parse current version: {current}{NC}")
         return 1
@@ -2259,6 +2408,9 @@ Examples:
         print(f"  uv venv --python {params.python_version} && source .venv/bin/activate")
         print("  uv pip install -e .")
         print("  uv run python scripts/setup-hooks.py")
+        print(f"\n{BOLD}After first push to GitHub:{NC}")
+        print("  # Apply the server-side ruleset that enforces CI as a required check")
+        print("  uv run python scripts/publish.py --install-branch-rules")
 
     return 0
 

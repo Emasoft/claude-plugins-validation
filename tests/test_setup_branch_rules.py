@@ -235,6 +235,41 @@ class TestBuildRuleset:
 
 # ── CLI integration ────────────────────────────────────────────────
 
+class TestRepoTypeDetection:
+    """Verifies plugin/marketplace auto-detection and default-selection logic."""
+
+    def test_default_plugin_contexts_has_three_checks(self):
+        """Plugin default requires the three parallel jobs from the consolidated CI."""
+        ctxs = setup_branch_rules.default_check_contexts_for("plugin")
+        assert ctxs == ["CI / Lint", "CI / Validate", "CI / Test"]
+
+    def test_default_marketplace_context_has_single_check(self):
+        """Marketplace default requires the single validate job from Marketplace Validation workflow."""
+        ctxs = setup_branch_rules.default_check_contexts_for("marketplace")
+        assert ctxs == ["Marketplace Validation / Validate"]
+
+    def test_unknown_type_falls_back_to_plugin(self):
+        """Unknown repo type falls back to plugin defaults (the common case)."""
+        ctxs = setup_branch_rules.default_check_contexts_for("unknown")
+        assert ctxs == ["CI / Lint", "CI / Validate", "CI / Test"]
+
+    def test_returned_list_is_a_copy_not_the_module_constant(self):
+        """default_check_contexts_for returns a fresh list so mutating it does not bleed into defaults."""
+        ctxs = setup_branch_rules.default_check_contexts_for("plugin")
+        ctxs.append("CI / Something")
+        assert "CI / Something" not in setup_branch_rules.DEFAULT_PLUGIN_CHECK_CONTEXTS
+
+    def test_detect_repo_type_is_callable(self):
+        """detect_repo_type is exposed as a module-level callable (used by main)."""
+        assert callable(setup_branch_rules.detect_repo_type)
+
+    def test_plugin_and_marketplace_constants_are_disjoint(self):
+        """Plugin and marketplace check-context constants have no overlap."""
+        plugin = set(setup_branch_rules.DEFAULT_PLUGIN_CHECK_CONTEXTS)
+        marketplace = set(setup_branch_rules.DEFAULT_MARKETPLACE_CHECK_CONTEXTS)
+        assert plugin.isdisjoint(marketplace)
+
+
 class TestCli:
     """Verifies CLI argument parsing and help output without network calls."""
 

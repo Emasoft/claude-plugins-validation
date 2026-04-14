@@ -495,6 +495,75 @@ class TestPublishPyCornerstoneRule:
         assert "no exceptions" in src.lower()
 
 
+class TestPublishPyAutoBump:
+    """Verify the template's auto-bump default (git-cliff --bumped-version).
+
+    User requirement: "every push MUST be a version bump". The template's
+    publish.py must auto-detect the bump type via git-cliff when no explicit
+    --patch/--minor/--major flag is passed, and must fall back to 'patch' on
+    any failure so the cornerstone rule is never violated.
+    """
+
+    @staticmethod
+    def _src() -> str:
+        p = _default_params()
+        from generate_plugin_repo import gen_publish_py  # noqa: PLC0415
+        return gen_publish_py(p)
+
+    def test_detect_bump_type_function_present(self):
+        """The generated publish.py defines detect_bump_type()."""
+        assert "def detect_bump_type(" in self._src()
+
+    def test_detect_bump_type_calls_git_cliff(self):
+        """detect_bump_type shells out to git-cliff --bumped-version."""
+        src = self._src()
+        assert "git-cliff" in src
+        assert "--bumped-version" in src
+
+    def test_detect_bump_type_falls_back_to_patch(self):
+        """The fallback on git-cliff failure is 'patch' (cornerstone: every push is a bump)."""
+        src = self._src()
+        # The function should return "patch" when git-cliff is unavailable or fails.
+        # Search for at least one literal "patch" return inside detect_bump_type.
+        # Use a rough proximity check: 'def detect_bump_type' ... 'return "patch"'
+        start = src.index("def detect_bump_type(")
+        end = src.index("\ndef ", start + 1)
+        body = src[start:end]
+        assert 'return "patch"' in body
+
+    def test_mode_group_not_required(self):
+        """The mode_group must NOT be required=True — calling publish.py with no flags must work."""
+        src = self._src()
+        # Look for mode_group definition and ensure it does not set required=True
+        assert "add_mutually_exclusive_group(required=True)" not in src
+        # Positive form — optional group
+        assert "add_mutually_exclusive_group()" in src
+
+    def test_bump_flags_are_store_const_not_store_true(self):
+        """--patch/--minor/--major use store_const so args.bump stays None when not passed."""
+        src = self._src()
+        assert 'dest="bump", const="patch"' in src
+        assert 'dest="bump", const="minor"' in src
+        assert 'dest="bump", const="major"' in src
+
+    def test_main_auto_detects_when_bump_unset(self):
+        """main() calls detect_bump_type when args.bump is None."""
+        src = self._src()
+        assert "if args.bump is None:" in src
+        assert "bump_type = detect_bump_type(root)" in src
+
+    def test_main_honors_forced_bump(self):
+        """main() uses args.bump when the user passed --patch/--minor/--major."""
+        src = self._src()
+        assert "bump_type = args.bump" in src
+
+    def test_header_documents_auto_bump(self):
+        """The module docstring explains auto-bump behavior."""
+        src = self._src()
+        assert "AUTO-DETECTED" in src or "auto-detect" in src.lower()
+        assert "git-cliff" in src.lower()
+
+
 class TestPublishPyMarketplaceRegistration:
     """Verify the template's marketplace-registration gate (parity with CPV's own Gate 6).
 

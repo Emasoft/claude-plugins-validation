@@ -882,6 +882,75 @@ def stage_version_consistency(plugin_root: Path) -> int:
     return 0
 
 
+def detect_bump_type(plugin_root: Path) -> str:
+    """Use git-cliff --bumped-version to pick the next semver bump automatically.
+
+    git-cliff reads the conventional commits since the last tag and decides
+    whether this release should be a major, minor, or patch bump. We compare
+    the resulting version string against the current version to figure out
+    which component changed.
+
+    Fallback behavior:
+      - git-cliff missing → patch (every push bumps something)
+      - --bumped-version returns the current version → patch
+      - output is malformed or version comparison fails → patch
+
+    The cornerstone rule is "every push is a bump" — picking patch on fallback
+    guarantees we never publish without changing the version, even when
+    git-cliff can't make a more confident recommendation.
+    """
+    cliff_bin = shutil.which("git-cliff")
+    if cliff_bin is None:
+        print(f"{YELLOW}git-cliff not installed — auto-bump falls back to 'patch'.{NC}")
+        return "patch"
+
+    current = get_current_version(plugin_root)
+    if not current:
+        print(f"{YELLOW}Cannot read current version for auto-bump — falling back to 'patch'.{NC}")
+        return "patch"
+
+    try:
+        result = subprocess.run(
+            [cliff_bin, "--bumped-version"],
+            capture_output=True,
+            text=True,
+            cwd=str(plugin_root),
+            check=False,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"{YELLOW}git-cliff --bumped-version failed ({exc}) — falling back to 'patch'.{NC}")
+        return "patch"
+
+    if result.returncode != 0:
+        stderr = result.stderr.strip() or "no stderr"
+        print(f"{YELLOW}git-cliff --bumped-version exit {result.returncode}: {stderr} — falling back to 'patch'.{NC}")
+        return "patch"
+
+    # git-cliff prints the predicted version (sometimes with a "v" prefix, sometimes bare),
+    # possibly along with warning lines on stderr. stdout should be one line.
+    bumped_raw = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
+    bumped = bumped_raw.lstrip("v").strip()
+    if not bumped or bumped == current:
+        return "patch"
+
+    try:
+        cur_parts = [int(p) for p in current.split(".")[:3]]
+        new_parts = [int(p) for p in bumped.split(".")[:3]]
+        while len(cur_parts) < 3:
+            cur_parts.append(0)
+        while len(new_parts) < 3:
+            new_parts.append(0)
+    except ValueError:
+        return "patch"
+
+    if new_parts[0] > cur_parts[0]:
+        return "major"
+    if new_parts[1] > cur_parts[1]:
+        return "minor"
+    return "patch"
+
+
 def stage_bump(plugin_root: Path, bump_type: str, dry_run: bool) -> tuple[int, str | None]:
     """Gate 8: bump version across all files. Returns (exit_code, new_version)."""
     current = get_current_version(plugin_root)
@@ -1039,7 +1108,7 @@ def stage_github_release(plugin_root: Path, tag_name: str, release_notes_file: P
 def main() -> int:
     gate_summary = "\n".join(f"  {name}: {desc}" for name, desc in GATES)
     parser = argparse.ArgumentParser(
-        description="Publish pipeline: 14-gate fail-fast release (bypass-proof)",
+        description="Publish pipeline: 14-gate fail-fast release with auto-bump (bypass-proof)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
 Gates (all mandatory, run in order):
@@ -1051,18 +1120,27 @@ tagged, pushed, or released. There is no --skip-tests, no --skip-lint, no
 --skip-validate, no --force. WARNING is the only allowed severity and does
 not block. If a gate fails, fix the underlying problem — don't bypass.
 
+CORNERSTONE: every push is a version bump. Running publish.py with no flag
+auto-detects the bump type from conventional commits (feat → minor, fix →
+patch, BREAKING CHANGE → major) via `git-cliff --bumped-version`. Explicit
+--major/--minor/--patch flags remain available as manual overrides.
+
 Examples:
-  %(prog)s --patch              # 1.0.0 → 1.0.1, full pipeline
-  %(prog)s --minor              # 1.0.0 → 1.1.0, full pipeline
-  %(prog)s --major              # 1.0.0 → 2.0.0, full pipeline
-  %(prog)s --patch --dry-run    # preview only, stops before bump commit
+  %(prog)s                      # auto-detect bump from git-cliff and publish
+  %(prog)s --patch              # force patch bump
+  %(prog)s --minor              # force minor bump
+  %(prog)s --major              # force major bump
+  %(prog)s --dry-run            # preview only, stops before bump commit
   %(prog)s --print-gates        # print gate list and exit
         """,
     )
     bump_group = parser.add_mutually_exclusive_group()
-    bump_group.add_argument("--major", action="store_true", help="Bump major version")
-    bump_group.add_argument("--minor", action="store_true", help="Bump minor version")
-    bump_group.add_argument("--patch", action="store_true", help="Bump patch version")
+    bump_group.add_argument("--major", action="store_true",
+                            help="Force a major bump (override auto-detection)")
+    bump_group.add_argument("--minor", action="store_true",
+                            help="Force a minor bump (override auto-detection)")
+    bump_group.add_argument("--patch", action="store_true",
+                            help="Force a patch bump (override auto-detection)")
     parser.add_argument("--dry-run", action="store_true", help="Preview without making changes")
     parser.add_argument("--print-gates", action="store_true", help="Print gate list and exit")
     args = parser.parse_args()
@@ -1071,16 +1149,30 @@ Examples:
         print_gates()
         return 0
 
-    if not (args.major or args.minor or args.patch):
-        parser.error("one of --major, --minor, or --patch is required (or use --print-gates)")
-
     # ── Gate 0: bypass guard ──
     rc = stage_bypass_guard()
     if rc != 0:
         return rc
 
     root = get_plugin_root()
-    bump_type = "major" if args.major else "minor" if args.minor else "patch"
+
+    # Auto-detect bump type from conventional commits (via git-cliff) unless
+    # the user explicitly forced one. The cornerstone rule is "every push is
+    # a bump" — running publish.py bare is the normal case, and git-cliff
+    # reads the commit log to decide whether this release is a major, minor,
+    # or patch bump. Explicit flags remain available for override.
+    if args.major:
+        bump_type = "major"
+        print(f"{BLUE}Bump type: major (forced via --major){NC}")
+    elif args.minor:
+        bump_type = "minor"
+        print(f"{BLUE}Bump type: minor (forced via --minor){NC}")
+    elif args.patch:
+        bump_type = "patch"
+        print(f"{BLUE}Bump type: patch (forced via --patch){NC}")
+    else:
+        bump_type = detect_bump_type(root)
+        print(f"{BLUE}Bump type: {bump_type} (auto-detected from git-cliff){NC}")
 
     # ── Gates 1-7: preflight (tests, lint, validate, marketplace-reg, consistency) ──
     for stage in (
