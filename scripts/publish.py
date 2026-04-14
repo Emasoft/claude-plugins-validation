@@ -277,8 +277,8 @@ def do_bump(plugin_root: Path, new_version: str, dry_run: bool = False) -> bool:
 GATES: list[tuple[str, str]] = [
     ("Gate 0", "Bypass-var rejection (CPV_SKIP_*, SKIP_*, NO_VERIFY)"),
     ("Gate 1", "Clean working tree (git status --porcelain)"),
-    ("Gate 2", "Tests (uv run pytest tests/ -x)"),
-    ("Gate 3", "Lint (uv run python scripts/lint_files.py .)"),
+    ("Gate 2", "Lint + typecheck (ruff + mypy via scripts/lint_files.py)"),
+    ("Gate 3", "Tests (uv run pytest tests/ -x)"),
     (
         "Gate 4",
         "Plugin validation (validate_plugin.py --strict) — blocks on CRITICAL/MAJOR/MINOR/NIT; WARNING advisory only",
@@ -286,8 +286,8 @@ GATES: list[tuple[str, str]] = [
     ("Gate 5", "Marketplace validation (validate_marketplace.py --strict) — Layout B only"),
     ("Gate 6", "Marketplace-registration check — verifies plugin is wired to its marketplace"),
     ("Gate 7", "Version consistency (plugin.json / pyproject.toml / __version__)"),
-    ("Gate 8", "Bump version (major|minor|patch)"),
-    ("Gate 9", "Generate CHANGELOG.md + release notes (git-cliff)"),
+    ("Gate 8", "Bump version (auto from git-cliff, overridable via --major/--minor/--patch)"),
+    ("Gate 9", "Generate CHANGELOG.md + release notes (git-cliff --bump --unreleased --tag)"),
     ("Gate 10", "Commit bump + changelog"),
     ("Gate 11", "Create annotated git tag vX.Y.Z"),
     ("Gate 12", "Push branch + tag to origin"),
@@ -1030,8 +1030,18 @@ def stage_changelog(plugin_root: Path, tag_name: str, new_version: str) -> tuple
     if not cliff_toml.is_file():
         print(f"{RED}✗ cliff.toml not found. Required for changelog generation.{NC}", file=sys.stderr)
         return 1, None
-    run([cliff_bin, "--tag", tag_name, "-o", "CHANGELOG.md"], cwd=plugin_root)
-    print(f"{GREEN}✓ CHANGELOG.md regenerated with {tag_name}{NC}")
+    # Use the pattern recommended by the git-cliff docs for release pipelines:
+    #   git cliff --bump --unreleased --tag <NEXT> -o CHANGELOG.md
+    # --bump          tells git-cliff to treat this as a release bump (so the
+    #                 unreleased section is promoted to a dated tag entry)
+    # --unreleased    process only commits since the last tag
+    # --tag <NEXT>    label the new entry with our computed version
+    # -o CHANGELOG.md write the full regenerated changelog back to disk
+    run(
+        [cliff_bin, "--bump", "--unreleased", "--tag", tag_name, "-o", "CHANGELOG.md"],
+        cwd=plugin_root,
+    )
+    print(f"{GREEN}✓ CHANGELOG.md updated with {tag_name}{NC}")
     release_notes_file = plugin_root / "reports_dev" / f"release-notes-{new_version}.md"
     release_notes_file.parent.mkdir(parents=True, exist_ok=True)
     run(
@@ -1174,11 +1184,16 @@ Examples:
         bump_type = detect_bump_type(root)
         print(f"{BLUE}Bump type: {bump_type} (auto-detected from git-cliff){NC}")
 
-    # ── Gates 1-7: preflight (tests, lint, validate, marketplace-reg, consistency) ──
+    # ── Gates 1-7: preflight ──
+    # Order: clean tree → lint(+typecheck) → tests → validate → marketplace →
+    # consistency. Lint comes BEFORE tests because type errors and syntax
+    # issues should fail fast (cheap), before paying the cost of running the
+    # test suite. Validate runs AFTER tests so the test suite catches any
+    # behavioral regression before the validator checks structural rules.
     for stage in (
         lambda: stage_check_working_tree(root),
-        lambda: stage_run_tests(root),
         lambda: stage_run_lint(root),
+        lambda: stage_run_tests(root),
         lambda: stage_validate_plugin(root),
     ):
         rc = stage()
