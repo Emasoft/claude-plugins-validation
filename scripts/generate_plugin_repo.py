@@ -1871,11 +1871,12 @@ def gen_ci_yml(p: PluginParams) -> str:
     Triggers on both master and main branches (handles repos renamed either way).
     Includes merge_group for GitHub merge-queue / auto-merge support.
 
-    The three job names map to these status check contexts (used by the
-    branch-rules ruleset to enforce CI passing before merge):
-      - CI / Lint
-      - CI / Validate
-      - CI / Test
+    The three job display names are what GitHub reports as check-run names
+    (used by the branch-rules ruleset to enforce CI passing before merge):
+      - Lint
+      - Validate
+      - Test
+    These are the bare `jobs.<id>.name:` values — NOT "workflow / job" format.
     """
     return f"""name: CI
 

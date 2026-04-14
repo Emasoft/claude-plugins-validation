@@ -91,7 +91,10 @@ def _run_bump(plugin_root: Path, args: list[str]) -> subprocess.CompletedProcess
 
 
 def _read_version(plugin_root: Path) -> str:
-    return json.loads((plugin_root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"]
+    data = json.loads((plugin_root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    version = data["version"]
+    assert isinstance(version, str)
+    return version
 
 
 class TestWrapperContract:

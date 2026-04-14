@@ -83,7 +83,7 @@ Running twice is a no-op — the script looks up the ruleset by name and updates
 | | `/cpv-setup-branch-rules` | `/cpv-setup-branch-rules-generic` |
 |---|---|---|
 | Target repo | CPV plugins & marketplaces | Any GitHub repo |
-| Default check contexts | Auto-detected (plugin → CI / Lint, CI / Validate, CI / Test; marketplace → Marketplace Validation / Validate) | None — must pass `--check` explicitly |
+| Default check contexts | Auto-detected (plugin → Lint, Validate, Test; marketplace → Validate) | None — must pass `--check` explicitly |
 | Ruleset name | `cpv-branch-rules` | `branch-rules` (overridable) |
 | Plugin/marketplace detection | Yes | No |
 | Everything else | Same | Same |

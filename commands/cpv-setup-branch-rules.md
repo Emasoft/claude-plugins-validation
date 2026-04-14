@@ -10,9 +10,9 @@ Create or update the `cpv-branch-rules` ruleset on the target repo so that CI mu
 ## What the ruleset enforces
 
 - **Required status checks** (auto-detected from repo type):
-  - **plugin repos**: `CI / Lint`, `CI / Validate`, `CI / Test` (from the consolidated `ci.yml`)
-  - **marketplace repos**: `Marketplace Validation / Validate` (from `validate.yml`)
-  - Override either with `--check-context <name>` (repeatable)
+  - **plugin repos**: `Lint`, `Validate`, `Test` — the three job display names from the consolidated `ci.yml` (these are the **bare** `jobs.<id>.name:` fields; GitHub does NOT use `workflow_name / job_name` format for check-run names)
+  - **marketplace repos**: `Validate` — the single job display name from `validate.yml`
+  - Override either with `--check-context <name>` (repeatable). Run `--dry-run` first to see the actual check-run names GitHub reports for your repo.
 - **Block deletion**: the default branch cannot be deleted
 - **Block force-push**: non-fast-forward pushes rejected
 - **Require PR**: every change goes through a pull request (but **no** manual approval required by default)

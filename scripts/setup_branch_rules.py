@@ -52,23 +52,33 @@ from dataclasses import dataclass
 # ── Defaults ──────────────────────────────────────────────────────────────
 
 # Status check contexts emitted by the consolidated CI workflow (ci.yml).
-# Format: "<workflow_name> / <job_display_name>"
 #
-# Plugin repos emit three checks from the three parallel jobs in ci.yml.
-# Marketplace repos emit a single check from the one validate job in
-# validate.yml (different workflow because marketplaces don't run pytest or
-# lint — they only validate marketplace.json + nested plugin wiring).
+# GitHub's check-runs API reports each job's *display name* (the `name:` field
+# on the job definition) as the check-run name — NOT "workflow_name / job_name".
+# The required_status_checks rule in a ruleset matches against those bare
+# names, so the defaults below must match what GitHub actually reports.
 #
-# The script auto-detects which shape the target repo is via detect_repo_type()
-# and picks the right default list. User-provided --check-context flags
-# override both defaults.
+# Verify with:
+#   gh api repos/<owner>/<repo>/commits/HEAD/check-runs --jq '.check_runs[].name'
+#
+# Plugin repos (consolidated ci.yml) report three job display names:
+#     Lint, Validate, Test
+#
+# Marketplace repos (validate.yml) report a single job. Older marketplaces
+# report the job ID "validate" (lowercase — GitHub seems to use the ID when
+# the `name:` field has non-alphanumerics like "(+ nested plugins …)").
+# Newer marketplaces generated after v2.13.x use `name: Validate`, which
+# GitHub reports as "Validate" (capital V).
+#
+# If neither bare name matches your repo's actual check-run output, override
+# with --check-context. Run --dry-run first to see what's reported.
 DEFAULT_PLUGIN_CHECK_CONTEXTS: list[str] = [
-    "CI / Lint",
-    "CI / Validate",
-    "CI / Test",
+    "Lint",
+    "Validate",
+    "Test",
 ]
 DEFAULT_MARKETPLACE_CHECK_CONTEXTS: list[str] = [
-    "Marketplace Validation / Validate",
+    "Validate",
 ]
 # Back-compat alias for tests written against the pre-split name.
 DEFAULT_CHECK_CONTEXTS = DEFAULT_PLUGIN_CHECK_CONTEXTS
@@ -493,8 +503,9 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Required status check context. Repeatable. Defaults are "
             "auto-detected from the target repo type: plugins use "
-            "'CI / Lint', 'CI / Validate', 'CI / Test' (the consolidated "
-            "CI workflow); marketplaces use 'Marketplace Validation / Validate'."
+            "'Lint', 'Validate', 'Test' (the three jobs of the consolidated "
+            "CI workflow); marketplaces use 'Validate'. Check-run names are "
+            "bare job display names, NOT 'workflow / job' format."
         ),
     )
     p.add_argument(
