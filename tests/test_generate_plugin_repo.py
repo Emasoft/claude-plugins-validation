@@ -38,7 +38,6 @@ from generate_plugin_repo import (  # noqa: E402
     gen_pyproject_toml,
     gen_readme,
     gen_release_yml,
-    gen_validate_yml,
     generate_all_files,
     generate_plugin_repo,
 )
@@ -214,12 +213,20 @@ class TestGenWorkflows:
         assert "v*.*.*" in content
         assert "name: Release" in content
 
-    def test_validate_yml_contains_plugin_validation(self):
-        """gen_validate_yml output references validate_plugin.py."""
+    def test_ci_yml_contains_three_job_consolidation(self):
+        """gen_ci_yml emits the consolidated lint/validate/test workflow."""
         p = _default_params()
-        content = gen_validate_yml(p)
-        assert "validate_plugin.py" in content
-        assert "name: Plugin Validation" in content
+        content = gen_ci_yml(p)
+        # Three parallel jobs — each produces its own status check context
+        assert "name: Lint" in content
+        assert "name: Validate" in content
+        assert "name: Test" in content
+        # Must trigger on both master and main (no stale branch filter)
+        assert "branches: [master, main]" in content
+        # Must use the remote CPV validator — downstream plugins don't vendor it
+        assert "cpv-remote-validate" in content
+        # Must support merge queue / auto-merge
+        assert "merge_group:" in content
 
     def test_notify_yml_contains_marketplace_repo(self):
         """gen_notify_marketplace_yml output references marketplace repo."""

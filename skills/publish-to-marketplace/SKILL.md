@@ -36,7 +36,7 @@ Ask the user for their marketplace repo coordinates (`<owner>/<marketplace-repo>
 1. **Create PAT**: Ask user for a GitHub PAT with `repo` scope. See publish-pipeline-guide (Resources) Section 1
 2. **Set secret**: `gh secret set MARKETPLACE_PAT --repo <owner>/<plugin-repo> --body "$MARKETPLACE_PAT"` (MUST use `--body` flag)
 3. **Install notify-marketplace.yml**: Copy from publish-pipeline-guide (Resources) Section 2 into `.github/workflows/`. Fill `MARKETPLACE_OWNER` and `MARKETPLACE_REPO`
-4. **Verify CI workflows**: Ensure `ci.yml`, `validate.yml`, `release.yml` exist (see `canonical-pipeline` skill)
+4. **Verify CI workflow**: Ensure `ci.yml` exists with jobs `lint`, `validate`, `test` (single consolidated workflow — see `canonical-pipeline` skill). `validate.yml` is no longer used.
 
 ### Phase 2: Configure Publish Pipeline
 
@@ -51,13 +51,23 @@ Ask the user for their marketplace repo coordinates (`<owner>/<marketplace-repo>
 10. **Verify dispatch**: Check marketplace repo Actions tab — `update-submodules.yml` should trigger within 30s
 11. **Verify marketplace.json**: Plugin version should update in marketplace repo
 
+### Phase 4: Enforce CI on GitHub (first publish only)
+
+12. **Apply branch-rules ruleset**: Once the first CI run completes, run the branch-rules script so future PRs cannot merge without the CI going green. This is the server-side enforcement — the local pre-push hook is bypassable with `--no-verify`, so this is the real gate.
+    ```bash
+    uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
+        cpv-setup-branch-rules <owner>/<plugin-repo>
+    ```
+    Add `--dry-run` to preview. The script is idempotent — re-running is a no-op.
+
 Copy this checklist and track your progress:
 - [ ] PAT created and secret set
 - [ ] notify-marketplace.yml installed
-- [ ] CI workflows present
+- [ ] Consolidated ci.yml workflow present (lint + validate + test jobs)
 - [ ] publish.py + pre-push hook installed
 - [ ] First publish successful
 - [ ] Marketplace sync verified
+- [ ] cpv-setup-branch-rules applied (CI required on GitHub)
 
 ## Output
 

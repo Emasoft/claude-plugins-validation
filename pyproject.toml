@@ -7,7 +7,7 @@ packages = ["scripts"]
 
 [project]
 name = "claude-plugins-validation"
-version = "2.12.31"
+version = "2.12.32"
 description = "Comprehensive validation suite for Claude Code plugins, marketplaces, hooks, skills, and MCP servers"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -43,6 +43,8 @@ cpv-doctor = "scripts.cli:doctor"
 cpv-standardize = "scripts.cli:standardize"
 # Remote validation launcher — isolated environment for validating external plugins
 cpv-remote-validate = "scripts.remote_validation:main"
+# Branch-rules setup — create/update GitHub ruleset on a plugin or marketplace repo
+cpv-setup-branch-rules = "scripts.setup_branch_rules:main"
 
 [tool.ruff]
 line-length = 120

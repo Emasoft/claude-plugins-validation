@@ -332,9 +332,7 @@ def gen_readme(p: PluginParams) -> str:
             f"(https://github.com/{owner}/{repo}/actions/workflows/ci.yml)\n"
             f"[![Version](https://img.shields.io/badge/version-{p.version}-blue)]"
             f"(https://github.com/{owner}/{repo})\n"
-            f"[![License](https://img.shields.io/badge/license-{p.license}-green)](LICENSE)\n"
-            f"[![Validation](https://github.com/{owner}/{repo}/actions/workflows/validate.yml/badge.svg)]"
-            f"(https://github.com/{owner}/{repo}/actions/workflows/validate.yml)"
+            f"[![License](https://img.shields.io/badge/license-{p.license}-green)](LICENSE)"
         )
     else:
         badges = "<!-- Badges will appear here once github_owner is set -->"
@@ -1669,19 +1667,41 @@ exit $?
 
 
 def gen_ci_yml(p: PluginParams) -> str:
-    """Generate .github/workflows/ci.yml — Mega-Linter + validate + test."""
-    # Use p.python_version instead of hardcoded 3.12
+    """Generate .github/workflows/ci.yml — single consolidated CI workflow.
+
+    Jobs:
+      - lint           : Mega-Linter (broad multi-language lint)
+      - validate       : uvx cpv-remote-validate plugin . --strict (issue #11)
+      - test           : pytest (if tests/ exists)
+
+    Triggers on both master and main branches (handles repos renamed either way).
+    Includes merge_group for GitHub merge-queue / auto-merge support.
+
+    The three job names map to these status check contexts (used by the
+    branch-rules ruleset to enforce CI passing before merge):
+      - CI / Lint
+      - CI / Validate
+      - CI / Test
+    """
     return f"""name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master, main]
   pull_request:
-    branches: [main]
+    branches: [master, main]
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{{{ github.workflow }}}}-${{{{ github.ref }}}}
+  cancel-in-progress: true
 
 jobs:
-  mega-linter:
-    name: Mega-Linter
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1708,10 +1728,12 @@ jobs:
             mega-linter.log
 
   validate:
-    name: Plugin Validation
+    name: Validate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -1722,19 +1744,31 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
-      - name: Validate plugin (remote CPV)
-        # Fetches the current CPV validator from GitHub via uvx so downstream
-        # plugins don't need to vendor scripts/validate_plugin.py. Matches
-        # what scripts/publish.py runs locally so CI and the local gate agree.
-        # Issue #11: do NOT call local scripts/validate_plugin.py — it does
-        # not exist in scaffolded downstream plugins.
+      - name: Run plugin validation (remote CPV, --strict)
+        # Fetches CPV from GitHub via uvx so downstream plugins do not need to
+        # vendor scripts/validate_plugin.py. Matches publish.py's local gate
+        # so CI and local gate agree. Issue #11: do NOT call local
+        # scripts/validate_plugin.py — it does not exist in scaffolded plugins.
         run: |
-          uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
-              --with pyyaml \
+          set +e
+          uvx --from git+https://github.com/Emasoft/claude-plugins-validation \\
+              --with pyyaml \\
               cpv-remote-validate plugin . --strict
+          exit_code=$?
+          set -e
+          if [ $exit_code -eq 0 ]; then
+            echo "Validation passed"
+            exit 0
+          elif [ $exit_code -ge 5 ]; then
+            echo "Only WARNING-level findings (exit $exit_code) — advisory, not blocking"
+            exit 0
+          else
+            echo "::error::Validation failed (exit $exit_code: CRITICAL/MAJOR/MINOR/NIT)"
+            exit $exit_code
+          fi
 
   test:
-    name: Tests
+    name: Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1840,58 +1874,6 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{{{ secrets.GITHUB_TOKEN }}}}
-"""
-
-
-def gen_validate_yml(p: PluginParams) -> str:
-    """Generate .github/workflows/validate.yml — CPV plugin validation only (linting is in ci.yml via Mega-Linter)."""
-    # Use p.python_version instead of hardcoded 3.12
-    return f"""name: Plugin Validation
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-
-jobs:
-  validate:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-
-      - name: Set up Python
-        run: uv python install {p.python_version}
-
-      - name: Install dependencies
-        run: uv sync --extra dev
-
-      - name: Validate plugin (remote CPV, --strict)
-        # Fetches CPV from GitHub via uvx so downstream plugins do not need
-        # to vendor scripts/validate_plugin.py. Matches publish.py's local
-        # gate so CI and local gate agree. Issue #11.
-        run: |
-          set +e
-          uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
-              --with pyyaml \
-              cpv-remote-validate plugin . --strict
-          exit_code=$?
-          set -e
-          if [ $exit_code -eq 0 ]; then
-            echo "Validation passed"
-            exit 0
-          elif [ $exit_code -ge 5 ]; then
-            echo "Only WARNING-level findings (exit $exit_code) — advisory, not blocking"
-            exit 0
-          else
-            echo "Validation failed (exit $exit_code: CRITICAL/MAJOR/MINOR/NIT)"
-            exit $exit_code
-          fi
 """
 
 
@@ -2067,7 +2049,6 @@ def generate_all_files(p: PluginParams) -> list[tuple[str, str, bool]]:
                 (".mega-linter.yml", gen_mega_linter_yml(p), False),
                 (".github/workflows/ci.yml", gen_ci_yml(p), False),
                 (".github/workflows/release.yml", gen_release_yml(p), False),
-                (".github/workflows/validate.yml", gen_validate_yml(p), False),
                 (".github/workflows/notify-marketplace.yml", gen_notify_marketplace_yml(p), False),
                 ("tests/__init__.py", gen_tests_init(), False),
             ]

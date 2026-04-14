@@ -1,8 +1,8 @@
 # Claude Plugins Validation (CPV)
 
 <!--BADGES-START-->
-![Version](https://img.shields.io/badge/version-2.12.31-blue)
-![Tests](https://img.shields.io/badge/tests-1667%20passed-brightgreen)
+![Version](https://img.shields.io/badge/version-2.12.32-blue)
+![Tests](https://img.shields.io/badge/tests-1697%20passed-brightgreen)
 ![Validation](https://img.shields.io/badge/validation-0%20issues-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 <!--BADGES-END-->
@@ -337,8 +337,8 @@ The semantic validator always warns about the cost and asks for confirmation bef
 | Management scripts | 13 | Plugin lifecycle, marketplace operations, scaffolding |
 | Agents | 7 | AI-powered validation, fixing, and management |
 | Skills | 14 | Validation, management, publishing, fix, migration, and auto-notify workflows |
-| Commands | 16 | 8 direct script + 6 agent-backed + 2 specialized utility commands |
-| Tests | 1667 | Full coverage across all modules |
+| Commands | 17 | 9 direct script + 6 agent-backed + 2 specialized utility commands |
+| Tests | 1697 | Full coverage across all modules |
 
 </details>
 
