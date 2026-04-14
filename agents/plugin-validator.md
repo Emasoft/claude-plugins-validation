@@ -22,6 +22,8 @@ When invoked without a target path, ask the user:
 > - **A plugin** — give me the path or name (e.g., `my-plugin` or `~/.claude/plugins/my-plugin`)
 > - **A marketplace** — give me the path to the marketplace repo
 > - **A specific component** — hook, MCP, agent, command, skill, security, encoding, etc.
+> - **A project's shared Claude Code config** (project scope — git-tracked `.claude/` + `.mcp.json`) — I'll run `cpv-validate-project-scope`
+> - **A project's personal Claude Code config** (local scope — gitignored `.claude/**`, `settings.local.json`, `CLAUDE.local.md`, `~/.claude.json` per-project state) — I'll run `cpv-validate-local-scope`
 >
 > I'll run the appropriate validator and return a summary with the report path.
 
@@ -66,6 +68,10 @@ uv run python scripts/validate_command.py /path/to/plugin --report docs_dev/vali
 uv run python scripts/validate_agent.py /path/to/plugin --report docs_dev/validate_agent_YYYYMMDD.md
 uv run python scripts/validate_lsp.py /path/to/plugin --report docs_dev/validate_lsp_YYYYMMDD.md
 uv run python scripts/lint_files.py /path/to/plugin --report docs_dev/lint_YYYYMMDD.md
+
+# Scope validators (Claude Code project / local scope — validates .claude/ + .mcp.json + CLAUDE.md under a project path)
+uv run python scripts/validate_project_scope.py /path/to/project --report docs_dev/validate_project_scope_YYYYMMDD.md
+uv run python scripts/validate_local_scope.py /path/to/project --report docs_dev/validate_local_scope_YYYYMMDD.md
 ```
 
 ## Exit Codes

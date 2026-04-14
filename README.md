@@ -301,6 +301,8 @@ The semantic validator always warns about the cost and asks for confirmation bef
 | `/cpv-validate-skill <path>` | Skill validation (190+ rules) |
 | `/cpv-validate-github-plugin <owner/repo>` | Validate a GitHub plugin without installing |
 | `/cpv-validate-github-marketplace <owner/repo>` | Validate a GitHub marketplace without registering |
+| `/cpv-validate-project-scope <path>` | Validate git-tracked (project-scope) Claude Code config under a project: `.claude/settings.json`, `.mcp.json`, agents, skills, commands, rules, `CLAUDE.md`. Rejects `autoMemoryDirectory`, managed-only keys, secrets in env, absolute home paths. |
+| `/cpv-validate-local-scope <path>` | Validate non-git-tracked (local-scope) Claude Code config under a project: `.claude/settings.local.json`, `CLAUDE.local.md`, gitignored agents/skills/commands/rules, per-project MCP state in `~/.claude.json`. Rules are relaxed (personal paths are OK), but managed-only/global-config keys still rejected. |
 | `/cpv-doctor` | Health-check installed plugins, settings, marketplaces |
 | `/cpv-list-plugins` | List installed plugins with version and status |
 | `/cpv-bump-version <path>` | Bump plugin version (patch, minor, major) |
@@ -335,7 +337,7 @@ The semantic validator always warns about the cost and asks for confirmation bef
 
 | Category | Count | Description |
 |----------|-------|-------------|
-| Validation scripts | 18 | Python validators (15 plugin + 3 marketplace) covering all plugin and marketplace components |
+| Validation scripts | 20 | Python validators (15 plugin + 3 marketplace + 2 scope) covering plugin packages, marketplaces, and end-user `.claude/` configuration |
 | Management scripts | 13 | Plugin lifecycle, marketplace operations, scaffolding |
 | Agents | 7 | AI-powered validation, fixing, and management |
 | Skills | 14 | Validation, management, publishing, fix, migration, and auto-notify workflows |
