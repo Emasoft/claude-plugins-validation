@@ -166,12 +166,20 @@ The publish script is the **recommended way** to push plugin updates. It validat
 ### CLI
 
 ```bash
-uv run python scripts/publish.py --patch              # 1.0.0 -> 1.0.1
-uv run python scripts/publish.py --minor              # 1.0.0 -> 1.1.0
-uv run python scripts/publish.py --major              # 1.0.0 -> 2.0.0
-uv run python scripts/publish.py --patch --dry-run    # preview only
+# Auto-bump (recommended) — git-cliff reads the conventional commits since
+# the last tag and picks the bump level automatically.
+uv run python scripts/publish.py                      # auto: feat → minor, fix → patch, BREAKING → major
+uv run python scripts/publish.py --dry-run            # preview with auto-detected bump
+
+# Force a specific bump level when the auto-detection picks the wrong one
+uv run python scripts/publish.py --patch              # force 1.0.0 -> 1.0.1
+uv run python scripts/publish.py --minor              # force 1.0.0 -> 1.1.0
+uv run python scripts/publish.py --major              # force 1.0.0 -> 2.0.0
+
+# Side-modes (no bump, no push)
 uv run python scripts/publish.py --gate               # pre-push gate (G0-G4)
 uv run python scripts/publish.py --install-hook       # wire git-hooks/pre-push
+uv run python scripts/publish.py --install-branch-rules  # apply the cpv-branch-rules ruleset on GitHub
 ```
 
 **CORNERSTONE RULE**: there is no `--skip-tests`, no `--skip-lint`, no

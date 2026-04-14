@@ -495,6 +495,99 @@ class TestPublishPyCornerstoneRule:
         assert "no exceptions" in src.lower()
 
 
+class TestTemplateGetOriginSlug:
+    """Verify the template's _get_origin_slug URL parser handles common formats.
+
+    The function is embedded inside the generated publish.py. We extract it by
+    parsing the f-string template output and compile the function in isolation
+    so we can test it as a pure URL parser (no subprocess needed — we stub out
+    the git config read via a fake subprocess module).
+    """
+
+    def _extract_and_compile(self):
+        """Return a ready-to-call _get_origin_slug function from the template."""
+        import ast as _ast
+        import subprocess as _sp
+        import types as _types
+        from pathlib import Path as _Path
+
+        from generate_plugin_repo import gen_publish_py  # noqa: PLC0415
+        src = gen_publish_py(_default_params())
+        tree = _ast.parse(src)
+        fn_node = None
+        for node in _ast.walk(tree):
+            if isinstance(node, _ast.FunctionDef) and node.name == "_get_origin_slug":
+                fn_node = node
+                break
+        assert fn_node is not None, "_get_origin_slug missing from template"
+        fn_src = _ast.get_source_segment(src, fn_node)
+        assert fn_src is not None
+
+        class _Result:
+            returncode = 0
+            stdout = ""
+
+        def _mock_run(*_args, **_kwargs):
+            r = _Result()
+            r.stdout = _Result.test_url  # type: ignore[attr-defined]
+            return r
+
+        ns: dict = {
+            "subprocess": _types.SimpleNamespace(run=_mock_run, SubprocessError=_sp.SubprocessError),
+            "Path": _Path,
+        }
+        exec(fn_src, ns)
+        return ns["_get_origin_slug"], _Result
+
+    def test_https_with_git_suffix(self):
+        """HTTPS URL with .git suffix returns OWNER/REPO."""
+        fn, Result = self._extract_and_compile()
+        Result.test_url = "https://github.com/Emasoft/my-plugin.git"
+        assert fn(Path(".")) == "Emasoft/my-plugin"
+
+    def test_https_without_git_suffix(self):
+        """HTTPS URL without .git suffix returns OWNER/REPO."""
+        fn, Result = self._extract_and_compile()
+        Result.test_url = "https://github.com/Emasoft/my-plugin"
+        assert fn(Path(".")) == "Emasoft/my-plugin"
+
+    def test_ssh_short_form_with_git_suffix(self):
+        """git@github.com:OWNER/REPO.git returns OWNER/REPO."""
+        fn, Result = self._extract_and_compile()
+        Result.test_url = "git@github.com:Emasoft/my-plugin.git"
+        assert fn(Path(".")) == "Emasoft/my-plugin"
+
+    def test_ssh_short_form_without_git_suffix(self):
+        """git@github.com:OWNER/REPO returns OWNER/REPO."""
+        fn, Result = self._extract_and_compile()
+        Result.test_url = "git@github.com:Emasoft/my-plugin"
+        assert fn(Path(".")) == "Emasoft/my-plugin"
+
+    def test_ssh_long_form(self):
+        """ssh://git@github.com/OWNER/REPO.git returns OWNER/REPO."""
+        fn, Result = self._extract_and_compile()
+        Result.test_url = "ssh://git@github.com/Emasoft/my-plugin.git"
+        assert fn(Path(".")) == "Emasoft/my-plugin"
+
+    def test_empty_url_returns_none(self):
+        """Empty origin URL returns None."""
+        fn, Result = self._extract_and_compile()
+        Result.test_url = ""
+        assert fn(Path(".")) is None
+
+    def test_malformed_url_returns_none(self):
+        """Unparseable URL returns None."""
+        fn, Result = self._extract_and_compile()
+        Result.test_url = "not-a-url"
+        assert fn(Path(".")) is None
+
+    def test_incomplete_url_returns_none(self):
+        """URL missing the repo segment returns None."""
+        fn, Result = self._extract_and_compile()
+        Result.test_url = "https://github.com/Emasoft"
+        assert fn(Path(".")) is None
+
+
 class TestPublishPyPipelineOrder:
     """Verify the template's publish.py runs stages in the correct order.
 

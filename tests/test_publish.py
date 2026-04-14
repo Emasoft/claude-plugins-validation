@@ -521,3 +521,93 @@ class TestCpvStageChangelogUsesBumpUnreleased:
         assert '"--bump"' in src or "'--bump'" in src
         assert '"--unreleased"' in src or "'--unreleased'" in src
         assert '"--tag"' in src or "'--tag'" in src
+
+
+class TestCpvDetectBumpType:
+    """Pin the behavior of publish.detect_bump_type — the auto-bump entry point.
+
+    detect_bump_type shells out to `git-cliff --bumped-version` and compares
+    the predicted version against the current one. On any failure it must
+    fall back to 'patch' so the cornerstone rule (every push is a bump) is
+    never violated.
+    """
+
+    def _fake_run(self, stdout: str = "", returncode: int = 0):
+        """Return a completed-process-like mock for subprocess.run."""
+        return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr="")
+
+    def test_falls_back_to_patch_when_git_cliff_missing(self, monkeypatch, tmp_path):
+        """detect_bump_type returns 'patch' when git-cliff is not on PATH."""
+        monkeypatch.setattr(publish.shutil, "which", lambda _name: None)
+        (tmp_path / ".claude-plugin").mkdir()
+        (tmp_path / ".claude-plugin" / "plugin.json").write_text('{"version": "1.0.0"}')
+        assert publish.detect_bump_type(tmp_path) == "patch"
+
+    def test_falls_back_to_patch_when_current_version_missing(self, monkeypatch, tmp_path):
+        """detect_bump_type returns 'patch' if plugin.json is missing."""
+        monkeypatch.setattr(publish.shutil, "which", lambda _name: "/usr/bin/git-cliff")
+        # No plugin.json at all
+        assert publish.detect_bump_type(tmp_path) == "patch"
+
+    def test_falls_back_to_patch_on_git_cliff_nonzero_exit(self, monkeypatch, tmp_path):
+        """detect_bump_type returns 'patch' if git-cliff exits non-zero."""
+        monkeypatch.setattr(publish.shutil, "which", lambda _name: "/usr/bin/git-cliff")
+        (tmp_path / ".claude-plugin").mkdir()
+        (tmp_path / ".claude-plugin" / "plugin.json").write_text('{"version": "1.0.0"}')
+        monkeypatch.setattr(publish.subprocess, "run",
+                            lambda *a, **k: self._fake_run(returncode=1))
+        assert publish.detect_bump_type(tmp_path) == "patch"
+
+    def test_detects_minor_bump(self, monkeypatch, tmp_path):
+        """When git-cliff reports a minor-version bump, detect_bump_type returns 'minor'."""
+        monkeypatch.setattr(publish.shutil, "which", lambda _name: "/usr/bin/git-cliff")
+        (tmp_path / ".claude-plugin").mkdir()
+        (tmp_path / ".claude-plugin" / "plugin.json").write_text('{"version": "1.2.3"}')
+        monkeypatch.setattr(publish.subprocess, "run",
+                            lambda *a, **k: self._fake_run(stdout="v1.3.0\n"))
+        assert publish.detect_bump_type(tmp_path) == "minor"
+
+    def test_detects_major_bump(self, monkeypatch, tmp_path):
+        """When git-cliff reports a major bump, detect_bump_type returns 'major'."""
+        monkeypatch.setattr(publish.shutil, "which", lambda _name: "/usr/bin/git-cliff")
+        (tmp_path / ".claude-plugin").mkdir()
+        (tmp_path / ".claude-plugin" / "plugin.json").write_text('{"version": "1.2.3"}')
+        monkeypatch.setattr(publish.subprocess, "run",
+                            lambda *a, **k: self._fake_run(stdout="2.0.0"))
+        assert publish.detect_bump_type(tmp_path) == "major"
+
+    def test_detects_patch_bump(self, monkeypatch, tmp_path):
+        """When git-cliff reports a patch-version bump, detect_bump_type returns 'patch'."""
+        monkeypatch.setattr(publish.shutil, "which", lambda _name: "/usr/bin/git-cliff")
+        (tmp_path / ".claude-plugin").mkdir()
+        (tmp_path / ".claude-plugin" / "plugin.json").write_text('{"version": "1.2.3"}')
+        monkeypatch.setattr(publish.subprocess, "run",
+                            lambda *a, **k: self._fake_run(stdout="v1.2.4"))
+        assert publish.detect_bump_type(tmp_path) == "patch"
+
+    def test_strips_v_prefix_and_whitespace(self, monkeypatch, tmp_path):
+        """detect_bump_type handles both 'v1.2.3' and '1.2.3' outputs with trailing whitespace."""
+        monkeypatch.setattr(publish.shutil, "which", lambda _name: "/usr/bin/git-cliff")
+        (tmp_path / ".claude-plugin").mkdir()
+        (tmp_path / ".claude-plugin" / "plugin.json").write_text('{"version": "1.0.0"}')
+        monkeypatch.setattr(publish.subprocess, "run",
+                            lambda *a, **k: self._fake_run(stdout="  v1.1.0  \n\n"))
+        assert publish.detect_bump_type(tmp_path) == "minor"
+
+    def test_falls_back_to_patch_on_malformed_version(self, monkeypatch, tmp_path):
+        """detect_bump_type returns 'patch' when git-cliff returns a non-semver string."""
+        monkeypatch.setattr(publish.shutil, "which", lambda _name: "/usr/bin/git-cliff")
+        (tmp_path / ".claude-plugin").mkdir()
+        (tmp_path / ".claude-plugin" / "plugin.json").write_text('{"version": "1.0.0"}')
+        monkeypatch.setattr(publish.subprocess, "run",
+                            lambda *a, **k: self._fake_run(stdout="not-a-version"))
+        assert publish.detect_bump_type(tmp_path) == "patch"
+
+    def test_equal_versions_returns_patch(self, monkeypatch, tmp_path):
+        """When git-cliff returns the current version unchanged, detect_bump_type returns 'patch'."""
+        monkeypatch.setattr(publish.shutil, "which", lambda _name: "/usr/bin/git-cliff")
+        (tmp_path / ".claude-plugin").mkdir()
+        (tmp_path / ".claude-plugin" / "plugin.json").write_text('{"version": "1.2.3"}')
+        monkeypatch.setattr(publish.subprocess, "run",
+                            lambda *a, **k: self._fake_run(stdout="v1.2.3"))
+        assert publish.detect_bump_type(tmp_path) == "patch"

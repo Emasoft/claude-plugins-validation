@@ -47,7 +47,7 @@ Ask the user for their marketplace repo coordinates (`<owner>/<marketplace-repo>
 ### Phase 3: Publish
 
 8. **Run gate check**: `uv run python scripts/publish.py --gate` (verify quality gates pass)
-9. **Run publish**: `uv run python scripts/publish.py --patch` (or `--minor`/`--major`)
+9. **Run publish**: `uv run python scripts/publish.py` — the bump type is auto-detected from git-cliff (feat → minor, fix → patch, BREAKING CHANGE → major). Force with `--patch`/`--minor`/`--major` only when the auto-detection picks the wrong level.
 10. **Verify dispatch**: Check marketplace repo Actions tab — `update-submodules.yml` should trigger within 30s
 11. **Verify marketplace.json**: Plugin version should update in marketplace repo
 
