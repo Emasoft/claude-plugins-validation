@@ -452,8 +452,10 @@ def parse_args() -> argparse.Namespace:
         action="append",
         default=None,
         help=(
-            "Required status check context. Repeatable. Default: CI / Lint, "
-            "CI / Validate, CI / Test (from the consolidated CI workflow)."
+            "Required status check context. Repeatable. Defaults are "
+            "auto-detected from the target repo type: plugins use "
+            "'CI / Lint', 'CI / Validate', 'CI / Test' (the consolidated "
+            "CI workflow); marketplaces use 'Marketplace Validation / Validate'."
         ),
     )
     p.add_argument(
