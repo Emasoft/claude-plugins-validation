@@ -32,7 +32,7 @@ release automatically.
 
 1. **Create GitHub repo**: `gh repo create <owner>/<name> --public --clone`, then `cd` into it
 2. **Initialize plugin**: create standard files from plugin-repo-templates (see Resources)
-3. **Install workflows**: from plugin-workflows (see Resources) copy `ci.yml`, `release.yml`, `validate.yml`, `notify-marketplace.yml` to `.github/workflows/`
+3. **Install workflows**: from plugin-workflows (see Resources) copy `ci.yml` (consolidated lint + validate + test), `release.yml`, `notify-marketplace.yml` to `.github/workflows/`
 4. **Install git hooks**: run `uv run python scripts/publish.py --install-hook` (sets `core.hooksPath` to `git-hooks`)
 5. **Configure marketplace**: `uv run python scripts/set_marketplace_pat.py <owner>/<repo>` (skip if declined — see setup-marketplace-auto-notification)
 6. **Validate** (remote CPV from GitHub): `uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-remote-validate plugin . --strict` — fix ALL non-WARNING issues
@@ -72,7 +72,7 @@ Report: repo URL, VALID/INVALID + severity counts, installed workflows/hooks, sk
 - [Plugin Repo Templates](references/plugin-repo-templates.md)
   > plugin.json Template · pyproject.toml Template · .gitignore Template · README.md Template · Placeholder Reference
 - [Plugin Workflows](references/plugin-workflows.md)
-  > ci.yml -- Continuous Integration · release.yml -- GitHub Release on Tag · validate.yml -- Plugin Validation · notify-marketplace.yml -- Marketplace Notification · Placeholder Reference · Setup Instructions
+  > ci.yml -- Consolidated CI (lint + validate + test) · release.yml -- GitHub Release on Tag · notify-marketplace.yml -- Marketplace Notification · Placeholder Reference · Setup Instructions
 - [Plugin Hooks and Scripts](references/plugin-hooks-and-scripts.md)
   > pre-push Hook Template · publish.py Pipeline Template · setup-hooks.py Template · Placeholder Reference
 - [Plugin Binary Builds](references/plugin-binary-builds.md)

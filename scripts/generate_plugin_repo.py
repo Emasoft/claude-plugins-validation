@@ -1352,7 +1352,11 @@ def stage_marketplace_registration(root: Path) -> None:
         marketplace_root_raw = details.get("marketplace_root")
         marketplace_root: Path | None = marketplace_root_raw if isinstance(marketplace_root_raw, Path) else None
         plugin_name_raw = details.get("plugin_name")
-        plugin_name: str = plugin_name_raw if isinstance(plugin_name_raw, str) else root.name
+        # Note: no type annotation here — mypy's no-redef rule complains even
+        # though the Layout A branch above returns before reaching this
+        # point. Plain assignment avoids the false positive in the generated
+        # template output (which downstream CI runs with mypy --strict).
+        plugin_name = plugin_name_raw if isinstance(plugin_name_raw, str) else root.name
         if marketplace_root is None:
             cprint(f"  {RED}BLOCKED: Layout B detected but marketplace_root unresolved.{NC}")
             sys.exit(1)

@@ -2,20 +2,21 @@
 
 ## Table of Contents
 
-- [ci.yml -- Continuous Integration](#ciyml----continuous-integration)
+- [ci.yml -- Consolidated CI (lint + validate + test)](#ciyml----consolidated-ci-lint--validate--test)
 - [release.yml -- GitHub Release on Tag](#releaseyml----github-release-on-tag)
-- [validate.yml -- Plugin Validation](#validateyml----plugin-validation)
 - [notify-marketplace.yml -- Marketplace Notification](#notify-marketplaceyml----marketplace-notification)
 - [Placeholder Reference](#placeholder-reference)
 - [Setup Instructions](#setup-instructions)
 
 > For plugins with compiled binaries, see [`plugin-binary-builds.md`](plugin-binary-builds.md) for the `build-binaries.yml` cross-compilation workflow and CI build step patterns.
+>
+> **v2.12.32 consolidation**: the old separate `validate.yml` was merged into `ci.yml` as three parallel jobs (`lint`, `validate`, `test`). The three resulting status check contexts (`CI / Lint`, `CI / Validate`, `CI / Test`) are what `cpv-setup-branch-rules` enforces on the default branch.
 
 ---
 
-## ci.yml -- Continuous Integration
+## ci.yml -- Consolidated CI (lint + validate + test)
 
-Runs on every push and PR to the main branch. Lints source files, validates the plugin structure, and runs the test suite.
+Runs on every push/PR to the default branch and on merge-queue events. Three parallel jobs each emit their own required status check context, which `cpv-setup-branch-rules` then requires on PRs.
 
 ```yaml
 name: CI
@@ -25,9 +26,75 @@ on:
     branches: [<placeholder-for-default-branch>]
   pull_request:
     branches: [<placeholder-for-default-branch>]
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Mega-Linter
+        uses: oxsecurity/megalinter@v8
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VALIDATE_ALL_CODEBASE: false
+
   validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Run plugin validation (remote CPV, --strict)
+        # Fetches CPV from GitHub via uvx so downstream plugins do not need
+        # to vendor scripts/validate_plugin.py. Matches publish.py's local
+        # gate so CI and local gate agree. Issue #11.
+        run: |
+          set +e
+          uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
+              --with pyyaml \
+              cpv-remote-validate plugin . --strict
+          exit_code=$?
+          set -e
+          if [ $exit_code -eq 0 ]; then
+            echo "Validation passed"
+            exit 0
+          elif [ $exit_code -ge 5 ]; then
+            echo "Only WARNING-level findings (exit $exit_code) — advisory, not blocking"
+            exit 0
+          else
+            echo "::error::Validation failed (exit $exit_code: CRITICAL/MAJOR/MINOR/NIT)"
+            exit $exit_code
+          fi
+
+  test:
+    name: Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,22 +106,15 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync
-
-      - name: Lint all source files (read-only)
-        run: uv run python scripts/lint_files.py .
-
-      - name: Run plugin validation (remote CPV, strict)
-        # Fetches CPV from GitHub via uvx — downstream plugins don't vendor
-        # the validator. Matches what publish.py runs locally so CI and the
-        # local gate never disagree. Issue #11.
-        run: |
-          uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
-              --with pyyaml \
-              cpv-remote-validate plugin . --strict
+        run: uv sync --extra dev
 
       - name: Run tests
-        run: uv run pytest tests/ -v
+        run: |
+          if [ -d "tests" ] && ls tests/test_*.py 1>/dev/null 2>&1; then
+            uv run pytest tests/ -v
+          else
+            echo "No test files found, skipping"
+          fi
 ```
 
 ---
@@ -144,70 +204,6 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-```
-
----
-
-## validate.yml -- Plugin Validation
-
-Runs on every push and PR to the main branch. Discovers the validator script location (supports both in-repo and submodule layouts), lints source files, validates the plugin, and runs ruff lint checks.
-
-```yaml
-name: Plugin Validation
-
-on:
-  push:
-    branches: [<placeholder-for-default-branch>]
-  pull_request:
-    branches: [<placeholder-for-default-branch>]
-
-jobs:
-  validate:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-
-      - name: Set up Python
-        run: uv python install 3.12
-
-      - name: Install dependencies
-        run: uv sync
-
-      - name: Lint all source files (read-only)
-        run: uv run python scripts/lint_files.py .
-
-      - name: Validate plugin (remote CPV, --strict)
-        # Issue #11: CI no longer depends on a local scripts/validate_plugin.py
-        # or a submodule. uvx fetches the current CPV release from GitHub
-        # for every run so the ruleset stays in sync with upstream.
-        run: |
-          set +e
-          uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
-              --with pyyaml \
-              cpv-remote-validate plugin . --strict
-          exit_code=$?
-          set -e
-          if [ $exit_code -eq 0 ]; then
-            echo "Validation passed"
-            exit 0
-          elif [ $exit_code -ge 5 ]; then
-            echo "Only WARNING findings (exit $exit_code) — advisory, not blocking"
-            exit 0
-          else
-            echo "Validation failed (exit $exit_code: CRITICAL/MAJOR/MINOR/NIT)"
-            exit $exit_code
-          fi
-
-      - name: Lint Python files
-        run: |
-          # Run ruff check but don't fail CI - just report issues
-          # The validate_plugin.py already checks lint via mypy
-          uv run ruff check scripts/ --select=E,F,W --ignore=E501 || echo "Lint issues found (non-blocking)"
 ```
 
 ---
@@ -326,10 +322,11 @@ jobs:
    ```
 
 2. **Copy each workflow file** from the templates above into `.github/workflows/`:
-   - `ci.yml` -- basic CI on every push/PR
+   - `ci.yml` -- consolidated CI on every push/PR: `lint`, `validate`, `test` jobs
    - `release.yml` -- creates GitHub Releases on version tags
-   - `validate.yml` -- runs plugin validation with CPV
    - `notify-marketplace.yml` -- notifies your marketplace repo on plugin changes
+
+   > **Note**: there is no separate `validate.yml` anymore (removed in v2.12.32). The old validate job is now the `validate` job inside `ci.yml`, and its status check context is `CI / Validate`. See `cpv-setup-branch-rules` command for enforcing this check as a required status on PRs.
 
 3. **Replace all `<placeholder-for-...>` values** with your actual values (see Placeholder Reference above).
 

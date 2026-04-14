@@ -29,10 +29,11 @@
 
 | Workflow | Required | Triggers | Purpose |
 |----------|----------|----------|---------|
-| `.github/workflows/ci.yml` | YES | push, PR | Lint + validate + test |
+| `.github/workflows/ci.yml` | YES | push, PR, merge_group | Consolidated: `lint` + `validate` + `test` jobs. Check contexts: `CI / Lint`, `CI / Validate`, `CI / Test`. |
 | `.github/workflows/release.yml` | YES | version tag (`v*`) | Create GitHub Release |
-| `.github/workflows/validate.yml` | YES | push, PR | Run CPV validation |
 | `.github/workflows/notify-marketplace.yml` | Marketplace | release published | Notify marketplace via repository_dispatch |
+
+> **v2.12.32**: `validate.yml` was merged into `ci.yml`. Plugins are expected to have ONE workflow file (`ci.yml`) with three jobs. The `cpv-setup-branch-rules` CLI depends on these three check contexts to build the required-status-checks rule.
 
 ### Binary Plugins (Rust, Go, C/C++)
 

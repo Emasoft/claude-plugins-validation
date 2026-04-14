@@ -165,7 +165,6 @@ Place this file at the repository root.
 [![CI](https://github.com/<placeholder-for-github-repo-owner>/<placeholder-for-plugin-github-repo>/actions/workflows/ci.yml/badge.svg)](https://github.com/<placeholder-for-github-repo-owner>/<placeholder-for-plugin-github-repo>/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/badge/version-<placeholder-for-plugin-version>-blue)](https://github.com/<placeholder-for-github-repo-owner>/<placeholder-for-plugin-github-repo>)
 [![License](https://img.shields.io/badge/license-<placeholder-for-license-type>-green)](LICENSE)
-[![Validation](https://github.com/<placeholder-for-github-repo-owner>/<placeholder-for-plugin-github-repo>/actions/workflows/validate.yml/badge.svg)](https://github.com/<placeholder-for-github-repo-owner>/<placeholder-for-plugin-github-repo>/actions/workflows/validate.yml)
 
 <placeholder-for-plugin-description>
 
