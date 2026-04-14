@@ -73,20 +73,23 @@ DEFAULT_MARKETPLACE_CHECK_CONTEXTS: list[str] = [
 # Back-compat alias for tests written against the pre-split name.
 DEFAULT_CHECK_CONTEXTS = DEFAULT_PLUGIN_CHECK_CONTEXTS
 
-# Well-known GitHub App IDs that CPV considers trusted by default. These are
-# the apps that should bypass the PR review requirement so routine bot PRs
-# can merge without manual approval. The user can always override via CLI.
+# Integration (GitHub App) IDs that CPV tries to seed as bypass actors on
+# a fresh ruleset. THIS LIST IS INTENTIONALLY EMPTY.
 #
-# Sources:
-#   - dependabot[bot]       = 29110  (Dependabot)
-#   - github-actions[bot]   = 15368  (GitHub Actions)
+# The GitHub Rulesets API rejects any app_id that is not installed on the
+# target owner's account with:
+#     "Actor GitHub Actions integration must be part of the ruleset source
+#      or owner organization" (HTTP 422)
+# because apps vary per-repo and per-owner. Hardcoding an app_id that is
+# not installed causes the entire ruleset creation to fail.
 #
-# Other common apps (Claude, Copilot, Codecov, Renovate) are preserved from
-# the existing ruleset automatically — this list only seeds NEW rulesets.
-DEFAULT_TRUSTED_APP_IDS: list[int] = [
-    29110,  # dependabot[bot]
-    15368,  # github-actions[bot]
-]
+# The supported way to bypass integrations is:
+#   1. Run once — bypass_actors is seeded from the admin role only
+#   2. Any existing legacy ruleset's bypass_actors are auto-adopted
+#      (preserved verbatim so already-installed apps keep their bypass)
+#   3. Users add more apps explicitly via --add-bypass-app-id <id>
+#      after checking `--list-apps` to find the correct IDs
+DEFAULT_TRUSTED_APP_IDS: list[int] = []
 
 # Repository role IDs — well-known GitHub values.
 # actor_id: 1=read, 2=triage, 4=write, 5=maintain, ...=admin (varies)
@@ -419,7 +422,6 @@ def build_ruleset(
                     "require_last_push_approval": False,
                     "required_review_thread_resolution": False,
                     "allowed_merge_methods": ["merge", "squash", "rebase"],
-                    "automatic_copilot_code_review_enabled": False,
                 },
             },
             # The real gate: CI must pass before merge.
@@ -432,7 +434,6 @@ def build_ruleset(
                     "required_status_checks": [
                         {"context": ctx} for ctx in check_contexts
                     ],
-                    "do_not_enforce_on_create": False,
                 },
             },
         ],

@@ -45,6 +45,8 @@ cpv-standardize = "scripts.cli:standardize"
 cpv-remote-validate = "scripts.remote_validation:main"
 # Branch-rules setup — create/update GitHub ruleset on a plugin or marketplace repo
 cpv-setup-branch-rules = "scripts.setup_branch_rules:main"
+# Generic variant — works on ANY GitHub repository (no CPV/plugin/marketplace assumptions)
+branch-rules-install = "scripts.setup_branch_rules_generic:main"
 
 [tool.ruff]
 line-length = 120

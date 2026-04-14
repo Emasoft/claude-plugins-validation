@@ -2,7 +2,7 @@
 
 <!--BADGES-START-->
 ![Version](https://img.shields.io/badge/version-2.13.0-blue)
-![Tests](https://img.shields.io/badge/tests-1743%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1768%20passed-brightgreen)
 ![Validation](https://img.shields.io/badge/validation-0%20issues-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 <!--BADGES-END-->
@@ -291,7 +291,7 @@ The semantic validator always warns about the cost and asks for confirmation bef
 
 ### Slash Commands
 
-17 commands — 9 run scripts directly (zero AI tokens), 6 spawn an agent, 2 are specialized utility scripts.
+18 commands — 10 run scripts directly (zero AI tokens), 6 spawn an agent, 2 are specialized utility scripts.
 
 #### Script Commands (free — no AI tokens)
 
@@ -305,6 +305,7 @@ The semantic validator always warns about the cost and asks for confirmation bef
 | `/cpv-list-plugins` | List installed plugins with version and status |
 | `/cpv-bump-version <path>` | Bump plugin version (patch, minor, major) |
 | `/cpv-setup-branch-rules <owner/repo>` | Create/update the GitHub ruleset that enforces CI as a required status check (server-side gate — idempotent, auto-detects plugin vs marketplace, preserves existing bot bypass actors) |
+| `/cpv-setup-branch-rules-generic <owner/repo> --check "CI / job"` | Project-agnostic variant that works on ANY GitHub repo (not just CPV plugins). Requires explicit `--check` contexts, no hardcoded defaults. Also available as `uvx branch-rules-install`. |
 | `/cpv-version` | Show CPV version |
 
 #### Agent Commands (interactive — uses AI tokens)
@@ -338,8 +339,8 @@ The semantic validator always warns about the cost and asks for confirmation bef
 | Management scripts | 13 | Plugin lifecycle, marketplace operations, scaffolding |
 | Agents | 7 | AI-powered validation, fixing, and management |
 | Skills | 14 | Validation, management, publishing, fix, migration, and auto-notify workflows |
-| Commands | 17 | 9 direct script + 6 agent-backed + 2 specialized utility commands |
-| Tests | 1743 | Full coverage across all modules |
+| Commands | 18 | 10 direct script + 6 agent-backed + 2 specialized utility commands |
+| Tests | 1768 | Full coverage across all modules |
 
 </details>
 
