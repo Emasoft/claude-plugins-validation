@@ -434,7 +434,10 @@ def classify_folder_scope(folder: Path, repo_root: Path | None = None) -> Scope:
 
     Semantics per TRDD-2be75e88 section 3.4:
 
-    - ``missing``: the folder does not exist
+    - ``missing``: the folder does not exist, OR is a symlink that
+      resolves outside ``repo_root`` (safer to treat symlink-escape as
+      "missing" so neither scope validator follows it — see aegis
+      MEDIUM-1 and llm-ext LOGIC-2)
     - ``no-git``: the folder has no ``.git`` ancestor
     - ``local``: the folder is git-ignored OR has zero tracked files
     - ``project``: the folder has at least one tracked file inside it
@@ -445,6 +448,11 @@ def classify_folder_scope(folder: Path, repo_root: Path | None = None) -> Scope:
         repo_root = find_git_root(folder)
         if repo_root is None:
             return "no-git"
+    # Symlink-escape guard: a folder that resolves outside the repo root
+    # (e.g., .claude/agents -> /tmp/malicious) must not be walked. We
+    # classify it as "missing" so both scope validators skip it silently.
+    if resolve_within(folder, repo_root) is None:
+        return "missing"
     if is_git_ignored(folder, repo_root):
         return "local"
     rel = _relative_to_root(folder, repo_root)
@@ -461,7 +469,9 @@ def classify_folder_scope(folder: Path, repo_root: Path | None = None) -> Scope:
 def classify_file_scope(file: Path, repo_root: Path | None = None) -> Scope:
     """Classify a single file as project / local / missing / no-git.
 
-    - ``missing``: the file does not exist
+    - ``missing``: the file does not exist, OR resolves outside
+      ``repo_root`` via a symlink (treated as missing so neither
+      validator touches it)
     - ``no-git``: the file has no ``.git`` ancestor
     - ``project``: the file is tracked
     - ``local``: the file is ignored or otherwise untracked
@@ -472,6 +482,9 @@ def classify_file_scope(file: Path, repo_root: Path | None = None) -> Scope:
         repo_root = find_git_root(file)
         if repo_root is None:
             return "no-git"
+    # Symlink-escape guard — same rationale as classify_folder_scope.
+    if resolve_within(file, repo_root) is None:
+        return "missing"
     if is_git_tracked(file, repo_root):
         return "project"
     return "local"
@@ -565,14 +578,17 @@ def safe_read_text(path: Path, max_bytes: int) -> str:
         UnicodeDecodeError: on non-UTF-8 content.
 
     The size check happens BEFORE the read so a hostile project cannot
-    make the validator OOM by pointing it at a multi-GB file.
+    make the validator OOM by pointing it at a multi-GB file. A leading
+    UTF-8 BOM (``\\ufeff``), if present, is stripped transparently using
+    ``encoding="utf-8-sig"`` — fixes Windows-edited settings files that
+    otherwise fail to parse (llm-ext EDGE-2).
     """
     st = path.stat()
     if st.st_size > max_bytes:
         raise OversizedFileError(
             f"file exceeds {max_bytes} byte cap ({st.st_size} bytes)"
         )
-    return path.read_text(encoding="utf-8")
+    return path.read_text(encoding="utf-8-sig")
 
 
 def _count_yaml_alias_markers(text: str) -> int:
@@ -632,9 +648,14 @@ def safe_parse_frontmatter(content: str) -> tuple[dict[str, object] | None, str]
 def safe_load_jsonc(path: Path, max_bytes: int) -> object:
     """Load a JSONC file bounded to ``max_bytes``.
 
-    Delegates to ``cpv_management_common.load_jsonc`` after size-checking
-    the file. The import of ``load_jsonc`` is deferred so this module can
-    be imported before the full validation-common module graph is ready.
+    Unlike ``cpv_management_common.load_jsonc``, this helper:
+
+    1. Size-caps the read via ``safe_read_text`` (aegis HIGH-2).
+    2. Strips a leading UTF-8 BOM if present (``encoding="utf-8-sig"``) so
+       files edited on Windows parse successfully (llm-ext EDGE-2).
+    3. Strips JSONC comments and trailing commas via the existing
+       ``cpv_management_common`` helpers — parse behaviour is otherwise
+       identical.
 
     Raises:
         OversizedFileError: on oversize input.
@@ -642,14 +663,15 @@ def safe_load_jsonc(path: Path, max_bytes: int) -> object:
         failure — callers are expected to catch these and convert them to
         sanitised findings (see aegis MEDIUM-4).
     """
-    st = path.stat()
-    if st.st_size > max_bytes:
-        raise OversizedFileError(
-            f"file exceeds {max_bytes} byte cap ({st.st_size} bytes)"
-        )
-    from cpv_management_common import load_jsonc  # deferred to avoid import cycles
+    text = safe_read_text(path, max_bytes)
+    # Defer the strip-helpers import so cc_scope_rules does not have a
+    # hard module-load dependency on cpv_management_common's full graph.
+    import json as _json
 
-    return load_jsonc(path)
+    from cpv_management_common import strip_jsonc_comments, strip_trailing_commas
+
+    cleaned = strip_trailing_commas(strip_jsonc_comments(text))
+    return _json.loads(cleaned)
 
 
 def read_finding(

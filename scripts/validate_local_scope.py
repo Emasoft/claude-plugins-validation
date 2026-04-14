@@ -39,6 +39,13 @@ Additional local-scope checks:
   a WIP shared config that will be committed soon.
 - An untracked ``.mcp.json`` is flagged as WARNING per TRDD 5.6.
 
+This validator is a **single-shot, single-threaded** offline tool. Like
+``validate_project_scope``, its ``exists()`` → ``read_text()`` sequences
+are a benign TOCTOU window: an attacker who can swap files mid-run
+already controls the validation outcome by virtue of owning the project
+tree. Do not call these helpers from a background worker or a
+long-running service without first adding a locking layer (aegis INFO-1).
+
 Exit codes follow the CPV convention:
 
 - 0: no blocking issues

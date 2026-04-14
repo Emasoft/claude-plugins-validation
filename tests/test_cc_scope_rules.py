@@ -710,3 +710,84 @@ class TestBatchedGitHelpers:
         _git(git_repo, "commit", "-m", "add gitignore", "--quiet")
         assert gitignore_covers_path(".claude/settings.local.json", git_repo)
         assert not gitignore_covers_path("src/main.py", git_repo)
+
+
+# =============================================================================
+# UTF-8 BOM handling (llm-ext EDGE-2)
+# =============================================================================
+
+
+class TestBomHandling:
+    """safe_read_text and safe_load_jsonc transparently handle UTF-8 BOM."""
+
+    def test_safe_read_text_strips_leading_bom(self, tmp_path: Path) -> None:
+        """A file with a leading UTF-8 BOM reads without the BOM char."""
+        f = tmp_path / "bom.md"
+        f.write_bytes(b"\xef\xbb\xbfhello\n")
+        result = safe_read_text(f, 1024)
+        assert result == "hello\n"
+        assert "\ufeff" not in result
+
+    def test_safe_load_jsonc_parses_json_with_bom(self, tmp_path: Path) -> None:
+        """A JSON file with a leading UTF-8 BOM (common on Windows) parses."""
+        f = tmp_path / "settings.json"
+        f.write_bytes(b'\xef\xbb\xbf{"model": "opus"}\n')
+        result = safe_load_jsonc(f, 1024)
+        assert result == {"model": "opus"}
+
+    def test_safe_load_jsonc_parses_jsonc_with_bom_and_comments(
+        self, tmp_path: Path
+    ) -> None:
+        """BOM + JSONC comments + trailing commas all parse cleanly."""
+        payload = b'\xef\xbb\xbf{\n  // a comment\n  "k": "v",\n}\n'
+        f = tmp_path / "settings.json"
+        f.write_bytes(payload)
+        result = safe_load_jsonc(f, 1024)
+        assert result == {"k": "v"}
+
+
+# =============================================================================
+# Symlink-escape classification (aegis MEDIUM-1 + llm-ext LOGIC-2)
+# =============================================================================
+
+
+class TestSymlinkEscapeClassification:
+    """classify_folder_scope / classify_file_scope reject symlink escapes."""
+
+    def test_folder_symlink_outside_repo_classifies_missing(
+        self, git_repo: Path, tmp_path: Path
+    ) -> None:
+        """A folder symlink to outside the repo classifies as 'missing'."""
+        outside = tmp_path / "outside-dir"
+        outside.mkdir()
+        (outside / "leaked.md").write_text("secret\n", encoding="utf-8")
+        link = git_repo / ".claude" / "agents"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(outside)
+        scope = classify_folder_scope(link, git_repo)
+        assert scope == "missing"
+
+    def test_file_symlink_outside_repo_classifies_missing(
+        self, git_repo: Path, tmp_path: Path
+    ) -> None:
+        """A file symlink to outside the repo classifies as 'missing'."""
+        outside = tmp_path / "outside.txt"
+        outside.write_text("secret\n", encoding="utf-8")
+        link = git_repo / ".claude" / "settings.json"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(outside)
+        scope = classify_file_scope(link, git_repo)
+        assert scope == "missing"
+
+    def test_normal_folder_inside_repo_still_classified_correctly(
+        self, git_repo: Path
+    ) -> None:
+        """Regression guard — plain folders (no symlinks) still work."""
+        (git_repo / ".claude" / "agents").mkdir(parents=True)
+        (git_repo / ".claude" / "agents" / "x.md").write_text(
+            "---\nname: x\n---\n", encoding="utf-8"
+        )
+        _git(git_repo, "add", ".claude/agents/x.md")
+        _git(git_repo, "commit", "-m", "add agent", "--quiet")
+        scope = classify_folder_scope(git_repo / ".claude" / "agents", git_repo)
+        assert scope == "project"

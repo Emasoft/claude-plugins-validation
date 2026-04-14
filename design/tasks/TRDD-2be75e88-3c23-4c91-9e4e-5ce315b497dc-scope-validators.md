@@ -3,7 +3,7 @@
 **TRDD ID:** `2be75e88-3c23-4c91-9e4e-5ce315b497dc`
 **Filename:** `design/tasks/TRDD-2be75e88-3c23-4c91-9e4e-5ce315b497dc-scope-validators.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
-**Status:** Not started
+**Status:** Done (shipped in v2.15.0, hardened in v2.15.1)
 **Author:** Emasoft (via Claude session)
 **Created:** 2026-04-14
 
@@ -77,9 +77,13 @@ Non-goals:
 |------|--------|
 | `scripts/cli.py` | Add `validate_project_scope()` and `validate_local_scope()` entry functions. |
 | `pyproject.toml` | Add `cpv-validate-project-scope` and `cpv-validate-local-scope` to `[project.scripts]`. |
-| `.claude-plugin/marketplace.json` | Add both commands to the CPV plugin's commands list. |
 | `README.md` | Document the two new commands. |
-| `agents/plugin-validator.md` | Add the two commands to the First Contact menu if they belong there, else leave alone. |
+| `agents/plugin-validator.md` | Add the two commands to the First Contact menu. |
+
+> **Note**: This TRDD originally referenced `.claude-plugin/marketplace.json`,
+> but CPV is a standalone plugin (Layout A) — commands are auto-discovered
+> from the `commands/` folder at install time, so no manifest update is
+> needed. The reference was removed during the v2.15.1 audit pass.
 
 ### 3.3 Data flow
 
