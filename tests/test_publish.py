@@ -456,3 +456,68 @@ def test_print_gates_lists_all_14_gates(capsys):
     for i in range(14):
         assert f"Gate {i}:" in out
     assert "WARNING is the only severity" in out
+
+
+# ── Pipeline order + git-cliff wiring ───────────────────────────────────────
+# Pin the cornerstone contract: lint must precede tests, tests must precede
+# validate, validate must precede bump, bump must precede changelog, and the
+# changelog must be generated via `git-cliff --bump --unreleased --tag`. The
+# template's pipeline is covered by TestPublishPyPipelineOrder in
+# test_generate_plugin_repo.py — these tests cover CPV's OWN publish.py.
+
+
+class TestCpvPublishPipelineOrder:
+    """Pin the order of gates in CPV's own publish.py main() pipeline."""
+
+    def test_gate_2_is_lint(self):
+        """Gate 2 must be lint+typecheck (runs before tests on Gate 3)."""
+        label, desc = publish.GATES[2]
+        assert label == "Gate 2"
+        assert "lint" in desc.lower()
+        assert "typecheck" in desc.lower() or "mypy" in desc.lower()
+
+    def test_gate_3_is_tests(self):
+        """Gate 3 must be tests (runs after lint on Gate 2)."""
+        label, desc = publish.GATES[3]
+        assert label == "Gate 3"
+        assert "test" in desc.lower() or "pytest" in desc.lower()
+
+    def test_gate_4_is_plugin_validate(self):
+        """Gate 4 must be plugin validation (runs after tests on Gate 3)."""
+        label, desc = publish.GATES[4]
+        assert label == "Gate 4"
+        assert "validat" in desc.lower()
+
+    def test_gate_8_is_bump(self):
+        """Gate 8 must be the bump stage."""
+        label, desc = publish.GATES[8]
+        assert label == "Gate 8"
+        assert "bump" in desc.lower()
+
+    def test_gate_9_is_changelog_with_git_cliff_bump_unreleased(self):
+        """Gate 9 must be the changelog stage, explicitly using git-cliff --bump --unreleased."""
+        label, desc = publish.GATES[9]
+        assert label == "Gate 9"
+        assert "git-cliff" in desc.lower()
+        assert "--bump" in desc
+        assert "--unreleased" in desc
+        assert "--tag" in desc
+
+    def test_gates_10_to_13_run_commit_tag_push_release(self):
+        """Gates 10-13 must run commit → tag → push → github release in that order."""
+        assert "commit" in publish.GATES[10][1].lower()
+        assert "tag" in publish.GATES[11][1].lower()
+        assert "push" in publish.GATES[12][1].lower()
+        assert "release" in publish.GATES[13][1].lower()
+
+
+class TestCpvStageChangelogUsesBumpUnreleased:
+    """Pin that stage_changelog uses the git-cliff --bump --unreleased --tag pattern."""
+
+    def test_stage_changelog_source_references_bump_unreleased_tag(self):
+        """The stage_changelog function body must contain --bump, --unreleased, and --tag."""
+        import inspect
+        src = inspect.getsource(publish.stage_changelog)
+        assert '"--bump"' in src or "'--bump'" in src
+        assert '"--unreleased"' in src or "'--unreleased'" in src
+        assert '"--tag"' in src or "'--tag'" in src

@@ -57,10 +57,16 @@ from pathlib import Path
 
 
 def _colors_supported() -> bool:
-    """Return True only when the terminal supports ANSI escape sequences."""
+    """Return True only when the terminal supports ANSI escape sequences.
+
+    Uses sys.platform (rather than os.name) so that pyright's type-narrowing
+    can analyze both branches — os.name == "nt" is evaluated as unreachable
+    on non-Windows hosts and flagged as "code not analyzed", but sys.platform
+    comparisons are understood by static analyzers.
+    """
     if os.environ.get("NO_COLOR"):
         return False
-    if os.name == "nt":  # type: ignore[unreachable]
+    if sys.platform.startswith("win"):
         # Enable ANSI on Windows 10+
         try:
             import ctypes

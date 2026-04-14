@@ -26,10 +26,16 @@ from pathlib import Path
 
 
 def _colors_supported() -> bool:
-    """Return True only when the terminal supports ANSI escape sequences."""
+    """Return True only when the terminal supports ANSI escape sequences.
+
+    Uses sys.platform (rather than os.name) so that pyright's type-narrowing
+    can analyze both branches — os.name == "nt" is evaluated as unreachable
+    on non-Windows hosts and flagged as "code not analyzed", but sys.platform
+    comparisons are understood by static analyzers.
+    """
     if os.environ.get("NO_COLOR"):
         return False
-    if os.name == "nt":
+    if sys.platform.startswith("win"):
         try:
             import ctypes
 
@@ -1159,45 +1165,34 @@ def stage_check_clean(root: Path) -> None:
     cprint(f"  {GREEN}Clean.{NC}")
 
 def stage_lint(root: Path) -> None:
-    """Step 2: Lint with ruff. MANDATORY — no skip."""
-    cprint(f"\n{BOLD}[2/11] Linting...{NC}")
+    """Step 2: Lint + typecheck (ruff + mypy). MANDATORY — no skip.
+
+    Runs ruff for style/syntax and mypy for static types in the same stage.
+    Both must succeed — the cornerstone rule forbids any push with lint or
+    type errors. Type-checking runs BEFORE the test suite so the cheap fails
+    come before the expensive ones.
+    """
+    cprint(f"\n{BOLD}[2/11] Linting + type-checking...{NC}")
     scripts_dir = root / "scripts"
     if not scripts_dir.is_dir():
         cprint(f"  {RED}BLOCKED: scripts/ directory missing — cannot lint.{NC}")
         sys.exit(1)
+    cprint(f"  {BLUE}ruff check scripts/{NC}")
     run(["uv", "run", "ruff", "check", "scripts/"], cwd=root)
-    cprint(f"  {GREEN}Lint passed.{NC}")
-
-def stage_validate(root: Path) -> None:
-    """Step 3: Validate plugin via REMOTE CPV validator. MANDATORY — no skip.
-
-    Cornerstone rule: a plugin cannot be pushed unless validation passes
-    with 0 issues (WARNING allowed). The validator is ALWAYS fetched from
-    GitHub (git+https://github.com/Emasoft/claude-plugins-validation) via
-    uvx so a local tampered copy cannot weaken the rules. No exceptions.
-    """
-    cprint(f"\n{BOLD}[3/11] Validating plugin (remote CPV)...{NC}")
-    if not shutil.which("uvx"):
-        cprint(f"  {RED}BLOCKED: uvx not found on PATH.{NC}")
-        cprint(f"  {RED}Install via: brew install uv  or  pip install uv{NC}")
-        sys.exit(1)
-    # Fetch CPV from GitHub and run validate_plugin remotely. --strict blocks
-    # on CRITICAL(1), MAJOR(2), MINOR(3), NIT(4); WARNING(5+) passes.
-    run([
-        "uvx", "--from",
-        "git+https://github.com/Emasoft/claude-plugins-validation",
-        "--with", "pyyaml",
-        "cpv-remote-validate", "plugin", ".", "--strict",
-    ], cwd=root)
-    cprint(f"  {GREEN}Validation passed (0 blocking issues).{NC}")
+    cprint(f"  {BLUE}mypy scripts/ --ignore-missing-imports{NC}")
+    run(["uv", "run", "mypy", "scripts/", "--ignore-missing-imports"], cwd=root)
+    cprint(f"  {GREEN}Lint + typecheck passed.{NC}")
 
 def stage_tests(root: Path) -> None:
-    """Step 4: Run pytest. MANDATORY — no skip, no exceptions.
+    """Step 3: Run pytest. MANDATORY — no skip, no exceptions.
 
     Cornerstone rule: failing tests block the push. Missing tests/ directory
     is a scaffolding bug and must be fixed, not bypassed.
+
+    Order: tests run BEFORE the CPV validator so behavioral regressions fail
+    fast on unit tests before the structural validator inspects the manifest.
     """
-    cprint(f"\n{BOLD}[4/11] Running tests...{NC}")
+    cprint(f"\n{BOLD}[3/11] Running tests...{NC}")
     test_dir = root / "tests"
     if not test_dir.is_dir():
         cprint(f"  {RED}BLOCKED: tests/ directory missing.{NC}")
@@ -1213,6 +1208,33 @@ def stage_tests(root: Path) -> None:
         cprint(f"  {RED}BLOCKED: tests failed (exit {r.returncode}).{NC}")
         sys.exit(r.returncode)
     cprint(f"  {GREEN}Tests passed.{NC}")
+
+
+def stage_validate(root: Path) -> None:
+    """Step 4: Validate plugin via REMOTE CPV validator. MANDATORY — no skip.
+
+    Cornerstone rule: a plugin cannot be pushed unless validation passes
+    with 0 issues (WARNING allowed). The validator is ALWAYS fetched from
+    GitHub (git+https://github.com/Emasoft/claude-plugins-validation) via
+    uvx so a local tampered copy cannot weaken the rules. No exceptions.
+
+    Order: runs AFTER lint + tests so behavioral regressions fail fast
+    before the structural validator even looks at the manifest.
+    """
+    cprint(f"\n{BOLD}[4/11] Validating plugin (remote CPV)...{NC}")
+    if not shutil.which("uvx"):
+        cprint(f"  {RED}BLOCKED: uvx not found on PATH.{NC}")
+        cprint(f"  {RED}Install via: brew install uv  or  pip install uv{NC}")
+        sys.exit(1)
+    # Fetch CPV from GitHub and run validate_plugin remotely. --strict blocks
+    # on CRITICAL(1), MAJOR(2), MINOR(3), NIT(4); WARNING(5+) passes.
+    run([
+        "uvx", "--from",
+        "git+https://github.com/Emasoft/claude-plugins-validation",
+        "--with", "pyyaml",
+        "cpv-remote-validate", "plugin", ".", "--strict",
+    ], cwd=root)
+    cprint(f"  {GREEN}Validation passed (0 blocking issues).{NC}")
 
 
 # ── Marketplace-registration helpers (mirror of CPV's own publish.py Gate 6) ─
@@ -1576,9 +1598,18 @@ def detect_bump_type(root: Path) -> str:
     return "patch"
 
 
-def stage_changelog(root: Path, dry_run: bool) -> None:
-    """Step 8: Generate changelog with git-cliff."""
-    cprint(f"\n{BOLD}[9/11] Generating changelog...{NC}")
+def stage_changelog(root: Path, new_ver: str, dry_run: bool) -> None:
+    """Step 9: Generate CHANGELOG.md with git-cliff using the bumped tag.
+
+    Uses the git-cliff pattern recommended for release pipelines:
+        git cliff --bump --unreleased --tag v<NEXT> -o CHANGELOG.md
+
+    --bump          promote the unreleased section into a dated tag entry
+    --unreleased    process only commits since the last tag
+    --tag v<NEXT>   label the new entry with the computed version (prefixed v)
+    -o CHANGELOG.md write the regenerated changelog back to disk
+    """
+    cprint(f"\n{BOLD}[9/11] Generating changelog (git-cliff)...{NC}")
     if not shutil.which("git-cliff"):
         cprint(f"  {YELLOW}git-cliff not installed — skipping changelog.{NC}")
         return
@@ -1586,11 +1617,15 @@ def stage_changelog(root: Path, dry_run: bool) -> None:
     if not cliff_toml.is_file():
         cprint(f"  {YELLOW}No cliff.toml — skipping changelog.{NC}")
         return
+    tag = f"v{new_ver}"
     if dry_run:
-        cprint("  Would run: git-cliff -o CHANGELOG.md")
+        cprint(f"  Would run: git-cliff --bump --unreleased --tag {tag} -o CHANGELOG.md")
         return
-    run(["git-cliff", "-o", "CHANGELOG.md"], cwd=root)
-    cprint(f"  {GREEN}Changelog generated.{NC}")
+    run(
+        ["git-cliff", "--bump", "--unreleased", "--tag", tag, "-o", "CHANGELOG.md"],
+        cwd=root,
+    )
+    cprint(f"  {GREEN}CHANGELOG.md updated with {tag}.{NC}")
 
 def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
     """Step 9: Commit, tag, push."""
@@ -1698,16 +1733,22 @@ def main() -> int:
         cprint(f"{YELLOW}(dry-run mode — no changes will be made){NC}")
 
     # Gate 0: reject bypass attempts BEFORE running any other stage.
+    # Pipeline order (per the cornerstone rule "every push is a bump"):
+    #   lint+typecheck → tests → validate → marketplace-reg → consistency →
+    #   bump → badge → changelog → commit → push → github release
+    # Lint runs before tests (cheap fails first). Tests run before validate
+    # so behavioral regressions fail the test suite before the structural
+    # validator inspects the manifest.
     stage_bypass_guard()
     stage_check_clean(root)
     stage_lint(root)
-    stage_validate(root)
     stage_tests(root)  # MANDATORY — no skip flag, no exceptions
+    stage_validate(root)
     stage_marketplace_registration(root)  # Gate 6 parity with CPV's own publish.py
     stage_consistency(root)
     stage_bump(root, new_ver, args.dry_run)
     stage_update_badges(root, current, new_ver, args.dry_run)
-    stage_changelog(root, args.dry_run)
+    stage_changelog(root, new_ver, args.dry_run)
     stage_commit_and_push(root, new_ver, args.dry_run)
     stage_gh_release(root, new_ver, args.dry_run)
 

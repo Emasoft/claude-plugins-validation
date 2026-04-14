@@ -495,6 +495,91 @@ class TestPublishPyCornerstoneRule:
         assert "no exceptions" in src.lower()
 
 
+class TestPublishPyPipelineOrder:
+    """Verify the template's publish.py runs stages in the correct order.
+
+    User requirement: "first lint, typecheck, test, validate, then the
+    bump/git-cliff/commit/tag workflow, and only then push and publish".
+    This pins the order so a future refactor cannot silently swap stages.
+    """
+
+    @staticmethod
+    def _src() -> str:
+        p = _default_params()
+        from generate_plugin_repo import gen_publish_py  # noqa: PLC0415
+        return gen_publish_py(p)
+
+    def _stage_call_order(self, src: str) -> list[str]:
+        """Return the ordered list of stage_* calls appearing in the full pipeline."""
+        # Find the main() block where all the stage_* calls live together
+        import re
+        pattern = re.compile(r"^\s*(stage_[a-z_]+)\s*\(", re.MULTILINE)
+        # Find the final publish pipeline region — the one that ends with stage_gh_release
+        all_calls = pattern.findall(src)
+        if "stage_gh_release" not in all_calls:
+            return []
+        end = len(all_calls) - 1 - all_calls[::-1].index("stage_gh_release")
+        start = end
+        while start > 0 and all_calls[start - 1].startswith("stage_"):
+            start -= 1
+        # Walk back up to stage_bypass_guard
+        if "stage_bypass_guard" in all_calls[start : end + 1]:
+            return all_calls[start : end + 1]
+        # Fallback — include last 12 calls
+        return all_calls[-12:]
+
+    def test_lint_runs_before_tests(self):
+        """stage_lint must appear before stage_tests in the pipeline."""
+        order = self._stage_call_order(self._src())
+        assert "stage_lint" in order
+        assert "stage_tests" in order
+        assert order.index("stage_lint") < order.index("stage_tests")
+
+    def test_tests_run_before_validate(self):
+        """stage_tests must appear before stage_validate in the pipeline."""
+        order = self._stage_call_order(self._src())
+        assert "stage_tests" in order
+        assert "stage_validate" in order
+        assert order.index("stage_tests") < order.index("stage_validate")
+
+    def test_validate_runs_before_bump(self):
+        """stage_validate must appear before stage_bump (validate blocks broken publishes)."""
+        order = self._stage_call_order(self._src())
+        assert order.index("stage_validate") < order.index("stage_bump")
+
+    def test_bump_runs_before_changelog(self):
+        """stage_bump must appear before stage_changelog (changelog needs the new tag)."""
+        order = self._stage_call_order(self._src())
+        assert order.index("stage_bump") < order.index("stage_changelog")
+
+    def test_changelog_runs_before_commit(self):
+        """stage_changelog must appear before stage_commit_and_push (commit captures the changelog)."""
+        order = self._stage_call_order(self._src())
+        assert order.index("stage_changelog") < order.index("stage_commit_and_push")
+
+    def test_commit_runs_before_gh_release(self):
+        """stage_commit_and_push must appear before stage_gh_release (release points at the pushed tag)."""
+        order = self._stage_call_order(self._src())
+        assert order.index("stage_commit_and_push") < order.index("stage_gh_release")
+
+    def test_lint_stage_runs_both_ruff_and_mypy(self):
+        """stage_lint must invoke ruff AND mypy, not just ruff."""
+        src = self._src()
+        # Find stage_lint body
+        start = src.index("def stage_lint(")
+        end = src.index("\ndef ", start + 1)
+        body = src[start:end]
+        assert "ruff" in body
+        assert "mypy" in body
+
+    def test_changelog_uses_git_cliff_bump_unreleased_tag(self):
+        """stage_changelog must use the --bump --unreleased --tag pattern."""
+        src = self._src()
+        assert "--bump" in src
+        assert "--unreleased" in src
+        assert '"--tag", tag' in src or "'--tag', tag" in src
+
+
 class TestPublishPyAutoBump:
     """Verify the template's auto-bump default (git-cliff --bumped-version).
 
