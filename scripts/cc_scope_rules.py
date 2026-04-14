@@ -12,6 +12,18 @@ Contains:
   ``classify_folder_scope``, ``classify_file_scope``) used to decide whether
   an element is in project scope (tracked) or local scope (ignored /
   untracked).
+- Bounded I/O helpers (``safe_read_text``, ``safe_load_jsonc``,
+  ``safe_parse_frontmatter``) that cap memory usage on adversarial inputs
+  and scrub secrets from error messages before they reach the report.
+- Sandbox helpers (``resolve_within``, ``gitignore_covers_path``,
+  ``list_tracked_files_under``) used by the orchestrators to keep file
+  walks contained inside the validated project and batched to one git
+  call per folder.
+
+This module's resource and security invariants are load-bearing for the
+scope validators' ability to process untrusted project input. See the
+aegis security audit in ``docs_dev/aegis-security-audit-20260414.md`` for
+the threat model and the rationale for each bound.
 
 References:
 
@@ -23,10 +35,17 @@ References:
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+import yaml
+
+if TYPE_CHECKING:
+    from cpv_validation_common import ValidationReport
 
 __all__ = [
     "PROJECT_REJECTED_KEYS",
@@ -37,17 +56,67 @@ __all__ = [
     "SECRET_KEY_NAME_PATTERN",
     "ABSOLUTE_HOME_PATH_PATTERNS",
     "CLAUDE_VAR_PREFIXES",
+    "MAX_SETTINGS_JSON_BYTES",
+    "MAX_MCP_JSON_BYTES",
+    "MAX_MARKDOWN_BYTES",
+    "MAX_CLAUDE_MD_BYTES",
+    "MAX_HOME_CLAUDE_JSON_BYTES",
+    "MAX_GITIGNORE_BYTES",
+    "MAX_FRONTMATTER_BYTES",
+    "MAX_YAML_ALIASES",
+    "MAX_FILES_PER_FOLDER",
     "Scope",
     "is_secret_value",
     "looks_like_secret_key_name",
     "contains_absolute_home_path",
     "uses_claude_var_expansion",
+    "redact_home_path",
     "find_git_root",
     "is_git_tracked",
     "is_git_ignored",
     "classify_folder_scope",
     "classify_file_scope",
+    "resolve_within",
+    "gitignore_covers_path",
+    "list_tracked_files_under",
+    "safe_read_text",
+    "safe_load_jsonc",
+    "safe_parse_frontmatter",
 ]
+
+
+# =============================================================================
+# Resource limits (aegis HIGH-1, HIGH-2, MEDIUM-5, LOW-2)
+# =============================================================================
+
+# Size caps for file reads, chosen to comfortably fit all real-world content
+# while rejecting adversarial inputs. These are applied BEFORE ``read_text``
+# or JSONC parsing so the validator can never be OOM'd by a hostile project.
+MAX_SETTINGS_JSON_BYTES: int = 1 * 1024 * 1024        # 1 MB — settings.json / settings.local.json
+MAX_MCP_JSON_BYTES: int = 1 * 1024 * 1024             # 1 MB — .mcp.json
+MAX_MARKDOWN_BYTES: int = 256 * 1024                  # 256 KB — individual agent/skill/command/rule .md
+MAX_CLAUDE_MD_BYTES: int = 2 * 1024 * 1024            # 2 MB — CLAUDE.md / CLAUDE.local.md
+MAX_HOME_CLAUDE_JSON_BYTES: int = 16 * 1024 * 1024    # 16 MB — ~/.claude.json (many projects)
+MAX_GITIGNORE_BYTES: int = 1 * 1024 * 1024            # 1 MB — .gitignore
+
+# Frontmatter size cap + alias count limit close the YAML "billion laughs"
+# bomb surface on adversarial SKILL.md / agent .md files.
+MAX_FRONTMATTER_BYTES: int = 64 * 1024                # 64 KB
+MAX_YAML_ALIASES: int = 100                           # anchors + references combined
+
+# Per-folder file count cap on rglob walks — prevents a hostile project from
+# forcing an unbounded tree walk via millions of .md files or directory symlinks.
+MAX_FILES_PER_FOLDER: int = 10_000
+
+
+# =============================================================================
+# Git binary resolution (aegis LOW-4)
+# =============================================================================
+
+# Pin the ``git`` binary at import time so later PATH changes cannot substitute
+# a malicious shim. ``None`` means git is unavailable — classifier helpers
+# return False/"no-git" gracefully in that case.
+GIT_BIN: str | None = shutil.which("git")
 
 
 # =============================================================================
@@ -142,12 +211,28 @@ SECRET_KEY_NAME_PATTERN: re.Pattern[str] = re.compile(
 
 # Absolute home directory path patterns. Applied to shared settings fields to
 # catch machine-specific paths that will break for other team members.
+# Case-insensitive on all platforms — macOS and Windows filesystems are
+# case-insensitive by default, so ``/users/alice/`` and ``/Users/alice/`` are
+# the same path and the detection must not be bypassable by changing case.
 ABSOLUTE_HOME_PATH_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"(?:^|\s|[\"'=])/Users/[^/\s\"']+/"),
-    re.compile(r"(?:^|\s|[\"'=])/home/[^/\s\"']+/"),
-    re.compile(r"(?:^|\s|[\"'=])/root/"),
-    re.compile(r"(?:^|\s|[\"'=])C:[\\/](?:Users|Documents and Settings)[\\/][^\\/\s\"']+[\\/]", re.IGNORECASE),
+    re.compile(r"(?:^|\s|[\"'=])/Users/[^/\s\"']+/", re.IGNORECASE),
+    re.compile(r"(?:^|\s|[\"'=])/home/[^/\s\"']+/", re.IGNORECASE),
+    re.compile(r"(?:^|\s|[\"'=])/root/", re.IGNORECASE),
+    re.compile(
+        r"(?:^|\s|[\"'=])C:[\\/](?:Users|Documents and Settings)[\\/][^\\/\s\"']+[\\/]",
+        re.IGNORECASE,
+    ),
     re.compile(r"(?:^|\s|[\"'=])~[/\\]"),
+)
+
+# Redaction pattern — same branches as the detection regexes, but captures
+# only the username portion so we can replace it with ``<REDACTED>`` in
+# finding messages before they reach the report file.
+_HOME_PATH_REDACT_PATTERN: re.Pattern[str] = re.compile(
+    r"(?P<prefix>/Users/|/home/|C:[\\/]Users[\\/]|C:[\\/]Documents and Settings[\\/])"
+    r"(?P<user>[^/\\\s\"']+)"
+    r"(?P<suffix>[/\\])",
+    re.IGNORECASE,
 )
 
 # Claude-Code-safe variable prefixes. Any field that starts with one of these
@@ -214,6 +299,23 @@ def contains_absolute_home_path(text: object) -> bool:
     return False
 
 
+def redact_home_path(text: str) -> str:
+    """Replace the username segment of absolute home paths with ``<REDACTED>``.
+
+    This is the sanitisation layer between raw user input from a settings
+    file and the finding messages that the validator writes to its report.
+    Matches ``/Users/alice/...``, ``/home/bob/...``,
+    ``C:\\Users\\Alice\\...``, and the localised Windows variant.
+    Non-matches are returned unchanged.
+    """
+    if not isinstance(text, str) or not text:
+        return text
+    return _HOME_PATH_REDACT_PATTERN.sub(
+        lambda m: f"{m.group('prefix')}<REDACTED>{m.group('suffix')}",
+        text,
+    )
+
+
 # =============================================================================
 # Git-tracking classifier
 # =============================================================================
@@ -221,19 +323,54 @@ def contains_absolute_home_path(text: object) -> bool:
 Scope = Literal["project", "local", "missing", "no-git"]
 
 
-def find_git_root(path: Path) -> Path | None:
+def _run_git(
+    args: list[str], cwd: Path, *, timeout: int = 10
+) -> subprocess.CompletedProcess[str] | None:
+    """Run a pinned-binary git command. Returns None on any exec failure.
+
+    This is the only place that calls ``subprocess.run`` for git — every
+    caller goes through it so binary pinning and timeout are uniform.
+    """
+    if GIT_BIN is None:
+        return None
+    try:
+        return subprocess.run(
+            [GIT_BIN, *args],
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def find_git_root(path: Path, *, boundary: Path | None = None) -> Path | None:
     """Walk up from ``path`` to find the nearest ``.git`` directory.
 
     Returns the repo root Path or None when no parent has ``.git``.
-    The walk is bounded to 50 levels as a sanity limit.
+    The walk is bounded to 50 levels as a sanity limit. When ``boundary``
+    is provided, the walk does NOT look above ``boundary`` — used by the
+    orchestrators to prevent symlinked parents from exposing unrelated git
+    roots far outside the validator's nominal working set
+    (aegis MEDIUM-6).
     """
     try:
         current = path.resolve()
     except OSError:
         return None
+    boundary_resolved: Path | None = None
+    if boundary is not None:
+        try:
+            boundary_resolved = boundary.resolve()
+        except OSError:
+            boundary_resolved = None
     for _ in range(50):
         if (current / ".git").exists():
             return current
+        if boundary_resolved is not None and current == boundary_resolved:
+            return None
         parent = current.parent
         if parent == current:
             return None
@@ -271,18 +408,8 @@ def is_git_tracked(path: Path, repo_root: Path | None = None) -> bool:
     rel = _relative_to_root(path, repo_root)
     if rel is None:
         return False
-    try:
-        result = subprocess.run(
-            ["git", "ls-files", "--error-unmatch", "--", str(rel)],
-            cwd=str(repo_root),
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return result.returncode == 0
+    result = _run_git(["ls-files", "--error-unmatch", "--", str(rel)], repo_root)
+    return result is not None and result.returncode == 0
 
 
 def is_git_ignored(path: Path, repo_root: Path | None = None) -> bool:
@@ -298,18 +425,8 @@ def is_git_ignored(path: Path, repo_root: Path | None = None) -> bool:
     rel = _relative_to_root(path, repo_root)
     if rel is None:
         return False
-    try:
-        result = subprocess.run(
-            ["git", "check-ignore", "-q", "--", str(rel)],
-            cwd=str(repo_root),
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return result.returncode == 0
+    result = _run_git(["check-ignore", "-q", "--", str(rel)], repo_root)
+    return result is not None and result.returncode == 0
 
 
 def classify_folder_scope(folder: Path, repo_root: Path | None = None) -> Scope:
@@ -333,16 +450,8 @@ def classify_folder_scope(folder: Path, repo_root: Path | None = None) -> Scope:
     rel = _relative_to_root(folder, repo_root)
     if rel is None:
         return "no-git"
-    try:
-        result = subprocess.run(
-            ["git", "ls-files", "--", f"{rel}/"],
-            cwd=str(repo_root),
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
+    result = _run_git(["ls-files", "--", f"{rel}/"], repo_root)
+    if result is None:
         return "local"
     if result.returncode == 0 and result.stdout.strip():
         return "project"
@@ -366,3 +475,212 @@ def classify_file_scope(file: Path, repo_root: Path | None = None) -> Scope:
     if is_git_tracked(file, repo_root):
         return "project"
     return "local"
+
+
+# =============================================================================
+# Sandbox helpers — containment + batched git queries
+# =============================================================================
+
+
+def resolve_within(path: Path, root: Path) -> Path | None:
+    """Resolve ``path`` and verify it stays under ``root``.
+
+    Returns the fully resolved Path on success, or None when:
+
+    - ``path`` does not exist / cannot be stat'd
+    - ``path`` resolves outside ``root`` (symlink escape — aegis MEDIUM-1)
+
+    The resolved root is computed once via ``os.path.realpath`` (which
+    accepts non-existent paths on Python 3.6+) and compared segment-wise
+    via ``relative_to``. If ``relative_to`` raises ``ValueError``, the
+    path is not contained.
+    """
+    try:
+        resolved = Path(os.path.realpath(str(path)))
+        resolved_root = Path(os.path.realpath(str(root)))
+    except OSError:
+        return None
+    try:
+        resolved.relative_to(resolved_root)
+    except ValueError:
+        return None
+    return resolved
+
+
+def gitignore_covers_path(rel_path: str, repo_root: Path) -> bool:
+    """Return True when ``rel_path`` would be gitignored inside ``repo_root``.
+
+    Unlike ``is_git_ignored``, this accepts a plain relative string (no Path
+    resolution) and works on hypothetical files that do not exist on disk.
+    Used by the orchestrators to verify that common local-scope files
+    (``settings.local.json``, ``CLAUDE.local.md``) are covered by the
+    project's ``.gitignore`` rules.
+    """
+    result = _run_git(["check-ignore", "-q", "--", rel_path], repo_root)
+    return result is not None and result.returncode == 0
+
+
+def list_tracked_files_under(folder: Path, repo_root: Path) -> set[Path] | None:
+    """Return the set of tracked file Paths under ``folder`` in one git call.
+
+    Returns None when git is unavailable. Returns an empty set when the
+    folder has no tracked files. Batches the "is this file tracked?" check
+    into a single ``git ls-files -z -- <folder>/`` invocation, replacing N
+    per-file subprocess calls with one (aegis LOW-3).
+
+    Paths in the returned set are absolute and resolved (via
+    ``repo_root / rel_path``) so callers can compare against file system
+    Path objects directly.
+    """
+    rel = _relative_to_root(folder, repo_root)
+    if rel is None:
+        return None
+    result = _run_git(["ls-files", "-z", "--", f"{rel}/"], repo_root)
+    if result is None or result.returncode != 0:
+        return None
+    tracked: set[Path] = set()
+    repo_root_resolved = repo_root.resolve()
+    for entry in result.stdout.split("\0"):
+        if not entry:
+            continue
+        tracked.add((repo_root_resolved / entry).resolve())
+    return tracked
+
+
+# =============================================================================
+# Bounded I/O — size-capped reads + safe parsers
+# =============================================================================
+
+
+class OversizedFileError(Exception):
+    """Raised by ``safe_read_text`` when a file exceeds its size cap."""
+
+
+def safe_read_text(path: Path, max_bytes: int) -> str:
+    """Read a text file bounded to ``max_bytes``.
+
+    Raises:
+        OversizedFileError: file is larger than ``max_bytes``.
+        OSError: on stat or read failure.
+        UnicodeDecodeError: on non-UTF-8 content.
+
+    The size check happens BEFORE the read so a hostile project cannot
+    make the validator OOM by pointing it at a multi-GB file.
+    """
+    st = path.stat()
+    if st.st_size > max_bytes:
+        raise OversizedFileError(
+            f"file exceeds {max_bytes} byte cap ({st.st_size} bytes)"
+        )
+    return path.read_text(encoding="utf-8")
+
+
+def _count_yaml_alias_markers(text: str) -> int:
+    """Count YAML anchor (``&name``) + alias (``*name``) markers in ``text``.
+
+    Used by ``safe_parse_frontmatter`` as a cheap pre-check against YAML
+    billion-laughs bombs. Anchors and references add up because a bomb
+    works by referencing few anchors many times.
+    """
+    anchors = len(re.findall(r"(?m)(?:^|\s)&[A-Za-z0-9_-]+", text))
+    aliases = len(re.findall(r"(?m)(?:^|\s)\*[A-Za-z0-9_-]+", text))
+    return anchors + aliases
+
+
+def safe_parse_frontmatter(content: str) -> tuple[dict[str, object] | None, str]:
+    """Parse YAML frontmatter from a markdown document, bounded.
+
+    Returns ``(frontmatter_dict_or_None, body)``. The dict is None when:
+
+    - The document has no ``---`` fence
+    - The frontmatter exceeds ``MAX_FRONTMATTER_BYTES``
+    - The frontmatter contains more than ``MAX_YAML_ALIASES`` anchor/alias
+      markers (billion-laughs heuristic)
+    - ``yaml.safe_load`` raises
+    - ``yaml.safe_load`` returns a non-mapping
+
+    The body is always returned (minus the fence) so callers can still
+    scan it even when the frontmatter is rejected.
+    """
+    if not content.startswith("---"):
+        return None, content
+    lines = content.splitlines()
+    if len(lines) < 2:
+        return None, content
+    end_idx: int | None = None
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            end_idx = i
+            break
+    if end_idx is None:
+        return None, content
+    fm_text = "\n".join(lines[1:end_idx])
+    body = "\n".join(lines[end_idx + 1 :])
+    if len(fm_text.encode("utf-8")) > MAX_FRONTMATTER_BYTES:
+        return None, body
+    if _count_yaml_alias_markers(fm_text) > MAX_YAML_ALIASES:
+        return None, body
+    try:
+        data = yaml.safe_load(fm_text)
+    except yaml.YAMLError:
+        return None, body
+    if not isinstance(data, dict):
+        return None, body
+    return data, body
+
+
+def safe_load_jsonc(path: Path, max_bytes: int) -> object:
+    """Load a JSONC file bounded to ``max_bytes``.
+
+    Delegates to ``cpv_management_common.load_jsonc`` after size-checking
+    the file. The import of ``load_jsonc`` is deferred so this module can
+    be imported before the full validation-common module graph is ready.
+
+    Raises:
+        OversizedFileError: on oversize input.
+        OSError / json.JSONDecodeError / UnicodeDecodeError: on parse
+        failure — callers are expected to catch these and convert them to
+        sanitised findings (see aegis MEDIUM-4).
+    """
+    st = path.stat()
+    if st.st_size > max_bytes:
+        raise OversizedFileError(
+            f"file exceeds {max_bytes} byte cap ({st.st_size} bytes)"
+        )
+    from cpv_management_common import load_jsonc  # deferred to avoid import cycles
+
+    return load_jsonc(path)
+
+
+def read_finding(
+    report: ValidationReport | None,
+    path: Path,
+    max_bytes: int,
+    *,
+    file_label: str,
+) -> str | None:
+    """Bounded-read helper that funnels errors through the report.
+
+    Reads ``path`` via ``safe_read_text`` and returns the content on
+    success. On failure it adds a sanitised finding to ``report`` (using
+    the exception *type* name only, never the exception message, to
+    avoid leaking file contents per aegis MEDIUM-4) and returns None.
+    When ``report`` is None, the function silently returns None — used
+    by pure helpers that cannot emit findings directly.
+    """
+    try:
+        return safe_read_text(path, max_bytes)
+    except OversizedFileError:
+        if report is not None:
+            report.major(
+                f"{file_label}: exceeds {max_bytes} byte size cap — skipping",
+                file_label,
+            )
+        return None
+    except (OSError, UnicodeDecodeError) as exc:
+        if report is not None:
+            report.critical(
+                f"{file_label}: read failed ({type(exc).__name__})",
+                file_label,
+            )
+        return None

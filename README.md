@@ -2,7 +2,7 @@
 
 <!--BADGES-START-->
 ![Version](https://img.shields.io/badge/version-2.15.0-blue)
-![Tests](https://img.shields.io/badge/tests-1800%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1947%20passed-brightgreen)
 ![Validation](https://img.shields.io/badge/validation-0%20issues-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 <!--BADGES-END-->
@@ -291,7 +291,7 @@ The semantic validator always warns about the cost and asks for confirmation bef
 
 ### Slash Commands
 
-18 commands — 10 run scripts directly (zero AI tokens), 6 spawn an agent, 2 are specialized utility scripts.
+20 commands — 12 run scripts directly (zero AI tokens), 6 spawn an agent, 2 are specialized utility scripts.
 
 #### Script Commands (free — no AI tokens)
 

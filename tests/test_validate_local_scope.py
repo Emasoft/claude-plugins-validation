@@ -25,10 +25,9 @@ scripts_dir = Path(__file__).parent.parent / "scripts"
 if str(scripts_dir) not in sys.path:
     sys.path.insert(0, str(scripts_dir))
 
+from cc_scope_rules import gitignore_covers_path  # noqa: E402
 from cpv_validation_common import ValidationReport  # noqa: E402
 from validate_local_scope import (  # noqa: E402
-    _gitignore_covers_claude_local_md,
-    _gitignore_covers_settings_local,
     validate_claude_local_md,
     validate_local_scope,
     validate_settings_local_json,
@@ -389,39 +388,47 @@ class TestMissingPath:
 
 
 class TestGitignoreCoverageHelpers:
-    """Pure-function tests for the gitignore pattern matchers."""
+    """Real git check-ignore tests via gitignore_covers_path."""
 
-    def test_claude_dir_covers_settings_local(self) -> None:
-        """'.claude/' in .gitignore covers settings.local.json."""
-        assert _gitignore_covers_settings_local({".claude/"})
+    def test_claude_dir_covers_settings_local(self, project: Path) -> None:
+        """'.claude/' in .gitignore covers .claude/settings.local.json."""
+        _commit(project, ".gitignore", ".claude/\n")
+        assert gitignore_covers_path(".claude/settings.local.json", project)
 
-    def test_claude_dir_without_slash_covers_settings_local(self) -> None:
-        """'.claude' in .gitignore covers settings.local.json."""
-        assert _gitignore_covers_settings_local({".claude"})
+    def test_explicit_settings_local_entry_covers(self, project: Path) -> None:
+        """Explicit '.claude/settings.local.json' entry is covered."""
+        _commit(project, ".gitignore", ".claude/settings.local.json\n")
+        assert gitignore_covers_path(".claude/settings.local.json", project)
 
-    def test_explicit_settings_local_entry_covers(self) -> None:
-        """'.claude/settings.local.json' explicit entry is covered."""
-        assert _gitignore_covers_settings_local({".claude/settings.local.json"})
+    def test_glob_pattern_covers_settings_local(self, project: Path) -> None:
+        """'*.local.*' glob covers .claude/settings.local.json."""
+        _commit(project, ".gitignore", "*.local.*\n")
+        assert gitignore_covers_path(".claude/settings.local.json", project)
 
-    def test_settings_local_alone_covers(self) -> None:
-        """Bare 'settings.local.json' entry (global) is covered."""
-        assert _gitignore_covers_settings_local({"settings.local.json"})
+    def test_double_star_pattern_covers_settings_local(self, project: Path) -> None:
+        """'**/settings.local.json' glob covers it."""
+        _commit(project, ".gitignore", "**/settings.local.json\n")
+        assert gitignore_covers_path(".claude/settings.local.json", project)
 
-    def test_unrelated_entries_do_not_cover(self) -> None:
+    def test_unrelated_entries_do_not_cover(self, project: Path) -> None:
         """Unrelated gitignore lines do NOT cover settings.local.json."""
-        assert not _gitignore_covers_settings_local({"node_modules/", "*.log"})
+        _commit(project, ".gitignore", "node_modules/\n*.log\n")
+        assert not gitignore_covers_path(".claude/settings.local.json", project)
 
-    def test_claude_local_md_explicit_entry(self) -> None:
+    def test_claude_local_md_explicit_entry(self, project: Path) -> None:
         """'CLAUDE.local.md' explicit entry is covered."""
-        assert _gitignore_covers_claude_local_md({"CLAUDE.local.md"})
+        _commit(project, ".gitignore", "CLAUDE.local.md\n")
+        assert gitignore_covers_path("CLAUDE.local.md", project)
 
-    def test_claude_local_md_glob_pattern(self) -> None:
+    def test_claude_local_md_glob_pattern(self, project: Path) -> None:
         """'*.local.md' glob pattern is covered."""
-        assert _gitignore_covers_claude_local_md({"*.local.md"})
+        _commit(project, ".gitignore", "*.local.md\n")
+        assert gitignore_covers_path("CLAUDE.local.md", project)
 
-    def test_unrelated_entries_do_not_cover_claude_local_md(self) -> None:
+    def test_unrelated_entries_do_not_cover_claude_local_md(self, project: Path) -> None:
         """Unrelated gitignore lines do NOT cover CLAUDE.local.md."""
-        assert not _gitignore_covers_claude_local_md({"node_modules/", ".env"})
+        _commit(project, ".gitignore", "node_modules/\n.env\n")
+        assert not gitignore_covers_path("CLAUDE.local.md", project)
 
 
 # =============================================================================
