@@ -524,9 +524,10 @@ tag_pattern = "v[0-9].*"
 # generate_plugin_repo.gen_ci_yml() and applied by standardize_plugin.py.
 # Having this retrofit tool write its own parallel template would cause drift
 # between the two code paths and break the cpv-setup-branch-rules script
-# (which depends on the "CI / Lint", "CI / Validate", "CI / Test" check
-# context names from the consolidated workflow). Users who run this tool on
-# a plugin missing ci.yml now get instructed to run standardize_plugin.py.
+# (which depends on the bare job display names "Lint", "Validate", "Test"
+# that the consolidated workflow reports as check-run names). Users who run
+# this tool on a plugin missing ci.yml now get instructed to run
+# standardize_plugin.py instead.
 
 GITIGNORE_ADDITIONS = """
 # Python

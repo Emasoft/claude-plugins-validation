@@ -10,7 +10,7 @@
 
 > For plugins with compiled binaries, see [`plugin-binary-builds.md`](plugin-binary-builds.md) for the `build-binaries.yml` cross-compilation workflow and CI build step patterns.
 >
-> **v2.12.32 consolidation**: the old separate `validate.yml` was merged into `ci.yml` as three parallel jobs (`lint`, `validate`, `test`). The three resulting status check contexts (`CI / Lint`, `CI / Validate`, `CI / Test`) are what `cpv-setup-branch-rules` enforces on the default branch.
+> **v2.12.32 consolidation**: the old separate `validate.yml` was merged into `ci.yml` as three parallel jobs (`lint`, `validate`, `test`). GitHub reports their check-run names as bare `Lint`, `Validate`, `Test` (the job's `name:` field — **not** `workflow / job` format) and those are what `cpv-setup-branch-rules` enforces on the default branch.
 
 ---
 
@@ -326,7 +326,7 @@ jobs:
    - `release.yml` -- creates GitHub Releases on version tags
    - `notify-marketplace.yml` -- notifies your marketplace repo on plugin changes
 
-   > **Note**: there is no separate `validate.yml` anymore (removed in v2.12.32). The old validate job is now the `validate` job inside `ci.yml`, and its status check context is `CI / Validate`. See `cpv-setup-branch-rules` command for enforcing this check as a required status on PRs.
+   > **Note**: there is no separate `validate.yml` anymore (removed in v2.12.32). The old validate job is now the `validate` job inside `ci.yml`, and its GitHub check-run name is **`Validate`** (the bare `jobs.validate.name:` field — NOT `CI / Validate`). See `cpv-setup-branch-rules` command for enforcing this check as a required status on PRs.
 
 3. **Replace all `<placeholder-for-...>` values** with your actual values (see Placeholder Reference above).
 

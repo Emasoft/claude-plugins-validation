@@ -2,7 +2,7 @@
 
 <!--BADGES-START-->
 ![Version](https://img.shields.io/badge/version-2.13.0-blue)
-![Tests](https://img.shields.io/badge/tests-1768%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1800%20passed-brightgreen)
 ![Validation](https://img.shields.io/badge/validation-0%20issues-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 <!--BADGES-END-->
@@ -305,7 +305,7 @@ The semantic validator always warns about the cost and asks for confirmation bef
 | `/cpv-list-plugins` | List installed plugins with version and status |
 | `/cpv-bump-version <path>` | Bump plugin version (patch, minor, major) |
 | `/cpv-setup-branch-rules <owner/repo>` | Create/update the GitHub ruleset that enforces CI as a required status check (server-side gate — idempotent, auto-detects plugin vs marketplace, preserves existing bot bypass actors) |
-| `/cpv-setup-branch-rules-generic <owner/repo> --check "CI / job"` | Project-agnostic variant that works on ANY GitHub repo (not just CPV plugins). Requires explicit `--check` contexts, no hardcoded defaults. Also available as `uvx branch-rules-install`. |
+| `/cpv-setup-branch-rules-generic <owner/repo> --check "job-name"` | Project-agnostic variant that works on ANY GitHub repo (not just CPV plugins). Requires explicit `--check` contexts, no hardcoded defaults. Also available as `uvx branch-rules-install` or as a self-contained bash script (`scripts/branch_rules_install.sh`) that you can drop into any project folder — only `gh` + `jq` required, no Python. |
 | `/cpv-version` | Show CPV version |
 
 #### Agent Commands (interactive — uses AI tokens)
@@ -340,7 +340,7 @@ The semantic validator always warns about the cost and asks for confirmation bef
 | Agents | 7 | AI-powered validation, fixing, and management |
 | Skills | 14 | Validation, management, publishing, fix, migration, and auto-notify workflows |
 | Commands | 18 | 10 direct script + 6 agent-backed + 2 specialized utility commands |
-| Tests | 1768 | Full coverage across all modules |
+| Tests | 1800 | Full coverage across all modules |
 
 </details>
 

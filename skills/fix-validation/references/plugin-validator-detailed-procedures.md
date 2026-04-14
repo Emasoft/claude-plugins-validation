@@ -297,7 +297,10 @@ uv run python scripts/setup_plugin_pipeline.py . --validate
 ```bash
 # Regenerate ci.yml from the current CPV template so local gate and CI agree.
 # Since v2.12.32, plugin CI is a single consolidated ci.yml with three jobs
-# (lint, validate, test) — check contexts "CI / Lint", "CI / Validate", "CI / Test".
+# (lint, validate, test). GitHub reports their check-run names as bare
+# "Lint", "Validate", "Test" — these are the bare `jobs.<id>.name:` fields,
+# NOT a "workflow / job" format. cpv-setup-branch-rules requires them in
+# this form.
 uv run python scripts/standardize_plugin.py . --fix
 ```
 

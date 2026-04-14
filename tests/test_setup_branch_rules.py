@@ -200,7 +200,7 @@ class TestBuildRuleset:
 
     def test_required_status_checks_contexts_included(self):
         """Each provided check context appears in required_status_checks."""
-        contexts = ["CI / Lint", "CI / Validate", "CI / Test"]
+        contexts = ["Lint", "Validate", "Test"]
         ruleset = setup_branch_rules.build_ruleset(contexts, [])
         status_rule = next(
             r for r in ruleset["rules"] if r["type"] == "required_status_checks"
@@ -240,19 +240,24 @@ class TestRepoTypeDetection:
     """Verifies plugin/marketplace auto-detection and default-selection logic."""
 
     def test_default_plugin_contexts_has_three_checks(self):
-        """Plugin default requires the three parallel jobs from the consolidated CI."""
+        """Plugin default requires the three parallel job display names.
+
+        GitHub reports check-run names as the bare `jobs.<id>.name:` display
+        field — NOT "workflow_name / job_name". So the correct defaults are
+        "Lint", "Validate", "Test", not "CI / Lint" etc.
+        """
         ctxs = setup_branch_rules.default_check_contexts_for("plugin")
-        assert ctxs == ["CI / Lint", "CI / Validate", "CI / Test"]
+        assert ctxs == ["Lint", "Validate", "Test"]
 
     def test_default_marketplace_context_has_single_check(self):
-        """Marketplace default requires the single validate job from Marketplace Validation workflow."""
+        """Marketplace default matches the single job's display name."""
         ctxs = setup_branch_rules.default_check_contexts_for("marketplace")
-        assert ctxs == ["Marketplace Validation / Validate"]
+        assert ctxs == ["Validate"]
 
     def test_unknown_type_falls_back_to_plugin(self):
         """Unknown repo type falls back to plugin defaults (the common case)."""
         ctxs = setup_branch_rules.default_check_contexts_for("unknown")
-        assert ctxs == ["CI / Lint", "CI / Validate", "CI / Test"]
+        assert ctxs == ["Lint", "Validate", "Test"]
 
     def test_returned_list_is_a_copy_not_the_module_constant(self):
         """default_check_contexts_for returns a fresh list so mutating it does not bleed into defaults."""
@@ -264,11 +269,22 @@ class TestRepoTypeDetection:
         """detect_repo_type is exposed as a module-level callable (used by main)."""
         assert callable(setup_branch_rules.detect_repo_type)
 
-    def test_plugin_and_marketplace_constants_are_disjoint(self):
-        """Plugin and marketplace check-context constants have no overlap."""
+    def test_plugin_and_marketplace_share_validate_context(self):
+        """Both plugin and marketplace default contexts include 'Validate'.
+
+        After the GitHub-check-run-name correction (v2.13.x), both plugin
+        and marketplace repos emit a 'Validate' check — plugins as one of
+        three jobs in ci.yml, marketplaces as the single job in validate.yml.
+        The overlap is intentional: the context name is identical because
+        both workflows have `jobs.validate.name: Validate`. The DISTINCTION
+        is in the count (plugin = 3, marketplace = 1), not in disjoint sets.
+        """
         plugin = set(setup_branch_rules.DEFAULT_PLUGIN_CHECK_CONTEXTS)
         marketplace = set(setup_branch_rules.DEFAULT_MARKETPLACE_CHECK_CONTEXTS)
-        assert plugin.isdisjoint(marketplace)
+        assert "Validate" in plugin
+        assert "Validate" in marketplace
+        # Plugin has more — Lint and Test on top of Validate
+        assert plugin - marketplace == {"Lint", "Test"}
 
 
 class TestCli:
