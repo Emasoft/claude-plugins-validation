@@ -514,6 +514,27 @@ def validate_claude_md_file(
                 break
 
 
+def _gitignore_covers_settings_local(lines: set[str]) -> bool:
+    """Return True when any .gitignore line covers .claude/settings.local.json."""
+    return (
+        ".claude/" in lines
+        or ".claude" in lines
+        or ".claude/*" in lines
+        or ".claude/**" in lines
+        or ".claude/settings.local.json" in lines
+        or "settings.local.json" in lines
+    )
+
+
+def _gitignore_covers_claude_local_md(lines: set[str]) -> bool:
+    """Return True when any .gitignore line covers CLAUDE.local.md."""
+    return (
+        "CLAUDE.local.md" in lines
+        or "/CLAUDE.local.md" in lines
+        or "*.local.md" in lines
+    )
+
+
 def validate_gitignore_for_scope_hygiene(repo_root: Path, report: ValidationReport) -> None:
     """Informational: recommend gitignore entries for local-scope files."""
     gitignore = repo_root / ".gitignore"
@@ -524,15 +545,15 @@ def validate_gitignore_for_scope_hygiene(repo_root: Path, report: ValidationRepo
     except (OSError, UnicodeDecodeError):
         return
     lines = {ln.strip() for ln in content.splitlines() if ln.strip() and not ln.strip().startswith("#")}
-    if ".claude/settings.local.json" not in lines and "settings.local.json" not in lines:
+    if not _gitignore_covers_settings_local(lines):
         report.info(
-            ".gitignore does not pin '.claude/settings.local.json' — "
+            ".gitignore does not cover '.claude/settings.local.json' — "
             "Claude Code auto-adds it on first creation, but pinning is safer.",
             ".gitignore",
         )
-    if "CLAUDE.local.md" not in lines:
+    if not _gitignore_covers_claude_local_md(lines):
         report.info(
-            ".gitignore does not pin 'CLAUDE.local.md' — pin it to prevent "
+            ".gitignore does not cover 'CLAUDE.local.md' — pin it to prevent "
             "accidental commits of personal memory notes.",
             ".gitignore",
         )
