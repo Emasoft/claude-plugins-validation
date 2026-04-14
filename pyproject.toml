@@ -38,6 +38,10 @@ cpv-validate-mcp = "scripts.cli:validate_mcp"
 cpv-validate-lsp = "scripts.cli:validate_lsp"
 cpv-validate-rules = "scripts.cli:validate_rules"
 cpv-validate-xref = "scripts.cli:validate_xref"
+# Scope validators — validate Claude Code configuration under a project path,
+# distinguishing git-tracked (project) from non-git-tracked (local) elements.
+cpv-validate-project-scope = "scripts.cli:validate_project_scope"
+cpv-validate-local-scope = "scripts.cli:validate_local_scope"
 # Management tools
 cpv-doctor = "scripts.cli:doctor"
 cpv-standardize = "scripts.cli:standardize"

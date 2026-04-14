@@ -50,6 +50,7 @@ DIRECT_SCRIPT_COMMANDS = [
     "cpv-version",
     "cpv-setup-branch-rules",
     "cpv-setup-branch-rules-generic",
+    "cpv-validate-project-scope",
 ]
 
 # --- Agent commands (with agent field) ---
@@ -67,17 +68,18 @@ AGENT_COMMANDS = {
 class TestCommandCount:
     """Verify total command count after consolidation."""
 
-    def test_total_command_count_is_18(self):
-        """commands/ directory should contain exactly 18 .md files.
+    def test_total_command_count_is_19(self):
+        """commands/ directory should contain exactly 19 .md files.
 
         Originally 13 after consolidation (8 direct + 5 agent).
         v2.12.13 added: cpv-link-plugin, cpv-validate-settings-marketplace.
         v2.12.x split: cpv-fix-marketplace-validation (routes to marketplace-fixer).
         v2.12.32 added: cpv-setup-branch-rules (server-side CI enforcement).
         v2.13.1 added: cpv-setup-branch-rules-generic (project-agnostic variant).
+        v2.14.x added: cpv-validate-project-scope (TRDD-2be75e88 phase 2).
         """
         md_files = list(COMMANDS_DIR.glob("*.md"))
-        assert len(md_files) == 18, f"Expected 18 commands, found {len(md_files)}: {sorted(f.name for f in md_files)}"
+        assert len(md_files) == 19, f"Expected 19 commands, found {len(md_files)}: {sorted(f.name for f in md_files)}"
 
 
 class TestDirectScriptCommands:

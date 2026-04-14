@@ -134,6 +134,20 @@ def validate_xref() -> None:
     sys.exit(main())
 
 
+def validate_project_scope() -> None:
+    """Validate git-tracked (project-scope) Claude Code configuration."""
+    from validate_project_scope import main
+
+    sys.exit(main())
+
+
+def validate_local_scope() -> None:
+    """Validate non-git-tracked (local-scope) Claude Code configuration."""
+    from validate_local_scope import main
+
+    sys.exit(main())
+
+
 # ── Management entry points ──────────────────────────────────────────
 
 
