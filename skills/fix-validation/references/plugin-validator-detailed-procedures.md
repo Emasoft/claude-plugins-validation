@@ -124,8 +124,10 @@ The pre-push hook automatically detects languages by:
 
 ```bash
 gh run list --repo OWNER/REPO --limit 10
-gh run list --repo OWNER/REPO --workflow validate.yml --limit 5
+gh run list --repo OWNER/REPO --workflow ci.yml --limit 5
 ```
+
+> For plugins scaffolded before v2.12.32, use `--workflow validate.yml` instead (the separate workflow was merged into `ci.yml` in v2.12.32). For marketplaces, the workflow is still `validate.yml`.
 
 ### Step 2: Check Run Status
 
@@ -293,8 +295,10 @@ uv run python scripts/setup_plugin_pipeline.py . --validate
 
 **Issue: "CI passes but local push blocked"**
 ```bash
-# Update CI workflow to match local validator
-cp templates/github-workflows/validate-marketplace.yml .github/workflows/validate.yml
+# Regenerate ci.yml from the current CPV template so local gate and CI agree.
+# Since v2.12.32, plugin CI is a single consolidated ci.yml with three jobs
+# (lint, validate, test) — check contexts "CI / Lint", "CI / Validate", "CI / Test".
+uv run python scripts/standardize_plugin.py . --fix
 ```
 
 ---

@@ -61,9 +61,8 @@ STANDARD_FILES: list[tuple[str, bool, str]] = [
     (".mega-linter.yml", False, "Mega-Linter configuration"),
     ("scripts/publish.py", False, "Publish pipeline script"),
     ("git-hooks/pre-push", False, "Pre-push quality gate hook"),
-    (".github/workflows/ci.yml", False, "CI workflow"),
+    (".github/workflows/ci.yml", False, "CI workflow (consolidated: lint + validate + test)"),
     (".github/workflows/release.yml", False, "Release workflow"),
-    (".github/workflows/validate.yml", False, "Plugin validation workflow"),
     (".github/workflows/notify-marketplace.yml", False, "Marketplace notification workflow"),
 ]
 
@@ -89,7 +88,6 @@ README_BADGE_PATTERNS: list[tuple[str, str]] = [
     ("CI badge", "actions/workflows/ci.yml/badge.svg"),
     ("Version badge", "img.shields.io/badge/version-"),
     ("License badge", "img.shields.io/badge/license-"),
-    ("Validation badge", "actions/workflows/validate.yml/badge.svg"),
 ]
 
 # Standard component directories
@@ -684,7 +682,6 @@ _FILE_TO_GENERATOR: dict[str, str] = {
     "git-hooks/pre-push": "gen_pre_push_hook",
     ".github/workflows/ci.yml": "gen_ci_yml",
     ".github/workflows/release.yml": "gen_release_yml",
-    ".github/workflows/validate.yml": "gen_validate_yml",
     ".github/workflows/notify-marketplace.yml": "gen_notify_marketplace_yml",
 }
 

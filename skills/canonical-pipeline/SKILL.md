@@ -22,7 +22,7 @@ Defines the standard files, workflows, hooks, and release pipeline that every Em
 
 1. **Create plugin repo**: Run `generate_plugin_repo.py` or use `/cpv-create`
 2. **Verify standard files**: Check all required files exist per [Detailed Standard](references/detailed-standard.md#standard-plugin-files)
-3. **Install CI/CD workflows**: Ensure `ci.yml`, `release.yml`, `validate.yml`, `notify-marketplace.yml` in `.github/workflows/`
+3. **Install CI/CD workflows**: Ensure `ci.yml` (consolidated lint + validate + test), `release.yml`, `notify-marketplace.yml` in `.github/workflows/`. `validate.yml` was merged into `ci.yml` in v2.12.32.
 4. **Install pre-push hook**: `uv run python scripts/publish.py --install-hook`
 5. **Validate** (from any directory — fetches CPV from GitHub, no local vendoring):
    `uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-remote-validate plugin . --strict`
