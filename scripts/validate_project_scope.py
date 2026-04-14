@@ -29,13 +29,28 @@ Rules enforced (summary — see TRDD section 4 for details):
   ``system-prompt``/``initialPrompt``
 - ``.claude/skills/<name>/SKILL.md``: frontmatter validity
 - ``.claude/commands/*.md``: frontmatter validity
-- ``.claude/rules/*.md``: frontmatter validity (``paths`` field)
+- ``.claude/rules/*.md``: body scans for absolute home paths
+- ``.claude/output-styles/*.md``: frontmatter validity
+- ``.claude/hooks/*.sh`` / ``*.py``: body scans for absolute home paths
 - ``CLAUDE.md`` / ``.claude/CLAUDE.md``: absolute home paths in content,
   secret patterns, import targets
 
 Elements are validated only if their containing folder (or the file
 itself) is git-tracked under the given project root. Non-git-tracked
 elements are the concern of ``validate_local_scope.py``.
+
+Security invariants preserved by this module (see aegis audit):
+
+- Every file read is size-capped via ``safe_read_text`` / ``safe_load_jsonc``.
+- Every markdown frontmatter parse is bounded via
+  ``safe_parse_frontmatter`` (YAML bomb mitigation).
+- Every ``rglob`` hit is re-resolved via ``resolve_within`` to reject
+  symlinks that escape the project root.
+- Every per-folder file walk is capped at ``MAX_FILES_PER_FOLDER``.
+- All absolute home paths in finding messages are run through
+  ``redact_home_path`` before being written to the report.
+- All parse-error messages use ``type(exc).__name__`` only, never
+  ``str(exc)`` (avoids leaking file contents).
 
 Exit codes follow the CPV convention:
 
@@ -61,23 +76,100 @@ from typing import Any
 from cc_scope_rules import (
     GLOBAL_CONFIG_KEYS,
     MANAGED_ONLY_KEYS,
+    MAX_CLAUDE_MD_BYTES,
+    MAX_FILES_PER_FOLDER,
+    MAX_GITIGNORE_BYTES,
+    MAX_MARKDOWN_BYTES,
+    MAX_MCP_JSON_BYTES,
+    MAX_SETTINGS_JSON_BYTES,
     PROJECT_REJECTED_KEYS,
     PROJECT_REJECTED_NESTED_KEYS,
+    OversizedFileError,
     classify_file_scope,
     classify_folder_scope,
     contains_absolute_home_path,
     find_git_root,
-    is_git_tracked,
+    gitignore_covers_path,
     is_secret_value,
+    list_tracked_files_under,
     looks_like_secret_key_name,
+    redact_home_path,
+    resolve_within,
+    safe_load_jsonc,
+    safe_parse_frontmatter,
+    safe_read_text,
 )
-from cpv_management_common import load_jsonc
 from cpv_validation_common import (
     ValidationReport,
     check_remote_execution_guard,
     print_results_by_level,
     save_report_and_print_summary,
 )
+
+# =============================================================================
+# Shared IO helpers (sanitised error reporting)
+# =============================================================================
+
+
+def _report_parse_error(
+    report: ValidationReport, file_label: str, exc: BaseException
+) -> None:
+    """Record a CRITICAL parse-error finding without leaking file contents.
+
+    Uses ``type(exc).__name__`` only — never ``str(exc)`` — because
+    ``json.JSONDecodeError`` and ``UnicodeDecodeError`` messages embed
+    line/column excerpts of the failing input, which may contain real
+    secrets (aegis MEDIUM-4).
+    """
+    report.critical(f"{file_label}: parse error ({type(exc).__name__})", file_label)
+
+
+def _load_json_or_report(
+    path: Path,
+    max_bytes: int,
+    report: ValidationReport,
+    file_label: str,
+) -> object | None:
+    """Load a JSONC file with size cap + sanitised error reporting."""
+    try:
+        return safe_load_jsonc(path, max_bytes)
+    except OversizedFileError:
+        report.major(
+            f"{file_label}: exceeds {max_bytes} byte size cap — skipping",
+            file_label,
+        )
+        return None
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
+        _report_parse_error(report, file_label, exc)
+        return None
+
+
+def _read_text_or_report(
+    path: Path,
+    max_bytes: int,
+    report: ValidationReport,
+    file_label: str,
+) -> str | None:
+    """Read a text file with size cap + sanitised error reporting."""
+    try:
+        return safe_read_text(path, max_bytes)
+    except OversizedFileError:
+        report.major(
+            f"{file_label}: exceeds {max_bytes} byte size cap — skipping",
+            file_label,
+        )
+        return None
+    except (OSError, UnicodeDecodeError) as exc:
+        report.critical(f"{file_label}: read failed ({type(exc).__name__})", file_label)
+        return None
+
+
+def _safe_path_message(value: Any) -> str:
+    """Render a value for inclusion in a finding message with redaction."""
+    if not isinstance(value, str):
+        return repr(value)
+    return redact_home_path(value)
+
 
 # =============================================================================
 # settings.json — scope-specific rules
@@ -178,13 +270,17 @@ def _flag_secrets_in_env(data: dict[str, Any], report: ValidationReport, file_la
 def _flag_absolute_home_paths_in_scalar(
     label: str, value: Any, report: ValidationReport, file_label: str
 ) -> None:
-    """Emit a MINOR if ``value`` is a string containing an absolute home path."""
+    """Emit a MINOR if ``value`` is a string containing an absolute home path.
+
+    The value is redacted (username replaced with ``<REDACTED>``) before
+    being echoed into the finding message (aegis MEDIUM-3).
+    """
     if isinstance(value, str) and contains_absolute_home_path(value):
         report.minor(
             (
-                f"settings.json {label} contains an absolute home path ('{value}') — "
-                "this will break for other team members. Use $CLAUDE_PROJECT_DIR "
-                "or a relative path instead."
+                f"settings.json {label} contains an absolute home path "
+                f"('{_safe_path_message(value)}') — this will break for other "
+                "team members. Use $CLAUDE_PROJECT_DIR or a relative path instead."
             ),
             file_label,
         )
@@ -279,10 +375,8 @@ def validate_settings_json_project_scope(
 ) -> None:
     """Apply project-scope rules to ``.claude/settings.json`` contents."""
     file_label = ".claude/settings.json"
-    try:
-        data = load_jsonc(settings_path)
-    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
-        report.critical(f"settings.json: parse error: {exc}", file_label)
+    data = _load_json_or_report(settings_path, MAX_SETTINGS_JSON_BYTES, report, file_label)
+    if data is None:
         return
     if not isinstance(data, dict):
         report.critical("settings.json root must be a JSON object", file_label)
@@ -311,10 +405,8 @@ def validate_settings_json_project_scope(
 def validate_mcp_json_project_scope(mcp_path: Path, report: ValidationReport) -> None:
     """Apply project-scope rules to a ``.mcp.json`` at the repo root."""
     file_label = ".mcp.json"
-    try:
-        data = load_jsonc(mcp_path)
-    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
-        report.critical(f".mcp.json: parse error: {exc}", file_label)
+    data = _load_json_or_report(mcp_path, MAX_MCP_JSON_BYTES, report, file_label)
+    if data is None:
         return
     if not isinstance(data, dict):
         report.major(".mcp.json root must be a JSON object", file_label)
@@ -364,47 +456,14 @@ def validate_mcp_json_project_scope(mcp_path: Path, report: ValidationReport) ->
 # =============================================================================
 
 
-def _parse_frontmatter(content: str) -> tuple[dict[str, Any] | None, str]:
-    """Split YAML frontmatter from markdown body.
-
-    Returns ``(frontmatter_dict_or_None, body)``. If the file has no
-    frontmatter, returns ``(None, content)``.
-    """
-    if not content.startswith("---"):
-        return None, content
-    lines = content.splitlines()
-    if len(lines) < 2:
-        return None, content
-    end_idx: int | None = None
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
-            end_idx = i
-            break
-    if end_idx is None:
-        return None, content
-    fm_text = "\n".join(lines[1:end_idx])
-    body = "\n".join(lines[end_idx + 1 :])
-    try:
-        import yaml  # type: ignore[import-not-found]
-    except ImportError:
-        return None, body
-    try:
-        data = yaml.safe_load(fm_text)
-    except yaml.YAMLError:
-        return None, body
-    return (data if isinstance(data, dict) else None), body
-
-
 def _validate_markdown_file_shared(
-    path: Path, report: ValidationReport, rel_label: str, forbid_home_paths: bool
+    path: Path, report: ValidationReport, rel_label: str, *, forbid_home_paths: bool
 ) -> None:
     """Shared frontmatter + home-path scan for project-scope markdown files."""
-    try:
-        content = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        report.critical(f"{rel_label}: cannot read: {exc}", rel_label)
+    content = _read_text_or_report(path, MAX_MARKDOWN_BYTES, report, rel_label)
+    if content is None:
         return
-    frontmatter, body = _parse_frontmatter(content)
+    frontmatter, body = safe_parse_frontmatter(content)
     if frontmatter is None:
         report.minor(f"{rel_label}: missing or invalid YAML frontmatter", rel_label)
         return
@@ -430,52 +489,145 @@ def _validate_markdown_file_shared(
             )
 
 
+def _walk_tracked_markdown(
+    folder: Path,
+    repo_root: Path,
+    project_root: Path,
+    report: ValidationReport,
+    glob_pattern: str,
+    *,
+    forbid_home_paths: bool,
+) -> None:
+    """Walk ``folder`` for ``glob_pattern`` matches, apply markdown checks.
+
+    Only tracked files are validated (the folder was already classified as
+    project scope by the caller). Symlink escapes are rejected via
+    ``resolve_within`` (aegis MEDIUM-1/2). The walk is capped at
+    ``MAX_FILES_PER_FOLDER`` to prevent DoS via millions-of-files projects
+    (aegis LOW-3).
+
+    A single ``git ls-files`` call is used to get the tracked set for the
+    folder, avoiding one ``git ls-files --error-unmatch`` call per file.
+    """
+    tracked = list_tracked_files_under(folder, repo_root)
+    if tracked is None:
+        return
+    count = 0
+    for md in sorted(folder.rglob(glob_pattern)):
+        count += 1
+        if count > MAX_FILES_PER_FOLDER:
+            report.warning(
+                f"{folder.relative_to(repo_root)}: stopped walking at "
+                f"{MAX_FILES_PER_FOLDER} files — truncating validation",
+                str(folder.relative_to(repo_root)),
+            )
+            return
+        real = resolve_within(md, project_root)
+        if real is None:
+            report.major(
+                f"{md.relative_to(project_root)}: path resolves outside the "
+                "project root (symlink escape) — skipping",
+                str(md.relative_to(project_root)),
+            )
+            continue
+        if real not in tracked:
+            continue
+        rel = md.relative_to(project_root)
+        _validate_markdown_file_shared(
+            md, report, str(rel), forbid_home_paths=forbid_home_paths
+        )
+
+
 def validate_agents_folder(
-    agents_dir: Path, repo_root: Path, report: ValidationReport
+    agents_dir: Path,
+    repo_root: Path,
+    project_root: Path,
+    report: ValidationReport,
 ) -> None:
     """Validate every tracked ``*.md`` file in ``.claude/agents/``."""
-    for agent_file in sorted(agents_dir.rglob("*.md")):
-        if not is_git_tracked(agent_file, repo_root):
-            continue
-        rel = agent_file.relative_to(repo_root)
-        _validate_markdown_file_shared(agent_file, report, str(rel), forbid_home_paths=True)
+    _walk_tracked_markdown(
+        agents_dir, repo_root, project_root, report, "*.md", forbid_home_paths=True
+    )
 
 
 def validate_skills_folder(
-    skills_dir: Path, repo_root: Path, report: ValidationReport
+    skills_dir: Path,
+    repo_root: Path,
+    project_root: Path,
+    report: ValidationReport,
 ) -> None:
     """Validate every tracked ``SKILL.md`` in ``.claude/skills/``."""
-    for skill_file in sorted(skills_dir.rglob("SKILL.md")):
-        if not is_git_tracked(skill_file, repo_root):
-            continue
-        rel = skill_file.relative_to(repo_root)
-        _validate_markdown_file_shared(skill_file, report, str(rel), forbid_home_paths=True)
+    _walk_tracked_markdown(
+        skills_dir, repo_root, project_root, report, "SKILL.md", forbid_home_paths=True
+    )
 
 
 def validate_commands_folder(
-    commands_dir: Path, repo_root: Path, report: ValidationReport
+    commands_dir: Path,
+    repo_root: Path,
+    project_root: Path,
+    report: ValidationReport,
 ) -> None:
     """Validate every tracked ``*.md`` file in ``.claude/commands/``."""
-    for cmd_file in sorted(commands_dir.rglob("*.md")):
-        if not is_git_tracked(cmd_file, repo_root):
-            continue
-        rel = cmd_file.relative_to(repo_root)
-        _validate_markdown_file_shared(cmd_file, report, str(rel), forbid_home_paths=True)
+    _walk_tracked_markdown(
+        commands_dir, repo_root, project_root, report, "*.md", forbid_home_paths=True
+    )
+
+
+def validate_output_styles_folder(
+    styles_dir: Path,
+    repo_root: Path,
+    project_root: Path,
+    report: ValidationReport,
+) -> None:
+    """Validate every tracked ``*.md`` file in ``.claude/output-styles/``.
+
+    Output-styles are frontmatter + body text per the Claude Code docs.
+    The structure is simpler than agents/skills but the same markdown
+    hygiene rules apply — no absolute home paths in body, no secrets.
+    """
+    _walk_tracked_markdown(
+        styles_dir, repo_root, project_root, report, "*.md", forbid_home_paths=True
+    )
 
 
 def validate_rules_folder(
-    rules_dir: Path, repo_root: Path, report: ValidationReport
+    rules_dir: Path,
+    repo_root: Path,
+    project_root: Path,
+    report: ValidationReport,
 ) -> None:
-    """Validate every tracked ``*.md`` file in ``.claude/rules/``."""
-    for rule_file in sorted(rules_dir.rglob("*.md")):
-        if not is_git_tracked(rule_file, repo_root):
+    """Validate every tracked ``*.md`` file in ``.claude/rules/``.
+
+    Rules are loaded unconditionally when they have no ``paths:`` field or
+    when a tracked file matches the glob. Body is scanned for absolute
+    home paths only — no frontmatter requirement (rules without
+    frontmatter still load).
+    """
+    tracked = list_tracked_files_under(rules_dir, repo_root)
+    if tracked is None:
+        return
+    count = 0
+    for md in sorted(rules_dir.rglob("*.md")):
+        count += 1
+        if count > MAX_FILES_PER_FOLDER:
+            report.warning(
+                f".claude/rules: stopped walking at {MAX_FILES_PER_FOLDER} files",
+                ".claude/rules",
+            )
+            return
+        real = resolve_within(md, project_root)
+        if real is None:
+            report.major(
+                f"{md.relative_to(project_root)}: symlink escape — skipping",
+                str(md.relative_to(project_root)),
+            )
             continue
-        rel = rule_file.relative_to(repo_root)
-        # Rules are simpler: frontmatter is optional, just scan body for paths.
-        try:
-            content = rule_file.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            report.critical(f"{rel}: cannot read: {exc}", str(rel))
+        if real not in tracked:
+            continue
+        rel = md.relative_to(project_root)
+        content = _read_text_or_report(md, MAX_MARKDOWN_BYTES, report, str(rel))
+        if content is None:
             continue
         if contains_absolute_home_path(content):
             report.minor(
@@ -484,15 +636,63 @@ def validate_rules_folder(
             )
 
 
+def validate_hooks_folder(
+    hooks_dir: Path,
+    repo_root: Path,
+    project_root: Path,
+    report: ValidationReport,
+) -> None:
+    """Validate every tracked ``*.sh`` / ``*.py`` in ``.claude/hooks/``.
+
+    Per hooks.md, hook scripts referenced from ``settings.json`` should
+    use ``$CLAUDE_PROJECT_DIR`` / ``${CLAUDE_PLUGIN_ROOT}`` for portable
+    absolute paths. Hardcoded home paths break for other team members.
+    """
+    tracked = list_tracked_files_under(hooks_dir, repo_root)
+    if tracked is None:
+        return
+    count = 0
+    for script in sorted(list(hooks_dir.rglob("*.sh")) + list(hooks_dir.rglob("*.py"))):
+        count += 1
+        if count > MAX_FILES_PER_FOLDER:
+            report.warning(
+                f".claude/hooks: stopped walking at {MAX_FILES_PER_FOLDER} files",
+                ".claude/hooks",
+            )
+            return
+        real = resolve_within(script, project_root)
+        if real is None:
+            report.major(
+                f"{script.relative_to(project_root)}: symlink escape — skipping",
+                str(script.relative_to(project_root)),
+            )
+            continue
+        if real not in tracked:
+            continue
+        rel = script.relative_to(project_root)
+        content = _read_text_or_report(script, MAX_MARKDOWN_BYTES, report, str(rel))
+        if content is None:
+            continue
+        if contains_absolute_home_path(content):
+            report.minor(
+                f"{rel}: hook script contains an absolute home path — "
+                "use $CLAUDE_PROJECT_DIR instead",
+                str(rel),
+            )
+
+
 def validate_claude_md_file(
     md_path: Path, repo_root: Path, report: ValidationReport
 ) -> None:
-    """Validate a CLAUDE.md file (project root or .claude/)."""
+    """Validate a CLAUDE.md file (project root or .claude/).
+
+    ``repo_root`` is used to build relative labels; the symlink-escape
+    check is skipped here because the caller already verified the file
+    is tracked by git (symlinks would have been rejected by the commit).
+    """
     rel = md_path.relative_to(repo_root)
-    try:
-        content = md_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        report.critical(f"{rel}: cannot read: {exc}", str(rel))
+    content = _read_text_or_report(md_path, MAX_CLAUDE_MD_BYTES, report, str(rel))
+    if content is None:
         return
     if contains_absolute_home_path(content):
         report.minor(
@@ -514,44 +714,30 @@ def validate_claude_md_file(
                 break
 
 
-def _gitignore_covers_settings_local(lines: set[str]) -> bool:
-    """Return True when any .gitignore line covers .claude/settings.local.json."""
-    return (
-        ".claude/" in lines
-        or ".claude" in lines
-        or ".claude/*" in lines
-        or ".claude/**" in lines
-        or ".claude/settings.local.json" in lines
-        or "settings.local.json" in lines
-    )
+def validate_gitignore_for_scope_hygiene(
+    repo_root: Path, report: ValidationReport
+) -> None:
+    """Informational: recommend gitignore entries for local-scope files.
 
-
-def _gitignore_covers_claude_local_md(lines: set[str]) -> bool:
-    """Return True when any .gitignore line covers CLAUDE.local.md."""
-    return (
-        "CLAUDE.local.md" in lines
-        or "/CLAUDE.local.md" in lines
-        or "*.local.md" in lines
-    )
-
-
-def validate_gitignore_for_scope_hygiene(repo_root: Path, report: ValidationReport) -> None:
-    """Informational: recommend gitignore entries for local-scope files."""
+    Uses ``git check-ignore`` (via ``gitignore_covers_path``) rather than
+    a string-match on ``.gitignore`` lines, so gitignore globs like
+    ``*.local.*`` / ``.claude/`` / ``**/settings.local.json`` are all
+    recognised correctly.
+    """
     gitignore = repo_root / ".gitignore"
     if not gitignore.exists():
         return
-    try:
-        content = gitignore.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
+    # Size-cap the .gitignore read to prevent DoS via a hostile 2GB file.
+    content = _read_text_or_report(gitignore, MAX_GITIGNORE_BYTES, report, ".gitignore")
+    if content is None:
         return
-    lines = {ln.strip() for ln in content.splitlines() if ln.strip() and not ln.strip().startswith("#")}
-    if not _gitignore_covers_settings_local(lines):
+    if not gitignore_covers_path(".claude/settings.local.json", repo_root):
         report.info(
             ".gitignore does not cover '.claude/settings.local.json' — "
             "Claude Code auto-adds it on first creation, but pinning is safer.",
             ".gitignore",
         )
-    if not _gitignore_covers_claude_local_md(lines):
+    if not gitignore_covers_path("CLAUDE.local.md", repo_root):
         report.info(
             ".gitignore does not cover 'CLAUDE.local.md' — pin it to prevent "
             "accidental commits of personal memory notes.",
@@ -573,12 +759,19 @@ def validate_project_scope(project_root: Path, report: ValidationReport) -> None
       project-scope validation (no files can be classified as tracked).
     - If ``.claude/`` does not exist, emits an INFO and validates only
       ``.mcp.json`` / ``CLAUDE.md`` at the project root.
+    - If ``.claude/`` exists but is empty, emits a distinct INFO so the
+      caller can distinguish "no config" from "empty folder".
     """
     if not project_root.exists() or not project_root.is_dir():
-        report.critical(f"Project path does not exist or is not a directory: {project_root}", str(project_root))
+        report.critical(
+            f"Project path does not exist or is not a directory: {project_root}",
+            str(project_root),
+        )
         return
 
-    repo_root = find_git_root(project_root) or project_root
+    # Bound find_git_root to the project path so symlinked parents cannot
+    # escape the user's nominal working set (aegis MEDIUM-6).
+    repo_root = find_git_root(project_root, boundary=project_root) or project_root
     if not (repo_root / ".git").exists():
         report.warning(
             "Not a git repository — no files can be classified as project-scope. "
@@ -587,8 +780,10 @@ def validate_project_scope(project_root: Path, report: ValidationReport) -> None
         )
         return
 
+    claude_dir = project_root / ".claude"
+
     # 1. .claude/settings.json
-    settings_path = project_root / ".claude" / "settings.json"
+    settings_path = claude_dir / "settings.json"
     if classify_file_scope(settings_path, repo_root) == "project":
         validate_settings_json_project_scope(settings_path, report)
     elif settings_path.exists():
@@ -610,38 +805,55 @@ def validate_project_scope(project_root: Path, report: ValidationReport) -> None
         )
 
     # 3. .claude/agents/
-    agents_dir = project_root / ".claude" / "agents"
+    agents_dir = claude_dir / "agents"
     if classify_folder_scope(agents_dir, repo_root) == "project":
-        validate_agents_folder(agents_dir, repo_root, report)
+        validate_agents_folder(agents_dir, repo_root, project_root, report)
 
     # 4. .claude/skills/
-    skills_dir = project_root / ".claude" / "skills"
+    skills_dir = claude_dir / "skills"
     if classify_folder_scope(skills_dir, repo_root) == "project":
-        validate_skills_folder(skills_dir, repo_root, report)
+        validate_skills_folder(skills_dir, repo_root, project_root, report)
 
     # 5. .claude/commands/
-    commands_dir = project_root / ".claude" / "commands"
+    commands_dir = claude_dir / "commands"
     if classify_folder_scope(commands_dir, repo_root) == "project":
-        validate_commands_folder(commands_dir, repo_root, report)
+        validate_commands_folder(commands_dir, repo_root, project_root, report)
 
     # 6. .claude/rules/
-    rules_dir = project_root / ".claude" / "rules"
+    rules_dir = claude_dir / "rules"
     if classify_folder_scope(rules_dir, repo_root) == "project":
-        validate_rules_folder(rules_dir, repo_root, report)
+        validate_rules_folder(rules_dir, repo_root, project_root, report)
 
-    # 7. CLAUDE.md (project root or .claude/)
-    for md_candidate in (project_root / "CLAUDE.md", project_root / ".claude" / "CLAUDE.md"):
+    # 7. .claude/output-styles/ (TRDD 4.7)
+    styles_dir = claude_dir / "output-styles"
+    if classify_folder_scope(styles_dir, repo_root) == "project":
+        validate_output_styles_folder(styles_dir, repo_root, project_root, report)
+
+    # 8. .claude/hooks/ (TRDD 4.9)
+    hooks_dir = claude_dir / "hooks"
+    if classify_folder_scope(hooks_dir, repo_root) == "project":
+        validate_hooks_folder(hooks_dir, repo_root, project_root, report)
+
+    # 9. CLAUDE.md (project root or .claude/)
+    for md_candidate in (project_root / "CLAUDE.md", claude_dir / "CLAUDE.md"):
         if classify_file_scope(md_candidate, repo_root) == "project":
             validate_claude_md_file(md_candidate, repo_root, report)
 
-    # 8. .gitignore hygiene
+    # 10. .gitignore hygiene
     validate_gitignore_for_scope_hygiene(repo_root, report)
 
+    # 11. Distinct empty-folder INFO vs "no config found"
     if not report.results:
-        report.info(
-            "No Claude Code project-scope configuration found under this path.",
-            str(project_root),
-        )
+        if claude_dir.exists() and not any(claude_dir.iterdir()):
+            report.info(
+                ".claude/ directory exists but is empty — no configuration to validate.",
+                str(project_root),
+            )
+        else:
+            report.info(
+                "No Claude Code project-scope configuration found under this path.",
+                str(project_root),
+            )
 
 
 # =============================================================================

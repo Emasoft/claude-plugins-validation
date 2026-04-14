@@ -25,6 +25,9 @@ dmypy.json
 .tldr/
 .tldrignore
 llm_externalizer_output/
+# Personal per-project memory file (loaded alongside CLAUDE.md per memory.md —
+# must be gitignored so it never leaks into shared history)
+CLAUDE.local.md
 
 # IDE
 .idea/

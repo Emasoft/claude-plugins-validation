@@ -31,17 +31,27 @@ from cc_scope_rules import (  # noqa: E402
     CLAUDE_VAR_PREFIXES,
     GLOBAL_CONFIG_KEYS,
     MANAGED_ONLY_KEYS,
+    MAX_FRONTMATTER_BYTES,
+    MAX_YAML_ALIASES,
     PROJECT_REJECTED_KEYS,
     PROJECT_REJECTED_NESTED_KEYS,
     SECRET_VALUE_PATTERNS,
+    OversizedFileError,
     classify_file_scope,
     classify_folder_scope,
     contains_absolute_home_path,
     find_git_root,
+    gitignore_covers_path,
     is_git_ignored,
     is_git_tracked,
     is_secret_value,
+    list_tracked_files_under,
     looks_like_secret_key_name,
+    redact_home_path,
+    resolve_within,
+    safe_load_jsonc,
+    safe_parse_frontmatter,
+    safe_read_text,
     uses_claude_var_expansion,
 )
 
@@ -464,3 +474,239 @@ class TestClassifyFileScope:
         """A non-existent file classifies as 'missing'."""
         f = git_repo / ".claude" / "nope.json"
         assert classify_file_scope(f, git_repo) == "missing"
+
+
+# =============================================================================
+# Bounded I/O — safe_read_text + safe_load_jsonc + safe_parse_frontmatter
+# =============================================================================
+
+
+class TestSafeReadText:
+    """safe_read_text enforces size caps and lets smaller reads through."""
+
+    def test_small_file_reads_successfully(self, tmp_path: Path) -> None:
+        """A file under the cap is returned verbatim."""
+        f = tmp_path / "small.txt"
+        f.write_text("hello\n", encoding="utf-8")
+        assert safe_read_text(f, 1024) == "hello\n"
+
+    def test_oversize_file_raises(self, tmp_path: Path) -> None:
+        """A file larger than max_bytes raises OversizedFileError."""
+        f = tmp_path / "big.txt"
+        f.write_text("x" * 2048, encoding="utf-8")
+        with pytest.raises(OversizedFileError):
+            safe_read_text(f, 1024)
+
+    def test_missing_file_raises_oserror(self, tmp_path: Path) -> None:
+        """A missing file raises FileNotFoundError (subclass of OSError)."""
+        with pytest.raises(OSError):
+            safe_read_text(tmp_path / "nope.txt", 1024)
+
+
+class TestSafeLoadJsonc:
+    """safe_load_jsonc size-caps JSONC file reads."""
+
+    def test_small_json_loads(self, tmp_path: Path) -> None:
+        """Small JSON parses into a dict."""
+        f = tmp_path / "settings.json"
+        f.write_text('{"model": "opus"}\n', encoding="utf-8")
+        result = safe_load_jsonc(f, 1024)
+        assert result == {"model": "opus"}
+
+    def test_oversize_json_raises(self, tmp_path: Path) -> None:
+        """A JSON file over max_bytes raises OversizedFileError."""
+        f = tmp_path / "huge.json"
+        f.write_text("{" + '"k":"v",' * 5000 + '"last":1}', encoding="utf-8")
+        with pytest.raises(OversizedFileError):
+            safe_load_jsonc(f, 1024)
+
+
+class TestSafeParseFrontmatter:
+    """safe_parse_frontmatter rejects oversize + YAML-bomb content."""
+
+    def test_parses_small_frontmatter(self) -> None:
+        """Well-formed small frontmatter parses to a dict."""
+        content = "---\nname: test\ndescription: hi\n---\nBody.\n"
+        fm, body = safe_parse_frontmatter(content)
+        assert fm is not None
+        assert fm.get("name") == "test"
+        assert body == "Body.\n" or body == "Body."
+
+    def test_no_frontmatter_returns_none(self) -> None:
+        """A document without --- fence returns (None, original content)."""
+        content = "Just a body.\n"
+        fm, body = safe_parse_frontmatter(content)
+        assert fm is None
+        assert body == content
+
+    def test_unterminated_frontmatter_returns_none(self) -> None:
+        """A document with opening --- but no closing fence returns None."""
+        content = "---\nname: x\n"  # no closing ---
+        fm, _body = safe_parse_frontmatter(content)
+        assert fm is None
+
+    def test_oversize_frontmatter_is_rejected(self) -> None:
+        """Frontmatter larger than MAX_FRONTMATTER_BYTES is rejected."""
+        padding = "x" * (MAX_FRONTMATTER_BYTES + 1024)
+        content = f"---\nname: big\ndescription: {padding}\n---\nbody\n"
+        fm, body = safe_parse_frontmatter(content)
+        assert fm is None
+        assert "body" in body
+
+    def test_yaml_bomb_is_rejected(self) -> None:
+        """A YAML document with too many anchor/alias markers is rejected.
+
+        This is the billion-laughs mitigation — safe_parse_frontmatter
+        pre-scans for &name and *name markers and bails when the count
+        exceeds MAX_YAML_ALIASES, BEFORE invoking yaml.safe_load.
+        """
+        # Build a frontmatter with MAX_YAML_ALIASES + 10 anchor/alias markers
+        markers = "\n".join(f"k{i}: &a{i} x" for i in range(MAX_YAML_ALIASES + 10))
+        content = f"---\n{markers}\n---\nbody\n"
+        fm, _body = safe_parse_frontmatter(content)
+        assert fm is None
+
+    def test_malformed_yaml_returns_none(self) -> None:
+        """Syntactically broken YAML returns None, not an exception."""
+        content = "---\n: : : : not valid\n---\n"
+        fm, _body = safe_parse_frontmatter(content)
+        assert fm is None
+
+
+# =============================================================================
+# Symlink containment — resolve_within
+# =============================================================================
+
+
+class TestResolveWithin:
+    """resolve_within rejects paths that escape the project root."""
+
+    def test_normal_path_inside_root(self, tmp_path: Path) -> None:
+        """A normal path inside the root resolves."""
+        root = tmp_path / "proj"
+        root.mkdir()
+        inside = root / "file.md"
+        inside.write_text("x", encoding="utf-8")
+        result = resolve_within(inside, root)
+        assert result is not None
+        assert result.name == "file.md"
+
+    def test_symlink_outside_root_is_rejected(self, tmp_path: Path) -> None:
+        """A symlink that targets outside the project returns None."""
+        root = tmp_path / "proj"
+        root.mkdir()
+        outside = tmp_path / "outside.md"
+        outside.write_text("secret", encoding="utf-8")
+        link = root / "link.md"
+        link.symlink_to(outside)
+        result = resolve_within(link, root)
+        assert result is None
+
+    def test_parent_directory_escape_is_rejected(self, tmp_path: Path) -> None:
+        """A `..` path escape is rejected."""
+        root = tmp_path / "proj"
+        root.mkdir()
+        sibling = tmp_path / "sibling.md"
+        sibling.write_text("x", encoding="utf-8")
+        # Craft a path that resolves outside
+        result = resolve_within(root / ".." / "sibling.md", root)
+        assert result is None
+
+
+# =============================================================================
+# Redaction — redact_home_path
+# =============================================================================
+
+
+class TestRedactHomePath:
+    """redact_home_path replaces usernames with <REDACTED>."""
+
+    def test_redacts_macos_username(self) -> None:
+        """/Users/alice/... → /Users/<REDACTED>/..."""
+        result = redact_home_path("/Users/alice/secret/file.sh")
+        assert "alice" not in result
+        assert "<REDACTED>" in result
+        assert result.endswith("/secret/file.sh")
+
+    def test_redacts_linux_username(self) -> None:
+        """/home/bob/... → /home/<REDACTED>/..."""
+        result = redact_home_path("/home/bob/.local/bin/tool")
+        assert "bob" not in result
+        assert "<REDACTED>" in result
+
+    def test_redacts_windows_username(self) -> None:
+        r"""C:\Users\Alice\... → C:\Users\<REDACTED>\..."""
+        result = redact_home_path(r"C:\Users\Alice\AppData\tool.exe")
+        assert "Alice" not in result
+        assert "<REDACTED>" in result
+
+    def test_non_home_path_unchanged(self) -> None:
+        """Paths without a home segment pass through unchanged."""
+        assert redact_home_path("/usr/local/bin/python") == "/usr/local/bin/python"
+        assert redact_home_path("relative/path") == "relative/path"
+
+    def test_empty_string_unchanged(self) -> None:
+        """Empty string passes through."""
+        assert redact_home_path("") == ""
+
+    def test_non_string_unchanged(self) -> None:
+        """Non-string inputs pass through unchanged (returned as-is)."""
+        assert redact_home_path(None) is None  # type: ignore[arg-type]
+
+
+# =============================================================================
+# Case-insensitive home path detection (aegis LOW-1)
+# =============================================================================
+
+
+class TestCaseInsensitiveHomeDetection:
+    """Unix home-path regexes catch case variants (macOS filesystem)."""
+
+    def test_lowercase_users_is_detected(self) -> None:
+        """/users/alice/ (lowercase u) is caught on case-insensitive FS."""
+        assert contains_absolute_home_path("/users/alice/secret")
+
+    def test_mixed_case_home_is_detected(self) -> None:
+        """/Home/Bob/ is caught."""
+        assert contains_absolute_home_path("/Home/Bob/file")
+
+    def test_lowercase_root_is_detected(self) -> None:
+        """/ROOT/ uppercase is caught."""
+        assert contains_absolute_home_path("/ROOT/data")
+
+
+# =============================================================================
+# Batched git ls-files — list_tracked_files_under + gitignore_covers_path
+# =============================================================================
+
+
+class TestBatchedGitHelpers:
+    """list_tracked_files_under returns a set of absolute tracked Paths."""
+
+    def test_returns_tracked_files(self, git_repo: Path) -> None:
+        """A folder with 3 tracked files returns a set of 3 Paths."""
+        for name in ("a.md", "b.md", "c.md"):
+            (git_repo / "dir" / name).parent.mkdir(exist_ok=True)
+            (git_repo / "dir" / name).write_text("x", encoding="utf-8")
+        _git(git_repo, "add", "dir/")
+        _git(git_repo, "commit", "-m", "add dir", "--quiet")
+        result = list_tracked_files_under(git_repo / "dir", git_repo)
+        assert result is not None
+        assert len(result) == 3
+        names = {p.name for p in result}
+        assert names == {"a.md", "b.md", "c.md"}
+
+    def test_returns_empty_set_for_untracked_folder(self, git_repo: Path) -> None:
+        """An untracked folder returns an empty set (git ls-files returns nothing)."""
+        (git_repo / "new").mkdir()
+        (git_repo / "new" / "x.md").write_text("x", encoding="utf-8")
+        result = list_tracked_files_under(git_repo / "new", git_repo)
+        assert result == set()
+
+    def test_gitignore_covers_path_via_git(self, git_repo: Path) -> None:
+        """gitignore_covers_path uses git check-ignore for accurate pattern matching."""
+        (git_repo / ".gitignore").write_text("*.local.*\n", encoding="utf-8")
+        _git(git_repo, "add", ".gitignore")
+        _git(git_repo, "commit", "-m", "add gitignore", "--quiet")
+        assert gitignore_covers_path(".claude/settings.local.json", git_repo)
+        assert not gitignore_covers_path("src/main.py", git_repo)

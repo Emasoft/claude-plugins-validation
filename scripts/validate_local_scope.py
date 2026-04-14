@@ -33,7 +33,11 @@ Additional local-scope checks:
 - ``~/.claude.json`` may contain per-project MCP state under
   ``projects[<abs_path>].mcpServers``. Reported as INFO when present.
 - ``.gitignore`` missing entries for ``settings.local.json`` and
-  ``CLAUDE.local.md`` — INFO level.
+  ``CLAUDE.local.md`` — MINOR level (this validator cares about them).
+- An untracked ``.claude/settings.json`` is validated with the strict
+  **project-scope rules** (not local rules), because it is almost always
+  a WIP shared config that will be committed soon.
+- An untracked ``.mcp.json`` is flagged as WARNING per TRDD 5.6.
 
 Exit codes follow the CPV convention:
 
@@ -59,12 +63,23 @@ from typing import Any
 from cc_scope_rules import (
     GLOBAL_CONFIG_KEYS,
     MANAGED_ONLY_KEYS,
+    MAX_FILES_PER_FOLDER,
+    MAX_HOME_CLAUDE_JSON_BYTES,
+    MAX_MARKDOWN_BYTES,
+    MAX_SETTINGS_JSON_BYTES,
+    OversizedFileError,
     classify_file_scope,
     classify_folder_scope,
     find_git_root,
+    gitignore_covers_path,
     is_git_tracked,
+    list_tracked_files_under,
+    redact_home_path,
+    resolve_within,
+    safe_load_jsonc,
+    safe_parse_frontmatter,
+    safe_read_text,
 )
-from cpv_management_common import load_jsonc
 from cpv_validation_common import (
     ValidationReport,
     check_remote_execution_guard,
@@ -82,6 +97,42 @@ _TYPICALLY_SHARED_KEYS: frozenset[str] = frozenset(
         "disabledMcpjsonServers",
     }
 )
+
+
+# =============================================================================
+# Shared IO helpers (sanitised error reporting)
+# =============================================================================
+
+
+def _report_parse_error(
+    report: ValidationReport, file_label: str, exc: BaseException
+) -> None:
+    """Record a CRITICAL parse-error finding without leaking file contents.
+
+    Uses ``type(exc).__name__`` only — never ``str(exc)`` — per aegis
+    MEDIUM-4.
+    """
+    report.critical(f"{file_label}: parse error ({type(exc).__name__})", file_label)
+
+
+def _load_json_or_report(
+    path: Path,
+    max_bytes: int,
+    report: ValidationReport,
+    file_label: str,
+) -> object | None:
+    """Load a JSONC file with size cap + sanitised error reporting."""
+    try:
+        return safe_load_jsonc(path, max_bytes)
+    except OversizedFileError:
+        report.major(
+            f"{file_label}: exceeds {max_bytes} byte size cap — skipping",
+            file_label,
+        )
+        return None
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
+        _report_parse_error(report, file_label, exc)
+        return None
 
 
 # =============================================================================
@@ -170,10 +221,8 @@ def validate_settings_local_json(
 ) -> None:
     """Apply local-scope rules to ``.claude/settings.local.json`` contents."""
     file_label = ".claude/settings.local.json"
-    try:
-        data = load_jsonc(settings_path)
-    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
-        report.critical(f"{file_label}: parse error: {exc}", file_label)
+    data = _load_json_or_report(settings_path, MAX_SETTINGS_JSON_BYTES, report, file_label)
+    if data is None:
         return
     if not isinstance(data, dict):
         report.critical(f"{file_label}: root must be a JSON object", file_label)
@@ -197,40 +246,32 @@ def validate_settings_local_json(
 def _validate_markdown_frontmatter_only(
     path: Path, report: ValidationReport, rel_label: str
 ) -> None:
-    """Light-touch validation: YAML frontmatter parseable, name/description present.
+    """Light-touch validation: YAML frontmatter parseable, name present.
 
     Intentionally does NOT check for absolute home paths — local scope is
-    personal config.
+    personal config. Frontmatter parsing uses ``safe_parse_frontmatter``
+    which bounds size and alias count.
     """
     try:
-        content = path.read_text(encoding="utf-8")
+        content = safe_read_text(path, MAX_MARKDOWN_BYTES)
+    except OversizedFileError:
+        report.major(
+            f"{rel_label}: exceeds {MAX_MARKDOWN_BYTES} byte size cap — skipping",
+            rel_label,
+        )
+        return
     except (OSError, UnicodeDecodeError) as exc:
-        report.critical(f"{rel_label}: cannot read: {exc}", rel_label)
+        report.critical(f"{rel_label}: read failed ({type(exc).__name__})", rel_label)
         return
     if not content.startswith("---"):
         report.minor(f"{rel_label}: missing YAML frontmatter", rel_label)
         return
-    lines = content.splitlines()
-    end_idx: int | None = None
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
-            end_idx = i
-            break
-    if end_idx is None:
-        report.minor(f"{rel_label}: unterminated YAML frontmatter", rel_label)
-        return
-    try:
-        import yaml  # type: ignore[import-not-found]
-    except ImportError:
-        # PyYAML missing — can only check structure
-        return
-    try:
-        fm = yaml.safe_load("\n".join(lines[1:end_idx]))
-    except yaml.YAMLError as exc:
-        report.minor(f"{rel_label}: YAML parse error: {exc}", rel_label)
-        return
-    if not isinstance(fm, dict):
-        report.minor(f"{rel_label}: frontmatter is not a mapping", rel_label)
+    fm, _body = safe_parse_frontmatter(content)
+    if fm is None:
+        report.minor(
+            f"{rel_label}: missing, oversized, or malformed YAML frontmatter",
+            rel_label,
+        )
         return
     name = fm.get("name")
     if not isinstance(name, str) or not name.strip():
@@ -238,49 +279,109 @@ def _validate_markdown_frontmatter_only(
 
 
 def _walk_local_markdown_folder(
-    folder: Path, repo_root: Path, report: ValidationReport, glob: str
+    folder: Path,
+    repo_root: Path,
+    project_root: Path,
+    report: ValidationReport,
+    glob: str,
 ) -> None:
-    """Validate every .md file matching glob inside a local-scope folder."""
+    """Validate every .md file matching glob inside a local-scope folder.
+
+    Uses ``list_tracked_files_under`` once to get the tracked set, then
+    filters via set membership instead of running ``is_git_tracked`` per
+    file (aegis LOW-3). Symlink escapes are rejected via
+    ``resolve_within`` (aegis MEDIUM-1). Walk is capped at
+    ``MAX_FILES_PER_FOLDER``.
+    """
+    tracked = list_tracked_files_under(folder, repo_root)
+    if tracked is None:
+        tracked = set()
+    count = 0
     for md in sorted(folder.rglob(glob)):
-        if is_git_tracked(md, repo_root):
+        count += 1
+        if count > MAX_FILES_PER_FOLDER:
+            report.warning(
+                f"{folder.relative_to(project_root)}: stopped walking at "
+                f"{MAX_FILES_PER_FOLDER} files — truncating validation",
+                str(folder.relative_to(project_root)),
+            )
+            return
+        real = resolve_within(md, project_root)
+        if real is None:
+            report.major(
+                f"{md.relative_to(project_root)}: path resolves outside the "
+                "project root (symlink escape) — skipping",
+                str(md.relative_to(project_root)),
+            )
             continue
-        rel = md.relative_to(repo_root)
+        if real in tracked:
+            continue  # tracked files are project-scope's concern
+        rel = md.relative_to(project_root)
         _validate_markdown_frontmatter_only(md, report, str(rel))
 
 
 def validate_local_agents(
-    agents_dir: Path, repo_root: Path, report: ValidationReport
+    agents_dir: Path, repo_root: Path, project_root: Path, report: ValidationReport
 ) -> None:
     """Validate untracked agent .md files."""
-    _walk_local_markdown_folder(agents_dir, repo_root, report, "*.md")
+    _walk_local_markdown_folder(agents_dir, repo_root, project_root, report, "*.md")
 
 
 def validate_local_skills(
-    skills_dir: Path, repo_root: Path, report: ValidationReport
+    skills_dir: Path, repo_root: Path, project_root: Path, report: ValidationReport
 ) -> None:
     """Validate untracked SKILL.md files."""
-    _walk_local_markdown_folder(skills_dir, repo_root, report, "SKILL.md")
+    _walk_local_markdown_folder(skills_dir, repo_root, project_root, report, "SKILL.md")
 
 
 def validate_local_commands(
-    commands_dir: Path, repo_root: Path, report: ValidationReport
+    commands_dir: Path, repo_root: Path, project_root: Path, report: ValidationReport
 ) -> None:
     """Validate untracked command .md files."""
-    _walk_local_markdown_folder(commands_dir, repo_root, report, "*.md")
+    _walk_local_markdown_folder(commands_dir, repo_root, project_root, report, "*.md")
+
+
+def validate_local_output_styles(
+    styles_dir: Path, repo_root: Path, project_root: Path, report: ValidationReport
+) -> None:
+    """Validate untracked output-styles/*.md files."""
+    _walk_local_markdown_folder(styles_dir, repo_root, project_root, report, "*.md")
 
 
 def validate_local_rules(
-    rules_dir: Path, repo_root: Path, report: ValidationReport
+    rules_dir: Path, repo_root: Path, project_root: Path, report: ValidationReport
 ) -> None:
-    """Validate untracked rule .md files (frontmatter optional)."""
+    """Surface untracked rule .md files as INFO (relaxed rules)."""
+    tracked = list_tracked_files_under(rules_dir, repo_root) or set()
+    count = 0
     for md in sorted(rules_dir.rglob("*.md")):
-        if is_git_tracked(md, repo_root):
+        count += 1
+        if count > MAX_FILES_PER_FOLDER:
+            report.warning(
+                f".claude/rules: stopped walking at {MAX_FILES_PER_FOLDER} files",
+                ".claude/rules",
+            )
+            return
+        real = resolve_within(md, project_root)
+        if real is None:
+            report.major(
+                f"{md.relative_to(project_root)}: symlink escape — skipping",
+                str(md.relative_to(project_root)),
+            )
             continue
-        rel = md.relative_to(repo_root)
+        if real in tracked:
+            continue
+        rel = md.relative_to(project_root)
         try:
-            md.read_text(encoding="utf-8")
+            safe_read_text(md, MAX_MARKDOWN_BYTES)
+        except OversizedFileError:
+            report.major(
+                f"{rel}: exceeds {MAX_MARKDOWN_BYTES} byte size cap — skipping",
+                str(rel),
+            )
+            continue
         except (OSError, UnicodeDecodeError) as exc:
-            report.critical(f"{rel}: cannot read: {exc}", str(rel))
+            report.critical(f"{rel}: read failed ({type(exc).__name__})", str(rel))
             continue
         report.info(f"{rel}: local-scope rule file", str(rel))
 
@@ -296,9 +397,15 @@ def validate_claude_local_md(
     """Validate ``CLAUDE.local.md`` — must be gitignored, structurally valid."""
     rel = md_path.relative_to(repo_root)
     try:
-        md_path.read_text(encoding="utf-8")
+        safe_read_text(md_path, MAX_MARKDOWN_BYTES)
+    except OversizedFileError:
+        report.major(
+            f"{rel}: exceeds {MAX_MARKDOWN_BYTES} byte size cap — skipping",
+            str(rel),
+        )
+        return
     except (OSError, UnicodeDecodeError) as exc:
-        report.critical(f"{rel}: cannot read: {exc}", str(rel))
+        report.critical(f"{rel}: read failed ({type(exc).__name__})", str(rel))
         return
     # If the file is tracked, that's a scope violation
     if is_git_tracked(md_path, repo_root):
@@ -325,6 +432,10 @@ def validate_home_claude_json_for_project(
     Reports any ``projects[<abs_path>].mcpServers`` entries as INFO. This
     is user-managed state and cannot really be "wrong" — we just surface
     what Claude Code itself has stored for this project on this machine.
+
+    The file read is size-capped (aegis MEDIUM-5) and any reported
+    project path is run through ``redact_home_path`` before it lands in
+    a finding message (aegis INFO-2).
     """
     home_claude_json = Path.home() / ".claude.json"
     if not home_claude_json.exists():
@@ -334,10 +445,18 @@ def validate_home_claude_json_for_project(
         )
         return
     try:
-        data = load_jsonc(home_claude_json)
+        data = safe_load_jsonc(home_claude_json, MAX_HOME_CLAUDE_JSON_BYTES)
+    except OversizedFileError:
+        report.warning(
+            f"~/.claude.json exceeds {MAX_HOME_CLAUDE_JSON_BYTES} byte cap — "
+            "skipping per-project MCP check.",
+            "~/.claude.json",
+        )
+        return
     except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
         report.warning(
-            f"~/.claude.json: cannot parse ({exc}) — skipping per-project MCP check.",
+            f"~/.claude.json: cannot parse ({type(exc).__name__}) — "
+            "skipping per-project MCP check.",
             "~/.claude.json",
         )
         return
@@ -347,10 +466,11 @@ def validate_home_claude_json_for_project(
     if not isinstance(projects, dict):
         return
     key = str(project_root.resolve())
+    key_display = redact_home_path(key)
     entry = projects.get(key)
     if not isinstance(entry, dict):
         report.info(
-            f"~/.claude.json has no entry for this project ({key}).",
+            f"~/.claude.json has no entry for this project ({key_display}).",
             "~/.claude.json",
         )
         return
@@ -370,35 +490,21 @@ def validate_home_claude_json_for_project(
 
 
 # =============================================================================
-# .gitignore hygiene (stricter in local scope — it's the topic of the validator)
+# .gitignore hygiene — delegated to git check-ignore
 # =============================================================================
-
-
-def _gitignore_covers_settings_local(lines: set[str]) -> bool:
-    """Return True when any .gitignore line covers .claude/settings.local.json."""
-    return (
-        ".claude/" in lines
-        or ".claude" in lines
-        or ".claude/*" in lines
-        or ".claude/**" in lines
-        or ".claude/settings.local.json" in lines
-        or "settings.local.json" in lines
-    )
-
-
-def _gitignore_covers_claude_local_md(lines: set[str]) -> bool:
-    """Return True when any .gitignore line covers CLAUDE.local.md."""
-    return (
-        "CLAUDE.local.md" in lines
-        or "/CLAUDE.local.md" in lines
-        or "*.local.md" in lines
-    )
 
 
 def validate_gitignore_for_local_files(
     repo_root: Path, report: ValidationReport
 ) -> None:
-    """Check that common local-scope files are gitignored."""
+    """Check that common local-scope files are gitignored.
+
+    Uses ``git check-ignore`` (via ``gitignore_covers_path``) which
+    correctly handles every gitignore pattern syntax — including
+    ``.claude/``, ``**/*.local.json``, ``/CLAUDE.local.md``, and so on.
+    Works on paths that don't exist on disk (check-ignore matches
+    patterns, not files).
+    """
     gitignore = repo_root / ".gitignore"
     if not gitignore.exists():
         report.info(
@@ -407,19 +513,14 @@ def validate_gitignore_for_local_files(
             ".gitignore",
         )
         return
-    try:
-        content = gitignore.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return
-    lines = {ln.strip() for ln in content.splitlines() if ln.strip() and not ln.strip().startswith("#")}
-    if not _gitignore_covers_settings_local(lines):
+    if not gitignore_covers_path(".claude/settings.local.json", repo_root):
         report.minor(
             ".gitignore does not cover '.claude/settings.local.json' — add "
             "'.claude/settings.local.json' (or '.claude/') to prevent accidental "
             "commits of personal settings.",
             ".gitignore",
         )
-    if not _gitignore_covers_claude_local_md(lines):
+    if not gitignore_covers_path("CLAUDE.local.md", repo_root):
         report.minor(
             ".gitignore does not cover 'CLAUDE.local.md' — add it to prevent "
             "accidental commits of personal memory notes.",
@@ -432,6 +533,28 @@ def validate_gitignore_for_local_files(
 # =============================================================================
 
 
+def _validate_wip_shared_settings(
+    settings_path: Path, report: ValidationReport
+) -> None:
+    """Apply strict project-scope rules to an UNTRACKED settings.json.
+
+    TRDD section 5 + llm-ext correctness-followup finding #1: a developer
+    may have authored a new ``.claude/settings.json`` that is not yet
+    committed. This file is on its way to being shared with the team, so
+    we should enforce the *project-scope* rules right now (secrets,
+    absolute paths, rejected keys) rather than the relaxed local-scope
+    rules — those would mask issues the developer wants to know about
+    before pushing.
+
+    Delegates to ``validate_project_scope.validate_settings_json_project_scope``
+    via a deferred import to avoid a module-level circular dependency
+    between the two orchestrators.
+    """
+    from validate_project_scope import validate_settings_json_project_scope
+
+    validate_settings_json_project_scope(settings_path, report)
+
+
 def validate_local_scope(project_root: Path, report: ValidationReport) -> None:
     """Walk the project tree and validate every non-git-tracked Claude element.
 
@@ -441,6 +564,8 @@ def validate_local_scope(project_root: Path, report: ValidationReport) -> None:
       ``.claude/`` is treated as local scope (there is no "tracked").
     - Folders that are project-scope (all files tracked) are skipped —
       they are covered by validate_project_scope.
+    - An untracked ``settings.json`` is validated with strict rules so
+      a WIP shared config is still scrubbed for secrets/absolute paths.
     """
     if not project_root.exists() or not project_root.is_dir():
         report.critical(
@@ -449,7 +574,9 @@ def validate_local_scope(project_root: Path, report: ValidationReport) -> None:
         )
         return
 
-    repo_root = find_git_root(project_root) or project_root
+    # Bound the git-root search to project_root so symlinked parents
+    # cannot expose unrelated repos (aegis MEDIUM-6).
+    repo_root = find_git_root(project_root, boundary=project_root) or project_root
     no_git = not (repo_root / ".git").exists()
     if no_git:
         report.info(
@@ -459,6 +586,7 @@ def validate_local_scope(project_root: Path, report: ValidationReport) -> None:
         )
 
     claude_dir = project_root / ".claude"
+    git_repo = None if no_git else repo_root
 
     # 1. settings.local.json — always local-scope
     settings_local = claude_dir / "settings.local.json"
@@ -473,57 +601,65 @@ def validate_local_scope(project_root: Path, report: ValidationReport) -> None:
         else:
             validate_settings_local_json(settings_local, report)
 
-    # 2. Untracked settings.json (rare — usually a WIP)
+    # 2. Untracked settings.json (WIP shared config) — use STRICT project rules.
     settings = claude_dir / "settings.json"
-    if settings.exists() and classify_file_scope(settings, None if no_git else repo_root) in ("local", "no-git"):
+    if settings.exists() and classify_file_scope(settings, git_repo) in ("local", "no-git"):
         report.warning(
-            ".claude/settings.json exists but is not git-tracked. Usually "
-            "settings.json is committed to share with the team.",
+            ".claude/settings.json exists but is not git-tracked. Validating "
+            "with strict project-scope rules since this file is usually shared "
+            "with the team once committed.",
             ".claude/settings.json",
         )
-        validate_settings_local_json(settings, report)  # re-use local rules
+        _validate_wip_shared_settings(settings, report)
 
-    # 3. .claude/agents/ (walk if folder is local-scope)
-    agents_dir = claude_dir / "agents"
-    if classify_folder_scope(agents_dir, None if no_git else repo_root) in ("local", "no-git"):
-        if agents_dir.exists():
-            validate_local_agents(agents_dir, repo_root, report)
+    # 3. Untracked .mcp.json — WARNING per TRDD 5.6
+    mcp_path = project_root / ".mcp.json"
+    if mcp_path.exists() and classify_file_scope(mcp_path, git_repo) in ("local", "no-git"):
+        report.warning(
+            ".mcp.json exists but is not git-tracked — per mcp.md, .mcp.json "
+            "is meant to be committed so the whole team gets the same MCP "
+            "servers. Is this intentional?",
+            ".mcp.json",
+        )
 
-    # 4. .claude/skills/
-    skills_dir = claude_dir / "skills"
-    if classify_folder_scope(skills_dir, None if no_git else repo_root) in ("local", "no-git"):
-        if skills_dir.exists():
-            validate_local_skills(skills_dir, repo_root, report)
+    # 4-8. Walk each .claude/<element>/ folder if it's local-scope.
+    for subfolder, validator in (
+        ("agents", validate_local_agents),
+        ("skills", validate_local_skills),
+        ("commands", validate_local_commands),
+        ("rules", validate_local_rules),
+        ("output-styles", validate_local_output_styles),
+    ):
+        folder = claude_dir / subfolder
+        if classify_folder_scope(folder, git_repo) in ("local", "no-git"):
+            if folder.exists():
+                validator(folder, repo_root, project_root, report)
 
-    # 5. .claude/commands/
-    commands_dir = claude_dir / "commands"
-    if classify_folder_scope(commands_dir, None if no_git else repo_root) in ("local", "no-git"):
-        if commands_dir.exists():
-            validate_local_commands(commands_dir, repo_root, report)
-
-    # 6. .claude/rules/
-    rules_dir = claude_dir / "rules"
-    if classify_folder_scope(rules_dir, None if no_git else repo_root) in ("local", "no-git"):
-        if rules_dir.exists():
-            validate_local_rules(rules_dir, repo_root, report)
-
-    # 7. CLAUDE.local.md at project root
+    # 9. CLAUDE.local.md at project root
     claude_local_md = project_root / "CLAUDE.local.md"
     if claude_local_md.exists():
         validate_claude_local_md(claude_local_md, repo_root, report)
 
-    # 8. ~/.claude.json per-project MCP state
+    # 10. ~/.claude.json per-project MCP state
     validate_home_claude_json_for_project(project_root, report)
 
-    # 9. .gitignore hygiene
+    # 11. .gitignore hygiene
     if not no_git:
         validate_gitignore_for_local_files(repo_root, report)
 
+    # 12. Distinct empty-folder INFO vs "no config found"
     if not report.results:
-        report.info(
-            "No local-scope Claude Code configuration found under this path.",
-            str(project_root),
-        )
+        if claude_dir.exists() and not any(claude_dir.iterdir()):
+            report.info(
+                ".claude/ directory exists but is empty — no local configuration "
+                "to validate.",
+                str(project_root),
+            )
+        else:
+            report.info(
+                "No local-scope Claude Code configuration found under this path.",
+                str(project_root),
+            )
 
 
 # =============================================================================
