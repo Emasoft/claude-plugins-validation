@@ -85,20 +85,21 @@ class TestBuildDefaultBypassActors:
         role_ids = {a.actor_id for a in actors if a.actor_type == "RepositoryRole"}
         assert 5 in role_ids
 
-    def test_includes_dependabot(self):
-        """Default seed includes dependabot app_id 29110."""
-        actors = setup_branch_rules.build_default_bypass_actors()
-        app_ids = {a.actor_id for a in actors if a.actor_type == "Integration"}
-        assert 29110 in app_ids
+    def test_seeds_no_integrations_by_default(self):
+        """Default seed contains ZERO Integration actors.
 
-    def test_includes_github_actions(self):
-        """Default seed includes github-actions app_id 15368."""
+        Hardcoding GitHub App IDs caused HTTP 422 "Actor X must be part of
+        the ruleset source or owner organization" for apps that aren't
+        installed on the target owner. The defaults are now admin-only; the
+        user adds integrations explicitly via --add-bypass-app-id after
+        running `--list-apps` to get the correct IDs for their account.
+        """
         actors = setup_branch_rules.build_default_bypass_actors()
-        app_ids = {a.actor_id for a in actors if a.actor_type == "Integration"}
-        assert 15368 in app_ids
+        integration_actors = [a for a in actors if a.actor_type == "Integration"]
+        assert integration_actors == []
 
     def test_all_defaults_are_always_bypass(self):
-        """Every default actor uses bypass_mode='always' for friction-free bot merges."""
+        """Every default actor uses bypass_mode='always' for friction-free merges."""
         actors = setup_branch_rules.build_default_bypass_actors()
         for a in actors:
             assert a.bypass_mode == "always"
