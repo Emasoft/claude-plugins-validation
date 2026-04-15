@@ -951,6 +951,7 @@ def validate_single_hook(
         "model",
         "timeout",
         "async",
+        "asyncRewake",  # v2.1.98+ — background hook, wakes Claude on exit code 2 (implies async)
         "matcher",
         "statusMessage",
         "once",

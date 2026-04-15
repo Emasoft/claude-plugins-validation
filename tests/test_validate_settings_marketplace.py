@@ -238,3 +238,61 @@ def test_extra_known_marketplaces_not_an_object_is_critical():
     validate_extra_known_marketplaces(["not", "a", "dict"], report, "settings.json")  # type: ignore[arg-type]
     assert report.has_critical
     assert any("must be an object" in r.message for r in report.results if r.level == "CRITICAL")
+
+
+# =============================================================================
+# v2.1.98+ taxonomy regression tests
+# =============================================================================
+
+
+def test_file_source_type_accepted(tmp_path: Path):
+    """v2.1.98+: 'file' source type with 'path' field is accepted."""
+    settings_path = _write_settings(
+        tmp_path,
+        {EXTRA_KNOWN_MARKETPLACES_KEY: {"local-file-mp": {"source": {"source": "file", "path": "/opt/mp.json"}}}},
+    )
+    report = validate_settings_marketplace_file(settings_path)
+    assert not report.has_major, (
+        f"unexpected MAJOR on 'file' source: {[r.message for r in report.results if r.level == 'MAJOR']}"
+    )
+
+
+def test_file_source_type_missing_path_is_major(tmp_path: Path):
+    """v2.1.98+: 'file' source type without 'path' produces a MAJOR finding."""
+    settings_path = _write_settings(
+        tmp_path,
+        {EXTRA_KNOWN_MARKETPLACES_KEY: {"bad-file-mp": {"source": {"source": "file"}}}},
+    )
+    report = validate_settings_marketplace_file(settings_path)
+    assert report.has_major
+    assert any("bad-file-mp" in m and "path" in m for m in (r.message for r in report.results if r.level == "MAJOR"))
+
+
+def test_host_pattern_source_type_accepted(tmp_path: Path):
+    """v2.1.98+: 'hostPattern' source type with 'hostPattern' field is accepted."""
+    settings_path = _write_settings(
+        tmp_path,
+        {
+            EXTRA_KNOWN_MARKETPLACES_KEY: {
+                "regex-mp": {"source": {"source": "hostPattern", "hostPattern": "^https://plugins\\.example\\.com/.*$"}}
+            }
+        },
+    )
+    report = validate_settings_marketplace_file(settings_path)
+    assert not report.has_major, (
+        f"unexpected MAJOR on 'hostPattern' source: {[r.message for r in report.results if r.level == 'MAJOR']}"
+    )
+
+
+def test_host_pattern_source_type_missing_field_is_major(tmp_path: Path):
+    """v2.1.98+: 'hostPattern' source type without its field produces MAJOR."""
+    settings_path = _write_settings(
+        tmp_path,
+        {EXTRA_KNOWN_MARKETPLACES_KEY: {"bad-host-mp": {"source": {"source": "hostPattern"}}}},
+    )
+    report = validate_settings_marketplace_file(settings_path)
+    assert report.has_major
+    assert any(
+        "bad-host-mp" in m and "hostPattern" in m
+        for m in (r.message for r in report.results if r.level == "MAJOR")
+    )

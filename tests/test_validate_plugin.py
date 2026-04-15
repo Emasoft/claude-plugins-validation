@@ -284,6 +284,24 @@ class TestManifestFieldValidation:
         warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
         assert any("Unknown manifest field 'foobar'" in m for m in warning_msgs)
 
+    def test_monitors_field_is_not_unknown(self, tmp_path):
+        """v2.1.105+: 'monitors' top-level field is accepted without warning."""
+        plugin_dir = tmp_path / "mon-plugin"
+        plugin_dir.mkdir()
+        claude_dir = plugin_dir / ".claude-plugin"
+        claude_dir.mkdir()
+        manifest = {
+            "name": "mon-plugin",
+            "version": "1.0.0",
+            "monitors": [{"name": "health", "script": "monitors/health.sh"}],
+        }
+        (claude_dir / "plugin.json").write_text(json.dumps(manifest))
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        # Must NOT warn about 'monitors' — it is a v2.1.105 official field.
+        warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
+        assert not any("Unknown manifest field 'monitors'" in m for m in warning_msgs)
+
     def test_repository_object_reports_major(self, tmp_path):
         """validate_manifest reports MAJOR when repository field is an object not string (lines 168-170)."""
         plugin_dir = tmp_path / "repo-obj"

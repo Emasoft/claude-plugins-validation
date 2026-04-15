@@ -114,7 +114,7 @@ ValidationReport = MarketplaceValidationReport
 # "directory" is a Layout-B source for nested plugins inside the marketplace repo:
 # {"source": {"source": "directory", "path": "./plugins/my-plugin"}}
 # Equivalent to the shorthand form "./plugins/my-plugin" as a plain string.
-VALID_SOURCE_TYPES = {"github", "url", "npm", "git-subdir", "directory"}
+VALID_SOURCE_TYPES = {"github", "url", "npm", "git", "git-subdir", "directory", "file"}
 
 # Required fields in marketplace.json
 REQUIRED_MARKETPLACE_FIELDS = {"name", "owner", "plugins"}
@@ -152,8 +152,10 @@ SOURCE_REQUIRED_FIELDS = {
     "github": {"repo"},
     "url": {"url"},
     "npm": {"package"},
+    "git": {"url"},  # v2.1.98+ — generic git URL (non-GitHub hosts); use optional `path` for subdir
     "git-subdir": {"url", "path"},  # Points to a subdirectory within a git repo (v2.1.69+)
     "directory": {"path"},  # Layout B: nested plugin inside marketplace repo
+    "file": {"path"},  # v2.1.98+ — absolute path to a marketplace.json file on disk
 }
 
 # Reserved marketplace names that cannot be used
