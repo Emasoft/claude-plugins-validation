@@ -179,6 +179,7 @@ def validate_manifest(
         "mcpServers",
         "outputStyles",
         "lspServers",
+        "monitors",  # v2.1.105 — background monitor configs (monitors/monitors.json by default)
         "userConfig",  # User-configurable values prompted at enable time (v2.1.80)
         "channels",  # Channel declarations for message injection (v2.1.85)
     }

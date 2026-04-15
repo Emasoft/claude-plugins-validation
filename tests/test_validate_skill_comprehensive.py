@@ -1246,16 +1246,29 @@ class TestBooleanFieldValidation:
 
 
 class TestFieldWhitelistDeprecated:
-    """Tests for validate_field_whitelist with deprecated fields (line 1137)."""
+    """Tests for validate_field_whitelist with deprecated fields.
 
-    def test_deprecated_field_flagged_as_minor(self):
-        """Deprecated field 'when_to_use' should generate minor issue."""
-        from validate_skill_comprehensive import validate_field_whitelist
+    As of CPV v2.16.x / Claude Code v2.1.98+, ``when_to_use`` is NOT
+    deprecated — it is an officially supported supplemental trigger
+    field per skills.md. The previous test asserted the reverse and has
+    been rewritten to pin the corrected behaviour: ``when_to_use`` must
+    be accepted without any deprecation warning.
+    """
+
+    def test_when_to_use_is_not_flagged_as_deprecated(self):
+        """when_to_use is an official v2.1.98+ field, NOT deprecated."""
+        from validate_skill_comprehensive import DEPRECATED_FIELDS, validate_field_whitelist
 
         report = ValidationReport(skill_path="test")
         frontmatter = {"name": "test", "when_to_use": "always"}
         validate_field_whitelist(frontmatter, report)
-        assert any("Deprecated field" in r.message for r in report.results)
+        # No finding should mention deprecation for when_to_use.
+        assert not any(
+            "Deprecated field" in r.message and "when_to_use" in r.message
+            for r in report.results
+        )
+        # And the DEPRECATED_FIELDS set must not contain it.
+        assert "when_to_use" not in DEPRECATED_FIELDS
 
 
 class TestTokenBudgetBranches:

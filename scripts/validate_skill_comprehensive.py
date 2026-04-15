@@ -97,7 +97,13 @@ CLAUDE_CODE_FIELDS = SKILL_FRONTMATTER_FIELDS
 # --- Nixtla/Enterprise Extended Fields ---
 ENTERPRISE_REQUIRED_FIELDS = {"name", "description", "allowed-tools", "version", "author", "license"}
 ENTERPRISE_OPTIONAL_FIELDS = {"model", "disable-model-invocation", "mode", "tags", "metadata"}
-DEPRECATED_FIELDS = {"when_to_use"}
+# NOTE: previously included ``when_to_use``, but per Claude Code docs
+# (skills.md in v2.1.98+) this is an officially supported supplemental
+# trigger-guidance field that concatenates with ``description`` up to a
+# 1,536-char combined cap. Flagging it as deprecated produced a false
+# positive MINOR on every skill that used it. Empty set for now; add
+# real deprecations here as they appear in future releases.
+DEPRECATED_FIELDS: set[str] = set()
 
 # Combine all known fields (includes OpenSpec, Claude Code, and Enterprise fields)
 ALL_KNOWN_FIELDS = (

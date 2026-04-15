@@ -262,11 +262,13 @@ SEMVER_PATTERN = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?(\+[a-zA-Z0-9.]+)?$
 VALID_SETTINGS_SOURCE_TYPES = {
     "github",
     "url",
-    "git-subdir",
+    "git-subdir",  # CPV legacy alias — docs use {source: "git", path: ...} instead
     "npm",
     "settings",  # inline marketplace defined in same settings.json
     "git",  # generic git URL (less common than github)
     "directory",  # dev-only: local filesystem path
+    "file",  # v2.1.98+ — absolute path to a marketplace.json file
+    "hostPattern",  # v2.1.98+ — regex pattern matching marketplace host
 }
 
 # Required fields per settings-level source type.
@@ -279,6 +281,8 @@ SETTINGS_SOURCE_REQUIRED_FIELDS: dict[str, set[str]] = {
     "settings": {"name", "plugins"},
     "git": {"url"},
     "directory": {"path"},
+    "file": {"path"},  # v2.1.98+
+    "hostPattern": {"hostPattern"},  # v2.1.98+
 }
 
 # Valid tool names for Claude Code agents
@@ -514,6 +518,7 @@ BINARY_EXTENSIONS = {
 SKILL_FRONTMATTER_FIELDS = {
     "name",
     "description",
+    "when_to_use",  # v2.1.98+ — supplemental trigger guidance, concatenated with description up to 1,536 char cap
     "argument-hint",
     "disable-model-invocation",
     "user-invocable",

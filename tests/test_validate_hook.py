@@ -652,6 +652,30 @@ def test_postcompact_command_only(tmp_path: Path):
         ), f"PostCompact should reject '{bad_type}' hooks"
 
 
+def test_async_rewake_is_recognised(tmp_path: Path):
+    """v2.1.98+: 'asyncRewake' hook field is accepted without a warning.
+
+    asyncRewake runs the hook in the background (implies async) and wakes
+    Claude on exit code 2. Per authoritative hooks.md, this is a
+    first-class field and must NOT trigger 'Unknown hook field'.
+    """
+    hook = {
+        "type": "command",
+        "command": "sleep 30 && exit 2",
+        "async": True,
+        "asyncRewake": True,
+    }
+    r = HookValidationReport()
+    validate_single_hook(hook, "PreToolUse", tmp_path, r)
+    unknown_warnings = [
+        res for res in r.results
+        if res.level == "WARNING" and "asyncRewake" in res.message and "Unknown" in res.message
+    ]
+    assert unknown_warnings == [], (
+        f"asyncRewake should NOT be flagged as unknown: {unknown_warnings}"
+    )
+
+
 def test_elicitation_no_matchers(tmp_path: Path):
     """Elicitation events now support matchers (MCP server name) since v2.1.76."""
     from cpv_validation_common import ValidationReport as VReport
