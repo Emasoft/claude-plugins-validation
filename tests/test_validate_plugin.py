@@ -1148,7 +1148,7 @@ class TestV2212AuditFixes:
 # ============================================================================
 
 
-def _write_plugin(tmp_path, name: str, manifest: dict) -> Path:
+def _write_plugin(tmp_path: Path, name: str, manifest: dict) -> Path:
     """Create a minimal plugin skeleton at ``tmp_path/name`` with ``plugin.json``.
 
     Returns the plugin root directory so validators can be run directly.
