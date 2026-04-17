@@ -101,17 +101,41 @@ local MCP servers Claude Code has registered for this project.
 
 ## Execution
 
+### From within a CPV checkout (development)
+
 ```bash
 uv run python scripts/validate_local_scope.py "$PROJECT_PATH" \
   --report docs_dev/validate_local_scope_$(date +%Y%m%d).md
 ```
 
-Or via the installed entry point:
+### From the plugin cache / installed CLI / uvx (remote execution)
+
+When CPV runs OUTSIDE its own checkout (e.g. from the Claude Code plugin
+cache or via `uvx`), direct invocation is blocked by the remote-execution
+guard — this prevents the target project's local config files from being
+mis-applied to the validator's own environment. Use the launcher instead:
 
 ```bash
+# Via the plugin cache (most common — how Claude Code runs slash commands):
+uv run python "${CPV_ROOT}/scripts/remote_validation.py" \
+  local-scope "$PROJECT_PATH" \
+  -o "${PROJECT_PATH}/docs_dev/validate_local_scope_$(date +%Y%m%d).md"
+
+# Via uvx (one-shot, no checkout needed):
 uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
-  cpv-validate-local-scope "$PROJECT_PATH"
+  --with pyyaml \
+  cpv-remote-validate local-scope "$PROJECT_PATH" \
+  -o docs_dev/validate_local_scope_$(date +%Y%m%d).md
 ```
+
+The launcher accepts several equivalent aliases (pick whichever you
+remember most easily):
+
+- `local-scope` (short — matches the help-menu listing)
+- `validate_local_scope` (full script name)
+- `cpv-validate-local-scope` (installed CLI entry-point name)
+
+All three resolve to the same script and produce identical reports.
 
 ## Related Commands
 
