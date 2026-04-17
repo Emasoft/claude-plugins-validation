@@ -1096,3 +1096,137 @@ class TestValidateMarketplaceIntegration:
         report = validate_marketplace(tmp_path)
         critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
         assert any("Missing required field" in m for m in critical_msgs)
+
+
+class TestV221MarketplaceReservedFuzzy:
+    """Fuzzy-match impersonation detection for marketplace names (plugin-marketplaces.md:160)."""
+
+    def test_official_claude_prefix_blocked(self):
+        """Names starting with 'official-claude' must produce MAJOR impersonation finding."""
+        from validate_marketplace import validate_marketplace_name
+
+        results = validate_marketplace_name("official-claude-something", "test.json")
+        assert any(r.level == "MAJOR" and "impersonate" in r.message.lower() for r in results)
+
+    def test_anthropic_prefix_blocked(self):
+        """Names starting with 'anthropic-' must produce MAJOR impersonation finding."""
+        from validate_marketplace import validate_marketplace_name
+
+        results = validate_marketplace_name("anthropic-tools-v2", "test.json")
+        assert any(r.level == "MAJOR" and "impersonate" in r.message.lower() for r in results)
+
+    def test_claude_code_prefix_blocked(self):
+        """Names starting with 'claude-code-' must produce MAJOR impersonation finding."""
+        from validate_marketplace import validate_marketplace_name
+
+        results = validate_marketplace_name("claude-code-superhub", "test.json")
+        assert any(r.level == "MAJOR" and "impersonate" in r.message.lower() for r in results)
+
+    def test_claude_plugins_prefix_blocked(self):
+        """Names starting with 'claude-plugins-' must produce MAJOR impersonation finding."""
+        from validate_marketplace import validate_marketplace_name
+
+        results = validate_marketplace_name("claude-plugins-foo", "test.json")
+        assert any(r.level == "MAJOR" and "impersonate" in r.message.lower() for r in results)
+
+    def test_unrelated_name_accepted(self):
+        """Unrelated marketplace names must not trigger the impersonation check."""
+        from validate_marketplace import validate_marketplace_name
+
+        results = validate_marketplace_name("emasoft-plugins", "test.json")
+        assert not any("impersonate" in r.message.lower() for r in results)
+
+    def test_exact_reserved_name_still_critical(self):
+        """Exact reserved names keep their CRITICAL classification (regression guard)."""
+        from validate_marketplace import validate_marketplace_name
+
+        results = validate_marketplace_name("anthropic-plugins", "test.json")
+        # Reserved match is CRITICAL, not MAJOR
+        assert any(r.level == "CRITICAL" and "reserved" in r.message for r in results)
+        # And the exact-match branch should suppress the fuzzy MAJOR to avoid duplicate findings
+        assert not any(r.level == "MAJOR" and "impersonate" in r.message.lower() for r in results)
+
+
+def _write_plugin_manifest(plugin_root, version):
+    """Helper: create plugin_root/.claude-plugin/plugin.json with the given version string."""
+    manifest_dir = plugin_root / ".claude-plugin"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {"name": plugin_root.name, "version": version} if version is not None else {"name": plugin_root.name}
+    (manifest_dir / "plugin.json").write_text(json.dumps(manifest))
+
+
+class TestV221MarketplaceVersionDuplication:
+    """Version declared in both plugin.json and marketplace.json entry (plugin-marketplaces.md:696-698)."""
+
+    def test_version_in_both_matching_nit(self, tmp_path):
+        """Relative-path source with matching versions in both manifests must produce NIT."""
+        from validate_marketplace import validate_plugin_entry
+
+        plugin_root = tmp_path / "my-plugin"
+        plugin_root.mkdir()
+        _write_plugin_manifest(plugin_root, "1.2.3")
+
+        plugin = {"name": "my-plugin", "source": "./my-plugin", "version": "1.2.3"}
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        assert any(
+            r.level == "NIT" and "only one place" in r.message.lower() for r in results
+        ), f"expected NIT with 'only one place' guidance, got: {[(r.level, r.message) for r in results]}"
+
+    def test_version_in_both_diverging_minor(self, tmp_path):
+        """Relative-path source with diverging versions must produce MINOR drift warning."""
+        from validate_marketplace import validate_plugin_entry
+
+        plugin_root = tmp_path / "my-plugin"
+        plugin_root.mkdir()
+        _write_plugin_manifest(plugin_root, "2.0.0")
+
+        plugin = {"name": "my-plugin", "source": "./my-plugin", "version": "1.0.0"}
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        assert any(
+            r.level == "MINOR" and "wins silently" in r.message.lower() for r in results
+        ), f"expected MINOR drift warning, got: {[(r.level, r.message) for r in results]}"
+
+    def test_version_in_entry_only_ok(self, tmp_path):
+        """Marketplace entry has version, plugin.json has no version → no version-consistency finding."""
+        from validate_marketplace import validate_plugin_entry
+
+        plugin_root = tmp_path / "my-plugin"
+        plugin_root.mkdir()
+        _write_plugin_manifest(plugin_root, None)
+
+        plugin = {"name": "my-plugin", "source": "./my-plugin", "version": "1.0.0"}
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        assert not any(
+            r.level in {"NIT", "MINOR", "INFO"}
+            and ("wins silently" in r.message.lower() or "only one place" in r.message.lower())
+            for r in results
+        )
+
+    def test_version_in_plugin_json_only_ok(self, tmp_path):
+        """plugin.json has version, marketplace entry does not → no version-consistency finding."""
+        from validate_marketplace import validate_plugin_entry
+
+        plugin_root = tmp_path / "my-plugin"
+        plugin_root.mkdir()
+        _write_plugin_manifest(plugin_root, "1.0.0")
+
+        plugin = {"name": "my-plugin", "source": "./my-plugin"}  # no version field
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        assert not any(
+            "wins silently" in r.message.lower() or "only one place" in r.message.lower()
+            for r in results
+        )
+
+    def test_remote_source_version_set_in_both_info_fallback(self, tmp_path):
+        """GitHub source with version in entry → INFO fallback (cannot verify remote plugin.json)."""
+        from validate_marketplace import validate_plugin_entry
+
+        plugin = {
+            "name": "my-plugin",
+            "source": {"source": "github", "repo": "owner/my-plugin"},
+            "version": "1.0.0",
+        }
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        assert any(
+            r.level == "INFO" and "cannot verify version consistency" in r.message.lower() for r in results
+        ), f"expected INFO about unverifiable remote source, got: {[(r.level, r.message) for r in results]}"

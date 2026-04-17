@@ -76,12 +76,15 @@ class TestValidateFrontmatter:
         assert len(warning_messages) == 0
 
     def test_unknown_frontmatter_field_warns(self):
-        """_validate_frontmatter warns about unknown frontmatter fields."""
+        """_validate_frontmatter flags unknown frontmatter fields as MINOR."""
+        # v2.22+ behaviour: unknown keys are MINOR (not WARNING). A typo of
+        # `path:` for `paths:` silently disables path-matching, so surfacing
+        # the typo matters more than burying it at WARNING level.
         frontmatter = {"paths": ["src/**"], "author": "Someone"}
         report = ValidationReport()
         _validate_frontmatter(frontmatter, report, "rules/my-rule.md")
-        warning_messages = [r.message for r in report.results if r.level == "WARNING"]
-        assert any("Unknown frontmatter field" in m and "author" in m for m in warning_messages)
+        minor_messages = [r.message for r in report.results if r.level == "MINOR"]
+        assert any("Unknown frontmatter field" in m and "author" in m for m in minor_messages)
 
 
 class TestValidateRuleFile:
@@ -478,3 +481,86 @@ class TestMain:
         result = main()
         # No issues at all, so strict mode also returns 0
         assert result == 0
+
+
+# =============================================================================
+# v2.22.0: .claude/rules/*.md `paths:` frontmatter glob validator
+#
+# Per memory.md L159-221, rule files may declare a single known YAML
+# frontmatter field `paths:` — an array of glob patterns. When present, the
+# rule loads only when Claude reads a file matching one of the globs.
+# Validation rules exercised below:
+# - array-of-strings type contract
+# - absolute globs (leading "/" or drive letter) forbidden
+# - ".." segments that escape the project root forbidden
+# - unknown top-level frontmatter keys are MINOR (typo surface)
+# =============================================================================
+
+
+class TestV221RulesPathsFrontmatter:
+    """Frontmatter `paths:` validation for `.claude/rules/*.md` (memory.md L159-221)."""
+
+    def test_rule_with_valid_paths_frontmatter_passes(self, tmp_path):
+        """A rule file whose frontmatter declares only `paths:` with a proper
+        array of relative globs emits no CRITICAL/MAJOR/MINOR findings."""
+        rule_file = tmp_path / "scoped.md"
+        rule_file.write_text(
+            "---\npaths:\n  - src/**/*.py\n  - tests/**/*.py\n---\n"
+            "# Scoped Rule\n\nUse f-strings in src/ and tests/.\n",
+            encoding="utf-8",
+        )
+        report = ValidationReport()
+        validate_rule_file(rule_file, report, "rules/scoped.md")
+        blocking = [
+            r for r in report.results
+            if r.level in ("CRITICAL", "MAJOR", "MINOR")
+        ]
+        assert blocking == [], (
+            f"Valid `paths:` frontmatter must not produce blocking findings; "
+            f"got: {[(r.level, r.message) for r in blocking]}"
+        )
+
+    def test_rule_paths_non_array_major(self, tmp_path):
+        """`paths` set to a scalar (string) instead of an array → MAJOR."""
+        frontmatter = {"paths": "src/**/*.py"}
+        report = ValidationReport()
+        _validate_frontmatter(frontmatter, report, "rules/bad-paths.md")
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any(
+            "must be an array" in m for m in majors
+        ), f"Expected MAJOR about non-array paths; got MAJORs: {majors}"
+
+    def test_rule_paths_absolute_glob_major(self, tmp_path):
+        """`paths: ['/etc/**']` is MAJOR — absolute globs never match relative
+        file lookups, so the rule would silently never load."""
+        frontmatter = {"paths": ["/etc/**"]}
+        report = ValidationReport()
+        _validate_frontmatter(frontmatter, report, "rules/abs-glob.md")
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any(
+            "absolute" in m.lower() or "relative" in m.lower()
+            for m in majors
+        ), f"Expected MAJOR about absolute glob; got MAJORs: {majors}"
+
+    def test_rule_paths_traversal_glob_major(self, tmp_path):
+        """`paths: ['../**']` escapes the project root → MAJOR."""
+        frontmatter = {"paths": ["../**"]}
+        report = ValidationReport()
+        _validate_frontmatter(frontmatter, report, "rules/escape-glob.md")
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any(
+            "escape" in m.lower() or ".." in m
+            for m in majors
+        ), f"Expected MAJOR about .. escape; got MAJORs: {majors}"
+
+    def test_rule_paths_unknown_key_minor(self, tmp_path):
+        """An unknown top-level key in frontmatter is MINOR (not WARNING),
+        so `path:` typos for `paths:` get appropriate visibility."""
+        frontmatter = {"paths": ["src/**"], "author": "Alice"}
+        report = ValidationReport()
+        _validate_frontmatter(frontmatter, report, "rules/unknown-key.md")
+        minors = [r.message for r in report.results if r.level == "MINOR"]
+        assert any(
+            "Unknown frontmatter field" in m and "author" in m
+            for m in minors
+        ), f"Expected MINOR about unknown key 'author'; got MINORs: {minors}"

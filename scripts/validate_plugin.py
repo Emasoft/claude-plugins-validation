@@ -939,6 +939,8 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         "scripts": "INFO",
         "docs": "INFO",
         "output-styles": "INFO",
+        "bin": "INFO",  # plugins.md L192 — contents added to Bash PATH while plugin enabled
+        "monitors": "INFO",  # plugins-reference.md — background monitor definitions
     }
 
     for d, level in common_dirs.items():
@@ -966,7 +968,8 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         "docs",
         "rules",
         "schemas",
-        "bin",
+        "bin",  # plugins.md L192 — executables on PATH while plugin enabled
+        "monitors",  # plugins-reference.md — background monitor definitions (v2.1.105+)
         "templates",
         "tests",
         # Common non-standard but legitimate dirs

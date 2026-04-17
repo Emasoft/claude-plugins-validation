@@ -170,6 +170,19 @@ RESERVED_MARKETPLACE_NAMES = {
     "life-sciences",
 }
 
+# Impersonation prefix patterns — names that LOOK like official Anthropic
+# marketplaces but are not in the canonical reserved list. Per
+# plugin-marketplaces.md:160, names like "official-claude-plugins" or
+# "anthropic-tools-v2" are also blocked. Severity is MAJOR (not CRITICAL)
+# because these are suspected impersonations, not the canonical reserved names.
+RESERVED_MARKETPLACE_IMPERSONATION_PATTERNS = (
+    re.compile(r"^official-claude"),
+    re.compile(r"^anthropic-"),
+    re.compile(r"^claude-code-"),
+    re.compile(r"^claude-plugins-"),
+    re.compile(r"^claude-marketplace"),
+)
+
 # NAME_PATTERN and MAX_NAME_LENGTH imported from cpv_validation_common
 # VERSION_PATTERN imported from cpv_validation_common as SEMVER_PATTERN
 
@@ -374,17 +387,25 @@ def validate_marketplace_name(name: Any, json_path: str) -> list[ValidationResul
             )
         )
     else:
-        # Impersonation detection — flag names that look like official Anthropic marketplaces
+        # Fuzzy-match impersonation detection (plugin-marketplaces.md:160) —
+        # names that START with an official-looking prefix are blocked even
+        # when they are not in the canonical 8-name reserved set. Severity is
+        # MAJOR (not CRITICAL) because these are suspected impersonations.
         lower = name.lower()
-        impersonation_keywords = {"official", "anthropic", "claude-code", "claude-plugins"}
-        if any(kw in lower for kw in impersonation_keywords):
+        if any(pat.match(lower) for pat in RESERVED_MARKETPLACE_IMPERSONATION_PATTERNS):
             results.append(
                 ValidationResult(
                     level="MAJOR",
                     category="marketplace",
-                    message=f"Marketplace name '{name}' may impersonate an official Anthropic marketplace",
+                    message=(
+                        f"Marketplace name '{name}' may impersonate an official Anthropic marketplace "
+                        "(plugin-marketplaces.md:160)"
+                    ),
                     file=json_path,
-                    suggestion="Avoid names containing 'official', 'anthropic', 'claude-code', or 'claude-plugins'",
+                    suggestion=(
+                        "Rename to avoid the prefixes 'official-claude', 'anthropic-', 'claude-code-', "
+                        "'claude-plugins-', or 'claude-marketplace'"
+                    ),
                 )
             )
 
@@ -472,6 +493,14 @@ def validate_plugin_entry(
     source = plugin.get("source")
     if source is not None:
         results.extend(validate_plugin_source(plugin, plugin_id, marketplace_dir, json_path))
+
+    # Version duplication across manifests (plugin-marketplaces.md:696-698) —
+    # the plugin manifest always wins silently when both marketplace.json and
+    # plugin.json declare a version, so drift is a real risk.
+    if isinstance(version, str):
+        results.extend(
+            _validate_version_consistency(plugin, plugin_id, version, marketplace_dir, json_path)
+        )
 
     # Validate local path if present
     local_path = plugin.get("path")
@@ -634,6 +663,143 @@ def validate_plugin_entry(
             )
 
     return results
+
+
+def _resolve_local_plugin_root(
+    plugin: dict[str, Any],
+    marketplace_dir: Path,
+) -> Path | None:
+    """Return the on-disk plugin root for a marketplace entry if it is a local source, else None.
+
+    Handles three shapes per plugin-marketplaces.md:
+    - `source: "./path"` (relative string shorthand) → Layout B nested plugin
+    - `source: {"source": "directory", "path": "./path"}` (dict directory source)
+    - `path: "some-dir"` (legacy/explicit local path field alongside remote source)
+
+    Returns None for remote sources (github, url, npm, git, git-subdir, file)
+    so callers can distinguish "unreachable at validate-time" from "disk-local".
+    """
+    source = plugin.get("source")
+    # String shorthand: "./foo"
+    if isinstance(source, str) and source.startswith("./") and ".." not in source:
+        return marketplace_dir / source.removeprefix("./")
+    # Dict form with "directory" source type
+    if isinstance(source, dict):
+        source_type = source.get("source")
+        if source_type == "directory":
+            path_val = source.get("path")
+            if isinstance(path_val, str) and not path_val.startswith("/") and ".." not in path_val:
+                return marketplace_dir / path_val.removeprefix("./")
+    # Legacy `path` field
+    local_path = plugin.get("path")
+    if isinstance(local_path, str) and not local_path.startswith("/") and ".." not in local_path:
+        return marketplace_dir / local_path.removeprefix("./")
+    return None
+
+
+def _read_plugin_json_version(plugin_root: Path) -> tuple[str | None, Path | None]:
+    """Read the `version` field from a plugin's plugin.json.
+
+    Tries `.claude-plugin/plugin.json` first, then the legacy root `plugin.json`.
+    Returns (version, path) where version is None if the file is missing or the
+    field is missing/non-string; path is the file that was consulted (for error
+    messages) or None if no candidate existed on disk.
+
+    Does NOT raise on bad JSON — missing/unreadable files produce (None, path)
+    so callers can treat them as "nothing to compare against".
+    """
+    candidates = (
+        plugin_root / ".claude-plugin" / "plugin.json",
+        plugin_root / "plugin.json",
+    )
+    for candidate in candidates:
+        if not candidate.is_file():
+            continue
+        try:
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None, candidate
+        if isinstance(data, dict):
+            v = data.get("version")
+            if isinstance(v, str):
+                return v, candidate
+        return None, candidate
+    return None, None
+
+
+def _validate_version_consistency(
+    plugin: dict[str, Any],
+    plugin_id: str,
+    entry_version: str,
+    marketplace_dir: Path,
+    json_path: str,
+) -> list[ValidationResult]:
+    """Warn when version is declared both in marketplace.json and plugin.json.
+
+    Per plugin-marketplaces.md:696-698, the plugin manifest always wins silently
+    so the marketplace version can be ignored and drift becomes invisible.
+
+    - Remote sources (github/url/npm/git/git-subdir/file): INFO fallback because
+      CPV cannot fetch the plugin.json at validate-time.
+    - Local sources (relative path, directory, legacy `path` field): read the
+      on-disk plugin.json and compare:
+        * versions match → NIT (stylistic reminder, prefer one source of truth)
+        * versions differ → MINOR (explicit drift warning)
+        * plugin.json missing or lacks a version field → silent (nothing to compare)
+    """
+    plugin_root = _resolve_local_plugin_root(plugin, marketplace_dir)
+    if plugin_root is None:
+        # Remote source — cannot reach plugin.json during validation.
+        return [
+            ValidationResult(
+                level="INFO",
+                category="plugin",
+                message=(
+                    f"Plugin '{plugin_id}' declares version='{entry_version}' in marketplace.json and has a "
+                    "remote source — cannot verify version consistency at this remote source; the plugin "
+                    "manifest always wins silently (plugin-marketplaces.md:696-698)"
+                ),
+                file=json_path,
+                suggestion=(
+                    "Prefer to declare the version in only one place (the plugin.json manifest) per "
+                    "plugin-marketplaces.md:696"
+                ),
+            )
+        ]
+
+    manifest_version, manifest_path = _read_plugin_json_version(plugin_root)
+    if manifest_version is None:
+        # No plugin.json on disk, or no version field in it — nothing to compare.
+        return []
+
+    manifest_rel = str(manifest_path) if manifest_path is not None else str(plugin_root)
+    if manifest_version == entry_version:
+        return [
+            ValidationResult(
+                level="NIT",
+                category="plugin",
+                message=(
+                    f"Plugin '{plugin_id}' declares version='{entry_version}' in both marketplace.json and "
+                    f"plugin.json at {manifest_rel}. Prefer to set version in only one place per "
+                    "plugin-marketplaces.md:696."
+                ),
+                file=json_path,
+                suggestion="Remove the marketplace.json version and keep plugin.json as the single source of truth",
+            )
+        ]
+    return [
+        ValidationResult(
+            level="MINOR",
+            category="plugin",
+            message=(
+                f"Plugin '{plugin_id}': marketplace entry declares version='{entry_version}' while "
+                f"plugin.json at {manifest_rel} declares version='{manifest_version}'. "
+                "The plugin manifest wins silently (plugin-marketplaces.md:696-698)."
+            ),
+            file=json_path,
+            suggestion="Remove the marketplace.json version or align it with plugin.json",
+        )
+    ]
 
 
 def _validate_nested_plugin(

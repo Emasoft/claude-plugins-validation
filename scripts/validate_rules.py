@@ -226,11 +226,27 @@ def validate_rule_file(rule_path: Path, report: ValidationReport, rel_path: str)
 
 
 def _validate_frontmatter(frontmatter: dict[str, Any], report: ValidationReport, rel_path: str) -> None:
-    """Validate rule frontmatter fields."""
-    # Check for unknown fields
+    """Validate rule frontmatter fields.
+
+    Per memory.md L159-221: rule files may declare a single known YAML
+    frontmatter field, ``paths`` — an array of glob patterns. When present,
+    the rule loads only when Claude reads a file matching one of the globs.
+
+    Validation rules:
+
+    - Unknown top-level frontmatter keys → MINOR (Claude Code ignores them,
+      but typos like ``path:`` instead of ``paths:`` silently disable
+      path-matching, so we surface the typo).
+    - ``paths`` MUST be an array of strings.
+    - Each glob must NOT be absolute (start with ``/``) — absolute patterns
+      never match relative lookups, so the rule would never load.
+    - Each glob must NOT contain ``..`` segments that would escape the
+      project root (``../**`` would match files outside the repo).
+    """
+    # Check for unknown fields — MINOR so typos of `paths:` are visible.
     for key in frontmatter:
         if key not in KNOWN_RULES_FRONTMATTER_FIELDS:
-            report.warning(
+            report.minor(
                 f"Unknown frontmatter field '{key}' in rule file — only 'paths' is recognized by Claude Code.",
                 rel_path,
             )
@@ -240,12 +256,43 @@ def _validate_frontmatter(frontmatter: dict[str, Any], report: ValidationReport,
         paths = frontmatter["paths"]
         if not isinstance(paths, list):
             report.major("'paths' must be an array of glob patterns", rel_path)
-        else:
-            for i, p in enumerate(paths):
-                if not isinstance(p, str):
-                    report.major(f"paths[{i}] must be a string, got {type(p).__name__}", rel_path)
-                elif not p.strip():
-                    report.minor(f"paths[{i}] is empty", rel_path)
+            return
+        for i, p in enumerate(paths):
+            if not isinstance(p, str):
+                report.major(f"paths[{i}] must be a string, got {type(p).__name__}", rel_path)
+                continue
+            if not p.strip():
+                report.minor(f"paths[{i}] is empty", rel_path)
+                continue
+            # Absolute glob → MAJOR. Relative lookups never match absolute
+            # patterns, so an absolute glob silently prevents the rule
+            # from ever loading. Both POSIX ("/...") and Windows ("C:\\")
+            # absolutes are rejected.
+            if p.startswith("/") or (len(p) >= 2 and p[1] == ":"):
+                report.major(
+                    f"paths[{i}] '{p}' is absolute — globs must be relative "
+                    "to the project root or the rule will never match.",
+                    rel_path,
+                )
+                continue
+            # `..` segment escape check: split on both "/" and "\\" so
+            # Windows-style patterns are caught too. A single ".." at the
+            # start means the glob would match files outside the repo.
+            segments = re.split(r"[\\/]", p)
+            depth = 0
+            for seg in segments:
+                if seg == "..":
+                    depth -= 1
+                    if depth < 0:
+                        report.major(
+                            f"paths[{i}] '{p}' uses '..' segments that escape "
+                            "the project root — the glob would match files "
+                            "outside the repo.",
+                            rel_path,
+                        )
+                        break
+                elif seg and seg != ".":
+                    depth += 1
 
 
 def validate_rules_directory(

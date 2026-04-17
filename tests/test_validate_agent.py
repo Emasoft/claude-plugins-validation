@@ -1424,3 +1424,120 @@ class TestV22AgentFrontmatterUpdates:
         assert any("isolation" in m and ("empty" in m.lower() or "Invalid" in m) for m in major_msgs), (
             f"Expected MAJOR for empty isolation; got MAJORs: {major_msgs}"
         )
+
+
+# ---------------------------------------------------------------------------
+# v2.22.1 — Agent(name, name, ...) spawnable-subagent allowlist grammar
+# (sub-agents.md L296-318). Task(...) remains a legacy alias for Agent(...)
+# per the v2.1.63 rename. Tests cover both the parser helper in isolation and
+# the end-to-end behaviour through validate_tools_field.
+# ---------------------------------------------------------------------------
+
+
+from validate_agent import _parse_tool_reference  # noqa: E402
+
+
+class TestV221AgentToolGrammar:
+    """Tests for the Agent(worker, researcher) spawnable-allowlist grammar."""
+
+    def test_agent_bare_reference_accepted(self):
+        """Bare 'Agent' with no parens is accepted and produces no findings beyond PASSED."""
+        report = AgentValidationReport()
+        validate_tools_field({"tools": ["Agent"]}, "agent.md", report)
+        # Parser returns spawnables=None so no MINOR/INFO/MAJOR is emitted.
+        assert _parse_tool_reference("Agent") == ("Agent", None, None)
+        assert not [r for r in report.results if r.level in ("MAJOR", "MINOR")]
+        passed = [r.message for r in report.results if r.level == "PASSED"]
+        assert any("'tools' field valid" in m for m in passed)
+
+    def test_agent_with_single_spawnable_accepted(self):
+        """'Agent(worker)' is parsed as a single-entry allowlist and passes structurally."""
+        assert _parse_tool_reference("Agent(worker)") == ("Agent", ["worker"], None)
+        report = AgentValidationReport()
+        validate_tools_field({"tools": ["Agent(worker)"]}, "agent.md", report)
+        major = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not major, f"Unexpected MAJOR findings: {major}"
+
+    def test_agent_with_multiple_spawnables_accepted(self):
+        """'Agent(worker, researcher)' is parsed into a two-entry allowlist."""
+        assert _parse_tool_reference("Agent(worker, researcher)") == (
+            "Agent",
+            ["worker", "researcher"],
+            None,
+        )
+        report = AgentValidationReport()
+        validate_tools_field({"tools": ["Agent(worker, researcher)"]}, "agent.md", report)
+        major = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not major
+
+    def test_agent_trailing_comma_accepted(self):
+        """'Agent(worker,)' with a trailing comma is tolerated and parses like 'Agent(worker)'."""
+        assert _parse_tool_reference("Agent(worker,)") == ("Agent", ["worker"], None)
+        report = AgentValidationReport()
+        validate_tools_field({"tools": ["Agent(worker,)"]}, "agent.md", report)
+        major = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not major
+
+    def test_agent_empty_parens_accepted_as_info(self):
+        """'Agent()' is an explicit empty allowlist and must emit INFO (not MAJOR)."""
+        assert _parse_tool_reference("Agent()") == ("Agent", [], None)
+        report = AgentValidationReport()
+        validate_tools_field({"tools": ["Agent()"]}, "agent.md", report)
+        info_msgs = [r.message for r in report.results if r.level == "INFO"]
+        assert any("explicit empty allowlist" in m for m in info_msgs), (
+            f"Expected INFO explaining empty allowlist; got INFO: {info_msgs}"
+        )
+        assert not [r for r in report.results if r.level == "MAJOR"]
+
+    def test_agent_unbalanced_paren_major(self):
+        """'Agent(worker' with a missing close-paren must emit MAJOR via the parser error path."""
+        assert _parse_tool_reference("Agent(worker") == ("Agent", None, "unbalanced parens")
+        report = AgentValidationReport()
+        validate_tools_field({"tools": ["Agent(worker"]}, "agent.md", report)
+        major = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("malformed tool reference" in m and "unbalanced parens" in m for m in major), (
+            f"Expected MAJOR citing malformed/unbalanced parens; got: {major}"
+        )
+
+    def test_task_legacy_alias_accepted(self):
+        """'Task(worker)' is the legacy alias for 'Agent(worker)' (renamed v2.1.63)."""
+        assert _parse_tool_reference("Task(worker)") == ("Task", ["worker"], None)
+        report = AgentValidationReport()
+        validate_tools_field({"tools": ["Task(worker)"]}, "agent.md", report)
+        major = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not major
+        # Legacy alias still triggers the Task→Agent rename WARNING.
+        warnings = [r.message for r in report.results if r.level == "WARNING"]
+        assert any("Task" in m and "renamed" in m for m in warnings)
+
+    def test_agent_unknown_spawnable_minor(self):
+        """'Agent(nonexistent-agent)' emits MINOR — we can't verify custom plugin-shipped agents."""
+        report = AgentValidationReport()
+        validate_tools_field({"tools": ["Agent(nonexistent-agent)"]}, "agent.md", report)
+        minor = [r.message for r in report.results if r.level == "MINOR"]
+        assert any("nonexistent-agent" in m and "unknown spawnable" in m for m in minor), (
+            f"Expected MINOR flagging unknown spawnable; got MINOR: {minor}"
+        )
+        # Unknown spawnable is MINOR, NOT MAJOR — the tool itself still validates.
+        assert not [r for r in report.results if r.level == "MAJOR"]
+
+    def test_agent_builtin_spawnable_accepted(self):
+        """'Agent(Explore, Plan)' uses only BUILTIN_AGENT_TYPES and must emit no MINOR/MAJOR findings."""
+        report = AgentValidationReport()
+        validate_tools_field({"tools": ["Agent(Explore, Plan)"]}, "agent.md", report)
+        findings = [
+            (r.level, r.message) for r in report.results if r.level in ("MAJOR", "MINOR")
+        ]
+        assert not findings, f"Expected zero MAJOR/MINOR findings; got: {findings}"
+
+    def test_agent_whitespace_around_names_accepted(self):
+        """'Agent( worker , researcher )' with interior whitespace parses to trimmed names."""
+        assert _parse_tool_reference("Agent( worker , researcher )") == (
+            "Agent",
+            ["worker", "researcher"],
+            None,
+        )
+        report = AgentValidationReport()
+        validate_tools_field({"tools": ["Agent( worker , researcher )"]}, "agent.md", report)
+        major = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not major
