@@ -78,7 +78,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -759,6 +762,316 @@ def validate_gitignore_for_scope_hygiene(
 # =============================================================================
 
 
+# =============================================================================
+# TRDD-f4e2d385: Deep validation helpers (project-scope variant).
+#
+# Mirror of the helpers in validate_local_scope.py, filtered to TRACKED files
+# (not untracked). Settings subtree validators pull from settings.json (not
+# .local). Plugin enumeration reads enabledPlugins from settings.json.
+# =============================================================================
+
+
+def _merge_subreport_project(subreport: ValidationReport, parent: ValidationReport, label_prefix: str) -> None:
+    """Copy findings from a sub-validator into the main report with a prefix."""
+    for r in subreport.results:
+        parent.add(
+            r.level,
+            f"{label_prefix} {r.message}",
+            r.file,
+            r.line,
+        )
+
+
+def _deep_validate_tracked_file(
+    path: Path,
+    project_root: Path,
+    tracked: set[Path],
+    validator_fn,
+    parent_report: ValidationReport,
+    label_kind: str,
+) -> None:
+    """Run `validator_fn(path)` on a TRACKED file and merge findings."""
+    real = resolve_within(path, project_root)
+    if real is None:
+        parent_report.major(
+            f"[{label_kind}] {path.relative_to(project_root)}: symlink escape — skipping",
+            str(path.relative_to(project_root)),
+        )
+        return
+    if real not in tracked:
+        return  # untracked — skipped at project scope
+    rel = path.relative_to(project_root)
+    try:
+        subreport = validator_fn(path)
+    except Exception as exc:  # pragma: no cover — defensive
+        parent_report.critical(
+            f"[{label_kind}] {rel}: validator raised {type(exc).__name__}: {exc}",
+            str(rel),
+        )
+        return
+    _merge_subreport_project(subreport, parent_report, f"[{label_kind} {rel}]")
+
+
+def validate_project_agents_deep(
+    agents_dir: Path, repo_root: Path, project_root: Path, report: ValidationReport
+) -> None:
+    """Run `validate_agent` on every TRACKED agent .md file."""
+    from validate_agent import validate_agent as _deep_validate_agent  # noqa: E402
+
+    tracked = list_tracked_files_under(agents_dir, repo_root) or set()
+    count = 0
+    for md in sorted(agents_dir.glob("*.md")):
+        count += 1
+        if count > MAX_FILES_PER_FOLDER:
+            report.warning(
+                f".claude/agents: stopped walking at {MAX_FILES_PER_FOLDER} files",
+                ".claude/agents",
+            )
+            return
+        _deep_validate_tracked_file(md, project_root, tracked, _deep_validate_agent, report, "agent")
+
+
+def validate_project_commands_deep(
+    commands_dir: Path, repo_root: Path, project_root: Path, report: ValidationReport
+) -> None:
+    """Run `validate_command` on every TRACKED command .md file."""
+    from validate_command import validate_command as _deep_validate_command  # noqa: E402
+
+    tracked = list_tracked_files_under(commands_dir, repo_root) or set()
+    count = 0
+    for md in sorted(commands_dir.glob("*.md")):
+        count += 1
+        if count > MAX_FILES_PER_FOLDER:
+            report.warning(
+                f".claude/commands: stopped walking at {MAX_FILES_PER_FOLDER} files",
+                ".claude/commands",
+            )
+            return
+        _deep_validate_tracked_file(md, project_root, tracked, _deep_validate_command, report, "command")
+
+
+def validate_project_skills_deep(
+    skills_dir: Path, repo_root: Path, project_root: Path, report: ValidationReport
+) -> None:
+    """Run `validate_skill_comprehensive` on every skill dir whose SKILL.md is TRACKED."""
+    from validate_skill_comprehensive import validate_skill as _deep_validate_skill  # noqa: E402
+
+    count = 0
+    for skill_dir in sorted(skills_dir.iterdir()):
+        if not skill_dir.is_dir():
+            continue
+        count += 1
+        if count > MAX_FILES_PER_FOLDER:
+            report.warning(
+                f".claude/skills: stopped walking at {MAX_FILES_PER_FOLDER} skills",
+                ".claude/skills",
+            )
+            return
+        skill_md = skill_dir / "SKILL.md"
+        if not skill_md.exists():
+            skill_md_lower = skill_dir / "skill.md"
+            if skill_md_lower.exists():
+                skill_md = skill_md_lower
+            else:
+                continue  # no SKILL.md, skip (project scope — not our concern)
+        real = resolve_within(skill_md, project_root)
+        if real is None:
+            continue
+        tracked = list_tracked_files_under(skill_dir, repo_root) or set()
+        if real not in tracked:
+            continue  # untracked skill — validate_local_scope's concern
+        try:
+            subreport = _deep_validate_skill(skill_dir)
+        except Exception as exc:  # pragma: no cover — defensive
+            report.critical(
+                f"[skill .claude/skills/{skill_dir.name}]: validator raised "
+                f"{type(exc).__name__}: {exc}",
+                f".claude/skills/{skill_dir.name}",
+            )
+            continue
+        _merge_subreport_project(subreport, report, f"[skill .claude/skills/{skill_dir.name}]")
+
+
+def _validate_project_settings_hooks(
+    settings: dict[str, Any], settings_file_label: str, report: ValidationReport
+) -> None:
+    """Deep-validate `hooks` subtree in settings.json."""
+    from validate_hook import validate_hooks as _deep_validate_hooks  # noqa: E402
+
+    hooks = settings.get("hooks")
+    if hooks is None:
+        return
+    if not isinstance(hooks, dict):
+        report.major(
+            f"[hooks in {settings_file_label}] 'hooks' must be an object",
+            settings_file_label,
+        )
+        return
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as tmp:
+        json.dump({"hooks": hooks}, tmp)
+        tmp_path = Path(tmp.name)
+    try:
+        subreport = _deep_validate_hooks(tmp_path, plugin_root=None)
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+    _merge_subreport_project(subreport, report, f"[hooks in {settings_file_label}]")
+
+
+def _validate_project_settings_mcp(
+    settings: dict[str, Any], settings_file_label: str, report: ValidationReport
+) -> None:
+    """Deep-validate `mcpServers` subtree in settings.json."""
+    from validate_mcp import validate_mcp_config as _deep_validate_mcp  # noqa: E402
+
+    mcp = settings.get("mcpServers")
+    if mcp is None:
+        return
+    if not isinstance(mcp, dict):
+        report.major(
+            f"[mcpServers in {settings_file_label}] must be an object",
+            settings_file_label,
+        )
+        return
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as tmp:
+        json.dump({"mcpServers": mcp}, tmp)
+        tmp_path = Path(tmp.name)
+    try:
+        subreport = _deep_validate_mcp(tmp_path, plugin_root=None)
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+    _merge_subreport_project(subreport, report, f"[mcpServers in {settings_file_label}]")
+
+
+def _validate_project_settings_lsp(
+    settings: dict[str, Any], settings_file_label: str, report: ValidationReport
+) -> None:
+    """Deep-validate `lspServers` subtree in settings.json."""
+    from validate_lsp import validate_lsp_config as _deep_validate_lsp  # noqa: E402
+
+    lsp = settings.get("lspServers")
+    if lsp is None:
+        return
+    if not isinstance(lsp, dict):
+        report.major(
+            f"[lspServers in {settings_file_label}] must be an object",
+            settings_file_label,
+        )
+        return
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as tmp:
+        json.dump({"lspServers": lsp}, tmp)
+        tmp_path = Path(tmp.name)
+    try:
+        subreport = _deep_validate_lsp(tmp_path, plugin_root=None)
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+    _merge_subreport_project(subreport, report, f"[lspServers in {settings_file_label}]")
+
+
+_ENABLED_PLUGIN_RE_PROJECT = re.compile(r"^(?P<plugin>[A-Za-z0-9_.\-]+)@(?P<marketplace>[A-Za-z0-9_.\-]+)$")
+
+
+def _resolve_plugin_cache_dir_project(plugin_name: str, marketplace: str) -> Path | None:
+    """Resolve plugin cache dir — identical to local-scope helper."""
+    base = Path.home() / ".claude" / "plugins" / "cache" / marketplace / plugin_name
+    if not base.is_dir():
+        return None
+    versions = [d for d in base.iterdir() if d.is_dir()]
+    if not versions:
+        return base
+    def _version_key(p: Path) -> tuple:
+        parts = p.name.lstrip("v").split(".")
+        return tuple(int(x) if x.isdigit() else x for x in parts)
+    try:
+        versions.sort(key=_version_key, reverse=True)
+    except TypeError:
+        versions.sort(reverse=True)
+    return versions[0]
+
+
+def validate_project_enabled_plugins(
+    enabled_plugins: dict[str, Any], report: ValidationReport
+) -> None:
+    """For each `plugin@marketplace: true` in settings.json.enabledPlugins,
+    validate the installed plugin with the core plugin pipeline.
+    """
+    if not isinstance(enabled_plugins, dict):
+        return
+    from validate_plugin import (  # noqa: E402
+        validate_agents as _vp_agents,
+    )
+    from validate_plugin import (
+        validate_commands as _vp_commands,
+    )
+    from validate_plugin import (
+        validate_hooks as _vp_hooks,
+    )
+    from validate_plugin import (
+        validate_manifest as _vp_manifest,
+    )
+    from validate_plugin import (
+        validate_mcp as _vp_mcp,
+    )
+    from validate_plugin import (
+        validate_rules as _vp_rules,
+    )
+    from validate_plugin import (
+        validate_scripts as _vp_scripts,
+    )
+    from validate_plugin import (
+        validate_skills as _vp_skills,
+    )
+    from validate_plugin import (
+        validate_structure as _vp_structure,
+    )
+    for key, value in enabled_plugins.items():
+        if value is not True:
+            continue
+        m = _ENABLED_PLUGIN_RE_PROJECT.match(str(key))
+        if not m:
+            report.minor(
+                f"[enabledPlugins] '{key}' does not match '<plugin>@<marketplace>' form",
+                "enabledPlugins",
+            )
+            continue
+        plugin = m.group("plugin")
+        marketplace = m.group("marketplace")
+        cache_dir = _resolve_plugin_cache_dir_project(plugin, marketplace)
+        if cache_dir is None:
+            report.major(
+                f"[enabledPlugins {key}] plugin is enabled in settings.json but "
+                f"NOT installed at ~/.claude/plugins/cache/{marketplace}/{plugin}/",
+                "enabledPlugins",
+            )
+            continue
+        subreport = ValidationReport()
+        try:
+            _vp_manifest(cache_dir, subreport, False)
+            _vp_structure(cache_dir, subreport, False)
+            _vp_commands(cache_dir, subreport)
+            _vp_agents(cache_dir, subreport)
+            _vp_hooks(cache_dir, subreport)
+            _vp_mcp(cache_dir, subreport)
+            _vp_scripts(cache_dir, subreport)
+            _vp_skills(cache_dir, subreport, None)
+            _vp_rules(cache_dir, subreport)
+        except Exception as exc:  # pragma: no cover
+            report.critical(
+                f"[enabledPlugins {key}] validator raised {type(exc).__name__}: {exc}",
+                "enabledPlugins",
+            )
+            continue
+        _merge_subreport_project(subreport, report, f"[enabled plugin {key}]")
+
+
 def validate_project_scope(project_root: Path, report: ValidationReport) -> None:
     """Walk the project tree and validate every git-tracked Claude Code element.
 
@@ -791,10 +1104,22 @@ def validate_project_scope(project_root: Path, report: ValidationReport) -> None
 
     claude_dir = project_root / ".claude"
 
-    # 1. .claude/settings.json
+    # 1. .claude/settings.json — the project-scope settings.
+    # Per user spec: settings.local.json is IGNORED (that's local-scope's job).
+    # Deep-validate inline hooks/mcpServers/lspServers subtrees from settings.json.
     settings_path = claude_dir / "settings.json"
+    settings_data: dict[str, Any] | None = None
     if classify_file_scope(settings_path, repo_root) == "project":
         validate_settings_json_project_scope(settings_path, report)
+        # Re-parse to access subtrees.
+        settings_raw = _load_json_or_report(
+            settings_path, MAX_SETTINGS_JSON_BYTES, report, ".claude/settings.json"
+        )
+        if isinstance(settings_raw, dict):
+            settings_data = settings_raw
+            _validate_project_settings_hooks(settings_data, ".claude/settings.json", report)
+            _validate_project_settings_mcp(settings_data, ".claude/settings.json", report)
+            _validate_project_settings_lsp(settings_data, ".claude/settings.json", report)
     elif settings_path.exists():
         report.info(
             ".claude/settings.json exists but is not git-tracked — validated by "
@@ -813,20 +1138,24 @@ def validate_project_scope(project_root: Path, report: ValidationReport) -> None
             ".mcp.json",
         )
 
-    # 3. .claude/agents/
+    # 3. .claude/agents/ — deep validation on TRACKED files.
     agents_dir = claude_dir / "agents"
     if classify_folder_scope(agents_dir, repo_root) == "project":
         validate_agents_folder(agents_dir, repo_root, project_root, report)
+        # TRDD-f4e2d385: add deep validator findings.
+        validate_project_agents_deep(agents_dir, repo_root, project_root, report)
 
-    # 4. .claude/skills/
+    # 4. .claude/skills/ — deep validation via validate_skill_comprehensive.
     skills_dir = claude_dir / "skills"
     if classify_folder_scope(skills_dir, repo_root) == "project":
         validate_skills_folder(skills_dir, repo_root, project_root, report)
+        validate_project_skills_deep(skills_dir, repo_root, project_root, report)
 
-    # 5. .claude/commands/
+    # 5. .claude/commands/ — deep validation via validate_command.
     commands_dir = claude_dir / "commands"
     if classify_folder_scope(commands_dir, repo_root) == "project":
         validate_commands_folder(commands_dir, repo_root, project_root, report)
+        validate_project_commands_deep(commands_dir, repo_root, project_root, report)
 
     # 6. .claude/rules/
     rules_dir = claude_dir / "rules"
@@ -850,6 +1179,15 @@ def validate_project_scope(project_root: Path, report: ValidationReport) -> None
 
     # 10. .gitignore hygiene
     validate_gitignore_for_scope_hygiene(repo_root, report)
+
+    # 10b. Enumerate and validate project-enabled plugins from settings.json.
+    # TRDD-f4e2d385 §3.4: `enabledPlugins` in the SHARED settings.json
+    # means "the whole team agrees to enable this plugin". Validate each
+    # with the core plugin pipeline.
+    if isinstance(settings_data, dict):
+        enabled_plugins = settings_data.get("enabledPlugins")
+        if isinstance(enabled_plugins, dict):
+            validate_project_enabled_plugins(enabled_plugins, report)
 
     # 11. Distinct empty-folder INFO vs "no config found"
     if not report.results:
