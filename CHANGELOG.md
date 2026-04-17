@@ -2,11 +2,11 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
-## [2.21.1] - 2026-04-17
+## [2.21.2] - 2026-04-17
 
 ### Bug Fixes
 
-- **cpv:** Slash commands run from \${CLAUDE_PLUGIN_ROOT}, not remote github
+- 35 real defects from ensemble LLM audit (10 files, 2056 tests passing)
 
 ### Miscellaneous Tasks
 
