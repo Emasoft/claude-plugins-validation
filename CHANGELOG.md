@@ -2,11 +2,11 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
-## [2.21.3] - 2026-04-17
+## [2.22.0] - 2026-04-17
 
-### Bug Fixes
+### Features
 
-- **v2.21.3:** Triple-review follow-ups + lspServers is plugin-only
+- **v2.22.0:** Claude Code spec alignment (TRDD-479cde0c)
 
 ### Miscellaneous Tasks
 
