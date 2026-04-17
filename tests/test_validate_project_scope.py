@@ -368,18 +368,45 @@ class TestMarkdownElements:
     """Frontmatter + home-path scans on .claude/<element>/*.md files."""
 
     def test_agent_with_valid_frontmatter_is_clean(self, project: Path) -> None:
-        """A well-formed tracked agent emits no MINOR frontmatter findings."""
+        """A fully-specified tracked agent (frontmatter + ≥2 <example> blocks
+        in body per Claude Code agent spec) emits no CRITICAL/MAJOR findings.
+
+        TRDD-f4e2d385: deep validation via `validate_agent` enforces the
+        full agent spec (including 2+ example blocks for good triggering).
+        An agent without examples would — correctly — fail validation at
+        project scope because teammates who receive the shared agent
+        wouldn't know when it should fire. See fix-validation refs for
+        remediation details.
+        """
         _commit(
             project,
             ".claude/agents/alice.md",
-            "---\nname: alice\ndescription: An agent\n---\nBody.\n",
+            (
+                "---\n"
+                "name: alice\n"
+                "description: A demonstration agent that performs example-driven "
+                "validation of TRDD-f4e2d385 deep-validator plumbing.\n"
+                "---\n"
+                "Body of the agent.\n\n"
+                "<example>\n"
+                "Context: User asks Alice to validate a file.\n"
+                "user: \"Validate foo.md\"\n"
+                "assistant: \"I'll validate foo.md now.\"\n"
+                "</example>\n\n"
+                "<example>\n"
+                "Context: User asks Alice to audit a directory.\n"
+                "user: \"Audit the agents folder\"\n"
+                "assistant: \"Running the audit on the agents folder.\"\n"
+                "</example>\n"
+            ),
         )
         report = ValidationReport()
         validate_project_scope(project, report)
-        alice_minors = [
-            m for m in _messages(report, "MINOR") if ".claude/agents/alice.md" in m
+        blocking = [
+            m for m in _messages(report, "CRITICAL") + _messages(report, "MAJOR")
+            if ".claude/agents/alice.md" in m
         ]
-        assert alice_minors == []
+        assert blocking == [], f"Fully-specified agent should have no CRITICAL/MAJOR; got: {blocking}"
 
     def test_agent_with_missing_name_is_minor(self, project: Path) -> None:
         """Agent missing 'name' in frontmatter → MINOR."""

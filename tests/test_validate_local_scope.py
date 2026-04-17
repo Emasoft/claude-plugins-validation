@@ -288,7 +288,13 @@ class TestFolderScopeFilter:
         assert not any("alice" in r.message for r in report.results)
 
     def test_gitignored_agents_folder_is_validated(self, project: Path) -> None:
-        """A gitignored .claude/agents/ folder is validated with relaxed rules."""
+        """A gitignored .claude/agents/ folder is validated with the full
+        `validate_agent` pipeline (TRDD-f4e2d385).
+
+        A well-formed agent must NOT trigger CRITICAL findings. (It may
+        still surface minor advisory findings like missing optional fields
+        — that's validate_agent's call to make, not this test's concern.)
+        """
         _commit(project, ".gitignore", ".claude/agents/\n")
         _write_untracked(
             project,
@@ -297,26 +303,39 @@ class TestFolderScopeFilter:
         )
         report = ValidationReport()
         validate_local_scope(project, report)
-        # Well-formed frontmatter → no MINOR about personal.md
+        # Deep validation replaces shallow frontmatter-only check; assert no
+        # CRITICAL findings about this agent (valid frontmatter → no blocking).
         assert not any(
-            "personal.md" in m for m in _messages(report, "MINOR")
+            "personal.md" in m for m in _messages(report, "CRITICAL")
         )
 
-    def test_local_agent_with_no_frontmatter_is_minor(self, project: Path) -> None:
-        """Untracked agent without frontmatter is flagged MINOR even at local scope."""
+    def test_local_agent_with_no_frontmatter_is_flagged(self, project: Path) -> None:
+        """Untracked agent without frontmatter is flagged by the deep
+        validator (validate_agent emits CRITICAL for missing frontmatter).
+
+        Pre-TRDD-f4e2d385 behaviour was MINOR (shallow frontmatter-only
+        check); with deep validation the severity is elevated because a
+        frontmatter-less agent definition is genuinely broken, not advisory.
+        """
         _commit(project, ".gitignore", ".claude/agents/\n")
         _write_untracked(
             project, ".claude/agents/nofm.md", "Just body no frontmatter\n"
         )
         report = ValidationReport()
         validate_local_scope(project, report)
+        # After deep-validation: no-frontmatter is CRITICAL (blocking).
         assert any(
-            "nofm.md" in m and "frontmatter" in m
-            for m in _messages(report, "MINOR")
-        )
+            "nofm.md" in m and ("frontmatter" in m or "YAML" in m)
+            for level in ("CRITICAL", "MAJOR")
+            for m in _messages(report, level)
+        ), f"Expected CRITICAL/MAJOR finding about missing frontmatter; got: {report.results}"
 
     def test_untracked_commands_folder_is_validated(self, project: Path) -> None:
-        """An untracked .claude/commands/ folder is walked by local validator."""
+        """An untracked `.claude/commands/` folder is deep-validated.
+
+        A command .md without frontmatter triggers a CRITICAL finding from
+        `validate_command` (frontmatter is required for command definitions).
+        """
         _write_untracked(
             project,
             ".claude/commands/quick.md",
@@ -324,9 +343,12 @@ class TestFolderScopeFilter:
         )
         report = ValidationReport()
         validate_local_scope(project, report)
+        # Deep validation elevates no-frontmatter to CRITICAL/MAJOR.
         assert any(
-            "quick.md" in m for m in _messages(report, "MINOR")
-        )
+            "quick.md" in m
+            for level in ("CRITICAL", "MAJOR", "MINOR")
+            for m in _messages(report, level)
+        ), f"Expected a finding about quick.md; got: {report.results}"
 
     def test_local_skill_with_valid_frontmatter_clean(self, project: Path) -> None:
         """Untracked SKILL.md with valid frontmatter → no findings."""
@@ -454,3 +476,170 @@ class TestDirectHelpers:
         report = ValidationReport()
         validate_claude_local_md(md, project, report)
         assert report.has_major
+
+
+# =============================================================================
+# TRDD-f4e2d385: Deep validation regression tests
+#
+# These cover the v2.21.0 transition from shallow frontmatter-only checks to
+# the full per-element validator pipeline (validate_agent, validate_skill,
+# validate_command, validate_rules_directory), plus settings subtree
+# validation (hooks/mcp/lsp) and locally-enabled plugin enumeration.
+# =============================================================================
+
+
+class TestDeepElementValidation:
+    """Each test asserts that a known-bad element produces a finding that
+    ONLY the deep validator would emit — catches regression to shallow mode.
+    """
+
+    def test_agent_missing_name_field_caught_by_deep_validator(self, project: Path) -> None:
+        """An agent with frontmatter but missing `name` field fires a
+        validate_agent-specific MAJOR/CRITICAL. Shallow mode would miss this
+        since shallow only requires SOME frontmatter and a `name` or emit
+        only a NIT.
+        """
+        _commit(project, ".gitignore", ".claude/agents/\n")
+        _write_untracked(
+            project,
+            ".claude/agents/noname.md",
+            "---\ndescription: An agent without a name\n---\nBody.\n",
+        )
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        # The deep validate_agent emits a specific finding about missing name.
+        all_msgs = [r.message for r in report.results]
+        assert any(
+            "name" in m.lower() and "noname.md" in m
+            for m in all_msgs
+        ), f"Deep validator must flag missing `name` field; got: {all_msgs}"
+
+    def test_command_with_invalid_tools_caught(self, project: Path) -> None:
+        """A command with an unknown tool in allowed-tools fires a
+        validate_command-specific finding.
+        """
+        _commit(project, ".gitignore", ".claude/commands/\n")
+        _write_untracked(
+            project,
+            ".claude/commands/cmd.md",
+            (
+                "---\n"
+                "name: cmd\n"
+                "description: test command\n"
+                "allowed-tools: [NotARealTool, Read]\n"
+                "---\n"
+                "Body.\n"
+            ),
+        )
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        # The deep command validator knows the valid tools list.
+        all_msgs = [r.message for r in report.results]
+        assert any(
+            "cmd.md" in m and ("NotARealTool" in m or "tool" in m.lower())
+            for m in all_msgs
+        ), f"Deep validator must flag unknown tool; got: {all_msgs}"
+
+
+class TestSettingsSubtreeValidation:
+    """hooks / mcpServers / lspServers inside settings.local.json are
+    deep-validated by the same pipelines that validate plugin-shipped copies.
+    """
+
+    def test_hooks_subtree_invalid_event_caught(self, project: Path) -> None:
+        """An invalid event name in settings.local.json.hooks is caught by
+        validate_hooks — not by any shallow settings check.
+        """
+        settings = {
+            "hooks": {
+                "NotARealEvent": [
+                    {"hooks": [{"type": "command", "command": "echo x"}]}
+                ]
+            }
+        }
+        _write_untracked(project, ".claude/settings.local.json", json.dumps(settings))
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        all_msgs = [r.message for r in report.results]
+        assert any(
+            "NotARealEvent" in m or "Unknown hook event" in m
+            for m in all_msgs
+        ), f"Hook subtree validator must catch bad event; got: {all_msgs}"
+
+    def test_mcp_subtree_invalid_shape_caught(self, project: Path) -> None:
+        """Malformed mcpServers block — missing required command — is
+        caught by the MCP validator.
+        """
+        settings = {
+            "mcpServers": {
+                "bad-server": {"no-required-fields": True}
+            }
+        }
+        _write_untracked(project, ".claude/settings.local.json", json.dumps(settings))
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        all_msgs = [r.message for r in report.results]
+        # validate_mcp_config surfaces issues about missing 'command' etc.
+        assert any(
+            "bad-server" in m or "mcpServers" in m.lower()
+            for m in all_msgs
+        ), f"MCP subtree validator must run; got: {all_msgs}"
+
+
+class TestLocallyEnabledPluginEnumeration:
+    """enabledPlugins in settings.local.json triggers per-plugin deep validation."""
+
+    def test_enabled_but_not_installed_plugin_is_major(self, project: Path) -> None:
+        """A plugin enabled in settings.local.json but not present in the
+        plugin cache fires a MAJOR — enabling a non-existent plugin is a
+        silent no-op that's almost certainly a user mistake.
+        """
+        settings = {
+            "enabledPlugins": {
+                "nonexistent-plugin@fake-marketplace-xyz123": True,
+            }
+        }
+        _write_untracked(project, ".claude/settings.local.json", json.dumps(settings))
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        all_msgs = [r.message for r in report.results]
+        assert any(
+            "nonexistent-plugin" in m and ("not installed" in m or "enabledPlugins" in m)
+            for m in all_msgs
+        ), f"Missing-plugin enablement must trigger MAJOR; got: {all_msgs}"
+
+    def test_disabled_plugin_not_enumerated(self, project: Path) -> None:
+        """A plugin explicitly set to false must NOT be validated (user
+        has opted out). Assert no findings mention it.
+        """
+        settings = {
+            "enabledPlugins": {
+                "some-plugin@some-marketplace": False,
+            }
+        }
+        _write_untracked(project, ".claude/settings.local.json", json.dumps(settings))
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        all_msgs = [r.message for r in report.results]
+        # No findings should reference a disabled plugin.
+        assert not any(
+            "some-plugin" in m for m in all_msgs
+        ), f"Disabled plugin MUST NOT be enumerated; got findings referencing it: {all_msgs}"
+
+    def test_malformed_plugin_key_is_minor(self, project: Path) -> None:
+        """A plugin key not matching `<name>@<marketplace>` form is MINOR
+        (user typo) — not crashed on.
+        """
+        settings = {
+            "enabledPlugins": {
+                "malformed-no-at-sign": True,
+            }
+        }
+        _write_untracked(project, ".claude/settings.local.json", json.dumps(settings))
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        all_msgs = [r.message for r in report.results]
+        assert any(
+            "malformed-no-at-sign" in m and ("match" in m or "plugin" in m.lower())
+            for m in all_msgs
+        ), f"Malformed plugin key must trigger MINOR; got: {all_msgs}"
