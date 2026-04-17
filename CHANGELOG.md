@@ -2,11 +2,11 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
-## [2.19.0] - 2026-04-17
+## [2.20.0] - 2026-04-17
 
-### Features
+### Bug Fixes
 
-- **validate_hook:** Path-traversal detection + 4 more audit fixes
+- **validate_hook:** 3 issues — shebang mode, env prefix, timeout doc
 
 ### Miscellaneous Tasks
 
