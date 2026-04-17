@@ -2,11 +2,12 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
-## [2.20.0] - 2026-04-17
+## [2.20.1] - 2026-04-17
 
 ### Bug Fixes
 
-- **validate_hook:** 3 issues — shebang mode, env prefix, timeout doc
+- **remote_validation:** Register scope validators in launcher
+- **cpv:** Scope validator bug — invocation paths now work from plugin cache
 
 ### Miscellaneous Tasks
 
