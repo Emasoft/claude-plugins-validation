@@ -520,7 +520,8 @@ def validate_claude_local_md(
     classification applies as for project-scope CLAUDE.md:
 
     - CRITICAL: absolute path that resolves outside the repo root (e.g.
-      ``@/etc/passwd``). Local scope relaxes home-path checks, NOT
+      absolute path that escapes the repo). Local scope relaxes
+      home-path checks, NOT
       security leaks — a personal CLAUDE.local.md can still exfiltrate
       host files into Claude's context.
     - MAJOR: ``..`` escape, missing file, depth >5, or cycle.
