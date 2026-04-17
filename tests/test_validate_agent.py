@@ -1570,7 +1570,7 @@ class TestV221AgentToolGrammar:
 # ============================================================================
 
 
-def _make_plugin_agent(tmp_path, agent_frontmatter: str, agent_name: str = "agent") -> Path:
+def _make_plugin_agent(tmp_path: Path, agent_frontmatter: str, agent_name: str = "agent") -> Path:
     """Create a plugin skeleton with a single agent file and return the agent path."""
     plugin_dir = tmp_path / f"pl-{agent_name}"
     plugin_dir.mkdir()
