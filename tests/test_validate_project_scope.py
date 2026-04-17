@@ -843,3 +843,143 @@ class TestLoopMdProjectScope:
             "loop.md" in m and ("25000" in m or "25,000" in m or "cap" in m)
             for m in majors
         ), f"Expected MAJOR about tracked loop.md size cap; got MAJORs: {majors}"
+
+
+# =============================================================================
+# v2.22.0: CLAUDE.md @path import recursion validator (memory.md L95-107)
+#
+# `@path/to/file.md` in a tracked CLAUDE.md triggers a recursive load (max
+# depth 5). Relative paths resolve from the containing file. Absolute paths
+# outside the repo are a security surface — `@/etc/passwd` would pull host
+# files into Claude's context. The project-scope validator must classify
+# each finding category correctly.
+# =============================================================================
+
+
+class TestV221ClaudeMdImports:
+    """``@path`` import resolution and recursion enforcement (memory.md L95-107)."""
+
+    def test_at_path_import_into_project_file_accepted(self, project: Path) -> None:
+        """A valid relative `@notes.md` import to an existing in-repo file
+        does NOT trigger any CRITICAL/MAJOR finding about imports."""
+        _commit(project, "notes.md", "# Notes\n\nSome content.\n")
+        _commit(project, "CLAUDE.md", "# Main\n\nSee @notes.md for details.\n")
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        import_findings = [
+            r for r in report.results
+            if r.level in ("CRITICAL", "MAJOR")
+            and ("import" in r.message.lower() or "@notes.md" in r.message)
+        ]
+        assert import_findings == [], (
+            f"Valid in-repo import must not trigger findings; got: {import_findings}"
+        )
+
+    def test_at_path_absolute_outside_repo_critical(self, project: Path) -> None:
+        """`@/etc/passwd` in CLAUDE.md is a security leak → CRITICAL."""
+        _commit(project, "CLAUDE.md", "# Main\n\nRead @/etc/passwd for config.\n")
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        criticals = _messages(report, "CRITICAL")
+        assert any(
+            "/etc/passwd" in m and ("import" in m.lower() or "outside" in m.lower())
+            for m in criticals
+        ), f"Expected CRITICAL about @/etc/passwd; got CRITICALs: {criticals}"
+
+    def test_at_path_traversal_escaping_repo_major(self, project: Path) -> None:
+        """`@../../outside.md` that escapes the repo root is MAJOR."""
+        _commit(project, "CLAUDE.md", "# Main\n\nAlso @../../outside.md\n")
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        majors = _messages(report, "MAJOR")
+        assert any(
+            "outside.md" in m and ("escape" in m.lower() or ".." in m)
+            for m in majors
+        ), f"Expected MAJOR about .. escape; got MAJORs: {majors}"
+
+    def test_at_path_missing_file_major(self, project: Path) -> None:
+        """`@does-not-exist.md` import to a missing file is MAJOR (dead import)."""
+        _commit(project, "CLAUDE.md", "# Main\n\nSee @does-not-exist.md\n")
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        majors = _messages(report, "MAJOR")
+        assert any(
+            "does-not-exist.md" in m and ("not exist" in m.lower() or "dead" in m.lower())
+            for m in majors
+        ), f"Expected MAJOR about missing imported file; got MAJORs: {majors}"
+
+    def test_at_path_recursion_depth_5_max(self, project: Path) -> None:
+        """A chain A→B→C→D→E→F (depth 6) must fire a depth-exceeded MAJOR
+        on the 6th link (when loading F from E)."""
+        # Depth 0 = CLAUDE.md (A). Each import adds one level.
+        # CLAUDE.md → b.md → c.md → d.md → e.md → f.md → g.md
+        # That's 6 import links; the 6th (f.md → g.md) must trip the cap.
+        _commit(project, "g.md", "# G\n\nEnd of chain.\n")
+        _commit(project, "f.md", "# F\n\nNext: @g.md\n")
+        _commit(project, "e.md", "# E\n\nNext: @f.md\n")
+        _commit(project, "d.md", "# D\n\nNext: @e.md\n")
+        _commit(project, "c.md", "# C\n\nNext: @d.md\n")
+        _commit(project, "b.md", "# B\n\nNext: @c.md\n")
+        _commit(project, "CLAUDE.md", "# A\n\nNext: @b.md\n")
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        majors = _messages(report, "MAJOR")
+        assert any(
+            "depth" in m.lower() and ("5" in m or "maximum" in m.lower())
+            for m in majors
+        ), f"Expected MAJOR about depth-5 limit; got MAJORs: {majors}"
+
+    def test_at_path_circular_import_detected_major(self, project: Path) -> None:
+        """A imports B imports A must fire a circular-import MAJOR."""
+        _commit(project, "other.md", "# Other\n\nLoops back: @CLAUDE.md\n")
+        _commit(project, "CLAUDE.md", "# Main\n\nSee @other.md\n")
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        majors = _messages(report, "MAJOR")
+        assert any(
+            "circular" in m.lower()
+            for m in majors
+        ), f"Expected MAJOR about circular import; got MAJORs: {majors}"
+
+    def test_at_path_inside_fenced_block_is_not_an_import(self, project: Path) -> None:
+        """An `@path` token inside a fenced code block must NOT be treated
+        as an import — no finding about the fenced token should appear."""
+        body = (
+            "# Main\n\n"
+            "Example usage:\n\n"
+            "```markdown\n"
+            "See @/etc/passwd for example only.\n"
+            "```\n\n"
+            "End of doc.\n"
+        )
+        _commit(project, "CLAUDE.md", body)
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        # No CRITICAL about /etc/passwd should appear because it's in a
+        # fenced code block and thus not an import.
+        assert not any(
+            "/etc/passwd" in r.message and r.level == "CRITICAL"
+            for r in report.results
+        ), (
+            f"Fenced `@/etc/passwd` must not trigger an import finding; "
+            f"got CRITICALs: {_messages(report, 'CRITICAL')}"
+        )
+
+    def test_email_addresses_are_not_imports(self, project: Path) -> None:
+        """`email@domain.com` in prose is not an import — no finding."""
+        _commit(
+            project,
+            "CLAUDE.md",
+            "# Main\n\nContact us at support@example.com for help.\n",
+        )
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        # No import-related finding should mention example.com.
+        import_findings = [
+            r for r in report.results
+            if "example.com" in r.message
+            and ("import" in r.message.lower() or "@" in r.message)
+        ]
+        assert import_findings == [], (
+            f"Email address must not be treated as import; got: {import_findings}"
+        )

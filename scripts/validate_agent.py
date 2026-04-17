@@ -30,6 +30,7 @@ from typing import Any
 
 import yaml
 from cpv_validation_common import (
+    BUILTIN_AGENT_TYPES,
     COLORS,
     MAX_BODY_WORDS,
     MAX_DESCRIPTION_LENGTH,
@@ -39,6 +40,7 @@ from cpv_validation_common import (
     VALID_CONTEXT_VALUES,
     VALID_EFFORT_VALUES,
     VALID_MODELS,
+    VALID_PERMISSION_MODES,
     VALID_TOOLS,
     ValidationReport,
     check_utf8_encoding,
@@ -78,18 +80,17 @@ KNOWN_FRONTMATTER_FIELDS = {
     "system-prompt",  # [legacy — emits WARNING] not in current sub-agents spec (v2.1.98)
 }
 
-# Valid values for the 'permissionMode' field
-VALID_PERMISSION_MODES = {
-    "default",  # Standard permission checking with prompts
-    "auto",  # Auto-approve all tool calls (v2.1.84)
-    "acceptEdits",  # Auto-accept file edits
-    "dontAsk",  # Auto-deny permission prompts (explicitly allowed tools still work)
-    "bypassPermissions",  # Skip all permission checks (use with caution!)
-    "plan",  # Plan mode (read-only exploration)
-}
+# Valid values for the 'permissionMode' field. Aliased to the canonical
+# ``VALID_PERMISSION_MODES`` in ``cpv_validation_common`` so agent frontmatter
+# and settings ``permissions.defaultMode`` share the same enumeration
+# (permission-modes.md L17-22).
+# (Imported at module-level for the agent validator's type hints.)
 
-# Built-in agent types per official docs — custom agent names are also valid
-VALID_AGENT_VALUES = {"Explore", "Plan", "general-purpose"}
+# Built-in agent types per official docs — custom agent names are also valid.
+# Aliased to the shared ``BUILTIN_AGENT_TYPES`` in ``cpv_validation_common`` to
+# keep one source of truth (updated in v2.22.0 with ``statusline-setup`` and
+# ``Claude Code Guide`` per sub-agents.md L29-74).
+VALID_AGENT_VALUES = BUILTIN_AGENT_TYPES
 
 # Valid values for the 'memory' field (persistent memory scope)
 VALID_MEMORY_SCOPES = {"user", "project", "local"}
@@ -277,6 +278,55 @@ def validate_description_field(frontmatter: dict[str, Any], filename: str, repor
     report.passed("'description' field valid", filename)
 
 
+def _parse_tool_reference(raw: str) -> tuple[str, list[str] | None, str | None]:
+    """Parse a tool reference string into (base_name, spawnable_subagents, error).
+
+    Supports the v2.1.63+ grammar ``Agent(worker, researcher)`` (and the legacy
+    alias ``Task(...)``) from sub-agents.md L296-318, where the parenthesized
+    list is an allowlist of spawnable subagent types. Non-Agent/Task tools
+    with parentheses (e.g. ``Bash(git *)``) pass through unchanged so the
+    caller's existing Bash/MCP logic still sees them.
+
+    Returns:
+        (base_tool_name, spawnable_subagents, error)
+        - base_tool_name: always the leading identifier (e.g. "Agent", "Bash")
+        - spawnable_subagents: list of agent names when ``raw`` is
+          ``Agent(...)``/``Task(...)``; ``None`` otherwise. An empty list means
+          ``Agent()`` with an explicit empty allowlist.
+        - error: non-None only when the reference is malformed (e.g.
+          unbalanced parens). ``spawnable_subagents`` is ``None`` on error.
+    """
+    stripped = raw.strip()
+    # Bare identifier like "Agent" or "Read" — no parens, no spawnable list.
+    if "(" not in stripped:
+        return stripped, None, None
+
+    # Find the base name (identifier before the first '(').
+    open_idx = stripped.index("(")
+    base = stripped[:open_idx].strip()
+
+    # Unbalanced / missing closing paren.
+    if not stripped.endswith(")"):
+        if base in ("Agent", "Task"):
+            return base, None, "unbalanced parens"
+        # For non-Agent/Task tools, let downstream validators surface their own
+        # error (they've handled ``Bash(...)`` patterns historically).
+        return base, None, None
+
+    # Only Agent/Task use the spawnable-subagent list grammar.
+    if base not in ("Agent", "Task"):
+        return base, None, None
+
+    inner = stripped[open_idx + 1 : -1]
+    # Empty parens == explicit empty allowlist (distinct from bare "Agent").
+    if not inner.strip():
+        return base, [], None
+
+    # Comma-separated, whitespace-tolerant, trailing-comma OK.
+    names = [n.strip() for n in inner.split(",") if n.strip()]
+    return base, names, None
+
+
 def validate_tools_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
     """Validate the 'tools' frontmatter field."""
     if "tools" not in frontmatter:
@@ -304,10 +354,34 @@ def validate_tools_field(frontmatter: dict[str, Any], filename: str, report: Age
     # Validate each tool name
     invalid_tools = []
     for tool in tool_list:
-        # Handle tool with pattern like "Bash(git *)"
-        base_tool = tool.split("(")[0].strip()
+        base_tool, spawnables, error = _parse_tool_reference(tool)
+        if error is not None:
+            # Malformed Agent()/Task() grammar — surface as MAJOR and skip
+            # further per-tool checks for this entry.
+            report.major(
+                f"malformed tool reference '{tool}': {error}",
+                filename,
+            )
+            continue
         if base_tool not in VALID_TOOLS and not base_tool.startswith("mcp__"):
             invalid_tools.append(tool)
+            continue
+        # Only Agent()/Task() carry a spawnable-subagent allowlist. Bare
+        # "Agent"/"Task" (spawnables is None) is still accepted as-is.
+        if spawnables is not None:
+            if not spawnables:
+                report.info(
+                    f"'{tool}' declares an explicit empty allowlist; this agent may spawn no subagents",
+                    filename,
+                )
+            else:
+                for name in spawnables:
+                    if name not in BUILTIN_AGENT_TYPES:
+                        report.minor(
+                            f"'{tool}' references unknown spawnable agent '{name}' "
+                            "(may be a custom plugin-shipped agent we cannot verify)",
+                            filename,
+                        )
 
     if invalid_tools:
         report.info(
@@ -318,7 +392,9 @@ def validate_tools_field(frontmatter: dict[str, Any], filename: str, report: Age
     # Deprecation warnings for renamed/soft-deprecated tools
     # (kept in VALID_TOOLS — these are still accepted as aliases).
     for tool in tool_list:
-        base_tool = tool.split("(")[0].strip()
+        base_tool, _, error = _parse_tool_reference(tool)
+        if error is not None:
+            continue
         if base_tool == "TaskOutput":
             report.warning(
                 "Tool 'TaskOutput' is deprecated — prefer Read on the task's output file path",
@@ -779,10 +855,17 @@ def validate_disallowed_tools_field(frontmatter: dict[str, Any], filename: str, 
         report.minor("'disallowedTools' field is empty - consider removing", filename)
         return
 
-    # Validate each tool name
+    # Validate each tool name. Reuse the shared Agent()/Task() grammar parser
+    # so "Agent(worker, researcher)" entries don't get flagged as unknown.
     invalid_tools = []
     for tool in tool_list:
-        base_tool = tool.split("(")[0].strip()
+        base_tool, _, error = _parse_tool_reference(tool)
+        if error is not None:
+            report.major(
+                f"malformed tool reference '{tool}' in disallowedTools: {error}",
+                filename,
+            )
+            continue
         if base_tool not in VALID_TOOLS and not base_tool.startswith("mcp__"):
             invalid_tools.append(tool)
 

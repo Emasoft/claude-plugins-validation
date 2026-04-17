@@ -281,6 +281,20 @@ VALID_HOOK_EVENTS = {
 # Valid context values for agents and skills. Official spec only lists "fork".
 VALID_CONTEXT_VALUES = {"fork"}
 
+# Valid permission-mode values, used by agent frontmatter ``permissionMode``
+# and by settings ``permissions.defaultMode`` (permission-modes.md L17-22).
+# The same 6 values apply to both surfaces — single source of truth.
+VALID_PERMISSION_MODES: frozenset[str] = frozenset(
+    {
+        "default",
+        "acceptEdits",
+        "plan",
+        "auto",
+        "dontAsk",
+        "bypassPermissions",
+    }
+)
+
 # Built-in agent types provided by Claude Code (sub-agents.md L29-74)
 BUILTIN_AGENT_TYPES = {
     "Explore",

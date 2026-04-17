@@ -777,3 +777,161 @@ class TestLoopMdLocalScope:
             f"Tracked loop.md must NOT produce local-scope findings; got: "
             f"{loop_findings}"
         )
+
+
+# =============================================================================
+# v2.22.0: CLAUDE.local.md @path import recursion validator (memory.md L95-107)
+#
+# Mirror of the project-scope tests. CLAUDE.local.md is personal config, but
+# `@path` imports from it still must resolve — an absolute path outside the
+# repo is still a security leak (relaxed home-path rules DO NOT relax
+# exfiltration vectors).
+# =============================================================================
+
+
+class TestV221ClaudeMdImports:
+    """``@path`` import resolution in CLAUDE.local.md (memory.md L95-107)."""
+
+    def test_at_path_import_into_project_file_accepted(self, project: Path) -> None:
+        """A valid relative `@notes.md` import in CLAUDE.local.md to an
+        existing in-repo file does NOT trigger CRITICAL/MAJOR import findings."""
+        _commit(project, ".gitignore", "CLAUDE.local.md\n")
+        _commit(project, "notes.md", "# Notes\n\nSome content.\n")
+        _write_untracked(
+            project,
+            "CLAUDE.local.md",
+            "# Personal\n\nSee @notes.md for details.\n",
+        )
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        import_findings = [
+            r for r in report.results
+            if r.level in ("CRITICAL", "MAJOR")
+            and ("import" in r.message.lower() or "@notes.md" in r.message)
+        ]
+        assert import_findings == [], (
+            f"Valid in-repo import must not trigger findings; got: {import_findings}"
+        )
+
+    def test_at_path_absolute_outside_repo_critical(self, project: Path) -> None:
+        """`@/etc/passwd` in CLAUDE.local.md is a CRITICAL exfiltration leak."""
+        _commit(project, ".gitignore", "CLAUDE.local.md\n")
+        _write_untracked(
+            project,
+            "CLAUDE.local.md",
+            "# Personal\n\nRead @/etc/passwd for config.\n",
+        )
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        criticals = _messages(report, "CRITICAL")
+        assert any(
+            "/etc/passwd" in m and ("import" in m.lower() or "outside" in m.lower())
+            for m in criticals
+        ), f"Expected CRITICAL about @/etc/passwd; got CRITICALs: {criticals}"
+
+    def test_at_path_traversal_escaping_repo_major(self, project: Path) -> None:
+        """`@../../outside.md` that escapes the repo root is MAJOR."""
+        _commit(project, ".gitignore", "CLAUDE.local.md\n")
+        _write_untracked(
+            project,
+            "CLAUDE.local.md",
+            "# Personal\n\nAlso @../../outside.md\n",
+        )
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        majors = _messages(report, "MAJOR")
+        assert any(
+            "outside.md" in m and ("escape" in m.lower() or ".." in m)
+            for m in majors
+        ), f"Expected MAJOR about .. escape; got MAJORs: {majors}"
+
+    def test_at_path_missing_file_major(self, project: Path) -> None:
+        """`@does-not-exist.md` in CLAUDE.local.md is MAJOR (dead import)."""
+        _commit(project, ".gitignore", "CLAUDE.local.md\n")
+        _write_untracked(
+            project,
+            "CLAUDE.local.md",
+            "# Personal\n\nSee @does-not-exist.md\n",
+        )
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        majors = _messages(report, "MAJOR")
+        assert any(
+            "does-not-exist.md" in m and ("not exist" in m.lower() or "dead" in m.lower())
+            for m in majors
+        ), f"Expected MAJOR about missing imported file; got MAJORs: {majors}"
+
+    def test_at_path_recursion_depth_5_max(self, project: Path) -> None:
+        """A chain rooted in CLAUDE.local.md exceeding depth 5 must fire MAJOR."""
+        _commit(project, ".gitignore", "CLAUDE.local.md\n")
+        _commit(project, "g.md", "# G\n\nEnd of chain.\n")
+        _commit(project, "f.md", "# F\n\nNext: @g.md\n")
+        _commit(project, "e.md", "# E\n\nNext: @f.md\n")
+        _commit(project, "d.md", "# D\n\nNext: @e.md\n")
+        _commit(project, "c.md", "# C\n\nNext: @d.md\n")
+        _commit(project, "b.md", "# B\n\nNext: @c.md\n")
+        _write_untracked(project, "CLAUDE.local.md", "# A\n\nNext: @b.md\n")
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        majors = _messages(report, "MAJOR")
+        assert any(
+            "depth" in m.lower() and ("5" in m or "maximum" in m.lower())
+            for m in majors
+        ), f"Expected MAJOR about depth-5 limit; got MAJORs: {majors}"
+
+    def test_at_path_circular_import_detected_major(self, project: Path) -> None:
+        """CLAUDE.local.md → other.md → CLAUDE.local.md must fire circular MAJOR."""
+        _commit(project, ".gitignore", "CLAUDE.local.md\n")
+        _commit(project, "other.md", "# Other\n\nLoops back: @CLAUDE.local.md\n")
+        _write_untracked(
+            project, "CLAUDE.local.md", "# Main\n\nSee @other.md\n"
+        )
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        majors = _messages(report, "MAJOR")
+        assert any(
+            "circular" in m.lower()
+            for m in majors
+        ), f"Expected MAJOR about circular import; got MAJORs: {majors}"
+
+    def test_at_path_inside_fenced_block_is_not_an_import(self, project: Path) -> None:
+        """An `@path` token inside a fenced code block in CLAUDE.local.md
+        must NOT be treated as an import."""
+        body = (
+            "# Main\n\n"
+            "Example usage:\n\n"
+            "```markdown\n"
+            "See @/etc/passwd for example only.\n"
+            "```\n\n"
+            "End of doc.\n"
+        )
+        _commit(project, ".gitignore", "CLAUDE.local.md\n")
+        _write_untracked(project, "CLAUDE.local.md", body)
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        assert not any(
+            "/etc/passwd" in r.message and r.level == "CRITICAL"
+            for r in report.results
+        ), (
+            f"Fenced `@/etc/passwd` must not trigger an import finding; "
+            f"got CRITICALs: {_messages(report, 'CRITICAL')}"
+        )
+
+    def test_email_addresses_are_not_imports(self, project: Path) -> None:
+        """`email@domain.com` in prose is not an import — no finding."""
+        _commit(project, ".gitignore", "CLAUDE.local.md\n")
+        _write_untracked(
+            project,
+            "CLAUDE.local.md",
+            "# Main\n\nContact us at support@example.com for help.\n",
+        )
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        import_findings = [
+            r for r in report.results
+            if "example.com" in r.message
+            and ("import" in r.message.lower() or "@" in r.message)
+        ]
+        assert import_findings == [], (
+            f"Email address must not be treated as import; got: {import_findings}"
+        )

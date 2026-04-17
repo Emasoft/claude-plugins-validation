@@ -113,6 +113,7 @@ from cc_scope_rules import (
     safe_load_jsonc,
     safe_parse_frontmatter,
     safe_read_text,
+    validate_claude_md_imports,
 )
 from cpv_validation_common import (
     ValidationReport,
@@ -232,6 +233,35 @@ def _flag_rejected_nested_keys(data: dict[str, Any], report: ValidationReport, f
                 ),
                 file_label,
             )
+
+
+def _flag_permissions_default_mode(
+    data: dict[str, Any], report: ValidationReport, file_label: str
+) -> None:
+    """Validate ``permissions.defaultMode`` against the 6 permission-modes.md
+    values. An out-of-enum value is silently dropped by Claude Code, so the
+    author's intended default never takes effect — MAJOR, not CRITICAL
+    (Claude Code falls back to ``default`` behavior instead of erroring).
+    """
+    from cpv_validation_common import VALID_PERMISSION_MODES  # lazy to avoid cycle
+
+    permissions = data.get("permissions")
+    if not isinstance(permissions, dict):
+        return
+    default_mode = permissions.get("defaultMode")
+    if default_mode is None:
+        return
+    if not isinstance(default_mode, str) or default_mode not in VALID_PERMISSION_MODES:
+        report.major(
+            (
+                f"{file_label} sets 'permissions.defaultMode' to "
+                f"{default_mode!r} — must be one of "
+                f"{sorted(VALID_PERMISSION_MODES)}. Any other value is "
+                "silently dropped by Claude Code; the intended default never "
+                "takes effect."
+            ),
+            file_label,
+        )
 
 
 def _flag_managed_only_nested_keys(
@@ -471,6 +501,7 @@ def validate_settings_json_project_scope(
     _flag_managed_only_nested_keys(data, report, file_label)
     _flag_global_config_keys(data, report, file_label)
     _flag_plugin_only_keys(data, report, file_label)
+    _flag_permissions_default_mode(data, report, file_label)
     _flag_secrets_in_env(data, report, file_label)
     _flag_machine_specific_command_paths(data, report, file_label)
     _flag_hook_command_paths(data, report, file_label)
@@ -779,6 +810,13 @@ def validate_claude_md_file(
     symlink could still resolve outside the repo. Per the module's
     "Every rglob/file hit is re-resolved via resolve_within" invariant,
     we enforce the check here too and skip escapes.
+
+    The body is additionally scanned for ``@path/to/file.md`` import
+    tokens per memory.md L95-107. Each import is resolved relative to
+    the containing file, walked recursively (max depth 5), and
+    classified: absolute paths outside the repo are CRITICAL security
+    leaks, ``..`` escapes / missing files / over-deep chains / cycles
+    are MAJOR, and a summary INFO is emitted at the end.
     """
     rel = md_path.relative_to(repo_root)
     real = resolve_within(md_path, repo_root)
@@ -809,6 +847,10 @@ def validate_claude_md_file(
                     line=lineno,
                 )
                 break
+    # @path import recursion check (memory.md L95-107).
+    validate_claude_md_imports(
+        md_path, repo_root, report, str(rel), max_bytes=MAX_CLAUDE_MD_BYTES
+    )
 
 
 def validate_gitignore_for_scope_hygiene(

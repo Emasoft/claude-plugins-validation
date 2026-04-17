@@ -74,6 +74,7 @@ from cc_scope_rules import (
     GLOBAL_CONFIG_KEYS,
     MANAGED_ONLY_KEYS,
     MANAGED_ONLY_NESTED_KEYS,
+    MAX_CLAUDE_MD_BYTES,
     MAX_FILES_PER_FOLDER,
     MAX_HOME_CLAUDE_JSON_BYTES,
     MAX_MARKDOWN_BYTES,
@@ -92,6 +93,7 @@ from cc_scope_rules import (
     safe_load_jsonc,
     safe_parse_frontmatter,
     safe_read_text,
+    validate_claude_md_imports,
 )
 from cpv_validation_common import (
     ValidationReport,
@@ -202,6 +204,32 @@ def _flag_global_config_keys_local(
                 ),
                 file_label,
             )
+
+
+def _flag_permissions_default_mode_local(
+    data: dict[str, Any], report: ValidationReport, file_label: str
+) -> None:
+    """Validate ``permissions.defaultMode`` against the 6 permission-modes.md
+    values. Same enforcement as project scope — an out-of-enum value is
+    silently dropped so the author's intent never takes effect.
+    """
+    from cpv_validation_common import VALID_PERMISSION_MODES  # lazy to avoid cycle
+
+    permissions = data.get("permissions")
+    if not isinstance(permissions, dict):
+        return
+    default_mode = permissions.get("defaultMode")
+    if default_mode is None:
+        return
+    if not isinstance(default_mode, str) or default_mode not in VALID_PERMISSION_MODES:
+        report.major(
+            (
+                f"{file_label} sets 'permissions.defaultMode' to "
+                f"{default_mode!r} — must be one of "
+                f"{sorted(VALID_PERMISSION_MODES)}."
+            ),
+            file_label,
+        )
 
 
 def _flag_managed_only_nested_keys_local(
@@ -319,6 +347,7 @@ def validate_settings_local_json(
     _flag_managed_only_nested_keys_local(data, report, file_label)
     _flag_global_config_keys_local(data, report, file_label)
     _flag_plugin_only_keys_local(data, report, file_label)
+    _flag_permissions_default_mode_local(data, report, file_label)
     _suggest_typically_shared_keys(data, report, file_label)
     _flag_deprecated_keys(data, report, file_label)
     _flag_missing_schema_local(data, report, file_label)
@@ -484,13 +513,24 @@ def validate_local_rules(
 def validate_claude_local_md(
     md_path: Path, repo_root: Path, report: ValidationReport
 ) -> None:
-    """Validate ``CLAUDE.local.md`` — must be gitignored, structurally valid."""
+    """Validate ``CLAUDE.local.md`` — must be gitignored, structurally valid.
+
+    Besides the gitignored + size-cap checks, the body is scanned for
+    ``@path/to/file.md`` import tokens (memory.md L95-107). The same
+    classification applies as for project-scope CLAUDE.md:
+
+    - CRITICAL: absolute path that resolves outside the repo root (e.g.
+      ``@/etc/passwd``). Local scope relaxes home-path checks, NOT
+      security leaks — a personal CLAUDE.local.md can still exfiltrate
+      host files into Claude's context.
+    - MAJOR: ``..`` escape, missing file, depth >5, or cycle.
+    """
     rel = md_path.relative_to(repo_root)
     try:
-        safe_read_text(md_path, MAX_MARKDOWN_BYTES)
+        safe_read_text(md_path, MAX_CLAUDE_MD_BYTES)
     except OversizedFileError:
         report.major(
-            f"{rel}: exceeds {MAX_MARKDOWN_BYTES} byte size cap — skipping",
+            f"{rel}: exceeds {MAX_CLAUDE_MD_BYTES} byte size cap — skipping",
             str(rel),
         )
         return
@@ -506,6 +546,10 @@ def validate_claude_local_md(
             str(rel),
         )
         return
+    # @path import recursion check (memory.md L95-107).
+    validate_claude_md_imports(
+        md_path, repo_root, report, str(rel), max_bytes=MAX_CLAUDE_MD_BYTES
+    )
     report.passed(f"{rel}: CLAUDE.local.md present and not tracked", str(rel))
 
 

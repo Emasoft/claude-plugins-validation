@@ -68,6 +68,7 @@ __all__ = [
     "MAX_FRONTMATTER_BYTES",
     "MAX_YAML_ALIASES",
     "MAX_FILES_PER_FOLDER",
+    "MAX_CLAUDE_MD_IMPORT_DEPTH",
     "Scope",
     "is_secret_value",
     "looks_like_secret_key_name",
@@ -85,6 +86,8 @@ __all__ = [
     "safe_read_text",
     "safe_load_jsonc",
     "safe_parse_frontmatter",
+    "extract_at_path_imports",
+    "validate_claude_md_imports",
     "ENABLED_PLUGIN_RE",
     "resolve_plugin_cache_dir",
 ]
@@ -112,6 +115,13 @@ MAX_YAML_ALIASES: int = 100                           # anchors + references com
 # Per-folder file count cap on rglob walks — prevents a hostile project from
 # forcing an unbounded tree walk via millions of .md files or directory symlinks.
 MAX_FILES_PER_FOLDER: int = 10_000
+
+# CLAUDE.md / CLAUDE.local.md ``@path/to/file.md`` imports are recursively loaded
+# by Claude Code up to a maximum depth of 5 (per memory.md L95-107). Deeper
+# chains are silently truncated — we flag them as MAJOR so the author knows the
+# import will not fire. A file importing itself (depth increment with the same
+# path in the chain) is a circular import and also flagged.
+MAX_CLAUDE_MD_IMPORT_DEPTH: int = 5
 
 
 # =============================================================================
@@ -887,3 +897,201 @@ def read_finding(
                 file_label,
             )
         return None
+
+
+# =============================================================================
+# CLAUDE.md / CLAUDE.local.md ``@path`` import validator (memory.md L95-107)
+# =============================================================================
+
+# An import token is `@` followed by a non-empty, non-whitespace path. We anchor
+# the `@` to the start of a word (start-of-line or preceded by whitespace) so
+# that "email@domain.com" in prose is NOT interpreted as an import marker. The
+# path itself is a run of non-whitespace characters terminated by whitespace or
+# end-of-line. Trailing punctuation (.,;:!?) is stripped in a follow-up pass so
+# tokens like "see @notes.md." don't include the terminal period as part of the
+# path.
+_AT_IMPORT_RE: re.Pattern[str] = re.compile(r"(?:^|(?<=\s))@(\S+)")
+_AT_IMPORT_TRAILING_PUNCT: str = ".,;:!?)"
+
+# Fenced code blocks (``` ... ```) and inline code (`...`) are skipped so that
+# instructions/examples inside Markdown code DO NOT trigger imports — this
+# matches Claude Code's actual loader behaviour (memory.md L98-101).
+_FENCED_CODE_BLOCK_RE: re.Pattern[str] = re.compile(
+    r"^\s*```.*?^\s*```",
+    re.DOTALL | re.MULTILINE,
+)
+_INLINE_CODE_RE: re.Pattern[str] = re.compile(r"`[^`\n]*`")
+
+
+def _strip_code_spans(text: str) -> str:
+    """Remove fenced code blocks and inline code spans from markdown ``text``.
+
+    Returns the same text with each match replaced by an equal-length run of
+    spaces so that line/column positions of the remaining content are
+    preserved. Callers that scan for ``@path`` import tokens use the stripped
+    version to avoid false positives inside code examples.
+    """
+    def _blank(match: re.Match[str]) -> str:
+        span = match.group(0)
+        # Preserve newlines so line numbers remain stable for callers that
+        # would want to report line positions (none currently, but cheap).
+        return "".join("\n" if c == "\n" else " " for c in span)
+
+    stripped = _FENCED_CODE_BLOCK_RE.sub(_blank, text)
+    stripped = _INLINE_CODE_RE.sub(_blank, stripped)
+    return stripped
+
+
+def extract_at_path_imports(content: str) -> list[str]:
+    """Return every ``@path`` import token found in ``content``.
+
+    Per memory.md L95-107: ``@path/to/file.md`` in CLAUDE.md (or a nested
+    imported file) triggers a recursive load. Tokens inside fenced code
+    blocks or inline code spans are NOT imports and are excluded.
+
+    The returned list preserves source order and MAY contain duplicates
+    (the caller deduplicates when needed for cycle detection).
+    """
+    stripped = _strip_code_spans(content)
+    out: list[str] = []
+    for m in _AT_IMPORT_RE.finditer(stripped):
+        raw = m.group(1)
+        # Strip trailing punctuation so "see @notes.md." does not import
+        # the literal path "notes.md." — memory.md's loader treats trailing
+        # sentence punctuation as prose, not part of the path.
+        path = raw.rstrip(_AT_IMPORT_TRAILING_PUNCT)
+        if path:
+            out.append(path)
+    return out
+
+
+def validate_claude_md_imports(
+    source: Path,
+    repo_root: Path,
+    report: ValidationReport,
+    rel_label: str,
+    *,
+    max_bytes: int,
+) -> None:
+    """Recursively validate ``@path`` imports starting from ``source``.
+
+    Per memory.md L95-107, CLAUDE.md (and every file it imports) may contain
+    ``@path/to/file.md`` import tokens that Claude Code resolves relative to
+    the containing file. This helper walks the import graph from ``source``
+    and emits findings for:
+
+    - CRITICAL: an absolute path (leading ``/``) that resolves outside
+      ``repo_root`` — e.g. ``@/etc/passwd`` is a security leak.
+    - MAJOR: a path whose ``..`` segments escape ``repo_root``.
+    - MAJOR: a path that does not exist on disk (dead import).
+    - MAJOR: recursion depth exceeds ``MAX_CLAUDE_MD_IMPORT_DEPTH`` (5).
+    - MAJOR: a circular import (A imports B imports A).
+
+    An INFO line is emitted at the end summarising ``N imports from M
+    files``. The walk is size-capped per read (via ``safe_read_text``) so
+    a hostile imported file cannot OOM the validator.
+
+    Args:
+        source: path to the starting file (CLAUDE.md / CLAUDE.local.md /
+                an already-imported file).
+        repo_root: root below which imports are considered "inside" the
+                   project; any resolved target outside it is flagged.
+        report: findings sink.
+        rel_label: display label for the starting file (used as the
+                   ``file`` field on every finding emitted from this
+                   walk).
+        max_bytes: per-file size cap applied to every imported file read.
+    """
+    visited: set[Path] = set()
+    import_count = 0
+    file_count = 0
+
+    def _walk(current: Path, chain: tuple[Path, ...], depth: int) -> None:
+        nonlocal import_count, file_count
+        try:
+            content = safe_read_text(current, max_bytes)
+        except (OversizedFileError, OSError, UnicodeDecodeError):
+            # Read errors for the starting file are reported by the caller;
+            # for imported files the caller already emitted a MAJOR on the
+            # "does not exist" check or a follow-up.
+            return
+        file_count += 1
+        for raw_path in extract_at_path_imports(content):
+            import_count += 1
+            # CRITICAL: absolute path outside repo root is a security leak.
+            if raw_path.startswith("/"):
+                try:
+                    abs_target = Path(raw_path).resolve()
+                except (OSError, ValueError):
+                    abs_target = Path(raw_path)
+                try:
+                    abs_target.relative_to(repo_root.resolve())
+                    # Absolute path that DOES resolve inside the repo is
+                    # unusual (authors typically use relative paths) but is
+                    # not a security leak — skip without a finding here.
+                    # Fall through to the general resolve-and-check logic
+                    # so "file does not exist" / depth checks still apply.
+                    target = abs_target
+                except ValueError:
+                    report.critical(
+                        f"{rel_label}: import '@{raw_path}' points outside the "
+                        "project root (absolute path) — this would leak host "
+                        "files into Claude's context.",
+                        rel_label,
+                    )
+                    continue
+            else:
+                # Relative path — resolve from the CONTAINING file's dir.
+                candidate = (current.parent / raw_path).resolve()
+                try:
+                    candidate.relative_to(repo_root.resolve())
+                except ValueError:
+                    report.major(
+                        f"{rel_label}: import '@{raw_path}' uses '..' "
+                        "segments that escape the project root — the target "
+                        "lives outside the repo and will not load.",
+                        rel_label,
+                    )
+                    continue
+                target = candidate
+
+            if not target.exists():
+                report.major(
+                    f"{rel_label}: import '@{raw_path}' points to a file that "
+                    "does not exist — dead imports are silently ignored by "
+                    "Claude Code.",
+                    rel_label,
+                )
+                continue
+
+            if target in chain:
+                report.major(
+                    f"{rel_label}: circular import detected — '@{raw_path}' "
+                    "is already in the current import chain and will be "
+                    "skipped by Claude Code's loader.",
+                    rel_label,
+                )
+                continue
+
+            if depth + 1 > MAX_CLAUDE_MD_IMPORT_DEPTH:
+                report.major(
+                    f"{rel_label}: import '@{raw_path}' exceeds the maximum "
+                    f"recursion depth of {MAX_CLAUDE_MD_IMPORT_DEPTH} — "
+                    "deeper chains are silently truncated by Claude Code.",
+                    rel_label,
+                )
+                continue
+
+            if target in visited:
+                continue
+            visited.add(target)
+            _walk(target, chain + (target,), depth + 1)
+
+    _walk(source, (source.resolve(),), 0)
+
+    if import_count > 0:
+        report.info(
+            f"{rel_label}: {import_count} import(s) resolved from {file_count} "
+            "file(s) (including the starting file).",
+            rel_label,
+        )
