@@ -80,6 +80,425 @@ IS_WINDOWS = platform.system() == "Windows"
 _gi: GitignoreFilter | None = None
 
 
+# Plugin-name pattern (kebab-case) — mirrors cpv_validation_common.NAME_PATTERN but
+# expressed here as a local regex so dependency + channel validators don't reach out.
+_PLUGIN_NAME_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+
+# Identifier pattern for userConfig keys — Python-style identifier.
+_IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+# Monitor `when` pattern — "always" or "on-skill-invoke:<kebab-skill-name>".
+_MONITOR_WHEN_RE = re.compile(r"^always$|^on-skill-invoke:[a-z0-9-]+$")
+
+# Minimal syntactic semver-range check for plugin dependencies.
+# Accepts npm-semver-range idioms documented at plugin-dependencies.md:44-52:
+#   ~2.1.0, ^2.0, ^2.0.0-0, >=1.4, =2.1.0, 1.2.3, x.y.z - a.b.c, "a || b".
+# The regex targets a SINGLE range atom; logical OR is split and each side checked.
+_SEMVER_ATOM_RE = re.compile(
+    r"""^
+    \s*                                           # leading space ok
+    (?:                                           # range-kind prefix
+        [~^]                                      #   ~ or ^
+      | =
+      | >=?|<=?                                   #   >, >=, <, <=
+    )?
+    \s*
+    \d+(?:\.\d+){0,2}                             # MAJOR[.MINOR[.PATCH]]
+    (?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?       # -prerelease
+    (?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?      # +build
+    \s*
+    $
+    """,
+    re.VERBOSE,
+)
+
+# Hyphen range "x.y.z - a.b.c" (3 tokens separated by a bare dash and spaces).
+_SEMVER_HYPHEN_RE = re.compile(
+    r"^\s*\d+(?:\.\d+){0,2}(?:-[0-9A-Za-z.-]+)?\s+-\s+\d+(?:\.\d+){0,2}(?:-[0-9A-Za-z.-]+)?\s*$"
+)
+
+
+def _is_valid_semver_range(text: str) -> bool:
+    """Return True when ``text`` parses as a syntactic semver range.
+
+    Not a full npm-semver parser — we only guard against obviously-malformed
+    strings (empty, spaces inside a single range token, non-ASCII). Valid
+    ranges like ``~2.1.0``, ``^2.0``, ``^2.0.0-0``, ``>=1.4``, ``=2.1.0``,
+    ``1.2.3``, ``x.y.z - a.b.c``, logical OR chains ``a || b`` all pass.
+    """
+    if not isinstance(text, str) or not text:
+        return False
+    try:
+        text.encode("ascii")
+    except UnicodeEncodeError:
+        return False
+    # Logical OR — each side must be a valid range on its own.
+    if "||" in text:
+        return all(_is_valid_semver_range(part) for part in text.split("||"))
+    # Hyphen range ("x.y.z - a.b.c") — must be checked before the atom regex
+    # since the atom regex does not allow internal whitespace.
+    if _SEMVER_HYPHEN_RE.match(text):
+        return True
+    return bool(_SEMVER_ATOM_RE.match(text))
+
+
+def _path_has_traversal(path: str) -> bool:
+    """Return True when ``path`` contains a `..` path segment.
+
+    Splits on both ``/`` and ``\\`` so Windows-style paths are caught too.
+    """
+    if not isinstance(path, str):
+        return False
+    parts = re.split(r"[\\/]+", path)
+    return any(p == ".." for p in parts)
+
+
+def validate_dependencies(manifest: dict[str, Any], report: ValidationReport) -> None:
+    """Validate the ``dependencies`` array per plugin-dependencies.md:29-67.
+
+    Each entry is either:
+      * a bare string (plugin name only), or
+      * a dict ``{name, version?, marketplace?}``.
+
+    ``name`` is required and must match the plugin kebab-case name pattern.
+    ``version`` is optional and must parse as a syntactic semver range.
+    ``marketplace`` is optional and must also match the name pattern.
+    Extra unknown sub-keys produce a MINOR finding so consumers notice.
+    """
+    if "dependencies" not in manifest:
+        return
+    deps = manifest["dependencies"]
+    if not isinstance(deps, list):
+        report.major(
+            f"'dependencies' must be an array, got {type(deps).__name__} (plugin-dependencies.md:29)",
+            ".claude-plugin/plugin.json",
+        )
+        return
+    known_subkeys = {"name", "version", "marketplace"}
+    for i, entry in enumerate(deps):
+        if isinstance(entry, str):
+            if not _PLUGIN_NAME_RE.match(entry):
+                report.major(
+                    f"'dependencies[{i}]' bare-string name '{entry}' is not a valid kebab-case plugin name",
+                    ".claude-plugin/plugin.json",
+                )
+            continue
+        if not isinstance(entry, dict):
+            report.major(
+                f"'dependencies[{i}]' must be a string or object, got {type(entry).__name__} "
+                "(plugin-dependencies.md:29-50)",
+                ".claude-plugin/plugin.json",
+            )
+            continue
+        # name — required
+        if "name" not in entry:
+            report.major(
+                f"'dependencies[{i}]' object missing required 'name' field "
+                "(plugin-dependencies.md:46)",
+                ".claude-plugin/plugin.json",
+            )
+        else:
+            dep_name = entry["name"]
+            if not isinstance(dep_name, str) or not _PLUGIN_NAME_RE.match(dep_name):
+                report.major(
+                    f"'dependencies[{i}].name' must be a kebab-case plugin name, got {dep_name!r}",
+                    ".claude-plugin/plugin.json",
+                )
+        # version — optional; syntactic range check
+        if "version" in entry:
+            dep_version = entry["version"]
+            if not isinstance(dep_version, str) or not _is_valid_semver_range(dep_version):
+                report.major(
+                    f"'dependencies[{i}].version' is not a valid semver range: {dep_version!r} "
+                    "(plugin-dependencies.md:44-52)",
+                    ".claude-plugin/plugin.json",
+                )
+        # marketplace — optional; must be a plugin-style kebab name
+        if "marketplace" in entry:
+            market = entry["marketplace"]
+            if not isinstance(market, str) or not _PLUGIN_NAME_RE.match(market):
+                report.major(
+                    f"'dependencies[{i}].marketplace' must be a kebab-case marketplace name, got {market!r}",
+                    ".claude-plugin/plugin.json",
+                )
+        # unknown sub-keys — MINOR so authors notice typos
+        for extra in set(entry.keys()) - known_subkeys:
+            report.minor(
+                f"'dependencies[{i}].{extra}' is not a recognized dependency sub-field "
+                "(recognized: name, version, marketplace)",
+                ".claude-plugin/plugin.json",
+            )
+    if deps:
+        report.passed(f"'dependencies' schema valid: {len(deps)} entry(ies)", ".claude-plugin/plugin.json")
+
+
+def validate_user_config_structure(manifest: dict[str, Any], report: ValidationReport) -> None:
+    """Validate the ``userConfig`` root per plugins-reference.md:414-435.
+
+    Each entry accepts optional ``description`` (string) and ``sensitive`` (bool).
+    Keys must be Python identifiers. Unknown sub-fields emit MINOR so typos
+    surface during validation. (This helper is complementary to the stricter
+    runtime-title check that lives inline in ``validate_manifest`` and keeps
+    existing plugins that rely on ``title``/``type``/``default`` healthy.)
+    """
+    if "userConfig" not in manifest:
+        return
+    uc = manifest["userConfig"]
+    if not isinstance(uc, dict):
+        # The inline validator in validate_manifest already emits a MAJOR for
+        # non-dict userConfig — no need to duplicate it here.
+        return
+    # Sub-fields the runtime understands (title/type/default/sensitive/description);
+    # unknown keys beyond this set are MINOR.
+    known_sub = {"title", "description", "sensitive", "type", "default"}
+    for key, entry in uc.items():
+        if not isinstance(key, str) or not _IDENTIFIER_RE.match(key):
+            report.major(
+                f"'userConfig.{key}' key must be a valid identifier "
+                "(plugins-reference.md:414-435)",
+                ".claude-plugin/plugin.json",
+            )
+            continue
+        if not isinstance(entry, dict):
+            # Inline validator already reports a MAJOR — do not duplicate.
+            continue
+        # description — optional per spec; type-checked when present.
+        if "description" in entry and not isinstance(entry["description"], str):
+            report.major(
+                f"'userConfig.{key}.description' must be a string, got {type(entry['description']).__name__}",
+                ".claude-plugin/plugin.json",
+            )
+        # sensitive — optional per spec; must be bool when present.
+        if "sensitive" in entry and not isinstance(entry["sensitive"], bool):
+            report.major(
+                f"'userConfig.{key}.sensitive' must be a boolean, got {type(entry['sensitive']).__name__}",
+                ".claude-plugin/plugin.json",
+            )
+        # Unknown sub-fields — MINOR so authors notice typos.
+        for extra in set(entry.keys()) - known_sub:
+            report.minor(
+                f"'userConfig.{key}.{extra}' is not a recognized sub-field "
+                "(recognized: title, description, sensitive, type, default)",
+                ".claude-plugin/plugin.json",
+            )
+
+
+def _mcp_server_keys(manifest: dict[str, Any], plugin_root: Path) -> set[str] | None:
+    """Resolve the set of declared MCP server names.
+
+    Returns ``None`` when the set cannot be determined (e.g. ``mcpServers``
+    is a path string that cannot be loaded) so callers can skip cross-ref
+    checks rather than emit false-positive MAJORs.
+    """
+    if "mcpServers" not in manifest:
+        return set()
+    mcp = manifest["mcpServers"]
+    if isinstance(mcp, dict):
+        # Inline object — either {name: config, ...} directly, or the MCP-standard
+        # wrapper shape {"mcpServers": {name: config, ...}}.
+        if "mcpServers" in mcp and isinstance(mcp["mcpServers"], dict):
+            return set(mcp["mcpServers"].keys())
+        return set(mcp.keys())
+    if isinstance(mcp, str):
+        mcp_path = (plugin_root / mcp.lstrip("./")).resolve()
+        if not mcp_path.is_file():
+            return None
+        try:
+            data = json.loads(mcp_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None
+        if isinstance(data, dict):
+            if "mcpServers" in data and isinstance(data["mcpServers"], dict):
+                return set(data["mcpServers"].keys())
+            return set(data.keys())
+        return None
+    return None
+
+
+def validate_channels_structure(
+    manifest: dict[str, Any], plugin_root: Path, report: ValidationReport
+) -> None:
+    """Validate the ``channels`` array per plugins-reference.md:438-455.
+
+    Each entry is a dict with required ``server`` (string). ``server`` MUST
+    match a key in the plugin's ``mcpServers``. ``mcpServers`` may be an
+    inline dict or a path string pointing at an MCP config — when it's a path
+    we try to resolve it from ``plugin_root``; if the file cannot be loaded
+    we skip the cross-reference check rather than emit a false positive.
+
+    The optional per-entry ``userConfig`` follows the same schema as the
+    top-level one; we validate structure inline since the helper is scoped
+    to the root manifest.
+    """
+    if "channels" not in manifest:
+        return
+    channels = manifest["channels"]
+    if not isinstance(channels, list):
+        report.major(
+            f"'channels' must be an array, got {type(channels).__name__} (plugins-reference.md:438)",
+            ".claude-plugin/plugin.json",
+        )
+        return
+    mcp_keys = _mcp_server_keys(manifest, plugin_root)
+    for i, entry in enumerate(channels):
+        if not isinstance(entry, dict):
+            report.major(
+                f"'channels[{i}]' must be an object (plugins-reference.md:438-455)",
+                ".claude-plugin/plugin.json",
+            )
+            continue
+        # server — required + cross-reference
+        if "server" not in entry:
+            report.major(
+                f"'channels[{i}]' missing required 'server' field "
+                "(plugins-reference.md:438-455)",
+                ".claude-plugin/plugin.json",
+            )
+        elif not isinstance(entry["server"], str):
+            report.major(
+                f"'channels[{i}].server' must be a string, got {type(entry['server']).__name__}",
+                ".claude-plugin/plugin.json",
+            )
+        elif mcp_keys is not None and entry["server"] not in mcp_keys:
+            # mcp_keys may be empty (no mcpServers declared) — still a MAJOR
+            # because channels[].server MUST reference an existing MCP server.
+            report.major(
+                f"'channels[{i}].server' = '{entry['server']}' does not match any key in mcpServers "
+                "(plugins-reference.md:438-455)",
+                ".claude-plugin/plugin.json",
+            )
+        # per-channel userConfig — optional; reuse identifier + type checks.
+        if "userConfig" in entry:
+            cuc = entry["userConfig"]
+            if not isinstance(cuc, dict):
+                report.major(
+                    f"'channels[{i}].userConfig' must be an object, got {type(cuc).__name__}",
+                    ".claude-plugin/plugin.json",
+                )
+            else:
+                for ck, cv in cuc.items():
+                    if not isinstance(ck, str) or not _IDENTIFIER_RE.match(ck):
+                        report.major(
+                            f"'channels[{i}].userConfig.{ck}' key must be a valid identifier",
+                            ".claude-plugin/plugin.json",
+                        )
+                    if isinstance(cv, dict):
+                        if "description" in cv and not isinstance(cv["description"], str):
+                            report.major(
+                                f"'channels[{i}].userConfig.{ck}.description' must be a string",
+                                ".claude-plugin/plugin.json",
+                            )
+                        if "sensitive" in cv and not isinstance(cv["sensitive"], bool):
+                            report.major(
+                                f"'channels[{i}].userConfig.{ck}.sensitive' must be a boolean",
+                                ".claude-plugin/plugin.json",
+                            )
+
+
+def _validate_monitors_array(entries: list[Any], source_label: str, report: ValidationReport) -> None:
+    """Shared per-entry validator for monitors arrays (inline or external file)."""
+    seen: set[str] = set()
+    known = {"name", "command", "description", "when"}
+    for i, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            report.major(
+                f"monitors[{i}] must be an object (plugins-reference.md:268-318)",
+                source_label,
+            )
+            continue
+        # name — required + unique
+        name = entry.get("name")
+        if not isinstance(name, str) or not name:
+            report.major(
+                f"monitors[{i}] missing required 'name' field (plugins-reference.md:302-318)",
+                source_label,
+            )
+        elif name in seen:
+            report.major(
+                f"monitors[{i}] duplicate 'name' = '{name}' — monitor names must be unique",
+                source_label,
+            )
+        else:
+            seen.add(name)
+        # command — required
+        if not isinstance(entry.get("command"), str) or not entry.get("command"):
+            report.major(
+                f"monitors[{i}] missing required 'command' field (plugins-reference.md:302-318)",
+                source_label,
+            )
+        # description — required
+        if not isinstance(entry.get("description"), str) or not entry.get("description"):
+            report.major(
+                f"monitors[{i}] missing required 'description' field (plugins-reference.md:302-318)",
+                source_label,
+            )
+        # when — optional; must match "always" or "on-skill-invoke:<name>"
+        if "when" in entry:
+            when_val = entry["when"]
+            if not isinstance(when_val, str) or not _MONITOR_WHEN_RE.match(when_val):
+                report.major(
+                    f"monitors[{i}].when = {when_val!r} must match 'always' or "
+                    "'on-skill-invoke:<skill-name>' (plugins-reference.md:302-318)",
+                    source_label,
+                )
+        # unknown keys — MINOR
+        if isinstance(entry, dict):
+            for extra in set(entry.keys()) - known:
+                report.minor(
+                    f"monitors[{i}].{extra} is not a recognized monitor field "
+                    "(recognized: name, command, description, when)",
+                    source_label,
+                )
+
+
+def validate_monitors_entries(
+    manifest: dict[str, Any], plugin_root: Path, report: ValidationReport
+) -> None:
+    """Validate the ``monitors`` entries per plugins-reference.md:268-318.
+
+    ``monitors`` may be inline in plugin.json OR a path string pointing at a
+    ``monitors.json`` file. Either shape is an array of dicts requiring
+    ``name`` (unique), ``command``, and ``description``. Optional ``when``
+    must match the ``always``/``on-skill-invoke:<name>`` grammar.
+    """
+    if "monitors" not in manifest:
+        return
+    monitors = manifest["monitors"]
+    if isinstance(monitors, list):
+        _validate_monitors_array(monitors, ".claude-plugin/plugin.json", report)
+        return
+    if isinstance(monitors, str):
+        # Path string — resolve relative to plugin_root and load.
+        rel = monitors.lstrip("./")
+        monitors_path = (plugin_root / rel).resolve()
+        if not monitors_path.is_file():
+            # Missing file is already flagged elsewhere (path validator);
+            # we only check contents when the file actually exists.
+            return
+        try:
+            data = json.loads(monitors_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as err:
+            report.major(f"monitors file could not be parsed: {err}", monitors)
+            return
+        # monitors.json can be an array or {monitors: [...]} wrapper.
+        if isinstance(data, list):
+            _validate_monitors_array(data, monitors, report)
+        elif isinstance(data, dict) and isinstance(data.get("monitors"), list):
+            _validate_monitors_array(data["monitors"], monitors, report)
+        else:
+            report.major(
+                f"monitors file must contain an array or {{'monitors': [...]}} wrapper, "
+                f"got {type(data).__name__}",
+                monitors,
+            )
+        return
+    report.major(
+        f"'monitors' must be an array or path string, got {type(monitors).__name__} "
+        "(plugins-reference.md:268-318)",
+        ".claude-plugin/plugin.json",
+    )
+
+
 def validate_manifest(
     plugin_root: Path, report: ValidationReport, marketplace_only: bool = False
 ) -> dict[str, Any] | None:
@@ -182,6 +601,7 @@ def validate_manifest(
         "monitors",  # v2.1.105 — background monitor configs (monitors/monitors.json by default)
         "userConfig",  # User-configurable values prompted at enable time (v2.1.80)
         "channels",  # Channel declarations for message injection (v2.1.85)
+        "dependencies",  # v2.1.110+ — plugin dependency declarations with semver ranges (see plugin-dependencies.md)
     }
     for key in manifest.keys():
         if key not in known_fields:
@@ -199,7 +619,7 @@ def validate_manifest(
                 ".claude-plugin/plugin.json",
             )
 
-    # Validate author field structure
+    # Validate author field structure (plugins-reference.md:352 — object supports {name, email, url})
     if "author" in manifest:
         author = manifest["author"]
         if isinstance(author, str):
@@ -217,6 +637,12 @@ def validate_manifest(
                 )
             else:
                 report.passed("Author object has valid 'name' field", ".claude-plugin/plugin.json")
+            # author.url (optional, v2.1.x — spec plugins-reference.md:352)
+            if "url" in author and not isinstance(author["url"], str):
+                report.major(
+                    f"'author.url' must be a string, got {type(author['url']).__name__}",
+                    ".claude-plugin/plugin.json",
+                )
         else:
             report.major(
                 f"'author' must be a string or object, got {type(author).__name__}",
@@ -244,6 +670,8 @@ def validate_manifest(
                 )
 
     # Validate component path fields start with ./
+    # Also rejects `..` segments per plugins-reference.md:568-571 — paths escaping the
+    # plugin root never resolve post-install because external files aren't copied to the cache.
     path_fields = [
         "commands",
         "agents",
@@ -252,6 +680,7 @@ def validate_manifest(
         "mcpServers",
         "outputStyles",
         "lspServers",
+        "monitors",
     ]
     for key in path_fields:
         if key in manifest:
@@ -259,6 +688,13 @@ def validate_manifest(
             if isinstance(value, str) and not value.startswith("./"):
                 report.major(
                     f"Field '{key}' path must start with './': {value}",
+                    ".claude-plugin/plugin.json",
+                )
+            if isinstance(value, str) and _path_has_traversal(value):
+                report.major(
+                    f"Field '{key}' contains path-traversal segment '..': {value} — "
+                    "paths escaping the plugin root do not resolve post-install "
+                    "(plugins-reference.md:568-571)",
                     ".claude-plugin/plugin.json",
                 )
             elif isinstance(value, list):
@@ -271,6 +707,13 @@ def validate_manifest(
                     elif not path.startswith("./"):
                         report.major(
                             f"Field '{key}[{i}]' path must start with './': {path}",
+                            ".claude-plugin/plugin.json",
+                        )
+                    elif _path_has_traversal(path):
+                        report.major(
+                            f"Field '{key}[{i}]' contains path-traversal segment '..': {path} — "
+                            "paths escaping the plugin root do not resolve post-install "
+                            "(plugins-reference.md:568-571)",
                             ".claude-plugin/plugin.json",
                         )
             elif isinstance(value, dict):
@@ -451,6 +894,14 @@ def validate_manifest(
                 ".claude-plugin/plugin.json",
             )
 
+    # v2.22.0 spec-parity helpers — dependencies, userConfig sub-fields, channels/mcp
+    # cross-ref, and monitors entry shape. Each helper is a no-op when the corresponding
+    # field is absent so unused manifests pay zero extra cost.
+    validate_dependencies(manifest, report)
+    validate_user_config_structure(manifest, report)
+    validate_channels_structure(manifest, plugin_root, report)
+    validate_monitors_entries(manifest, plugin_root, report)
+
     return cast(dict[str, Any], manifest)
 
 
@@ -565,7 +1016,8 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
             else:
                 # "agent" is the primary plugin-level setting; "extraKnownMarketplaces"
                 # is the v2.1.80 inline-marketplace declaration validated separately below.
-                recognized_keys = {"agent", "extraKnownMarketplaces"}
+                # "subagentStatusLine" is the v2.1.x plugin-scoped override (plugins.md:278-288).
+                recognized_keys = {"agent", "extraKnownMarketplaces", "subagentStatusLine"}
                 has_unrecognized = False
                 for key in settings_data:
                     if key not in recognized_keys:

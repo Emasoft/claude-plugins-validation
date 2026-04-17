@@ -93,6 +93,17 @@ Reads the current user's `~/.claude.json` and reports any
 `projects[<abs_path>].mcpServers` entries as INFO so you can see which
 local MCP servers Claude Code has registered for this project.
 
+### 6b. `.claude/loop.md` (v2.22.0, scheduled-tasks.md)
+If the file exists and is NOT git-tracked, it is validated under local
+scope. `.claude/loop.md` replaces the built-in `/loop` maintenance prompt
+(project-level takes precedence over `~/.claude/loop.md`).
+- **CRITICAL**: file is not UTF-8 decodable.
+- **MAJOR**: file exceeds 25,000 bytes (scheduled-tasks.md truncates above
+  this cap).
+- **INFO** otherwise: confirms the file is a maintenance instruction, not
+  an inadvertent command. Tracked `loop.md` is the responsibility of
+  `/cpv-validate-project-scope`.
+
 ### 7. `.gitignore` coverage
 - **MINOR**: `.claude/settings.local.json` is not covered by any
   `.gitignore` line (accepts `.claude/`, `.claude/settings.local.json`,

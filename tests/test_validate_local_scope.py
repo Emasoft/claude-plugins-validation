@@ -702,3 +702,78 @@ class TestTrackedRulesDoNotDuplicate:
             f"Tracked rule foo.md must NOT appear in [rules] local findings; "
             f"got leaks: {leaked}"
         )
+
+
+# =============================================================================
+# v2.22.0: .claude/loop.md local-scope coverage
+#
+# Per scheduled-tasks.md, `.claude/loop.md` replaces the built-in `/loop`
+# maintenance prompt. When the file is NOT git-tracked, it belongs to local
+# scope. The validator enforces a 25 KB size cap (scheduled-tasks.md says
+# content above that is silently truncated by Claude Code) and requires
+# UTF-8 decodability.
+# =============================================================================
+
+
+class TestLoopMdLocalScope:
+    """`.claude/loop.md` recognition under local scope (TRDD-479cde0c §NOW #19)."""
+
+    def test_loop_md_untracked_validated_under_local_scope(self, project: Path) -> None:
+        """An untracked `.claude/loop.md` produces a finding mentioning loop.md.
+
+        The validator should NOT flag loop.md as an unknown file and should
+        emit at least one finding (INFO by default) that names the file, so
+        users can confirm the content is intentional.
+        """
+        _write_untracked(
+            project, ".claude/loop.md", "# Loop prompt\n\nRun /review-pr 1234\n"
+        )
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        all_msgs = [r.message for r in report.results]
+        assert any(
+            "loop.md" in m for m in all_msgs
+        ), f"Expected a finding mentioning loop.md; got: {all_msgs}"
+
+    def test_loop_md_size_cap_major(self, project: Path) -> None:
+        """A `.claude/loop.md` larger than 25,000 bytes fires a MAJOR."""
+        # 30 KB of content — comfortably above the 25,000-byte cap.
+        oversized = "x" * 30_000
+        _write_untracked(project, ".claude/loop.md", oversized)
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        majors = _messages(report, "MAJOR")
+        assert any(
+            "loop.md" in m and ("25000" in m or "25,000" in m or "cap" in m)
+            for m in majors
+        ), f"Expected MAJOR about loop.md size cap; got MAJORs: {majors}"
+
+    def test_loop_md_non_utf8_critical(self, project: Path) -> None:
+        """A `.claude/loop.md` with non-UTF-8 bytes fires a CRITICAL."""
+        # Write raw bytes that are not valid UTF-8 (lone continuation byte 0x80
+        # and invalid-start byte 0xff).
+        full = project / ".claude" / "loop.md"
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_bytes(b"\xff\xfe\x80\x81 binary gibberish \xc0\xc1")
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        criticals = _messages(report, "CRITICAL")
+        assert any(
+            "loop.md" in m and ("read failed" in m or "UnicodeDecodeError" in m)
+            for m in criticals
+        ), f"Expected CRITICAL about loop.md UTF-8 decode; got CRITICALs: {criticals}"
+
+    def test_loop_md_tracked_skipped_by_local_validator(self, project: Path) -> None:
+        """A TRACKED `.claude/loop.md` must not produce a local-scope finding —
+        it belongs to validate_project_scope. The local validator silently
+        skips it (no MAJOR, no CRITICAL, no INFO mentioning it)."""
+        _commit(project, ".claude/loop.md", "Tracked loop content.\n")
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        # No local-scope finding should mention loop.md — the tracked file
+        # is project-scope's concern.
+        loop_findings = [r.message for r in report.results if "loop.md" in r.message]
+        assert loop_findings == [], (
+            f"Tracked loop.md must NOT produce local-scope findings; got: "
+            f"{loop_findings}"
+        )

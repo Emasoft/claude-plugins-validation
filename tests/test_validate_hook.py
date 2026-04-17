@@ -2478,3 +2478,130 @@ def test_clean_quoted_command_produces_no_malformed_finding(tmp_path: Path):
     assert not any("unparseable" in m or "unbalanced quote" in m for m in major_msgs), (
         f"Clean quoted command must not produce malformed-quote MAJOR; got MAJORs: {major_msgs}"
     )
+
+
+class TestV22HookMatcherValues:
+    """v2.22.0 (spec-audit-3 §1.5, §1.7): matcher-value completeness on
+    SessionEnd / StopFailure / InstructionsLoaded / ConfigChange / Notification,
+    PreToolUse `permissionDecision` output `"defer"`, and recognition of the
+    `${CLAUDE_PLUGIN_DATA}` / `${user_config.KEY}` substitution tokens.
+
+    Each test anchors on a single spec line from hooks.md or plugins-reference.md
+    to give a future maintainer a stable cite when the check is touched.
+    """
+
+    def test_pretool_use_defer_decision_accepted(self) -> None:
+        """hooks.md L984, L1013-1053: `permissionDecision: "defer"` is valid
+        (v2.1.89+, non-interactive `-p` mode only). CPV does not deeply validate
+        hook output JSON, so we assert on the authoritative allowed-values
+        constant instead — any downstream output validator must honour this set.
+        """
+        from validate_hook import PRETOOLUSE_PERMISSION_DECISIONS
+
+        assert "defer" in PRETOOLUSE_PERMISSION_DECISIONS, (
+            "PreToolUse permissionDecision must accept 'defer' per hooks.md L984 "
+            "(added in Claude Code v2.1.89 for non-interactive `-p` mode)."
+        )
+        # Sanity check: the 3 pre-v2.1.89 values are still allowed.
+        assert {"allow", "deny", "ask"}.issubset(PRETOOLUSE_PERMISSION_DECISIONS)
+
+    def test_session_end_reason_bypass_permissions_disabled_accepted(self) -> None:
+        """hooks.md L192: SessionEnd reason `bypass_permissions_disabled` is one
+        of the 6 official reasons. The matcher-value check must NOT emit an
+        INFO "not a known reason" for it.
+        """
+        report = ValidationReport()
+        ok = validate_matcher("bypass_permissions_disabled", "SessionEnd", report)
+        assert ok is True
+        unknown_infos = [
+            r.message for r in report.results
+            if r.level == "INFO" and "not a known reason" in r.message
+        ]
+        assert unknown_infos == [], (
+            f"'bypass_permissions_disabled' must be a recognised SessionEnd "
+            f"reason; got INFOs: {unknown_infos}"
+        )
+
+    def test_instructions_loaded_reason_compact_accepted(self) -> None:
+        """hooks.md L201 + L787: InstructionsLoaded load_reason `compact` fires
+        when instruction files are re-loaded after a compaction event. Must be
+        recognised by CPV's matcher-value check.
+        """
+        report = ValidationReport()
+        ok = validate_matcher("compact", "InstructionsLoaded", report)
+        assert ok is True
+        unknown_infos = [
+            r.message for r in report.results
+            if r.level == "INFO" and "not a known load_reason" in r.message
+        ]
+        assert unknown_infos == [], (
+            f"'compact' must be a recognised InstructionsLoaded load_reason; "
+            f"got INFOs: {unknown_infos}"
+        )
+
+    def test_stopfailure_error_max_output_tokens_accepted(self) -> None:
+        """hooks.md L200: StopFailure error `max_output_tokens` (v2.1.78) is
+        one of the 7 official error values.
+        """
+        report = ValidationReport()
+        ok = validate_matcher("max_output_tokens", "StopFailure", report)
+        assert ok is True
+        unknown_infos = [
+            r.message for r in report.results
+            if r.level == "INFO" and "not a known error" in r.message
+        ]
+        assert unknown_infos == [], (
+            f"'max_output_tokens' must be a recognised StopFailure error; "
+            f"got INFOs: {unknown_infos}"
+        )
+
+    def test_claude_plugin_data_substitution_not_flagged(self, tmp_path: Path) -> None:
+        """plugins-reference.md L484-550: `${CLAUDE_PLUGIN_DATA}` is the
+        persistent-data substitution token (paired with CLAUDE_PLUGIN_ROOT).
+        A hook command that uses it must not draw any CRITICAL, MAJOR, or
+        "unknown substitution" finding.
+        """
+        report = ValidationReport()
+        hook = {"type": "command", "command": "${CLAUDE_PLUGIN_DATA}/cache/foo.db"}
+        ok = validate_command_hook(hook, "PreToolUse", tmp_path, report)
+        assert ok is True
+        assert not report.has_critical, (
+            f"${{CLAUDE_PLUGIN_DATA}} must not produce CRITICAL; got "
+            f"{[r.message for r in report.results if r.level == 'CRITICAL']}"
+        )
+        assert not report.has_major, (
+            f"${{CLAUDE_PLUGIN_DATA}} must not produce MAJOR; got "
+            f"{[r.message for r in report.results if r.level == 'MAJOR']}"
+        )
+        # Belt-and-suspenders: no "unknown substitution" messaging at any level.
+        assert not any(
+            "unknown substitution" in r.message.lower() for r in report.results
+        ), (
+            "${CLAUDE_PLUGIN_DATA} must be recognised as a known substitution "
+            "token per plugins-reference.md L484-550."
+        )
+
+    def test_user_config_substitution_not_flagged(self, tmp_path: Path) -> None:
+        """plugins-reference.md L423-432: `${user_config.<KEY>}` is the plugin
+        userConfig substitution token (surfaced at runtime as
+        CLAUDE_PLUGIN_OPTION_<KEY>). A hook command that uses it must not
+        draw any CRITICAL, MAJOR, or "unknown substitution" finding.
+        """
+        report = ValidationReport()
+        hook = {"type": "command", "command": "${user_config.api_token}"}
+        ok = validate_command_hook(hook, "PreToolUse", tmp_path, report)
+        assert ok is True
+        assert not report.has_critical, (
+            f"${{user_config.KEY}} must not produce CRITICAL; got "
+            f"{[r.message for r in report.results if r.level == 'CRITICAL']}"
+        )
+        assert not report.has_major, (
+            f"${{user_config.KEY}} must not produce MAJOR; got "
+            f"{[r.message for r in report.results if r.level == 'MAJOR']}"
+        )
+        assert not any(
+            "unknown substitution" in r.message.lower() for r in report.results
+        ), (
+            "${user_config.<KEY>} must be recognised as a known substitution "
+            "token per plugins-reference.md L423-432."
+        )

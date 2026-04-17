@@ -53,7 +53,7 @@ EVENTS_WITH_MATCHERS = {
     "PostCompact",  # matcher: manual, auto (v2.1.76)
     "Setup",  # matcher: (legacy — not in official docs as of v2.1.86)
     "SessionStart",  # matcher: startup, resume, clear, compact
-    "SessionEnd",  # matcher: clear, resume, logout, prompt_input_exit, other
+    "SessionEnd",  # matcher: clear, resume, logout, prompt_input_exit, bypass_permissions_disabled, other (hooks.md L192)
     "SubagentStart",  # matcher: agent name (Bash, Explore, Plan, custom)
     "SubagentStop",  # matcher: agent name
     "ConfigChange",  # matcher: user_settings, project_settings, local_settings, policy_settings, skills
@@ -147,6 +147,58 @@ SETUP_TRIGGERS = {"init", "maintenance"}
 
 # SessionStart source types
 SESSION_START_SOURCES = {"startup", "resume", "clear", "compact"}
+
+# SessionEnd reason values (hooks.md L192).
+# `bypass_permissions_disabled` was added in a later v2.1.x point release alongside
+# `prompt_input_exit`; CPV accepts it as of v2.22.0 (spec-audit-3 §1.5).
+SESSION_END_REASONS = {
+    "clear",
+    "resume",
+    "logout",
+    "prompt_input_exit",
+    "bypass_permissions_disabled",
+    "other",
+}
+
+# StopFailure error values (hooks.md L200).
+# 7 values total; `max_output_tokens` was the last add (v2.1.78).
+STOPFAILURE_ERRORS = {
+    "rate_limit",
+    "authentication_failed",
+    "billing_error",
+    "invalid_request",
+    "server_error",
+    "max_output_tokens",
+    "unknown",
+}
+
+# InstructionsLoaded load_reason values (hooks.md L201 + L787).
+# `compact` fires when instruction files are re-loaded after a compaction event.
+INSTRUCTIONS_LOADED_REASONS = {
+    "session_start",
+    "nested_traversal",
+    "path_glob_match",
+    "include",
+    "compact",
+}
+
+# ConfigChange source values (hooks.md L197).
+CONFIG_CHANGE_SOURCES = {
+    "user_settings",
+    "project_settings",
+    "local_settings",
+    "policy_settings",
+    "skills",
+}
+
+# PreToolUse `permissionDecision` output values (hooks.md L984, L1013-1053).
+# `"defer"` was added in Claude Code v2.1.89+ and only applies in non-interactive
+# `-p` mode. Precedence: deny > defer > ask > allow.
+#
+# CPV does not currently validate the output JSON schema of hook responses, but
+# this constant is exported so downstream validators and tests can reference the
+# authoritative allowed-values set.
+PRETOOLUSE_PERMISSION_DECISIONS = {"allow", "deny", "ask", "defer"}
 
 # Environment variables available in hooks are sourced from
 # cpv_validation_common.VALID_PLUGIN_ENV_VARS + is_valid_plugin_env_var
@@ -394,15 +446,26 @@ def validate_matcher(matcher: Any, event_name: str, report: ValidationReport) ->
                 if re.match(r"^[A-Z][a-zA-Z]+$", part):
                     report.info(f"Matcher '{part}' is not a common tool name (may be custom or MCP tool)")
 
-    # Validate matcher values against known sets for specific event types
+    # Validate matcher values against known sets for specific event types.
+    # These are INFO-level checks (per _check_matcher_values) — unknown values
+    # are hinted at, not rejected, because the spec may grow faster than CPV
+    # catches up and plugins can still legitimately use future values.
     if event_name == "Notification":
         _check_matcher_values(matcher, COMMON_NOTIFICATION_TYPES, "Notification", "type", report)
     if event_name == "SessionStart":
         _check_matcher_values(matcher, SESSION_START_SOURCES, "SessionStart", "source", report)
+    if event_name == "SessionEnd":
+        _check_matcher_values(matcher, SESSION_END_REASONS, "SessionEnd", "reason", report)
     if event_name == "PreCompact":
         _check_matcher_values(matcher, COMPACT_TRIGGERS, "PreCompact", "trigger", report)
     if event_name == "PostCompact":
         _check_matcher_values(matcher, COMPACT_TRIGGERS, "PostCompact", "trigger", report)
+    if event_name == "StopFailure":
+        _check_matcher_values(matcher, STOPFAILURE_ERRORS, "StopFailure", "error", report)
+    if event_name == "InstructionsLoaded":
+        _check_matcher_values(matcher, INSTRUCTIONS_LOADED_REASONS, "InstructionsLoaded", "load_reason", report)
+    if event_name == "ConfigChange":
+        _check_matcher_values(matcher, CONFIG_CHANGE_SOURCES, "ConfigChange", "source", report)
 
     return True
 

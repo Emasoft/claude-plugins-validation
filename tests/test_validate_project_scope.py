@@ -788,3 +788,58 @@ class TestProjectPluginCacheHighestSemver:
             f"removeprefix must strip exactly one 'v'. If the resolver "
             f"picked 'v1.0.0', the lstrip bug returned; got: {picked.name}"
         )
+
+
+# =============================================================================
+# v2.22.0: .claude/loop.md project-scope coverage
+#
+# Per scheduled-tasks.md, `.claude/loop.md` replaces the built-in `/loop`
+# maintenance prompt. When the file IS git-tracked, it belongs to project
+# scope. The validator enforces the 25 KB truncation cap and requires
+# UTF-8 decodability. Silent when the file does not exist.
+# =============================================================================
+
+
+class TestLoopMdProjectScope:
+    """`.claude/loop.md` recognition under project scope (TRDD-479cde0c §NOW #19)."""
+
+    def test_loop_md_tracked_validated_under_project_scope(
+        self, project: Path
+    ) -> None:
+        """A git-tracked `.claude/loop.md` produces at least one finding that
+        names the file — confirms the project-scope validator is actually
+        walking it (not silently skipping)."""
+        _commit(project, ".claude/loop.md", "# Loop prompt\n\nRun /review-pr\n")
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        all_msgs = [r.message for r in report.results]
+        assert any(
+            "loop.md" in m for m in all_msgs
+        ), f"Expected a finding mentioning tracked loop.md; got: {all_msgs}"
+
+    def test_loop_md_missing_is_silent(self, project: Path) -> None:
+        """If `.claude/loop.md` does not exist, the validator must not emit
+        ANY finding that mentions loop.md — silent absence is the correct
+        behaviour. (Everything else in the report is fine; only loop.md
+        must be silent.)"""
+        # No loop.md in the tree — but commit something unrelated so the
+        # validator has real work to do (avoids the "no config found" INFO).
+        _commit(project, ".claude/settings.json", '{"model": "sonnet"}\n')
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        loop_findings = [r.message for r in report.results if "loop.md" in r.message]
+        assert loop_findings == [], (
+            f"Missing loop.md must produce NO findings; got: {loop_findings}"
+        )
+
+    def test_loop_md_tracked_size_cap_major(self, project: Path) -> None:
+        """A tracked `.claude/loop.md` larger than 25,000 bytes fires MAJOR."""
+        oversized = "y" * 30_000
+        _commit(project, ".claude/loop.md", oversized)
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        majors = _messages(report, "MAJOR")
+        assert any(
+            "loop.md" in m and ("25000" in m or "25,000" in m or "cap" in m)
+            for m in majors
+        ), f"Expected MAJOR about tracked loop.md size cap; got MAJORs: {majors}"

@@ -33,6 +33,7 @@ from validate_skill_comprehensive import (  # noqa: E402
     RE_TIME_SENSITIVE,
     ValidationReport,
     validate_allowed_tools_field,
+    validate_effort_field,
     validate_mcp_tool_references,
     validate_metadata_field,
     validate_name_field,
@@ -1748,4 +1749,48 @@ class TestV2212NonStringAllowedTools:
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
         assert any("allowed-tools" in m and ("string" in m or "type" in m.lower()) for m in major_msgs), (
             f"Expected MAJOR mentioning allowed-tools type, got MAJORs: {major_msgs}"
+        )
+
+
+class TestV22SkillEffort:
+    """v2.22.0: skill effort field accepts xhigh (Opus 4.7) + max (Opus 4.6 legacy).
+
+    Spec sources:
+      - skills.md L192 — effort: low|medium|high|xhigh|max.
+      - cli-reference.md --effort — same value set for CLI flags.
+    """
+
+    def test_skill_effort_xhigh_accepted(self):
+        """effort: xhigh is accepted (v2.1.111 Opus 4.7 addition) — no MAJOR emitted."""
+        report = ValidationReport()
+        # Pair with opus model so the Opus-only guard for xhigh does NOT fire a
+        # secondary MAJOR — this test isolates the value-acceptance check.
+        validate_effort_field({"effort": "xhigh", "model": "opus"}, report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not any("Invalid 'effort'" in m for m in major_msgs), (
+            f"xhigh must be accepted per skills.md L192; got MAJORs: {major_msgs}"
+        )
+        passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
+        assert any("'effort' field valid: xhigh" in m for m in passed_msgs), (
+            f"Expected PASSED 'effort field valid: xhigh'; got PASSEDs: {passed_msgs}"
+        )
+
+    def test_skill_effort_max_accepted(self):
+        """effort: max remains accepted (Opus 4.6 legacy) — backward compat preserved."""
+        report = ValidationReport()
+        validate_effort_field({"effort": "max", "model": "opus"}, report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not any("Invalid 'effort'" in m for m in major_msgs), (
+            f"max must remain accepted for Opus 4.6 compat; got MAJORs: {major_msgs}"
+        )
+        passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
+        assert any("'effort' field valid: max" in m for m in passed_msgs)
+
+    def test_skill_effort_invalid_rejected(self):
+        """effort: insane (not in {low, medium, high, xhigh, max}) must emit MAJOR."""
+        report = ValidationReport()
+        validate_effort_field({"effort": "insane"}, report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("Invalid 'effort' value: 'insane'" in m for m in major_msgs), (
+            f"Expected MAJOR rejecting 'insane'; got MAJORs: {major_msgs}"
         )

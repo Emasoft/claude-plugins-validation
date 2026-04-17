@@ -37,6 +37,7 @@ from cpv_validation_common import (
     SECRET_PATTERNS,
     USER_PATH_PATTERNS,
     VALID_CONTEXT_VALUES,
+    VALID_EFFORT_VALUES,
     VALID_MODELS,
     VALID_TOOLS,
     ValidationReport,
@@ -644,7 +645,11 @@ def validate_memory_field(frontmatter: dict[str, Any], filename: str, report: Ag
 
 
 def validate_isolation_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
-    """Validate the 'isolation' frontmatter field."""
+    """Validate the 'isolation' frontmatter field.
+
+    Per plugins-reference.md:70, ``"worktree"`` is the only documented value.
+    Anything else (including an empty string) is rejected as MAJOR.
+    """
     if "isolation" not in frontmatter:
         return
 
@@ -652,9 +657,16 @@ def validate_isolation_field(frontmatter: dict[str, Any], filename: str, report:
     isolation_val = frontmatter["isolation"]
     if not isinstance(isolation_val, str):
         report.major(f"'isolation' must be a string, got {type(isolation_val).__name__}", rel_path)
+    elif not isolation_val.strip():
+        report.major(
+            "'isolation' field cannot be empty. "
+            "'worktree' is the only valid value per plugins-reference.md:70.",
+            rel_path,
+        )
     elif isolation_val not in VALID_ISOLATION_VALUES:
         report.major(
-            f"Invalid 'isolation' value: '{isolation_val}'. Must be one of: {sorted(VALID_ISOLATION_VALUES)}",
+            f"Invalid 'isolation' value: '{isolation_val}'. "
+            "'worktree' is the only valid value per plugins-reference.md:70.",
             rel_path,
         )
     else:
@@ -688,7 +700,16 @@ def validate_background_field(frontmatter: dict[str, Any], filename: str, report
 
 
 def validate_effort_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
-    """Validate the 'effort' frontmatter field (v2.1.78)."""
+    """Validate the 'effort' frontmatter field (v2.1.78+).
+
+    Accepted values per sub-agents.md L244 + cli-reference.md --effort:
+      low | medium | high | xhigh | max
+
+    - ``xhigh`` was added in v2.1.111 for Opus 4.7 only — any non-Opus model
+      with ``xhigh`` fails at runtime, so we mirror the same strict check
+      applied to ``max``.
+    - ``max`` remains supported (Opus 4.6 legacy) for backward compatibility.
+    """
     if "effort" not in frontmatter:
         return
 
@@ -701,26 +722,29 @@ def validate_effort_field(frontmatter: dict[str, Any], filename: str, report: Ag
         report.major("'effort' field cannot be empty", rel_path)
         return
 
-    valid_effort_values = {"low", "medium", "high", "max"}  # "max" is Opus 4.6 only
-    if effort_val.lower() not in valid_effort_values:
-        report.major(f"Invalid 'effort' value: '{effort_val}'. Must be one of: {sorted(valid_effort_values)}", rel_path)
+    if effort_val.lower() not in VALID_EFFORT_VALUES:
+        report.major(
+            f"Invalid 'effort' value: '{effort_val}'. Must be one of: {sorted(VALID_EFFORT_VALUES)}",
+            rel_path,
+        )
         return
 
     report.passed(f"Valid effort: {effort_val}", rel_path)
 
-    # "max" effort requires model: opus
-    if effort_val.lower() == "max":
+    # "max" and "xhigh" effort require an Opus model.
+    # "xhigh" is Opus 4.7 only; "max" is Opus 4.6 legacy. Both fail on non-Opus.
+    if effort_val.lower() in {"max", "xhigh"}:
         model = frontmatter.get("model", "")
         model_str = str(model).lower() if model else ""
         if model_str and "opus" not in model_str:
             report.major(
-                f"effort: max requires an Opus model, but model is '{model}'. "
+                f"effort: {effort_val} requires an Opus model, but model is '{model}'. "
                 "Use effort: high for non-Opus models, or set model: opus.",
                 rel_path,
             )
         elif not model_str:
             report.warning(
-                "effort: max only works with Opus models. No 'model' field set — "
+                f"effort: {effort_val} only works with Opus models. No 'model' field set — "
                 "this agent will fail if the session uses a non-Opus model. "
                 "Consider adding 'model: opus' or using effort: high.",
                 rel_path,

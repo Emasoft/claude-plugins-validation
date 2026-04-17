@@ -38,6 +38,7 @@ from validate_agent import (  # noqa: E402
     validate_context_field,
     validate_description_field,
     validate_disallowed_tools_field,
+    validate_effort_field,
     validate_example_blocks,
     validate_frontmatter_exists,
     validate_hooks_field,
@@ -1304,4 +1305,122 @@ class TestV2212NonDictFrontmatter:
         critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
         assert any("Frontmatter must be a YAML mapping" in m for m in critical_msgs), (
             f"Expected CRITICAL about non-dict frontmatter, got CRITICALs: {critical_msgs}"
+        )
+
+
+class TestV22AgentFrontmatterUpdates:
+    """v2.22.0: effort: xhigh (Opus 4.7), memory enum, isolation enum guardrails.
+
+    Spec sources:
+      - sub-agents.md L244 + cli-reference.md --effort — effort: xhigh added v2.1.111.
+      - claude-directory.md L374, L656 + memory.md L35 — memory: project|local|user.
+      - plugins-reference.md:70 — isolation: worktree is the only documented value.
+    """
+
+    # --- effort: xhigh / max / unknown ---
+
+    def test_effort_xhigh_accepted(self):
+        """effort: xhigh is accepted (v2.1.111 Opus 4.7 addition) — no MAJOR."""
+        report = AgentValidationReport()
+        # Use an Opus model so the xhigh Opus-only guard does NOT fire a secondary MAJOR.
+        validate_effort_field({"effort": "xhigh", "model": "opus"}, "agent.md", report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not any("Invalid 'effort'" in m for m in major_msgs), (
+            f"xhigh must be accepted per sub-agents.md L244; got MAJORs: {major_msgs}"
+        )
+        passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
+        assert any("Valid effort: xhigh" in m for m in passed_msgs), (
+            f"Expected PASSED 'Valid effort: xhigh', got PASSEDs: {passed_msgs}"
+        )
+
+    def test_effort_max_accepted(self):
+        """effort: max is still accepted (Opus 4.6 legacy) — backward compat preserved."""
+        report = AgentValidationReport()
+        validate_effort_field({"effort": "max", "model": "opus"}, "agent.md", report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not any("Invalid 'effort'" in m for m in major_msgs), (
+            f"max must remain accepted for Opus 4.6 compat; got MAJORs: {major_msgs}"
+        )
+        passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
+        assert any("Valid effort: max" in m for m in passed_msgs)
+
+    def test_effort_unknown_value_rejected(self):
+        """effort: turbo (not in {low, medium, high, xhigh, max}) must emit MAJOR."""
+        report = AgentValidationReport()
+        validate_effort_field({"effort": "turbo"}, "agent.md", report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("Invalid 'effort' value: 'turbo'" in m for m in major_msgs), (
+            f"Expected MAJOR rejecting 'turbo'; got MAJORs: {major_msgs}"
+        )
+
+    # --- memory: project | local | user ---
+
+    def test_memory_project_accepted(self):
+        """memory: project is a valid scope per claude-directory.md L374."""
+        report = AgentValidationReport()
+        validate_memory_field({"memory": "project"}, "agent.md", report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not any("Invalid 'memory'" in m for m in major_msgs)
+        passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
+        assert any("Valid memory scope: project" in m for m in passed_msgs)
+
+    def test_memory_local_accepted(self):
+        """memory: local is a valid scope per memory.md L35."""
+        report = AgentValidationReport()
+        validate_memory_field({"memory": "local"}, "agent.md", report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not any("Invalid 'memory'" in m for m in major_msgs)
+        passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
+        assert any("Valid memory scope: local" in m for m in passed_msgs)
+
+    def test_memory_user_accepted(self):
+        """memory: user is a valid scope per claude-directory.md L656."""
+        report = AgentValidationReport()
+        validate_memory_field({"memory": "user"}, "agent.md", report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not any("Invalid 'memory'" in m for m in major_msgs)
+        passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
+        assert any("Valid memory scope: user" in m for m in passed_msgs)
+
+    def test_memory_invalid_value_rejected(self):
+        """memory: cluster (not in {project, local, user}) must emit MAJOR."""
+        report = AgentValidationReport()
+        validate_memory_field({"memory": "cluster"}, "agent.md", report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("Invalid 'memory'" in m and "cluster" in m for m in major_msgs), (
+            f"Expected MAJOR rejecting 'cluster'; got MAJORs: {major_msgs}"
+        )
+
+    # --- isolation: worktree is the only valid value ---
+
+    def test_isolation_worktree_accepted(self):
+        """isolation: worktree is the sole documented value per plugins-reference.md:70."""
+        report = AgentValidationReport()
+        validate_isolation_field({"isolation": "worktree"}, "agent.md", report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not any("Invalid 'isolation'" in m for m in major_msgs)
+        passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
+        assert any("Valid isolation mode: worktree" in m for m in passed_msgs)
+
+    def test_isolation_other_value_major(self):
+        """isolation: container must emit MAJOR — 'worktree' is the only valid value."""
+        report = AgentValidationReport()
+        validate_isolation_field({"isolation": "container"}, "agent.md", report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("Invalid 'isolation'" in m and "container" in m for m in major_msgs), (
+            f"Expected MAJOR rejecting 'container'; got MAJORs: {major_msgs}"
+        )
+        # The error message must surface the 'worktree' guidance so authors know
+        # what to use — otherwise the diagnostic is useless.
+        assert any("worktree" in m for m in major_msgs), (
+            f"Expected MAJOR message to cite 'worktree' as the valid value; got: {major_msgs}"
+        )
+
+    def test_isolation_empty_string_major(self):
+        """isolation: '' (empty string) must emit MAJOR — empty is not 'worktree'."""
+        report = AgentValidationReport()
+        validate_isolation_field({"isolation": ""}, "agent.md", report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("isolation" in m and ("empty" in m.lower() or "Invalid" in m) for m in major_msgs), (
+            f"Expected MAJOR for empty isolation; got MAJORs: {major_msgs}"
         )
