@@ -173,6 +173,17 @@ def validate_frontmatter_exists(content: str, report: AgentValidationReport, fil
     if frontmatter is None:
         return None
 
+    # Frontmatter MUST be a mapping (dict). yaml.safe_load can return any
+    # valid YAML type (scalar, list, str, etc.); treating those as frontmatter
+    # and calling .keys() on them would crash with AttributeError. Reject
+    # non-dict frontmatter as malformed.
+    if not isinstance(frontmatter, dict):
+        report.critical(
+            f"Frontmatter must be a YAML mapping, got {type(frontmatter).__name__}",
+            filename,
+        )
+        return None
+
     report.passed("Valid YAML frontmatter", filename)
 
     # Check for unknown fields
@@ -1186,7 +1197,10 @@ def validate_agents_directory(agents_dir: Path) -> list[AgentValidationReport]:
         report.critical(f"Not a directory: {agents_dir}")
         return [report]
 
-    agent_files = list(agents_dir.glob("*.md"))
+    # Case-insensitive .md match — Path.glob is case-sensitive on POSIX, so
+    # files named Agent.MD / foo.Md would be silently skipped on Linux/macOS
+    # even though Claude Code treats them as valid agent files.
+    agent_files = [p for p in agents_dir.iterdir() if p.is_file() and p.suffix.lower() == ".md"]
 
     if not agent_files:
         report = AgentValidationReport(agent_path=str(agents_dir))
@@ -1300,11 +1314,14 @@ def main() -> int:
         print(f"Error: {path} does not exist", file=sys.stderr)
         return 1
 
-    # Verify content type — must be .md file or directory containing .md files
-    if path.is_file() and path.suffix != ".md":
+    # Verify content type — must be .md file or directory containing .md files.
+    # Use case-insensitive suffix check to stay consistent with validate_agent()
+    # (which compares suffix.lower()) and to handle case-sensitive filesystems
+    # where .MD / .Md are legal filenames.
+    if path.is_file() and path.suffix.lower() != ".md":
         print(f"Error: {path} is not a Markdown (.md) agent file", file=sys.stderr)
         return 1
-    if path.is_dir() and not list(path.glob("*.md")):
+    if path.is_dir() and not any(p.suffix.lower() == ".md" for p in path.iterdir() if p.is_file()):
         print(f"Error: No agent definition files (.md) found in {path}", file=sys.stderr)
         return 1
 

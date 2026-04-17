@@ -384,15 +384,21 @@ def _flag_missing_schema(data: dict[str, Any], report: ValidationReport, file_la
 
 def validate_settings_json_project_scope(
     settings_path: Path, report: ValidationReport
-) -> None:
-    """Apply project-scope rules to ``.claude/settings.json`` contents."""
+) -> dict[str, Any] | None:
+    """Apply project-scope rules to ``.claude/settings.json`` contents.
+
+    Returns the parsed JSON dict on success so the orchestrator can reuse
+    it for subtree deep validation (hooks/mcpServers/lspServers/
+    enabledPlugins) without parsing the same file twice. Returns None
+    when the file fails to parse or the root is not a JSON object.
+    """
     file_label = ".claude/settings.json"
     data = _load_json_or_report(settings_path, MAX_SETTINGS_JSON_BYTES, report, file_label)
     if data is None:
-        return
+        return None
     if not isinstance(data, dict):
         report.critical("settings.json root must be a JSON object", file_label)
-        return
+        return None
 
     _flag_rejected_top_level_keys(data, report, file_label)
     _flag_rejected_nested_keys(data, report, file_label)
@@ -407,6 +413,7 @@ def validate_settings_json_project_scope(
 
     if not report.has_critical and not report.has_major and not report.has_minor:
         report.passed("settings.json project-scope rules OK", file_label)
+    return data
 
 
 # =============================================================================
@@ -698,11 +705,22 @@ def validate_claude_md_file(
 ) -> None:
     """Validate a CLAUDE.md file (project root or .claude/).
 
-    ``repo_root`` is used to build relative labels; the symlink-escape
-    check is skipped here because the caller already verified the file
-    is tracked by git (symlinks would have been rejected by the commit).
+    ``repo_root`` is used to build relative labels. A ``resolve_within``
+    check is applied defensively: although ``classify_file_scope`` in
+    the caller restricts us to git-tracked files, git DOES track
+    symlinks as blobs pointing at arbitrary targets — so a committed
+    symlink could still resolve outside the repo. Per the module's
+    "Every rglob/file hit is re-resolved via resolve_within" invariant,
+    we enforce the check here too and skip escapes.
     """
     rel = md_path.relative_to(repo_root)
+    real = resolve_within(md_path, repo_root)
+    if real is None:
+        report.major(
+            f"{rel}: path resolves outside the repo root (symlink escape) — skipping",
+            str(rel),
+        )
+        return
     content = _read_text_or_report(md_path, MAX_CLAUDE_MD_BYTES, report, str(rel))
     if content is None:
         return
@@ -804,8 +822,12 @@ def _deep_validate_tracked_file(
     try:
         subreport = validator_fn(path)
     except Exception as exc:  # pragma: no cover — defensive
+        # Module invariant (see module docstring §"Security invariants"):
+        # exception messages are reported via type(exc).__name__ only —
+        # never str(exc). JSON/YAML decode error messages embed excerpts
+        # of the failing input, which may contain real secrets.
         parent_report.critical(
-            f"[{label_kind}] {rel}: validator raised {type(exc).__name__}: {exc}",
+            f"[{label_kind}] {rel}: validator raised {type(exc).__name__}",
             str(rel),
         )
         return
@@ -856,6 +878,11 @@ def validate_project_skills_deep(
     """Run `validate_skill_comprehensive` on every skill dir whose SKILL.md is TRACKED."""
     from validate_skill_comprehensive import validate_skill as _deep_validate_skill  # noqa: E402
 
+    # Hoist the tracked-files lookup out of the loop: one ``git ls-files``
+    # subprocess covers the whole skills_dir tree. Previously this spawned
+    # one subprocess per skill_dir (O(N) overhead on large plugins).
+    tracked = list_tracked_files_under(skills_dir, repo_root) or set()
+
     count = 0
     for skill_dir in sorted(skills_dir.iterdir()):
         if not skill_dir.is_dir():
@@ -877,15 +904,16 @@ def validate_project_skills_deep(
         real = resolve_within(skill_md, project_root)
         if real is None:
             continue
-        tracked = list_tracked_files_under(skill_dir, repo_root) or set()
         if real not in tracked:
             continue  # untracked skill — validate_local_scope's concern
         try:
             subreport = _deep_validate_skill(skill_dir)
         except Exception as exc:  # pragma: no cover — defensive
+            # Module invariant: never leak str(exc) — validator exception
+            # messages may embed excerpts of user files (see module docstring).
             report.critical(
                 f"[skill .claude/skills/{skill_dir.name}]: validator raised "
-                f"{type(exc).__name__}: {exc}",
+                f"{type(exc).__name__}",
                 f".claude/skills/{skill_dir.name}",
             )
             continue
@@ -988,7 +1016,12 @@ def _resolve_plugin_cache_dir_project(plugin_name: str, marketplace: str) -> Pat
     if not versions:
         return base
     def _version_key(p: Path) -> tuple:
-        parts = p.name.lstrip("v").split(".")
+        # ``str.lstrip`` treats its argument as a set of characters, so a
+        # directory named e.g. ``vv1.0.0`` would become ``1.0.0`` (both
+        # leading v's stripped) — wrong for semver sort. ``removeprefix``
+        # strips exactly one occurrence of the ``v`` prefix, which matches
+        # the canonical ``v<major>.<minor>.<patch>`` plugin-cache layout.
+        parts = p.name.removeprefix("v").split(".")
         return tuple(int(x) if x.isdigit() else x for x in parts)
     try:
         versions.sort(key=_version_key, reverse=True)
@@ -1064,8 +1097,10 @@ def validate_project_enabled_plugins(
             _vp_skills(cache_dir, subreport, None)
             _vp_rules(cache_dir, subreport)
         except Exception as exc:  # pragma: no cover
+            # Module invariant: exception strings can leak plugin file
+            # contents — use the type name only (see module docstring).
             report.critical(
-                f"[enabledPlugins {key}] validator raised {type(exc).__name__}: {exc}",
+                f"[enabledPlugins {key}] validator raised {type(exc).__name__}",
                 "enabledPlugins",
             )
             continue
@@ -1110,13 +1145,12 @@ def validate_project_scope(project_root: Path, report: ValidationReport) -> None
     settings_path = claude_dir / "settings.json"
     settings_data: dict[str, Any] | None = None
     if classify_file_scope(settings_path, repo_root) == "project":
-        validate_settings_json_project_scope(settings_path, report)
-        # Re-parse to access subtrees.
-        settings_raw = _load_json_or_report(
-            settings_path, MAX_SETTINGS_JSON_BYTES, report, ".claude/settings.json"
-        )
-        if isinstance(settings_raw, dict):
-            settings_data = settings_raw
+        # Parse once: validate_settings_json_project_scope returns the
+        # parsed dict so we can reuse it for subtree deep validation
+        # (hooks/mcpServers/lspServers/enabledPlugins) and avoid parsing
+        # the same JSON file twice.
+        settings_data = validate_settings_json_project_scope(settings_path, report)
+        if settings_data is not None:
             _validate_project_settings_hooks(settings_data, ".claude/settings.json", report)
             _validate_project_settings_mcp(settings_data, ".claude/settings.json", report)
             _validate_project_settings_lsp(settings_data, ".claude/settings.json", report)

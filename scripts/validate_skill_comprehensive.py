@@ -153,7 +153,12 @@ RE_SECOND_PERSON = re.compile(r"\b(You\s+can|You\s+should|You\s+will|You\s+need)
 ABSOLUTE_PATH_PATTERNS = [
     (re.compile(r"/home/\w+/"), "/home/..."),
     (re.compile(r"/Users/\w+/"), "/Users/..."),
-    (re.compile(r"[A-Za-z]:\\\\Users\\\\"), "C:\\Users\\..."),
+    # Raw string `r"...\\..."` is ONE literal backslash in the regex, which in
+    # turn matches a single `\` character — i.e. a real Windows path segment
+    # like `C:\Users\alice\`. The previous `r"...\\\\..."` required a literal
+    # DOUBLE backslash (`C:\\Users\\`) and so silently missed every genuine
+    # Windows path. Do NOT "fix" this by adding more backslashes.
+    (re.compile(r"[A-Za-z]:\\Users\\"), "C:\\Users\\..."),
 ]
 
 # --- Reference Pattern ---
@@ -757,6 +762,14 @@ def _split_tools_string(tools: str) -> list[str]:
     token = "".join(current).strip()
     if token:
         result.append(token)
+    # If parentheses are unbalanced, the paren-aware split above silently
+    # merges tokens (unbalanced `(` keeps depth>0 forever, so subsequent
+    # commas never split). Fall back to a naive comma split so malformed
+    # input still produces the expected token count; downstream callers then
+    # flag the individual unknown tool(s). This prevents a single typo like
+    # "Bash(git:*, Read" from being reported as one mystery token.
+    if depth != 0:
+        return [t.strip() for t in tools.split(",") if t.strip()]
     return result
 
 
@@ -811,6 +824,18 @@ def validate_allowed_tools_field(
 
     # Validate individual tools
     for tool in tool_list:
+        # Guard against YAML list items that aren't strings (e.g. int, bool, None).
+        # Before this guard, `tool.split("(")` would raise AttributeError and crash
+        # the whole run for a single malformed entry like `- 42` in an allowed-tools
+        # YAML list. Report it as MAJOR and skip — we cannot classify a non-string
+        # as a tool name.
+        if not isinstance(tool, str):
+            report.major(
+                f"'allowed-tools' list item must be string, got {type(tool).__name__}: {tool!r}",
+                "SKILL.md",
+                category="Frontmatter",
+            )
+            continue
         # Handle scoped tools like Bash(git:*)
         base_tool = tool.split("(")[0].strip()
         if base_tool and base_tool not in VALID_TOOLS and not base_tool.startswith("mcp__"):
@@ -1338,16 +1363,11 @@ def validate_token_budget(content: str, body: str, report: ValidationReport) -> 
             "SKILL.md",
             category="Token Budget",
         )
-
-    # Line count check (spec: "Keep SKILL.md under 500 lines")
-    line_count = content.count("\n") + 1
-    if line_count > 500:
-        report.minor(
-            f"SKILL.md has {line_count} lines (recommended: under 500). "
-            "Move detailed reference material to supporting files.",
-            "SKILL.md",
-            category="Token Budget",
-        )
+    # NOTE: A duplicate MINOR line-count check used to live here — it re-used
+    # the same 500-line threshold as the MAJOR check above (MAX_SKILL_LINES),
+    # so it could never add information: if you exceeded 500 lines, you already
+    # got the MAJOR; if you were under 500, the MINOR branch was unreachable.
+    # Removed to avoid double-reporting the same threshold at two severities.
 
 
 def validate_required_sections(body: str, report: ValidationReport, strict_mode: bool = False) -> None:

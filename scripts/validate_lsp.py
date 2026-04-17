@@ -84,10 +84,21 @@ PLUGIN_ENV_VARS = VALID_PLUGIN_ENV_VARS
 
 
 def is_absolute_path(path: str) -> bool:
-    """Check if a path appears to be an absolute path."""
-    if path.startswith("/") and not path.startswith("${"):
+    """Check if a path appears to be an absolute path.
+
+    Detects POSIX absolute paths ("/foo"), Windows drive-letter paths using
+    either separator ("C:\\foo" or "C:/foo"), Windows UNC paths ("\\\\server\\share"
+    or "//server/share"), and tilde-expansion paths ("~/foo"). Paths starting
+    with a "${VAR}" env-var reference are never considered absolute because
+    their absoluteness depends on expansion context.
+    """
+    if path.startswith("${"):
+        return False
+    if path.startswith(("/", "\\", "~")):
         return True
-    if len(path) > 2 and path[1] == ":" and path[2] == "\\":
+    # Windows drive-letter paths: "C:\foo" or "C:/foo". Detect on any platform
+    # because LSP configs may be authored on Windows and shipped cross-platform.
+    if len(path) >= 3 and path[1] == ":" and path[2] in ("\\", "/") and path[0].isalpha():
         return True
     return False
 
@@ -129,9 +140,12 @@ def validate_path_value(
     if plugin_root and "${CLAUDE_PLUGIN_ROOT}" in value:
         resolved = value.replace("${CLAUDE_PLUGIN_ROOT}", str(plugin_root))
         resolved_path = Path(resolved)
-        if "." in resolved_path.name or resolved_path.suffix:
-            if not resolved_path.exists():
-                report.info(f"Referenced file may not exist: {value}")
+        # Check existence for ANY resolved path, not only those with an extension.
+        # Extensionless executables (e.g. "pyright-langserver", "gopls") would
+        # otherwise silently skip the existence check and produce no signal
+        # when the binary is genuinely missing from the plugin.
+        if not resolved_path.exists():
+            report.info(f"Referenced file may not exist: {value}")
 
 
 def validate_lsp_server(

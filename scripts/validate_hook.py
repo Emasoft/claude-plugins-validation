@@ -298,8 +298,9 @@ def validate_top_level_structure(data: Any, report: ValidationReport) -> bool:
         else:
             report.passed(f"disableAllHooks: {data['disableAllHooks']}")
 
-    # Check for unknown top-level fields
-    known_top_level = {"hooks", "description", "disableAllHooks"}
+    # Check for unknown top-level fields. `$schema` is a standard JSON Schema
+    # declaration recognized by editors and linters and should not be flagged.
+    known_top_level = {"hooks", "description", "disableAllHooks", "$schema"}
     for key in data:
         if key not in known_top_level:
             report.warning(f"Unknown top-level field '{key}' in hooks config")
@@ -602,9 +603,15 @@ def _find_script_in_interpreter_args(tokens: list[str]) -> int | None:
 
     Skips common option-with-value flags that do NOT precede a script:
       -m MODULE  / -c CODE   → script-less modes; return None entirely
-      -X OPT                 → consumes one value then continues
+      -X OPT   / -W OPT      → consumes one value then continues
       --                     → ends option parsing; next token is the script
       other single-dash flags (-u, -B, -E, ...) → boolean-ish, consume one token
+
+    Note on `-W`: Python's `-W` flag takes a warning-action argument (e.g.
+    `python -W ignore script.py`). Without special-casing it here, the
+    argument `ignore` would be misclassified as the script path and the
+    real script would be skipped. Same applies to `-X` (implementation
+    options like `-X dev`).
     """
     i = 1
     n = len(tokens)
@@ -613,8 +620,9 @@ def _find_script_in_interpreter_args(tokens: list[str]) -> int | None:
         if tok in ("-m", "-c"):
             # -m MODULE / -c CODE — no script path follows. Report as "no script".
             return None
-        if tok == "-X":
-            # -X OPT — consume the next token as the option value and continue.
+        if tok in ("-X", "-W"):
+            # -X OPT / -W ACTION — consume the next token as the option value
+            # and continue. If the flag is the last token, just advance.
             i += 2
             continue
         if tok == "--":
@@ -810,7 +818,11 @@ def extract_script_paths(command: str, plugin_root: Path | None) -> list[ScriptR
                     )
             continue
 
-        # 5. `env [-S] [-i] [...] python3 foo.py`
+        # 5. `env [-S] [-i] [...] [VAR=value ...] python3 foo.py`
+        # The env utility accepts VAR=value assignments before the command
+        # (this is its primary use case — setting env vars for a subprocess).
+        # e.g. `env FOO=bar PYTHONPATH=./lib python3 foo.py`. Skip those so
+        # we land on the actual interpreter token.
         if first_name == "env":
             j = 1
             while j < len(tokens):
@@ -822,6 +834,10 @@ def extract_script_paths(command: str, plugin_root: Path | None) -> list[ScriptR
                     j += 1
                     break
                 if t.startswith("-"):
+                    j += 1
+                    continue
+                if _ENV_ASSIGNMENT_RE.match(t):
+                    # VAR=value before the command — consume and continue.
                     j += 1
                     continue
                 break
@@ -1583,8 +1599,15 @@ def validate_command_hook(
             "'cd' alone has no effect — each hook runs in a fresh shell. Combine with your command: 'cd /dir && your-command'"
         )
 
-    # 3d: Windows-style backslash paths (look for drive-letter patterns or consecutive backslash dirs)
-    if re.search(r"[A-Za-z]:\\\\|\\\\[A-Za-z]", command):
+    # 3d: Windows-style backslash paths. JSON parsing has already un-escaped
+    # `\\` → `\`, so by the time we see the command string the backslashes
+    # are single chars. Match either a drive-letter prefix (`C:\`) or a
+    # path-segment separator where a backslash is followed by an alphanumeric
+    # path component (`\scripts`). We require the backslash to come after a
+    # path-ish anchor (start of token, `/`, or drive colon) to avoid matching
+    # escape sequences like `\n` / `\t` that can legitimately appear inside
+    # quoted string arguments.
+    if re.search(r"[A-Za-z]:\\[A-Za-z0-9_.\- ]|(?:^|[\s/])\\[A-Za-z]", command):
         report.minor(
             "Command contains Windows-style backslash paths — use forward slashes for cross-platform compatibility"
         )
