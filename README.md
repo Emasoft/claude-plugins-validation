@@ -2,7 +2,7 @@
 
 <!--BADGES-START-->
 ![Version](https://img.shields.io/badge/version-2.22.2-blue)
-![Tests](https://img.shields.io/badge/tests-2180%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-2336%20passed-brightgreen)
 ![Validation](https://img.shields.io/badge/validation-0%20issues-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 <!--BADGES-END-->
