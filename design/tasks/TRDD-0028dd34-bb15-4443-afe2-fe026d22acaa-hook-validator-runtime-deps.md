@@ -127,8 +127,28 @@ Else: MAJOR — `Hook invokes '{script}' which imports third-party modules {mods
 
 ### 4.7. Antipattern checks (new)
 
-- In `validate_command_hook`, WARN on `\bunset\s+VIRTUAL_ENV\b` and `\bunset\s+PYTHONPATH\b` with an explanation of why this is suspicious.
-- In `detect_python_third_party_imports` (or a sibling helper), detect top-level `Expr(Call(func=…))` where `func` is `sys.exit` or `exit`, or top-level `Raise(SystemExit)`. WARN at MAJOR: `Script '{script}' calls sys.exit() at module scope — any importer will be killed by SystemExit at import time.`
+**`unset VIRTUAL_ENV` — conditional warning (refined 2026-04-17):**
+
+The initial draft warned on every `unset VIRTUAL_ENV` occurrence. That was
+too broad. There are three real-world patterns:
+
+| Pattern | Verdict | Why |
+|---|---|---|
+| `unset VIRTUAL_ENV; python3 foo.py` | **WARN** | The PSS v3.1.0 failure mode. Sheds user venv, falls back to system `python3` with no project deps. |
+| `unset VIRTUAL_ENV; uv run --script foo.py` | **OK (silent)** | Defensive belt-and-suspenders. uv respects VIRTUAL_ENV by default and might sync into it; unsetting it forces uv to create its own script-scoped cache venv. |
+| `unset VIRTUAL_ENV; ${CLAUDE_PLUGIN_DATA}/.venv/bin/python foo.py` | **OK (silent)** | Direct-invocation of a venv's python resolves `sys.prefix` from the binary path regardless of VIRTUAL_ENV — so unsetting it is redundant but harmless. |
+
+The check therefore fires ONLY when `unset VIRTUAL_ENV` coincides with a
+`interpreter-python` ScriptRef in the same command **and no safer-python ref
+is present**. Same logic applies to `unset PYTHONPATH`.
+
+**Module-scope `sys.exit` / `raise SystemExit`:**
+
+In `detect_python_third_party_imports` (or a sibling helper), detect top-level
+`Expr(Call(func=…))` where `func` is `sys.exit` or `exit`, or top-level
+`Raise(SystemExit)`, and the same forms inside top-level `if` blocks.
+WARN at MAJOR: `Script '{script}' calls sys.exit() at module scope — the
+hook process will be killed at import time if the call path is reached.`
 
 ### 4.8. mypy flag review
 

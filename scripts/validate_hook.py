@@ -1474,25 +1474,6 @@ def validate_command_hook(
         if event_name not in {"SessionStart", "Setup"}:
             report.major("CLAUDE_ENV_FILE is only available in SessionStart and Setup hooks")
 
-    # Antipattern: explicit env-stripping that forces the hook into the system
-    # interpreter, defeating any plugin-managed venv. This was the proximate
-    # cause of the PSS v3.1.0 hook crash: `unset VIRTUAL_ENV; python3 ...`
-    # deliberately shed the project venv, forcing a system python3 that did not
-    # have `pycozo` installed.
-    if re.search(r"\bunset\s+VIRTUAL_ENV\b", command):
-        report.warning(
-            "Command runs `unset VIRTUAL_ENV` before invoking a script — this forces the "
-            "hook into the system interpreter and bypasses any plugin-managed venv. If the "
-            "script has third-party imports, they will fail at runtime. Prefer `uv run --script` "
-            "with PEP 723 metadata, or ${CLAUDE_PLUGIN_DATA}/.venv/bin/python with a SessionStart setup hook."
-        )
-    if re.search(r"\bunset\s+PYTHONPATH\b", command):
-        report.warning(
-            "Command runs `unset PYTHONPATH` — inspect why. If the intent is to avoid "
-            "leaking the user's PYTHONPATH into the hook, prefer isolating via `uv run` "
-            "or a plugin-managed venv."
-        )
-
     # Extract and validate every script referenced by this hook command.
     # Unlike the legacy extractor, this recognizes interpreter forms
     # (`python3 foo.py`), compound commands (`unset VAR; python3 foo.py`),
@@ -1500,6 +1481,47 @@ def validate_command_hook(
     # and `env python3 foo.py` — the extractor also reports the invocation_mode
     # which drives runtime-dep reconciliation and module-scope sys.exit checks.
     refs = extract_script_paths(command, plugin_root)
+
+    # Antipattern: env-stripping that defeats isolation without providing any
+    # replacement. Three patterns exist in the wild:
+    #
+    #   1. `unset VIRTUAL_ENV; python3 foo.py`
+    #      → BAD. PSS v3.1.0 did exactly this, fell back to system python3 with
+    #        no pycozo. The user explicitly sheds the project venv and then
+    #        depends on ambient python3 having the deps.
+    #
+    #   2. `unset VIRTUAL_ENV; uv run --script foo.py`
+    #      → LEGITIMATE. Defensive belt-and-suspenders — uv respects VIRTUAL_ENV
+    #        by default and might try to sync into it; unsetting it forces uv
+    #        to create its own script-scoped cache venv.
+    #
+    #   3. `unset VIRTUAL_ENV; ${CLAUDE_PLUGIN_DATA}/.venv/bin/python foo.py`
+    #      → LEGITIMATE. Direct-invocation of a venv's python resolves sys.prefix
+    #        from the binary path regardless of VIRTUAL_ENV, so unsetting it is
+    #        redundant but harmless.
+    #
+    # Warn only on case 1 — the combination of env-stripping with a plain
+    # interpreter fallback is the actual foot-gun.
+    has_plain_python = any(ref.invocation_mode == "interpreter-python" for ref in refs)
+    has_safer_python = any(
+        ref.invocation_mode in ("uv-run-script", "uv-run-with", "venv-python") for ref in refs
+    )
+    if re.search(r"\bunset\s+VIRTUAL_ENV\b", command) and has_plain_python and not has_safer_python:
+        report.warning(
+            "Command runs `unset VIRTUAL_ENV` and then invokes a plain `python3` interpreter. "
+            "Unsetting VIRTUAL_ENV removes the user's venv but leaves you depending on whatever "
+            "`python3` resolves to on PATH — typically system Python with none of the project's "
+            "dependencies. This is how PSS v3.1.0's UserPromptSubmit hook crashed. Isolate "
+            "properly: `uv run --script` with PEP 723 metadata, or "
+            "`${CLAUDE_PLUGIN_DATA}/.venv/bin/python` (its sys.prefix is resolved from the binary "
+            "path, so VIRTUAL_ENV is ignored without needing to unset it)."
+        )
+    if re.search(r"\bunset\s+PYTHONPATH\b", command) and has_plain_python and not has_safer_python:
+        report.warning(
+            "Command runs `unset PYTHONPATH` before a plain `python3` invocation — by itself this "
+            "does not provide meaningful isolation. Prefer `uv run --script` or direct-invocation "
+            "of a venv's python binary."
+        )
     for ref in refs:
         script_path = ref.path
         if script_path.exists():

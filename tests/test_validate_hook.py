@@ -1183,10 +1183,93 @@ def test_pss_v310_hooks_json_produces_major_regression(tmp_path: Path):
         "plain interpreter" in m and "pycozo" in m for m in major_msgs
     ), f"Expected runtime-dep MAJOR mentioning 'plain interpreter' and 'pycozo'; got MAJORs: {major_msgs}"
 
-    # unset VIRTUAL_ENV antipattern warning
+    # unset VIRTUAL_ENV antipattern warning — fires ONLY because `unset VIRTUAL_ENV`
+    # is combined with plain `python3` (the PSS failure mode). If the hook used
+    # `uv run --script` or venv-python, unsetting VIRTUAL_ENV is a legitimate
+    # defensive pattern and the warning does NOT fire (see separate test below).
     warnings = [r.message for r in report.results if r.level == "WARNING"]
-    assert any("unset VIRTUAL_ENV" in m for m in warnings), (
-        f"Expected WARNING on `unset VIRTUAL_ENV`; got: {warnings}"
+    assert any(
+        "unset VIRTUAL_ENV" in m and "plain `python3`" in m for m in warnings
+    ), f"Expected conditional WARNING on `unset VIRTUAL_ENV + plain python3`; got: {warnings}"
+
+
+def test_unset_virtual_env_with_uv_run_script_no_warning(tmp_path: Path):
+    """`unset VIRTUAL_ENV; uv run --script foo.py` is a LEGITIMATE defensive pattern
+    (shedding user VIRTUAL_ENV so uv creates its own cache venv). Must NOT warn.
+    """
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    script = scripts_dir / "safe.py"
+    script.write_text(
+        '# /// script\n'
+        '# dependencies = ["pycozo"]\n'
+        '# ///\n'
+        "import pycozo\n"
+    )
+    import os
+    os.chmod(script, 0o755)
+
+    hooks_dir = tmp_path / "hooks"
+    hooks_dir.mkdir()
+    hooks_file = hooks_dir / "hooks.json"
+    hooks_file.write_text(
+        json.dumps({
+            "hooks": {
+                "UserPromptSubmit": [{
+                    "hooks": [{
+                        "type": "command",
+                        "command": 'unset VIRTUAL_ENV; uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/safe.py"',
+                    }]
+                }]
+            }
+        })
+    )
+    report = validate_hooks(hooks_file, plugin_root=tmp_path)
+    warnings = [r.message for r in report.results if r.level == "WARNING"]
+    assert not any("unset VIRTUAL_ENV" in m for m in warnings), (
+        f"Should NOT warn on `unset VIRTUAL_ENV` when combined with `uv run --script` "
+        f"(legitimate defensive pattern); got: {warnings}"
+    )
+
+
+def test_unset_virtual_env_with_venv_python_no_warning(tmp_path: Path):
+    """`unset VIRTUAL_ENV; ${CLAUDE_PLUGIN_DATA}/.venv/bin/python foo.py` is legitimate
+    (redundant but harmless — direct-invocation of the venv python ignores VIRTUAL_ENV).
+    Must NOT warn.
+    """
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    script = scripts_dir / "safe.py"
+    script.write_text("import pycozo\n")
+    import os
+    os.chmod(script, 0o755)
+
+    hooks_dir = tmp_path / "hooks"
+    hooks_dir.mkdir()
+    hooks_file = hooks_dir / "hooks.json"
+    hooks_file.write_text(
+        json.dumps({
+            "hooks": {
+                "SessionStart": [{
+                    "hooks": [{
+                        "type": "command",
+                        "command": 'uv venv "${CLAUDE_PLUGIN_DATA}/.venv" && uv pip install pycozo',
+                    }]
+                }],
+                "UserPromptSubmit": [{
+                    "hooks": [{
+                        "type": "command",
+                        "command": 'unset VIRTUAL_ENV; "${CLAUDE_PLUGIN_DATA}/.venv/bin/python" "${CLAUDE_PLUGIN_ROOT}/scripts/safe.py"',
+                    }]
+                }]
+            }
+        })
+    )
+    report = validate_hooks(hooks_file, plugin_root=tmp_path)
+    warnings = [r.message for r in report.results if r.level == "WARNING"]
+    assert not any("unset VIRTUAL_ENV" in m for m in warnings), (
+        f"Should NOT warn on `unset VIRTUAL_ENV` when combined with venv-python; "
+        f"got: {warnings}"
     )
 
 
