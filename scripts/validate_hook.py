@@ -1057,7 +1057,10 @@ def reconcile_python_runtime_deps(
             f"Hook invokes {label} via plain interpreter — third-party imports "
             f"{sorted(imports)} will fail at runtime unless satisfied via "
             f"`uv run --script` + PEP 723 metadata, `uv run --with`, or a "
-            f"${{CLAUDE_PLUGIN_DATA}}/.venv/bin/python set up by a SessionStart hook."
+            f"${{CLAUDE_PLUGIN_DATA}}/.venv/bin/python set up by a SessionStart hook. "
+            f"(Note: do NOT substitute `uvx` — `uvx` / `uv tool run` runs installable "
+            f"PyPI packages via entry-points, not local script files with PEP 723 metadata. "
+            f"There is no `uvx --script` flag. `uv run --script` is the correct tool here.)"
         )
         return
 

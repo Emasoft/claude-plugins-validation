@@ -227,6 +227,39 @@ All four phases land in one commit sequence for this TRDD.
 - Validating non-Python hook scripts for runtime deps (JS/TS node_modules resolution is out of scope for now — can be a follow-up TRDD).
 - Detecting dynamic imports (`importlib.import_module`, `__import__`) — AST-only, static analysis only.
 
+## 8.5. `uvx` vs `uv run --script` (recommendation-design note)
+
+Published for the avoidance of doubt after a user question during TRDD review:
+
+**The validator recommends `uv run --script`, not `uvx`.** They are NOT
+interchangeable:
+
+| Tool | Purpose | Can target a local `.py` file with PEP 723 metadata? |
+|---|---|---|
+| `uv run --script foo.py` | Run a local script; resolve deps from the script's PEP 723 inline metadata block | **Yes — purpose-built for this.** |
+| `uvx pkg` / `uv tool run pkg` | Run an installable PyPI package (or git URL) via its `[project.scripts]` entry-point | **No.** `uvx /path/to/pss_hook.py` tries to resolve `pss_hook.py` as a PyPI package name and fails. There is no `uvx --script` flag. |
+
+Secondary reasons `uv run --script` is the right primitive for hook scripts:
+
+1. **Cache invalidation**: `uv run --script` keys its cache on the script's
+   PEP 723 metadata hash. When a plugin update bumps a dependency range
+   (e.g. `pycozo>=0.7.6 → >=0.8`), the cache auto-invalidates on the next
+   run. `uvx`-installed tools persist across invocations and require
+   explicit `uv tool upgrade` to refresh.
+2. **No user-visible state**: `uv run --script` operates silently in its
+   cache. `uvx` installations show up in `uv tool list` and pollute the
+   user's tool namespace — bad for a hook that runs in someone else's
+   environment.
+3. **Packaging burden**: to use `uvx`, the plugin would have to publish
+   the hook as a pip-installable package (PyPI release, pyproject.toml
+   with `[project.scripts]` entry-point, version bumps tied to release).
+   `uv run --script` needs only a `# /// script` header comment.
+
+The reconciliation MAJOR message for `interpreter-python` mode therefore
+explicitly calls out `uvx` as a non-substitute, so plugin authors who
+reach for the shorter command don't mistakenly "fix" the warning by
+switching to a tool that doesn't support their use case.
+
 ## 9. References
 
 - Incident transcript: supplied by user 2026-04-17 in session; preserved in this TRDD's section 1 for posterity.
