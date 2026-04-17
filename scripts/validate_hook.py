@@ -100,6 +100,13 @@ COMMAND_ONLY_EVENTS = {
     "TaskCreated",  # v2.1.84
 }
 
+# Events that only support "command" hooks — a STRICT subset of
+# COMMAND_ONLY_EVENTS. Per hooks.md L687 and L2109, SessionStart rejects
+# `http`, `prompt`, and `agent` hook types unconditionally.
+COMMAND_STRICT_EVENTS = {
+    "SessionStart",
+}
+
 # Common tool names for matcher validation hints
 COMMON_TOOL_NAMES = {
     "Bash",
@@ -2103,7 +2110,15 @@ def validate_single_hook(
         return False
 
     # Validate hook type is allowed for this event
-    if hook_type in {"prompt", "agent"} and event_name in COMMAND_ONLY_EVENTS:
+    if event_name in COMMAND_STRICT_EVENTS and hook_type != "command":
+        # hooks.md L687/L2109 — SessionStart supports ONLY command hooks.
+        hook_path_str = report.hook_path
+        report.critical(
+            f"Event '{event_name}' only supports 'command' hooks, not '{hook_type}'. "
+            "Per hooks.md L687/L2109, http/prompt/agent hooks are not supported for this event.",
+            hook_path_str,
+        )
+    elif hook_type in {"prompt", "agent"} and event_name in COMMAND_ONLY_EVENTS:
         hook_path_str = report.hook_path
         report.critical(
             f"Event '{event_name}' only supports 'command' or 'http' hooks, not '{hook_type}'. Prompt and agent hooks are not supported for this event.",
@@ -2117,6 +2132,17 @@ def validate_single_hook(
             f"'async: true' is only supported on 'command' or 'http' hooks, not '{hook_type}'. Prompt and agent hooks cannot run asynchronously.",
             hook_path_str,
         )
+
+    # asyncRewake implies async per hooks.md L305. Flag contradictions.
+    if "asyncRewake" in hook:
+        rewake_val = hook.get("asyncRewake")
+        if rewake_val is True and hook.get("async") is False:
+            hook_path_str = report.hook_path
+            report.minor(
+                "'asyncRewake: true' implies 'async: true' (hooks.md L305) — "
+                "'async: false' contradicts it and the hook will still run in the background.",
+                hook_path_str,
+            )
 
     # Validate based on type
     if hook_type == "command":

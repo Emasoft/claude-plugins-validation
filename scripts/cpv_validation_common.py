@@ -345,6 +345,26 @@ SETTINGS_SOURCE_REQUIRED_FIELDS: dict[str, set[str]] = {
     "pathPattern": {"pathPattern"},  # v2.1.98+
 }
 
+# =============================================================================
+# strictKnownMarketplaces: an allowlist of marketplace identities used to
+# LOCK DOWN which marketplaces a managed Claude Code install may load from.
+# Per plugin-marketplaces.md:625-669 the allowed source-shape enumeration is
+# INTENTIONALLY NARROWER than extraKnownMarketplaces:
+#   - github:      {source: "github", repo: "owner/name"}
+#   - url:         {source: "url", url: "https://..."}
+#   - hostPattern: {source: "hostPattern", hostPattern: "<regex>"}
+#   - pathPattern: {source: "pathPattern", pathPattern: "<regex>"}
+# Using any other type (npm, git, git-subdir, settings, file, directory)
+# here is accepted by CPV's broader VALID_SETTINGS_SOURCE_TYPES set but
+# rejected at runtime by Claude Code — hence a MAJOR finding.
+# =============================================================================
+STRICT_KNOWN_MARKETPLACES_ALLOWED_SOURCE_TYPES: frozenset[str] = frozenset({
+    "github",
+    "url",
+    "hostPattern",
+    "pathPattern",
+})
+
 # Valid tool names for Claude Code agents
 VALID_TOOLS = {
     "Read",
@@ -386,7 +406,13 @@ VALID_TOOLS = {
     "SendMessage",  # Agent teams — message teammates or resume subagents
     "TeamCreate",  # Agent teams — create a team
     "TeamDelete",  # Agent teams — disband a team
-    "PushNotification",  # v2.1.110 — mobile push notifications when Remote Control enabled
+    # NOTE: `PushNotification` is not currently enumerated in tools-reference.md L13-49.
+    # It was added to CPV under the rationale of v2.1.110 remote-control push support
+    # but remains unverified against the official tools table. Kept here so authors
+    # who use it do not trip a CPV MAJOR; revisit when tools-reference.md confirms.
+    "PushNotification",
+    "SlashCommand",  # v1.0.123 — enables Claude to invoke your slash commands
+    "MCPSearch",  # v2.1.7 — MCP-specific tool search (distinct from generic ToolSearch)
 }
 
 # Valid model short names for agents (v2.1.74+: full model IDs also accepted)
@@ -481,6 +507,104 @@ VALID_PLUGIN_ENV_VARS = {
     "OTEL_METRICS_INCLUDE_ACCOUNT_UUID",
     "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",
     "OTEL_RESOURCE_ATTRIBUTES",
+    # v2.22.2 batch: ANTHROPIC_* core API vars referenced pervasively in plugin
+    # docs, env blocks, and settings.json env maps. False-positive source if absent.
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_BEDROCK_BASE_URL",
+    "ANTHROPIC_BETAS",  # v2.1.98 — beta opt-ins as env var
+    "ANTHROPIC_CUSTOM_HEADERS",
+    "ANTHROPIC_VERTEX_BASE_URL",
+    "ANTHROPIC_VERTEX_PROJECT_ID",
+    "ANTHROPIC_VERTEX_REGION",
+    # Anthropic model-override env vars (v2.0.17 / v2.1.78 / v2.1.84)
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTS",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTS",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTS",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION",
+    # Plugin-lifecycle CLAUDE_CODE_PLUGIN_* env vars (v2.1.51 / v2.1.72 /
+    # v2.1.78 / v2.1.90). Plugin authors legitimately reference these in docs,
+    # CI, and setup scripts — false-positive source if absent.
+    "CLAUDE_CODE_PLUGIN_SEED_DIR",
+    "CLAUDE_CODE_PLUGIN_KEEP_MARKETPLACE_ON_FAILURE",
+    "CLAUDE_CODE_PLUGIN_CACHE_DIR",
+    "CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS",
+    # CLAUDE_CODE_* feature flags / toggles referenced in plugin docs + env blocks
+    "CLAUDE_CODE_SIMPLE",  # v2.1.50 — set by --bare flag
+    "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",  # v2.1.83 — security-critical
+    "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS",  # v2.1.4
+    "CLAUDE_CODE_TMPDIR",  # v2.1.5
+    "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS",  # v2.1.69
+    "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD",  # v2.1.20
+    "CLAUDE_CODE_DISABLE_1M_CONTEXT",  # v2.1.50
+    "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK",  # v2.1.82
+    "CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS",  # v2.1.74
+    "CLAUDE_CODE_PERFORCE_MODE",  # v2.1.98
+    "CLAUDE_CODE_SCRIPT_CAPS",  # v2.1.98
+    "CLAUDE_CODE_USE_MANTLE",  # v2.1.94 — Bedrock Mantle
+    "CLAUDE_CODE_CERT_STORE",  # v2.1.101 — "bundled" to force bundled CAs
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",  # v2.0.17
+    "CLAUDE_CODE_DISABLE_TERMINAL_TITLE",  # v2.1.79
+    "CLAUDE_CODE_EXIT_AFTER_STOP_DELAY",  # v2.0.35
+    "CLAUDE_CODE_ENABLE_AWAY_SUMMARY",  # v2.1.108
+    "CLAUDE_CODE_ENABLE_TASKS",  # v2.1.19
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS",  # v2.1.98
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS",  # v2.1.69
+    "CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS",  # v2.1.0
+    "CLAUDE_CODE_ACCOUNT_UUID",  # v2.1.51 — internal, read-only
+    "CLAUDE_CODE_USER_EMAIL",  # v2.1.51 — internal, read-only
+    "CLAUDE_CODE_ORGANIZATION_UUID",  # v2.1.51 — internal, read-only
+    "CLAUDE_CODE_SHELL",  # v2.0.65 — override shell used for Bash tool
+    "CLAUDE_CODE_DEBUG_LOGS_DIR",  # cli-reference.md --debug-file
+    "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS",  # v2.1.25 / v2.1.81
+    "CLAUDE_CODE_GIT_BASH_PATH",  # v2.1.98 — Windows git-bash path override
+    "CLAUDE_CODE_PROXY_RESOLVES_HOSTS",  # v2.0.55
+    "CLAUDE_CODE_SKIP_BEDROCK_AUTH",  # v2.1.96
+    "CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX",  # v2.1.84
+    "CLAUDE_STREAM_IDLE_TIMEOUT_MS",  # v2.1.84
+    "CLAUDE_BASH_NO_LOGIN",  # v1.0.124 — preserved reference
+    "CLAUDE_CONFIG_DIR",  # env-vars.md — override ~/.claude
+    # MCP-specific env vars (plugin authors reference these in docs)
+    "MCP_CONNECTION_NONBLOCKING",  # v2.1.89
+    "ENABLE_CLAUDEAI_MCP_SERVERS",  # v2.1.63
+    "ENABLE_TOOL_SEARCH",  # v2.1.72
+    # AWS / Bedrock auth env vars
+    "AWS_BEARER_TOKEN_BEDROCK",  # v2.1.94
+    # Auto-updater + feature toggles referenced in plugin READMEs
+    "DISABLE_AUTOUPDATER",  # discover-plugins.md
+    "FORCE_AUTOUPDATE_PLUGINS",  # discover-plugins.md
+    "DISABLE_TELEMETRY",  # v2.1.98
+    "DISABLE_COMPACT",  # v2.1.98
+    "DISABLE_PROMPT_CACHING",  # v2.1.98
+    "DISABLE_PROMPT_CACHING_1H",
+    "DISABLE_PROMPT_CACHING_5M",
+    "ENABLE_PROMPT_CACHING_1H",  # v2.1.108
+    "ENABLE_PROMPT_CACHING_1H_BEDROCK",
+    "FORCE_PROMPT_CACHING_5M",
+    "FORCE_HYPERLINK",  # v2.1.94
+    # OAuth / auth token vars
+    "CLAUDE_CODE_OAUTH_TOKEN",  # env-vars.md
+    "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
+    "CLAUDE_CODE_OAUTH_SCOPES",
+    # Standard Node/proxy/network vars plugins may legitimately document
+    "NODE_EXTRA_CA_CERTS",  # v2.1.73
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    # Demo / dev-only
+    "IS_DEMO",  # v2.1.0
 }
 
 # Env var name pattern matching for dynamic plugin env vars

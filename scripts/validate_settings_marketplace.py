@@ -39,13 +39,15 @@ from cpv_validation_common import (
     COLORS,
     NAME_PATTERN,
     SETTINGS_SOURCE_REQUIRED_FIELDS,
+    STRICT_KNOWN_MARKETPLACES_ALLOWED_SOURCE_TYPES,
     VALID_SETTINGS_SOURCE_TYPES,
     ValidationReport,
     save_report_and_print_summary,
 )
 
-# Top-level key in settings.json that we validate
+# Top-level keys in settings.json that we validate
 EXTRA_KNOWN_MARKETPLACES_KEY = "extraKnownMarketplaces"
+STRICT_KNOWN_MARKETPLACES_KEY = "strictKnownMarketplaces"
 
 
 def _fmt_ctx(marketplace_name: str, *, field: str | None = None) -> str:
@@ -61,6 +63,8 @@ def validate_source_object(
     marketplace_name: str,
     report: ValidationReport,
     file_label: str,
+    *,
+    strict_mode: bool = False,
 ) -> None:
     """Validate a single source object from extraKnownMarketplaces[<name>].source.
 
@@ -69,6 +73,12 @@ def validate_source_object(
         marketplace_name: Name of the marketplace entry this source belongs to
         report: ValidationReport to add results to
         file_label: Filename for error messages (e.g. "settings.json")
+        strict_mode: If True, the source object lives inside
+            ``strictKnownMarketplaces`` where plugin-marketplaces.md:625-669
+            restricts source types to {github, url, hostPattern, pathPattern}.
+            Other otherwise-accepted settings-level types (npm, git, file,
+            directory, settings, git-subdir) emit a MAJOR because Claude Code
+            refuses them at runtime in strict mode.
     """
     ctx = _fmt_ctx(marketplace_name, field="source")
 
@@ -93,6 +103,16 @@ def validate_source_object(
         report.major(
             f"{ctx}.source: unknown source type '{source_type}' "
             f"(valid: {', '.join(sorted(VALID_SETTINGS_SOURCE_TYPES))})",
+            file_label,
+        )
+        return
+
+    # 2b. strict mode narrows the allowlist per plugin-marketplaces.md:625-669
+    if strict_mode and source_type not in STRICT_KNOWN_MARKETPLACES_ALLOWED_SOURCE_TYPES:
+        report.major(
+            f"{ctx}.source: '{source_type}' is not allowed inside strictKnownMarketplaces "
+            f"(only {', '.join(sorted(STRICT_KNOWN_MARKETPLACES_ALLOWED_SOURCE_TYPES))} are accepted "
+            "per plugin-marketplaces.md:625-669)",
             file_label,
         )
         return
@@ -302,6 +322,54 @@ def validate_extra_known_marketplaces(
         validate_source_object(source_obj, marketplace_name, report, file_label)
 
 
+def validate_strict_known_marketplaces(
+    block: list[Any],
+    report: ValidationReport,
+    file_label: str,
+) -> None:
+    """Validate the strictKnownMarketplaces array.
+
+    Per plugin-marketplaces.md:625-669 this is an allowlist used in managed
+    Claude Code installs. Entries are source objects — the spec's allowed
+    source types are NARROWER than extraKnownMarketplaces: only
+    {github, url, hostPattern, pathPattern} are accepted.
+    """
+    if not isinstance(block, list):
+        report.critical(
+            f"{STRICT_KNOWN_MARKETPLACES_KEY}: must be an array, got {type(block).__name__}",
+            file_label,
+        )
+        return
+
+    if not block:
+        report.info(
+            f"{STRICT_KNOWN_MARKETPLACES_KEY}: empty array — lockdown applies, no marketplaces allowed",
+            file_label,
+        )
+        return
+
+    for idx, entry in enumerate(block):
+        synthetic_name = f"[{idx}]"
+        if not isinstance(entry, dict):
+            report.major(
+                f"{STRICT_KNOWN_MARKETPLACES_KEY}{synthetic_name}: must be an object, got {type(entry).__name__}",
+                file_label,
+            )
+            continue
+
+        # strictKnownMarketplaces items are flat source objects, e.g.
+        # {"source": "github", "repo": "owner/name"} — the entry itself IS
+        # the source object (unlike extraKnownMarketplaces where sources are
+        # nested under a marketplace-name key with a "source" sub-object).
+        validate_source_object(
+            entry,
+            synthetic_name,
+            report,
+            file_label,
+            strict_mode=True,
+        )
+
+
 def validate_settings_marketplace_file(
     settings_path: Path,
     report: ValidationReport | None = None,
@@ -339,20 +407,27 @@ def validate_settings_marketplace_file(
         report.critical("settings.json: root must be a JSON object", file_label)
         return report
 
-    # extraKnownMarketplaces is OPTIONAL — if missing, PASS
-    if EXTRA_KNOWN_MARKETPLACES_KEY not in data:
+    saw_any_block = False
+    if EXTRA_KNOWN_MARKETPLACES_KEY in data:
+        saw_any_block = True
+        validate_extra_known_marketplaces(data[EXTRA_KNOWN_MARKETPLACES_KEY], report, file_label)
+
+    if STRICT_KNOWN_MARKETPLACES_KEY in data:
+        saw_any_block = True
+        validate_strict_known_marketplaces(data[STRICT_KNOWN_MARKETPLACES_KEY], report, file_label)
+
+    if not saw_any_block:
         report.passed(
-            f"settings.json has no '{EXTRA_KNOWN_MARKETPLACES_KEY}' block — nothing to validate",
+            f"settings.json has no '{EXTRA_KNOWN_MARKETPLACES_KEY}' or "
+            f"'{STRICT_KNOWN_MARKETPLACES_KEY}' block — nothing to validate",
             file_label,
         )
         return report
 
-    validate_extra_known_marketplaces(data[EXTRA_KNOWN_MARKETPLACES_KEY], report, file_label)
-
     # Summary PASSED line if nothing went wrong
     if not report.has_critical and not report.has_major and not report.has_minor:
         report.passed(
-            f"settings.json: {EXTRA_KNOWN_MARKETPLACES_KEY} block is valid",
+            "settings.json: all marketplace blocks valid",
             file_label,
         )
 

@@ -111,10 +111,31 @@ def test_validate_single_hook_type_errors(tmp_path: Path):
     r2 = HookValidationReport()
     assert validate_single_hook({"type": "webhook", "command": "curl x"}, "PreToolUse", tmp_path, r2) is False
     assert any("Invalid hook type" in r.message for r in r2.results if r.level == "CRITICAL")
-    # Prompt on command-only event (SessionStart)
+    # SessionStart is command-STRICT (hooks.md L687/L2109) — prompt is rejected.
     r3 = HookValidationReport()
     validate_single_hook({"type": "prompt", "prompt": "Do something"}, "SessionStart", tmp_path, r3)
-    assert any("only supports 'command' or 'http'" in r.message for r in r3.results if r.level == "CRITICAL")
+    assert any(
+        "only supports 'command' hooks" in r.message
+        for r in r3.results
+        if r.level == "CRITICAL"
+    )
+    # Prompt on a command-or-http event (Notification) — still CRITICAL with
+    # the legacy message wording.
+    r4 = HookValidationReport()
+    validate_single_hook({"type": "prompt", "prompt": "Do something"}, "Notification", tmp_path, r4)
+    assert any(
+        "only supports 'command' or 'http'" in r.message
+        for r in r4.results
+        if r.level == "CRITICAL"
+    )
+    # v2.22.2 GAP-P2-C2: SessionStart also rejects http hooks (was silently passing).
+    r5 = HookValidationReport()
+    validate_single_hook({"type": "http", "url": "https://x"}, "SessionStart", tmp_path, r5)
+    assert any(
+        "only supports 'command' hooks" in r.message
+        for r in r5.results
+        if r.level == "CRITICAL"
+    ), "expected CRITICAL: SessionStart rejects http hooks"
 
 
 def test_validate_hooks_valid_end_to_end(tmp_path: Path):

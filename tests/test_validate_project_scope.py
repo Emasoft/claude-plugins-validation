@@ -179,16 +179,25 @@ class TestSettingsGlobalConfigKeys:
 
 
 class TestSettingsSecretsInEnv:
-    """Literal credentials in env block are MINOR."""
+    """Literal credentials in env block are CRITICAL when the key name is a
+    known secret, MINOR when the value merely matches a secret pattern.
+    """
 
-    def test_literal_api_key_in_env_is_minor(self, project: Path) -> None:
-        """A literal ghp_... token in env is flagged as MINOR."""
+    def test_literal_api_key_in_env_is_critical(self, project: Path) -> None:
+        """A literal credential for a known-secret env var is CRITICAL.
+
+        v2.22.2 spec update: env-vars.md lists GITHUB_TOKEN, ANTHROPIC_API_KEY,
+        CLAUDE_CODE_OAUTH_TOKEN, AWS_BEARER_TOKEN_BEDROCK and related names
+        as secrets by definition. A hard-coded literal in a shared
+        settings.json ``env`` block commits a credential to version control —
+        CRITICAL, not MINOR. Only ``${VAR}`` expansion is acceptable.
+        """
         payload = {"env": {"GITHUB_TOKEN": "ghp_" + "a" * 40}}
         _commit(project, ".claude/settings.json", json.dumps(payload) + "\n")
         report = ValidationReport()
         validate_project_scope(project, report)
-        assert report.has_minor
-        assert any("GITHUB_TOKEN" in m for m in _messages(report, "MINOR"))
+        assert report.has_critical
+        assert any("GITHUB_TOKEN" in m for m in _messages(report, "CRITICAL"))
 
     def test_env_var_expansion_in_env_is_not_flagged(self, project: Path) -> None:
         """${VAR} expansion in env is the portable pattern and is NOT flagged."""
