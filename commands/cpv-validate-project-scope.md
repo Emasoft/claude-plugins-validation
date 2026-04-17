@@ -100,34 +100,20 @@ WARNING and INFO never block. They are always printed.
 
 ## Execution
 
-### From within a CPV checkout (development)
+Slash commands ALWAYS run the validator from the installed plugin —
+`${CLAUDE_PLUGIN_ROOT}` is set by Claude Code. **Never** fetch scripts
+from GitHub at runtime for in-session validation.
 
 ```bash
-uv run python scripts/validate_project_scope.py "$PROJECT_PATH" \
-  --report docs_dev/validate_project_scope_$(date +%Y%m%d).md
+uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/validate_project_scope.py" \
+  "$PROJECT_PATH" \
+  --report "${PROJECT_PATH}/docs_dev/validate_project_scope_$(date +%Y%m%d).md"
 ```
 
-### From the plugin cache / installed CLI / uvx (remote execution)
+### Alternative invocations (not for slash-command flow)
 
-When CPV runs OUTSIDE its own checkout (e.g. from the Claude Code plugin
-cache or via `uvx`), direct invocation is blocked by the remote-execution
-guard. Use the launcher instead:
-
-```bash
-# Via the plugin cache:
-uv run python "${CPV_ROOT}/scripts/remote_validation.py" \
-  project-scope "$PROJECT_PATH" \
-  -o "${PROJECT_PATH}/docs_dev/validate_project_scope_$(date +%Y%m%d).md"
-
-# Via uvx:
-uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
-  --with pyyaml \
-  cpv-remote-validate project-scope "$PROJECT_PATH" \
-  -o docs_dev/validate_project_scope_$(date +%Y%m%d).md
-```
-
-Accepted aliases (equivalent): `project-scope`, `validate_project_scope`,
-`cpv-validate-project-scope`.
+- **From a CPV checkout** (development): `uv run python scripts/validate_project_scope.py "$PROJECT_PATH"`.
+- **From uvx, CI, or a fresh machine without CPV installed**: `uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-remote-validate project-scope "$PROJECT_PATH"` — GitHub-sourced ephemeral invocation, use only in CI.
 
 ## Related Commands
 

@@ -30,33 +30,71 @@ from typing import Any, Callable, Literal
 
 
 def check_remote_execution_guard() -> None:
-    """Abort if running from a remote location without the remote_validation.py launcher.
+    """Abort if running from an unanchored remote location without the
+    remote_validation.py launcher.
 
-    Detects remote execution by checking if the scripts directory is inside a
-    plugin cache, uvx temp dir, or any path outside the user's working directory.
-    When detected, requires CPV_REMOTE_VALIDATION=1 (set by remote_validation.py)
-    to ensure proper environment isolation.
+    Rationale
+    ---------
+    Validation scripts are designed to be invoked from either:
+
+      (a) A development checkout of the CPV repo (cwd == scripts_dir_parent).
+      (b) A PINNED, INSTALLED Claude Code plugin
+          (`$CLAUDE_PLUGIN_ROOT/scripts/`) — the canonical path for slash-
+          command and agent invocation.
+      (c) The `remote_validation.py` launcher (which sets
+          `CPV_REMOTE_VALIDATION=1` and handles environment isolation).
+
+    Case (b) is the NORMAL path when a user runs `/cpv-validate-local-scope`
+    or any CPV slash command — Claude Code sets `CLAUDE_PLUGIN_ROOT` to the
+    installed plugin's directory and invokes the script from there. Treating
+    this as "remote" was a v2.20.x false-positive that forced users into an
+    undocumented env-var bypass.
+
+    The guard fires ONLY when the scripts directory is in a bona-fide
+    ephemeral location (uvx temp env, pipx venv) OR in a plugin cache that
+    is NOT the one the current invocation advertises via `CLAUDE_PLUGIN_ROOT`.
     """
     if os.environ.get("CPV_REMOTE_VALIDATION") == "1":
         return  # Running via remote_validation.py — isolation is set up
 
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # Case (b): slash-command / agent invocation — CLAUDE_PLUGIN_ROOT is set
+    # by Claude Code and points to the installed plugin. If the running
+    # scripts directory is inside that plugin root, trust it: the plugin is
+    # pinned, version-locked, and already sandboxed by Claude Code's plugin
+    # system. No isolation guard is required.
+    claude_plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT")
+    if claude_plugin_root:
+        try:
+            scripts_path = Path(scripts_dir).resolve()
+            plugin_root_path = Path(claude_plugin_root).resolve()
+            # str.startswith is fine here — both paths are resolved absolutes.
+            if str(scripts_path).startswith(str(plugin_root_path) + os.sep) or str(scripts_path) == str(plugin_root_path):
+                return
+        except (OSError, ValueError):
+            pass
+
     cwd = os.getcwd()
 
-    # Detect known remote execution paths
-    remote_indicators = [
-        "/plugins/cache/",  # Claude Code plugin cache
-        "/.claude/plugins/",  # User plugin dir
+    # Remaining remote-execution indicators — uvx/pipx temp envs only.
+    # Plugin cache paths are INTENTIONALLY not listed here anymore: when the
+    # plugin is invoked via its slash command, CLAUDE_PLUGIN_ROOT catches
+    # the case above; when invoked via `uv run --from /path/to/cache/...`
+    # without CLAUDE_PLUGIN_ROOT set, the cwd check below catches it.
+    ephemeral_indicators = [
         "/uv/tools/",  # uvx temp environment
         "/pipx/venvs/",  # pipx environment
     ]
 
-    is_remote = any(indicator in scripts_dir for indicator in remote_indicators)
+    is_remote = any(indicator in scripts_dir for indicator in ephemeral_indicators)
 
-    # Also detect: scripts dir is not under or above the current working directory
+    # Also detect: scripts dir is not under or above the current working
+    # directory. This catches stale plugin-cache invocations where
+    # CLAUDE_PLUGIN_ROOT is not set (e.g. a user manually running the script
+    # from an old cache copy via `python3 ~/.claude/plugins/cache/.../x.py`).
     if not is_remote:
         try:
-            # If scripts_dir and cwd share no common project root, it's remote
             scripts_path = Path(scripts_dir).resolve()
             cwd_path = Path(cwd).resolve()
             is_remote = not (
@@ -70,17 +108,17 @@ def check_remote_execution_guard() -> None:
         print(
             f"ERROR: {script_name} is being run from a remote location without "
             f"the environment isolation launcher.\n\n"
-            f"When running CPV scripts remotely (from the plugin cache, via uvx, "
-            f"or from any location outside the target plugin), you MUST use "
+            f"When running CPV scripts remotely (from uvx, pipx, or a plugin "
+            f"cache WITHOUT the CLAUDE_PLUGIN_ROOT env var set), you MUST use "
             f"remote_validation.py to prevent the target's local config files "
             f"from interfering with validation.\n\n"
+            f"If you are invoking via a Claude Code slash command, your plugin "
+            f"is out of date — upgrade with `/plugin update "
+            f"claude-plugins-validation@emasoft-plugins`.\n\n"
             f"Instead of:\n"
             f"  python3 {scripts_dir}/{script_name} /path/to/target\n\n"
             f"Use:\n"
-            f"  python3 {scripts_dir}/remote_validation.py {script_name.replace('.py', '')} /path/to/target\n\n"
-            f"Or via uvx:\n"
-            f"  uvx --from git+https://github.com/Emasoft/claude-plugins-validation "
-            f"--with pyyaml cpv-remote-validate {script_name.replace('.py', '')} /path/to/target",
+            f"  python3 {scripts_dir}/remote_validation.py {script_name.replace('.py', '')} /path/to/target",
             file=sys.stderr,
         )
         sys.exit(1)

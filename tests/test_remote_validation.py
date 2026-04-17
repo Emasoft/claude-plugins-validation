@@ -147,3 +147,85 @@ class TestCommandsDictCoherentWithAliases:
             f"launcher's --help would advertise commands that then fail with "
             f"'Unknown command'."
         )
+
+
+class TestRemoteExecutionGuardPluginCache:
+    """TRDD-v2.21.1: the guard must NOT block `$CLAUDE_PLUGIN_ROOT`-rooted
+    invocations. Slash commands set `CLAUDE_PLUGIN_ROOT` to the pinned plugin
+    directory — the validator should trust this and run without requiring
+    the `remote_validation.py` indirection or the `CPV_REMOTE_VALIDATION=1`
+    bypass.
+    """
+
+    def test_guard_does_not_fire_when_claude_plugin_root_matches(self, tmp_path, monkeypatch):
+        """Simulate a slash-command invocation: `CLAUDE_PLUGIN_ROOT` is set
+        and the running scripts directory is inside it. The guard must
+        return WITHOUT raising SystemExit.
+        """
+        from cpv_validation_common import check_remote_execution_guard
+
+        # Simulate the layout Claude Code creates when invoking a plugin's
+        # slash command: CLAUDE_PLUGIN_ROOT points at a plugin cache dir,
+        # and the validator scripts live under it.
+        fake_plugin_root = tmp_path / "cache" / "marketplace" / "plugin" / "1.0.0"
+        (fake_plugin_root / "scripts").mkdir(parents=True)
+        fake_script = fake_plugin_root / "scripts" / "validate_local_scope.py"
+        fake_script.write_text("# stub\n")
+
+        monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(fake_plugin_root))
+        monkeypatch.delenv("CPV_REMOTE_VALIDATION", raising=False)
+
+        # Trick the guard into thinking it's running from the fake script
+        # path: monkey-patch __file__ on cpv_validation_common.
+        import cpv_validation_common as cvc
+        original_file = cvc.__file__
+        try:
+            cvc.__file__ = str(fake_script)
+            # The guard MUST return without calling sys.exit.
+            check_remote_execution_guard()
+        finally:
+            cvc.__file__ = original_file
+
+    def test_guard_still_fires_for_true_ephemeral_uvx(self, tmp_path, monkeypatch, capsys):
+        """The guard MUST still block when the scripts directory is inside
+        a true ephemeral location (`/uv/tools/`) and `CLAUDE_PLUGIN_ROOT` is
+        NOT set. This preserves the original safety behaviour for genuine
+        remote invocations.
+        """
+        import pytest
+        from cpv_validation_common import check_remote_execution_guard
+
+        # Fake a uvx-temp-env-like path that contains the marker substring.
+        fake_scripts = tmp_path / "uv" / "tools" / "cpv" / "scripts"
+        fake_scripts.mkdir(parents=True)
+        fake_script = fake_scripts / "validate_local_scope.py"
+        fake_script.write_text("# stub\n")
+
+        monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
+        monkeypatch.delenv("CPV_REMOTE_VALIDATION", raising=False)
+        # Set cwd to somewhere unrelated so the "cwd check" is also remote.
+        monkeypatch.chdir(tmp_path / "other_project" if (tmp_path / "other_project").exists() else tmp_path)
+
+        import cpv_validation_common as cvc
+        original_file = cvc.__file__
+        try:
+            cvc.__file__ = str(fake_script)
+            with pytest.raises(SystemExit) as exc:
+                check_remote_execution_guard()
+            assert exc.value.code == 1
+            captured = capsys.readouterr()
+            assert "being run from a remote location" in captured.err
+        finally:
+            cvc.__file__ = original_file
+
+    def test_guard_respects_cpv_remote_validation_env(self, tmp_path, monkeypatch):
+        """When `CPV_REMOTE_VALIDATION=1` is set, the guard returns
+        immediately without any path inspection — the launcher has already
+        set up isolation.
+        """
+        from cpv_validation_common import check_remote_execution_guard
+
+        monkeypatch.setenv("CPV_REMOTE_VALIDATION", "1")
+        monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
+        # No other setup — the guard must short-circuit.
+        check_remote_execution_guard()
