@@ -1484,6 +1484,209 @@ def test_venv_python_without_session_start_setup_minor(tmp_path: Path):
     )
 
 
+def test_stdlib_only_script_with_plain_python3_produces_no_major(tmp_path: Path):
+    """Critical non-regression: a script that imports only stdlib modules under
+    a plain `python3` invocation must NOT produce a runtime-dep MAJOR.
+
+    This guards against the class of false positives where the validator
+    over-reaches and flags perfectly safe hooks. The fixer agent must not
+    touch these.
+    """
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    script = scripts_dir / "stdlib_only.py"
+    script.write_text(
+        "import os\nimport sys\nimport json\nfrom pathlib import Path\n"
+        "def main():\n    print('ok')\n"
+        "if __name__ == '__main__':\n    main()\n"
+    )
+    import os
+    os.chmod(script, 0o755)
+
+    hooks_dir = tmp_path / "hooks"
+    hooks_dir.mkdir()
+    hooks_file = hooks_dir / "hooks.json"
+    hooks_file.write_text(
+        json.dumps({
+            "hooks": {
+                "UserPromptSubmit": [{
+                    "hooks": [{
+                        "type": "command",
+                        "command": 'python3 "${CLAUDE_PLUGIN_ROOT}/scripts/stdlib_only.py"',
+                    }]
+                }]
+            }
+        })
+    )
+    report = validate_hooks(hooks_file, plugin_root=tmp_path)
+    major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+    # Must NOT contain the runtime-dep MAJOR for stdlib-only scripts.
+    assert not any("plain interpreter" in m for m in major_msgs), (
+        f"stdlib-only script should NOT trigger runtime-dep MAJOR; got: {major_msgs}"
+    )
+
+
+def test_python_versioned_interpreter_is_classified_correctly(tmp_path: Path):
+    """`python3.12 foo.py` is recognized as interpreter-python — via the
+    version-suffix regex — and fires the runtime-dep MAJOR for third-party
+    imports just like plain `python3` does.
+    """
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    script = scripts_dir / "v.py"
+    script.write_text("import httpx\n")
+    import os
+    os.chmod(script, 0o755)
+
+    hooks_dir = tmp_path / "hooks"
+    hooks_dir.mkdir()
+    hooks_file = hooks_dir / "hooks.json"
+    hooks_file.write_text(
+        json.dumps({
+            "hooks": {
+                "UserPromptSubmit": [{
+                    "hooks": [{
+                        "type": "command",
+                        "command": 'python3.12 "${CLAUDE_PLUGIN_ROOT}/scripts/v.py"',
+                    }]
+                }]
+            }
+        })
+    )
+    report = validate_hooks(hooks_file, plugin_root=tmp_path)
+    major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+    assert any("plain interpreter" in m and "httpx" in m for m in major_msgs), (
+        f"python3.12 invocation must fire the runtime-dep MAJOR for httpx; got: {major_msgs}"
+    )
+
+
+def test_uv_run_with_comma_separated_deps(tmp_path: Path):
+    """`uv run --with pycozo,httpx foo.py` (comma-separated) is parsed into
+    explicit_deps = ('pycozo', 'httpx'), and both imports are covered.
+    """
+    from validate_hook import extract_script_paths
+
+    refs = extract_script_paths(
+        'uv run --with pycozo,httpx "${CLAUDE_PLUGIN_ROOT}/scripts/foo.py"',
+        tmp_path,
+    )
+    assert len(refs) == 1
+    assert refs[0].invocation_mode == "uv-run-with"
+    assert set(refs[0].explicit_deps) == {"pycozo", "httpx"}
+
+
+def test_scripts_in_nested_subdirectories(tmp_path: Path):
+    """Scripts in subdirs like `scripts/hooks/foo.py` are still found and
+    analyzed. No hard-coded assumption about path depth.
+    """
+    from validate_hook import extract_script_paths
+
+    nested = tmp_path / "scripts" / "hooks"
+    nested.mkdir(parents=True)
+    script = nested / "deep.py"
+    script.write_text("import pycozo\n")
+    import os
+    os.chmod(script, 0o755)
+
+    refs = extract_script_paths(
+        'python3 "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/deep.py"', tmp_path
+    )
+    assert len(refs) == 1
+    assert refs[0].path == tmp_path / "scripts" / "hooks" / "deep.py"
+
+
+def test_compound_command_with_multiple_scripts(tmp_path: Path):
+    """`foo.sh && python3 bar.py` yields TWO refs: foo.sh direct + bar.py
+    interpreter-python. Each is diagnosed independently.
+    """
+    from validate_hook import extract_script_paths
+
+    refs = extract_script_paths(
+        'bash "${CLAUDE_PLUGIN_ROOT}/scripts/foo.sh" && python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bar.py"',
+        tmp_path,
+    )
+    assert len(refs) == 2
+    modes = {r.invocation_mode for r in refs}
+    assert modes == {"bash", "interpreter-python"}
+
+
+def test_sys_exit_inside_function_body_is_ignored(tmp_path: Path):
+    """A `sys.exit` inside a function body (not at module scope) must NOT
+    trigger the MAJOR — it only runs when the function is called.
+    """
+    from validate_hook import detect_module_scope_sys_exit
+
+    script = _make_py_script(
+        tmp_path,
+        "safe_exit.py",
+        "import sys\n"
+        "\n"
+        "def fail():\n"
+        "    sys.exit(1)\n"
+        "\n"
+        "class Handler:\n"
+        "    def abort(self):\n"
+        "        sys.exit(2)\n"
+        "\n"
+        "if __name__ == '__main__':\n"
+        "    fail()\n",
+    )
+    # if __name__ == '__main__' IS a top-level if — but the detector descends
+    # with the caveat that it won't walk INTO function/class bodies. Since
+    # sys.exit here is inside fail() (function) and Handler.abort (method),
+    # neither should be flagged. The top-level if __name__ guard itself only
+    # contains a function CALL, not a direct sys.exit, so it's also safe.
+    hits = detect_module_scope_sys_exit(script)
+    assert hits == [], f"Function-body sys.exit should not be flagged; got: {hits}"
+
+
+def test_type_checking_guard_imports_are_detected_as_third_party(tmp_path: Path):
+    """`if TYPE_CHECKING: import httpx` — we INTENTIONALLY flag this because
+    the validator cannot distinguish a type-only import from a runtime-reachable
+    `if` branch at AST level. Documents the behavior for the fix guide.
+    """
+    from validate_hook import detect_python_third_party_imports
+
+    script = _make_py_script(
+        tmp_path,
+        "type_check.py",
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    import httpx\n",
+    )
+    imports = detect_python_third_party_imports(script)
+    # httpx IS detected — hook-fixes §13.3 documents how to handle this
+    # (move to a dedicated TYPE_CHECKING block near the actual usage, or
+    # just declare httpx as a dep since import cost is trivial).
+    assert "httpx" in imports, (
+        f"TYPE_CHECKING-guarded imports ARE detected — this is documented "
+        f"behavior; see hook-fixes.md §13.3. Got: {imports}"
+    )
+
+
+def test_extract_script_paths_from_env_dash_s_shebang_style(tmp_path: Path):
+    """`env -S python3 -u foo.py` (portable shebang style) parses correctly."""
+    from validate_hook import extract_script_paths
+
+    refs = extract_script_paths(
+        'env -S python3 -u "${CLAUDE_PLUGIN_ROOT}/scripts/foo.py"', tmp_path
+    )
+    assert len(refs) == 1
+    assert refs[0].invocation_mode == "interpreter-python"
+
+
+def test_extract_script_paths_preserves_direct_sh_invocation(tmp_path: Path):
+    """`./scripts/foo.sh` as first token — direct invocation mode."""
+    from validate_hook import extract_script_paths
+
+    refs = extract_script_paths(
+        '"${CLAUDE_PLUGIN_ROOT}/scripts/foo.sh" --verbose', tmp_path
+    )
+    assert len(refs) == 1
+    assert refs[0].invocation_mode == "direct"
+    assert refs[0].path.suffix == ".sh"
+
+
 def test_interpreter_python_major_warns_against_uvx_substitution(tmp_path: Path):
     """The plain-interpreter + third-party MAJOR message must explicitly say NOT
     to substitute `uvx` — because `uvx` runs installable PyPI packages via
