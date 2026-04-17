@@ -981,7 +981,8 @@ def validate_claude_md_imports(
     and emits findings for:
 
     - CRITICAL: an absolute path (leading ``/``) that resolves outside
-      ``repo_root`` — e.g. ``@/etc/passwd`` is a security leak.
+      ``repo_root`` — e.g. an import that points at a host-level system
+      file would leak its contents into Claude's context.
     - MAJOR: a path whose ``..`` segments escape ``repo_root``.
     - MAJOR: a path that does not exist on disk (dead import).
     - MAJOR: recursion depth exceeds ``MAX_CLAUDE_MD_IMPORT_DEPTH`` (5).
