@@ -1278,3 +1278,30 @@ class TestMonitorToolValidation:
         info_msgs = [r.message for r in report.results if r.level == "INFO"]
         assert not any("Monitor" in m for m in major_msgs)
         assert not any("Unknown tool 'Monitor'" in m for m in info_msgs)
+
+
+# ---------------------------------------------------------------------------
+# v2.21.2 audit-fix regression (commit c9b869a) — G33
+# ---------------------------------------------------------------------------
+
+
+class TestV2212NonDictFrontmatter:
+    """G33 (CRITICAL): list/scalar YAML frontmatter must not crash .keys()."""
+
+    def test_validate_agent_non_dict_frontmatter_does_not_crash(self, tmp_path):
+        """Agent .md with list-valued frontmatter must produce CRITICAL, not crash."""
+        agent_file = tmp_path / "weird-agent.md"
+        # Frontmatter parses to a YAML list, not a mapping. Pre-fix the
+        # downstream `.keys()` iteration crashed with AttributeError.
+        agent_file.write_text(
+            "---\n- list\n- frontmatter\n---\nbody content\n",
+            encoding="utf-8",
+        )
+
+        # Must not raise AttributeError — the validator has to handle non-dict FM.
+        report = validate_agent(agent_file)
+
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert any("Frontmatter must be a YAML mapping" in m for m in critical_msgs), (
+            f"Expected CRITICAL about non-dict frontmatter, got CRITICALs: {critical_msgs}"
+        )

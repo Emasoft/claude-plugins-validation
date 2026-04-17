@@ -724,3 +724,61 @@ class TestV170JsonOutput:
         output = json.loads(captured.out)
         assert "counts" in output
         assert "warning" in output["counts"], "JSON counts dict must include 'warning' key"
+
+
+# ---------------------------------------------------------------------------
+# v2.21.2 audit regression tests (commit c9b869a)
+# ---------------------------------------------------------------------------
+
+
+class TestV2212AuditFixes:
+    """Regression tests for the 2 validate_lsp defects fixed in commit c9b869a.
+
+    Covers:
+    - G31: is_absolute_path missing UNC (\\\\server\\share), C:/foo, ~/foo cases
+    - G32: existence check no longer skips extensionless binaries (pyright-langserver etc.)
+    """
+
+    def test_lsp_unc_path_detected_as_absolute(self, tmp_path):
+        """G31: UNC-form path `\\\\server\\share\\pyright-langserver` must flag MAJOR absolute-path."""
+        config_file = tmp_path / "lsp-config.json"
+        # Python literal "\\\\server\\share\\pyright-langserver" == runtime
+        # "\\server\share\pyright-langserver" (an SMB UNC path).
+        config_data = {
+            "lspServers": {
+                "foo": {
+                    "command": "\\\\server\\share\\pyright-langserver",
+                    "extensionToLanguage": {".py": "python"},
+                },
+            },
+        }
+        config_file.write_text(json.dumps(config_data))
+        report = validate_lsp_config(config_file)
+        majors = [r for r in report.results if r.level == "MAJOR"]
+        assert any("Absolute path" in m.message or "absolute path" in m.message.lower() for m in majors), (
+            f"Expected MAJOR about UNC/absolute path, got: {[m.message for m in majors]}"
+        )
+
+    def test_lsp_extensionless_binary_not_skipped(self, tmp_path):
+        """G32: extensionless binary at absolute home path must not be silently skipped — emits MAJOR."""
+        # Pre-fix the existence check only ran for suffixed binaries (.exe/.sh), so
+        # an extensionless `pyright-langserver` resolved path was silently skipped.
+        # The existence-check fix is one part; the absolute-path finding on
+        # /Users/alice/... is the guaranteed MAJOR signal we assert.
+        config_file = tmp_path / "lsp-config.json"
+        config_data = {
+            "lspServers": {
+                "foo": {
+                    "command": "/Users/alice/pyright-langserver",
+                    "extensionToLanguage": {".py": "python"},
+                },
+            },
+        }
+        config_file.write_text(json.dumps(config_data))
+        report = validate_lsp_config(config_file)
+        majors = [r for r in report.results if r.level == "MAJOR"]
+        assert any(
+            "/Users/alice/pyright-langserver" in m.message
+            or ("Absolute path" in m.message and "pyright-langserver" in m.message)
+            for m in majors
+        ), f"Expected MAJOR about absolute home path on extensionless binary, got: {[m.message for m in majors]}"

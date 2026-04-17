@@ -121,7 +121,7 @@ The pre-push hook runs `--strict` and blocks on CRITICAL, MAJOR, MINOR, and NIT.
 6. Check for compiled binaries (Cargo.toml, go.mod, Makefile) — if found, sources MUST be in `src/` subdirectory with binaries in `src/<component>/bin/`. Add `build-binaries.yml` as fallback only.
 7. Git init + commit (if not already a git repo)
 8. Create GitHub repo: `gh repo create <owner>/<name> --public --source . --push`
-9. Configure git hooks: `uv run python scripts/publish.py --install-hook`. **The pre-push hook delegates to `publish.py --gate`** — it runs lint + validate (--strict) + tests and blocks pushes with ANY non-WARNING issue.
+9. Configure git hooks: **run this FROM INSIDE the newly-scaffolded plugin repo** (the one you just created in step 7-8) — `uv run python scripts/publish.py --install-hook`. Those `--install-hook` and `--gate` flags live in the `scripts/publish.py` that `generate_plugin_repo.py` writes into every new plugin (see `gen_publish_py` at `scripts/generate_plugin_repo.py:585`). **DO NOT** run this from inside CPV itself — CPV's own `scripts/publish.py` is the minimal release-bump variant without those modes and will error with `argparse: unrecognized arguments: --install-hook`. Once installed, the pre-push hook delegates to `publish.py --gate` which runs lint + validate (--strict) + tests and blocks pushes with ANY non-WARNING issue.
 10. Optionally configure marketplace notification:
     - Update notify-marketplace.yml with correct MARKETPLACE_OWNER and MARKETPLACE_REPO values
     - Check env: `test -n "$MARKETPLACE_PAT"` before asking user

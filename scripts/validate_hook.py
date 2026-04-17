@@ -477,7 +477,10 @@ def _split_compound_command(command: str) -> list[str]:
     return [p for p in parts if p]
 
 
-def _tokenize_hook_command(command: str) -> list[list[str]]:
+def _tokenize_hook_command(
+    command: str,
+    malformed_out: list[str] | None = None,
+) -> list[list[str]]:
     """Tokenize a hook command into a list of simple-command token lists.
 
     Splits compound commands on `;`, `&&`, `||`, `|` (via _split_compound_command,
@@ -487,6 +490,12 @@ def _tokenize_hook_command(command: str) -> list[list[str]]:
 
     Quotes are stripped from values but env-var syntax is preserved literally:
     `"${CLAUDE_PLUGIN_ROOT}/foo.py"` becomes a single token `${CLAUDE_PLUGIN_ROOT}/foo.py`.
+
+    When ``malformed_out`` is provided, every simple command that ``shlex.split``
+    cannot tokenize (typically unbalanced quotes) is appended to it. Callers
+    with access to a ``ValidationReport`` surface these as MAJOR findings —
+    a silent fallback would let an attacker-authored hook with a deliberately
+    malformed quote smuggle a script past ``extract_script_paths``.
     """
     s = command.rstrip()
     # Strip trailing single `&` (background marker); preserve `&&`.
@@ -501,8 +510,11 @@ def _tokenize_hook_command(command: str) -> list[list[str]]:
         except ValueError:
             # Unterminated quote or other shlex error — fall back to a single
             # whole-string token so downstream code can still make a best-effort
-            # path guess. Reporting of the malformed command belongs in a
-            # separate check (not yet implemented).
+            # path guess, but record the malformed command so the caller can
+            # raise a MAJOR (unbalanced quotes obscure what the hook will
+            # actually run at event time).
+            if malformed_out is not None:
+                malformed_out.append(sc)
             tokens = [sc]
         if tokens:
             out.append(tokens)
@@ -734,7 +746,11 @@ def _find_script_in_uv_run(tokens: list[str]) -> tuple[int, str, tuple[str, ...]
     return (i, mode, tuple(with_deps))
 
 
-def extract_script_paths(command: str, plugin_root: Path | None) -> list[ScriptRef]:
+def extract_script_paths(
+    command: str,
+    plugin_root: Path | None,
+    malformed_out: list[str] | None = None,
+) -> list[ScriptRef]:
     """Extract every script reference from a hook command, with invocation_mode.
 
     Handles compound commands (`;`, `&&`, `||`, `|`), interpreter invocations
@@ -743,11 +759,17 @@ def extract_script_paths(command: str, plugin_root: Path | None) -> list[ScriptR
     and direct script invocations (`./foo.py`). Skips pure side-effect simple
     commands like `unset VAR` and `cd /dir`.
 
+    When ``malformed_out`` is a list, any simple command that ``shlex`` refuses
+    to tokenize is appended to it. The canonical caller
+    (``validate_command_hook``) surfaces these as MAJOR findings —
+    unbalanced-quote commands produce ambiguous parses that can hide scripts
+    from lint coverage.
+
     The new canonical API — prefer this over extract_script_path which is
     retained for backwards compatibility.
     """
     refs: list[ScriptRef] = []
-    for original_tokens in _tokenize_hook_command(command):
+    for original_tokens in _tokenize_hook_command(command, malformed_out=malformed_out):
         if not original_tokens:
             continue
         # Strip leading env-var-assignment tokens: `FOO=bar python3 foo.py`
@@ -1085,15 +1107,23 @@ def _import_names_covered_by(dep_spec: str) -> set[str]:
 
 
 def _is_sys_exit_call(node: ast.AST) -> bool:
-    """Recognize `sys.exit(...)`, `exit(...)`, or `quit(...)` expression."""
+    """Recognize `sys.exit(...)`, `os._exit(...)`, `exit(...)`, or `quit(...)`.
+
+    All four terminate the hook process at import time, short-circuiting the
+    event handler that Claude Code expects to run. `os._exit` skips cleanup
+    handlers — the PSS-class "fatal dep missing" pattern could equally well
+    use it.
+    """
     if not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Call):
         return False
     func = node.value.func
     if isinstance(func, ast.Name) and func.id in ("exit", "quit"):
         return True
-    if isinstance(func, ast.Attribute) and func.attr == "exit":
+    if isinstance(func, ast.Attribute):
         target = func.value
-        if isinstance(target, ast.Name) and target.id == "sys":
+        if func.attr == "exit" and isinstance(target, ast.Name) and target.id == "sys":
+            return True
+        if func.attr == "_exit" and isinstance(target, ast.Name) and target.id == "os":
             return True
     return False
 
@@ -1625,11 +1655,20 @@ def validate_command_hook(
     _TRAVERSAL_RE = re.compile(
         r"""
         (?:
-            # env-var-prefixed:  ${VAR}/.. or $VAR/..
+            # env-var-prefixed (POSIX forward slash):  ${VAR}/.. or $VAR/..
             \$\{?CLAUDE_[A-Z_]+\}?/\.\./
             |
-            # absolute path containing /../ (but not //./ or similar)
+            # env-var-prefixed (Windows backslash): ${VAR}\.. or $VAR\..
+            \$\{?CLAUDE_[A-Z_]+\}?\\\.\.\\
+            |
+            # POSIX absolute path containing /../ (not //./ or similar)
             /[A-Za-z0-9_.\-]+/\.\./
+            |
+            # Windows path containing \..\  — matches both C:\foo\..\bar
+            # and UNC-style \\server\share\..\bar. Excludes \. escape
+            # sequences (e.g. \t, \n) by requiring an actual \..\ segment
+            # between path components.
+            \\[A-Za-z0-9_.\-]+\\\.\.\\
         )
         """,
         re.VERBOSE,
@@ -1696,7 +1735,19 @@ def validate_command_hook(
     # `uv run [--script]`, `${CLAUDE_PLUGIN_DATA}/.venv/bin/python foo.py`,
     # and `env python3 foo.py` — the extractor also reports the invocation_mode
     # which drives runtime-dep reconciliation and module-scope sys.exit checks.
-    refs = extract_script_paths(command, plugin_root)
+    #
+    # ``malformed_parts`` collects any simple command that ``shlex`` could not
+    # tokenize (unbalanced quote, etc.). These land as MAJOR findings because
+    # silent fallback would let an attacker-authored hook smuggle a script
+    # past lint coverage via a deliberately malformed quote.
+    malformed_parts: list[str] = []
+    refs = extract_script_paths(command, plugin_root, malformed_out=malformed_parts)
+    for malformed in malformed_parts:
+        report.major(
+            f"Hook command simple-command portion is unparseable (likely unbalanced quote): "
+            f"{malformed!r}. Fix the quoting — the validator can only make a best-effort "
+            "path guess and may miss malicious payloads smuggled inside the broken region."
+        )
 
     # Antipattern: env-stripping that defeats isolation without providing any
     # replacement. Three patterns exist in the wild:

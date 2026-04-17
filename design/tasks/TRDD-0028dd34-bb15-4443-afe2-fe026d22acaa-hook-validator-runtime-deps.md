@@ -193,7 +193,17 @@ No changes to agent/command/skill files — this is a pure validator-internal re
 
 - File with `# /// script\n# dependencies = ["foo"]\n# ///` → `["foo"]`
 - File without the block → `None`
-- Malformed block → `None` with MINOR report
+- Malformed block (unbalanced markers, invalid TOML, non-list `dependencies`)
+  → `[]` (block present but unusable). No MINOR is surfaced here — this
+  case is caught *indirectly* during reconciliation: if the script's imports
+  include third-party modules, the empty-dep list fails `uv run --script`
+  coverage and the MAJOR "invocation X imports third-party modules but the
+  PEP 723 block does not declare them" finding fires downstream. Splitting
+  out a dedicated "malformed block" MINOR would report the same failure
+  twice for the same root cause, so it is intentionally omitted. Tests:
+  `test_detect_pep723_malformed_block_returns_empty` (unit) plus the
+  reconciliation matrix entry "`uv run --script foo.py` / imports pycozo /
+  covers `other` only" (integration).
 
 ### 6.5. Integration: reconciliation matrix
 

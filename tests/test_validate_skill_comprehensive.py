@@ -1706,3 +1706,46 @@ class TestV170ToolCountSeverity:
         validate_allowed_tools_field(frontmatter, report)
         many_tools_results = [r for r in report.results if "Many tools permitted" in r.message]
         assert len(many_tools_results) == 0, "Expected no 'Many tools permitted' result for 2 tools"
+
+
+# =============================================================================
+# v2.21.2 audit-fix regression (commit c9b869a) — G36 CRITICAL
+# =============================================================================
+
+
+class TestV2212NonStringAllowedTools:
+    """G36 (CRITICAL): non-string allowed-tools must not raise TypeError/AttributeError."""
+
+    def test_validate_skill_non_string_allowed_tools_does_not_crash(self, tmp_path):
+        """SKILL.md with `allowed-tools: 42` (integer) must not crash the validator.
+
+        Pre-fix, downstream handling of non-string allowed-tools values could
+        raise AttributeError/TypeError (e.g. when a list item was later passed
+        through ``.split('(')``). End-to-end ``validate_skill`` must handle
+        this malformed input cleanly and emit a MAJOR about the type.
+        """
+        skill_dir = tmp_path / "bad-tools-skill"
+        skill_dir.mkdir()
+        # Integer value — invalid per schema (must be string or list)
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: bad-tools-skill\n"
+            "description: A skill with an invalid allowed-tools value. "
+            "Use when testing that non-string allowed-tools does not crash.\n"
+            "allowed-tools: 42\n"
+            "---\n"
+            "# Bad Tools Skill\n"
+            "\n"
+            "## When to use\n"
+            "\n"
+            "Never — this SKILL.md exists only as a regression fixture.\n",
+            encoding="utf-8",
+        )
+
+        # Must NOT raise TypeError/AttributeError
+        report = validate_skill(skill_dir)
+
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("allowed-tools" in m and ("string" in m or "type" in m.lower()) for m in major_msgs), (
+            f"Expected MAJOR mentioning allowed-tools type, got MAJORs: {major_msgs}"
+        )

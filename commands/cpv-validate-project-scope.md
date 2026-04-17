@@ -65,18 +65,36 @@ with a WARNING.
 - **MINOR**: literal secrets in `mcpServers.*.env` values (use `${VAR}`
   expansion per mcp.md), absolute home paths in `command` / `args`.
 
+> **v2.21.0 behavior change (TRDD-f4e2d385 §3.1):** every tracked element
+> under `.claude/` is now passed to the FULL per-element validator
+> (the same pipeline `cpv-validate-plugin` uses for each bundled file).
+> Expect more findings than in v2.20.x — this is the intended semantics,
+> not a regression. The old shallow "frontmatter-parseable + name present"
+> check still runs on top, but the deep pipeline is the authoritative
+> source.
+
 ### 3. `.claude/agents/*.md`
-Frontmatter YAML parseable, `name` and `description` present, no absolute
-home paths in `system-prompt`/`initialPrompt` or body.
+Shallow: frontmatter YAML parseable, `name` and `description` present,
+no absolute home paths in `system-prompt`/`initialPrompt` or body.
+Deep (v2.21.0+): invoked via `validate_agent` — checks `tools` allowlist,
+`model`, deprecated fields, `<example>` blocks, description triggers,
+plugin-shipped restrictions, etc.
 
 ### 4. `.claude/skills/<name>/SKILL.md`
-Same lightweight frontmatter + absolute-path checks.
+Shallow: frontmatter + absolute-path checks.
+Deep (v2.21.0+): invoked via `validate_skill_comprehensive` — the 190-rule
+pipeline covering Overview / Prerequisites / Output / Error Handling /
+Examples / Resources sections, `argument-hint` format, `allowed-tools`
+syntax, etc.
 
 ### 5. `.claude/commands/*.md` (legacy commands directory)
-Same lightweight frontmatter + absolute-path checks.
+Shallow: frontmatter + absolute-path checks.
+Deep (v2.21.0+): invoked via `validate_command`.
 
 ### 6. `.claude/rules/*.md`
-Body scanned for absolute home paths.
+Shallow: body scanned for absolute home paths.
+Deep (v2.21.0+): invoked via `validate_rules` — catches stale references,
+obsolete TODO/FIXME markers, large inline command blocks, etc.
 
 ### 7. `CLAUDE.md` or `.claude/CLAUDE.md`
 Body scanned for absolute home paths and literal credentials.

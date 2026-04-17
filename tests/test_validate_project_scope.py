@@ -23,6 +23,7 @@ scripts_dir = Path(__file__).parent.parent / "scripts"
 if str(scripts_dir) not in sys.path:
     sys.path.insert(0, str(scripts_dir))
 
+from cc_scope_rules import resolve_plugin_cache_dir  # noqa: E402
 from cpv_validation_common import ValidationReport  # noqa: E402
 from validate_project_scope import (  # noqa: E402
     validate_claude_md_file,
@@ -600,3 +601,190 @@ class TestDirectHelpers:
         report = ValidationReport()
         validate_claude_md_file(md, repo, report)
         assert report.has_major
+
+
+# =============================================================================
+# Gap tests G4-G7: project-scope deep-validator / settings-subtree /
+# enabled-plugin enumeration / plugin-cache highest-semver coverage.
+#
+# These mirror the TestDeepElementValidation / TestSettingsSubtreeValidation /
+# TestLocallyEnabledPluginEnumeration classes in test_validate_local_scope.py
+# but assert the same guarantees for the TRACKED (git-committed) files that
+# validate_project_scope walks.
+# =============================================================================
+
+
+class TestProjectDeepElementValidation:
+    """Tracked agents/commands/skills must go through the full per-element
+    deep validator (validate_agent, validate_command, validate_skill_comprehensive).
+    """
+
+    def test_tracked_agent_with_invalid_tools_is_caught(self, project: Path) -> None:
+        """G4: a tracked agent declaring an unknown tool fires a deep-validator
+        finding mentioning the tool. Without the deep pipeline, `validate_project_scope`
+        would only run the shallow frontmatter scan and silently accept any
+        tool name.
+        """
+        _commit(
+            project,
+            ".claude/agents/badtool.md",
+            (
+                "---\n"
+                "name: badtool\n"
+                "description: A demonstration agent whose tools list contains "
+                "an unknown symbol to exercise the deep validator pipeline.\n"
+                "tools: [NonExistentTool, Read]\n"
+                "---\n"
+                "Body of the agent.\n\n"
+                "<example>\n"
+                "Context: User asks badtool to do something.\n"
+                "user: \"Run the tool\"\n"
+                "assistant: \"Running now.\"\n"
+                "</example>\n\n"
+                "<example>\n"
+                "Context: User asks badtool to audit files.\n"
+                "user: \"Audit the folder\"\n"
+                "assistant: \"Auditing now.\"\n"
+                "</example>\n"
+            ),
+        )
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        all_msgs = [r.message for r in report.results]
+        # The deep validate_agent surfaces an "Unknown tools" finding that
+        # includes the offending tool name. The shallow scan would not.
+        assert any(
+            "badtool.md" in m and "NonExistentTool" in m
+            for m in all_msgs
+        ), f"Deep agent validator must flag unknown tool; got: {all_msgs}"
+
+
+class TestProjectSettingsSubtreeValidation:
+    """hooks / mcpServers / lspServers inside a TRACKED settings.json are
+    deep-validated by the same pipelines that validate plugin-shipped copies.
+    """
+
+    def test_tracked_settings_hooks_with_bad_event_is_caught(self, project: Path) -> None:
+        """G5: an unknown event name inside settings.json.hooks is caught by
+        the deep `validate_hook` pipeline. A shallow schema check would not
+        know which event names are valid.
+        """
+        settings = {
+            "hooks": {
+                "NotARealEvent": [
+                    {"hooks": [{"type": "command", "command": "echo x"}]}
+                ]
+            }
+        }
+        _commit(project, ".claude/settings.json", json.dumps(settings) + "\n")
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        all_msgs = [r.message for r in report.results]
+        assert any(
+            "NotARealEvent" in m or "Unknown hook event" in m
+            for m in all_msgs
+        ), f"Hook subtree validator must catch bad event; got: {all_msgs}"
+
+    def test_tracked_settings_with_non_dict_hooks_is_major(self, project: Path) -> None:
+        """G5: `hooks` set to a non-object must trigger MAJOR without crashing
+        the validator. The subtree dispatcher defensively rejects scalars
+        instead of passing them to `validate_hook` and blowing up on a type
+        error.
+        """
+        _commit(project, ".claude/settings.json", '{"hooks": "not a dict"}\n')
+        report = ValidationReport()
+        # Must not raise.
+        validate_project_scope(project, report)
+        majors = _messages(report, "MAJOR")
+        assert any(
+            "hooks" in m and ("object" in m or "dict" in m.lower())
+            for m in majors
+        ), f"Non-object hooks value must be MAJOR; got MAJORs: {majors}"
+
+
+class TestProjectEnabledPluginEnumeration:
+    """`enabledPlugins` inside a tracked settings.json triggers per-plugin
+    deep validation. Missing installations fire MAJOR.
+    """
+
+    def test_enabled_but_uninstalled_plugin_is_major(self, project: Path) -> None:
+        """G6: a plugin enabled in the shared settings.json but not present
+        in the plugin cache fires a MAJOR — enabling a plugin the team
+        doesn't actually have installed is silently a no-op and almost
+        always a user mistake.
+        """
+        settings = {
+            "enabledPlugins": {
+                "nonexistent-plugin-xyz@fake-marketplace-xyz123": True,
+            }
+        }
+        _commit(project, ".claude/settings.json", json.dumps(settings) + "\n")
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        all_msgs = [r.message for r in report.results]
+        assert any(
+            "nonexistent-plugin-xyz" in m
+            and ("not installed" in m.lower() or "enabledPlugins" in m)
+            for m in all_msgs
+        ), f"Missing-plugin enablement must trigger MAJOR; got: {all_msgs}"
+
+
+class TestProjectPluginCacheHighestSemver:
+    """`resolve_plugin_cache_dir` picks the highest-semver subdirectory out
+    of `~/.claude/plugins/cache/<marketplace>/<plugin>/v*/`. Tests here fake
+    `Path.home()` to a tmp_path so no real user cache is touched.
+    """
+
+    def test_picks_v2_over_v1(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """G7: when both `v1.0.0/` and `v2.0.0/` exist, the resolver picks
+        v2.0.0. Confirms the semver tuple-compare works for canonical
+        `v<MAJOR>.<MINOR>.<PATCH>` layout.
+        """
+        # Fake HOME so the resolver looks at tmp_path instead of the user's
+        # real ~/.claude/ cache. Both `Path.home()` and `Path("~").expanduser()`
+        # consult this.
+        monkeypatch.setenv("HOME", str(tmp_path))
+        cache_base = tmp_path / ".claude" / "plugins" / "cache" / "mkt" / "plg"
+        for version in ("v1.0.0", "v2.0.0"):
+            (cache_base / version).mkdir(parents=True)
+            (cache_base / version / ".claude-plugin").mkdir()
+            (cache_base / version / ".claude-plugin" / "plugin.json").write_text(
+                json.dumps({"name": "plg", "version": version.removeprefix("v")}),
+                encoding="utf-8",
+            )
+        picked = resolve_plugin_cache_dir("plg", "mkt")
+        assert picked is not None, "resolver must locate the cache dir"
+        assert picked.name == "v2.0.0", (
+            f"Resolver must pick highest semver v2.0.0, got: {picked.name}"
+        )
+
+    def test_vv_prefix_is_not_doubly_stripped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """G7: a directory literally named `vv1.0.0` must not be collapsed to
+        `1.0.0` by over-eager prefix stripping. `str.removeprefix` strips
+        exactly ONE leading "v"; `str.lstrip("v")` would strip both and
+        produce a wrong sort. With the correct `removeprefix` behaviour,
+        `vv1.0.0` parses as a tuple whose first element is the string
+        `"v1"` (non-numeric → kept as str), which lexicographically
+        outranks the pure-int tuple from `v1.0.0`. Confirms the bugfix
+        described in the `_version_key` inline comment.
+        """
+        monkeypatch.setenv("HOME", str(tmp_path))
+        cache_base = tmp_path / ".claude" / "plugins" / "cache" / "mkt" / "plg"
+        for dirname in ("v1.0.0", "vv1.0.0"):
+            (cache_base / dirname).mkdir(parents=True)
+            (cache_base / dirname / ".claude-plugin").mkdir()
+            (cache_base / dirname / ".claude-plugin" / "plugin.json").write_text(
+                json.dumps({"name": "plg", "version": "1.0.0"}),
+                encoding="utf-8",
+            )
+        picked = resolve_plugin_cache_dir("plg", "mkt")
+        assert picked is not None, "resolver must locate the cache dir"
+        # Expect `vv1.0.0` to outrank `v1.0.0` given tuple ordering of
+        # `(str, int, int)` vs `(int, int, int)` after a SINGLE removeprefix.
+        # If this fails, the strip logic regressed (probably back to lstrip).
+        assert picked.name == "vv1.0.0", (
+            f"removeprefix must strip exactly one 'v'. If the resolver "
+            f"picked 'v1.0.0', the lstrip bug returned; got: {picked.name}"
+        )

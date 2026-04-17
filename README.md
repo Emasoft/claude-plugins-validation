@@ -1,8 +1,8 @@
 # Claude Plugins Validation (CPV)
 
 <!--BADGES-START-->
-![Version](https://img.shields.io/badge/version-2.21.2-blue)
-![Tests](https://img.shields.io/badge/tests-1947%20passed-brightgreen)
+![Version](https://img.shields.io/badge/version-2.21.3-blue)
+![Tests](https://img.shields.io/badge/tests-2056%20passed-brightgreen)
 ![Validation](https://img.shields.io/badge/validation-0%20issues-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 <!--BADGES-END-->
@@ -43,7 +43,7 @@ There are **two ways to use CPV**. Pick the one that fits your workflow:
 
 ## What Does CPV Check?
 
-CPV runs **18 specialized validators** covering **190+ rules** across every part of a Claude Code plugin (15 plugin validators + 3 marketplace validators):
+CPV runs **20 specialized validators** covering **190+ rules** across every part of a Claude Code plugin (17 plugin validators + 3 marketplace/settings validators):
 
 | Area | Examples of what CPV catches |
 |------|------------------------------|
@@ -78,7 +78,7 @@ CPV validates plugins against the official Claude Code specification. If you are
 You need [uv](https://docs.astral.sh/uv/getting-started/installation/) installed. Then:
 
 ```bash
-# Validate a plugin (runs all 18 checks + linting)
+# Validate a plugin (runs all 20 checks + linting)
 uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml \
     cpv-remote-validate validate_plugin /path/to/your-plugin
 ```
@@ -128,7 +128,7 @@ Any of these can be passed as the first argument to `cpv-remote-validate`. Short
 
 | Command | What It Checks |
 |---------|----------------|
-| `plugin` | **Everything.** Runs all 18 sub-validators + linting. Start here. |
+| `plugin` | **Everything.** Runs all 20 sub-validators + linting. Start here. |
 | `skill` | **Skills.** SKILL.md frontmatter, required sections, description quality. 190+ rules. |
 | `hook` | **Hooks.** 27 event types, 4 hook types, script paths, bash portability. |
 | `agent` | **Agents.** Frontmatter fields, naming, tools, model, skills. |
@@ -137,6 +137,8 @@ Any of these can be passed as the first argument to `cpv-remote-validate`. Short
 | `scoring` | **Quality score.** Weighted across structure, docs, security, testing. |
 | `marketplace` | **Marketplace.** Manifest structure, plugin entries, source references. Supports Layout A (hub-and-spoke) and Layout B (nested). |
 | `settings-marketplace` | **Inline marketplace in settings.** Validates `marketplaces` entries embedded in Claude Code settings files. |
+| `local-scope` | **Local scope.** (v2.21.0+) Validates non-git-tracked `.claude/` elements under a project — `settings.local.json`, gitignored agents/skills/commands/rules, `enabledPlugins` from local settings. Each tracked element is passed to the FULL per-element validator. |
+| `project-scope` | **Project scope.** (v2.21.0+) Validates git-tracked `.claude/` elements — `settings.json`, tracked agents/skills/commands/rules/hooks, `.mcp.json`, `CLAUDE.md`. Same deep per-element pipeline. |
 | `enterprise` | **Enterprise.** Author, license, SPDX, keywords, metadata. |
 | `mcp` | **MCP.** Transport types, required fields, OAuth, paths. |
 | `lsp` | **LSP.** Command paths, language IDs, file patterns. |
@@ -297,12 +299,12 @@ The semantic validator always warns about the cost and asks for confirmation bef
 
 | Command | What It Does |
 |---------|--------------|
-| `/cpv-validate-plugin <path>` | **Full validation** -- runs all 18 sub-validators |
+| `/cpv-validate-plugin <path>` | **Full validation** -- runs all 20 sub-validators |
 | `/cpv-validate-skill <path>` | Skill validation (190+ rules) |
 | `/cpv-validate-github-plugin <owner/repo>` | Validate a GitHub plugin without installing |
 | `/cpv-validate-github-marketplace <owner/repo>` | Validate a GitHub marketplace without registering |
-| `/cpv-validate-project-scope <path>` | Validate git-tracked (project-scope) Claude Code config under a project: `.claude/settings.json`, `.mcp.json`, agents, skills, commands, rules, `CLAUDE.md`. Rejects `autoMemoryDirectory`, managed-only keys, secrets in env, absolute home paths. |
-| `/cpv-validate-local-scope <path>` | Validate non-git-tracked (local-scope) Claude Code config under a project: `.claude/settings.local.json`, `CLAUDE.local.md`, gitignored agents/skills/commands/rules, per-project MCP state in `~/.claude.json`. Rules are relaxed (personal paths are OK), but managed-only/global-config keys still rejected. |
+| `/cpv-validate-project-scope <path>` | Validate git-tracked (project-scope) Claude Code config under a project: `.claude/settings.json`, `.mcp.json`, agents, skills, commands, rules, `CLAUDE.md`, tracked hooks/mcp/lsp subtrees. **v2.21.0+:** every tracked element now runs the FULL per-element validator pipeline (same as `cpv-validate-plugin`). Rejects `autoMemoryDirectory`, managed-only keys, secrets in env, absolute home paths. |
+| `/cpv-validate-local-scope <path>` | Validate non-git-tracked (local-scope) Claude Code config under a project: `.claude/settings.local.json`, `CLAUDE.local.md`, gitignored agents/skills/commands/rules, per-project MCP state in `~/.claude.json`, and locally-enabled plugins from `enabledPlugins`. **v2.21.0+:** deep per-element pipeline runs even on untracked content; absolute-path rules remain relaxed (personal paths OK), but managed-only/global-config keys are still rejected. |
 | `/cpv-doctor` | Health-check installed plugins, settings, marketplaces |
 | `/cpv-list-plugins` | List installed plugins with version and status |
 | `/cpv-bump-version <path>` | Bump plugin version (patch, minor, major) |
@@ -341,8 +343,8 @@ The semantic validator always warns about the cost and asks for confirmation bef
 | Management scripts | 13 | Plugin lifecycle, marketplace operations, scaffolding |
 | Agents | 7 | AI-powered validation, fixing, and management |
 | Skills | 14 | Validation, management, publishing, fix, migration, and auto-notify workflows |
-| Commands | 18 | 10 direct script + 6 agent-backed + 2 specialized utility commands |
-| Tests | 1800 | Full coverage across all modules |
+| Commands | 20 | 12 direct script + 6 agent-backed + 2 specialized utility commands |
+| Tests | 2056+ | Full coverage across all modules |
 
 </details>
 
@@ -351,7 +353,7 @@ The semantic validator always warns about the cost and asks for confirmation bef
 
 | Script | Purpose |
 |--------|---------|
-| `validate_plugin.py` | Main orchestrator -- runs all 18 sub-validators |
+| `validate_plugin.py` | Main orchestrator -- runs all 20 sub-validators |
 | `validate_skill_comprehensive.py` | Comprehensive skill validator (190+ rules) |
 | `validate_hook.py` | Hook configuration validator |
 | `validate_agent.py` | Agent definition validator |
@@ -369,6 +371,8 @@ The semantic validator always warns about the cost and asks for confirmation bef
 | `validate_rules.py` | Rules directory validator |
 | `validate_xref.py` | Cross-reference validator |
 | `validate_skill.py` | Basic skill validator |
+| `validate_local_scope.py` | Local-scope `.claude/` validator (v2.21.0+) — non-git-tracked settings/agents/skills/commands/rules + enabledPlugins |
+| `validate_project_scope.py` | Project-scope `.claude/` validator (v2.21.0+) — git-tracked settings/agents/skills/commands/rules + tracked hooks/mcp/lsp subtrees |
 
 </details>
 

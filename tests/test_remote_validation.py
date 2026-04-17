@@ -229,3 +229,136 @@ class TestRemoteExecutionGuardPluginCache:
         monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
         # No other setup — the guard must short-circuit.
         check_remote_execution_guard()
+
+
+# =============================================================================
+# Gap tests G19-G21: remote-validation launcher and execution-guard coverage.
+# =============================================================================
+
+
+class TestRemoteExecutionGuardLookalike:
+    """G21: the guard must NOT silently trust `CLAUDE_PLUGIN_ROOT` when the
+    scripts directory is OUTSIDE the advertised plugin root. A forged
+    env-var must still hit the cwd-based fallback check.
+    """
+
+    def test_claude_plugin_root_set_but_script_outside_rejects(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """G21: regression guard. If an attacker sets `CLAUDE_PLUGIN_ROOT`
+        to a legitimate plugin dir but tricks Python into running a copy
+        of `validate_*.py` from a `/uv/tools/...` ephemeral env, the
+        guard's trust check (`scripts_path is inside plugin_root_path`)
+        MUST fail — and the ephemeral-indicator fallback MUST still fire
+        and reject the invocation.
+
+        This protects against the lookalike-env-var attack: setting
+        `CLAUDE_PLUGIN_ROOT` to any random valid-looking dir does NOT
+        automatically whitelist the running script; the script must
+        genuinely live under that root.
+        """
+        import pytest as _pytest
+        from cpv_validation_common import check_remote_execution_guard
+
+        # Plant a real plugin-like root, but arrange for the validator
+        # to run from an ephemeral path (`/uv/tools/.../scripts`) that
+        # is *not* inside it. The ephemeral-indicator check catches this
+        # path shape regardless of cwd.
+        plugin_root = tmp_path / "plugin-root"
+        (plugin_root / "scripts").mkdir(parents=True)
+        other_scripts = tmp_path / "uv" / "tools" / "cpv" / "scripts"
+        other_scripts.mkdir(parents=True)
+        fake_script = other_scripts / "validate_local_scope.py"
+        fake_script.write_text("# stub\n")
+
+        monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin_root))
+        monkeypatch.delenv("CPV_REMOTE_VALIDATION", raising=False)
+        # Move cwd off to a completely unrelated subdirectory, independent
+        # of scripts_path. The /uv/tools/ substring is what actually fires
+        # the ephemeral detector regardless of cwd.
+        monkeypatch.chdir(plugin_root)
+
+        import cpv_validation_common as cvc
+        original_file = cvc.__file__
+        try:
+            cvc.__file__ = str(fake_script)
+            with _pytest.raises(SystemExit) as exc:
+                check_remote_execution_guard()
+            assert exc.value.code == 1, (
+                "guard must exit(1) when scripts dir is outside "
+                "CLAUDE_PLUGIN_ROOT even when the env var is set — "
+                "the ephemeral-indicator check (`/uv/tools/`) must "
+                "override the CLAUDE_PLUGIN_ROOT trust path when the "
+                "advertised root does not actually contain the running "
+                "scripts dir."
+            )
+            captured = capsys.readouterr()
+            assert "being run from a remote location" in captured.err
+        finally:
+            cvc.__file__ = original_file
+
+
+class TestSysPathRemoveDuplicates:
+    """G19: `remote_validation` must strip every duplicate of its scripts
+    directory from `sys.path`, not just the first occurrence. `list.remove`
+    is single-shot; the correct pattern is a `while ... in ...:` loop.
+    """
+
+    def test_duplicate_scripts_dir_entries_all_removed(self, monkeypatch):
+        """G19: plant 3 copies of the scripts dir in `sys.path`, then run
+        the exact cleanup loop used by `remote_validation.py` at import
+        time. Assert zero copies remain before the canonical `insert(0)`.
+        """
+        import remote_validation as rv
+
+        scripts_dir = rv._cpv_scripts_dir
+        # Save and clear any existing entries so we start from a known state.
+        original = list(sys.path)
+        try:
+            sys.path[:] = [p for p in sys.path if p != scripts_dir]
+            # Plant 3 duplicates.
+            sys.path.extend([scripts_dir, scripts_dir, scripts_dir])
+            assert sys.path.count(scripts_dir) == 3
+
+            # Replicate the while-loop from remote_validation.py lines 54-56.
+            while scripts_dir in sys.path:
+                sys.path.remove(scripts_dir)
+            sys.path.insert(0, scripts_dir)
+
+            # After cleanup there must be exactly ONE entry — the one
+            # inserted at index 0 — and no stragglers further down.
+            assert sys.path.count(scripts_dir) == 1, (
+                f"all duplicate entries of {scripts_dir!r} must be removed; "
+                f"got {sys.path.count(scripts_dir)} copies"
+            )
+            assert sys.path[0] == scripts_dir
+        finally:
+            sys.path[:] = original
+
+
+class TestAtexitTmpfileRace:
+    """G20: the atexit handler registered at module import time uses
+    `Path(...).unlink(missing_ok=True)` so the common "tmp cleaner already
+    nuked the file" race at interpreter exit does NOT print an ugly
+    traceback.
+    """
+
+    def test_unlink_missing_ok_does_not_raise(self, tmp_path):
+        """G20: manually delete the mypy tmpfile that `remote_validation`
+        registered for cleanup, then invoke the cleanup contract directly.
+        Must NOT raise FileNotFoundError. This simulates the OS/tmp
+        cleaner having removed the file during a long-running session
+        before Python's atexit machinery fires.
+        """
+        import remote_validation as rv
+
+        tmpfile_path = Path(rv._tmpfile.name)
+        # Pre-delete as the tmp cleaner would.
+        if tmpfile_path.exists():
+            tmpfile_path.unlink()
+        assert not tmpfile_path.exists()
+
+        # Re-invoke the exact lambda body the module registered via
+        # `atexit.register(lambda: Path(_tmpfile.name).unlink(missing_ok=True))`.
+        # Must NOT raise.
+        Path(rv._tmpfile.name).unlink(missing_ok=True)

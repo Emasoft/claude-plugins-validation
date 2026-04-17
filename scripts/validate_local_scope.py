@@ -63,20 +63,21 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import re
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from cc_scope_rules import (
+    ENABLED_PLUGIN_RE,
     GLOBAL_CONFIG_KEYS,
     MANAGED_ONLY_KEYS,
     MAX_FILES_PER_FOLDER,
     MAX_HOME_CLAUDE_JSON_BYTES,
     MAX_MARKDOWN_BYTES,
     MAX_SETTINGS_JSON_BYTES,
+    PLUGIN_ONLY_KEYS,
     OversizedFileError,
     classify_file_scope,
     classify_folder_scope,
@@ -85,6 +86,7 @@ from cc_scope_rules import (
     is_git_tracked,
     list_tracked_files_under,
     redact_home_path,
+    resolve_plugin_cache_dir,
     resolve_within,
     safe_load_jsonc,
     safe_parse_frontmatter,
@@ -107,7 +109,6 @@ from cpv_validation_common import (
 from validate_agent import validate_agent as _deep_validate_agent  # noqa: E402
 from validate_command import validate_command as _deep_validate_command  # noqa: E402
 from validate_hook import validate_hooks as _deep_validate_hooks  # noqa: E402
-from validate_lsp import validate_lsp_config as _deep_validate_lsp  # noqa: E402
 from validate_mcp import validate_mcp_config as _deep_validate_mcp  # noqa: E402
 from validate_rules import validate_rules_directory as _deep_validate_rules  # noqa: E402
 from validate_skill_comprehensive import validate_skill as _deep_validate_skill  # noqa: E402
@@ -196,6 +197,27 @@ def _flag_global_config_keys_local(
             )
 
 
+def _flag_plugin_only_keys_local(
+    data: dict[str, Any], report: ValidationReport, file_label: str
+) -> None:
+    """Plugin-only keys (``lspServers``, ``monitors``) never work in a settings
+    file — Claude Code reads them only from a plugin package's ``plugin.json``.
+    CRITICAL because the author's intent is silently dropped.
+    """
+    for key in sorted(PLUGIN_ONLY_KEYS):
+        if key in data:
+            report.critical(
+                (
+                    f"{file_label} has plugin-only key '{key}' — Claude Code reads "
+                    "this ONLY from a plugin's plugin.json (top-level field). The "
+                    f"'{key}' block in a settings file is silently dropped. Move "
+                    "the declaration into the owning plugin's plugin.json, or "
+                    "delete it."
+                ),
+                file_label,
+            )
+
+
 def _suggest_typically_shared_keys(
     data: dict[str, Any], report: ValidationReport, file_label: str
 ) -> None:
@@ -243,24 +265,32 @@ def _flag_missing_schema_local(
 
 def validate_settings_local_json(
     settings_path: Path, report: ValidationReport
-) -> None:
-    """Apply local-scope rules to ``.claude/settings.local.json`` contents."""
+) -> dict[str, Any] | None:
+    """Apply local-scope rules to ``.claude/settings.local.json`` contents.
+
+    Returns the parsed top-level dict (or ``None`` when parsing failed or the
+    root is not an object) so the caller can reuse it for downstream subtree
+    validation without re-reading the file. Reading once eliminates the
+    TOCTOU window between the schema check here and the subtree walk below.
+    """
     file_label = ".claude/settings.local.json"
     data = _load_json_or_report(settings_path, MAX_SETTINGS_JSON_BYTES, report, file_label)
     if data is None:
-        return
+        return None
     if not isinstance(data, dict):
         report.critical(f"{file_label}: root must be a JSON object", file_label)
-        return
+        return None
 
     _flag_managed_only_keys_local(data, report, file_label)
     _flag_global_config_keys_local(data, report, file_label)
+    _flag_plugin_only_keys_local(data, report, file_label)
     _suggest_typically_shared_keys(data, report, file_label)
     _flag_deprecated_keys(data, report, file_label)
     _flag_missing_schema_local(data, report, file_label)
 
     if not report.has_critical and not report.has_major and not report.has_minor:
         report.passed(f"{file_label} local-scope rules OK", file_label)
+    return data
 
 
 # =============================================================================
@@ -563,21 +593,33 @@ def _validate_wip_shared_settings(
 ) -> None:
     """Apply strict project-scope rules to an UNTRACKED settings.json.
 
-    TRDD section 5 + llm-ext correctness-followup finding #1: a developer
-    may have authored a new ``.claude/settings.json`` that is not yet
-    committed. This file is on its way to being shared with the team, so
-    we should enforce the *project-scope* rules right now (secrets,
-    absolute paths, rejected keys) rather than the relaxed local-scope
-    rules — those would mask issues the developer wants to know about
-    before pushing.
+    TRDD-f4e2d385 §3.1 invariant: a finding that fires for a tracked
+    ``.claude/settings.json`` MUST also fire here — the content is
+    on its way to being committed and the developer wants the same
+    diagnostic coverage pre-push. That means:
 
-    Delegates to ``validate_project_scope.validate_settings_json_project_scope``
-    via a deferred import to avoid a module-level circular dependency
-    between the two orchestrators.
+    1. Top-level schema (rejected keys, secrets, absolute paths) via
+       ``validate_settings_json_project_scope``.
+    2. Deep subtree validation for ``hooks`` — the ONLY element
+       definition block Claude Code accepts inside settings files.
+       ``lspServers`` is plugin-only (see ``plugin.json``), and inline
+       ``mcpServers`` definitions are only meaningful in ``.mcp.json``
+       / ``~/.claude.json`` / plugin.json — not in settings. A
+       ``lspServers`` block in settings is a CRITICAL
+       ``PLUGIN_ONLY_KEY`` finding raised by the top-level schema
+       check above.
+
+    Deferred imports avoid a module-level circular dependency between
+    the two orchestrators.
     """
-    from validate_project_scope import validate_settings_json_project_scope
+    from validate_project_scope import (
+        _validate_project_settings_hooks,
+        validate_settings_json_project_scope,
+    )
 
-    validate_settings_json_project_scope(settings_path, report)
+    settings_data = validate_settings_json_project_scope(settings_path, report)
+    if isinstance(settings_data, dict):
+        _validate_project_settings_hooks(settings_data, ".claude/settings.json", report)
 
 
 def validate_local_scope(project_root: Path, report: ValidationReport) -> None:
@@ -625,22 +667,20 @@ def validate_local_scope(project_root: Path, report: ValidationReport) -> None:
                 ".claude/settings.local.json",
             )
         else:
-            validate_settings_local_json(settings_local, report)
-            # TRDD-f4e2d385 §3.2: deep-validate inline hooks/mcpServers/
-            # lspServers subtrees. Re-parse to get the data for subtree extraction.
-            settings_local_raw = _load_json_or_report(
-                settings_local, MAX_SETTINGS_JSON_BYTES, report, ".claude/settings.local.json"
-            )
-            if isinstance(settings_local_raw, dict):
-                settings_local_data = settings_local_raw
+            # TRDD-f4e2d385 §3.2: deep-validate the inline ``hooks`` subtree.
+            # Read the file ONCE via ``validate_settings_local_json`` (which
+            # returns the parsed dict) so the subtree walk operates on the
+            # same snapshot as the top-level schema check — closes the H-3
+            # TOCTOU window. ``lspServers`` is plugin-only and is flagged as
+            # a CRITICAL plugin-only-key violation by the top-level schema
+            # check; we do NOT deep-validate it here as if it were
+            # semantically valid in settings.
+            settings_local_data = validate_settings_local_json(settings_local, report)
             if isinstance(settings_local_data, dict):
                 _validate_settings_hooks_subtree(
                     settings_local_data, ".claude/settings.local.json", report
                 )
                 _validate_settings_mcp_subtree(
-                    settings_local_data, ".claude/settings.local.json", report
-                )
-                _validate_settings_lsp_subtree(
                     settings_local_data, ".claude/settings.local.json", report
                 )
 
@@ -785,7 +825,7 @@ def _validate_untracked_file_deep(
         subreport = validator_fn(path)
     except Exception as exc:  # pragma: no cover — defensive
         parent_report.critical(
-            f"[{label_kind}] {rel}: validator raised {type(exc).__name__}: {exc}",
+            f"[{label_kind}] {rel}: validator raised {type(exc).__name__}",
             str(rel),
         )
         return
@@ -876,7 +916,7 @@ def validate_local_skills_deep(
         except Exception as exc:  # pragma: no cover — defensive
             report.critical(
                 f"[skill .claude/skills/{skill_dir.name}]: validator raised "
-                f"{type(exc).__name__}: {exc}",
+                f"{type(exc).__name__}",
                 f".claude/skills/{skill_dir.name}",
             )
             continue
@@ -899,7 +939,7 @@ def validate_local_rules_deep(
         _deep_validate_rules(rules_dir, rules_report, plugin_root=None)
     except Exception as exc:  # pragma: no cover — defensive
         report.critical(
-            f"[rules .claude/rules]: validator raised {type(exc).__name__}: {exc}",
+            f"[rules .claude/rules]: validator raised {type(exc).__name__}",
             ".claude/rules",
         )
         return
@@ -940,114 +980,75 @@ def validate_local_rules_deep(
 # =============================================================================
 
 
+def _run_settings_subtree_validator(
+    subtree_key: str,
+    subtree_value: Any,
+    settings_file_label: str,
+    validator: Callable[..., ValidationReport],
+    report: ValidationReport,
+) -> None:
+    """Dump ``{subtree_key: subtree_value}`` to a temp JSON file, run the
+    per-element ``validator`` on it, and merge the sub-report.
+
+    Uses ``tempfile.TemporaryDirectory`` (mode 0700 on POSIX) so the tempfile
+    inside is unreadable by other users even on shared-tmp hosts, and the
+    enclosing directory is always cleaned up by the context manager's
+    ``shutil.rmtree`` regardless of interpreter-crash path (H-2 hardening).
+    Non-dict subtree values short-circuit as MAJOR before the tempfile
+    exists.
+    """
+    if subtree_value is None:
+        return
+    if not isinstance(subtree_value, dict):
+        report.major(
+            f"[{subtree_key} in {settings_file_label}] '{subtree_key}' must be an "
+            f"object, got {type(subtree_value).__name__}",
+            settings_file_label,
+        )
+        return
+    with tempfile.TemporaryDirectory(prefix="cpv-subtree-") as tmpdir:
+        tmp_path = Path(tmpdir) / "settings.json"
+        tmp_path.write_text(json.dumps({subtree_key: subtree_value}), encoding="utf-8")
+        try:
+            subreport = validator(tmp_path, plugin_root=None)
+        except Exception as exc:  # pragma: no cover — defensive
+            report.critical(
+                f"[{subtree_key} in {settings_file_label}] validator raised "
+                f"{type(exc).__name__}",
+                settings_file_label,
+            )
+            return
+    _merge_subreport(subreport, report, f"[{subtree_key} in {settings_file_label}]")
+
+
 def _validate_settings_hooks_subtree(
     settings: dict[str, Any], settings_file_label: str, report: ValidationReport
 ) -> None:
     """Extract `hooks` from a settings dict and run the hook validator."""
-    hooks = settings.get("hooks")
-    if hooks is None:
-        return
-    if not isinstance(hooks, dict):
-        report.major(
-            f"[hooks in {settings_file_label}] 'hooks' must be an object, got "
-            f"{type(hooks).__name__}",
-            settings_file_label,
-        )
-        return
-    # Canonical hooks.json shape: {"hooks": {...}} — already matches.
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False, encoding="utf-8"
-    ) as tmp:
-        json.dump({"hooks": hooks}, tmp)
-        tmp_path = Path(tmp.name)
-    try:
-        subreport = _deep_validate_hooks(tmp_path, plugin_root=None)
-    except Exception as exc:  # pragma: no cover — defensive
-        report.critical(
-            f"[hooks in {settings_file_label}] validator raised "
-            f"{type(exc).__name__}: {exc}",
-            settings_file_label,
-        )
-        return
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-    _merge_subreport(subreport, report, f"[hooks in {settings_file_label}]")
+    _run_settings_subtree_validator(
+        "hooks", settings.get("hooks"), settings_file_label, _deep_validate_hooks, report
+    )
 
 
 def _validate_settings_mcp_subtree(
     settings: dict[str, Any], settings_file_label: str, report: ValidationReport
 ) -> None:
     """Extract `mcpServers` from a settings dict and run the MCP validator."""
-    mcp_servers = settings.get("mcpServers")
-    if mcp_servers is None:
-        return
-    if not isinstance(mcp_servers, dict):
-        report.major(
-            f"[mcpServers in {settings_file_label}] 'mcpServers' must be an "
-            f"object, got {type(mcp_servers).__name__}",
-            settings_file_label,
-        )
-        return
-    # validate_mcp_config expects {"mcpServers": {...}} at root.
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False, encoding="utf-8"
-    ) as tmp:
-        json.dump({"mcpServers": mcp_servers}, tmp)
-        tmp_path = Path(tmp.name)
-    try:
-        subreport = _deep_validate_mcp(tmp_path, plugin_root=None)
-    except Exception as exc:  # pragma: no cover — defensive
-        report.critical(
-            f"[mcpServers in {settings_file_label}] validator raised "
-            f"{type(exc).__name__}: {exc}",
-            settings_file_label,
-        )
-        return
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-    _merge_subreport(subreport, report, f"[mcpServers in {settings_file_label}]")
+    _run_settings_subtree_validator(
+        "mcpServers",
+        settings.get("mcpServers"),
+        settings_file_label,
+        _deep_validate_mcp,
+        report,
+    )
 
 
-def _validate_settings_lsp_subtree(
-    settings: dict[str, Any], settings_file_label: str, report: ValidationReport
-) -> None:
-    """Extract `lspServers` from a settings dict and run the LSP validator."""
-    lsp_servers = settings.get("lspServers")
-    if lsp_servers is None:
-        return
-    if not isinstance(lsp_servers, dict):
-        report.major(
-            f"[lspServers in {settings_file_label}] 'lspServers' must be an "
-            f"object, got {type(lsp_servers).__name__}",
-            settings_file_label,
-        )
-        return
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False, encoding="utf-8"
-    ) as tmp:
-        json.dump({"lspServers": lsp_servers}, tmp)
-        tmp_path = Path(tmp.name)
-    try:
-        subreport = _deep_validate_lsp(tmp_path, plugin_root=None)
-    except Exception as exc:  # pragma: no cover — defensive
-        report.critical(
-            f"[lspServers in {settings_file_label}] validator raised "
-            f"{type(exc).__name__}: {exc}",
-            settings_file_label,
-        )
-        return
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-    _merge_subreport(subreport, report, f"[lspServers in {settings_file_label}]")
+# `lspServers` is plugin-only (per Claude Code plugin-reference: plugin.json
+# top-level `lspServers`). Settings files (settings.json / settings.local.json)
+# do NOT accept an `lspServers` block — Claude Code silently drops it. We
+# deliberately do NOT deep-validate such a block here, because that would
+# mask the real problem: the key is in the wrong file. The top-level schema
+# check (_flag_plugin_only_keys_*) fires a CRITICAL when it sees it.
 
 
 # =============================================================================
@@ -1067,7 +1068,7 @@ def _validate_mcp_json_file_deep(
         subreport = _deep_validate_mcp(mcp_path, plugin_root=None)
     except Exception as exc:  # pragma: no cover — defensive
         report.critical(
-            f"[.mcp.json] validator raised {type(exc).__name__}: {exc}",
+            f"[.mcp.json] validator raised {type(exc).__name__}",
             ".mcp.json",
         )
         return
@@ -1085,32 +1086,9 @@ def _validate_mcp_json_file_deep(
 # =============================================================================
 
 
-_ENABLED_PLUGIN_RE = re.compile(r"^(?P<plugin>[A-Za-z0-9_.\-]+)@(?P<marketplace>[A-Za-z0-9_.\-]+)$")
-
-
-def _resolve_plugin_cache_dir(plugin_name: str, marketplace: str) -> Path | None:
-    """Find `~/.claude/plugins/cache/<marketplace>/<plugin>/<highest-version>/`.
-
-    Returns the highest-version subdirectory, or the plugin dir itself if no
-    version subdirectories exist. Returns None if the plugin is not cached.
-    """
-    base = Path.home() / ".claude" / "plugins" / "cache" / marketplace / plugin_name
-    if not base.is_dir():
-        return None
-    # Look for version-like subdirectories (semver-ish). If present, take the
-    # highest one by lexicographic sort (v2.20.0 sorts after v2.18.0).
-    versions = [d for d in base.iterdir() if d.is_dir()]
-    if not versions:
-        return base
-    # Simple semver sort: split on dots, compare tuples of ints when possible.
-    def _version_key(p: Path) -> tuple:
-        parts = p.name.lstrip("v").split(".")
-        return tuple(int(x) if x.isdigit() else x for x in parts)
-    try:
-        versions.sort(key=_version_key, reverse=True)
-    except TypeError:
-        versions.sort(reverse=True)
-    return versions[0]
+# Plugin-cache resolver + regex are shared with validate_project_scope.py,
+# hosted in cc_scope_rules.py so both sides agree on semver normalization,
+# symlink-escape containment, and INFO emission on mixed-version fallback.
 
 
 def _validate_plugin_all_checks(plugin_root: Path, report: ValidationReport) -> None:
@@ -1181,10 +1159,14 @@ def _validate_plugin_all_checks(plugin_root: Path, report: ValidationReport) -> 
 
 
 def validate_locally_enabled_plugins(
-    enabled_plugins: dict[str, Any], report: ValidationReport
+    enabled_plugins: object, report: ValidationReport
 ) -> None:
     """For each `plugin@marketplace: true` in enabledPlugins, locate the
     installed plugin and run the core plugin checks on it.
+
+    Takes ``object`` (not ``dict``) because the source is
+    ``settings.local.json`` — untrusted JSON content. A runtime non-dict
+    value short-circuits cleanly instead of raising.
     """
     if not isinstance(enabled_plugins, dict):
         return
@@ -1192,7 +1174,7 @@ def validate_locally_enabled_plugins(
     for key, value in enabled_plugins.items():
         if value is not True:
             continue  # disabled or non-true value → skipped
-        m = _ENABLED_PLUGIN_RE.match(str(key))
+        m = ENABLED_PLUGIN_RE.match(str(key))
         if not m:
             report.minor(
                 f"[enabledPlugins] '{key}' does not match "
@@ -1202,7 +1184,9 @@ def validate_locally_enabled_plugins(
             continue
         plugin = m.group("plugin")
         marketplace = m.group("marketplace")
-        cache_dir = _resolve_plugin_cache_dir(plugin, marketplace)
+        cache_dir = resolve_plugin_cache_dir(
+            plugin, marketplace, report=report, scope_label="enabledPlugins"
+        )
         if cache_dir is None:
             report.major(
                 f"[enabledPlugins {key}] plugin is enabled but NOT installed "
@@ -1219,7 +1203,7 @@ def validate_locally_enabled_plugins(
         except Exception as exc:  # pragma: no cover — defensive
             report.critical(
                 f"[enabledPlugins {key}] plugin validator raised "
-                f"{type(exc).__name__}: {exc}",
+                f"{type(exc).__name__}",
                 "enabledPlugins",
             )
             continue

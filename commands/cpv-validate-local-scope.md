@@ -72,17 +72,28 @@ If `settings.json` exists but is not committed, that is unusual. The
 validator emits a WARNING and still runs the local-scope rules on it.
 
 ### 4. Untracked `.claude/agents/`, `.claude/skills/`, `.claude/commands/`, `.claude/rules/`
-If any of these folders are gitignored, the validator walks them and
-applies lightweight frontmatter checks (YAML parseable, `name` present).
-Absolute home paths and secrets are **not** flagged here — only at
-project scope.
 
-### 5. `~/.claude.json` per-project MCP state
+> **v2.21.0 behavior change (TRDD-f4e2d385 §3.1):** untracked elements
+> are now passed to the FULL per-element validator — the same pipeline
+> `cpv-validate-plugin` uses for each bundled file. The shallow
+> frontmatter walk still runs on top, but the deep pipeline is the
+> authoritative source. Absolute-path / secret rules remain relaxed for
+> local scope (personal config is allowed machine-specific paths) —
+> but structural and semantic rules now fire consistently.
+
+### 5. Locally-enabled plugins (`settings.local.json.enabledPlugins`)
+For every `"<plugin>@<marketplace>": true` entry, CPV resolves the plugin's
+cache directory at `~/.claude/plugins/cache/<marketplace>/<plugin>/<highest-version>/`
+and runs the core plugin-validation pipeline on it. An enabled-but-not-installed
+plugin produces a MAJOR. The resolver is symlink-confined to the cache root,
+so a path that escapes `~/.claude/plugins/cache/` is rejected with a WARNING.
+
+### 6. `~/.claude.json` per-project MCP state
 Reads the current user's `~/.claude.json` and reports any
 `projects[<abs_path>].mcpServers` entries as INFO so you can see which
 local MCP servers Claude Code has registered for this project.
 
-### 6. `.gitignore` coverage
+### 7. `.gitignore` coverage
 - **MINOR**: `.claude/settings.local.json` is not covered by any
   `.gitignore` line (accepts `.claude/`, `.claude/settings.local.json`,
   or bare `settings.local.json`).

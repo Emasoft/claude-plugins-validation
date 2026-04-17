@@ -2222,3 +2222,259 @@ def test_http_hook_latency_sensitive_event_warning():
     assert any("latency" not in m.lower() or "blocks user interaction" in m for m in warnings), (
         f"Expected latency warning for UserPromptSubmit HTTP hook; got: {warnings}"
     )
+
+
+# ---------------------------------------------------------------------------
+# v2.21.3 regression batch D — gaps G1/G2/G3 + hardening changes
+# ---------------------------------------------------------------------------
+
+
+def test_interpreter_W_flag_arg_consumption_preserves_script(tmp_path: Path):
+    """G1: `python3 -W ignore foo.py` — the `-W` flag consumes its action
+    argument (`ignore`), so `foo.py` must be recognised as the script token.
+
+    Pre-fix, the generic single-dash flag branch advanced only by one token,
+    so `ignore` was misclassified as the script path and the real `foo.py`
+    was silently skipped.
+    """
+    from validate_hook import extract_script_paths
+
+    refs = extract_script_paths("python3 -W ignore foo.py", None)
+    assert len(refs) == 1, (
+        f"Expected exactly 1 script ref with `-W ignore` consumed, got: {refs}"
+    )
+    assert refs[0].path == Path("foo.py")
+    assert refs[0].invocation_mode == "interpreter-python"
+
+
+def test_schema_top_level_field_is_known(tmp_path: Path):
+    """G2: `$schema` is a standard JSON Schema declaration recognised by editors
+    and linters. It MUST be in the known-top-level-fields set so plugins that
+    declare one do not receive a spurious "unknown top-level field" warning.
+    """
+    hooks_file = tmp_path / "hooks.json"
+    hooks_file.write_text(
+        json.dumps(
+            {
+                "$schema": "https://example.com/hooks.schema.json",
+                "hooks": {},
+            }
+        )
+    )
+    report = validate_hooks(hooks_file, plugin_root=tmp_path)
+    warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
+    assert not any(
+        "unknown top-level field" in m.lower() and "$schema" in m for m in warning_msgs
+    ), (
+        f"`$schema` must not produce an 'unknown top-level field' warning; got: {warning_msgs}"
+    )
+
+
+def test_windows_single_backslash_regex_matches_escaped_path(tmp_path: Path):
+    """G3: JSON parsing un-escapes `\\\\` → `\\`, so by the time we inspect the
+    command string the backslashes are single chars. The Windows-backslash
+    MINOR must match on single `\\` (not require double `\\\\`).
+
+    Pre-fix, the regex kept the JSON-level `\\\\` doubling and so never
+    matched the actual post-JSON string.
+    """
+    hooks_file = tmp_path / "hooks.json"
+    # JSON encodes a single real backslash as `\\`. Python's json.dumps below
+    # emits the correct wire form; after parse the command string will contain
+    # single `\` characters — the exact wire form a plugin author writes.
+    hooks_file.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "C:\\Users\\alice\\foo.py",
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        )
+    )
+    report = validate_hooks(hooks_file, plugin_root=tmp_path)
+    minor_msgs = [r.message for r in report.results if r.level == "MINOR"]
+    assert any("Windows-style backslash" in m for m in minor_msgs), (
+        f"Expected Windows-style-backslash MINOR for single-backslash path; got MINORs: {minor_msgs}"
+    )
+
+
+def test_os_exit_at_module_scope_is_flagged(tmp_path: Path):
+    """SR-007: `os._exit(1)` at module scope terminates the hook process just
+    as surely as `sys.exit(1)` does — and even more hostilely (skips atexit /
+    __del__ cleanup). It must be flagged identically.
+
+    This guards against the PSS-class "fatal dep missing" pattern being
+    rewritten to use `os._exit` and silently evading the detector.
+    """
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    script = scripts_dir / "os_exit_script.py"
+    script.write_text(
+        "# /// script\n"
+        "# requires-python = \">=3.10\"\n"
+        "# dependencies = []\n"
+        "# ///\n"
+        "import os\n"
+        "os._exit(1)\n"
+        "def main():\n"
+        "    print('never reached')\n"
+    )
+    import os
+
+    os.chmod(script, 0o755)
+
+    hooks_dir = tmp_path / "hooks"
+    hooks_dir.mkdir()
+    hooks_file = hooks_dir / "hooks.json"
+    hooks_file.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": 'uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/os_exit_script.py"',
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        )
+    )
+    report = validate_hooks(hooks_file, plugin_root=tmp_path)
+    major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+    assert any("MODULE scope" in m for m in major_msgs), (
+        f"os._exit at module scope must produce a MODULE-scope MAJOR; got MAJORs: {major_msgs}"
+    )
+
+
+def test_backslash_windows_path_traversal_warning(tmp_path: Path):
+    """T-2: `${CLAUDE_PLUGIN_ROOT}\\..\\other\\foo.py` (Windows-style backslash
+    path traversal using the env-var prefix) must trigger the path-traversal
+    WARNING.
+
+    Covers the env-var-prefixed backslash branch of `_TRAVERSAL_RE`.
+    """
+    hooks_file = tmp_path / "hooks.json"
+    hooks_file.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "${CLAUDE_PLUGIN_ROOT}\\..\\other\\foo.py",
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        )
+    )
+    report = validate_hooks(hooks_file, plugin_root=tmp_path)
+    warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
+    assert any("path-traversal" in m or "escapes the plugin/project root" in m for m in warning_msgs), (
+        f"Expected path-traversal WARNING for env-var-prefixed backslash traversal; got: {warning_msgs}"
+    )
+
+
+def test_windows_component_backslash_traversal_warning(tmp_path: Path):
+    """T-2: `C:\\Users\\alice\\..\\evil.py` triggers the bare-component branch
+    of `_TRAVERSAL_RE` — a Windows absolute path with a `\\..\\` segment
+    escaping a named component.
+    """
+    hooks_file = tmp_path / "hooks.json"
+    hooks_file.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "C:\\Users\\alice\\..\\evil.py",
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        )
+    )
+    report = validate_hooks(hooks_file, plugin_root=tmp_path)
+    warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
+    assert any("path-traversal" in m or "escapes the plugin/project root" in m for m in warning_msgs), (
+        f"Expected path-traversal WARNING for Windows component backslash traversal; got: {warning_msgs}"
+    )
+
+
+def test_unbalanced_quote_in_simple_command_is_major(tmp_path: Path):
+    """T-3: a hook command with an unterminated double quote — `python3 "foo.py;
+    rm -rf /` — must surface as a MAJOR by way of the `malformed_out` plumb
+    that validate_command_hook feeds from extract_script_paths.
+
+    Two independent checks, both required:
+      1. extract_script_paths populates malformed_out when shlex cannot tokenize.
+      2. validate_command_hook converts those into MAJOR findings mentioning
+         "unparseable" or "unbalanced quote".
+    """
+    from validate_hook import extract_script_paths
+
+    malformed: list[str] = []
+    refs = extract_script_paths('python3 "foo.py; rm -rf /', None, malformed_out=malformed)
+    assert malformed, (
+        f"extract_script_paths must append the unterminated-quote simple command to malformed_out; "
+        f"got malformed={malformed!r}, refs={refs!r}"
+    )
+
+    # Full-flow: validate_command_hook must emit a MAJOR.
+    report = ValidationReport()
+    hook = {"type": "command", "command": 'python3 "foo.py; rm -rf /'}
+    validate_command_hook(hook, "PreToolUse", tmp_path, report)
+    major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+    assert any("unparseable" in m or "unbalanced quote" in m for m in major_msgs), (
+        f"Expected MAJOR about unparseable / unbalanced quote; got MAJORs: {major_msgs}"
+    )
+
+
+def test_clean_quoted_command_produces_no_malformed_finding(tmp_path: Path):
+    """T-3 negative: a perfectly balanced-quoted command — `python3 "foo bar.py"`
+    — must NOT populate malformed_out and must NOT produce a MAJOR about
+    malformed quoting. Guards against the validator over-reaching on legitimate
+    quoted paths that contain spaces.
+    """
+    from validate_hook import extract_script_paths
+
+    malformed: list[str] = []
+    refs = extract_script_paths('python3 "foo bar.py"', None, malformed_out=malformed)
+    assert malformed == [], (
+        f"Balanced quotes must not trip malformed_out; got malformed={malformed!r}"
+    )
+    assert len(refs) == 1 and refs[0].path == Path("foo bar.py"), (
+        f"Expected single script ref for `foo bar.py`; got refs={refs!r}"
+    )
+
+    # Full-flow: no MAJOR about unparseable / unbalanced quote.
+    report = ValidationReport()
+    hook = {"type": "command", "command": 'python3 "foo bar.py"'}
+    validate_command_hook(hook, "PreToolUse", tmp_path, report)
+    major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+    assert not any("unparseable" in m or "unbalanced quote" in m for m in major_msgs), (
+        f"Clean quoted command must not produce malformed-quote MAJOR; got MAJORs: {major_msgs}"
+    )
