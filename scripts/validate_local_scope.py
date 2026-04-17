@@ -906,10 +906,24 @@ def validate_local_rules_deep(
 
     # Filter out findings whose `file` path resolves to a tracked rule —
     # those are project-scope's concern.
+    #
+    # BUG FIX (CPV audit 2026-04-17): `_deep_validate_rules` emits `r.file`
+    # as a path RELATIVE TO `rules_dir.parent` (e.g. ".claude/") — see
+    # validate_rules.validate_rules_directory where
+    # `rel_path = rule_path.relative_to(rules_dir.parent)`. Joining it with
+    # `project_root` produced `<project_root>/rules/<file>.md` which never
+    # matches entries in `tracked` (which are resolved to
+    # `<project_root>/.claude/rules/<file>.md`). The net effect was that
+    # tracked rules incorrectly leaked into local-scope findings as
+    # duplicates of what `validate_project_scope` already reported. We must
+    # resolve against `rules_dir.parent` to reconstruct the same absolute
+    # path that `tracked` holds.
+    rel_base = rules_dir.parent
     for r in rules_report.results:
         if r.file:
             try:
-                resolved = (project_root / r.file).resolve() if not Path(r.file).is_absolute() else Path(r.file).resolve()
+                rfile = Path(r.file)
+                resolved = rfile.resolve() if rfile.is_absolute() else (rel_base / rfile).resolve()
             except (OSError, ValueError):
                 resolved = None
             if resolved is not None and resolved in tracked:

@@ -40,14 +40,18 @@ import atexit
 import os
 import sys
 import tempfile
+from pathlib import Path
 
 # ── Environment isolation (runs at import time) ──────────────────────────
 
 # CPV's scripts directory (where this file lives)
 _cpv_scripts_dir = os.path.dirname(os.path.abspath(__file__))
 
-# 1. Ensure CPV's scripts dir is FIRST on sys.path
-if _cpv_scripts_dir in sys.path:
+# 1. Ensure CPV's scripts dir is FIRST on sys.path.
+# Purge ALL occurrences (list.remove only removes the first one, which would
+# leave stale duplicates later in sys.path and could shadow CPV modules if
+# another importer prepends a different path later).
+while _cpv_scripts_dir in sys.path:
     sys.path.remove(_cpv_scripts_dir)
 sys.path.insert(0, _cpv_scripts_dir)
 
@@ -63,7 +67,10 @@ disable_error_code = no-any-return, import-untyped
 _tmpfile = tempfile.NamedTemporaryFile(mode="w", suffix=".ini", prefix="cpv_mypy_", delete=False)
 _tmpfile.write(_MYPY_REMOTE_CONFIG)
 _tmpfile.close()
-atexit.register(lambda: os.unlink(_tmpfile.name))
+# Use missing_ok=True: if the OS/tmp cleaner already removed the file (e.g.
+# long-running session, sandbox cleanup), os.unlink would raise and Python's
+# atexit machinery prints an ugly traceback to stderr on interpreter exit.
+atexit.register(lambda: Path(_tmpfile.name).unlink(missing_ok=True))
 
 os.environ["MYPY_CONFIG_FILE"] = _tmpfile.name
 
@@ -221,9 +228,33 @@ def main() -> int:
     # Import and run
     import importlib
 
-    module = importlib.import_module(module_name)
-    result: int = module.main()
-    return result
+    try:
+        module = importlib.import_module(module_name)
+    except ImportError as e:
+        # e.g. stale alias pointing at a renamed script. Give a readable
+        # error instead of a raw traceback, which users otherwise blame on
+        # their own environment.
+        print(f"cpv-remote-validate: failed to import '{module_name}': {e}", file=sys.stderr)
+        return 1
+
+    main_fn = getattr(module, "main", None)
+    if not callable(main_fn):
+        print(
+            f"cpv-remote-validate: target script '{module_name}.py' has no callable main()",
+            file=sys.stderr,
+        )
+        return 1
+
+    result = main_fn()
+    # Scripts that fall off the end of main() return None; passing None to
+    # sys.exit silently reports exit code 0 even on a missed-return bug.
+    # Coerce None → 0 explicitly and non-int returns → 1 so the exit code
+    # always matches the underlying intent.
+    if result is None:
+        return 0
+    if isinstance(result, int):
+        return result
+    return 1
 
 
 if __name__ == "__main__":

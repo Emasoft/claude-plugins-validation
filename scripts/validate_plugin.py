@@ -879,7 +879,16 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
     # --- Shell scripts (.sh, .bash) ---
     sh_files = list(scripts_dir.glob("*.sh")) + list(scripts_dir.glob("*.bash"))
     for sh_file in sh_files:
-        if not os.access(sh_file, os.X_OK):
+        # os.access(..., X_OK) is unreliable on Windows (NTFS ACLs don't map to
+        # POSIX exec bits), so skip the exec-bit check there. Users on Windows
+        # won't be executing .sh scripts directly from PowerShell/cmd anyway;
+        # the check is a Unix portability safeguard.
+        if IS_WINDOWS:
+            report.passed(
+                f"Shell script present (exec bit not checked on Windows): {sh_file.name}",
+                f"scripts/{sh_file.name}",
+            )
+        elif not os.access(sh_file, os.X_OK):
             report.major(f"Shell script not executable: {sh_file.name}", f"scripts/{sh_file.name}")
         else:
             report.passed(f"Shell script executable: {sh_file.name}", f"scripts/{sh_file.name}")
@@ -1151,7 +1160,17 @@ def validate_bin_executables(plugin_root: Path, report: ValidationReport) -> Non
             continue  # Skip data/library files
         # Files with no extension or script extensions should be executable
         if ext == "" or ext in script_extensions:
-            if not os.access(bin_file, os.X_OK):
+            # os.access(..., X_OK) on Windows is unreliable: NTFS ACL checks
+            # don't map to POSIX exec bits, and every file often reports as
+            # executable. Skip the exec check on Windows to avoid false
+            # positives/negatives; the user's chmod advice is Unix-only anyway.
+            if IS_WINDOWS:
+                executable_count += 1
+                report.passed(
+                    f"bin/{bin_file.name} present (exec bit not checked on Windows)",
+                    f"bin/{bin_file.name}",
+                )
+            elif not os.access(bin_file, os.X_OK):
                 report.minor(
                     f"bin/{bin_file.name} is not executable — if this is a command, run: chmod +x bin/{bin_file.name}",
                     f"bin/{bin_file.name}",
@@ -1444,8 +1463,6 @@ def validate_output_styles(plugin_root: Path, report: ValidationReport) -> None:
     if not styles_dir.is_dir():
         return
 
-    import yaml as yaml_mod
-
     md_files = list(styles_dir.glob("*.md"))
     if not md_files:
         report.info("output-styles/ directory exists but has no .md files")
@@ -1477,15 +1494,25 @@ def validate_output_styles(plugin_root: Path, report: ValidationReport) -> None:
             continue
 
         try:
-            fm = yaml_mod.safe_load(parts[1])
-        except yaml_mod.YAMLError as e:
+            fm = yaml.safe_load(parts[1])
+        except yaml.YAMLError as e:
             report.major(
                 f"Output style '{md_file.name}' has invalid YAML: {e}",
                 f"output-styles/{md_file.name}",
             )
             continue
 
-        if not isinstance(fm, dict):
+        # If frontmatter exists but is not a mapping (e.g. a bare string or a
+        # list), the file is malformed. Report it as a MAJOR finding before
+        # normalizing to {} so downstream field checks don't spuriously claim
+        # success on garbage frontmatter.
+        if fm is not None and not isinstance(fm, dict):
+            report.major(
+                f"Output style '{md_file.name}': frontmatter must be a YAML mapping, got {type(fm).__name__}",
+                f"output-styles/{md_file.name}",
+            )
+            fm = {}
+        elif not isinstance(fm, dict):
             fm = {}
 
         # Validate fields
@@ -1681,12 +1708,33 @@ def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
         )
 
     # Scan for actual venv directories by structure (any name, not just .venv/venv)
+    # BUG FIX: previous substring match `dirname in line` falsely reported that a
+    # venv named `venv/` was covered when the gitignore only contained `.venv/`,
+    # because "venv" is a substring of ".venv". Use fnmatch against the normalised
+    # pattern body so exact directory names are required (glob still supported).
+    import fnmatch
+
+    def _gitignore_covers(name: str, gitignore_lines: list[str]) -> bool:
+        lower_name = name.lower()
+        for raw in gitignore_lines:
+            # Strip negation marker, leading slash, and trailing slash — gitignore
+            # semantics: `/foo/` and `foo/` both mean "dir named foo". We don't
+            # need full gitignore semantics here, just an exact/glob name check.
+            pat = raw.strip()
+            if pat.startswith("!"):
+                pat = pat[1:]
+            pat = pat.lstrip("/").rstrip("/")
+            if not pat:
+                continue
+            if fnmatch.fnmatch(lower_name, pat.lower()):
+                return True
+        return False
+
     for item in plugin_root.iterdir():
         if item.is_dir() and _is_python_venv(item):
             dirname = item.name
             # Check if this specific directory is covered by .gitignore
-            covered = any(dirname.lower() in line.lower() for line in lines)
-            if not covered:
+            if not _gitignore_covers(dirname, lines):
                 report.major(
                     f"Virtual environment '{dirname}/' detected (contains pyvenv.cfg) but not covered by .gitignore. Add '{dirname}/' to .gitignore."
                 )

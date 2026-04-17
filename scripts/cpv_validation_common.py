@@ -670,7 +670,9 @@ EXAMPLE_USERNAMES = {
 # Note: These are generic patterns that may produce false positives for example paths
 USER_PATH_PATTERNS = [
     re.compile(r"/Users/[^/\s]+/"),
-    re.compile(r"C:\\Users\\[^\\\s]+\\"),
+    # re.IGNORECASE because Windows accepts both "C:\Users\..." and "c:\users\..."
+    # and the scan should flag either form when detecting leaked user paths.
+    re.compile(r"C:\\Users\\[^\\\s]+\\", re.IGNORECASE),
     re.compile(r"/home/[^/\s]+/"),
 ]
 

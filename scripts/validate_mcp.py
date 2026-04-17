@@ -133,7 +133,25 @@ def validate_path_value(value: str, report: ValidationReport, context: str, plug
     if plugin_root and "${CLAUDE_PLUGIN_ROOT}" in value:
         # Substitute to check existence
         resolved = value.replace("${CLAUDE_PLUGIN_ROOT}", str(plugin_root))
-        resolved_path = Path(resolved)
+        try:
+            resolved_path = Path(resolved)
+        except (ValueError, OSError):
+            # Invalid path syntax after substitution — skip filesystem checks
+            return
+
+        # Security check: detect path traversal out of plugin root. Any ${CLAUDE_PLUGIN_ROOT}/..
+        # sequence that escapes plugin_root is a red flag — the plugin is trying to read
+        # files outside its own directory.
+        try:
+            resolved_abs = resolved_path.resolve()
+            plugin_root_abs = plugin_root.resolve()
+            resolved_abs.relative_to(plugin_root_abs)
+        except (ValueError, OSError):
+            report.major(
+                f"Path traverses outside plugin root in {context}: {value} (resolves to {resolved_path})"
+            )
+            return
+
         # Only check if it looks like a file (has extension) not a dir
         if "." in resolved_path.name or resolved_path.suffix:
             if not resolved_path.exists():
@@ -310,7 +328,9 @@ def validate_mcp_server(
     # Validate timeout field
     if "timeout" in config:
         timeout = config["timeout"]
-        if not isinstance(timeout, (int, float)):
+        # bool is a subclass of int in Python — isinstance(True, int) is True.
+        # Reject bool explicitly so `"timeout": true` doesn't silently pass as timeout=1.
+        if not isinstance(timeout, (int, float)) or isinstance(timeout, bool):
             report.major(f"Server {server_name} 'timeout' must be a number, got {type(timeout).__name__}")
         elif timeout <= 0:
             report.major(f"Server {server_name} 'timeout' must be positive")
@@ -326,7 +346,10 @@ def validate_mcp_server(
             # clientId is the key field for OAuth
             if "clientId" in oauth and not isinstance(oauth["clientId"], str):
                 report.major(f"Server {server_name} 'oauth.clientId' must be a string")
-            if "callbackPort" in oauth and not isinstance(oauth["callbackPort"], int):
+            # bool is a subclass of int — reject explicitly so `"callbackPort": true` fails.
+            if "callbackPort" in oauth and (
+                not isinstance(oauth["callbackPort"], int) or isinstance(oauth["callbackPort"], bool)
+            ):
                 report.major(f"Server {server_name} 'oauth.callbackPort' must be an integer")
             # authServerMetadataUrl: custom OAuth metadata discovery URL (v2.1.69+)
             if "authServerMetadataUrl" in oauth and not isinstance(oauth["authServerMetadataUrl"], str):
@@ -373,6 +396,13 @@ def validate_mcp_config(
         return report
 
     report.passed(f"{rel_path} is valid JSON")
+
+    # Root JSON must be an object. `"mcpServers" not in config` silently returns True
+    # for arrays/scalars, and later `config["mcpServers"]` would TypeError on arrays
+    # or skip validation on other scalar types.
+    if not isinstance(config, dict):
+        report.critical(f"Root of {rel_path} must be a JSON object, got {type(config).__name__}")
+        return report
 
     # Check for mcpServers field
     if "mcpServers" not in config:
@@ -432,6 +462,10 @@ def validate_plugin_mcp(plugin_root: Path, report: ValidationReport | None = Non
     if plugin_json.exists():
         try:
             manifest = json.loads(plugin_json.read_text(encoding="utf-8"))
+            # Guard against non-object roots — plugin.json validation is handled
+            # elsewhere but we must not TypeError on `manifest["mcpServers"]` below.
+            if not isinstance(manifest, dict):
+                return report
             if "mcpServers" in manifest:
                 mcp_servers = manifest["mcpServers"]
 
@@ -487,7 +521,9 @@ def print_results(report: ValidationReport, verbose: bool = False) -> None:
 
     counts = {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0, "INFO": 0, "PASSED": 0}
     for r in report.results:
-        counts[r.level] += 1
+        # Use .get() so unknown severity labels don't crash with KeyError.
+        if r.level in counts:
+            counts[r.level] += 1
 
     print("\n" + "=" * 60)
     print("MCP Configuration Validation Report")
@@ -510,7 +546,7 @@ def print_results(report: ValidationReport, verbose: bool = False) -> None:
         if r.level == "INFO" and not verbose:
             continue
 
-        color = colors[r.level]
+        color = colors.get(r.level, "")
         reset = colors["RESET"]
         file_info = f" ({r.file})" if r.file else ""
         line_info = f":{r.line}" if r.line else ""
@@ -555,8 +591,9 @@ def main() -> int:
         print(f"Error: {path} does not exist", file=sys.stderr)
         return 1
 
-    # Verify content type — must be .mcp.json file or directory containing one
-    if path.is_file() and not path.name.endswith(".mcp.json"):
+    # Verify content type — must be .mcp.json file or directory containing one.
+    # Use case-insensitive match so Windows filesystems (.MCP.JSON) work.
+    if path.is_file() and not path.name.lower().endswith(".mcp.json"):
         print(f"Error: {path} is not an MCP config file (expected .mcp.json)", file=sys.stderr)
         return 1
     if path.is_dir():
