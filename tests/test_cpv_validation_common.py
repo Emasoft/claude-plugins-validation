@@ -1261,3 +1261,36 @@ class TestNewHooksInValidHookEvents:
         from cpv_validation_common import VALID_HOOK_EVENTS
 
         assert "PreCompact" in VALID_HOOK_EVENTS
+
+
+# ---------------------------------------------------------------------------
+# v2.21.2 audit regression tests (commit c9b869a)
+# ---------------------------------------------------------------------------
+
+
+class TestV2212UserPathPatternsIgnoreCase:
+    """Regression tests for USER_PATH_PATTERNS Windows-regex case-sensitivity fix.
+
+    Pre-fix: the Windows pattern `r"C:\\Users\\[^\\\\s]+\\"` was case-sensitive,
+    so lowercase `c:\\users\\alice\\...` (a legitimate Windows path form) was
+    never flagged by the private-info scanner. Fix adds `re.IGNORECASE`.
+    """
+
+    def test_user_path_regex_matches_lowercase_windows_drive(self):
+        """G22: Lowercase `c:\\users\\alice\\foo` must match one of USER_PATH_PATTERNS."""
+        from cpv_validation_common import USER_PATH_PATTERNS
+
+        text = "c:\\users\\alice\\foo"
+        matched = any(p.search(text) for p in USER_PATH_PATTERNS)
+        assert matched, (
+            "Lowercase Windows drive path c:\\users\\alice\\... must match USER_PATH_PATTERNS "
+            "(re.IGNORECASE fix)"
+        )
+
+    def test_user_path_regex_matches_uppercase_windows_drive(self):
+        """Positive sanity: uppercase `C:\\Users\\Alice\\foo` still matches after the fix."""
+        from cpv_validation_common import USER_PATH_PATTERNS
+
+        text = "C:\\Users\\Alice\\foo"
+        matched = any(p.search(text) for p in USER_PATH_PATTERNS)
+        assert matched, "Uppercase Windows drive path must still match after IGNORECASE fix"

@@ -996,3 +996,147 @@ class TestShPortableFallback:
         validate_cross_platform(plugin_dir, report)
         sh_warnings = [r.message for r in report.results if r.level == "WARNING" and "Bash/Shell" in r.message]
         assert sh_warnings, "Expected WARNING for unaccompanied .sh script"
+
+
+# ============================================================================
+# v2.21.2 audit-fix regression tests (commit c9b869a)
+# ============================================================================
+
+
+class TestV2212AuditFixes:
+    """Regression tests for v2.21.2 audit fixes in validate_plugin.py.
+
+    Covers 3 fixes:
+    - G23 (CRITICAL): non-dict output-style frontmatter crashes .keys() pre-fix
+    - G24 (MAJOR): .gitignore venv coverage check was substring not fnmatch
+    - G25 (MAJOR): os.access(X_OK) skipped on Windows (NTFS has no POSIX exec bits)
+    """
+
+    def test_validate_plugin_non_dict_output_style_frontmatter_does_not_crash(self, tmp_path):
+        """G23: list-valued YAML frontmatter in output-styles/*.md must not crash .keys()."""
+        # Import here to exercise the production module by reference (not re-import)
+        from validate_plugin import validate_output_styles
+
+        plugin_dir = tmp_path / "bad-output-style-plugin"
+        plugin_dir.mkdir()
+        styles_dir = plugin_dir / "output-styles"
+        styles_dir.mkdir()
+        # Frontmatter is a YAML list — pre-fix code called .keys() on it and crashed
+        (styles_dir / "foo.md").write_text("---\n- item\n- other\n---\nbody content\n")
+
+        report = ValidationReport()
+        # Must not raise AttributeError
+        validate_output_styles(plugin_dir, report)
+
+        # Expect a MAJOR about frontmatter being a YAML mapping
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("frontmatter must be a YAML mapping" in m and "foo.md" in m for m in major_msgs), (
+            f"Expected MAJOR about non-dict frontmatter, got MAJORs: {major_msgs}"
+        )
+
+    def test_validate_plugin_venv_gitignore_is_fnmatch_not_substring(self, tmp_path):
+        """G24: .gitignore venv-coverage check uses fnmatch, not substring 'in' comparison.
+
+        Pre-fix used ``dirname.lower() in line.lower()`` which falsely passed when
+        a real venv named ``venv/`` was present but the gitignore only listed
+        ``.venv/`` (because 'venv' is a substring of '.venv'). Post-fix uses
+        fnmatch so only genuine glob/exact matches cover the directory.
+        """
+        from validate_plugin import validate_gitignore
+
+        # --- Scenario A: exact fnmatch coverage — no MAJOR for venv coverage ---
+        plugin_a = tmp_path / "fnmatch-covered"
+        plugin_a.mkdir()
+        # Create a real venv structure so _is_python_venv(item) returns True
+        venv_a = plugin_a / ".venv"
+        venv_a.mkdir()
+        (venv_a / "pyvenv.cfg").write_text("home = /usr/bin\n")
+        bin_a = venv_a / "bin"
+        bin_a.mkdir()
+        (bin_a / "something").write_text("#!/bin/sh\n")
+        # .gitignore lists `.venv/` explicitly — fnmatch('.venv', '.venv') should pass
+        (plugin_a / ".gitignore").write_text(".venv/\n__pycache__/\n.env\n*.pyc\n")
+
+        report_a = ValidationReport()
+        validate_gitignore(plugin_a, report_a)
+        venv_majors_a = [
+            r.message for r in report_a.results
+            if r.level == "MAJOR" and "Virtual environment '.venv/' detected" in r.message
+        ]
+        assert not venv_majors_a, (
+            f"fnmatch should have matched '.venv' against '.venv/' pattern; got MAJORs: {venv_majors_a}"
+        )
+
+        # --- Scenario B: pre-fix false-positive — post-fix must emit MAJOR ---
+        # dirname = 'venv', gitignore = '.venv/'. Pre-fix substring check:
+        # 'venv' in '.venv/' == True → no MAJOR (bug). Post-fix fnmatch:
+        # fnmatch('venv', '.venv') == False → MAJOR emitted (correct).
+        plugin_b = tmp_path / "substring-false-positive"
+        plugin_b.mkdir()
+        venv_b = plugin_b / "venv"
+        venv_b.mkdir()
+        (venv_b / "pyvenv.cfg").write_text("home = /usr/bin\n")
+        bin_b = venv_b / "bin"
+        bin_b.mkdir()
+        (bin_b / "something").write_text("#!/bin/sh\n")
+        # Only `.venv/` is listed; the real dir is `venv/` — NOT covered by fnmatch
+        (plugin_b / ".gitignore").write_text(".venv/\n__pycache__/\n.env\n*.pyc\n")
+
+        report_b = ValidationReport()
+        validate_gitignore(plugin_b, report_b)
+        venv_majors_b = [
+            r.message for r in report_b.results
+            if r.level == "MAJOR" and "Virtual environment 'venv/' detected" in r.message
+        ]
+        assert venv_majors_b, (
+            "Expected MAJOR for uncovered 'venv/' when only '.venv/' is in .gitignore "
+            "(fnmatch('venv', '.venv') must be False). "
+            f"Got MAJORs: {[r.message for r in report_b.results if r.level == 'MAJOR']}"
+        )
+
+    def test_validate_plugin_x_ok_guarded_on_windows(self, tmp_path, monkeypatch):
+        """G25: bin/ exec-bit check must be skipped on Windows (NTFS has no POSIX X_OK)."""
+        import validate_plugin as vp_mod
+
+        plugin_dir = tmp_path / "bin-plugin"
+        plugin_dir.mkdir()
+        bin_dir = plugin_dir / "bin"
+        bin_dir.mkdir()
+        cli = bin_dir / "cli"
+        cli.write_text("#!/usr/bin/env bash\necho hi\n")
+        # Intentionally do NOT chmod +x — on Unix this triggers the MINOR finding
+        cli.chmod(0o644)
+
+        # --- Windows: must NOT flag the missing exec bit ---
+        monkeypatch.setattr(vp_mod, "IS_WINDOWS", True)
+        report_win = ValidationReport()
+        vp_mod.validate_bin_executables(plugin_dir, report_win)
+        win_not_exec = [
+            r.message for r in report_win.results
+            if r.level == "MINOR" and "bin/cli" in r.message and "not executable" in r.message
+        ]
+        assert not win_not_exec, (
+            f"On Windows, X_OK should be skipped so no 'not executable' MINOR must appear. "
+            f"Got MINORs: {[r.message for r in report_win.results if r.level == 'MINOR']}"
+        )
+        # And a PASSED note mentioning Windows skip should be present
+        win_passed = [
+            r.message for r in report_win.results
+            if r.level == "PASSED" and "bin/cli" in r.message and "Windows" in r.message
+        ]
+        assert win_passed, (
+            "Expected PASSED message noting exec bit not checked on Windows for bin/cli"
+        )
+
+        # --- Non-Windows: the same file WITH missing +x MUST produce the MINOR finding ---
+        monkeypatch.setattr(vp_mod, "IS_WINDOWS", False)
+        report_unix = ValidationReport()
+        vp_mod.validate_bin_executables(plugin_dir, report_unix)
+        unix_not_exec = [
+            r.message for r in report_unix.results
+            if r.level == "MINOR" and "bin/cli" in r.message and "not executable" in r.message
+        ]
+        assert unix_not_exec, (
+            "On non-Windows, a non-executable bin/cli MUST raise a MINOR finding. "
+            f"Got MINORs: {[r.message for r in report_unix.results if r.level == 'MINOR']}"
+        )

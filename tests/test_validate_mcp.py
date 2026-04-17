@@ -730,3 +730,95 @@ class TestV170Fixes:
         # Should have at least one PASSED result (server validated)
         passed = [r for r in report.results if r.level == "PASSED"]
         assert len(passed) >= 1
+
+
+# ============================================================================
+# v2.21.2 audit regression tests (commit c9b869a)
+# ============================================================================
+
+from cpv_validation_common import ValidationResult  # noqa: E402
+
+
+class TestV2212AuditFixes:
+    """Regression tests for the 6 validate_mcp defects fixed in commit c9b869a.
+
+    Covers:
+    - G26: bool accepted as int (timeout, oauth.callbackPort) — bool is subclass of int
+    - G27: print_results KeyError on unknown severity levels
+    - G28: non-dict JSON root crash (validate_mcp_config)
+    - G30: ${CLAUDE_PLUGIN_ROOT}/.. path-traversal detection in validate_path_value
+    """
+
+    def test_mcp_bool_rejected_as_timeout(self):
+        """G26: `"timeout": true` must be rejected — bool is int subclass, pre-fix silently passed."""
+        report = ValidationReport()
+        config = {"type": "stdio", "command": "node", "timeout": True}
+        validate_mcp_server("srv", config, report)
+        majors = [r for r in report.results if r.level == "MAJOR"]
+        # The fix adds `isinstance(v, bool)` rejection so `True` is caught as not-a-number.
+        assert any("timeout" in m.message and "number" in m.message.lower() for m in majors), (
+            f"Expected MAJOR about timeout not being a number, got: {[m.message for m in majors]}"
+        )
+
+    def test_mcp_bool_rejected_as_callbackPort(self):
+        """G26: `"oauth.callbackPort": false` must be rejected — bool is int subclass."""
+        report = ValidationReport()
+        config = {
+            "type": "stdio",
+            "command": "node",
+            "oauth": {"clientId": "abc", "callbackPort": False},
+        }
+        validate_mcp_server("srv", config, report)
+        majors = [r for r in report.results if r.level == "MAJOR"]
+        assert any(
+            "callbackPort" in m.message and "integer" in m.message.lower() for m in majors
+        ), f"Expected MAJOR about callbackPort integer, got: {[m.message for m in majors]}"
+
+    def test_mcp_print_results_handles_unknown_severity(self, capsys):
+        """G27: print_results must not KeyError when a result has an unknown severity label."""
+        from validate_mcp import print_results as mcp_print_results
+
+        report = ValidationReport()
+        # Append a synthetic result with a severity not in the counts/colors dicts.
+        report.results.append(ValidationResult(level="FOOBAR", message="synthetic unknown-severity"))  # type: ignore[arg-type]
+        # Must not raise KeyError (pre-fix: counts[r.level] and colors[r.level] crashed).
+        mcp_print_results(report, verbose=True)
+        out = capsys.readouterr().out
+        assert "MCP Configuration Validation Report" in out
+
+    def test_mcp_non_dict_json_root_produces_blocking_finding(self, tmp_path):
+        """G28: `.mcp.json` root as a JSON array (`[1,2,3]`) must not crash — it
+        emits a blocking finding (CRITICAL or MAJOR, both are exit-blocking).
+        The exact level is implementation choice; what matters is (a) no
+        TypeError from ``config["mcpServers"]`` on a list and (b) a finding
+        that tells the user the root shape is wrong.
+        """
+        mcp_file = tmp_path / ".mcp.json"
+        mcp_file.write_text(json.dumps([1, 2, 3]))
+        # Must not raise — pre-fix `"mcpServers" not in config` for a list silently
+        # returned True and later `config["mcpServers"]` would TypeError.
+        report = validate_mcp_config(mcp_file)
+        blockers = [r for r in report.results if r.level in ("CRITICAL", "MAJOR")]
+        assert any(
+            "must be a JSON object" in r.message or "object" in r.message.lower()
+            for r in blockers
+        ), (
+            f"Expected CRITICAL/MAJOR about root not being an object, "
+            f"got: {[(r.level, r.message) for r in report.results]}"
+        )
+
+    def test_mcp_path_traversal_claude_plugin_root(self, tmp_path):
+        """G30: `${CLAUDE_PLUGIN_ROOT}/../other/cli` must emit MAJOR path-traversal finding."""
+        # Create a plugin root so path resolution works
+        plugin_root = tmp_path / "plugin"
+        plugin_root.mkdir()
+        # Sibling directory the traversal would escape into
+        (tmp_path / "other").mkdir()
+
+        report = ValidationReport()
+        config = {"type": "stdio", "command": "${CLAUDE_PLUGIN_ROOT}/../other/cli"}
+        validate_mcp_server("srv", config, report, plugin_root=plugin_root)
+        majors = [r for r in report.results if r.level == "MAJOR"]
+        assert any("traverse" in m.message.lower() or "outside plugin root" in m.message.lower() for m in majors), (
+            f"Expected MAJOR about path traversal, got: {[m.message for m in majors]}"
+        )

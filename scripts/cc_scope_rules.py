@@ -52,6 +52,7 @@ __all__ = [
     "PROJECT_REJECTED_NESTED_KEYS",
     "MANAGED_ONLY_KEYS",
     "GLOBAL_CONFIG_KEYS",
+    "PLUGIN_ONLY_KEYS",
     "SECRET_VALUE_PATTERNS",
     "SECRET_KEY_NAME_PATTERN",
     "ABSOLUTE_HOME_PATH_PATTERNS",
@@ -82,6 +83,8 @@ __all__ = [
     "safe_read_text",
     "safe_load_jsonc",
     "safe_parse_frontmatter",
+    "ENABLED_PLUGIN_RE",
+    "resolve_plugin_cache_dir",
 ]
 
 
@@ -177,6 +180,19 @@ GLOBAL_CONFIG_KEYS: frozenset[str] = frozenset(
         "showTurnDuration",
         "terminalProgressBarEnabled",
         "teammateMode",
+    }
+)
+
+# Per plugins-reference.md: these top-level keys are recognized ONLY inside
+# a plugin package's ``plugin.json``. Placing them in any settings file
+# (``settings.json`` / ``settings.local.json`` / ``~/.claude.json``) is a
+# CRITICAL error — Claude Code silently drops the block, so the author's
+# declaration of LSP / background monitors never takes effect. The correct
+# home for these is the owning plugin's manifest.
+PLUGIN_ONLY_KEYS: frozenset[str] = frozenset(
+    {
+        "lspServers",
+        "monitors",
     }
 )
 
@@ -558,6 +574,77 @@ def list_tracked_files_under(folder: Path, repo_root: Path) -> set[Path] | None:
             continue
         tracked.add((repo_root_resolved / entry).resolve())
     return tracked
+
+
+# =============================================================================
+# Claude Code plugin-cache layout
+# =============================================================================
+
+# ``settings[.local].json.enabledPlugins`` keys have the form
+# ``<plugin>@<marketplace>``. Both components use a strict name charset — no
+# slashes, no ``..``, no leading/trailing dots — so once the regex matches,
+# Path component injection into the cache-dir resolver is contained.
+ENABLED_PLUGIN_RE: re.Pattern[str] = re.compile(
+    r"^(?P<plugin>[A-Za-z0-9_.\-]+)@(?P<marketplace>[A-Za-z0-9_.\-]+)$"
+)
+
+
+def resolve_plugin_cache_dir(
+    plugin_name: str,
+    marketplace: str,
+    *,
+    report: "ValidationReport | None" = None,
+    scope_label: str = "enabledPlugins",
+) -> Path | None:
+    """Find ``~/.claude/plugins/cache/<marketplace>/<plugin>/<highest-version>/``.
+
+    Picks the highest-semver subdirectory. Falls back to lexicographic sort
+    when mixed version formats (e.g. ``v2.0-alpha`` next to ``v1.5``) make
+    the tuple-compare raise ``TypeError`` — in that case an INFO is emitted
+    via ``report`` when supplied, so the operator knows the pick is not
+    deterministic.
+
+    The returned path is confined to the ``~/.claude/plugins/cache/`` tree
+    via ``resolve_within``; a symlink that escapes the cache base returns
+    ``None`` instead. This defends against post-compromise enumeration.
+    """
+    cache_base = Path.home() / ".claude" / "plugins" / "cache"
+    base = cache_base / marketplace / plugin_name
+    if not base.is_dir():
+        return None
+    versions = [d for d in base.iterdir() if d.is_dir()]
+    if not versions:
+        picked = base
+    else:
+        def _version_key(p: Path) -> tuple:
+            # ``str.lstrip`` treats its argument as a set of characters, so
+            # ``vv1.0.0`` would become ``1.0.0`` (both leading v's stripped)
+            # — wrong for semver sort. ``removeprefix`` strips exactly one
+            # ``v``, matching the canonical ``v<MAJOR>.<MINOR>.<PATCH>``
+            # plugin-cache layout.
+            parts = p.name.removeprefix("v").split(".")
+            return tuple(int(x) if x.isdigit() else x for x in parts)
+        try:
+            versions.sort(key=_version_key, reverse=True)
+        except TypeError:
+            if report is not None:
+                report.info(
+                    f"[{scope_label} {marketplace}/{plugin_name}] version sort "
+                    "fell back to lexicographic — mixed version formats "
+                    "(e.g. ``v2.0-alpha`` next to ``v1.5``) make the highest-"
+                    "pick non-deterministic. Review the cache directory.",
+                    scope_label,
+                )
+            versions.sort(reverse=True)
+        picked = versions[0]
+    confined = resolve_within(picked, cache_base)
+    if confined is None and report is not None:
+        report.warning(
+            f"[{scope_label} {marketplace}/{plugin_name}] cache dir escapes "
+            f"``~/.claude/plugins/cache/`` via symlink — skipping",
+            scope_label,
+        )
+    return confined
 
 
 # =============================================================================
