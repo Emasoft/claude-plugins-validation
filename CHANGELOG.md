@@ -2,11 +2,11 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
-## [2.21.2] - 2026-04-17
+## [2.21.3] - 2026-04-17
 
 ### Bug Fixes
 
-- 35 real defects from ensemble LLM audit (10 files, 2056 tests passing)
+- **v2.21.3:** Triple-review follow-ups + lspServers is plugin-only
 
 ### Miscellaneous Tasks
 
