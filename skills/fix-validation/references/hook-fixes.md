@@ -1905,3 +1905,73 @@ The extractor now returns `ScriptRef(path, invocation_mode, simple_command, expl
 | (separate: HTTP hook + latency-sensitive event) | §13.8 |
 
 ---
+
+### 13.11. Fix-agent checklist (work each item top-to-bottom)
+
+Copy the checklist below into your fix log at `docs_dev/fix-log_<plugin>_YYYYMMDD.md` and tick items as they're complete. Do NOT skip the verification step — silently leaving a script broken is worse than not fixing it at all.
+
+```
+Runtime-dep fix checklist (per affected hook command)
+
+Phase 1 — identify
+- [ ] Read the validator message. Match its phrase against §13.1–§13.8 to
+      pick the diagnosis subsection.
+- [ ] Open the hook file (`hooks/hooks.json` or `hooks.json`) and locate the
+      exact command string the finding refers to. DO NOT guess — line/column
+      in the report is authoritative.
+- [ ] Open the referenced script. Confirm:
+      * which modules it imports (compare against the validator's `imports: {...}`)
+      * whether any imports are stdlib-only (if so, the fix is usually `no-op`;
+        see §13.9 first row)
+      * whether a PEP 723 `# /// script` block already exists
+      * whether any `sys.exit` / `raise SystemExit` sits at module scope
+
+Phase 2 — choose fix path
+- [ ] If third-party imports exist AND hook uses plain `python3`:
+      apply §13.1 (primary: `uv run --script` + PEP 723 block)
+- [ ] If hook uses `uv run --script` but PEP 723 is missing / incomplete:
+      apply §13.2 or §13.3 (add / extend block)
+- [ ] If hook uses `uv run --with`:
+      apply §13.4 (add --with <pkg> per missing import)
+- [ ] If hook uses `${CLAUDE_PLUGIN_DATA}/.venv/bin/python`:
+      apply §13.5 (add SessionStart setup hook)
+- [ ] If script has module-scope sys.exit:
+      apply §13.6 (Pattern A/B/C as applicable)
+- [ ] If `unset VIRTUAL_ENV` + plain python3 fires:
+      the fix from §13.1 makes this warning disappear automatically
+- [ ] If HTTP hook latency warning fires:
+      apply §13.8 (`async: true` OR shorter timeout)
+
+Phase 3 — apply
+- [ ] Make the edit to hooks.json (command string) AND/OR the script (PEP 723
+      block, sys.exit relocation) as §13.x specifies. Keep all changes minimal.
+- [ ] DO NOT substitute `uvx` for `uv run --script` — they are not interchangeable.
+- [ ] DO NOT add error suppression (`|| true`, `2>/dev/null`) to mute the issue.
+- [ ] DO NOT delete the hook to make the warning go away.
+- [ ] Preserve the hook's effective behavior: what it does must match what it
+      did before (minus the actual bug).
+
+Phase 4 — verify (REQUIRED)
+- [ ] Re-read the edited files to confirm the changes landed as intended.
+- [ ] If PEP 723 deps were added, run the script once locally under uv to
+      confirm uv can resolve the listed packages:
+      `uv run --quiet --script <path/to/script.py> --help` (or equivalent)
+- [ ] If a SessionStart venv-setup hook was added, run the command locally once
+      to confirm it creates the venv without error.
+- [ ] Verify that the test suite for the plugin still passes.
+- [ ] Ask the validator to re-run and confirm the diagnostic is gone.
+
+Phase 5 — log
+- [ ] Append a Fix-log entry documenting: validator message, subsection used,
+      files touched, commands run to verify.
+```
+
+PSS-specific examples (what the PSS v3.1.0 → v3.1.1 fix actually did):
+- `unset VIRTUAL_ENV; python3 pss_hook.py` → `uv run --quiet --script pss_hook.py`
+- Added PEP 723 block to `pss_hook.py` declaring `pycozo[embedded]>=0.7.6`
+- Replaced `sys.exit("ERROR: pycozo is required.")` in `pss_cozodb.py` at module scope with a sentinel `Client = None` + `_require_pycozo()` helper that raises `ImportError` on first use (§13.6 Pattern B)
+- Added `uv` as a prerequisite in the README
+
+This is the canonical reference fix — mimic its shape.
+
+---
