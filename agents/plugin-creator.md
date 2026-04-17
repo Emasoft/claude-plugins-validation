@@ -105,8 +105,8 @@ The pre-push hook runs `--strict` and blocks on CRITICAL, MAJOR, MINOR, and NIT.
 
 ### Steps
 
-1. **Validate** (`--strict`, remote CPV — works on any plugin folder, no local vendoring):
-   `uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-remote-validate plugin <folder> --strict --verbose`
+1. **Validate** (`--strict`, installed CPV — Claude Code sets `${CLAUDE_PLUGIN_ROOT}` when running agents):
+   `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" <folder> --strict --verbose`
 2. **Standardize**: `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" <folder> --fix` — adds missing files
 3. **FIX ALL ISSUES** (CRITICAL → MAJOR → MINOR → NIT): Read each offending file, apply the fix. Common fixes:
    - SKILL.md missing sections → add Overview, Prerequisites, Output, Error Handling, Examples, Resources

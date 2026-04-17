@@ -101,41 +101,29 @@ local MCP servers Claude Code has registered for this project.
 
 ## Execution
 
-### From within a CPV checkout (development)
+Slash commands and agents ALWAYS run the validator from the locally-installed
+plugin — `${CLAUDE_PLUGIN_ROOT}` is set by Claude Code to the pinned,
+version-locked plugin directory (`~/.claude/plugins/cache/<marketplace>/
+<plugin>/<version>/`). **Never** fetch scripts from GitHub at runtime for
+in-session validation; that would pull an unpinned `main` that drifts from
+the behavior the user installed.
 
 ```bash
-uv run python scripts/validate_local_scope.py "$PROJECT_PATH" \
-  --report docs_dev/validate_local_scope_$(date +%Y%m%d).md
+uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/validate_local_scope.py" \
+  "$PROJECT_PATH" \
+  --report "${PROJECT_PATH}/docs_dev/validate_local_scope_$(date +%Y%m%d).md"
 ```
 
-### From the plugin cache / installed CLI / uvx (remote execution)
+This works out-of-the-box from any Claude Code session — no
+`remote_validation.py` indirection, no `CPV_REMOTE_VALIDATION` env-var
+bypass. The v2.21.1 fix to `check_remote_execution_guard` recognizes that
+`${CLAUDE_PLUGIN_ROOT}`-rooted invocations are trusted (pinned plugin
+installs are already sandboxed by Claude Code's plugin system).
 
-When CPV runs OUTSIDE its own checkout (e.g. from the Claude Code plugin
-cache or via `uvx`), direct invocation is blocked by the remote-execution
-guard — this prevents the target project's local config files from being
-mis-applied to the validator's own environment. Use the launcher instead:
+### Alternative invocations (not for slash-command flow)
 
-```bash
-# Via the plugin cache (most common — how Claude Code runs slash commands):
-uv run python "${CPV_ROOT}/scripts/remote_validation.py" \
-  local-scope "$PROJECT_PATH" \
-  -o "${PROJECT_PATH}/docs_dev/validate_local_scope_$(date +%Y%m%d).md"
-
-# Via uvx (one-shot, no checkout needed):
-uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
-  --with pyyaml \
-  cpv-remote-validate local-scope "$PROJECT_PATH" \
-  -o docs_dev/validate_local_scope_$(date +%Y%m%d).md
-```
-
-The launcher accepts several equivalent aliases (pick whichever you
-remember most easily):
-
-- `local-scope` (short — matches the help-menu listing)
-- `validate_local_scope` (full script name)
-- `cpv-validate-local-scope` (installed CLI entry-point name)
-
-All three resolve to the same script and produce identical reports.
+- **From a CPV checkout** (development): `uv run python scripts/validate_local_scope.py "$PROJECT_PATH"` — useful when iterating on the validator itself.
+- **From uvx, CI, or a fresh machine without CPV installed**: `uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-remote-validate local-scope "$PROJECT_PATH"` — this IS an ephemeral GitHub-sourced invocation and routes through the remote-execution guard correctly. Use only in GitHub Actions or one-shot CI, never in an interactive session where the plugin is already installed.
 
 ## Related Commands
 
