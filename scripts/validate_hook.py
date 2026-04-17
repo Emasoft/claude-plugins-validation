@@ -182,6 +182,14 @@ SHELL_NOOPS = {
     "popd",
 }
 
+# Matches a bash-style environment-variable assignment prefix like `FOO=bar`
+# which, per POSIX shell semantics, exports FOO=bar for the NEXT command:
+#   e.g. `NODE_ENV=production node foo.js`
+#   e.g. `PYTHONPATH=./lib python3 foo.py`
+# These tokens must be SKIPPED when hunting for the interpreter — they are
+# not the command itself. The variable name must start with a letter/_.
+_ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
 # Python stdlib module names — everything NOT in this set (and not a local
 # sibling module inside the plugin's scripts/ dir) is treated as third-party.
 # Python 3.10+: sys.stdlib_module_names is the authoritative source.
@@ -731,7 +739,16 @@ def extract_script_paths(command: str, plugin_root: Path | None) -> list[ScriptR
     retained for backwards compatibility.
     """
     refs: list[ScriptRef] = []
-    for tokens in _tokenize_hook_command(command):
+    for original_tokens in _tokenize_hook_command(command):
+        if not original_tokens:
+            continue
+        # Strip leading env-var-assignment tokens: `FOO=bar python3 foo.py`
+        # → the command proper is `python3 foo.py`; the assignment only sets
+        # env vars for the child process and is semantically invisible to the
+        # "what's being invoked" question.
+        tokens = list(original_tokens)
+        while tokens and _ENV_ASSIGNMENT_RE.match(tokens[0]):
+            tokens.pop(0)
         if not tokens:
             continue
         first = _resolve_plugin_vars(tokens[0], plugin_root)
@@ -1734,13 +1751,39 @@ def validate_command_hook(
         if script_path.exists():
             validate_script(script_path, report)
             # Python-only: reconcile script third-party imports against the hook's
-            # declared resolution path (PEP 723 + uv run, --with flags, or venv).
-            if script_path.suffix.lower() == ".py" and ref.invocation_mode in (
-                "interpreter-python",
-                "uv-run-script",
-                "uv-run-with",
-                "venv-python",
-            ):
+            # declared resolution path. Covered modes:
+            #   - interpreter-python  (python3 foo.py)
+            #   - uv-run-script       (uv run --script foo.py, PEP 723 metadata)
+            #   - uv-run-with         (uv run --with pkg foo.py)
+            #   - venv-python         (${CLAUDE_PLUGIN_DATA}/.venv/bin/python foo.py)
+            #   - direct              (./foo.py — relies on shebang; SAME runtime
+            #                          risk as interpreter-python because the
+            #                          shebang resolves to an ambient python.
+            #                          This is the pattern used when a hook
+            #                          script is chmod +x and invoked directly.)
+            #
+            # For the `direct` mode we promote to `interpreter-python` semantics
+            # for reconciliation purposes — the diagnosis and fix are identical.
+            is_python_reconcilable = (
+                script_path.suffix.lower() == ".py"
+                and ref.invocation_mode in (
+                    "interpreter-python",
+                    "uv-run-script",
+                    "uv-run-with",
+                    "venv-python",
+                    "direct",
+                )
+            )
+            if is_python_reconcilable:
+                if ref.invocation_mode == "direct":
+                    # Reconcile as if it were interpreter-python — the shebang
+                    # resolves to whatever `python` / `python3` means on PATH.
+                    ref = ScriptRef(
+                        path=ref.path,
+                        invocation_mode="interpreter-python",
+                        simple_command=ref.simple_command,
+                        explicit_deps=ref.explicit_deps,
+                    )
                 reconcile_python_runtime_deps(ref, plugin_root, hooks_json_data, report)
                 # Module-scope sys.exit / raise SystemExit — any importer (including
                 # the hook process itself, via module load) is killed on import.

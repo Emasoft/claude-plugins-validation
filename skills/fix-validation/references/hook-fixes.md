@@ -46,15 +46,17 @@ Comprehensive remediation guide for all issues detected by `validate_hook.py`.
 
 ## Timeout Units
 
-**IMPORTANT**: Claude Code hook timeouts are specified in **MILLISECONDS**, not seconds.
+**IMPORTANT**: Claude Code hook timeouts are specified in **SECONDS** (verified against https://code.claude.com/docs/en/hooks.md "Common fields" table: "Seconds before canceling").
 
 | Value | Actual Duration |
 |-------|----------------|
-| `100` | 100ms (0.1 seconds) |
-| `5000` | 5 seconds |
-| `30000` | 30 seconds |
-| `60000` | 1 minute |
-| `600000` | 10 minutes |
+| `5` | 5 seconds |
+| `30` | 30 seconds (default for prompt/http hooks) |
+| `60` | 60 seconds (default for agent hooks) |
+| `600` | 10 minutes (default for command hooks) |
+| `10000` | **≥ 10000s → likely a bug**: the validator warns that a value this large looks like milliseconds — fix by dividing by 1000 |
+
+Prior editions of this document INCORRECTLY claimed hooks used milliseconds — that was a documentation bug. The validator's `validate_hook.py` has always compared against second-unit thresholds (600 default, >10000 warning), and the official hooks.md spec has always said seconds.
 
 ## 1. hooks.json Structure Issues
 
@@ -974,7 +976,7 @@ Comprehensive remediation guide for all issues detected by `validate_hook.py`.
 **Severity**: MAJOR
 **Root cause**: The `"timeout"` field for an agent hook is not a number.
 **Fix**:
-1. **Note**: Agent hook timeouts are in **seconds** (unlike command/prompt hooks which use milliseconds). Default is 60 seconds.
+1. **Note**: All Claude Code hook timeouts are in **seconds**. Agent-hook default is 60 seconds.
    ```json
    {
      "type": "agent",
@@ -1014,90 +1016,108 @@ Comprehensive remediation guide for all issues detected by `validate_hook.py`.
 
 ## 8. Timeout Issues
 
-### MAJOR: 'timeout' must be a number (command/prompt hooks)
+**ALL hook timeouts are SECONDS.** Default values per official `hooks.md` "Common fields" spec:
+
+| Hook type | Default timeout |
+|---|---|
+| `command` | 600 seconds (10 minutes) |
+| `prompt` | 30 seconds |
+| `agent` | 60 seconds |
+| `http` | 30 seconds |
+
+The validator warns when a value looks accidentally milliseconds-scaled (> 10000 → probable bug).
+
+### MAJOR: 'timeout' must be a number
 
 **Error message**: `'timeout' must be a number, got {type_name}`
 **Severity**: MAJOR
 **Root cause**: The `"timeout"` field is not a numeric type (e.g., it is a string or boolean).
 **Fix**:
-1. Provide a numeric value in **milliseconds**:
+1. Provide a numeric value in **seconds**:
    ```json
-   { "type": "command", "command": "echo hi", "timeout": 5000 }
+   { "type": "command", "command": "echo hi", "timeout": 5 }
    ```
 2. **Wrong**:
    ```json
-   { "timeout": "5000" }
+   { "timeout": "5" }
    { "timeout": "5s" }
    ```
 
 ---
 
-### MAJOR: 'timeout' must be positive (command/prompt hooks)
+### MAJOR: 'timeout' must be positive
 
 **Error message**: `'timeout' must be positive`
 **Severity**: MAJOR
 **Root cause**: The timeout value is zero or negative.
 **Fix**:
-1. Set a positive timeout in milliseconds:
+1. Set a positive timeout in **seconds**:
    ```json
-   { "type": "command", "command": "echo hi", "timeout": 5000 }
+   { "type": "command", "command": "echo hi", "timeout": 5 }
    ```
 
 ---
 
-### WARNING: Command hook timeout unusually long
+### WARNING: Command / Prompt hook timeout looks like milliseconds
 
-**Error message**: `Command hook timeout is {timeout}ms ({seconds}s) — unusually long`
+**Error message**: `Command hook timeout is {timeout}s — this looks like milliseconds. Hook timeouts are in SECONDS (default: 600 for command hooks).` (analogous for prompt hooks with default 30)
 **Severity**: WARNING
-**Root cause**: The command hook timeout exceeds 600,000ms (10 minutes).
+**Root cause**: The timeout value is > 10000 seconds (≈ 2.8 hours) which almost certainly means the author wrote milliseconds. The field IS seconds — if you meant 5 seconds, write `5`, not `5000`.
 **Fix**:
-1. Consider whether the command genuinely needs more than 10 minutes
-2. Long-running hooks block Claude Code's operation
-3. Recommended range: 1,000ms to 60,000ms (1 second to 1 minute)
-4. For long tasks, consider using `"async": true` so the hook runs in the background:
+1. Divide the value by 1000 if you meant milliseconds:
+   ```json
+   { "type": "command", "command": "echo hi", "timeout": 5 }
+   ```
+   not
+   ```json
+   { "type": "command", "command": "echo hi", "timeout": 5000 }
+   ```
+2. If you genuinely need > 10000 seconds for a command hook, consider `"async": true` so the hook runs in the background and doesn't block Claude Code:
    ```json
    { "type": "command", "command": "long-task.sh", "async": true }
    ```
 
 ---
 
-### WARNING: Command hook timeout very short
+### WARNING: Command hook timeout exceeds default 600s
 
-**Error message**: `Command hook timeout is {timeout}ms — very short, may cause premature timeouts`
+**Error message**: `Command hook timeout is {timeout}s — exceeds default 600s`
 **Severity**: WARNING
-**Root cause**: The command hook timeout is less than 100ms, which may not give the command enough time to execute.
+**Root cause**: The timeout value is between 600 and 10000 seconds. The default is 600s (10 min); anything larger blocks Claude Code operation for longer than usual.
 **Fix**:
-1. Increase the timeout to at least 1000ms (1 second):
+1. Reduce the timeout to ≤ 600 if possible, or mark the hook async so long runs don't block:
    ```json
-   { "type": "command", "command": "quick-check.sh", "timeout": 5000 }
+   { "type": "command", "command": "long-task.sh", "async": true }
    ```
-2. Even simple commands need time for process startup
+2. Recommended range (critical path): 1–60 seconds. Up to 600 seconds for legitimate long-running setup hooks (e.g. SessionStart dependency install).
 
 ---
 
-### WARNING: Prompt hook timeout unusually long
+### WARNING: Prompt hook timeout exceeds 600s
 
-**Error message**: `Prompt hook timeout is {timeout}ms ({seconds}s) — unusually long`
+**Error message**: `Prompt hook timeout is {timeout}s — exceeds 600s`
 **Severity**: WARNING
-**Root cause**: The prompt hook timeout exceeds 600,000ms (10 minutes).
+**Root cause**: A prompt hook (which invokes an AI model) has a timeout > 600s. This is unusual for AI model calls.
 **Fix**:
-1. Prompt hooks invoke an AI model — 10+ minutes is excessive
-2. Recommended range: 5,000ms to 60,000ms (5 seconds to 1 minute)
-3. Simplify the prompt if processing takes too long
+1. Reduce timeout — prompt hooks should complete in seconds-to-minutes:
+   ```json
+   { "type": "prompt", "prompt": "Check safety", "timeout": 30 }
+   ```
+2. If the prompt is complex, simplify it or break it into smaller hooks.
 
 ---
 
-### WARNING: Prompt hook timeout very short
+### WARNING: HTTP hook timeout exceeds 600s
 
-**Error message**: `Prompt hook timeout is {timeout}ms — very short, may cause premature timeouts`
+**Error message**: `HTTP hook timeout is {timeout}s — exceeds 600s`
 **Severity**: WARNING
-**Root cause**: The prompt hook timeout is less than 100ms, which is far too short for AI model inference.
+**Root cause**: An HTTP hook has a timeout > 600s. Remote calls should not block this long.
 **Fix**:
-1. Increase to at least 5000ms (5 seconds):
+1. Reduce the timeout:
    ```json
-   { "type": "prompt", "prompt": "Check safety", "timeout": 10000 }
+   { "type": "http", "url": "https://...", "timeout": 10 }
    ```
-2. AI model calls typically need several seconds
+2. For latency-sensitive events (`UserPromptSubmit`, `PreToolUse`, etc.) use timeouts ≤ 5 seconds — see §13.8.
 
 ---
 
