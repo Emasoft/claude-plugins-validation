@@ -1065,23 +1065,46 @@ def test_detect_module_scope_sys_exit_direct(tmp_path: Path):
     assert hits == [2]
 
 
-def test_detect_module_scope_sys_exit_inside_if(tmp_path: Path):
-    """`sys.exit(...)` inside a top-level `if` block (PSS's pattern) is detected."""
+def test_detect_module_scope_sys_exit_inside_try_except(tmp_path: Path):
+    """`sys.exit(...)` inside a top-level `try/except` (the EXACT PSS v3.1.0
+    pattern that killed the hook process at import time) MUST be detected.
+
+    This used to be a silent gap — the original detector walked ast.If but
+    not ast.Try. The rewrite descends through every import-time-reachable
+    statement container (If, Try, For, While, With) while stopping at
+    function/class bodies.
+    """
     from validate_hook import detect_module_scope_sys_exit
 
     script = _make_py_script(
         tmp_path,
-        "if_exit.py",
+        "try_exit.py",
         "import sys\n\ntry:\n    import pycozo\nexcept ImportError:\n    sys.exit('ERROR: pycozo is required.')\n",
     )
     hits = detect_module_scope_sys_exit(script)
-    # The sys.exit is inside a try/except, which top-level walks into via the
-    # "non-function/class" descent. If-block-only descent is a conservative
-    # choice; ensure we at least detect the if-block form explicitly.
-    # For this test: the sys.exit is inside `except`, which AST models as
-    # part of ast.Try. We don't descend into Try right now, so it would be
-    # missed. Document this gap — the if-block form is the critical one.
-    _ = hits  # not asserting; test below covers the critical case
+    assert hits == [6], (
+        f"sys.exit inside top-level try/except MUST be detected "
+        f"(this is the PSS v3.1.0 pattern); got: {hits}"
+    )
+
+
+def test_detect_module_scope_sys_exit_inside_for_while_with(tmp_path: Path):
+    """sys.exit inside top-level for/while/with blocks runs at import time."""
+    from validate_hook import detect_module_scope_sys_exit
+
+    script = _make_py_script(
+        tmp_path,
+        "loops_exit.py",
+        "import sys\nfor i in range(1):\n    sys.exit(1)\n",
+    )
+    assert detect_module_scope_sys_exit(script) == [3]
+
+    script2 = _make_py_script(
+        tmp_path,
+        "with_exit.py",
+        "import contextlib\nimport sys\nwith contextlib.nullcontext():\n    sys.exit(1)\n",
+    )
+    assert detect_module_scope_sys_exit(script2) == [4]
 
 
 def test_detect_module_scope_sys_exit_top_level_if(tmp_path: Path):
@@ -1673,6 +1696,203 @@ def test_extract_script_paths_from_env_dash_s_shebang_style(tmp_path: Path):
     )
     assert len(refs) == 1
     assert refs[0].invocation_mode == "interpreter-python"
+
+
+def test_windows_python_exe_classified_correctly(tmp_path: Path):
+    """Windows interpreter binaries carry an `.exe` suffix. `python.exe`,
+    `python3.exe`, `python3.12.exe`, `node.exe` must all be recognized.
+    """
+    from validate_hook import _classify_interpreter
+
+    assert _classify_interpreter("python.exe") == "interpreter-python"
+    assert _classify_interpreter("python3.exe") == "interpreter-python"
+    assert _classify_interpreter("python3.12.exe") == "interpreter-python"
+    assert _classify_interpreter("node.exe") == "node"
+    assert _classify_interpreter("bash.exe") == "bash"
+    # Case-insensitive extension matching
+    assert _classify_interpreter("PYTHON.EXE") == "interpreter-python"
+
+
+def test_windows_venv_python_exe_detected(tmp_path: Path):
+    """Windows venv layout `.venv\\Scripts\\python.exe` must be detected."""
+    from validate_hook import _detect_venv_python
+
+    # Posix layout (canonical)
+    assert _detect_venv_python("/plugin/.venv/bin/python")
+    assert _detect_venv_python("/plugin/.venv/bin/python3")
+    assert _detect_venv_python("/plugin/.venv/bin/python3.12")
+    # Windows layout with .exe
+    assert _detect_venv_python(r"C:\plugin\.venv\Scripts\python.exe")
+    assert _detect_venv_python(r"C:\plugin\.venv\Scripts\python3.12.exe")
+    # Mixed separators (common in env var substitution)
+    assert _detect_venv_python("C:/plugin/.venv/Scripts/python.exe")
+    # Non-venv paths must NOT match
+    assert not _detect_venv_python("/usr/bin/python3")
+    assert not _detect_venv_python(r"C:\Python312\python.exe")
+
+
+def test_pypi_to_import_alias_covers_pillow_pil(tmp_path: Path):
+    """`dependencies = ["pillow"]` must be considered to cover `import PIL`.
+
+    Without the alias map this would fire a spurious "missing declarations"
+    MAJOR for every Pillow-using script with a correct PEP 723 block.
+    """
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    script = scripts_dir / "with_pil.py"
+    script.write_text(
+        '# /// script\n'
+        '# dependencies = ["pillow>=10"]\n'
+        '# ///\n'
+        "from PIL import Image\n"
+    )
+    import os
+    os.chmod(script, 0o755)
+
+    hooks_dir = tmp_path / "hooks"
+    hooks_dir.mkdir()
+    hooks_file = hooks_dir / "hooks.json"
+    hooks_file.write_text(
+        json.dumps({
+            "hooks": {
+                "UserPromptSubmit": [{
+                    "hooks": [{
+                        "type": "command",
+                        "command": 'uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/with_pil.py"',
+                    }]
+                }]
+            }
+        })
+    )
+    report = validate_hooks(hooks_file, plugin_root=tmp_path)
+    major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+    assert not any(
+        "missing declarations" in m and "PIL" in m.upper() for m in major_msgs
+    ), f"pillow in deps must cover `import PIL`; got MAJORs: {major_msgs}"
+
+
+def test_pypi_to_import_alias_covers_beautifulsoup4_bs4(tmp_path: Path):
+    """`dependencies = ["beautifulsoup4"]` must cover `import bs4`."""
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    script = scripts_dir / "soup.py"
+    script.write_text(
+        '# /// script\n'
+        '# dependencies = ["beautifulsoup4>=4"]\n'
+        '# ///\n'
+        "import bs4\n"
+    )
+    import os
+    os.chmod(script, 0o755)
+
+    hooks_dir = tmp_path / "hooks"
+    hooks_dir.mkdir()
+    hooks_file = hooks_dir / "hooks.json"
+    hooks_file.write_text(
+        json.dumps({
+            "hooks": {
+                "UserPromptSubmit": [{
+                    "hooks": [{
+                        "type": "command",
+                        "command": 'uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/soup.py"',
+                    }]
+                }]
+            }
+        })
+    )
+    report = validate_hooks(hooks_file, plugin_root=tmp_path)
+    major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+    assert not any(
+        "missing declarations" in m and "bs4" in m for m in major_msgs
+    ), f"beautifulsoup4 in deps must cover `import bs4`; got MAJORs: {major_msgs}"
+
+
+def test_pep503_normalization_covers_dashes_and_case(tmp_path: Path):
+    """A dep declared as `Scikit-Learn` must cover `import sklearn` via
+    the alias map AND PEP 503 case/dash normalization.
+    """
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    script = scripts_dir / "sk.py"
+    script.write_text(
+        '# /// script\n'
+        '# dependencies = ["Scikit-Learn==1.5"]\n'
+        '# ///\n'
+        "import sklearn\n"
+    )
+    import os
+    os.chmod(script, 0o755)
+
+    hooks_dir = tmp_path / "hooks"
+    hooks_dir.mkdir()
+    hooks_file = hooks_dir / "hooks.json"
+    hooks_file.write_text(
+        json.dumps({
+            "hooks": {
+                "UserPromptSubmit": [{
+                    "hooks": [{
+                        "type": "command",
+                        "command": 'uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/sk.py"',
+                    }]
+                }]
+            }
+        })
+    )
+    report = validate_hooks(hooks_file, plugin_root=tmp_path)
+    major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+    assert not any(
+        "missing declarations" in m and "sklearn" in m for m in major_msgs
+    ), f"Scikit-Learn must cover sklearn after PEP 503 normalization; got: {major_msgs}"
+
+
+def test_uv_run_isolated_is_boolean_flag_not_value_consumer(tmp_path: Path):
+    """`uv run --isolated foo.py` — `--isolated` is a boolean flag that
+    takes NO value. The extractor must still find foo.py at the correct index.
+
+    Regression test: `--isolated` was previously in TWO_ARG_FLAGS, which
+    would have eaten `foo.py` as its value and returned None.
+    """
+    from validate_hook import extract_script_paths
+
+    refs = extract_script_paths(
+        'uv run --isolated --script "${CLAUDE_PLUGIN_ROOT}/scripts/foo.py"', tmp_path
+    )
+    assert len(refs) == 1
+    assert refs[0].invocation_mode == "uv-run-script"
+
+
+def test_uv_run_module_flag_yields_no_script(tmp_path: Path):
+    """`uv run --module mypkg` has no script file — extractor returns empty."""
+    from validate_hook import extract_script_paths
+
+    refs = extract_script_paths("uv run --module mymod arg1", tmp_path)
+    assert refs == []
+
+
+def test_uv_run_gui_script_mode(tmp_path: Path):
+    """`uv run --gui-script foo.py` maps to uv-run-script mode (same PEP 723 semantics)."""
+    from validate_hook import extract_script_paths
+
+    refs = extract_script_paths(
+        'uv run --gui-script "${CLAUDE_PLUGIN_ROOT}/scripts/foo.py"', tmp_path
+    )
+    assert len(refs) == 1
+    assert refs[0].invocation_mode == "uv-run-script"
+
+
+def test_uv_run_new_flags_link_mode_exclude_newer_env_file(tmp_path: Path):
+    """`--link-mode`, `--exclude-newer`, `--env-file` each consume one value token
+    — confirm the script index is correctly computed past them.
+    """
+    from validate_hook import extract_script_paths
+
+    refs = extract_script_paths(
+        'uv run --link-mode copy --exclude-newer 2026-01-01 --env-file .env --script "${CLAUDE_PLUGIN_ROOT}/scripts/foo.py"',
+        tmp_path,
+    )
+    assert len(refs) == 1
+    assert refs[0].invocation_mode == "uv-run-script"
+    assert refs[0].path == tmp_path / "scripts" / "foo.py"
 
 
 def test_extract_script_paths_preserves_direct_sh_invocation(tmp_path: Path):

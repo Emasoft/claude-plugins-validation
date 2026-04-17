@@ -541,13 +541,21 @@ _PYTHON_VERSIONED_RE = re.compile(r"^python3\.\d+$")
 def _classify_interpreter(first_token_name: str) -> str | None:
     """Given the basename of a simple command's first token, return the
     invocation_mode tag if it is a known interpreter — else None.
+
+    Strips a trailing `.exe` (case-insensitive) to handle Windows binaries
+    and normalizes to lowercase so case-insensitive filesystems (APFS,
+    NTFS, FAT) produce stable results.
     """
     if not first_token_name:
         return None
-    tag = _INTERPRETER_TAGS.get(first_token_name)
+    # Windows binaries carry a .exe suffix; strip (case-insensitively) first.
+    lower = first_token_name.lower()
+    if lower.endswith(".exe"):
+        lower = lower[:-4]
+    tag = _INTERPRETER_TAGS.get(lower)
     if tag:
         return tag
-    if _PYTHON_VERSIONED_RE.match(first_token_name):
+    if _PYTHON_VERSIONED_RE.match(lower):
         return "interpreter-python"
     return None
 
@@ -555,11 +563,19 @@ def _classify_interpreter(first_token_name: str) -> str | None:
 def _detect_venv_python(resolved_token: str) -> bool:
     """True if token looks like a path to a venv's Python binary.
 
-    Matches both POSIX (`.venv/bin/python...`) and Windows (`.venv\\Scripts\\python...`)
+    Matches both POSIX (`.venv/bin/python...`) and Windows (`.venv\\Scripts\\python.exe`)
     layouts. The directory name must literally be ".venv" or "venv" since other
     patterns (e.g. "/usr/bin/python3") must NOT be misclassified.
+    Accepts any python binary name in that directory — `python`, `python3`,
+    `python3.12`, with or without the Windows `.exe` suffix.
     """
-    return bool(re.search(r"(?:^|[/\\])(?:\.venv|venv)[/\\](?:bin|Scripts)[/\\]python", resolved_token))
+    return bool(
+        re.search(
+            r"(?:^|[/\\])(?:\.venv|venv)[/\\](?:bin|Scripts)[/\\]python(?:3(?:\.\d+)?)?(?:\.exe)?\b",
+            resolved_token,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _find_script_in_interpreter_args(tokens: list[str]) -> int | None:
@@ -613,7 +629,9 @@ def _find_script_in_uv_run(tokens: list[str]) -> tuple[int, str, tuple[str, ...]
 
     has_script = False
     with_deps: list[str] = []
-    # Flags that consume their value as a separate token
+    # Flags that consume their value as a separate token.
+    # Verified against https://docs.astral.sh/uv/reference/cli/#uv-run
+    # Do NOT include purely-boolean flags here — they consume 0 args.
     TWO_ARG_FLAGS = {
         "--python",
         "--with",
@@ -622,23 +640,30 @@ def _find_script_in_uv_run(tokens: list[str]) -> tuple[int, str, tuple[str, ...]
         "--directory",
         "--project",
         "--extra",
-        "--isolated",
         "--index",
         "--default-index",
         "--upgrade-package",
         "--reinstall-package",
         "--resolution",
         "--package",
+        "--link-mode",
+        "--exclude-newer",
+        "--env-file",
     }
 
     i = 2
     n = len(tokens)
     while i < n:
         tok = tokens[i]
-        if tok == "--script":
+        # `--script` and `--gui-script` both mark PEP-723-metadata-driven runs.
+        if tok in ("--script", "--gui-script"):
             has_script = True
             i += 1
             continue
+        # `--module MODULE` — like `python -m`, no script path follows; the
+        # next positional is a module name, not a file. Signal "no script".
+        if tok == "--module":
+            return None
         # --flag=value form
         if tok.startswith("--") and "=" in tok:
             name, _, value = tok.partition("=")
@@ -653,7 +678,8 @@ def _find_script_in_uv_run(tokens: list[str]) -> tuple[int, str, tuple[str, ...]
             i += 2
             continue
         if tok.startswith("-"):
-            # Generic boolean flag (e.g. --quiet, --no-sync, -q)
+            # Generic boolean flag (e.g. --quiet, --no-sync, --isolated,
+            # --compile-bytecode, --all-extras, --no-editable, -q).
             i += 1
             continue
         # First positional — the script
@@ -926,19 +952,140 @@ def detect_pep723_deps(script_path: Path) -> list[str] | None:
     return [str(d) for d in deps]
 
 
+# Well-known import-name ≠ PyPI-name mappings. When a PEP 723 `dependencies`
+# block declares e.g. "pillow", the script's `import PIL` statement should be
+# considered covered. Without this map, the reconciler would flag every such
+# case as a missing declaration. This is a CONSERVATIVE list — only mappings
+# that are standard and unambiguous are included. When in doubt, rely on the
+# per-module case: import name == PyPI name (after case / dash normalization).
+#
+# Each entry maps ONE PyPI distribution name to the set of import-time module
+# roots it provides. PyPI names use the canonical form (lowercase, dashes).
+_PYPI_TO_IMPORT_NAMES: dict[str, frozenset[str]] = {
+    "pillow": frozenset({"pil"}),
+    "beautifulsoup4": frozenset({"bs4"}),
+    "opencv_python": frozenset({"cv2"}),
+    "opencv_python_headless": frozenset({"cv2"}),
+    "opencv_contrib_python": frozenset({"cv2"}),
+    "pyyaml": frozenset({"yaml"}),
+    "scikit_learn": frozenset({"sklearn"}),
+    "scikit_image": frozenset({"skimage"}),
+    "attrs": frozenset({"attr", "attrs"}),
+    "msgpack_python": frozenset({"msgpack"}),
+    "python_dateutil": frozenset({"dateutil"}),
+    "python_levenshtein": frozenset({"levenshtein", "_levenshtein"}),
+    "python_dotenv": frozenset({"dotenv"}),
+    "python_multipart": frozenset({"multipart"}),
+    "python_ldap": frozenset({"ldap"}),
+    "mysqlclient": frozenset({"mysqldb", "_mysql"}),
+    "psycopg2": frozenset({"psycopg2"}),
+    "psycopg2_binary": frozenset({"psycopg2"}),
+    "pyjwt": frozenset({"jwt"}),
+    "pycryptodome": frozenset({"crypto"}),
+    "pycryptodomex": frozenset({"cryptodome"}),
+    "protobuf": frozenset({"google"}),  # google.protobuf
+    "google_api_python_client": frozenset({"googleapiclient"}),
+    "google_cloud_storage": frozenset({"google"}),
+    "docopt_ng": frozenset({"docopt"}),
+    "click_spinner": frozenset({"click_spinner"}),
+    "pynacl": frozenset({"nacl"}),
+    "qrcode": frozenset({"qrcode"}),
+    "pyserial": frozenset({"serial"}),
+    "pygments": frozenset({"pygments"}),
+    "pymongo": frozenset({"pymongo", "bson", "gridfs"}),
+    "paho_mq": frozenset({"paho"}),
+    "paho_mqtt": frozenset({"paho"}),
+    "grpcio": frozenset({"grpc"}),
+    "grpcio_tools": frozenset({"grpc_tools"}),
+    "azure_storage_blob": frozenset({"azure"}),
+    "azure_identity": frozenset({"azure"}),
+    "boto3": frozenset({"boto3", "botocore"}),
+}
+
+
 def _strip_dep_name(dep_spec: str) -> str:
-    """Extract the project name from a PEP 508 requirement spec.
+    """Extract the normalized project name from a PEP 508 requirement spec.
 
     Examples:
       "pycozo[embedded]>=0.7.6" → "pycozo"
       "httpx ; python_version>='3.10'" → "httpx"
-      "my-pkg" → "my_pkg" (normalized to importable name)
+      "my-pkg" → "my_pkg" (normalized to importable name form)
+      "Scikit-Learn==1.5" → "scikit_learn"
     """
     # Strip environment markers (after ;), extras (brackets), version specifiers.
     spec = dep_spec.split(";", 1)[0].strip()
     spec = re.split(r"[\[<>=!~ ]", spec, maxsplit=1)[0].strip()
-    # PyPI names use "-" but the import path uses "_". Make both forms available.
-    return spec.replace("-", "_").lower()
+    # PEP 503 name normalization: lowercase, runs of [-_.] collapse to single _
+    return re.sub(r"[-_.]+", "_", spec).lower()
+
+
+def _import_names_covered_by(dep_spec: str) -> set[str]:
+    """Return all import-name roots considered "covered" by a single PEP 508 dep.
+
+    For most packages this is just {normalized_name}. For known-alias packages
+    (see _PYPI_TO_IMPORT_NAMES) the set is extended with the alias imports.
+    All names are normalized (lowercase, underscores).
+    """
+    canonical = _strip_dep_name(dep_spec)
+    covered = {canonical}
+    aliases = _PYPI_TO_IMPORT_NAMES.get(canonical)
+    if aliases:
+        covered.update(aliases)
+    return covered
+
+
+def _is_sys_exit_call(node: ast.AST) -> bool:
+    """Recognize `sys.exit(...)`, `exit(...)`, or `quit(...)` expression."""
+    if not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Call):
+        return False
+    func = node.value.func
+    if isinstance(func, ast.Name) and func.id in ("exit", "quit"):
+        return True
+    if isinstance(func, ast.Attribute) and func.attr == "exit":
+        target = func.value
+        if isinstance(target, ast.Name) and target.id == "sys":
+            return True
+    return False
+
+
+def _is_raise_system_exit(node: ast.AST) -> bool:
+    """Recognize `raise SystemExit(...)` or bare `raise SystemExit`."""
+    if not isinstance(node, ast.Raise) or node.exc is None:
+        return False
+    exc = node.exc
+    if isinstance(exc, ast.Call) and isinstance(exc.func, ast.Name) and exc.func.id == "SystemExit":
+        return True
+    if isinstance(exc, ast.Name) and exc.id == "SystemExit":
+        return True
+    return False
+
+
+def _walk_module_scope(node: ast.AST, hits: list[int]) -> None:
+    """Walk a module-scope AST subtree, collecting `sys.exit`/`SystemExit`
+    line numbers. Descends into import-time-reachable constructs (If, Try,
+    For, While, With — all execute on module load) but STOPS at function,
+    async function, and class definition bodies (those only run when called).
+
+    This catches the PSS v3.1.0 pattern where the fatal `sys.exit` lived
+    inside a top-level `try/except ImportError:` block, plus:
+      - if-blocks (documented by the original implementation)
+      - try/except/else/finally (new — the PSS pattern)
+      - for/while loops evaluated at import time (rare but legal)
+      - with-blocks at module scope
+    """
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return  # Stop: these bodies don't run at import time.
+    # Statement nodes (Expr, Raise, If, Try, For, While, With, ...) always have
+    # a `lineno` attribute — ast.AST itself does not, hence the explicit check.
+    if _is_sys_exit_call(node) and isinstance(node, ast.stmt):
+        hits.append(node.lineno)
+        return
+    if _is_raise_system_exit(node) and isinstance(node, ast.stmt):
+        hits.append(node.lineno)
+        return
+    # Descend into import-time-reachable container nodes.
+    for child in ast.iter_child_nodes(node):
+        _walk_module_scope(child, hits)
 
 
 def detect_module_scope_sys_exit(script_path: Path) -> list[int]:
@@ -948,6 +1095,11 @@ def detect_module_scope_sys_exit(script_path: Path) -> list[int]:
     Module-scope SystemExit is especially dangerous in hook scripts because
     ANY importer (including the hook process itself, via module load) is
     killed. This was the proximate mechanism of the PSS v3.1.0 hook crash.
+
+    The detector recurses through every import-time-reachable AST construct
+    (module body, if/else, try/except/else/finally, for, while, with) but
+    stops at function/class bodies — those only execute when explicitly
+    invoked, not on import.
 
     Returns a list of 1-based line numbers. Empty if none found or the file
     cannot be parsed.
@@ -965,40 +1117,7 @@ def detect_module_scope_sys_exit(script_path: Path) -> list[int]:
 
     hits: list[int] = []
     for node in tree.body:
-        # Direct top-level expression: sys.exit(...) or exit(...)
-        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
-            call = node.value
-            func = call.func
-            if isinstance(func, ast.Name) and func.id in ("exit", "quit"):
-                hits.append(node.lineno)
-            elif isinstance(func, ast.Attribute) and func.attr == "exit":
-                target = func.value
-                if isinstance(target, ast.Name) and target.id == "sys":
-                    hits.append(node.lineno)
-        # Top-level raise SystemExit(...) or raise SystemExit
-        elif isinstance(node, ast.Raise) and node.exc is not None:
-            exc = node.exc
-            if isinstance(exc, ast.Call) and isinstance(exc.func, ast.Name) and exc.func.id == "SystemExit":
-                hits.append(node.lineno)
-            elif isinstance(exc, ast.Name) and exc.id == "SystemExit":
-                hits.append(node.lineno)
-        # if-block at top level (e.g. if pycozo is None: sys.exit(...)) —
-        # still runs at import time, so we descend one level.
-        elif isinstance(node, ast.If):
-            for sub in ast.walk(node):
-                if isinstance(sub, ast.FunctionDef) or isinstance(sub, ast.AsyncFunctionDef) or isinstance(sub, ast.ClassDef):
-                    # Don't descend into function/class bodies — their exits
-                    # don't run at import time.
-                    continue
-                if isinstance(sub, ast.Expr) and isinstance(sub.value, ast.Call):
-                    call = sub.value
-                    func = call.func
-                    if isinstance(func, ast.Name) and func.id in ("exit", "quit"):
-                        hits.append(sub.lineno)
-                    elif isinstance(func, ast.Attribute) and func.attr == "exit":
-                        target = func.value
-                        if isinstance(target, ast.Name) and target.id == "sys":
-                            hits.append(sub.lineno)
+        _walk_module_scope(node, hits)
     return sorted(set(hits))
 
 
@@ -1044,8 +1163,14 @@ def reconcile_python_runtime_deps(
         return  # stdlib-only — any invocation style works
 
     def _covered_by(dep_specs: list[str]) -> tuple[set[str], set[str]]:
-        declared = {_strip_dep_name(d) for d in dep_specs}
-        needed = {i.lower().replace("-", "_") for i in imports}
+        """Set-difference the script's imports against the declared deps,
+        expanding each dep through the PyPI→import-name alias map so that
+        e.g. `pillow` in dependencies covers `import PIL` in the script.
+        """
+        declared: set[str] = set()
+        for spec in dep_specs:
+            declared.update(_import_names_covered_by(spec))
+        needed = {re.sub(r"[-_.]+", "_", i).lower() for i in imports}
         missing = needed - declared
         covered = needed & declared
         return covered, missing
