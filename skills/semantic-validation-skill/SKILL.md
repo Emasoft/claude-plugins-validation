@@ -83,42 +83,19 @@ This produces a **Semantic Grade (A-F)**, complementary to the **Syntactic Score
 
 ## Pillar: Channel MCP Server Source-Code Security
 
-**When it runs**: only when the target plugin's `plugin.json` contains a non-empty `channels` array AND ships MCP server source code referenced by `mcpServers.<server>.command` / `args`. Skip entirely for plugins with no channels.
+Runs only when `plugin.json.channels` is non-empty AND the plugin ships MCP server source code. Skip entirely for plugins with no channels.
 
-**Why it matters**: `channels-reference.md` (Claude Code v2.1.80+) lets MCP servers forward inbound messages (Telegram, Discord, iMessage, etc.) to Claude. Two attack vectors exist that CPV's syntactic validators cannot catch — only an LLM reading the server source can:
+Two attack vectors only an LLM reading the server source can catch:
 
-1. **Ungated inbound messages.** Without a sender-ID allowlist, anyone who can reach the transport can inject arbitrary prompts into the Claude session.
-2. **Permission-relay without sender gating.** A server declaring `capabilities.experimental['claude/channel/permission']` without sender gating lets any external sender approve destructive tool calls.
+1. Ungated inbound messages — no sender-ID allowlist => prompt-injection vector.
+2. Permission-relay without sender gating — `capabilities.experimental['claude/channel/permission']` declared without sender check => external senders can approve destructive tool calls.
 
-**Workflow**:
-1. Read `plugin.json`. If `channels` is empty or missing, skip this pillar entirely (record "Skipped" in the report).
-2. Resolve each MCP server's entry-point source file from `mcpServers.<server>.args[0]`. Prefer `src/*.ts` / `src/*.py` over bundled `dist/` artifacts.
-3. Load the source (TypeScript, JavaScript, or Python — other languages emit an INFO note recommending manual review).
-4. Evaluate four rules against the source:
-   - **Rule 1 (CRITICAL)** — Sender-ID allowlist check (`message.from.id`, `message.author.id`, `message.sender`, or equivalent) before every forward call to `mcp.notification('notifications/claude/channel', ...)`. Missing => CRITICAL. Naïve (always-true guard, empty allowlist, truthy-only check) => MAJOR.
-   - **Rule 2 (CRITICAL)** — If `capabilities.experimental['claude/channel/permission']` is declared, the permission handler MUST also gate on sender ID. Missing => CRITICAL.
-   - **Rule 3 (MAJOR)** — Chat-ID-only gating (e.g. `msg.chat.id === ALLOWED_CHAT_ID` with no sender-ID compare) => MAJOR.
-   - **Rule 4 (PASSED)** — Rules 1-3 all satisfied => PASSED with the file:line of the gating check.
-5. Quote the exact `<file>:<line>` for every finding. Do not infer safety from variable names alone.
-6. Write findings into the **Channel Source Security** section of the semantic report.
-
-**Rubric contribution** (folds into the A-F grade per the existing table):
-
-| Finding | Rubric effect |
-|---------|---------------|
-| No channels in plugin.json | N/A (pillar skipped — no grade impact) |
-| Rule 4 PASSED | Pass |
-| Rule 3 MAJOR only | Partial |
-| Rule 1 MAJOR only (naïve gating) | Partial |
-| Rule 1 CRITICAL (no gating) | Fail |
-| Rule 2 CRITICAL (permission cap ungated) | Fail |
-
-**Detailed rules, example code (vulnerable + safe), and the opus prompt template** are in `references/channel-source-security.md`. Load that reference when you begin the pillar.
+Load [channel-source-security](references/channel-source-security.md) for the full workflow, the 4 evaluation rules (CRITICAL/MAJOR/PASSED), rubric contribution, example vulnerable/safe code (TypeScript + Python), and the opus prompt template.
 
 ## Resources
 
+- [channel-source-security](references/channel-source-security.md) — full rules + examples for the channel security pillar
 - Semantic Validation Criteria — see `skills/fix-validation/references/skill-semantic-validation.md` for full criteria, rubrics, report format
-- Channel Source Security — see `references/channel-source-security.md` for the full rules, example vulnerable/safe patterns, and the opus prompt template
 - `skill-validation-skill` — Script-based validation (cheap, fast)
 - `plugin-validation-skill` — Full plugin validation
 
