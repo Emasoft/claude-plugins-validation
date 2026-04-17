@@ -1484,6 +1484,43 @@ def test_venv_python_without_session_start_setup_minor(tmp_path: Path):
     )
 
 
+def test_interpreter_python_major_warns_against_uvx_substitution(tmp_path: Path):
+    """The plain-interpreter + third-party MAJOR message must explicitly say NOT
+    to substitute `uvx` — because `uvx` runs installable PyPI packages via
+    entry-points and cannot target a local script with PEP 723 metadata.
+    """
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    script = scripts_dir / "plain.py"
+    script.write_text("import pycozo\n")
+    import os
+    os.chmod(script, 0o755)
+
+    hooks_dir = tmp_path / "hooks"
+    hooks_dir.mkdir()
+    hooks_file = hooks_dir / "hooks.json"
+    hooks_file.write_text(
+        json.dumps({
+            "hooks": {
+                "UserPromptSubmit": [{
+                    "hooks": [{
+                        "type": "command",
+                        "command": 'python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plain.py"',
+                    }]
+                }]
+            }
+        })
+    )
+    report = validate_hooks(hooks_file, plugin_root=tmp_path)
+    major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+    # The message must call out `uvx` specifically so plugin authors don't
+    # mistake it for a valid alternative to `uv run --script`.
+    assert any(
+        "plain interpreter" in m and "uvx" in m and "uv run --script" in m
+        for m in major_msgs
+    ), f"MAJOR message must mention both uvx (as non-substitute) and uv run --script (as correct tool); got: {major_msgs}"
+
+
 def test_http_hook_latency_sensitive_event_warning():
     """HTTP hook on UserPromptSubmit with > 5s timeout warns about latency."""
     report = HookValidationReport()

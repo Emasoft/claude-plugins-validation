@@ -1,0 +1,8 @@
+{
+  "pythonVersion": "3.12",
+  "extraPaths": ["scripts", "tests"],
+  "reportMissingImports": "warning",
+  "typeCheckingMode": "basic",
+  "include": ["scripts", "tests"],
+  "exclude": ["**/__pycache__", "**/.venv", "**/build", "**/dist"]
+}
