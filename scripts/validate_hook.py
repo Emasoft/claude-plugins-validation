@@ -22,13 +22,15 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import ast
 import difflib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
@@ -159,6 +161,89 @@ LINTABLE_EXTENSIONS = {
     ".js": "javascript",
     ".ts": "typescript",
 }
+
+# Shell builtins / side-effect-only simple commands — when a compound hook
+# command begins with one of these, it has no script payload and we move on
+# to the NEXT simple command to find the actual invocation.
+#   e.g. `unset VIRTUAL_ENV; python3 foo.py`  → skip "unset VIRTUAL_ENV", scan "python3 foo.py"
+#   e.g. `cd /tmp && python3 foo.py`          → skip "cd /tmp", scan "python3 foo.py"
+SHELL_NOOPS = {
+    "unset",
+    "export",
+    "cd",
+    "source",
+    ".",
+    "set",
+    "shift",
+    "alias",
+    "umask",
+    "ulimit",
+    "pushd",
+    "popd",
+}
+
+# Python stdlib module names — everything NOT in this set (and not a local
+# sibling module inside the plugin's scripts/ dir) is treated as third-party.
+# Python 3.10+: sys.stdlib_module_names is the authoritative source.
+# For older Pythons we supply a conservative fallback. CPV itself requires
+# Python 3.11+ (see pyproject.toml) so this fallback is a safety net only.
+_STDLIB_FALLBACK = frozenset({
+    "abc", "argparse", "ast", "asyncio", "base64", "binascii", "bisect", "builtins",
+    "bz2", "calendar", "cgi", "cmath", "cmd", "codecs", "collections", "colorsys",
+    "compileall", "concurrent", "configparser", "contextlib", "contextvars", "copy",
+    "csv", "ctypes", "curses", "dataclasses", "datetime", "dbm", "decimal", "difflib",
+    "dis", "doctest", "email", "encodings", "enum", "errno", "fcntl", "filecmp",
+    "fileinput", "fnmatch", "fractions", "ftplib", "functools", "gc", "getopt",
+    "getpass", "gettext", "glob", "graphlib", "grp", "gzip", "hashlib", "heapq",
+    "hmac", "html", "http", "imaplib", "imp", "importlib", "inspect", "io",
+    "ipaddress", "itertools", "json", "keyword", "lib2to3", "linecache", "locale",
+    "logging", "lzma", "mailbox", "mailcap", "marshal", "math", "mimetypes",
+    "mmap", "modulefinder", "multiprocessing", "netrc", "numbers", "operator", "optparse",
+    "os", "pathlib", "pdb", "pickle", "pickletools", "pkgutil", "platform", "plistlib",
+    "poplib", "posix", "posixpath", "pprint", "profile", "pstats", "pty", "pwd",
+    "py_compile", "pyclbr", "pydoc", "queue", "quopri", "random", "re", "readline",
+    "reprlib", "resource", "rlcompleter", "runpy", "sched", "secrets", "select",
+    "selectors", "shelve", "shlex", "shutil", "signal", "site", "smtplib", "sndhdr",
+    "socket", "socketserver", "spwd", "sqlite3", "ssl", "stat", "statistics",
+    "string", "stringprep", "struct", "subprocess", "sys", "sysconfig", "syslog",
+    "tabnanny", "tarfile", "telnetlib", "tempfile", "termios", "textwrap", "threading",
+    "time", "timeit", "tkinter", "token", "tokenize", "tomllib", "trace", "traceback",
+    "tracemalloc", "tty", "turtle", "types", "typing", "unicodedata", "unittest",
+    "urllib", "uu", "uuid", "venv", "warnings", "wave", "weakref", "webbrowser",
+    "winreg", "winsound", "wsgiref", "xdrlib", "xml", "xmlrpc", "zipapp", "zipfile",
+    "zipimport", "zlib", "zoneinfo",
+})
+PYTHON_STDLIB_MODULES: frozenset[str] = (
+    frozenset(sys.stdlib_module_names) if hasattr(sys, "stdlib_module_names") else _STDLIB_FALLBACK
+)
+
+
+@dataclass(frozen=True)
+class ScriptRef:
+    """A reference to a script invoked by a hook command.
+
+    invocation_mode captures HOW the script is being launched, which determines
+    whether third-party imports will resolve at runtime:
+      - "direct"              → `./foo.py` or `/abs/foo.sh` (first token IS the script)
+      - "interpreter-python"  → `python3 foo.py` — runs under the hook's ambient
+                                python3; third-party imports fail unless globally
+                                installed or PEP 723 metadata + uv.
+      - "uv-run-script"       → `uv run --script foo.py` — uv resolves deps from
+                                the script's PEP 723 inline metadata block.
+      - "uv-run-with"         → `uv run --with pkg[,pkg] foo.py` — deps supplied
+                                explicitly on the command line.
+      - "venv-python"         → `${CLAUDE_PLUGIN_DATA}/.venv/bin/python foo.py` —
+                                runs inside a plugin-scoped venv (which must be
+                                set up by a SessionStart install hook).
+      - "node" / "bash" / "ruby" / "perl" / "php" → language-specific; no Python
+                                runtime-dep reconciliation applies.
+    """
+
+    path: Path
+    invocation_mode: str
+    simple_command: tuple[str, ...] = field(default_factory=tuple)
+    # For uv-run-with: the packages passed via --with flags.
+    explicit_deps: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass
@@ -313,50 +398,738 @@ def validate_matcher(matcher: Any, event_name: str, report: ValidationReport) ->
     return True
 
 
-def extract_script_path(command: str, plugin_root: Path | None) -> Path | None:
-    """Extract script path from a command string."""
-    # Handle environment variable substitution
-    cmd = command.strip()
+def _split_compound_command(command: str) -> list[str]:
+    """Split a shell command string on top-level `;`, `&&`, `||`, `|`.
 
-    # Common patterns:
-    # "${CLAUDE_PLUGIN_ROOT}/scripts/foo.sh"
-    # "$CLAUDE_PROJECT_DIR/.claude/hooks/foo.py"
-    # /absolute/path/to/script.sh
-    # ./relative/path/to/script.py
+    Quote-aware: operators inside single- or double-quoted strings are NOT
+    treated as separators. Backslash escapes outside single quotes are
+    preserved verbatim (we do not expand them — shlex.split handles that
+    later on each simple command).
 
-    # Extract the first path-like token
-    # Remove leading quotes
-    if cmd.startswith('"'):
-        # Find matching quote
-        end = cmd.find('"', 1)
-        if end > 0:
-            cmd = cmd[1:end]
-        else:
-            cmd = cmd[1:]
+    Example:
+        "unset VIRTUAL_ENV; python3 'a;b.py'"
+            → ["unset VIRTUAL_ENV", "python3 'a;b.py'"]
+    """
+    parts: list[str] = []
+    buf: list[str] = []
+    in_single = False
+    in_double = False
+    i = 0
+    n = len(command)
+    while i < n:
+        c = command[i]
+        if in_single:
+            buf.append(c)
+            if c == "'":
+                in_single = False
+            i += 1
+            continue
+        if in_double:
+            buf.append(c)
+            if c == "\\" and i + 1 < n:
+                buf.append(command[i + 1])
+                i += 2
+                continue
+            if c == '"':
+                in_double = False
+            i += 1
+            continue
+        if c == "\\" and i + 1 < n:
+            buf.append(c)
+            buf.append(command[i + 1])
+            i += 2
+            continue
+        if c == "'":
+            in_single = True
+            buf.append(c)
+            i += 1
+            continue
+        if c == '"':
+            in_double = True
+            buf.append(c)
+            i += 1
+            continue
+        # Two-char operators first
+        if command[i : i + 2] in ("&&", "||"):
+            parts.append("".join(buf).strip())
+            buf = []
+            i += 2
+            continue
+        if c in (";", "|"):
+            parts.append("".join(buf).strip())
+            buf = []
+            i += 1
+            continue
+        buf.append(c)
+        i += 1
+    last = "".join(buf).strip()
+    if last:
+        parts.append(last)
+    return [p for p in parts if p]
 
-    # Split on spaces to get first token (the command/script)
-    parts = cmd.split()
-    if not parts:
-        return None
 
-    script_part = parts[0]
+def _tokenize_hook_command(command: str) -> list[list[str]]:
+    """Tokenize a hook command into a list of simple-command token lists.
 
-    # Substitute environment variables
+    Splits compound commands on `;`, `&&`, `||`, `|` (via _split_compound_command,
+    which is quote-aware), then shlex-splits each simple command in POSIX mode.
+    A trailing backgrounding `&` on the whole command is stripped from the
+    final simple command.
+
+    Quotes are stripped from values but env-var syntax is preserved literally:
+    `"${CLAUDE_PLUGIN_ROOT}/foo.py"` becomes a single token `${CLAUDE_PLUGIN_ROOT}/foo.py`.
+    """
+    s = command.rstrip()
+    # Strip trailing single `&` (background marker); preserve `&&`.
+    if s.endswith("&") and not s.endswith("&&"):
+        s = s[:-1].rstrip()
+
+    simple_commands = _split_compound_command(s)
+    out: list[list[str]] = []
+    for sc in simple_commands:
+        try:
+            tokens = shlex.split(sc, posix=True)
+        except ValueError:
+            # Unterminated quote or other shlex error — fall back to a single
+            # whole-string token so downstream code can still make a best-effort
+            # path guess. Reporting of the malformed command belongs in a
+            # separate check (not yet implemented).
+            tokens = [sc]
+        if tokens:
+            out.append(tokens)
+    return out
+
+
+def _resolve_plugin_vars(token: str, plugin_root: Path | None) -> str:
+    """Substitute only CLAUDE_PLUGIN_ROOT references (both ${...} and $...).
+
+    Other env vars (CLAUDE_PROJECT_DIR, CLAUDE_PLUGIN_DATA, $HOME, ...) are
+    intentionally NOT substituted — they are resolved at runtime by Claude
+    Code / the shell, and their values are not knowable statically.
+    """
     if plugin_root:
-        script_part = script_part.replace("${CLAUDE_PLUGIN_ROOT}", str(plugin_root))
-        script_part = script_part.replace("$CLAUDE_PLUGIN_ROOT", str(plugin_root))
+        token = token.replace("${CLAUDE_PLUGIN_ROOT}", str(plugin_root))
+        token = token.replace("$CLAUDE_PLUGIN_ROOT", str(plugin_root))
+    return token
 
-    # Skip if still has unresolved variables
-    if "$" in script_part:
+
+def _is_lintable_script(path_str: str) -> bool:
+    """True if path's suffix is in the lintable-extensions set."""
+    suffix = Path(path_str).suffix.lower()
+    return suffix in LINTABLE_EXTENSIONS or suffix in {".rb", ".pl", ".php"}
+
+
+# Interpreter name → invocation_mode tag. First token (basename) is looked up
+# here; a version suffix like python3.12 is accepted via regex fallback.
+_INTERPRETER_TAGS: dict[str, str] = {
+    "python": "interpreter-python",
+    "python3": "interpreter-python",
+    "node": "node",
+    "deno": "node",
+    "bun": "node",
+    "bash": "bash",
+    "sh": "bash",
+    "zsh": "bash",
+    "dash": "bash",
+    "ruby": "ruby",
+    "perl": "perl",
+    "php": "php",
+}
+_PYTHON_VERSIONED_RE = re.compile(r"^python3\.\d+$")
+
+
+def _classify_interpreter(first_token_name: str) -> str | None:
+    """Given the basename of a simple command's first token, return the
+    invocation_mode tag if it is a known interpreter — else None.
+    """
+    if not first_token_name:
+        return None
+    tag = _INTERPRETER_TAGS.get(first_token_name)
+    if tag:
+        return tag
+    if _PYTHON_VERSIONED_RE.match(first_token_name):
+        return "interpreter-python"
+    return None
+
+
+def _detect_venv_python(resolved_token: str) -> bool:
+    """True if token looks like a path to a venv's Python binary.
+
+    Matches both POSIX (`.venv/bin/python...`) and Windows (`.venv\\Scripts\\python...`)
+    layouts. The directory name must literally be ".venv" or "venv" since other
+    patterns (e.g. "/usr/bin/python3") must NOT be misclassified.
+    """
+    return bool(re.search(r"(?:^|[/\\])(?:\.venv|venv)[/\\](?:bin|Scripts)[/\\]python", resolved_token))
+
+
+def _find_script_in_interpreter_args(tokens: list[str]) -> int | None:
+    """Given an interpreter-led simple command, return the index of the first
+    positional that looks like a script path, or None if there is none.
+
+    Skips common option-with-value flags that do NOT precede a script:
+      -m MODULE  / -c CODE   → script-less modes; return None entirely
+      -X OPT                 → consumes one value then continues
+      --                     → ends option parsing; next token is the script
+      other single-dash flags (-u, -B, -E, ...) → boolean-ish, consume one token
+    """
+    i = 1
+    n = len(tokens)
+    while i < n:
+        tok = tokens[i]
+        if tok in ("-m", "-c"):
+            # -m MODULE / -c CODE — no script path follows. Report as "no script".
+            return None
+        if tok == "-X":
+            # -X OPT — consume the next token as the option value and continue.
+            i += 2
+            continue
+        if tok == "--":
+            i += 1
+            if i < n:
+                return i
+            return None
+        if tok.startswith("-"):
+            # Generic single-dash flag without a paired value (e.g. -u, -B).
+            i += 1
+            continue
+        return i
+    return None
+
+
+def _find_script_in_uv_run(tokens: list[str]) -> tuple[int, str, tuple[str, ...]] | None:
+    """Parse `uv run [flags] path.py [script-args]`.
+
+    Returns (script_index, invocation_mode, explicit_deps) or None.
+
+    invocation_mode is:
+      - "uv-run-script"  if any `--script` flag was supplied
+      - "uv-run-with"    if any `--with pkg[,pkg]` was supplied (and not --script)
+      - "interpreter-python" otherwise (uv run transparently executes via project python)
+
+    explicit_deps is the tuple of packages passed via --with flags (comma-split).
+    """
+    if len(tokens) < 3 or tokens[1] != "run":
         return None
 
-    # Check if it looks like a script path
-    path = Path(script_part)
-    suffix = path.suffix.lower()
-    if suffix in LINTABLE_EXTENSIONS or suffix in {".rb", ".pl", ".php"}:
-        return path
+    has_script = False
+    with_deps: list[str] = []
+    # Flags that consume their value as a separate token
+    TWO_ARG_FLAGS = {
+        "--python",
+        "--with",
+        "--with-editable",
+        "--with-requirements",
+        "--directory",
+        "--project",
+        "--extra",
+        "--isolated",
+        "--index",
+        "--default-index",
+        "--upgrade-package",
+        "--reinstall-package",
+        "--resolution",
+        "--package",
+    }
 
-    return None
+    i = 2
+    n = len(tokens)
+    while i < n:
+        tok = tokens[i]
+        if tok == "--script":
+            has_script = True
+            i += 1
+            continue
+        # --flag=value form
+        if tok.startswith("--") and "=" in tok:
+            name, _, value = tok.partition("=")
+            if name == "--with":
+                with_deps.extend(p.strip() for p in value.split(",") if p.strip())
+            i += 1
+            continue
+        if tok in TWO_ARG_FLAGS:
+            # value is the next token
+            if tok == "--with" and i + 1 < n:
+                with_deps.extend(p.strip() for p in tokens[i + 1].split(",") if p.strip())
+            i += 2
+            continue
+        if tok.startswith("-"):
+            # Generic boolean flag (e.g. --quiet, --no-sync, -q)
+            i += 1
+            continue
+        # First positional — the script
+        break
+
+    if i >= n:
+        return None
+    script_token = tokens[i]
+    if not _is_lintable_script(script_token):
+        # Could be `uv run my-tool` (a script entry point), not a file path.
+        return None
+
+    if has_script:
+        mode = "uv-run-script"
+    elif with_deps:
+        mode = "uv-run-with"
+    else:
+        mode = "interpreter-python"
+    return (i, mode, tuple(with_deps))
+
+
+def extract_script_paths(command: str, plugin_root: Path | None) -> list[ScriptRef]:
+    """Extract every script reference from a hook command, with invocation_mode.
+
+    Handles compound commands (`;`, `&&`, `||`, `|`), interpreter invocations
+    (`python3 foo.py`, `node foo.js`, `bash foo.sh`), `uv run [--script]`,
+    `${CLAUDE_PLUGIN_DATA}/.venv/bin/python foo.py`, `env python3 foo.py`,
+    and direct script invocations (`./foo.py`). Skips pure side-effect simple
+    commands like `unset VAR` and `cd /dir`.
+
+    The new canonical API — prefer this over extract_script_path which is
+    retained for backwards compatibility.
+    """
+    refs: list[ScriptRef] = []
+    for tokens in _tokenize_hook_command(command):
+        if not tokens:
+            continue
+        first = _resolve_plugin_vars(tokens[0], plugin_root)
+        first_name = Path(first).name
+
+        # 1. Skip pure-side-effect simple commands (unset / cd / export / source ...)
+        if first_name in SHELL_NOOPS:
+            continue
+
+        # 2. uv / uvx — uvx is a package executor, not a local-script runner
+        if first_name == "uv":
+            r = _find_script_in_uv_run(tokens)
+            if r is not None:
+                idx, mode, deps = r
+                script_token = _resolve_plugin_vars(tokens[idx], plugin_root)
+                if "$" not in script_token:
+                    refs.append(
+                        ScriptRef(
+                            path=Path(script_token),
+                            invocation_mode=mode,
+                            simple_command=tuple(tokens),
+                            explicit_deps=deps,
+                        )
+                    )
+            continue
+        if first_name in ("uvx", "pipx"):
+            # These invoke remote packages; no local script to lint. The
+            # package-executor WARN in validate_command_hook covers the risk.
+            continue
+
+        # 3. Venv Python binary — the hook explicitly targets a venv's python
+        if _detect_venv_python(first):
+            venv_idx: int | None = _find_script_in_interpreter_args(tokens)
+            if venv_idx is not None:
+                script_token = _resolve_plugin_vars(tokens[venv_idx], plugin_root)
+                if _is_lintable_script(script_token) and "$" not in script_token:
+                    refs.append(
+                        ScriptRef(
+                            path=Path(script_token),
+                            invocation_mode="venv-python",
+                            simple_command=tuple(tokens),
+                        )
+                    )
+            continue
+
+        # 4. Standard interpreter (python3, node, bash, ruby, perl, php, ...)
+        interp_mode: str | None = _classify_interpreter(first_name)
+        if interp_mode is not None:
+            interp_idx: int | None = _find_script_in_interpreter_args(tokens)
+            if interp_idx is not None and interp_idx < len(tokens):
+                script_token = _resolve_plugin_vars(tokens[interp_idx], plugin_root)
+                if _is_lintable_script(script_token) and "$" not in script_token:
+                    refs.append(
+                        ScriptRef(
+                            path=Path(script_token),
+                            invocation_mode=interp_mode,
+                            simple_command=tuple(tokens),
+                        )
+                    )
+            continue
+
+        # 5. `env [-S] [-i] [...] python3 foo.py`
+        if first_name == "env":
+            j = 1
+            while j < len(tokens):
+                t = tokens[j]
+                if t == "-S":
+                    j += 1
+                    continue
+                if t == "--":
+                    j += 1
+                    break
+                if t.startswith("-"):
+                    j += 1
+                    continue
+                break
+            if j < len(tokens):
+                sub = tokens[j:]
+                sub_name = Path(_resolve_plugin_vars(sub[0], plugin_root)).name
+                sub_mode = _classify_interpreter(sub_name)
+                if sub_mode is not None:
+                    env_idx: int | None = _find_script_in_interpreter_args(sub)
+                    if env_idx is not None and env_idx < len(sub):
+                        script_token = _resolve_plugin_vars(sub[env_idx], plugin_root)
+                        if _is_lintable_script(script_token) and "$" not in script_token:
+                            refs.append(
+                                ScriptRef(
+                                    path=Path(script_token),
+                                    invocation_mode=sub_mode,
+                                    simple_command=tuple(tokens),
+                                )
+                            )
+            continue
+
+        # 6. Direct script invocation — first token IS the script
+        first_resolved = first
+        if "$" not in first_resolved and _is_lintable_script(first_resolved):
+            refs.append(
+                ScriptRef(
+                    path=Path(first_resolved),
+                    invocation_mode="direct",
+                    simple_command=tuple(tokens),
+                )
+            )
+
+    return refs
+
+
+def extract_script_path(command: str, plugin_root: Path | None) -> Path | None:
+    """Legacy single-path extractor.
+
+    Retained for backwards compatibility with existing callers and tests.
+    Returns the FIRST script path found by extract_script_paths, or None.
+    New code should call extract_script_paths directly and act on the
+    invocation_mode of each ScriptRef.
+    """
+    refs = extract_script_paths(command, plugin_root)
+    return refs[0].path if refs else None
+
+
+# ---------------------------------------------------------------------------
+# Python script analysis helpers — used by the runtime-dep reconciliation
+# check to decide whether a hook's invocation style will actually be able to
+# resolve the referenced script's imports.
+# ---------------------------------------------------------------------------
+
+
+def detect_python_third_party_imports(
+    script_path: Path, plugin_script_dir: Path | None = None
+) -> set[str]:
+    """Parse a Python file with ast and return the set of third-party module
+    root names it imports.
+
+    - Stdlib modules (per sys.stdlib_module_names) are excluded.
+    - Intra-plugin imports (sibling modules in scripts/ named the same) are
+      excluded so plugins using multi-file layouts do not trip the check.
+    - Relative imports (from . import x) are never third-party.
+    - Dynamic imports (importlib.import_module, __import__) are out of scope —
+      static-only detection by design.
+
+    On SyntaxError or missing file, returns an empty set; the caller is
+    expected to surface those errors through separate channels.
+    """
+    if not script_path.exists() or not script_path.is_file():
+        return set()
+    try:
+        source = script_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return set()
+    try:
+        tree = ast.parse(source, filename=str(script_path))
+    except SyntaxError:
+        return set()
+
+    local_siblings: set[str] = set()
+    if plugin_script_dir and plugin_script_dir.is_dir():
+        for sibling in plugin_script_dir.iterdir():
+            if sibling.is_file() and sibling.suffix == ".py":
+                local_siblings.add(sibling.stem)
+            elif sibling.is_dir() and (sibling / "__init__.py").exists():
+                local_siblings.add(sibling.name)
+
+    third_party: set[str] = set()
+    # Walk Import / ImportFrom at any depth so try/except-guarded imports
+    # (e.g. `try: import pycozo except ImportError: ...`) are still detected —
+    # the PSS bug fits this exact pattern.
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".", 1)[0]
+                if root and root not in PYTHON_STDLIB_MODULES and root not in local_siblings:
+                    third_party.add(root)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level and node.level > 0:
+                continue  # relative import
+            if node.module is None:
+                continue
+            root = node.module.split(".", 1)[0]
+            if root and root not in PYTHON_STDLIB_MODULES and root not in local_siblings:
+                third_party.add(root)
+    return third_party
+
+
+_PEP723_BLOCK_RE = re.compile(
+    r"(?m)^# /// script\s*$\n(?P<body>(?:^#(?: .*)?\n)+)^# ///\s*$",
+)
+
+
+def detect_pep723_deps(script_path: Path) -> list[str] | None:
+    """Parse a PEP 723 inline script metadata block and return its
+    dependencies list.
+
+    Returns:
+      - list[str] if the block exists and parses (empty list is possible).
+      - None if there is no PEP 723 block at all.
+
+    A malformed block (unbalanced markers, invalid TOML, non-list deps field)
+    returns an empty list — the caller can treat that as "block present but
+    unusable" which still fails reconciliation. We do not surface parse
+    errors here; that belongs in a dedicated linter pass if ever needed.
+    """
+    if not script_path.exists() or not script_path.is_file():
+        return None
+    try:
+        source = script_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    match = _PEP723_BLOCK_RE.search(source)
+    if not match:
+        return None
+    body_lines = match.group("body").splitlines()
+    toml_source_lines: list[str] = []
+    for line in body_lines:
+        # Each line starts with "#"; strip one optional space after it.
+        if line.startswith("# "):
+            toml_source_lines.append(line[2:])
+        elif line.startswith("#"):
+            toml_source_lines.append(line[1:])
+        else:
+            toml_source_lines.append(line)
+    toml_text = "\n".join(toml_source_lines)
+
+    try:
+        import tomllib  # Python 3.11+
+    except ImportError:  # pragma: no cover — CPV requires Python 3.11+
+        return []
+
+    try:
+        data = tomllib.loads(toml_text)
+    except tomllib.TOMLDecodeError:
+        return []
+    deps = data.get("dependencies")
+    if not isinstance(deps, list):
+        return []
+    return [str(d) for d in deps]
+
+
+def _strip_dep_name(dep_spec: str) -> str:
+    """Extract the project name from a PEP 508 requirement spec.
+
+    Examples:
+      "pycozo[embedded]>=0.7.6" → "pycozo"
+      "httpx ; python_version>='3.10'" → "httpx"
+      "my-pkg" → "my_pkg" (normalized to importable name)
+    """
+    # Strip environment markers (after ;), extras (brackets), version specifiers.
+    spec = dep_spec.split(";", 1)[0].strip()
+    spec = re.split(r"[\[<>=!~ ]", spec, maxsplit=1)[0].strip()
+    # PyPI names use "-" but the import path uses "_". Make both forms available.
+    return spec.replace("-", "_").lower()
+
+
+def detect_module_scope_sys_exit(script_path: Path) -> list[int]:
+    """Return line numbers where the script calls sys.exit(), exit(), or
+    raises SystemExit at MODULE scope.
+
+    Module-scope SystemExit is especially dangerous in hook scripts because
+    ANY importer (including the hook process itself, via module load) is
+    killed. This was the proximate mechanism of the PSS v3.1.0 hook crash.
+
+    Returns a list of 1-based line numbers. Empty if none found or the file
+    cannot be parsed.
+    """
+    if not script_path.exists() or not script_path.is_file():
+        return []
+    try:
+        source = script_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+    try:
+        tree = ast.parse(source, filename=str(script_path))
+    except SyntaxError:
+        return []
+
+    hits: list[int] = []
+    for node in tree.body:
+        # Direct top-level expression: sys.exit(...) or exit(...)
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+            call = node.value
+            func = call.func
+            if isinstance(func, ast.Name) and func.id in ("exit", "quit"):
+                hits.append(node.lineno)
+            elif isinstance(func, ast.Attribute) and func.attr == "exit":
+                target = func.value
+                if isinstance(target, ast.Name) and target.id == "sys":
+                    hits.append(node.lineno)
+        # Top-level raise SystemExit(...) or raise SystemExit
+        elif isinstance(node, ast.Raise) and node.exc is not None:
+            exc = node.exc
+            if isinstance(exc, ast.Call) and isinstance(exc.func, ast.Name) and exc.func.id == "SystemExit":
+                hits.append(node.lineno)
+            elif isinstance(exc, ast.Name) and exc.id == "SystemExit":
+                hits.append(node.lineno)
+        # if-block at top level (e.g. if pycozo is None: sys.exit(...)) —
+        # still runs at import time, so we descend one level.
+        elif isinstance(node, ast.If):
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.FunctionDef) or isinstance(sub, ast.AsyncFunctionDef) or isinstance(sub, ast.ClassDef):
+                    # Don't descend into function/class bodies — their exits
+                    # don't run at import time.
+                    continue
+                if isinstance(sub, ast.Expr) and isinstance(sub.value, ast.Call):
+                    call = sub.value
+                    func = call.func
+                    if isinstance(func, ast.Name) and func.id in ("exit", "quit"):
+                        hits.append(sub.lineno)
+                    elif isinstance(func, ast.Attribute) and func.attr == "exit":
+                        target = func.value
+                        if isinstance(target, ast.Name) and target.id == "sys":
+                            hits.append(sub.lineno)
+    return sorted(set(hits))
+
+
+# ---------------------------------------------------------------------------
+# Runtime-dep reconciliation
+# ---------------------------------------------------------------------------
+
+
+def reconcile_python_runtime_deps(
+    ref: ScriptRef,
+    plugin_root: Path | None,
+    hooks_json_data: dict[str, Any] | None,
+    report: ValidationReport,
+) -> None:
+    """For a Python ScriptRef, verify that the hook's invocation method
+    can actually resolve the script's third-party imports.
+
+    Matrix (see TRDD-0028dd34 §6.5):
+      interpreter-python + third-party imports                    → MAJOR
+      uv-run-script      + PEP 723 covers all imports             → PASSED
+      uv-run-script      + PEP 723 missing / incomplete            → MAJOR
+      uv-run-with        + --with covers all imports               → PASSED
+      uv-run-with        + --with incomplete                      → MAJOR
+      venv-python        + SessionStart venv-setup hook present    → PASSED
+      venv-python        + no SessionStart setup                   → MINOR
+      stdlib-only (any mode)                                      → silent PASS
+    """
+    if ref.invocation_mode not in (
+        "interpreter-python",
+        "uv-run-script",
+        "uv-run-with",
+        "venv-python",
+    ):
+        return  # non-Python script (node/bash/...) or direct .py — out of scope
+
+    script_path = ref.path
+    if not script_path.exists():
+        return  # absence reported elsewhere
+
+    plugin_script_dir = plugin_root / "scripts" if plugin_root else None
+    imports = detect_python_third_party_imports(script_path, plugin_script_dir)
+    if not imports:
+        return  # stdlib-only — any invocation style works
+
+    def _covered_by(dep_specs: list[str]) -> tuple[set[str], set[str]]:
+        declared = {_strip_dep_name(d) for d in dep_specs}
+        needed = {i.lower().replace("-", "_") for i in imports}
+        missing = needed - declared
+        covered = needed & declared
+        return covered, missing
+
+    label = f"{script_path.name} (imports: {', '.join(sorted(imports))})"
+
+    if ref.invocation_mode == "interpreter-python":
+        report.major(
+            f"Hook invokes {label} via plain interpreter — third-party imports "
+            f"{sorted(imports)} will fail at runtime unless satisfied via "
+            f"`uv run --script` + PEP 723 metadata, `uv run --with`, or a "
+            f"${{CLAUDE_PLUGIN_DATA}}/.venv/bin/python set up by a SessionStart hook."
+        )
+        return
+
+    if ref.invocation_mode == "uv-run-script":
+        deps = detect_pep723_deps(script_path)
+        if deps is None:
+            report.major(
+                f"Hook uses `uv run --script` on {script_path.name} but the "
+                f"script has no PEP 723 inline metadata block. Add a `# /// script` "
+                f"header declaring dependencies: {sorted(imports)}."
+            )
+            return
+        _, missing = _covered_by(deps)
+        if missing:
+            report.major(
+                f"PEP 723 metadata in {script_path.name} is missing declarations "
+                f"for imported third-party modules: {sorted(missing)}. "
+                f"Add them to the `dependencies` list in the `# /// script` block."
+            )
+        else:
+            report.passed(
+                f"Runtime-dep reconciliation: {script_path.name} via `uv run --script` — "
+                f"PEP 723 metadata covers all third-party imports."
+            )
+        return
+
+    if ref.invocation_mode == "uv-run-with":
+        _, missing = _covered_by(list(ref.explicit_deps))
+        if missing:
+            report.major(
+                f"`uv run --with` flags do not cover imported modules "
+                f"{sorted(missing)} in {script_path.name}. Add them to --with."
+            )
+        else:
+            report.passed(
+                f"Runtime-dep reconciliation: {script_path.name} — "
+                f"`uv run --with` covers all third-party imports."
+            )
+        return
+
+    if ref.invocation_mode == "venv-python":
+        # Look for a SessionStart hook that sets up the venv.
+        has_setup = False
+        if hooks_json_data:
+            sessions = hooks_json_data.get("hooks", {}).get("SessionStart", [])
+            for block in sessions if isinstance(sessions, list) else []:
+                for h in block.get("hooks", []) if isinstance(block, dict) else []:
+                    cmd = h.get("command", "") if isinstance(h, dict) else ""
+                    if not isinstance(cmd, str):
+                        continue
+                    # Heuristic: any venv-creation or pip-install command targeting
+                    # ${CLAUDE_PLUGIN_DATA} counts as setup.
+                    if "CLAUDE_PLUGIN_DATA" in cmd and re.search(
+                        r"\b(uv\s+venv|python\s+-m\s+venv|pip\s+install)\b", cmd
+                    ):
+                        has_setup = True
+                        break
+                if has_setup:
+                    break
+        if has_setup:
+            report.passed(
+                f"Runtime-dep reconciliation: {script_path.name} via "
+                f"${{CLAUDE_PLUGIN_DATA}}/.venv/bin/python — SessionStart venv-setup hook present."
+            )
+        else:
+            report.minor(
+                f"Hook invokes {script_path.name} via ${{CLAUDE_PLUGIN_DATA}}/.venv/bin/python "
+                f"but no SessionStart hook was found that creates the venv (expected: a command "
+                f"containing `uv venv` or `pip install` targeting ${{CLAUDE_PLUGIN_DATA}}). "
+                f"First-install runs will fail with ImportError for {sorted(imports)}."
+            )
+        return
 
 
 def lint_bash_script(script_path: Path, report: ValidationReport) -> None:
@@ -449,6 +1222,15 @@ def lint_python_script(script_path: Path, report: ValidationReport) -> None:
         report.minor(f"ruff not available locally or via uvx, skipping lint for {script_path.name}")
 
     # Mypy check
+    # --ignore-missing-imports is KEPT deliberately. Without it, every hook
+    # script that imports anything outside its own venv floods the report
+    # with "Library stubs not installed / module not found" noise. The real
+    # "will my import resolve at runtime?" question is answered precisely by
+    # reconcile_python_runtime_deps(), which cross-references actual script
+    # imports against the hook's invocation method (uv run --script + PEP 723,
+    # --with flags, or a SessionStart-provisioned venv). Don't re-enable the
+    # flag expecting a PSS-style regression catch — that job belongs to the
+    # reconciliation check, not mypy.
     mypy_cmd = resolve_tool_command("mypy")
     if mypy_cmd:
         try:
@@ -568,8 +1350,16 @@ def validate_command_hook(
     event_name: str,
     plugin_root: Path | None,
     report: ValidationReport,
+    hooks_json_data: dict[str, Any] | None = None,
 ) -> bool:
-    """Validate a command-type hook."""
+    """Validate a command-type hook.
+
+    hooks_json_data is the parsed top-level hooks.json (passed through from
+    validate_hooks) so the runtime-dep reconciliation check can look for a
+    SessionStart venv-setup hook elsewhere in the same file. Defaults to
+    None for backwards compatibility with callers that only have a single
+    hook in hand.
+    """
     if "command" not in hook:
         report.critical("Command hook missing required 'command' field")
         return False
@@ -684,19 +1474,68 @@ def validate_command_hook(
         if event_name not in {"SessionStart", "Setup"}:
             report.major("CLAUDE_ENV_FILE is only available in SessionStart and Setup hooks")
 
-    # Extract and validate script path
-    script_path = extract_script_path(command, plugin_root)
-    if script_path and script_path.exists():
-        validate_script(script_path, report)
-    elif script_path:
-        # Script path detected but doesn't exist
-        if (
-            plugin_root
-            and "${CLAUDE_PLUGIN_ROOT}" not in hook["command"]
-            and "${CLAUDE_PLUGIN_DATA}" not in hook["command"]
-        ):
-            # Absolute path that should exist
-            report.major(f"Script not found: {script_path}")
+    # Antipattern: explicit env-stripping that forces the hook into the system
+    # interpreter, defeating any plugin-managed venv. This was the proximate
+    # cause of the PSS v3.1.0 hook crash: `unset VIRTUAL_ENV; python3 ...`
+    # deliberately shed the project venv, forcing a system python3 that did not
+    # have `pycozo` installed.
+    if re.search(r"\bunset\s+VIRTUAL_ENV\b", command):
+        report.warning(
+            "Command runs `unset VIRTUAL_ENV` before invoking a script — this forces the "
+            "hook into the system interpreter and bypasses any plugin-managed venv. If the "
+            "script has third-party imports, they will fail at runtime. Prefer `uv run --script` "
+            "with PEP 723 metadata, or ${CLAUDE_PLUGIN_DATA}/.venv/bin/python with a SessionStart setup hook."
+        )
+    if re.search(r"\bunset\s+PYTHONPATH\b", command):
+        report.warning(
+            "Command runs `unset PYTHONPATH` — inspect why. If the intent is to avoid "
+            "leaking the user's PYTHONPATH into the hook, prefer isolating via `uv run` "
+            "or a plugin-managed venv."
+        )
+
+    # Extract and validate every script referenced by this hook command.
+    # Unlike the legacy extractor, this recognizes interpreter forms
+    # (`python3 foo.py`), compound commands (`unset VAR; python3 foo.py`),
+    # `uv run [--script]`, `${CLAUDE_PLUGIN_DATA}/.venv/bin/python foo.py`,
+    # and `env python3 foo.py` — the extractor also reports the invocation_mode
+    # which drives runtime-dep reconciliation and module-scope sys.exit checks.
+    refs = extract_script_paths(command, plugin_root)
+    for ref in refs:
+        script_path = ref.path
+        if script_path.exists():
+            validate_script(script_path, report)
+            # Python-only: reconcile script third-party imports against the hook's
+            # declared resolution path (PEP 723 + uv run, --with flags, or venv).
+            if script_path.suffix.lower() == ".py" and ref.invocation_mode in (
+                "interpreter-python",
+                "uv-run-script",
+                "uv-run-with",
+                "venv-python",
+            ):
+                reconcile_python_runtime_deps(ref, plugin_root, hooks_json_data, report)
+                # Module-scope sys.exit / raise SystemExit — any importer (including
+                # the hook process itself, via module load) is killed on import.
+                exit_lines = detect_module_scope_sys_exit(script_path)
+                if exit_lines:
+                    report.major(
+                        f"{script_path.name} calls sys.exit()/exit()/raise SystemExit at MODULE "
+                        f"scope (line(s): {exit_lines}) — the hook process will be killed at import "
+                        f"time if the call path is reached. Move such exits inside a function "
+                        f"guarded by `if __name__ == '__main__':` or raise ImportError instead."
+                    )
+        else:
+            # Script path detected but doesn't exist — report only if the command
+            # used a resolvable root (${CLAUDE_PLUGIN_ROOT}) or an absolute path.
+            # Paths using ${CLAUDE_PROJECT_DIR} or ${CLAUDE_PLUGIN_DATA} are
+            # resolved at runtime and may legitimately not exist during validation.
+            if (
+                plugin_root
+                and "${CLAUDE_PLUGIN_ROOT}" not in hook["command"]
+                and "${CLAUDE_PLUGIN_DATA}" not in hook["command"]
+                and "$CLAUDE_PROJECT_DIR" not in hook["command"]
+                and "${CLAUDE_PROJECT_DIR}" not in hook["command"]
+            ):
+                report.major(f"Script not found: {script_path}")
 
     return True
 
@@ -801,6 +1640,17 @@ def validate_http_hook(
             report.major("HTTP hook 'allowedEnvVars' must contain only strings")
 
     # Validate timeout if present (seconds)
+    # Latency-sensitive events block user interaction: UserPromptSubmit and
+    # PreToolUse run synchronously on the critical path, so a slow HTTP hook
+    # here degrades every interaction. Warn on generous timeouts for those.
+    # (This is the sole reason validate_http_hook takes `event_name` — without
+    # it the parameter would be dead weight.)
+    LATENCY_SENSITIVE_EVENTS = {
+        "UserPromptSubmit",
+        "PreToolUse",
+        "PermissionRequest",
+        "SessionStart",
+    }
     if "timeout" in hook:
         timeout = hook["timeout"]
         if not isinstance(timeout, (int, float)):
@@ -809,6 +1659,13 @@ def validate_http_hook(
             report.major("HTTP hook 'timeout' must be positive")
         elif timeout > 600:
             report.warning(f"HTTP hook timeout is {timeout}s — exceeds 600s")
+        elif event_name in LATENCY_SENSITIVE_EVENTS and timeout > 5:
+            report.warning(
+                f"HTTP hook on '{event_name}' has a {timeout}s timeout — this event "
+                f"blocks user interaction, so every invocation can stall for up to "
+                f"{timeout}s on a slow/failing endpoint. Consider `async: true` or "
+                f"a shorter timeout (<= 5s)."
+            )
 
     report.passed(f"HTTP hook URL: {url_stripped[:60]}")
     return True
@@ -819,6 +1676,7 @@ def validate_single_hook(
     event_name: str,
     plugin_root: Path | None,
     report: HookValidationReport,
+    hooks_json_data: dict[str, Any] | None = None,
 ) -> bool:
     """Validate a single hook definition."""
     if not isinstance(hook, dict):
@@ -853,7 +1711,7 @@ def validate_single_hook(
 
     # Validate based on type
     if hook_type == "command":
-        if not validate_command_hook(hook, event_name, plugin_root, report):
+        if not validate_command_hook(hook, event_name, plugin_root, report, hooks_json_data):
             return False
     elif hook_type == "http":
         if not validate_http_hook(hook, event_name, report):
@@ -973,6 +1831,7 @@ def validate_matcher_block(
     event_name: str,
     plugin_root: Path | None,
     report: HookValidationReport,
+    hooks_json_data: dict[str, Any] | None = None,
 ) -> bool:
     """Validate a matcher block (contains matcher and hooks array)."""
     if not isinstance(matcher_block, dict):
@@ -1002,7 +1861,7 @@ def validate_matcher_block(
     all_valid = True
     for i, hook in enumerate(hooks):
         report.info(f"Validating hook {i + 1} of {len(hooks)}...")
-        if not validate_single_hook(hook, event_name, plugin_root, report):
+        if not validate_single_hook(hook, event_name, plugin_root, report, hooks_json_data):
             all_valid = False
 
     return all_valid
@@ -1013,6 +1872,7 @@ def validate_event_hooks(
     event_config: Any,
     plugin_root: Path | None,
     report: HookValidationReport,
+    hooks_json_data: dict[str, Any] | None = None,
 ) -> bool:
     """Validate all hooks for a specific event."""
     if not isinstance(event_config, list):
@@ -1028,7 +1888,7 @@ def validate_event_hooks(
     all_valid = True
     for i, matcher_block in enumerate(event_config):
         report.info(f"Matcher block {i + 1}...")
-        if not validate_matcher_block(matcher_block, event_name, plugin_root, report):
+        if not validate_matcher_block(matcher_block, event_name, plugin_root, report, hooks_json_data):
             all_valid = False
 
     if all_valid:
@@ -1061,13 +1921,17 @@ def validate_hooks(
     if not validate_top_level_structure(data, report):
         return report
 
-    # Validate each event
+    # Validate each event. Pass the parsed top-level document through so
+    # per-event checks (runtime-dep reconciliation, specifically) can look at
+    # sibling events — e.g. a UserPromptSubmit hook that invokes
+    # ${CLAUDE_PLUGIN_DATA}/.venv/bin/python needs to know whether a
+    # SessionStart hook elsewhere in the same file sets up that venv.
     hooks = data["hooks"]
     for event_name, event_config in hooks.items():
         if not validate_event_name(event_name, report):
             continue
 
-        validate_event_hooks(event_name, event_config, plugin_root, report)
+        validate_event_hooks(event_name, event_config, plugin_root, report, hooks_json_data=data)
 
     return report
 
