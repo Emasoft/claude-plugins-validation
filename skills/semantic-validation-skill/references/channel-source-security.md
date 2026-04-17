@@ -1,5 +1,18 @@
 # Channel MCP Server Source-Code Security
 
+## Contents
+
+- [Why This Pillar Exists](#why-this-pillar-exists)
+- [Workflow](#workflow)
+- [Rule 1 — Sender-ID allowlist (CRITICAL)](#rule-1--sender-id-allowlist-critical)
+- [Rule 2 — Permission-relay gating (CRITICAL)](#rule-2--permission-relay-gating-critical)
+- [Rule 3 — Chat-ID-only gating (MAJOR)](#rule-3--chat-id-only-gating-major)
+- [Rule 4 — Fully gated (PASSED)](#rule-4--fully-gated-passed)
+- [Example vulnerable code](#example-vulnerable-code)
+- [Example safe code](#example-safe-code)
+- [Opus prompt template](#opus-prompt-template)
+- [Rubric contribution](#rubric-contribution)
+
 Detailed semantic-validation rules for the **Channel MCP Server Source-Code Security** pillar. This reference is loaded by the `semantic-validator` agent whenever a plugin declares a non-empty `channels` array in `plugin.json`.
 
 ## Why This Pillar Exists
