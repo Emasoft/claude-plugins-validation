@@ -2,12 +2,15 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
-## [2.20.1] - 2026-04-17
+## [2.21.0] - 2026-04-17
 
-### Bug Fixes
+### Documentation
 
-- **remote_validation:** Register scope validators in launcher
-- **cpv:** Scope validator bug — invocation paths now work from plugin cache
+- Add TRDD-f4e2d385 — deep scope validation spec
+
+### Features
+
+- **scope-validators:** Deep element validation + settings subtrees + plugin enum (TRDD-f4e2d385)
 
 ### Miscellaneous Tasks
 
