@@ -103,6 +103,12 @@ _ALIASES: dict[str, str] = {
     "registry": "manage_registry",
     "github": "manage_github_validate",
     "standardize": "standardize_plugin",
+    # Scope validators (validate a project's .claude/ config, separating
+    # git-tracked "project" elements from non-git-tracked "local" elements)
+    "local-scope": "validate_local_scope",
+    "project-scope": "validate_project_scope",
+    "cpv-validate-local-scope": "validate_local_scope",
+    "cpv-validate-project-scope": "validate_project_scope",
     # Full script names (also accepted)
     "validate_plugin": "validate_plugin",
     "validate_skill": "validate_skill_comprehensive",
@@ -130,6 +136,8 @@ _ALIASES: dict[str, str] = {
     "standardize_plugin": "standardize_plugin",
     "standardize_marketplace": "standardize_marketplace",
     "bump_version": "bump_version",
+    "validate_local_scope": "validate_local_scope",
+    "validate_project_scope": "validate_project_scope",
 }
 
 # For --help display: short alias → description
@@ -152,6 +160,8 @@ _COMMANDS: dict[str, str] = {
     "lint": "Lint all scripts (Python, Shell, JS, PowerShell, Go, Rust)",
     "doctor": "Health-check installed plugins and settings",
     "standardize": "Audit and fix plugin repo to match standards",
+    "local-scope": "Local scope validation (non-git-tracked .claude/ elements)",
+    "project-scope": "Project scope validation (git-tracked .claude/ elements)",
 }
 
 
