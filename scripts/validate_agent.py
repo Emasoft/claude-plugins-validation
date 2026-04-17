@@ -80,6 +80,30 @@ KNOWN_FRONTMATTER_FIELDS = {
     "system-prompt",  # [legacy — emits WARNING] not in current sub-agents spec (v2.1.98)
 }
 
+# GAP-79 (v2.22.3): Plugin-shipped agent allowed frontmatter fields. Per
+# plugins-reference.md:70 the set of fields accepted for PLUGIN-shipped
+# agents is intentionally narrower than the full project/user agent
+# superset. Keys present on a plugin-shipped agent but OUTSIDE this set
+# trigger a MINOR so authors notice CPV-legacy / non-plugin drift.
+# ``hooks``/``mcpServers``/``permissionMode`` already produce MAJORs via
+# ``PLUGIN_SHIPPED_AGENT_FORBIDDEN_FIELDS`` — we do NOT double-count them
+# here.
+PLUGIN_SHIPPED_AGENT_ALLOWED_FIELDS: frozenset[str] = frozenset(
+    {
+        "name",
+        "description",
+        "tools",
+        "model",
+        "effort",
+        "system-prompt",
+        "context",
+        "memory",
+        "isolation",
+        "initialPrompt",
+        "agent",
+    }
+)
+
 # Valid values for the 'permissionMode' field. Aliased to the canonical
 # ``VALID_PERMISSION_MODES`` in ``cpv_validation_common`` so agent frontmatter
 # and settings ``permissions.defaultMode`` share the same enumeration
@@ -1047,6 +1071,49 @@ def validate_hooks_field(frontmatter: dict[str, Any], filename: str, report: Age
     report.passed("'hooks' field structure valid", filename)
 
 
+def validate_plugin_shipped_allowed_fields(
+    frontmatter: dict[str, Any],
+    filename: str,
+    report: AgentValidationReport,
+    is_plugin_shipped: bool,
+) -> None:
+    """GAP-79 (v2.22.3): Enforce the narrower plugin-shipped agent field list.
+
+    Per plugins-reference.md:70, plugin-shipped agents accept exactly these 11
+    fields: ``name, description, tools, model, effort, system-prompt, context,
+    memory, isolation, initialPrompt, agent``. Fields OUTSIDE this set (but
+    inside the broader KNOWN_FRONTMATTER_FIELDS superset accepted for
+    project/user agents) emit a MINOR so authors notice the drift.
+
+    ``hooks``/``mcpServers``/``permissionMode`` are NOT double-reported here:
+    those already trigger MAJORs via PLUGIN_SHIPPED_AGENT_FORBIDDEN_FIELDS
+    (security restriction, stricter level). Truly-unknown keys are handled
+    by ``validate_frontmatter_exists`` upstream (WARNING).
+    """
+    if not is_plugin_shipped:
+        return
+
+    from cpv_validation_common import PLUGIN_SHIPPED_AGENT_FORBIDDEN_FIELDS
+
+    forbidden = set(PLUGIN_SHIPPED_AGENT_FORBIDDEN_FIELDS)
+    for key in frontmatter:
+        if key in PLUGIN_SHIPPED_AGENT_ALLOWED_FIELDS:
+            continue
+        if key in forbidden:
+            # Covered by validate_plugin_shipped_restrictions (MAJOR) — no double hit.
+            continue
+        if key not in KNOWN_FRONTMATTER_FIELDS:
+            # Unknown to the agent spec entirely — upstream WARNING already fires.
+            continue
+        report.minor(
+            f"Field '{key}' is not in the plugin-shipped agent allowed set "
+            f"({sorted(PLUGIN_SHIPPED_AGENT_ALLOWED_FIELDS)}) — plugins-reference.md:70. "
+            "It may be a CPV-legacy / non-plugin agent field and could be ignored "
+            "by plugin-shipped agent runtimes.",
+            filename,
+        )
+
+
 def validate_task_tool_prohibition(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
     """Validate that subagents (context: fork) do not have Task tool.
 
@@ -1306,6 +1373,9 @@ def validate_agent(agent_path: Path) -> AgentValidationReport:
         # Detect whether this agent file is inside a plugin directory.
         plugin_shipped = is_plugin_shipped_agent(agent_path)
         validate_plugin_shipped_restrictions(frontmatter, filename, report, plugin_shipped)
+        # GAP-79 (v2.22.3): plugin-shipped agents only accept 11 fields per
+        # plugins-reference.md:70 — flag any CPV-legacy / non-plugin fields.
+        validate_plugin_shipped_allowed_fields(frontmatter, filename, report, plugin_shipped)
 
     # Validate body content
     validate_body_content(content, filename, report)

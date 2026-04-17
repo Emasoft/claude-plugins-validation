@@ -1543,3 +1543,414 @@ class TestV222PluginSchema:
             "Expected MAJOR for non-string author.url; got MAJORs: "
             f"{[r.message for r in bad_report.results if r.level == 'MAJOR']}"
         )
+
+
+# ============================================================================
+# v2.22.3 — GAP-27, GAP-10, LSP-type-checks, cross-marketplace deps
+# ============================================================================
+
+
+class TestV223Gap27MissingPluginJsonDowngrade:
+    """GAP-27: plugin.json missing is MINOR when components exist in default dirs.
+
+    Per plugins-reference.md:374-385 a manifest is optional when the plugin
+    has components in auto-discovered directories. CPV previously emitted
+    CRITICAL; v2.22.3 downgrades to MINOR when default components exist, and
+    keeps CRITICAL when both plugin.json AND default dirs are absent.
+    """
+
+    def test_missing_plugin_json_with_commands_is_minor(self, tmp_path):
+        """plugin.json absent but commands/ has content → MINOR (not CRITICAL)."""
+        plugin_dir = tmp_path / "gap27-with-commands"
+        plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
+        cmds = plugin_dir / "commands"
+        cmds.mkdir()
+        (cmds / "example.md").write_text("# example\n\nA command.\n")
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        minors = [r.message for r in report.results if r.level == "MINOR"]
+        criticals = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert any("plugin.json not found" in m and "recommended" in m for m in minors), (
+            f"Expected MINOR downgrade; got MINOR: {minors}, CRITICAL: {criticals}"
+        )
+        assert not any("plugin.json not found" in m for m in criticals)
+
+    def test_missing_plugin_json_with_skills_is_minor(self, tmp_path):
+        """plugin.json absent but skills/<name>/SKILL.md exists → MINOR."""
+        plugin_dir = tmp_path / "gap27-with-skills"
+        plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
+        skill = plugin_dir / "skills" / "demo"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("---\nname: demo\n---\n# Demo\n")
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        minors = [r.message for r in report.results if r.level == "MINOR"]
+        assert any("plugin.json not found" in m for m in minors)
+        assert not report.has_critical
+
+    def test_missing_plugin_json_no_components_stays_critical(self, tmp_path):
+        """plugin.json absent AND no default dirs → CRITICAL (spec floor)."""
+        plugin_dir = tmp_path / "gap27-empty"
+        plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
+        # No component dirs created.
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        assert report.has_critical
+        criticals = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert any("plugin.json not found" in m for m in criticals), (
+            f"Expected CRITICAL when no components exist; got CRITICAL: {criticals}"
+        )
+
+    def test_empty_component_dir_stays_critical(self, tmp_path):
+        """Empty commands/ directory is NOT a component — CRITICAL still fires."""
+        plugin_dir = tmp_path / "gap27-empty-dir"
+        plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
+        (plugin_dir / "commands").mkdir()
+        # commands/ exists but is empty.
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        assert report.has_critical
+
+
+class TestV223Gap10MonitorSkillCrossRef:
+    """GAP-10: monitors[].when = 'on-skill-invoke:<skill>' references a declared skill.
+
+    Per plugins-reference.md:314 the <skill> suffix must resolve to an
+    actual skill in the plugin's skills/ tree. A dangling reference emits
+    a MINOR so authors notice typos.
+    """
+
+    def test_monitor_on_skill_invoke_matching_skill_accepted(self, tmp_path):
+        """when: on-skill-invoke:<name> with matching skills/<name>/SKILL.md — no MINOR emitted."""
+        manifest = {
+            "name": "mon-skill-ok",
+            "version": "1.0.0",
+            "description": "x",
+            "monitors": [
+                {
+                    "name": "watch-demo",
+                    "command": "bash run.sh",
+                    "description": "Watches demo.",
+                    "when": "on-skill-invoke:demo",
+                }
+            ],
+        }
+        plugin_dir = _write_plugin(tmp_path, "mon-skill-ok", manifest)
+        # Create the matching skill.
+        skill_dir = plugin_dir / "skills" / "demo"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("---\nname: demo\n---\n# Demo\n")
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        cross_minors = [
+            r.message for r in report.results
+            if r.level == "MINOR" and "references unknown skill" in r.message
+        ]
+        assert not cross_minors, f"Unexpected dangling-ref MINORs: {cross_minors}"
+
+    def test_monitor_on_skill_invoke_missing_skill_is_minor(self, tmp_path):
+        """when: on-skill-invoke:<ghost> without skills/ghost/ emits MINOR."""
+        manifest = {
+            "name": "mon-skill-ghost",
+            "version": "1.0.0",
+            "description": "x",
+            "monitors": [
+                {
+                    "name": "watch-ghost",
+                    "command": "true",
+                    "description": "Watches the ghost.",
+                    "when": "on-skill-invoke:ghost",
+                }
+            ],
+        }
+        plugin_dir = _write_plugin(tmp_path, "mon-skill-ghost", manifest)
+        # No skills/ directory at all.
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        cross_minors = [
+            r.message for r in report.results
+            if r.level == "MINOR" and "ghost" in r.message and "unknown skill" in r.message
+        ]
+        assert cross_minors, (
+            "Expected MINOR for dangling on-skill-invoke; got MINORs: "
+            f"{[r.message for r in report.results if r.level == 'MINOR']}"
+        )
+
+    def test_monitor_always_no_cross_ref_check(self, tmp_path):
+        """when: always does NOT trigger the skill cross-ref check."""
+        manifest = {
+            "name": "mon-always",
+            "version": "1.0.0",
+            "description": "x",
+            "monitors": [
+                {
+                    "name": "heartbeat",
+                    "command": "true",
+                    "description": "Always on.",
+                    "when": "always",
+                }
+            ],
+        }
+        plugin_dir = _write_plugin(tmp_path, "mon-always", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        cross_minors = [
+            r.message for r in report.results
+            if r.level == "MINOR" and "unknown skill" in r.message
+        ]
+        assert not cross_minors
+
+
+class TestV223LspInlineTypeChecks:
+    """GAP-65/66/67/68: inline lspServers optional fields get MINOR on wrong type."""
+
+    def _lsp_manifest(self, **config_overrides):
+        """Build a plugin manifest with one inline LSP entry applying the overrides."""
+        base_config = {
+            "command": "pyright-langserver",
+            "extensionToLanguage": {".py": "python"},
+        }
+        base_config.update(config_overrides)
+        return {
+            "name": "lsp-check",
+            "version": "1.0.0",
+            "description": "x",
+            "lspServers": {"pyright": base_config},
+        }
+
+    def test_lsp_args_non_array_emits_minor(self, tmp_path):
+        """lspServers.<name>.args not a list → MINOR (plugins-reference.md:243)."""
+        manifest = self._lsp_manifest(args="--foo")  # should be a list
+        plugin_dir = _write_plugin(tmp_path, "lsp-args-bad", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        minors = [r.message for r in report.results if r.level == "MINOR"]
+        assert any("'args' must be an array" in m for m in minors), (
+            f"Expected MINOR for wrong args type; got MINORs: {minors}"
+        )
+
+    def test_lsp_env_non_object_emits_minor(self, tmp_path):
+        """lspServers.<name>.env not a dict → MINOR (plugins-reference.md:245)."""
+        manifest = self._lsp_manifest(env=["KEY=VAL"])  # should be an object
+        plugin_dir = _write_plugin(tmp_path, "lsp-env-bad", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        minors = [r.message for r in report.results if r.level == "MINOR"]
+        assert any("'env' must be an object" in m for m in minors), (
+            f"Expected MINOR for wrong env type; got MINORs: {minors}"
+        )
+
+    def test_lsp_env_non_string_value_emits_minor(self, tmp_path):
+        """lspServers.<name>.env[key] non-string value → MINOR."""
+        manifest = self._lsp_manifest(env={"PORT": 8080})  # value must be string
+        plugin_dir = _write_plugin(tmp_path, "lsp-env-nonstr", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        minors = [r.message for r in report.results if r.level == "MINOR"]
+        assert any("env['PORT']" in m and "must be a string" in m for m in minors), (
+            f"Expected MINOR for non-string env value; got MINORs: {minors}"
+        )
+
+    def test_lsp_settings_non_object_emits_minor(self, tmp_path):
+        """lspServers.<name>.settings not a dict → MINOR (plugins-reference.md:241-252)."""
+        manifest = self._lsp_manifest(settings="strict")  # should be an object
+        plugin_dir = _write_plugin(tmp_path, "lsp-settings-bad", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        minors = [r.message for r in report.results if r.level == "MINOR"]
+        assert any("'settings' must be an object" in m for m in minors), (
+            f"Expected MINOR for wrong settings type; got MINORs: {minors}"
+        )
+
+    def test_lsp_init_options_non_object_emits_minor(self, tmp_path):
+        """lspServers.<name>.initializationOptions not a dict → MINOR."""
+        manifest = self._lsp_manifest(initializationOptions=42)
+        plugin_dir = _write_plugin(tmp_path, "lsp-init-bad", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        minors = [r.message for r in report.results if r.level == "MINOR"]
+        assert any("'initializationOptions' must be an object" in m for m in minors), (
+            f"Expected MINOR for wrong initializationOptions type; got MINORs: {minors}"
+        )
+
+    def test_lsp_workspace_folder_non_string_emits_minor(self, tmp_path):
+        """lspServers.<name>.workspaceFolder not a string → MINOR."""
+        manifest = self._lsp_manifest(workspaceFolder=["./src"])  # should be a string
+        plugin_dir = _write_plugin(tmp_path, "lsp-wf-bad", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        minors = [r.message for r in report.results if r.level == "MINOR"]
+        assert any("'workspaceFolder' must be a string" in m for m in minors), (
+            f"Expected MINOR for wrong workspaceFolder type; got MINORs: {minors}"
+        )
+
+    def test_lsp_restart_on_crash_non_bool_emits_minor(self, tmp_path):
+        """lspServers.<name>.restartOnCrash not a bool → MINOR (plugins-reference.md:251)."""
+        manifest = self._lsp_manifest(restartOnCrash="yes")  # should be a bool
+        plugin_dir = _write_plugin(tmp_path, "lsp-roc-bad", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        minors = [r.message for r in report.results if r.level == "MINOR"]
+        assert any("'restartOnCrash' must be a boolean" in m for m in minors), (
+            f"Expected MINOR for non-boolean restartOnCrash; got MINORs: {minors}"
+        )
+
+    def test_lsp_valid_optional_fields_no_minor(self, tmp_path):
+        """Correct types across all optional LSP fields → no MINOR emitted."""
+        manifest = self._lsp_manifest(
+            args=["--flag", "--flag2"],
+            env={"LOGLEVEL": "info"},
+            settings={"strict": True},
+            initializationOptions={"feature": True},
+            workspaceFolder="./src",
+            restartOnCrash=True,
+        )
+        plugin_dir = _write_plugin(tmp_path, "lsp-ok", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        unexpected = [
+            r.message for r in report.results
+            if r.level == "MINOR" and any(
+                kw in r.message for kw in ("'args'", "'env'", "'settings'", "'initializationOptions'",
+                                           "'workspaceFolder'", "'restartOnCrash'")
+            )
+        ]
+        assert not unexpected, f"Unexpected MINORs on valid LSP config: {unexpected}"
+
+
+class TestV223CrossMarketplaceDeps:
+    """TRDD-20108ab7: cross-marketplace dependency allowlist enforcement.
+
+    When plugin.json declares a dependency with a `marketplace` sub-field
+    pointing at a DIFFERENT marketplace than the hosting one, the target
+    must appear in the hosting marketplace's
+    `allowedDependencyMarketplaces` list. Validating a plugin with no
+    marketplace context emits INFO for cross-marketplace refs.
+    """
+
+    def test_cross_marketplace_dep_with_allowlist_accepted(self, tmp_path):
+        """Cross-marketplace dep allowlisted → PASSED, no MAJOR."""
+        manifest = {
+            "name": "consumer",
+            "version": "1.0.0",
+            "description": "x",
+            "dependencies": [
+                {"name": "shared-lib", "marketplace": "other-market"}
+            ],
+        }
+        plugin_dir = _write_plugin(tmp_path, "xm-ok", manifest)
+        hosting = {
+            "name": "host-market",
+            "allowedDependencyMarketplaces": ["other-market"],
+        }
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report, hosting_marketplace=hosting)
+        majors = [
+            r.message for r in report.results
+            if r.level == "MAJOR" and "allowedDependencyMarketplaces" in r.message
+        ]
+        passed = [
+            r.message for r in report.results
+            if r.level == "PASSED" and "allowlisted" in r.message
+        ]
+        assert not majors, f"Unexpected MAJOR for allowlisted dep: {majors}"
+        assert passed, (
+            "Expected PASSED for allowlisted cross-market dep; got PASSED: "
+            f"{[r.message for r in report.results if r.level == 'PASSED']}"
+        )
+
+    def test_cross_marketplace_dep_without_allowlist_major(self, tmp_path):
+        """Cross-marketplace dep with NO allowlist declared → MAJOR."""
+        manifest = {
+            "name": "consumer",
+            "version": "1.0.0",
+            "description": "x",
+            "dependencies": [
+                {"name": "shared-lib", "marketplace": "other-market"}
+            ],
+        }
+        plugin_dir = _write_plugin(tmp_path, "xm-none", manifest)
+        hosting = {"name": "host-market"}  # no allowedDependencyMarketplaces
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report, hosting_marketplace=hosting)
+        majors = [
+            r.message for r in report.results
+            if r.level == "MAJOR" and "allowedDependencyMarketplaces" in r.message
+        ]
+        assert majors, (
+            "Expected MAJOR without allowlist; got MAJORs: "
+            f"{[r.message for r in report.results if r.level == 'MAJOR']}"
+        )
+
+    def test_cross_marketplace_dep_not_in_allowlist_major(self, tmp_path):
+        """Target not present in allowlist → MAJOR with the list in the message."""
+        manifest = {
+            "name": "consumer",
+            "version": "1.0.0",
+            "description": "x",
+            "dependencies": [
+                {"name": "shared-lib", "marketplace": "other-market"}
+            ],
+        }
+        plugin_dir = _write_plugin(tmp_path, "xm-notin", manifest)
+        hosting = {
+            "name": "host-market",
+            "allowedDependencyMarketplaces": ["trusted-a", "trusted-b"],
+        }
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report, hosting_marketplace=hosting)
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any(
+            "other-market" in m and "trusted-a" in m for m in majors
+        ), f"Expected MAJOR listing allowlist; got MAJORs: {majors}"
+
+    def test_same_marketplace_dep_no_cross_check(self, tmp_path):
+        """Dep pointing at the SAME hosting marketplace → no cross-check fire."""
+        manifest = {
+            "name": "consumer",
+            "version": "1.0.0",
+            "description": "x",
+            "dependencies": [
+                {"name": "sibling", "marketplace": "host-market"}
+            ],
+        }
+        plugin_dir = _write_plugin(tmp_path, "xm-same", manifest)
+        hosting = {"name": "host-market"}  # no allowlist — same marketplace OK
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report, hosting_marketplace=hosting)
+        blocked = [
+            r.message for r in report.results
+            if r.level == "MAJOR" and "allowedDependencyMarketplaces" in r.message
+        ]
+        assert not blocked, f"Same-market dep must not be blocked; got MAJORs: {blocked}"
+
+    def test_no_hosting_context_emits_info(self, tmp_path):
+        """Cross-market dep without hosting context → INFO (not MAJOR)."""
+        manifest = {
+            "name": "consumer",
+            "version": "1.0.0",
+            "description": "x",
+            "dependencies": [
+                {"name": "shared-lib", "marketplace": "other-market"}
+            ],
+        }
+        plugin_dir = _write_plugin(tmp_path, "xm-noctx", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)  # no hosting_marketplace
+        infos = [
+            r.message for r in report.results
+            if r.level == "INFO" and "cross-marketplace" in r.message
+        ]
+        blocked = [
+            r.message for r in report.results
+            if r.level == "MAJOR" and "allowedDependencyMarketplaces" in r.message
+        ]
+        assert infos, (
+            "Expected INFO for missing hosting context; got INFO: "
+            f"{[r.message for r in report.results if r.level == 'INFO']}"
+        )
+        assert not blocked

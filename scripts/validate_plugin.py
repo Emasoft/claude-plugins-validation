@@ -153,7 +153,11 @@ def _path_has_traversal(path: str) -> bool:
     return any(p == ".." for p in parts)
 
 
-def validate_dependencies(manifest: dict[str, Any], report: ValidationReport) -> None:
+def validate_dependencies(
+    manifest: dict[str, Any],
+    report: ValidationReport,
+    hosting_marketplace: dict[str, Any] | None = None,
+) -> None:
     """Validate the ``dependencies`` array per plugin-dependencies.md:29-67.
 
     Each entry is either:
@@ -164,6 +168,17 @@ def validate_dependencies(manifest: dict[str, Any], report: ValidationReport) ->
     ``version`` is optional and must parse as a syntactic semver range.
     ``marketplace`` is optional and must also match the name pattern.
     Extra unknown sub-keys produce a MINOR finding so consumers notice.
+
+    ``hosting_marketplace`` (TRDD-20108ab7, v2.22.3) is the parsed
+    ``marketplace.json`` of the marketplace hosting the plugin under
+    validation. When supplied, cross-marketplace dependency references are
+    checked against the marketplace's ``allowedDependencyMarketplaces``
+    allowlist. The dict MUST contain a ``name`` key identifying the hosting
+    marketplace; the allowlist is read from
+    ``hosting_marketplace["allowedDependencyMarketplaces"]`` (optional,
+    defaults to empty allowlist). Pass ``None`` to skip cross-marketplace
+    allowlist checks (e.g. when validating a plugin in isolation without
+    marketplace context) — in that case an INFO is emitted per cross-dep.
     """
     if "dependencies" not in manifest:
         return
@@ -174,6 +189,17 @@ def validate_dependencies(manifest: dict[str, Any], report: ValidationReport) ->
             ".claude-plugin/plugin.json",
         )
         return
+    # Resolve hosting-marketplace context (TRDD-20108ab7).
+    hosting_name: str | None = None
+    hosting_allowlist: list[str] | None = None
+    if isinstance(hosting_marketplace, dict):
+        raw_name = hosting_marketplace.get("name")
+        if isinstance(raw_name, str) and raw_name:
+            hosting_name = raw_name
+        raw_allow = hosting_marketplace.get("allowedDependencyMarketplaces")
+        if isinstance(raw_allow, list):
+            # Keep only string items — bad items are the marketplace validator's job.
+            hosting_allowlist = [x for x in raw_allow if isinstance(x, str) and x]
     known_subkeys = {"name", "version", "marketplace"}
     for i, entry in enumerate(deps):
         if isinstance(entry, str):
@@ -221,6 +247,39 @@ def validate_dependencies(manifest: dict[str, Any], report: ValidationReport) ->
                     f"'dependencies[{i}].marketplace' must be a kebab-case marketplace name, got {market!r}",
                     ".claude-plugin/plugin.json",
                 )
+            else:
+                # TRDD-20108ab7: cross-marketplace dependency resolution. When a
+                # dep declares a DIFFERENT marketplace from the hosting one, the
+                # target MUST appear in the hosting marketplace's
+                # `allowedDependencyMarketplaces` list — otherwise the
+                # dependency is blocked at install time.
+                if hosting_marketplace is None:
+                    # Validating in isolation — informational only.
+                    report.info(
+                        f"'dependencies[{i}].marketplace' = '{market}' is a cross-marketplace "
+                        "reference; allowlist check skipped (no hosting marketplace context)",
+                        ".claude-plugin/plugin.json",
+                    )
+                elif hosting_name is not None and market != hosting_name:
+                    if hosting_allowlist is None or market not in hosting_allowlist:
+                        allow_desc = (
+                            sorted(hosting_allowlist)
+                            if hosting_allowlist is not None
+                            else "<none declared>"
+                        )
+                        report.major(
+                            f"'dependencies[{i}].marketplace' = '{market}' is not in the hosting "
+                            f"marketplace's allowedDependencyMarketplaces allowlist "
+                            f"({allow_desc}) — cross-marketplace dependency is blocked "
+                            "(TRDD-20108ab7, plugin-dependencies.md)",
+                            ".claude-plugin/plugin.json",
+                        )
+                    else:
+                        report.passed(
+                            f"'dependencies[{i}].marketplace' = '{market}' allowlisted "
+                            "for cross-marketplace resolution",
+                            ".claude-plugin/plugin.json",
+                        )
         # unknown sub-keys — MINOR so authors notice typos
         for extra in set(entry.keys()) - known_subkeys:
             report.minor(
@@ -395,8 +454,38 @@ def validate_channels_structure(
                             )
 
 
-def _validate_monitors_array(entries: list[Any], source_label: str, report: ValidationReport) -> None:
-    """Shared per-entry validator for monitors arrays (inline or external file)."""
+def _discover_plugin_skills(plugin_root: Path) -> set[str]:
+    """Return the set of skill names declared by this plugin.
+
+    GAP-10 helper (v2.22.3): scans ``<plugin>/skills/<skill>/SKILL.md`` so
+    the monitors validator can cross-reference ``on-skill-invoke:<skill>``
+    targets against actually-declared skills. Returns an empty set when
+    the plugin has no skills directory.
+    """
+    skills_dir = plugin_root / "skills"
+    if not skills_dir.is_dir():
+        return set()
+    discovered: set[str] = set()
+    for entry in skills_dir.iterdir():
+        if entry.is_dir() and (entry / "SKILL.md").is_file():
+            discovered.add(entry.name)
+    return discovered
+
+
+def _validate_monitors_array(
+    entries: list[Any],
+    source_label: str,
+    report: ValidationReport,
+    declared_skills: set[str] | None = None,
+) -> None:
+    """Shared per-entry validator for monitors arrays (inline or external file).
+
+    ``declared_skills`` is the set of skill names declared by the hosting plugin.
+    When supplied, ``on-skill-invoke:<name>`` targets are cross-referenced
+    against the declared set; a MINOR is emitted when the referenced skill
+    does not exist (GAP-10). Pass ``None`` to skip the check (e.g. when the
+    caller cannot determine the plugin root).
+    """
     seen: set[str] = set()
     known = {"name", "command", "description", "when"}
     for i, entry in enumerate(entries):
@@ -441,6 +530,23 @@ def _validate_monitors_array(entries: list[Any], source_label: str, report: Vali
                     "'on-skill-invoke:<skill-name>' (plugins-reference.md:302-318)",
                     source_label,
                 )
+            elif (
+                declared_skills is not None
+                and isinstance(when_val, str)
+                and when_val.startswith("on-skill-invoke:")
+            ):
+                # GAP-10 (v2.22.3): cross-reference the skill name against
+                # declared skills. Empty declared_skills means the plugin
+                # has no skills/ directory at all — still report so authors
+                # notice the dangling reference.
+                target = when_val.split(":", 1)[1]
+                if target and target not in declared_skills:
+                    report.minor(
+                        f"monitors[{i}].when references unknown skill "
+                        f"'{target}' — no skills/{target}/SKILL.md found "
+                        "(plugins-reference.md:314)",
+                        source_label,
+                    )
         # unknown keys — MINOR
         if isinstance(entry, dict):
             for extra in set(entry.keys()) - known:
@@ -464,8 +570,11 @@ def validate_monitors_entries(
     if "monitors" not in manifest:
         return
     monitors = manifest["monitors"]
+    declared_skills = _discover_plugin_skills(plugin_root)
     if isinstance(monitors, list):
-        _validate_monitors_array(monitors, ".claude-plugin/plugin.json", report)
+        _validate_monitors_array(
+            monitors, ".claude-plugin/plugin.json", report, declared_skills
+        )
         return
     if isinstance(monitors, str):
         # Path string — resolve relative to plugin_root and load.
@@ -482,9 +591,9 @@ def validate_monitors_entries(
             return
         # monitors.json can be an array or {monitors: [...]} wrapper.
         if isinstance(data, list):
-            _validate_monitors_array(data, monitors, report)
+            _validate_monitors_array(data, monitors, report, declared_skills)
         elif isinstance(data, dict) and isinstance(data.get("monitors"), list):
-            _validate_monitors_array(data["monitors"], monitors, report)
+            _validate_monitors_array(data["monitors"], monitors, report, declared_skills)
         else:
             report.major(
                 f"monitors file must contain an array or {{'monitors': [...]}} wrapper, "
@@ -500,7 +609,10 @@ def validate_monitors_entries(
 
 
 def validate_manifest(
-    plugin_root: Path, report: ValidationReport, marketplace_only: bool = False
+    plugin_root: Path,
+    report: ValidationReport,
+    marketplace_only: bool = False,
+    hosting_marketplace: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Validate plugin.json manifest.
 
@@ -508,6 +620,11 @@ def validate_manifest(
         plugin_root: Path to the plugin directory
         report: ValidationReport to add results to
         marketplace_only: If True, skip plugin.json requirement
+        hosting_marketplace: Parsed ``marketplace.json`` of the hosting
+            marketplace (TRDD-20108ab7). Used to check cross-marketplace
+            dependencies against the marketplace's
+            ``allowedDependencyMarketplaces`` allowlist. ``None`` skips the
+            cross-marketplace allowlist check (INFO emitted per cross-dep).
 
     Returns:
         The manifest dict if valid, None otherwise
@@ -519,7 +636,38 @@ def validate_manifest(
             msg = "plugin.json correctly absent (marketplace-only, strict=false)"
             report.passed(msg, ".claude-plugin/plugin.json")
             return None
-        report.critical("plugin.json not found", ".claude-plugin/plugin.json")
+        # GAP-27 (v2.22.3): plugin.json is OPTIONAL when components exist in default
+        # directories per plugins-reference.md:374-385 — "If you include a manifest,
+        # `name` is the only required field." Downgrade CRITICAL→MINOR when ANY of
+        # the auto-discovered default directories has content. A plugin with
+        # only commands/ is perfectly valid and the plugin name is derived from
+        # the directory name per plugins-reference.md:341.
+        default_component_dirs = (
+            "commands",
+            "skills",
+            "agents",
+            "hooks",
+            "rules",
+            "monitors",
+            "output-styles",
+        )
+        has_components = any(
+            (plugin_root / d).is_dir() and any((plugin_root / d).iterdir())
+            for d in default_component_dirs
+        )
+        if has_components:
+            report.minor(
+                "plugin.json not found — plugin is valid because components exist in "
+                "default directories, but adding a manifest is recommended for "
+                "discoverability and version control (plugins-reference.md:374-385)",
+                ".claude-plugin/plugin.json",
+            )
+            return None
+        report.critical(
+            "plugin.json not found and no components in default directories "
+            "(commands/, skills/, agents/, hooks/, rules/, monitors/, output-styles/)",
+            ".claude-plugin/plugin.json",
+        )
         return None
 
     if marketplace_only:
@@ -834,7 +982,12 @@ def validate_manifest(
             if ch:
                 report.passed(f"'channels' schema valid: {len(ch)} channel(s)", ".claude-plugin/plugin.json")
 
-    # Validate lspServers required fields (command + extensionToLanguage)
+    # Validate lspServers required fields (command + extensionToLanguage) plus
+    # optional-field type checks. GAP-65/66/67/68 (v2.22.3) tighten type-checks
+    # for `settings`/`initializationOptions`/`workspaceFolder`/`restartOnCrash`/
+    # `args`/`env` on the inline `lspServers` block so malformed values are
+    # flagged here as MINOR without needing to invoke the full `validate_lsp`
+    # helper (which operates on external `.lsp.json` files).
     if "lspServers" in manifest and isinstance(manifest["lspServers"], dict):
         for name, config in manifest["lspServers"].items():
             if isinstance(config, dict):
@@ -852,6 +1005,79 @@ def validate_manifest(
                                 f"LSP server '{name}' extensionToLanguage key '{ext}' should start with '.'",
                                 ".claude-plugin/plugin.json",
                             )
+                # GAP-67 (v2.22.3): `args` must be a list of strings per
+                # plugins-reference.md:243.
+                if "args" in config:
+                    args_val = config["args"]
+                    if not isinstance(args_val, list):
+                        report.minor(
+                            f"LSP server '{name}' 'args' must be an array, got {type(args_val).__name__} "
+                            "(plugins-reference.md:243)",
+                            ".claude-plugin/plugin.json",
+                        )
+                    else:
+                        for ai, arg in enumerate(args_val):
+                            if not isinstance(arg, str):
+                                report.minor(
+                                    f"LSP server '{name}' args[{ai}] must be a string, "
+                                    f"got {type(arg).__name__}",
+                                    ".claude-plugin/plugin.json",
+                                )
+                # GAP-68 (v2.22.3): `env` must be a dict with string values per
+                # plugins-reference.md:245.
+                if "env" in config:
+                    env_val = config["env"]
+                    if not isinstance(env_val, dict):
+                        report.minor(
+                            f"LSP server '{name}' 'env' must be an object, got {type(env_val).__name__} "
+                            "(plugins-reference.md:245)",
+                            ".claude-plugin/plugin.json",
+                        )
+                    else:
+                        for env_key, env_value in env_val.items():
+                            if not isinstance(env_value, str):
+                                report.minor(
+                                    f"LSP server '{name}' env[{env_key!r}] must be a string, "
+                                    f"got {type(env_value).__name__}",
+                                    ".claude-plugin/plugin.json",
+                                )
+                # GAP-65 (v2.22.3): `initializationOptions` must be an object.
+                if "initializationOptions" in config:
+                    init_val = config["initializationOptions"]
+                    if not isinstance(init_val, dict):
+                        report.minor(
+                            f"LSP server '{name}' 'initializationOptions' must be an object, "
+                            f"got {type(init_val).__name__} (plugins-reference.md:241-252)",
+                            ".claude-plugin/plugin.json",
+                        )
+                # GAP-65 (v2.22.3): `settings` must be an object.
+                if "settings" in config:
+                    settings_val = config["settings"]
+                    if not isinstance(settings_val, dict):
+                        report.minor(
+                            f"LSP server '{name}' 'settings' must be an object, "
+                            f"got {type(settings_val).__name__} (plugins-reference.md:241-252)",
+                            ".claude-plugin/plugin.json",
+                        )
+                # GAP-65 (v2.22.3): `workspaceFolder` must be a string.
+                if "workspaceFolder" in config:
+                    wf_val = config["workspaceFolder"]
+                    if not isinstance(wf_val, str):
+                        report.minor(
+                            f"LSP server '{name}' 'workspaceFolder' must be a string, "
+                            f"got {type(wf_val).__name__} (plugins-reference.md:241-252)",
+                            ".claude-plugin/plugin.json",
+                        )
+                # GAP-66 (v2.22.3): `restartOnCrash` must be a boolean per
+                # plugins-reference.md:251.
+                if "restartOnCrash" in config:
+                    roc_val = config["restartOnCrash"]
+                    if not isinstance(roc_val, bool):
+                        report.minor(
+                            f"LSP server '{name}' 'restartOnCrash' must be a boolean, "
+                            f"got {type(roc_val).__name__} (plugins-reference.md:251)",
+                            ".claude-plugin/plugin.json",
+                        )
 
     # Claude Code auto-discovers standard directories (commands/, agents/, skills/,
     # hooks/) without needing them declared in plugin.json. Declaring the default path
@@ -897,7 +1123,9 @@ def validate_manifest(
     # v2.22.0 spec-parity helpers — dependencies, userConfig sub-fields, channels/mcp
     # cross-ref, and monitors entry shape. Each helper is a no-op when the corresponding
     # field is absent so unused manifests pay zero extra cost.
-    validate_dependencies(manifest, report)
+    # v2.22.3 (TRDD-20108ab7): dependencies receives hosting_marketplace context
+    # so cross-marketplace refs can be checked against the allowlist.
+    validate_dependencies(manifest, report, hosting_marketplace=hosting_marketplace)
     validate_user_config_structure(manifest, report)
     validate_channels_structure(manifest, plugin_root, report)
     validate_monitors_entries(manifest, plugin_root, report)

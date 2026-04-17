@@ -127,7 +127,7 @@ MAX_CHAR_COUNT_WARN = 5000  # Character warning threshold
 MAX_CHAR_COUNT_ERROR = 5000  # Character error threshold (hard limit)
 MAX_WORD_COUNT_WARN = 3500
 MAX_WORD_COUNT_ERROR = 5000
-MAX_DESCRIPTION_WARN = 250  # Official Claude Code spec: descriptions truncated at 250 chars in skill listing
+MAX_DESCRIPTION_WARN = 250  # CPV-internal readability heuristic — NOT a skills.md rule.
 MAX_FRONTMATTER_CHARS_WARN = 12000
 MAX_FRONTMATTER_CHARS_ERROR = 15000
 
@@ -234,8 +234,14 @@ RE_SESSION_ID_VAR = re.compile(r"\$\{CLAUDE_SESSION_ID\}")
 RE_SKILL_DIR_VAR = re.compile(r"\$\{CLAUDE_SKILL_DIR\}")
 # Valid ${} substitution variables in skills are resolved via
 # cpv_validation_common.is_valid_plugin_env_var (handles both the fixed
-# VALID_PLUGIN_ENV_VARS set and the dynamic CLAUDE_PLUGIN_OPTION_<KEY> pattern).
-RE_BRACED_VAR = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")  # Matches ${ANY_VAR}
+# VALID_PLUGIN_ENV_VARS set and the dynamic CLAUDE_PLUGIN_OPTION_<KEY> and
+# user_config.<KEY> patterns — GAP-57).
+#
+# The character class intentionally includes lowercase letters and `.` so the
+# ``${user_config.KEY}`` dotted token (plugins-reference.md L433) is captured.
+# The captured inner name is then dispatched to ``is_valid_plugin_env_var``
+# which applies the full pattern set.
+RE_BRACED_VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_.]*)\}")  # Matches ${ANY_VAR} or ${user_config.KEY}
 
 # --- Dynamic Context Injection Pattern (skills.md: !`command`) ---
 RE_DYNAMIC_CONTEXT = re.compile(r"!\s*`[^`]+`")  # Correct: !`command`
@@ -486,6 +492,35 @@ def find_skill_md(skill_dir: Path) -> Path | None:
         if path.exists():
             return path
     return None
+
+
+# GAP-53: plugins-reference.md L465 allows `"skills": ["./"]` (or `"."`) to
+# declare that the plugin ROOT is itself the skill. This is ambiguous because:
+#   (a) CPV must NOT traverse into `skills/` — the root IS the skill;
+#   (b) SKILL.md must live at the plugin root (not in ./skills/SKILL.md);
+#   (c) the skill's invocation name comes from the SKILL.md frontmatter
+#       `name` field, falling back to the plugin directory basename.
+# Callers (validate_plugin.py) should invoke this helper and, if true, emit
+# a MINOR warning that the self-reference is ambiguous AND validate the
+# plugin root as the skill directly (not under ./skills/).
+_SKILLS_SELF_POINTING_VALUES = frozenset({"./", "."})
+
+
+def is_self_pointing_skill_path(path: str) -> bool:
+    """Return True if a declared `skills: [...]` entry points to the plugin root.
+
+    Per plugins-reference.md L465, `"skills": ["./"]` (or ``"."``) means
+    "the plugin root itself is a skill — look for SKILL.md at the root".
+    CPV emits MINOR for this case because it is a legitimate-but-ambiguous
+    self-reference that confuses skill discovery; when seen, the caller must
+    validate the plugin root as the skill directory directly (not traverse
+    into ``./skills/``).
+
+    Accepts leading/trailing whitespace (stripped).
+    """
+    if not isinstance(path, str):
+        return False
+    return path.strip() in _SKILLS_SELF_POINTING_VALUES
 
 
 # =============================================================================
@@ -2306,6 +2341,20 @@ def validate_skill(
         validate_agent_field(frontmatter, report)
         validate_boolean_field(frontmatter, "user-invocable", report)
         validate_boolean_field(frontmatter, "disable-model-invocation", report)
+        # CPV-P2-m6: skills.md L414 documents `disableSkillShellExecution` as a
+        # boolean settings.json key. It is NOT a skill-frontmatter field; if a
+        # plugin puts it in SKILL.md frontmatter it is a misuse pattern. Accept
+        # it leniently as a boolean (it's still typed correctly) but nudge
+        # authors that this belongs in settings.json, not in frontmatter.
+        if "disableSkillShellExecution" in frontmatter:
+            validate_boolean_field(frontmatter, "disableSkillShellExecution", report)
+            report.minor(
+                "'disableSkillShellExecution' is a settings.json key (skills.md L414), "
+                "not a skill frontmatter field. Move it to the project or user "
+                "settings.json so Claude Code actually reads it.",
+                "SKILL.md",
+                category="Frontmatter",
+            )
         validate_allowed_tools_field(frontmatter, report, strict_mode, strict_openspec)
         validate_metadata_field(frontmatter, report)
 

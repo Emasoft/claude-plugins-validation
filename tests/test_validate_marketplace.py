@@ -1108,11 +1108,23 @@ class TestValidateMarketplaceIntegration:
         assert not source_type_issues, f"'github' must be valid, got: {[r.message for r in source_type_issues]}"
 
     def test_marketplace_with_owner_not_object(self, tmp_path):
-        """Owner field that is not an object must produce MAJOR (lines 1652-1658)."""
+        """Owner as a bare string produces MINOR per GAP-14 (canonical form is {name: str})."""
         from validate_marketplace import validate_marketplace
 
         mp = tmp_path / "marketplace.json"
         mp.write_text(json.dumps({"name": "test-mp", "owner": "just-a-string", "plugins": []}))
+        report = validate_marketplace(tmp_path)
+        # v2.22.3 — GAP-14: bare-string owner softened from MAJOR to MINOR
+        assert any(
+            r.level == "MINOR" and "bare string" in r.message.lower() for r in report.results
+        ), f"expected MINOR for bare-string owner, got: {[(r.level, r.message) for r in report.results]}"
+
+    def test_marketplace_with_owner_non_string_non_object(self, tmp_path):
+        """Owner that is neither a string nor an object still produces MAJOR."""
+        from validate_marketplace import validate_marketplace
+
+        mp = tmp_path / "marketplace.json"
+        mp.write_text(json.dumps({"name": "test-mp", "owner": 42, "plugins": []}))
         report = validate_marketplace(tmp_path)
         assert any(r.level == "MAJOR" and "owner" in r.message.lower() for r in report.results)
 
@@ -1259,3 +1271,401 @@ class TestV221MarketplaceVersionDuplication:
         assert any(
             r.level == "INFO" and "cannot verify version consistency" in r.message.lower() for r in results
         ), f"expected INFO about unverifiable remote source, got: {[(r.level, r.message) for r in results]}"
+
+
+# =============================================================================
+# v2.22.3 — Marketplace minor/NIT fix suite (GAP-2, 3, 6, 7, 13, 15, 25, 28, 32,
+# 33, 34, 101)
+# Each test targets one of the audit gaps in
+# docs_dev/audit-pass2-plugins-20260417-180252.md Part D Priority 1/2/3.
+# =============================================================================
+
+
+class TestV2223MarketplaceMinorFixes:
+    """Append-only regression coverage for the v2.22.3 marketplace validator fixes."""
+
+    def test_gap6_userconfig_channels_monitors_accepted_as_optional(self, tmp_path):
+        """GAP-6: userConfig/channels/monitors at plugin-entry level no longer trigger INFO unknown-field."""
+        from validate_marketplace import validate_plugin_entry
+
+        plugin = {
+            "name": "my-plugin",
+            "source": {"source": "github", "repo": "owner/my-plugin"},
+            "userConfig": {"api_endpoint": {"title": "API endpoint", "type": "string"}},
+            "channels": [],
+            "monitors": [],
+        }
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        assert not any(
+            r.level == "INFO" and "unknown field" in r.message.lower() and "userConfig" in r.message
+            for r in results
+        ), f"userConfig should no longer trigger unknown-field INFO: {[(r.level, r.message) for r in results]}"
+        assert not any(
+            r.level == "INFO" and "unknown field" in r.message.lower() and "channels" in r.message
+            for r in results
+        )
+        assert not any(
+            r.level == "INFO" and "unknown field" in r.message.lower() and "monitors" in r.message
+            for r in results
+        )
+
+    def test_gap7_sha_uppercase_hex_accepted(self, tmp_path):
+        """GAP-7: uppercase-hex SHA no longer emits a MINOR (git accepts A-F)."""
+        from validate_marketplace import validate_plugin_source
+
+        plugin = {
+            "name": "my-plugin",
+            "source": {
+                "source": "github",
+                "repo": "owner/my-plugin",
+                "sha": "ABCDEF1234567890ABCDEF1234567890ABCDEF12",
+            },
+        }
+        results = validate_plugin_source(plugin, "my-plugin", tmp_path, "mp.json")
+        assert not any(r.level == "MINOR" and "sha" in r.message.lower() for r in results), (
+            f"uppercase-hex SHA should be accepted: {[(r.level, r.message) for r in results]}"
+        )
+
+    def test_gap7_sha_mixed_case_accepted(self, tmp_path):
+        """GAP-7 regression guard: lowercase SHAs also still accepted."""
+        from validate_marketplace import validate_plugin_source
+
+        plugin = {
+            "name": "my-plugin",
+            "source": {
+                "source": "github",
+                "repo": "owner/my-plugin",
+                "sha": "abcdef1234567890abcdef1234567890abcdef12",
+            },
+        }
+        results = validate_plugin_source(plugin, "my-plugin", tmp_path, "mp.json")
+        assert not any(r.level == "MINOR" and "sha" in r.message.lower() for r in results)
+
+    def test_gap7_sha_too_short_still_minor(self, tmp_path):
+        """GAP-7 regression guard: a SHA that is not 40 chars long still produces MINOR."""
+        from validate_marketplace import validate_plugin_source
+
+        plugin = {"name": "p", "source": {"source": "github", "repo": "o/p", "sha": "abc"}}
+        results = validate_plugin_source(plugin, "p", tmp_path, "mp.json")
+        assert any(r.level == "MINOR" and "sha" in r.message.lower() for r in results)
+
+    def test_gap2_git_source_emits_nit(self, tmp_path):
+        """GAP-2: `source: "git"` emits a NIT suggesting the canonical `url` type."""
+        from validate_marketplace import validate_plugin_source
+
+        plugin = {
+            "name": "my-plugin",
+            "source": {"source": "git", "url": "https://gitea.internal/org/plugin.git"},
+        }
+        results = validate_plugin_source(plugin, "my-plugin", tmp_path, "mp.json")
+        assert any(
+            r.level == "NIT" and "CPV-only alias" in r.message and "url" in r.message.lower()
+            for r in results
+        ), f"expected NIT advising canonical 'url' type: {[(r.level, r.message) for r in results]}"
+
+    def test_gap3_directory_source_emits_nit(self, tmp_path):
+        """GAP-3: `source: "directory"` emits NIT suggesting bare relative-path shorthand."""
+        from validate_marketplace import validate_plugin_source
+
+        nested = tmp_path / "plugins" / "my-plugin"
+        nested.mkdir(parents=True)
+        plugin = {
+            "name": "my-plugin",
+            "source": {"source": "directory", "path": "./plugins/my-plugin"},
+        }
+        results = validate_plugin_source(plugin, "my-plugin", tmp_path, "mp.json")
+        assert any(
+            r.level == "NIT" and "CPV-only extension" in r.message and "plain string shorthand" in (r.suggestion or "")
+            for r in results
+        ), f"expected NIT advising bare relative-path shorthand: {[(r.level, r.message) for r in results]}"
+
+    def test_gap13_author_url_non_string_is_minor(self, tmp_path):
+        """GAP-13: author.url as non-string produces a MINOR with clear message."""
+        from validate_marketplace import validate_plugin_entry
+
+        plugin = {
+            "name": "my-plugin",
+            "source": {"source": "github", "repo": "o/p"},
+            "author": {"name": "Alice", "url": 12345},
+        }
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        assert any(
+            r.level == "MINOR" and "author.url" in r.message and "string" in r.message for r in results
+        )
+
+    def test_gap13_author_url_bad_scheme_is_minor(self, tmp_path):
+        """GAP-13: author.url not starting with http/https/git produces a MINOR."""
+        from validate_marketplace import validate_plugin_entry
+
+        plugin = {
+            "name": "my-plugin",
+            "source": {"source": "github", "repo": "o/p"},
+            "author": {"name": "Alice", "url": "ftp://bad-scheme.example.com"},
+        }
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        assert any(
+            r.level == "MINOR" and "author.url" in r.message and "http" in r.message for r in results
+        )
+
+    def test_gap13_author_url_http_ok(self, tmp_path):
+        """GAP-13: author.url with http/https/git scheme is accepted silently."""
+        from validate_marketplace import validate_plugin_entry
+
+        for url in [
+            "https://github.com/alice",
+            "http://alice.example.com",
+            "git://git.example.com/alice",
+        ]:
+            plugin = {
+                "name": "my-plugin",
+                "source": {"source": "github", "repo": "o/p"},
+                "author": {"name": "Alice", "url": url},
+            }
+            results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+            assert not any(
+                r.level == "MINOR" and "author.url" in r.message for r in results
+            ), f"URL {url} should be accepted: {[(r.level, r.message) for r in results]}"
+
+    def test_gap15_owner_url_emits_nit(self, tmp_path):
+        """GAP-15: owner.url is not documented in the canonical owner schema — emit NIT."""
+        from validate_marketplace import validate_marketplace
+
+        mp = tmp_path / "marketplace.json"
+        mp.write_text(
+            json.dumps(
+                {
+                    "name": "test-mp",
+                    "owner": {"name": "Alice", "url": "https://example.com"},
+                    "plugins": [],
+                    "metadata": {"description": "hi"},
+                }
+            )
+        )
+        report = validate_marketplace(tmp_path)
+        assert any(
+            r.level == "NIT" and "owner.url" in r.message and "not in the documented" in r.message
+            for r in report.results
+        ), f"expected NIT about owner.url: {[(r.level, r.message) for r in report.results]}"
+
+    def test_gap25_strict_false_with_nested_plugin_json_components_is_major(self, tmp_path):
+        """GAP-25: strict:false + nested plugin.json with component fields -> MAJOR conflicting-manifests."""
+        from validate_marketplace import validate_plugin_entry
+
+        plugin_root = tmp_path / "my-plugin"
+        (plugin_root / ".claude-plugin").mkdir(parents=True)
+        (plugin_root / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "name": "my-plugin",
+                    "commands": "./commands",  # conflict-triggering field
+                }
+            )
+        )
+        plugin = {
+            "name": "my-plugin",
+            "source": "./my-plugin",
+            "strict": False,
+        }
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        assert any(
+            r.level == "MAJOR" and "conflicting manifests" in r.message for r in results
+        ), f"expected MAJOR for strict:false vs plugin.json components: {[(r.level, r.message) for r in results]}"
+
+    def test_gap25_strict_false_with_metadata_only_plugin_json_is_silent(self, tmp_path):
+        """GAP-25: strict:false with a plugin.json that has ONLY metadata (no components) is fine."""
+        from validate_marketplace import validate_plugin_entry
+
+        plugin_root = tmp_path / "my-plugin"
+        (plugin_root / ".claude-plugin").mkdir(parents=True)
+        (plugin_root / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "my-plugin", "version": "1.0.0", "description": "metadata only"})
+        )
+        plugin = {"name": "my-plugin", "source": "./my-plugin", "strict": False}
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        assert not any(
+            "conflicting manifests" in r.message for r in results
+        ), f"metadata-only plugin.json must not trigger conflicting-manifests MAJOR: {[(r.level, r.message) for r in results]}"
+
+    def test_gap34_plugin_root_prefix_prepended_to_relative_path(self, tmp_path):
+        """GAP-34: metadata.pluginRoot is prepended when resolving a relative source string."""
+        from validate_marketplace import validate_marketplace
+
+        (tmp_path / "plugins" / "formatter" / ".claude-plugin").mkdir(parents=True)
+        (tmp_path / "plugins" / "formatter" / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "formatter", "version": "1.0.0"})
+        )
+        mp = tmp_path / "marketplace.json"
+        mp.write_text(
+            json.dumps(
+                {
+                    "name": "test-mp",
+                    "owner": {"name": "Lead"},
+                    "metadata": {"description": "with pluginRoot", "pluginRoot": "./plugins"},
+                    "plugins": [{"name": "formatter", "source": "./formatter"}],
+                }
+            )
+        )
+        report = validate_marketplace(tmp_path)
+        # The relative path resolves as ./plugins/formatter thanks to GAP-34.
+        assert not any(
+            r.level == "MAJOR" and "does not exist" in r.message and "formatter" in r.message
+            for r in report.results
+        ), f"pluginRoot should make ./formatter resolve to ./plugins/formatter: {[(r.level, r.message) for r in report.results]}"
+
+    def test_gap34_plugin_root_prefix_applied_to_bare_name_source(self, tmp_path):
+        """GAP-34: bare-name source (`source: "formatter"`) resolves under pluginRoot."""
+        from validate_marketplace import validate_marketplace
+
+        (tmp_path / "plugins" / "formatter" / ".claude-plugin").mkdir(parents=True)
+        (tmp_path / "plugins" / "formatter" / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "formatter", "version": "1.0.0"})
+        )
+        mp = tmp_path / "marketplace.json"
+        mp.write_text(
+            json.dumps(
+                {
+                    "name": "test-mp",
+                    "owner": {"name": "Lead"},
+                    "metadata": {"description": "with pluginRoot", "pluginRoot": "./plugins"},
+                    "plugins": [{"name": "formatter", "source": "formatter"}],
+                }
+            )
+        )
+        report = validate_marketplace(tmp_path)
+        # Previously: bare name "formatter" would trigger "invalid source type".
+        # After GAP-34: bare name resolves via pluginRoot and passes.
+        assert not any(
+            r.level == "MAJOR" and "invalid source type: formatter" in r.message
+            for r in report.results
+        ), f"bare-name source must resolve via pluginRoot: {[(r.level, r.message) for r in report.results]}"
+
+    def test_gap32_top_level_description_emits_nit(self, tmp_path):
+        """GAP-32: top-level `description` emits NIT favoring metadata.description."""
+        from validate_marketplace import validate_marketplace
+
+        mp = tmp_path / "marketplace.json"
+        mp.write_text(
+            json.dumps(
+                {
+                    "name": "test-mp",
+                    "owner": {"name": "Lead"},
+                    "description": "I am at top level",
+                    "plugins": [],
+                }
+            )
+        )
+        report = validate_marketplace(tmp_path)
+        assert any(
+            r.level == "NIT" and "Top-level 'description'" in r.message
+            for r in report.results
+        ), f"expected NIT for top-level description: {[(r.level, r.message) for r in report.results]}"
+
+    def test_gap33_top_level_version_emits_nit(self, tmp_path):
+        """GAP-33: top-level `version` emits NIT favoring metadata.version."""
+        from validate_marketplace import validate_marketplace
+
+        mp = tmp_path / "marketplace.json"
+        mp.write_text(
+            json.dumps(
+                {
+                    "name": "test-mp",
+                    "owner": {"name": "Lead"},
+                    "version": "1.0.0",
+                    "plugins": [],
+                    "metadata": {"description": "x"},
+                }
+            )
+        )
+        report = validate_marketplace(tmp_path)
+        assert any(
+            r.level == "NIT" and "Top-level 'version'" in r.message
+            for r in report.results
+        ), f"expected NIT for top-level version: {[(r.level, r.message) for r in report.results]}"
+
+    def test_gap28_channel_userconfig_unknown_type_is_minor(self, tmp_path):
+        """GAP-28: channels[i].userConfig.type outside the allowed set produces MINOR."""
+        from validate_marketplace import validate_plugin_entry
+
+        plugin = {
+            "name": "my-plugin",
+            "source": {"source": "github", "repo": "o/p"},
+            "channels": [
+                {
+                    "userConfig": {
+                        "api_endpoint": {"title": "Endpoint", "type": "quantum"},
+                    }
+                }
+            ],
+        }
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        assert any(
+            r.level == "MINOR"
+            and "channels[0].userConfig.api_endpoint.type" in r.message
+            and "'quantum'" in r.message
+            for r in results
+        ), f"expected MINOR for unknown channel userConfig type: {[(r.level, r.message) for r in results]}"
+
+    def test_gap101_channel_userconfig_missing_title_is_minor(self, tmp_path):
+        """GAP-101: channels[i].userConfig entries without `title` produce MINOR (CPV Issue #9)."""
+        from validate_marketplace import validate_plugin_entry
+
+        plugin = {
+            "name": "my-plugin",
+            "source": {"source": "github", "repo": "o/p"},
+            "channels": [
+                {
+                    "userConfig": {
+                        "api_endpoint": {"type": "string", "description": "missing title"},
+                    }
+                }
+            ],
+        }
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        assert any(
+            r.level == "MINOR"
+            and "channels[0].userConfig.api_endpoint" in r.message
+            and "'title'" in r.message
+            for r in results
+        ), f"expected MINOR for missing 'title': {[(r.level, r.message) for r in results]}"
+
+    def test_gap101_top_level_userconfig_missing_title_is_minor(self, tmp_path):
+        """GAP-101 (top-level variant): plugin.userConfig without `title` also MINOR."""
+        from validate_marketplace import validate_plugin_entry
+
+        plugin = {
+            "name": "my-plugin",
+            "source": {"source": "github", "repo": "o/p"},
+            "userConfig": {"key1": {"type": "string", "description": "no title"}},
+        }
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        assert any(
+            r.level == "MINOR"
+            and "userConfig.key1" in r.message
+            and "'title'" in r.message
+            for r in results
+        )
+
+    def test_gap101_channel_userconfig_valid_entry_silent(self, tmp_path):
+        """GAP-101: well-formed channels[i].userConfig entry produces no userConfig findings."""
+        from validate_marketplace import validate_plugin_entry
+
+        plugin = {
+            "name": "my-plugin",
+            "source": {"source": "github", "repo": "o/p"},
+            "channels": [
+                {
+                    "userConfig": {
+                        "api_endpoint": {
+                            "title": "Endpoint",
+                            "type": "string",
+                            "description": "desc",
+                            "sensitive": True,
+                        }
+                    }
+                }
+            ],
+        }
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        assert not any(
+            r.level in {"MINOR", "MAJOR", "CRITICAL"} and "userConfig" in r.message for r in results
+        ), f"valid userConfig must be silent: {[(r.level, r.message) for r in results]}"

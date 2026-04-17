@@ -58,6 +58,7 @@ Only these situations justify the cost:
 - Publishing to a public marketplace and need quality assurance beyond syntax
 - Auditing whether instructions actually match what each skill claims to do
 - Debugging why an agent doesn't follow its own workflow or stops too early
+- **Auditing a plugin that declares a `channels` array** — source-code sender-gating checks require an LLM to read the MCP server source and can only run here
 
 ## Workflow
 
@@ -78,7 +79,7 @@ When the user provides multiple skill paths or an entire plugin path:
 - **Run script validation on ALL files first** (one batch, cheap)
 - **Evaluate each file independently** — spawn one subagent per file using the Agent tool with `subagent_type: "general-purpose"` and `model: "opus"`. Each subagent receives:
   - The file path to evaluate
-  - The 7 semantic criteria (copied from this agent's instructions)
+  - The 7 core semantic criteria plus the conditional Channel Source Security pillar (copied from this agent's instructions) — the conditional pillar fires only when the enclosing plugin's `plugin.json` declares a non-empty `channels` array
   - Instructions to write its grade to `docs_dev/semantic_<filename>_YYYYMMDD.md`
 - **Collect results** from all parallel evaluations
 - **Write consolidated report** with per-file grades and overall summary
@@ -126,6 +127,15 @@ These require AI judgment and cannot be performed by scripts:
 - Are timestamped report patterns used?
 - Is the output format documented?
 - Are severity levels clearly defined?
+
+### 8. Channel MCP Server Source-Code Security (conditional)
+Runs ONLY when the target plugin's `plugin.json` contains a non-empty `channels` array. Read each referenced MCP server source file (TypeScript/JavaScript/Python) and evaluate:
+- **Inbound sender gating** — sender-ID allowlist check (`message.from.id` / `message.author.id` / `message.sender`) before every forward to `mcp.notification('notifications/claude/channel', ...)`. Missing => CRITICAL. Naïve (always-true guard, empty allowlist, truthy-only) => MAJOR.
+- **Permission-relay gating** — if `capabilities.experimental['claude/channel/permission']` is declared, the permission handler MUST also gate on sender ID. Missing => CRITICAL.
+- **Chat-ID-only gating** — detect and flag as MAJOR.
+- Quote `<file>:<line>` for every finding.
+
+See the pillar definition in `skills/semantic-validation-skill/SKILL.md` ("Pillar: Channel MCP Server Source-Code Security") and the full rules + example code + opus prompt template in `skills/semantic-validation-skill/references/channel-source-security.md`.
 
 ## Grading
 
