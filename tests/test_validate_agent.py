@@ -1563,3 +1563,164 @@ class TestV221AgentToolGrammar:
         validate_tools_field({"tools": ["Agent( worker , researcher )"]}, "agent.md", report)
         major = [r.message for r in report.results if r.level == "MAJOR"]
         assert not major
+
+
+# ============================================================================
+# v2.22.3 — GAP-79: plugin-shipped agents accept exactly 11 fields
+# ============================================================================
+
+
+def _make_plugin_agent(tmp_path, agent_frontmatter: str, agent_name: str = "agent") -> Path:
+    """Create a plugin skeleton with a single agent file and return the agent path."""
+    plugin_dir = tmp_path / f"pl-{agent_name}"
+    plugin_dir.mkdir()
+    cp = plugin_dir / ".claude-plugin"
+    cp.mkdir()
+    (cp / "plugin.json").write_text('{"name": "pl", "version": "1.0.0"}')
+    agents_dir = plugin_dir / "agents"
+    agents_dir.mkdir()
+    agent_file = agents_dir / f"{agent_name}.md"
+    agent_file.write_text(agent_frontmatter)
+    return agent_file
+
+
+class TestV223Gap79PluginShippedAllowedFields:
+    """GAP-79 (v2.22.3): plugin-shipped agents accept exactly 11 fields.
+
+    Per plugins-reference.md:70 plugin-shipped agents may use only
+    {name, description, tools, model, effort, system-prompt, context,
+    memory, isolation, initialPrompt, agent}. CPV-legacy fields
+    (color, capabilities, user-invocable, etc.) and non-plugin spec
+    fields (skills, maxTurns, background, disallowedTools) emit MINOR
+    when seen on a plugin-shipped agent.
+    """
+
+    def test_plugin_agent_with_color_emits_minor(self, tmp_path):
+        """Plugin-shipped agent with `color` → MINOR (not in plugin allow-list)."""
+        content = (
+            "---\n"
+            "name: a\n"
+            "description: An agent.\n"
+            "color: blue\n"
+            "---\n\n# A\n\nBody.\n"
+        )
+        agent_path = _make_plugin_agent(tmp_path, content, "a")
+        report = validate_agent(agent_path)
+        minors = [
+            r.message for r in report.results
+            if r.level == "MINOR" and "color" in r.message and "plugin-shipped" in r.message
+        ]
+        assert minors, (
+            "Expected MINOR for `color` on plugin-shipped agent; got MINORs: "
+            f"{[r.message for r in report.results if r.level == 'MINOR']}"
+        )
+
+    def test_plugin_agent_with_skills_emits_minor(self, tmp_path):
+        """Plugin-shipped agent with `skills` → MINOR (not in plugin allow-list)."""
+        content = (
+            "---\n"
+            "name: b\n"
+            "description: An agent.\n"
+            "skills:\n  - helper\n"
+            "---\n\n# B\n\nBody.\n"
+        )
+        agent_path = _make_plugin_agent(tmp_path, content, "b")
+        report = validate_agent(agent_path)
+        minors = [
+            r.message for r in report.results
+            if r.level == "MINOR" and "'skills'" in r.message and "plugin-shipped" in r.message
+        ]
+        assert minors, f"Expected MINOR for `skills`; got MINORs: {minors}"
+
+    def test_plugin_agent_with_only_allowed_fields_no_minor(self, tmp_path):
+        """Plugin-shipped agent with only the 11 allowed fields → no plugin-shipped MINOR."""
+        content = (
+            "---\n"
+            "name: ok\n"
+            "description: Good agent.\n"
+            "model: sonnet\n"
+            "tools:\n  - Read\n"
+            "effort: high\n"
+            "memory: project\n"
+            "isolation: worktree\n"
+            "initialPrompt: hello\n"
+            "---\n\n# OK\n\nBody.\n"
+        )
+        agent_path = _make_plugin_agent(tmp_path, content, "ok")
+        report = validate_agent(agent_path)
+        minors = [
+            r.message for r in report.results
+            if r.level == "MINOR" and "plugin-shipped agent allowed set" in r.message
+        ]
+        assert not minors, f"Unexpected plugin-shipped MINORs: {minors}"
+
+    def test_non_plugin_agent_with_color_no_minor(self, tmp_path):
+        """Standalone (non-plugin) agent with `color` → no plugin-shipped MINOR."""
+        agents_dir = tmp_path / "standalone-agents"
+        agents_dir.mkdir()
+        agent_path = agents_dir / "solo.md"
+        content = (
+            "---\n"
+            "name: solo\n"
+            "description: A standalone agent.\n"
+            "color: blue\n"
+            "---\n\n# Solo\n\nBody.\n"
+        )
+        agent_path.write_text(content)
+        report = validate_agent(agent_path)
+        minors = [
+            r.message for r in report.results
+            if r.level == "MINOR" and "plugin-shipped agent allowed set" in r.message
+        ]
+        assert not minors, (
+            "Non-plugin agents must not emit plugin-shipped MINORs; got: "
+            f"{minors}"
+        )
+
+    def test_plugin_agent_with_user_invocable_emits_minor(self, tmp_path):
+        """Plugin-shipped agent with legacy `user-invocable` → MINOR."""
+        content = (
+            "---\n"
+            "name: ui-agent\n"
+            "description: Agent.\n"
+            "user-invocable: true\n"
+            "---\n\n# UI\n\nBody.\n"
+        )
+        agent_path = _make_plugin_agent(tmp_path, content, "ui")
+        report = validate_agent(agent_path)
+        minors = [
+            r.message for r in report.results
+            if r.level == "MINOR" and "'user-invocable'" in r.message and "plugin-shipped" in r.message
+        ]
+        assert minors, (
+            f"Expected MINOR for legacy `user-invocable`; got MINORs: "
+            f"{[r.message for r in report.results if r.level == 'MINOR']}"
+        )
+
+    def test_plugin_agent_forbidden_field_no_double_minor(self, tmp_path):
+        """hooks/mcpServers/permissionMode already emit MAJOR — MINOR must NOT double-fire."""
+        content = (
+            "---\n"
+            "name: double\n"
+            "description: Agent.\n"
+            "hooks: {}\n"
+            "---\n\n# Double\n\nBody.\n"
+        )
+        agent_path = _make_plugin_agent(tmp_path, content, "double")
+        report = validate_agent(agent_path)
+        # hooks must emit exactly one MAJOR (plugin_shipped_restrictions) and
+        # zero `hooks`-related MINORs from the new allowed-fields check.
+        hooks_majors = [
+            r.message for r in report.results
+            if r.level == "MAJOR" and "'hooks'" in r.message
+        ]
+        hooks_minors_doubled = [
+            r.message for r in report.results
+            if r.level == "MINOR"
+            and "hooks" in r.message
+            and "plugin-shipped agent allowed set" in r.message
+        ]
+        assert hooks_majors, "Expected MAJOR from plugin-shipped forbidden fields"
+        assert not hooks_minors_doubled, (
+            f"`hooks` must not double-emit MINOR from allowed-fields check; got: {hooks_minors_doubled}"
+        )

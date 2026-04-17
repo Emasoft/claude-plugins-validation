@@ -130,7 +130,12 @@ REQUIRED_MARKETPLACE_FIELDS = {"name", "owner", "plugins"}
 # Required fields for each plugin entry
 REQUIRED_PLUGIN_FIELDS = {"name", "source"}
 
-# Optional plugin fields
+# Optional plugin fields.
+# Per plugin-marketplaces.md:180-181 any field from the plugin manifest schema
+# is accepted at the marketplace plugin-entry level, so the set below mirrors
+# the plugin.json optional fields. GAP-6 (v2.22.3) added `userConfig`,
+# `channels`, and `monitors` — previously these triggered spurious INFOs at
+# the "unknown field" branch (validate_marketplace.py:520-523).
 OPTIONAL_PLUGIN_FIELDS = {
     "version",
     "description",
@@ -153,6 +158,10 @@ OPTIONAL_PLUGIN_FIELDS = {
     "mcpServers",
     "lspServers",
     "outputStyles",
+    # v2.22.3 — GAP-6: accept manifest-schema fields at marketplace entry level
+    "userConfig",
+    "channels",
+    "monitors",
 }
 
 # Source-specific required fields
@@ -588,15 +597,47 @@ def validate_plugin_entry(
                     file=json_path,
                 )
             )
-        elif "name" not in author:
-            results.append(
-                ValidationResult(
-                    level="MINOR",
-                    category="plugin",
-                    message=f"Plugin '{plugin_id}' author object missing required 'name' field",
-                    file=json_path,
+        else:
+            if "name" not in author:
+                results.append(
+                    ValidationResult(
+                        level="MINOR",
+                        category="plugin",
+                        message=f"Plugin '{plugin_id}' author object missing required 'name' field",
+                        file=json_path,
+                    )
                 )
-            )
+            # v2.22.3 — GAP-13: author.url is documented at plugins-reference.md:352.
+            # Accept only strings beginning with http://, https://, or git://.
+            author_url = author.get("url")
+            if author_url is not None:
+                if not isinstance(author_url, str):
+                    results.append(
+                        ValidationResult(
+                            level="MINOR",
+                            category="plugin",
+                            message=(
+                                f"Plugin '{plugin_id}' author.url must be a string, got {type(author_url).__name__}"
+                            ),
+                            file=json_path,
+                        )
+                    )
+                elif not (
+                    author_url.startswith("http://")
+                    or author_url.startswith("https://")
+                    or author_url.startswith("git://")
+                ):
+                    results.append(
+                        ValidationResult(
+                            level="MINOR",
+                            category="plugin",
+                            message=(
+                                f"Plugin '{plugin_id}' author.url '{author_url}' must start with "
+                                "http://, https://, or git:// (plugins-reference.md:352)"
+                            ),
+                            file=json_path,
+                        )
+                    )
 
     # Validate strict field type (spec: boolean, default true)
     strict = plugin.get("strict")
@@ -609,6 +650,61 @@ def validate_plugin_entry(
                 file=json_path,
             )
         )
+
+    # v2.22.3 — GAP-25: when `strict: false` is declared on a local/Layout-B
+    # plugin entry, plugin-marketplaces.md:464-476 requires that the nested
+    # plugin MUST NOT also ship a plugin.json with component fields. Doing so
+    # produces the runtime error *"Plugin ... has conflicting manifests"* at
+    # install time. Detect this at validate time so authors don't ship a dead
+    # marketplace. Remote sources (github/npm/url) are unverifiable here, so
+    # the check is scoped to local plugin roots where we can read plugin.json.
+    if strict is False:
+        nested_root = _resolve_local_plugin_root(plugin, marketplace_dir)
+        if nested_root is not None and nested_root.is_dir():
+            for candidate in (
+                nested_root / ".claude-plugin" / "plugin.json",
+                nested_root / "plugin.json",
+            ):
+                if not candidate.is_file():
+                    continue
+                try:
+                    manifest = json.loads(candidate.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    break
+                if not isinstance(manifest, dict):
+                    break
+                # Only "component" fields matter — the runtime conflict is on
+                # commands/agents/skills/hooks/mcpServers/lspServers/outputStyles
+                # (everything else in plugin.json is metadata that co-exists fine).
+                component_keys = {
+                    "commands",
+                    "agents",
+                    "skills",
+                    "hooks",
+                    "mcpServers",
+                    "lspServers",
+                    "outputStyles",
+                }
+                present = sorted(set(manifest.keys()) & component_keys)
+                if present:
+                    results.append(
+                        ValidationResult(
+                            level="MAJOR",
+                            category="plugin",
+                            message=(
+                                f"Plugin '{plugin_id}' has strict:false but nested plugin.json declares "
+                                f"component(s): {', '.join(present)}. Per plugin-marketplaces.md:464-476 "
+                                "strict:false means the marketplace entry is authoritative; the runtime error "
+                                "'Plugin ... has conflicting manifests' will fire at install time."
+                            ),
+                            file=str(candidate),
+                            suggestion=(
+                                "Either remove the component fields from the nested plugin.json, "
+                                "delete the plugin.json entirely, or drop `strict: false` from the marketplace entry"
+                            ),
+                        )
+                    )
+                break
 
     # Validate keywords type (spec: array of strings)
     keywords = plugin.get("keywords")
@@ -669,7 +765,227 @@ def validate_plugin_entry(
                 )
             )
 
+    # v2.22.3 — GAP-28/101: validate userConfig and channels[].userConfig.
+    # Per CPV Issue #9, Claude Code runtime REQUIRES `title` even though the
+    # spec at plugins-reference.md:414-435 only documents description/sensitive.
+    # Valid `type` values: string, boolean, select, number, integer.
+    user_config = plugin.get("userConfig")
+    if user_config is not None:
+        results.extend(_validate_marketplace_userconfig(user_config, plugin_id, json_path, context="userConfig"))
+
+    channels = plugin.get("channels")
+    if channels is not None:
+        if not isinstance(channels, list):
+            results.append(
+                ValidationResult(
+                    level="MINOR",
+                    category="plugin",
+                    message=f"Plugin '{plugin_id}' channels must be an array, got {type(channels).__name__}",
+                    file=json_path,
+                )
+            )
+        else:
+            for idx, channel in enumerate(channels):
+                if not isinstance(channel, dict):
+                    results.append(
+                        ValidationResult(
+                            level="MINOR",
+                            category="plugin",
+                            message=(
+                                f"Plugin '{plugin_id}' channels[{idx}] must be an object, "
+                                f"got {type(channel).__name__}"
+                            ),
+                            file=json_path,
+                        )
+                    )
+                    continue
+                channel_user_config = channel.get("userConfig")
+                if channel_user_config is not None:
+                    results.extend(
+                        _validate_marketplace_userconfig(
+                            channel_user_config,
+                            plugin_id,
+                            json_path,
+                            context=f"channels[{idx}].userConfig",
+                        )
+                    )
+
     return results
+
+
+# Valid `type` values for userConfig entries per plugins-reference.md runtime schema
+# (empirically verified via CPV Issue #9 — the spec text itself is under-documented).
+_MARKETPLACE_USERCONFIG_VALID_TYPES = frozenset(
+    {"string", "boolean", "select", "number", "integer"}
+)
+
+
+def _validate_marketplace_userconfig(
+    user_config: Any,
+    plugin_id: str,
+    json_path: str,
+    *,
+    context: str,
+) -> list[ValidationResult]:
+    """Validate a userConfig dict (top-level or per-channel).
+
+    v2.22.3 — GAP-28/101. `context` is the field path used in messages
+    (e.g. 'userConfig' or 'channels[0].userConfig'). Same validation applies
+    to both because CPV Issue #9 confirmed the runtime schema is identical.
+    """
+    results: list[ValidationResult] = []
+    if not isinstance(user_config, dict):
+        results.append(
+            ValidationResult(
+                level="MINOR",
+                category="plugin",
+                message=(
+                    f"Plugin '{plugin_id}' {context} must be an object mapping keys to entries, "
+                    f"got {type(user_config).__name__}"
+                ),
+                file=json_path,
+            )
+        )
+        return results
+
+    for key, entry in user_config.items():
+        entry_ctx = f"{context}.{key}"
+        if not isinstance(entry, dict):
+            results.append(
+                ValidationResult(
+                    level="MINOR",
+                    category="plugin",
+                    message=(
+                        f"Plugin '{plugin_id}' {entry_ctx} must be an object, got {type(entry).__name__}"
+                    ),
+                    file=json_path,
+                )
+            )
+            continue
+        # `title` is runtime-required (CPV Issue #9) even though the spec
+        # at plugins-reference.md:414-435 omits it.
+        if "title" not in entry:
+            results.append(
+                ValidationResult(
+                    level="MINOR",
+                    category="plugin",
+                    message=(
+                        f"Plugin '{plugin_id}' {entry_ctx} missing required 'title' field "
+                        "(Claude Code runtime rejects userConfig without title; CPV Issue #9)"
+                    ),
+                    file=json_path,
+                )
+            )
+        elif not isinstance(entry["title"], str):
+            results.append(
+                ValidationResult(
+                    level="MINOR",
+                    category="plugin",
+                    message=(
+                        f"Plugin '{plugin_id}' {entry_ctx}.title must be a string, "
+                        f"got {type(entry['title']).__name__}"
+                    ),
+                    file=json_path,
+                )
+            )
+        # `type` is optional. When provided, it must be one of the runtime-supported set.
+        entry_type = entry.get("type")
+        if entry_type is not None:
+            if not isinstance(entry_type, str):
+                results.append(
+                    ValidationResult(
+                        level="MINOR",
+                        category="plugin",
+                        message=(
+                            f"Plugin '{plugin_id}' {entry_ctx}.type must be a string, "
+                            f"got {type(entry_type).__name__}"
+                        ),
+                        file=json_path,
+                    )
+                )
+            elif entry_type not in _MARKETPLACE_USERCONFIG_VALID_TYPES:
+                results.append(
+                    ValidationResult(
+                        level="MINOR",
+                        category="plugin",
+                        message=(
+                            f"Plugin '{plugin_id}' {entry_ctx}.type '{entry_type}' is not a recognized "
+                            f"userConfig type (valid: {', '.join(sorted(_MARKETPLACE_USERCONFIG_VALID_TYPES))})"
+                        ),
+                        file=json_path,
+                    )
+                )
+        # `description` and `sensitive` are documented — type-check only.
+        if "description" in entry and not isinstance(entry["description"], str):
+            results.append(
+                ValidationResult(
+                    level="MINOR",
+                    category="plugin",
+                    message=f"Plugin '{plugin_id}' {entry_ctx}.description must be a string",
+                    file=json_path,
+                )
+            )
+        if "sensitive" in entry and not isinstance(entry["sensitive"], bool):
+            results.append(
+                ValidationResult(
+                    level="MINOR",
+                    category="plugin",
+                    message=f"Plugin '{plugin_id}' {entry_ctx}.sensitive must be a boolean",
+                    file=json_path,
+                )
+            )
+    return results
+
+
+def _read_marketplace_plugin_root(marketplace_dir: Path) -> str:
+    """Return the marketplace.json `metadata.pluginRoot` prefix (or empty string).
+
+    Per plugin-marketplaces.md:176 `metadata.pluginRoot` is a base directory
+    that is *prepended* to relative plugin source paths at load time. A user
+    who writes `{metadata: {pluginRoot: "./plugins"}, plugins: [{source: "formatter"}]}`
+    is asking Claude Code to resolve `formatter` as `./plugins/formatter`.
+
+    v2.22.3 — GAP-34: CPV previously only type-checked pluginRoot but never
+    *used* it when resolving per-plugin relative paths, which caused spurious
+    MAJORs for marketplaces that relied on this prefix. Load the value here
+    so downstream resolvers can apply it uniformly.
+    """
+    for candidate in (
+        marketplace_dir / "marketplace.json",
+        marketplace_dir / ".claude-plugin" / "marketplace.json",
+    ):
+        if not candidate.is_file():
+            continue
+        try:
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return ""
+        if not isinstance(data, dict):
+            return ""
+        metadata = data.get("metadata")
+        if isinstance(metadata, dict):
+            root = metadata.get("pluginRoot")
+            if isinstance(root, str):
+                return root
+        return ""
+    return ""
+
+
+def _apply_plugin_root(marketplace_dir: Path, relative: str) -> Path:
+    """Prepend `metadata.pluginRoot` to a relative plugin source path (GAP-34).
+
+    `relative` may be a bare name (`formatter`), a `./` path (`./formatter`),
+    or a multi-segment path (`subdir/formatter`). All forms are normalised
+    before joining under `marketplace_dir / pluginRoot`.
+    """
+    prefix = _read_marketplace_plugin_root(marketplace_dir).strip()
+    tail = relative.removeprefix("./") if relative.startswith("./") else relative
+    if not prefix:
+        return marketplace_dir / tail
+    prefix_clean = prefix.removeprefix("./").rstrip("/")
+    if not prefix_clean:
+        return marketplace_dir / tail
+    return marketplace_dir / prefix_clean / tail
 
 
 def _resolve_local_plugin_root(
@@ -685,22 +1001,25 @@ def _resolve_local_plugin_root(
 
     Returns None for remote sources (github, url, npm, git, git-subdir, file)
     so callers can distinguish "unreachable at validate-time" from "disk-local".
+
+    v2.22.3 — GAP-34: applies `metadata.pluginRoot` prefix when resolving
+    relative-string and `directory`-type sources, matching runtime behaviour.
     """
     source = plugin.get("source")
-    # String shorthand: "./foo"
+    # String shorthand: "./foo" — applies pluginRoot prefix per GAP-34.
     if isinstance(source, str) and source.startswith("./") and ".." not in source:
-        return marketplace_dir / source.removeprefix("./")
+        return _apply_plugin_root(marketplace_dir, source)
     # Dict form with "directory" source type
     if isinstance(source, dict):
         source_type = source.get("source")
         if source_type == "directory":
             path_val = source.get("path")
             if isinstance(path_val, str) and not path_val.startswith("/") and ".." not in path_val:
-                return marketplace_dir / path_val.removeprefix("./")
+                return _apply_plugin_root(marketplace_dir, path_val)
     # Legacy `path` field
     local_path = plugin.get("path")
     if isinstance(local_path, str) and not local_path.startswith("/") and ".." not in local_path:
-        return marketplace_dir / local_path.removeprefix("./")
+        return _apply_plugin_root(marketplace_dir, local_path)
     return None
 
 
@@ -905,10 +1224,12 @@ def validate_plugin_source(
                     )
                 )
                 return results
-            # Accept relative paths (./path) as local source — Layout B nested plugin
+            # Accept relative paths (./path) as local source — Layout B nested plugin.
+            # v2.22.3 — GAP-34: apply metadata.pluginRoot prefix so marketplaces
+            # relying on that prefix (e.g. pluginRoot="./plugins" + source="./formatter")
+            # resolve correctly instead of tripping a spurious MAJOR.
             if source.startswith("./"):
-                # Validate that the local path exists
-                resolved = marketplace_dir / source.removeprefix("./")
+                resolved = _apply_plugin_root(marketplace_dir, source)
                 if not resolved.exists():
                     results.append(
                         ValidationResult(
@@ -939,17 +1260,29 @@ def validate_plugin_source(
                     )
                 )
             elif source not in VALID_SOURCE_TYPES:
-                results.append(
-                    ValidationResult(
-                        level="MAJOR",
-                        category="plugin",
-                        message=f"Plugin '{plugin_id}' has invalid source type: {source}",
-                        file=json_path,
-                        suggestion=(
-                            f"Valid source types: {', '.join(sorted(VALID_SOURCE_TYPES))} or relative path (./path)"
-                        ),
-                    )
+                # v2.22.3 — GAP-34: when metadata.pluginRoot is set, a bare-name
+                # source like "formatter" should resolve as `<pluginRoot>/formatter`.
+                # Only fall back to "invalid source type" when NO pluginRoot
+                # prefix is configured or the prefixed path does not exist.
+                plugin_root_prefix = _read_marketplace_plugin_root(marketplace_dir).strip()
+                prefixed_root: Path | None = (
+                    _apply_plugin_root(marketplace_dir, source) if plugin_root_prefix else None
                 )
+                if prefixed_root is not None and prefixed_root.exists() and prefixed_root.is_dir():
+                    # Treat as Layout B nested plugin via pluginRoot prefix
+                    results.extend(_validate_nested_plugin(prefixed_root, plugin_id, json_path))
+                else:
+                    results.append(
+                        ValidationResult(
+                            level="MAJOR",
+                            category="plugin",
+                            message=f"Plugin '{plugin_id}' has invalid source type: {source}",
+                            file=json_path,
+                            suggestion=(
+                                f"Valid source types: {', '.join(sorted(VALID_SOURCE_TYPES))} or relative path (./path)"
+                            ),
+                        )
+                    )
         else:
             results.append(
                 ValidationResult(
@@ -1000,6 +1333,40 @@ def validate_plugin_source(
             )
         )
     else:
+        # v2.22.3 — GAP-2: `git` is a CPV-only alias for `url` per the spec.
+        # Emit a NIT suggesting authors use the canonical `url` type. GAP-3:
+        # `directory` is a CPV extension for Layout-B nested plugins. The spec
+        # shorthand is the bare relative-path string — emit a NIT in both cases
+        # so authors can rewrite to the canonical form without breaking today.
+        if source_type == "git":
+            results.append(
+                ValidationResult(
+                    level="NIT",
+                    category="source",
+                    message=(
+                        f"Plugin '{plugin_id}' uses source type 'git' (CPV-only alias). "
+                        "Per plugin-marketplaces.md:223-229 the spec-canonical name is 'url'."
+                    ),
+                    file=json_path,
+                    suggestion="Rewrite to {source: 'url', url: '<url>'} for spec compatibility",
+                )
+            )
+        elif source_type == "directory":
+            path_val = source.get("path")
+            path_hint = path_val if isinstance(path_val, str) else "./plugins/<name>"
+            results.append(
+                ValidationResult(
+                    level="NIT",
+                    category="source",
+                    message=(
+                        f"Plugin '{plugin_id}' uses source type 'directory' (CPV-only extension). "
+                        "Per plugin-marketplaces.md:223-229 the canonical form is the bare relative-path string."
+                    ),
+                    file=json_path,
+                    suggestion=f"Rewrite as `source: \"{path_hint}\"` (plain string shorthand)",
+                )
+            )
+
         # Check source-specific required fields
         required = SOURCE_REQUIRED_FIELDS.get(source_type, set())
         for field_name in required:
@@ -1013,10 +1380,12 @@ def validate_plugin_source(
                     )
                 )
 
-        # Validate SHA format (all source types that support it)
+        # Validate SHA format (all source types that support it).
+        # v2.22.3 — GAP-7: accept uppercase hex (git itself permits [A-F] SHAs)
+        # so CPV no longer rejects `sha: "ABCDEF...".
         if "sha" in source:
             sha = source["sha"]
-            if not isinstance(sha, str) or not re.match(r"^[0-9a-f]{40}$", sha):
+            if not isinstance(sha, str) or not re.match(r"^[0-9a-fA-F]{40}$", sha):
                 results.append(
                     ValidationResult(
                         level="MINOR",
@@ -1071,11 +1440,12 @@ def validate_plugin_source(
                 )
 
         # Layout B via object form: {"source": "directory", "path": "./plugins/..."}
-        # Recursively validate the nested plugin.
+        # Recursively validate the nested plugin. v2.22.3 — GAP-34 applies the
+        # metadata.pluginRoot prefix just like the string-shorthand branch does.
         if source_type == "directory":
             path_val = source.get("path")
             if isinstance(path_val, str) and not path_val.startswith("/") and ".." not in path_val:
-                nested_root = marketplace_dir / path_val.removeprefix("./")
+                nested_root = _apply_plugin_root(marketplace_dir, path_val)
                 if nested_root.exists() and nested_root.is_dir():
                     results.extend(_validate_nested_plugin(nested_root, plugin_id, json_path))
                 else:
@@ -2156,6 +2526,33 @@ def validate_marketplace(marketplace_path: Path) -> ValidationReport:
                 message=f"'owner.email' must be a string, got {type(owner['email']).__name__}",
                 file=json_path,
             )
+        # v2.22.3 — GAP-15: owner.url is not in the canonical schema at
+        # plugin-marketplaces.md:165-168 (only `name` + `email` are listed).
+        # Accept but emit a NIT so authors know they're carrying an unusual field.
+        if "url" in owner:
+            report.add_marketplace_result(
+                level="NIT",
+                category="marketplace",
+                message=(
+                    "'owner.url' is not in the documented marketplace.json owner schema "
+                    "(plugin-marketplaces.md:165-168 only lists 'name' and 'email')"
+                ),
+                file=json_path,
+            )
+    elif isinstance(owner, str):
+        # v2.22.3 — GAP-14: owner-as-string is not the canonical form. Some
+        # authors write `"owner": "Alice"` — accept but emit MINOR pointing to
+        # the documented {name, email} object shape so the field is parseable.
+        report.add_marketplace_result(
+            level="MINOR",
+            category="marketplace",
+            message=(
+                f"'owner' is a bare string '{owner}' — canonical form is an object with 'name' "
+                "(plugin-marketplaces.md:165-168)"
+            ),
+            file=json_path,
+            suggestion=f'Rewrite as `"owner": {{"name": "{owner}"}}`',
+        )
     elif owner is not None:
         report.add_marketplace_result(
             level="MAJOR",
@@ -2199,7 +2596,11 @@ def validate_marketplace(marketplace_path: Path) -> ValidationReport:
             workflow_results = validate_workflow_inline_python(marketplace_dir)
             report.results.extend(workflow_results)
 
-    # Validate optional fields — description and version can be top-level or nested under metadata
+    # Validate optional fields — description and version can be top-level or
+    # nested under metadata. v2.22.3 — GAP-32/33: top-level `description` and
+    # `version` are NOT documented in plugin-marketplaces.md:172-176 (only
+    # `metadata.description` and `metadata.version` are listed). Accept for
+    # backward compatibility but emit a NIT so authors prefer `metadata.*`.
     has_description = False
     if "description" in data:
         has_description = True
@@ -2208,6 +2609,16 @@ def validate_marketplace(marketplace_path: Path) -> ValidationReport:
                 level="MINOR",
                 category="manifest",
                 message="description field must be a string",
+                file=json_path,
+            )
+        else:
+            report.add_marketplace_result(
+                level="NIT",
+                category="manifest",
+                message=(
+                    "Top-level 'description' is not documented at plugin-marketplaces.md:172-176; "
+                    "prefer 'metadata.description'"
+                ),
                 file=json_path,
             )
 
@@ -2225,6 +2636,16 @@ def validate_marketplace(marketplace_path: Path) -> ValidationReport:
                 level="MINOR",
                 category="manifest",
                 message=f"Marketplace version '{version}' should follow semver format",
+                file=json_path,
+            )
+        else:
+            report.add_marketplace_result(
+                level="NIT",
+                category="manifest",
+                message=(
+                    "Top-level 'version' is not documented at plugin-marketplaces.md:172-176; "
+                    "prefer 'metadata.version'"
+                ),
                 file=json_path,
             )
 

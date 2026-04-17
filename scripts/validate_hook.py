@@ -51,7 +51,7 @@ EVENTS_WITH_MATCHERS = {
     "Notification",  # matcher: notification_type (permission_prompt, idle_prompt, auth_success, elicitation_dialog)
     "PreCompact",  # matcher: manual, auto
     "PostCompact",  # matcher: manual, auto (v2.1.76)
-    "Setup",  # matcher: (legacy — not in official docs as of v2.1.86)
+    "Setup",  # matcher: (legacy — not in official docs as of v2.1.109)
     "SessionStart",  # matcher: startup, resume, clear, compact
     "SessionEnd",  # matcher: clear, resume, logout, prompt_input_exit, bypass_permissions_disabled, other (hooks.md L192)
     "SubagentStart",  # matcher: agent name (Bash, Explore, Plan, custom)
@@ -206,6 +206,83 @@ CONFIG_CHANGE_SOURCES = {
 # this constant is exported so downstream validators and tests can reference the
 # authoritative allowed-values set.
 PRETOOLUSE_PERMISSION_DECISIONS = {"allow", "deny", "ask", "defer"}
+
+# PreToolUse `hookSpecificOutput` known fields (hooks.md L1013-1053 and
+# v2.1.110 `additionalContext` retention on tool failure — GAP-19).
+# `additionalContext` was added as a retention field for context that should
+# survive tool failure. CPV does not currently validate hook *output* shape,
+# but exposing this constant prevents downstream validators from flagging
+# `additionalContext` as unknown should output validation ever land.
+PRETOOLUSE_HOOK_SPECIFIC_OUTPUT_FIELDS = {
+    "hookEventName",  # hooks.md L1015 — required, == "PreToolUse"
+    "permissionDecision",  # see PRETOOLUSE_PERMISSION_DECISIONS
+    "permissionDecisionReason",  # free-form explanation
+    "additionalContext",  # v2.1.110 — retained on tool failure (GAP-19)
+}
+
+# Permission-update-entry type enum (hooks.md L1115-1141, PermissionRequest
+# output schema). 6 types total. Exposed for downstream validators.
+# CPV-P2-m2 requested these constants exist even if unused by today's
+# validators so that future output validation doesn't have to rediscover them.
+PERMISSION_UPDATE_TYPES = {
+    "addRules",
+    "replaceRules",
+    "removeRules",
+    "setMode",
+    "addDirectories",
+    "removeDirectories",
+}
+
+# Permission-update `behavior` enum (hooks.md L1121).
+PERMISSION_BEHAVIORS = {"allow", "deny", "ask"}
+
+# Permission-update `destination` enum (hooks.md L1134-1139).
+PERMISSION_DESTINATIONS = {
+    "session",
+    "localSettings",
+    "projectSettings",
+    "userSettings",
+}
+
+# PermissionDenied `hookSpecificOutput` fields (plugins-reference.md L117:
+# "Return `{retry: true}` to tell the model it may retry the denied tool call.")
+# GAP-17: recognizing this output shape. When the output dict is parsed (not
+# currently wired into the validator pipeline), `retry` must be a boolean.
+PERMISSION_DENIED_HOOK_SPECIFIC_OUTPUT_FIELDS = {
+    "hookEventName",  # == "PermissionDenied"
+    "retry",  # boolean — tell the model to retry the denied call
+}
+
+
+def validate_permission_denied_output(output: Any) -> list[str]:
+    """Validate a PermissionDenied hook's JSON output shape.
+
+    GAP-17: plugins-reference.md L117 states PermissionDenied hooks return
+    ``{retry: true}`` to tell the model it may retry the denied tool call.
+    This helper is not wired into the main validator pipeline (CPV does not
+    currently execute hooks to capture their output), but is exposed so that
+    future output validation, integration tests, and hooks authored alongside
+    CPV can confirm the shape.
+
+    Returns a list of human-readable issue strings; an empty list means OK.
+    Each issue is MINOR-class (the hook still runs, the model just can't
+    retry in the expected way).
+    """
+    issues: list[str] = []
+    if not isinstance(output, dict):
+        return [f"PermissionDenied hook output must be a JSON object, got {type(output).__name__}"]
+    # Accept hookSpecificOutput wrapper or flat shape — both are observed in
+    # the spec examples. If wrapped, unwrap to look at the inner shape.
+    payload = output.get("hookSpecificOutput", output)
+    if not isinstance(payload, dict):
+        return ["PermissionDenied hookSpecificOutput must be a JSON object"]
+    if "retry" in payload and not isinstance(payload["retry"], bool):
+        issues.append(
+            f"PermissionDenied 'retry' must be a boolean (plugins-reference.md L117), "
+            f"got {type(payload['retry']).__name__}"
+        )
+    return issues
+
 
 # Environment variables available in hooks are sourced from
 # cpv_validation_common.VALID_PLUGIN_ENV_VARS + is_valid_plugin_env_var
@@ -473,6 +550,25 @@ def validate_matcher(matcher: Any, event_name: str, report: ValidationReport) ->
         _check_matcher_values(matcher, INSTRUCTIONS_LOADED_REASONS, "InstructionsLoaded", "load_reason", report)
     if event_name == "ConfigChange":
         _check_matcher_values(matcher, CONFIG_CHANGE_SOURCES, "ConfigChange", "source", report)
+
+    # GAP-18: FileChanged `matcher` is a FILENAME glob (plugins-reference.md L131),
+    # not a tool-name regex. Authors occasionally paste a tool name here by
+    # analogy with PreToolUse — emit a NIT-level info when that happens so the
+    # misconfiguration doesn't silently match nothing.
+    if event_name == "FileChanged":
+        # Split on typical glob/regex separators and check whether every part
+        # looks like a tool identifier (PascalCase, no dot, no slash, no wildcard).
+        parts = [p.strip() for p in re.split(r"[|()]", matcher) if p.strip()]
+        tool_like = [
+            p for p in parts
+            if p in COMMON_TOOL_NAMES and "." not in p and "/" not in p and "*" not in p
+        ]
+        if tool_like and len(tool_like) == len(parts):
+            report.info(
+                f"FileChanged matcher '{matcher}' looks like a tool name, but per "
+                "plugins-reference.md L131 the FileChanged `matcher` is a FILENAME "
+                "glob (e.g. '*.py', 'src/**/*.ts'), not a tool name."
+            )
 
     return True
 
@@ -1996,18 +2092,31 @@ def validate_prompt_hook(
         if not isinstance(hook["model"], str) or not hook["model"].strip():
             report.major("Prompt hook 'model' must be a non-empty string")
 
-    # Validate timeout if present (seconds; default 30 for prompt hooks)
+    # Validate timeout if present (seconds; default 30 for prompt hooks per hooks.md L2147).
+    # CPV-P2-m1: prompt hook default is 30s. A timeout > 300s is already 10× the
+    # spec default and usually indicates a misconfiguration (e.g., user meant
+    # milliseconds). The absurd-looking ">10000" check below was unreachable
+    # because it came after "> 600"; we now order the checks so each branch is
+    # actually reachable: millisecond-likely > very-long > suspiciously-long.
     if "timeout" in hook:
         timeout = hook["timeout"]
         if not isinstance(timeout, (int, float)):
             report.major(f"'timeout' must be a number, got {type(timeout).__name__}")
         elif timeout <= 0:
             report.major("'timeout' must be positive")
-        elif timeout > 600:
-            report.warning(f"Prompt hook timeout is {timeout}s — exceeds 600s")
         elif timeout > 10000:
+            # Almost certainly someone typed milliseconds — 10000s = 2.7 hours.
             report.warning(
                 f"Prompt hook timeout is {timeout}s — this looks like milliseconds. Hook timeouts are in SECONDS (default: 30 for prompt hooks)."
+            )
+        elif timeout > 600:
+            report.warning(f"Prompt hook timeout is {timeout}s — exceeds 600s")
+        elif timeout > 300:
+            # CPV-P2-m1: prompt default is 30s; >10× is suspicious. MINOR nudge,
+            # not a block — a legitimate long-running analysis prompt is possible.
+            report.minor(
+                f"Prompt hook timeout is {timeout}s — more than 10× the 30s default "
+                "(hooks.md L2147). Confirm this is intentional."
             )
 
     return True

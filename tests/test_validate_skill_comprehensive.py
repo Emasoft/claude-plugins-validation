@@ -1794,3 +1794,111 @@ class TestV22SkillEffort:
         assert any("Invalid 'effort' value: 'insane'" in m for m in major_msgs), (
             f"Expected MAJOR rejecting 'insane'; got MAJORs: {major_msgs}"
         )
+
+
+class TestPass2SkillFixes:
+    """Pass-2 audit fixes for validate_skill_comprehensive.py.
+
+    Covers:
+      - CPV-P2-n1: fix false spec citation on MAX_DESCRIPTION_WARN comment
+      - CPV-P2-m6: `disableSkillShellExecution` misuse in frontmatter
+      - GAP-53: self-pointing `skills: ["./"]` detection helper
+    """
+
+    def test_max_description_warn_comment_not_falsely_citing_spec(self):
+        """CPV-P2-n1: the comment next to MAX_DESCRIPTION_WARN must NOT
+        falsely cite a 250-char rule in skills.md — there is no such rule.
+        """
+        src = Path(__file__).parent.parent / "scripts" / "validate_skill_comprehensive.py"
+        text = src.read_text(encoding="utf-8")
+        # The wrong comment claimed "Official Claude Code spec: descriptions
+        # truncated at 250 chars in skill listing" — verify it's gone.
+        assert (
+            "descriptions truncated at 250 chars in skill listing"
+            not in text
+        ), "stale false-citation comment still present on MAX_DESCRIPTION_WARN"
+        # And the corrected comment (CPV-internal heuristic) is present.
+        assert "CPV-internal readability heuristic" in text, (
+            "CPV-P2-n1 fix not applied: MAX_DESCRIPTION_WARN comment should "
+            "now state 'CPV-internal readability heuristic — NOT a skills.md rule.'"
+        )
+
+    def test_disable_skill_shell_execution_in_frontmatter_emits_minor(self, tmp_path):
+        """CPV-P2-m6 / skills.md L414: `disableSkillShellExecution` is a
+        settings.json key, not a skill frontmatter field. If a plugin puts it
+        in SKILL.md it's misuse — CPV must emit MINOR explaining the correct
+        placement.
+        """
+        skill_dir = tmp_path / "bad-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: bad-skill\n"
+            "description: Use when demonstrating misuse of the settings key.\n"
+            "disableSkillShellExecution: true\n"
+            "---\n"
+            "\n## Overview\nBody.\n"
+        )
+        report = validate_skill(skill_dir)
+        minor_msgs = [r.message for r in report.results if r.level == "MINOR"]
+        assert any(
+            "disableSkillShellExecution" in m
+            and "settings.json key" in m
+            for m in minor_msgs
+        ), (
+            f"CPV-P2-m6 MINOR not emitted for frontmatter misuse; got MINORs: "
+            f"{minor_msgs}"
+        )
+
+    def test_disable_skill_shell_execution_still_type_checked_as_boolean(
+        self, tmp_path
+    ):
+        """CPV-P2-m6: even when misplaced in frontmatter, CPV still type-checks
+        `disableSkillShellExecution` as a boolean — a string value must
+        produce a CRITICAL from validate_boolean_field on top of the MINOR.
+        """
+        skill_dir = tmp_path / "bad-skill-2"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: bad-skill-2\n"
+            "description: Use when testing that non-boolean type is caught.\n"
+            "disableSkillShellExecution: yes-please\n"
+            "---\n"
+            "\n## Overview\nBody.\n"
+        )
+        report = validate_skill(skill_dir)
+        criticals = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert any(
+            "disableSkillShellExecution" in m and "must be a boolean" in m
+            for m in criticals
+        ), (
+            f"Type check of disableSkillShellExecution missed non-bool value; "
+            f"got CRITICALs: {criticals}"
+        )
+
+    def test_is_self_pointing_skill_path_positives(self):
+        """GAP-53: `./` and `.` both mean "the plugin root IS the skill".
+        The helper must return True for both forms and tolerate whitespace.
+        """
+        from validate_skill_comprehensive import is_self_pointing_skill_path
+
+        assert is_self_pointing_skill_path("./") is True
+        assert is_self_pointing_skill_path(".") is True
+        assert is_self_pointing_skill_path("  ./  ") is True, (
+            "Must tolerate surrounding whitespace — YAML loaders can emit "
+            "leading/trailing spaces in some quoting modes."
+        )
+
+    def test_is_self_pointing_skill_path_negatives(self):
+        """GAP-53: any path other than the exact self-reference must return
+        False — including ``./extras/``, ``./skills``, and non-strings.
+        """
+        from validate_skill_comprehensive import is_self_pointing_skill_path
+
+        assert is_self_pointing_skill_path("./extras/") is False
+        assert is_self_pointing_skill_path("./skills") is False
+        assert is_self_pointing_skill_path("skills/") is False
+        assert is_self_pointing_skill_path("") is False
+        assert is_self_pointing_skill_path(None) is False  # type: ignore[arg-type]
+        assert is_self_pointing_skill_path(42) is False  # type: ignore[arg-type]

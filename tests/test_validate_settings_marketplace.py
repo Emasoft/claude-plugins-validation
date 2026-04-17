@@ -364,3 +364,71 @@ def test_strict_known_marketplaces_empty_array_is_info(tmp_path: Path):
     report = validate_settings_marketplace_file(settings_path)
     assert not report.has_critical
     assert not report.has_major
+
+
+# =============================================================================
+# v2.22.3 — GAP-5: hostPattern/pathPattern regex compile validation
+# =============================================================================
+
+
+def test_gap5_host_pattern_invalid_regex_is_minor(tmp_path: Path):
+    """GAP-5: an un-compilable hostPattern regex produces MINOR (not silent)."""
+    settings_path = _write_settings(
+        tmp_path,
+        {EXTRA_KNOWN_MARKETPLACES_KEY: {"bad-host": {"source": {"source": "hostPattern", "hostPattern": "["}}}},
+    )
+    report = validate_settings_marketplace_file(settings_path)
+    assert report.has_minor, (
+        f"expected MINOR for invalid regex, got: {[(r.level, r.message) for r in report.results]}"
+    )
+    assert any(
+        r.level == "MINOR" and "invalid regex" in r.message and "hostPattern" in r.message
+        for r in report.results
+    )
+
+
+def test_gap5_path_pattern_invalid_regex_is_minor(tmp_path: Path):
+    """GAP-5: an un-compilable pathPattern regex produces MINOR (not silent)."""
+    settings_path = _write_settings(
+        tmp_path,
+        {EXTRA_KNOWN_MARKETPLACES_KEY: {"bad-path": {"source": {"source": "pathPattern", "pathPattern": "(unclosed"}}}},
+    )
+    report = validate_settings_marketplace_file(settings_path)
+    assert any(
+        r.level == "MINOR" and "invalid regex" in r.message and "pathPattern" in r.message
+        for r in report.results
+    )
+
+
+def test_gap5_host_pattern_valid_regex_silent(tmp_path: Path):
+    """GAP-5 regression guard: a valid regex produces no MINOR invalid-regex finding."""
+    settings_path = _write_settings(
+        tmp_path,
+        {
+            EXTRA_KNOWN_MARKETPLACES_KEY: {
+                "ok-host": {
+                    "source": {
+                        "source": "hostPattern",
+                        "hostPattern": r"^https://plugins\.example\.com/.*$",
+                    }
+                }
+            }
+        },
+    )
+    report = validate_settings_marketplace_file(settings_path)
+    assert not any(
+        r.level == "MINOR" and "invalid regex" in r.message for r in report.results
+    )
+
+
+def test_gap5_host_pattern_non_string_value_is_major(tmp_path: Path):
+    """GAP-5: when hostPattern value is not a string, CPV still emits MAJOR (type error)."""
+    settings_path = _write_settings(
+        tmp_path,
+        {EXTRA_KNOWN_MARKETPLACES_KEY: {"bad": {"source": {"source": "hostPattern", "hostPattern": 123}}}},
+    )
+    report = validate_settings_marketplace_file(settings_path)
+    assert any(
+        r.level == "MAJOR" and "hostPattern" in r.message and "must be a string" in r.message
+        for r in report.results
+    )

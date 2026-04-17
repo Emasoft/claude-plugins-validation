@@ -607,9 +607,17 @@ VALID_PLUGIN_ENV_VARS = {
     "IS_DEMO",  # v2.1.0
 }
 
-# Env var name pattern matching for dynamic plugin env vars
-# CLAUDE_PLUGIN_OPTION_<KEY> — exported for each userConfig key in plugin.json (v2.1.98)
-PLUGIN_ENV_VAR_PATTERNS = (re.compile(r"^CLAUDE_PLUGIN_OPTION_[A-Z][A-Z0-9_]*$"),)
+# Env var name pattern matching for dynamic plugin env vars.
+# - CLAUDE_PLUGIN_OPTION_<KEY> — exported for each userConfig key in plugin.json (v2.1.98)
+# - user_config.<KEY> — GAP-57: plugins-reference.md L433 documents the
+#   ``${user_config.KEY}`` substitution token (the same userConfig values,
+#   referenced by dotted name inside hook/MCP commands). Recognizing this
+#   prevents the skill/command substitution linter from flagging legitimate
+#   ``${user_config.foo}`` references as unknown variables.
+PLUGIN_ENV_VAR_PATTERNS = (
+    re.compile(r"^CLAUDE_PLUGIN_OPTION_[A-Z][A-Z0-9_]*$"),
+    re.compile(r"^user_config\.[a-zA-Z_][a-zA-Z0-9_]*$"),
+)
 
 
 def is_valid_plugin_env_var(name: str) -> bool:

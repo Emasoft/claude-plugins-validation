@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -190,6 +191,28 @@ def validate_source_object(
                     "only usable on this machine; do not ship this in a plugin settings snippet",
                     file_label,
                 )
+
+    elif source_type in ("hostPattern", "pathPattern"):
+        # v2.22.3 — GAP-5: the `hostPattern`/`pathPattern` values are regex
+        # strings (plugin-marketplaces.md:645-669). Previously CPV only
+        # checked presence. Now also attempt `re.compile()` and emit MINOR
+        # when the pattern is syntactically invalid so authors don't ship a
+        # marketplace that silently never matches at runtime.
+        pattern_val = source_obj.get(source_type)
+        if pattern_val is not None:
+            if not isinstance(pattern_val, str):
+                report.major(
+                    f"{ctx}.{source_type}: must be a string, got {type(pattern_val).__name__}",
+                    file_label,
+                )
+            else:
+                try:
+                    re.compile(pattern_val)
+                except re.error as exc:
+                    report.minor(
+                        f"{ctx}.{source_type}: invalid regex '{pattern_val}' — {exc}",
+                        file_label,
+                    )
 
     elif source_type == "settings":
         # Inline marketplace: must declare name + plugins array

@@ -2626,3 +2626,197 @@ class TestV22HookMatcherValues:
             "${user_config.<KEY>} must be recognised as a known substitution "
             "token per plugins-reference.md L423-432."
         )
+
+
+class TestPass2HookFixes:
+    """Pass-2 audit fixes for validate_hook.py (CPV-P2-m1, GAP-17/18/19, CPV-P2-m2/n6).
+
+    These tests anchor on specific hooks.md / plugins-reference.md line references
+    so the provenance of each check is immediate when re-reading this file.
+    """
+
+    # --- CPV-P2-m1: prompt hook timeout > 10× 30s default is suspicious ---
+
+    def test_prompt_hook_timeout_over_300s_emits_minor(self) -> None:
+        """CPV-P2-m1 / hooks.md L2147: prompt hook default is 30s.
+        Any timeout above 300s (10× default) is suspicious and must emit a
+        MINOR nudge, not a silent pass.
+        """
+        report = ValidationReport()
+        hook = {"type": "prompt", "prompt": "Summarize.", "timeout": 350}
+        validate_prompt_hook(hook, "Stop", report)
+        minors = [r for r in report.results if r.level == "MINOR"]
+        assert any("more than 10" in r.message for r in minors), (
+            f"timeout=350s must emit a MINOR per CPV-P2-m1; got: "
+            f"{[r.message for r in report.results]}"
+        )
+
+    def test_prompt_hook_timeout_exactly_300s_does_not_emit_minor(self) -> None:
+        """CPV-P2-m1 boundary: 300s is EXACTLY 10× the 30s default. The check
+        is ``> 300``, so 300 must NOT trigger the MINOR — only values strictly
+        above 300 do.
+        """
+        report = ValidationReport()
+        hook = {"type": "prompt", "prompt": "Summarize.", "timeout": 300}
+        validate_prompt_hook(hook, "Stop", report)
+        # Neither MINOR nor the "exceeds 600s" warning should fire at 300s.
+        assert not any(
+            "more than 10" in r.message for r in report.results if r.level == "MINOR"
+        )
+        assert not any(
+            "exceeds 600s" in r.message for r in report.results if r.level == "WARNING"
+        )
+
+    def test_prompt_hook_timeout_millisecond_branch_reachable(self) -> None:
+        """CPV-P2-m1 regression: the pre-fix code ordered '>600' before '>10000',
+        making the millisecond-typo branch unreachable. After the fix, a
+        timeout of 15000 must hit the 'looks like milliseconds' branch
+        (not the 'exceeds 600s' branch).
+        """
+        report = ValidationReport()
+        hook = {"type": "prompt", "prompt": "Summarize.", "timeout": 15000}
+        validate_prompt_hook(hook, "Stop", report)
+        ms_warnings = [
+            r for r in report.results
+            if r.level == "WARNING" and "milliseconds" in r.message
+        ]
+        assert ms_warnings, (
+            f"timeout=15000s must hit the milliseconds branch; got: "
+            f"{[r.message for r in report.results]}"
+        )
+
+    # --- GAP-17: PermissionDenied {retry: true} output shape ---
+
+    def test_permission_denied_retry_boolean_ok(self) -> None:
+        """GAP-17 / plugins-reference.md L117: PermissionDenied hooks return
+        ``{retry: true}``. The helper must return an empty issue list when
+        ``retry`` is a proper boolean.
+        """
+        from validate_hook import validate_permission_denied_output
+
+        assert validate_permission_denied_output({"retry": True}) == []
+        assert validate_permission_denied_output({"retry": False}) == []
+        # Wrapped in hookSpecificOutput — both forms are seen in the spec.
+        assert validate_permission_denied_output(
+            {"hookSpecificOutput": {"retry": True}}
+        ) == []
+
+    def test_permission_denied_retry_non_boolean_emits_minor_issue(self) -> None:
+        """GAP-17: ``retry`` must be a boolean; any non-bool produces an issue."""
+        from validate_hook import validate_permission_denied_output
+
+        issues = validate_permission_denied_output({"retry": "yes"})
+        assert len(issues) == 1
+        assert "must be a boolean" in issues[0]
+        assert "plugins-reference.md L117" in issues[0]
+
+    def test_permission_denied_output_fields_constant_contains_retry(self) -> None:
+        """GAP-17: ``retry`` must be recognised in the PermissionDenied
+        hookSpecificOutput-fields constant so future output validation can
+        reference it without re-discovering the spec.
+        """
+        from validate_hook import PERMISSION_DENIED_HOOK_SPECIFIC_OUTPUT_FIELDS
+
+        assert "retry" in PERMISSION_DENIED_HOOK_SPECIFIC_OUTPUT_FIELDS
+        assert "hookEventName" in PERMISSION_DENIED_HOOK_SPECIFIC_OUTPUT_FIELDS
+
+    # --- GAP-18: FileChanged matcher is a filename glob, not a tool name ---
+
+    def test_filechanged_matcher_tool_name_emits_info(self) -> None:
+        """GAP-18 / plugins-reference.md L131: FileChanged matchers are FILENAME
+        globs. A matcher like ``"Bash"`` that looks like a tool name must emit
+        an INFO explaining the semantics difference.
+        """
+        report = ValidationReport()
+        ok = validate_matcher("Bash", "FileChanged", report)
+        assert ok is True
+        infos = [
+            r for r in report.results
+            if r.level == "INFO" and "FileChanged matcher" in r.message
+        ]
+        assert infos, (
+            f"FileChanged matcher='Bash' must emit the GAP-18 INFO; got: "
+            f"{[r.message for r in report.results]}"
+        )
+        assert "FILENAME glob" in infos[0].message
+
+    def test_filechanged_matcher_filename_glob_no_info(self) -> None:
+        """GAP-18 boundary: a real filename glob like ``src/foo\\.py$`` must NOT
+        trigger the tool-name warning — only tool-name-looking matchers do.
+        (CPV's matcher field is parsed as a regex — see ``validate_matcher``
+        at validate_hook.py:~440 — so the glob tests use regex-legal forms.)
+        """
+        report = ValidationReport()
+        ok = validate_matcher(r"src/foo\.py$", "FileChanged", report)
+        assert ok is True
+        # Must NOT emit the GAP-18 INFO for a legitimate glob/regex.
+        tool_infos = [
+            r for r in report.results
+            if r.level == "INFO" and "FileChanged matcher" in r.message
+        ]
+        assert not tool_infos, (
+            f"filename regex 'src/foo\\.py$' must NOT trigger the GAP-18 INFO; "
+            f"got: {[r.message for r in tool_infos]}"
+        )
+
+    # --- GAP-19: PreToolUse additionalContext in hookSpecificOutput ---
+
+    def test_pretool_use_additionalcontext_in_output_fields_constant(self) -> None:
+        """GAP-19: v2.1.110 added ``additionalContext`` retention on tool
+        failure to the PreToolUse hookSpecificOutput shape. The constant must
+        include it so downstream validators don't flag it as unknown.
+        """
+        from validate_hook import PRETOOLUSE_HOOK_SPECIFIC_OUTPUT_FIELDS
+
+        assert "additionalContext" in PRETOOLUSE_HOOK_SPECIFIC_OUTPUT_FIELDS
+        assert "permissionDecision" in PRETOOLUSE_HOOK_SPECIFIC_OUTPUT_FIELDS
+        assert "permissionDecisionReason" in PRETOOLUSE_HOOK_SPECIFIC_OUTPUT_FIELDS
+
+    # --- CPV-P2-m2: permission-update constants ---
+
+    def test_permission_update_types_exactly_six(self) -> None:
+        """CPV-P2-m2 / hooks.md L1115-1141: the permission-update-entry type
+        enum has exactly 6 values. Must be exposed for future output validation.
+        """
+        from validate_hook import PERMISSION_UPDATE_TYPES
+
+        assert PERMISSION_UPDATE_TYPES == {
+            "addRules",
+            "replaceRules",
+            "removeRules",
+            "setMode",
+            "addDirectories",
+            "removeDirectories",
+        }
+
+    def test_permission_behaviors_and_destinations(self) -> None:
+        """CPV-P2-m2 / hooks.md L1121, L1134-1139: the ``behavior`` enum has 3
+        values (allow/deny/ask) and ``destination`` has 4 values."""
+        from validate_hook import PERMISSION_BEHAVIORS, PERMISSION_DESTINATIONS
+
+        assert PERMISSION_BEHAVIORS == {"allow", "deny", "ask"}
+        assert PERMISSION_DESTINATIONS == {
+            "session",
+            "localSettings",
+            "projectSettings",
+            "userSettings",
+        }
+
+    # --- CPV-P2-n6: Setup-matcher comment version ---
+
+    def test_setup_matcher_comment_references_current_version(self) -> None:
+        """CPV-P2-n6 / validate_hook.py L54: the inline comment next to the
+        ``Setup`` matcher entry must cite the CURRENT Claude Code release. After
+        the fix it is v2.1.109 (was v2.1.86).
+        """
+        hook_src = Path(
+            __file__
+        ).parent.parent / "scripts" / "validate_hook.py"
+        src_text = hook_src.read_text(encoding="utf-8")
+        # The comment must cite v2.1.109 now and MUST NOT still cite v2.1.86.
+        assert "v2.1.109" in src_text, (
+            "Setup matcher comment must reference v2.1.109 (CPV-P2-n6)."
+        )
+        assert (
+            "as of v2.1.86" not in src_text
+        ), "stale v2.1.86 citation left in validate_hook.py — CPV-P2-n6 not applied"

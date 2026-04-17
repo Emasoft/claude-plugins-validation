@@ -1294,3 +1294,76 @@ class TestV2212UserPathPatternsIgnoreCase:
         text = "C:\\Users\\Alice\\foo"
         matched = any(p.search(text) for p in USER_PATH_PATTERNS)
         assert matched, "Uppercase Windows drive path must still match after IGNORECASE fix"
+
+
+class TestPass2TaxonomyAdditions:
+    """Pass-2 taxonomy additions (GAP-57, GAP-59, GAP-60, GAP-76, CPV-P2-m6).
+
+    These tests assert that specific env-var names, substitution tokens, and
+    settings keys are recognised AFTER the pass-2 fixes. They are the only
+    long-term guarantee that the whitelists don't silently regress.
+    """
+
+    def test_plugin_lifecycle_env_vars_recognised(self):
+        """GAP-59 / GAP-60 / GAP-76: all plugin-lifecycle env vars referenced
+        in plugin-marketplaces.md and discover-plugins.md must pass
+        ``is_valid_plugin_env_var``.
+        """
+        from cpv_validation_common import VALID_PLUGIN_ENV_VARS, is_valid_plugin_env_var
+
+        for env_var in (
+            "CLAUDE_CODE_PLUGIN_KEEP_MARKETPLACE_ON_FAILURE",  # GAP-59
+            "CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS",  # GAP-59
+            "CLAUDE_CODE_PLUGIN_SEED_DIR",  # GAP-60
+            "CLAUDE_CODE_PLUGIN_CACHE_DIR",  # GAP-60
+            "DISABLE_AUTOUPDATER",  # GAP-76
+            "FORCE_AUTOUPDATE_PLUGINS",  # GAP-76
+        ):
+            assert env_var in VALID_PLUGIN_ENV_VARS, (
+                f"{env_var} must be in VALID_PLUGIN_ENV_VARS (pass-2 GAP-59/60/76)"
+            )
+            assert is_valid_plugin_env_var(env_var), (
+                f"is_valid_plugin_env_var({env_var!r}) must return True"
+            )
+
+    def test_user_config_substitution_pattern_recognised(self):
+        """GAP-57 / plugins-reference.md L433: `${user_config.<KEY>}` is a
+        legitimate plugin substitution token and must pass
+        ``is_valid_plugin_env_var``.
+        """
+        from cpv_validation_common import is_valid_plugin_env_var
+
+        assert is_valid_plugin_env_var("user_config.api_key") is True
+        assert is_valid_plugin_env_var("user_config.foo_bar_2") is True
+        # Negative: the prefix must be exactly ``user_config.`` — a bare
+        # ``user_config`` with no dotted key is NOT the documented syntax.
+        assert is_valid_plugin_env_var("user_config") is False
+        # Negative: case-sensitive per the spec.
+        assert is_valid_plugin_env_var("User_Config.key") is False
+
+    def test_claude_plugin_option_pattern_still_recognised(self):
+        """Regression guard: adding the ``user_config.`` pattern must not
+        break the pre-existing ``CLAUDE_PLUGIN_OPTION_<KEY>`` pattern.
+        """
+        from cpv_validation_common import is_valid_plugin_env_var
+
+        assert is_valid_plugin_env_var("CLAUDE_PLUGIN_OPTION_API_KEY") is True
+        assert is_valid_plugin_env_var("CLAUDE_PLUGIN_OPTION_FOO") is True
+        # Pattern anchor: lowercase letters in the KEY part are rejected.
+        assert is_valid_plugin_env_var("CLAUDE_PLUGIN_OPTION_foo") is False
+
+    def test_disable_skill_shell_execution_in_known_settings(self):
+        """CPV-P2-m6 / skills.md L414: `disableSkillShellExecution` is an
+        official settings.json key. It must be in
+        ``cc_scope_rules.KNOWN_SETTINGS_KEYS`` so the settings validator
+        does not flag legitimate usage as unknown.
+        """
+        from cc_scope_rules import KNOWN_SETTINGS_KEYS
+
+        assert "disableSkillShellExecution" in KNOWN_SETTINGS_KEYS, (
+            "KNOWN_SETTINGS_KEYS must recognise `disableSkillShellExecution` "
+            "(skills.md L414) per CPV-P2-m6."
+        )
+        # Regression guard: the two v2.22.2 additions must also still be present.
+        assert "attribution" in KNOWN_SETTINGS_KEYS
+        assert "subagentStatusLine" in KNOWN_SETTINGS_KEYS
