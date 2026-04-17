@@ -90,6 +90,28 @@ Marketplace-level CI/CD (marketplace workflow files, auto-notification receivers
 - **ALWAYS write fix log** to `docs_dev/fix-log_<name>_YYYYMMDD.md` — return only summary to caller.
 - **After fixing**, return a one-line summary, not the full fix log.
 
+## Special class: runtime-dep and invocation hook issues (TRDD-0028dd34)
+
+Any finding whose message references one of these phrases is a RUNTIME-DEP issue and **must be fixed by changing the invocation method, NOT the script's logic**:
+
+- `plain interpreter — third-party imports`
+- `no PEP 723 inline metadata block`
+- `PEP 723 metadata in {script} is missing declarations`
+- `uv run --with flags do not cover`
+- `no SessionStart hook was found that creates the venv`
+- `calls sys.exit()/exit()/raise SystemExit at MODULE scope`
+- `unset VIRTUAL_ENV and then invokes a plain python3`
+- `HTTP hook on ... has a {timeout}s timeout` (latency-sensitive events)
+
+For these, read **hook-fixes.md §13** (it has a dedicated subsection per diagnostic + an edge-case matrix in §13.9). The critical rule: **preserve the hook's effective behavior**. Don't delete the hook, don't mute the warning with `|| true` / `2>/dev/null`, and don't strip third-party imports unless a genuine stdlib alternative exists. The fix is almost always one of:
+
+1. Change the hook command to `uv run --quiet --script` and add a `# /// script` PEP 723 block to the script
+2. Add a SessionStart hook that sets up `${CLAUDE_PLUGIN_DATA}/.venv`
+3. Move a module-scope `sys.exit` into an `if __name__ == '__main__':` guard or raise `ImportError` instead
+4. Add `"async": true` to an HTTP hook on a latency-sensitive event
+
+Never substitute `uvx` for `uv run --script` — they solve different problems; `uvx` cannot target a local `.py` file (see hook-fixes §13.1 for details).
+
 ## CRITICAL: Never improvise `gh secret set`
 
 If any fix requires touching the `MARKETPLACE_PAT` secret (rare for plugin-scope fixes — usually routed to marketplace-fixer), **always use the helper script** `scripts/set_marketplace_pat.py`. The helper never prints the token value, so it cannot leak into the Claude transcript, shell history, or log files.

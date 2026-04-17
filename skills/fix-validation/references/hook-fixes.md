@@ -14,6 +14,7 @@
 - [10. Script Linting Issues](#10-script-linting-issues)
 - [11. Field Validation Issues](#11-field-validation-issues)
 - [12. Informational Notices](#12-informational-notices)
+- [13. Runtime-Dep & Invocation Issues (TRDD-0028dd34)](#13-runtime-dep--invocation-issues-trdd-0028dd34)
 
 ---
 
@@ -1546,3 +1547,361 @@ Comprehensive remediation guide for all issues detected by `validate_hook.py`.
 | `1` | CRITICAL issues found (hooks will not work) |
 | `2` | MAJOR issues found (significant problems) |
 | `3` | MINOR issues found (may affect behavior) |
+
+---
+
+## 13. Runtime-Dep & Invocation Issues (TRDD-0028dd34)
+
+**Context:** Perfect Skill Suggester v3.1.0 shipped a `UserPromptSubmit` hook
+that crashed on every prompt with `ERROR: pycozo is required` because the
+command invoked `python3 pss_hook.py` — and system `python3` had no pycozo.
+CPV's legacy hook validator silently approved the plugin. The TRDD-0028dd34
+rewrite added a tokenizer, AST-based import detection, PEP 723 metadata
+parsing, a cross-cutting runtime-dep reconciliation check, module-scope
+`sys.exit` detection, and an `unset VIRTUAL_ENV` antipattern check.
+
+**Critical fix-agent rule:** all of these diagnostics report real runtime
+failures. The fix must preserve the hook's effective behavior — usually
+that means **changing HOW the script is invoked, not WHAT it does**. Never
+"fix" one of these by deleting the hook, muting the warning, or changing
+the script's logic to strip third-party imports unless a simpler stdlib
+alternative genuinely exists.
+
+### 13.1. MAJOR: Plain interpreter with third-party imports
+
+**Error message**: `Hook invokes {script} (imports: {mods}) via plain interpreter — third-party imports {mods} will fail at runtime unless satisfied via \`uv run --script\` + PEP 723 metadata, \`uv run --with\`, or a ${CLAUDE_PLUGIN_DATA}/.venv/bin/python set up by a SessionStart hook. (Note: do NOT substitute \`uvx\` — ...)`
+
+**Severity**: MAJOR
+**Root cause**: The hook runs `python3 script.py` (or `python script.py`, `python3.12 script.py`, etc.) on a script whose imports include packages outside the Python stdlib. At runtime, whatever `python3` resolves to on the user's PATH gets used — typically system Python, which has none of the project's dependencies. The hook will raise `ImportError` on every invocation. This is exactly what killed PSS v3.1.0.
+
+**Preferred fix — PEP 723 inline metadata + `uv run --script`:**
+
+1. Add a PEP 723 metadata block at the top of the script (before any `import` statement, after any shebang):
+   ```python
+   #!/usr/bin/env python3
+   # /// script
+   # requires-python = ">=3.10"
+   # dependencies = [
+   #     "pycozo[embedded]>=0.7.6",
+   #     # One entry per third-party import mentioned in the validator message
+   # ]
+   # ///
+   ```
+2. Change the hook command from `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/foo.py` to `uv run --quiet --script ${CLAUDE_PLUGIN_ROOT}/scripts/foo.py`. Example:
+   ```jsonc
+   // BEFORE
+   { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/foo.py\"" }
+   // AFTER
+   { "type": "command", "command": "uv run --quiet --script \"${CLAUDE_PLUGIN_ROOT}/scripts/foo.py\"" }
+   ```
+3. Keep `--quiet` so uv's progress output does not leak into hook stdout (which Claude Code treats as hook-returned JSON).
+4. Do NOT substitute `uvx` (`uv tool run`). `uvx` runs installable PyPI packages via their `[project.scripts]` entry-points; it cannot target a local `.py` file with PEP 723 metadata — `uvx /path/to/foo.py` attempts to resolve `foo.py` as a PyPI package and fails. There is no `uvx --script` flag.
+5. Document uv as a prerequisite in the plugin README (e.g. add a Requirements section stating Python ≥ 3.10 and uv on `PATH`).
+
+**Alternative fix A — `uv run --with`:** If PEP 723 metadata is infeasible (e.g. the script is shared between the hook and a packaged entry-point with its own dep manifest), pass `--with` flags for each third-party dep:
+```jsonc
+{ "command": "uv run --with pycozo --with httpx \"${CLAUDE_PLUGIN_ROOT}/scripts/foo.py\"" }
+```
+The fix-agent must supply a `--with pkg[==version]` for every module named in the validator's `imports: {...}` list. Missing entries will re-fire the check (now as the "uv-run-with missing" MAJOR — see §13.3).
+
+**Alternative fix B — `${CLAUDE_PLUGIN_DATA}/.venv/bin/python`:** If the plugin needs a dedicated venv that survives across invocations:
+
+1. Add a SessionStart hook that creates the venv on first session and installs deps:
+   ```jsonc
+   "SessionStart": [{
+     "hooks": [{
+       "type": "command",
+       "command": "diff -q \"${CLAUDE_PLUGIN_ROOT}/pyproject.toml\" \"${CLAUDE_PLUGIN_DATA}/pyproject.toml\" >/dev/null 2>&1 || (mkdir -p \"${CLAUDE_PLUGIN_DATA}\" && cp \"${CLAUDE_PLUGIN_ROOT}/pyproject.toml\" \"${CLAUDE_PLUGIN_DATA}/\" && uv venv \"${CLAUDE_PLUGIN_DATA}/.venv\" --python 3.10 && VIRTUAL_ENV=\"${CLAUDE_PLUGIN_DATA}/.venv\" uv pip install -r \"${CLAUDE_PLUGIN_ROOT}/pyproject.toml\")"
+     }]
+   }]
+   ```
+2. Change the consuming hook to invoke the venv python directly:
+   ```jsonc
+   { "command": "\"${CLAUDE_PLUGIN_DATA}/.venv/bin/python\" \"${CLAUDE_PLUGIN_ROOT}/scripts/foo.py\"" }
+   ```
+
+**Alternative fix C — make the script stdlib-only:** Only if the third-party dep is genuinely optional (e.g. a nice-to-have formatter), refactor the script to remove the import. Never do this by `try: import x except ImportError: x = None` — the validator treats try-except-guarded imports as third-party too (see §13.7 for the right pattern when a dep is truly optional).
+
+**Do NOT:**
+- Add `|| true`, `2>/dev/null`, or other error suppression. That hides the failure without fixing it.
+- Delete the hook. Find out what it does first.
+- Change `python3` to `python` — same problem.
+- Set `async: true` to "fire and forget" the ImportError. Claude Code still surfaces hook errors.
+
+---
+
+### 13.2. MAJOR: `uv run --script` with no PEP 723 metadata block
+
+**Error message**: `Hook uses \`uv run --script\` on {script} but the script has no PEP 723 inline metadata block. Add a \`# /// script\` header declaring dependencies: {mods}.`
+
+**Severity**: MAJOR
+**Root cause**: The hook command uses `uv run --script` (the correct wrapper) but the referenced script has no `# /// script` block, so uv creates an empty-deps cache venv and the script's imports fail.
+
+**Fix**:
+
+1. Add the metadata block immediately after any shebang and before the first `import`:
+   ```python
+   #!/usr/bin/env python3
+   # /// script
+   # requires-python = ">=3.10"
+   # dependencies = [
+   # ]
+   # ///
+   import os  # stdlib imports go below
+   import pycozo  # third-party
+   ```
+2. Populate `dependencies` with a PEP 508 requirement spec for each module in the validator's `mods` list. Use the **PyPI project name**, not the import name (`pillow`, not `PIL`; `beautifulsoup4`, not `bs4`). Include a version floor when possible:
+   ```
+   "pycozo[embedded]>=0.7.6",
+   "httpx>=0.27",
+   "pyyaml>=6",
+   ```
+3. If unsure of the project name, run `uv pip show <import-name>` in a venv that already has the package, or check PyPI.
+4. Commit the script change alongside the hooks.json change.
+
+**Do NOT** remove `--script` from the command to silence the warning — that falls back to the §13.1 failure mode.
+
+---
+
+### 13.3. MAJOR: PEP 723 block is incomplete
+
+**Error message**: `PEP 723 metadata in {script} is missing declarations for imported third-party modules: {missing}. Add them to the \`dependencies\` list in the \`# /// script\` block.`
+
+**Severity**: MAJOR
+**Root cause**: The PEP 723 block exists but the `dependencies` array omits packages the script actually imports. uv's cache venv will not contain them at runtime.
+
+**Fix**:
+
+1. Open the script. Locate the `# /// script` block.
+2. For each module name in `{missing}`, append a PEP 508 line inside `dependencies`. Preserve any existing version pins:
+   ```diff
+    # /// script
+    # requires-python = ">=3.10"
+    # dependencies = [
+    #     "pycozo[embedded]>=0.7.6",
+   +#     "httpx>=0.27",
+    # ]
+    # ///
+   ```
+3. Keep the map from import name to PyPI name in mind (same table as §13.2).
+4. If the script legitimately does NOT use a module at runtime (e.g. an import sits behind `if typing.TYPE_CHECKING:`), move that import inside the TYPE_CHECKING guard so ast detection skips it:
+   ```python
+   from typing import TYPE_CHECKING
+   if TYPE_CHECKING:
+       import some_heavy_lib  # type-only import, not a runtime dep
+   ```
+   The validator walks all imports including those inside `if TYPE_CHECKING` — this is intentional, because runtime-reachable `if` branches also fire. Use `if TYPE_CHECKING` ONLY for true type-only imports.
+
+---
+
+### 13.4. MAJOR: `uv run --with` flags do not cover imports
+
+**Error message**: `\`uv run --with\` flags do not cover imported modules {missing} in {script}. Add them to --with.`
+
+**Severity**: MAJOR
+**Root cause**: The command uses `uv run --with pkg foo.py` (explicit-deps mode) but at least one import has no matching `--with` flag.
+
+**Fix**:
+
+1. Append a `--with <pkg>` for each missing module. Example:
+   ```jsonc
+   // BEFORE
+   { "command": "uv run --with pycozo \"${CLAUDE_PLUGIN_ROOT}/scripts/foo.py\"" }
+   // AFTER (foo.py also imports httpx)
+   { "command": "uv run --with pycozo --with httpx \"${CLAUDE_PLUGIN_ROOT}/scripts/foo.py\"" }
+   ```
+2. `--with` accepts comma-separated lists too: `--with pycozo,httpx` — use whichever style keeps the command readable.
+3. Consider migrating to PEP 723 metadata (§13.1 Preferred Fix) once `--with` grows past 2–3 entries — inline metadata is easier to review and auto-invalidates its cache on changes.
+
+---
+
+### 13.5. MINOR: venv-python invocation without SessionStart setup hook
+
+**Error message**: `Hook invokes {script} via ${CLAUDE_PLUGIN_DATA}/.venv/bin/python but no SessionStart hook was found that creates the venv (expected: a command containing \`uv venv\` or \`pip install\` targeting ${CLAUDE_PLUGIN_DATA}). First-install runs will fail with ImportError for {mods}.`
+
+**Severity**: MINOR
+**Root cause**: The hook targets a plugin-scoped venv via direct binary invocation, but no companion SessionStart hook exists to create that venv on first session. The user's first prompt after install will fail because `.venv/bin/python` does not exist yet.
+
+**Fix**:
+
+Add a SessionStart hook whose command meets the detector's heuristic (contains `CLAUDE_PLUGIN_DATA` **and** matches one of `uv venv`, `python -m venv`, or `pip install`):
+
+```jsonc
+{
+  "hooks": {
+    "SessionStart": [{
+      "hooks": [{
+        "type": "command",
+        "command": "diff -q \"${CLAUDE_PLUGIN_ROOT}/pyproject.toml\" \"${CLAUDE_PLUGIN_DATA}/pyproject.toml\" >/dev/null 2>&1 || (mkdir -p \"${CLAUDE_PLUGIN_DATA}\" && cp \"${CLAUDE_PLUGIN_ROOT}/pyproject.toml\" \"${CLAUDE_PLUGIN_DATA}/\" && uv venv \"${CLAUDE_PLUGIN_DATA}/.venv\" --python 3.10 && VIRTUAL_ENV=\"${CLAUDE_PLUGIN_DATA}/.venv\" uv pip install -r \"${CLAUDE_PLUGIN_ROOT}/pyproject.toml\")"
+      }]
+    }],
+    "UserPromptSubmit": [{
+      "hooks": [{
+        "type": "command",
+        "command": "\"${CLAUDE_PLUGIN_DATA}/.venv/bin/python\" \"${CLAUDE_PLUGIN_ROOT}/scripts/foo.py\""
+      }]
+    }]
+  }
+}
+```
+
+Key properties:
+- The `diff -q` guard skips reinstall when the manifest has not changed, keeping warm-session latency to a few milliseconds.
+- On plugin updates that change `pyproject.toml`, the diff fails → venv re-syncs automatically.
+- `uv venv` / `uv pip install` is preferred over `python -m venv` / `pip install` for speed, but either matches the detector.
+
+If switching to `uv run --script` (§13.1 Preferred Fix) is feasible instead, do that — it needs no SessionStart bootstrap and has better cache semantics.
+
+---
+
+### 13.6. MAJOR: Script calls `sys.exit` / `raise SystemExit` at module scope
+
+**Error message**: `{script} calls sys.exit()/exit()/raise SystemExit at MODULE scope (line(s): {lines}) — the hook process will be killed at import time if the call path is reached. Move such exits inside a function guarded by \`if __name__ == '__main__':\` or raise ImportError instead.`
+
+**Severity**: MAJOR
+**Root cause**: Python's `sys.exit()` raises `SystemExit`. When an `import` statement triggers `SystemExit` at module top level (including inside a top-level `if` block), the SystemExit propagates **past any `try/except ImportError` in the importer** and kills the entire process. For a hook script this means the hook dies silently on every invocation the moment the problematic import path is taken.
+
+This was the second layer of the PSS v3.1.0 failure: `pss_cozodb.py` had `sys.exit("ERROR: pycozo is required...")` inside a top-level `except ImportError:` block, so even though `pss_hook.py` wrapped its import of `pss_cozodb` in `try/except ImportError`, the SystemExit from the nested sys.exit was NOT caught.
+
+**Fix — three patterns (pick by context):**
+
+**Pattern A — CLI script with `main()`:** If the script IS a CLI that's meant to be run directly, move the exit logic into `main()` and guard with `if __name__ == '__main__':`.
+
+   ```diff
+   - import sys
+   - if not os.environ.get("TOKEN"):
+   -     sys.exit("TOKEN env var required")
+   - do_work()
+   + import sys
+   + def main() -> int:
+   +     if not os.environ.get("TOKEN"):
+   +         print("TOKEN env var required", file=sys.stderr)
+   +         return 1
+   +     do_work()
+   +     return 0
+   + if __name__ == "__main__":
+   +     sys.exit(main())
+   ```
+
+   The exit now only fires when the script is run as `__main__`, not when imported.
+
+**Pattern B — Library module with optional dep:** If the script is imported by other modules and has an optional dependency, raise `ImportError` (which IS caught by `try/except ImportError`) or fall back gracefully. NEVER call `sys.exit` from a library.
+
+   ```diff
+   - import sys
+   - try:
+   -     import pycozo
+   - except ImportError:
+   -     sys.exit("ERROR: pycozo is required.")
+   + try:
+   +     import pycozo
+   + except ImportError as _e:
+   +     # Provide a stub/sentinel or raise ImportError with a clear message —
+   +     # NEVER sys.exit, because SystemExit propagates past the caller's
+   +     # `except ImportError:` and kills the process.
+   +     pycozo = None  # type: ignore[assignment]
+   +     _pycozo_import_error = _e
+   +
+   + def _require_pycozo():
+   +     if pycozo is None:
+   +         raise ImportError(
+   +             "pycozo is required. Install via PEP 723 metadata + uv run --script, "
+   +             "or add to the plugin's SessionStart venv-setup hook."
+   +         ) from _pycozo_import_error
+   ```
+
+**Pattern C — Assertion-style top-level guard:** If the script genuinely must not load under certain conditions (rare), raise a concrete exception type that the caller can handle — not a bare `SystemExit`:
+
+   ```python
+   class HookConfigurationError(RuntimeError):
+       """Raised at import time when the hook is misconfigured."""
+   if some_required_condition is False:
+       raise HookConfigurationError("required: foo env var set")
+   ```
+
+**Do NOT:**
+- Comment out the `sys.exit` to silence the warning — you remove the check but keep the bad design.
+- Wrap the `sys.exit` in `if __name__ == '__main__':` AT MODULE TOP LEVEL for a library module — that works but Pattern A is the clearer idiom.
+- Change `sys.exit(...)` to `os._exit(...)` — that's strictly worse (skips cleanup, same kill semantics).
+
+---
+
+### 13.7. WARNING: `unset VIRTUAL_ENV` with plain `python3` (conditional)
+
+**Error message**: `Command runs \`unset VIRTUAL_ENV\` and then invokes a plain \`python3\` interpreter. Unsetting VIRTUAL_ENV removes the user's venv but leaves you depending on whatever \`python3\` resolves to on PATH — typically system Python with none of the project's dependencies. ...`
+
+**Severity**: WARNING
+**Root cause**: The command tries to isolate from the user's ambient environment by unsetting `VIRTUAL_ENV`, but then falls back to plain `python3`. System Python has none of the plugin's deps — this is the exact PSS v3.1.0 failure mode. The warning fires ONLY when `unset VIRTUAL_ENV` coincides with an `interpreter-python` ScriptRef in the same command AND no safer-python ref (`uv-run-script`, `uv-run-with`, `venv-python`) is present. Legitimate uses with `uv run --script` or direct-invoked venv python do NOT trigger this warning.
+
+**Fix**: apply the same fix as §13.1 (switch to `uv run --script` with PEP 723 metadata). The `unset VIRTUAL_ENV` becomes unnecessary once the invocation changes:
+
+```jsonc
+// BEFORE
+{ "command": "unset VIRTUAL_ENV; python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/foo.py\"" }
+// AFTER
+{ "command": "uv run --quiet --script \"${CLAUDE_PLUGIN_ROOT}/scripts/foo.py\"" }
+```
+
+If for some reason `unset VIRTUAL_ENV` is still desired after switching to `uv run --script` (e.g. belt-and-suspenders isolation), the warning WILL NOT fire — the check requires BOTH `unset VIRTUAL_ENV` AND plain `python3` AND no safer invocation.
+
+Analogous PYTHONPATH variant: same diagnosis and same fix; a bare `unset PYTHONPATH; python3 foo.py` is flagged for the same reason.
+
+---
+
+### 13.8. WARNING: HTTP hook latency-sensitive event with long timeout
+
+**Error message**: `HTTP hook on '{event_name}' has a {timeout}s timeout — this event blocks user interaction, so every invocation can stall for up to {timeout}s on a slow/failing endpoint. Consider \`async: true\` or a shorter timeout (<= 5s).`
+
+**Severity**: WARNING
+**Root cause**: HTTP hooks block the hook thread until the remote responds. For events that sit on the user's critical path (`UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `SessionStart`), a slow or unresponsive endpoint stalls every invocation. A 30s timeout means every bad endpoint hit is a 30s freeze.
+
+**Fix — pick the option that matches intent:**
+
+1. **If the HTTP call is fire-and-forget (analytics, audit logs):** mark the hook async so it does not block:
+   ```jsonc
+   { "type": "http", "url": "https://analytics.example.com/event", "async": true, "timeout": 30 }
+   ```
+   Async hooks run in the background and their latency never touches the user.
+2. **If the HTTP response matters (allow/deny decision):** cap the timeout at 5 seconds and make sure the endpoint is fast:
+   ```jsonc
+   { "type": "http", "url": "https://policy.example.com/check", "timeout": 5 }
+   ```
+   If the endpoint legitimately takes longer, you are in trouble — the user will notice every call. Consider moving the decision out of the critical path.
+3. **If the event is not actually latency-sensitive:** you likely want a different event (e.g. `Stop` or `TaskCompleted`) rather than `UserPromptSubmit`.
+
+The warning is advisory — it does not block the hook from running. But if the endpoint ever degrades, the user sees the stall before any error is raised.
+
+---
+
+### 13.9. Edge cases the fix-agent MUST handle correctly
+
+| Scenario | Validator sees | Correct fix |
+|---|---|---|
+| Script uses only stdlib (`os`, `sys`, `json`) | `plain python3` but no third-party imports → silent PASS | No change needed — the hook is safe as-is. Fix-agent MUST NOT touch it. |
+| Script has optional dep behind `try/except ImportError` | AST still detects the import → flagged | Apply §13.6 Pattern B (ImportError-raising helper) AND §13.1 (uv-run-script + PEP 723) |
+| Script imports `pss_cozodb` (sibling plugin module) | Not flagged — sibling modules excluded by `plugin_script_dir` heuristic | No action — validator handles this. |
+| Script has PEP 723 block AND uses `python3` invocation | Metadata block is ignored by `python3` (it's just a comment). Validator flags interpreter-python + third-party imports. | Change invocation to `uv run --quiet --script`; the existing metadata block is reused. |
+| Script imports `PIL` (aka `pillow`) | Validator sees `PIL` in `imports` | PEP 723 entry must use PyPI name: `"pillow>=10"`, not `"PIL"` |
+| Hook uses `python3.12 foo.py` (versioned interpreter) | Recognized as `interpreter-python` by the version-suffix regex | Same fix as §13.1 — `uv run --script` supersedes the versioned invocation and uv reads `requires-python` from the PEP 723 block |
+| Hook uses compound command `unset VAR; uv run --script foo.py` | `unset VIRTUAL_ENV` detected but coincides with `uv-run-script` ref → NO warning | Fix-agent MUST NOT touch this — it's a legitimate defensive pattern |
+| Hook uses `env python3 foo.py` (portable shebang style) | Recognized as interpreter-python after `env` wrapper parsing | Same fix as §13.1 — `env uv run --script foo.py` works too |
+| Multiple scripts in one command: `foo.sh && python3 bar.py` | Extractor emits TWO ScriptRefs (foo.sh direct, bar.py interpreter-python) | Fix each ref independently; their diagnoses are unrelated |
+
+---
+
+### 13.10. Cross-reference with rewritten extractor
+
+The extractor now returns `ScriptRef(path, invocation_mode, simple_command, explicit_deps)` for every script. The fix-agent can use `invocation_mode` to know which fix-path applies:
+
+| invocation_mode | §13 subsection that diagnoses it |
+|---|---|
+| `interpreter-python` + third-party imports | §13.1 |
+| `uv-run-script` + no PEP 723 block | §13.2 |
+| `uv-run-script` + incomplete PEP 723 | §13.3 |
+| `uv-run-with` + missing --with flags | §13.4 |
+| `venv-python` + no SessionStart setup | §13.5 |
+| any Python mode + module-scope sys.exit | §13.6 |
+| (separate: `unset VIRTUAL_ENV` + interpreter-python) | §13.7 |
+| (separate: HTTP hook + latency-sensitive event) | §13.8 |
+
+---

@@ -132,6 +132,14 @@ Primary fix guide: [hook-fixes.md](hook-fixes.md)
 | `PostCompact` event **[NEW]** (v2.1.76) | hook-fixes §2 |
 | `ElicitationResult` / `Elicitation` events **[NEW]** (v2.1.76) | hook-fixes §2 |
 | `InstructionsLoaded` event matcher **[NEW]** (v2.1.69) | hook-fixes §2 |
+| Runtime-dep: plain `python3` + third-party imports **[NEW]** (TRDD-0028dd34) | hook-fixes §13.1 — switch to `uv run --quiet --script` + PEP 723 block. Do NOT substitute `uvx`. |
+| Runtime-dep: `uv run --script` with no PEP 723 block **[NEW]** (TRDD-0028dd34) | hook-fixes §13.2 — add `# /// script` header with `dependencies` list |
+| Runtime-dep: PEP 723 block is incomplete **[NEW]** (TRDD-0028dd34) | hook-fixes §13.3 — append missing PyPI names to `dependencies` |
+| Runtime-dep: `uv run --with` flags incomplete **[NEW]** (TRDD-0028dd34) | hook-fixes §13.4 — add `--with <pkg>` per missing import |
+| Runtime-dep: venv-python with no SessionStart setup **[NEW]** (TRDD-0028dd34) | hook-fixes §13.5 — add a SessionStart hook with `uv venv` / `pip install` targeting `${CLAUDE_PLUGIN_DATA}` |
+| Module-scope `sys.exit` / `raise SystemExit` in hook script **[NEW]** (TRDD-0028dd34) | hook-fixes §13.6 — move to `if __name__ == '__main__':` guard OR raise ImportError instead |
+| `unset VIRTUAL_ENV` + plain `python3` antipattern **[NEW]** (TRDD-0028dd34) | hook-fixes §13.7 — switch to `uv run --script`; the `unset` becomes unnecessary |
+| HTTP hook on latency-sensitive event with long timeout **[NEW]** (TRDD-0028dd34) | hook-fixes §13.8 — add `"async": true` for fire-and-forget OR cap timeout at 5s |
 
 ---
 
