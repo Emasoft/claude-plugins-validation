@@ -90,11 +90,20 @@ Two attack vectors only an LLM reading the server source can catch:
 1. Ungated inbound messages — no sender-ID allowlist => prompt-injection vector.
 2. Permission-relay without sender gating — `capabilities.experimental['claude/channel/permission']` declared without sender check => external senders can approve destructive tool calls.
 
-Load [channel-source-security](references/channel-source-security.md) for the full workflow, the 4 evaluation rules (CRITICAL/MAJOR/PASSED), rubric contribution, example vulnerable/safe code (TypeScript + Python), and the opus prompt template.
+Load [channel-source-security](references/channel-source-security.md):
+- Why This Pillar Exists
+- Workflow
+- Rule 1 — Sender-ID allowlist (CRITICAL)
+- Rule 2 — Permission-relay gating (CRITICAL)
+- Rule 3 — Chat-ID-only gating (MAJOR)
+- Rule 4 — Fully gated (PASSED)
+- Example vulnerable code
+- Example safe code
+- Opus prompt template
+- Rubric contribution
 
 ## Resources
 
-- [channel-source-security](references/channel-source-security.md) — full rules + examples for the channel security pillar
 - Semantic Validation Criteria — see `skills/fix-validation/references/skill-semantic-validation.md` for full criteria, rubrics, report format
 - `skill-validation-skill` — Script-based validation (cheap, fast)
 - `plugin-validation-skill` — Full plugin validation
