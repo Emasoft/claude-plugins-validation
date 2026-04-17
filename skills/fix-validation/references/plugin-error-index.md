@@ -140,6 +140,7 @@ Primary fix guide: [hook-fixes.md](hook-fixes.md)
 | Module-scope `sys.exit` / `raise SystemExit` in hook script **[NEW]** (TRDD-0028dd34) | hook-fixes §13.6 — move to `if __name__ == '__main__':` guard OR raise ImportError instead |
 | `unset VIRTUAL_ENV` + plain `python3` antipattern **[NEW]** (TRDD-0028dd34) | hook-fixes §13.7 — switch to `uv run --script`; the `unset` becomes unnecessary |
 | HTTP hook on latency-sensitive event with long timeout **[NEW]** (TRDD-0028dd34) | hook-fixes §13.8 — add `"async": true` for fire-and-forget OR cap timeout at 5s |
+| Path-traversal in hook command (`..` segments escape plugin root) **[NEW]** (TRDD-0028dd34) | hook-fixes §13.11 — rewrite path to anchor at `${CLAUDE_PLUGIN_ROOT}` / `${CLAUDE_PROJECT_DIR}` without `..`, or declare cross-plugin dependency in plugin.json |
 
 ---
 

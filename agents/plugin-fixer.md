@@ -102,6 +102,8 @@ Any finding whose message references one of these phrases is a RUNTIME-DEP issue
 - `calls sys.exit()/exit()/raise SystemExit at MODULE scope`
 - `unset VIRTUAL_ENV and then invokes a plain python3`
 - `HTTP hook on ... has a {timeout}s timeout` (latency-sensitive events)
+- `..` path segment that escapes the plugin/project root`
+- `resolves OUTSIDE the plugin root`
 
 For these, read **hook-fixes.md §13** (it has a dedicated subsection per diagnostic + an edge-case matrix in §13.9). The critical rule: **preserve the hook's effective behavior**. Don't delete the hook, don't mute the warning with `|| true` / `2>/dev/null`, and don't strip third-party imports unless a genuine stdlib alternative exists. The fix is almost always one of:
 

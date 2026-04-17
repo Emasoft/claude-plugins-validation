@@ -14,7 +14,7 @@
 - [10. Script Linting Issues](#10-script-linting-issues)
 - [11. Field Validation Issues](#11-field-validation-issues)
 - [12. Informational Notices](#12-informational-notices)
-- [13. Runtime-Dep & Invocation Issues (TRDD-0028dd34)](#13-runtime-dep--invocation-issues-trdd-0028dd34)
+- [13. Runtime-Dep, Invocation & Path-Traversal Issues (TRDD-0028dd34)](#13-runtime-dep--invocation-issues-trdd-0028dd34)
 
 ---
 
@@ -1906,7 +1906,60 @@ The extractor now returns `ScriptRef(path, invocation_mode, simple_command, expl
 
 ---
 
-### 13.11. Fix-agent checklist (work each item top-to-bottom)
+### 13.11. WARNING: Path-traversal in hook command
+
+**Error message A** (command-string regex): `Command contains a \`..\` path segment that escapes the plugin/project root — this is a path-traversal pattern that may break plugin isolation or enable cross-plugin interference. ...`
+
+**Error message B** (resolved-path check): `Script path \`{path}\` resolves OUTSIDE the plugin root \`{plugin_root}\` via \`..\` segments — this breaks plugin isolation. ...`
+
+**Severity**: WARNING
+**Root cause**: The hook command references a script path containing `..` components that, once resolved, land outside the plugin's declared root directory. Typical instances:
+1. `${CLAUDE_PLUGIN_ROOT}/../sibling_plugin/foo.py` — directly reaches into a sibling plugin
+2. `${CLAUDE_PROJECT_DIR}/../.secrets/key.json` — escapes the project directory to read sensitive data
+3. `${CLAUDE_PLUGIN_DATA}/../../shared/cache` — escapes the plugin's persistent data area
+4. `/abs/path/with/../../traversal/foo.py` — absolute path containing traversal segments
+
+**Why this matters**:
+- **Plugin isolation**: Each plugin is a self-contained unit. Reaching into another plugin's files bypasses that boundary and creates hidden cross-plugin dependencies that break when the other plugin updates.
+- **Security**: Traversal can access credentials, env files, or scripts outside the plugin's declared footprint. A malicious or buggy hook could read secrets that Claude Code's permission model intends to protect.
+- **Maintainability**: Path-traversal references are fragile. Any restructure of the repo or plugin install location invalidates them silently.
+
+**Fix — three patterns based on intent:**
+
+1. **Intended cross-plugin access** (rare, should be explicit via plugin-dependencies): if the plugin genuinely needs data from a sibling, declare the sibling as a plugin dependency in `plugin.json`:
+   ```json
+   {
+     "dependencies": {
+       "other-plugin": "^1.0.0"
+     }
+   }
+   ```
+   Then access the sibling's files via `${CLAUDE_PROJECT_DIR}` + a relative path that does not use `..` — or require the sibling to expose data via an MCP server or a shared file in `${CLAUDE_PLUGIN_DATA}`.
+
+2. **Accidental traversal** (most common): the path was wrong. Rewrite to reference the intended location directly:
+   ```jsonc
+   // BEFORE (escapes plugin root)
+   { "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/../shared/lib.py\"" }
+   // AFTER
+   { "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/shared/lib.py\"" }
+   ```
+   Move the referenced file INTO the plugin if it belongs there.
+
+3. **Traversal was for testing** (development-only): delete the hook or guard it behind an env-var check so it doesn't ship in the published plugin.
+
+**Do NOT:**
+- "Fix" the warning by adding `set +e` or `|| true` — the warning is not an error that stops the hook, it is advisory. Suppressing it leaves the isolation break in place.
+- Rewrite the path with `realpath` / `readlink -f` to pre-resolve traversal — that silences the static check without fixing the semantic issue. The resolved-path check will still fire at validation time.
+- Add traversal to a SessionStart setup hook that writes outside `${CLAUDE_PLUGIN_DATA}` — shared mutable state across plugins is a well-known antipattern.
+
+**Legitimate patterns that WILL NOT trigger the warning:**
+- `${CLAUDE_PLUGIN_ROOT}/scripts/hooks/foo.py` — deep subdirs, no `..`
+- `${CLAUDE_PROJECT_DIR}/src/main/foo.py` — deep subdirs, no `..`
+- Paths inside quoted strings with `..` in the FILENAME itself (e.g. `"foo..bar.py"` — regex requires `..` as a path segment, not part of a name)
+
+---
+
+### 13.12. Fix-agent checklist (work each item top-to-bottom)
 
 Copy the checklist below into your fix log at `docs_dev/fix-log_<plugin>_YYYYMMDD.md` and tick items as they're complete. Do NOT skip the verification step — silently leaving a script broken is worse than not fixing it at all.
 
