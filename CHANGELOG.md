@@ -2,15 +2,11 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
-## [2.21.0] - 2026-04-17
+## [2.21.1] - 2026-04-17
 
-### Documentation
+### Bug Fixes
 
-- Add TRDD-f4e2d385 — deep scope validation spec
-
-### Features
-
-- **scope-validators:** Deep element validation + settings subtrees + plugin enum (TRDD-f4e2d385)
+- **cpv:** Slash commands run from \${CLAUDE_PLUGIN_ROOT}, not remote github
 
 ### Miscellaneous Tasks
 
