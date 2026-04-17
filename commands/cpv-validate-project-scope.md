@@ -100,17 +100,34 @@ WARNING and INFO never block. They are always printed.
 
 ## Execution
 
+### From within a CPV checkout (development)
+
 ```bash
 uv run python scripts/validate_project_scope.py "$PROJECT_PATH" \
   --report docs_dev/validate_project_scope_$(date +%Y%m%d).md
 ```
 
-Or via the installed entry point:
+### From the plugin cache / installed CLI / uvx (remote execution)
+
+When CPV runs OUTSIDE its own checkout (e.g. from the Claude Code plugin
+cache or via `uvx`), direct invocation is blocked by the remote-execution
+guard. Use the launcher instead:
 
 ```bash
+# Via the plugin cache:
+uv run python "${CPV_ROOT}/scripts/remote_validation.py" \
+  project-scope "$PROJECT_PATH" \
+  -o "${PROJECT_PATH}/docs_dev/validate_project_scope_$(date +%Y%m%d).md"
+
+# Via uvx:
 uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
-  cpv-validate-project-scope "$PROJECT_PATH"
+  --with pyyaml \
+  cpv-remote-validate project-scope "$PROJECT_PATH" \
+  -o docs_dev/validate_project_scope_$(date +%Y%m%d).md
 ```
+
+Accepted aliases (equivalent): `project-scope`, `validate_project_scope`,
+`cpv-validate-project-scope`.
 
 ## Related Commands
 
