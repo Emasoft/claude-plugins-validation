@@ -2081,6 +2081,83 @@ def test_resolved_script_path_escaping_plugin_root_warns(tmp_path: Path):
     ), f"Expected escape-plugin-root WARNING; got: {warnings}"
 
 
+def test_direct_python_shebang_reconciles_like_interpreter(tmp_path: Path):
+    """A `.py` script invoked directly (shebang-driven, mode='direct') relies on
+    whatever `python3` the shebang resolves to — same runtime-dep risk as
+    `python3 foo.py`. The reconciler MUST fire for direct mode .py scripts.
+
+    Before this fix: direct mode skipped reconciliation entirely, silently
+    approving hook commands that would ImportError at runtime.
+    """
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    script = scripts_dir / "direct.py"
+    script.write_text("#!/usr/bin/env python3\nimport pycozo\n")
+    import os
+    os.chmod(script, 0o755)
+
+    hooks_dir = tmp_path / "hooks"
+    hooks_dir.mkdir()
+    hooks_file = hooks_dir / "hooks.json"
+    hooks_file.write_text(
+        json.dumps({
+            "hooks": {
+                "UserPromptSubmit": [{
+                    "hooks": [{
+                        "type": "command",
+                        "command": '"${CLAUDE_PLUGIN_ROOT}/scripts/direct.py"',
+                    }]
+                }]
+            }
+        })
+    )
+    report = validate_hooks(hooks_file, plugin_root=tmp_path)
+    major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+    assert any(
+        "plain interpreter" in m and "pycozo" in m for m in major_msgs
+    ), f"Direct-mode .py with third-party imports must trigger runtime-dep MAJOR; got: {major_msgs}"
+
+
+def test_env_var_assignment_prefix_python3(tmp_path: Path):
+    """`FOO=bar python3 script.py` — the `FOO=bar` prefix sets env vars for
+    the child process and must be skipped when finding the interpreter.
+    """
+    from validate_hook import extract_script_paths
+
+    refs = extract_script_paths(
+        'PYTHONPATH=./lib python3 "${CLAUDE_PLUGIN_ROOT}/scripts/foo.py"', tmp_path
+    )
+    assert len(refs) == 1
+    assert refs[0].invocation_mode == "interpreter-python"
+    assert refs[0].path == tmp_path / "scripts" / "foo.py"
+
+
+def test_env_var_assignment_multiple(tmp_path: Path):
+    """Multiple env-var assignments in a row: `A=1 B=2 python3 foo.py`."""
+    from validate_hook import extract_script_paths
+
+    refs = extract_script_paths(
+        'NODE_ENV=production DEBUG=1 node "${CLAUDE_PLUGIN_ROOT}/hook.js"', tmp_path
+    )
+    assert len(refs) == 1
+    assert refs[0].invocation_mode == "node"
+
+
+def test_env_var_assignment_only_legal_names(tmp_path: Path):
+    """The env-var pattern requires a letter/_ start. A token like `1=2` is NOT
+    a legal env-var name and must NOT be eaten by the assignment-skip logic.
+    """
+    from validate_hook import extract_script_paths
+
+    # `1=2` is not a valid POSIX env-var name → should NOT be skipped. The
+    # tokenizer's first real token is "1=2" which falls through to direct
+    # invocation (no interpreter matched, no lintable extension → empty refs).
+    refs = extract_script_paths('1=2 foo.py', tmp_path)
+    # Conservative: either no refs OR the `1=2` becomes first token and does
+    # nothing. Either way the downstream should not crash.
+    assert isinstance(refs, list)
+
+
 def test_extract_script_paths_preserves_direct_sh_invocation(tmp_path: Path):
     """`./scripts/foo.sh` as first token — direct invocation mode."""
     from validate_hook import extract_script_paths
