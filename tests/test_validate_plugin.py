@@ -1140,3 +1140,406 @@ class TestV2212AuditFixes:
             "On non-Windows, a non-executable bin/cli MUST raise a MINOR finding. "
             f"Got MINORs: {[r.message for r in report_unix.results if r.level == 'MINOR']}"
         )
+
+
+# ============================================================================
+# v2.22.0 schema tests — dependencies, userConfig, channels, monitors, misc
+# (per TRDD-479cde0c-c781-4bfb-b62a-fbf40e91523f + spec-audit-2-plugins)
+# ============================================================================
+
+
+def _write_plugin(tmp_path, name: str, manifest: dict) -> Path:
+    """Create a minimal plugin skeleton at ``tmp_path/name`` with ``plugin.json``.
+
+    Returns the plugin root directory so validators can be run directly.
+    """
+    import json as _json
+
+    plugin_dir = tmp_path / name
+    plugin_dir.mkdir()
+    claude_plugin = plugin_dir / ".claude-plugin"
+    claude_plugin.mkdir()
+    (claude_plugin / "plugin.json").write_text(_json.dumps(manifest, indent=2))
+    return plugin_dir
+
+
+class TestV222PluginSchema:
+    """Tests for v2.22.0 plugin.json schema additions.
+
+    Covers:
+    - ``dependencies`` array entries (bare string + object forms)
+    - ``userConfig`` sub-field types + identifier keys
+    - ``channels[].server`` cross-reference against ``mcpServers``
+    - ``monitors`` entry shape (name/command/description + ``when`` grammar)
+    - ``settings.json`` ``subagentStatusLine`` acceptance
+    - ``author.url`` acknowledgement
+    - path-traversal rejection in plugin.json path fields
+    """
+
+    def test_dependencies_bare_string_accepted(self, tmp_path):
+        """Bare-string dependency entry (just the plugin name) must validate clean."""
+        manifest = {
+            "name": "deps-bare",
+            "version": "1.0.0",
+            "description": "x",
+            "dependencies": ["helper-lib"],
+        }
+        plugin_dir = _write_plugin(tmp_path, "deps-bare", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        dep_majors = [
+            r.message for r in report.results
+            if r.level == "MAJOR" and "dependencies" in r.message
+        ]
+        assert not dep_majors, f"Unexpected MAJORs for bare-string dep: {dep_majors}"
+
+    def test_dependencies_object_with_version_accepted(self, tmp_path):
+        """Object-form dependency with semver range must validate clean."""
+        manifest = {
+            "name": "deps-obj",
+            "version": "1.0.0",
+            "description": "x",
+            "dependencies": [
+                {"name": "secrets-vault", "version": "~2.1.0"},
+                {"name": "retry-lib", "version": "^2.0.0-0"},
+                {"name": "http-lib", "version": ">=1.4"},
+                {"name": "cache-lib", "version": "=2.1.0"},
+                {"name": "or-lib", "version": "^1.0 || ^2.0"},
+                {"name": "range-lib", "version": "1.0.0 - 2.0.0"},
+            ],
+        }
+        plugin_dir = _write_plugin(tmp_path, "deps-obj", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        dep_majors = [
+            r.message for r in report.results
+            if r.level == "MAJOR" and "dependencies" in r.message
+        ]
+        assert not dep_majors, f"Unexpected MAJORs for object deps: {dep_majors}"
+
+    def test_dependencies_malformed_semver_rejected(self, tmp_path):
+        """Obviously-malformed semver ranges emit MAJOR."""
+        manifest = {
+            "name": "deps-bad-semver",
+            "version": "1.0.0",
+            "description": "x",
+            "dependencies": [
+                {"name": "bad-lib", "version": "not-a-version"},
+            ],
+        }
+        plugin_dir = _write_plugin(tmp_path, "deps-bad-semver", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        dep_majors = [
+            r.message for r in report.results
+            if r.level == "MAJOR" and "semver" in r.message.lower()
+        ]
+        assert dep_majors, (
+            "Expected MAJOR for malformed semver range; got: "
+            f"{[r.message for r in report.results if r.level == 'MAJOR']}"
+        )
+
+    def test_dependencies_non_dict_non_string_entry_major(self, tmp_path):
+        """Array entry that's neither string nor dict → MAJOR."""
+        manifest = {
+            "name": "deps-wrong-type",
+            "version": "1.0.0",
+            "description": "x",
+            "dependencies": [42, ["nested-list-not-allowed"]],
+        }
+        plugin_dir = _write_plugin(tmp_path, "deps-wrong-type", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        wrong_type = [
+            r.message for r in report.results
+            if r.level == "MAJOR" and "string or object" in r.message
+        ]
+        assert len(wrong_type) >= 2, (
+            "Expected 2+ MAJORs for non-string/non-dict entries; got: "
+            f"{[r.message for r in report.results if r.level == 'MAJOR']}"
+        )
+
+    def test_dependencies_extra_subkey_minor(self, tmp_path):
+        """Unknown sub-keys on dependency entries emit MINOR."""
+        manifest = {
+            "name": "deps-extra-key",
+            "version": "1.0.0",
+            "description": "x",
+            "dependencies": [
+                {"name": "lib", "version": "1.0.0", "wat": "unknown-field"},
+            ],
+        }
+        plugin_dir = _write_plugin(tmp_path, "deps-extra-key", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        minors = [
+            r.message for r in report.results
+            if r.level == "MINOR" and "dependencies" in r.message and "wat" in r.message
+        ]
+        assert minors, (
+            "Expected MINOR for unknown sub-key 'wat'; got MINORs: "
+            f"{[r.message for r in report.results if r.level == 'MINOR']}"
+        )
+
+    def test_userconfig_valid_structure_passes(self, tmp_path):
+        """A well-formed userConfig with description + sensitive validates clean."""
+        manifest = {
+            "name": "uc-valid",
+            "version": "1.0.0",
+            "description": "x",
+            "userConfig": {
+                "api_endpoint": {
+                    "title": "API endpoint",
+                    "description": "Where the API lives",
+                    "sensitive": False,
+                },
+                "api_token": {
+                    "title": "API token",
+                    "description": "Bearer token",
+                    "sensitive": True,
+                },
+            },
+        }
+        plugin_dir = _write_plugin(tmp_path, "uc-valid", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        # No structural MAJOR about userConfig keys or types
+        uc_majors = [
+            r.message for r in report.results
+            if r.level == "MAJOR" and "userConfig" in r.message
+        ]
+        assert not uc_majors, f"Unexpected userConfig MAJORs: {uc_majors}"
+
+    def test_userconfig_non_identifier_key_rejected(self, tmp_path):
+        """userConfig keys must be valid Python identifiers."""
+        manifest = {
+            "name": "uc-bad-key",
+            "version": "1.0.0",
+            "description": "x",
+            "userConfig": {
+                "not a valid-key!": {
+                    "title": "t",
+                    "description": "d",
+                },
+            },
+        }
+        plugin_dir = _write_plugin(tmp_path, "uc-bad-key", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        ident_majors = [
+            r.message for r in report.results
+            if r.level == "MAJOR" and "userConfig" in r.message and "identifier" in r.message
+        ]
+        assert ident_majors, (
+            "Expected MAJOR for non-identifier userConfig key; got MAJORs: "
+            f"{[r.message for r in report.results if r.level == 'MAJOR']}"
+        )
+
+    def test_userconfig_non_bool_sensitive_rejected(self, tmp_path):
+        """userConfig entry.sensitive must be a boolean."""
+        manifest = {
+            "name": "uc-bad-sensitive",
+            "version": "1.0.0",
+            "description": "x",
+            "userConfig": {
+                "api_token": {
+                    "title": "t",
+                    "description": "d",
+                    "sensitive": "yes",
+                },
+            },
+        }
+        plugin_dir = _write_plugin(tmp_path, "uc-bad-sensitive", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        sens_majors = [
+            r.message for r in report.results
+            if r.level == "MAJOR" and "sensitive" in r.message and "boolean" in r.message
+        ]
+        assert sens_majors, (
+            "Expected MAJOR for non-bool 'sensitive'; got MAJORs: "
+            f"{[r.message for r in report.results if r.level == 'MAJOR']}"
+        )
+
+    def test_channels_server_cross_ref_to_mcpservers(self, tmp_path):
+        """channels[].server matching an mcpServers key validates clean."""
+        manifest = {
+            "name": "chan-ok",
+            "version": "1.0.0",
+            "description": "x",
+            "mcpServers": {
+                "telegram": {"command": "node", "args": ["server.js"]},
+            },
+            "channels": [
+                {
+                    "server": "telegram",
+                    "userConfig": {
+                        "bot_token": {"description": "t", "sensitive": True},
+                    },
+                },
+            ],
+        }
+        plugin_dir = _write_plugin(tmp_path, "chan-ok", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        chan_majors = [
+            r.message for r in report.results
+            if r.level == "MAJOR" and "channels" in r.message
+        ]
+        assert not chan_majors, f"Unexpected channel MAJORs: {chan_majors}"
+
+    def test_channels_server_missing_mcpserver_major(self, tmp_path):
+        """channels[].server pointing at a non-existent mcpServer key → MAJOR."""
+        manifest = {
+            "name": "chan-missing-ref",
+            "version": "1.0.0",
+            "description": "x",
+            "mcpServers": {
+                "telegram": {"command": "node", "args": ["server.js"]},
+            },
+            "channels": [
+                {"server": "slack"},
+            ],
+        }
+        plugin_dir = _write_plugin(tmp_path, "chan-missing-ref", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        miss = [
+            r.message for r in report.results
+            if r.level == "MAJOR"
+            and "channels[0].server" in r.message
+            and "slack" in r.message
+        ]
+        assert miss, (
+            "Expected MAJOR for missing mcpServers cross-ref; got MAJORs: "
+            f"{[r.message for r in report.results if r.level == 'MAJOR']}"
+        )
+
+    def test_monitors_entry_requires_name_command_description(self, tmp_path):
+        """monitors inline entries require all three mandatory fields."""
+        manifest = {
+            "name": "mon-missing-fields",
+            "version": "1.0.0",
+            "description": "x",
+            "monitors": [
+                {"name": "m1"},  # missing command + description
+            ],
+        }
+        plugin_dir = _write_plugin(tmp_path, "mon-missing-fields", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        majors = [
+            r.message for r in report.results
+            if r.level == "MAJOR" and "monitors[0]" in r.message
+        ]
+        # Expect at least two MAJORs: command + description
+        assert any("command" in m for m in majors), f"Missing 'command' MAJOR; got: {majors}"
+        assert any("description" in m for m in majors), f"Missing 'description' MAJOR; got: {majors}"
+
+    def test_monitors_when_invalid_format_major(self, tmp_path):
+        """monitors[].when must match 'always' or 'on-skill-invoke:<name>'."""
+        manifest = {
+            "name": "mon-bad-when",
+            "version": "1.0.0",
+            "description": "x",
+            "monitors": [
+                {
+                    "name": "m1",
+                    "command": "python run.py",
+                    "description": "does stuff",
+                    "when": "sometimes",  # invalid
+                },
+            ],
+        }
+        plugin_dir = _write_plugin(tmp_path, "mon-bad-when", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        when_majors = [
+            r.message for r in report.results
+            if r.level == "MAJOR" and "when" in r.message and "always" in r.message
+        ]
+        assert when_majors, (
+            "Expected MAJOR for invalid 'when' format; got MAJORs: "
+            f"{[r.message for r in report.results if r.level == 'MAJOR']}"
+        )
+
+    def test_plugin_json_path_with_traversal_is_major(self, tmp_path):
+        """Path fields containing `..` segments → MAJOR per plugins-reference.md:568-571."""
+        manifest = {
+            "name": "path-traversal",
+            "version": "1.0.0",
+            "description": "x",
+            "skills": "./../shared-skills/",
+            "commands": ["./commands/ok.md", "./../escape.md"],
+        }
+        plugin_dir = _write_plugin(tmp_path, "path-traversal", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        trav = [
+            r.message for r in report.results
+            if r.level == "MAJOR" and "path-traversal" in r.message
+        ]
+        # One for 'skills' string, one for 'commands[1]' entry
+        assert len(trav) >= 2, (
+            "Expected 2+ MAJORs for path-traversal; got MAJORs: "
+            f"{[r.message for r in report.results if r.level == 'MAJOR']}"
+        )
+
+    def test_subagent_statusline_plugin_settings_accepted(self, tmp_path):
+        """subagentStatusLine in plugin-root settings.json must not emit unrecognized-key MINOR."""
+        manifest = {
+            "name": "sas-plugin",
+            "version": "1.0.0",
+            "description": "x",
+        }
+        plugin_dir = _write_plugin(tmp_path, "sas-plugin", manifest)
+        # Add plugin-root settings.json
+        (plugin_dir / "settings.json").write_text(
+            json.dumps({"subagentStatusLine": {"command": "echo status"}})
+        )
+        report = ValidationReport()
+        validate_structure(plugin_dir, report)
+        unrec = [
+            r.message for r in report.results
+            if r.level == "MINOR" and "subagentStatusLine" in r.message and "unrecognized" in r.message
+        ]
+        assert not unrec, (
+            "subagentStatusLine must be recognized in plugin settings.json; got MINORs: "
+            f"{[r.message for r in report.results if r.level == 'MINOR']}"
+        )
+
+    def test_author_url_accepted(self, tmp_path):
+        """author.url as string validates clean (plugins-reference.md:352)."""
+        manifest = {
+            "name": "author-url",
+            "version": "1.0.0",
+            "description": "x",
+            "author": {
+                "name": "Test",
+                "email": "t@example.com",
+                "url": "https://github.com/test",
+            },
+        }
+        plugin_dir = _write_plugin(tmp_path, "author-url", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        url_majors = [
+            r.message for r in report.results
+            if r.level == "MAJOR" and "author.url" in r.message
+        ]
+        assert not url_majors, f"Unexpected author.url MAJORs: {url_majors}"
+
+        # Negative: non-string author.url IS a MAJOR
+        bad_manifest = dict(manifest)
+        bad_manifest["author"] = {"name": "Test", "url": 42}
+        bad_dir = _write_plugin(tmp_path, "author-url-bad", bad_manifest)
+        bad_report = ValidationReport()
+        validate_manifest(bad_dir, bad_report)
+        bad_url_majors = [
+            r.message for r in bad_report.results
+            if r.level == "MAJOR" and "author.url" in r.message and "string" in r.message
+        ]
+        assert bad_url_majors, (
+            "Expected MAJOR for non-string author.url; got MAJORs: "
+            f"{[r.message for r in bad_report.results if r.level == 'MAJOR']}"
+        )

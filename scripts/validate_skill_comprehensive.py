@@ -51,6 +51,7 @@ from cpv_validation_common import (
     EXIT_OK,
     SKILL_FRONTMATTER_FIELDS,
     VALID_CONTEXT_VALUES,
+    VALID_EFFORT_VALUES,
     VALID_HOOK_EVENTS,
     VALID_PLUGIN_ENV_VARS,
     VALID_TOOLS,
@@ -78,7 +79,17 @@ Score = Literal[0, 1, 2, 3]
 
 # --- AgentSkills OpenSpec Constants ---
 MAX_SKILL_NAME_LENGTH = 64  # Aligned with MAX_NAME_LENGTH in cpv_validation_common (official spec limit)
-MAX_DESCRIPTION_LENGTH = 1024
+# Per skills.md L192-193 (Claude Code v2.1.98+): the 1,536-char cap applies to
+# ``description + when_to_use`` COMBINED, not to ``description`` alone. Earlier
+# CPV used 1024 against ``description`` only, which (a) rejected legit skills
+# whose description fit the old 1024 budget but together with when_to_use
+# exceeded the real 1536, and (b) false-positive-flagged skills whose
+# description alone was between 1025 and 1536 — both of which the current
+# Claude Code runtime accepts.
+MAX_DESCRIPTION_COMBINED_LENGTH = 1536
+# Kept as a legacy alias so existing imports/tests continue to resolve while
+# the semantics change. New call sites should reference the combined cap.
+MAX_DESCRIPTION_LENGTH = MAX_DESCRIPTION_COMBINED_LENGTH
 MAX_COMPATIBILITY_LENGTH = 500
 
 # AgentSkills OpenSpec allowed fields (strict whitelist)
@@ -652,9 +663,21 @@ def validate_description_field(
     if len(desc) < 20:
         report.minor("Description is very short (< 20 chars)", "SKILL.md", category="Description Quality")
 
-    if len(desc) > MAX_DESCRIPTION_LENGTH:
+    # skills.md L192-193: the authoritative cap is on ``description +
+    # when_to_use`` COMBINED, not description alone. Claude Code truncates
+    # the combined text at 1,536 chars in the skill listing — anything above
+    # that is silently dropped and the skill's triggering intent is lost.
+    when_to_use = frontmatter.get("when_to_use") or ""
+    if not isinstance(when_to_use, str):
+        when_to_use = ""
+    combined_len = len(desc) + len(when_to_use)
+    if combined_len > MAX_DESCRIPTION_COMBINED_LENGTH:
         report.major(
-            f"Description exceeds {MAX_DESCRIPTION_LENGTH} characters ({len(desc)} chars)",
+            f"Combined length of 'description' ({len(desc)} chars) + 'when_to_use' "
+            f"({len(when_to_use)} chars) is {combined_len} chars — exceeds the "
+            f"{MAX_DESCRIPTION_COMBINED_LENGTH}-char cap. Claude Code truncates the "
+            "listing at this point, so the trailing portion of the skill's trigger "
+            "guidance is silently dropped. Tighten one or both fields.",
             "SKILL.md",
             category="Description Quality",
         )
@@ -1185,7 +1208,16 @@ def validate_boolean_field(
 
 
 def validate_effort_field(frontmatter: dict[str, Any], report: ValidationReport) -> None:
-    """Validate the 'effort' frontmatter field (v2.1.80)."""
+    """Validate the 'effort' frontmatter field (v2.1.80+).
+
+    Accepted values per skills.md L192 + cli-reference.md --effort:
+      low | medium | high | xhigh | max
+
+    - ``xhigh`` was added in v2.1.111 for Opus 4.7 only — any non-Opus model
+      with ``xhigh`` fails at runtime, so we mirror the same strict check
+      applied to ``max``.
+    - ``max`` remains supported (Opus 4.6 legacy) for backward compatibility.
+    """
     if "effort" not in frontmatter:
         return
 
@@ -1197,30 +1229,30 @@ def validate_effort_field(frontmatter: dict[str, Any], report: ValidationReport)
         report.major("'effort' field cannot be empty", "SKILL.md", category="Frontmatter")
         return
 
-    valid_effort_values = {"low", "medium", "high", "max"}  # "max" is Opus 4.6 only
-    if effort_val.lower() not in valid_effort_values:
+    if effort_val.lower() not in VALID_EFFORT_VALUES:
         report.major(
-            f"Invalid 'effort' value: '{effort_val}'. Must be one of: {sorted(valid_effort_values)}",
+            f"Invalid 'effort' value: '{effort_val}'. Must be one of: {sorted(VALID_EFFORT_VALUES)}",
             "SKILL.md",
             category="Frontmatter",
         )
     else:
         report.passed(f"'effort' field valid: {effort_val}", "SKILL.md", category="Frontmatter")
 
-    # "max" effort requires model: opus
-    if effort_val.lower() == "max":
+    # "max" and "xhigh" effort require an Opus model.
+    # "xhigh" is Opus 4.7 only; "max" is Opus 4.6 legacy. Both fail on non-Opus.
+    if effort_val.lower() in {"max", "xhigh"}:
         model = frontmatter.get("model", "")
         model_str = str(model).lower() if model else ""
         if model_str and "opus" not in model_str:
             report.major(
-                f"effort: max requires an Opus model, but model is '{model}'. "
+                f"effort: {effort_val} requires an Opus model, but model is '{model}'. "
                 "Use effort: high for non-Opus models, or set model: opus.",
                 "SKILL.md",
                 category="Frontmatter",
             )
         elif not model_str:
             report.warning(
-                "effort: max only works with Opus models. No 'model' field set — "
+                f"effort: {effort_val} only works with Opus models. No 'model' field set — "
                 "this skill will fail if the session uses a non-Opus model. "
                 "Consider adding 'model: opus' or using effort: high.",
                 "SKILL.md",

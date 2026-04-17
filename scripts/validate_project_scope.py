@@ -88,6 +88,7 @@ from cc_scope_rules import (
     ENABLED_PLUGIN_RE,
     GLOBAL_CONFIG_KEYS,
     MANAGED_ONLY_KEYS,
+    MANAGED_ONLY_NESTED_KEYS,
     MAX_CLAUDE_MD_BYTES,
     MAX_FILES_PER_FOLDER,
     MAX_GITIGNORE_BYTES,
@@ -119,6 +120,14 @@ from cpv_validation_common import (
     print_results_by_level,
     save_report_and_print_summary,
 )
+
+# v2.22.0: `.claude/loop.md` is a plain-markdown file that replaces the built-in
+# `/loop` maintenance prompt (scheduled-tasks.md). Content above 25,000 bytes
+# is silently truncated by Claude Code — we enforce the same cap with a MAJOR
+# finding pointing at the doc rule. Tracked instances are validated here;
+# untracked ones belong to ``validate_local_scope``.
+MAX_LOOP_MD_BYTES: int = 25_000
+
 
 # =============================================================================
 # Shared IO helpers (sanitised error reporting)
@@ -220,6 +229,37 @@ def _flag_rejected_nested_keys(data: dict[str, Any], report: ValidationReport, f
                     f"settings.json sets '{dotted}' — Claude Code silently ignores "
                     "this in project settings to prevent untrusted repositories "
                     "from auto-bypassing the prompt. Move it to local or user scope."
+                ),
+                file_label,
+            )
+
+
+def _flag_managed_only_nested_keys(
+    data: dict[str, Any], report: ValidationReport, file_label: str
+) -> None:
+    """Flag nested paths that only work in a managed settings file.
+
+    ``permissions.disableAutoMode`` and ``permissions.disableBypassPermissionsMode``
+    are admin kill-switches — placing them in project settings has no effect
+    (Claude Code ignores them outside managed-settings). MAJOR severity so the
+    user moves them to the correct scope.
+    """
+    for path_tuple in sorted(MANAGED_ONLY_NESTED_KEYS):
+        cursor: Any = data
+        for segment in path_tuple:
+            if not isinstance(cursor, dict) or segment not in cursor:
+                cursor = None
+                break
+            cursor = cursor[segment]
+        if cursor is not None:
+            dotted = ".".join(path_tuple)
+            report.major(
+                (
+                    f"settings.json sets '{dotted}' — this is a managed-only "
+                    "admin kill-switch and has no effect in project settings. "
+                    "Move it into managed-settings.json (macOS: "
+                    "/Library/Application Support/ClaudeCode/managed-settings.json) "
+                    "or deploy via server-managed settings. Remove from project."
                 ),
                 file_label,
             )
@@ -428,6 +468,7 @@ def validate_settings_json_project_scope(
     _flag_rejected_top_level_keys(data, report, file_label)
     _flag_rejected_nested_keys(data, report, file_label)
     _flag_managed_only_keys(data, report, file_label)
+    _flag_managed_only_nested_keys(data, report, file_label)
     _flag_global_config_keys(data, report, file_label)
     _flag_plugin_only_keys(data, report, file_label)
     _flag_secrets_in_env(data, report, file_label)
@@ -799,6 +840,64 @@ def validate_gitignore_for_scope_hygiene(
             "accidental commits of personal memory notes.",
             ".gitignore",
         )
+
+
+# =============================================================================
+# .claude/loop.md — v2.22.0 (scheduled-tasks.md)
+#
+# When `.claude/loop.md` is git-tracked, it is a shared team artefact —
+# validate it under project scope. The only hard rules are the size cap
+# (25 KB; content above is silently truncated by Claude Code) and UTF-8
+# decodability. The file replaces the built-in `/loop` maintenance prompt,
+# so we emit an INFO so the author confirms the content is intentional.
+# Untracked instances are validate_local_scope's territory.
+# =============================================================================
+
+
+def validate_loop_md_project(
+    loop_path: Path, repo_root: Path, report: ValidationReport
+) -> None:
+    """Validate a TRACKED ``.claude/loop.md`` file (project scope).
+
+    Rules (TRDD-479cde0c §NOW #19, scheduled-tasks.md):
+
+    - If the file exceeds 25,000 bytes: MAJOR (content above the cap is
+      silently truncated by Claude Code per scheduled-tasks.md).
+    - If the file is not UTF-8 decodable: CRITICAL (same pattern used by
+      other markdown readers in this module).
+    - Otherwise: INFO noting that ``loop.md`` replaces the built-in
+      ``/loop`` prompt so the author confirms the content is a maintenance
+      instruction, not an inadvertent command.
+
+    Symlink escapes are rejected via ``resolve_within`` to honour the
+    module's security invariant.
+    """
+    rel = loop_path.relative_to(repo_root)
+    real = resolve_within(loop_path, repo_root)
+    if real is None:
+        report.major(
+            f"{rel}: path resolves outside the repo root (symlink escape) — skipping",
+            str(rel),
+        )
+        return
+    try:
+        safe_read_text(loop_path, MAX_LOOP_MD_BYTES)
+    except OversizedFileError:
+        report.major(
+            f"{rel}: exceeds {MAX_LOOP_MD_BYTES}-byte cap from scheduled-tasks.md "
+            "— content above this size is silently truncated by Claude Code. "
+            "Trim the loop prompt or split it into multiple files.",
+            str(rel),
+        )
+        return
+    except (OSError, UnicodeDecodeError) as exc:
+        report.critical(f"{rel}: read failed ({type(exc).__name__})", str(rel))
+        return
+    report.info(
+        f"{rel}: loop.md present — replaces the built-in /loop prompt. Ensure "
+        "content is a maintenance instruction, not an inadvertent command.",
+        str(rel),
+    )
 
 
 # =============================================================================
@@ -1204,6 +1303,14 @@ def validate_project_scope(project_root: Path, report: ValidationReport) -> None
     for md_candidate in (project_root / "CLAUDE.md", claude_dir / "CLAUDE.md"):
         if classify_file_scope(md_candidate, repo_root) == "project":
             validate_claude_md_file(md_candidate, repo_root, report)
+
+    # 9b. .claude/loop.md (v2.22.0, scheduled-tasks.md).
+    # Only validated here when tracked — untracked loop.md belongs to
+    # validate_local_scope. Enforces the 25 KB truncation cap and checks
+    # UTF-8 decodability.
+    loop_md = claude_dir / "loop.md"
+    if classify_file_scope(loop_md, repo_root) == "project":
+        validate_loop_md_project(loop_md, repo_root, report)
 
     # 10. .gitignore hygiene
     validate_gitignore_for_scope_hygiene(repo_root, report)

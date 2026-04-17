@@ -73,6 +73,7 @@ from cc_scope_rules import (
     ENABLED_PLUGIN_RE,
     GLOBAL_CONFIG_KEYS,
     MANAGED_ONLY_KEYS,
+    MANAGED_ONLY_NESTED_KEYS,
     MAX_FILES_PER_FOLDER,
     MAX_HOME_CLAUDE_JSON_BYTES,
     MAX_MARKDOWN_BYTES,
@@ -123,6 +124,12 @@ _TYPICALLY_SHARED_KEYS: frozenset[str] = frozenset(
         "disabledMcpjsonServers",
     }
 )
+
+# v2.22.0: `.claude/loop.md` is a plain-markdown file that replaces the built-in
+# `/loop` maintenance prompt (scheduled-tasks.md). Content above 25,000 bytes
+# is silently truncated by Claude Code, so we enforce the same cap with a MAJOR
+# finding pointing at the doc rule.
+MAX_LOOP_MD_BYTES: int = 25_000
 
 
 # =============================================================================
@@ -192,6 +199,33 @@ def _flag_global_config_keys_local(
                 (
                     f"{file_label} has global-config-only key '{key}' — this key "
                     "lives in ~/.claude.json only and triggers a schema error."
+                ),
+                file_label,
+            )
+
+
+def _flag_managed_only_nested_keys_local(
+    data: dict[str, Any], report: ValidationReport, file_label: str
+) -> None:
+    """Nested admin kill-switches (``permissions.disableAutoMode`` etc.) are
+    silently ignored outside managed settings. MAJOR so the user moves them to
+    the correct scope.
+    """
+    for path_tuple in sorted(MANAGED_ONLY_NESTED_KEYS):
+        cursor: Any = data
+        for segment in path_tuple:
+            if not isinstance(cursor, dict) or segment not in cursor:
+                cursor = None
+                break
+            cursor = cursor[segment]
+        if cursor is not None:
+            dotted = ".".join(path_tuple)
+            report.major(
+                (
+                    f"{file_label} sets '{dotted}' — this is a managed-only "
+                    "admin kill-switch and has no effect in a regular settings "
+                    "file. Deploy via managed-settings.json or server-managed "
+                    "settings instead."
                 ),
                 file_label,
             )
@@ -282,6 +316,7 @@ def validate_settings_local_json(
         return None
 
     _flag_managed_only_keys_local(data, report, file_label)
+    _flag_managed_only_nested_keys_local(data, report, file_label)
     _flag_global_config_keys_local(data, report, file_label)
     _flag_plugin_only_keys_local(data, report, file_label)
     _suggest_typically_shared_keys(data, report, file_label)
@@ -584,6 +619,58 @@ def validate_gitignore_for_local_files(
 
 
 # =============================================================================
+# .claude/loop.md — v2.22.0
+#
+# Per scheduled-tasks.md, `.claude/loop.md` replaces the built-in `/loop`
+# maintenance prompt. Project-level takes precedence over user-level
+# (`~/.claude/loop.md`). The file is a plain-markdown maintenance instruction
+# bounded at 25,000 bytes (content above the cap is silently truncated by
+# Claude Code). Untracked instances belong to local scope.
+# =============================================================================
+
+
+def validate_loop_md_local(
+    loop_path: Path, repo_root: Path, project_root: Path, report: ValidationReport
+) -> None:
+    """Validate an UNTRACKED ``.claude/loop.md`` file (local scope).
+
+    Rules (TRDD-479cde0c §NOW #19, scheduled-tasks.md):
+
+    - If the file is git-tracked, silently skip — that's project-scope's
+      territory, handled by ``validate_loop_md_project``.
+    - If the file exceeds 25,000 bytes: MAJOR (content above the cap is
+      silently truncated by Claude Code per scheduled-tasks.md).
+    - If the file is not UTF-8 decodable: CRITICAL (same pattern used by
+      other markdown readers in this module).
+    - Otherwise: INFO noting that ``loop.md`` replaces the built-in
+      ``/loop`` prompt so the author confirms the content is a maintenance
+      instruction, not an inadvertent command.
+    """
+    rel = loop_path.relative_to(project_root)
+    # Tracked files are validated by the project-scope validator — skip here.
+    if is_git_tracked(loop_path, repo_root):
+        return
+    try:
+        safe_read_text(loop_path, MAX_LOOP_MD_BYTES)
+    except OversizedFileError:
+        report.major(
+            f"{rel}: exceeds {MAX_LOOP_MD_BYTES}-byte cap from scheduled-tasks.md "
+            "— content above this size is silently truncated by Claude Code. "
+            "Trim the loop prompt or split it into multiple files.",
+            str(rel),
+        )
+        return
+    except (OSError, UnicodeDecodeError) as exc:
+        report.critical(f"{rel}: read failed ({type(exc).__name__})", str(rel))
+        return
+    report.info(
+        f"{rel}: loop.md present — replaces the built-in /loop prompt. Ensure "
+        "content is a maintenance instruction, not an inadvertent command.",
+        str(rel),
+    )
+
+
+# =============================================================================
 # Orchestrator
 # =============================================================================
 
@@ -743,6 +830,14 @@ def validate_local_scope(project_root: Path, report: ValidationReport) -> None:
     claude_local_md = project_root / "CLAUDE.local.md"
     if claude_local_md.exists():
         validate_claude_local_md(claude_local_md, repo_root, report)
+
+    # 9b. .claude/loop.md (v2.22.0, scheduled-tasks.md).
+    # Only validated here when untracked — tracked loop.md belongs to
+    # validate_project_scope. Size-cap and UTF-8 check only (local rules
+    # are deliberately relaxed).
+    loop_md = claude_dir / "loop.md"
+    if loop_md.exists():
+        validate_loop_md_local(loop_md, repo_root, project_root, report)
 
     # 10. ~/.claude.json per-project MCP state
     validate_home_claude_json_for_project(project_root, report)

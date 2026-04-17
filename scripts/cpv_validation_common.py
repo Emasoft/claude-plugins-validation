@@ -258,7 +258,7 @@ VALID_HOOK_EVENTS = {
     "SessionEnd",
     "PreCompact",
     "PostCompact",  # v2.1.76 — fires after compaction completes
-    "Setup",  # [legacy — emits WARNING] not in official hooks spec as of v2.1.98, kept for backward compatibility
+    "Setup",  # [legacy — emits WARNING] not in hooks spec as of v2.1.109 — kept as legacy WARN only
     "TeammateIdle",
     "TaskCompleted",
     "ConfigChange",
@@ -281,8 +281,14 @@ VALID_HOOK_EVENTS = {
 # Valid context values for agents and skills. Official spec only lists "fork".
 VALID_CONTEXT_VALUES = {"fork"}
 
-# Built-in agent types provided by Claude Code
-BUILTIN_AGENT_TYPES = {"Explore", "Plan", "general-purpose"}
+# Built-in agent types provided by Claude Code (sub-agents.md L29-74)
+BUILTIN_AGENT_TYPES = {
+    "Explore",
+    "Plan",
+    "general-purpose",
+    "statusline-setup",
+    "Claude Code Guide",
+}
 
 # Semantic version pattern for marketplace version fields
 SEMVER_PATTERN = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?(\+[a-zA-Z0-9.]+)?$")
@@ -307,6 +313,7 @@ VALID_SETTINGS_SOURCE_TYPES = {
     "directory",  # dev-only: local filesystem path
     "file",  # v2.1.98+ — absolute path to a marketplace.json file
     "hostPattern",  # v2.1.98+ — regex pattern matching marketplace host
+    "pathPattern",  # v2.1.98+ — regex pattern matching filesystem path (self-hosted git)
 }
 
 # Required fields per settings-level source type.
@@ -321,6 +328,7 @@ SETTINGS_SOURCE_REQUIRED_FIELDS: dict[str, set[str]] = {
     "directory": {"path"},
     "file": {"path"},  # v2.1.98+
     "hostPattern": {"hostPattern"},  # v2.1.98+
+    "pathPattern": {"pathPattern"},  # v2.1.98+
 }
 
 # Valid tool names for Claude Code agents
@@ -364,10 +372,17 @@ VALID_TOOLS = {
     "SendMessage",  # Agent teams — message teammates or resume subagents
     "TeamCreate",  # Agent teams — create a team
     "TeamDelete",  # Agent teams — disband a team
+    "PushNotification",  # v2.1.110 — mobile push notifications when Remote Control enabled
 }
 
 # Valid model short names for agents (v2.1.74+: full model IDs also accepted)
 VALID_MODELS = {"haiku", "sonnet", "opus", "inherit"}
+
+# Valid effort levels for agents (v2.1.78+) and skills (v2.1.80+).
+# - "low"/"medium"/"high": supported on all models per cli-reference.md --effort.
+# - "xhigh": v2.1.111+ Opus 4.7 only (skills.md L192, sub-agents.md L244).
+# - "max": Opus 4.6 legacy — still accepted, upgraded to Opus on request.
+VALID_EFFORT_VALUES = {"low", "medium", "high", "xhigh", "max"}
 
 # Regex for full model IDs like claude-opus-4-5, claude-sonnet-4-6, claude-haiku-4-5-20251001
 # Full model IDs like claude-opus-4-6, claude-sonnet-4-6[1m], etc.
@@ -388,20 +403,70 @@ def is_valid_model(value: str) -> bool:
     return bool(_SHORT_MODEL_RE.match(value)) or bool(_FULL_MODEL_ID_RE.match(value))
 
 
-# Environment variables provided by Claude Code at plugin load time
-# Plugins must use these instead of hardcoded absolute paths
+# Environment variables provided by Claude Code at plugin load time.
+# Plugins must use these instead of hardcoded absolute paths.
+# Also includes Claude Code-configuration env vars that plugin authors may
+# legitimately document or reference (OTEL_* for telemetry, CRON flags, etc.)
+# — flagging them as unknown would produce false positives on legitimate plugin
+# documentation. See env-vars.md + monitoring-usage.md + scheduled-tasks.md.
 VALID_PLUGIN_ENV_VARS = {
+    # Plugin-scoped (set by Claude Code per plugin/hook/skill)
     "CLAUDE_PLUGIN_ROOT",  # Plugin's root directory (all plugin hooks)
     "CLAUDE_PLUGIN_DATA",  # Persistent data directory that survives updates (v2.1.78)
     "CLAUDE_PROJECT_DIR",  # Project root directory (all hooks)
     "CLAUDE_ENV_FILE",  # SessionStart/CwdChanged/FileChanged — write export statements to persist env vars
     "CLAUDE_CODE_REMOTE",  # Set to "true" in remote web environments; not set in local CLI
+    "CLAUDE_CODE_REMOTE_SESSION_ID",  # v2.1.x — cloud-session ID for transcript links (env-vars.md L123)
     "CLAUDE_CODE_MCP_SERVER_NAME",  # v2.1.85 — MCP server name, available in headersHelper scripts
     "CLAUDE_CODE_MCP_SERVER_URL",  # v2.1.85 — MCP server URL, available in headersHelper scripts
+    "CLAUDE_CODE_TEAM_NAME",  # v2.1.x — agent team name for team members (env-vars.md L142)
+    "CLAUDE_CODE_TASK_LIST_ID",  # v2.1.x — shared task list across sessions (env-vars.md L141)
     "CLAUDE_SKILL_DIR",  # Skill's own directory — for skills to reference their own files in SKILL.md
     "CLAUDE_SESSION_ID",  # Current session ID (skills.md — string substitution)
     "CLAUDECODE",  # Set to "1" in shells spawned by Claude Code (env-vars.md)
-    "TRACEPARENT",  # W3C trace context propagated to Bash/PowerShell subprocesses when tracing active (monitoring-usage.md)
+    # Telemetry / monitoring (monitoring-usage.md)
+    "TRACEPARENT",  # W3C trace context propagated to Bash/PowerShell subprocesses when tracing active
+    "TRACESTATE",  # v2.1.110 — companion trace-context header for SDK/headless distributed tracing
+    "CLAUDE_CODE_ENABLE_TELEMETRY",  # Opt-in flag for OTEL export
+    "CLAUDE_CODE_ENHANCED_TELEMETRY_BETA",  # Opt-in flag for enhanced OTEL (beta)
+    "CLAUDE_CODE_OTEL_HEADERS_HELPER_DEBOUNCE_MS",  # Interval (default 1740000 = 29 min)
+    "CLAUDE_CODE_MAX_RETRIES",  # Default 10 — referenced by telemetry retry-exhaustion detection
+    # Scheduled tasks (scheduled-tasks.md)
+    "CLAUDE_CODE_DISABLE_CRON",  # Disable the scheduler entirely
+    # Feature flags (costs.md, features-overview.md)
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS",  # User-level opt-in for agent teams (not plugin-shipped)
+    "CLAUDE_CODE_USE_POWERSHELL_TOOL",  # Windows/macOS/Linux PowerShell opt-in (v2.1.84/v2.1.111)
+    "MAX_THINKING_TOKENS",  # Extended-thinking token budget cap (default 8000)
+    # Full OTEL env-var surface (monitoring-usage.md) — recognized to avoid
+    # "unknown env var" false positives on legitimate enterprise telemetry setup.
+    # Plugin-shipped settings SHOULD NOT include these (admin-managed), but
+    # plugin READMEs and docs commonly reference them.
+    "OTEL_METRICS_EXPORTER",
+    "OTEL_LOGS_EXPORTER",
+    "OTEL_TRACES_EXPORTER",
+    "OTEL_EXPORTER_OTLP_PROTOCOL",
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_HEADERS",
+    "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL",
+    "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL",
+    "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL",
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_METRICS_CLIENT_KEY",
+    "OTEL_EXPORTER_OTLP_METRICS_CLIENT_CERTIFICATE",
+    "OTEL_METRIC_EXPORT_INTERVAL",
+    "OTEL_LOGS_EXPORT_INTERVAL",
+    "OTEL_TRACES_EXPORT_INTERVAL",
+    "OTEL_LOG_USER_PROMPTS",  # Privacy-sensitive — flagged as CRITICAL when plugin-shipped
+    "OTEL_LOG_TOOL_DETAILS",
+    "OTEL_LOG_TOOL_CONTENT",
+    "OTEL_LOG_RAW_API_BODIES",  # Privacy-sensitive — flagged as CRITICAL when plugin-shipped
+    "OTEL_METRICS_INCLUDE_SESSION_ID",
+    "OTEL_METRICS_INCLUDE_VERSION",
+    "OTEL_METRICS_INCLUDE_ACCOUNT_UUID",
+    "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",
+    "OTEL_RESOURCE_ATTRIBUTES",
 }
 
 # Env var name pattern matching for dynamic plugin env vars

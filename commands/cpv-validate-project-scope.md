@@ -99,6 +99,17 @@ obsolete TODO/FIXME markers, large inline command blocks, etc.
 ### 7. `CLAUDE.md` or `.claude/CLAUDE.md`
 Body scanned for absolute home paths and literal credentials.
 
+### 7b. `.claude/loop.md` (v2.22.0, scheduled-tasks.md)
+If the file is git-tracked, it is validated under project scope.
+`.claude/loop.md` replaces the built-in `/loop` maintenance prompt
+(project-level takes precedence over `~/.claude/loop.md`).
+- **CRITICAL**: file is not UTF-8 decodable.
+- **MAJOR**: file exceeds 25,000 bytes (scheduled-tasks.md truncates above
+  this cap); or the path is a symlink escape outside the repo root.
+- **INFO** otherwise: confirms the file is a maintenance instruction, not
+  an inadvertent command. Untracked `loop.md` is the responsibility of
+  `/cpv-validate-local-scope`.
+
 ### 8. `.gitignore` hygiene
 - **INFO**: `.claude/settings.local.json` not pinned (Claude Code auto-adds
   it on first creation, pinning is recommended).

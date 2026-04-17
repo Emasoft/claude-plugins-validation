@@ -51,8 +51,10 @@ __all__ = [
     "PROJECT_REJECTED_KEYS",
     "PROJECT_REJECTED_NESTED_KEYS",
     "MANAGED_ONLY_KEYS",
+    "MANAGED_ONLY_NESTED_KEYS",
     "GLOBAL_CONFIG_KEYS",
     "PLUGIN_ONLY_KEYS",
+    "KNOWN_SETTINGS_KEYS",
     "SECRET_VALUE_PATTERNS",
     "SECRET_KEY_NAME_PATTERN",
     "ABSOLUTE_HOME_PATH_PATTERNS",
@@ -163,9 +165,23 @@ MANAGED_ONLY_KEYS: frozenset[str] = frozenset(
         "allowManagedPermissionRulesOnly",
         "blockedMarketplaces",
         "channelsEnabled",
+        "forceLoginMethod",  # memory.md L272 — admin authentication enforcement
+        "forceLoginOrgUUID",  # memory.md L272 — organization lock
         "forceRemoteSettingsRefresh",
         "pluginTrustMessage",
         "strictKnownMarketplaces",
+    }
+)
+
+# Per permission-modes.md: admin kill-switches nested under ``permissions``.
+# Silently ignored outside managed settings — the value "disable" only binds
+# when the key appears in a managed-settings file (or server-managed settings).
+# Placing these in project settings has no effect; CPV emits MAJOR so users
+# move them to the correct scope.
+MANAGED_ONLY_NESTED_KEYS: frozenset[tuple[str, ...]] = frozenset(
+    {
+        ("permissions", "disableAutoMode"),  # permission-modes.md L154
+        ("permissions", "disableBypassPermissionsMode"),  # permission-modes.md L258
     }
 )
 
@@ -191,6 +207,84 @@ GLOBAL_CONFIG_KEYS: frozenset[str] = frozenset(
 # home for these is the owning plugin's manifest.
 PLUGIN_ONLY_KEYS: frozenset[str] = frozenset(
     {
+        "lspServers",
+        "monitors",
+    }
+)
+
+# Per settings.md + memory.md + channels.md + scheduled-tasks.md +
+# monitoring-usage.md: settings keys that are VALID in one or more settings
+# scopes (not plugin-only, not project-rejected). This set is used for gentle
+# typo detection — unknown keys produce an INFO when validation is verbose,
+# not a MAJOR. Claude Code silently ignores truly unknown keys at runtime, so
+# this is a UX aid, not a hard gate. The union includes project/local/user/
+# managed-valid keys; per-scope restrictions are enforced separately via
+# MANAGED_ONLY_KEYS / GLOBAL_CONFIG_KEYS / PLUGIN_ONLY_KEYS.
+KNOWN_SETTINGS_KEYS: frozenset[str] = frozenset(
+    {
+        # Core
+        "$schema",
+        "apiKeyHelper",
+        "awsAuthRefresh",
+        "awsCredentialExport",
+        "env",
+        "hooks",
+        "includeCoAuthoredBy",  # deprecated
+        "mcpServers",
+        "model",
+        "otelHeadersHelper",  # monitoring-usage.md — admin-managed script for OTEL headers
+        "outputStyle",  # claude-directory.md L116/L612 — active output style
+        "permissions",
+        "sandbox",
+        "statusLine",
+        "fileSuggestion",
+        "subagentStatusLine",  # v2.1.x — plugin-shipped settings key per plugins.md L278
+        # Cleanup / retention
+        "cleanupPeriodDays",
+        # Memory / CLAUDE.md
+        "autoMemoryEnabled",  # memory.md L308-313
+        "autoMemoryDirectory",
+        "autoMode",
+        "useAutoModeDuringPlan",
+        "claudeMdExcludes",  # memory.md L285-294
+        # Skill shell-exec control (skills.md L414)
+        "disableSkillShellExecution",
+        # UI
+        "tui",  # v2.1.110 — flicker-free rendering mode
+        "autoScrollEnabled",  # v2.1.110 — fullscreen auto-scroll toggle
+        "showTurnDuration",
+        "terminalProgressBarEnabled",
+        "editorMode",
+        "teammateMode",
+        "autoConnectIde",
+        "autoInstallIdeExtension",
+        # Git hint overrides
+        "includeGitInstructions",
+        "respectGitignore",
+        "awaySummaryEnabled",
+        # Plugin / marketplace configuration
+        "extraKnownMarketplaces",
+        "enableAllProjectMcpServers",
+        "enabledMcpjsonServers",
+        "disabledMcpjsonServers",
+        "enabledPlugins",
+        "disabledPlugins",
+        "pluginConfigs",
+        # Managed-only (kept here for typo detection; semantics enforced elsewhere)
+        "allowedChannelPlugins",
+        "allowedMcpServers",
+        "deniedMcpServers",
+        "allowManagedHooksOnly",
+        "allowManagedMcpServersOnly",
+        "allowManagedPermissionRulesOnly",
+        "blockedMarketplaces",
+        "channelsEnabled",
+        "forceLoginMethod",
+        "forceLoginOrgUUID",
+        "forceRemoteSettingsRefresh",
+        "pluginTrustMessage",
+        "strictKnownMarketplaces",
+        # Plugin-only (kept here for typo detection; emits CRITICAL when misplaced)
         "lspServers",
         "monitors",
     }
