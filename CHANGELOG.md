@@ -2,11 +2,16 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
-## [2.22.0] - 2026-04-17
+## [2.22.1] - 2026-04-17
+
+### Documentation
+
+- **badges:** Sync test-count badge to 2129 (post v2.22.0)
+- Reword @path examples to avoid literal absolute paths (CPV self-flag)
 
 ### Features
 
-- **v2.22.0:** Claude Code spec alignment (TRDD-479cde0c)
+- **v2.22.1:** Spec-deferred items — @path imports, rules paths, Agent() grammar
 
 ### Miscellaneous Tasks
 
