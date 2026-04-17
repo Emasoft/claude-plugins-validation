@@ -57,6 +57,7 @@ __all__ = [
     "KNOWN_SETTINGS_KEYS",
     "SECRET_VALUE_PATTERNS",
     "SECRET_KEY_NAME_PATTERN",
+    "SECRET_ENV_VAR_NAMES",
     "ABSOLUTE_HOME_PATH_PATTERNS",
     "CLAUDE_VAR_PREFIXES",
     "MAX_SETTINGS_JSON_BYTES",
@@ -192,6 +193,7 @@ MANAGED_ONLY_NESTED_KEYS: frozenset[tuple[str, ...]] = frozenset(
     {
         ("permissions", "disableAutoMode"),  # permission-modes.md L154
         ("permissions", "disableBypassPermissionsMode"),  # permission-modes.md L258
+        ("autoMode", "environment"),  # server-managed-settings.md L85-94 — trusted-infra list
     }
 )
 
@@ -297,6 +299,29 @@ KNOWN_SETTINGS_KEYS: frozenset[str] = frozenset(
         # Plugin-only (kept here for typo detection; emits CRITICAL when misplaced)
         "lspServers",
         "monitors",
+        # v2.22.2 batch — keys present across changelog versions that CPV
+        # was flagging as unknown in legitimate settings files.
+        "attribution",  # v2.0.62 — replaces includeCoAuthoredBy; commit/PR by-line config
+        "effortLevel",  # env-vars.md L87 — effort level setting (CLAUDE_CODE_EFFORT_LEVEL overrides)
+        "alwaysThinkingEnabled",  # v2.1.47
+        "companyAnnouncements",  # v2.0.32
+        "spinnerTipsEnabled",  # v1.0.112
+        "spinnerTipsOverride",  # v2.1.45 — tips array + excludeDefault
+        "spinnerVerbs",  # v2.1.23 + v2.1.46 — custom spinner verbs
+        "plansDirectory",  # v2.1.9
+        "refreshInterval",  # v2.1.97 — statusline re-run interval
+        "feedbackSurveyRate",  # v2.1.76 — enterprise session-quality survey rate
+        "modelOverrides",  # v2.1.73 — Bedrock inference profile ARN mapping
+        "showThinkingSummaries",  # v2.1.89
+        "showClearContextOnPlanAccept",  # v2.1.81
+        "disableDeepLinkRegistration",  # v2.1.83
+        "keychainFallback",  # sensitive-credential keychain fallback
+        "allowManagedDomainsOnly",  # v2.1.69 — managed domain allowlist
+        "language",  # v2.1.0 — e.g. "japanese"
+        "disallowAllHooks",  # v2.1.49
+        "disableAllHooks",  # v2.1.49 — companion toggle
+        "voiceEnabled",  # v2.1.79
+        "worktree",  # v2.1.76 — top-level object (sparsePaths, etc.)
     }
 )
 
@@ -308,6 +333,34 @@ KNOWN_SETTINGS_KEYS: frozenset[str] = frozenset(
 # Known secret formats. Each regex is anchored so a value matches only if the
 # entire string looks like a secret. These are intentionally conservative to
 # avoid false positives on ordinary strings.
+# Per env-vars.md: these env vars ARE secrets by definition. A literal value
+# in a settings file's ``env`` block (or MCP server ``env`` map) is an
+# unconditional CRITICAL leak — it doesn't matter if the format looks
+# "secret-ish" to ``SECRET_VALUE_PATTERNS``. Only ``${VAR}``-expansion
+# references are acceptable. Names drawn from env-vars.md L13, L14, L36,
+# L45, L64, L110, L112, L188, and Bedrock/Foundry references.
+SECRET_ENV_VAR_NAMES: frozenset[str] = frozenset(
+    {
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_FOUNDRY_API_KEY",
+        "ANTHROPIC_CUSTOM_HEADERS",  # may carry auth tokens in header form
+        "AWS_BEARER_TOKEN_BEDROCK",
+        "CLAUDE_CODE_CLIENT_CERT",
+        "CLAUDE_CODE_CLIENT_KEY",
+        "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
+        "MCP_CLIENT_SECRET",
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+        "GITLAB_TOKEN",
+        "GL_TOKEN",
+        "BITBUCKET_TOKEN",
+    }
+)
+
+
 SECRET_VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^sk-ant-[A-Za-z0-9_-]{20,}$"),               # Anthropic API key
     re.compile(r"^sk-[A-Za-z0-9_-]{32,}$"),                   # OpenAI-style

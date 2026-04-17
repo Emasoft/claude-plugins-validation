@@ -98,6 +98,7 @@ from cc_scope_rules import (
     PLUGIN_ONLY_KEYS,
     PROJECT_REJECTED_KEYS,
     PROJECT_REJECTED_NESTED_KEYS,
+    SECRET_ENV_VAR_NAMES,
     OversizedFileError,
     classify_file_scope,
     classify_folder_scope,
@@ -347,12 +348,43 @@ def _flag_plugin_only_keys(data: dict[str, Any], report: ValidationReport, file_
 
 
 def _flag_secrets_in_env(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
-    """Scan the ``env`` block for literal secrets."""
+    """Scan the ``env`` block for literal secrets.
+
+    Three-tier check:
+    1. **CRITICAL** — key is a known-secret env var (``SECRET_ENV_VAR_NAMES``:
+       ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, AWS_BEARER_TOKEN_BEDROCK,
+       etc.) AND the value is a plain string literal (not ``${VAR}``
+       expansion). These names are secrets by definition per env-vars.md;
+       pattern-matching doesn't apply.
+    2. **MINOR** — value matches a ``SECRET_VALUE_PATTERNS`` regex
+       (Anthropic sk-ant-*, GitHub ghp_/gho_*, etc.) regardless of key name.
+    3. **MINOR** — key looks secret-ish (``api_key``, ``token``, ``password``)
+       AND value is a plain string not using ``${VAR}`` expansion.
+    """
     env = data.get("env")
     if not isinstance(env, dict):
         return
     for key, value in env.items():
         if not isinstance(key, str):
+            continue
+        # Tier 1: known-secret env var with literal value → CRITICAL.
+        if (
+            key in SECRET_ENV_VAR_NAMES
+            and isinstance(value, str)
+            and value
+            and not value.startswith("${")
+            and not value.startswith("$")
+        ):
+            report.critical(
+                (
+                    f"settings.json env.{key} is a known-secret env var with a "
+                    "hard-coded literal value. This commits a credential into a "
+                    "shared settings file. Use ${" + key + "} expansion instead "
+                    "and keep the actual value in .env (gitignored) or a secret "
+                    "manager."
+                ),
+                file_label,
+            )
             continue
         if is_secret_value(value):
             report.minor(

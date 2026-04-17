@@ -437,8 +437,27 @@ def validate_model_field(frontmatter: dict[str, Any], filename: str, report: Age
     report.passed(f"'model' field valid: {model}", filename)
 
 
+AGENT_NAMED_COLORS: frozenset[str] = frozenset({
+    "red",
+    "blue",
+    "green",
+    "yellow",
+    "purple",
+    "orange",
+    "pink",
+    "cyan",
+})
+
+
 def validate_color_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
-    """Validate the 'color' frontmatter field."""
+    """Validate the 'color' frontmatter field.
+
+    Per sub-agents.md L247 the spec accepts exactly 8 named colors
+    (red, blue, green, yellow, purple, orange, pink, cyan). CPV also
+    accepts hex ``#RRGGBB`` values as a legacy/CPV-extension shape so
+    existing agents keep validating, but emits a NIT when hex is used
+    nudging authors toward the canonical named values.
+    """
     if "color" not in frontmatter:
         return
 
@@ -448,16 +467,24 @@ def validate_color_field(frontmatter: dict[str, Any], filename: str, report: Age
         report.major(f"'color' must be a string, got {type(color).__name__}", filename)
         return
 
-    # Hex color pattern
+    if color in AGENT_NAMED_COLORS:
+        report.passed(f"'color' field valid (named): {color}", filename)
+        return
+
     hex_pattern = re.compile(r"^#[0-9A-Fa-f]{6}$")
-    if not hex_pattern.match(color):
-        report.major(
-            f"'color' must be hex format (#RRGGBB): {color}",
+    if hex_pattern.match(color):
+        report.nit(
+            f"'color' uses legacy hex format ({color}); prefer a named color "
+            f"from {sorted(AGENT_NAMED_COLORS)} per sub-agents.md L247",
             filename,
         )
         return
 
-    report.passed(f"'color' field valid: {color}", filename)
+    report.major(
+        f"'color' must be one of {sorted(AGENT_NAMED_COLORS)} "
+        f"or hex (#RRGGBB), got {color!r}",
+        filename,
+    )
 
 
 def validate_capabilities_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
@@ -933,11 +960,12 @@ def validate_mcp_servers_field(frontmatter: dict[str, Any], filename: str, repor
 def validate_hooks_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
     """Validate the 'hooks' frontmatter field.
 
-    Hooks scoped to this subagent. Valid event types for agents:
-    - PreToolUse: Before the subagent uses a tool (supports matcher)
-    - PostToolUse: After the subagent uses a tool (supports matcher)
-    - Stop: When the subagent finishes (no matcher)
+    Hooks scoped to this subagent. Per hooks.md L422 (v2.1.109): "All hook
+    events are supported" in agent frontmatter. CPV therefore accepts every
+    event name from VALID_HOOK_EVENTS (all 26 + legacy Setup).
     """
+    from cpv_validation_common import VALID_HOOK_EVENTS
+
     if "hooks" not in frontmatter:
         # hooks is optional
         return
@@ -948,12 +976,11 @@ def validate_hooks_field(frontmatter: dict[str, Any], filename: str, report: Age
         report.major(f"'hooks' must be an object, got {type(hooks).__name__}", filename)
         return
 
-    valid_agent_hook_events = {"PreToolUse", "PostToolUse", "Stop"}
-
     for event_name, event_config in hooks.items():
-        if event_name not in valid_agent_hook_events:
+        if event_name not in VALID_HOOK_EVENTS:
             report.major(
-                f"Invalid hook event for agent: '{event_name}'. Valid events: {sorted(valid_agent_hook_events)}",
+                f"Invalid hook event for agent: '{event_name}'. "
+                f"Valid events: {sorted(VALID_HOOK_EVENTS)}",
                 filename,
             )
             continue
@@ -1007,9 +1034,13 @@ def validate_hooks_field(frontmatter: dict[str, Any], filename: str, report: Age
                     continue
 
                 hook_type = hook["type"]
-                if hook_type not in {"command", "prompt"}:
+                # Per hooks.md L278-283 the 4 valid hook types are
+                # {command, http, prompt, agent}. Agent-scoped hooks accept
+                # the same set.
+                if hook_type not in {"command", "http", "prompt", "agent"}:
                     report.major(
-                        f"Invalid hook type '{hook_type}' in '{event_name}[{i}].hooks[{j}]'. Valid types: command, prompt",
+                        f"Invalid hook type '{hook_type}' in '{event_name}[{i}].hooks[{j}]'. "
+                        "Valid types: command, http, prompt, agent",
                         filename,
                     )
 

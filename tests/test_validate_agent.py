@@ -369,21 +369,43 @@ class TestValidateModelField:
 
 
 class TestValidateColorField:
-    """Tests for validate_color_field (lines 347-362)."""
+    """Tests for validate_color_field. Per sub-agents.md L247 (v2.1.109+)
+    the 8 named colors are canonical; hex is accepted as a legacy shape with
+    a NIT nudging authors toward the named values."""
 
-    def test_invalid_hex_color_reports_major(self):
-        """validate_color_field reports MAJOR for a non-hex color string."""
+    def test_invalid_color_value_reports_major(self):
+        """validate_color_field reports MAJOR for a string that is neither a
+        spec-named color nor a #RRGGBB hex — e.g. 'magenta' or 'hot-pink'."""
+        report = AgentValidationReport()
+        validate_color_field({"color": "magenta"}, "agent.md", report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("must be one of" in m for m in major_msgs)
+
+    def test_named_color_red_passes(self):
+        """Spec-named color 'red' is PASSED with no MAJOR/NIT."""
         report = AgentValidationReport()
         validate_color_field({"color": "red"}, "agent.md", report)
-        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("hex format" in m for m in major_msgs)
+        passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
+        assert any("'color' field valid (named)" in m for m in passed_msgs)
+        assert not any(r.level == "MAJOR" for r in report.results)
 
-    def test_valid_hex_color_passes(self):
-        """validate_color_field records PASSED for a proper #RRGGBB value."""
+    def test_named_color_cyan_passes(self):
+        """All 8 named colors pass — spot-check 'cyan'."""
+        report = AgentValidationReport()
+        validate_color_field({"color": "cyan"}, "agent.md", report)
+        assert any(r.level == "PASSED" for r in report.results)
+        assert not any(r.level == "MAJOR" for r in report.results)
+
+    def test_valid_hex_color_gets_nit_nudge(self):
+        """Legacy hex color #RRGGBB is accepted but emits a NIT recommending
+        a named color per sub-agents.md L247."""
         report = AgentValidationReport()
         validate_color_field({"color": "#FF00AA"}, "agent.md", report)
-        passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
-        assert any("'color' field valid" in m for m in passed_msgs)
+        nit_msgs = [r.message for r in report.results if r.level == "NIT"]
+        assert any("legacy hex format" in m for m in nit_msgs), (
+            f"expected NIT about legacy hex, got: {[r.message for r in report.results]}"
+        )
+        assert not any(r.level == "MAJOR" for r in report.results)
 
 
 class TestValidateCapabilitiesField:

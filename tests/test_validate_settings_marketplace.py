@@ -150,9 +150,12 @@ def test_no_extra_known_marketplaces_key_passes(tmp_path: Path):
     assert not report.has_critical
     assert not report.has_major
     assert not report.has_minor
-    assert any(r.level == "PASSED" and "no 'extraKnownMarketplaces' block" in r.message for r in report.results), (
-        "expected a PASSED result stating the block is absent"
-    )
+    assert any(
+        r.level == "PASSED"
+        and "no 'extraKnownMarketplaces'" in r.message
+        and "strictKnownMarketplaces" in r.message
+        for r in report.results
+    ), "expected a PASSED result stating both marketplace blocks are absent"
 
 
 def test_inline_plugin_missing_name_and_source_is_major(tmp_path: Path):
@@ -296,3 +299,68 @@ def test_host_pattern_source_type_missing_field_is_major(tmp_path: Path):
         "bad-host-mp" in m and "hostPattern" in m
         for m in (r.message for r in report.results if r.level == "MAJOR")
     )
+
+
+# =============================================================================
+# v2.22.2 — strictKnownMarketplaces narrower source-type allowlist (GAP-4)
+# Per plugin-marketplaces.md:625-669 only {github, url, hostPattern, pathPattern}
+# are valid inside strictKnownMarketplaces — extraKnownMarketplaces accepts more.
+# =============================================================================
+
+def test_strict_known_marketplaces_github_source_passes(tmp_path: Path):
+    """strictKnownMarketplaces with a github source is accepted."""
+    settings_path = _write_settings(
+        tmp_path,
+        {"strictKnownMarketplaces": [{"source": "github", "repo": "owner/repo"}]},
+    )
+    report = validate_settings_marketplace_file(settings_path)
+    assert not report.has_critical
+    assert not report.has_major, [r.message for r in report.results if r.level == "MAJOR"]
+
+
+def test_strict_known_marketplaces_npm_source_is_major(tmp_path: Path):
+    """strictKnownMarketplaces with an npm source is MAJOR (narrower allowlist)."""
+    settings_path = _write_settings(
+        tmp_path,
+        {"strictKnownMarketplaces": [{"source": "npm", "package": "@scope/pkg"}]},
+    )
+    report = validate_settings_marketplace_file(settings_path)
+    assert report.has_major
+    assert any(
+        "npm" in r.message and "strictKnownMarketplaces" in r.message
+        for r in report.results
+        if r.level == "MAJOR"
+    ), "expected MAJOR explaining npm is not allowed in strictKnownMarketplaces"
+
+
+def test_strict_known_marketplaces_file_source_is_major(tmp_path: Path):
+    """strictKnownMarketplaces with a file source is MAJOR (not in narrower allowlist)."""
+    settings_path = _write_settings(
+        tmp_path,
+        {"strictKnownMarketplaces": [{"source": "file", "path": "/abs/marketplace.json"}]},
+    )
+    report = validate_settings_marketplace_file(settings_path)
+    assert report.has_major
+    assert any(
+        "file" in r.message and "strictKnownMarketplaces" in r.message
+        for r in report.results
+        if r.level == "MAJOR"
+    )
+
+
+def test_strict_known_marketplaces_host_pattern_passes(tmp_path: Path):
+    """strictKnownMarketplaces with hostPattern (regex) is accepted."""
+    settings_path = _write_settings(
+        tmp_path,
+        {"strictKnownMarketplaces": [{"source": "hostPattern", "hostPattern": "^https://.*\\.example\\.com/.*$"}]},
+    )
+    report = validate_settings_marketplace_file(settings_path)
+    assert not report.has_major, [r.message for r in report.results if r.level == "MAJOR"]
+
+
+def test_strict_known_marketplaces_empty_array_is_info(tmp_path: Path):
+    """Empty strictKnownMarketplaces array is legal — it locks everything down."""
+    settings_path = _write_settings(tmp_path, {"strictKnownMarketplaces": []})
+    report = validate_settings_marketplace_file(settings_path)
+    assert not report.has_critical
+    assert not report.has_major

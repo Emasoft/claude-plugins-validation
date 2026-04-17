@@ -482,6 +482,35 @@ class TestValidatePluginSource:
         results = validate_plugin_source(plugin, "myplugin", tmp_path, "mp.json")
         assert any(r.level == "MAJOR" and "invalid source type" in r.message for r in results)
 
+    def test_dict_source_file_type_is_settings_level_only(self, tmp_path):
+        """GAP-1 (v2.22.2): 'file' source is valid only at settings.json level,
+        not as a per-plugin source in marketplace.json. Per plugin-marketplaces.md:223-229
+        the 5 allowed per-plugin source types are relative-path, github, url, git-subdir, npm.
+        Using 'file' here emits a MAJOR explaining it is a settings-level-only type."""
+        from validate_marketplace import validate_plugin_source
+
+        plugin = {"name": "myplugin", "source": {"source": "file", "path": "/abs/path/marketplace.json"}}
+        results = validate_plugin_source(plugin, "myplugin", tmp_path, "mp.json")
+        assert any(
+            r.level == "MAJOR" and "settings-level" in r.message and "file" in r.message
+            for r in results
+        ), "expected MAJOR identifying 'file' as settings-level-only"
+
+    def test_string_source_file_name_is_settings_level_only(self, tmp_path):
+        """GAP-1 variant: bare 'file' string as source (not a relative path) hits the
+        same marketplace-level-only path in the string-source branch."""
+        from validate_marketplace import validate_plugin_source
+
+        plugin = {"name": "myplugin", "source": "file"}
+        results = validate_plugin_source(plugin, "myplugin", tmp_path, "mp.json")
+        # Either the MARKETPLACE_LEVEL_ONLY branch or the "invalid source type" branch is
+        # acceptable — what must NOT happen is CPV accepting this silently.
+        assert any(
+            r.level == "MAJOR"
+            and ("settings-level" in r.message or "invalid source type" in r.message)
+            for r in results
+        )
+
     def test_dict_source_missing_required_fields(self, tmp_path):
         """Dict source with valid type but missing required fields must produce MAJOR (lines 555-566)."""
         from validate_marketplace import validate_plugin_source

@@ -114,7 +114,15 @@ ValidationReport = MarketplaceValidationReport
 # "directory" is a Layout-B source for nested plugins inside the marketplace repo:
 # {"source": {"source": "directory", "path": "./plugins/my-plugin"}}
 # Equivalent to the shorthand form "./plugins/my-plugin" as a plain string.
-VALID_SOURCE_TYPES = {"github", "url", "npm", "git", "git-subdir", "directory", "file"}
+# Per plugin-marketplaces.md:223-229 the 5 official per-plugin source types are
+# relative-path string, github, url, git-subdir, npm. "file" is a settings-level
+# source for extraKnownMarketplaces, NOT valid as a per-plugin source.
+VALID_SOURCE_TYPES = {"github", "url", "npm", "git", "git-subdir", "directory"}
+
+# Source types that are valid at the settings.json level (extraKnownMarketplaces)
+# but NOT inside per-plugin source entries in marketplace.json. If authors use
+# these inside a plugin entry, CPV emits a MAJOR explaining the distinction.
+MARKETPLACE_LEVEL_ONLY_SOURCE_TYPES = {"file", "settings", "hostPattern", "pathPattern"}
 
 # Required fields in marketplace.json
 REQUIRED_MARKETPLACE_FIELDS = {"name", "owner", "plugins"}
@@ -155,7 +163,6 @@ SOURCE_REQUIRED_FIELDS = {
     "git": {"url"},  # v2.1.98+ — generic git URL (non-GitHub hosts); use optional `path` for subdir
     "git-subdir": {"url", "path"},  # Points to a subdirectory within a git repo (v2.1.69+)
     "directory": {"path"},  # Layout B: nested plugin inside marketplace repo
-    "file": {"path"},  # v2.1.98+ — absolute path to a marketplace.json file on disk
 }
 
 # Reserved marketplace names that cannot be used
@@ -915,6 +922,22 @@ def validate_plugin_source(
                 else:
                     # Layout B: recursively validate the nested plugin
                     results.extend(_validate_nested_plugin(resolved, plugin_id, json_path))
+            elif source in MARKETPLACE_LEVEL_ONLY_SOURCE_TYPES:
+                results.append(
+                    ValidationResult(
+                        level="MAJOR",
+                        category="plugin",
+                        message=(
+                            f"Plugin '{plugin_id}' uses '{source}' — a settings-level source type "
+                            f"(extraKnownMarketplaces/strictKnownMarketplaces), NOT valid as a per-plugin source"
+                        ),
+                        file=json_path,
+                        suggestion=(
+                            "Per plugin-marketplaces.md:223-229 the only per-plugin source types are: "
+                            "relative path (./path), github, url, git-subdir, npm"
+                        ),
+                    )
+                )
             elif source not in VALID_SOURCE_TYPES:
                 results.append(
                     ValidationResult(
@@ -948,6 +971,22 @@ def validate_plugin_source(
                 message=f"Plugin '{plugin_id}' source missing 'source' field",
                 file=json_path,
                 suggestion=f"Add source: {', '.join(sorted(VALID_SOURCE_TYPES))}",
+            )
+        )
+    elif source_type in MARKETPLACE_LEVEL_ONLY_SOURCE_TYPES:
+        results.append(
+            ValidationResult(
+                level="MAJOR",
+                category="plugin",
+                message=(
+                    f"Plugin '{plugin_id}' uses source type '{source_type}' — a settings-level type "
+                    f"(extraKnownMarketplaces/strictKnownMarketplaces), NOT valid inside a per-plugin source"
+                ),
+                file=json_path,
+                suggestion=(
+                    "Per plugin-marketplaces.md:223-229 the only per-plugin source types are: "
+                    "relative path (./path), github, url, git-subdir, npm"
+                ),
             )
         )
     elif source_type not in VALID_SOURCE_TYPES:
