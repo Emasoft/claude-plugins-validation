@@ -521,12 +521,22 @@ def _is_lintable_script(path_str: str) -> bool:
 
 # Interpreter name → invocation_mode tag. First token (basename) is looked up
 # here; a version suffix like python3.12 is accepted via regex fallback.
+# `py` is the Windows Python Launcher (ships with Python 3 on Windows); its
+# version selectors like `-3.12` are handled by the generic boolean-flag
+# skipper in _find_script_in_interpreter_args.
+# `tsx` and `ts-node` are TypeScript runners that accept a .ts script path
+# directly (like a Python interpreter). Treating them under the "node" mode
+# is correct for runtime-dep-reconciliation purposes (they don't go through
+# the uv/PEP 723 path).
 _INTERPRETER_TAGS: dict[str, str] = {
     "python": "interpreter-python",
     "python3": "interpreter-python",
+    "py": "interpreter-python",  # Windows Python Launcher
     "node": "node",
     "deno": "node",
     "bun": "node",
+    "tsx": "node",
+    "ts-node": "node",
     "bash": "bash",
     "sh": "bash",
     "zsh": "bash",
@@ -655,6 +665,13 @@ def _find_script_in_uv_run(tokens: list[str]) -> tuple[int, str, tuple[str, ...]
     n = len(tokens)
     while i < n:
         tok = tokens[i]
+        # POSIX end-of-options marker. Everything after `--` is passed to the
+        # subprocess verbatim — not parsed as uv flags. The next token (if
+        # lintable) is the command/script; flag-looking tokens after `--` are
+        # script args, NOT uv options.
+        if tok == "--":
+            i += 1
+            break
         # `--script` and `--gui-script` both mark PEP-723-metadata-driven runs.
         if tok in ("--script", "--gui-script"):
             has_script = True
@@ -1555,6 +1572,37 @@ def validate_command_hook(
             "Command contains Windows-style backslash paths — use forward slashes for cross-platform compatibility"
         )
 
+    # 3e: Path-traversal detection. Hook commands MUST NOT reference script
+    # paths that escape the plugin root via `..` segments. A path like
+    # `${CLAUDE_PLUGIN_ROOT}/../other-plugin/foo.py` breaks plugin isolation
+    # and may violate the security model. Same rule for `${CLAUDE_PROJECT_DIR}`,
+    # `${CLAUDE_PLUGIN_DATA}`, and bare `$HOME` references.
+    #
+    # We check the original (unresolved) command string for `..` segments that
+    # appear immediately after an env-var prefix OR as a path component
+    # anywhere inside a path-looking token. Tokenizer-level detection would
+    # miss traversal inside quoted strings that shlex normalizes.
+    _TRAVERSAL_RE = re.compile(
+        r"""
+        (?:
+            # env-var-prefixed:  ${VAR}/.. or $VAR/..
+            \$\{?CLAUDE_[A-Z_]+\}?/\.\./
+            |
+            # absolute path containing /../ (but not //./ or similar)
+            /[A-Za-z0-9_.\-]+/\.\./
+        )
+        """,
+        re.VERBOSE,
+    )
+    if _TRAVERSAL_RE.search(command):
+        report.warning(
+            "Command contains a `..` path segment that escapes the plugin/project root — "
+            "this is a path-traversal pattern that may break plugin isolation or enable "
+            "cross-plugin interference. If the traversal is intentional (e.g. accessing "
+            "a sibling directory in a monorepo), document it; otherwise rewrite the path "
+            "to reference `${CLAUDE_PLUGIN_ROOT}/...` or `${CLAUDE_PROJECT_DIR}/...` directly."
+        )
+
     # Relative path without $CLAUDE_PLUGIN_ROOT or $CLAUDE_PLUGIN_DATA — may not resolve at runtime
     if (
         cmd_first_token.startswith("./")
@@ -1652,6 +1700,37 @@ def validate_command_hook(
         )
     for ref in refs:
         script_path = ref.path
+        # Path-traversal check: verify the resolved script path does not escape
+        # the plugin root. This catches cases the command-level regex misses —
+        # e.g. a path that uses `..` via a pass-through wrapper or a script
+        # that legitimately looks clean in the command string but whose
+        # components resolve outside the plugin on the filesystem.
+        if plugin_root is not None:
+            try:
+                plugin_root_resolved = plugin_root.resolve(strict=False)
+                script_resolved = script_path.resolve(strict=False)
+                # On Python 3.9+ Path.is_relative_to is available.
+                if not script_resolved.is_relative_to(plugin_root_resolved):
+                    # Only warn if the script path used an env var that SHOULD
+                    # anchor it to the plugin root — external paths like
+                    # ${CLAUDE_PROJECT_DIR}/... or bare /usr/... are legitimate.
+                    cmd_original = hook.get("command", "")
+                    if (
+                        "${CLAUDE_PLUGIN_ROOT}" in cmd_original
+                        or "$CLAUDE_PLUGIN_ROOT" in cmd_original
+                    ) and "CLAUDE_PROJECT_DIR" not in cmd_original:
+                        report.warning(
+                            f"Script path `{script_path}` resolves OUTSIDE the plugin root "
+                            f"`{plugin_root_resolved}` via `..` segments — this breaks plugin "
+                            f"isolation. If cross-plugin access is truly required, use "
+                            f"${{CLAUDE_PROJECT_DIR}} to anchor the path at the project root "
+                            f"instead, or document the dependency explicitly."
+                        )
+            except (OSError, ValueError):
+                # Path resolution failed (e.g. permission error, invalid
+                # filename) — the subsequent exists() check will catch any
+                # truly broken paths. Don't surface noise here.
+                pass
         if script_path.exists():
             validate_script(script_path, report)
             # Python-only: reconcile script third-party imports against the hook's

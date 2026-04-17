@@ -1895,6 +1895,192 @@ def test_uv_run_new_flags_link_mode_exclude_newer_env_file(tmp_path: Path):
     assert refs[0].path == tmp_path / "scripts" / "foo.py"
 
 
+def test_uv_run_end_of_options_marker(tmp_path: Path):
+    """`uv run -- --script foo.py` — after `--`, uv stops parsing its own flags.
+    `--script` appearing AFTER `--` is a script argument, NOT the uv flag.
+
+    Before this fix: the validator incorrectly classified this as `uv-run-script`.
+    """
+    from validate_hook import _find_script_in_uv_run, _tokenize_hook_command
+
+    tokens = _tokenize_hook_command("uv run -- --script foo.py")[0]
+    result = _find_script_in_uv_run(tokens)
+    # After `--`, the next positional is `--script` which looks like a flag but
+    # should be treated as a script arg. Since `--script` isn't a lintable
+    # path, the function should return None (no valid script after `--`).
+    assert result is None, (
+        f"After `--`, flags should not be re-interpreted; got: {result}"
+    )
+
+
+def test_uv_run_end_of_options_with_real_script(tmp_path: Path):
+    """`uv run -- foo.py arg1` — after `--`, foo.py is the script (plain mode)."""
+    from validate_hook import extract_script_paths
+
+    refs = extract_script_paths(
+        'uv run -- "${CLAUDE_PLUGIN_ROOT}/scripts/foo.py" --some-arg', tmp_path
+    )
+    assert len(refs) == 1
+    assert refs[0].invocation_mode == "interpreter-python"
+
+
+def test_windows_py_launcher_recognized(tmp_path: Path):
+    """`py foo.py` and `py.exe -3.12 foo.py` (Windows Python Launcher) must be
+    classified as interpreter-python.
+    """
+    from validate_hook import extract_script_paths
+
+    refs = extract_script_paths('py "${CLAUDE_PLUGIN_ROOT}/scripts/foo.py"', tmp_path)
+    assert len(refs) == 1
+    assert refs[0].invocation_mode == "interpreter-python"
+
+    # With version selector flag (-3.12 is py-launcher specific)
+    refs2 = extract_script_paths(
+        'py.exe -3.12 "${CLAUDE_PLUGIN_ROOT}/scripts/foo.py"', tmp_path
+    )
+    assert len(refs2) == 1
+    assert refs2[0].invocation_mode == "interpreter-python"
+
+
+def test_tsx_ts_node_typescript_runners(tmp_path: Path):
+    """`tsx foo.ts` and `ts-node foo.ts` are TypeScript runners, classify as node mode."""
+    from validate_hook import extract_script_paths
+
+    refs = extract_script_paths('tsx "${CLAUDE_PLUGIN_ROOT}/scripts/hook.ts"', tmp_path)
+    assert len(refs) == 1
+    assert refs[0].invocation_mode == "node"
+
+    refs2 = extract_script_paths('ts-node "${CLAUDE_PLUGIN_ROOT}/scripts/hook.ts"', tmp_path)
+    assert len(refs2) == 1
+    assert refs2[0].invocation_mode == "node"
+
+
+def test_path_traversal_in_hook_command_warns(tmp_path: Path):
+    """`${CLAUDE_PLUGIN_ROOT}/../other_plugin/foo.py` triggers a WARNING."""
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    script = scripts_dir / "ok.py"
+    script.write_text("print('ok')\n")
+    import os
+    os.chmod(script, 0o755)
+
+    hooks_dir = tmp_path / "hooks"
+    hooks_dir.mkdir()
+    hooks_file = hooks_dir / "hooks.json"
+    hooks_file.write_text(
+        json.dumps({
+            "hooks": {
+                "UserPromptSubmit": [{
+                    "hooks": [{
+                        "type": "command",
+                        "command": 'python3 "${CLAUDE_PLUGIN_ROOT}/../other_plugin/foo.py"',
+                    }]
+                }]
+            }
+        })
+    )
+    report = validate_hooks(hooks_file, plugin_root=tmp_path)
+    warnings = [r.message for r in report.results if r.level == "WARNING"]
+    assert any("path-traversal" in m or "..` path segment" in m for m in warnings), (
+        f"Expected path-traversal WARNING; got: {warnings}"
+    )
+
+
+def test_path_traversal_for_env_var_prefix(tmp_path: Path):
+    """`${CLAUDE_PROJECT_DIR}/../outside.sh` also warns (not just plugin root)."""
+    hooks_dir = tmp_path / "hooks"
+    hooks_dir.mkdir()
+    hooks_file = hooks_dir / "hooks.json"
+    hooks_file.write_text(
+        json.dumps({
+            "hooks": {
+                "UserPromptSubmit": [{
+                    "hooks": [{
+                        "type": "command",
+                        "command": 'bash "${CLAUDE_PROJECT_DIR}/../evil.sh"',
+                    }]
+                }]
+            }
+        })
+    )
+    report = validate_hooks(hooks_file, plugin_root=tmp_path)
+    warnings = [r.message for r in report.results if r.level == "WARNING"]
+    assert any("..` path segment" in m for m in warnings), (
+        f"Expected traversal WARNING for CLAUDE_PROJECT_DIR/../; got: {warnings}"
+    )
+
+
+def test_no_false_positive_on_clean_paths(tmp_path: Path):
+    """A hook command with clean paths (no `..`) must NOT trigger traversal WARNING."""
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    script = scripts_dir / "clean.py"
+    script.write_text("print('ok')\n")
+    import os
+    os.chmod(script, 0o755)
+
+    hooks_dir = tmp_path / "hooks"
+    hooks_dir.mkdir()
+    hooks_file = hooks_dir / "hooks.json"
+    hooks_file.write_text(
+        json.dumps({
+            "hooks": {
+                "UserPromptSubmit": [{
+                    "hooks": [{
+                        "type": "command",
+                        "command": 'python3 "${CLAUDE_PLUGIN_ROOT}/scripts/clean.py"',
+                    }]
+                }]
+            }
+        })
+    )
+    report = validate_hooks(hooks_file, plugin_root=tmp_path)
+    warnings = [r.message for r in report.results if r.level == "WARNING"]
+    assert not any("path-traversal" in m or "..` path segment" in m for m in warnings), (
+        f"Clean paths MUST NOT trigger traversal WARNING; got: {warnings}"
+    )
+
+
+def test_resolved_script_path_escaping_plugin_root_warns(tmp_path: Path):
+    """Even if a path uses `${CLAUDE_PLUGIN_ROOT}` and looks clean in the string,
+    if the resolved path lands OUTSIDE the plugin root, a WARNING fires.
+    """
+    # Create plugin at tmp_path/plugin/ and a sibling at tmp_path/external/
+    plugin_dir = tmp_path / "plugin"
+    plugin_dir.mkdir()
+    scripts_dir = plugin_dir / "scripts"
+    scripts_dir.mkdir()
+    external_dir = tmp_path / "external"
+    external_dir.mkdir()
+    external_script = external_dir / "foo.py"
+    external_script.write_text("print('ok')\n")
+    import os
+    os.chmod(external_script, 0o755)
+
+    hooks_dir = plugin_dir / "hooks"
+    hooks_dir.mkdir()
+    hooks_file = hooks_dir / "hooks.json"
+    # The command uses CLAUDE_PLUGIN_ROOT/.. which escapes plugin_dir
+    hooks_file.write_text(
+        json.dumps({
+            "hooks": {
+                "UserPromptSubmit": [{
+                    "hooks": [{
+                        "type": "command",
+                        "command": 'python3 "${CLAUDE_PLUGIN_ROOT}/../external/foo.py"',
+                    }]
+                }]
+            }
+        })
+    )
+    report = validate_hooks(hooks_file, plugin_root=plugin_dir)
+    warnings = [r.message for r in report.results if r.level == "WARNING"]
+    # Either the command-regex traversal check OR the resolved-path check should fire.
+    assert any(
+        "OUTSIDE the plugin root" in m or "..` path segment" in m for m in warnings
+    ), f"Expected escape-plugin-root WARNING; got: {warnings}"
+
+
 def test_extract_script_paths_preserves_direct_sh_invocation(tmp_path: Path):
     """`./scripts/foo.sh` as first token — direct invocation mode."""
     from validate_hook import extract_script_paths
