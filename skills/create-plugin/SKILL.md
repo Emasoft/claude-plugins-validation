@@ -93,20 +93,16 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/generate_marketplace_repo.py" /tmp/my-mkt 
 ## Resources
 
 - [Pipeline Rules](references/pipeline-rules.md) — mandatory rules for all plugin operations
-  > Pre-Push Hook: The Quality Gate · Fix-All Mandate · Running CPV Scripts · Processing Validation Output · GitHub Secrets · CI Workflow Dependencies · Marketplace Notification · All Scripts Are Python · Binary Plugins · README Requirements · Pre-Publish Local Dry-Run · Post-Push CI Verification · Mega-Linter Configuration · Common Fixes Reference
+  > Pre-Push Hook · Fix-All Mandate · Running CPV Scripts · Processing Validation Output · GitHub Secrets · CI Workflow Dependencies · Marketplace Notification · All Scripts Are Python · Binary Plugins · README Requirements · Pre-Publish Local Dry-Run · Post-Push CI Verification · Mega-Linter Configuration · Common Fixes Reference
 - [v2.1.80+ Plugin Features](references/v2-1-80-features.md)
-  > Monitor tool · userConfig (plugin.json) · channels (plugin.json) · CLAUDE_PLUGIN_OPTION_<KEY> env vars · Inline marketplace (settings.json) · managed-settings.d/ drop-in directory · Plugin skill `name` field (v2.1.98)
+  > Monitor tool · userConfig · channels · CLAUDE_PLUGIN_OPTION_<KEY> · Inline marketplace · managed-settings.d/ · Plugin skill `name` field
 - [Marketplace Layouts](references/marketplace-layouts.md)
   > Overview · Layout A — Hub-and-Spoke (separate repos) · Layout B — Nested single-repo (monorepo) · How Claude Code updates plugins in each layout · When to choose which · Rich metadata fields (author, homepage, license, category) · Why CPV does not use git-subdir · Encountering a non-CPV marketplace · Refactoring between layouts · Agent behavior summary
 
-## MCP Server Bundling Convention
+## MCP Server Bundling
 
-When the new plugin includes bundled MCP server executables/scripts:
-- Place them in **`servers/`** at plugin root (matches the official docs example).
-- Sources may coexist (`.mcp.json` at root, inline `mcpServers` in `plugin.json`, path-string `mcpServers`) but **every server name must be unique across all sources** — defining the same server name in two sources is a conflict (CPV emits MAJOR per duplicate). Default to a single source for simplicity.
-- Reference executables as `${CLAUDE_PLUGIN_ROOT}/servers/<name>` in the `command:` field.
-- Soft preference — apply only when no location is predefined by the user.
+Place bundled MCP executables in **`servers/`** (docs convention), reference as `${CLAUDE_PLUGIN_ROOT}/servers/<name>`. Server names unique across sources. See `skills/fix-validation/references/empirical-loading-bugs.md` for 5 silent footguns CPV catches.
 
 ## Token Optimization
 
-Use `mcp__plugin_llm-externalizer_llm-externalizer__*` tools for bounded analysis. Pass file paths via `input_files_paths`.
+Use `mcp__plugin_llm-externalizer_llm-externalizer__*` for bounded analysis. Pass paths via `input_files_paths`.

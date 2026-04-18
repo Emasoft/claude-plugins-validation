@@ -66,27 +66,20 @@ CPV validates plugin sources; it does not install them. Schema rules mirror Clau
 ## Resources
 
 - [Plugin Error Index](references/plugin-error-index.md)
-  > validate_plugin.py · validate_skill.py · validate_skill_comprehensive.py · validate_hook.py · validate_agent.py · validate_command.py · validate_mcp.py · validate_lsp.py · validate_security.py · validate_rules.py · validate_xref.py · validate_settings_marketplace.py · validate_documentation.py · validate_encoding.py · validate_enterprise.py · validate_scoring.py
+  > validate_plugin · validate_skill · validate_skill_comprehensive · validate_hook · validate_agent · validate_command · validate_mcp · validate_lsp · validate_security · validate_rules · validate_xref · validate_settings_marketplace · validate_documentation · validate_encoding · validate_enterprise · validate_scoring
 - [Marketplace Error Index](references/marketplace-error-index.md)
-  > validate_marketplace.py · validate_marketplace_pipeline.py · Architecture / Layout Migration Warnings (7 signals)
+  > validate_marketplace · validate_marketplace_pipeline · Architecture / Layout Migration Warnings (7 signals)
 - [Schema-Parity Contract](references/schema-parity-contract.md)
   > What CPV does · The contract · What this contract does NOT say · What IS covered · Validator-gap protocol · Historical incidents · Related
 - [Iterative Fix Loop](references/iterative-fix-loop.md)
-  > Why a loop · Algorithm · Entry points — plugin path vs report path · Termination and safety · WARNING evaluation rules · Publish-blocking warning categories · Truly advisory warnings · Output contract
+  > Why a loop · Algorithm · Entry points · Termination · WARNING evaluation · Publish-blocking warnings · Output contract
+- [Empirical Loading Bugs](references/empirical-loading-bugs.md)
+  > 5 silent footguns + fix recipes (agents folder · hooks default-file cascade · MCP/LSP cross-source · MCP redundancy)
 
-## MCP Server Bundling Convention
+## MCP Server Bundling
 
-When a fix adds or relocates bundled MCP server executables/scripts:
-- Prefer **`servers/`** at plugin root (matches the official docs example).
-- Reference as `${CLAUDE_PLUGIN_ROOT}/servers/<name>` in `command:`.
-- Server names must be unique across all sources (`.mcp.json`, inline `mcpServers`, path-string `mcpServers`). If CPV reports `"MCP server '<name>' is declared in both <source1> and <source2>"`, remove the duplicate entry from one source (prefer keeping the inline `plugin.json` entry unless the user says otherwise).
-- Soft preference — never relocate a working script that already has a predefined path.
+Place executables in `servers/`, reference via `${CLAUDE_PLUGIN_ROOT}/servers/<name>`. Names unique across sources.
 
 ## Token Optimization
 
-When LLM Externalizer MCP is available, use it to save context tokens:
-- `mcp__plugin_llm-externalizer_llm-externalizer__chat` — analyze validation reports, summarize fix guides
-- `mcp__plugin_llm-externalizer_llm-externalizer__code_task` with `answer_mode=0, max_retries=3` — scan multiple fix guide files for relevant sections
-- `mcp__plugin_llm-externalizer_llm-externalizer__scan_folder` — discover all reference files in a directory
-- `mcp__plugin_llm-externalizer_llm-externalizer__check_references` — verify symbol references after applying fixes
-- Always pass file paths via `input_files_paths`, never paste content into your context
+Use `mcp__plugin_llm-externalizer_llm-externalizer__*` (chat / code_task / scan_folder / check_references) for bounded analysis. Always pass file paths via `input_files_paths`, never paste content.
