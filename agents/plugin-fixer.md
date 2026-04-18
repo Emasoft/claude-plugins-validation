@@ -178,11 +178,11 @@ When CPV reports any of these MAJORs, use the recipe below. Each is a silent-fai
 
 | CPV finding | Fix recipe |
 |---|---|
-| `Field 'agents' contains folder path '<path>'` | Replace the folder with explicit `.md` file paths: `"agents": ["./<path>/file1.md", "./<path>/file2.md"]`. Or remove the field if files are in default `./agents/` (auto-discovered). See `references/plugin-structure-fixes.md` "agents field contains a folder path". |
-| `Field 'hooks' points to './hooks/hooks.json' which Claude Code already auto-loads ... DISABLES this plugin's MCP servers` | Remove the `hooks` field entirely from `plugin.json` (the file is auto-loaded). If the user genuinely needs additional hook files, point at a non-default name like `"./hooks/extra.json"`. See `references/plugin-structure-fixes.md` "hooks points at the default file". |
-| `Field 'mcpServers' points to './.mcp.json' which Claude Code auto-discovers` (MINOR) | Remove the `mcpServers` field entirely. The `.mcp.json` file is auto-loaded. See `references/mcp-fixes.md` §12a. |
-| `MCP server '<name>' is declared in <src1> and <src2>` (MAJOR) | Remove the duplicate entry from ONE of the sources. Default preference: keep inline `plugin.json:mcpServers` (single source of truth). See `references/mcp-fixes.md` §13. |
-| `LSP server '<name>' is declared in <src1> and <src2>` (MAJOR) | Remove the duplicate entry from ONE source. Default: keep inline `plugin.json:lspServers`. See `references/lsp-fixes.md` "Cross-source duplicate". |
+| `Field 'agents' contains folder path '<path>'` | Replace the folder with explicit `.md` file paths: `"agents": ["./<path>/file1.md", "./<path>/file2.md"]`. Or remove the field if files are in default `./agents/` (auto-discovered). See `skills/fix-validation/references/plugin-structure-fixes.md` "agents field contains a folder path". |
+| `Field 'hooks' points to './hooks/hooks.json' which Claude Code already auto-loads ... DISABLES this plugin's MCP servers` | Remove the `hooks` field entirely from `plugin.json` (the file is auto-loaded). If the user genuinely needs additional hook files, point at a non-default name like `"./hooks/extra.json"`. See `skills/fix-validation/references/plugin-structure-fixes.md` "hooks points at the default file". |
+| `Field 'mcpServers' points to './.mcp.json' which Claude Code auto-discovers` (MINOR) | Remove the `mcpServers` field entirely. The `.mcp.json` file is auto-loaded. See `skills/fix-validation/references/mcp-fixes.md` §12a. |
+| `MCP server '<name>' is declared in <src1> and <src2>` (MAJOR) | Remove the duplicate entry from ONE of the sources. Default preference: keep inline `plugin.json:mcpServers` (single source of truth). See `skills/fix-validation/references/mcp-fixes.md` §13. |
+| `LSP server '<name>' is declared in <src1> and <src2>` (MAJOR) | Remove the duplicate entry from ONE source. Default: keep inline `plugin.json:lspServers`. See `skills/fix-validation/references/lsp-fixes.md` "Cross-source duplicate". |
 
 For full empirical evidence (13 test plugin scenarios, debug-log excerpts, runtime probes), see `skills/fix-validation/references/empirical-loading-bugs.md`.
 

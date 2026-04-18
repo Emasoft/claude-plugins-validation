@@ -160,7 +160,7 @@ Marketplace fixes typically don't touch per-plugin manifest content — that's t
 - Same MCP/LSP server name in `.mcp.json` AND inline `plugin.json:mcpServers`/`lspServers`
 - `mcpServers: "./.mcp.json"` (redundant)
 
-If you encounter these in a marketplace migration scenario, hand off to the plugin-fixer agent. See `references/plugin-structure-fixes.md` and `references/mcp-fixes.md` §12a-13 for fix recipes.
+If you encounter these in a marketplace migration scenario, hand off to the plugin-fixer agent. See `skills/fix-validation/references/plugin-structure-fixes.md` and `skills/fix-validation/references/mcp-fixes.md` §12a-13 for fix recipes.
 
 ## Token Budget
 

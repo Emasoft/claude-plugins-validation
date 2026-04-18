@@ -1,5 +1,18 @@
 # Empirical Plugin-Loading Bugs (CC v2.1.x as of 2026-04-18)
 
+## Table of Contents
+
+- [Path-form acceptance matrix](#path-form-acceptance-matrix-claude-plugin-validate)
+- [Override-vs-default semantics](#override-vs-default-semantics-verified-runtime--debug-log)
+- [Three silent footguns CC does NOT catch](#three-silent-footguns-cc-does-not-catch)
+- [CPV validators added 2026-04-18](#cpv-validators-added-2026-04-18)
+- [Anthropic docs corrections](#anthropic-docs-corrections)
+- [Round 2 confirmations](#round-2-confirmations)
+- [Tests added](#tests-added-all-passing)
+- [Untestable in headless mode](#untestable-in-headless-mode-acknowledged-limitations)
+
+---
+
 This document records the empirical evidence behind the five validators CPV added on 2026-04-18 to catch silent-failure modes in Claude Code's plugin loader. These failure modes are NOT detected by `claude plugin validate` (CC's own validator).
 
 ## Path-form acceptance matrix (`claude plugin validate`)
