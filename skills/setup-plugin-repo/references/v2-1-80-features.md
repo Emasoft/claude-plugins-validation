@@ -34,7 +34,23 @@ Validator: `scripts/cpv_validation_common.py:287`.
 
 ## userConfig (plugin.json)
 
-User-configurable values prompted at plugin enable time. Keys must be valid identifiers (`^[a-zA-Z_][a-zA-Z0-9_]*$`). Each entry should declare `description`. Mark secrets with `sensitive: true` so they are not copied into `CLAUDE_PLUGIN_OPTION_*` env vars.
+User-configurable values prompted at plugin enable time. Keys must be valid identifiers (`^[a-zA-Z_][a-zA-Z0-9_]*$`). Claude Code's runtime Zod schema enforces stricter rules than the public docs suggest:
+
+- **`title`** (string) — **REQUIRED**. Missing title fails install with `userConfig.<key>.title: Invalid input: expected string, received undefined`
+- **`type`** (string) — **REQUIRED**, must be exactly one of `"string" | "number" | "boolean" | "directory" | "file"`. Missing/invalid type fails install with `userConfig.<key>.type: Invalid option: expected one of "string"|"number"|"boolean"|"directory"|"file"`. Note: `"integer"`, `"array"`, `"object"` are NOT accepted by the runtime.
+- **`description`** (string) — optional but recommended
+- **`sensitive`** (boolean) — optional; set `true` for secrets so they are routed to the system keychain instead of `CLAUDE_PLUGIN_OPTION_*` expansion
+- **`default`** — optional; when present must match the declared `type`
+
+Authoring rule: when scaffolding a new userConfig entry, ALWAYS include both `title` and `type`. Inferring `type` from the field name:
+
+| Field-name pattern | Recommended `type` |
+|---|---|
+| `*_interval`, `*_seconds`, `*_timeout`, `*_threshold`, `*_count`, `*_days`, `*_port`, `max_*`, `min_*` | `number` |
+| `enable_*`, `disable_*`, `use_*`, `is_*`, `has_*`, `*_flag` | `boolean` |
+| `*_dir`, `workspace_dir`, `output_dir` (ABSOLUTE path expected) | `directory` |
+| `*_file`, `config_file`, `credentials_file` (ABSOLUTE path expected) | `file` |
+| path/slug/token/URL/everything else | `string` |
 
 ```json
 {
@@ -42,11 +58,26 @@ User-configurable values prompted at plugin enable time. Keys must be valid iden
   "version": "1.0.0",
   "userConfig": {
     "WORKSPACE_DIR": {
-      "description": "Absolute path to the user's workspace directory"
+      "title": "Workspace directory",
+      "description": "Absolute path to the user's workspace directory",
+      "type": "directory"
     },
     "OPENAI_API_KEY": {
+      "title": "OpenAI API key",
       "description": "OpenAI API key used by the assistant",
+      "type": "string",
       "sensitive": true
+    },
+    "POLL_INTERVAL": {
+      "title": "Poll interval (seconds)",
+      "description": "How often to poll upstream",
+      "type": "number",
+      "default": 900
+    },
+    "ENABLE_CACHE": {
+      "title": "Enable cache",
+      "type": "boolean",
+      "default": true
     }
   }
 }
@@ -54,7 +85,7 @@ User-configurable values prompted at plugin enable time. Keys must be valid iden
 
 Access values in hooks/MCP/LSP via `${user_config.WORKSPACE_DIR}`, and (non-sensitive only) as `${CLAUDE_PLUGIN_OPTION_WORKSPACE_DIR}`.
 
-Validator: `scripts/validate_plugin.py:283-302`.
+Validator: `scripts/validate_plugin.py` — `validate_manifest` enforces the 5-type whitelist and required-`title`/`type` fields (CPV v2.22.4+).
 
 ## channels (plugin.json)
 

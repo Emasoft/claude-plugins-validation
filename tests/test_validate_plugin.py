@@ -990,6 +990,57 @@ class TestValidateUserConfig:
         majors = [r.message for r in report.results if r.level == "MAJOR" and "ENABLE_FOO" in r.message]
         assert majors == [], majors
 
+    def test_userconfig_valid_types_whitelist_locked(self):
+        """Regression guard (2026-04-18): the 5-type whitelist MUST match the runtime Zod enum.
+
+        Claude Code's runtime accepts exactly {"string", "number", "boolean", "directory", "file"}.
+        ANY change to USERCONFIG_VALID_TYPES — additions (`integer`, `array`, `object` etc.)
+        or removals — breaks install-time compatibility. If this test fails, verify the change
+        against the runtime Zod schema first; do not relax the assertion.
+        """
+        from validate_plugin import validate_manifest  # noqa: F401 — exercise import path
+        import inspect
+        src = inspect.getsource(validate_manifest)
+        # The whitelist literal must appear in the validator source
+        assert 'USERCONFIG_VALID_TYPES = {"string", "number", "boolean", "directory", "file"}' in src, (
+            "USERCONFIG_VALID_TYPES whitelist has drifted from the runtime Zod enum. "
+            "The runtime rejects any type outside {string, number, boolean, directory, file}. "
+            "If the runtime schema has changed, update this test with the new runtime literal."
+        )
+
+    def test_userconfig_all_11_janitor_entries_would_be_caught(self, tmp_path):
+        """Regression test for the ai-maestro-janitor v0.1.2 install failure (2026-04-18).
+
+        The janitor shipped 11 userConfig entries without `type`. CPV ≤v2.22.3 passed it,
+        but Claude Code's runtime rejected all 11 at `claude plugin install`. This test
+        replicates the exact manifest and asserts that the validator now emits 11 MAJORs
+        — one per entry — so the plugin-fixer can auto-repair them.
+        """
+        report = self._run(
+            tmp_path,
+            {
+                "github_repo": {"title": "GitHub Repository", "description": "x", "sensitive": False},
+                "trdd_path": {"title": "TRDD Directory Path", "description": "x", "sensitive": False},
+                "pr_reconciler_interval": {"title": "PR Reconciler Interval", "description": "x", "sensitive": False},
+                "worktree_janitor_interval": {"title": "Worktree Janitor Interval", "description": "x", "sensitive": False},
+                "trdd_drift_interval": {"title": "TRDD Drift Interval", "description": "x", "sensitive": False},
+                "trdd_reminder_interval": {"title": "TRDD Reminder Interval", "description": "x", "sensitive": False},
+                "task_pr_mismatch_interval": {"title": "Task/PR Mismatch Interval", "description": "x", "sensitive": False},
+                "rate_limit_retry_interval": {"title": "Rate-Limit Retry Interval", "description": "x", "sensitive": False},
+                "cache_keepalive_threshold": {"title": "Cache Keep-Alive Threshold", "description": "x", "sensitive": False},
+                "trdd_staleness_days": {"title": "TRDD Staleness Threshold", "description": "x", "sensitive": False},
+                "stale_pr_days": {"title": "Stale PR Threshold", "description": "x", "sensitive": False},
+            },
+        )
+        missing_type_majors = [
+            r.message for r in report.results
+            if r.level == "MAJOR" and "missing required 'type' field" in r.message
+        ]
+        assert len(missing_type_majors) == 11, (
+            f"Expected 11 missing-type MAJORs (one per userConfig entry), got {len(missing_type_majors)}. "
+            f"Messages: {missing_type_majors}"
+        )
+
 
 class TestBinShebangScriptDetection:
     """Issue #9 secondary: bin/ extensionless executable with shebang must NOT be flagged as binary."""
