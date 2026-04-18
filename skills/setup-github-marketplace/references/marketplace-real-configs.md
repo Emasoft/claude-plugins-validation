@@ -9,6 +9,13 @@ Real configuration files from a production marketplace repo, template-ized for r
 - [.gitignore Template](#gitignore-template)
 - [Placeholder Reference](#placeholder-reference)
 
+## Checklist
+
+- [ ] Copy the template verbatim into the target repo
+- [ ] Replace every `<placeholder-for-*>` token with real user values
+- [ ] Confirm no placeholders remain (`grep -r 'placeholder-for-' <dir>`)
+- [ ] Validate the result with `validate_marketplace.py --strict`
+
 ---
 
 ## marketplace.json Template

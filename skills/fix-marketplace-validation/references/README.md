@@ -9,6 +9,13 @@
 - [Marketplace Fixes](#marketplace-fixes)
 - [Pipeline Fixes](#pipeline-fixes)
 
+## Checklist
+
+- [ ] Confirm you're fixing a MARKETPLACE-scope finding (not plugin-scope)
+- [ ] Open the canonical fix guides at the paths listed below (currently in `skills/fix-validation/`)
+- [ ] Apply the fix per the guide
+- [ ] Re-validate with `validate_marketplace.py --strict`
+
 ## Purpose
 
 This directory will host the dedicated marketplace fix guides once the split from

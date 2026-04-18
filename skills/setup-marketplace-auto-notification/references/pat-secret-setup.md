@@ -11,6 +11,14 @@
 - [Rotation](#rotation)
 - [Renewal When Expired](#renewal-when-expired)
 
+## Checklist
+
+- [ ] Create a PAT with `repo` scope (classic) or fine-grained equivalent
+- [ ] Store via `scripts/set_marketplace_pat.py` (never pipe to `gh secret set`)
+- [ ] Verify secret is set with `gh secret list` (value never printed)
+- [ ] Add rotation reminder to calendar before expiry
+- [ ] Document the rotation procedure for renewal
+
 This reference explains how to create and scope the Personal Access Token
 that lets a plugin repo fire `repository_dispatch` at its marketplace repo.
 Without this PAT, the notify workflow cannot cross repo boundaries.

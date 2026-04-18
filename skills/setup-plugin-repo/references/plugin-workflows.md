@@ -12,6 +12,14 @@
 >
 > **v2.12.32 consolidation**: the old separate `validate.yml` was merged into `ci.yml` as three parallel jobs (`lint`, `validate`, `test`). GitHub reports their check-run names as bare `Lint`, `Validate`, `Test` (the job's `name:` field — **not** `workflow / job` format) and those are what `cpv-setup-branch-rules` enforces on the default branch.
 
+## Checklist
+
+- [ ] Copy `ci.yml` into `.github/workflows/` (with lint + validate + test jobs)
+- [ ] Copy `release.yml` for tag-triggered releases
+- [ ] Copy `notify-marketplace.yml` if publishing to a marketplace
+- [ ] Replace all `<placeholder-for-*>` tokens
+- [ ] Apply branch-rules via `cpv-setup-branch-rules <owner>/<repo>`
+
 ---
 
 ## ci.yml -- Consolidated CI (lint + validate + test)

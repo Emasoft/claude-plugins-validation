@@ -13,6 +13,14 @@
 - [Opus prompt template](#opus-prompt-template)
 - [Rubric contribution](#rubric-contribution)
 
+## Checklist
+
+- [ ] Identify the channel-hosting MCP server source
+- [ ] Apply Rule 1 (sender allowlist), Rule 2 (permission-relay gating), or Rule 3 (chat-ID gating)
+- [ ] Confirm Rule 4 (fully gated PASSED) holds before shipping
+- [ ] Use the Opus prompt template exactly — no paraphrasing
+- [ ] Record rubric contribution for scoring
+
 Detailed semantic-validation rules for the **Channel MCP Server Source-Code Security** pillar. This reference is loaded by the `semantic-validator` agent whenever a plugin declares a non-empty `channels` array in `plugin.json`.
 
 ## Why This Pillar Exists

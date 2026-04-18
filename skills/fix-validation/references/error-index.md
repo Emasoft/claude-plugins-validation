@@ -5,6 +5,12 @@
 - [Plugin index](#plugin-index)
 - [Marketplace index](#marketplace-index)
 
+## Checklist
+
+- [ ] Determine whether the report came from a plugin-scope or marketplace-scope validator
+- [ ] Open the matching index file (plugin-error-index.md or marketplace-error-index.md)
+- [ ] Continue from that index
+
 ---
 
 The monolithic error-to-fix index has been split into two indexes by validator scope. The `plugin-fixer` agent loads `plugin-error-index.md` for plugin-scope reports; the `marketplace-fixer` agent loads `marketplace-error-index.md` for marketplace-scope reports. This redirect stub exists only so external links pointing at the old filename still resolve.

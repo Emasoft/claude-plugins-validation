@@ -12,6 +12,16 @@
 - [Historical incidents](#historical-incidents)
 - [Related](#related)
 
+## Checklist (use when investigating a suspected validator gap)
+
+- [ ] Confirm CPV on the source reports zero findings above WARNING
+- [ ] Capture the exact Claude Code runtime error (verbatim `Validation errors: ...`)
+- [ ] Identify the manifest snippet the runtime rejected
+- [ ] Note the CPV version that passed the source
+- [ ] File a validator-gap issue (NOT a plugin patch) with the three items above
+- [ ] Add a regression test mirroring the failing manifest
+- [ ] Release a CPV validator fix before considering the issue closed
+
 ## What CPV does
 
 CPV validates plugin **sources**: a local folder, a GitHub repo, a remote archive. It does not install anything. Plugins do not need to be installed to be scanned. The commands `/cpv-validate-plugin`, `/cpv-validate-github-plugin`, `/cpv-validate-project-scope` all operate on sources, not installation state.

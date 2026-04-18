@@ -13,6 +13,15 @@
 
 Complete reference for the Hub-and-Spoke Architecture used by Claude Code plugin marketplaces: 1 marketplace hub + N plugin spokes (unlimited plugins). Includes notification flows, schemas, PAT configuration, and directory conventions.
 
+## Checklist
+
+- [ ] Marketplace repo holds only marketplace.json + CI (no per-plugin subdirs)
+- [ ] Each plugin lives in its own GitHub repo
+- [ ] Notification flow wired via notify-marketplace.yml → repository_dispatch → update-submodules.yml
+- [ ] marketplace.json entries have `source: github` + full metadata
+- [ ] `MARKETPLACE_PAT` configured on every plugin spoke
+- [ ] Validation pipeline green on both marketplace + each plugin
+
 ---
 
 ## Hub-and-Spoke Architecture

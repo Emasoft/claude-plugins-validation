@@ -16,6 +16,14 @@ Comprehensive remediation guide for all issues detected by `validate_marketplace
 
 ---
 
+## Checklist
+
+- [ ] Identify the marketplace-scope finding (file, severity, validator)
+- [ ] Architecture signal? → route to `migrate-marketplace-architecture` skill instead
+- [ ] Match mechanical finding to a numbered section below
+- [ ] Apply the fix to `marketplace.json` / workflows / scripts
+- [ ] Re-validate with `validate_marketplace.py --strict`
+
 ## 1. marketplace.json Structure Issues
 
 These errors come from `validate_marketplace_file()`, `validate_marketplace_name()`, `validate_marketplace()`, and `validate_marketplace_structure()` (pipeline).

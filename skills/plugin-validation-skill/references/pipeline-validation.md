@@ -13,6 +13,14 @@
   - 3.1 Full Pipeline Validation
   - 3.2 Component-Level Validation
 - 4. Auto-Setup
+
+## Checklist
+
+- [ ] 3-repo architecture understood (CPV + plugin + marketplace)
+- [ ] Marketplace repo has marketplace.json + CI + update-submodules workflow
+- [ ] Plugin repo has plugin.json + CI + notify-marketplace + publish.py
+- [ ] `MARKETPLACE_PAT` secret set on plugin repo
+- [ ] Full pipeline validation run via `cpv-remote-validate`
   - 4.1 Automatic Setup Script
   - 4.2 Manual Setup Steps
 - 5. Troubleshooting

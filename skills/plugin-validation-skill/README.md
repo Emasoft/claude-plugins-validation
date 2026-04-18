@@ -12,6 +12,13 @@ This skill teaches Claude how to validate all components of Claude Code plugins.
 - MCP server configuration
 - Marketplace setup and plugin distribution
 
+## Checklist
+
+- [ ] Identify what to validate (plugin, marketplace, skill, hook, MCP, settings)
+- [ ] Run the appropriate CPV validator with `--strict`
+- [ ] Route any findings to plugin-fixer or marketplace-fixer
+- [ ] Re-validate after fixes
+
 ## Files
 
 | File | Description |

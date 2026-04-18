@@ -12,6 +12,18 @@
 - [MARKETPLACE_PAT Env Check](#8-marketplace_pat-env-check)
 - [Audit Report Format](#9-audit-report-format)
 
+## Checklist
+
+- [ ] Working tree clean (no uncommitted changes)
+- [ ] Plugin inventory collected
+- [ ] Every plugin manifest validates
+- [ ] No already-migrated plugins blocking the plan
+- [ ] No name collisions detected
+- [ ] Enough disk space for subtree splits + clones
+- [ ] `gh auth status` green
+- [ ] `MARKETPLACE_PAT` env var set
+- [ ] Audit report written and reviewed before proceeding
+
 ---
 
 ## Purpose

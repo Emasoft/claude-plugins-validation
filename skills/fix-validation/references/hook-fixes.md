@@ -16,6 +16,15 @@
 - [12. Informational Notices](#12-informational-notices)
 - [13. Runtime-Dep, Invocation & Path-Traversal Issues (TRDD-0028dd34)](#13-runtime-dep--invocation-issues-trdd-0028dd34)
 
+## Checklist
+
+- [ ] Identify the hook event and type (command/http/prompt/agent)
+- [ ] Match the finding to one of the 13 sections below
+- [ ] Read the hook's script (if command-type) in full before editing
+- [ ] Apply fix — preserve effective hook behavior; never silence with `|| true` / `2>/dev/null`
+- [ ] For runtime-dep findings (§13): change invocation (PEP 723 / SessionStart venv), never strip imports
+- [ ] Re-validate the plugin
+
 ---
 
 Comprehensive remediation guide for all issues detected by `validate_hook.py`.

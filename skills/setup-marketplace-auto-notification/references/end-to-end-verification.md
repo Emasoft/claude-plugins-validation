@@ -14,6 +14,15 @@ repository_dispatch → receiver workflow → marketplace.json bump → Claude
 Code sees the new version. Run it once after installing the notify and
 receiver templates, and again after rotating the `MARKETPLACE_PAT` secret.
 
+## Checklist
+
+- [ ] Dry run executed without cutting a real release
+- [ ] Plugin-side notify workflow fires (watch Actions tab)
+- [ ] Marketplace-side receiver workflow fires and succeeds
+- [ ] marketplace.json updated to the new plugin version
+- [ ] `claude plugin marketplace update` refreshes the cache
+- [ ] Claude Code install shows the new version
+
 ---
 
 ## Dry Run Without Cutting a Release

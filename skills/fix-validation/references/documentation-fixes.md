@@ -16,6 +16,14 @@ Comprehensive remediation guide for all issues detected by `validate_documentati
 
 ---
 
+## Checklist
+
+- [ ] Identify which documentation file the finding is about (README, LICENSE, SKILL.md, agent.md, etc.)
+- [ ] Match to a numbered section below
+- [ ] Read the target file in full before editing
+- [ ] Apply the fix using Edit (preserve existing structure)
+- [ ] Re-validate
+
 ## 1. README Existence Issues
 
 ### [CRITICAL] README.md is missing at plugin root

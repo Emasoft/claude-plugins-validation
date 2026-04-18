@@ -13,6 +13,14 @@ Ready-to-use scripts for managing a Claude Code plugin marketplace repository.
 Each script is based on production code from a production marketplace. Replace
 all `<placeholder-for-...>` values with your actual configuration before use.
 
+## Checklist
+
+- [ ] Pick the scripts you need (sync/pre-commit/pre-push/setup-hooks/push/generate-readme)
+- [ ] Copy each into the marketplace repo's `scripts/` directory
+- [ ] Replace every `<placeholder-for-*>` — grep to confirm zero remain
+- [ ] `chmod +x` each script
+- [ ] Run `setup-hooks.py` to wire them
+
 ## Placeholder Reference
 
 | Placeholder | Description | Where Used |

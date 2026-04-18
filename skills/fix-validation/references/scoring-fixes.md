@@ -13,6 +13,14 @@
 
 Comprehensive remediation guide for all issues detected by `validate_scoring.py`.
 
+## Checklist
+
+- [ ] Identify which sub-validator crashed (message will say e.g. "validate_skill.py crashed")
+- [ ] Re-run that sub-validator directly with `--verbose` to see the traceback
+- [ ] Fix the underlying cause (usually a malformed input file)
+- [ ] Re-run scoring to confirm no crash-class CRITICALs remain
+- [ ] Re-validate
+
 ## Overview
 
 `validate_scoring.py` is the quality aggregator — it runs ALL other validators and computes a weighted quality score (0–100) broken into seven categories. It does not generate its own validation messages beyond the error messages produced when a sub-validator crashes. The messages you will see from scoring are:

@@ -8,6 +8,14 @@
 - [Concurrency and Loops](#concurrency-and-loops)
 - [Troubleshooting](#troubleshooting)
 
+## Checklist
+
+- [ ] Decide layout (A = hub-only, B = nested monorepo)
+- [ ] Copy the matching receiver template into marketplace's `.github/workflows/update-submodules.yml`
+- [ ] Replace placeholders
+- [ ] Verify payload contract matches what plugin's notify workflow sends
+- [ ] Test with a dummy dispatch before going live
+
 The receiver workflow lives in the **marketplace** repo and listens for the
 `plugin-updated` dispatch events that plugin repos send. It updates
 `marketplace.json` and commits the change. CPV's marketplace uses the Layout

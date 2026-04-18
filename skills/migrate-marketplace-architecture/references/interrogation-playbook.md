@@ -10,6 +10,15 @@
 - [Guest contributor handling](#guest-contributor-handling)
 - [Final confirmation](#final-confirmation)
 
+## Checklist
+
+- [ ] Target layout chosen (A or B) via AskUserQuestion — user's words recorded
+- [ ] Layout A: GitHub owner + visibility gathered
+- [ ] Layout B: primary author + email consolidated
+- [ ] Per-plugin metadata gathered (category, homepage, author, license)
+- [ ] Guest contributors handled (preserve or reassign)
+- [ ] Final confirmation from user BEFORE any destructive migration step
+
 ## Purpose
 
 Exact `AskUserQuestion` prompts the agent must use to gather user preferences before running any Layout A or Layout B migration. Do not invent defaults silently — every user decision is recorded in the migration log.

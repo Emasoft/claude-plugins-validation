@@ -17,6 +17,14 @@
 - [13. .gitignore Issues](#13-gitignore-issues)
 - [14. Workflow Inline Python Issues](#14-workflow-inline-python-issues)
 
+## Checklist
+
+- [ ] Read the failing finding's message, file path, and line number
+- [ ] Locate the matching section (1-14) in the TOC above
+- [ ] Read the target file in full before editing (stale context = broken edits)
+- [ ] Apply the exact edit pattern the section prescribes
+- [ ] Re-validate the plugin to confirm the finding is gone and no new ones appeared
+
 Comprehensive remediation guide for all issues detected by `validate_plugin.py`.
 Every entry includes the **exact error message** (for automated matching), severity,
 root cause, and step-by-step fix instructions.

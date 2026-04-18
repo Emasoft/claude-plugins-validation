@@ -14,6 +14,14 @@ This reference contains detailed semantic validation criteria that require AI ju
 
 ---
 
+## Checklist
+
+- [ ] Identify the skill under semantic review (path, name)
+- [ ] Read the semantic-validation report entry (grade, category)
+- [ ] Match to a numbered section below
+- [ ] Rewrite description/instructions per the guidance (NO mechanical regex — this is judgment work)
+- [ ] Re-run semantic validation (expensive — only after all mechanical findings are zero)
+
 ## 1. Description Clarity & Specificity
 
 **Check**: Is the description specific enough for Claude to match this skill to user intent?

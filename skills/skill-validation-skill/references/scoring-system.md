@@ -11,6 +11,14 @@
 - [7. Interpreting Results](#7-interpreting-results)
 - [8. Two Scoring Systems](#8-two-scoring-systems)
 
+## Checklist
+
+- [ ] Understand multi-scale criterion scoring (0-3 per criterion)
+- [ ] Map score → tier (PASS / CONDITIONAL_PASS / FAIL)
+- [ ] Know severity levels and category weights
+- [ ] Understand exit codes returned by the scoring script
+- [ ] Distinguish syntactic scoring (0-100) from semantic grading (A-F)
+
 This document explains the **Syntactic Validation Score** — a 0-100 numeric score computed by scripts based on structural and mechanical checks.
 
 > **Note**: For **Semantic Quality Grading** (A-F letter grades based on AI judgment), see `/cpv-semantic-validation`. The two scoring systems are independent and complementary.

@@ -9,6 +9,15 @@
 - [Section 6: marketplace.json Entry Format](#section-6-marketplacejson-entry-format)
 - [Section 7: Troubleshooting](#section-7-troubleshooting)
 
+## Checklist
+
+- [ ] PAT created with `repo` scope
+- [ ] Secret set via `set_marketplace_pat.py` helper (never piped)
+- [ ] `notify-marketplace.yml` installed on plugin's default branch
+- [ ] `publish.py --install-hook` run inside the plugin repo
+- [ ] First publish triggers dispatch; marketplace.json reflects the version
+- [ ] Branch-rules applied server-side
+
 ---
 
 ## Section 1: PAT Setup

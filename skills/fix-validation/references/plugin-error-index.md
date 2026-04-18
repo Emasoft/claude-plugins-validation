@@ -19,6 +19,14 @@
 - [15. validate_enterprise.py](#15-validate_enterprisepy)
 - [16. validate_scoring.py](#16-validate_scoringpy)
 
+## Checklist
+
+- [ ] Identify the validator that produced the finding (top of the report or message prefix)
+- [ ] Jump to the matching section in the table below
+- [ ] Open the fix reference it points to
+- [ ] Apply the fix using Read+Edit (never scripted bulk edits)
+- [ ] Re-validate — do NOT assume the fix worked without confirmation
+
 ---
 
 Maps each **plugin-scope** CPV validator to its fix reference guide with section numbers. This index covers the 16 validators that operate on a single plugin directory. For marketplace-level validators (`validate_marketplace.py`, `validate_marketplace_pipeline.py`) see [marketplace-error-index.md](marketplace-error-index.md).

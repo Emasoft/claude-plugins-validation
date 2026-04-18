@@ -8,6 +8,14 @@
 - [Curl Fallback](#curl-fallback)
 - [Troubleshooting](#troubleshooting)
 
+## Checklist
+
+- [ ] Decide trigger: A (push) or B (release tag)
+- [ ] Copy the chosen template into plugin's `.github/workflows/notify-marketplace.yml`
+- [ ] Replace placeholders (MARKETPLACE_OWNER, MARKETPLACE_REPO)
+- [ ] Ensure `MARKETPLACE_PAT` secret is set on the plugin repo
+- [ ] Commit + push; verify the workflow runs successfully
+
 Copy one of the two templates below into `.github/workflows/notify-marketplace.yml`
 in the plugin repository. Replace the placeholders, add the `MARKETPLACE_PAT`
 secret, then push. The CPV reference implementation lives at

@@ -59,6 +59,14 @@
 
 Comprehensive remediation guide for encoding, security, and code quality issues detected by the CPV (Claude Plugins Validation) framework.
 
+## Checklist
+
+- [ ] Read the validation report entry (tool, file, severity)
+- [ ] Match to a numbered section below
+- [ ] Open the target file + run the mentioned linter locally
+- [ ] Apply the fix and re-run the linter until clean
+- [ ] Re-validate the plugin
+
 ## Severity Levels
 
 | Level | Blocking? | Score Impact | Description |

@@ -7,6 +7,15 @@
 - [README.md Template](#readmemd-template)
 - [Placeholder Reference](#placeholder-reference)
 
+## Checklist
+
+- [ ] Copy plugin.json template to `.claude-plugin/plugin.json`
+- [ ] Copy pyproject.toml template to repo root
+- [ ] Copy .gitignore template to repo root
+- [ ] Copy README.md template to repo root
+- [ ] Replace every `<placeholder-for-*>` with real values
+- [ ] Run `validate_plugin.py --strict` to confirm
+
 ---
 
 ## plugin.json Template

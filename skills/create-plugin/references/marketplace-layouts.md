@@ -13,6 +13,15 @@
 - [Refactoring between layouts](#refactoring-between-layouts)
 - [Agent behavior summary](#agent-behavior-summary)
 
+## Checklist
+
+- [ ] Pick a layout: A (hub-and-spoke) for independently-versioned plugins, B (nested) for monorepos
+- [ ] Verify the choice with the user — never unilateral
+- [ ] Apply layout-specific template (separate plugin repos + hub OR nested subdirs)
+- [ ] Populate rich metadata (author, homepage, license, category) in every marketplace entry
+- [ ] Reject git-subdir requests — CPV does not emit it
+- [ ] For refactor between layouts, load `migrate-marketplace-architecture` skill
+
 ## Overview
 
 CPV supports exactly two marketplace layouts. Both are opinionated: each enforces proper release ceremony (tags, CHANGELOG, CI), single-author publishing, and one-way-to-do-it semantics. **No hybrids, no community-monorepos, no mixed layouts** — those patterns degrade discipline and trade the benefits of both layouts for the downsides of both.

@@ -12,6 +12,14 @@ This document explains the 8+1 Pillars validation for language and conversion sk
 - [6. Gap Mitigation Strategies](#6-gap-mitigation-strategies)
 - [7. Example Evaluation](#7-example-evaluation)
 
+## Checklist
+
+- [ ] Determine if the skill is a language or conversion skill (pillars apply)
+- [ ] Evaluate each of the 8 core pillars
+- [ ] Evaluate the 9th pillar (REPL/workflow) if applicable
+- [ ] Compute score against coverage thresholds
+- [ ] Apply gap mitigation for low-coverage pillars
+
 ---
 
 ## 1. When to Apply Pillars Validation

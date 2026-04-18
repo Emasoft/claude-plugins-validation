@@ -11,6 +11,20 @@
 - [Truly advisory warnings](#truly-advisory-warnings)
 - [Output contract](#output-contract)
 
+## Checklist
+
+Copy this checklist into your fix log and tick each item as you go:
+
+- [ ] Resolve the target (plugin/marketplace path via Path Resolution Protocol, or parse report)
+- [ ] Run validation with `--strict`
+- [ ] Apply fix batch in priority order (CRITICAL → MAJOR → MINOR → NIT)
+- [ ] Re-validate AFTER every batch (never chain speculative fixes)
+- [ ] Evaluate every remaining WARNING against the publish-blocker rules
+- [ ] Fix publish-blocker WARNINGs; leave truly-advisory WARNINGs with per-entry justification
+- [ ] Stop when findings empty AND no blocking warnings, OR escalate at iteration 5 / identical-finding-set
+- [ ] Write the iteration-by-iteration fix log to `docs_dev/fix-log_<name>_YYYYMMDD.md`
+- [ ] Return one-line summary to caller
+
 ## Why a loop
 
 Fixes often cascade. Adding `"type": "number"` to a `userConfig` entry can expose a MINOR that was masked by the missing-field check. Running `standardize_plugin.py --fix` creates new files that must themselves be validated. A single validate-then-fix pass is insufficient — the fixer must re-validate after every batch of changes and continue fixing until the report is fully clean.

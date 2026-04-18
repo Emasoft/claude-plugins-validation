@@ -13,6 +13,13 @@ This document contains all 190+ validation rules extracted from multiple validat
 - [7. Path Format Rules (6 rules)](#7-path-format-rules)
 - [8. Resource Reference Rules (8 rules)](#8-resource-reference-rules)
 - [9. Allowed-Tools Rules (10 rules)](#9-allowed-tools-rules)
+
+## Checklist
+
+- [ ] Identify the rule category the finding belongs to (1-9)
+- [ ] Open the matching section
+- [ ] Apply the rule's remediation to SKILL.md
+- [ ] Re-run `validate_skill.py --strict`
 - [10. 8+1 Pillars Rules (18 rules)](#10-81-pillars-rules)
 - [11. Progressive Disclosure Rules (12 rules)](#11-progressive-disclosure-rules)
 - [12. Content Quality Rules (15 rules)](#12-content-quality-rules)

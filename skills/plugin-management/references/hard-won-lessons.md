@@ -13,6 +13,17 @@
 - CI uv sync --extra dev
 - Update notify before push
 - Local dry-run
+
+## Checklist
+
+- [ ] Running CPV scripts? — use `uv run --with pyyaml python`
+- [ ] Setting GitHub secrets? — use `--body` flag or the helper script, NEVER pipe
+- [ ] Editing `notify-marketplace.yml`? — update MARKETPLACE_OWNER + MARKETPLACE_REPO before push
+- [ ] Need `MARKETPLACE_PAT`? — check env BEFORE asking user
+- [ ] Parsing validator output? — strip ANSI codes with `sed 's/\x1b\[[0-9;]*m//g'`
+- [ ] Checking author.email? — noreply GitHub format
+- [ ] Updating notify workflow? — commit before push, not after
+- [ ] First push of a new repo? — run local dry-run first
 - Verify CI after push
 - Checkov CKV2_ prefix
 - pytest exit code 5

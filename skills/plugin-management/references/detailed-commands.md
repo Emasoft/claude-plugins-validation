@@ -13,6 +13,14 @@
 - [Creation & Publishing](#creation--publishing)
 - [Flags](#flags)
 - [Plugin Variables](#plugin-variables)
+
+## Checklist
+
+- [ ] Identify the management operation needed (install / enable / disable / validate / remove / list)
+- [ ] Jump to the matching section below
+- [ ] Select the correct scope (user / project / local / managed)
+- [ ] Run the command as documented
+- [ ] Verify via `claude plugin list`
 - [Notes](#notes)
 
 ## Local Install / Update / Uninstall
