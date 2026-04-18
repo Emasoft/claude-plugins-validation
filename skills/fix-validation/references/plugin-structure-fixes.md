@@ -1411,21 +1411,59 @@ These errors can appear for any text file scanned across the plugin:
 |-------|-------|
 | **Script** | `validate_plugin.py` |
 | **Severity** | MAJOR |
-| **Message** | `userConfig.KEY missing description field` or `userConfig.KEY.sensitive must be a boolean` |
+| **Messages** | `userConfig.KEY missing required 'title' field`, `userConfig.KEY missing required 'type' field`, `userConfig.KEY.type must be one of ['boolean','directory','file','number','string']`, `userConfig.KEY.sensitive must be a boolean`, `userConfig.KEY.default type (...) does not match declared type (...)` |
 
-**Root Cause:** `userConfig` entries must have `description` (string) and optionally `sensitive` (boolean).
+**Root Cause:** Claude Code's runtime Zod schema enforces stricter rules than the public docs suggest:
+- `title` is REQUIRED (string) — missing title fails install with `userConfig.<key>.title: Invalid input: expected string, received undefined`
+- `type` is REQUIRED and must be exactly one of `"string" | "number" | "boolean" | "directory" | "file"` — missing/invalid type fails install with `userConfig.<key>.type: Invalid option: expected one of "string"|"number"|"boolean"|"directory"|"file"`
+- `"integer"`, `"array"`, `"object"` (listed in some docs / JSON Schema) are NOT accepted by the runtime
+- `description` (string) is optional but recommended
+- `sensitive` (boolean) is optional; `true` routes the value to the system keychain
+- `default` (optional) must match the declared `type` — bool is rejected when `type="number"` even though bool is a Python int subclass
 
-**Fix:**
+**Fix — complete template for all 5 valid types:**
 ```json
 {
   "userConfig": {
+    "api_endpoint": {
+      "title": "API endpoint URL",
+      "description": "Your team's API endpoint",
+      "type": "string",
+      "sensitive": false
+    },
     "api_token": {
-      "description": "Your API authentication token",
+      "title": "API authentication token",
+      "description": "Bearer token for API auth",
+      "type": "string",
       "sensitive": true
+    },
+    "poll_interval_seconds": {
+      "title": "Poll interval (seconds)",
+      "description": "How often to poll (e.g. 900 = 15 min)",
+      "type": "number",
+      "default": 900
+    },
+    "enable_cache": {
+      "title": "Enable cache",
+      "description": "Whether to cache API responses",
+      "type": "boolean",
+      "default": true
+    },
+    "workspace_dir": {
+      "title": "Workspace directory",
+      "description": "Absolute path to the workspace folder",
+      "type": "directory"
+    },
+    "config_file": {
+      "title": "Config file path",
+      "description": "Absolute path to the config YAML",
+      "type": "file"
     }
   }
 }
 ```
+
+**Common mistake — numeric config fields:** Authors often forget `type` on numeric intervals. The correct form is `"type": "number"` with a matching numeric `default`. Do NOT use `"type": "integer"` — the runtime rejects it.
 
 ---
 
