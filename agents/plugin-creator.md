@@ -120,7 +120,7 @@ The pre-push hook runs `--strict` and blocks on CRITICAL, MAJOR, MINOR, and NIT.
    - Ruff lint errors → `uv run ruff check --fix scripts/`
    - Missing author.email → add noreply GitHub email
 4. **Generate README component tables**: Scan `commands/*.md`, `agents/*.md`, `skills/*/SKILL.md` frontmatter → generate tables. Add Install/Uninstall/Update/Troubleshooting sections.
-5. **Re-validate** (`--strict`): MUST show only WARNINGs. If any CRITICAL/MAJOR/MINOR/NIT remain, go back to step 3. **DO NOT skip this step** — a 0-finding validation on CPV is the ONLY guarantee that `claude plugin install` will succeed at runtime. Previous releases that shipped without the re-validate pass hit runtime-only Zod rejections (e.g. v0.1.2 of ai-maestro-janitor, 2026-04-18).
+5. **Re-validate** (`--strict`): MUST show only WARNINGs. If any CRITICAL/MAJOR/MINOR/NIT remain, go back to step 3. **DO NOT skip this step** — CPV validates a source folder; a 0-finding run is how you confirm the plugin will clear Claude Code's install-time manifest schema. Previous releases that shipped without the re-validate pass hit runtime-only Zod rejections (e.g. v0.1.2 of ai-maestro-janitor, 2026-04-18).
 6. Check for compiled binaries (Cargo.toml, go.mod, Makefile) — if found, sources MUST be in `src/` subdirectory with binaries in `src/<component>/bin/`. Add `build-binaries.yml` as fallback only.
 7. Git init + commit (if not already a git repo)
 8. Create GitHub repo: `gh repo create <owner>/<name> --public --source . --push`
