@@ -1117,6 +1117,50 @@ class TestPathResolutionHints:
         assert "MARKETPLACE" in hint or "marketplace" in hint.lower()
         assert "validate_marketplace" in hint
 
+    def test_classify_standalone_skill(self, tmp_path):
+        """A folder with SKILL.md but no plugin.json (and no plugin ancestor) is a standalone skill."""
+        from validate_plugin import _classify_path
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("---\nname: my-skill\n---\n# Skill")
+        assert _classify_path(skill_dir) == "standalone_skill"
+
+    def test_classify_skill_inside_plugin(self, tmp_path):
+        """A SKILL.md nested inside a plugin (ancestor has plugin.json) classifies differently."""
+        from validate_plugin import _classify_path
+        plugin_dir = tmp_path / "my-plugin"
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text('{"name":"my-plugin"}')
+        skill_dir = plugin_dir / "skills" / "my-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("---\nname: my-skill\n---\n# Skill")
+        assert _classify_path(skill_dir) == "skill_inside_plugin"
+
+    def test_hint_for_standalone_skill_explains_difference(self, tmp_path):
+        """The error hint must clearly distinguish skill from plugin and mention scope options."""
+        from validate_plugin import _format_no_plugin_found_hint
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("---\nname: my-skill\n---\n# Skill")
+        hint = _format_no_plugin_found_hint(skill_dir)
+        # Must mention both options clearly
+        assert "SKILL" in hint or "skill" in hint.lower()
+        assert ".claude/skills" in hint
+        assert "validate_skill" in hint
+
+    def test_hint_for_skill_inside_plugin_points_to_plugin_root(self, tmp_path):
+        """When the user points at a skill inside a plugin, the hint must redirect to the plugin root."""
+        from validate_plugin import _format_no_plugin_found_hint
+        plugin_dir = tmp_path / "my-plugin"
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text('{"name":"my-plugin"}')
+        skill_dir = plugin_dir / "skills" / "my-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("---\nname: my-skill\n---\n# Skill")
+        hint = _format_no_plugin_found_hint(skill_dir)
+        assert "plugin.json" in hint.lower() or "plugin root" in hint.lower()
+        assert "validate_skill" in hint
+
 
 class TestBinShebangScriptDetection:
     """Issue #9 secondary: bin/ extensionless executable with shebang must NOT be flagged as binary."""

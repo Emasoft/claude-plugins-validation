@@ -21,12 +21,7 @@ Automates creation and configuration of a GitHub-based marketplace repository fo
 
 ## Marketplace layout
 
-CPV supports TWO marketplace layouts and the agent must be fluent in both:
-
-- **Layout A (hub-and-spoke)**: separate repos per plugin, marketplace holds only `marketplace.json`. Entries: `{"source": "github", "repo": "owner/name"}`. Preferred default.
-- **Layout B (nested single-repo)**: plugins as subdirectories inside the marketplace repo. Entries: `"./plugins/<name>"`. Also fully supported.
-
-Both layouts make plugins installable and updatable by Claude Code. The agent defaults to suggesting Layout A for new marketplaces but must follow the user's preference without argument. Full guide, version-update flows for each layout, refactor procedures in both directions, and agent behavior matrix in [marketplace-layouts.md](references/marketplace-layouts.md).
+Two supported layouts: **A (hub-and-spoke)** — separate repos per plugin, entries `{"source":"github","repo":"owner/name"}`, preferred default; **B (nested monorepo)** — plugins as subdirs, entries `"./plugins/<name>"`. Agent defaults to suggesting A but follows user preference. Details: [marketplace-layouts.md](references/marketplace-layouts.md).
 
 ## Prerequisites
 
@@ -52,37 +47,33 @@ See [Marketplace Setup Guide](references/marketplace-setup-guide.md) for detaile
 
 ## Output
 
-- Marketplace repo with `marketplace.json`, CI/CD workflows, sync scripts
-- `notify-marketplace.yml` installed on each linked plugin repo
+Marketplace repo with `marketplace.json` + CI/CD + sync scripts; `notify-marketplace.yml` on each linked plugin repo.
 
 ## Error Handling
 
-- **Authentication failures**: Verify PAT scopes include `repo` and `workflow`
-- **Dispatch not received**: Check `notify-marketplace.yml` is on the plugin's default branch
-- **Validation errors**: Run `validate_marketplace.py --verbose`
+PAT needs `repo`+`workflow`. Dispatch missing: confirm `notify-marketplace.yml` on plugin default branch. Run `validate_marketplace.py --verbose`. Full troubleshooting: below.
 
 ## Examples
 
-**Input:** `setup-github-marketplace` with a new org
-**Output:** Creates marketplace repo, installs CI/CD, generates README
-
-**Input:** `setup-github-marketplace --link org/my-plugin`
-**Output:** Fetches plugin metadata, adds to `marketplace.json`, installs notification workflow
+**Input:** new marketplace → **Output:** creates repo, installs CI/CD, generates README.
+**Input:** `--link org/my-plugin` → **Output:** fetches metadata, adds entry, installs `notify-marketplace.yml`.
 
 ## Resources
 
 - [Marketplace Layouts](references/marketplace-layouts.md)
   > Overview · Layout A — Hub-and-Spoke (separate repos) · Layout B — Nested single-repo (monorepo) · How Claude Code updates plugins in each layout · When to choose which · Rich metadata fields (author, homepage, license, category) · Why CPV does not use git-subdir · Encountering a non-CPV marketplace · Refactoring between layouts · Agent behavior summary
 - [Workflow Templates](references/workflow-templates.md)
-  > Placeholder Reference · validate.yml (Marketplace CI) · update-submodules.yml (Dispatch Receiver) · notify-marketplace.yml.template (Plugin Side)
+  > Placeholder Ref · validate.yml (CI) · update-submodules.yml (dispatch) · notify-marketplace.yml.template (plugin side)
 - [Script Templates](references/script-templates.md)
-  > Placeholder Reference · sync_marketplace_versions.py · pre-commit-hook.py · pre-push-hook.py · setup-hooks.py · push-plugins.sh · generate-readme.py
+  > Placeholder Ref · sync_marketplace_versions.py · pre-commit/pre-push hooks · setup-hooks.py · push-plugins.sh · generate-readme.py
 - [README Template](references/readme-template.md)
-  > Template Content · Placeholder Reference · Auto-Generation · Customization Guide
+  > Content · Placeholder Ref · Auto-Generation · Customization
 - [Troubleshooting Guide](references/troubleshooting.md)
-  > Authentication Issues · Repository Creation Failures · CI/CD Pipeline Issues · Notification Chain Failures · Validation Failures · Secret Configuration Issues · Common Error Messages · Debug Commands
+  > Authentication · Repo Creation · CI/CD · Notification Chain · Validation · Secret Config · Common Errors · Debug Commands
 - [Local → GitHub Migration](references/local-to-github-migration.md)
-  > Scenario · Detect starting state · 4 paths · Path 1 (shift Layout B) · Path 2 (split + Layout A hub) · Path 3 (one plugin, keep local dev) · Path 4 (third-party marketplace) · Gotchas · Verification · User instructions
+  > Scenario · Detect the starting state · Four migration paths · Path 1: Lift-and-shift the whole marketplace to GitHub as Layout B · Path 2: Split every plugin into its own repo + create a Layout A hub from the local folder · Path 3: Ship ONE plugin to its own GitHub repo + keep the local marketplace for dev · Path 4: Ship ONE plugin to an EXISTING third-party GitHub marketplace · Gotchas · Post-migration verification · User instructions template
+- [Orphan Plugin Onboarding](references/orphan-plugin-onboarding.md)
+  > Scenario · The marketplace requirement — explain it first · Detect the scenario · Ask the user which path fits · Path A: plugin came from an existing marketplace · Path B: host in a NEW local marketplace · Path C: host in a NEW GitHub marketplace (user's own) · Path D: host in an EXISTING GitHub marketplace the user owns · Full pipeline is mandatory · Final user instructions
 
 ## Compiling Templates
 

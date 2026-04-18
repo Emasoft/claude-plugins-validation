@@ -80,7 +80,24 @@ For the path P they passed, check in this order and stop at the first match:
    > "I didn't find a plugin at `<P>` itself, but I see these plugin folders inside: `<candidates>`. Which one do you want me to work on? (Or: do you want me to treat `<P>` as a new marketplace hub and register all of these?)"
    If exactly one candidate, phrase as a single "Did you mean `<candidate>`?" prompt instead of a list.
 
-7. **P is otherwise a valid directory with no plugin markers** → offer to scaffold. Tell the user:
+7. **P has `SKILL.md` but NO `.claude-plugin/plugin.json`** → this is a **skill**, not a plugin. Users often confuse the two. STOP and explain the difference, then offer the skill-install routes:
+
+   > "That folder is a **skill**, not a **plugin** — different things:
+   > - A **plugin** is a bundle (commands + agents + skills + hooks + MCP servers) with a `.claude-plugin/plugin.json` manifest. It is installed via `claude plugin install <name>@<marketplace>` and needs a marketplace.
+   > - A **skill** is a single folder (`SKILL.md` + optional references/scripts) that Claude invokes when its description matches. It does NOT need a marketplace — you just drop it into a skills folder.
+   >
+   > Where do you want this skill to be available?
+   > 1. **Globally (user scope)** — drop it into `~/.claude/skills/<skill-name>/`. It will be available in every Claude Code session you run.
+   > 2. **This project only (project scope)** — drop it into `<project-root>/.claude/skills/<skill-name>/` and commit it, so your team gets it too.
+   > 3. **This project only, gitignored (local scope)** — same as project scope but listed in `.gitignore` so only your checkout has it.
+   > 4. **I actually want this wrapped into a plugin** — we'll scaffold a plugin folder around it with `.claude-plugin/plugin.json`, then run the normal plugin deploy flow."
+
+   Use `AskUserQuestion`. If they pick 1/2/3, copy the skill folder (or `ln -s` if on same filesystem and the user agrees) into the chosen location, then run `validate_skill.py` against it (or route to the `skill-validation-agent`) and report. If they pick 4, treat as a fresh scaffold — create the plugin wrapper, move the skill to `<plugin-root>/skills/<skill-name>/`, and enter the standard deploy flow.
+
+   If P has SKILL.md AND an ancestor within 3 levels has `.claude-plugin/plugin.json`, it's a skill inside a plugin. Tell the user:
+   > "That skill is inside plugin `<plugin-name>` at `<plugin-root>`. Did you mean to work on the plugin (I can run the full plugin flow) or just this one skill (I'll validate it with `validate_skill.py`)?"
+
+8. **P is otherwise a valid directory with no plugin markers** → offer to scaffold. Tell the user:
    > "`<P>` exists but has no plugin manifest. Want me to scaffold a new plugin here (`generate_plugin_repo.py`)?"
 
 `scripts/validate_plugin.py` already emits most of these hints on its stderr when it cannot find a plugin at the given path — but you MUST do the same intelligent resolution in the agent first, before running the validator, so the user sees the question inside the agent conversation and can answer it in one round-trip.
@@ -121,6 +138,7 @@ Before running any workflow, read the current state and identify what is missing
 | Plugin folder is not a git repo | `git init` + initial commit |
 | Plugin folder is a git repo but has no GitHub remote | Ask user for `<owner>` → `gh repo create <owner>/<name> --public --source . --push` |
 | **Plugin lives inside a LOCAL-ONLY marketplace** (parent or ancestor within 3 levels has `marketplace.json` AND that folder has no GitHub remote AND its entries use relative-path sources) and the user wants to publish | Load `setup-github-marketplace` skill and open its "Local → GitHub Migration" reference. Ask the user which of the **4 migration paths** fits: (1) lift-and-shift whole marketplace as Layout B, (2) split every plugin into its own repo + make the host a Layout A hub, (3) publish this plugin only and keep the local marketplace for dev, (4) publish this plugin only and register it in a different, already-existing GitHub marketplace (user owns it OR opens a PR). Never decide for the user. |
+| **ORPHAN plugin — user has a plugin folder they want to install but no marketplace exists around it** (no ancestor `marketplace.json` within 3 levels, the plugin has no parent marketplace context, AND the user has expressed the goal of installing rather than developing) | Load `setup-github-marketplace` skill and open its "Orphan Plugin Onboarding" reference. The user probably doesn't know Claude Code plugins require a marketplace — start by EXPLAINING that requirement in plain language, then ask (via `AskUserQuestion`) which of the **4 hosting paths** fits: (A) the plugin came from a marketplace the user can name → no rebuild, just emit `marketplace add` + `install` commands, (B) host in a new local marketplace (quick, private, no GitHub), (C) host in a new GitHub marketplace the agent creates fresh, (D) host in an existing GitHub marketplace the user already owns (check `~/.claude/plugins/known_marketplaces.json` for candidates). Paths C and D require the full pipeline — plugin repo with `publish.py` + CI + pre-push hook, marketplace repo with dispatch receiver, per-plugin `notify-marketplace.yml`, `MARKETPLACE_PAT` secret, `cpv-setup-branch-rules` on both repos. Path B needs only `marketplace.json` + a README. Path A needs only documentation. Never skip the pipeline on C/D — silently-broken sync chains are worse than missing features. |
 | Validation fails (CRITICAL/MAJOR/MINOR/NIT) | Delegate to `plugin-fixer` agent (`/cpv-fix-validation <report>`) |
 | No marketplace specified by the user | Use `AskUserQuestion` — list existing marketplaces from `claude plugin marketplace list` output if available, plus "create a new one" |
 | Marketplace specified but doesn't exist on GitHub | Load `setup-github-marketplace` skill and create it (Layout A by default) |
@@ -145,8 +163,9 @@ When invoked without a specific task, greet the user and ask what they need. Pre
 > 2. **Create a new plugin from scratch** — scaffold files, then run the full deploy flow from option 1
 > 3. **Create a new marketplace** — scaffold a GitHub marketplace hub (Layout A default)
 > 4. **Add an existing plugin to a marketplace** — works whether the plugin is local-only, on GitHub but unregistered, or already in another marketplace (migrates)
-> 5. **Standardize an existing plugin** — audit + fix, then continue the deploy flow
-> 6. **Standardize an existing marketplace** — audit + fix a marketplace repo
+> 5. **I downloaded a plugin and want to install it, but don't know how** — the orphan-plugin onboarding path: agent explains the marketplace requirement, then hosts it in the right kind of marketplace (local / new GitHub / existing marketplace you own / the marketplace it came from)
+> 6. **Standardize an existing plugin** — audit + fix, then continue the deploy flow
+> 7. **Standardize an existing marketplace** — audit + fix a marketplace repo
 >
 > Tell me which one, or describe what you need in your own words.
 
