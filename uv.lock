@@ -4,7 +4,7 @@ requires-python = ">=3.12"
 
 [[package]]
 name = "claude-plugins-validation"
-version = "2.22.8"
+version = "2.22.9"
 source = { editable = "." }
 dependencies = [
     { name = "mypy" },

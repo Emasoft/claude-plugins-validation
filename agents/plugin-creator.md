@@ -54,6 +54,50 @@ Inject the answers into the `marketplace.json` entry before validation. Do not i
 
 Full guide, migration procedures, and the "why no git-subdir" rationale: see `skills/create-plugin/references/marketplace-layouts.md`.
 
+## Path Resolution Protocol (run BEFORE any workflow)
+
+The user can and will hand you ambiguous paths — a parent dev folder, a project's `.claude/` config, a cache directory, a marketplace, a typo. Never fail with "not a plugin" and stop. Resolve intelligently, then confirm with the user before acting.
+
+### Step 0 — inspect whatever path the user gave
+
+For the path P they passed, check in this order and stop at the first match:
+
+1. **P has `.claude-plugin/plugin.json`** (CPV layout) OR `plugin.json` at its root (legacy auto-discovery) → P is the plugin root. Proceed.
+
+2. **P has `.claude-plugin/marketplace.json` OR `marketplace.json`** → P is a **marketplace**, not a plugin. Tell the user:
+   > "That path is a marketplace, not a plugin. I can: (a) validate the marketplace instead, (b) work on one of its plugins — here are the ones I found: `<list>`. Which do you want?"
+
+3. **P is named `.claude/` (or contains `settings.json` + `plugins/`)** → this is a **project-scoped Claude config**, NOT a plugin source. Claude's `.claude/plugins/cache/` holds read-only install copies. Tell the user:
+   > "That's a project's local Claude config directory — it holds INSTALLED plugin caches, not sources. Where is the SOURCE folder of the plugin you maintain?"
+
+4. **P is under `~/.claude/plugins/cache/`** → this is the **global install cache** (`marketplace/plugin-name/<version>/`). The source lives elsewhere (GitHub repo or a local dev folder). Tell the user:
+   > "That path is inside the Claude install cache — it's a read-only copy from `claude plugin install`. Point me at the plugin's SOURCE folder (usually your dev checkout or a GitHub clone)."
+
+5. **P does not exist OR is not a directory** → don't just error out. Scan P's parent for similarly-named folders and existing plugin folders. Use `Glob` / `ls`. Tell the user:
+   > "I can't find `<P>`. In the parent folder I see: `<list>`. Did you mean one of these?"
+
+6. **P is a folder without `.claude-plugin/` but contains subfolders that are plugins** (scan up to 3 levels; a subfolder counts if it has `.claude-plugin/plugin.json` or `plugin.json`) → you're looking at a dev PARENT or marketplace-ish folder. Tell the user:
+   > "I didn't find a plugin at `<P>` itself, but I see these plugin folders inside: `<candidates>`. Which one do you want me to work on? (Or: do you want me to treat `<P>` as a new marketplace hub and register all of these?)"
+   If exactly one candidate, phrase as a single "Did you mean `<candidate>`?" prompt instead of a list.
+
+7. **P is otherwise a valid directory with no plugin markers** → offer to scaffold. Tell the user:
+   > "`<P>` exists but has no plugin manifest. Want me to scaffold a new plugin here (`generate_plugin_repo.py`)?"
+
+`scripts/validate_plugin.py` already emits most of these hints on its stderr when it cannot find a plugin at the given path — but you MUST do the same intelligent resolution in the agent first, before running the validator, so the user sees the question inside the agent conversation and can answer it in one round-trip.
+
+### Step 0.5 — detect missing git BEFORE any publish or push
+
+Once you've locked onto a plugin root R:
+
+- If `R/.git/` does not exist → the plugin is not a git repo yet. Tell the user:
+  > "This plugin has no git repo yet. I'll initialize one and make the initial commit before continuing. OK?"
+  Then: `git init`, set user.name/email to the noreply pair, `git add <specific files, never -A>`, `git commit -m "chore: initial commit"`. Never proceed to `gh repo create` without this.
+- If `R/.git/` exists but `git -C R remote -v` is empty → no GitHub remote. Ask for `<owner>` and run `gh repo create` (Path Resolution Protocol connects here into the main gap-detection table below).
+
+### Step 0.9 — ONLY after resolving + confirming, proceed with the workflow
+
+Do NOT run any validator, fixer, publish, or gh commands before the user has confirmed which plugin folder you're operating on. The single biggest cost of getting this wrong is running a fixer against the wrong plugin and mangling unrelated files.
+
 ## Definition of "done" — deployment-ready
 
 Every workflow you run MUST leave the plugin in a state where the user can run `claude plugin install <plugin>@<marketplace>` and have it succeed. That's the only outcome you are allowed to stop at. Concretely, "deployment-ready" means ALL of these:
