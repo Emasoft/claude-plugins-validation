@@ -927,6 +927,69 @@ class TestValidateUserConfig:
         majors = [r.message for r in report.results if r.level == "MAJOR"]
         assert any("does not match declared type (number)" in m for m in majors), majors
 
+    def test_userconfig_missing_type_reports_major(self, tmp_path):
+        """2026-04-18 bug: runtime rejects missing type with 'Invalid option' — CPV must enforce."""
+        report = self._run(
+            tmp_path,
+            {"github_repo": {"title": "GitHub repo", "description": "x", "sensitive": False}},
+        )
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("missing required 'type'" in m for m in majors), majors
+
+    def test_userconfig_type_integer_rejected(self, tmp_path):
+        """'integer' was previously accepted by CPV but runtime rejects it — must now be MAJOR."""
+        report = self._run(
+            tmp_path,
+            {"COUNT": {"title": "Count", "description": "x", "type": "integer"}},
+        )
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("type' must be one of" in m and "integer" in m for m in majors), majors
+
+    def test_userconfig_type_array_rejected(self, tmp_path):
+        """'array' was previously accepted by CPV but runtime rejects it — must now be MAJOR."""
+        report = self._run(
+            tmp_path,
+            {"ITEMS": {"title": "Items", "description": "x", "type": "array"}},
+        )
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("type' must be one of" in m and "array" in m for m in majors), majors
+
+    def test_userconfig_type_object_rejected(self, tmp_path):
+        """'object' was previously accepted by CPV but runtime rejects it — must now be MAJOR."""
+        report = self._run(
+            tmp_path,
+            {"CFG": {"title": "Config", "description": "x", "type": "object"}},
+        )
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("type' must be one of" in m and "object" in m for m in majors), majors
+
+    def test_userconfig_type_directory_accepted(self, tmp_path):
+        """'directory' is one of the 5 runtime-valid types — must validate clean."""
+        report = self._run(
+            tmp_path,
+            {"OUTPUT_DIR": {"title": "Output dir", "description": "x", "type": "directory"}},
+        )
+        majors = [r.message for r in report.results if r.level == "MAJOR" and "OUTPUT_DIR" in r.message]
+        assert majors == [], majors
+
+    def test_userconfig_type_file_accepted(self, tmp_path):
+        """'file' is one of the 5 runtime-valid types — must validate clean."""
+        report = self._run(
+            tmp_path,
+            {"CONFIG_FILE": {"title": "Config file", "description": "x", "type": "file"}},
+        )
+        majors = [r.message for r in report.results if r.level == "MAJOR" and "CONFIG_FILE" in r.message]
+        assert majors == [], majors
+
+    def test_userconfig_type_boolean_accepted(self, tmp_path):
+        """'boolean' is one of the 5 runtime-valid types — must validate clean."""
+        report = self._run(
+            tmp_path,
+            {"ENABLE_FOO": {"title": "Enable foo", "description": "x", "type": "boolean", "default": True}},
+        )
+        majors = [r.message for r in report.results if r.level == "MAJOR" and "ENABLE_FOO" in r.message]
+        assert majors == [], majors
+
 
 class TestBinShebangScriptDetection:
     """Issue #9 secondary: bin/ extensionless executable with shebang must NOT be flagged as binary."""
@@ -1282,7 +1345,7 @@ class TestV222PluginSchema:
         )
 
     def test_userconfig_valid_structure_passes(self, tmp_path):
-        """A well-formed userConfig with description + sensitive validates clean."""
+        """A well-formed userConfig with title + type + description + sensitive validates clean."""
         manifest = {
             "name": "uc-valid",
             "version": "1.0.0",
@@ -1291,11 +1354,13 @@ class TestV222PluginSchema:
                 "api_endpoint": {
                     "title": "API endpoint",
                     "description": "Where the API lives",
+                    "type": "string",
                     "sensitive": False,
                 },
                 "api_token": {
                     "title": "API token",
                     "description": "Bearer token",
+                    "type": "string",
                     "sensitive": True,
                 },
             },

@@ -877,19 +877,22 @@ def validate_manifest(
                         ".claude-plugin/plugin.json",
                     )
 
-    # Validate userConfig schema (v2.1.80): keys must be identifiers, each entry needs title + description.
+    # Validate userConfig schema (v2.1.80): keys must be identifiers, each entry needs title + type.
     # Claude Code's runtime validator enforces 'title' as REQUIRED — issue #9 documented a v1.7.0
     # release of token-reporter that passed CPV but failed at install with:
     #   userConfig.<key>.title: Invalid input: expected string, received undefined
+    # Issue #??? (2026-04-18): runtime ALSO enforces 'type' as REQUIRED via Zod .enum() — when
+    # missing, Zod emits "userConfig.<key>.type: Invalid option: expected one of
+    # \"string\"|\"number\"|\"boolean\"|\"directory\"|\"file\"". The docs-listed types
+    # (integer/array/object) are NOT accepted by the runtime; the runtime accepts exactly 5.
     # Mirror the runtime schema strictly to catch this at validation time.
-    USERCONFIG_VALID_TYPES = {"string", "number", "integer", "boolean", "array", "object"}
+    USERCONFIG_VALID_TYPES = {"string", "number", "boolean", "directory", "file"}
     USERCONFIG_TYPE_TO_PYTHON: dict[str, tuple[type, ...]] = {
         "string": (str,),
         "number": (int, float),
-        "integer": (int,),
         "boolean": (bool,),
-        "array": (list,),
-        "object": (dict,),
+        "directory": (str,),  # path string
+        "file": (str,),       # path string
     }
     if "userConfig" in manifest:
         uc = manifest["userConfig"]
@@ -901,7 +904,7 @@ def validate_manifest(
                     report.major(f"'userConfig' key '{key}' must be a valid identifier", ".claude-plugin/plugin.json")
                 if not isinstance(entry, dict):
                     report.major(
-                        f"'userConfig.{key}' must be an object with 'title' and 'description'",
+                        f"'userConfig.{key}' must be an object with 'title' and 'type'",
                         ".claude-plugin/plugin.json",
                     )
                     continue
@@ -922,29 +925,36 @@ def validate_manifest(
                     report.minor(f"'userConfig.{key}' missing 'description' field", ".claude-plugin/plugin.json")
                 elif not isinstance(entry["description"], str):
                     report.major(f"'userConfig.{key}.description' must be a string", ".claude-plugin/plugin.json")
-                # type (optional, but if present must be valid)
+                # type (REQUIRED — runtime rejects missing type with "Invalid option: expected one of ...")
                 declared_type: str | None = None
-                if "type" in entry:
-                    if not isinstance(entry["type"], str):
-                        report.major(
-                            f"'userConfig.{key}.type' must be a string, got {type(entry['type']).__name__}",
-                            ".claude-plugin/plugin.json",
-                        )
-                    elif entry["type"] not in USERCONFIG_VALID_TYPES:
-                        report.major(
-                            f"'userConfig.{key}.type' must be one of "
-                            f"{sorted(USERCONFIG_VALID_TYPES)}, got {entry['type']!r}",
-                            ".claude-plugin/plugin.json",
-                        )
-                    else:
-                        declared_type = entry["type"]
+                if "type" not in entry:
+                    report.major(
+                        f"'userConfig.{key}' missing required 'type' field — Claude Code runtime "
+                        f"rejects this at install time with 'Invalid option: expected one of "
+                        f"\"string\"|\"number\"|\"boolean\"|\"directory\"|\"file\"'",
+                        ".claude-plugin/plugin.json",
+                    )
+                elif not isinstance(entry["type"], str):
+                    report.major(
+                        f"'userConfig.{key}.type' must be a string, got {type(entry['type']).__name__}",
+                        ".claude-plugin/plugin.json",
+                    )
+                elif entry["type"] not in USERCONFIG_VALID_TYPES:
+                    report.major(
+                        f"'userConfig.{key}.type' must be one of "
+                        f"{sorted(USERCONFIG_VALID_TYPES)}, got {entry['type']!r} — "
+                        f"Claude Code runtime rejects this at install time",
+                        ".claude-plugin/plugin.json",
+                    )
+                else:
+                    declared_type = entry["type"]
                 # default (optional, but if both type and default present, types must match)
                 if "default" in entry and declared_type is not None:
                     expected_py_types = USERCONFIG_TYPE_TO_PYTHON.get(declared_type, ())
                     default_value = entry["default"]
-                    # bool is a subclass of int — exclude when checking number/integer
+                    # bool is a subclass of int — exclude when checking number
                     is_match = isinstance(default_value, expected_py_types)
-                    if declared_type in ("number", "integer") and isinstance(default_value, bool):
+                    if declared_type == "number" and isinstance(default_value, bool):
                         is_match = False
                     if not is_match:
                         report.major(

@@ -32,7 +32,13 @@ Validator: `scripts/cpv_validation_common.py:287`.
 
 ## userConfig (plugin.json)
 
-User-configurable values prompted at plugin enable time. Keys must be valid identifiers. Each entry should declare `description` (MINOR if missing). Set `sensitive: true` for secrets to keep them out of `CLAUDE_PLUGIN_OPTION_*` expansion.
+User-configurable values prompted at plugin enable time. Keys must be valid identifiers. The runtime Zod schema enforces stricter rules than the public docs suggest:
+
+- **`title`** (string) — **REQUIRED**. Missing title fails install with `userConfig.<key>.title: Invalid input: expected string, received undefined`
+- **`type`** (string) — **REQUIRED**, must be exactly one of `"string" | "number" | "boolean" | "directory" | "file"`. Missing/invalid type fails install with `userConfig.<key>.type: Invalid option: expected one of "string"|"number"|"boolean"|"directory"|"file"`. Note: `"integer"`, `"array"`, `"object"` are NOT accepted by the runtime.
+- **`description`** (string) — optional but recommended (MINOR if missing)
+- **`sensitive`** (boolean) — optional; set `true` for secrets to route them to the system keychain (not `CLAUDE_PLUGIN_OPTION_*` expansion)
+- **`default`** — optional; when present must match the declared `type`
 
 ```json
 {
@@ -40,11 +46,34 @@ User-configurable values prompted at plugin enable time. Keys must be valid iden
   "version": "1.0.0",
   "userConfig": {
     "API_ENDPOINT": {
-      "description": "Base URL for the upstream service"
+      "title": "API endpoint URL",
+      "description": "Base URL for the upstream service",
+      "type": "string"
     },
     "API_TOKEN": {
+      "title": "API authentication token",
       "description": "Bearer token — provided by the user on enable",
+      "type": "string",
       "sensitive": true
+    },
+    "POLL_INTERVAL": {
+      "title": "Poll interval (seconds)",
+      "description": "How often to poll upstream",
+      "type": "number",
+      "default": 900
+    },
+    "ENABLE_CACHE": {
+      "title": "Enable cache",
+      "type": "boolean",
+      "default": true
+    },
+    "WORKSPACE_DIR": {
+      "title": "Workspace directory",
+      "type": "directory"
+    },
+    "CONFIG_FILE": {
+      "title": "Config file path",
+      "type": "file"
     }
   }
 }
@@ -52,7 +81,7 @@ User-configurable values prompted at plugin enable time. Keys must be valid iden
 
 Values are readable from hook/MCP/LSP configs via `${user_config.API_ENDPOINT}`, and (non-sensitive only) as `CLAUDE_PLUGIN_OPTION_API_ENDPOINT`.
 
-Validator: `scripts/validate_plugin.py:283-302`.
+Validator: `scripts/validate_plugin.py` — `validate_manifest` enforces the 5-type whitelist and required-`title`/`type` fields.
 
 ## channels (plugin.json)
 
