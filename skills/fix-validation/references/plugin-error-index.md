@@ -231,6 +231,8 @@ Primary fix guide: [lsp-fixes.md](lsp-fixes.md)
 | `initializationOptions`, `settings` | lsp-fixes §7 |
 | Timeouts, `maxRestarts`, `restartOnCrash` | lsp-fixes §7 |
 | Cross-source duplicate LSP server name (`LSP server '<name>' is declared in <src1> and <src2>`) **[NEW 2026-04-18]** | lsp-fixes "Cross-source duplicate" entry at end |
+| `lspServers: "./.lsp.json"` redundancy nudge **[NEW 2026-04-19]** | lsp-fixes "lspServers redundancy nudge" |
+| `Non-standard directory '<dir>/'` (auto-suppressed when referenced by manifest, since v2.23.1) **[UPDATED 2026-04-19]** | plugin-structure-fixes §2 (Non-standard directory found) |
 
 ---
 

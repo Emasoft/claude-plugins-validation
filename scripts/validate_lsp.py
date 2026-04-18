@@ -389,6 +389,17 @@ def validate_lsp_config(
     return report
 
 
+def _is_default_lsp_path(path: str) -> bool:
+    """True if path resolves to the auto-discovered .lsp.json default at plugin root.
+
+    Handles common authoring slip-ups: backslashes (Windows), redundant ./ segments,
+    trailing slashes. Static path equivalence only — does not follow symlinks.
+    """
+    normalized = path.replace("\\", "/")
+    parts = [p for p in normalized.split("/") if p and p != "."]
+    return parts == [".lsp.json"]
+
+
 def _extract_lsp_server_names_from_config_file(config_path: Path) -> list[str]:
     """Read an LSP config file and return its server names.
 
@@ -480,6 +491,20 @@ def validate_plugin_lsp(
                 elif isinstance(lsp_servers, str):
                     # Path-string reference to external LSP config file
                     ref_path = lsp_servers
+                    # Defensive nudge: pointing the override at the auto-discovered
+                    # default `.lsp.json` is silently accepted but redundant — analogous
+                    # to the MCP nudge (validate_mcp._is_default_mcp_path).
+                    if _is_default_lsp_path(ref_path):
+                        report.minor(
+                            f"Field 'lspServers' = '{ref_path}' resolves to the "
+                            "auto-discovered '.lsp.json' default at plugin root. This is "
+                            "redundant — the file is loaded automatically. Remove the "
+                            "'lspServers' field from plugin.json (the default file will "
+                            "still load), or point it at a NON-default path like "
+                            "'./extras/lsp.json' if you genuinely need an additional "
+                            "config file.",
+                            ".claude-plugin/plugin.json",
+                        )
                     if ref_path.startswith("./"):
                         external_path = plugin_root / ref_path[2:]
                     else:
@@ -494,6 +519,13 @@ def validate_plugin_lsp(
                     for ref_path in lsp_servers:
                         if not isinstance(ref_path, str):
                             continue
+                        if _is_default_lsp_path(ref_path):
+                            report.minor(
+                                f"Field 'lspServers' array entry '{ref_path}' resolves to "
+                                "the auto-discovered '.lsp.json' default at plugin root. "
+                                "This is redundant — the file is loaded automatically.",
+                                ".claude-plugin/plugin.json",
+                            )
                         if ref_path.startswith("./"):
                             external_path = plugin_root / ref_path[2:]
                         else:

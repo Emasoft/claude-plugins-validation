@@ -882,6 +882,62 @@ class TestLspCrossSourceDuplicateServerNames:
             f"Expected note that inline wins per empirical test, got: {msg}"
         )
 
+    def test_lspservers_pointing_at_default_lsp_json_emits_minor(self, tmp_path):
+        """lspServers: './.lsp.json' (override = default file) → MINOR redundancy nudge.
+
+        Analogous to the MCP equivalent (test_mcpservers_pointing_at_default_mcp_json).
+        Added 2026-04-19 to ensure parity between MCP and LSP defensive nudges.
+        """
+        # Create the .lsp.json at root with a real server
+        (tmp_path / ".lsp.json").write_text(json.dumps({
+            "go-lsp": {"command": "gopls", "extensionToLanguage": {".go": "go"}}
+        }))
+        # plugin.json with lspServers pointing at the same default file (redundant)
+        self._make_plugin(
+            tmp_path,
+            plugin_manifest={"name": "p", "lspServers": "./.lsp.json"},
+        )
+        report = validate_plugin_lsp(tmp_path)
+        nudges = [
+            r for r in report.results
+            if r.level == "MINOR" and ".lsp.json" in r.message and "auto-discover" in r.message
+        ]
+        assert len(nudges) == 1, (
+            f"Expected exactly 1 MINOR nudge for redundant lspServers→.lsp.json, got: "
+            f"{[m.message for m in nudges]}"
+        )
+        # And the cross-source duplicate detection should ALSO fire for every server
+        # in .lsp.json (which gets loaded twice — once by auto-discovery, once by
+        # the override), as it does for the MCP equivalent.
+        dup_majors = [
+            r for r in report.results
+            if r.level == "MAJOR" and "go-lsp" in r.message and "declared in" in r.message
+        ]
+        assert len(dup_majors) == 1, (
+            f"Expected MAJOR for go-lsp duplicated when override = default file, got: "
+            f"{[m.message for m in dup_majors]}"
+        )
+
+    def test_lspservers_pointing_at_non_default_no_minor(self, tmp_path):
+        """lspServers: './extras/lsp.json' (legitimate non-default path) → no MINOR nudge."""
+        (tmp_path / "extras").mkdir()
+        (tmp_path / "extras" / "lsp.json").write_text(json.dumps({
+            "go-lsp": {"command": "gopls", "extensionToLanguage": {".go": "go"}}
+        }))
+        self._make_plugin(
+            tmp_path,
+            plugin_manifest={"name": "p", "lspServers": "./extras/lsp.json"},
+        )
+        report = validate_plugin_lsp(tmp_path)
+        nudges = [
+            r for r in report.results
+            if r.level == "MINOR" and "auto-discover" in r.message
+        ]
+        assert nudges == [], (
+            f"Non-default path should not trigger redundancy MINOR, got: "
+            f"{[m.message for m in nudges]}"
+        )
+
     def test_multiple_duplicates_emit_separate_majors(self, tmp_path):
         """Each duplicated name across sources gets its own MAJOR."""
         self._make_plugin(

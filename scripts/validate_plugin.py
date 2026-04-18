@@ -342,6 +342,108 @@ def validate_user_config_structure(manifest: dict[str, Any], report: ValidationR
             )
 
 
+_PLUGIN_ROOT_DIR_PATTERN = re.compile(
+    r"\$\{?CLAUDE_PLUGIN_ROOT\}?[/\\]+([A-Za-z0-9_.\-]+)[/\\]"
+)
+
+
+def _extract_referenced_dirs_from_text(text: str) -> set[str]:
+    """Find folder names referenced as `${CLAUDE_PLUGIN_ROOT}/<dir>/...` in text.
+
+    Returns the lowercase set of distinct first-level folder names found. Used to
+    discover plugin-bundled folders that the manifest legitimately uses, so the
+    "non-standard directory" warning doesn't false-positive on e.g. `mcp-server/`
+    when `.mcp.json` has `"command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/mcp-server/index.js"]`.
+    """
+    return {m.group(1).lower() for m in _PLUGIN_ROOT_DIR_PATTERN.finditer(text)}
+
+
+def _walk_for_command_args(node: Any) -> list[str]:
+    """Recursively collect string values from `command` / `args` keys in nested dicts/lists."""
+    out: list[str] = []
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k in ("command", "url") and isinstance(v, str):
+                out.append(v)
+            elif k == "args" and isinstance(v, list):
+                out.extend(s for s in v if isinstance(s, str))
+            elif k == "env" and isinstance(v, dict):
+                out.extend(s for s in v.values() if isinstance(s, str))
+            else:
+                out.extend(_walk_for_command_args(v))
+    elif isinstance(node, list):
+        for item in node:
+            out.extend(_walk_for_command_args(item))
+    return out
+
+
+def _collect_manifest_referenced_dirs(plugin_root: Path) -> set[str]:
+    """Discover plugin-bundled folders referenced from the manifest.
+
+    Scans .mcp.json, .lsp.json, hooks/hooks.json, monitors/monitors.json, and
+    plugin.json's inline mcpServers/lspServers/hooks/monitors fields for
+    `${CLAUDE_PLUGIN_ROOT}/<dirname>/...` patterns. Returns the lowercase set of
+    distinct first-level folder names found. Failures (missing file, malformed
+    JSON, etc.) are silently ignored — this is a hint generator, not a validator.
+    """
+    referenced: set[str] = set()
+
+    def _safe_load(p: Path) -> Any:
+        if not p.exists():
+            return None
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None
+
+    # Standard root-level config files
+    for cfg_path in (
+        plugin_root / ".mcp.json",
+        plugin_root / ".lsp.json",
+        plugin_root / "hooks" / "hooks.json",
+        plugin_root / "monitors" / "monitors.json",
+    ):
+        data = _safe_load(cfg_path)
+        if data is not None:
+            for s in _walk_for_command_args(data):
+                referenced |= _extract_referenced_dirs_from_text(s)
+
+    # Inline plugin.json fields (mcpServers / lspServers / hooks / monitors)
+    manifest = _safe_load(plugin_root / ".claude-plugin" / "plugin.json")
+    if isinstance(manifest, dict):
+        for field in ("mcpServers", "lspServers", "hooks", "monitors", "channels"):
+            value = manifest.get(field)
+            if value is None:
+                continue
+            # Inline object/array: walk it directly
+            if isinstance(value, (dict, list)):
+                for s in _walk_for_command_args(value):
+                    referenced |= _extract_referenced_dirs_from_text(s)
+            # Path string: also load the referenced file (if it exists) and walk it
+            if isinstance(value, str):
+                ref_path = value
+                if ref_path.startswith("./"):
+                    ref_path = ref_path[2:]
+                ref_file = plugin_root / ref_path
+                ref_data = _safe_load(ref_file)
+                if ref_data is not None:
+                    for s in _walk_for_command_args(ref_data):
+                        referenced |= _extract_referenced_dirs_from_text(s)
+            # Array of path strings (e.g. mcpServers: ["./a.json", "./b.json"])
+            elif isinstance(value, list):
+                for entry in value:
+                    if not isinstance(entry, str):
+                        continue
+                    ref_path = entry[2:] if entry.startswith("./") else entry
+                    ref_file = plugin_root / ref_path
+                    ref_data = _safe_load(ref_file)
+                    if ref_data is not None:
+                        for s in _walk_for_command_args(ref_data):
+                            referenced |= _extract_referenced_dirs_from_text(s)
+
+    return referenced
+
+
 def _mcp_server_keys(manifest: dict[str, Any], plugin_root: Path) -> set[str] | None:
     """Resolve the set of declared MCP server names.
 
@@ -1161,15 +1263,16 @@ def validate_manifest(
 
     # `agents` field empirical constraint (NOT in docs schema): Claude Code's manifest
     # validator rejects ANY folder path in the `agents` field with the cryptic message
-    # "agents: Invalid input" — both string and array forms, default folder or not.
+    # "agents: Invalid input" — both string and array forms, default folder OR not.
     # Only `.md` file paths are accepted. The docs' own complete-schema example
-    # ("./custom/agents/") would actually fail this check.
+    # ("./custom/agents/") would actually fail this check. The default folder ./agents/
+    # is no exception — empirically `agents: "./agents/"` ALSO fails with `Invalid input`
+    # (auto_discovered_defaults CRITICAL skips agents because this dedicated check
+    # provides the richer message).
     # If a plugin author skips `claude plugin validate` and publishes with a folder path,
     # CC silently drops the agents at runtime — no error in --debug log, agents simply
     # don't appear. Pre-empt CC's cryptic error with a clear, actionable message.
-    # Empirical evidence: TRDD-20260418 (cpv-agents-other-folder-test).
-    # NOTE: skip the case where path is exactly the default `./agents/` — the existing
-    # `auto_discovered_defaults` CRITICAL above already covers it, so we'd double-fire.
+    # Empirical evidence: TRDD-20260418 (cpv-agents-other-folder-test, cpv-agents-default-test).
     agents_value = manifest.get("agents")
     if agents_value is not None:
         agents_paths: list[str] = []
@@ -1183,19 +1286,20 @@ def validate_manifest(
             looks_like_folder = normalized.endswith("/") or not normalized.lower().endswith(".md")
             if not looks_like_folder:
                 continue
-            # Skip if this is the auto-discovered default folder — the existing CRITICAL
-            # check above already handles it, no need for a redundant MAJOR.
             normalized_with_slash = normalized.rstrip("/") + "/"
-            if normalized_with_slash == "./agents/":
-                continue
+            is_default = normalized_with_slash == "./agents/"
+            extra_default_note = (
+                " (Note: the default ./agents/ folder is auto-discovered — just remove "
+                "the 'agents' field entirely from plugin.json.)"
+            ) if is_default else ""
             report.major(
                 f"Field 'agents' contains folder path '{path_str}' — Claude Code's manifest validator "
                 f"REJECTS folder paths in the 'agents' field with the cryptic error 'agents: Invalid input' "
                 f"(both string and array forms). Only '.md' file paths are accepted. If you skip validate "
                 f"and publish, CC silently drops the agents at runtime with no error. "
                 f"Fix: list specific .md files like ['./agents/reviewer.md', './agents/tester.md'] "
-                f"instead of '{path_str}'. Note: the docs' own complete-schema example ('./custom/agents/') "
-                f"is incorrect — it would also be rejected.",
+                f"instead of '{path_str}'.{extra_default_note} Note: the docs' own complete-schema example "
+                f"('./custom/agents/') is incorrect — it would also be rejected.",
                 ".claude-plugin/plugin.json",
             )
 
@@ -1298,7 +1402,11 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
                 report.minor(f"Directory {d}/ not found")
 
     # Check for non-standard directories — warn but don't block, since users
-    # may add folders like libs/, modules/, resources/ needed by scripts
+    # may add folders like libs/, modules/, resources/ needed by scripts.
+    # Also dynamically discover folders referenced from manifest fields
+    # (.mcp.json, .lsp.json, hooks, monitors, plugin.json mcpServers/lspServers
+    # commands+args) so e.g. `mcp-server/` referenced via
+    # `${CLAUDE_PLUGIN_ROOT}/mcp-server/index.js` doesn't false-positive.
     known_dirs = {
         ".claude-plugin",
         ".git",
@@ -1315,6 +1423,7 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         "schemas",
         "bin",  # plugins.md L192 — executables on PATH while plugin enabled
         "monitors",  # plugins-reference.md — background monitor definitions (v2.1.105+)
+        "servers",  # MCP server bundles per docs example: ${CLAUDE_PLUGIN_ROOT}/servers/db-server
         "templates",
         "tests",
         # Common non-standard but legitimate dirs
@@ -1342,6 +1451,7 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         "output-styles",
         "design",  # TRDD design docs (design/tasks/)
     }
+    referenced_dirs = _collect_manifest_referenced_dirs(plugin_root)
     # Also skip hidden dirs and _dev dirs
     for item in plugin_root.iterdir():
         if not item.is_dir():
@@ -1349,10 +1459,17 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         dirname = item.name
         if dirname.startswith(".") or dirname.endswith("_dev"):
             continue
-        if dirname.lower() not in known_dirs:
-            report.warning(
-                f"Non-standard directory '{dirname}/' — not part of the plugin spec. If needed by plugin scripts, consider documenting its purpose in README."
-            )
+        dirname_lower = dirname.lower()
+        if dirname_lower in known_dirs:
+            continue
+        if dirname_lower in referenced_dirs:
+            # Folder is legitimately used by the plugin's manifest (MCP, LSP, hooks,
+            # or monitor commands reference `${CLAUDE_PLUGIN_ROOT}/<dirname>/...`).
+            # No warning needed — its purpose is self-documented by the manifest.
+            continue
+        report.warning(
+            f"Non-standard directory '{dirname}/' — not part of the plugin spec. If needed by plugin scripts, consider documenting its purpose in README."
+        )
 
     # Validate plugin-shipped settings.json if present
     settings_path = plugin_root / "settings.json"

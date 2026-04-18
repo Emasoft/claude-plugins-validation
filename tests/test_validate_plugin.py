@@ -2407,17 +2407,16 @@ class TestEmpiricalDocsBugsAdded20260418:
 
     # --- Audit fixes: edge cases for path normalization, array forms, no-double-fire ---
 
-    def test_agents_default_folder_no_double_fire(self, tmp_path):
-        """agents: './agents/' (default folder) → no double-fire of related checks.
+    def test_agents_default_folder_emits_major_with_extra_note(self, tmp_path):
+        """agents: './agents/' (default folder) → ONE MAJOR with default-folder note.
 
-        After 2026-04-18 audit, the `auto_discovered_defaults` check skips agents
-        entirely (the dedicated agents-folder MAJOR provides a richer message), AND
-        the agents-folder MAJOR skips the exact default `./agents/` (since CC's actual
-        behavior for that exact case is undocumented but the agents handler will
-        ignore the field if it doesn't load anyway).
+        Updated 2026-04-19: previously this test asserted ≤1 finding (some versions
+        emitted 0). Empirically CC rejects `agents: "./agents/"` with `Invalid input`
+        — same as for non-default folder paths. CPV must catch this consistently with
+        a MAJOR + a helpful "just remove the field" note (since the default folder is
+        auto-discovered).
 
-        Net effect: only ONE finding for `agents: "./agents/"`. Check that we don't
-        emit BOTH a CRITICAL and a MAJOR for the same configuration.
+        Net effect: exactly ONE MAJOR finding (no CRITICAL, no double-fire).
         """
         manifest = {
             "name": "p", "version": "1.0.0", "description": "x",
@@ -2426,14 +2425,26 @@ class TestEmpiricalDocsBugsAdded20260418:
         plugin_dir = self._make_plugin_dir(tmp_path, manifest)
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
-        agents_findings = [
+        agents_majors = [
             r for r in report.results
-            if "agents" in r.message and r.level in ("CRITICAL", "MAJOR")
+            if r.level == "MAJOR" and "agents" in r.message and "folder path" in r.message.lower()
         ]
-        # We accept 0 or 1 findings, but NOT 2 (no double-fire).
-        assert len(agents_findings) <= 1, (
-            f"Expected at most 1 finding for agents: './agents/', got {len(agents_findings)}: "
-            f"{[(r.level, r.message) for r in agents_findings]}"
+        assert len(agents_majors) == 1, (
+            f"Expected exactly 1 MAJOR for agents: './agents/', got {len(agents_majors)}: "
+            f"{[r.message for r in agents_majors]}"
+        )
+        # The message should include a hint that for the default folder, just remove the field
+        assert "remove the 'agents' field entirely" in agents_majors[0].message, (
+            f"Expected default-folder hint in message, got: {agents_majors[0].message}"
+        )
+        # No CRITICAL for agents (auto_discovered_defaults check skips agents)
+        agents_criticals = [
+            r for r in report.results
+            if r.level == "CRITICAL" and "agents" in r.message
+        ]
+        assert agents_criticals == [], (
+            f"agents: './agents/' should not emit CRITICAL (only the dedicated MAJOR), got: "
+            f"{[r.message for r in agents_criticals]}"
         )
 
     def test_hooks_array_form_pointing_at_default_emits_major(self, tmp_path):
@@ -2473,4 +2484,210 @@ class TestEmpiricalDocsBugsAdded20260418:
         assert len(majors) >= 1, (
             f"Expected MAJOR for hooks path with normalization quirks, got: "
             f"{[r.message for r in report.results if r.level == 'MAJOR']}"
+        )
+
+
+class TestManifestReferencedDirsSuppressNonStandardWarning:
+    """Tests for the manifest-referenced-folder discovery added 2026-04-19.
+
+    `validate_structure` warns about "non-standard directories" at plugin root.
+    But folders referenced from .mcp.json, .lsp.json, hooks, monitors, or inline
+    plugin.json fields via `${CLAUDE_PLUGIN_ROOT}/<dir>/...` are legitimate and
+    should NOT trigger the warning. Empirical bug fix: llm-externalizer plugin
+    has `mcp-server/` referenced via `.mcp.json` and was wrongly warned about
+    in CPV v2.23.0.
+    """
+
+    def _make_plugin_with_dir_and_manifest(
+        self,
+        tmp_path: Path,
+        nonstandard_dirname: str,
+        *,
+        mcp_json: dict | None = None,
+        lsp_json: dict | None = None,
+        hooks_json: dict | None = None,
+        monitors_json: list | None = None,
+        plugin_manifest_extra: dict | None = None,
+    ) -> Path:
+        plugin_dir = tmp_path / "p"
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / nonstandard_dirname).mkdir()
+        # Add a placeholder file so the directory isn't empty
+        (plugin_dir / nonstandard_dirname / "index.js").write_text("// stub")
+        manifest = {"name": "p", "version": "1.0.0", "description": "x"}
+        if plugin_manifest_extra:
+            manifest.update(plugin_manifest_extra)
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest))
+        if mcp_json is not None:
+            (plugin_dir / ".mcp.json").write_text(json.dumps(mcp_json))
+        if lsp_json is not None:
+            (plugin_dir / ".lsp.json").write_text(json.dumps(lsp_json))
+        if hooks_json is not None:
+            (plugin_dir / "hooks").mkdir(exist_ok=True)
+            (plugin_dir / "hooks" / "hooks.json").write_text(json.dumps(hooks_json))
+        if monitors_json is not None:
+            (plugin_dir / "monitors").mkdir(exist_ok=True)
+            (plugin_dir / "monitors" / "monitors.json").write_text(json.dumps(monitors_json))
+        return plugin_dir
+
+    def _has_warning_for_dir(self, report: ValidationReport, dirname: str) -> bool:
+        return any(
+            r.level == "WARNING" and f"'{dirname}/'" in r.message and "Non-standard" in r.message
+            for r in report.results
+        )
+
+    def test_mcp_json_command_arg_reference_suppresses_warning(self, tmp_path):
+        """mcp-server/ referenced via `.mcp.json` args → no warning (the llm-externalizer case)."""
+        plugin_dir = self._make_plugin_with_dir_and_manifest(
+            tmp_path,
+            "mcp-server",
+            mcp_json={
+                "mcpServers": {
+                    "my-mcp": {
+                        "command": "node",
+                        "args": ["${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/index.js"],
+                    }
+                }
+            },
+        )
+        report = ValidationReport()
+        validate_structure(plugin_dir, report)
+        assert not self._has_warning_for_dir(report, "mcp-server"), (
+            f"mcp-server/ referenced from .mcp.json should NOT warn. Got warnings: "
+            f"{[r.message for r in report.results if r.level == 'WARNING']}"
+        )
+
+    def test_lsp_json_command_reference_suppresses_warning(self, tmp_path):
+        """lsp-bin/ referenced via `.lsp.json` command → no warning."""
+        plugin_dir = self._make_plugin_with_dir_and_manifest(
+            tmp_path,
+            "lsp-bin",
+            lsp_json={
+                "go": {
+                    "command": "${CLAUDE_PLUGIN_ROOT}/lsp-bin/gopls",
+                    "extensionToLanguage": {".go": "go"},
+                }
+            },
+        )
+        report = ValidationReport()
+        validate_structure(plugin_dir, report)
+        assert not self._has_warning_for_dir(report, "lsp-bin"), (
+            f"lsp-bin/ referenced from .lsp.json should NOT warn. Got: "
+            f"{[r.message for r in report.results if r.level == 'WARNING']}"
+        )
+
+    def test_hooks_command_reference_suppresses_warning(self, tmp_path):
+        """custom-tools/ referenced via hooks/hooks.json command → no warning."""
+        plugin_dir = self._make_plugin_with_dir_and_manifest(
+            tmp_path,
+            "custom-tools",
+            hooks_json={
+                "hooks": {
+                    "PostToolUse": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "${CLAUDE_PLUGIN_ROOT}/custom-tools/format.sh",
+                                }
+                            ]
+                        }
+                    ]
+                }
+            },
+        )
+        report = ValidationReport()
+        validate_structure(plugin_dir, report)
+        assert not self._has_warning_for_dir(report, "custom-tools"), (
+            f"custom-tools/ referenced from hooks should NOT warn. Got: "
+            f"{[r.message for r in report.results if r.level == 'WARNING']}"
+        )
+
+    def test_monitors_command_reference_suppresses_warning(self, tmp_path):
+        """polling/ referenced via monitors/monitors.json → no warning."""
+        plugin_dir = self._make_plugin_with_dir_and_manifest(
+            tmp_path,
+            "polling",
+            monitors_json=[
+                {
+                    "name": "deploy-status",
+                    "command": "${CLAUDE_PLUGIN_ROOT}/polling/check-deploy.sh",
+                    "description": "Deploy poller",
+                }
+            ],
+        )
+        report = ValidationReport()
+        validate_structure(plugin_dir, report)
+        assert not self._has_warning_for_dir(report, "polling"), (
+            f"polling/ referenced from monitors should NOT warn. Got: "
+            f"{[r.message for r in report.results if r.level == 'WARNING']}"
+        )
+
+    def test_inline_plugin_json_mcpservers_reference_suppresses_warning(self, tmp_path):
+        """servers/ referenced via inline plugin.json:mcpServers → no warning."""
+        plugin_dir = self._make_plugin_with_dir_and_manifest(
+            tmp_path,
+            "my-server-bundle",
+            plugin_manifest_extra={
+                "mcpServers": {
+                    "x": {
+                        "command": "${CLAUDE_PLUGIN_ROOT}/my-server-bundle/server",
+                    }
+                }
+            },
+        )
+        report = ValidationReport()
+        validate_structure(plugin_dir, report)
+        assert not self._has_warning_for_dir(report, "my-server-bundle"), (
+            f"my-server-bundle/ referenced from inline plugin.json should NOT warn. Got: "
+            f"{[r.message for r in report.results if r.level == 'WARNING']}"
+        )
+
+    def test_inline_plugin_json_lspservers_reference_suppresses_warning(self, tmp_path):
+        """language-bin/ referenced via inline plugin.json:lspServers → no warning."""
+        plugin_dir = self._make_plugin_with_dir_and_manifest(
+            tmp_path,
+            "language-bin",
+            plugin_manifest_extra={
+                "lspServers": {
+                    "myls": {
+                        "command": "${CLAUDE_PLUGIN_ROOT}/language-bin/myls",
+                        "extensionToLanguage": {".my": "my"},
+                    }
+                }
+            },
+        )
+        report = ValidationReport()
+        validate_structure(plugin_dir, report)
+        assert not self._has_warning_for_dir(report, "language-bin"), (
+            f"language-bin/ referenced from inline lspServers should NOT warn. Got: "
+            f"{[r.message for r in report.results if r.level == 'WARNING']}"
+        )
+
+    def test_unreferenced_nonstandard_dir_still_warns(self, tmp_path):
+        """A non-standard dir NOT referenced anywhere should still warn."""
+        plugin_dir = self._make_plugin_with_dir_and_manifest(
+            tmp_path,
+            "random-junk",
+            # No mcp/lsp/hooks/monitors/inline reference to random-junk/
+        )
+        report = ValidationReport()
+        validate_structure(plugin_dir, report)
+        assert self._has_warning_for_dir(report, "random-junk"), (
+            f"random-junk/ (no manifest reference) SHOULD still warn. Got: "
+            f"{[r.message for r in report.results if r.level == 'WARNING']}"
+        )
+
+    def test_servers_dir_now_in_known_list(self, tmp_path):
+        """servers/ (docs convention for MCP bundles) is in the static known list."""
+        plugin_dir = self._make_plugin_with_dir_and_manifest(
+            tmp_path,
+            "servers",
+            # No manifest reference; should be allowed via known_dirs alone
+        )
+        report = ValidationReport()
+        validate_structure(plugin_dir, report)
+        assert not self._has_warning_for_dir(report, "servers"), (
+            f"servers/ should be in static known_dirs. Got: "
+            f"{[r.message for r in report.results if r.level == 'WARNING']}"
         )
