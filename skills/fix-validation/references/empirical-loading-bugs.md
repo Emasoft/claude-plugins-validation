@@ -10,6 +10,7 @@
 - [Round 2 confirmations](#round-2-confirmations)
 - [Tests added](#tests-added-all-passing)
 - [Untestable in headless mode](#untestable-in-headless-mode-acknowledged-limitations)
+- [v2.23.2 false-positive sweep](#v2232--false-positive-sweep-2026-04-19)
 
 ---
 
@@ -112,3 +113,52 @@ Total: 20 new tests. Full suite: 2376 passing.
 - userConfig prompt + substitution end-to-end (require interactive enable flow)
 - Marketplace dependency tag resolution (requires marketplace + git tag setup)
 - Cross-marketplace allowlist blocking (requires multi-marketplace setup)
+
+## v2.23.2 — false-positive sweep (2026-04-19)
+
+Batch-scanned all 160 installed plugins under `~/.claude/plugins/cache/` to surface
+patterns where CPV WARNINGs were systematically wrong. The empirical scan found
+19 plugins flagged with "Non-standard directory" warnings — all were false positives
+for legitimate patterns.
+
+**Three classes of fix:**
+
+### 1. Common dir names added to `known_dirs`
+
+Added these to `validate_structure`'s `known_dirs` set (no longer warn):
+
+`prompts`, `demo`, `demos`, `eval`, `evals`, `node_modules`, `output`, `outputs`,
+`server`, `public`, `static`, `web`, `shared`, `settings`, `guidances`, `plugins`,
+`rust`, `go`, `python`, `node`, `ts`, `js`, `java`, `kotlin`, `swift`, `ruby`,
+`csharp`, `cpp`, `c`.
+
+The language-source dirs (rust, go, etc.) cover plugins that ship native binaries
+in `bin/` and bundle the source tree alongside (e.g. perfect-skill-suggester ships
+both `rust/` source and `bin/<platform-binary>`).
+
+### 2. Submodule pattern auto-allowance
+
+Many plugins (especially Layout B nested marketplaces) have a subdirectory named
+after the plugin itself, e.g. `web-automation-suite/web-automation-suite/`. The
+validator now reads `.claude-plugin/plugin.json:name` and auto-allows a sibling
+directory matching that name (case-insensitive).
+
+### 3. Marketplace short-circuit in `main()`
+
+If `validate_plugin.py` is pointed at a folder with `.claude-plugin/marketplace.json`
+but no `plugin.json`, it now exits 1 with a clear "this is a marketplace, use
+validate_marketplace.py" hint instead of running plugin checks (which produced
+dozens of false WARNINGs for the per-plugin subfolders).
+
+**Result:** False-positive count for "Non-standard directory" warnings dropped
+from 19 plugins (across the 160 surveyed) to 1 remaining — and that 1 is a
+genuine non-standard dir (`web-automation-suite/task-manager/`) that the plugin
+author should rename or document.
+
+**Tests added:**
+
+- `test_validate_plugin.py::TestKnownDirsExpandedV2_23_2` — 29 parametrized cases
+- `test_validate_plugin.py::TestSubmodulePatternAllowance` — 3 tests
+- `test_validate_plugin.py::TestMarketplaceShortCircuit` — 2 tests
+
+Total tests after v2.23.2: 2426 (up from 2392).
