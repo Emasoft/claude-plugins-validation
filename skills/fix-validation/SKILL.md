@@ -59,9 +59,9 @@ If no matching section is found in the reference file, search by error message k
 **Input:** `[WARNING] architecture/recommend-restructure (7-signal)`
 **Output:** marketplace-error-index → §3 → marketplace-fixes §9 → apply per-signal mechanical fix
 
-## Install-time guarantee
+## Schema-parity contract
 
-CPV passing MUST imply `claude plugin install` succeeding — CPV's schema mirrors the runtime Zod. If a CPV-clean plugin is rejected by the runtime, that is a **validator gap** to file against CPV (with the exact runtime error), not a plugin bug.
+CPV validates plugin **sources** (folders, GitHub repos) — it does not install them. The contract: CPV's schema rules mirror Claude Code's install-time manifest validators, so a source with zero CPV findings should not trip a runtime schema error. This is narrower than "install will succeed" — install can still fail for non-schema reasons (network, missing host binaries, execution errors). Full contract + validator-gap protocol: [schema-parity-contract.md](references/schema-parity-contract.md).
 
 ## Resources
 
@@ -69,6 +69,8 @@ CPV passing MUST imply `claude plugin install` succeeding — CPV's schema mirro
   > validate_plugin.py · validate_skill.py · validate_skill_comprehensive.py · validate_hook.py · validate_agent.py · validate_command.py · validate_mcp.py · validate_lsp.py · validate_security.py · validate_rules.py · validate_xref.py · validate_settings_marketplace.py · validate_documentation.py · validate_encoding.py · validate_enterprise.py · validate_scoring.py
 - [Marketplace Error Index](references/marketplace-error-index.md)
   > validate_marketplace.py · validate_marketplace_pipeline.py · Architecture / Layout Migration Warnings (7 signals)
+- [Schema-Parity Contract](references/schema-parity-contract.md)
+  > What CPV does · The contract · What this contract does NOT say · What IS covered · Validator-gap protocol · Historical incidents · Related
 
 ## Token Optimization
 
