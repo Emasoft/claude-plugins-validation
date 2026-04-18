@@ -2988,14 +2988,29 @@ def _classify_path(path: Path) -> str:
 
     Helps the user understand WHY the path they passed is not a plugin root,
     and what to do next. Used by the "no plugin found" error to give
-    targeted guidance (different messages for marketplaces, project
-    ``.claude/`` configs, cache directories, etc.).
+    targeted guidance (different messages for marketplaces, skills,
+    project ``.claude/`` configs, cache directories, etc.).
     """
     name = path.name
     parent_name = path.parent.name if path.parent != path else ""
     # Marketplace folder
     if (path / ".claude-plugin" / "marketplace.json").is_file() or (path / "marketplace.json").is_file():
         return "marketplace"
+    # Standalone skill folder (has SKILL.md but NO plugin.json). Easy to confuse
+    # with a plugin because both live in "plugin-like" directories.
+    if (path / "SKILL.md").is_file() and not (path / ".claude-plugin" / "plugin.json").is_file():
+        # Distinguish a skill nested INSIDE a plugin's skills/<name>/ from a truly
+        # standalone skill by checking ancestors within 3 levels for plugin.json.
+        ancestor: Path | None = path.parent
+        for _ in range(3):
+            if ancestor is None:
+                break
+            if (ancestor / ".claude-plugin" / "plugin.json").is_file():
+                return "skill_inside_plugin"
+            if ancestor.parent == ancestor:
+                break
+            ancestor = ancestor.parent
+        return "standalone_skill"
     # Project-scoped Claude config (.claude/ in a project root)
     if name == ".claude" or (path / "settings.json").is_file() and (path / "plugins").is_dir():
         return "claude_project_config"
@@ -3026,6 +3041,22 @@ def _format_no_plugin_found_hint(plugin_root: Path) -> str:
         lines.append(
             "  → This path looks like a MARKETPLACE (has marketplace.json), not a plugin. "
             "Use `validate_marketplace.py` for marketplaces, or pick a plugin subfolder for `validate_plugin.py`."
+        )
+    elif classification == "standalone_skill":
+        lines.append(
+            "  → This path looks like a STANDALONE SKILL (has SKILL.md, no plugin.json). "
+            "Skills and plugins are different things — skills are single folders dropped into "
+            "`~/.claude/skills/` (user scope) or `<project>/.claude/skills/` (project/local scope), "
+            "and do NOT need a marketplace or plugin.json. If you want to validate a skill, use "
+            "`validate_skill.py` or the `skill-validation-agent`. If you meant to scaffold this as a "
+            "full plugin, you need to wrap it in a plugin folder with `.claude-plugin/plugin.json` first."
+        )
+    elif classification == "skill_inside_plugin":
+        lines.append(
+            "  → This path is a SKILL INSIDE A PLUGIN (has SKILL.md; a parent folder has plugin.json). "
+            "`validate_plugin.py` wants the PLUGIN root, not the skill. Use `validate_skill.py` to "
+            "validate this skill on its own, or move up to the plugin root (the ancestor folder with "
+            "`.claude-plugin/plugin.json`) to validate the whole plugin."
         )
     elif classification == "claude_project_config":
         lines.append(
