@@ -671,3 +671,56 @@ Note: Most language servers use `stdio`. Only use `socket` if the server documen
 **Source**: `validate_lsp.py` — `validate_plugin_lsp()`
 **What it means**: None of the standard LSP config locations (`.lsp.json`, `lsp.json`, `lsp-config.json`, `.vscode/settings.json`) exist in the plugin directory. This is informational — LSP config is optional.
 **How to fix**: No fix required if the plugin does not use language servers. To add LSP support, create `lsp.json` in the plugin root.
+
+---
+
+### [MAJOR] LSP server '{name}' is declared in {source1} and {source2} — server names must be unique across all LSP sources
+
+**Source**: `validate_lsp.py` — `validate_plugin_lsp()`
+**Empirical evidence**: TRDD-20260418, test plugin `cpv-lsp-coexist-test`. CC's debug log showed `Loaded 3 LSP server(s) from plugin: cpv-lsp-coexist-test` (4 declarations across .lsp.json + plugin.json:lspServers, deduplicated to 3 unique names). The LSP_WINNER probe further established that **inline `plugin.json:lspServers` WINS** when names collide; the losing source's declaration is silently dropped at runtime with no warning from CC.
+
+**What it means**: A plugin has the same LSP server name (e.g., `pyright-lsp`) declared in more than one source — most commonly both `.lsp.json` (auto-discovered at plugin root) AND inline `lspServers` in `plugin.json`. CC silently picks one (inline wins) and discards the other. The plugin author may not realize one configuration is being ignored.
+
+Source labels in the message:
+| Label | Meaning |
+|---|---|
+| `.lsp.json` | The auto-discovered config at plugin root (unwrapped: top-level keys are server names) |
+| `plugin.json:lspServers` | Inline `lspServers: {...}` dict in `plugin.json` |
+| `lsp.json`, `lsp-config.json`, `.vscode/settings.json` | Other auto-checked LSP config locations |
+
+**How to fix**:
+1. Identify the duplicated server name(s) from the error message.
+2. Decide which source should "own" the server. Default preference: **inline `plugin.json:lspServers`** (single source of truth alongside the rest of the manifest).
+3. Remove the duplicate entry from the OTHER source(s).
+4. Re-validate.
+
+**Example — duplicate**:
+`.lsp.json`:
+```json
+{
+  "pyright-lsp": {
+    "command": "pyright-langserver",
+    "args": ["--stdio"],
+    "extensionToLanguage": {".py": "python"}
+  }
+}
+```
+`plugin.json`:
+```json
+{
+  "name": "my-plugin",
+  "lspServers": {
+    "pyright-lsp": {
+      "command": "pyright-langserver",
+      "args": ["--stdio", "--watch"],
+      "extensionToLanguage": {".py": "python"}
+    },
+    "rust-lsp": { "command": "rust-analyzer", "extensionToLanguage": {".rs": "rust"} }
+  }
+}
+```
+CPV emits: `LSP server 'pyright-lsp' is declared in .lsp.json and plugin.json:lspServers — server names must be unique across all LSP sources (when collisions occur, the inline plugin.json:lspServers entry WINS per empirical test; the other source is silently dropped)`.
+
+**Example — fixed**: delete `.lsp.json` (since `pyright-lsp` was its only entry); the inline definition in `plugin.json` already covers it. Or, if you wanted `.lsp.json` to win, remove `pyright-lsp` from `plugin.json:lspServers`.
+
+**Why this is MAJOR**: silent shadowing means one of your two configurations is being ignored and you may not realize it. Explicitly choose which source owns each server.

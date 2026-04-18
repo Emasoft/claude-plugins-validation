@@ -43,13 +43,17 @@ Master checklist for validating all Claude Code plugin components. Use this chec
 
 ### Manifest Rules
 
-- [ ] `agents` field is array of `.md` file paths (NOT directory) — only if using non-standard path
+- [ ] `agents` field is array of `.md` **file** paths (NOT directory) — folder paths in `agents` are **rejected by CC** with cryptic `agents: Invalid input` (empirical 2026-04-18). Only `.md` file paths work, both string and array form.
 - [ ] `scripts` field is NOT present (invalid field)
 - [ ] `templates` field is NOT present (invalid field)
 - [ ] `commands` field NOT present if pointing to default `./commands/` (auto-discovered)
 - [ ] `agents` field NOT present if pointing to default `./agents/` (auto-discovered)
 - [ ] `skills` field NOT present if pointing to default `./skills/` (auto-discovered)
 - [ ] `hooks` field NOT present if pointing to default `./hooks/` (auto-discovered)
+- [ ] `hooks` field does NOT point to `./hooks/hooks.json` — even though `claude plugin validate` passes silently, this triggers a runtime `Duplicate hooks file detected` error AND **cascades to disable the plugin's MCP servers** (`hook-load-failed` error). Empirical 2026-04-18.
+- [ ] `mcpServers` field does NOT point to `./.mcp.json` — redundant (default file is auto-loaded). CPV emits MINOR.
+- [ ] No same server name in BOTH `.mcp.json` AND inline `plugin.json:mcpServers` — collisions silently shadow with inline winning. CPV emits MAJOR per duplicate.
+- [ ] No same server name in BOTH `.lsp.json` AND inline `plugin.json:lspServers` — same silent-shadow risk. CPV emits MAJOR per duplicate.
 - [ ] Component path fields only used for **non-standard** locations
 
 ### Manifest Validation Command
@@ -95,6 +99,8 @@ jq . .claude-plugin/plugin.json && echo "✓ Valid JSON"
 - [ ] `hooks/hooks.json` is valid JSON
 - [ ] Top-level has `hooks` object
 - [ ] Optional `description` field is string
+- [ ] `plugin.json:hooks` field does NOT point to `./hooks/hooks.json` (the auto-discovered default) — empirical 2026-04-18 confirmed CC's runtime emits `Duplicate hooks file detected` AND cascades `hook-load-failed` which **disables the plugin's MCP servers**. CPV emits MAJOR.
+- [ ] Override hook paths point to NON-default files (e.g. `./hooks/extra.json`) — these merge cleanly without cascade
 
 ### Event Types
 
@@ -219,15 +225,17 @@ skills-ref validate /path/to/skill
 
 ### Configuration Location
 
-- [ ] `.mcp.json` at plugin root OR
-- [ ] `mcpServers` inline in plugin.json OR
-- [ ] `mcpServers` references external file
+- [ ] `.mcp.json` at plugin root (auto-discovered) AND/OR
+- [ ] `mcpServers` inline in plugin.json AND/OR
+- [ ] `mcpServers` references external file (e.g. `"./extras/mcp.json"`)
+- [ ] **Sources are loaded ADDITIVELY at runtime** — empirical 2026-04-18. All declared sources contribute their servers.
+- [ ] `mcpServers` does NOT point to `./.mcp.json` (redundant with auto-discovery; CPV emits MINOR)
 
 ### JSON Structure
 
 - [ ] Configuration is valid JSON
 - [ ] `mcpServers` is object with named servers
-- [ ] Each server has unique name
+- [ ] Each server has unique name **across ALL declaration sources** — same name in two sources causes silent inline-wins shadowing. CPV emits MAJOR per duplicate name.
 
 ### stdio Transport (Default)
 
@@ -388,6 +396,11 @@ uv run python scripts/validate_marketplace.py /path/to/marketplace --verbose
 - [ ] `isolation` (if present) is "worktree"
 - [ ] `background` (if present) is boolean
 
+### Manifest `agents` field — CRITICAL CONSTRAINT (undocumented in Anthropic docs)
+
+- [ ] If `agents` field is present in plugin.json, it contains ONLY `.md` file paths — NEVER folder paths. Empirical 2026-04-18: CC rejects folder paths with cryptic `agents: Invalid input` error in BOTH string and array form. Even the docs' own complete-schema example `"./custom/agents/"` is wrong — it would be rejected.
+- [ ] If a plugin author skips `claude plugin validate` and publishes with a folder path, **CC silently drops the agents at runtime** with no error in `--debug` log. CPV pre-empts this with a helpful MAJOR.
+
 ---
 
 ## 8. LSP Server Checklist
@@ -398,6 +411,10 @@ uv run python scripts/validate_marketplace.py /path/to/marketplace --verbose
 - [ ] Transport (if present) is "stdio" or "pipe"
 - [ ] Numeric fields (startupTimeout, shutdownTimeout, maxRestarts) are numbers
 - [ ] `restartOnCrash` (if present) is boolean
+
+### LSP Cross-Source Uniqueness
+
+- [ ] No same server name in BOTH `.lsp.json` (auto-discovered, unwrapped format) AND inline `plugin.json:lspServers` — empirical 2026-04-18 (LSP_WINNER probe) confirmed inline silently wins on collision; the other source's declaration is dropped. CPV emits MAJOR per duplicate.
 
 ---
 

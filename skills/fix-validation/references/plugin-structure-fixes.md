@@ -367,6 +367,64 @@ root cause, and step-by-step fix instructions.
 2. All files inside `commands/`, `agents/`, `skills/`, and `hooks/` are auto-discovered.
 3. Only use explicit file lists when referencing files **outside** the default directories.
 
+### MAJOR: `agents` field contains a folder path
+
+**Error message**: `Field 'agents' contains folder path '<path>' — Claude Code's manifest validator REJECTS folder paths in the 'agents' field with the cryptic error 'agents: Invalid input' (both string and array forms). Only '.md' file paths are accepted. ...`
+**Severity**: MAJOR
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: This is an **undocumented schema constraint** in CC's manifest validator (verified empirically 2026-04-18). The docs schema says `agents: string | array` and the docs' own complete-schema example shows `"./custom/agents/"` (a folder), but CC's validator REJECTS folder paths in the `agents` field with the message `agents: Invalid input`. Only `.md` file paths are accepted in both string and array form. Worse, if the plugin author skips `claude plugin validate` and publishes the plugin, **CC silently drops the agents at runtime** with no error in `--debug` — agents simply don't appear in the agent list.
+
+This is a **publish-and-break** scenario. Your plugin will install but the agents won't work, and users won't know why.
+
+**Fix**:
+1. List specific `.md` file paths instead of folders:
+   ```diff
+   {
+     "name": "my-plugin",
+   - "agents": "./custom-agents/",
+   + "agents": ["./custom-agents/reviewer.md", "./custom-agents/tester.md"]
+   }
+   ```
+2. Or use the array form with one file per entry:
+   ```json
+   {
+     "agents": [
+       "./custom-agents/reviewer.md",
+       "./custom-agents/tester.md"
+     ]
+   }
+   ```
+3. If the agents are in the default `agents/` folder, **remove the `agents` field entirely** — CC auto-discovers `agents/` at the plugin root.
+4. **Note**: this constraint applies ONLY to `agents`. The `skills`, `commands`, and `outputStyles` fields accept folder paths normally. This is an `agents`-specific validator bug.
+
+### MAJOR: `hooks` points at the default file (cascading MCP failure)
+
+**Error message**: `Field 'hooks' points to './hooks/hooks.json' which Claude Code already auto-loads by convention. At runtime this triggers 'Duplicate hooks file detected' AND the cascading 'hook-load-failed' error DISABLES this plugin's MCP servers (silent partial failure — `claude plugin validate` does not catch it). ...`
+**Severity**: MAJOR
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: Empirically verified 2026-04-18 (test: `cpv-hooks-doublefire-test`). When `plugin.json` has `"hooks": "./hooks/hooks.json"` (or `"hooks/hooks.json"`), CC's runtime debug log shows:
+```
+[ERROR] Duplicate hooks file detected: ./hooks/hooks.json resolves to already-loaded file
+[DEBUG] Plugin not available for MCP: <plugin>@inline - error type: hook-load-failed
+```
+The hook itself dedupes correctly (fires exactly once), BUT the `hook-load-failed` error CASCADES and disables this plugin's MCP servers entirely. `claude plugin validate` does NOT catch this — it passes silently — so the plugin author doesn't see the problem until users complain that MCP tools don't work.
+
+**Fix**:
+1. Remove the `hooks` field from `plugin.json`. CC auto-loads `hooks/hooks.json` at the plugin root automatically:
+   ```diff
+   {
+     "name": "my-plugin",
+   - "hooks": "./hooks/hooks.json"
+   }
+   ```
+2. Or, if you genuinely need an additional hook file (separate from the auto-loaded one), point at a **non-default** path:
+   ```json
+   {
+     "hooks": "./hooks/extra.json"
+   }
+   ```
+3. Verify the fix: re-run validation and check the runtime debug log doesn't show `hook-load-failed`.
+
 ---
 
 ## 2. Directory Structure Issues

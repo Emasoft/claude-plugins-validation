@@ -53,6 +53,19 @@ CPV runs **20 specialized validators** covering **190+ rules** across every part
 | **Security** | Hardcoded secrets, path traversal, command injection, prompt injection |
 | **Compatibility** | Windows/macOS/Linux path issues, encoding problems, broken references |
 | **Quality** | Missing documentation, no license, inconsistent versions, dead links |
+| **Empirical Loading Bugs** *(v2.23.0+)* | Silent-failure modes in CC's plugin loader that `claude plugin validate` doesn't catch — see below |
+
+### Empirical Plugin-Loading Bugs CPV Catches
+
+Through extensive empirical testing of Claude Code's plugin loader (April 2026), CPV identified five silent-failure modes that the official docs hide and that CC's own `claude plugin validate` does NOT detect. CPV catches all five:
+
+1. **`agents` field with folder paths** — CC rejects with cryptic `agents: Invalid input`. If validate is skipped, agents are silently dropped at runtime. CPV emits MAJOR with helpful fix recipe (`.md` file paths only). The official docs' own complete-schema example showing `"./custom/agents/"` is incorrect.
+2. **`hooks: "./hooks/hooks.json"` cascade** — pointing the override at the auto-discovered default file passes validation silently, but at runtime CC emits `Duplicate hooks file detected` AND **disables the plugin's MCP servers** with `error type: hook-load-failed`. CPV emits MAJOR.
+3. **MCP cross-source server-name collision** — same server name in both `.mcp.json` and inline `plugin.json:mcpServers` causes silent inline-wins shadowing; the `.mcp.json` declaration is dropped without warning. CPV emits MAJOR per duplicate.
+4. **LSP cross-source server-name collision** — same silent-shadow risk for LSP servers. CPV emits MAJOR per duplicate.
+5. **`mcpServers: "./.mcp.json"` redundancy** — points the override at the auto-discovered default file. Harmless single load (no cascade like hooks) but redundant and confusing. CPV emits MINOR nudge.
+
+All five rules are documented with empirical evidence in [`skills/fix-validation/references/empirical-loading-bugs.md`](skills/fix-validation/references/empirical-loading-bugs.md) (13 test plugin scenarios, debug-log excerpts, runtime probes).
 
 All checks run as pure Python -- no API calls, no tokens consumed, no data sent anywhere.
 

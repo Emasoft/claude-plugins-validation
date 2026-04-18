@@ -1089,46 +1089,153 @@ def validate_manifest(
                             ".claude-plugin/plugin.json",
                         )
 
-    # Claude Code auto-discovers standard directories (commands/, agents/, skills/,
-    # hooks/) without needing them declared in plugin.json. Declaring the default path
-    # causes Claude Code to reject the manifest as malformed — the plugin won't load.
+    # Claude Code auto-discovers standard directories at the plugin root.
+    # Empirically verified 2026-04-18:
+    #   - For commands/skills/outputStyles: pointing the manifest field at the default
+    #     directory (e.g. "skills": "./skills/") is accepted and works fine — the docs
+    #     even endorse this for "include the default in your array to keep both" form.
+    #     CPV downgrades this to a MINOR redundancy nudge (was previously CRITICAL —
+    #     false positive).
+    #   - For hooks: pointing at the default directory (`hooks: "./hooks/"`, the DIR
+    #     not the file) IS rejected by CC's validator with `hooks: Invalid input`. CPV
+    #     keeps CRITICAL for this case.
+    #   - For agents: see the dedicated `agents`-folder check below — folder paths in
+    #     `agents` are ALWAYS rejected by CC with `agents: Invalid input`.
+    # See `skills/fix-validation/references/empirical-loading-bugs.md` for evidence.
     auto_discovered_defaults = {
         "commands": "./commands/",
         "agents": "./agents/",
         "skills": "./skills/",
         "hooks": "./hooks/",
-        "outputStyles": "./output-styles/",  # Also auto-discovered per official docs
+        "outputStyles": "./output-styles/",
     }
+    # Fields where pointing at the default DIRECTORY actually breaks plugin loading
+    # (verified empirically — CC's validator rejects these with `Invalid input`).
+    breaks_loading_when_default = {"hooks"}
     for key, default_path in auto_discovered_defaults.items():
-        if key in manifest:
-            value = manifest[key]
-            # String pointing to the default directory breaks plugin loading
-            if isinstance(value, str):
-                normalized = value.replace("\\", "/").rstrip("/") + "/"
-                if normalized == default_path:
+        if key not in manifest:
+            continue
+        value = manifest[key]
+        # String pointing to the default directory
+        if isinstance(value, str):
+            normalized = value.replace("\\", "/").rstrip("/") + "/"
+            if normalized == default_path:
+                if key in breaks_loading_when_default:
                     report.critical(
-                        f"Field '{key}' points to '{default_path}' which is auto-discovered by Claude Code. This causes a malformed manifest error and the plugin will not load. Remove it from plugin.json — only non-standard paths need explicit declaration.",
+                        f"Field '{key}' points to '{default_path}' which Claude Code rejects "
+                        f"with `{key}: Invalid input` — the plugin will not load. Remove it "
+                        "from plugin.json — only non-standard paths need explicit declaration.",
                         ".claude-plugin/plugin.json",
                     )
-            # Array of files inside the default directory also breaks plugin loading
-            elif isinstance(value, list) and all(isinstance(p, str) and p.startswith(default_path) for p in value):
+                elif key == "agents":
+                    # Agents-folder rejection is handled by the dedicated agents check
+                    # below (which provides a richer error message). Skip here.
+                    pass
+                else:
+                    # commands / skills / outputStyles: redundant but harmless.
+                    report.minor(
+                        f"Field '{key}' points to '{default_path}' which Claude Code "
+                        "auto-discovers anyway. This declaration is redundant. Remove the "
+                        "field from plugin.json (the default folder is scanned automatically).",
+                        ".claude-plugin/plugin.json",
+                    )
+        # Array of files inside the default directory
+        elif isinstance(value, list) and all(isinstance(p, str) and p.startswith(default_path) for p in value):
+            if key in breaks_loading_when_default:
                 report.critical(
-                    f"Field '{key}' lists files inside '{default_path}' which is auto-discovered by Claude Code. This causes a malformed manifest error and the plugin will not load. Remove it from plugin.json.",
+                    f"Field '{key}' lists items inside '{default_path}' which Claude Code "
+                    f"rejects with `{key}: Invalid input` — the plugin will not load. "
+                    "Remove it from plugin.json.",
+                    ".claude-plugin/plugin.json",
+                )
+            elif key == "agents":
+                # Skip — the dedicated agents check below handles this.
+                pass
+            else:
+                report.minor(
+                    f"Field '{key}' lists items inside '{default_path}' which Claude Code "
+                    "auto-discovers anyway. This is redundant. Remove the field from "
+                    "plugin.json (or include only items OUTSIDE the default folder).",
                     ".claude-plugin/plugin.json",
                 )
 
-    # Check for duplicate hooks loading — Claude Code auto-discovers hooks/hooks.json,
-    # so explicitly pointing to it in plugin.json causes it to load twice (runtime error)
-    hooks_value = manifest.get("hooks")
-    if isinstance(hooks_value, str):
-        normalized_hooks = hooks_value.replace("\\", "/")
-        if normalized_hooks in ("./hooks/hooks.json", "hooks/hooks.json"):
-            report.warning(
-                "Field 'hooks' points to './hooks/hooks.json' which Claude Code already auto-loads by convention. "
-                "This causes a 'Duplicate hooks file detected' runtime error. Remove the 'hooks' field from plugin.json "
-                "or use a non-default path.",
+    # `agents` field empirical constraint (NOT in docs schema): Claude Code's manifest
+    # validator rejects ANY folder path in the `agents` field with the cryptic message
+    # "agents: Invalid input" — both string and array forms, default folder or not.
+    # Only `.md` file paths are accepted. The docs' own complete-schema example
+    # ("./custom/agents/") would actually fail this check.
+    # If a plugin author skips `claude plugin validate` and publishes with a folder path,
+    # CC silently drops the agents at runtime — no error in --debug log, agents simply
+    # don't appear. Pre-empt CC's cryptic error with a clear, actionable message.
+    # Empirical evidence: TRDD-20260418 (cpv-agents-other-folder-test).
+    # NOTE: skip the case where path is exactly the default `./agents/` — the existing
+    # `auto_discovered_defaults` CRITICAL above already covers it, so we'd double-fire.
+    agents_value = manifest.get("agents")
+    if agents_value is not None:
+        agents_paths: list[str] = []
+        if isinstance(agents_value, str):
+            agents_paths = [agents_value]
+        elif isinstance(agents_value, list):
+            agents_paths = [p for p in agents_value if isinstance(p, str)]
+        for path_str in agents_paths:
+            normalized = path_str.replace("\\", "/")
+            # A folder path either ends with "/" or has no .md extension on its last segment.
+            looks_like_folder = normalized.endswith("/") or not normalized.lower().endswith(".md")
+            if not looks_like_folder:
+                continue
+            # Skip if this is the auto-discovered default folder — the existing CRITICAL
+            # check above already handles it, no need for a redundant MAJOR.
+            normalized_with_slash = normalized.rstrip("/") + "/"
+            if normalized_with_slash == "./agents/":
+                continue
+            report.major(
+                f"Field 'agents' contains folder path '{path_str}' — Claude Code's manifest validator "
+                f"REJECTS folder paths in the 'agents' field with the cryptic error 'agents: Invalid input' "
+                f"(both string and array forms). Only '.md' file paths are accepted. If you skip validate "
+                f"and publish, CC silently drops the agents at runtime with no error. "
+                f"Fix: list specific .md files like ['./agents/reviewer.md', './agents/tester.md'] "
+                f"instead of '{path_str}'. Note: the docs' own complete-schema example ('./custom/agents/') "
+                f"is incorrect — it would also be rejected.",
                 ".claude-plugin/plugin.json",
             )
+
+    # Check for duplicate hooks loading — Claude Code auto-discovers hooks/hooks.json,
+    # so explicitly pointing to it in plugin.json triggers a runtime ERROR with a CASCADE:
+    # not only does Claude Code log "Duplicate hooks file detected" at runtime, but the
+    # error also disables the plugin's other capabilities such as MCP servers
+    # (debug log: "Plugin not available for MCP: <plugin>@inline - error type: hook-load-failed").
+    # `claude plugin validate` does NOT catch this, so CPV emits MAJOR to give the author
+    # a chance to spot the silent partial-failure mode before publishing.
+    # Empirical evidence: TRDD-20260418 (cpv-hooks-doublefire-test) — hook fires once
+    # (CC dedupes), but plugin's MCP servers fail to load with "hook-load-failed".
+    # Handles BOTH string form ("./hooks/hooks.json") AND array form (["./hooks/hooks.json"])
+    # AND path normalization (./hooks/./hooks.json, hooks\\hooks.json on Windows, etc.).
+    def _is_default_hooks_path(path: str) -> bool:
+        """True if path resolves to the auto-discovered hooks/hooks.json default."""
+        normalized = path.replace("\\", "/")
+        # Collapse "./" and "//" path segments — common authoring slip-ups.
+        # We don't follow symlinks; static path equivalence is sufficient for this check.
+        parts = [p for p in normalized.split("/") if p and p != "."]
+        return parts == ["hooks", "hooks.json"]
+
+    hooks_value = manifest.get("hooks")
+    hooks_paths_to_check: list[str] = []
+    if isinstance(hooks_value, str):
+        hooks_paths_to_check = [hooks_value]
+    elif isinstance(hooks_value, list):
+        hooks_paths_to_check = [p for p in hooks_value if isinstance(p, str)]
+    for hooks_path in hooks_paths_to_check:
+        if _is_default_hooks_path(hooks_path):
+            report.major(
+                f"Field 'hooks' contains '{hooks_path}' which resolves to the auto-discovered "
+                "'hooks/hooks.json' default. At runtime this triggers 'Duplicate hooks file detected' "
+                "AND the cascading 'hook-load-failed' error DISABLES this plugin's MCP servers "
+                "(silent partial failure — `claude plugin validate` does not catch it). "
+                "Fix: remove the 'hooks' field from plugin.json (the default file is loaded automatically), "
+                "or point it at a NON-default path like './hooks/extra.json'.",
+                ".claude-plugin/plugin.json",
+            )
+            break  # Only emit once even if listed in array — the message is the same.
 
     # v2.22.0 spec-parity helpers — dependencies, userConfig sub-fields, channels/mcp
     # cross-ref, and monitors entry shape. Each helper is a no-op when the corresponding

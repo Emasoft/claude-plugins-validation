@@ -74,6 +74,14 @@ CPV validates plugin sources; it does not install them. Schema rules mirror Clau
 - [Iterative Fix Loop](references/iterative-fix-loop.md)
   > Why a loop · Algorithm · Entry points — plugin path vs report path · Termination and safety · WARNING evaluation rules · Publish-blocking warning categories · Truly advisory warnings · Output contract
 
+## MCP Server Bundling Convention
+
+When a fix adds or relocates bundled MCP server executables/scripts:
+- Prefer **`servers/`** at plugin root (matches the official docs example).
+- Reference as `${CLAUDE_PLUGIN_ROOT}/servers/<name>` in `command:`.
+- Server names must be unique across all sources (`.mcp.json`, inline `mcpServers`, path-string `mcpServers`). If CPV reports `"MCP server '<name>' is declared in both <source1> and <source2>"`, remove the duplicate entry from one source (prefer keeping the inline `plugin.json` entry unless the user says otherwise).
+- Soft preference — never relocate a working script that already has a predefined path.
+
 ## Token Optimization
 
 When LLM Externalizer MCP is available, use it to save context tokens:

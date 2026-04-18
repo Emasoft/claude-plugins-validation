@@ -63,6 +63,8 @@ Primary fix guide: [plugin-structure-fixes.md](plugin-structure-fixes.md)
 | `settings.json` agent value matching **[NEW]** | plugin-structure-fixes "New Validations (v2.11.0+)" |
 | Submodule-containment INFO **[NEW]** | plugin-structure-fixes §2 (submodule advisory) |
 | Language-detection INFO / orphan lockfiles **[NEW]** | plugin-structure-fixes §7 (script quality) |
+| `agents` field with folder path (`agents: Invalid input`) **[NEW 2026-04-18]** | plugin-structure-fixes §1 ("agents field contains a folder path") |
+| `hooks: "./hooks/hooks.json"` cascading MCP failure (upgraded WARNING→MAJOR) **[NEW 2026-04-18]** | plugin-structure-fixes §1 ("hooks points at the default file") |
 | Monitor tool recognition (valid) **[NEW]** | plugin-structure-fixes §4 (valid tool names) — Monitor (v2.1.98) is accepted in agent `tools:` |
 | Plugin-shipped agent restrictions (`hooks`/`mcpServers`/`permissionMode` forbidden) **[NEW]** | plugin-structure-fixes §4 (Agent frontmatter) |
 
@@ -210,6 +212,8 @@ Primary fix guide: [mcp-fixes.md](mcp-fixes.md)
 | `oauth` object (clientId, callbackPort, authServerMetadataUrl) | mcp-fixes §11 |
 | Supply-chain patterns (`npx`/`uvx` remote packages) | mcp-fixes §2 (command validation) |
 | Deprecated `sse` transport MINOR | mcp-fixes §3 |
+| Cross-source duplicate server name (`MCP server '<name>' is declared in <src1> and <src2>`) **[NEW]** | mcp-fixes §13 |
+| `mcpServers: "./.mcp.json"` redundancy nudge **[NEW 2026-04-18]** | mcp-fixes §12a |
 
 ---
 
@@ -226,6 +230,7 @@ Primary fix guide: [lsp-fixes.md](lsp-fixes.md)
 | `filetypes`, `rootPatterns` | lsp-fixes §7 |
 | `initializationOptions`, `settings` | lsp-fixes §7 |
 | Timeouts, `maxRestarts`, `restartOnCrash` | lsp-fixes §7 |
+| Cross-source duplicate LSP server name (`LSP server '<name>' is declared in <src1> and <src2>`) **[NEW 2026-04-18]** | lsp-fixes "Cross-source duplicate" entry at end |
 
 ---
 

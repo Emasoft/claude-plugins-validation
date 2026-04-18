@@ -437,7 +437,13 @@ class TestManifestPathFields:
         assert any("inline configuration object" in m for m in passed_msgs)
 
     def test_hooks_default_path_reports_critical(self, tmp_path):
-        """validate_manifest reports CRITICAL when hooks points to auto-discovered default path."""
+        """validate_manifest reports CRITICAL when hooks points to default `./hooks/` directory.
+
+        Empirical 2026-04-18: CC rejects `hooks: "./hooks/"` (the directory) with
+        `hooks: Invalid input`. Plugin will not load. The CRITICAL message wording was
+        updated to reflect the actual CC error rather than the older "malformed manifest"
+        text. (Unlike commands/skills/outputStyles which CC accepts pointing at default.)
+        """
         plugin_dir = tmp_path / "dup-hooks"
         plugin_dir.mkdir()
         claude_dir = plugin_dir / ".claude-plugin"
@@ -446,11 +452,19 @@ class TestManifestPathFields:
         (claude_dir / "plugin.json").write_text(json.dumps(manifest))
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
-        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
-        assert any("auto-discovered" in m and "malformed manifest" in m for m in critical_msgs)
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL" and "hooks" in r.message]
+        assert any(
+            "Invalid input" in m or "will not load" in m
+            for m in critical_msgs
+        ), f"Expected CRITICAL for hooks default-dir, got: {critical_msgs}"
 
-    def test_commands_default_path_reports_critical(self, tmp_path):
-        """validate_manifest reports CRITICAL when commands points to auto-discovered default path."""
+    def test_commands_default_path_reports_minor(self, tmp_path):
+        """validate_manifest reports MINOR (was CRITICAL until 2026-04-18) when commands points to default.
+
+        Empirical verification 2026-04-18: CC accepts `commands: "./commands/"` and the
+        plugin loads fine. The earlier CRITICAL was a false positive — the form is
+        redundant but harmless. Downgraded to MINOR (redundancy nudge).
+        """
         plugin_dir = tmp_path / "dup-cmds"
         plugin_dir.mkdir()
         claude_dir = plugin_dir / ".claude-plugin"
@@ -459,11 +473,22 @@ class TestManifestPathFields:
         (claude_dir / "plugin.json").write_text(json.dumps(manifest))
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
-        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
-        assert any("auto-discovered" in m and "malformed manifest" in m for m in critical_msgs)
+        minor_msgs = [r.message for r in report.results if r.level == "MINOR"]
+        assert any("auto-discover" in m and "redundant" in m.lower() for m in minor_msgs), (
+            f"Expected MINOR redundancy nudge for commands default path, got: {minor_msgs}"
+        )
+        # Should NOT be CRITICAL anymore
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL" and "commands" in r.message]
+        assert critical_msgs == [], (
+            f"commands default path should not be CRITICAL anymore (verified 2026-04-18 — "
+            f"plugin loads fine), got: {critical_msgs}"
+        )
 
-    def test_skills_default_path_reports_critical(self, tmp_path):
-        """validate_manifest reports CRITICAL when skills points to auto-discovered default path."""
+    def test_skills_default_path_reports_minor(self, tmp_path):
+        """validate_manifest reports MINOR (was CRITICAL until 2026-04-18) when skills points to default.
+
+        Empirical: CC accepts `skills: "./skills/"` and plugin loads with skill discoverable.
+        """
         plugin_dir = tmp_path / "dup-skills"
         plugin_dir.mkdir()
         claude_dir = plugin_dir / ".claude-plugin"
@@ -472,21 +497,59 @@ class TestManifestPathFields:
         (claude_dir / "plugin.json").write_text(json.dumps(manifest))
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
-        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
-        assert any("auto-discovered" in m and "malformed manifest" in m for m in critical_msgs)
+        minor_msgs = [r.message for r in report.results if r.level == "MINOR"]
+        assert any("auto-discover" in m and "redundant" in m.lower() for m in minor_msgs), (
+            f"Expected MINOR redundancy nudge for skills default path, got: {minor_msgs}"
+        )
 
-    def test_agents_array_default_path_reports_critical(self, tmp_path):
-        """validate_manifest reports CRITICAL when agents lists files in auto-discovered default dir."""
+    def test_hooks_default_dir_still_reports_critical(self, tmp_path):
+        """validate_manifest STILL reports CRITICAL for hooks: './hooks/' (the directory).
+
+        Unlike commands/skills/outputStyles, hooks REALLY does break loading when set to
+        the default DIRECTORY (not the file) — empirically verified 2026-04-18 that CC
+        emits `hooks: Invalid input` and rejects the manifest.
+        """
+        plugin_dir = tmp_path / "broken-hooks"
+        plugin_dir.mkdir()
+        claude_dir = plugin_dir / ".claude-plugin"
+        claude_dir.mkdir()
+        manifest = {"name": "broken-hooks", "version": "1.0.0", "hooks": "./hooks/"}
+        (claude_dir / "plugin.json").write_text(json.dumps(manifest))
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL" and "hooks" in r.message]
+        assert critical_msgs, (
+            f"hooks: './hooks/' (directory) should remain CRITICAL — CC rejects with Invalid input. "
+            f"Got: {[r.message for r in report.results if r.level == 'CRITICAL']}"
+        )
+
+    def test_agents_array_default_path_reports_major(self, tmp_path):
+        """agents: array of files inside default folder → MAJOR (agents folder rejection).
+
+        Empirical: agents field rejects ALL folder-shaped paths. An array containing
+        only items inside the default folder used to be CRITICAL (with claim of malformed
+        manifest); since 2026-04-18 the agents-specific check fires MAJOR with helpful
+        fix recipe instead. CC actually accepts these `.md` file paths fine — it's only
+        FOLDER paths that break.
+        """
         plugin_dir = tmp_path / "dup-agents"
         plugin_dir.mkdir()
         claude_dir = plugin_dir / ".claude-plugin"
         claude_dir.mkdir()
+        # Use file paths (CC accepts these); the existing CRITICAL was a false positive
+        # since the array entries are .md files (not folders).
         manifest = {"name": "dup-agents", "version": "1.0.0", "agents": ["./agents/a.md", "./agents/b.md"]}
         (claude_dir / "plugin.json").write_text(json.dumps(manifest))
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
-        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
-        assert any("auto-discovered" in m and "malformed manifest" in m for m in critical_msgs)
+        # The downgrade from CRITICAL to MINOR/skip means this case now produces no
+        # CRITICAL (which is correct — the form actually works in CC). Just verify no
+        # CRITICAL for agents.
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL" and "agents" in r.message]
+        assert critical_msgs == [], (
+            f"agents: ['./agents/a.md', './agents/b.md'] should not be CRITICAL — "
+            f"these are valid .md file paths. Got: {critical_msgs}"
+        )
 
     def test_nonstandard_path_no_critical(self, tmp_path):
         """validate_manifest does NOT flag non-standard paths as redundant."""
@@ -2190,3 +2253,224 @@ class TestV223CrossMarketplaceDeps:
             f"{[r.message for r in report.results if r.level == 'INFO']}"
         )
         assert not blocked
+
+
+class TestEmpiricalDocsBugsAdded20260418:
+    """Tests for new validator rules added after empirical testing of CC's plugin loader.
+
+    These rules catch silent-failure modes that `claude plugin validate` does NOT catch:
+      - hooks: "./hooks/hooks.json" → runtime cascade disables MCP servers (MAJOR)
+      - agents: any folder path → CC rejects with cryptic "Invalid input" (MAJOR)
+      - mcpServers: "./.mcp.json" → redundant declaration, silently accepted (MINOR)
+    """
+
+    def _make_plugin_dir(self, tmp_path: Path, manifest: dict) -> Path:
+        plugin_dir = tmp_path / manifest.get("name", "p")
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest))
+        return plugin_dir
+
+    # --- Tier 1.1: hooks override = default file → MAJOR cascade explanation ---
+
+    def test_hooks_pointing_at_default_file_emits_major(self, tmp_path):
+        """hooks: './hooks/hooks.json' → MAJOR (was WARNING) due to MCP-cascade footgun."""
+        manifest = {
+            "name": "p",
+            "version": "1.0.0",
+            "description": "x",
+            "hooks": "./hooks/hooks.json",
+        }
+        plugin_dir = self._make_plugin_dir(tmp_path, manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        majors = [r for r in report.results if r.level == "MAJOR" and "hooks/hooks.json" in r.message]
+        assert len(majors) >= 1, (
+            f"Expected MAJOR for hooks pointing at default file, got: "
+            f"{[r.message for r in report.results if r.level == 'MAJOR']}"
+        )
+        msg = majors[0].message
+        assert "MCP" in msg or "mcp" in msg, f"Expected message to mention MCP cascade, got: {msg}"
+        assert "hook-load-failed" in msg or "Duplicate hooks" in msg or "disable" in msg.lower(), (
+            f"Expected message to explain runtime cascade, got: {msg}"
+        )
+
+    def test_hooks_pointing_at_default_file_no_leading_dotslash(self, tmp_path):
+        """Also catches 'hooks/hooks.json' without './' prefix."""
+        manifest = {
+            "name": "p", "version": "1.0.0", "description": "x",
+            "hooks": "hooks/hooks.json",
+        }
+        plugin_dir = self._make_plugin_dir(tmp_path, manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        majors = [r for r in report.results if r.level == "MAJOR" and "hooks/hooks.json" in r.message]
+        assert len(majors) >= 1, (
+            f"Expected MAJOR for hooks: 'hooks/hooks.json' (no './' prefix), got: "
+            f"{[r.message for r in report.results if r.level == 'MAJOR']}"
+        )
+
+    def test_hooks_pointing_at_non_default_file_no_major(self, tmp_path):
+        """hooks: './hooks/extra.json' → no cascade-MAJOR (it's a legitimate non-default path)."""
+        manifest = {
+            "name": "p", "version": "1.0.0", "description": "x",
+            "hooks": "./hooks/extra.json",
+        }
+        plugin_dir = self._make_plugin_dir(tmp_path, manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        cascade_majors = [
+            r for r in report.results
+            if r.level == "MAJOR" and "hook-load-failed" in r.message
+        ]
+        assert cascade_majors == [], (
+            f"Non-default hooks path should not trigger cascade MAJOR, got: "
+            f"{[m.message for m in cascade_majors]}"
+        )
+
+    # --- Tier 1.2: agents folder paths → MAJOR with helpful pre-empt ---
+
+    def test_agents_string_folder_path_emits_major(self, tmp_path):
+        """agents: './custom-agents/' (string folder) → MAJOR."""
+        manifest = {
+            "name": "p", "version": "1.0.0", "description": "x",
+            "agents": "./custom-agents/",
+        }
+        plugin_dir = self._make_plugin_dir(tmp_path, manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        majors = [
+            r for r in report.results
+            if r.level == "MAJOR" and "agents" in r.message and "folder path" in r.message.lower()
+        ]
+        assert len(majors) >= 1, (
+            f"Expected MAJOR for agents string folder path, got: "
+            f"{[r.message for r in report.results if r.level == 'MAJOR']}"
+        )
+        msg = majors[0].message
+        assert ".md" in msg, f"Expected message to suggest .md file paths, got: {msg}"
+        assert "Invalid input" in msg, f"Expected message to mention CC's cryptic error, got: {msg}"
+
+    def test_agents_array_of_folder_paths_emits_major(self, tmp_path):
+        """agents: ['./custom-agents/'] (array of folders) → MAJOR."""
+        manifest = {
+            "name": "p", "version": "1.0.0", "description": "x",
+            "agents": ["./custom-agents/", "./more-agents/"],
+        }
+        plugin_dir = self._make_plugin_dir(tmp_path, manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        majors = [
+            r for r in report.results
+            if r.level == "MAJOR" and "agents" in r.message and "folder path" in r.message.lower()
+        ]
+        # Should emit one MAJOR per folder path
+        assert len(majors) >= 2, (
+            f"Expected MAJOR per folder path in agents array (2 expected), got {len(majors)}: "
+            f"{[m.message for m in majors]}"
+        )
+
+    def test_agents_array_of_file_paths_no_major(self, tmp_path):
+        """agents: ['./custom-agents/foo.md'] (array of .md files) → no folder-path MAJOR."""
+        manifest = {
+            "name": "p", "version": "1.0.0", "description": "x",
+            "agents": ["./custom-agents/foo.md", "./agents/bar.md"],
+        }
+        plugin_dir = self._make_plugin_dir(tmp_path, manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        folder_majors = [
+            r for r in report.results
+            if r.level == "MAJOR" and "agents" in r.message and "folder path" in r.message.lower()
+        ]
+        assert folder_majors == [], (
+            f".md file paths in agents array should not trigger folder-path MAJOR, got: "
+            f"{[m.message for m in folder_majors]}"
+        )
+
+    def test_agents_string_file_path_no_major(self, tmp_path):
+        """agents: './custom-agents/foo.md' (string .md file) → no folder-path MAJOR."""
+        manifest = {
+            "name": "p", "version": "1.0.0", "description": "x",
+            "agents": "./custom-agents/foo.md",
+        }
+        plugin_dir = self._make_plugin_dir(tmp_path, manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        folder_majors = [
+            r for r in report.results
+            if r.level == "MAJOR" and "agents" in r.message and "folder path" in r.message.lower()
+        ]
+        assert folder_majors == [], (
+            f"String .md file path should not trigger folder-path MAJOR, got: "
+            f"{[m.message for m in folder_majors]}"
+        )
+
+    # --- Audit fixes: edge cases for path normalization, array forms, no-double-fire ---
+
+    def test_agents_default_folder_no_double_fire(self, tmp_path):
+        """agents: './agents/' (default folder) → no double-fire of related checks.
+
+        After 2026-04-18 audit, the `auto_discovered_defaults` check skips agents
+        entirely (the dedicated agents-folder MAJOR provides a richer message), AND
+        the agents-folder MAJOR skips the exact default `./agents/` (since CC's actual
+        behavior for that exact case is undocumented but the agents handler will
+        ignore the field if it doesn't load anyway).
+
+        Net effect: only ONE finding for `agents: "./agents/"`. Check that we don't
+        emit BOTH a CRITICAL and a MAJOR for the same configuration.
+        """
+        manifest = {
+            "name": "p", "version": "1.0.0", "description": "x",
+            "agents": "./agents/",
+        }
+        plugin_dir = self._make_plugin_dir(tmp_path, manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        agents_findings = [
+            r for r in report.results
+            if "agents" in r.message and r.level in ("CRITICAL", "MAJOR")
+        ]
+        # We accept 0 or 1 findings, but NOT 2 (no double-fire).
+        assert len(agents_findings) <= 1, (
+            f"Expected at most 1 finding for agents: './agents/', got {len(agents_findings)}: "
+            f"{[(r.level, r.message) for r in agents_findings]}"
+        )
+
+    def test_hooks_array_form_pointing_at_default_emits_major(self, tmp_path):
+        """hooks: ['./hooks/hooks.json'] (array form pointing at default) → MAJOR."""
+        manifest = {
+            "name": "p", "version": "1.0.0", "description": "x",
+            "hooks": ["./hooks/hooks.json"],
+        }
+        plugin_dir = self._make_plugin_dir(tmp_path, manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        majors = [
+            r for r in report.results
+            if r.level == "MAJOR" and "hook-load-failed" in r.message
+        ]
+        assert len(majors) >= 1, (
+            f"Expected MAJOR for hooks array containing default file, got: "
+            f"{[r.message for r in report.results if r.level == 'MAJOR']}"
+        )
+
+    def test_hooks_path_with_normalization_quirks_emits_major(self, tmp_path):
+        """hooks: './hooks/./hooks.json' (with redundant './') → still MAJOR.
+
+        Audit fix: the new _is_default_hooks_path collapses './' segments.
+        """
+        manifest = {
+            "name": "p", "version": "1.0.0", "description": "x",
+            "hooks": "./hooks/./hooks.json",
+        }
+        plugin_dir = self._make_plugin_dir(tmp_path, manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        majors = [
+            r for r in report.results
+            if r.level == "MAJOR" and "hook-load-failed" in r.message
+        ]
+        assert len(majors) >= 1, (
+            f"Expected MAJOR for hooks path with normalization quirks, got: "
+            f"{[r.message for r in report.results if r.level == 'MAJOR']}"
+        )

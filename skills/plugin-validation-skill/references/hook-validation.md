@@ -21,6 +21,21 @@ Complete reference for Claude Code hook configuration and validation.
 
 Standard location: `hooks/hooks.json` (auto-loaded by Claude Code)
 
+**Override sources** (additive, NOT replace — verified empirically 2026-04-18):
+- `hooks/hooks.json` (default file, ALWAYS auto-loaded)
+- `plugin.json` `hooks` field — string path to extra file, array of paths, or inline object
+- The default file and any override sources are MERGED at runtime
+
+### CRITICAL: never point `hooks` override at the default file
+
+If `plugin.json` has `"hooks": "./hooks/hooks.json"` (or `"hooks/hooks.json"`), this:
+- ✅ Passes `claude plugin validate` silently (CC's validator does not catch it)
+- ❌ Triggers runtime ERROR `Duplicate hooks file detected: ./hooks/hooks.json resolves to already-loaded file`
+- ❌ **CASCADES to disable the plugin's MCP servers** with `error type: hook-load-failed` (debug log: `Plugin not available for MCP: <plugin>@inline - error type: hook-load-failed`)
+- ✅ Hook itself still fires once (CC dedupes), but MCP integration is silently broken
+
+CPV emits MAJOR for this case. Fix: remove the `hooks` field entirely (default file loads automatically), or point at a NON-default path like `./hooks/extra.json`. Empirical evidence: `cpv-hooks-doublefire-test` and `cpv-hooks-nondefault-test` (the latter confirms cascade is SPECIFIC to default-path collision).
+
 ### Basic Structure
 
 The top-level `hooks` key must be an object whose keys are event names and values are arrays of hook objects:

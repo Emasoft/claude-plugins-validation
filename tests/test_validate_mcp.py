@@ -564,14 +564,22 @@ class TestValidatePluginMcpAdvanced:
         assert any("config must be an object" in c.message for c in criticals)
 
     def test_plugin_json_mcp_servers_invalid_type_produces_major(self, tmp_path):
-        """mcpServers that is neither string nor dict should produce MAJOR."""
+        """mcpServers that is none of string/array/object should produce MAJOR.
+
+        Per docs schema, mcpServers accepts string|array|object. A scalar like 42 is none
+        of these and should be rejected. Updated 2026-04-18: array form is now valid
+        (was previously incorrectly rejected as MAJOR).
+        """
         claude_dir = tmp_path / ".claude-plugin"
         claude_dir.mkdir()
         manifest = {"name": "test", "mcpServers": 42}
         (claude_dir / "plugin.json").write_text(json.dumps(manifest))
         report = validate_plugin_mcp(tmp_path)
         majors = [r for r in report.results if r.level == "MAJOR"]
-        assert any("must be a string (path) or object" in m.message for m in majors)
+        assert any(
+            "must be a string (path), array (paths), or object (inline)" in m.message
+            for m in majors
+        ), f"Expected MAJOR about mcpServers type, got: {[m.message for m in majors]}"
 
     def test_plugin_json_invalid_json_silently_skips(self, tmp_path):
         """plugin.json with invalid JSON should be silently handled (validated elsewhere)."""
@@ -821,4 +829,274 @@ class TestV2212AuditFixes:
         majors = [r for r in report.results if r.level == "MAJOR"]
         assert any("traverse" in m.message.lower() or "outside plugin root" in m.message.lower() for m in majors), (
             f"Expected MAJOR about path traversal, got: {[m.message for m in majors]}"
+        )
+
+
+class TestCrossSourceDuplicateServerNames:
+    """Tests for the cross-source duplicate server-name detection rule.
+
+    A plugin may declare MCP servers in any combination of:
+      - .mcp.json at plugin root (auto-discovered)
+      - inline mcpServers: {...} dict in plugin.json
+      - path-string mcpServers: "./path/to/file.json" in plugin.json
+    Sources can coexist, but every server name MUST be unique across all sources.
+    Same name in 2+ sources → MAJOR per duplicate name.
+    """
+
+    def _make_plugin(self, root: Path, *, mcp_json=None, plugin_manifest=None) -> None:
+        """Helper: create plugin folder structure with optional .mcp.json and plugin.json."""
+        if plugin_manifest is not None:
+            (root / ".claude-plugin").mkdir(exist_ok=True)
+            (root / ".claude-plugin" / "plugin.json").write_text(json.dumps(plugin_manifest))
+        if mcp_json is not None:
+            (root / ".mcp.json").write_text(json.dumps(mcp_json))
+
+    def test_only_mcp_json_no_duplicate_emitted(self, tmp_path):
+        """Single source (.mcp.json only) — no duplicate MAJOR should fire."""
+        self._make_plugin(
+            tmp_path,
+            mcp_json={"mcpServers": {"db": {"command": "node", "args": ["s.js"]}}},
+        )
+        report = validate_plugin_mcp(tmp_path)
+        dup_majors = [
+            r for r in report.results
+            if r.level == "MAJOR" and "declared in" in r.message
+        ]
+        assert dup_majors == [], (
+            f"Expected no cross-source duplicate MAJORs, got: {[m.message for m in dup_majors]}"
+        )
+
+    def test_only_inline_no_duplicate_emitted(self, tmp_path):
+        """Single source (inline plugin.json mcpServers only) — no duplicate MAJOR."""
+        self._make_plugin(
+            tmp_path,
+            plugin_manifest={
+                "name": "p",
+                "mcpServers": {"db": {"command": "node", "args": ["s.js"]}},
+            },
+        )
+        report = validate_plugin_mcp(tmp_path)
+        dup_majors = [
+            r for r in report.results
+            if r.level == "MAJOR" and "declared in" in r.message
+        ]
+        assert dup_majors == [], (
+            f"Expected no cross-source duplicate MAJORs, got: {[m.message for m in dup_majors]}"
+        )
+
+    def test_distinct_names_in_two_sources_no_duplicate(self, tmp_path):
+        """Two sources with disjoint server names — no duplicate MAJOR (sources can coexist)."""
+        self._make_plugin(
+            tmp_path,
+            mcp_json={"mcpServers": {"db-server": {"command": "node", "args": ["db.js"]}}},
+            plugin_manifest={
+                "name": "p",
+                "mcpServers": {"api-server": {"command": "node", "args": ["api.js"]}},
+            },
+        )
+        report = validate_plugin_mcp(tmp_path)
+        dup_majors = [
+            r for r in report.results
+            if r.level == "MAJOR" and "declared in" in r.message
+        ]
+        assert dup_majors == [], (
+            f"Two sources with distinct names is allowed; expected no duplicate MAJORs, "
+            f"got: {[m.message for m in dup_majors]}"
+        )
+
+    def test_same_name_in_mcp_json_and_inline_emits_major(self, tmp_path):
+        """Same server name in .mcp.json AND inline plugin.json:mcpServers → MAJOR per duplicate."""
+        self._make_plugin(
+            tmp_path,
+            mcp_json={"mcpServers": {"shared-server": {"command": "node", "args": ["a.js"]}}},
+            plugin_manifest={
+                "name": "p",
+                "mcpServers": {"shared-server": {"command": "node", "args": ["b.js"]}},
+            },
+        )
+        report = validate_plugin_mcp(tmp_path)
+        dup_majors = [
+            r for r in report.results
+            if r.level == "MAJOR" and "shared-server" in r.message and "declared in" in r.message
+        ]
+        assert len(dup_majors) == 1, (
+            f"Expected exactly 1 cross-source duplicate MAJOR for 'shared-server', "
+            f"got: {[m.message for m in dup_majors]}"
+        )
+        msg = dup_majors[0].message
+        assert ".mcp.json" in msg and "plugin.json:mcpServers" in msg, (
+            f"Expected message to name both sources, got: {msg}"
+        )
+        assert "must be unique" in msg.lower(), f"Expected uniqueness wording, got: {msg}"
+
+    def test_multiple_duplicates_emit_separate_majors(self, tmp_path):
+        """Each duplicated name across sources gets its own MAJOR."""
+        self._make_plugin(
+            tmp_path,
+            mcp_json={
+                "mcpServers": {
+                    "alpha": {"command": "node", "args": ["a.js"]},
+                    "beta": {"command": "node", "args": ["b.js"]},
+                    "gamma": {"command": "node", "args": ["g.js"]},
+                }
+            },
+            plugin_manifest={
+                "name": "p",
+                "mcpServers": {
+                    "alpha": {"command": "node", "args": ["x.js"]},
+                    "beta": {"command": "node", "args": ["y.js"]},
+                    "delta": {"command": "node", "args": ["d.js"]},
+                },
+            },
+        )
+        report = validate_plugin_mcp(tmp_path)
+        dup_majors = [
+            r for r in report.results
+            if r.level == "MAJOR" and "declared in" in r.message
+        ]
+        names_in_dup_majors = {n for n in ("alpha", "beta", "gamma", "delta") if any(n in m.message for m in dup_majors)}
+        assert names_in_dup_majors == {"alpha", "beta"}, (
+            f"Expected MAJORs only for 'alpha' and 'beta' (the duplicated names), "
+            f"got names: {names_in_dup_majors}, full messages: {[m.message for m in dup_majors]}"
+        )
+        assert len(dup_majors) == 2, (
+            f"Expected exactly 2 duplicate MAJORs (one per duplicated name), got {len(dup_majors)}: "
+            f"{[m.message for m in dup_majors]}"
+        )
+
+    def test_mcpservers_pointing_at_default_mcp_json_emits_minor(self, tmp_path):
+        """mcpServers: './.mcp.json' (override = default file) → MINOR defensive nudge."""
+        # Create the .mcp.json at root with a real server
+        (tmp_path / ".mcp.json").write_text(json.dumps({
+            "mcpServers": {"db-server": {"command": "node", "args": ["s.js"]}}
+        }))
+        # plugin.json with mcpServers pointing at the same default file (redundant)
+        self._make_plugin(
+            tmp_path,
+            plugin_manifest={"name": "p", "mcpServers": "./.mcp.json"},
+        )
+        report = validate_plugin_mcp(tmp_path)
+        nudge_minors = [
+            r for r in report.results
+            if r.level == "MINOR" and ".mcp.json" in r.message and "auto-discover" in r.message
+        ]
+        assert len(nudge_minors) == 1, (
+            f"Expected exactly 1 MINOR nudge for redundant mcpServers→.mcp.json, got: "
+            f"{[m.message for m in nudge_minors]}"
+        )
+        msg = nudge_minors[0].message
+        assert "redundant" in msg.lower() or "auto-discover" in msg.lower(), (
+            f"Expected message to explain redundancy, got: {msg}"
+        )
+        # And critically — there should be cross-source duplicate MAJORs for every
+        # server in .mcp.json since it gets loaded twice (once by auto-discovery, once
+        # by the override). Verify the duplicate-name detection still fires.
+        dup_majors = [
+            r for r in report.results
+            if r.level == "MAJOR" and "db-server" in r.message and "declared in" in r.message
+        ]
+        assert len(dup_majors) == 1, (
+            f"Expected MAJOR for db-server duplicated when override = default file, got: "
+            f"{[m.message for m in dup_majors]}"
+        )
+
+    def test_mcpservers_array_form_now_accepted(self, tmp_path):
+        """mcpServers as array of paths is valid per docs schema (was previously rejected).
+
+        Audit fix 2026-04-18: validate_plugin_mcp now accepts string|array|object for
+        mcpServers (previously only string|object, with array rejected as MAJOR).
+        """
+        # Create two referenced config files
+        (tmp_path / "configs").mkdir()
+        (tmp_path / "configs" / "a.mcp.json").write_text(json.dumps({
+            "mcpServers": {"server-a": {"command": "node", "args": ["a.js"]}}
+        }))
+        (tmp_path / "configs" / "b.mcp.json").write_text(json.dumps({
+            "mcpServers": {"server-b": {"command": "node", "args": ["b.js"]}}
+        }))
+        self._make_plugin(
+            tmp_path,
+            plugin_manifest={
+                "name": "p",
+                "mcpServers": ["./configs/a.mcp.json", "./configs/b.mcp.json"],
+            },
+        )
+        report = validate_plugin_mcp(tmp_path)
+        # Should NOT emit "must be a string or object" MAJOR
+        rejection_majors = [
+            r for r in report.results
+            if r.level == "MAJOR" and "must be a string" in r.message and "array" not in r.message
+        ]
+        assert rejection_majors == [], (
+            f"Array form of mcpServers should be accepted (per docs schema), got: "
+            f"{[m.message for m in rejection_majors]}"
+        )
+
+    def test_mcpservers_default_path_with_normalization_quirks(self, tmp_path):
+        """mcpServers: './mcp.json' (no leading dot) should NOT be flagged as default.
+
+        Audit fix 2026-04-18: _is_default_mcp_path correctly distinguishes .mcp.json
+        (with the leading dot — the actual default) from mcp.json (a non-default file).
+        """
+        # Test with the ACTUAL default name
+        (tmp_path / ".mcp.json").write_text(json.dumps({
+            "mcpServers": {"db-server": {"command": "node", "args": ["s.js"]}}
+        }))
+        self._make_plugin(
+            tmp_path,
+            plugin_manifest={"name": "p", "mcpServers": ".mcp.json"},  # NO leading "./"
+        )
+        report = validate_plugin_mcp(tmp_path)
+        nudges = [
+            r for r in report.results
+            if r.level == "MINOR" and "auto-discover" in r.message
+        ]
+        assert len(nudges) == 1, (
+            f"Expected MINOR nudge for '.mcp.json' (no './'), got: "
+            f"{[m.message for m in nudges]}"
+        )
+
+    def test_mcpservers_pointing_at_non_default_no_minor_nudge(self, tmp_path):
+        """mcpServers: './extras/mcp.json' (legitimate non-default path) → no MINOR nudge."""
+        (tmp_path / "extras").mkdir()
+        (tmp_path / "extras" / "mcp.json").write_text(json.dumps({
+            "mcpServers": {"db-server": {"command": "node", "args": ["s.js"]}}
+        }))
+        self._make_plugin(
+            tmp_path,
+            plugin_manifest={"name": "p", "mcpServers": "./extras/mcp.json"},
+        )
+        report = validate_plugin_mcp(tmp_path)
+        nudge_minors = [
+            r for r in report.results
+            if r.level == "MINOR" and "auto-discover" in r.message
+        ]
+        assert nudge_minors == [], (
+            f"Non-default path should not trigger redundancy MINOR, got: "
+            f"{[m.message for m in nudge_minors]}"
+        )
+
+    def test_same_name_in_mcp_json_and_path_string_external_emits_major(self, tmp_path):
+        """Same server name in .mcp.json AND a path-string-referenced external file → MAJOR."""
+        external = tmp_path / "extra-mcp.json"
+        external.write_text(json.dumps({
+            "mcpServers": {"db-server": {"command": "node", "args": ["x.js"]}}
+        }))
+        self._make_plugin(
+            tmp_path,
+            mcp_json={"mcpServers": {"db-server": {"command": "node", "args": ["y.js"]}}},
+            plugin_manifest={"name": "p", "mcpServers": "./extra-mcp.json"},
+        )
+        report = validate_plugin_mcp(tmp_path)
+        dup_majors = [
+            r for r in report.results
+            if r.level == "MAJOR" and "db-server" in r.message and "declared in" in r.message
+        ]
+        assert len(dup_majors) == 1, (
+            f"Expected MAJOR for 'db-server' duplicated across .mcp.json + external file, "
+            f"got: {[m.message for m in dup_majors]}"
+        )
+        msg = dup_majors[0].message
+        assert ".mcp.json" in msg and "extra-mcp.json" in msg, (
+            f"Expected message to name both sources (.mcp.json and the external file path), got: {msg}"
         )

@@ -16,6 +16,7 @@ Comprehensive remediation guide for all issues detected by `validate_mcp.py`.
 - [10. Timeout Issues](#10-timeout-issues)
 - [11. OAuth Issues](#11-oauth-issues)
 - [12. Plugin Manifest Issues](#12-plugin-manifest-issues)
+- [13. Cross-Source Duplicate Server Names](#13-cross-source-duplicate-server-names)
 
 ---
 
@@ -863,6 +864,111 @@ ls -la /path/to/plugin/.mcp.json
 **Error message**: `Found inline mcpServers in plugin.json ({N} server(s))`
 **Severity**: INFO
 **Root cause**: Informational — reports that inline MCP server definitions were found in `plugin.json`. No action needed.
+
+---
+
+## 12a. Redundant `mcpServers` pointing at default `.mcp.json`
+
+### MINOR: `mcpServers` redundancy nudge
+
+**Error message**: `Field 'mcpServers' points to './.mcp.json' which Claude Code auto-discovers at the plugin root. This is redundant ...`
+**Severity**: MINOR
+**File**: `.claude-plugin/plugin.json`
+**Root cause**: When `plugin.json` has `"mcpServers": "./.mcp.json"`, the override is pointing at the file that's already auto-discovered. Empirically (test `cpv-mcp-default-path-test`, 2026-04-18) CC silently accepts this and loads the file once at runtime — but the declaration is redundant and confusing. Unlike the analogous `hooks` case (which CASCADES to disable MCP), this MCP redundancy does not cause runtime failures. CPV emits MINOR as a defensive nudge.
+
+**Important side effect**: When this nudge fires, CPV will ALSO emit a MAJOR cross-source duplicate for every server declared in `.mcp.json` (see §13). That's because the same file is "loaded" from two source labels in CPV's accounting (auto-discovery + override path). Removing the redundant field fixes both findings at once.
+
+**Fix**:
+1. Remove the `mcpServers` field entirely (the default file will still load automatically):
+   ```diff
+   {
+     "name": "my-plugin",
+   - "mcpServers": "./.mcp.json"
+   }
+   ```
+2. Or, if you actually need an additional MCP config file, point at a non-default path:
+   ```json
+   {
+     "mcpServers": "./extras/mcp.json"
+   }
+   ```
+
+---
+
+## 13. Cross-Source Duplicate Server Names
+
+A plugin can declare MCP servers in multiple sources simultaneously — `.mcp.json` at plugin root, inline `mcpServers: {...}` in `plugin.json`, and a path-string `mcpServers: "./path/to/file.json"` in `plugin.json` may all coexist. **However, every server name must be unique across ALL sources.** The same server name (the key in `mcpServers`) declared in two sources is a configuration conflict.
+
+### MAJOR: MCP server declared in multiple sources
+
+**Error message**: `MCP server '{name}' is declared in {source1} and {source2} — server names must be unique across all MCP sources`
+**Severity**: MAJOR
+**Root cause**: The same server name (e.g. `database-tools`) appears in more than one MCP declaration source within the same plugin. Claude Code does not specify which source wins for runtime resolution; in practice this either causes the server to fail to load, or one declaration is silently shadowed, leaving the user with a "phantom" config that does nothing.
+
+**How sources are identified in the message:**
+| Label | Meaning |
+|---|---|
+| `.mcp.json` | The auto-discovered config at plugin root |
+| `plugin.json:mcpServers` | An inline `mcpServers: {...}` dict in `plugin.json` |
+| `plugin.json:mcpServers -> ./<path>` | A path-string `mcpServers: "./<path>"` in `plugin.json` pointing to an external config file |
+
+**Fix**:
+1. Identify the duplicated server name(s) from the error message.
+2. Decide which source should "own" the server. Default preference (when the user has no specific reason to split):
+   - **Inline `plugin.json:mcpServers`** — single source of truth alongside the rest of the manifest. Easiest to maintain.
+   - **`.mcp.json`** — pick this if you want the MCP config in a standalone file that can be reused outside the plugin context.
+   - **External file via path-string** — pick this only if you have a specific reason (e.g. generated config, shared between multiple plugins).
+3. Remove the duplicate entry from the OTHER source(s). Do NOT just rename — rename only if the user actually wants two different servers.
+4. Re-validate.
+
+**Example — duplicate**:
+`.mcp.json`:
+```json
+{
+  "mcpServers": {
+    "database-tools": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/servers/db-server"
+    }
+  }
+}
+```
+`plugin.json`:
+```json
+{
+  "name": "my-plugin",
+  "mcpServers": {
+    "database-tools": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/servers/db-server"
+    },
+    "api-tools": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/servers/api-server"
+    }
+  }
+}
+```
+CPV emits: `MCP server 'database-tools' is declared in .mcp.json and plugin.json:mcpServers — server names must be unique across all MCP sources`.
+
+**Example — fixed (consolidated into plugin.json)**:
+Delete `.mcp.json` entirely (since `database-tools` was its only entry). Keep `plugin.json` as-is. `database-tools` and `api-tools` are now both declared in one place and there is no conflict.
+
+**Example — fixed (kept in .mcp.json, removed from plugin.json)**:
+`plugin.json`:
+```json
+{
+  "name": "my-plugin",
+  "mcpServers": {
+    "api-tools": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/servers/api-server"
+    }
+  }
+}
+```
+`.mcp.json` keeps `database-tools`. Each server name now lives in exactly one source.
+
+**Verification**:
+After fixing, re-run `validate_mcp.py` (or `cpv-validate-plugin <path>`) and confirm the MAJOR is gone.
+
+**Why this is MAJOR (not CRITICAL)**: the plugin will load, but the server may behave unpredictably at runtime. Fix before publishing.
 
 ---
 

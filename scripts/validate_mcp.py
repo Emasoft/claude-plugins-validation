@@ -437,10 +437,43 @@ def validate_mcp_config(
     return report
 
 
+def _extract_server_names_from_config_file(config_path: Path) -> list[str]:
+    """Read an MCP config file and return its mcpServers keys.
+
+    Returns an empty list if the file is missing, malformed, or has no mcpServers.
+    Used by validate_plugin_mcp to detect duplicate server names across sources —
+    validation of the config itself is handled separately by validate_mcp_config.
+    """
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    servers = data.get("mcpServers")
+    if not isinstance(servers, dict):
+        return []
+    return list(servers.keys())
+
+
+def _is_default_mcp_path(path: str) -> bool:
+    """True if path resolves to the auto-discovered .mcp.json default at plugin root.
+
+    Handles common authoring slip-ups: backslashes (Windows), redundant ./ segments,
+    trailing slashes. Static path equivalence only — does not follow symlinks.
+    """
+    normalized = path.replace("\\", "/")
+    parts = [p for p in normalized.split("/") if p and p != "."]
+    return parts == [".mcp.json"]
+
+
 def validate_plugin_mcp(plugin_root: Path, report: ValidationReport | None = None) -> ValidationReport:
     """Validate all MCP configurations in a plugin.
 
-    Checks both .mcp.json and inline mcpServers in plugin.json.
+    Checks both .mcp.json and inline mcpServers in plugin.json. Sources can coexist,
+    but every server name must be unique across all sources — the same name in two
+    sources is a configuration conflict (per https://code.claude.com/docs/en/mcp#plugin-provided-mcp-servers
+    and https://code.claude.com/docs/en/plugins-reference#mcp-servers).
 
     Args:
         plugin_root: Path to the plugin root directory
@@ -452,12 +485,19 @@ def validate_plugin_mcp(plugin_root: Path, report: ValidationReport | None = Non
     if report is None:
         report = ValidationReport()
 
-    # Check for .mcp.json
+    # Track server names per source for cross-source duplicate detection.
+    # Maps source_label -> list of server names declared in that source.
+    sources: dict[str, list[str]] = {}
+
+    # Source 1: .mcp.json at plugin root (auto-discovered)
     mcp_json = plugin_root / ".mcp.json"
     if mcp_json.exists():
         validate_mcp_config(mcp_json, plugin_root, report)
+        names = _extract_server_names_from_config_file(mcp_json)
+        if names:
+            sources[".mcp.json"] = names
 
-    # Check for inline mcpServers in plugin.json
+    # Source 2/3: mcpServers field in plugin.json (inline dict OR path string)
     plugin_json = plugin_root / ".claude-plugin" / "plugin.json"
     if plugin_json.exists():
         try:
@@ -477,8 +517,31 @@ def validate_plugin_mcp(plugin_root: Path, report: ValidationReport | None = Non
                     else:
                         external_path = plugin_root / mcp_servers
 
+                    # Defensive nudge: pointing the override at the auto-discovered
+                    # default `.mcp.json` is silently accepted by Claude Code (no
+                    # double-load, no error), but it's redundant and confusing — the
+                    # default file is always loaded automatically. Empirical test
+                    # (TRDD-20260418, cpv-mcp-default-path-test): runtime loaded the
+                    # server exactly once. Worth flagging so authors don't think they
+                    # need this redundant declaration. Unlike the hooks equivalent,
+                    # this does NOT cascade into other plugin failures, so MINOR.
+                    if _is_default_mcp_path(mcp_servers):
+                        report.minor(
+                            f"Field 'mcpServers' = '{mcp_servers}' resolves to the "
+                            "auto-discovered '.mcp.json' default at plugin root. This is "
+                            "redundant — the file is loaded automatically. Remove the "
+                            "'mcpServers' field from plugin.json (the default file will "
+                            "still load), or point it at a NON-default path like "
+                            "'./extras/mcp.json' if you genuinely need an additional "
+                            "config file.",
+                            ".claude-plugin/plugin.json",
+                        )
+
                     if external_path.exists():
                         validate_mcp_config(external_path, plugin_root, report)
+                        names = _extract_server_names_from_config_file(external_path)
+                        if names:
+                            sources[f"plugin.json:mcpServers -> {mcp_servers}"] = names
                     else:
                         report.major(
                             f"Referenced MCP config not found: {mcp_servers}",
@@ -488,6 +551,7 @@ def validate_plugin_mcp(plugin_root: Path, report: ValidationReport | None = Non
                 elif isinstance(mcp_servers, dict):
                     # Inline definition
                     report.info(f"Found inline mcpServers in plugin.json ({len(mcp_servers)} server(s))")
+                    inline_names: list[str] = []
                     for server_name, server_config in mcp_servers.items():
                         if isinstance(server_config, dict):
                             validate_mcp_server(
@@ -497,20 +561,82 @@ def validate_plugin_mcp(plugin_root: Path, report: ValidationReport | None = Non
                                 plugin_root,
                                 "plugin.json:mcpServers",
                             )
+                            inline_names.append(server_name)
                         else:
                             report.critical(
                                 f"Server '{server_name}' config must be an object",
                                 ".claude-plugin/plugin.json",
                             )
+                    if inline_names:
+                        sources["plugin.json:mcpServers"] = inline_names
+                elif isinstance(mcp_servers, list):
+                    # Array form: a list of path-string references to external MCP config
+                    # files. Per docs schema, mcpServers accepts string|array|object.
+                    # Each entry must be a path string; validate each referenced file
+                    # and collect server names for cross-source duplicate detection.
+                    for ref_path in mcp_servers:
+                        if not isinstance(ref_path, str):
+                            report.major(
+                                f"'mcpServers' array contains non-string entry: {ref_path!r}",
+                                ".claude-plugin/plugin.json",
+                            )
+                            continue
+                        # Apply the same default-path nudge to each array entry.
+                        if _is_default_mcp_path(ref_path):
+                            report.minor(
+                                f"Field 'mcpServers' array entry '{ref_path}' resolves to the "
+                                "auto-discovered '.mcp.json' default at plugin root. This is "
+                                "redundant — the file is loaded automatically.",
+                                ".claude-plugin/plugin.json",
+                            )
+                        if ref_path.startswith("./"):
+                            external_path = plugin_root / ref_path[2:]
+                        else:
+                            external_path = plugin_root / ref_path
+                        if external_path.exists():
+                            validate_mcp_config(external_path, plugin_root, report)
+                            names = _extract_server_names_from_config_file(external_path)
+                            if names:
+                                sources[f"plugin.json:mcpServers -> {ref_path}"] = names
+                        else:
+                            report.major(
+                                f"Referenced MCP config not found: {ref_path}",
+                                ".claude-plugin/plugin.json",
+                            )
                 else:
                     report.major(
-                        "mcpServers must be a string (path) or object",
+                        "mcpServers must be a string (path), array (paths), or object (inline)",
                         ".claude-plugin/plugin.json",
                     )
 
         except json.JSONDecodeError:
             # plugin.json validation is handled elsewhere
             pass
+
+    # Cross-source duplicate detection — server names MUST be unique across ALL sources.
+    # Defining the same server name in two sources (e.g. ".mcp.json" + inline plugin.json)
+    # is a configuration conflict per the Claude Code docs.
+    # Within a single source, duplicate keys are already deduplicated by the JSON parser
+    # so we only check across sources.
+    if len(sources) >= 2:
+        name_to_sources: dict[str, list[str]] = {}
+        for source_label, names in sources.items():
+            for name in names:
+                name_to_sources.setdefault(name, []).append(source_label)
+        for name, source_list in sorted(name_to_sources.items()):
+            if len(source_list) >= 2:
+                joined = " and ".join(sorted(source_list))
+                # Empirical: when inline plugin.json:mcpServers is one of the colliding
+                # sources, it WINS (verified via cpv-mcp-coexist-test). Surface that so
+                # the author knows which declaration is being silently dropped.
+                inline_wins_note = (
+                    " (when collisions occur, the inline plugin.json:mcpServers entry "
+                    "WINS per empirical test; the other source is silently dropped)"
+                ) if "plugin.json:mcpServers" in source_list else ""
+                report.major(
+                    f"MCP server '{name}' is declared in {joined} — server names must be unique across all MCP sources{inline_wins_note}",
+                    ".claude-plugin/plugin.json",
+                )
 
     return report
 
