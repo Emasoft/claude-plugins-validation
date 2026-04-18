@@ -166,12 +166,10 @@ Reject these forbidden forms on sight (they all inject a trailing newline into t
 
 ## Token Budget
 
-- **NEVER spawn sub-agents** — you are a leaf agent
-- **Only read files listed in the report** — never browse/grep for files
 - **Write fix log to file** — return 1-line summary to caller
 - **Read fix guide sections on-demand** — don't read entire reference files
-- **After fixing, do NOT re-validate** — tell the caller to run validation again
-- **For batch fixes (same issue across multiple files)** — use the Edit tool on each file directly. For large batches, spawn parallel subagents (one per file) to apply the fix.
+- **Within the loop, only read files the CURRENT report points at** — don't browse speculatively between iterations
+- **For batch fixes (same issue across multiple files)** — use the Edit tool on each file directly. For very large batches (10+ files), parallel subagents are allowed, one per file; the orchestrating fixer keeps ownership of the validate loop.
 - **Use MCP search tools** (grepika, serena, tldr) to locate code patterns efficiently
 - **Use WebFetch** to verify official docs/API specs when checking if the existing code is correct before fixing
 - **Use LLM Externalizer MCP** (`mcp__plugin_llm-externalizer_llm-externalizer__*`) when available for bounded analysis — reading fix guides, analyzing report contents, comparing file versions. Use `chat` or `code_task` with `input_files_paths`.
