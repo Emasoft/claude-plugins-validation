@@ -1465,6 +1465,20 @@ These errors can appear for any text file scanned across the plugin:
 
 **Common mistake — numeric config fields:** Authors often forget `type` on numeric intervals. The correct form is `"type": "number"` with a matching numeric `default`. Do NOT use `"type": "integer"` — the runtime rejects it.
 
+**Heuristic — infer `type` from the key name (use this when the report only tells you the type is missing/invalid):**
+
+| Field-name pattern (case-insensitive) | Recommended `type` | Example |
+|---|---|---|
+| `*_interval`, `*_seconds`, `*_timeout`, `*_threshold`, `*_count`, `*_days`, `*_port`, `max_*`, `min_*` | `number` | `poll_interval`, `max_retries`, `stale_pr_days` |
+| `enable_*`, `disable_*`, `use_*`, `is_*`, `has_*`, `*_flag` | `boolean` | `enable_cache`, `use_colors` |
+| `*_dir`, `workspace_dir`, `output_dir`, `data_dir` (expects ABSOLUTE path) | `directory` | `workspace_dir`, `cache_dir` |
+| `*_file`, `config_file`, `credentials_file` (expects ABSOLUTE path) | `file` | `config_file`, `ca_bundle_file` |
+| URLs, repo slugs, tokens, API keys, relative paths, fallback | `string` | `github_repo`, `api_endpoint`, `trdd_path`, `api_token` |
+
+**Extract `default` from the description text:** descriptions like `"Default: 900 (15 min)"` contain the intended numeric default — extract it and add `"default": 900`. Descriptions like `"Default: design/tasks/"` contain a string default — add `"default": "design/tasks/"`. When the description provides no default, omit the field (it's optional).
+
+**Example repair (the ai-maestro-janitor v0.1.2 → v0.1.3 bug, 2026-04-18):** an 11-entry `userConfig` shipped without any `type` fields and passed CPV ≤v2.22.3. Runtime rejected all 11 at `claude plugin install` time. The repair added `"type": "string"` to path/slug fields and `"type": "number"` with extracted numeric defaults to every `*_interval`/`*_days`/`*_threshold` field. CPV v2.22.4+ catches this automatically — if you see this pattern in a report, the fix is mechanical.
+
 ---
 
 ### channels server field missing or invalid

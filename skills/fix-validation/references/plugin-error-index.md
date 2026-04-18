@@ -48,7 +48,7 @@ Primary fix guide: [plugin-structure-fixes.md](plugin-structure-fixes.md)
 | `.gitignore` coverage and virtual-env leakage | plugin-structure-fixes §13 |
 | Workflow inline-Python patterns | plugin-structure-fixes §14 |
 | `bin/` executables and platform naming **[NEW]** | plugin-structure-fixes §8 (bin/ subsections) |
-| `userConfig` schema validation **[NEW]** | plugin-structure-fixes "New Validations (v2.11.0+)" |
+| `userConfig` schema validation — `title` required, `type` required + must be one of `{string, number, boolean, directory, file}`, `default` must match `type` (CPV v2.22.4+) | plugin-structure-fixes "userConfig schema invalid" |
 | `channels` schema validation **[NEW]** | plugin-structure-fixes "New Validations (v2.11.0+)" |
 | `lspServers` in plugin.json **[NEW]** | plugin-structure-fixes "New Validations (v2.11.0+)" |
 | `output-styles/` frontmatter **[NEW]** | plugin-structure-fixes "New Validations (v2.11.0+)" |

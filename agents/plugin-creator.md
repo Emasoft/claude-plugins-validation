@@ -108,7 +108,10 @@ The pre-push hook runs `--strict` and blocks on CRITICAL, MAJOR, MINOR, and NIT.
 1. **Validate** (`--strict`, installed CPV — Claude Code sets `${CLAUDE_PLUGIN_ROOT}` when running agents):
    `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" <folder> --strict --verbose`
 2. **Standardize**: `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" <folder> --fix` — adds missing files
-3. **FIX ALL ISSUES** (CRITICAL → MAJOR → MINOR → NIT): Read each offending file, apply the fix. Common fixes:
+3. **FIX ALL ISSUES** (CRITICAL → MAJOR → MINOR → NIT): **Always delegate to the `plugin-fixer` agent** (via `/cpv-fix-validation <report-path>`) rather than improvising ad-hoc patches. The fixer owns the error-to-fix mapping and keeps up with install-time schema drift (e.g. runtime-only Zod rules like `userConfig.<key>.type` required, which the docs omit). Common fixes it applies:
+   - **`userConfig.<key>` missing `type` / invalid `type`** → add `"type": "<inferred>"`. Field-name heuristics: `*_interval|*_seconds|*_timeout|*_threshold|*_count|*_days|*_port|max_*|min_*` → `number`; `enable_*|disable_*|use_*|is_*|has_*` → `boolean`; `*_dir|workspace_dir` (absolute path) → `directory`; `*_file|config_file` (absolute path) → `file`; everything else (repo slugs, URLs, tokens, relative paths) → `string`. Only the 5 runtime types `{string, number, boolean, directory, file}` are accepted. Reject `integer`, `array`, `object` — they pass JSON-Schema but Claude Code rejects them at install.
+   - **`userConfig.<key>` missing `title`** → add a human-readable title derived from the key
+   - **`default` type mismatch** → coerce the default to match the declared `type` (extract the number from descriptions like `Default: 900 (15 min)`)
    - SKILL.md missing sections → add Overview, Prerequisites, Output, Error Handling, Examples, Resources
    - .gitignore gaps → append missing patterns
    - Missing badges → add `<!--BADGES-START-->` block
@@ -117,7 +120,7 @@ The pre-push hook runs `--strict` and blocks on CRITICAL, MAJOR, MINOR, and NIT.
    - Ruff lint errors → `uv run ruff check --fix scripts/`
    - Missing author.email → add noreply GitHub email
 4. **Generate README component tables**: Scan `commands/*.md`, `agents/*.md`, `skills/*/SKILL.md` frontmatter → generate tables. Add Install/Uninstall/Update/Troubleshooting sections.
-5. **Re-validate** (`--strict`): MUST show only WARNINGs. If any CRITICAL/MAJOR/MINOR/NIT remain, go back to step 3.
+5. **Re-validate** (`--strict`): MUST show only WARNINGs. If any CRITICAL/MAJOR/MINOR/NIT remain, go back to step 3. **DO NOT skip this step** — a 0-finding validation on CPV is the ONLY guarantee that `claude plugin install` will succeed at runtime. Previous releases that shipped without the re-validate pass hit runtime-only Zod rejections (e.g. v0.1.2 of ai-maestro-janitor, 2026-04-18).
 6. Check for compiled binaries (Cargo.toml, go.mod, Makefile) — if found, sources MUST be in `src/` subdirectory with binaries in `src/<component>/bin/`. Add `build-binaries.yml` as fallback only.
 7. Git init + commit (if not already a git repo)
 8. Create GitHub repo: `gh repo create <owner>/<name> --public --source . --push`
