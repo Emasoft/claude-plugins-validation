@@ -667,6 +667,29 @@ Note: Most language servers use `stdio`. Only use `socket` if the server documen
 
 ---
 
+### [MINOR] `lspServers` redundancy nudge (override = default `.lsp.json`)
+
+**Source**: `validate_lsp.py` — `validate_plugin_lsp()` (added v2.23.1, mirrors MCP)
+**Error message**: `Field 'lspServers' = '<path>' resolves to the auto-discovered '.lsp.json' default at plugin root. This is redundant ...`
+**What it means**: When `plugin.json` has `"lspServers": "./.lsp.json"`, the override is pointing at the file that's already auto-discovered. CC silently accepts and loads the file once, but the declaration is redundant and confusing. Analogous to the MCP equivalent (mcp-fixes §12a). Unlike the hooks equivalent (which CASCADES to disable MCP), this LSP redundancy does not cause runtime failures.
+
+**Important side effect**: When this nudge fires, CPV will ALSO emit a MAJOR cross-source duplicate for every server declared in `.lsp.json` (because the same file is "loaded" from two source labels). Removing the redundant field fixes both findings at once.
+
+**How to fix**:
+1. Remove the `lspServers` field entirely (the default file will still load):
+   ```diff
+   {
+     "name": "my-plugin",
+   - "lspServers": "./.lsp.json"
+   }
+   ```
+2. Or, if you actually need an additional LSP config file, point at a non-default path:
+   ```json
+   { "lspServers": "./extras/lsp.json" }
+   ```
+
+---
+
 ### [INFO] No LSP configuration files found
 **Source**: `validate_lsp.py` — `validate_plugin_lsp()`
 **What it means**: None of the standard LSP config locations (`.lsp.json`, `lsp.json`, `lsp-config.json`, `.vscode/settings.json`) exist in the plugin directory. This is informational — LSP config is optional.

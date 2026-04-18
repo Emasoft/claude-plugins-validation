@@ -476,11 +476,19 @@ The hook itself dedupes correctly (fires exactly once), BUT the `hook-load-faile
 
 **Error message**: `Non-standard directory '<dirname>/' — not part of the plugin spec. If needed by plugin scripts, consider documenting its purpose in README.`
 **Severity**: WARNING
-**Root cause**: A directory at the plugin root is not part of the standard plugin directory set and is not a known common directory (like `lib/`, `resources/`, `assets/`, etc.).
-**Fix**:
-1. If the directory is needed by your plugin, document its purpose in README.md.
-2. If it is a leftover or artifact, remove it.
-3. Known standard directories: `.claude-plugin`, `commands`, `agents`, `skills`, `hooks`, `scripts`, `docs`, `rules`, `schemas`, `bin`, `templates`, `tests`, `lib`, `libs`, `modules`, `resources`, `assets`, `data`, `config`, `configs`, `examples`, `samples`, `references`, `git-hooks`, `shared`, `fixtures`, `vendor`, `src`, `dist`, `build`, `out`, `target`.
+**Root cause**: A directory at the plugin root is not part of the standard plugin directory set, is not a known common directory (like `lib/`, `resources/`, `assets/`, etc.), AND is not referenced from any manifest source via `${CLAUDE_PLUGIN_ROOT}/<dirname>/...`.
+
+Since v2.23.1, CPV automatically suppresses this warning when the directory IS referenced from `.mcp.json`, `.lsp.json`, `hooks/hooks.json`, `monitors/monitors.json`, or any inline `mcpServers`/`lspServers`/`hooks`/`monitors`/`channels` field in `plugin.json`. So if you see this warning, it means the directory exists but nothing in your manifest refers to it.
+
+**Fix** (in order of preference):
+1. If the directory contains executables/scripts your plugin uses, REFERENCE them from the appropriate manifest source. For example, an MCP server bundle should be referenced from `.mcp.json`:
+   ```json
+   {"mcpServers": {"my-server": {"command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/<dirname>/index.js"]}}}
+   ```
+   Once referenced, CPV will auto-suppress the warning.
+2. If the directory is needed by your plugin scripts but not via `${CLAUDE_PLUGIN_ROOT}` substitution, document its purpose in README.md (the WARNING is advisory only — does not block publish).
+3. If it is a leftover or artifact, remove it.
+4. Known standard directories (always allowed): `.claude-plugin`, `commands`, `agents`, `skills`, `hooks`, `scripts`, `docs`, `rules`, `schemas`, `bin`, `monitors`, `servers`, `templates`, `tests`, `lib`, `libs`, `modules`, `resources`, `assets`, `data`, `config`, `configs`, `examples`, `samples`, `references`, `git-hooks`, `shared`, `fixtures`, `vendor`, `src`, `dist`, `build`, `out`, `target`, `output-styles`, `design`.
 
 ### MAJOR: Plugin has manifest but no content
 
