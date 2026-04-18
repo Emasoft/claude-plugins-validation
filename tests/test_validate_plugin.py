@@ -1043,6 +1043,81 @@ class TestValidateUserConfig:
         )
 
 
+class TestPathResolutionHints:
+    """Intelligent path-resolution hints emitted when the user passes a non-plugin path.
+
+    Regression tests for the 2026-04-18 'the agent must handle all edge cases' requirement:
+    parent folders, missing git, `.claude/` project configs, cache directories, typo'd paths.
+    The helpers must return structured output the caller (agent or user) can act on.
+    """
+
+    @staticmethod
+    def _write_plugin_fixture(parent: Path, name: str) -> Path:
+        plugin_dir = parent / name
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(f'{{"name":"{name}","version":"0.1.0","description":"x"}}')
+        return plugin_dir
+
+    def test_find_plugin_candidates_detects_child_plugin(self, tmp_path):
+        """Given a parent dev folder, _find_plugin_candidates must surface the inner plugin."""
+        from validate_plugin import _find_plugin_candidates
+        self._write_plugin_fixture(tmp_path, "my-plugin")
+        candidates = _find_plugin_candidates(tmp_path)
+        assert len(candidates) == 1
+        assert candidates[0].name == "my-plugin"
+
+    def test_find_plugin_candidates_detects_multiple_siblings(self, tmp_path):
+        """Two sibling plugins under the same parent are both reported."""
+        from validate_plugin import _find_plugin_candidates
+        self._write_plugin_fixture(tmp_path, "plugin-a")
+        self._write_plugin_fixture(tmp_path, "plugin-b")
+        candidates = _find_plugin_candidates(tmp_path)
+        names = sorted(c.name for c in candidates)
+        assert names == ["plugin-a", "plugin-b"]
+
+    def test_find_plugin_candidates_skips_noise_directories(self, tmp_path):
+        """node_modules, .git, _dev folders must not pollute candidate lists."""
+        from validate_plugin import _find_plugin_candidates
+        # Write a real plugin and a noise folder with something that LOOKS like a plugin inside
+        self._write_plugin_fixture(tmp_path, "real-plugin")
+        noise = tmp_path / "node_modules" / "fake-plugin"
+        (noise / ".claude-plugin").mkdir(parents=True)
+        (noise / ".claude-plugin" / "plugin.json").write_text('{"name":"fake"}')
+        candidates = _find_plugin_candidates(tmp_path)
+        assert [c.name for c in candidates] == ["real-plugin"]
+
+    def test_classify_marketplace_path(self, tmp_path):
+        """A folder with marketplace.json must classify as 'marketplace'."""
+        from validate_plugin import _classify_path
+        (tmp_path / ".claude-plugin").mkdir()
+        (tmp_path / ".claude-plugin" / "marketplace.json").write_text('{"plugins":[]}')
+        assert _classify_path(tmp_path) == "marketplace"
+
+    def test_classify_claude_project_config(self, tmp_path):
+        """A folder named .claude (or with settings.json + plugins/) is a project config, not a source."""
+        from validate_plugin import _classify_path
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        assert _classify_path(claude_dir) == "claude_project_config"
+
+    def test_no_plugin_found_hint_includes_candidates(self, tmp_path):
+        """The error hint must surface the discovered candidate path."""
+        from validate_plugin import _format_no_plugin_found_hint
+        self._write_plugin_fixture(tmp_path, "my-plugin")
+        hint = _format_no_plugin_found_hint(tmp_path)
+        assert "my-plugin" in hint
+        assert "Did you mean" in hint or "candidate" in hint
+
+    def test_no_plugin_found_hint_classifies_marketplace(self, tmp_path):
+        """When the path is a marketplace, the hint must say so and route to marketplace validator."""
+        from validate_plugin import _format_no_plugin_found_hint
+        (tmp_path / ".claude-plugin").mkdir()
+        (tmp_path / ".claude-plugin" / "marketplace.json").write_text('{"plugins":[]}')
+        hint = _format_no_plugin_found_hint(tmp_path)
+        assert "MARKETPLACE" in hint or "marketplace" in hint.lower()
+        assert "validate_marketplace" in hint
+
+
 class TestBinShebangScriptDetection:
     """Issue #9 secondary: bin/ extensionless executable with shebang must NOT be flagged as binary."""
 

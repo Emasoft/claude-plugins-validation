@@ -2943,6 +2943,132 @@ def _lockfile_is_gitignored(lockfile_name: str, patterns: list[str]) -> bool:
     return False
 
 
+def _find_plugin_candidates(root: Path, max_depth: int = 3) -> list[Path]:
+    """Scan ``root`` up to ``max_depth`` levels deep for plugin folders.
+
+    A folder counts as a plugin candidate when it has either:
+    - ``.claude-plugin/plugin.json`` (CPV-preferred layout), or
+    - ``plugin.json`` at the folder root (auto-discovery legacy layout).
+
+    Skips common no-go directories (node_modules, .git, .venv, __pycache__,
+    dist, build, _dev suffixed folders, cache) so we don't flood the hint
+    with irrelevant hits.
+    """
+    skip_names = {
+        "node_modules", ".git", ".venv", "venv", "__pycache__", "dist", "build",
+        "target", ".idea", ".vscode", "tmp", "vendor", "cache",
+    }
+    candidates: list[Path] = []
+
+    def _walk(d: Path, depth: int) -> None:
+        if depth > max_depth:
+            return
+        try:
+            entries = list(d.iterdir())
+        except (OSError, PermissionError):
+            return
+        # Is this folder itself a plugin?
+        if (d / ".claude-plugin" / "plugin.json").is_file() or (d / "plugin.json").is_file():
+            if d != root:
+                candidates.append(d)
+            return  # don't descend further once a plugin root is hit
+        for entry in entries:
+            if not entry.is_dir():
+                continue
+            if entry.name in skip_names or entry.name.endswith("_dev"):
+                continue
+            _walk(entry, depth + 1)
+
+    _walk(root, 0)
+    return candidates
+
+
+def _classify_path(path: Path) -> str:
+    """Return a short human-readable classification for a non-plugin path.
+
+    Helps the user understand WHY the path they passed is not a plugin root,
+    and what to do next. Used by the "no plugin found" error to give
+    targeted guidance (different messages for marketplaces, project
+    ``.claude/`` configs, cache directories, etc.).
+    """
+    name = path.name
+    parent_name = path.parent.name if path.parent != path else ""
+    # Marketplace folder
+    if (path / ".claude-plugin" / "marketplace.json").is_file() or (path / "marketplace.json").is_file():
+        return "marketplace"
+    # Project-scoped Claude config (.claude/ in a project root)
+    if name == ".claude" or (path / "settings.json").is_file() and (path / "plugins").is_dir():
+        return "claude_project_config"
+    # Global Claude plugin cache
+    try:
+        if ".claude" in path.parts and "cache" in path.parts:
+            return "plugin_cache"
+    except ValueError:
+        pass
+    # Home/projects parent
+    if parent_name in {"projects", "Code", "code", "workspace", "dev"}:
+        return "dev_parent"
+    return "unknown"
+
+
+def _format_no_plugin_found_hint(plugin_root: Path) -> str:
+    """Compose the multi-line error emitted when ``plugin_root`` is not a plugin.
+
+    The output has three parts:
+    1. A classified explanation of what the path looks like (marketplace,
+       ``.claude/`` project config, cache, etc.).
+    2. A list of plugin candidates found within 3 levels, ranked by proximity.
+    3. A reminder of how to pass the right path.
+    """
+    lines = [f"Error: No Claude Code plugin found at {plugin_root}"]
+    classification = _classify_path(plugin_root)
+    if classification == "marketplace":
+        lines.append(
+            "  → This path looks like a MARKETPLACE (has marketplace.json), not a plugin. "
+            "Use `validate_marketplace.py` for marketplaces, or pick a plugin subfolder for `validate_plugin.py`."
+        )
+    elif classification == "claude_project_config":
+        lines.append(
+            "  → This path looks like a project-scoped `.claude/` config directory. That holds INSTALLED "
+            "plugin metadata (`.claude/plugins/cache/`), NOT plugin sources. Point to the source folder you "
+            "maintain (the one with `.claude-plugin/plugin.json`)."
+        )
+    elif classification == "plugin_cache":
+        lines.append(
+            "  → This path looks like the global Claude plugin cache (~/.claude/plugins/cache/). That is a "
+            "read-only copy created at install time, not a source. Point to the plugin's source repo/folder."
+        )
+    elif classification == "dev_parent":
+        lines.append(
+            "  → This path looks like a dev parent folder (projects/, Code/, workspace/, dev/). "
+            "It is not the plugin itself — the plugin lives in a subfolder."
+        )
+    candidates = _find_plugin_candidates(plugin_root, max_depth=3)
+    if candidates:
+        lines.append("")
+        if len(candidates) == 1:
+            c = candidates[0]
+            rel = c.relative_to(plugin_root) if c.is_relative_to(plugin_root) else c
+            lines.append(f"  Did you mean: {rel}   (full path: {c})")
+            lines.append(f"  Try:  uv run python scripts/validate_plugin.py {c}")
+        else:
+            lines.append(f"  Found {len(candidates)} plugin candidate(s) under this path:")
+            for c in candidates[:10]:
+                rel = c.relative_to(plugin_root) if c.is_relative_to(plugin_root) else c
+                lines.append(f"    - {rel}   (full path: {c})")
+            if len(candidates) > 10:
+                lines.append(f"    ... and {len(candidates) - 10} more")
+            lines.append("  Pass one of the above paths to validate a specific plugin.")
+    else:
+        lines.append("")
+        lines.append(
+            "  No plugin folders were found within 3 levels. Expected layout: "
+            "`<plugin-root>/.claude-plugin/plugin.json`. Check the path and try again, "
+            "or run the scaffolder (`generate_plugin_repo.py`) to create a new plugin here."
+        )
+    return "\n".join(lines)
+
+
 def main() -> int:
     """Main entry point."""
     check_remote_execution_guard()
@@ -2992,7 +3118,28 @@ def main() -> int:
         plugin_root = Path(__file__).resolve().parent.parent
 
     if not plugin_root.is_dir():
-        print(f"Error: {plugin_root} is not a directory", file=sys.stderr)
+        # Typo-tolerant hint: scan the parent for similarly-named folders
+        # that DO exist, so a mistyped path gets a "did you mean" suggestion.
+        msg = [f"Error: {plugin_root} is not a directory (or does not exist)"]
+        parent = plugin_root.parent
+        if parent.is_dir() and parent != plugin_root:
+            target_name = plugin_root.name.lower()
+            try:
+                siblings = [d for d in parent.iterdir() if d.is_dir() and not d.name.startswith(".")]
+            except (OSError, PermissionError):
+                siblings = []
+            near = [d for d in siblings if target_name in d.name.lower() or d.name.lower() in target_name]
+            if near:
+                msg.append("  Did you mean one of these?")
+                for d in near[:5]:
+                    msg.append(f"    - {d}")
+            elif siblings:
+                msg.append(f"  Parent {parent} exists. Plugin folders I can see there:")
+                for d in siblings[:8]:
+                    has_plugin = (d / ".claude-plugin" / "plugin.json").is_file() or (d / "plugin.json").is_file()
+                    marker = "  ← plugin" if has_plugin else ""
+                    msg.append(f"    - {d.name}{marker}")
+        print("\n".join(msg), file=sys.stderr)
         return 1
 
     # Auto-resolve plugin cache directories that contain version subdirectories
@@ -3007,11 +3154,9 @@ def main() -> int:
             plugin_root = version_dirs[0]
             print(f"Auto-resolved to latest version: {plugin_root.name}", file=sys.stderr)
         elif not args.marketplace_only:
-            # No .claude-plugin/ found and no version subdirs — not a plugin directory
-            print(
-                f"Error: No Claude Code plugin found at {plugin_root}\nExpected a .claude-plugin/ directory. Make sure you are running this from the plugin root directory.",
-                file=sys.stderr,
-            )
+            # No .claude-plugin/ at this path — scan for nearby candidates + explain
+            # what kind of folder this looks like, so the agent/user can correct course.
+            print(_format_no_plugin_found_hint(plugin_root), file=sys.stderr)
             return 1
 
     # Initialize gitignore filter — all scan functions use this to skip ignored files

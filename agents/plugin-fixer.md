@@ -29,6 +29,10 @@ When invoked without a report file path, ask the user:
 >
 > I can also search `docs_dev/` for recent validation reports if you're not sure which one.
 
+**If the user gives you a PLUGIN path instead of a REPORT path** (e.g., a folder like `~/dev/my-plugin/` or `./plugin-foo/`), do not fail — you are a fix-only agent, not a locator. Route the user:
+> "I fix issues from existing validation reports — I don't generate them. To make one, run `/cpv-validate-plugin <that-path>` and it will handle intelligent path resolution (parent-folder detection, missing-`.claude-plugin/` hints, git-init prompts, `.claude/` vs. cache vs. source disambiguation). Once you have the report path, come back to me."
+This keeps the validate → fix contract clean and lets the validator (and the plugin-creator/plugin-manager agents) own path-resolution intelligence. Do NOT try to re-implement path resolution here.
+
 Wait for the user's answer before doing anything. Then use these skills:
 
 | Task | Skill to use |
