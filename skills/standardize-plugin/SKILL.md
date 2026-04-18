@@ -34,6 +34,10 @@ Audits existing plugin or marketplace repositories against CPV standards and aut
 3. **After --fix**, manually fix remaining issues:
    - .gitignore gaps, SKILL.md missing Nixtla sections, README badges, MINOR/NIT issues
    - Pre-push hook blocks on CRITICAL, MAJOR, MINOR, NIT — only WARNINGs pass
+   - **Empirical-loading-bugs MAJORs** (added 2026-04-18) need manual fixes — see `references/canonical-pipeline/detailed-standard.md` "Empirical Validation Rules":
+     - `agents` field with folder paths → list specific `.md` files instead
+     - `hooks: "./hooks/hooks.json"` → remove the field (default file auto-loads) or point at non-default path
+     - MCP/LSP same server name in 2 sources → consolidate into one source per name
 
 Copy this checklist and track your progress:
 - [ ] Audit report reviewed

@@ -782,3 +782,133 @@ class TestV2212AuditFixes:
             or ("Absolute path" in m.message and "pyright-langserver" in m.message)
             for m in majors
         ), f"Expected MAJOR about absolute home path on extensionless binary, got: {[m.message for m in majors]}"
+
+
+class TestLspCrossSourceDuplicateServerNames:
+    """Tests for cross-source duplicate-name detection in validate_plugin_lsp.
+
+    A plugin can declare LSP servers in:
+      - .lsp.json at plugin root (auto-discovered, unwrapped {name: cfg, ...} format)
+      - inline lspServers: {...} in plugin.json
+    Sources are loaded ADDITIVELY at runtime (verified empirically). Per-name collisions
+    are silently DEDUPLICATED with INLINE WINNING — the losing source is silently dropped.
+    CPV emits MAJOR per duplicate name.
+    """
+
+    def _make_plugin(self, root: Path, *, lsp_json=None, plugin_manifest=None) -> None:
+        if plugin_manifest is not None:
+            (root / ".claude-plugin").mkdir(exist_ok=True)
+            (root / ".claude-plugin" / "plugin.json").write_text(json.dumps(plugin_manifest))
+        if lsp_json is not None:
+            (root / ".lsp.json").write_text(json.dumps(lsp_json))
+
+    def test_only_lsp_json_unwrapped_no_duplicate(self, tmp_path):
+        """Single source (.lsp.json unwrapped format only) — no duplicate MAJOR."""
+        self._make_plugin(
+            tmp_path,
+            lsp_json={"go": {"command": "gopls", "extensionToLanguage": {".go": "go"}}},
+        )
+        report = validate_plugin_lsp(tmp_path)
+        dup_majors = [
+            r for r in report.results
+            if r.level == "MAJOR" and "declared in" in r.message
+        ]
+        assert dup_majors == [], (
+            f"Expected no cross-source duplicate MAJORs, got: {[m.message for m in dup_majors]}"
+        )
+
+    def test_only_inline_no_duplicate(self, tmp_path):
+        """Single source (inline plugin.json lspServers only) — no duplicate MAJOR."""
+        self._make_plugin(
+            tmp_path,
+            plugin_manifest={
+                "name": "p",
+                "lspServers": {"go": {"command": "gopls", "extensionToLanguage": {".go": "go"}}},
+            },
+        )
+        report = validate_plugin_lsp(tmp_path)
+        dup_majors = [
+            r for r in report.results
+            if r.level == "MAJOR" and "declared in" in r.message
+        ]
+        assert dup_majors == [], (
+            f"Expected no cross-source duplicate MAJORs, got: {[m.message for m in dup_majors]}"
+        )
+
+    def test_distinct_names_in_two_sources_no_duplicate(self, tmp_path):
+        """Two sources with disjoint server names — no MAJOR (sources can coexist)."""
+        self._make_plugin(
+            tmp_path,
+            lsp_json={"go-lsp": {"command": "gopls", "extensionToLanguage": {".go": "go"}}},
+            plugin_manifest={
+                "name": "p",
+                "lspServers": {"py-lsp": {"command": "pyright", "extensionToLanguage": {".py": "python"}}},
+            },
+        )
+        report = validate_plugin_lsp(tmp_path)
+        dup_majors = [
+            r for r in report.results
+            if r.level == "MAJOR" and "declared in" in r.message
+        ]
+        assert dup_majors == [], (
+            f"Two sources with distinct names is allowed; got: {[m.message for m in dup_majors]}"
+        )
+
+    def test_same_name_in_lsp_json_and_inline_emits_major(self, tmp_path):
+        """Same server name in .lsp.json AND inline plugin.json:lspServers → MAJOR."""
+        self._make_plugin(
+            tmp_path,
+            lsp_json={"shared-lsp": {"command": "echo", "args": ["lsp-json"], "extensionToLanguage": {".x": "x"}}},
+            plugin_manifest={
+                "name": "p",
+                "lspServers": {"shared-lsp": {"command": "echo", "args": ["inline"], "extensionToLanguage": {".x": "x"}}},
+            },
+        )
+        report = validate_plugin_lsp(tmp_path)
+        dup_majors = [
+            r for r in report.results
+            if r.level == "MAJOR" and "shared-lsp" in r.message and "declared in" in r.message
+        ]
+        assert len(dup_majors) == 1, (
+            f"Expected exactly 1 cross-source duplicate MAJOR for 'shared-lsp', "
+            f"got: {[m.message for m in dup_majors]}"
+        )
+        msg = dup_majors[0].message
+        assert ".lsp.json" in msg and "plugin.json:lspServers" in msg, (
+            f"Expected message to name both sources, got: {msg}"
+        )
+        assert "must be unique" in msg.lower(), f"Expected uniqueness wording, got: {msg}"
+        assert "inline" in msg.lower() and "wins" in msg.lower(), (
+            f"Expected note that inline wins per empirical test, got: {msg}"
+        )
+
+    def test_multiple_duplicates_emit_separate_majors(self, tmp_path):
+        """Each duplicated name across sources gets its own MAJOR."""
+        self._make_plugin(
+            tmp_path,
+            lsp_json={
+                "alpha": {"command": "x", "extensionToLanguage": {".a": "a"}},
+                "beta": {"command": "y", "extensionToLanguage": {".b": "b"}},
+                "gamma": {"command": "z", "extensionToLanguage": {".g": "g"}},
+            },
+            plugin_manifest={
+                "name": "p",
+                "lspServers": {
+                    "alpha": {"command": "xx", "extensionToLanguage": {".a": "a"}},
+                    "beta": {"command": "yy", "extensionToLanguage": {".b": "b"}},
+                    "delta": {"command": "dd", "extensionToLanguage": {".d": "d"}},
+                },
+            },
+        )
+        report = validate_plugin_lsp(tmp_path)
+        dup_majors = [
+            r for r in report.results
+            if r.level == "MAJOR" and "declared in" in r.message
+        ]
+        names_in_dup_majors = {n for n in ("alpha", "beta", "gamma", "delta") if any(n in m.message for m in dup_majors)}
+        assert names_in_dup_majors == {"alpha", "beta"}, (
+            f"Expected MAJORs only for 'alpha' and 'beta' (duplicated names), got: {names_in_dup_majors}"
+        )
+        assert len(dup_majors) == 2, (
+            f"Expected exactly 2 duplicate MAJORs, got {len(dup_majors)}: {[m.message for m in dup_majors]}"
+        )

@@ -99,6 +99,14 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/generate_marketplace_repo.py" /tmp/my-mkt 
 - [Marketplace Layouts](references/marketplace-layouts.md)
   > Overview · Layout A — Hub-and-Spoke (separate repos) · Layout B — Nested single-repo (monorepo) · How Claude Code updates plugins in each layout · When to choose which · Rich metadata fields (author, homepage, license, category) · Why CPV does not use git-subdir · Encountering a non-CPV marketplace · Refactoring between layouts · Agent behavior summary
 
+## MCP Server Bundling Convention
+
+When the new plugin includes bundled MCP server executables/scripts:
+- Place them in **`servers/`** at plugin root (matches the official docs example).
+- Sources may coexist (`.mcp.json` at root, inline `mcpServers` in `plugin.json`, path-string `mcpServers`) but **every server name must be unique across all sources** — defining the same server name in two sources is a conflict (CPV emits MAJOR per duplicate). Default to a single source for simplicity.
+- Reference executables as `${CLAUDE_PLUGIN_ROOT}/servers/<name>` in the `command:` field.
+- Soft preference — apply only when no location is predefined by the user.
+
 ## Token Optimization
 
 Use `mcp__plugin_llm-externalizer_llm-externalizer__*` tools for bounded analysis. Pass file paths via `input_files_paths`.

@@ -289,6 +289,34 @@ The pre-push hook runs `--strict` and blocks on CRITICAL, MAJOR, MINOR, and NIT.
 
 **Marketplaces are HUBS ONLY.** Plugin sources in marketplace.json MUST use: `{"source": "github", "repo": "owner/repo-name"}`. NEVER use local paths. Each plugin must have its own GitHub repo.
 
+## CRITICAL: Empirical Plugin-Loading Footguns (verified 2026-04-18)
+
+When scaffolding a new plugin, NEVER emit any of these patterns — `claude plugin validate` won't catch them but they break plugins silently at runtime:
+
+| Pattern | What it does | Use this instead |
+|---|---|---|
+| `"agents": "./custom/agents/"` (or any folder path) | CC rejects with cryptic `Invalid input`; if validate skipped, agents silently dropped at runtime | `"agents": ["./custom/agents/foo.md", "./custom/agents/bar.md"]` (file paths only) |
+| `"hooks": "./hooks/hooks.json"` (default file) | Runtime cascade DISABLES this plugin's MCP servers (`hook-load-failed`) | Just remove the `hooks` field — the file is auto-loaded. Or use `"./hooks/extra.json"` for a non-default file |
+| `"mcpServers": "./.mcp.json"` (default file) | Redundant; CC silently accepts but it's confusing | Remove the field — `.mcp.json` is auto-loaded |
+| Same MCP server name in `.mcp.json` AND inline `plugin.json:mcpServers` | Inline silently wins, `.mcp.json` declaration dropped | Pick ONE source per server name |
+| Same LSP server name in `.lsp.json` AND inline `plugin.json:lspServers` | Same silent shadow as MCP | Pick ONE source per server name |
+
+For a new plugin, the simplest safe default is:
+- `agents/` directory at plugin root with `.md` files → omit `agents` field from `plugin.json`
+- `hooks/hooks.json` at plugin root → omit `hooks` field from `plugin.json`
+- `.mcp.json` at plugin root with all MCP servers → omit `mcpServers` field from `plugin.json`
+- `.lsp.json` at plugin root with all LSP servers → omit `lspServers` field from `plugin.json`
+
+CC auto-discovers all four. Only use the manifest fields for NON-default paths or to declare additional files.
+
+## Convention: MCP Server Bundling
+
+When the plugin you are creating includes bundled MCP server executables/scripts:
+- Place them in **`servers/`** at the plugin root (matches the official docs example: https://code.claude.com/docs/en/plugins-reference#mcp-servers).
+- Reference them as `${CLAUDE_PLUGIN_ROOT}/servers/<name>` from the `command:` field.
+- **Server names must be unique across all declaration sources.** Sources can coexist: `.mcp.json` at plugin root, inline `mcpServers: {...}` in `plugin.json`, and path-string `mcpServers: "./path/to/config.json"` in `plugin.json` may all be present in one plugin. But the SAME server name MUST NOT appear in more than one source — that's a conflict and CPV emits a MAJOR per duplicate name. When creating a new plugin, default to a single source (inline `mcpServers` in `plugin.json`) for simplicity unless the user has reason to split.
+- This is a **soft preference**: only apply when no other location is predefined by the user. If the user has already specified `bin/`, `src/servers/`, or another path, follow that instead.
+
 ## HARD-WON LESSONS
 
 See the **plugin-management** skill for the full list of 19 hard-won lessons from real publish runs. Key ones to never forget:

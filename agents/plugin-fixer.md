@@ -164,6 +164,28 @@ Reject these forbidden forms on sight (they all inject a trailing newline into t
 - `printf "$MARKETPLACE_PAT" | gh secret set ...`
 - stdin-driven `gh secret set` without `--body`/`-b`
 
+## MCP Server Bundling (when fixing MCP-related issues)
+
+When a fix involves **adding** or **relocating** bundled MCP server executables/scripts:
+- Prefer placing them in **`servers/`** at the plugin root (matches the official docs example: https://code.claude.com/docs/en/plugins-reference#mcp-servers).
+- Reference them as `${CLAUDE_PLUGIN_ROOT}/servers/<name>` from the `command:` field — never bare relative paths.
+- **Server names must be unique across all declaration sources.** Multiple sources (`.mcp.json` at root, inline `mcpServers` in `plugin.json`, path-string `mcpServers`) may coexist as long as no server name is defined in more than one source. If CPV emits a MAJOR like `"MCP server '<name>' is declared in both <source1> and <source2>"`, fix it by removing the duplicate entry from one of the sources (keep whichever the user intended; if unclear, prefer the inline `plugin.json` entry).
+- **Never relocate a working server script** that already has a predefined path (e.g. `bin/`, `src/servers/`) just to match this convention. Only apply when no location is predefined or when the existing path is broken.
+
+## Empirical Plugin-Loading Footguns — fix recipes (verified 2026-04-18)
+
+When CPV reports any of these MAJORs, use the recipe below. Each is a silent-failure mode that CC's `claude plugin validate` does NOT catch.
+
+| CPV finding | Fix recipe |
+|---|---|
+| `Field 'agents' contains folder path '<path>'` | Replace the folder with explicit `.md` file paths: `"agents": ["./<path>/file1.md", "./<path>/file2.md"]`. Or remove the field if files are in default `./agents/` (auto-discovered). See `references/plugin-structure-fixes.md` "agents field contains a folder path". |
+| `Field 'hooks' points to './hooks/hooks.json' which Claude Code already auto-loads ... DISABLES this plugin's MCP servers` | Remove the `hooks` field entirely from `plugin.json` (the file is auto-loaded). If the user genuinely needs additional hook files, point at a non-default name like `"./hooks/extra.json"`. See `references/plugin-structure-fixes.md` "hooks points at the default file". |
+| `Field 'mcpServers' points to './.mcp.json' which Claude Code auto-discovers` (MINOR) | Remove the `mcpServers` field entirely. The `.mcp.json` file is auto-loaded. See `references/mcp-fixes.md` §12a. |
+| `MCP server '<name>' is declared in <src1> and <src2>` (MAJOR) | Remove the duplicate entry from ONE of the sources. Default preference: keep inline `plugin.json:mcpServers` (single source of truth). See `references/mcp-fixes.md` §13. |
+| `LSP server '<name>' is declared in <src1> and <src2>` (MAJOR) | Remove the duplicate entry from ONE source. Default: keep inline `plugin.json:lspServers`. See `references/lsp-fixes.md` "Cross-source duplicate". |
+
+For full empirical evidence (13 test plugin scenarios, debug-log excerpts, runtime probes), see `skills/fix-validation/references/empirical-loading-bugs.md`.
+
 ## Token Budget
 
 - **Write fix log to file** — return 1-line summary to caller

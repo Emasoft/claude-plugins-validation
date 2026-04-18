@@ -151,6 +151,17 @@ Forbidden patterns — reject these on sight and do not emit them in your own co
 - `gh secret set MARKETPLACE_PAT` with no value (stdin prompt) — fragile across shells, also leaks into echo if the pty buffers it
 - Any form that prints the PAT value to stdout, stderr, a log file, or the git fix log
 
+## Empirical Plugin-Loading Footguns (per-plugin level, not marketplace-level)
+
+Marketplace fixes typically don't touch per-plugin manifest content — that's the plugin-fixer's job. However, when a marketplace migration scaffolds NEW plugin entries or copies plugin files, ensure the resulting plugin manifests don't contain these silent-failure patterns (verified empirically 2026-04-18):
+
+- `agents` field with folder paths (must be `.md` file paths only)
+- `hooks: "./hooks/hooks.json"` (cascades to disable plugin's MCP)
+- Same MCP/LSP server name in `.mcp.json` AND inline `plugin.json:mcpServers`/`lspServers`
+- `mcpServers: "./.mcp.json"` (redundant)
+
+If you encounter these in a marketplace migration scenario, hand off to the plugin-fixer agent. See `references/plugin-structure-fixes.md` and `references/mcp-fixes.md` §12a-13 for fix recipes.
+
 ## Token Budget
 
 - **Write fix log to file** — return a 1-line summary to the caller.

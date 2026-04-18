@@ -150,3 +150,40 @@ Marketplaces follow the **hub-only architecture**:
 ### Shell Plugins
 - Scripts in `scripts/` or `bin/`
 - CI: `shellcheck` on all `.sh` files
+
+## MCP Server Bundling
+
+When a plugin bundles MCP server executables/scripts (referenced by the `command:` field in `.mcp.json` or inline `mcpServers`), place them in **`servers/`** at the plugin root.
+
+This matches the official docs example (https://code.claude.com/docs/en/plugins-reference#mcp-servers):
+```json
+{
+  "mcpServers": {
+    "database-tools": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/servers/db-server",
+      "args": ["--config", "${CLAUDE_PLUGIN_ROOT}/config.json"]
+    }
+  }
+}
+```
+
+Rules:
+- A plugin may declare MCP servers in any of: (A) `.mcp.json` at plugin root, (B) inline `mcpServers: {...}` in `plugin.json`, or (C) path-string `mcpServers: "./path/to/config.json"` in `plugin.json`. Multiple sources can coexist as long as **every server name is unique across ALL sources** (verified empirically 2026-04-18 — sources are loaded ADDITIVELY at runtime). Defining the same server name in two sources (e.g. `database-tools` declared in both `.mcp.json` and inline `plugin.json mcpServers`) causes silent inline-wins shadowing — CPV emits MAJOR per duplicate name.
+- DO NOT set `mcpServers: "./.mcp.json"` (override pointing at default file). It is redundant — CC auto-loads `.mcp.json` automatically. CPV emits MINOR.
+- The **server executables** referenced by `command:` live in `servers/` — `servers/db-server`, `servers/api-server.py`, `servers/index.js`, etc.
+- Always reference them with `${CLAUDE_PLUGIN_ROOT}/servers/<name>` — never with bare relative paths.
+- This is a **soft convention** for new plugins. Existing plugins with a different working layout (e.g. `bin/`, `src/servers/`) are not required to migrate.
+
+## Empirical Validation Rules — DO NOT VIOLATE (verified 2026-04-18)
+
+These five rules catch silent-failure modes in CC's plugin loader that `claude plugin validate` does NOT catch. CPV catches them all. Plugin authors should treat them as hard constraints.
+
+| # | Rule | What CC does if violated | CPV severity |
+|---|------|-------------------------|--------------|
+| 1 | `agents` field never contains folder paths — only `.md` file paths | Validate-time: rejects with cryptic `Invalid input`. If validate skipped: silently drops the agents at runtime, no error in `--debug` | MAJOR |
+| 2 | `hooks` override never points at `./hooks/hooks.json` (the default) | Validate passes silently. Runtime: `Duplicate hooks file detected` AND **disables the plugin's MCP servers** with `hook-load-failed` | MAJOR |
+| 3 | MCP server names unique across `.mcp.json` + inline `plugin.json:mcpServers` | Silent inline-wins shadow at runtime. The `.mcp.json` declaration is dropped without warning | MAJOR per duplicate |
+| 4 | LSP server names unique across `.lsp.json` + inline `plugin.json:lspServers` | Silent inline-wins shadow at runtime (verified via flag-touch probe) | MAJOR per duplicate |
+| 5 | `mcpServers` field never points at `./.mcp.json` (the default) | Harmless single load (no cascade like hooks), but redundant and confusing | MINOR |
+
+For full empirical evidence and 13 test plugin scenarios, see `skills/fix-validation/references/empirical-loading-bugs.md`.

@@ -71,6 +71,23 @@ Point to external MCP config file:
 }
 ```
 
+### Combining Sources — Per-Server-Name Uniqueness
+
+The three options above can **coexist in the same plugin** — `.mcp.json` at root + inline `mcpServers` in `plugin.json` + a path-string `mcpServers` reference are all valid simultaneously.
+
+**Hard rule:** every server name MUST be unique across ALL sources. Defining the same server name (the key in `mcpServers`) in two sources is a configuration conflict and CPV emits a MAJOR:
+
+```
+MCP server '<name>' is declared in <source1> and <source2> — server names must be unique across all MCP sources
+```
+
+Source labels in the message:
+- `.mcp.json` — auto-discovered config at plugin root
+- `plugin.json:mcpServers` — inline `mcpServers: {...}` dict in plugin.json
+- `plugin.json:mcpServers -> ./<path>` — path-string `mcpServers: "./<path>"` pointing to an external config file
+
+Within a single source, JSON object key uniqueness is enforced by the JSON parser, so duplicates can only occur ACROSS sources. Fix by removing the duplicate entry from one source — see [mcp-fixes.md §13](../../fix-validation/references/mcp-fixes.md#13-cross-source-duplicate-server-names).
+
 ---
 
 ## 2. Server Definition Fields
