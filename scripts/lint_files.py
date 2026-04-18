@@ -493,7 +493,10 @@ def lint_python(repo_root: Path, files: list[Path] | None = None) -> bool:  # no
     print(f"{BLUE}    [1/2] ruff check...{NC}")
     try:
         result = subprocess.run(
-            ["ruff", "check", "--select=E,F,W", "--ignore=E501,E402", str(repo_root)],
+            # Match pyproject's select — keep I (import sorting) in parity with CI, which runs
+            # `uv run ruff check scripts/ tests/` with pyproject's full config. Skipping I here
+            # caused a v2.22.7 CI failure after the local gate passed clean (2026-04-18).
+            ["ruff", "check", "--select=E,F,W,I", "--ignore=E501,E402", str(repo_root)],
             capture_output=True,
             text=True,
             timeout=120,
