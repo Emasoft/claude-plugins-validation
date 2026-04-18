@@ -998,8 +998,9 @@ class TestValidateUserConfig:
         or removals — breaks install-time compatibility. If this test fails, verify the change
         against the runtime Zod schema first; do not relax the assertion.
         """
-        from validate_plugin import validate_manifest  # noqa: F401 — exercise import path
         import inspect
+
+        from validate_plugin import validate_manifest  # noqa: F401 — exercise import path
         src = inspect.getsource(validate_manifest)
         # The whitelist literal must appear in the validator source
         assert 'USERCONFIG_VALID_TYPES = {"string", "number", "boolean", "directory", "file"}' in src, (
