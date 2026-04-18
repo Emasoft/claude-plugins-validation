@@ -19,6 +19,14 @@
 
 Comprehensive remediation guide for all issues detected by `validate_enterprise.py`.
 
+## Checklist
+
+- [ ] Identify the enterprise compliance finding (path, severity, rule)
+- [ ] Match to a numbered section below
+- [ ] Open the target file and read the relevant section
+- [ ] Apply the compliance fix
+- [ ] Re-validate with `--strict`
+
 ## Overview
 
 The enterprise compliance validator checks skills (in `skills/`) and agents (in `agents/`) for nine compliance rules:

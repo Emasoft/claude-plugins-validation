@@ -11,6 +11,14 @@
 
 Comprehensive remediation guide for all issues detected by `validate_rules.py`.
 
+## Checklist
+
+- [ ] Identify the rules file with the finding
+- [ ] Match to a numbered section below
+- [ ] Open the rule file and inspect frontmatter + body
+- [ ] Apply the fix (frontmatter, token budget, paths field)
+- [ ] Re-validate
+
 ## Overview
 
 Rule files are plain Markdown files placed in a plugin's `rules/` directory. They are loaded alongside `CLAUDE.md` into the model context for every session. Rules support optional YAML frontmatter with a `paths` field for path-specific activation.

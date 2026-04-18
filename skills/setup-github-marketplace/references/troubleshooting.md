@@ -13,6 +13,14 @@ Diagnostic reference for common issues encountered when setting up and operating
 - [Common Error Messages](#common-error-messages)
 - [Debug Commands](#debug-commands)
 
+## Checklist
+
+- [ ] Identify which failure category matches your symptom
+- [ ] Jump to the matching section below
+- [ ] Run the documented debug commands to confirm the diagnosis
+- [ ] Apply the remedy
+- [ ] Re-run the failing operation to verify
+
 ---
 
 ## Authentication Issues

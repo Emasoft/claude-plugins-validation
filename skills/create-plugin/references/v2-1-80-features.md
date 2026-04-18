@@ -12,6 +12,15 @@ CPV validators already accept these features. Use them when they apply — CPV w
 - [managed-settings.d/ drop-in directory](#managed-settingsd-drop-in-directory)
 - [Plugin skill `name` field (v2.1.98)](#plugin-skill-name-field-v2198)
 
+## Checklist
+
+- [ ] Using Monitors? — declare in `monitors/monitors.json`
+- [ ] Using userConfig? — every entry has `title` AND `type` (5-type whitelist)
+- [ ] Using channels? — each `server` matches an `mcpServers` key
+- [ ] CLAUDE_PLUGIN_OPTION_* env vars used where needed
+- [ ] Inline marketplace source type is valid (8 allowed)
+- [ ] Skills with explicit `name:` frontmatter for path-based invocation
+
 ## Monitor tool
 
 New in v2.1.98. Runs a shell command in the background and feeds each stdout line to Claude as it is produced. Shares Bash permission rules — anything forbidden for Bash is forbidden for Monitor.

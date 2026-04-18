@@ -9,6 +9,13 @@
 
 Reference for the auto-generated README.md that is placed in each marketplace repository. The template uses `<placeholder-for-...>` syntax and is filled in by `generate-readme.py`.
 
+## Checklist
+
+- [ ] Copy the template content into the target marketplace repo's README.md
+- [ ] Either run `generate-readme.py` OR manually replace each `<placeholder-for-*>`
+- [ ] Verify no placeholders remain (`grep -r 'placeholder-for-'`)
+- [ ] Customize optional sections per the customization guide
+
 ---
 
 ## Template Content

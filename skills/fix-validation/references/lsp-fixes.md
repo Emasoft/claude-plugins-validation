@@ -21,6 +21,14 @@
 - [17. Path Value Issues](#17-path-value-issues)
 - [18. Informational Messages](#18-informational-messages)
 
+## Checklist
+
+- [ ] Identify the LSP config file (`.lsp.json` or inline in `plugin.json`)
+- [ ] Match the finding to a numbered section below
+- [ ] Verify the language server binary is installed locally (`which <command>`)
+- [ ] Apply the fix to the config
+- [ ] Re-validate
+
 ## Overview
 
 Comprehensive remediation guide for all issues detected by `validate_lsp.py`.

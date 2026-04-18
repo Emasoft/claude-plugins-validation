@@ -13,6 +13,13 @@
 9. [Git Tag Already Exists Error](#9-git-tag-already-exists-error-verified)
 10. [subprocess.run Output Truncation](#10-subprocessrun-output-truncation-verified)
 11. [Best Practices Summary](#best-practices-summary-all-verified)
+
+## Checklist
+
+- [ ] Identify the specific error symptom
+- [ ] Match to one of the 11 sections below
+- [ ] Apply the documented fix
+- [ ] Re-run the offending script
 12. [Quick Diagnostic Commands](#quick-diagnostic-commands)
 
 ---

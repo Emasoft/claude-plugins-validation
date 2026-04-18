@@ -8,6 +8,14 @@
 
 > For plugins with compiled binaries, see [`plugin-binary-builds.md`](plugin-binary-builds.md) for adding build phases to the pre-push hook and publish pipeline.
 
+## Checklist
+
+- [ ] Install pre-push hook via `publish.py --install-hook`
+- [ ] Copy `publish.py` template into `scripts/`
+- [ ] Copy `setup-hooks.py` into `scripts/`
+- [ ] Replace all placeholders
+- [ ] Verify hooks fire by attempting a bad commit
+
 ---
 
 ## pre-push Hook Template

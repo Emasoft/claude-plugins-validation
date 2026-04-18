@@ -13,6 +13,13 @@
 9. [MCP (Model Context Protocol)](#mcp-model-context-protocol)
 10. [MCP Detailed Specifications](#mcp-detailed-specifications)
 11. [Troubleshooting](#troubleshooting)
+
+## Checklist
+
+- [ ] Identify the topic area
+- [ ] Fetch the relevant URL with WebFetch (always https://)
+- [ ] Cite the section + version you referenced
+- [ ] Re-check the URL if the docs have moved (Anthropic moved domains in 2026-04)
 12. [How to Use Official Documentation](#how-to-use-official-documentation)
 
 ---

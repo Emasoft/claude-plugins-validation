@@ -15,6 +15,14 @@ Comprehensive remediation guide for all issues detected by `validate_xref.py`.
 
 ---
 
+## Checklist
+
+- [ ] Read the finding — what broken reference or missing file is reported
+- [ ] Match to a numbered section below
+- [ ] Resolve: fix the path, restore the missing file, or remove the stale reference
+- [ ] Re-validate with `validate_xref.py`
+- [ ] Re-run full `validate_plugin.py --strict` to catch cascading issues
+
 ## 1. Plugin Directory Issues
 
 ### [CRITICAL] Plugin directory does not exist: {plugin_root}

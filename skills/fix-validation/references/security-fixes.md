@@ -14,6 +14,14 @@
 
 Comprehensive remediation guide for all issues detected by `validate_security.py`.
 
+## Checklist
+
+- [ ] Read the finding carefully — security CRITICALs can have false positives (documented secrets, public IDs)
+- [ ] Confirm the finding is a real risk, not a documentation example
+- [ ] Match to a numbered section below
+- [ ] Apply the fix (rotate secret, move to .env, update .gitignore, etc.)
+- [ ] Re-validate — DO NOT commit until the finding is gone
+
 ## Overview of Security Checks
 
 | Check | Severity | Function |

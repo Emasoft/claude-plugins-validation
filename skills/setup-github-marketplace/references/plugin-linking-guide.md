@@ -13,6 +13,15 @@ Complete reference for linking, unlinking, and managing plugins within a Claude 
 - [Migrating Plugins Between Marketplaces](#migrating-plugins-between-marketplaces)
 - [Batch Operations](#batch-operations)
 
+## Checklist
+
+- [ ] Confirm plugin repo exists and has tagged releases
+- [ ] Add plugin entry to marketplace.json with full metadata
+- [ ] Configure `MARKETPLACE_PAT` secret on the plugin repo
+- [ ] Install `notify-marketplace.yml` on the plugin's default branch
+- [ ] Test the notification chain end-to-end
+- [ ] Verify marketplace.json reflects the latest plugin version
+
 ---
 
 ## Adding a Plugin to the Marketplace

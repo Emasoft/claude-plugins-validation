@@ -13,6 +13,16 @@
 - [Single Atomic Commit](#single-atomic-commit)
 - [Tag the Marketplace](#tag-the-marketplace)
 - [Verification](#verification)
+
+## Checklist
+
+- [ ] Pre-flight audit passed
+- [ ] publish.py + cliff.toml + validate.yml scaffolded at marketplace root
+- [ ] CHANGELOG.md generated
+- [ ] Authorship consolidated to primary author (guest contributors preserved)
+- [ ] Single atomic commit for the whole migration
+- [ ] Marketplace tagged (single-tag-per-release discipline)
+- [ ] Verification: `validate_marketplace.py --strict` clean
 - [Rollback Recipe](#rollback-recipe)
 
 ---

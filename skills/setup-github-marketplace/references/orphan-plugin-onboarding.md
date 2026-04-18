@@ -13,6 +13,14 @@
 - [Full pipeline is mandatory](#full-pipeline-is-mandatory)
 - [Final user instructions](#final-user-instructions)
 
+## Checklist
+
+- [ ] Detect the scenario (orphan plugin folder, no ancestor marketplace within 3 levels)
+- [ ] Explain the marketplace requirement in plain language BEFORE doing anything
+- [ ] Ask the user which of the 4 paths fits (A existing, B local, C new GitHub, D owned GitHub)
+- [ ] Build the full pipeline for Paths C/D — never skip CI, publish.py, auto-notify
+- [ ] Emit the final `marketplace add` + `update` + `install` commands verbatim
+
 ## Scenario
 
 The user has downloaded a plugin from the internet — a standalone folder with `.claude-plugin/plugin.json` but no marketplace around it. They want to install it with `claude plugin install`. They do NOT know that Claude Code plugins can't be installed directly without a marketplace. The agent must educate, decide, build, and hand back install commands.

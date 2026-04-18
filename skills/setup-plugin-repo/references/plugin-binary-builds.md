@@ -10,6 +10,15 @@
 - [Extending ci.yml for Binary Builds](#extending-ciyml-for-binary-builds)
 - [Cargo Release Profile (Rust Optimization)](#cargo-release-profile-rust-optimization)
 
+## Checklist
+
+- [ ] Decide if a build phase is needed (native binaries, not pure scripts)
+- [ ] Scaffold `build-binaries.yml` workflow
+- [ ] Place sources in `src/<component>/` with binaries in `src/<component>/bin/`
+- [ ] Add platform-detection wrapper for runtime dispatch
+- [ ] Extend `publish.py` and `ci.yml` for cross-compilation
+- [ ] For Rust: enable release profile optimizations
+
 ---
 
 ## When to Add a Build Phase

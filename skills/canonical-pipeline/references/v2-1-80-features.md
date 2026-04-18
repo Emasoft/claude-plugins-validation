@@ -12,6 +12,15 @@
 
 Features added in Claude Code v2.1.80 through v2.1.98 that CPV's validators already accept.
 
+## Checklist
+
+- [ ] Using Monitors? — declare in `monitors/monitors.json` with name+command+description
+- [ ] Using userConfig? — every entry has `title` AND `type` (one of string|number|boolean|directory|file)
+- [ ] Using channels? — each has `server` matching an `mcpServers` key
+- [ ] Using CLAUDE_PLUGIN_OPTION_* env vars? — pattern-matched by CPV whitelist
+- [ ] Inline marketplace in settings.json? — source type is one of the 8 allowed
+- [ ] Skills with explicit `name:` frontmatter? — v2.1.98+ required for path-based skills
+
 ## Monitor tool
 
 v2.1.98 background command runner. Feeds each stdout line to Claude. Respects Bash permission rules — anything Bash cannot run, Monitor cannot run either. Declare in an agent's `tools:` list.

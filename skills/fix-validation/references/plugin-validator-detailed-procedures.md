@@ -13,6 +13,15 @@ This reference contains detailed verification checklists, CI procedures, and tro
 
 ---
 
+## Checklist
+
+- [ ] Determine which validator phase you need detail on (language detection, lockfiles, scripts, etc.)
+- [ ] Jump to the matching section below
+- [ ] Follow the procedure step-by-step
+- [ ] Re-run the validator to confirm expected behavior
+
+---
+
 ## AUTO-DETECTION AND AUTO-INSTALLATION BEHAVIOR
 
 ### Language Detection Process

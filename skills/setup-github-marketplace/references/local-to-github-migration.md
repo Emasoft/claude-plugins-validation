@@ -18,6 +18,14 @@
 
 A plugin is under development inside a **local** marketplace folder (a directory with `marketplace.json` that the user registered via `claude plugin marketplace add <path>` or `--plugin-dir`). The user wants to publish it to GitHub — either alongside its whole host marketplace or by splitting it into its own repo and linking it somewhere public.
 
+## Checklist
+
+- [ ] Detect starting state (local marketplace, no GitHub remote, relative-path sources)
+- [ ] Ask the user which of the 4 paths fits (never decide for them)
+- [ ] Execute the chosen path end-to-end
+- [ ] Run post-migration verification (remote validate + marketplace.json check)
+- [ ] Emit final user-runnable install commands verbatim
+
 ## Detect the starting state
 
 Before planning, the agent must confirm it's looking at a local marketplace. Markers:

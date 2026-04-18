@@ -15,6 +15,14 @@ Comprehensive remediation guide for all issues detected by `validate_settings_ma
 
 ---
 
+## Checklist
+
+- [ ] Identify the settings.json file the finding references
+- [ ] Match to a numbered section below
+- [ ] Distinguish this from `validate_marketplace.py` findings (this is settings-scope)
+- [ ] Apply the fix to settings.json
+- [ ] Re-validate
+
 ## 1. settings.json Structure Issues
 
 ### CRITICAL: settings.json not found

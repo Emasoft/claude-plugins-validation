@@ -13,6 +13,18 @@
 - [Verification](#verification)
 - [Rollback Recipe](#rollback-recipe)
 
+## Checklist
+
+- [ ] Pre-flight audit passed (no uncommitted changes, backup tag made)
+- [ ] Each plugin subtree split via `git subtree split` or equivalent
+- [ ] Per-plugin GitHub repo created with `gh repo create`
+- [ ] Each plugin canonicalized (CI, hooks, publish.py) — fixer may be invoked
+- [ ] Each plugin tagged with initial version
+- [ ] Auto-notify wired per-plugin (notify-marketplace.yml + MARKETPLACE_PAT)
+- [ ] marketplace.json rewritten with github-source entries
+- [ ] Cleanup commit removes the old per-plugin subfolders from the hub repo
+- [ ] Verification: `marketplace.json` validates; dispatch round-trips
+
 ---
 
 ## Purpose

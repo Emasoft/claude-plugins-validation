@@ -11,6 +11,14 @@ This document defines the complete schema for SKILL.md frontmatter validation.
 - [5. Field Whitelist Modes](#5-field-whitelist-modes)
 - [6. Examples](#6-examples)
 
+## Checklist
+
+- [ ] Required fields present (`name`, `description`)
+- [ ] Optional fields valid (when present)
+- [ ] Enterprise fields use correct types
+- [ ] Field whitelist mode honored (no unknown fields in strict mode)
+- [ ] Frontmatter parses as valid YAML
+
 ---
 
 ## 1. Required Fields

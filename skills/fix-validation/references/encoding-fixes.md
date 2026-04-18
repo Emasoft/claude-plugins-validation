@@ -14,6 +14,14 @@
 
 Comprehensive remediation guide for all issues detected by `validate_encoding.py`.
 
+## Checklist
+
+- [ ] Identify the offending file and byte offset from the finding
+- [ ] Match to a numbered section below
+- [ ] Open the file and inspect around the offset
+- [ ] Apply the encoding fix (strip BOM, replace smart quotes, normalize line endings, etc.)
+- [ ] Re-validate
+
 ## Overview
 
 The encoding validator scans all text files in the plugin directory and checks seven rules:

@@ -17,6 +17,14 @@ Comprehensive remediation guide for all issues detected by `validate_skill.py` a
 - [11. 8+1 Pillars Issues](#11-81-pillars-issues)
 - [12. OpenSpec Mode Issues](#12-openspec-mode-issues)
 
+## Checklist
+
+- [ ] Identify the skill and the specific finding (file + severity)
+- [ ] Match the finding to one of the 12 sections below
+- [ ] Read SKILL.md + any referenced files mentioned in the finding
+- [ ] Apply the fix — respect the 5000-char SKILL.md limit (move bulk to references/)
+- [ ] Re-run `validate_skill.py --strict` against the skill
+
 ---
 
 ## 1. Structure Issues

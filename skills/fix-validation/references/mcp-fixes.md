@@ -19,6 +19,14 @@ Comprehensive remediation guide for all issues detected by `validate_mcp.py`.
 
 ---
 
+## Checklist
+
+- [ ] Identify which MCP config (.mcp.json or inline) and server the finding references
+- [ ] Match to a numbered section below
+- [ ] Verify the server command is executable and installed
+- [ ] Apply the fix (env vars, args, transport, etc.)
+- [ ] Re-validate
+
 ## 1. Configuration File Issues
 
 ### CRITICAL: Invalid JSON in configuration file

@@ -6,6 +6,14 @@
 - [2. validate_marketplace_pipeline.py](#2-validate_marketplace_pipelinepy)
 - [3. Architecture / Layout Migration Warnings (7 signals)](#3-architecture--layout-migration-warnings-7-signals)
 
+## Checklist
+
+- [ ] Identify the validator that produced the finding
+- [ ] Distinguish MECHANICAL findings (route to `fix-marketplace-validation`) from ARCHITECTURE signals (route to `migrate-marketplace-architecture`)
+- [ ] Jump to the matching section below
+- [ ] Apply the fix from the referenced guide
+- [ ] Re-validate — marketplace findings often cascade, so loop until clean
+
 ---
 
 Maps each **marketplace-scope** CPV validator to its fix reference guide with section numbers. This index covers the 2 validators that operate on a marketplace repository. For plugin-level validators see [plugin-error-index.md](plugin-error-index.md).

@@ -9,6 +9,15 @@
 - [Marketplace Standard](#marketplace-standard)
 - [Language-Specific Additions](#language-specific-additions)
 
+## Checklist
+
+- [ ] Standard files present (plugin.json, README.md, LICENSE, CHANGELOG.md, .gitignore, pyproject.toml, cliff.toml)
+- [ ] CI/CD workflows present (`.github/workflows/ci.yml` with lint + validate + test jobs)
+- [ ] Pre-push git hook installed (`publish.py --install-hook`)
+- [ ] `scripts/publish.py` present and executable
+- [ ] Marketplace-side pieces configured if applicable
+- [ ] Language-specific additions applied for the detected stack
+
 ## Standard Plugin Files
 
 | File | Required | Purpose |

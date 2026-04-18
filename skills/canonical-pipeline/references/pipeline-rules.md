@@ -13,6 +13,16 @@
 - [Binary Plugins](#binary-plugins)
 - [README Requirements](#readme-requirements)
 - [Pre-Publish Local Dry-Run](#pre-publish-local-dry-run)
+
+## Checklist
+
+- [ ] Pre-push hook installed and enforcing --strict
+- [ ] All findings above WARNING fixed before push
+- [ ] CPV scripts invoked with `uv run --with pyyaml python`
+- [ ] GitHub secrets set via `set_marketplace_pat.py` (never pipe to `gh secret set`)
+- [ ] Plugin scripts are all Python (no ad-hoc shell)
+- [ ] README has install/update/uninstall sections
+- [ ] Dry-run passes before the first real publish
 - [Post-Push CI Verification](#post-push-ci-verification)
 - [Mega-Linter Configuration](#mega-linter-configuration)
 - [Common Fixes Reference](#common-fixes-reference)

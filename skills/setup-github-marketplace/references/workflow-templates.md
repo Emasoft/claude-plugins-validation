@@ -10,6 +10,14 @@ Reusable GitHub Actions workflow templates for the Claude Plugin Marketplace
 ecosystem. Based on production marketplace workflows. Replace
 all `<placeholder-for-...>` values with your actual configuration before committing.
 
+## Checklist
+
+- [ ] Copy `validate.yml` into the marketplace repo's `.github/workflows/`
+- [ ] Copy `update-submodules.yml` into the marketplace repo's `.github/workflows/`
+- [ ] Copy `notify-marketplace.yml.template` into each plugin repo's `.github/workflows/notify-marketplace.yml`
+- [ ] Replace every `<placeholder-for-*>` with real owner/repo values
+- [ ] Commit + push; watch first run for success
+
 ---
 
 ## Placeholder Reference
