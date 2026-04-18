@@ -81,6 +81,8 @@ See [Marketplace Setup Guide](references/marketplace-setup-guide.md) for detaile
   > Template Content · Placeholder Reference · Auto-Generation · Customization Guide
 - [Troubleshooting Guide](references/troubleshooting.md)
   > Authentication Issues · Repository Creation Failures · CI/CD Pipeline Issues · Notification Chain Failures · Validation Failures · Secret Configuration Issues · Common Error Messages · Debug Commands
+- [Local → GitHub Migration](references/local-to-github-migration.md)
+  > Scenario · Detect starting state · 4 paths · Path 1 (shift Layout B) · Path 2 (split + Layout A hub) · Path 3 (one plugin, keep local dev) · Path 4 (third-party marketplace) · Gotchas · Verification · User instructions
 
 ## Compiling Templates
 

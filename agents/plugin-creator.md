@@ -76,6 +76,7 @@ Before running any workflow, read the current state and identify what is missing
 | Plugin folder has no `.claude-plugin/plugin.json` | Scaffold with `generate_plugin_repo.py` or `create-plugin` skill |
 | Plugin folder is not a git repo | `git init` + initial commit |
 | Plugin folder is a git repo but has no GitHub remote | Ask user for `<owner>` → `gh repo create <owner>/<name> --public --source . --push` |
+| **Plugin lives inside a LOCAL-ONLY marketplace** (parent or ancestor within 3 levels has `marketplace.json` AND that folder has no GitHub remote AND its entries use relative-path sources) and the user wants to publish | Load `setup-github-marketplace` skill and open its "Local → GitHub Migration" reference. Ask the user which of the **4 migration paths** fits: (1) lift-and-shift whole marketplace as Layout B, (2) split every plugin into its own repo + make the host a Layout A hub, (3) publish this plugin only and keep the local marketplace for dev, (4) publish this plugin only and register it in a different, already-existing GitHub marketplace (user owns it OR opens a PR). Never decide for the user. |
 | Validation fails (CRITICAL/MAJOR/MINOR/NIT) | Delegate to `plugin-fixer` agent (`/cpv-fix-validation <report>`) |
 | No marketplace specified by the user | Use `AskUserQuestion` — list existing marketplaces from `claude plugin marketplace list` output if available, plus "create a new one" |
 | Marketplace specified but doesn't exist on GitHub | Load `setup-github-marketplace` skill and create it (Layout A by default) |
