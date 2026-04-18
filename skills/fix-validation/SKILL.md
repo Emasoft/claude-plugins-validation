@@ -53,15 +53,15 @@ If no matching section is found in the reference file, search by error message k
 **Input:** `[MAJOR] Description too short`
 **Output:** plugin-error-index → validate_skill_comprehensive.py → skill-fixes §4 → apply fix
 
-**Input:** `[MAJOR] userConfig.<key> missing 'type' / invalid 'type'` (install-breaking)
-**Output:** plugin-structure-fixes "userConfig schema invalid" → infer type from key name (heuristic table there). Only `{string, number, boolean, directory, file}` are runtime-valid — NOT `integer`/`array`/`object`.
+**Input:** `[MAJOR] userConfig.<key> missing/invalid 'type'` (install-breaking)
+**Output:** plugin-structure-fixes "userConfig schema invalid" → infer from key name. Only `{string, number, boolean, directory, file}` are valid.
 
 **Input:** `[WARNING] architecture/recommend-restructure (7-signal)`
-**Output:** marketplace-error-index → §3 → marketplace-fixes §9 → apply per-signal mechanical fix
+**Output:** marketplace-error-index → §3 → marketplace-fixes §9 → per-signal mechanical fix
 
 ## Schema-parity contract
 
-CPV validates plugin **sources** (folders, GitHub repos) — it does not install them. The contract: CPV's schema rules mirror Claude Code's install-time manifest validators, so a source with zero CPV findings should not trip a runtime schema error. This is narrower than "install will succeed" — install can still fail for non-schema reasons (network, missing host binaries, execution errors). Full contract + validator-gap protocol: [schema-parity-contract.md](references/schema-parity-contract.md).
+CPV validates plugin sources; it does not install them. Schema rules mirror Claude Code's install-time validators, so a source with zero CPV findings should not trip a runtime schema error. Install can still fail for non-schema reasons. Full contract: [schema-parity-contract.md](references/schema-parity-contract.md).
 
 ## Resources
 
@@ -71,6 +71,8 @@ CPV validates plugin **sources** (folders, GitHub repos) — it does not install
   > validate_marketplace.py · validate_marketplace_pipeline.py · Architecture / Layout Migration Warnings (7 signals)
 - [Schema-Parity Contract](references/schema-parity-contract.md)
   > What CPV does · The contract · What this contract does NOT say · What IS covered · Validator-gap protocol · Historical incidents · Related
+- [Iterative Fix Loop](references/iterative-fix-loop.md)
+  > Why a loop · Algorithm · Entry points — plugin path vs report path · Termination and safety · WARNING evaluation rules · Publish-blocking warning categories · Truly advisory warnings · Output contract
 
 ## Token Optimization
 
