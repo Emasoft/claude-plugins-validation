@@ -1426,6 +1426,7 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         "servers",  # MCP server bundles per docs example: ${CLAUDE_PLUGIN_ROOT}/servers/db-server
         "templates",
         "tests",
+        "test",  # singular variant
         # Common non-standard but legitimate dirs
         "lib",
         "libs",
@@ -1440,7 +1441,6 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         "references",
         # Developer tooling dirs
         "git-hooks",
-        "shared",
         "fixtures",
         "vendor",
         "src",
@@ -1450,8 +1450,58 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         "target",
         "output-styles",
         "design",  # TRDD design docs (design/tasks/)
+        # Common dirs across many plugins (added v2.23.2 after empirical scan
+        # of 160 installed plugins surfaced these as repeat false positives):
+        "prompts",  # prompt templates (used by codex and most AI plugins)
+        "demo",
+        "demos",
+        "eval",
+        "evals",  # evaluation scripts (visualize, clean-viz)
+        "node_modules",  # JavaScript dependencies — never publish, but common in dev caches
+        "output",
+        "outputs",
+        "server",  # backend code (cc-plugin-viz, web-automation-suite)
+        "public",  # public web assets (cc-plugin-viz)
+        "static",  # static web assets
+        "web",  # web frontend
+        "shared",  # shared utilities
+        "settings",  # plugin-managed settings (claude-code-settings)
+        "guidances",  # AI guidance docs (claude-code-settings)
+        "plugins",  # nested plugin defs (claude-code-settings)
+        # Language source directories (plugins that ship native binaries often
+        # bundle source for the platform-specific binaries in bin/):
+        "rust",  # Rust source (perfect-skill-suggester, etc.)
+        "go",  # Go source
+        "python",  # Python source (less common when scripts/ exists, but seen)
+        "node",  # Node.js source
+        "ts",  # TypeScript source
+        "js",  # JavaScript source
+        "java",
+        "kotlin",
+        "swift",
+        "ruby",
+        "csharp",
+        "cpp",
+        "c",
     }
     referenced_dirs = _collect_manifest_referenced_dirs(plugin_root)
+
+    # Submodule pattern: many plugins (especially Layout B nested ones) have a
+    # subdirectory named after the plugin itself (e.g., `web-automation-suite/`
+    # contains `web-automation-suite/`). Auto-allow this pattern. Read the plugin
+    # name from .claude-plugin/plugin.json once.
+    plugin_name_lower: str | None = None
+    plugin_json_path = plugin_root / ".claude-plugin" / "plugin.json"
+    if plugin_json_path.exists():
+        try:
+            pj = json.loads(plugin_json_path.read_text(encoding="utf-8"))
+            if isinstance(pj, dict):
+                pn = pj.get("name")
+                if isinstance(pn, str):
+                    plugin_name_lower = pn.lower()
+        except (json.JSONDecodeError, OSError):
+            pass
+
     # Also skip hidden dirs and _dev dirs
     for item in plugin_root.iterdir():
         if not item.is_dir():
@@ -1466,6 +1516,10 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
             # Folder is legitimately used by the plugin's manifest (MCP, LSP, hooks,
             # or monitor commands reference `${CLAUDE_PLUGIN_ROOT}/<dirname>/...`).
             # No warning needed — its purpose is self-documented by the manifest.
+            continue
+        if plugin_name_lower and dirname_lower == plugin_name_lower:
+            # Submodule pattern: subdirectory named after the plugin itself.
+            # Common in Layout B nested marketplaces and dev-cached plugins.
             continue
         report.warning(
             f"Non-standard directory '{dirname}/' — not part of the plugin spec. If needed by plugin scripts, consider documenting its purpose in README."
@@ -3413,6 +3467,24 @@ def main() -> int:
             # what kind of folder this looks like, so the agent/user can correct course.
             print(_format_no_plugin_found_hint(plugin_root), file=sys.stderr)
             return 1
+
+    # Marketplace short-circuit: if the path has marketplace.json but NO plugin.json,
+    # this is a marketplace folder, not a plugin. Bail with a targeted error so we
+    # don't emit dozens of false positives ("Non-standard directory") for the
+    # plugin subfolders that ARE the marketplace's content.
+    has_marketplace = (
+        (plugin_root / ".claude-plugin" / "marketplace.json").is_file()
+        or (plugin_root / "marketplace.json").is_file()
+    )
+    has_plugin_manifest = (plugin_root / ".claude-plugin" / "plugin.json").is_file()
+    if has_marketplace and not has_plugin_manifest and not args.marketplace_only:
+        print(
+            f"Error: {plugin_root} is a MARKETPLACE folder (has marketplace.json), not a plugin.\n"
+            f"  Use validate_marketplace.py to validate marketplaces, or pass a plugin\n"
+            f"  subfolder to validate_plugin.py.",
+            file=sys.stderr,
+        )
+        return 1
 
     # Initialize gitignore filter — all scan functions use this to skip ignored files
     global _gi  # noqa: PLW0603

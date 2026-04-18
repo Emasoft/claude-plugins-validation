@@ -18,6 +18,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 # Add scripts directory to path for imports
 scripts_dir = Path(__file__).parent.parent / "scripts"
 if str(scripts_dir) not in sys.path:
@@ -2690,4 +2692,166 @@ class TestManifestReferencedDirsSuppressNonStandardWarning:
         assert not self._has_warning_for_dir(report, "servers"), (
             f"servers/ should be in static known_dirs. Got: "
             f"{[r.message for r in report.results if r.level == 'WARNING']}"
+        )
+
+
+class TestKnownDirsExpandedV2_23_2:
+    """Tests for known-dirs additions surfaced by the v2.23.2 batch scan of 160 plugins.
+
+    Goal: stop emitting "Non-standard directory" WARNING for common patterns that
+    every plugin uses but the spec doesn't explicitly name.
+    """
+
+    def _make_minimal_plugin_with_dir(self, tmp_path: Path, dirname: str) -> Path:
+        plugin_dir = tmp_path / "p"
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / dirname).mkdir()
+        (plugin_dir / dirname / "stub").write_text("// stub")
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "p", "version": "1.0.0", "description": "x"})
+        )
+        return plugin_dir
+
+    def _has_nonstandard_warning(self, report: ValidationReport, dirname: str) -> bool:
+        return any(
+            r.level == "WARNING" and f"'{dirname}/'" in r.message and "Non-standard" in r.message
+            for r in report.results
+        )
+
+    @pytest.mark.parametrize(
+        "dirname",
+        [
+            # Common cross-cutting dirs surfaced empirically:
+            "prompts", "demo", "demos", "eval", "evals",
+            "node_modules", "output", "outputs",
+            "server", "public", "static", "web",
+            "shared", "settings", "guidances", "plugins",
+            # Language source dirs (plugins shipping native binaries):
+            "rust", "go", "python", "node", "ts", "js",
+            "java", "kotlin", "swift", "ruby", "csharp", "cpp", "c",
+        ],
+    )
+    def test_common_dir_no_longer_warns(self, tmp_path, dirname):
+        """Each common dir name added in v2.23.2 must NOT trigger 'Non-standard directory'."""
+        plugin_dir = self._make_minimal_plugin_with_dir(tmp_path, dirname)
+        report = ValidationReport()
+        validate_structure(plugin_dir, report)
+        assert not self._has_nonstandard_warning(report, dirname), (
+            f"{dirname}/ should be in v2.23.2 expanded known_dirs. Got: "
+            f"{[r.message for r in report.results if r.level == 'WARNING']}"
+        )
+
+
+class TestSubmodulePatternAllowance:
+    """Tests for the submodule-pattern auto-allowance added in v2.23.2.
+
+    Many plugins (especially Layout B nested marketplaces) have a subdirectory
+    named after the plugin itself (e.g. `web-automation-suite/web-automation-suite/`).
+    The validator should auto-allow this without a WARNING.
+    """
+
+    def test_subdir_matching_plugin_name_does_not_warn(self, tmp_path):
+        plugin_dir = tmp_path / "my-cool-plugin"
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "my-cool-plugin", "version": "1.0.0", "description": "x"})
+        )
+        # Sub-directory matching the plugin name (the submodule pattern):
+        (plugin_dir / "my-cool-plugin").mkdir()
+        (plugin_dir / "my-cool-plugin" / "code.js").write_text("// stub")
+        report = ValidationReport()
+        validate_structure(plugin_dir, report)
+        assert not any(
+            r.level == "WARNING" and "'my-cool-plugin/'" in r.message and "Non-standard" in r.message
+            for r in report.results
+        ), (
+            "Subdir matching plugin name should be auto-allowed. Got: "
+            f"{[r.message for r in report.results if r.level == 'WARNING']}"
+        )
+
+    def test_subdir_not_matching_plugin_name_still_warns(self, tmp_path):
+        plugin_dir = tmp_path / "my-cool-plugin"
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "my-cool-plugin", "version": "1.0.0", "description": "x"})
+        )
+        # Different name — must still warn
+        (plugin_dir / "unrelated-folder").mkdir()
+        (plugin_dir / "unrelated-folder" / "x.js").write_text("// stub")
+        report = ValidationReport()
+        validate_structure(plugin_dir, report)
+        assert any(
+            r.level == "WARNING" and "'unrelated-folder/'" in r.message and "Non-standard" in r.message
+            for r in report.results
+        ), "Unrelated non-standard folder should still trigger WARNING"
+
+    def test_submodule_check_safe_with_invalid_plugin_json(self, tmp_path):
+        """If plugin.json is invalid JSON, the submodule check must not crash."""
+        plugin_dir = tmp_path / "p"
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text("{not valid json")
+        (plugin_dir / "weird-subdir").mkdir()
+        (plugin_dir / "weird-subdir" / "x.js").write_text("// stub")
+        # Should not raise; submodule check just skips
+        report = ValidationReport()
+        validate_structure(plugin_dir, report)
+        # We don't assert the warning here (other manifest validation will fire),
+        # only that no exception occurred — reaching this line is the test.
+        assert True
+
+
+class TestMarketplaceShortCircuit:
+    """Tests for the marketplace short-circuit added in v2.23.2.
+
+    If the path being validated has marketplace.json but no plugin.json, it's a
+    marketplace folder and validate_plugin should bail out cleanly with an error
+    pointing to validate_marketplace.py — instead of running plugin checks and
+    emitting dozens of false positives for the per-plugin subfolders.
+    """
+
+    def _run_validate_plugin_main(self, plugin_path: Path):
+        """Invoke validate_plugin.main() with the given path."""
+        # The marketplace short-circuit lives in main(), so we shell out
+        # rather than calling validate_structure directly.
+        import subprocess
+        result = subprocess.run(
+            [
+                "uv", "run", "--with", "pyyaml", "python",
+                "scripts/validate_plugin.py", str(plugin_path),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=Path(__file__).resolve().parent.parent,
+        )
+        return result
+
+    def test_marketplace_only_path_bails_out(self, tmp_path):
+        """Path with .claude-plugin/marketplace.json (no plugin.json) → exit 1 with marketplace error."""
+        marketplace_dir = tmp_path / "my-mkt"
+        (marketplace_dir / ".claude-plugin").mkdir(parents=True)
+        (marketplace_dir / ".claude-plugin" / "marketplace.json").write_text(
+            json.dumps({
+                "name": "my-mkt",
+                "owner": {"name": "x"},
+                "plugins": [{"name": "p1", "source": "./p1"}],
+            })
+        )
+        result = self._run_validate_plugin_main(marketplace_dir)
+        assert result.returncode == 1, f"Expected exit code 1, got {result.returncode}\nstderr: {result.stderr}\nstdout: {result.stdout}"
+        assert "MARKETPLACE folder" in result.stderr, f"Expected marketplace bail-out hint. Got stderr: {result.stderr}"
+
+    def test_plugin_with_both_manifests_proceeds_normally(self, tmp_path):
+        """If BOTH marketplace.json AND plugin.json exist (rare hybrid), plugin validation still runs."""
+        plugin_dir = tmp_path / "p"
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / ".claude-plugin" / "marketplace.json").write_text(
+            json.dumps({"name": "p", "owner": {"name": "x"}, "plugins": []})
+        )
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "p", "version": "1.0.0", "description": "x"})
+        )
+        result = self._run_validate_plugin_main(plugin_dir)
+        # Should NOT bail out with the marketplace-only error
+        assert "MARKETPLACE folder" not in result.stderr, (
+            f"Hybrid plugin (with both manifests) should proceed, not bail. Got stderr: {result.stderr}"
         )
