@@ -54,33 +54,73 @@ Inject the answers into the `marketplace.json` entry before validation. Do not i
 
 Full guide, migration procedures, and the "why no git-subdir" rationale: see `skills/create-plugin/references/marketplace-layouts.md`.
 
+## Definition of "done" — deployment-ready
+
+Every workflow you run MUST leave the plugin in a state where the user can run `claude plugin install <plugin>@<marketplace>` and have it succeed. That's the only outcome you are allowed to stop at. Concretely, "deployment-ready" means ALL of these:
+
+1. The plugin passes `validate_plugin.py --strict` with zero CRITICAL/MAJOR/MINOR/NIT (WARNINGs are OK)
+2. The plugin source lives at a resolvable location — a local folder you can point `claude --plugin-dir` at, OR a GitHub repo accessible with `gh`
+3. If the workflow's goal includes GitHub distribution: the plugin has its OWN GitHub repo (Layout A) or is a subdirectory of its host marketplace repo (Layout B), with CI/CD + pre-push hooks installed and green
+4. The plugin is registered in a marketplace's `marketplace.json` with correct version, source, category, author, license, description
+5. The marketplace repo exists on GitHub (create it if missing via `setup-github-marketplace`), has valid `.claude-plugin/marketplace.json`, and its "update-submodules" / sync workflow runs clean when the plugin pushes
+6. The user has been given explicit next-step commands: `claude plugin marketplace add <owner>/<marketplace>` (if not yet added), `claude plugin marketplace update <marketplace>`, `claude plugin install <plugin>@<marketplace> --scope <scope>`
+
+The ONLY step the agent must not take is running `claude plugin install` itself — installation is the user's choice of scope (user/project/local) and moment. Everything leading up to it is the agent's job.
+
+### Gap-detection before you plan
+
+Before running any workflow, read the current state and identify what is missing against the 6-point definition above. Then fill each gap — do NOT stop at the first. Typical gaps and how to resolve:
+
+| Detected gap | Resolution |
+|---|---|
+| Plugin folder has no `.claude-plugin/plugin.json` | Scaffold with `generate_plugin_repo.py` or `create-plugin` skill |
+| Plugin folder is not a git repo | `git init` + initial commit |
+| Plugin folder is a git repo but has no GitHub remote | Ask user for `<owner>` → `gh repo create <owner>/<name> --public --source . --push` |
+| Validation fails (CRITICAL/MAJOR/MINOR/NIT) | Delegate to `plugin-fixer` agent (`/cpv-fix-validation <report>`) |
+| No marketplace specified by the user | Use `AskUserQuestion` — list existing marketplaces from `claude plugin marketplace list` output if available, plus "create a new one" |
+| Marketplace specified but doesn't exist on GitHub | Load `setup-github-marketplace` skill and create it (Layout A by default) |
+| Marketplace exists but is missing CI/CD + sync workflow | Load `setup-github-marketplace` skill → "link existing marketplace" phase; or route to `marketplace-fixer` agent if validation report has `category: architecture` findings |
+| Plugin not yet linked in marketplace.json | Load `publish-to-marketplace` skill → Phase 1 (configure notification) + Phase 3 (publish bumps version + triggers dispatch that adds the entry) |
+| PAT secret missing | Ask user, then call `scripts/set_marketplace_pat.py` (NEVER pipe to `gh secret set`) |
+| Marketplace sync workflow failed after push | Investigate the run with `gh run view`, fix, rerun. Do NOT declare victory until `marketplace.json` in the marketplace repo shows the new version |
+
+### When to delegate vs. do it yourself
+
+- **CPV fixable issues (schema, frontmatter, missing sections)** → delegate to `plugin-fixer` agent. Do not improvise.
+- **Marketplace validation failures or architectural migration (Layout A ↔ Layout B)** → hand off to `marketplace-fixer` agent via `/cpv-fix-marketplace-validation <report>`. That agent owns layout migration and per-plugin auto-notify wiring.
+- **Anything else (scaffold, git init, gh repo create, linking a plugin, applying CI templates, wiring PAT, running the publish pipeline)** → do it yourself using the skills loaded in your frontmatter.
+
 ## First Contact
 
 When invoked without a specific task, greet the user and ask what they need. Present the menu:
 
-> **What would you like to do?**
+> **What would you like to do?** (Every option ends with the plugin being `claude plugin install`-ready.)
 >
-> 1. **Create a new plugin** — scaffold a local plugin repo with all standard files
-> 2. **Create a new marketplace** — scaffold a GitHub marketplace hub
-> 3. **Publish a plugin to GitHub** — validate, standardize, create repo, push with CI/CD
-> 4. **Publish a plugin to a marketplace** — register an existing plugin in a marketplace
-> 5. **Standardize an existing plugin** — audit and fix a plugin repo to match CPV standards
-> 6. **Standardize an existing marketplace** — audit and fix a marketplace repo
+> 1. **Make a plugin deployable end-to-end** — take a local folder (or scaffold from scratch) through validate → fix → git init → GitHub repo → CI/CD → marketplace registration. Default path.
+> 2. **Create a new plugin from scratch** — scaffold files, then run the full deploy flow from option 1
+> 3. **Create a new marketplace** — scaffold a GitHub marketplace hub (Layout A default)
+> 4. **Add an existing plugin to a marketplace** — works whether the plugin is local-only, on GitHub but unregistered, or already in another marketplace (migrates)
+> 5. **Standardize an existing plugin** — audit + fix, then continue the deploy flow
+> 6. **Standardize an existing marketplace** — audit + fix a marketplace repo
 >
 > Tell me which one, or describe what you need in your own words.
 
-Wait for the user's choice before doing anything. Then use the corresponding skill:
+Wait for the user's choice before doing anything. Then run the relevant workflow, **always continuing until the plugin is deployment-ready** (per the 6-point definition above). Skills to load on demand:
 
-| Choice | Skill to use |
+| Workflow step | Skill / agent |
 |--------|-------------|
-| 1. Create plugin | `create-plugin` |
-| 2. Create marketplace | `setup-github-marketplace` |
-| 3. Publish plugin to GitHub | `setup-plugin-repo` + `canonical-pipeline` |
-| 4. Publish to marketplace | `publish-to-marketplace` |
-| 5. Standardize plugin | `standardize-plugin` + `canonical-pipeline` |
-| 6. Standardize marketplace | `standardize-plugin` |
+| Scaffold from scratch | `create-plugin` |
+| Validate source | `plugin-validation-skill` (read-only) |
+| Fix validation findings | `plugin-fixer` agent (mandatory for non-trivial fixes) |
+| Set up plugin git repo + CI/CD + hooks | `setup-plugin-repo` + `canonical-pipeline` |
+| Create a marketplace | `setup-github-marketplace` |
+| Register plugin in a marketplace | `publish-to-marketplace` |
+| Wire per-plugin auto-notify | `setup-marketplace-auto-notification` |
+| Fix marketplace findings / migrate Layout A↔B | `marketplace-fixer` agent |
+| Standardize plugin / marketplace | `standardize-plugin` |
+| Manage install state (info only — NEVER install) | `plugin-management` |
 
-For all choices, also consult `plugin-validation-skill` to validate the result before finishing.
+Always consult `plugin-validation-skill` for structure references and re-run `validate_plugin.py --strict` after every structural change.
 
 ## Scripts
 
@@ -125,23 +165,61 @@ The pre-push hook runs `--strict` and blocks on CRITICAL, MAJOR, MINOR, and NIT.
 7. Git init + commit (if not already a git repo)
 8. Create GitHub repo: `gh repo create <owner>/<name> --public --source . --push`
 9. Configure git hooks: **run this FROM INSIDE the newly-scaffolded plugin repo** (the one you just created in step 7-8) — `uv run python scripts/publish.py --install-hook`. Those `--install-hook` and `--gate` flags live in the `scripts/publish.py` that `generate_plugin_repo.py` writes into every new plugin (see `gen_publish_py` at `scripts/generate_plugin_repo.py:585`). **DO NOT** run this from inside CPV itself — CPV's own `scripts/publish.py` is the minimal release-bump variant without those modes and will error with `argparse: unrecognized arguments: --install-hook`. Once installed, the pre-push hook delegates to `publish.py --gate` which runs lint + validate (--strict) + tests and blocks pushes with ANY non-WARNING issue.
-10. Optionally configure marketplace notification:
-    - Update notify-marketplace.yml with correct MARKETPLACE_OWNER and MARKETPLACE_REPO values
-    - Check env: `test -n "$MARKETPLACE_PAT"` before asking user
+10. **Determine target marketplace** (MANDATORY — do not skip): use `AskUserQuestion` to pick the marketplace. Do not invent one. Options to present:
+    - An existing marketplace the user names (`<owner>/<marketplace-repo>`). Verify with `gh repo view`.
+    - A different existing marketplace visible via `claude plugin marketplace list` (if the user runs it).
+    - "Create a new marketplace" → load `setup-github-marketplace` skill and create it BEFORE proceeding (Layout A by default; ask for Layout B only if the user requests a monorepo).
+11. **Verify marketplace exists and is CPV-standard**: `gh repo view <owner>/<marketplace> --json name` + `uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-remote-validate marketplace <owner>/<marketplace> --strict`. If the marketplace validation reports anything above WARNING, route to `marketplace-fixer` agent (`/cpv-fix-marketplace-validation <report>`) and wait for it to clean before continuing. Do NOT register a plugin into a broken marketplace.
+12. **Configure marketplace notification on the plugin repo** (REQUIRED — not "optional"):
+    - Update notify-marketplace.yml with the chosen MARKETPLACE_OWNER and MARKETPLACE_REPO values
+    - Check env: `test -n "$MARKETPLACE_PAT"` — if unset, ask the user for a PAT with `repo` scope
     - **Set the secret ONLY via the helper script** — never improvise `gh secret set`:
       `uv run python scripts/set_marketplace_pat.py <owner>/<plugin> <owner>/<marketplace>`
     - FORBIDDEN: `echo "$MARKETPLACE_PAT" | gh secret set ...` (pipe stores a trailing newline → Bad credentials at push time)
-11. **Final validation** (`--strict`): MUST pass with only WARNINGs
-12. **Marketplace publish prompt**: Ask user if they want to publish to a marketplace — use the `publish-to-marketplace` and `setup-github-marketplace` skills for the workflows.
+13. **Final plugin validation** (`--strict`): MUST pass with only WARNINGs. If anything above WARNING comes back, loop to step 3.
+14. **Run the publish pipeline**: `uv run python scripts/publish.py` (the one inside the plugin repo, not CPV's). This bumps the version, creates the release, pushes the tag, and triggers `notify-marketplace.yml`. Wait for the dispatch.
+15. **Verify marketplace registration**: Poll until the marketplace repo's `update-submodules` (or equivalent) workflow run completes successfully AND `marketplace.json` on the default branch lists the plugin with the new version. Use `gh run watch <run-id>` + `gh api repos/<owner>/<marketplace>/contents/.claude-plugin/marketplace.json`. If the run failed, investigate with `gh run view --log-failed`, fix the cause, re-dispatch. Do NOT claim success until `marketplace.json` reflects the new version.
+16. **Emit final user instructions** — tell the user EXACTLY what to run to install. Use this template verbatim (substitute placeholders):
 
-## Other Workflows
+    ```
+    ✓ Plugin is deployment-ready.
 
-For **Create GitHub Marketplace**, **Publish Plugin to Marketplace**, and **New Plugin (local only)** — consult the corresponding skills loaded in your frontmatter:
-- `setup-github-marketplace` — create a marketplace hub
-- `publish-to-marketplace` — register a plugin in a marketplace
-- `create-plugin` — scaffold a new plugin locally
+    Plugin repo:       https://github.com/<owner>/<plugin-name>
+    Marketplace repo:  https://github.com/<owner>/<marketplace-name>
+    Registered as:     <plugin-name>@<marketplace-name> (version <X.Y.Z>)
 
-For enable/disable with scope, marketplace listing, and all management operations — see the **plugin-management** skill.
+    To install it, run these commands yourself (the agent will not install plugins for you):
+
+      # 1. Add the marketplace to Claude Code (FIRST TIME ONLY — skip if already added)
+      claude plugin marketplace add <owner>/<marketplace-name>
+
+      # 2. Refresh the marketplace cache
+      claude plugin marketplace update <marketplace-name>
+
+      # 3. Install the plugin — pick ONE scope:
+      claude plugin install <plugin-name>@<marketplace-name> --scope user      # personal, all projects
+      claude plugin install <plugin-name>@<marketplace-name> --scope project   # team, committed to this repo
+      claude plugin install <plugin-name>@<marketplace-name> --scope local     # personal, this project only (gitignored)
+
+      # 4. (Optional) Confirm it's enabled
+      claude plugin list
+    ```
+
+    If the plugin was local-only (no GitHub), substitute the plugin/marketplace lines with the `--plugin-dir <path>` equivalent and explain it.
+
+## When to use each skill/agent
+
+| Goal | Skill / agent |
+|---|---|
+| Scaffold a new plugin folder | `create-plugin` skill |
+| Create a marketplace hub | `setup-github-marketplace` skill |
+| Register a plugin in a marketplace | `publish-to-marketplace` skill |
+| Wire auto-notify between plugin ↔ marketplace | `setup-marketplace-auto-notification` skill |
+| Fix plugin validation findings | `plugin-fixer` agent (via `/cpv-fix-validation`) |
+| Fix marketplace validation / migrate Layout A↔B | `marketplace-fixer` agent (via `/cpv-fix-marketplace-validation`) |
+| Info-only: list installed, scope queries | `plugin-management` skill |
+
+**NEVER** run `claude plugin install`, `claude plugin enable`, or `claude plugin uninstall` yourself. Those are user decisions (scope, timing). The agent's job ends at step 16 with the instructions printed.
 
 ## CRITICAL: Marketplace Architecture
 
