@@ -51,7 +51,8 @@ Primary fix guide: [plugin-structure-fixes.md](plugin-structure-fixes.md)
 | Cross-platform compatibility (shell/bat/ps1/compiled-lang sources) | plugin-structure-fixes §8 |
 | Skill validation entry point | plugin-structure-fixes §9 |
 | README.md / LICENSE | plugin-structure-fixes §10 |
-| `README.md has badge markdown but is missing the automation markers` (v2.26.0 — fires only when README already contains literal `[![badge](url)](...)` or shields.io URLs) **[UPDATED v2.26.0]** | plugin-structure-fixes §10 "README.md missing badge-automation markers" |
+| `README.md has badge markdown but is missing the automation markers` (v2.26.0 — fires only when README already contains literal `[![badge]({url})]({href})` or shields.io URLs) **[UPDATED v2.26.0]** | plugin-structure-fixes §10 "README.md missing badge-automation markers" |
+| `Broken file reference: [path] in <md_file> — file not found` — v2.26.0 message includes two legitimate fixes (fix path / create file, OR mark the path as a placeholder using `{brace}`, `<angle>`, known names, or fenced code blocks) **[UPDATED v2.26.0]** | plugin-structure-fixes §10 "Broken file reference" |
 | Rules directory | plugin-structure-fixes §11 |
 | Path and private info | plugin-structure-fixes §12 |
 | `.gitignore` coverage and virtual-env leakage | plugin-structure-fixes §13 |
