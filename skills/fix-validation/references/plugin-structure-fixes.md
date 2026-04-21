@@ -1211,15 +1211,17 @@ Use image-link badges like `[![alt](img)](href)`.
 Use image-link badges like `[![alt]({img})]({href})`.
 ```
 
-Or for longer examples, put them in a fenced block:
+Or for longer examples, put them in a fenced block (use 4-backtick
+outer fences when the inner content itself contains a 3-backtick
+fence):
 
-~~~markdown
+````markdown
 Example README pattern:
 
 ```markdown
 [![CI](https://img.shields.io/…)](https://github.com/…)
 ```
-~~~
+````
 
 #### Forbidden "fix"
 
