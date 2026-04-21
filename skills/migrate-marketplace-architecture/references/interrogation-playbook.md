@@ -182,6 +182,6 @@ If No: write the log and exit cleanly.
 
 ## After each question
 
-Record the user's answer in `reports/migration-log_<marketplace>_<date>.md` (at the project root, gitignored, worktree-aware — resolve via `${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}`) under a timestamped entry so the full decision trail is auditable.
+Record the user's answer in `$MAIN_ROOT/reports/migrate-marketplace-architecture/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` at the main-repo root (first entry of `git worktree list` — never a linked worktree) under a timestamped entry so the full decision trail is auditable.
 
 If the user refuses to answer any required question, cancel the migration — never pick silent defaults for fields that affect git operations or public repo creation.

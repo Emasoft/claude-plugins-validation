@@ -42,17 +42,17 @@ This produces a **Semantic Grade (A-F)**, complementary to the **Syntactic Score
 2. Run the command: `/cpv-semantic-validation <skill_or_agent_path>`
 3. The agent runs cheap script validation first as a baseline:
    ```bash
-   uv run python scripts/validate_skill_comprehensive.py "<skill_path>" --strict --report reports/validate_semantic_baseline_YYYYMMDD.md
+   uv run python scripts/validate_skill_comprehensive.py "<skill_path>" --strict --report "$MAIN_ROOT/reports/validate_skill/$(date +%Y%m%d_%H%M%S%z)-semantic-baseline.md"
    ```
 4. The agent reads the actual SKILL.md and agent .md files
 5. The agent evaluates 7 core semantic criteria plus 1 conditional pillar (Channel MCP Server Source-Code Security — only when `plugin.json.channels` is non-empty)
-6. Review the grade (A-F) and report at `reports/semantic_validation_YYYYMMDD.md`
+6. Review the grade (A-F) and report at `$MAIN_ROOT/reports/semantic-validator/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`
 
 ## Output
 
 - **Grade**: A-F letter grade based on semantic quality
 - **Criteria Results**: Pass/Partial/Fail for each of 7 core criteria, plus Pass/Partial/Fail/N/A for the conditional Channel Source Security pillar
-- **Report File**: `reports/semantic_validation_YYYYMMDD.md` (project-root, gitignored, worktree-aware).
+- **Report File**: `$MAIN_ROOT/reports/semantic-validator/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` at the **main-repo root** (first entry of `git worktree list`) — never a linked worktree. Per-component subfolder + local-time+GMT-offset timestamp mandatory. Both `reports/` and `reports_dev/` gitignored.
 
 ## Error Handling
 

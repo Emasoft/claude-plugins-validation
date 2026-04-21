@@ -143,7 +143,7 @@ With `--report`, the full detailed output is saved to file and only a compact su
 ```
 Plugin Validation: PASS
   CRITICAL:0 | MAJOR:0 | MINOR:2 | PASSED:155
-  Report: reports/validate_plugin_20260306.md
+  Report: reports/validate_plugin/20260421_183012+0200-my-plugin.md
 ```
 
 ## Exit Codes
@@ -168,16 +168,29 @@ Plugin Validation: PASS
 
 ## Execution
 
-> **Report location (mandatory):** every report is saved under `./reports/` at the **project root**, even when the command runs inside a git worktree. The folder is gitignored by convention — reports often contain private data (full paths, source snippets, validation output). Resolve the root with `${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}` when a non-CWD anchor is needed.
+> **Report location (mandatory):** every report lands at `$MAIN_ROOT/reports/validate_plugin/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`. `$MAIN_ROOT` is the **main-repo root** — never a linked worktree's own path. Per-component subfolder + local-time+GMT-offset timestamp. Both `reports/` and `reports_dev/` are gitignored (reports routinely contain private data: absolute paths, source snippets, validation output).
+
+Canonical shell prologue (resolves the main-repo root correctly from any worktree):
+
+```bash
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  MAIN_ROOT="$(git worktree list | head -n1 | awk '{print $1}')"
+else
+  MAIN_ROOT="${CLAUDE_PROJECT_DIR:-$PWD}"
+fi
+REPORT_DIR="$MAIN_ROOT/reports/validate_plugin"
+mkdir -p "$REPORT_DIR"
+REPORT_FILE="$REPORT_DIR/$(date +%Y%m%d_%H%M%S%z)-$(basename "$PLUGIN_PATH").md"
+```
 
 When running from the CPV plugin directory (has pyproject.toml with pyyaml):
 ```bash
-uv run python scripts/validate_plugin.py "$PLUGIN_PATH" $OPTIONS --report reports/validate_plugin_$(date +%Y%m%d).md
+uv run python scripts/validate_plugin.py "$PLUGIN_PATH" $OPTIONS --report "$REPORT_FILE"
 ```
 
 When running from another plugin's directory (no pyproject.toml), use `--with` to provide pyyaml:
 ```bash
-uv run --with pyyaml python scripts/validate_plugin.py . $OPTIONS --report reports/validate_plugin_$(date +%Y%m%d).md
+uv run --with pyyaml python scripts/validate_plugin.py . $OPTIONS --report "$REPORT_FILE"
 ```
 
 ## Related Commands

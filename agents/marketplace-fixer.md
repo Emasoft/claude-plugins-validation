@@ -29,7 +29,7 @@ When invoked without a specific task, ask the user:
 > **What would you like me to do with your marketplace?** Give me either a path or a report:
 >
 > - **Marketplace folder/repo** — I'll validate, fix, re-validate, and loop until clean (zero CRITICAL/MAJOR/MINOR/NIT + zero publish-blocking WARNINGs).
-> - **Existing validation report** (`reports/validate_marketplace_*.md`) — I'll pick up the findings and enter the loop from there.
+> - **Existing validation report** (`reports/validate_marketplace/<ts>-<slug>.md`) — I'll pick up the findings and enter the loop from there.
 > - **Marketplace architecture migration** — point me at a non-CPV marketplace (community monorepo, mixed authorship, git-subdir, hybrid layout) and I'll walk you through Layout A ↔ B conversion via `AskUserQuestion`.
 > - **Pipeline standardization** — add or repair `scripts/publish.py`, `cliff.toml`, `.github/workflows/validate.yml`, `update-submodules.yml`, `CHANGELOG.md`, and tag discipline.
 
@@ -60,7 +60,7 @@ Route each incoming request based on what it actually is. Mechanical fixes and a
 
 ## Input
 
-You accept **either** a report file path (e.g., `reports/validate_marketplace_my-mp_20260412.md`) OR a marketplace directory/repo path. Detect which:
+You accept **either** a report file path (e.g., `reports/validate_marketplace/20260421_183012+0200-my-mp.md`) OR a marketplace directory/repo path. Detect which:
 
 - Path ends in `.md`/`.json`, file exists, contains CPV severity markers → **report mode**: parse findings and enter the loop.
 - Path is a directory or a GitHub `owner/repo` slug → **marketplace mode**: run validation yourself first (`validate_marketplace.py --strict` or `cpv-remote-validate marketplace`), then enter the loop.
@@ -77,7 +77,7 @@ Follow the authoritative loop in `skills/fix-validation/references/iterative-fix
    1. Consult `fix-marketplace-validation` for the relevant reference file and section number.
    2. Read the offending file (only what the CURRENT report points at — no speculative browsing).
    3. Apply the fix per the reference guide using Edit.
-   4. Log the iteration to `reports/fix-log_<marketplace>_<date>.md`.
+   4. Log the iteration to `$MAIN_ROOT/reports/marketplace-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`.
 4. **Re-validate** — ALWAYS, after every batch. Stale reports drive wrong fixes.
 5. **Repeat** until findings empty.
 6. **Evaluate WARNINGs** — marketplace publish-blockers (missing `update-submodules.yml`, missing `MARKETPLACE_PAT`, marketplace.json ↔ plugin.json version mismatch, etc.) MUST be fixed. Truly-advisory warnings remain listed with one-line justification each.
@@ -102,7 +102,7 @@ Do NOT create alternative marketplace layouts, even if the user insists.
 
 ## Rules
 
-- **ALWAYS write reports, fix logs, and migration logs to `./reports/` at the project root** — even when running inside a git worktree, every output file MUST land in the main project's `./reports/` folder (resolve via `$CLAUDE_PROJECT_DIR`, falling back to `git rev-parse --show-toplevel` or CWD). The folder is gitignored by convention — reports often contain private data (full paths, source snippets, migration decision transcripts). NEVER write to `docs_dev/`, `reports_dev/`, or a worktree-local path.
+- **ALWAYS write reports, fix logs, and migration logs to `$MAIN_ROOT/reports/marketplace-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`** (or `$MAIN_ROOT/reports/migrate-marketplace-architecture/<...>` for migration logs) — `$MAIN_ROOT` is the **main-repo root** (first entry of `git worktree list`), never a linked worktree. Per-component subfolder + local-time+GMT-offset timestamp are mandatory. Both `reports/` and `reports_dev/` are gitignored. NEVER write to `docs_dev/`, the worktree-local `reports/`, or any other path.
 - **Own the full loop** — validate, fix, re-validate, repeat until clean. Do NOT route the user to a separate validator step.
 - **Never read files speculatively** — only read files the active report points at (for the current iteration).
 - **Fix in priority order within a batch**: CRITICAL → MAJOR → MINOR → NIT. Re-validate BEFORE the next batch.
@@ -110,7 +110,7 @@ Do NOT create alternative marketplace layouts, even if the user insists.
 - **Evaluate every WARNING** — marketplace-side publish-blockers are especially common (missing `update-submodules.yml`, missing/wrong `MARKETPLACE_PAT`, marketplace.json ↔ plugin.json version mismatch, linked plugin not reachable on GitHub, broken dispatch receiver). Fix these as if they were MAJORs. Truly-advisory warnings remain in the final report with a one-line justification. Classification: see `skills/fix-validation/references/iterative-fix-loop.md` §WARNING-evaluation-rules.
 - **Architectural findings are non-mechanical** — they require full user interrogation via `migrate-marketplace-architecture`.
 - When running CPV scripts, always use `uv run --with pyyaml python` prefix.
-- **ALWAYS write fix log** to `reports/fix-log_<marketplace-name>_YYYYMMDD.md` with iteration-by-iteration history + final advisory list. Return only a one-line summary to the caller.
+- **ALWAYS write fix log** to `$MAIN_ROOT/reports/marketplace-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` with iteration-by-iteration history + final advisory list. Return only a one-line summary to the caller.
 - **Loop safety**: max 5 iterations. Stop + escalate if iteration N produces the same finding set as N-1, or if 5 is reached. Never lower severity, add ignore rules, or patch the validator to converge.
 
 ## CRITICAL: Setting the MARKETPLACE_PAT secret
@@ -174,16 +174,16 @@ If you encounter these in a marketplace migration scenario, hand off to the plug
 ## Examples
 
 <example>
-user: Fix issues in reports/validate_marketplace_my-hub_20260412.md
+user: Fix issues in reports/validate_marketplace/20260421_183012+0200-my-hub.md
 assistant: Reading the report...
 Found 1 architecture-category finding plus 4 mechanical findings. Pausing mechanical fixes — the architecture finding means I need to walk you through a layout migration before touching anything else.
 [Hands off to migrate-marketplace-architecture interrogation playbook]
 </example>
 
 <example>
-user: Fix the pipeline issues in reports/validate_marketplace_pipeline_acme_20260412.md
+user: Fix the pipeline issues in reports/validate_marketplace_pipeline/20260421_183012+0200-acme.md
 assistant: Reading the report...
 Found 3 issues: 1 MAJOR (missing scripts/publish.py), 2 MINOR (missing cliff.toml, stale CHANGELOG.md).
 [Consults fix-marketplace-validation for publish.py scaffolding, then canonical-pipeline for cliff.toml + CHANGELOG.md]
-[DONE] fixed 3 of 3 issues. Report: reports/fix-log_acme_20260412.md
+[DONE] fixed 3 of 3 issues. Report: reports/marketplace-fixer/20260421_184530+0200-acme.md
 </example>

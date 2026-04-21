@@ -283,8 +283,8 @@ uv run python scripts/update_marketplace_metadata.py --marketplace-dir . && git 
 # Update target: regenerate, push, validate both
 cd "$TARGET" && uv run python scripts/update_marketplace_metadata.py --marketplace-dir .
 git add -A && git commit -m "Migrate in: ${PLUGINS_TO_MIGRATE[*]}" && git push
-uv run python scripts/validate_marketplace.py /tmp/source-mkt --verbose --report reports/validate_marketplace_source_YYYYMMDD.md
-uv run python scripts/validate_marketplace.py "$TARGET" --verbose --report reports/validate_marketplace_target_YYYYMMDD.md
+uv run python scripts/validate_marketplace.py /tmp/source-mkt --verbose --report $MAIN_ROOT/reports/validate_marketplace/$(date +%Y%m%d_%H%M%S%z)-source.md
+uv run python scripts/validate_marketplace.py "$TARGET" --verbose --report $MAIN_ROOT/reports/validate_marketplace/$(date +%Y%m%d_%H%M%S%z)-target.md
 ```
 
 Reference: [Plugin Linking Guide](plugin-linking-guide.md)
@@ -299,7 +299,7 @@ Reference: [Plugin Linking Guide](plugin-linking-guide.md)
 ### Step 1: Validate marketplace structure
 
 ```bash
-uv run python scripts/validate_marketplace.py <placeholder-for-marketplace-path> --verbose --report reports/validate_marketplace_YYYYMMDD.md
+uv run python scripts/validate_marketplace.py <placeholder-for-marketplace-path> --verbose --report $MAIN_ROOT/reports/validate_marketplace/$(date +%Y%m%d_%H%M%S%z)-<slug>.md
 ```
 
 Confirm: marketplace.json is valid, all plugin entries have source config, workflows are installed.

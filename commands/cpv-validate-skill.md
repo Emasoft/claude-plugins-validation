@@ -149,10 +149,19 @@ Uses standard CPV severity levels and exit codes. With `--report`, saves full ou
 
 ## Execution
 
-> **Report location (mandatory):** every report is saved under `./reports/` at the project root, even when the command runs inside a git worktree. The folder is gitignored by convention — reports often contain private data.
+> **Report location (mandatory):** `$MAIN_ROOT/reports/validate_skill/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`. `$MAIN_ROOT` is the **main-repo root** — never a linked worktree's own path. Both `reports/` and `reports_dev/` are gitignored.
 
 ```bash
-uv run python scripts/validate_skill_comprehensive.py "$SKILL_PATH" $OPTIONS --report reports/validate_skill_$(date +%Y%m%d).md
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  MAIN_ROOT="$(git worktree list | head -n1 | awk '{print $1}')"
+else
+  MAIN_ROOT="${CLAUDE_PROJECT_DIR:-$PWD}"
+fi
+REPORT_DIR="$MAIN_ROOT/reports/validate_skill"
+mkdir -p "$REPORT_DIR"
+REPORT_FILE="$REPORT_DIR/$(date +%Y%m%d_%H%M%S%z)-$(basename "$SKILL_PATH").md"
+
+uv run python scripts/validate_skill_comprehensive.py "$SKILL_PATH" $OPTIONS --report "$REPORT_FILE"
 ```
 
 Where `$SKILL_PATH` is the provided path and `$OPTIONS` are the flags passed.

@@ -27,7 +27,7 @@ When invoked without a target, ask the user:
 > **Which plugin should I fix?** I can work from either a path or a pre-existing report:
 >
 > - **A plugin folder** (e.g., `~/dev/my-plugin/`, `./plugin-foo/`, or even a parent/dev folder — I'll resolve it intelligently). I will validate, fix, re-validate, and loop until clean.
-> - **A pre-existing validation report** (e.g., `reports/validate_plugin_20260306.md`). I'll start from those findings and enter the loop from there.
+> - **A pre-existing validation report** (e.g., `reports/validate_plugin/20260421_183012+0200-my-plugin.md`). I'll start from those findings and enter the loop from there.
 >
 > Either works — give me a path.
 
@@ -67,7 +67,7 @@ Wait for the user's answer before doing anything. Then use these skills:
 
 ## Input
 
-You receive **either** a report file path (e.g., `reports/validate_plugin_20260306.md`) or a plugin folder path. You run the full validate → fix → re-validate loop either way.
+You receive **either** a report file path (e.g., `reports/validate_plugin/20260421_183012+0200-my-plugin.md`) or a plugin folder path. You run the full validate → fix → re-validate loop either way.
 
 ## Workflow
 
@@ -111,14 +111,14 @@ Marketplace-level CI/CD (marketplace workflow files, auto-notification receivers
 
 ## Rules
 
-- **ALWAYS write reports and fix logs to `./reports/` at the project root** — even when running inside a git worktree, every report/fix-log MUST land in the main project's `./reports/` folder (resolve via `$CLAUDE_PROJECT_DIR`, falling back to `git rev-parse --show-toplevel` or CWD). The folder is gitignored by convention — reports often contain private data (full paths, source snippets, fix diffs). NEVER write to `docs_dev/`, `reports_dev/`, or a worktree-local path.
+- **ALWAYS write reports and fix logs to `$MAIN_ROOT/reports/plugin-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`** — `$MAIN_ROOT` is the **main-repo root** (first entry of `git worktree list`), never a linked worktree. Per-component subfolder + local-time+GMT-offset timestamp are mandatory. Both `reports/` and `reports_dev/` are gitignored. NEVER write to `docs_dev/`, the worktree-local `reports/`, or any other path. Resolve with: `MAIN_ROOT="$(git worktree list \| head -n1 \| awk '{print $1}')"` then `mkdir -p "$MAIN_ROOT/reports/plugin-fixer"` then `REPORT_FILE="$MAIN_ROOT/reports/plugin-fixer/$(date +%Y%m%d_%H%M%S%z)-<slug>.md"`.
 - **Own the full loop** — validate, fix, re-validate, repeat. Do NOT route the user to a separate validator step.
 - **Never read files speculatively** — only read files mentioned in the active report (for the current iteration).
 - **Fix in priority order within a batch**: CRITICAL → MAJOR → MINOR → NIT. Re-validate BEFORE starting the next batch.
 - **Fix ALL non-WARNING issues** — the pre-push hook blocks on CRITICAL, MAJOR, MINOR, AND NIT. Zero tolerance in the final report.
 - **Evaluate every WARNING** — do not skip blindly. Publish-blocker warnings (missing CI, missing `notify-marketplace.yml`, missing `publish.py`, version mismatch across manifests, dependency version not satisfiable, declared `platform:` vs. script extensions mismatch, etc.) MUST be fixed. Truly-advisory warnings remain listed in the final report with a one-line justification each. Classification rules: `iterative-fix-loop.md` §WARNING-evaluation-rules.
 - When running CPV scripts, always use `uv run --with pyyaml python` prefix.
-- **ALWAYS write fix log** to `reports/fix-log_<name>_YYYYMMDD.md` containing the iteration-by-iteration history, per-batch diffs, and the final advisory-warning list. Return only a one-line summary to the caller.
+- **ALWAYS write fix log** to `$MAIN_ROOT/reports/plugin-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` containing the iteration-by-iteration history, per-batch diffs, and the final advisory-warning list. Return only a one-line summary to the caller.
 - **Loop safety**: max 5 iterations. Stop + escalate if iteration N produces the same finding set as N-1, or if 5 is reached. Never lower severity, add ignore rules, or patch the validator to converge.
 
 ## Special class: runtime-dep and invocation hook issues (TRDD-0028dd34)
@@ -200,9 +200,9 @@ For full empirical evidence (13 test plugin scenarios, debug-log excerpts, runti
 ## Examples
 
 <example>
-user: Fix issues in reports/validate_my-plugin_20260306.md
+user: Fix issues in reports/validate_plugin/20260421_183012+0200-my-plugin.md
 assistant: Reading the report file...
 Found 3 issues: 1 MAJOR, 2 MINOR.
 [Reads report, consults fix guide, applies fixes]
-[DONE] fixed 3 of 3 issues. Report: reports/fix-log_my-plugin_20260306.md
+[DONE] fixed 3 of 3 issues. Report: reports/plugin-fixer/20260421_184530+0200-my-plugin.md
 </example>

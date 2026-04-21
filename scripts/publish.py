@@ -33,6 +33,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Ensure the scripts/ directory is on sys.path so we can import cpv_validation_common
+# when publish.py is invoked directly (e.g. `uv run python scripts/publish.py`).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from cpv_validation_common import build_report_path  # noqa: E402
+
 # ── ANSI colors ──────────────────────────────────────────────────────────────
 
 _USE_COLOR = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
@@ -1042,8 +1048,14 @@ def stage_changelog(plugin_root: Path, tag_name: str, new_version: str) -> tuple
         cwd=plugin_root,
     )
     print(f"{GREEN}✓ CHANGELOG.md updated with {tag_name}{NC}")
-    release_notes_file = plugin_root / "reports" / f"release-notes-{new_version}.md"
-    release_notes_file.parent.mkdir(parents=True, exist_ok=True)
+    # Canonical report path per agent-reports-location.md:
+    #   $MAIN_ROOT/reports/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md
+    release_notes_file = build_report_path(
+        component="publish",
+        slug=f"release-notes-{new_version}",
+        ext="md",
+        anchor=plugin_root,
+    )
     run(
         [
             cliff_bin,
@@ -1057,7 +1069,11 @@ def stage_changelog(plugin_root: Path, tag_name: str, new_version: str) -> tuple
         ],
         cwd=plugin_root,
     )
-    print(f"{GREEN}✓ Release notes extracted to {release_notes_file.relative_to(plugin_root)}{NC}")
+    try:
+        rel_display = release_notes_file.relative_to(plugin_root)
+    except ValueError:
+        rel_display = release_notes_file
+    print(f"{GREEN}✓ Release notes extracted to {rel_display}{NC}")
     return 0, release_notes_file
 
 

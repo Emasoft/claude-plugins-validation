@@ -39,7 +39,7 @@ Deep semantic analysis of skill or agent quality. Evaluates aspects that automat
 
 - Grade: A-F
 - Per-criterion: Pass / Partial / Fail
-- Report file: `reports/semantic_validation_YYYYMMDD.md` (at the project root, gitignored — worktree-aware)
+- Report file: `$MAIN_ROOT/reports/semantic-validator/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` at the **main-repo root** (never a linked worktree). Resolve the root via `git worktree list | head -n1`. Both `reports/` and `reports_dev/` are gitignored.
 
 ## Examples
 

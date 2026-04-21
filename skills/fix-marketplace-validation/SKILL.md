@@ -48,7 +48,7 @@ If a report mixes both kinds, fix the mechanical findings first, then hand off t
 
 ## Output
 
-The fixer logs each fix to `reports/fix-log_<marketplace-name>_YYYYMMDD.md` at the project root (gitignored, worktree-aware — resolve via `$CLAUDE_PROJECT_DIR` or `git rev-parse --show-toplevel`).
+The fixer logs each fix to `$MAIN_ROOT/reports/marketplace-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` at the **main-repo root** (first entry of `git worktree list`). Both `reports/` and `reports_dev/` gitignored.
 
 ## Error Handling
 

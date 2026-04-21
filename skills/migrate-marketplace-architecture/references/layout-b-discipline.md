@@ -276,8 +276,10 @@ Run `validate_marketplace.py --strict` against the repo and confirm zero
 architecture warnings in the report:
 
 ```bash
+MAIN_ROOT="$(git worktree list | head -n1 | awk '{print $1}')"
+mkdir -p "$MAIN_ROOT/reports/migrate-marketplace-architecture"
 uv run --with pyyaml python scripts/validate_marketplace.py . --strict \
-  2>&1 | tee "reports/layout-b-verify_$(date -u +%Y%m%d).log"
+  2>&1 | tee "$MAIN_ROOT/reports/migrate-marketplace-architecture/$(date +%Y%m%d_%H%M%S%z)-layout-b-verify.log"
 ```
 
 Also run the per-plugin validator against every subdirectory so the report
@@ -305,5 +307,6 @@ Layout B is fully additive, so rollback is simple:
   discipline upgrade is rolled back.
 
 Record every rollback decision in
-`reports/migration-log_<marketplace>_<date>.md` (at the project root,
-gitignored, worktree-aware) under a fresh timestamped entry.
+`$MAIN_ROOT/reports/migrate-marketplace-architecture/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`
+at the main-repo root (first entry of `git worktree list`) under a fresh
+timestamped entry.

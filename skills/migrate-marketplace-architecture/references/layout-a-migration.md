@@ -333,7 +333,8 @@ every operation was additive:
   revert commit on the marketplace and ask the user whether to keep or
   delete the new repos.
 
-Record every rollback step in `reports/migration-log_<marketplace>_<date>.md`
-at the project root (gitignored, worktree-aware — resolve via
-`${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}`)
-so the audit trail is complete.
+Record every rollback step in
+`$MAIN_ROOT/reports/migrate-marketplace-architecture/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`
+at the main-repo root (first entry of `git worktree list` — never a linked
+worktree) so the audit trail is complete. Both `reports/` and
+`reports_dev/` are gitignored.

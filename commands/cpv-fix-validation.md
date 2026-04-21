@@ -34,13 +34,13 @@ Reads a **plugin** validation report file and fixes the issues it contains, one 
 ## Examples
 
 ```
-/cpv-fix-validation reports/validate_my-plugin_20260306.md
-/cpv-fix-validation reports/validate_skill_20260306.md
+/cpv-fix-validation reports/validate_plugin/20260421_183012+0200-my-plugin.md
+/cpv-fix-validation reports/validate_skill/20260421_183012+0200-my-skill.md
 ```
 
 ## Output
 
-- Fix log saved to `reports/fix-log_<name>_YYYYMMDD.md` (at the project root, gitignored — worktree-aware)
+- Fix log saved to `$MAIN_ROOT/reports/plugin-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` at the **main-repo root** (never a linked worktree). Resolve the root via `git worktree list | head -n1`. Both `reports/` and `reports_dev/` are gitignored.
 - Summary: number of issues fixed vs total
 
 ## Related Commands

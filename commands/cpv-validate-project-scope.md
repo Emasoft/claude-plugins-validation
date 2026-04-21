@@ -133,12 +133,22 @@ Slash commands ALWAYS run the validator from the installed plugin —
 `${CLAUDE_PLUGIN_ROOT}` is set by Claude Code. **Never** fetch scripts
 from GitHub at runtime for in-session validation.
 
-> **Report location (mandatory):** every report is saved under `./reports/` at the project root, even when the command runs inside a git worktree. The folder is gitignored by convention — reports often contain private data.
+> **Report location (mandatory):** `$MAIN_ROOT/reports/validate_project_scope/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` at the **main-repo root** of the target project (never a linked worktree). Both `reports/` and `reports_dev/` are gitignored.
 
 ```bash
+# Resolve the main-repo root of the project being validated (worktree-safe):
+if git -C "$PROJECT_PATH" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  MAIN_ROOT="$(git -C "$PROJECT_PATH" worktree list | head -n1 | awk '{print $1}')"
+else
+  MAIN_ROOT="$PROJECT_PATH"
+fi
+REPORT_DIR="$MAIN_ROOT/reports/validate_project_scope"
+mkdir -p "$REPORT_DIR"
+REPORT_FILE="$REPORT_DIR/$(date +%Y%m%d_%H%M%S%z)-$(basename "$PROJECT_PATH").md"
+
 uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/validate_project_scope.py" \
   "$PROJECT_PATH" \
-  --report "${PROJECT_PATH}/reports/validate_project_scope_$(date +%Y%m%d).md"
+  --report "$REPORT_FILE"
 ```
 
 ### Alternative invocations (not for slash-command flow)
