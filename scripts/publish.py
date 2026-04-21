@@ -1042,7 +1042,7 @@ def stage_changelog(plugin_root: Path, tag_name: str, new_version: str) -> tuple
         cwd=plugin_root,
     )
     print(f"{GREEN}✓ CHANGELOG.md updated with {tag_name}{NC}")
-    release_notes_file = plugin_root / "reports_dev" / f"release-notes-{new_version}.md"
+    release_notes_file = plugin_root / "reports" / f"release-notes-{new_version}.md"
     release_notes_file.parent.mkdir(parents=True, exist_ok=True)
     run(
         [

@@ -39,7 +39,7 @@ Copy this checklist and track your progress:
 
 ## Output
 
-The fix agent uses this index to locate the correct fix guide, then applies the fix and logs it to `docs_dev/fix-log_<name>_YYYYMMDD.md`.
+The fix agent uses this index to locate the correct fix guide, then applies the fix and logs it to `reports/fix-log_<name>_YYYYMMDD.md` at the **project root** (gitignored, worktree-aware). Resolve the root with `${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}` when running inside a worktree. NEVER write fix logs to `docs_dev/`, `reports_dev/`, or a worktree-local path.
 
 ## Error Handling
 

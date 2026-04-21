@@ -50,28 +50,28 @@ If auto-detection fails, ask the user. Pass via: `CLAUDE_PRIVATE_USERNAMES="user
 
 ```bash
 # Full plugin validation
-CLAUDE_PRIVATE_USERNAMES="$USER" uv run python scripts/validate_plugin.py /path/to/plugin --report docs_dev/validate_plugin_YYYYMMDD.md
+CLAUDE_PRIVATE_USERNAMES="$USER" uv run python scripts/validate_plugin.py /path/to/plugin --report reports/validate_plugin_YYYYMMDD.md
 
 # Component validators (each with --report)
-uv run python scripts/validate_skill_comprehensive.py /path/to/skill --report docs_dev/validate_skill_YYYYMMDD.md
-uv run python scripts/validate_hook.py /path/to/hooks.json --report docs_dev/validate_hook_YYYYMMDD.md
-uv run python scripts/validate_mcp.py /path/to/plugin --report docs_dev/validate_mcp_YYYYMMDD.md
-uv run python scripts/validate_marketplace.py /path/to/marketplace --report docs_dev/validate_marketplace_YYYYMMDD.md
-uv run python scripts/validate_xref.py /path/to/plugin --report docs_dev/validate_xref_YYYYMMDD.md
-uv run python scripts/validate_documentation.py /path/to/plugin --report docs_dev/validate_docs_YYYYMMDD.md
-uv run python scripts/validate_security.py /path/to/plugin --report docs_dev/validate_security_YYYYMMDD.md
-uv run python scripts/validate_rules.py /path/to/plugin --report docs_dev/validate_rules_YYYYMMDD.md
-uv run python scripts/validate_enterprise.py /path/to/plugin --report docs_dev/validate_enterprise_YYYYMMDD.md
-uv run python scripts/validate_encoding.py /path/to/plugin --report docs_dev/validate_encoding_YYYYMMDD.md
-uv run python scripts/validate_scoring.py /path/to/plugin --report docs_dev/validate_scoring_YYYYMMDD.md
-uv run python scripts/validate_command.py /path/to/plugin --report docs_dev/validate_command_YYYYMMDD.md
-uv run python scripts/validate_agent.py /path/to/plugin --report docs_dev/validate_agent_YYYYMMDD.md
-uv run python scripts/validate_lsp.py /path/to/plugin --report docs_dev/validate_lsp_YYYYMMDD.md
-uv run python scripts/lint_files.py /path/to/plugin --report docs_dev/lint_YYYYMMDD.md
+uv run python scripts/validate_skill_comprehensive.py /path/to/skill --report reports/validate_skill_YYYYMMDD.md
+uv run python scripts/validate_hook.py /path/to/hooks.json --report reports/validate_hook_YYYYMMDD.md
+uv run python scripts/validate_mcp.py /path/to/plugin --report reports/validate_mcp_YYYYMMDD.md
+uv run python scripts/validate_marketplace.py /path/to/marketplace --report reports/validate_marketplace_YYYYMMDD.md
+uv run python scripts/validate_xref.py /path/to/plugin --report reports/validate_xref_YYYYMMDD.md
+uv run python scripts/validate_documentation.py /path/to/plugin --report reports/validate_docs_YYYYMMDD.md
+uv run python scripts/validate_security.py /path/to/plugin --report reports/validate_security_YYYYMMDD.md
+uv run python scripts/validate_rules.py /path/to/plugin --report reports/validate_rules_YYYYMMDD.md
+uv run python scripts/validate_enterprise.py /path/to/plugin --report reports/validate_enterprise_YYYYMMDD.md
+uv run python scripts/validate_encoding.py /path/to/plugin --report reports/validate_encoding_YYYYMMDD.md
+uv run python scripts/validate_scoring.py /path/to/plugin --report reports/validate_scoring_YYYYMMDD.md
+uv run python scripts/validate_command.py /path/to/plugin --report reports/validate_command_YYYYMMDD.md
+uv run python scripts/validate_agent.py /path/to/plugin --report reports/validate_agent_YYYYMMDD.md
+uv run python scripts/validate_lsp.py /path/to/plugin --report reports/validate_lsp_YYYYMMDD.md
+uv run python scripts/lint_files.py /path/to/plugin --report reports/lint_YYYYMMDD.md
 
 # Scope validators (Claude Code project / local scope — validates .claude/ + .mcp.json + CLAUDE.md under a project path)
-uv run python scripts/validate_project_scope.py /path/to/project --report docs_dev/validate_project_scope_YYYYMMDD.md
-uv run python scripts/validate_local_scope.py /path/to/project --report docs_dev/validate_local_scope_YYYYMMDD.md
+uv run python scripts/validate_project_scope.py /path/to/project --report reports/validate_project_scope_YYYYMMDD.md
+uv run python scripts/validate_local_scope.py /path/to/project --report reports/validate_local_scope_YYYYMMDD.md
 ```
 
 ## Exit Codes
@@ -86,6 +86,7 @@ uv run python scripts/validate_local_scope.py /path/to/project --report docs_dev
 
 ## Rules
 
+- **ALWAYS write reports to `./reports/` at the project root** — even when running inside a git worktree, reports MUST land in the main project's `./reports/` folder (resolve via `$CLAUDE_PROJECT_DIR`, falling back to `git rev-parse --show-toplevel` or CWD). The folder is gitignored by convention — reports often contain private data (full paths, source snippets, validation output). NEVER write reports to `docs_dev/`, `reports_dev/`, or a worktree-local path.
 - **ALWAYS use `--report`** — saves full output to file, prints only compact summary to stdout
 - **NEVER read the report file** — provide the path to the user
 - **NEVER read source files** — the scripts do the reading
@@ -107,18 +108,18 @@ uv run python scripts/validate_local_scope.py /path/to/project --report docs_dev
 
 <example>
 user: Validate my-plugin before release
-assistant: [Runs: uv run python scripts/validate_plugin.py ./my-plugin --verbose --report docs_dev/validate_my-plugin_20260306.md]
+assistant: [Runs: uv run python scripts/validate_plugin.py ./my-plugin --verbose --report reports/validate_my-plugin_20260306.md]
 Plugin Validation: FAIL (major)
   CRITICAL:0 | MAJOR:1 | MINOR:2 | PASSED:154
-  Report: docs_dev/validate_my-plugin_20260306.md
+  Report: reports/validate_my-plugin_20260306.md
 </example>
 
 <example>
 user: Can you fix the issues?
-assistant: Run `/cpv-fix-validation docs_dev/validate_my-plugin_20260306.md` to fix the issues from that report.
+assistant: Run `/cpv-fix-validation reports/validate_my-plugin_20260306.md` to fix the issues from that report.
 </example>
 
 <example>
 user: Can you fix the marketplace issues?
-assistant: Run `/cpv-fix-marketplace-validation docs_dev/validate_marketplace_my-hub_20260412.md` to fix the issues from that marketplace report (marketplace reports must go to the marketplace-fixer agent, not the plugin-fixer).
+assistant: Run `/cpv-fix-marketplace-validation reports/validate_marketplace_my-hub_20260412.md` to fix the issues from that marketplace report (marketplace reports must go to the marketplace-fixer agent, not the plugin-fixer).
 </example>

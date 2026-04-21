@@ -64,12 +64,12 @@ Only these situations justify the cost:
 
 1. **Run script validation first** (cheap baseline — ALWAYS do this):
    ```bash
-   uv run python scripts/validate_skill_comprehensive.py "<path>" --strict --report docs_dev/validate_semantic_baseline_YYYYMMDD.md
+   uv run python scripts/validate_skill_comprehensive.py "<path>" --strict --report reports/validate_semantic_baseline_YYYYMMDD.md
    ```
 2. **Read the actual SKILL.md / agent .md files** for semantic evaluation
 3. **Evaluate each criterion** below (Pass / Partial / Fail)
 4. **Grade A-F** based on semantic quality gates
-5. **Write report** to `docs_dev/semantic_validation_YYYYMMDD.md`
+5. **Write report** to `reports/semantic_validation_YYYYMMDD.md`
 6. **Return**: `[DONE] Grade: X. Report: <filepath>`
 
 ## Parallel Evaluation for Multiple Files
@@ -80,7 +80,7 @@ When the user provides multiple skill paths or an entire plugin path:
 - **Evaluate each file independently** — spawn one subagent per file using the Agent tool with `subagent_type: "general-purpose"` and `model: "opus"`. Each subagent receives:
   - The file path to evaluate
   - The 7 core semantic criteria plus the conditional Channel Source Security pillar (copied from this agent's instructions) — the conditional pillar fires only when the enclosing plugin's `plugin.json` declares a non-empty `channels` array
-  - Instructions to write its grade to `docs_dev/semantic_<filename>_YYYYMMDD.md`
+  - Instructions to write its grade to `reports/semantic_<filename>_YYYYMMDD.md`
 - **Collect results** from all parallel evaluations
 - **Write consolidated report** with per-file grades and overall summary
 
@@ -155,6 +155,7 @@ For the full semantic validation criteria, scoring rubrics, and report format, s
 
 ## Rules
 
+- **ALWAYS write reports to `./reports/` at the project root** — even when running inside a git worktree, every report MUST land in the main project's `./reports/` folder (resolve via `$CLAUDE_PROJECT_DIR`, falling back to `git rev-parse --show-toplevel` or CWD). Parallel per-file subagents MUST also write to that same root — do NOT let them write to the worktree-local path. The folder is gitignored by convention — reports often contain private data. NEVER write to `docs_dev/`, `reports_dev/`, or a worktree-local path.
 - **ALWAYS discourage** — warn about cost and suggest script validation first.
 - **Run at most ONCE per session** — if the user asks for a second run, remind them of the cost and ask if they're sure.
 - **Always run script validation first** — do not duplicate what scripts already check.
@@ -186,7 +187,7 @@ assistant: Running baseline script validation...
 [Runs validate_skill_comprehensive.py --strict]
 Now performing deep semantic analysis...
 [Reads SKILL.md, evaluates 7 criteria]
-[DONE] Grade: B. 5 Pass, 2 Partial. Report: docs_dev/semantic_validation_20260306.md
+[DONE] Grade: B. 5 Pass, 2 Partial. Report: reports/semantic_validation_20260306.md
 </example>
 
 <example>
@@ -197,5 +198,5 @@ user: Yes
 assistant: Running baseline script validation on all files...
 [Spawns N parallel subagents, one per file]
 [Collects grades]
-[DONE] 11 files evaluated. Grades: A(3), B(5), C(2), D(1). Report: docs_dev/semantic_validation_full_20260306.md
+[DONE] 11 files evaluated. Grades: A(3), B(5), C(2), D(1). Report: reports/semantic_validation_full_20260306.md
 </example>

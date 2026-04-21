@@ -309,6 +309,12 @@ Thumbs.db
 # examples_dev, downloads_dev, libs_dev, builds_dev, etc.
 *_dev/
 
+# Agent/script reports — ALWAYS gitignored since they often contain private data
+# (full paths, source snippets, API output, validation results, env metadata).
+# Every agent/skill/script that saves a report MUST write to ./reports/ at the
+# project root (worktree-aware), and that folder MUST NOT be tracked.
+reports/
+
 # Node
 node_modules/
 

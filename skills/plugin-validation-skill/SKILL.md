@@ -22,7 +22,7 @@ Validates Claude Code plugins against 190+ structural and quality rules covering
 1. Set `CLAUDE_PRIVATE_USERNAMES="your_username"` if needed (usually auto-detected)
 2. Run the validator:
    ```bash
-   uv run python scripts/validate_plugin.py /path/to/plugin --report docs_dev/validate_plugin_YYYYMMDD.md
+   uv run python scripts/validate_plugin.py /path/to/plugin --report reports/validate_plugin_YYYYMMDD.md
    ```
 3. Review compact summary (always use `--report` to save details to file)
 4. Fix issues: CRITICAL > MAJOR > MINOR (use `/cpv-fix-validation <report_path>` for plugin reports, `/cpv-fix-marketplace-validation <report_path>` for marketplace reports)
@@ -33,7 +33,7 @@ Validates Claude Code plugins against 190+ structural and quality rules covering
 - **Syntactic Score**: 0-100 numeric with tier (PASS / CONDITIONAL_PASS / FAIL)
 - **Exit Code**: 0 (pass), 1 (CRITICAL), 2 (MAJOR), 3 (MINOR), 4 (NIT, --strict only). WARNING never blocks.
 - **Summary**: Issue counts by severity level
-- **Report File**: Full output saved to `docs_dev/validate_<plugin-name>_<date>.md`
+- **Report File**: Full output saved to `reports/validate_<plugin-name>_<date>.md` at the **project root** — worktree-aware. The folder is gitignored by convention; reports often contain private data (full paths, source snippets, validation output). Resolve the root with `${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}` when the caller runs inside a worktree.
 
 > For **Semantic Quality Grading** (A-F letter grades), use `/cpv-semantic-validation`.
 
@@ -46,8 +46,8 @@ Validates Claude Code plugins against 190+ structural and quality rules covering
 ## Examples
 
 ```bash
-uv run python scripts/validate_plugin.py /path/to/plugin --verbose --report docs_dev/report.md
-uv run python scripts/validate_skill_comprehensive.py /path/to/skill/ --strict --report docs_dev/report.md
+uv run python scripts/validate_plugin.py /path/to/plugin --verbose --report reports/report.md
+uv run python scripts/validate_skill_comprehensive.py /path/to/skill/ --strict --report reports/report.md
 ```
 
 ## Resources

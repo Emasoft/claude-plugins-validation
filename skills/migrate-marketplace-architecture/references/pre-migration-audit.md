@@ -177,7 +177,7 @@ characters — never the value or any prefix.
 
 ## 9. Audit Report Format
 
-The audit writes `docs_dev/pre-migration-audit_<timestamp>.md` containing:
+The audit writes `reports/pre-migration-audit_<timestamp>.md` (at the project root, gitignored, worktree-aware — resolve via `${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}`) containing:
 
 1. Target layout (A or B) — collected from the interrogation playbook
 2. Plugin inventory table: `| name | subdir | version | status |`

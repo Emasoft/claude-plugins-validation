@@ -143,7 +143,7 @@ With `--report`, the full detailed output is saved to file and only a compact su
 ```
 Plugin Validation: PASS
   CRITICAL:0 | MAJOR:0 | MINOR:2 | PASSED:155
-  Report: docs_dev/validate_plugin_20260306.md
+  Report: reports/validate_plugin_20260306.md
 ```
 
 ## Exit Codes
@@ -168,14 +168,16 @@ Plugin Validation: PASS
 
 ## Execution
 
+> **Report location (mandatory):** every report is saved under `./reports/` at the **project root**, even when the command runs inside a git worktree. The folder is gitignored by convention — reports often contain private data (full paths, source snippets, validation output). Resolve the root with `${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}` when a non-CWD anchor is needed.
+
 When running from the CPV plugin directory (has pyproject.toml with pyyaml):
 ```bash
-uv run python scripts/validate_plugin.py "$PLUGIN_PATH" $OPTIONS --report docs_dev/validate_plugin_$(date +%Y%m%d).md
+uv run python scripts/validate_plugin.py "$PLUGIN_PATH" $OPTIONS --report reports/validate_plugin_$(date +%Y%m%d).md
 ```
 
 When running from another plugin's directory (no pyproject.toml), use `--with` to provide pyyaml:
 ```bash
-uv run --with pyyaml python scripts/validate_plugin.py . $OPTIONS --report docs_dev/validate_plugin_$(date +%Y%m%d).md
+uv run --with pyyaml python scripts/validate_plugin.py . $OPTIONS --report reports/validate_plugin_$(date +%Y%m%d).md
 ```
 
 ## Related Commands
