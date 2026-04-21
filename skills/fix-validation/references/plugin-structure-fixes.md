@@ -1112,15 +1112,15 @@ Common issues include:
 **Error message** (v2.26.0+): `README.md has badge markdown but is missing the automation markers (<!--BADGES-START--> / <!--BADGES-END-->). CI cannot regenerate badges without the markers — wrap the badge block with those HTML comments so scripts/update_badges.py (or equivalent) can refresh versions/CI status automatically.`
 **Severity**: WARNING
 **Source**: `validate_plugin.py` — `validate_readme()`
-**When it fires (v2.26.0)**: ONLY when the README already contains literal badge markdown — either `[![alt](img)](href)` image-link badges, or a raw `shields.io` / `img.shields.io` URL. A README with no badges at all does NOT trip this warning anymore (fixed in v2.26.0 — previously it fired on every badge-less README).
+**When it fires (v2.26.0)**: ONLY when the README already contains literal badge markdown — either `[![alt](img)](href)` image-link badges, or a raw `shields.io` / `img.shields.io` URL. A README with no badges at all does NOT trip this warning anymore (fixed in v2.26.0 — previously it fired on every badge-less README). **An empty marker block** (`<!--BADGES-START-->\n<!--BADGES-END-->` with nothing between them, waiting for CI to populate) is a **valid and common pattern** and does NOT trigger this warning either — markers present → check passes.
 
 **Root cause**: The plugin ships badges as literal markdown that CI cannot auto-refresh. Version numbers in badges drift out of sync with `plugin.json` on every release; CI-status badges cache stale results without an automated regeneration pass.
 
 **Two legitimate fixes**:
 
-#### Fix A: Wrap existing badges with the automation markers (preferred)
+#### Fix A: Wrap existing badges with the automation markers (preferred in almost all cases)
 
-Add the `<!--BADGES-START-->` / `<!--BADGES-END-->` HTML comments around the badge block so `scripts/update_badges.py` (or any regeneration script) can target the region:
+Add the `<!--BADGES-START-->` / `<!--BADGES-END-->` HTML comments around the existing badge block. The badge markdown stays where it is; only the two HTML-comment wrappers are added:
 
 ```markdown
 # My Plugin
@@ -1136,13 +1136,25 @@ Add the `<!--BADGES-START-->` / `<!--BADGES-END-->` HTML comments around the bad
 
 The `scripts/generate_plugin_repo.py` scaffold emits this form by default, so new plugins get the markers for free. For existing READMEs, just add the two comments around whatever badges are already there.
 
-#### Fix B: Remove the badges entirely
+**Valid CI-placeholder variant**: if the plugin's CI populates badges on push, the wrapped region can be left empty — CI fills it in:
 
-If the plugin genuinely doesn't want auto-updated badges (e.g., a minimal README with no CI integration), delete the badge markdown. The warning disappears because the v2.26.0 check only fires on literal badges; a badge-less README is silent.
+```markdown
+<!--BADGES-START-->
+<!--BADGES-END-->
+```
 
-#### Forbidden "fix"
+The validator passes this form (markers present → pass) and the fixer MUST preserve it — treat empty-between-markers as intentional, not a cleanup target.
 
-- ❌ Adding the markers around an empty region just to silence the warning while the actual badges live elsewhere in the file. The markers must wrap the real badge block — CI regeneration scripts replace everything between them.
+#### Fix B: Remove the literal badge MARKDOWN (not the markers)
+
+Only use this when the plugin genuinely doesn't want badges at all (minimal README, no CI integration, hand-maintained project metadata). Delete the `[![...](url)](href)` and `shields.io` URLs. The HTML-comment markers can stay or go — if they stay empty, the validator still passes (they become harmless placeholders); if they go, a badge-less README is silent.
+
+**Scope of this fix**: what is removed is the LITERAL badge markdown (`[![CI](...)](...)`, shields.io URLs, plain-image badge lines). NEVER interpret this fix as permission to delete `<!--BADGES-START-->` / `<!--BADGES-END-->` markers — those are a CI-integration signal, not "bad content". If in doubt, prefer Fix A.
+
+#### Forbidden "fixes"
+
+- ❌ Deleting `<!--BADGES-START-->` / `<!--BADGES-END-->` markers to "clean up" a README. These markers are a contract with CI workflows that regenerate badges on push; removing them silently breaks automation and is not reversible from the validator's output alone. If the markers look empty, assume CI populates them.
+- ❌ Adding the markers around an empty region just to silence the warning while the actual badges live elsewhere in the file. CI regeneration scripts replace everything between the markers — the real badge block must be inside them or it will be overwritten.
 
 ### MINOR: No LICENSE file found
 

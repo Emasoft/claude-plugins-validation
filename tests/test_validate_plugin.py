@@ -936,6 +936,36 @@ class TestValidateReadmeAndLicense:
         ]
         assert badge_warnings, "shields.io badge without markers was NOT flagged (regression)"
 
+    def test_badge_markers_empty_ci_placeholder_passes(self, tmp_path):
+        """Empty `<!--BADGES-START-->...<!--BADGES-END-->` region with no
+        badges inside is a valid CI-placeholder pattern — common when a
+        workflow populates the region on push. The validator must PASS
+        (not warn) and the fixer must never suggest removing these
+        markers. Regression guard for v2.26.0 fixer-guidance tightening."""
+        plugin_dir = tmp_path / "empty-markers"
+        plugin_dir.mkdir()
+        (plugin_dir / "README.md").write_text(
+            "# My Plugin\n\n"
+            "<!--BADGES-START-->\n"
+            "<!--BADGES-END-->\n\n"
+            "A minimal README.\n"
+        )
+        report = ValidationReport()
+        validate_readme(plugin_dir, report)
+        badge_warnings = [
+            r for r in report.results if r.level == "WARNING" and "badge" in r.message.lower()
+        ]
+        assert not badge_warnings, (
+            f"empty CI-placeholder markers triggered a warning — "
+            f"must be silent per v2.26.0 guidance: "
+            f"{[r.message for r in badge_warnings]}"
+        )
+        passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
+        assert any("badge markers" in m for m in passed_msgs), (
+            "empty-marker CI-placeholder pattern did not produce the "
+            "PASSED result — markers present should always pass"
+        )
+
     def test_license_missing_reports_minor(self, tmp_path):
         """validate_license reports MINOR when no LICENSE file exists (lines 925-928)."""
         plugin_dir = tmp_path / "no-lic"
