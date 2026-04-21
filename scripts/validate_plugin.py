@@ -1450,6 +1450,7 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         "target",
         "output-styles",
         "design",  # TRDD design docs (design/tasks/)
+        "reports",  # v2.24.0 — mandated report output folder (gitignored; see cpv_validation_common.resolve_reports_dir())
         # Common dirs across many plugins (added v2.23.2 after empirical scan
         # of 160 installed plugins surfaced these as repeat false positives):
         "prompts",  # prompt templates (used by codex and most AI plugins)

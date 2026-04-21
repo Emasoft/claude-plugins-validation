@@ -52,7 +52,7 @@ This produces a **Semantic Grade (A-F)**, complementary to the **Syntactic Score
 
 - **Grade**: A-F letter grade based on semantic quality
 - **Criteria Results**: Pass/Partial/Fail for each of 7 core criteria, plus Pass/Partial/Fail/N/A for the conditional Channel Source Security pillar
-- **Report File**: Full analysis saved to `reports/semantic_validation_YYYYMMDD.md` at the **project root** — worktree-aware. The folder is gitignored by convention; reports often contain private data. Resolve the root with `${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}` when running inside a worktree.
+- **Report File**: `reports/semantic_validation_YYYYMMDD.md` (project-root, gitignored, worktree-aware).
 
 ## Error Handling
 
