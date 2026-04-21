@@ -357,30 +357,39 @@ dist/
 .claude/
 llm_externalizer_output/
 .tldr/
+reports/
+reports_dev/
 """
 
     def test_claude_dir_missing_warns(self, tmp_path):
-        """Missing .claude/ in gitignore reports MINOR."""
+        """Missing .claude/ in gitignore reports MINOR — but only when the
+        folder actually exists. v2.25.0 rule: never flag non-existent
+        artifacts."""
         gi = self._full_gitignore().replace(".claude/\n", "")
         plugin = _make_plugin(tmp_path, gitignore=gi)
+        (plugin / ".claude").mkdir()  # the artifact must exist to be flagged
         report = ValidationReport()
         validate_gitignore(plugin, report)
         msgs = [r.message for r in report.results if r.level == "MINOR"]
         assert any(".claude" in m.lower() for m in msgs)
 
     def test_llm_externalizer_output_missing_warns(self, tmp_path):
-        """Missing llm_externalizer_output/ in gitignore reports WARNING."""
+        """Missing llm_externalizer_output/ in gitignore reports WARNING —
+        only when the folder actually exists."""
         gi = self._full_gitignore().replace("llm_externalizer_output/\n", "")
         plugin = _make_plugin(tmp_path, gitignore=gi)
+        (plugin / "llm_externalizer_output").mkdir()
         report = ValidationReport()
         validate_gitignore(plugin, report)
         msgs = [r.message for r in report.results if r.level == "WARNING"]
         assert any("llm externalizer" in m.lower() for m in msgs)
 
     def test_tldr_dir_missing_warns(self, tmp_path):
-        """Missing .tldr/ in gitignore reports WARNING."""
+        """Missing .tldr/ in gitignore reports WARNING — only when the
+        folder actually exists."""
         gi = self._full_gitignore().replace(".tldr/\n", "")
         plugin = _make_plugin(tmp_path, gitignore=gi)
+        (plugin / ".tldr").mkdir()
         report = ValidationReport()
         validate_gitignore(plugin, report)
         msgs = [r.message for r in report.results if r.level == "WARNING"]
@@ -394,6 +403,57 @@ llm_externalizer_output/
         msgs = [r.message for r in report.results if r.level == "PASSED"]
         assert any("all expected categories" in m.lower() for m in msgs)
 
+    def test_nonexistent_folder_not_flagged(self, tmp_path):
+        """Categories whose artifact does NOT exist in the plugin must not
+        be flagged even if the pattern is missing from .gitignore.
+        v2.25.0 rule: never speculate on future files."""
+        gi = self._full_gitignore().replace(".claude/\n", "")
+        plugin = _make_plugin(tmp_path, gitignore=gi)
+        # note: no (.claude/) folder created
+        report = ValidationReport()
+        validate_gitignore(plugin, report)
+        for r in report.results:
+            assert ".claude" not in r.message.lower(), (
+                f"flagged non-existent .claude/ — v2.25.0 should suppress: {r.message}"
+            )
+
+    def test_reports_dir_missing_reports_major(self, tmp_path):
+        """Missing reports/ in gitignore reports MAJOR — only when reports/
+        actually exists (v2.25.0 rule)."""
+        gi = self._full_gitignore().replace("reports/\n", "")
+        plugin = _make_plugin(tmp_path, gitignore=gi)
+        (plugin / "reports").mkdir()
+        report = ValidationReport()
+        validate_gitignore(plugin, report)
+        msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("reports/" in m for m in msgs)
+
+    def test_reports_dev_dir_missing_warns(self, tmp_path):
+        """Missing reports_dev/ in gitignore reports WARNING — only when the
+        folder actually exists (v2.25.0 rule)."""
+        gi = self._full_gitignore().replace("reports_dev/\n", "")
+        plugin = _make_plugin(tmp_path, gitignore=gi)
+        (plugin / "reports_dev").mkdir()
+        report = ValidationReport()
+        validate_gitignore(plugin, report)
+        msgs = [r.message for r in report.results if r.level == "WARNING"]
+        assert any("reports_dev/" in m for m in msgs)
+
+    def test_reports_pattern_does_not_false_match_reports_dev(self, tmp_path):
+        """`reports_dev/` in .gitignore must NOT satisfy the `reports/`
+        requirement (regression guard: trailing-slash substring-matching)."""
+        gi = self._full_gitignore().replace("reports/\n", "")
+        plugin = _make_plugin(tmp_path, gitignore=gi)
+        (plugin / "reports").mkdir()
+        (plugin / "reports_dev").mkdir()
+        report = ValidationReport()
+        validate_gitignore(plugin, report)
+        msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("reports/" in m for m in msgs), (
+            "reports_dev/ satisfied the reports/ requirement — the validator "
+            "is substring-matching without the trailing slash"
+        )
+
     def test_no_gitignore_reports_major(self, tmp_path):
         """Plugin without .gitignore reports MAJOR."""
         plugin = _make_plugin(tmp_path)
@@ -402,9 +462,11 @@ llm_externalizer_output/
         assert report.has_major
 
     def test_env_missing_reports_major(self, tmp_path):
-        """Missing .env pattern in gitignore reports MAJOR."""
+        """Missing .env pattern in gitignore reports MAJOR — only when a
+        .env file actually exists (v2.25.0 rule)."""
         gi = self._full_gitignore().replace(".env\n", "")
         plugin = _make_plugin(tmp_path, gitignore=gi)
+        (plugin / ".env").write_text("SECRET=x")
         report = ValidationReport()
         validate_gitignore(plugin, report)
         msgs = [r.message for r in report.results if r.level == "MAJOR"]

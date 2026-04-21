@@ -36,11 +36,11 @@ Full architectural migration with extensive `AskUserQuestion` interaction. Loade
    - **Layout A** — [layout-a-migration](references/layout-a-migration.md) (hub-and-spoke).
    - **Layout B** — [layout-b-discipline](references/layout-b-discipline.md) (nested).
 
-4. **Wire auto-notification (Layout A only)** — for every new plugin repo, configure the auto-notify chain via the `setup-marketplace-auto-notification` skill: `pat-secret-setup.md` (env-var auto-detect), `notify-workflow-template.md`, `receiver-workflow-template.md`. Repeat per plugin. Layout B tags atomically and does NOT need cross-repo notification.
+4. **Wire auto-notification (Layout A only)** — for every new plugin repo, configure the auto-notify chain via `setup-marketplace-auto-notification` (pat-secret-setup, notify-workflow-template, receiver-workflow-template). Repeat per plugin. Layout B tags atomically and does NOT need cross-repo notification.
 
 5. **Verify** with `validate_marketplace.py --strict` and `validate_plugin.py --strict` on every new plugin. Fix every non-WARNING finding.
 
-6. **Write the migration log** at `$MAIN_ROOT/reports/migrate-marketplace-architecture/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` at the main-repo root (first entry of `git worktree list`).
+6. **Write the migration log** at `$MAIN_ROOT/reports/migrate-marketplace-architecture/<ts±tz>-<slug>.md`.
 
 Copy this checklist and track your progress:
 
@@ -57,7 +57,7 @@ Copy this checklist and track your progress:
 
 - **Layout A**: N plugin repos + cleaned marketplace (github sources, `plugins/*` removed, tagged). Each repo wired for auto-notify.
 - **Layout B**: same repo with `publish.py`, `cliff.toml`, CI, `CHANGELOG.md`, `CONTRIBUTORS.md` (optional), one atomic commit tagged.
-- `$MAIN_ROOT/reports/migrate-marketplace-architecture/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`
+- `$MAIN_ROOT/reports/migrate-marketplace-architecture/<ts±tz>-<slug>.md`
 
 ## Error Handling
 

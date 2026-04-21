@@ -708,7 +708,8 @@ class TestValidateGitignore:
         assert any("No .gitignore file found" in m for m in major_msgs)
 
     def test_complete_gitignore_passes(self, tmp_path):
-        """validate_gitignore passes when all categories are covered (lines 1036-1037)."""
+        """validate_gitignore passes when all categories are covered
+        (including reports/ and reports_dev/ per v2.25.0 rule)."""
         plugin_dir = tmp_path / "good-gi"
         plugin_dir.mkdir()
         gitignore_content = """
@@ -731,6 +732,8 @@ venv/
 .claude/
 llm_externalizer_output/
 .tldr/
+reports/
+reports_dev/
 """
         (plugin_dir / ".gitignore").write_text(gitignore_content)
         report = ValidationReport()
@@ -739,14 +742,20 @@ llm_externalizer_output/
         assert any("covers all expected categories" in m for m in passed_msgs)
 
     def test_gitignore_missing_categories_reports_issues(self, tmp_path):
-        """validate_gitignore reports warnings/majors for missing categories (lines 1038-1040)."""
+        """validate_gitignore reports warnings/majors for missing categories
+        when the corresponding artifact actually exists (v2.25.0 rule: only
+        flag existing artifacts, never speculate on future files)."""
         plugin_dir = tmp_path / "partial-gi"
         plugin_dir.mkdir()
         # Only include __pycache__ - missing everything else
         (plugin_dir / ".gitignore").write_text("__pycache__/\n")
+        # Create artifacts that should trigger the missing-coverage check
+        (plugin_dir / "node_modules").mkdir()
+        (plugin_dir / ".env").write_text("SECRET=x")
+        (plugin_dir / ".venv").mkdir()
         report = ValidationReport()
         validate_gitignore(plugin_dir, report)
-        # Should have warnings for missing node_modules, etc. and MAJOR for .env
+        # Should have WARNING for missing node_modules and MAJOR for .env / .venv
         warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
         assert any("missing coverage" in m for m in warning_msgs) or any("missing coverage" in m for m in major_msgs)
