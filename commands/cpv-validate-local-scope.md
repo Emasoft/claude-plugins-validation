@@ -130,10 +130,12 @@ version-locked plugin directory (`~/.claude/plugins/cache/<marketplace>/
 in-session validation; that would pull an unpinned `main` that drifts from
 the behavior the user installed.
 
+> **Report location (mandatory):** every report is saved under `./reports/` at the project root, even when the command runs inside a git worktree. The folder is gitignored by convention — reports often contain private data.
+
 ```bash
 uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/validate_local_scope.py" \
   "$PROJECT_PATH" \
-  --report "${PROJECT_PATH}/docs_dev/validate_local_scope_$(date +%Y%m%d).md"
+  --report "${PROJECT_PATH}/reports/validate_local_scope_$(date +%Y%m%d).md"
 ```
 
 This works out-of-the-box from any Claude Code session — no

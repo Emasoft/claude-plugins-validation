@@ -87,6 +87,7 @@ def _has_any_source_file(plugin_root: Path, suffix: str, limit: int = 500) -> Pa
         ".mypy_cache",
         ".tldr",
         ".claude",
+        "reports",
         "reports_dev",
         "docs_dev",
         "scripts_dev",

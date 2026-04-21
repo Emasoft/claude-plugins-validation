@@ -41,11 +41,12 @@ Wait for the user's answer before doing anything. Use the `skill-validation-skil
 ## Validation Command
 
 ```bash
-uv run python scripts/validate_skill_comprehensive.py "<skill_path>" [--strict] [--openspec] [--pillars] [--verbose] --report docs_dev/validate_skill_YYYYMMDD.md
+uv run python scripts/validate_skill_comprehensive.py "<skill_path>" [--strict] [--openspec] [--pillars] [--verbose] --report reports/validate_skill_YYYYMMDD.md
 ```
 
 ## Rules
 
+- **ALWAYS write reports to `./reports/` at the project root** — even when running inside a git worktree, reports MUST land in the main project's `./reports/` folder (resolve via `$CLAUDE_PROJECT_DIR`, falling back to `git rev-parse --show-toplevel` or CWD). The folder is gitignored by convention — reports often contain private data. NEVER write reports to `docs_dev/`, `reports_dev/`, or a worktree-local path.
 - **ALWAYS use `--report`** — saves full output to file, prints only compact summary
 - **NEVER read the report file** — provide the path to the user
 - **NEVER read source files** — the script does the reading
@@ -67,10 +68,10 @@ uv run python scripts/validate_skill_comprehensive.py "<skill_path>" [--strict] 
 
 <example>
 user: Validate my-skill with strict mode
-assistant: [Runs: uv run python scripts/validate_skill_comprehensive.py ./my-skill --strict --verbose --report docs_dev/validate_my-skill_20260306.md]
+assistant: [Runs: uv run python scripts/validate_skill_comprehensive.py ./my-skill --strict --verbose --report reports/validate_my-skill_20260306.md]
 Skill Validation: FAIL (major)
   CRITICAL:0 | MAJOR:1 | MINOR:2 | PASSED:15
-  Report: docs_dev/validate_my-skill_20260306.md
+  Report: reports/validate_my-skill_20260306.md
 </example>
 
 <example>

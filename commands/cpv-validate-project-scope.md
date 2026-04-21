@@ -133,10 +133,12 @@ Slash commands ALWAYS run the validator from the installed plugin —
 `${CLAUDE_PLUGIN_ROOT}` is set by Claude Code. **Never** fetch scripts
 from GitHub at runtime for in-session validation.
 
+> **Report location (mandatory):** every report is saved under `./reports/` at the project root, even when the command runs inside a git worktree. The folder is gitignored by convention — reports often contain private data.
+
 ```bash
 uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/validate_project_scope.py" \
   "$PROJECT_PATH" \
-  --report "${PROJECT_PATH}/docs_dev/validate_project_scope_$(date +%Y%m%d).md"
+  --report "${PROJECT_PATH}/reports/validate_project_scope_$(date +%Y%m%d).md"
 ```
 
 ### Alternative invocations (not for slash-command flow)

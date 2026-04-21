@@ -1035,7 +1035,7 @@ The following directories are always skipped by all validators (SKIP_DIRS):
 
 Additional directories skipped for private info scanning (PRIVATE_INFO_SKIP_DIRS adds):
 
-`venv`, `target`, `.eggs`, `docs_dev`, `scripts_dev`, `tests_dev`, `examples_dev`, `samples_dev`, `downloads_dev`, `libs_dev`, `builds_dev`
+`venv`, `target`, `.eggs`, `reports`, `reports_dev`, `docs_dev`, `scripts_dev`, `tests_dev`, `examples_dev`, `samples_dev`, `downloads_dev`, `libs_dev`, `builds_dev`
 
 ## Appendix: Files Exempt from Certain Checks
 

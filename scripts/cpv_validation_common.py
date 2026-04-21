@@ -1993,6 +1993,88 @@ def get_plugin_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def resolve_project_root(anchor: Path | None = None) -> Path:
+    """Resolve the project root for a worktree-aware reports directory.
+
+    Resolution order:
+        1. ``CLAUDE_PROJECT_DIR`` env var (set by Claude Code — always points to
+           the original project directory, even when the agent runs inside a
+           ``git worktree``).
+        2. The main worktree of the enclosing git repo. When ``anchor`` (or the
+           current working directory) is a linked worktree, ``git rev-parse
+           --git-common-dir`` points to the main ``.git`` directory; its parent
+           is the main worktree root.
+        3. The enclosing git repo toplevel (``git rev-parse --show-toplevel``).
+        4. The caller's anchor or CWD.
+
+    Args:
+        anchor: Optional starting path. Defaults to ``Path.cwd()``.
+
+    Returns:
+        Absolute path to the project root.
+    """
+    env_dir = os.environ.get("CLAUDE_PROJECT_DIR")
+    if env_dir:
+        p = Path(env_dir).expanduser()
+        if p.is_dir():
+            return p.resolve()
+
+    start = (anchor or Path.cwd()).resolve()
+
+    try:
+        common = subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            cwd=str(start),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        if common.returncode == 0:
+            common_dir = Path(common.stdout.strip())
+            if common_dir.name == ".git" and common_dir.parent.is_dir():
+                return common_dir.parent.resolve()
+    except (FileNotFoundError, subprocess.SubprocessError):
+        pass
+
+    try:
+        top = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=str(start),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        if top.returncode == 0 and top.stdout.strip():
+            return Path(top.stdout.strip()).resolve()
+    except (FileNotFoundError, subprocess.SubprocessError):
+        pass
+
+    return start
+
+
+def resolve_reports_dir(anchor: Path | None = None, *, ensure: bool = True) -> Path:
+    """Resolve the ``./reports/`` directory at the main project root.
+
+    Every agent, skill, and script that saves a report MUST write into the
+    directory returned here. ``./reports/`` is gitignored by convention so
+    reports may safely contain private data (full paths, source snippets,
+    validation output).
+
+    Args:
+        anchor: Optional starting path; defaults to the current directory.
+        ensure: When True (default), create the directory if it does not exist.
+
+    Returns:
+        Absolute path to the ``reports/`` directory.
+    """
+    reports = resolve_project_root(anchor) / "reports"
+    if ensure:
+        reports.mkdir(parents=True, exist_ok=True)
+    return reports
+
+
 def is_valid_kebab_case(name: str) -> bool:
     """Check if name follows kebab-case convention."""
     return bool(NAME_PATTERN.match(name))

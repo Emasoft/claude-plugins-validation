@@ -150,7 +150,7 @@ The `.mega-linter.yml` config must include:
 | Issue | Fix |
 |-------|-----|
 | SKILL.md missing sections | Add: Overview, Prerequisites, Instructions (numbered), Output, Error Handling, Examples, Resources |
-| .gitignore gaps | Append missing patterns: __pycache__/, .venv/, .env, dist/, build/, .coverage, .pytest_cache/, .ruff_cache/, node_modules/, *_dev/ |
+| .gitignore gaps | Append missing patterns: __pycache__/, .venv/, .env, dist/, build/, .coverage, .pytest_cache/, .ruff_cache/, node_modules/, *_dev/, reports/ |
 | Missing README badges | Add `<!--BADGES-START-->` block with CI, Version, License, Validation badges |
 | Missing LICENSE | Create MIT LICENSE file |
 | Script not executable | `chmod +x <script>` |

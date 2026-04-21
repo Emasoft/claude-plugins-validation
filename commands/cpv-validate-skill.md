@@ -149,8 +149,10 @@ Uses standard CPV severity levels and exit codes. With `--report`, saves full ou
 
 ## Execution
 
+> **Report location (mandatory):** every report is saved under `./reports/` at the project root, even when the command runs inside a git worktree. The folder is gitignored by convention — reports often contain private data.
+
 ```bash
-uv run python scripts/validate_skill_comprehensive.py "$SKILL_PATH" $OPTIONS --report docs_dev/validate_skill_$(date +%Y%m%d).md
+uv run python scripts/validate_skill_comprehensive.py "$SKILL_PATH" $OPTIONS --report reports/validate_skill_$(date +%Y%m%d).md
 ```
 
 Where `$SKILL_PATH` is the provided path and `$OPTIONS` are the flags passed.

@@ -1990,7 +1990,7 @@ The extractor now returns `ScriptRef(path, invocation_mode, simple_command, expl
 
 ### 13.12. Fix-agent checklist (work each item top-to-bottom)
 
-Copy the checklist below into your fix log at `docs_dev/fix-log_<plugin>_YYYYMMDD.md` and tick items as they're complete. Do NOT skip the verification step — silently leaving a script broken is worse than not fixing it at all.
+Copy the checklist below into your fix log at `reports/fix-log_<plugin>_YYYYMMDD.md` (at the project root, gitignored, worktree-aware) and tick items as they're complete. Do NOT skip the verification step — silently leaving a script broken is worse than not fixing it at all.
 
 ```
 Runtime-dep fix checklist (per affected hook command)

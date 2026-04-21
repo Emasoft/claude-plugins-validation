@@ -22,7 +22,7 @@ Copy this checklist into your fix log and tick each item as you go:
 - [ ] Evaluate every remaining WARNING against the publish-blocker rules
 - [ ] Fix publish-blocker WARNINGs; leave truly-advisory WARNINGs with per-entry justification
 - [ ] Stop when findings empty AND no blocking warnings, OR escalate at iteration 5 / identical-finding-set
-- [ ] Write the iteration-by-iteration fix log to `docs_dev/fix-log_<name>_YYYYMMDD.md`
+- [ ] Write the iteration-by-iteration fix log to `reports/fix-log_<name>_YYYYMMDD.md` (at the project root — gitignored, worktree-aware; resolve via `${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}` when running inside a worktree; NEVER write to `docs_dev/` or `reports_dev/`)
 - [ ] Return one-line summary to caller
 
 ## Why a loop

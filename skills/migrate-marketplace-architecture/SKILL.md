@@ -40,7 +40,7 @@ Full architectural migration with extensive `AskUserQuestion` interaction. Loade
 
 5. **Verify** with `validate_marketplace.py --strict` and `validate_plugin.py --strict` on every new plugin. Fix every non-WARNING finding.
 
-6. **Write the migration log** at `docs_dev/migration-log_<marketplace>_<date>.md`.
+6. **Write the migration log** at `reports/migration-log_<marketplace>_<date>.md` — always at the **project root** (gitignored, worktree-aware). Resolve the root with `${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}` when running inside a worktree. NEVER write to `docs_dev/`, `reports_dev/`, or a worktree-local path — migration logs record every user decision and every command, which often leaks local paths and secrets.
 
 Copy this checklist and track your progress:
 
@@ -57,7 +57,7 @@ Copy this checklist and track your progress:
 
 - **Layout A**: N plugin repos + cleaned marketplace (github sources, `plugins/*` removed, tagged). Each repo wired for auto-notify.
 - **Layout B**: same repo with `publish.py`, `cliff.toml`, CI, `CHANGELOG.md`, `CONTRIBUTORS.md` (optional), one atomic commit tagged.
-- `docs_dev/migration-log_<marketplace>_<date>.md`.
+- `reports/migration-log_<marketplace>_<date>.md`.
 
 ## Error Handling
 

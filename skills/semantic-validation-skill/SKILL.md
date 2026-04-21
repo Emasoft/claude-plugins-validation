@@ -42,17 +42,17 @@ This produces a **Semantic Grade (A-F)**, complementary to the **Syntactic Score
 2. Run the command: `/cpv-semantic-validation <skill_or_agent_path>`
 3. The agent runs cheap script validation first as a baseline:
    ```bash
-   uv run python scripts/validate_skill_comprehensive.py "<skill_path>" --strict --report docs_dev/validate_semantic_baseline_YYYYMMDD.md
+   uv run python scripts/validate_skill_comprehensive.py "<skill_path>" --strict --report reports/validate_semantic_baseline_YYYYMMDD.md
    ```
 4. The agent reads the actual SKILL.md and agent .md files
 5. The agent evaluates 7 core semantic criteria plus 1 conditional pillar (Channel MCP Server Source-Code Security — only when `plugin.json.channels` is non-empty)
-6. Review the grade (A-F) and report at `docs_dev/semantic_validation_YYYYMMDD.md`
+6. Review the grade (A-F) and report at `reports/semantic_validation_YYYYMMDD.md`
 
 ## Output
 
 - **Grade**: A-F letter grade based on semantic quality
 - **Criteria Results**: Pass/Partial/Fail for each of 7 core criteria, plus Pass/Partial/Fail/N/A for the conditional Channel Source Security pillar
-- **Report File**: Full analysis saved to `docs_dev/semantic_validation_YYYYMMDD.md`
+- **Report File**: Full analysis saved to `reports/semantic_validation_YYYYMMDD.md` at the **project root** — worktree-aware. The folder is gitignored by convention; reports often contain private data. Resolve the root with `${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}` when running inside a worktree.
 
 ## Error Handling
 

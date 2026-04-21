@@ -277,7 +277,7 @@ architecture warnings in the report:
 
 ```bash
 uv run --with pyyaml python scripts/validate_marketplace.py . --strict \
-  2>&1 | tee "docs_dev/layout-b-verify_$(date -u +%Y%m%d).log"
+  2>&1 | tee "reports/layout-b-verify_$(date -u +%Y%m%d).log"
 ```
 
 Also run the per-plugin validator against every subdirectory so the report
@@ -305,5 +305,5 @@ Layout B is fully additive, so rollback is simple:
   discipline upgrade is rolled back.
 
 Record every rollback decision in
-`docs_dev/migration-log_<marketplace>_<date>.md` under a fresh timestamped
-entry.
+`reports/migration-log_<marketplace>_<date>.md` (at the project root,
+gitignored, worktree-aware) under a fresh timestamped entry.

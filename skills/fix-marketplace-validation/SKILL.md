@@ -48,7 +48,7 @@ If a report mixes both kinds, fix the mechanical findings first, then hand off t
 
 ## Output
 
-The fixer agent uses this index to locate the correct fix guide, then applies the fix and logs it to `docs_dev/fix-log_<marketplace-name>_YYYYMMDD.md`.
+The fixer agent uses this index to locate the correct fix guide, then applies the fix and logs it to `reports/fix-log_<marketplace-name>_YYYYMMDD.md` at the **project root** (gitignored, worktree-aware). Resolve the root with `${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}` when running inside a worktree. NEVER write fix logs to `docs_dev/`, `reports_dev/`, or a worktree-local path.
 
 ## Error Handling
 

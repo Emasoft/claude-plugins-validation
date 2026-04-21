@@ -39,7 +39,7 @@ Deep semantic analysis of skill or agent quality. Evaluates aspects that automat
 
 - Grade: A-F
 - Per-criterion: Pass / Partial / Fail
-- Report file: `docs_dev/semantic_validation_YYYYMMDD.md`
+- Report file: `reports/semantic_validation_YYYYMMDD.md` (at the project root, gitignored — worktree-aware)
 
 ## Examples
 

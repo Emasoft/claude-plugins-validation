@@ -34,13 +34,13 @@ Reads a **plugin** validation report file and fixes the issues it contains, one 
 ## Examples
 
 ```
-/cpv-fix-validation docs_dev/validate_my-plugin_20260306.md
-/cpv-fix-validation docs_dev/validate_skill_20260306.md
+/cpv-fix-validation reports/validate_my-plugin_20260306.md
+/cpv-fix-validation reports/validate_skill_20260306.md
 ```
 
 ## Output
 
-- Fix log saved to `docs_dev/fix-log_<name>_YYYYMMDD.md`
+- Fix log saved to `reports/fix-log_<name>_YYYYMMDD.md` (at the project root, gitignored — worktree-aware)
 - Summary: number of issues fixed vs total
 
 ## Related Commands
