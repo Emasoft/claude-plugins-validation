@@ -40,7 +40,7 @@ Full architectural migration with extensive `AskUserQuestion` interaction. Loade
 
 5. **Verify** with `validate_marketplace.py --strict` and `validate_plugin.py --strict` on every new plugin. Fix every non-WARNING finding.
 
-6. **Write the migration log** at `reports/migration-log_<marketplace>_<date>.md` (project-root, gitignored).
+6. **Write the migration log** at `$MAIN_ROOT/reports/migrate-marketplace-architecture/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` at the main-repo root (first entry of `git worktree list`).
 
 Copy this checklist and track your progress:
 
@@ -57,7 +57,7 @@ Copy this checklist and track your progress:
 
 - **Layout A**: N plugin repos + cleaned marketplace (github sources, `plugins/*` removed, tagged). Each repo wired for auto-notify.
 - **Layout B**: same repo with `publish.py`, `cliff.toml`, CI, `CHANGELOG.md`, `CONTRIBUTORS.md` (optional), one atomic commit tagged.
-- `reports/migration-log_<marketplace>_<date>.md`
+- `$MAIN_ROOT/reports/migrate-marketplace-architecture/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`
 
 ## Error Handling
 

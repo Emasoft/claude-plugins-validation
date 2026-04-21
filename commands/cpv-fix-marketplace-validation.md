@@ -32,14 +32,14 @@ The argument is optional — if omitted, the marketplace-fixer agent asks what t
 3. For remaining mechanical findings, fixes in strict priority order: CRITICAL → MAJOR → MINOR → NIT.
 4. Consults `fix-marketplace-validation` to map each error to the correct fix guide section, then applies the Edit.
 5. Skips WARNING items (advisory only).
-6. Writes a fix log to `reports/fix-log_<marketplace-name>_YYYYMMDD.md`.
+6. Writes a fix log to `$MAIN_ROOT/reports/marketplace-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`.
 7. Returns a one-line summary: `fixed N of M issues. Report: <filepath>`.
 
 ## Examples
 
 ```
-/cpv-fix-marketplace-validation reports/validate_marketplace_my-hub_20260412.md
-/cpv-fix-marketplace-validation reports/validate_marketplace_pipeline_acme_20260412.md
+/cpv-fix-marketplace-validation reports/validate_marketplace/20260421_183012+0200-my-hub.md
+/cpv-fix-marketplace-validation reports/validate_marketplace_pipeline/20260421_183012+0200-acme.md
 /cpv-fix-marketplace-validation
 ```
 
@@ -47,9 +47,11 @@ The third form (no argument) triggers the First Contact menu in the marketplace-
 
 ## Output
 
-- Fix log saved to `reports/fix-log_<marketplace-name>_YYYYMMDD.md`
+All outputs land at the **main-repo root** (never a linked worktree). Resolve via `git worktree list | head -n1`. Both `reports/` and `reports_dev/` are gitignored.
+
+- Fix log: `$MAIN_ROOT/reports/marketplace-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`
 - Summary: number of issues fixed vs total
-- For architectural migrations: a migration log at `reports/migration-log_<marketplace>_<date>.md` recording every user decision and every command run (produced by the `migrate-marketplace-architecture` skill)
+- For architectural migrations: migration log at `$MAIN_ROOT/reports/migrate-marketplace-architecture/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` recording every user decision and every command run (produced by the `migrate-marketplace-architecture` skill)
 
 ## Related Commands
 

@@ -1994,24 +1994,30 @@ def get_plugin_root() -> Path:
 
 
 def resolve_project_root(anchor: Path | None = None) -> Path:
-    """Resolve the project root for a worktree-aware reports directory.
+    """Resolve the **main-repo root** for the reports-location rule.
 
-    Resolution order:
-        1. ``CLAUDE_PROJECT_DIR`` env var (set by Claude Code — always points to
-           the original project directory, even when the agent runs inside a
-           ``git worktree``).
-        2. The main worktree of the enclosing git repo. When ``anchor`` (or the
-           current working directory) is a linked worktree, ``git rev-parse
-           --git-common-dir`` points to the main ``.git`` directory; its parent
-           is the main worktree root.
-        3. The enclosing git repo toplevel (``git rev-parse --show-toplevel``).
-        4. The caller's anchor or CWD.
+    The rule (agent-reports-location.md) requires reports to land under the
+    main-repo `./reports/`, even when the caller runs inside a linked
+    ``git worktree``. ``git worktree list`` always lists the main worktree
+    first, so its first entry is the canonical source of truth.
+
+    Resolution order (matches the canonical shell prologue):
+
+        1. ``CLAUDE_PROJECT_DIR`` env var — Claude Code sets this to the
+           user's project directory and never rewrites it when spawning a
+           worktree subagent.
+        2. First entry of ``git worktree list --porcelain`` — always the
+           main worktree, regardless of whether we call it from the main
+           checkout or a linked worktree.
+        3. ``git rev-parse --show-toplevel`` — fallback for non-worktree
+           scenarios or older gits.
+        4. The caller's anchor or CWD — fallback when not inside a git repo.
 
     Args:
         anchor: Optional starting path. Defaults to ``Path.cwd()``.
 
     Returns:
-        Absolute path to the project root.
+        Absolute path to the main-repo root.
     """
     env_dir = os.environ.get("CLAUDE_PROJECT_DIR")
     if env_dir:
@@ -2022,18 +2028,18 @@ def resolve_project_root(anchor: Path | None = None) -> Path:
     start = (anchor or Path.cwd()).resolve()
 
     try:
-        common = subprocess.run(
-            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        wt = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
             cwd=str(start),
             capture_output=True,
             text=True,
             check=False,
             timeout=5,
         )
-        if common.returncode == 0:
-            common_dir = Path(common.stdout.strip())
-            if common_dir.name == ".git" and common_dir.parent.is_dir():
-                return common_dir.parent.resolve()
+        if wt.returncode == 0:
+            for line in wt.stdout.splitlines():
+                if line.startswith("worktree "):
+                    return Path(line[len("worktree "):].strip()).resolve()
     except (FileNotFoundError, subprocess.SubprocessError):
         pass
 
@@ -2054,25 +2060,83 @@ def resolve_project_root(anchor: Path | None = None) -> Path:
     return start
 
 
-def resolve_reports_dir(anchor: Path | None = None, *, ensure: bool = True) -> Path:
-    """Resolve the ``./reports/`` directory at the main project root.
+def report_timestamp() -> str:
+    """Return the canonical local-time+GMT-offset filename timestamp.
+
+    Format: ``YYYYMMDD_HHMMSS±HHMM`` (compact, filesystem-safe on every OS).
+    Example: ``20260421_183012+0200``.
+
+    The rule mandates local time (never UTC) with the GMT offset appended
+    so humans can tie a report back to their own workday without timezone
+    arithmetic, and so ``ls -t`` / glob sorting behave predictably.
+    """
+    from datetime import datetime
+    # astimezone() with no arg uses the local timezone, producing a timezone-aware
+    # datetime. strftime("%z") then produces the compact "±HHMM" form.
+    return datetime.now().astimezone().strftime("%Y%m%d_%H%M%S%z")
+
+
+def resolve_reports_dir(
+    component: str | None = None,
+    anchor: Path | None = None,
+    *,
+    ensure: bool = True,
+) -> Path:
+    """Resolve ``$MAIN_ROOT/reports/<component>/`` per the agent-reports rule.
 
     Every agent, skill, and script that saves a report MUST write into the
-    directory returned here. ``./reports/`` is gitignored by convention so
-    reports may safely contain private data (full paths, source snippets,
-    validation output).
+    directory returned here. Reports often contain private data (full paths,
+    source snippets, validation output, user decisions), so the folder is
+    gitignored by convention. Reports from a linked worktree still land in
+    the **main** repo's ``reports/`` — never the worktree's own.
 
     Args:
+        component: Per-component subfolder name (agent name, script name,
+            skill name). When omitted, returns the top-level ``reports/``
+            folder — callers should always pass a component, but the
+            legacy form remains supported for one-off ad-hoc writes.
         anchor: Optional starting path; defaults to the current directory.
-        ensure: When True (default), create the directory if it does not exist.
+        ensure: When True (default), create the directory if it does not
+            exist.
 
     Returns:
-        Absolute path to the ``reports/`` directory.
+        Absolute path to the ``reports/<component>/`` (or ``reports/``)
+        directory under the main-repo root.
     """
     reports = resolve_project_root(anchor) / "reports"
+    if component:
+        reports = reports / component
     if ensure:
         reports.mkdir(parents=True, exist_ok=True)
     return reports
+
+
+def build_report_path(
+    component: str,
+    slug: str,
+    ext: str = "md",
+    anchor: Path | None = None,
+    *,
+    ensure: bool = True,
+) -> Path:
+    """Return the canonical report path for a new artefact.
+
+    Produces ``$MAIN_ROOT/reports/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.<ext>``
+    per the mandatory format in ``~/.claude/rules/agent-reports-location.md``.
+
+    Args:
+        component: Per-component subfolder name.
+        slug: Short kebab-case summary (e.g. ``release-notes-2.25.0``,
+            ``validate-my-plugin``).
+        ext: File extension without the leading dot. Defaults to ``md``.
+        anchor: Optional starting path; defaults to the current directory.
+        ensure: When True (default), ensure the component subfolder exists.
+
+    Returns:
+        Absolute path to a fresh report filename — not the file itself,
+        the caller is responsible for writing content.
+    """
+    return resolve_reports_dir(component, anchor, ensure=ensure) / f"{report_timestamp()}-{slug}.{ext}"
 
 
 def is_valid_kebab_case(name: str) -> bool:

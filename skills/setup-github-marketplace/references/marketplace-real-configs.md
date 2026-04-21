@@ -248,9 +248,10 @@ temp/
 
 # Agent/script reports — ALWAYS gitignored since they often contain private data
 # (full paths, source snippets, API output, validation results, env metadata).
-# Every agent/skill/script that saves a report MUST write to ./reports/ at the
-# project root (worktree-aware), and that folder MUST NOT be tracked.
+# Rule: write reports under `./reports/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`
+# at the MAIN-repo root (worktree-aware). Neither folder may be tracked.
 reports/
+reports_dev/
 
 # Rust build artifacts
 target/

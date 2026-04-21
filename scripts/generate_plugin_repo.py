@@ -311,9 +311,12 @@ Thumbs.db
 
 # Agent/script reports — ALWAYS gitignored since they often contain private data
 # (full paths, source snippets, API output, validation results, env metadata).
-# Every agent/skill/script that saves a report MUST write to ./reports/ at the
-# project root (worktree-aware), and that folder MUST NOT be tracked.
+# Canonical rule: every agent/skill/script that saves a report MUST write
+# under the main-repo `./reports/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`.
+# Neither folder may ever be tracked. `reports_dev/` is also covered by the
+# `*_dev/` rule above, listed explicitly because both entries must be present.
 reports/
+reports_dev/
 
 # Node
 node_modules/

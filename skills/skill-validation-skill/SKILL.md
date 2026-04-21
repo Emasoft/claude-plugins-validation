@@ -29,7 +29,7 @@ Script-based validation of structure, frontmatter, content, and pillars. For sem
 1. Navigate to the claude-plugins-validation directory
 2. Run basic validation:
    ```bash
-   uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --report reports/validate_skill_YYYYMMDD.md
+   uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --report $MAIN_ROOT/reports/validate_skill/$(date +%Y%m%d_%H%M%S%z)-<slug>.md
    ```
 3. Optionally add mode flags: `--strict` (Nixtla), `--openspec` (AgentSkills whitelist), `--pillars` (8+1 for lang-*/convert-*)
 4. Review the compact summary output (full report saved to file via `--report`)
@@ -40,7 +40,7 @@ Script-based validation of structure, frontmatter, content, and pillars. For sem
 
 - **Syntactic Score**: 0-100 numeric with tier (PASS / CONDITIONAL_PASS / FAIL)
 - **Exit Code**: 0 (pass), 1 (CRITICAL), 2 (MAJOR), 3 (MINOR), 4 (NIT)
-- **Report File**: Full output saved to `reports/validate_skill_YYYYMMDD.md` at the **project root** — worktree-aware. The folder is gitignored by convention; reports often contain private data. Resolve the root with `${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}` when running inside a worktree.
+- **Report File**: `$MAIN_ROOT/reports/validate_skill/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` at the **main-repo root** (first entry of `git worktree list`) — never a linked worktree. Per-component subfolder + local-time+GMT-offset timestamp mandatory. Both `reports/` and `reports_dev/` gitignored.
 
 > For **Semantic Quality Grading** (A-F letter grades), use `/cpv-semantic-validation` instead.
 
@@ -57,13 +57,13 @@ Script-based validation of structure, frontmatter, content, and pillars. For sem
 ### Example 1: Basic Validation
 
 ```bash
-uv run python scripts/validate_skill_comprehensive.py ./skills/my-skill/ --report reports/validate_skill_YYYYMMDD.md
+uv run python scripts/validate_skill_comprehensive.py ./skills/my-skill/ --report $MAIN_ROOT/reports/validate_skill/$(date +%Y%m%d_%H%M%S%z)-<slug>.md
 ```
 
 ### Example 2: Full Validation with Pillars
 
 ```bash
-uv run python scripts/validate_skill_comprehensive.py ./skills/lang-rust-dev/ --strict --pillars --verbose --report reports/validate_skill_YYYYMMDD.md
+uv run python scripts/validate_skill_comprehensive.py ./skills/lang-rust-dev/ --strict --pillars --verbose --report $MAIN_ROOT/reports/validate_skill/$(date +%Y%m%d_%H%M%S%z)-<slug>.md
 ```
 
 ## Resources
