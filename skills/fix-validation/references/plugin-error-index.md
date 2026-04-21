@@ -51,6 +51,7 @@ Primary fix guide: [plugin-structure-fixes.md](plugin-structure-fixes.md)
 | Cross-platform compatibility (shell/bat/ps1/compiled-lang sources) | plugin-structure-fixes §8 |
 | Skill validation entry point | plugin-structure-fixes §9 |
 | README.md / LICENSE | plugin-structure-fixes §10 |
+| `README.md has badge markdown but is missing the automation markers` (v2.26.0 — fires only when README already contains literal `[![badge](url)](...)` or shields.io URLs) **[UPDATED v2.26.0]** | plugin-structure-fixes §10 "README.md missing badge-automation markers" |
 | Rules directory | plugin-structure-fixes §11 |
 | Path and private info | plugin-structure-fixes §12 |
 | `.gitignore` coverage and virtual-env leakage | plugin-structure-fixes §13 |
@@ -113,6 +114,9 @@ Primary fix guide: [skill-fixes.md](skill-fixes.md)
 | Task → Agent rename WARNING (alias still accepted) **[NEW]** | skill-fixes §3 |
 | TodoRead / Notebook / MultiEdit legacy WARNING **[NEW]** | skill-fixes §3 — verify existence before shipping |
 | `CLAUDE_PLUGIN_OPTION_*` env var recognition (accepted) **[NEW]** | skill-fixes "Environment variables" — accepted alongside `VALID_PLUGIN_ENV_VARS` |
+| `Many tools permitted (N distinct tool surfaces)` (v2.26.0 — Bash sub-patterns collapsed, threshold 15, suppressed when `user-invocable: false`) **[NEW v2.26.0]** | skill-fixes §9 "Many tools permitted" |
+| `Unknown variable reference: ${VAR}` — skill-local shell vars defined in code blocks are now whitelisted; inline-backticked `${VAR}` is treated as code, not prose (v2.26.0) **[NEW v2.26.0]** | skill-fixes §10a "String Substitutions" |
+| `Link/Reference has N/M TOC headings embedded` — v2.26.0 message upgraded with explicit guidance: embed the full TOC verbatim OR reduce the reference file's own TOC (drop/merge headings). No summaries. No partial lists. **[UPDATED v2.26.0]** | skill-fixes §8 "TOC Embedding Issues" |
 
 ---
 

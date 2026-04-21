@@ -14,6 +14,7 @@ Comprehensive remediation guide for all issues detected by `validate_skill.py` a
 - [8. TOC Embedding Issues](#8-toc-embedding-issues)
 - [9. Allowed-Tools Issues](#9-allowed-tools-issues)
 - [10. Content Quality Issues](#10-content-quality-issues)
+- [10a. String Substitutions](#10a-string-substitutions)
 - [11. 8+1 Pillars Issues](#11-81-pillars-issues)
 - [12. OpenSpec Mode Issues](#12-openspec-mode-issues)
 
@@ -703,25 +704,54 @@ references/
 
 ## 8. TOC Embedding Issues
 
-### MINOR: Reference file TOC not embedded in SKILL.md
+### WARNING / MINOR: Partial TOC — `N/M TOC headings embedded`
 
-**Error message**: `Reference to {filename} does not include the file's Table of Contents`
-**Severity**: MINOR
-**Root cause**: When SKILL.md links to a reference file, agents cannot see what content is available without navigating to it. This slows down skill execution because the agent must open each reference file to discover its structure.
-**Fix**:
-1. Open the referenced file and copy its Table of Contents section
-2. In the SKILL.md, add the TOC entries as indented bullets right after the link:
+**Error message** (verbatim from v2.26.0 validator):
+- `Link to '<ref>.md' in a list entry of SKILL.md has N/M TOC headings embedded. SKILL.md must copy the COMPLETE TOC of each referenced .md file verbatim immediately after its link — no exceptions, no summaries, no partial lists...` (WARNING on ambiguous list entries)
+- `Reference to '<ref>.md' in SKILL.md has N/M TOC headings embedded. ...` (MINOR on clear standalone references)
+- `Backtick reference to '<ref>.md' in SKILL.md has N/M TOC headings embedded. Convert to a markdown link and copy the COMPLETE TOC...` (MINOR on backticked references — also flagged as "uses backtick format" MINOR)
+
+**Severity**: WARNING (list-entry ambiguity) or MINOR (standalone / backtick)
+
+**Root cause**: The progressive-discovery algorithm only surfaces reference-file content that is mirrored as a heading inline in SKILL.md. Any heading missing from SKILL.md is **invisible** to agents — they will never fetch that reference for that topic, no matter how relevant the content is. A partial TOC is worse than no TOC because it *looks* like coverage while silently hiding sections.
+
+**The rule is absolute**: SKILL.md must copy the COMPLETE TOC of each referenced file **verbatim**. No summaries. No partial lists. No rephrasing. No omissions. Every heading in the reference file's TOC must appear in SKILL.md adjacent to the link.
+
+**Two — and only two — legitimate fixes**:
+
+#### Fix A: Embed the full TOC (the default answer)
+
+If the reference file's TOC is accurate and all headings represent content worth discovering, copy every entry into SKILL.md immediately after the link.
+
 ```markdown
-- [Reference Title](references/filename.md) - Brief description
-  - 1. First Section Title
-  - 2. Second Section Title
-  - 3. Third Section Title
+- [API Reference](references/api-reference.md)
+  > Authentication · Endpoints · Error Codes · Rate Limits · Pagination ·
+  > Webhooks · Idempotency · SDKs · Migration Guide
 ```
-3. This applies to EVERY .md file reference, not just in SKILL.md -- agent files must do the same
 
-**Full example**:
+Format conventions that work (the validator matches on heading text, not bullet style): indented bullets, inline `>` blockquote with `·` separators, numbered lists — any form where every heading text appears within ~50 lines of the link.
 
-Suppose you have `references/api-reference.md` with:
+#### Fix B: Reduce the reference file's own TOC — not SKILL.md
+
+If the TOC is too long to embed comfortably (say, >15 headings), the fix is in **the reference file**, not in SKILL.md:
+
+1. **Drop sections that are not worth discovering.** A heading in the TOC is an advertisement: "agents should load this file when they need this content." If a subsection is genuinely not useful for the skill's purpose, delete its heading from the reference file's TOC entirely (and usually the section content too). The TOC shrinks naturally.
+2. **Merge granular subsections into fewer, more encompassing headings.** Replace five sibling subsections with one umbrella heading whose body covers all five concerns. Same coverage for agents, fewer TOC entries.
+
+Both changes happen in the reference file, then SKILL.md mirrors the new (shorter) TOC verbatim.
+
+#### Forbidden "fixes"
+
+- ❌ Writing a paragraph-long summary in SKILL.md and calling that "the TOC" — agents cannot discover individual topics from prose.
+- ❌ Listing only the headings you *think* are important — the whole point of discovery is that agents, not authors, decide what's relevant.
+- ❌ Using a backticked file reference without a markdown link (e.g., `` `references/foo.md` ``) — backtick references are invisible to the discovery algorithm. Always use `[Title](references/foo.md)` form.
+- ❌ Using a hand-written "See references/ for details" stub — same problem, discovery sees nothing.
+
+**Binary test**: Either the content is worth discovering (embed the full TOC) or it is not (remove it from the reference file's TOC). There is no middle ground.
+
+**Full example of Fix A**:
+
+Suppose `references/api-reference.md` has:
 ```markdown
 ## Table of Contents
 - [Authentication](#authentication)
@@ -737,14 +767,41 @@ See [API Reference](references/api-reference.md) for details.
 
 Write:
 ```markdown
-See [API Reference](references/api-reference.md) for full API documentation:
+- [API Reference](references/api-reference.md) — full API documentation:
   - Authentication
   - Endpoints
   - Error Codes
   - Rate Limits
 ```
 
-This gives the agent immediate visibility into what each reference file contains, enabling it to decide which file to open based on the current task without trial-and-error navigation.
+**Full example of Fix B (merging)**:
+
+Before — reference file has 11 granular subsections:
+```markdown
+## Table of Contents
+1. Setup Prerequisites
+2. Install CLI
+3. Install SDK
+4. Install Runtime
+5. Configure Environment
+6. Configure Auth
+7. Configure Networking
+8. Verify Installation
+9. Run Smoke Tests
+10. Troubleshoot Install
+11. Uninstall
+```
+
+After — same coverage consolidated into 4 encompassing headings:
+```markdown
+## Table of Contents
+1. Installation (CLI, SDK, runtime, prerequisites)
+2. Configuration (environment, auth, networking)
+3. Verification (smoke tests, troubleshooting)
+4. Uninstall
+```
+
+SKILL.md then embeds the shorter 4-heading TOC verbatim. Agents still discover everything (each umbrella heading advertises the subtopics in parentheses), and the TOC is embeddable.
 
 ---
 
@@ -811,13 +868,41 @@ allowed-tools: "Read, Write"
 allowed-tools: "Bash(git:*), Bash(npm:*), Read, Write"
 ```
 
-### MINOR: Many tools permitted
+### WARNING: Many tools permitted
 
-**Error message**: `Many tools permitted ({count}) - consider limiting`
-**Severity**: MINOR
+**Error message** (v2.26.0+): `Many tools permitted ({effective_count} distinct tool surfaces; raw list has {raw_count} entries). Consider limiting...`
+**Severity**: WARNING (advisory, non-blocking)
 **Source**: `validate_skill_comprehensive.py` — `validate_allowed_tools_field()`
-**Root cause**: More than 6 tools are listed in allowed-tools.
-**Fix**: Limit tools to only what the skill actually needs. Over-permissioning increases attack surface.
+**Threshold**: Fires when **distinct tool surfaces** > 15 **and** the skill is not declared `user-invocable: false`.
+**Counting rule (v2.26.0)**: `Bash(...)` sub-scopes collapse to 1 surface — `Bash(git:*), Bash(gh:*), Bash(uv:*)` counts as one Bash surface, not three. `Monitor(...)` collapses the same way. All other tools count individually.
+**Root cause**: The skill requests a large tool surface area.
+
+**Three legitimate fixes, pick the one that fits the skill's shape**:
+
+#### Fix A: Trim the tool list
+
+The default answer. Review every entry in `allowed-tools` and remove any tool the skill doesn't actually invoke. Over-permissioning increases the attack surface and confuses the discovery heuristics that pick a skill for a task.
+
+#### Fix B: Consolidate Bash sub-scopes
+
+If the skill binds to many `Bash(foo:*)` entries, merge them where the tooling allows — `Bash(git:*,gh:*,uv:*)` syntactically counts as 3 sub-scopes but is one inline list. Even post-collapse, three bound sub-scopes are cheaper than three separately-declared `Bash(git:*)`, `Bash(gh:*)`, `Bash(uv:*)` lines. Purely a style change, same effective permission.
+
+#### Fix C: Declare the skill non-invocable and gate from the agent
+
+If the skill is loaded only by an agent (not invoked directly by the user), add `user-invocable: false` to the frontmatter. The warning is then suppressed entirely because the agent's own `allowed-tools` list is the real least-privilege boundary — the skill's declared tools describe capability, not a direct grant to the user. Example:
+
+```yaml
+---
+name: my-skill
+description: ...
+user-invocable: false   # loaded by agent X; tool surface gated by the agent
+allowed-tools: Read, Write, Edit, Grep, Glob, Agent, WebFetch, ...
+---
+```
+
+#### Forbidden "fix"
+
+- ❌ Inflating the description to make it look invocable just to justify the tools. If the skill is agent-loaded, mark it `user-invocable: false` honestly.
 
 ---
 
@@ -973,6 +1058,72 @@ Copy this checklist and track your progress:
 **Source**: `validate_skill_comprehensive.py` — `validate_dynamic_context()`
 **Root cause**: The skill explicitly uses the "ultrathink" keyword.
 **Fix**: No fix needed. This enables extended thinking mode.
+
+---
+
+## 10a. String Substitutions
+
+### WARNING: Unknown variable reference `${VAR}`
+
+**Error message** (v2.26.0+): `Unknown variable reference: ${VAR}. Valid platform variables: ${CLAUDE_*}, ... (or any CLAUDE_PLUGIN_OPTION_<KEY>). If ${VAR} is a shell variable defined inside a code block, the check will accept it once it's assigned (VAR=..., export VAR=..., or local VAR=...) somewhere in SKILL.md. If it's documentation-only, wrap the reference in backticks (\`${VAR}\`) so the validator treats it as code, not prose.`
+**Severity**: WARNING
+**Source**: `validate_skill_comprehensive.py` — `validate_string_substitutions()`
+**Root cause**: SKILL.md references `${VAR}` in prose and `VAR` is neither a Claude Code platform env var (`CLAUDE_*`, `CLAUDE_PLUGIN_OPTION_<KEY>`, etc.) nor a skill-local shell variable assigned anywhere in the file.
+
+**What the v2.26.0 validator accepts without complaint**:
+- Canonical platform env vars: `${CLAUDE_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_DATA}`, `${CLAUDE_PROJECT_DIR}`, `${CLAUDE_SESSION_ID}`, `${CLAUDE_SKILL_DIR}`, `${CLAUDECODE}`, `${TRACEPARENT}`, etc.
+- Dynamic per-plugin-option vars: `${CLAUDE_PLUGIN_OPTION_<ANY_KEY>}`.
+- Skill-local shell variables assigned in any code block: `MERGE_SCRIPT=/path/to/script`, `export REPORT_DIR="..."`, `local TS="$(date +%s)"` — once the variable is assigned, later `${VAR}` references in prose are accepted.
+- Anything inside inline backticks — `` `${CUSTOM_VAR}` ``, `` `${SOME_VAR_DOC}` `` — the validator strips inline backtick content before the check.
+
+**Three legitimate fixes**:
+
+#### Fix A: Assign the variable somewhere in SKILL.md (preferred for variables the skill actually uses)
+
+If `${MERGE_SCRIPT}` is a shell variable the skill sets up, add the assignment to the setup code block:
+
+```bash
+# Before (validator warns on ${MERGE_SCRIPT} in prose below)
+Run the merge via ${MERGE_SCRIPT}.
+
+# After — assignment in a code block tells the validator this is skill-local
+\`\`\`bash
+MERGE_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/merge.sh"
+\`\`\`
+Run the merge via ${MERGE_SCRIPT}.
+```
+
+The assignment can be in any code block in the document, not necessarily the one preceding the reference.
+
+#### Fix B: Wrap the reference in backticks (for documentation-only references)
+
+If the skill is only *describing* a variable name the user will define elsewhere, wrap every mention in inline backticks:
+
+```markdown
+# Before — looks like a platform var reference
+Export ${CUSTOM_CONFIG_DIR} before running.
+
+# After — clearly marked as code/documentation
+Export `${CUSTOM_CONFIG_DIR}` before running.
+```
+
+The v2.26.0 validator strips inline backtick content before the unknown-var check, so `` `${ANY_VAR}` `` is accepted even without an assignment.
+
+#### Fix C: Replace with a canonical platform var
+
+If the skill is actually trying to reference the plugin root, session id, or data dir, use the canonical spelling:
+
+```markdown
+# Before — unknown
+Output goes to ${PLUGIN_DATA}/results.
+
+# After — canonical
+Output goes to ${CLAUDE_PLUGIN_DATA}/results.
+```
+
+#### Forbidden "fix"
+
+- ❌ Adding the variable name to `is_valid_plugin_env_var` just to silence the warning. The whitelist is for real Claude Code platform env vars; anything else belongs in one of Fix A/B/C above.
 
 ---
 

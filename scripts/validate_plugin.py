@@ -2524,13 +2524,35 @@ def validate_readme(plugin_root: Path, report: ValidationReport) -> None:
     else:
         report.minor("README.md not found")
 
-    # Badge markers for automated badge updates
+    # Badge markers for automated badge updates (v2.26.0 — narrowed).
+    #
+    # Only fire the WARNING when the README ALREADY contains literal badge
+    # markdown and lacks the automation markers. If the README has no
+    # badges at all, the markers are unnecessary — nothing to regenerate.
+    # This removes a false-positive WARNING from minimal READMEs and keeps
+    # the check focused on its real purpose: flagging badges that cannot
+    # be auto-updated by CI.
     if readme.exists():
         readme_content = readme.read_text(encoding="utf-8", errors="replace")
-        if "<!--BADGES-START-->" in readme_content and "<!--BADGES-END-->" in readme_content:
+        has_markers = "<!--BADGES-START-->" in readme_content and "<!--BADGES-END-->" in readme_content
+        # Detect literal markdown badges. Two common forms:
+        # - Image-link form: [![alt](img)](href)
+        # - Plain image form followed by shields.io/badge URL
+        has_image_link_badge = bool(re.search(r"\[!\[[^\]]*\]\([^)]+\)\]\([^)]+\)", readme_content))
+        has_shields_url = "shields.io" in readme_content or "img.shields.io" in readme_content
+        has_badges = has_image_link_badge or has_shields_url
+        if has_markers:
             report.passed("README.md has badge markers for automated updates", "README.md")
-        else:
-            report.warning("README.md missing badge markers (<!--BADGES-START--> / <!--BADGES-END-->)", "README.md")
+        elif has_badges:
+            report.warning(
+                "README.md has badge markdown but is missing the automation "
+                "markers (<!--BADGES-START--> / <!--BADGES-END-->). CI cannot "
+                "regenerate badges without the markers — wrap the badge block "
+                "with those HTML comments so `scripts/update_badges.py` (or "
+                "equivalent) can refresh versions/CI status automatically.",
+                "README.md",
+            )
+        # else: no badges, no markers — nothing to flag. Silent pass.
 
 
 def validate_license(plugin_root: Path, report: ValidationReport) -> None:

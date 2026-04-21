@@ -936,15 +936,68 @@ def validate_allowed_tools_field(
                     category="Frontmatter",
                 )
 
-    # Over-permissioning advisory — not blocking
-    if len(tool_list) > 10:
+    # Over-permissioning advisory — not blocking (v2.26.0 — smarter count).
+    #
+    # Previous behaviour (pre-v2.26.0) emitted this WARNING any time the raw
+    # tool_list length exceeded 10. That counted `Bash(git:*)`, `Bash(gh:*)`,
+    # `Bash(uv:*)` as three separate tools, which meant legitimate skills
+    # binding to multiple Bash sub-scopes tripped the advisory even with a
+    # tight total permission surface.
+    #
+    # Three changes here, each independently reducing false positives:
+    # 1. **Collapse `Bash(...)` sub-patterns to 1.** All scoped Bash
+    #    entries count as a single tool — they are sub-scopes of the same
+    #    underlying Bash permission, not independent capabilities. Same
+    #    treatment for `Monitor(...)`, which has the same semantics.
+    # 2. **Raise the threshold from 10 to 15.** With collapsed Bash counts,
+    #    15 is a comfortable budget for skills that legitimately need a
+    #    broad surface (review-and-fix skills, orchestrators).
+    # 3. **Exempt non-user-invocable skills.** A skill declared
+    #    `user-invocable: false` runs only when an agent loads it — the
+    #    agent's own tool allowlist already gates usage. The skill's
+    #    declared tools describe what it *might* use, not a direct user
+    #    permission grant, so the least-privilege pressure belongs on the
+    #    agent, not the skill.
+    effective_tool_count = _count_distinct_tool_surfaces(tool_list)
+    is_non_invocable = frontmatter.get("user-invocable") is False
+    if effective_tool_count > 15 and not is_non_invocable:
         report.warning(
-            f"Many tools permitted ({len(tool_list)}) - consider limiting",
+            f"Many tools permitted ({effective_tool_count} distinct tool "
+            f"surfaces; raw list has {len(tool_list)} entries). Consider "
+            f"limiting — fewer tools means a smaller attack surface and "
+            f"clearer skill intent. If the broad surface is intentional "
+            f"(e.g. a review-and-fix skill that needs Read/Write/Edit + "
+            f"Agent + MCPs), declaring `user-invocable: false` on the "
+            f"skill suppresses this advisory since agent-loaded skills "
+            f"inherit gating from the agent's own allowlist.",
             "SKILL.md",
             category="Frontmatter",
         )
 
     report.passed(f"'allowed-tools' field valid: {len(tool_list)} tool(s)", "SKILL.md", category="Frontmatter")
+
+
+def _count_distinct_tool_surfaces(tool_list: list[Any]) -> int:
+    """Return the count of distinct tool *surfaces* in ``tool_list``.
+
+    Scoped tools like ``Bash(git:*)`` and ``Bash(gh:*)`` belong to the same
+    underlying surface (the shell) and count as one. Same for
+    ``Monitor(...)``. All other tools count individually. Non-string
+    entries are ignored (they are already flagged as MAJOR upstream).
+    """
+    collapsible = {"Bash", "Monitor"}
+    distinct: set[str] = set()
+    for tool in tool_list:
+        if not isinstance(tool, str):
+            continue
+        base = tool.split("(")[0].strip()
+        if not base:
+            continue
+        if base in collapsible:
+            distinct.add(base)
+        else:
+            distinct.add(tool.strip())
+    return len(distinct)
 
 
 def validate_metadata_field(
@@ -1667,20 +1720,62 @@ def validate_string_substitutions(body: str, report: ValidationReport) -> None:
             category="String Substitutions",
         )
 
-    # Check for unknown ${VAR} references — strip code fences first.
-    # Uses is_valid_plugin_env_var so that both the canonical env vars and the
-    # dynamic CLAUDE_PLUGIN_OPTION_<KEY> pattern (v2.1.98) are accepted.
+    # Check for unknown ${VAR} references (v2.26.0 — no false positives).
+    #
+    # The check fires only on `${VAR}` references that appear in PROSE and
+    # name a variable that is neither a Claude Code platform env var nor a
+    # skill-local shell variable defined in one of the skill's own code
+    # blocks. Three things must be stripped or collected before the check:
+    #
+    # 1. Triple-backtick fenced blocks — stripped entirely (their content
+    #    is example code, not user-facing prose).
+    # 2. Inline backtick content — also stripped. Authors write
+    #    `` `${MERGE_SCRIPT}` `` in prose to mean "this is a shell variable,
+    #    not a platform env var", and that should not trip the check.
+    # 3. Skill-local assignments — before stripping fences, scan all code
+    #    blocks for `VAR=value`, `export VAR=...`, and `local VAR=...`
+    #    lines and collect the variable names. Those names are then
+    #    whitelisted alongside the platform env vars.
+    #
+    # Uses is_valid_plugin_env_var so the canonical env vars and the
+    # dynamic CLAUDE_PLUGIN_OPTION_<KEY> pattern are accepted.
+    fenced_blocks = re.findall(r"```[\s\S]*?```", body)
+    skill_local_vars: set[str] = set()
+    # Match: `VAR=...`, `export VAR=...`, `local VAR=...`, `declare VAR=...`
+    # Anchored to line start (possibly after whitespace). Variable must be
+    # shell-style (uppercase + underscores + digits, starting with letter/_).
+    assignment_re = re.compile(
+        r"(?m)^[ \t]*(?:export[ \t]+|local[ \t]+|declare[ \t]+[^=\n]*?[ \t])?([A-Za-z_][A-Za-z0-9_]*)=",
+    )
+    for block in fenced_blocks:
+        skill_local_vars.update(assignment_re.findall(block))
+
+    # Strip fenced blocks AND inline backticks before collecting candidate
+    # references. Inline backticks are stripped with a non-greedy pattern
+    # so each pair of backticks closes correctly.
     body_no_fences = re.sub(r"```[\s\S]*?```", "", body)
-    all_braced_vars = RE_BRACED_VAR.findall(body_no_fences)
-    for var_name in all_braced_vars:
-        if not is_valid_plugin_env_var(var_name):
-            report.warning(
-                f"Unknown variable reference: ${{{var_name}}}. "
-                f"Valid skill variables: {', '.join(f'${{{v}}}' for v in sorted(VALID_PLUGIN_ENV_VARS))} "
-                "(or any CLAUDE_PLUGIN_OPTION_<KEY>)",
-                "SKILL.md",
-                category="String Substitutions",
-            )
+    body_prose_only = re.sub(r"`[^`\n]*`", "", body_no_fences)
+
+    all_braced_vars = RE_BRACED_VAR.findall(body_prose_only)
+    # De-duplicate so a single unknown var does not emit N warnings
+    for var_name in sorted(set(all_braced_vars)):
+        if is_valid_plugin_env_var(var_name):
+            continue
+        if var_name in skill_local_vars:
+            continue
+        report.warning(
+            f"Unknown variable reference: ${{{var_name}}}. "
+            f"Valid platform variables: {', '.join(f'${{{v}}}' for v in sorted(VALID_PLUGIN_ENV_VARS))} "
+            "(or any CLAUDE_PLUGIN_OPTION_<KEY>). "
+            f"If ${{{var_name}}} is a shell variable defined inside a "
+            f"code block, the check will accept it once it's assigned "
+            f"(VAR=..., export VAR=..., or local VAR=...) somewhere in "
+            f"SKILL.md. If it's documentation-only, wrap the reference "
+            f"in backticks (`${{{var_name}}}`) so the validator treats "
+            f"it as code, not prose.",
+            "SKILL.md",
+            category="String Substitutions",
+        )
 
 
 def validate_dynamic_context(body: str, report: ValidationReport) -> None:
