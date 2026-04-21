@@ -3207,7 +3207,18 @@ def validate_md_file_paths(
             resolved = plugin_root / path_no_anchor
         if not resolved.exists():
             report.minor(
-                f"Broken file reference: [{path_no_anchor}] in {rel_md} — file not found",
+                f"Broken file reference: [{path_no_anchor}] in {rel_md} — "
+                f"file not found. Two legitimate fixes: (1) if the "
+                f"reference is meant to be real, create the missing file "
+                f"or correct the path; (2) if it's a prose example/"
+                f"placeholder, convert the path to a template-exempt "
+                f"form the validator recognises — wrap in braces like "
+                f"`{{path}}`, angle brackets like `<path>`, use a known "
+                f"placeholder prefix (`my-`, `your-`, `foo`, `bar`, "
+                f"`example`, `placeholder`), or put the whole snippet "
+                f"inside a triple-backtick fenced code block (fenced "
+                f"content is stripped before the broken-reference "
+                f"check).",
                 rel_md,
             )
         else:
@@ -3441,6 +3452,19 @@ def validate_md_urls(
 
     checked_urls: set[str] = set()
 
+    # Two-phase scan (v2.26.0 — URL checks are now parallelized).
+    #
+    # Before v2.26.0 the loop ran one HEAD request at a time with an 8s
+    # timeout, so a file with N unreachable URLs spent ~8N seconds in
+    # IO wait. This dominated `validate_plugin.py --strict` runtime on
+    # any plugin that referenced a few dead or slow links.
+    #
+    # Phase 1 — collect the (raw_url, safe_url) pairs we actually need
+    # to hit the network for, plus any cache-hit results we can report
+    # immediately. Phase 2 — dispatch the remainder to a thread pool
+    # and drain results.
+    to_check: list[tuple[str, str]] = []  # (raw_url, safe_url)
+
     for match in url_re.finditer(content_no_codeblocks):
         raw_url = match.group(0).rstrip(".,;:!?)`")  # Strip trailing punctuation and backticks
 
@@ -3471,22 +3495,27 @@ def validate_md_urls(
         if safe_url is None:
             continue  # Silently skip unsafe URLs (internal IPs, credentials, etc.)
 
-        # Check cache
+        # Cache hit — report immediately, skip the network
         if safe_url in url_cache:
             if not url_cache[safe_url]:
                 report.warning(f"Dead URL: {raw_url} in {rel_md}", rel_md)
             continue
 
-        # HTTP HEAD request with timeout
+        to_check.append((raw_url, safe_url))
+
+    if not to_check:
+        return
+
+    def _check_one(pair: tuple[str, str]) -> tuple[str, str, bool, str | None]:
+        """Returns (raw_url, safe_url, is_alive, warning_suffix_or_None)."""
+        raw_url, safe_url = pair
         try:
             req = urllib.request.Request(safe_url, method="HEAD")
             req.add_header("User-Agent", "Mozilla/5.0 (compatible; CPV-LinkChecker/1.0)")
             with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
                 if resp.status >= 400:
-                    url_cache[safe_url] = False
-                    report.warning(f"Dead URL (HTTP {resp.status}): {raw_url} in {rel_md}", rel_md)
-                else:
-                    url_cache[safe_url] = True
+                    return (raw_url, safe_url, False, f"HTTP {resp.status}")
+                return (raw_url, safe_url, True, None)
         except urllib.error.HTTPError as e:
             if e.code == 405:
                 # Some servers reject HEAD — retry with GET
@@ -3494,18 +3523,29 @@ def validate_md_urls(
                     req2 = urllib.request.Request(safe_url, method="GET")
                     req2.add_header("User-Agent", "Mozilla/5.0 (compatible; CPV-LinkChecker/1.0)")
                     with urllib.request.urlopen(req2, timeout=timeout, context=ctx) as resp2:
-                        url_cache[safe_url] = resp2.status < 400
                         if resp2.status >= 400:
-                            report.warning(f"Dead URL (HTTP {resp2.status}): {raw_url} in {rel_md}", rel_md)
+                            return (raw_url, safe_url, False, f"HTTP {resp2.status}")
+                        return (raw_url, safe_url, True, None)
                 except Exception:
-                    url_cache[safe_url] = False
-                    report.warning(f"Dead URL (unreachable): {raw_url} in {rel_md}", rel_md)
-            elif e.code in (401, 403):
+                    return (raw_url, safe_url, False, "unreachable")
+            if e.code in (401, 403):
                 # Auth-protected URLs — treat as valid (they exist, just need auth)
-                url_cache[safe_url] = True
-            else:
-                url_cache[safe_url] = False
-                report.warning(f"Dead URL (HTTP {e.code}): {raw_url} in {rel_md}", rel_md)
+                return (raw_url, safe_url, True, None)
+            return (raw_url, safe_url, False, f"HTTP {e.code}")
         except Exception:
-            url_cache[safe_url] = False
-            report.warning(f"Dead URL (unreachable): {raw_url} in {rel_md}", rel_md)
+            return (raw_url, safe_url, False, "unreachable")
+
+    # Bounded worker pool: each worker may block up to `timeout` seconds on
+    # a slow URL, so wall-clock time is approximately
+    #   ceil(len(to_check) / max_workers) * worst-case-timeout
+    # 16 workers is a comfortable trade-off between I/O throughput and
+    # not hammering any single upstream host.
+    from concurrent.futures import ThreadPoolExecutor
+
+    max_workers = min(16, max(1, len(to_check)))
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        for raw_url, safe_url, is_alive, suffix in pool.map(_check_one, to_check):
+            url_cache[safe_url] = is_alive
+            if not is_alive:
+                label = f"Dead URL ({suffix})" if suffix else "Dead URL"
+                report.warning(f"{label}: {raw_url} in {rel_md}", rel_md)

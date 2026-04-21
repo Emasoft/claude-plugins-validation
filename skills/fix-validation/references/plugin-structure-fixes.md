@@ -1112,7 +1112,7 @@ Common issues include:
 **Error message** (v2.26.0+): `README.md has badge markdown but is missing the automation markers (<!--BADGES-START--> / <!--BADGES-END-->). CI cannot regenerate badges without the markers — wrap the badge block with those HTML comments so scripts/update_badges.py (or equivalent) can refresh versions/CI status automatically.`
 **Severity**: WARNING
 **Source**: `validate_plugin.py` — `validate_readme()`
-**When it fires (v2.26.0)**: ONLY when the README already contains literal badge markdown — either `[![alt](img)](href)` image-link badges, or a raw `shields.io` / `img.shields.io` URL. A README with no badges at all does NOT trip this warning anymore (fixed in v2.26.0 — previously it fired on every badge-less README). **An empty marker block** (`<!--BADGES-START-->\n<!--BADGES-END-->` with nothing between them, waiting for CI to populate) is a **valid and common pattern** and does NOT trigger this warning either — markers present → check passes.
+**When it fires (v2.26.0)**: ONLY when the README already contains literal badge markdown — either `[![alt]({img})]({href})` image-link badges, or a raw `shields.io` / `img.shields.io` URL. A README with no badges at all does NOT trip this warning anymore (fixed in v2.26.0 — previously it fired on every badge-less README). **An empty marker block** (`<!--BADGES-START-->\n<!--BADGES-END-->` with nothing between them, waiting for CI to populate) is a **valid and common pattern** and does NOT trigger this warning either — markers present → check passes.
 
 **Root cause**: The plugin ships badges as literal markdown that CI cannot auto-refresh. Version numbers in badges drift out of sync with `plugin.json` on every release; CI-status badges cache stale results without an automated regeneration pass.
 
@@ -1147,9 +1147,9 @@ The validator passes this form (markers present → pass) and the fixer MUST pre
 
 #### Fix B: Remove the literal badge MARKDOWN (not the markers)
 
-Only use this when the plugin genuinely doesn't want badges at all (minimal README, no CI integration, hand-maintained project metadata). Delete the `[![...](url)](href)` and `shields.io` URLs. The HTML-comment markers can stay or go — if they stay empty, the validator still passes (they become harmless placeholders); if they go, a badge-less README is silent.
+Only use this when the plugin genuinely doesn't want badges at all (minimal README, no CI integration, hand-maintained project metadata). Delete the `[![...]({url})]({href})` and `shields.io` URLs. The HTML-comment markers can stay or go — if they stay empty, the validator still passes (they become harmless placeholders); if they go, a badge-less README is silent.
 
-**Scope of this fix**: what is removed is the LITERAL badge markdown (`[![CI](...)](...)`, shields.io URLs, plain-image badge lines). NEVER interpret this fix as permission to delete `<!--BADGES-START-->` / `<!--BADGES-END-->` markers — those are a CI-integration signal, not "bad content". If in doubt, prefer Fix A.
+**Scope of this fix**: what is removed is the LITERAL badge markdown (`[![CI]({img})]({href})`, shields.io URLs, plain-image badge lines). NEVER interpret this fix as permission to delete `<!--BADGES-START-->` / `<!--BADGES-END-->` markers — those are a CI-integration signal, not "bad content". If in doubt, prefer Fix A.
 
 #### Forbidden "fixes"
 
@@ -1169,6 +1169,61 @@ Only use this when the plugin genuinely doesn't want badges at all (minimal READ
    ```bash
    curl -sL https://choosealicense.com/licenses/mit/ | grep -A999 'BEGIN LICENSE' > LICENSE
    ```
+
+### MINOR: Broken file reference
+
+**Error message** (v2.26.0+): `Broken file reference: [<path>] in <md_file> — file not found. Two legitimate fixes: (1) if the reference is meant to be real, create the missing file or correct the path; (2) if it's a prose example/placeholder, convert the path to a template-exempt form...`
+**Severity**: MINOR
+**Source**: `cpv_validation_common.py` — markdown-link resolution inside `.md` files.
+**Root cause**: A markdown link `[text]({path})` or backticked path reference `` `{path}/to/file.ext` `` appears outside a fenced code block, and the path does not resolve to an existing file (tried relative to the containing `.md` first, then relative to the plugin root). This is a MINOR because documentation with stale links is confusing for readers and invisible to the progressive-discovery algorithm.
+
+**Two legitimate fixes — diagnose which case applies first**:
+
+#### Fix A: the reference is meant to be real → fix the path or create the file
+
+If the doc intends to point at a genuine file, one of these is wrong:
+- The path itself is stale (file was renamed or moved) — update the link target to the current path. Use the plugin-relative form when the link can be resolved from multiple `.md` locations (`references/foo.md`), or the `.md`-relative form for siblings (`./sibling.md`).
+- The referenced file was deleted but the link was not — either restore the file or delete the link.
+- The referenced file is planned but not yet written — write it, or remove the link from the doc until the file exists.
+
+Anchor fragments (`file.md#section`) are OK — the validator strips the `#section` part before resolving. The file just has to exist.
+
+#### Fix B: the "reference" is a prose example or placeholder → mark it so the validator skips it
+
+The broken-reference check only runs on link targets that look like real paths. Several escape hatches make a prose example clearly non-real:
+
+- **Brace placeholders**: `[text]({path})`, `[text]({href})`, `[text]({img})`. Any `{...}` or `<...>` in the path is treated as a template and skipped.
+- **Angle-bracket placeholders**: `[text](<placeholder>)`.
+- **Known placeholder names**: path basenames `foo`, `bar`, `baz`, `run`, `test`, `example`, `sample`, `demo`, `my`, `your` are exempt. Also prefixes `my-*`, `your-*`, `example-*`, and literal `placeholder`.
+- **Ellipsis**: a path containing `...` (e.g. `references/...`) is treated as an example.
+- **Dollar-variables**: paths like `$PATH`, `${CLAUDE_PLUGIN_ROOT}/foo.md` are template-exempt because they contain `$VAR` sequences.
+- **Fenced code blocks**: anything inside a triple-backtick fence is stripped before the check. The most robust fix for multi-line examples is to wrap them in a code fence.
+
+**Example**:
+
+```markdown
+# Before — validator flags img and href as broken refs
+
+Use image-link badges like `[![alt](img)](href)`.
+
+# After — placeholders in braces, validator skips
+
+Use image-link badges like `[![alt]({img})]({href})`.
+```
+
+Or for longer examples, put them in a fenced block:
+
+~~~markdown
+Example README pattern:
+
+```markdown
+[![CI](https://img.shields.io/…)](https://github.com/…)
+```
+~~~
+
+#### Forbidden "fix"
+
+- ❌ Creating a stub file just to silence the warning when the link target was never meant to resolve. Prefer Fix B — mark the path as an example using one of the template-exempt forms above.
 
 ---
 
