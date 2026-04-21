@@ -720,6 +720,92 @@ class TestStringSubstitutionValidation:
         validate_string_substitutions(body, report)
         assert any("CLAUDE_SESSION_ID" in r.message for r in report.results)
 
+    # ------------------------------------------------------------------
+    # v2.26.0: skill-local VAR= assignments + inline-backtick stripping
+    # ------------------------------------------------------------------
+
+    def test_var_assigned_in_fenced_block_is_whitelisted(self):
+        """A shell variable assigned in a code block must NOT trigger the
+        unknown-variable warning when referenced elsewhere."""
+        from validate_skill_comprehensive import validate_string_substitutions
+
+        report = ValidationReport(skill_path="test")
+        body = (
+            "Set the script path:\n\n"
+            "```bash\n"
+            "MERGE_SCRIPT=/path/to/merge.sh\n"
+            "```\n\n"
+            "Then invoke ${MERGE_SCRIPT} from anywhere.\n"
+        )
+        validate_string_substitutions(body, report)
+        unknown = [r for r in report.results if "Unknown variable reference" in r.message]
+        assert not unknown, f"false-positive unknown-var for MERGE_SCRIPT: {[r.message for r in unknown]}"
+
+    def test_export_var_in_fenced_block_is_whitelisted(self):
+        """`export VAR=...` inside a code block also whitelists VAR."""
+        from validate_skill_comprehensive import validate_string_substitutions
+
+        report = ValidationReport(skill_path="test")
+        body = (
+            "```bash\n"
+            "export REPORT_DIR=\"$MAIN_ROOT/reports/foo\"\n"
+            "```\n\n"
+            "Write reports into ${REPORT_DIR}.\n"
+        )
+        validate_string_substitutions(body, report)
+        unknown = [r for r in report.results if "Unknown variable reference" in r.message]
+        assert not unknown, f"false-positive unknown-var for REPORT_DIR: {[r.message for r in unknown]}"
+
+    def test_local_var_in_fenced_block_is_whitelisted(self):
+        """`local VAR=...` (inside a shell function) whitelists VAR too."""
+        from validate_skill_comprehensive import validate_string_substitutions
+
+        report = ValidationReport(skill_path="test")
+        body = (
+            "```bash\n"
+            "my_fn() {\n"
+            "  local TS=\"$(date +%s)\"\n"
+            "}\n"
+            "```\n\n"
+            "The timestamp is captured in ${TS}.\n"
+        )
+        validate_string_substitutions(body, report)
+        unknown = [r for r in report.results if "Unknown variable reference" in r.message]
+        assert not unknown, f"false-positive unknown-var for TS: {[r.message for r in unknown]}"
+
+    def test_inline_backticked_reference_is_stripped(self):
+        """`${CUSTOM_VAR}` wrapped in single backticks is prose-as-code
+        and must not be flagged even if never assigned anywhere."""
+        from validate_skill_comprehensive import validate_string_substitutions
+
+        report = ValidationReport(skill_path="test")
+        body = "Users can reference `${CUSTOM_VAR}` in their own scripts."
+        validate_string_substitutions(body, report)
+        unknown = [r for r in report.results if "Unknown variable reference" in r.message]
+        assert not unknown, f"inline-backtick ${'{'}CUSTOM_VAR{'}'} should be stripped: {[r.message for r in unknown]}"
+
+    def test_genuinely_unknown_var_in_prose_still_flagged(self):
+        """A ${VAR} reference in plain prose, never assigned, never wrapped
+        in backticks, is still flagged — the check must still work."""
+        from validate_skill_comprehensive import validate_string_substitutions
+
+        report = ValidationReport(skill_path="test")
+        body = "The system will set ${SOME_MYSTERY_ENV} automatically."
+        validate_string_substitutions(body, report)
+        unknown = [r for r in report.results if "Unknown variable reference" in r.message]
+        assert unknown, "genuine unknown var was NOT flagged — regression"
+        assert any("SOME_MYSTERY_ENV" in r.message for r in unknown)
+
+    def test_unknown_var_deduplicated(self):
+        """A single unknown var referenced N times emits ONE warning, not N."""
+        from validate_skill_comprehensive import validate_string_substitutions
+
+        report = ValidationReport(skill_path="test")
+        body = "Set ${MYSTERY_VAR}. Then use ${MYSTERY_VAR} twice. And again: ${MYSTERY_VAR}."
+        validate_string_substitutions(body, report)
+        unknown = [r for r in report.results if "Unknown variable reference" in r.message and "MYSTERY_VAR" in r.message]
+        assert len(unknown) == 1, f"expected 1 warning for de-dup, got {len(unknown)}"
+
 
 class TestDynamicContextValidation:
     """Tests for dynamic context injection validation."""
@@ -1658,10 +1744,16 @@ class TestAllowedToolsEdgeCases:
         assert any("empty" in r.message.lower() for r in report.results)
 
     def test_many_tools_warns_overpermission(self):
-        """More than 10 tools should generate over-permissioning warning."""
+        """More than 15 distinct tool surfaces generate over-permissioning
+        warning (v2.26.0 — threshold raised from 10 to 15 after Bash
+        sub-pattern collapsing)."""
         report = ValidationReport(skill_path="test")
         frontmatter = {
-            "allowed-tools": "Read, Write, Edit, Bash, Grep, Glob, WebFetch, WebSearch, Task, AskUserQuestion, NotebookEdit"
+            "allowed-tools": (
+                "Read, Write, Edit, Bash, Grep, Glob, WebFetch, WebSearch, "
+                "Agent, AskUserQuestion, NotebookEdit, TaskCreate, TaskUpdate, "
+                "TaskList, TaskGet, TaskStop"
+            )
         }
         validate_allowed_tools_field(frontmatter, report)
         assert any("Many tools" in r.message for r in report.results)
@@ -1690,10 +1782,15 @@ class TestV170ToolCountSeverity:
     """Tests verifying that the many-tools advisory uses WARNING level."""
 
     def test_many_tools_is_warning_not_minor(self):
-        """11 tools should produce a WARNING-level 'Many tools permitted' result, not MINOR."""
+        """16 distinct tool surfaces produce a WARNING-level 'Many tools
+        permitted' result, not MINOR (v2.26.0 threshold: >15)."""
         report = ValidationReport(skill_path="test")
         frontmatter = {
-            "allowed-tools": "Read, Write, Edit, Bash, Glob, Grep, Agent, WebFetch, WebSearch, Task, AskUserQuestion"
+            "allowed-tools": (
+                "Read, Write, Edit, Bash, Glob, Grep, Agent, WebFetch, "
+                "WebSearch, AskUserQuestion, NotebookEdit, TaskCreate, "
+                "TaskUpdate, TaskList, TaskGet, TaskStop"
+            )
         }
         validate_allowed_tools_field(frontmatter, report)
         many_tools_results = [r for r in report.results if "Many tools permitted" in r.message]
@@ -1707,6 +1804,99 @@ class TestV170ToolCountSeverity:
         validate_allowed_tools_field(frontmatter, report)
         many_tools_results = [r for r in report.results if "Many tools permitted" in r.message]
         assert len(many_tools_results) == 0, "Expected no 'Many tools permitted' result for 2 tools"
+
+    # ------------------------------------------------------------------
+    # v2.26.0: Bash-subpattern collapsing + user-invocable exemption
+    # ------------------------------------------------------------------
+
+    def test_bash_subpatterns_collapse_to_one_surface(self):
+        """`Bash(git:*), Bash(gh:*), Bash(uv:*)` + 12 other tools = 15 raw
+        entries but only 13 distinct surfaces — under the new threshold,
+        so no warning. v2.26.0 rule: Bash sub-scopes share one surface."""
+        report = ValidationReport(skill_path="test")
+        frontmatter = {
+            "allowed-tools": (
+                "Read, Write, Edit, Grep, Glob, Agent, WebFetch, WebSearch, "
+                "AskUserQuestion, NotebookEdit, TaskCreate, TaskUpdate, "
+                "Bash(git:*), Bash(gh:*), Bash(uv:*)"
+            )
+        }
+        validate_allowed_tools_field(frontmatter, report)
+        many_tools_results = [r for r in report.results if "Many tools permitted" in r.message]
+        assert not many_tools_results, (
+            f"Bash subpatterns were not collapsed — Many tools warning fired "
+            f"on 13 distinct surfaces: {[r.message for r in many_tools_results]}"
+        )
+
+    def test_many_bash_subpatterns_still_count_as_one(self):
+        """Even 8 Bash sub-patterns count as a single Bash surface."""
+        report = ValidationReport(skill_path="test")
+        frontmatter = {
+            "allowed-tools": (
+                "Bash(git:*), Bash(gh:*), Bash(uv:*), Bash(npm:*), "
+                "Bash(jq:*), Bash(yq:*), Bash(rg:*), Bash(fd:*), "
+                "Read, Write, Edit, Grep, Glob, Agent, WebFetch"
+            )
+        }
+        validate_allowed_tools_field(frontmatter, report)
+        many_tools_results = [r for r in report.results if "Many tools permitted" in r.message]
+        assert not many_tools_results, (
+            f"8 Bash subpatterns + 7 other tools = 8 distinct surfaces, "
+            f"but warning fired: {[r.message for r in many_tools_results]}"
+        )
+
+    def test_user_invocable_false_suppresses_warning(self):
+        """A skill declared `user-invocable: false` suppresses the
+        Many-tools warning entirely — agent-loaded skills inherit gating
+        from the agent's own allowlist."""
+        report = ValidationReport(skill_path="test")
+        frontmatter = {
+            "user-invocable": False,
+            "allowed-tools": (
+                # 20 distinct non-Bash surfaces — would normally fire.
+                "Read, Write, Edit, Grep, Glob, Agent, WebFetch, WebSearch, "
+                "AskUserQuestion, NotebookEdit, TaskCreate, TaskUpdate, "
+                "TaskList, TaskGet, TaskStop, TaskOutput, Monitor, "
+                "CronCreate, CronDelete, CronList"
+            ),
+        }
+        validate_allowed_tools_field(frontmatter, report)
+        many_tools_results = [r for r in report.results if "Many tools permitted" in r.message]
+        assert not many_tools_results, (
+            f"user-invocable: false should suppress the warning but it "
+            f"fired: {[r.message for r in many_tools_results]}"
+        )
+
+    def test_user_invocable_true_does_not_suppress_warning(self):
+        """Regression guard: `user-invocable: true` must NOT suppress the
+        warning — only the false form does."""
+        report = ValidationReport(skill_path="test")
+        frontmatter = {
+            "user-invocable": True,
+            "allowed-tools": (
+                "Read, Write, Edit, Grep, Glob, Agent, WebFetch, WebSearch, "
+                "AskUserQuestion, NotebookEdit, TaskCreate, TaskUpdate, "
+                "TaskList, TaskGet, TaskStop, TaskOutput, Monitor, "
+                "CronCreate, CronDelete, CronList"
+            ),
+        }
+        validate_allowed_tools_field(frontmatter, report)
+        many_tools_results = [r for r in report.results if "Many tools permitted" in r.message]
+        assert many_tools_results, "user-invocable: true should NOT suppress"
+
+    def test_exactly_15_surfaces_no_warning(self):
+        """Boundary: exactly 15 distinct surfaces — no warning (threshold is >15)."""
+        report = ValidationReport(skill_path="test")
+        frontmatter = {
+            "allowed-tools": (
+                "Read, Write, Edit, Bash, Glob, Grep, Agent, WebFetch, "
+                "WebSearch, AskUserQuestion, NotebookEdit, TaskCreate, "
+                "TaskUpdate, TaskList, TaskGet"
+            )
+        }
+        validate_allowed_tools_field(frontmatter, report)
+        many_tools_results = [r for r in report.results if "Many tools permitted" in r.message]
+        assert not many_tools_results, f"15 surfaces should not warn: {[r.message for r in many_tools_results]}"
 
 
 # =============================================================================

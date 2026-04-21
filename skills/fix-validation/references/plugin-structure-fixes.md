@@ -1107,6 +1107,43 @@ Common issues include:
    - Configuration options
    - Usage examples
 
+### WARNING: README.md missing badge-automation markers
+
+**Error message** (v2.26.0+): `README.md has badge markdown but is missing the automation markers (<!--BADGES-START--> / <!--BADGES-END-->). CI cannot regenerate badges without the markers — wrap the badge block with those HTML comments so scripts/update_badges.py (or equivalent) can refresh versions/CI status automatically.`
+**Severity**: WARNING
+**Source**: `validate_plugin.py` — `validate_readme()`
+**When it fires (v2.26.0)**: ONLY when the README already contains literal badge markdown — either `[![alt](img)](href)` image-link badges, or a raw `shields.io` / `img.shields.io` URL. A README with no badges at all does NOT trip this warning anymore (fixed in v2.26.0 — previously it fired on every badge-less README).
+
+**Root cause**: The plugin ships badges as literal markdown that CI cannot auto-refresh. Version numbers in badges drift out of sync with `plugin.json` on every release; CI-status badges cache stale results without an automated regeneration pass.
+
+**Two legitimate fixes**:
+
+#### Fix A: Wrap existing badges with the automation markers (preferred)
+
+Add the `<!--BADGES-START-->` / `<!--BADGES-END-->` HTML comments around the badge block so `scripts/update_badges.py` (or any regeneration script) can target the region:
+
+```markdown
+# My Plugin
+
+<!--BADGES-START-->
+[![CI](https://github.com/owner/repo/actions/workflows/ci.yml/badge.svg)](https://github.com/owner/repo/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue)](https://github.com/owner/repo)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+<!--BADGES-END-->
+
+<description>...
+```
+
+The `scripts/generate_plugin_repo.py` scaffold emits this form by default, so new plugins get the markers for free. For existing READMEs, just add the two comments around whatever badges are already there.
+
+#### Fix B: Remove the badges entirely
+
+If the plugin genuinely doesn't want auto-updated badges (e.g., a minimal README with no CI integration), delete the badge markdown. The warning disappears because the v2.26.0 check only fires on literal badges; a badge-less README is silent.
+
+#### Forbidden "fix"
+
+- ❌ Adding the markers around an empty region just to silence the warning while the actual badges live elsewhere in the file. The markers must wrap the real badge block — CI regeneration scripts replace everything between them.
+
 ### MINOR: No LICENSE file found
 
 **Error message**: `No LICENSE file found`

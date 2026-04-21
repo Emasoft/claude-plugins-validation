@@ -2947,12 +2947,22 @@ def validate_toc_embedding(
                 f"Link to '{ref_path.name}' in a list entry of {rel_file} "
                 f"has {embedded_count}/{len(toc_headings)} TOC headings "
                 f"embedded. SKILL.md must copy the COMPLETE TOC of each "
-                f"referenced .md file immediately after its link. Any missing "
+                f"referenced .md file verbatim immediately after its link — "
+                f"no exceptions, no summaries, no partial lists. Any missing "
                 f"TOC entry will never be discovered by the progressive "
                 f"discovery algorithm — that content becomes invisible to "
                 f"agents. If this is a reference, embed all "
-                f"{len(toc_headings)} headings. If this is a TOC title, "
-                f"avoid using markdown links to prevent this ambiguity.",
+                f"{len(toc_headings)} headings exactly as they appear in "
+                f"'{ref_path.name}'. If the TOC is too long to embed, the "
+                f"fix is in the reference file, NOT in SKILL.md: (1) drop "
+                f"sections that are not worth discovering (then the TOC "
+                f"shrinks naturally), or (2) merge granular subsections "
+                f"into fewer, more encompassing headings (same coverage, "
+                f"fewer entries). Either the content is worth discovering "
+                f"(embed the full TOC) or it is not (remove it from the "
+                f"reference file's TOC). If this is a TOC title rather "
+                f"than a reference, avoid markdown links to prevent the "
+                f"ambiguity.",
                 rel_file,
             )
         else:
@@ -2961,10 +2971,19 @@ def validate_toc_embedding(
                 f"Reference to '{ref_path.name}' in {rel_file} has "
                 f"{embedded_count}/{len(toc_headings)} TOC headings embedded. "
                 f"SKILL.md must copy the COMPLETE TOC of each referenced .md "
-                f"file immediately after its link. Any missing TOC entry will "
+                f"file verbatim immediately after its link — no exceptions, "
+                f"no summaries, no partial lists. Any missing TOC entry will "
                 f"never be discovered by the progressive discovery algorithm "
                 f"— that content becomes invisible to agents. Embed all "
-                f"{len(toc_headings)} headings.",
+                f"{len(toc_headings)} headings exactly as they appear in "
+                f"'{ref_path.name}'. If the TOC is too long to embed, the "
+                f"fix is in the reference file, NOT in SKILL.md: (1) drop "
+                f"sections that are not worth discovering (then the TOC "
+                f"shrinks naturally), or (2) merge granular subsections "
+                f"into fewer, more encompassing headings (same coverage, "
+                f"fewer entries). Either the content is worth discovering "
+                f"(embed the full TOC) or it is not (remove it from the "
+                f"reference file's TOC).",
                 rel_file,
             )
 
@@ -3053,10 +3072,19 @@ def validate_toc_embedding(
                 f"Backtick reference to '{ref_path.name}' in {rel_file} has "
                 f"{embedded_count}/{len(toc_headings)} TOC headings embedded. "
                 f"Convert to a markdown link and copy the COMPLETE TOC of the "
-                f"referenced file immediately after the link. Any missing TOC "
+                f"referenced file verbatim immediately after the link — no "
+                f"exceptions, no summaries, no partial lists. Any missing TOC "
                 f"entry will never be discovered by the progressive discovery "
                 f"algorithm — that content becomes invisible to agents. "
-                f"Embed all {len(toc_headings)} headings.",
+                f"Embed all {len(toc_headings)} headings exactly as they "
+                f"appear in '{ref_path.name}'. If the TOC is too long to "
+                f"embed, the fix is in the reference file, NOT in SKILL.md: "
+                f"(1) drop sections that are not worth discovering (then the "
+                f"TOC shrinks naturally), or (2) merge granular subsections "
+                f"into fewer, more encompassing headings (same coverage, "
+                f"fewer entries). Either the content is worth discovering "
+                f"(embed the full TOC) or it is not (remove it from the "
+                f"reference file's TOC).",
                 rel_file,
             )
 

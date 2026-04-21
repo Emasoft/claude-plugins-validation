@@ -869,6 +869,73 @@ class TestValidateReadmeAndLicense:
         passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
         assert any("README.md found" in m for m in passed_msgs)
 
+    # ------------------------------------------------------------------
+    # v2.26.0: badge-markers warning only fires when badges are present
+    # ------------------------------------------------------------------
+
+    def test_badge_markers_with_markers_passes(self, tmp_path):
+        """README with <!--BADGES-START--> / <!--BADGES-END--> passes."""
+        plugin_dir = tmp_path / "markers"
+        plugin_dir.mkdir()
+        (plugin_dir / "README.md").write_text(
+            "# My Plugin\n\n"
+            "<!--BADGES-START-->\n"
+            "![Version](https://img.shields.io/badge/version-1.0.0-blue)\n"
+            "<!--BADGES-END-->\n"
+        )
+        report = ValidationReport()
+        validate_readme(plugin_dir, report)
+        passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
+        assert any("badge markers" in m for m in passed_msgs)
+
+    def test_badge_markers_no_badges_no_warning(self, tmp_path):
+        """README with NO badges and NO markers must NOT produce a WARNING
+        (v2.26.0 — nothing to auto-regenerate, so the markers are optional)."""
+        plugin_dir = tmp_path / "no-badges"
+        plugin_dir.mkdir()
+        (plugin_dir / "README.md").write_text("# My Plugin\n\nA minimal README.\n")
+        report = ValidationReport()
+        validate_readme(plugin_dir, report)
+        badge_warnings = [
+            r for r in report.results if r.level == "WARNING" and "badge" in r.message.lower()
+        ]
+        assert not badge_warnings, (
+            f"false-positive badge-markers WARNING on badge-less README: "
+            f"{[r.message for r in badge_warnings]}"
+        )
+
+    def test_badge_markers_literal_badge_no_markers_warns(self, tmp_path):
+        """README with literal [![badge](url)](href) but no markers still
+        warns — this is the case the check is really for."""
+        plugin_dir = tmp_path / "literal-badge"
+        plugin_dir.mkdir()
+        (plugin_dir / "README.md").write_text(
+            "# My Plugin\n\n"
+            "[![CI](https://img.shields.io/github/actions/workflow/status/owner/repo/ci.yml)]"
+            "(https://github.com/owner/repo/actions)\n"
+        )
+        report = ValidationReport()
+        validate_readme(plugin_dir, report)
+        badge_warnings = [
+            r for r in report.results if r.level == "WARNING" and "badge" in r.message.lower()
+        ]
+        assert badge_warnings, "literal badge without markers was NOT flagged (regression)"
+
+    def test_badge_markers_shields_url_no_markers_warns(self, tmp_path):
+        """README that merely links to shields.io also counts as having
+        badges — the warning should still fire."""
+        plugin_dir = tmp_path / "shields-url"
+        plugin_dir.mkdir()
+        (plugin_dir / "README.md").write_text(
+            "# My Plugin\n\n![](https://img.shields.io/badge/v-1.0-blue)\n"
+        )
+        report = ValidationReport()
+        validate_readme(plugin_dir, report)
+        badge_warnings = [
+            r for r in report.results if r.level == "WARNING" and "badge" in r.message.lower()
+        ]
+        assert badge_warnings, "shields.io badge without markers was NOT flagged (regression)"
+
     def test_license_missing_reports_minor(self, tmp_path):
         """validate_license reports MINOR when no LICENSE file exists (lines 925-928)."""
         plugin_dir = tmp_path / "no-lic"

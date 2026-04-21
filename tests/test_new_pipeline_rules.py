@@ -491,8 +491,14 @@ class TestReadmeBadgeMarkers:
         assert any("badge" in m.lower() for m in msgs)
 
     def test_missing_badge_markers_warns(self, tmp_path):
-        """README without badge markers reports WARNING."""
-        readme = "# Plugin\n\nDescription.\n"
+        """README with literal badges but NO automation markers reports WARNING
+        (v2.26.0 — check only fires when badges actually exist)."""
+        readme = (
+            "# Plugin\n\n"
+            "[![CI](https://img.shields.io/github/actions/workflow/status/o/r/ci.yml)]"
+            "(https://github.com/o/r/actions)\n\n"
+            "Description.\n"
+        )
         plugin = _make_plugin(tmp_path, readme=readme)
         report = ValidationReport()
         validate_readme(plugin, report)
@@ -500,8 +506,15 @@ class TestReadmeBadgeMarkers:
         assert any("badge" in m.lower() for m in msgs)
 
     def test_only_start_marker_warns(self, tmp_path):
-        """README with only <!--BADGES-START--> (missing END) reports WARNING."""
-        readme = "# Plugin\n\n<!--BADGES-START-->\n![badge](url)\n\nDescription.\n"
+        """README with only <!--BADGES-START--> (missing END) AND literal
+        badges reports WARNING. v2.26.0: literal badge markdown in the body
+        triggers the check even when only one of the two markers is present."""
+        readme = (
+            "# Plugin\n\n"
+            "<!--BADGES-START-->\n"
+            "[![CI](https://img.shields.io/badge/v-1.0-blue)](https://example)\n"
+            "\nDescription.\n"
+        )
         plugin = _make_plugin(tmp_path, readme=readme)
         report = ValidationReport()
         validate_readme(plugin, report)
