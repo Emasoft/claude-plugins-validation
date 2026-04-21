@@ -2616,6 +2616,16 @@ EXPECTED_GITIGNORE_CATEGORIES: list[tuple[list[str], str, str]] = [
     ([".claude"], "Claude Code cache directory (.claude/)", "minor"),
     (["llm_externalizer_output"], "LLM Externalizer output directory", "warning"),
     ([".tldr"], "TLDR cache directory (.tldr/)", "warning"),
+    # Agent/script reports — per ~/.claude/rules/agent-reports-location.md,
+    # every plugin MUST have both `reports/` and `reports_dev/` explicitly
+    # gitignored. Reports routinely contain private data (absolute paths,
+    # source snippets, auth tokens in logs, PII in test fixtures), so both
+    # entries MUST be present even if the folders do not yet exist — this
+    # is defensive intent, not a filesystem reflection. The trailing slash
+    # in each pattern disambiguates `reports/` from `reports_dev/` under
+    # the validator's substring-match logic (line 2673). Added v2.25.0.
+    (["reports/"], "Agent/script reports (reports/)", "major"),
+    (["reports_dev/"], "Dev-only report scratch (reports_dev/)", "warning"),
 ]
 
 
@@ -2636,11 +2646,54 @@ def _check_stale_user_settings_local(report: ValidationReport) -> None:
         )
 
 
+def _category_has_matching_artifact(plugin_root: Path, patterns: list[str]) -> bool:
+    """Return True iff ANY pattern in the category matches an existing
+    file or directory inside the plugin.
+
+    The gitignore-coverage check is GATED on this: we only flag missing
+    coverage when the artifact actually exists in the plugin. A .gitignore
+    pattern for a folder that does not exist in the plugin would be pure
+    speculation — there is nothing to leak, so nothing to require.
+
+    The gitignore bootstrap is performed lazily by agents at the point
+    they are about to write a report (per
+    ~/.claude/rules/agent-reports-location.md), not eagerly by CPV at
+    validation time.
+
+    Pattern matching:
+    - Patterns with a trailing ``/`` are treated as directories.
+    - Patterns containing ``*`` are passed through ``rglob`` (matches any
+      file under the plugin tree — catches nested ``__pycache__`` etc.).
+    - All other patterns are matched as either a file or a directory.
+    """
+    for raw in patterns:
+        p = raw.strip()
+        if p.endswith("/"):
+            if (plugin_root / p.rstrip("/")).is_dir():
+                return True
+            continue
+        if "*" in p:
+            try:
+                if next(plugin_root.rglob(p), None) is not None:
+                    return True
+            except OSError:
+                pass
+            continue
+        target = plugin_root / p
+        if target.is_dir() or target.is_file():
+            return True
+    return False
+
+
 def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
     """Validate that the plugin has a .gitignore with essential patterns.
 
     Checks that cache files, build artifacts, temp files, secrets,
-    and virtual environments are properly ignored.
+    and virtual environments are properly ignored — **but only for
+    artifacts that actually exist in the plugin**. Missing coverage for
+    a folder that does not exist is not a finding; the gitignore
+    bootstrap rule (agent-reports-location.md) is lazy — agents add
+    entries at the point they're about to write, not eagerly.
     """
     gitignore_path = plugin_root / ".gitignore"
 
@@ -2661,13 +2714,16 @@ def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
     missing_categories: list[tuple[str, str]] = []
 
     for patterns, description, severity in EXPECTED_GITIGNORE_CATEGORIES:
-        # Check if ANY of the patterns in this category appear in the gitignore
-        found = any(any(p.lower() in line.lower() for line in lines) for p in patterns)
-        if not found:
+        # Only flag if the gitignore misses this category AND the artifact
+        # actually exists in the plugin. Don't speculate about future files.
+        found_in_gitignore = any(any(p.lower() in line.lower() for line in lines) for p in patterns)
+        if found_in_gitignore:
+            continue
+        if _category_has_matching_artifact(plugin_root, patterns):
             missing_categories.append((description, severity))
 
     if not missing_categories:
-        report.passed(".gitignore covers all expected categories")
+        report.passed(".gitignore covers all expected categories for artifacts present in the plugin")
     else:
         for description, severity in missing_categories:
             getattr(report, severity)(f".gitignore missing coverage for: {description}")
