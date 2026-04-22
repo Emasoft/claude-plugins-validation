@@ -70,7 +70,9 @@ def check_remote_execution_guard() -> None:
             scripts_path = Path(scripts_dir).resolve()
             plugin_root_path = Path(claude_plugin_root).resolve()
             # str.startswith is fine here — both paths are resolved absolutes.
-            if str(scripts_path).startswith(str(plugin_root_path) + os.sep) or str(scripts_path) == str(plugin_root_path):
+            if str(scripts_path).startswith(str(plugin_root_path) + os.sep) or str(scripts_path) == str(
+                plugin_root_path
+            ):
                 return
         except (OSError, ValueError):
             pass
@@ -358,12 +360,14 @@ SETTINGS_SOURCE_REQUIRED_FIELDS: dict[str, set[str]] = {
 # here is accepted by CPV's broader VALID_SETTINGS_SOURCE_TYPES set but
 # rejected at runtime by Claude Code — hence a MAJOR finding.
 # =============================================================================
-STRICT_KNOWN_MARKETPLACES_ALLOWED_SOURCE_TYPES: frozenset[str] = frozenset({
-    "github",
-    "url",
-    "hostPattern",
-    "pathPattern",
-})
+STRICT_KNOWN_MARKETPLACES_ALLOWED_SOURCE_TYPES: frozenset[str] = frozenset(
+    {
+        "github",
+        "url",
+        "hostPattern",
+        "pathPattern",
+    }
+)
 
 # Valid tool names for Claude Code agents
 VALID_TOOLS = {
@@ -2039,7 +2043,7 @@ def resolve_project_root(anchor: Path | None = None) -> Path:
         if wt.returncode == 0:
             for line in wt.stdout.splitlines():
                 if line.startswith("worktree "):
-                    return Path(line[len("worktree "):].strip()).resolve()
+                    return Path(line[len("worktree ") :].strip()).resolve()
     except (FileNotFoundError, subprocess.SubprocessError):
         pass
 
@@ -2071,6 +2075,7 @@ def report_timestamp() -> str:
     arithmetic, and so ``ls -t`` / glob sorting behave predictably.
     """
     from datetime import datetime
+
     # astimezone() with no arg uses the local timezone, producing a timezone-aware
     # datetime. strftime("%z") then produces the compact "±HHMM" form.
     return datetime.now().astimezone().strftime("%Y%m%d_%H%M%S%z")
@@ -3391,6 +3396,89 @@ def _sanitize_url(url: str) -> str | None:
     return clean
 
 
+#: HTTP status codes that may clear up on retry (transient upstream state).
+#  Used by validate_md_urls() to distinguish real dead URLs from flaky ones.
+#  408=Request Timeout, 425=Too Early, 429=Too Many Requests,
+#  500=Internal Server Error, 502=Bad Gateway, 503=Service Unavailable,
+#  504=Gateway Timeout.
+_TRANSIENT_HTTP_CODES: frozenset[int] = frozenset({408, 425, 429, 500, 502, 503, 504})
+
+#: Hosts that aggressively throttle anonymous HEAD requests from one IP.
+#  github.com SYN-resets parallel HEADs when several arrive simultaneously,
+#  producing the false-positive "Dead URL (unreachable)" reported in issues
+#  #12 and #13. Cap per-host concurrency to 2 to avoid the reset.
+_STRICT_HOST_CONCURRENCY: dict[str, int] = {
+    "github.com": 2,
+    "www.github.com": 2,
+    "api.github.com": 2,
+    "raw.githubusercontent.com": 2,
+    "gist.github.com": 2,
+    "codeload.github.com": 2,
+}
+
+#: Default per-host cap for hosts not listed in _STRICT_HOST_CONCURRENCY.
+#  Still prevents a single upstream from seeing 16 parallel HEADs.
+_DEFAULT_PER_HOST_CONCURRENCY: int = 4
+
+
+def _is_transient_url_error(exc: BaseException | None) -> bool:
+    """True if `exc` is a network error that may clear up on retry.
+
+    Covers: socket/TimeoutError, ssl.SSLError, connection resets,
+    http.client.RemoteDisconnected/BadStatusLine, and URLError that
+    wraps any of the above. Permanent errors (DNS NXDOMAIN,
+    ConnectionRefused to a dead host) return False.
+    """
+    if exc is None:
+        return False
+
+    import socket
+    import ssl
+    import urllib.error
+    from http.client import BadStatusLine, RemoteDisconnected
+
+    if isinstance(exc, (socket.timeout, TimeoutError)):
+        return True
+    if isinstance(exc, ssl.SSLError):
+        return True
+    if isinstance(exc, (RemoteDisconnected, BadStatusLine)):
+        return True
+    if isinstance(exc, ConnectionResetError):
+        return True
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in _TRANSIENT_HTTP_CODES
+    if isinstance(exc, urllib.error.URLError):
+        # Peek at the wrapped reason — that's where the actionable info lives.
+        return _is_transient_url_error(getattr(exc, "reason", None))
+    return False
+
+
+def _format_url_exception(exc: BaseException | None) -> str:
+    """Render a short, filesystem-safe one-line summary of `exc` for a WARNING.
+
+    Keeps the exception type name and (when helpful) the wrapped reason
+    type or a trimmed str(e). Avoids dumping stack traces into reports.
+    """
+    if exc is None:
+        return "unreachable"
+
+    import urllib.error
+
+    name = type(exc).__name__
+    if isinstance(exc, urllib.error.URLError):
+        reason = getattr(exc, "reason", None)
+        if reason is not None and not isinstance(reason, str):
+            return f"{name}: {type(reason).__name__}"
+        if isinstance(reason, str) and reason:
+            return f"{name}: {reason[:80]}"
+        return name
+
+    msg = str(exc)
+    if msg and len(msg) <= 80:
+        return f"{name}: {msg}"
+    return name
+
+
 def validate_md_urls(
     md_file: Path,
     plugin_root: Path,
@@ -3399,6 +3487,8 @@ def validate_md_urls(
     timeout: float = 8.0,
     skip_domains: set[str] | None = None,
     url_cache: dict[str, bool] | None = None,
+    max_retries: int = 2,
+    retry_backoff: float = 0.4,
 ) -> None:
     """Validate that URLs referenced in a markdown file are reachable.
 
@@ -3407,11 +3497,40 @@ def validate_md_urls(
 
     Uses a cache dict (shared across calls) to avoid re-checking the same URL.
     All URLs are sanitized before any network request is made.
+
+    Reachability strategy (issues #12, #13 — GitHub false-positive fix):
+
+    1. **Per-host concurrency cap**: github.com and its sibling hosts rate-limit
+       parallel anonymous HEAD requests from a single IP. Each host gets a
+       semaphore (cap 2 for strict hosts, 4 otherwise) so concurrent HEADs
+       against the same upstream never exceed the safe ceiling.
+    2. **Retry on transient**: network timeouts, SSL handshake failures,
+       RemoteDisconnected, and 429/503 HTTP codes are retried up to
+       `max_retries` times with linear backoff (`retry_backoff` seconds
+       per attempt). A genuinely dead URL stays dead across all retries.
+    3. **HEAD → GET fallback**: the first retry uses GET instead of HEAD.
+       Some CDNs (and occasionally GitHub) silently drop HEAD requests but
+       serve GET cleanly.
+    4. **Exception surfacing**: the WARNING now includes the exception type
+       (and wrapped reason, when present) so users can distinguish a real
+       DNS failure from a transient `socket.timeout`.
+    5. **Env opt-out**: setting `CPV_SKIP_URL_CHECK=1` short-circuits the
+       function — useful for air-gapped networks and release pipelines
+       that treat WARNINGs as blocking.
     """
+    import os
     import ssl
+    import threading
+    import time
     import urllib.error
     import urllib.request
+    from concurrent.futures import ThreadPoolExecutor
     from urllib.parse import urlparse
+
+    # Escape hatch for air-gapped environments and CI/CD pipelines that
+    # can't afford false-positive WARNINGs. See issues #12, #13.
+    if os.environ.get("CPV_SKIP_URL_CHECK") in ("1", "true", "yes", "on"):
+        return
 
     try:
         content = md_file.read_text(encoding="utf-8")
@@ -3506,42 +3625,99 @@ def validate_md_urls(
     if not to_check:
         return
 
-    def _check_one(pair: tuple[str, str]) -> tuple[str, str, bool, str | None]:
-        """Returns (raw_url, safe_url, is_alive, warning_suffix_or_None)."""
-        raw_url, safe_url = pair
+    # Per-host semaphores. Scoped to this call so each validate_md_urls()
+    # invocation is isolated — no surprise throttling carried between
+    # markdown files or plugin runs. The cache is keyed by hostname so
+    # all URLs against the same host share a single semaphore.
+    sem_cache: dict[str, threading.Semaphore] = {}
+    sem_cache_lock = threading.Lock()
+
+    def _sem_for(host: str) -> threading.Semaphore:
+        with sem_cache_lock:
+            sem = sem_cache.get(host)
+            if sem is None:
+                cap = _STRICT_HOST_CONCURRENCY.get(host, _DEFAULT_PER_HOST_CONCURRENCY)
+                sem = threading.Semaphore(cap)
+                sem_cache[host] = sem
+            return sem
+
+    def _one_request(url: str, method: str) -> tuple[int | None, BaseException | None]:
+        """Single HEAD/GET. Returns (status_code, exc).
+
+        Exactly one of status_code / exc is non-None.
+        - HTTPError becomes (code, None) since GitHub-style 401/403/405
+          carry useful information — we don't need the exception object.
+        - Other exceptions (timeouts, connection resets, etc.) become
+          (None, exc) so the caller can decide whether to retry.
+        """
         try:
-            req = urllib.request.Request(safe_url, method="HEAD")
+            req = urllib.request.Request(url, method=method)
             req.add_header("User-Agent", "Mozilla/5.0 (compatible; CPV-LinkChecker/1.0)")
             with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-                if resp.status >= 400:
-                    return (raw_url, safe_url, False, f"HTTP {resp.status}")
-                return (raw_url, safe_url, True, None)
+                return (resp.status, None)
         except urllib.error.HTTPError as e:
-            if e.code == 405:
-                # Some servers reject HEAD — retry with GET
-                try:
-                    req2 = urllib.request.Request(safe_url, method="GET")
-                    req2.add_header("User-Agent", "Mozilla/5.0 (compatible; CPV-LinkChecker/1.0)")
-                    with urllib.request.urlopen(req2, timeout=timeout, context=ctx) as resp2:
-                        if resp2.status >= 400:
-                            return (raw_url, safe_url, False, f"HTTP {resp2.status}")
-                        return (raw_url, safe_url, True, None)
-                except Exception:
-                    return (raw_url, safe_url, False, "unreachable")
-            if e.code in (401, 403):
-                # Auth-protected URLs — treat as valid (they exist, just need auth)
-                return (raw_url, safe_url, True, None)
-            return (raw_url, safe_url, False, f"HTTP {e.code}")
-        except Exception:
-            return (raw_url, safe_url, False, "unreachable")
+            return (e.code, None)
+        except BaseException as e:  # noqa: BLE001 — return exception to caller
+            return (None, e)
+
+    def _check_one(pair: tuple[str, str]) -> tuple[str, str, bool, str | None]:
+        """Returns (raw_url, safe_url, is_alive, warning_suffix_or_None).
+
+        Retry loop: up to `max_retries + 1` attempts total. First attempt uses
+        HEAD; subsequent attempts use GET (HEAD-drop-on-CDN fallback). Only
+        transient errors (_is_transient_url_error / _TRANSIENT_HTTP_CODES)
+        trigger retry — a confirmed 404 returns immediately.
+        """
+        raw_url, safe_url = pair
+        host = (urlparse(safe_url).hostname or "").lower()
+        sem = _sem_for(host)
+
+        last_suffix = "unreachable"
+
+        for attempt in range(max_retries + 1):
+            if attempt > 0:
+                # Linear backoff — conservative so we don't stretch `--strict`
+                # runtime on a site that stays dead.
+                time.sleep(min(1.5, retry_backoff * attempt))
+
+            with sem:
+                # First attempt: HEAD (cheap). On retry, switch to GET
+                # because some CDNs (and occasionally GitHub) drop HEAD.
+                method = "HEAD" if attempt == 0 else "GET"
+                code, exc = _one_request(safe_url, method)
+
+                # Classic 405 Method Not Allowed → always GET.
+                if code == 405:
+                    code, exc = _one_request(safe_url, "GET")
+
+            # Evaluate outside semaphore so the retry sleep doesn't hold it.
+            if code is not None:
+                if code in (401, 403):
+                    # Auth-protected — the URL exists, just not anonymously readable.
+                    return (raw_url, safe_url, True, None)
+                if code < 400:
+                    return (raw_url, safe_url, True, None)
+                # Error status. Retry if transient; otherwise it's dead.
+                last_suffix = f"HTTP {code}"
+                if code not in _TRANSIENT_HTTP_CODES or attempt >= max_retries:
+                    return (raw_url, safe_url, False, last_suffix)
+                # Transient → fall through to retry.
+                continue
+
+            # Network-level exception. Surface the type so users can tell
+            # a DNS failure from a socket.timeout.
+            last_suffix = f"unreachable: {_format_url_exception(exc)}"
+            if not _is_transient_url_error(exc) or attempt >= max_retries:
+                return (raw_url, safe_url, False, last_suffix)
+            # Transient → fall through to retry.
+
+        return (raw_url, safe_url, False, last_suffix)
 
     # Bounded worker pool: each worker may block up to `timeout` seconds on
     # a slow URL, so wall-clock time is approximately
     #   ceil(len(to_check) / max_workers) * worst-case-timeout
-    # 16 workers is a comfortable trade-off between I/O throughput and
-    # not hammering any single upstream host.
-    from concurrent.futures import ThreadPoolExecutor
-
+    # 16 workers is a comfortable pool size; the per-host semaphores above
+    # prevent any single upstream from seeing all 16 at once.
     max_workers = min(16, max(1, len(to_check)))
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         for raw_url, safe_url, is_alive, suffix in pool.map(_check_one, to_check):
