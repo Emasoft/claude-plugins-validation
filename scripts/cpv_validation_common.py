@@ -1914,6 +1914,410 @@ register_rule(RuleSchema(
 ))
 
 
+# =============================================================================
+# Phase 3 — ~30 MAJOR net-new rules (4 sub-phases compact catalog)
+# =============================================================================
+#
+# Phase 3 follows Phase 2's "extend existing pattern lists" approach but for
+# rules that lack an existing list. Each rule below registers its RuleSchema
+# and contributes one or more regex patterns to the shared PHASE3_PATTERNS
+# list (consumed by check_phase3_all in validate_security.py).
+#
+# Format: each entry is a (rule_id, severity, regex, message_template) tuple.
+# The check function iterates this list once per file, applying Phase 0
+# FP-reduction (fence skip, negation guard, defensive demotion).
+
+# (rule_id, severity, regex, message_template)
+PHASE3_PATTERNS: list[tuple[str, str, "re.Pattern[str]", str]] = [
+    # -------------------------------------------------------------------------
+    # Phase 3a — Prompt-injection extended (RC-02/03/05/08/25/90/91/92/93/99/108)
+    # (RC-07 covered in Phase 2a; RC-02 + RC-43 differ — RC-02 is prose form,
+    # RC-43 is code-form already in Phase 1)
+    # -------------------------------------------------------------------------
+    ("RC-02", "MAJOR",
+     re.compile(
+         r"\b(?:if|when|once)\s+(?:you\s+(?:see|notice|encounter)|the\s+user\s+(?:says|asks|requests))\s+"
+         r"[\"'\w][^\n]{2,80}\s*[,;:]?\s*(?:then|do|please|first)",
+         re.IGNORECASE,
+     ),
+     "RC-02: prose conditional / time-bomb prompt injection"),
+    ("RC-03", "MAJOR",
+     re.compile(
+         r"\b(?:URGENT|EMERGENCY|critical|immediate)\s*[:!]?\s*"
+         r"(?:lives|safety|health|future|company|user)\s+(?:depend|hinge|rely)\s+on",
+         re.IGNORECASE,
+     ),
+     "RC-03: coercive authority / urgency manipulation"),
+    ("RC-03", "MAJOR",
+     re.compile(r"\byou\s+MUST\s+(?:do|comply|follow|obey|execute)\b"),
+     "RC-03: coercive authority — emphasized MUST"),
+    ("RC-05", "MAJOR",
+     re.compile(
+         r"\bas\s+(?:a|an|the)\s+(?:developer|admin(?:istrator)?|owner|operator|maintainer)\s+"
+         r"(?:with\s+)?(?:full|all|unrestricted|elevated|privileged)\s+(?:access|permissions?|rights?|capabilities)",
+         re.IGNORECASE,
+     ),
+     "RC-05: role-priority / capability-claim impersonation"),
+    ("RC-08", "MAJOR",
+     re.compile(
+         r"\b(?:Anthropic|OpenAI|the\s+team|Claude\s+team|engineers?)\s+"
+         r"(?:have\s+|has\s+)?(?:updated|changed|removed|disabled|modified)\s+"
+         r"(?:your|the)\s+(?:policy|guidelines?|safety|restrictions?|behavior|alignment)",
+         re.IGNORECASE,
+     ),
+     "RC-08: Anthropic / system-admin false-authority impersonation"),
+    ("RC-25", "MAJOR",
+     re.compile(
+         r"!\[[^\]]*\]\(https?://[^\s)]+(?:\?|&)(?:[a-z_]+=[^&\s)]*&?){2,}\)",
+         re.IGNORECASE,
+     ),
+     "RC-25: markdown image beacon (URL with multiple query params — exfil channel)"),
+    ("RC-90", "MAJOR",
+     re.compile(
+         r"\[(?:IMPORTANT|SYSTEM|ADMIN|ALERT|CRITICAL|URGENT|MUST|REQUIRED)\]\s*[:!]?\s*"
+         r"(?:ignore|disregard|forget|override|bypass|reveal|show|execute|run)",
+         re.IGNORECASE,
+     ),
+     "RC-90: IMPORTANT-tag / bracket amplification of injection imperative"),
+    ("RC-91", "MAJOR",
+     re.compile(
+         r"<!--\s*(?:ignore|disregard|forget|override|execute|run|do\s+not\s+show)[^\n]{1,200}-->",
+         re.IGNORECASE,
+     ),
+     "RC-91: hidden HTML comment containing action verb"),
+    ("RC-92", "MAJOR",
+     re.compile(
+         r"<(?:div|span)\s+[^>]*style=[\"'][^\"']*"
+         r"(?:display:\s*none|visibility:\s*hidden|opacity:\s*0|color:\s*(?:white|#fff)|font-size:\s*0)",
+         re.IGNORECASE,
+     ),
+     "RC-92: CSS-hidden injection (display:none, opacity:0, color:white)"),
+    ("RC-92", "MAJOR",
+     re.compile(r"<details\s+open\s*=\s*[\"']?false[\"']?>"),
+     "RC-92: collapsible <details> element with hidden content"),
+    ("RC-93", "MAJOR",
+     re.compile(r"\S\s{30,}\S"),
+     "RC-93: line with ≥30 contiguous spaces — visual deception (off-screen text)"),
+    ("RC-99", "CRITICAL",
+     re.compile(r"忽略.*?(?:指令|规则|说明|提示)"),
+     "RC-99: Mandarin prompt injection (忽略...指令)"),
+    ("RC-99", "CRITICAL",
+     re.compile(r"无视.*?(?:之前|以上|系统)"),
+     "RC-99: Mandarin prompt injection (无视...之前/以上/系统)"),
+    ("RC-99", "CRITICAL",
+     re.compile(r"以前の.*?(?:指示|ルール|ガイドライン).*?(?:無視|忘れ)"),
+     "RC-99: Japanese prompt injection (以前の...指示/ルール/ガイドライン...無視/忘れ)"),
+    ("RC-99", "CRITICAL",
+     re.compile(r"이전.*?(?:지시|규칙|지침).*?(?:무시|잊)"),
+     "RC-99: Korean prompt injection"),
+    ("RC-99", "CRITICAL",
+     re.compile(
+         r"\b(?:olvida|ignora|olvide|ignore)\s+(?:las?|los?)\s+"
+         r"instrucci[oó]n(?:es)?\s+(?:anterior(?:es)?|previa(?:s)?)",
+         re.IGNORECASE,
+     ),
+     "RC-99: Spanish prompt injection"),
+    ("RC-99", "CRITICAL",
+     re.compile(r"\bignorez\s+(?:les\s+)?instructions?\s+pr[eé]c[eé]dent(?:es)?", re.IGNORECASE),
+     "RC-99: French prompt injection"),
+    ("RC-99", "CRITICAL",
+     re.compile(
+         r"\b(?:ignoriere|vergiss)\s+(?:die\s+)?(?:vorherigen?|vorigen?)\s+(?:Anweisungen|Regeln)",
+         re.IGNORECASE,
+     ),
+     "RC-99: German prompt injection"),
+    ("RC-99", "CRITICAL",
+     re.compile(
+         r"(?:Игнорируй|Забудь)\s+(?:все\s+)?предыдущие\s+(?:инструкции|указания)",
+         re.IGNORECASE,
+     ),
+     "RC-99: Russian prompt injection"),
+    ("RC-99", "CRITICAL",
+     re.compile(r"تجاهل\s+(?:كل\s+)?التعليمات\s+السابقة"),
+     "RC-99: Arabic prompt injection"),
+    ("RC-108", "MAJOR",
+     re.compile(
+         r"<!--\s*\[\s*INSTRUCT(?:ION)?S?\s*\]\s*[\s\S]{1,500}-->",
+         re.IGNORECASE,
+     ),
+     "RC-108: comment-hidden injection bracket — LLMs read comments, regex misses them"),
+
+    # -------------------------------------------------------------------------
+    # Phase 3b — MCP / agent extras (RC-46/48/51/52/53/54/55/56/57/58/59/60/63)
+    # -------------------------------------------------------------------------
+    ("RC-46", "MAJOR",
+     re.compile(r"--(?:no-sandbox|allow-dangerous|disable-web-security|insecure)\b"),
+     "RC-46: MCP / browser security-disabling argument"),
+    ("RC-48", "CRITICAL",
+     re.compile(r"\"args\"\s*:\s*\[[^\]]*[\";]\s*(?:rm\s|curl\s|wget\s|sh\s)"),
+     "RC-48: MCP args contains shell metacharacters / command injection vector"),
+    ("RC-48", "CRITICAL",
+     re.compile(r"\"args\"\s*:\s*\[[^\]]*[\$`][\(<]"),
+     "RC-48: MCP args contains shell substitution `$( ` or `<( `"),
+    ("RC-51", "MAJOR",
+     re.compile(
+         r"\"(?:retry|retries|maxRetries|max_retries)\"\s*:\s*(?:-1|\"?(?:Infinity|inf|none|unlimited)\"?|[0-9]{4,})",
+         re.IGNORECASE,
+     ),
+     "RC-51: MCP unbounded retry (token-amplification vector)"),
+    ("RC-52", "MAJOR",
+     re.compile(
+         # Trailing \b removed — `agent.invoke(agent_self,...)` has `_` after
+         # `agent`, both word chars, so \b would fail. Allow word continuation.
+         r"\b(agent|skill|task)\s*\.\s*(?:invoke|spawn|launch|delegate)\s*\([^)]*\b\1\w*",
+         re.IGNORECASE,
+     ),
+     "RC-52: recursive self-invocation (token exhaustion)"),
+    ("RC-53", "CRITICAL",
+     re.compile(
+         r"\b(?:sampling|createMessage|sample)\s*\([^)]*?(?:credential|secret|token|key|password)",
+         re.IGNORECASE,
+     ),
+     "RC-53: MCP sampling/createMessage exfiltration (sensitive data in prompt)"),
+    ("RC-54", "MAJOR",
+     re.compile(r"\"(?:host|bind|listen)\"\s*:\s*\"(?:0\.0\.0\.0|::|::0)\""),
+     "RC-54: MCP server bound to 0.0.0.0 / :: (network exposure)"),
+    ("RC-56", "MAJOR",
+     re.compile(
+         r"\"inputSchema\"\s*:\s*\{[^}]*\"additionalProperties\"\s*:\s*true",
+         re.IGNORECASE,
+     ),
+     "RC-56: MCP inputSchema allows additionalProperties (manipulation surface)"),
+    ("RC-57", "MAJOR",
+     re.compile(r"\"(?:autoApprove|auto_approve|approve_all|alwaysApprove)\"\s*:\s*true", re.IGNORECASE),
+     "RC-57: MCP server auto-approves all calls (disables user safety gate)"),
+    ("RC-58", "CRITICAL",
+     re.compile(
+         r"\bagent\s*\.\s*(?:send|invoke|delegate)\s*\([^)]*\b(?:credential|api_?key|token|secret|password)",
+         re.IGNORECASE,
+     ),
+     "RC-58: agent passes credentials to a downstream agent (cross-agent relay)"),
+    ("RC-59", "CRITICAL",
+     re.compile(
+         r"\bname\s*[:=]\s*[\"'](?:claude|anthropic|admin|system|root)[\"']",
+         re.IGNORECASE,
+     ),
+     "RC-59: agent identity spoofing (Claude/Anthropic/admin/system in name field)"),
+    ("RC-60", "MAJOR",
+     re.compile(r"\b(?:shadow|alternate|hidden)\s*workspace\b|\bworkspace\s*[\"']hidden[\"']", re.IGNORECASE),
+     "RC-60: shadow / hidden / alternate workspace declaration"),
+    ("RC-63", "MAJOR",
+     re.compile(
+         r"\b(?:do\s+not|don'?t)\s+ask\s+(?:the\s+)?user\b|"
+         r"\bskip\s+(?:user\s+)?(?:confirmation|approval|prompt|verification)\b",
+         re.IGNORECASE,
+     ),
+     "RC-63: 'do not ask user' / skip-confirmation autonomy abuse"),
+
+    # -------------------------------------------------------------------------
+    # Phase 3c — Persistence / supply / exfil-extended
+    # (RC-18/22/23/24/30/31/32/33/40/41/42/72/80/81/95/96/98)
+    # -------------------------------------------------------------------------
+    ("RC-22", "CRITICAL",
+     re.compile(r"\bnavigator\.clipboard\.readText\s*\(\s*\)"),
+     "RC-22: clipboard-API exfil (browser navigator.clipboard.readText)"),
+    ("RC-22", "MINOR",
+     re.compile(r"\b(?:pbcopy|xclip\s+-(?:o|sel)|xsel\s+-(?:o|b)|Get-Clipboard)\b"),
+     "RC-22: clipboard read via pbcopy/xclip/xsel/Get-Clipboard"),
+    ("RC-23", "MAJOR",
+     re.compile(r"\bnavigator\.sendBeacon\s*\("),
+     "RC-23: navigator.sendBeacon (silent exfil — runs after page unload)"),
+    ("RC-24", "CRITICAL",
+     re.compile(
+         r"\b(?:WALLET|MNEMONIC|SEED|BIP39|BIP_39|PRIVATE_KEY)_(?:PHRASE|SEED|MNEMONIC|HEX|WIF)\b",
+         re.IGNORECASE,
+     ),
+     "RC-24: Web3 / crypto-wallet seed-related env var name"),
+    ("RC-24", "CRITICAL",
+     re.compile(r"\b(?:0x[0-9a-fA-F]{64})\b"),
+     "RC-24: Hex-encoded 256-bit value (Ethereum private-key shape)"),
+    ("RC-31", "MAJOR",
+     re.compile(r"\buses:\s*[A-Za-z0-9._/-]+@(?:main|master|develop|latest|HEAD)\s*$", re.MULTILINE),
+     "RC-31: GitHub Actions uses unpinned mutable ref (@main/master/latest)"),
+    ("RC-32", "MAJOR",
+     re.compile(r"\$\{\{\s*toJSON\s*\(\s*secrets\s*\)\s*\}\}", re.IGNORECASE),
+     "RC-32: GitHub Actions exfil — toJSON(secrets) dumps all repo secrets"),
+    ("RC-32", "MAJOR",
+     re.compile(r"echo\s+.*\$\{\{\s*secrets\.[A-Z_]+", re.IGNORECASE),
+     "RC-32: GitHub Actions secret value echoed (potential log leak)"),
+    ("RC-40", "CRITICAL",
+     re.compile(r">>?\s*~/\.ssh/authorized_keys\b"),
+     "RC-40: append to ~/.ssh/authorized_keys (permanent SSH backdoor)"),
+    ("RC-41", "MAJOR",
+     re.compile(r">>?\s*\.git/hooks/(?:pre|post|commit|push|update)-?[a-z]*\b"),
+     "RC-41: append to .git/hooks/* (git-hook persistence)"),
+    ("RC-42", "MAJOR",
+     re.compile(r"\b(?:echo|cat)\s+.*?>>?\s*(?:docker-entrypoint(?:\.sh)?|Dockerfile)\b"),
+     "RC-42: docker-entrypoint / Dockerfile modification at runtime"),
+    ("RC-72", "MAJOR",
+     re.compile(r"\b(?:0x[0-9a-fA-F]{8}|3232235521|0177\.0\.0\.1)\b"),
+     "RC-72: hex / decimal / octal IPv4 (IP-allowlist bypass)"),
+    ("RC-80", "MAJOR",
+     re.compile(r"\\x7fELF|\\xcf\\xfa\\xed\\xfe|\\xfe\\xed\\xfa\\xcf|MZ\\x90\\x00"),
+     "RC-80: embedded binary magic bytes (ELF / Mach-O / PE) in plaintext file"),
+    ("RC-81", "MAJOR",
+     re.compile(r"(?:^|/)\.\w+\.(?:sh|bash|zsh|ps1|bat|cmd|exe|dll|so|dylib)\b"),
+     "RC-81: hidden dotfile with executable extension (.foo.sh, .x.exe)"),
+    ("RC-95", "MAJOR",
+     re.compile(
+         # Allow optional surrounding quote on the JSON key: "postuninstall":
+         r"\b(?:postuninstall|post_uninstall)[\"']?\s*[:=]\s*[\"'](?:[^\"']*?)"
+         r"(?:curl|wget|sh\s+|bash\s+|node|python)",
+         re.IGNORECASE,
+     ),
+     "RC-95: post-uninstall hook invokes downloader/interpreter (residue persistence)"),
+    ("RC-96", "MAJOR",
+     re.compile(
+         # Allow optional surrounding quote on the JSON key + non-greedy
+         # path consumption (greedy [^\]]* would swallow the .env extension)
+         r"\bfiles[\"']?\s*:\s*\[[^\]]*?\.(?:env|pem|key|p12|pfx|crt)\b",
+         re.IGNORECASE,
+     ),
+     "RC-96: package.json `files` array includes secret-shape file (publish hygiene)"),
+    ("RC-98", "CRITICAL",
+     re.compile(
+         r"\b(?:ufw\s+disable|systemctl\s+stop\s+(?:firewalld|ufw|iptables)|"
+         r"netsh\s+advfirewall\s+set\s+\S+\s+state\s+off|"
+         r"Set-MpPreference\s+-Disable\w+|"
+         r"insmod\s+\S+|modprobe\s+\S+)",
+         re.IGNORECASE,
+     ),
+     "RC-98: firewall / Defender disable OR kernel-module load (RC-98)"),
+
+    # -------------------------------------------------------------------------
+    # Phase 3d — Architecture (RC-69/79/82/89/94)
+    # RC-73 cross-file taint, RC-74 multi-tool toxic-flow, RC-75 chain-detection
+    # are designed but DEFERRED to Phase 3e — they need a multi-pass
+    # architecture (per-file tag dict + post-scan cross-reference) that
+    # doesn't fit the single-pass PHASE3_PATTERNS model.
+    # -------------------------------------------------------------------------
+    ("RC-69", "CRITICAL",
+     re.compile(r"\b(?:window|globalThis|self)\s*\[\s*[\"']eval[\"']\s*\]"),
+     "RC-69: AST-level eval obfuscation (window['eval'] bypass)"),
+    ("RC-69", "CRITICAL",
+     re.compile(r"\bnew\s+(?:window|globalThis)\s*\[\s*[\"']Function[\"']\s*\]"),
+     "RC-69: AST-level Function obfuscation (constructor via bracket access)"),
+    ("RC-79", "CRITICAL",
+     re.compile(
+         r"\b(?:fs|fs\.promises|node:fs)\.\w+\s*\(\s*[\"'][^\"']*?\.(?:claude|cursor|vscode|zed)/[^\"']*[\"']",
+         re.IGNORECASE,
+     ),
+     "RC-79: workbench tampering — write into protected ~/.claude/.cursor/.vscode/.zed surface"),
+    ("RC-89", "MAJOR",
+     re.compile(
+         r"\bplease\s+(?:provide|enter|share|give)\s+(?:your|the)\s+"
+         r"(?:password|api[\s_-]?key|token|secret|credentials?|2fa|otp)",
+         re.IGNORECASE,
+     ),
+     "RC-89: social-engineering credential prompt"),
+    ("RC-94", "CRITICAL",
+     re.compile(r"\bcursor://(?:settings|extensions|hook)\b", re.IGNORECASE),
+     "RC-94: cursor:// deeplink that opens settings/extensions/hooks (RCE vector)"),
+]
+
+# Register all Phase 3 rules in the registry (deduplicated by rule_id)
+for _rule_id, _severity, _pat, _msg in PHASE3_PATTERNS:
+    register_rule(RuleSchema(
+        rule_id=_rule_id,
+        name=_msg.split(":", 1)[1].strip() if ":" in _msg else _rule_id,
+        category="phase3",
+        severity=_severity,
+        description=_msg,
+        references=("Phase 3 catalog — see TRDD-0f1f7889 §3 sub-phases 3a/3b/3c/3d",),
+    ))
+
+
+# -----------------------------------------------------------------------------
+# Phase 3 supplement — RC-30 typosquatting (top-100 + Levenshtein ≤1)
+# -----------------------------------------------------------------------------
+# Carries its own helper because the check is a Levenshtein lookup, not a regex.
+# Source: aguara TYPO_001 + skillscan TYPO-002.
+TOP_PYPI_PACKAGES: frozenset[str] = frozenset({
+    "requests", "urllib3", "boto3", "botocore", "setuptools", "pip", "numpy",
+    "pandas", "matplotlib", "pyyaml", "click", "flask", "django", "fastapi",
+    "pytest", "tox", "black", "ruff", "mypy", "pyright", "selenium", "scrapy",
+    "scikit-learn", "tensorflow", "torch", "transformers", "langchain",
+    "openai", "anthropic", "huggingface_hub", "wandb", "mlflow", "ray",
+})
+
+TOP_NPM_PACKAGES: frozenset[str] = frozenset({
+    "react", "vue", "angular", "lodash", "express", "axios", "moment",
+    "webpack", "babel", "typescript", "next", "nuxt", "tailwindcss", "vite",
+    "esbuild", "rollup", "jest", "mocha", "chai", "cypress", "playwright",
+    "eslint", "prettier", "stylelint", "react-dom", "react-router",
+    "@types/node", "@types/react", "redux", "rxjs", "graphql", "apollo",
+})
+
+
+def is_typosquat(name: str, ecosystem: str = "pypi") -> tuple[bool, str | None]:
+    """Return (True, target) if `name` is Levenshtein ≤1 from a top package.
+
+    Exact matches return (False, None) — they're the legitimate package, not
+    a typosquat.
+    """
+    name_lower = name.lower().strip()
+    pool = TOP_PYPI_PACKAGES if ecosystem == "pypi" else TOP_NPM_PACKAGES
+    if name_lower in pool:
+        return (False, None)
+    for legit in pool:
+        if abs(len(name_lower) - len(legit)) > 1:
+            continue
+        if _levenshtein_at_most_one(name_lower, legit):
+            return (True, legit)
+    return (False, None)
+
+
+register_rule(RuleSchema(
+    rule_id="RC-30",
+    name="Typosquatting — top-100 + Levenshtein ≤1",
+    category="supply-chain",
+    severity="MAJOR",
+    description="Package name within Levenshtein distance 1 of a top-100 PyPI/npm package.",
+    references=("aguara TYPO_001", "skillscan TYPO-002"),
+    cwe="CWE-829",
+    fp_guards=("Exact matches return False (those are the real package)",),
+))
+
+# -----------------------------------------------------------------------------
+# Phase 3 supplement — RC-33 compromised package DB
+# -----------------------------------------------------------------------------
+# Source: aguara COMPROMISED_PKG_LIST + 3 historical incidents (event-stream,
+# colors, litellm). The list is curated from public CVE feeds; should be
+# refreshed from a CVE database in production but a small static seed is OK
+# for the initial implementation.
+COMPROMISED_PACKAGES: frozenset[str] = frozenset({
+    # npm — well-documented incidents
+    "event-stream", "colors", "faker", "ua-parser-js", "coa", "rc",
+    "node-ipc", "discord.js", "noblox.js-proxy", "circle-app",
+    # PyPI — high-profile cases
+    "ctx", "phpass", "litellm@1.82.7",  # version-tagged for clarity
+    # Compromised version markers
+    "ua-parser-js@0.7.29", "colors@1.4.44-liberty-2", "faker@6.6.6",
+})
+
+
+def is_compromised_package(name: str, version: str | None = None) -> bool:
+    """Return True if `name` (optionally with `version`) is in the compromised set."""
+    name_lower = name.lower().strip()
+    if name_lower in COMPROMISED_PACKAGES:
+        return True
+    if version:
+        return f"{name_lower}@{version}" in COMPROMISED_PACKAGES
+    return False
+
+
+register_rule(RuleSchema(
+    rule_id="RC-33",
+    name="Compromised package (event-stream / colors / litellm pattern)",
+    category="supply-chain",
+    severity="CRITICAL",
+    description="Package name appears in the curated compromised-package list (CVE-derived).",
+    references=("aguara COMPROMISED_PKG_LIST", "event-stream incident", "colors incident", "litellm@1.82.7 CVE"),
+    cwe="CWE-829",
+    fp_guards=("Exact-match only — close-name typos handled by RC-30 instead",),
+))
+
+
 # Private usernames to detect - automatically detected from system
 # These should never appear in published code
 def _get_private_usernames() -> set[str]:

@@ -51,6 +51,7 @@ from cpv_validation_common import (
     MCP_DANGEROUS_ENV_KEYS,
     MCP_DESCRIPTION_INJECTION_PREFILTER,
     PERSISTENCE_PATTERNS,
+    PHASE3_PATTERNS,
     SECRET_PATTERNS,
     TIMEBOMB_PATTERNS,
     USER_PATH_PATTERNS,
@@ -64,9 +65,11 @@ from cpv_validation_common import (
     has_mixed_script,
     has_negation_guard_nearby,
     is_binary_file,
+    is_compromised_package,
     is_in_fenced_code_block,
     is_pth_with_exec,
     is_shadowed_tool_name,
+    is_typosquat,
     print_report_summary,
     print_results_by_level,
     save_report_and_print_summary,
@@ -2075,6 +2078,92 @@ def check_phase1_all(plugin_path: Path, report: ValidationReport) -> int:
 # shell rc / Windows registry), RC-70 obfuscated decode-then-exec.
 
 
+def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
+    """Phase 3 — single-pass iteration of PHASE3_PATTERNS across plugin files.
+
+    Plus 2 helpers that don't fit the regex catalog:
+    * RC-30 typosquatting — Levenshtein lookup on package.json deps + requirements.txt
+    * RC-33 compromised-package check — exact-match lookup on the same
+    """
+    issues = 0
+    for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
+        fence_state = build_fence_state(content)
+        for line_no, line in enumerate(content.split("\n"), start=1):
+            if is_in_fenced_code_block(line_no - 1, fence_state):
+                continue
+            for rule_id, severity, pattern, msg in PHASE3_PATTERNS:
+                m = pattern.search(line)
+                if not m:
+                    continue
+                if has_negation_guard_nearby(content, content.find(line) + m.start()):
+                    continue
+                level = effective_severity(severity.lower(), rel_path)
+                getattr(report, level)(
+                    f"{rule_id}: {msg.split(': ', 1)[-1] if ': ' in msg else msg} (line {line_no})",
+                    rel_path, line_no,
+                )
+                issues += 1
+                # Keep going — multiple Phase 3 rules can match a single line
+
+    # RC-30 typosquatting + RC-33 compromised packages from manifests
+    for manifest_path in list(plugin_path.rglob("package.json")) + list(plugin_path.rglob("requirements*.txt")):
+        try:
+            text = manifest_path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        rel = str(manifest_path.relative_to(plugin_path))
+        ecosystem = "npm" if manifest_path.name == "package.json" else "pypi"
+
+        # Extract dep names — different shapes per ecosystem
+        if ecosystem == "npm":
+            try:
+                pkg = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            deps = {}
+            for k in ("dependencies", "devDependencies", "peerDependencies"):
+                if isinstance(pkg.get(k), dict):
+                    deps.update(pkg[k])
+            for dep_name, dep_ver in deps.items():
+                if is_compromised_package(dep_name, dep_ver if isinstance(dep_ver, str) else None):
+                    report.critical(
+                        f"RC-33: dependency '{dep_name}' (version {dep_ver}) is in the compromised-package list",
+                        rel, 0,
+                    )
+                    issues += 1
+                is_squat, target = is_typosquat(dep_name, ecosystem)
+                if is_squat:
+                    report.major(
+                        f"RC-30: dependency '{dep_name}' is Levenshtein ≤1 from top-100 package '{target}' "
+                        f"(possible typosquat)",
+                        rel, 0,
+                    )
+                    issues += 1
+        else:  # pypi requirements.txt
+            for raw in text.splitlines():
+                line = raw.split("#", 1)[0].strip()
+                if not line or line.startswith(("-r ", "--", "-")):
+                    continue
+                # Take the dep name (before `==`, `>=`, `<`, `[`, `;`)
+                name = re.split(r"[<>=!~\[;\s]", line, 1)[0].strip()
+                if not name:
+                    continue
+                if is_compromised_package(name):
+                    report.critical(
+                        f"RC-33: dependency '{name}' is in the compromised-package list", rel, 0,
+                    )
+                    issues += 1
+                is_squat, target = is_typosquat(name, "pypi")
+                if is_squat:
+                    report.major(
+                        f"RC-30: dependency '{name}' is Levenshtein ≤1 from top-100 package '{target}' "
+                        f"(possible typosquat)",
+                        rel, 0,
+                    )
+                    issues += 1
+    return issues
+
+
 def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
     """RC-65 (cloud IMDS), RC-39 (persistence), RC-70 (obfuscated exec)."""
     issues = 0
@@ -2227,6 +2316,11 @@ def validate_security(plugin_path: Path, enable_tirith: bool = True) -> Validati
     phase2e_issues = check_phase2e_extras(plugin_path, report)
     if phase2e_issues == 0:
         report.passed("No Phase 2e extras findings (RC-39 persistence, RC-65 cloud IMDS, RC-70 obfuscated exec)")
+
+    # --- Phase 3 — ~30 MAJOR net-new rules ---
+    phase3_issues = check_phase3_all(plugin_path, report)
+    if phase3_issues == 0:
+        report.passed("No Phase 3 findings (~30 MAJOR net-new rules)")
 
     # --- External scanners (optional) ---
 
