@@ -63,13 +63,13 @@ PAT needs `repo`+`workflow`. Dispatch missing: confirm `notify-marketplace.yml` 
 - [Marketplace Layouts](references/marketplace-layouts.md)
   > Overview · Layout A — Hub-and-Spoke (separate repos) · Layout B — Nested single-repo (monorepo) · How Claude Code updates plugins in each layout · When to choose which · Rich metadata fields (author, homepage, license, category) · Why CPV does not use git-subdir · Encountering a non-CPV marketplace · Refactoring between layouts · Agent behavior summary
 - [Workflow Templates](references/workflow-templates.md)
-  > Placeholder Ref · validate.yml (CI) · update-submodules.yml (dispatch) · notify-marketplace.yml.template (plugin side)
+  > Placeholder Reference · validate.yml (Marketplace CI) · update-submodules.yml (Dispatch Receiver) · notify-marketplace.yml.template (Plugin Side)
 - [Script Templates](references/script-templates.md)
-  > Placeholder Ref · sync_marketplace_versions.py · pre-commit/pre-push hooks · setup-hooks.py · push-plugins.sh · generate-readme.py
+  > Placeholder Reference · sync_marketplace_versions.py · pre-commit-hook.py · pre-push-hook.py · setup-hooks.py · push-plugins.sh · generate-readme.py
 - [README Template](references/readme-template.md)
-  > Content · Placeholder Ref · Auto-Generation · Customization
+  > Template Content · Placeholder Reference · Auto-Generation · Customization Guide
 - [Troubleshooting Guide](references/troubleshooting.md)
-  > Authentication · Repo Creation · CI/CD · Notification Chain · Validation · Secret Config · Common Errors · Debug Commands
+  > Authentication Issues · Repository Creation Failures · CI/CD Pipeline Issues · Notification Chain Failures · Validation Failures · Secret Configuration Issues · Common Error Messages · Debug Commands
 - [Local → GitHub Migration](references/local-to-github-migration.md)
   > Scenario · Detect the starting state · Four migration paths · Path 1: Lift-and-shift the whole marketplace to GitHub as Layout B · Path 2: Split every plugin into its own repo + create a Layout A hub from the local folder · Path 3: Ship ONE plugin to its own GitHub repo + keep the local marketplace for dev · Path 4: Ship ONE plugin to an EXISTING third-party GitHub marketplace · Gotchas · Post-migration verification · User instructions template
 - [Orphan Plugin Onboarding](references/orphan-plugin-onboarding.md)
@@ -77,8 +77,8 @@ PAT needs `repo`+`workflow`. Dispatch missing: confirm `notify-marketplace.yml` 
 
 ## Compiling Templates
 
-Replace `<placeholder-for-...>` tokens with user values; verify with `grep -r 'placeholder-for-'`. For README, use generate-readme.py (script-templates — see Resources).
+Replace `<placeholder-for-...>` tokens; verify with `grep -r 'placeholder-for-'`. README: use generate-readme.py.
 
 ## Token Optimization
 
-Load reference files on-demand per phase. Prefer LLM Externalizer MCP for file analysis.
+Load reference files on-demand. Prefer LLM Externalizer MCP for file analysis.

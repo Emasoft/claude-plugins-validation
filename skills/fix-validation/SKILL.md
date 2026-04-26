@@ -47,17 +47,9 @@ If no matching section is found in the reference file, search by error message k
 
 ## Examples
 
-**Input:** `[MAJOR] Missing plugin.json`
-**Output:** plugin-error-index → validate_plugin.py → plugin-structure-fixes §1 → apply fix
-
-**Input:** `[MAJOR] Description too short`
-**Output:** plugin-error-index → validate_skill_comprehensive.py → skill-fixes §4 → apply fix
-
-**Input:** `[MAJOR] userConfig.<key> missing/invalid 'type'` (install-breaking)
-**Output:** plugin-structure-fixes "userConfig schema invalid" → infer from key name. Only `{string, number, boolean, directory, file}` are valid.
-
-**Input:** `[WARNING] architecture/recommend-restructure (7-signal)`
-**Output:** marketplace-error-index → §3 → marketplace-fixes §9 → per-signal mechanical fix
+**Input:** `[MAJOR] Missing plugin.json` → plugin-structure-fixes §1
+**Input:** `[MAJOR] userConfig.<key> missing/invalid 'type'` → plugin-structure-fixes "userConfig schema invalid" (valid types: `{string,number,boolean,directory,file}`)
+**Input:** `[WARNING] architecture/recommend-restructure (7-signal)` → marketplace-error-index §3 → marketplace-fixes §9
 
 ## Schema-parity contract
 
@@ -66,15 +58,15 @@ CPV validates plugin sources; it does not install them. Schema rules mirror Clau
 ## Resources
 
 - [Plugin Error Index](references/plugin-error-index.md)
-  > validate_plugin · validate_skill · validate_skill_comprehensive · validate_hook · validate_agent · validate_command · validate_mcp · validate_lsp · validate_security · validate_rules · validate_xref · validate_settings_marketplace · validate_documentation · validate_encoding · validate_enterprise · validate_scoring
+  > 1. validate_plugin.py · 2. validate_skill.py · 3. validate_skill_comprehensive.py · 4. validate_hook.py · 5. validate_agent.py · 6. validate_command.py · 7. validate_mcp.py · 8. validate_lsp.py · 9. validate_security.py · 10. validate_rules.py · 11. validate_xref.py · 12. validate_settings_marketplace.py · 13. validate_documentation.py · 14. validate_encoding.py · 15. validate_enterprise.py · 16. validate_scoring.py
 - [Marketplace Error Index](references/marketplace-error-index.md)
-  > validate_marketplace · validate_marketplace_pipeline · Architecture / Layout Migration Warnings (7 signals)
+  > 1. validate_marketplace.py · 2. validate_marketplace_pipeline.py · 3. Architecture / Layout Migration Warnings (7 signals)
 - [Schema-Parity Contract](references/schema-parity-contract.md)
   > What CPV does · The contract · What this contract does NOT say · What IS covered · Validator-gap protocol · Historical incidents · Related
 - [Iterative Fix Loop](references/iterative-fix-loop.md)
-  > Why a loop · Algorithm · Entry points · Termination · WARNING evaluation · Publish-blocking warnings · Output contract
+  > Why a loop · Algorithm · Entry points — plugin path vs report path · Termination and safety · WARNING evaluation rules · Publish-blocking warning categories · Truly advisory warnings · Output contract
 - [Empirical Loading Bugs](references/empirical-loading-bugs.md)
-  > 5 silent footguns + fix recipes (agents folder · hooks default-file cascade · MCP/LSP cross-source · MCP redundancy)
+  > Path-form acceptance matrix · Override-vs-default semantics · Three silent footguns CC does NOT catch · CPV validators added 2026-04-18 · Anthropic docs corrections · Round 2 confirmations · Tests added · Untestable in headless mode · v2.23.2 false-positive sweep
 
 ## MCP Server Bundling
 
