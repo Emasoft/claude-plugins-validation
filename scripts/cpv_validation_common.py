@@ -2318,6 +2318,166 @@ register_rule(RuleSchema(
 ))
 
 
+# =============================================================================
+# Phase 4 — Minor / informational + verdict-tier rules
+# =============================================================================
+
+# (rule_id, severity, regex, message_template) — same shape as PHASE3_PATTERNS.
+PHASE4_PATTERNS: list[tuple[str, str, "re.Pattern[str]", str]] = [
+    # RC-85 — License-compliance markers (proprietary-only or unlicensed code
+    # shipped in plugins). The plugin should declare a license.
+    ("RC-85", "MINOR",
+     re.compile(
+         # `\b` only applies cleanly to ASCII word boundaries; © (U+00A9) is
+         # not a word char so skip the boundary requirement on that branch.
+         r"(?:\bCopyright|©)\s*(?:\(c\))?\s*\d{4}.*?"
+         r"(?:All\s+Rights\s+Reserved|Proprietary|Confidential)",
+         re.IGNORECASE,
+     ),
+     "RC-85: proprietary / All Rights Reserved notice without OSS license declared"),
+    ("RC-85", "MINOR",
+     re.compile(r"\bSPDX-License-Identifier:\s*(?:UNLICENSED|NONE)\b", re.IGNORECASE),
+     "RC-85: SPDX UNLICENSED / NONE — plugin should declare an OSS license"),
+
+    # RC-87 — SSRF / external IP (suspicious-IP detection beyond the cloud-IMDS list)
+    # The 0.0.0.0/0 + private-RFC-1918 + link-local ranges most often appear
+    # in attack code that wants to bypass an "is this localhost?" check.
+    ("RC-87", "MINOR",
+     re.compile(r"\b127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\b"),
+     "RC-87: hardcoded loopback IP (127.x.x.x) — usually fine but worth flagging"),
+    ("RC-87", "MINOR",
+     re.compile(r"\b(?:10\.[0-9.]+|172\.(?:1[6-9]|2[0-9]|3[01])\.[0-9.]+|192\.168\.[0-9.]+)\b"),
+     "RC-87: hardcoded RFC-1918 private IP — review for environment leakage"),
+    ("RC-87", "MAJOR",
+     re.compile(r"\b169\.254\.(?!169\.254\b|170\.2\b)[0-9.]+\b"),
+     "RC-87: link-local IP outside known IMDS endpoints (RC-65)"),
+
+    # RC-88 — Suspicious TLDs / URL shorteners / dev tunnels
+    # Heuristic: certain TLDs (.tk, .ml, .ga, .cf, .gq) are free domains
+    # historically associated with malware. Shorteners hide the destination.
+    # Dev tunnels (ngrok / localtunnel / cloudflared / serveo) expose local
+    # services to the internet — legitimate but worth flagging.
+    ("RC-88", "MINOR",
+     re.compile(r"https?://[a-z0-9.-]+\.(?:tk|ml|ga|cf|gq|top|xyz|click|loan|country)\b", re.IGNORECASE),
+     "RC-88: URL on free / abuse-associated TLD"),
+    ("RC-88", "MINOR",
+     re.compile(
+         r"\bhttps?://(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|ow\.ly|is\.gd|"
+         r"buff\.ly|adf\.ly|tiny\.cc|short\.io)/\S+",
+         re.IGNORECASE,
+     ),
+     "RC-88: URL shortener (hides destination)"),
+    ("RC-88", "MAJOR",
+     re.compile(
+         r"\bhttps?://(?:[a-z0-9-]+\.)?(?:ngrok\.io|loca\.lt|trycloudflare\.com|"
+         r"serveo\.net|pagekite\.me|telebit\.cloud|expose\.dev)\b",
+         re.IGNORECASE,
+     ),
+     "RC-88: dev-tunnel URL (exposes local service to internet)"),
+
+    # RC-86 — Token cost / resource abuse (informational)
+    # Detects token-cost amplifiers: very long string literals in prompt files,
+    # repeated tokens, and high-loop-count patterns.
+    ("RC-86", "INFO",
+     re.compile(r"['\"](?:[^'\"\n]){5000,}['\"]"),
+     "RC-86: very long string literal (≥5000 chars) — possible prompt-stuffing"),
+    ("RC-86", "INFO",
+     re.compile(r"\bfor\s*\([^)]*<\s*[0-9]{5,}\s*[;)]"),
+     "RC-86: high-loop-count iteration (≥10000) — resource abuse vector"),
+]
+
+
+for _rule_id, _severity, _pat, _msg in PHASE4_PATTERNS:
+    register_rule(RuleSchema(
+        rule_id=_rule_id,
+        name=_msg.split(":", 1)[1].strip() if ":" in _msg else _rule_id,
+        category="phase4",
+        severity=_severity,
+        description=_msg,
+        references=("Phase 4 catalog — see TRDD-0f1f7889 §3 sub-phase 4",),
+    ))
+
+
+# =============================================================================
+# Phase 4 — RC-103 disposition (verdict-tier classifier)
+# =============================================================================
+# Deterministic disposition based on finding counts. The user-direction
+# "code first if accuracy permits" pushed this from agent-class to programmatic.
+
+
+def disposition(findings_by_severity: dict[str, int]) -> str:
+    """Compute a single-word disposition tag for a plugin given finding counts.
+
+    Returns one of: 'safe' | 'risky' | 'suspicious' | 'unsafe' | 'critical'.
+
+    Rules (deterministic, no LLM):
+    - ≥2 CRITICAL → critical
+    - 1 CRITICAL → unsafe
+    - ≥3 MAJOR → unsafe
+    - 1-2 MAJOR → suspicious
+    - ≥5 MINOR → risky
+    - any MINOR/WARNING → risky
+    - else → safe
+    """
+    crit = findings_by_severity.get("CRITICAL", 0)
+    maj = findings_by_severity.get("MAJOR", 0)
+    minr = findings_by_severity.get("MINOR", 0)
+    warn = findings_by_severity.get("WARNING", 0)
+    if crit >= 2:
+        return "critical"
+    if crit == 1:
+        return "unsafe"
+    if maj >= 3:
+        return "unsafe"
+    if maj >= 1:
+        return "suspicious"
+    if minr >= 5:
+        return "risky"
+    if minr > 0 or warn > 0:
+        return "risky"
+    return "safe"
+
+
+# RC-104 — HOLD verdict tier
+# When findings are inconclusive (e.g. a single MAJOR with negation_guard
+# nearby), return "hold" instead of forcing a verdict. Honest output.
+
+def disposition_with_hold(findings_by_severity: dict[str, int], ambiguous_count: int = 0) -> str:
+    """Like disposition() but returns 'hold' when ambiguous_count >= max(1, findings/3).
+
+    `ambiguous_count` is the number of findings that the FP-reduction layer
+    DEMOTED but flagged as ambiguous (e.g. negation-guard near-miss).
+    """
+    base = disposition(findings_by_severity)
+    if ambiguous_count == 0:
+        return base
+    total = sum(findings_by_severity.values())
+    if total > 0 and ambiguous_count >= max(1, total // 3):
+        return "hold"
+    return base
+
+
+register_rule(RuleSchema(
+    rule_id="RC-103",
+    name="Capability scoring disposition (verdict-tier classifier)",
+    category="verdict",
+    severity="INFO",
+    description="Deterministic 5-tier disposition (safe/risky/suspicious/unsafe/critical) from finding counts.",
+    references=("qualixar/skillfortify", "agentaudit VERDICT_DISPOSITION", "GoPlusSecurity/agentguard"),
+    fp_guards=("Disposition is deterministic — does not produce findings of its own",),
+))
+
+register_rule(RuleSchema(
+    rule_id="RC-104",
+    name="HOLD verdict tier (honest output for ambiguous results)",
+    category="verdict",
+    severity="INFO",
+    description="Returns 'hold' when ≥1/3 of findings were demoted as ambiguous, instead of forcing a verdict.",
+    references=("synthesis catalog",),
+    fp_guards=("Disposition is deterministic — does not produce findings of its own",),
+))
+
+
 # Private usernames to detect - automatically detected from system
 # These should never appear in published code
 def _get_private_usernames() -> set[str]:
