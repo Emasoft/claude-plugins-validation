@@ -93,9 +93,9 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/generate_marketplace_repo.py" /tmp/my-mkt 
 ## Resources
 
 - [Pipeline Rules](references/pipeline-rules.md) — mandatory rules for all plugin operations
-  > Pre-Push Hook · Fix-All Mandate · Running CPV Scripts · Processing Validation Output · GitHub Secrets · CI Workflow Dependencies · Marketplace Notification · All Scripts Are Python · Binary Plugins · README Requirements · Pre-Publish Local Dry-Run · Post-Push CI Verification · Mega-Linter Configuration · Common Fixes Reference
+  > Pre-Push Hook: The Quality Gate · Fix-All Mandate · Running CPV Scripts · Processing Validation Output · GitHub Secrets · CI Workflow Dependencies · Marketplace Notification · All Scripts Are Python · Binary Plugins · README Requirements · Pre-Publish Local Dry-Run
 - [v2.1.80+ Plugin Features](references/v2-1-80-features.md)
-  > Monitor tool · userConfig · channels · CLAUDE_PLUGIN_OPTION_<KEY> · Inline marketplace · managed-settings.d/ · Plugin skill `name` field
+  > Monitor tool · userConfig (plugin.json) · channels (plugin.json) · CLAUDE_PLUGIN_OPTION_<KEY> env vars · Inline marketplace (settings.json) · managed-settings.d/ drop-in directory · Plugin skill `name` field (v2.1.98)
 - [Marketplace Layouts](references/marketplace-layouts.md)
   > Overview · Layout A — Hub-and-Spoke (separate repos) · Layout B — Nested single-repo (monorepo) · How Claude Code updates plugins in each layout · When to choose which · Rich metadata fields (author, homepage, license, category) · Why CPV does not use git-subdir · Encountering a non-CPV marketplace · Refactoring between layouts · Agent behavior summary
 
