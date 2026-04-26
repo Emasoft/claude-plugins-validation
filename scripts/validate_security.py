@@ -1427,6 +1427,14 @@ Exit Codes:
     parser.add_argument(
         "--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout"
     )
+    parser.add_argument(
+        "--bare-folder",
+        action="store_true",
+        help=(
+            "Bypass the .claude-plugin/ precondition. Use to scan a bare skill or "
+            "content folder that is not wrapped in a Claude Code plugin tree."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -1437,9 +1445,11 @@ Exit Codes:
     if not plugin_path.is_dir():
         print(f"Error: {plugin_path} is not a directory", file=sys.stderr)
         return 1
-    if not (plugin_path / ".claude-plugin").is_dir():
+    if not args.bare_folder and not (plugin_path / ".claude-plugin").is_dir():
         print(
-            f"Error: No Claude Code plugin found at {plugin_path}\nExpected a .claude-plugin/ directory.",
+            f"Error: No Claude Code plugin found at {plugin_path}\n"
+            "Expected a .claude-plugin/ directory. Use --bare-folder to scan a "
+            "skill folder or any other directory tree without that precondition.",
             file=sys.stderr,
         )
         return 1

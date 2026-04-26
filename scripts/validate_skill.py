@@ -28,8 +28,32 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
-from cpv_validation_common import (
+_USING_FALLBACK_YAML = False
+_YAMLError: type[Exception] = Exception
+try:
+    import yaml as _real_yaml
+
+    def _yaml_safe_load(text: str) -> Any:
+        """Parse YAML frontmatter — pyyaml backend."""
+        return _real_yaml.safe_load(text)
+
+    _YAMLError = _real_yaml.YAMLError
+except ImportError:
+    # Fallback path so the script remains importable from a host venv that
+    # lacks pyyaml. The minimal parser handles the narrow subset of YAML
+    # used by skill frontmatter; complex shapes raise YAMLError and the
+    # caller can prompt the user to install pyyaml. See issue #14.
+    from _minimal_yaml import YAMLError as _MiniYAMLError
+    from _minimal_yaml import safe_load as _mini_safe_load
+
+    def _yaml_safe_load(text: str) -> Any:
+        """Parse YAML frontmatter — minimal stdlib fallback (no pyyaml)."""
+        return _mini_safe_load(text)
+
+    _YAMLError = _MiniYAMLError
+    _USING_FALLBACK_YAML = True
+
+from cpv_validation_common import (  # noqa: E402  (import below conditional yaml fallback)
     BUILTIN_AGENT_TYPES,
     COLORS,
     SKILL_FRONTMATTER_FIELDS,
@@ -81,14 +105,14 @@ def parse_frontmatter(content: str) -> tuple[dict[str, Any] | None, str, int]:
         return None, content, 0
 
     try:
-        frontmatter = yaml.safe_load(parts[1])
+        frontmatter = _yaml_safe_load(parts[1])
         if frontmatter is None:
             frontmatter = {}
         body = parts[2]
         # Count lines to find frontmatter end
         fm_end_line = parts[0].count("\n") + parts[1].count("\n") + 2
         return frontmatter, body, fm_end_line
-    except yaml.YAMLError:
+    except _YAMLError:
         return None, content, 0
 
 
@@ -591,6 +615,12 @@ def print_json(report: SkillValidationReport) -> None:
 
 def main() -> int:
     """Main entry point."""
+    if _USING_FALLBACK_YAML:
+        print(
+            "Note: pyyaml not found in this venv — using minimal frontmatter parser. "
+            "Install pyyaml for full YAML support: uv pip install pyyaml",
+            file=sys.stderr,
+        )
     parser = argparse.ArgumentParser(
         description="Validate a Claude Code skill directory.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
