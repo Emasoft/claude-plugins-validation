@@ -16,16 +16,9 @@ Deep AI analysis. Opus 1M, ~10-50× tokens of script validation.
 
 ## Overview
 
-7 quality pillars (description triggering, clarity, examples, workflow, technical, disclosure, output) + 3 conditional security pillars. Produces Semantic Grade (A-F).
+7 quality pillars + 3 conditional security pillars → Semantic Grade (A-F).
 
-**HARD SEPARATION — USER CHOICE:**
-
-| Layer | Invoke | Tokens | Catches |
-|-------|--------|--------|---------|
-| **Programmatic** (default) | `/cpv-validate-plugin` | 0 | 95%+ via regex. Surfaces CANDIDATES, emits INFO — never escalates. |
-| **Semantic** (this skill, opt-in) | `/cpv-semantic-validation` | thousands–millions | The 5% residue: ambiguous injection, shadow features, subtle MCP-description injection. |
-
-Most projects publish-ready with programmatic alone. Never default-on.
+**HARD SEPARATION — USER CHOICE.** Programmatic (`/cpv-validate-plugin`, 0 tokens) catches 95%+ via regex and surfaces CANDIDATES via INFO — never escalates. Semantic (this skill, opt-in via `/cpv-semantic-validation`, thousands–millions tokens) handles the 5% residue: ambiguous injection, shadow features, subtle MCP-description injection. Most projects publish-ready with programmatic alone. Never default-on.
 
 ## Prerequisites
 
@@ -57,7 +50,7 @@ Most projects publish-ready with programmatic alone. Never default-on.
 
 ## Token Optimization
 
-- Opt-in only. Run script baseline first (catches 90%). Read only target files. Write full report to disk; return only grade + filepath. Prefer LLM Externalizer MCP (`chat`, `code_task`) for file reads via `input_files_paths`.
+Opt-in only. Baseline first (90% catch rate). Read target files only. Write report to disk; return grade + filepath. Prefer LLM Externalizer MCP for file reads.
 
 ## Conditional Pillar: Channel MCP Server Source-Code Security
 
@@ -75,17 +68,40 @@ Load [channel-source-security](references/channel-source-security.md):
 - Opus prompt template
 - Rubric contribution
 
-## Conditional Pillar: Security Threat Catalog (AI Content Layer)
+## Conditional Pillar: AI Content Layer Threats (4 categorical files)
 
-19 categories from a 38-repo survey. Most have programmatic siblings; this is the LLM-judgment supplement.
+19 threat categories from a 38-repo survey. Most have programmatic siblings; these are the LLM-judgment supplement.
 
-Load [security-threat-catalog](references/security-threat-catalog.md):
-- CAT-01–19 (19 threat categories below)
-- Severity reference · Opus prompt template · A-F rubric integration · Report format · References
+Load [prompt-injection-rules](references/prompt-injection-rules.md):
+- CAT-01 Direct prompt injection (instruction override)
+- CAT-02 Conditional / time-bomb injection
+- CAT-03 Coercive authority / urgency bypass
+- CAT-04 Identity hijack (DAN, jailbreak modes)
+- CAT-05 System prompt impersonation
+- CAT-11 Psychological manipulation
+- CAT-13 Anthropic / system-admin impersonation
+- CAT-14 IMPORTANT-tag / bracket amplification
+
+Load [concealment-and-multilingual-rules](references/concealment-and-multilingual-rules.md):
+- CAT-06 Concealment — markdown comments, HTML, collapsible sections
+- CAT-07 Multilingual injection
+- CAT-17 Hidden HTML comment with action verbs
+- CAT-18 CSS-hidden / collapsible-section injection
+- CAT-19 Whitespace-padding / visual-deception
+
+Load [mcp-and-capability-rules](references/mcp-and-capability-rules.md):
+- CAT-08 MCP tool-description prompt injection
+- CAT-09 MCP tool-name shadowing
+- CAT-10 Capability mismatch / shadow features
+
+Load [exfil-and-autonomy-rules](references/exfil-and-autonomy-rules.md):
+- CAT-12 Social engineering credential prompt
+- CAT-15 Markdown image beacon (silent exfiltration)
+- CAT-16 "Don't ask user" autonomy abuse (removes HITL)
 
 ## Conditional Pillar: Truly-agent-class RCs (RC-49 partial + RC-77)
 
-Per "code first if accuracy permits", 5 of 7 originally-agent-class RCs reclassified to programmatic. Only RC-49 partial + RC-77 remain truly agent-class.
+Per "code first if accuracy permits", 5 of 7 RCs reclassified to programmatic. Only RC-49 partial + RC-77 remain.
 
 Load [agent-rule-checks](references/agent-rule-checks.md):
 - Re-evaluation table (which RCs need LLM, which moved to programmatic)
@@ -95,15 +111,14 @@ Load [agent-rule-checks](references/agent-rule-checks.md):
 
 ## Resources
 
-- Full criteria, rubrics, report format: `skills/fix-validation/references/skill-semantic-validation.md`
-- Cheap counterparts: `skill-validation-skill`, `plugin-validation-skill`
+- Full criteria/rubrics/format: `skills/fix-validation/references/skill-semantic-validation.md`. Cheap counterparts: `skill-validation-skill`, `plugin-validation-skill`.
 
 ## Validation Checklist
 
 Copy this checklist and track your progress:
 
-- [ ] Explicit user opt-in
-- [ ] Baseline script validation first
-- [ ] Evaluate 7 pillars + conditionals
+- [ ] User opt-in confirmed
+- [ ] Baseline script validation
+- [ ] Evaluate pillars + conditionals
 - [ ] Review A-F grade
 - [ ] Report to `$MAIN_ROOT/reports/semantic-validator/`

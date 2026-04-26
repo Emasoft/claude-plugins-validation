@@ -152,7 +152,10 @@ The threat catalog covers 19 categories distilled from a 38-repo survey of commu
 - The two layers NEVER auto-chain. A user running only `/cpv-validate-plugin` (programmatic) sees an INFO message: "RC-XX prefilter found N candidates — run `/cpv-semantic-validation` for deep LLM review." The user CHOOSES whether to escalate.
 
 Load the full pillar from these references:
-- `skills/semantic-validation-skill/references/security-threat-catalog.md` — 19 threat categories with indicator descriptions, false-positive guards, severity rules, opus prompt template
+- `skills/semantic-validation-skill/references/prompt-injection-rules.md` — 8 rules: CAT-01–05, 11, 13, 14 (direct injection + system + psychological + Anthropic impersonation + IMPORTANT-tag)
+- `skills/semantic-validation-skill/references/concealment-and-multilingual-rules.md` — 5 rules: CAT-06, 07, 17, 18, 19 (hiding attacks from humans/regex, multilingual)
+- `skills/semantic-validation-skill/references/mcp-and-capability-rules.md` — 3 rules: CAT-08, 09, 10 (tool-layer attacks)
+- `skills/semantic-validation-skill/references/exfil-and-autonomy-rules.md` — 3 rules: CAT-12, 15, 16 (data exfiltration + autonomy abuse)
 - `skills/semantic-validation-skill/references/agent-rule-checks.md` — the 7 specific RC checks (RC-49/50/64/77/78/99/103) that genuinely need LLM judgment, each with prefilter pseudocode + LLM evaluation prompt + FP guards
 
 **Per-finding workflow:**
