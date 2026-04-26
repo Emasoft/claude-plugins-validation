@@ -41,6 +41,8 @@ from pathlib import Path
 from typing import Any
 
 from cpv_validation_common import (
+    CLOUD_IMDS_PATTERNS,
+    CRYPTOMINING_PATTERNS,
     DANGEROUS_FILES,
     ENV_BULK_HARVEST_PATTERNS,
     EXAMPLE_USERNAMES,
@@ -48,13 +50,14 @@ from cpv_validation_common import (
     KNOWN_EXAMPLE_SECRETS,
     MCP_DANGEROUS_ENV_KEYS,
     MCP_DESCRIPTION_INJECTION_PREFILTER,
+    PERSISTENCE_PATTERNS,
     SECRET_PATTERNS,
     TIMEBOMB_PATTERNS,
     USER_PATH_PATTERNS,
     ValidationReport,
     build_fence_state,
-    CRYPTOMINING_PATTERNS,
     effective_severity,
+    find_obfuscated_exec,
     find_tag_block_chars,
     find_zero_width_chars,
     get_gitignore_filter,
@@ -143,7 +146,11 @@ PATH_TRAVERSAL_PATTERNS = [
 # =============================================================================
 
 # Prompt injection patterns — malicious instructions in skills/agents/commands
+# Phase 2a (RC-01/04/06/07) added paraphrase template, typo variants, privilege
+# roleplay, completion attacks, DAN/jailbreak modes, identity revocation, and
+# reveal-directive detection on top of the original 8 patterns.
 PROMPT_INJECTION_PATTERNS = [
+    # Original 8 patterns
     (
         re.compile(r"ignore\s+(?:all\s+)?(?:previous|prior|above)\s+instructions?", re.IGNORECASE),
         "Prompt injection: ignore previous instructions",
@@ -172,9 +179,82 @@ PROMPT_INJECTION_PATTERNS = [
         re.compile(r"IMPORTANT:\s*(?:ignore|override|forget|disregard)", re.IGNORECASE),
         "Prompt injection: IMPORTANT override",
     ),
+    # Phase 2a — RC-01 paraphrase template (verb x noun x target with up to 3 intervening words)
+    (
+        re.compile(
+            r"\b(?:bypass|skip|circumvent|workaround|sidestep|put\s+aside|set\s+aside)\s+"
+            r"(?:all\s+)?(?:\w+\s+){0,3}"
+            r"(?:previous|prior|above|earlier|original|system|prior\s+to\s+this)\s+"
+            r"(?:instructions?|rules?|guidelines?|directives?|constraints?)",
+            re.IGNORECASE,
+        ),
+        "Prompt injection: bypass/skip/circumvent variant (RC-01)",
+    ),
+    # RC-04 — typoglycemia evasion (1gnore, prev1ous, d1sregard, 0verride)
+    (
+        re.compile(r"\b(?:1gn0?re|1gnore|d1sregard|prev1ous|0verride|f0rget)\b", re.IGNORECASE),
+        "Prompt injection: typoglycemia evasion variant (RC-04)",
+    ),
+    # RC-04 — privilege-via-roleplay (you are now root/admin/system/super/sudo).
+    # The article (a/an/the) is OPTIONAL — many attack samples drop it for
+    # naturalness ("you are now root" without "the").
+    (
+        re.compile(
+            r"\byou\s+are\s+(?:now\s+)?(?:(?:a|an|the)\s+)?"
+            r"(?:root|admin(?:istrator)?|system|super(?:user)?|sudo|kernel)\b",
+            re.IGNORECASE,
+        ),
+        "Prompt injection: privilege-roleplay (RC-04)",
+    ),
+    # RC-04 — DAN / jailbreak mode invocation
+    (
+        re.compile(
+            r"\b(?:DAN\s+(?:mode|prompt)|developer\s+mode|jailbreak\s+mode|unrestricted\s+mode|do\s+anything\s+now)\b",
+            re.IGNORECASE,
+        ),
+        "Prompt injection: DAN / jailbreak mode (RC-04)",
+    ),
+    # RC-04 — identity revocation ("you have no restrictions", "you are not bound by")
+    (
+        re.compile(
+            r"\byou\s+(?:have\s+no|are\s+not\s+bound\s+by|are\s+free\s+from|no\s+longer\s+have)\s+"
+            r"(?:restrictions?|guidelines?|safety|limits?|rules?|constraints?)",
+            re.IGNORECASE,
+        ),
+        "Prompt injection: identity revocation (RC-04)",
+    ),
+    # RC-07 — completion / end-of-task attack (task complete, end of instructions, begin new task)
+    (
+        re.compile(
+            r"\b(?:task\s+complete\.?\s*now\s+(?:begin|start|do)|end\s+of\s+(?:instructions?|task|prompt)\.?\s*"
+            r"(?:now|next)|begin\s+new\s+task|new\s+task\s+begins)\b",
+            re.IGNORECASE,
+        ),
+        "Prompt injection: completion attack (RC-07)",
+    ),
+    # RC-06 — reveal-directive (show system prompt / what are your instructions)
+    (
+        re.compile(
+            r"\b(?:reveal|show|print|output|display|repeat|echo)\s+(?:me\s+)?(?:your|the)\s+"
+            r"(?:system\s+prompt|initial\s+instructions?|hidden\s+instructions?|"
+            r"original\s+(?:instructions?|prompt)|configuration|prompt|rules)",
+            re.IGNORECASE,
+        ),
+        "Prompt injection: reveal-directive (RC-06)",
+    ),
+    # RC-06 — what-are-you-told (questioning the system prompt)
+    (
+        re.compile(
+            r"\bwhat\s+(?:are|is|were)\s+(?:your|the)\s+(?:initial\s+|original\s+|system\s+)?(?:instructions?|prompt|rules)",
+            re.IGNORECASE,
+        ),
+        "Prompt injection: prompt-extraction question (RC-06)",
+    ),
 ]
 
 # Data exfiltration patterns — sending data to external servers
+# Phase 2c (RC-17/19) added webhook host list (discord/slack/telegram) + DNS
+# tunneling indicators per aguara DATA_EXFIL_001..006.
 DATA_EXFILTRATION_PATTERNS = [
     (
         re.compile(r"curl\s+.*-[dX]\s+.*https?://(?!localhost|127\.0\.0\.1)", re.IGNORECASE),
@@ -196,9 +276,29 @@ DATA_EXFILTRATION_PATTERNS = [
         re.compile(r"urllib\.\s*request\.\s*urlopen.*https?://(?!localhost|127\.0\.0\.1)"),
         "Data exfiltration: urllib to external URL",
     ),
+    # Phase 2c — Webhook hosts (discord/slack/telegram/etc.). These are
+    # almost always exfiltration channels; legitimate plugins should
+    # configure them via env var, not hardcode the URL.
+    (
+        re.compile(
+            r"https?://(?:discord\.com/api/webhooks|hooks\.slack\.com/services|"
+            r"api\.telegram\.org/bot|outlook\.office\.com/webhook|"
+            r"events\.pagerduty\.com|hooks\.zapier\.com|api\.sendgrid\.com|"
+            r"webhook\.site|requestbin\.com|pipedream\.com|n8n\.cloud|webhookrelay\.com)",
+            re.IGNORECASE,
+        ),
+        "Data exfiltration: hardcoded webhook host (RC-17 — discord/slack/telegram/etc.)",
+    ),
+    # Phase 2c — DNS tunneling pattern (long subdomain queries with base64-shape labels)
+    (
+        re.compile(r"\b[A-Za-z0-9+/=]{40,}\.(?:[a-z0-9-]{1,63}\.){0,4}[a-z]{2,}\b"),
+        "Data exfiltration: long-label DNS pattern (RC-18/19 — possible DNS tunneling)",
+    ),
 ]
 
 # Supply chain attack patterns — downloading and executing code
+# Phase 2d (RC-26/27/28) added redirect operators (`>`), command separators
+# (`;`/`&&`), pip --no-deps + unhashed installs, and lifecycle script targeting.
 SUPPLY_CHAIN_PATTERNS = [
     (re.compile(r"curl\s+.*\|\s*(?:sh|bash|zsh|python|python3|node)\b"), "Supply chain: curl piped to interpreter"),
     (re.compile(r"wget\s+.*\|\s*(?:sh|bash|zsh|python|python3|node)\b"), "Supply chain: wget piped to interpreter"),
@@ -218,10 +318,45 @@ SUPPLY_CHAIN_PATTERNS = [
         re.compile(r"wget\s+.*-[oO]\s+.*&&\s*(?:chmod|sh|bash|python|node)\b"),
         "Supply chain: wget download then execute",
     ),
+    # Phase 2d RC-26 — separator-based execution (no pipe, but `;`/`&&` connect)
+    (
+        re.compile(r"curl\s+\S+\s+>\s+\S+\s*[;&]+\s*(?:sh|bash|zsh|python|node)\b"),
+        "Supply chain: curl > file ; sh file (redirect-then-execute, RC-26)",
+    ),
+    (
+        re.compile(r"(?:curl|wget)\s+\S+\s*[;&]{1,2}\s*(?:sh|bash|python|node)\s+\S+"),
+        "Supply chain: curl/wget then exec via separator (RC-26)",
+    ),
+    # Phase 2d RC-28 — pip install without pinning / no hash check
+    (
+        re.compile(r"pip\s+install\s+.*--no-deps\b.*(?!--require-hashes)", re.IGNORECASE),
+        "Supply chain: pip install --no-deps without --require-hashes (RC-28)",
+    ),
+    (
+        re.compile(r"pip\s+install\s+--upgrade\s+--user\b.*(?!--require-hashes)", re.IGNORECASE),
+        "Supply chain: pip install --upgrade --user without hash pinning (RC-28)",
+    ),
+    # Phase 2d RC-27 — lifecycle scripts in package.json (preinstall/postinstall
+    # invoking shell commands). Real attack vector for npm supply-chain.
+    (
+        re.compile(
+            r'"(?:preinstall|postinstall|prepare|preuninstall|install)"\s*:\s*'
+            r'"(?:.*?(?:curl|wget|sh\s+|bash\s+|node\s+\S+\.js|python\s+\S+))',
+            re.IGNORECASE,
+        ),
+        "Supply chain: package.json lifecycle script invokes downloader/interpreter (RC-27)",
+    ),
+    # Phase 2d RC-27 — process-substitution + `-enc` (PowerShell base64 exec)
+    (
+        re.compile(r"powershell(?:\.exe)?\s+-(?:enc|EncodedCommand|e)\s+[A-Za-z0-9+/=]{20,}", re.IGNORECASE),
+        "Supply chain: PowerShell -enc base64 payload (RC-27)",
+    ),
 ]
 
 # Credential harvesting patterns — reading sensitive credential files
 # Note: ~/.claude/ is EXCLUDED (legitimate for plugins)
+# Phase 2c (RC-20) added Claude MEMORY/USER files, browser keystores, and
+# Windows vault per vexscan FILE-001..005.
 CREDENTIAL_HARVEST_PATTERNS = [
     (re.compile(r"~/\.ssh/|/\.ssh/|SSH_KEY|id_rsa|id_ed25519"), "Credential access: SSH key file reference"),
     (
@@ -249,6 +384,40 @@ CREDENTIAL_HARVEST_PATTERNS = [
         re.compile(r"(?:keychain|keyring|credential.?store|password.?store)", re.IGNORECASE),
         "Credential access: system keystore reference",
     ),
+    # Phase 2c (RC-20) — Claude memory/agent files (MEMORY.md, CLAUDE.md user
+    # mode, ~/.claude/USER.md). Reading these from a plugin can extract user
+    # context and history. Plugin-shipped MEMORY.md is its own — only USER /
+    # global memory paths trigger.
+    (
+        re.compile(r"~?/?\.claude/(?:USER|MEMORY)\.md|~/\.claude/projects/[^/]+/MEMORY\.md", re.IGNORECASE),
+        "Credential access: Claude user memory / USER.md (RC-20)",
+    ),
+    # Phase 2c (RC-20) — Browser keystores (Login Data, Cookies, Local State)
+    (
+        re.compile(
+            r"(?:Library/Application\s+Support/(?:Google/Chrome|Brave|Edge|Vivaldi|Arc)/[^\s]*"
+            r"(?:Login\s+Data|Cookies|Local\s+State|Web\s+Data)|"
+            r"~/\.config/(?:google-chrome|chromium|BraveSoftware)/[^\s]*Login\s+Data|"
+            r"AppData/Local/Google/Chrome/User\s+Data/[^\s]*Login\s+Data)",
+            re.IGNORECASE,
+        ),
+        "Credential access: browser keystore (RC-20)",
+    ),
+    # Phase 2c (RC-20) — Firefox profile credentials
+    (
+        re.compile(r"\.mozilla/firefox/[^\s]*(?:logins\.json|key[34]?\.db)", re.IGNORECASE),
+        "Credential access: Firefox keystore (RC-20)",
+    ),
+    # Phase 2c (RC-20) — Windows credential vault / DPAPI
+    (
+        re.compile(
+            r"(?:vaultcli\.dll|CryptUnprotectData|"
+            r"Microsoft/Credentials|Microsoft/Vault|"
+            r"vaultcmd(?:\.exe)?\s+(?:/list|/listcreds))",
+            re.IGNORECASE,
+        ),
+        "Credential access: Windows credential vault (RC-20)",
+    ),
 ]
 
 # Sandbox escape patterns — bypassing safety controls
@@ -263,6 +432,84 @@ SANDBOX_ESCAPE_PATTERNS = [
     (
         re.compile(r"(?:disable|bypass|skip)\s*(?:all\s+)?(?:hooks?|guard|safety|protection|sandbox)", re.IGNORECASE),
         "Sandbox escape: safety bypass language",
+    ),
+    # Phase 2d RC-34 — Reverse-shell variants in 7 languages + msfvenom + socat
+    (
+        re.compile(
+            r"\bbash\s+-i\s*>&\s*/dev/tcp/[\d.]+/\d+\s*0>&1|"
+            r"\bsh\s+-i\s*>&\s*/dev/tcp/[\d.]+/\d+",
+            re.IGNORECASE,
+        ),
+        "Sandbox escape: bash/sh reverse shell via /dev/tcp (RC-34)",
+    ),
+    (
+        re.compile(
+            r"\bpython3?\s+-c\s+['\"]?\s*import\s+(?:socket|subprocess).*"
+            r"(?:socket\.socket|connect|dup2|fork)",
+        ),
+        "Sandbox escape: Python reverse shell (RC-34)",
+    ),
+    (
+        re.compile(r"\bperl\s+-[eE]\s+['\"]?\s*use\s+Socket.*connect"),
+        "Sandbox escape: Perl reverse shell (RC-34)",
+    ),
+    (
+        re.compile(r"\bruby\s+-[rR]?[a-z]*\s+-[eE]\s+['\"]?.*TCPSocket\.(?:open|new)"),
+        "Sandbox escape: Ruby reverse shell (RC-34)",
+    ),
+    (
+        re.compile(r"\bphp\s+-r\s+['\"]?\s*\$sock\s*=\s*fsockopen"),
+        "Sandbox escape: PHP reverse shell (RC-34)",
+    ),
+    (
+        re.compile(r"\blua\s+-e\s+['\"]?.*socket\.tcp\(\)"),
+        "Sandbox escape: Lua reverse shell (RC-34)",
+    ),
+    (
+        re.compile(r"\bsocat\s+(?:tcp[46]?-listen|exec):", re.IGNORECASE),
+        "Sandbox escape: socat reverse shell / bind shell (RC-34)",
+    ),
+    (
+        re.compile(r"\bmsfvenom\s+-p\s+\S+\s+(?:lhost|rhost)=", re.IGNORECASE),
+        "Sandbox escape: msfvenom payload generator (RC-34)",
+    ),
+    # Phase 2d RC-35 — SUID +s and octal SUID variants
+    (
+        re.compile(r"\bchmod\s+(?:[+]s|u\+s|g\+s|4[7-9][0-9]{2}|2[7-9][0-9]{2}|6[7-9][0-9]{2})\b"),
+        "Sandbox escape: SUID / SGID set on file (RC-35 — escalation vector)",
+    ),
+    # Phase 2d RC-38 — Destructive file/disk operations
+    (
+        re.compile(r"\bwipefs\s+-a\s+/dev/", re.IGNORECASE),
+        "Sandbox escape: wipefs -a on a block device (RC-38)",
+    ),
+    (
+        re.compile(r"\bshred\s+-(?:[a-z]+\s+)?/(?!tmp/)", re.IGNORECASE),
+        "Sandbox escape: shred against absolute path (RC-38)",
+    ),
+    (
+        re.compile(r":\(\)\{\s*:\s*\|\s*:\s*&\s*\};:", re.IGNORECASE),
+        "Sandbox escape: classic fork bomb (RC-38)",
+    ),
+    (
+        re.compile(r"\bformat\s+[A-Z]:\s*/Q?\s*/Y", re.IGNORECASE),
+        "Sandbox escape: Windows FORMAT command (RC-38)",
+    ),
+    # Phase 2d RC-36 — Symlink / hardlink to system-sensitive files.
+    # Patterns accept `ln -s <source> <target>` and `ln <source> <target>`.
+    # `<source>` and `<target>` can be any non-whitespace path; the regex
+    # checks that the TARGET is a system-sensitive file.
+    (
+        re.compile(r"\bln\s+-s\s+\S+\s+/etc/(?:passwd|shadow|sudoers)\b", re.IGNORECASE),
+        "Sandbox escape: symlink to /etc/passwd|shadow|sudoers (RC-36)",
+    ),
+    (
+        re.compile(r"\bln\s+(?!-s)(?:-[a-zA-Z]+\s+)?\S+\s+/etc/(?:passwd|shadow|sudoers)\b", re.IGNORECASE),
+        "Sandbox escape: HARD LINK to /etc/passwd|shadow|sudoers (RC-36)",
+    ),
+    (
+        re.compile(r"\bln\s+-s\s+\S+\s+/Library/LaunchDaemons/", re.IGNORECASE),
+        "Sandbox escape: symlink into /Library/LaunchDaemons (RC-36)",
     ),
 ]
 
@@ -884,7 +1131,12 @@ def check_hook_abuse(plugin_path: Path, report: ValidationReport) -> int:
 
 
 def check_mcp_abuse(plugin_path: Path, report: ValidationReport) -> int:
-    """Check MCP config for non-localhost servers (WARNING — many valid remote MCPs)."""
+    """Check MCP config for non-localhost servers (WARNING — many valid remote MCPs).
+
+    Phase 2e (RC-45) added detection for socat / php / ruby / nc / ncat in the
+    `command` field — these are interpreter binaries that have no place running
+    as an MCP server and almost always indicate a reverse-shell wrapper.
+    """
     mcp_file = plugin_path / ".mcp.json"
     if not mcp_file.exists():
         return 0
@@ -895,6 +1147,14 @@ def check_mcp_abuse(plugin_path: Path, report: ValidationReport) -> int:
 
         data = _json.loads(mcp_file.read_text(encoding="utf-8"))
         servers = data.get("mcpServers", data) if isinstance(data, dict) else {}
+
+        # Phase 2e RC-45 — interpreter / network-tool binaries that have no
+        # legitimate place in an MCP `command` field.
+        DANGEROUS_MCP_COMMANDS = frozenset({
+            "socat", "ncat", "nc", "netcat",
+            "php", "ruby", "perl", "lua",
+            "telnet", "rsh", "ssh-keyscan",
+        })
 
         for name, config in servers.items():
             if not isinstance(config, dict):
@@ -909,6 +1169,17 @@ def check_mcp_abuse(plugin_path: Path, report: ValidationReport) -> int:
             cmd = config.get("command", "")
             args = config.get("args", [])
             full_cmd = f"{cmd} {' '.join(str(a) for a in args)}" if args else cmd
+
+            # Phase 2e RC-45 — dangerous interpreter / net binary as command
+            cmd_basename = cmd.split("/")[-1].lower() if cmd else ""
+            if cmd_basename in DANGEROUS_MCP_COMMANDS:
+                report.critical(
+                    f"RC-45: MCP server '{name}' command is '{cmd_basename}' — "
+                    f"interpreter / network binary, almost certainly a reverse-shell wrapper",
+                    ".mcp.json",
+                )
+                issues_found += 1
+
             for sc_pattern, sc_msg in SUPPLY_CHAIN_PATTERNS:
                 if sc_pattern.search(full_cmd):
                     report.critical(f"MCP server '{name}': {sc_msg}", ".mcp.json")
@@ -920,7 +1191,13 @@ def check_mcp_abuse(plugin_path: Path, report: ValidationReport) -> int:
 
 
 def check_permission_escalation(plugin_path: Path, report: ValidationReport) -> int:
-    """Check for permission escalation in plugin manifest and agent frontmatter (WARNING)."""
+    """Check for permission escalation in plugin manifest and agent frontmatter (WARNING).
+
+    Phase 2e (RC-61, RC-62) extended to flag:
+    * `permissionMode: bypassPermissions` — RC-62 (was missing)
+    * `dangerouslyDisableSandbox` — RC-61 sandbox disable
+    * TLS-bypass env vars (NODE_TLS_REJECT_UNAUTHORIZED=0, PYTHONHTTPSVERIFY=0)
+    """
     issues_found = 0
 
     # Check plugin.json for overly broad tool permissions
@@ -932,9 +1209,11 @@ def check_permission_escalation(plugin_path: Path, report: ValidationReport) -> 
             data = _json.loads(manifest.read_text(encoding="utf-8"))
             # Check if plugin requests dangerous permission modes
             perm_mode = data.get("permissionMode", "")
-            if perm_mode in ("dangerouslySkipPermissions", "bypass"):
+            # Phase 2e RC-62 — bypassPermissions explicit catch
+            if perm_mode in ("dangerouslySkipPermissions", "bypass", "bypassPermissions"):
                 report.warning(
-                    f"Permission escalation: plugin.json requests permissionMode '{perm_mode}'",
+                    f"Permission escalation: plugin.json requests permissionMode '{perm_mode}' "
+                    f"(RC-62 — bypassPermissions removes the user's safety gate)",
                     ".claude-plugin/plugin.json",
                 )
                 issues_found += 1
@@ -951,10 +1230,28 @@ def check_permission_escalation(plugin_path: Path, report: ValidationReport) -> 
                     parts = content.split("---", 2)
                     if len(parts) >= 3:
                         fm = parts[1]
-                        # Check for dangerouslySkipPermissions in agent frontmatter
-                        if "dangerouslyskippermissions" in fm.lower().replace("_", "").replace("-", ""):
+                        fm_normalized = fm.lower().replace("_", "").replace("-", "")
+                        # Phase 2e RC-61 — also catch dangerouslyDisableSandbox
+                        if "dangerouslyskippermissions" in fm_normalized:
                             report.warning(
-                                "Permission escalation: agent requests dangerouslySkipPermissions (valid for worktree agents, verify intent)",
+                                "Permission escalation: agent requests dangerouslySkipPermissions "
+                                "(valid for worktree agents, verify intent)",
+                                f"agents/{agent_file.name}",
+                            )
+                            issues_found += 1
+                        if "dangerouslydisablesandbox" in fm_normalized:
+                            report.major(
+                                "RC-61: agent requests dangerouslyDisableSandbox — disables the runtime "
+                                "sandbox; plugins should never need this",
+                                f"agents/{agent_file.name}",
+                            )
+                            issues_found += 1
+                        # Phase 2e RC-61 — TLS-bypass env vars
+                        if "node_tls_reject_unauthorized" in fm_normalized.replace(":", "") or \
+                           "pythonhttpsverify=0" in fm_normalized:
+                            report.major(
+                                "RC-61: agent declares TLS-bypass env var (NODE_TLS_REJECT_UNAUTHORIZED / "
+                                "PYTHONHTTPSVERIFY) — disables certificate validation",
                                 f"agents/{agent_file.name}",
                             )
                             issues_found += 1
@@ -1771,6 +2068,57 @@ def check_phase1_all(plugin_path: Path, report: ValidationReport) -> int:
     )
 
 
+# =============================================================================
+# Phase 2e — Cloud IMDS, persistence, generic obfuscation
+# =============================================================================
+# RC-65 cloud IMDS (with encoding variants), RC-39 persistence (cron / launchd /
+# shell rc / Windows registry), RC-70 obfuscated decode-then-exec.
+
+
+def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
+    """RC-65 (cloud IMDS), RC-39 (persistence), RC-70 (obfuscated exec)."""
+    issues = 0
+    for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
+        fence_state = build_fence_state(content)
+
+        # RC-65 — Cloud IMDS endpoints (with encoding variants)
+        for line_no, line in enumerate(content.split("\n"), start=1):
+            if is_in_fenced_code_block(line_no - 1, fence_state):
+                continue
+            for pattern in CLOUD_IMDS_PATTERNS:
+                m = pattern.search(line)
+                if m and not has_negation_guard_nearby(content, content.find(line) + m.start()):
+                    level = effective_severity("major", rel_path)
+                    getattr(report, level)(
+                        f"RC-65: cloud IMDS endpoint at line {line_no}: {m.group(0)}",
+                        rel_path, line_no,
+                    )
+                    issues += 1
+                    break
+
+        # RC-39 — Persistence
+        for line_no, line in enumerate(content.split("\n"), start=1):
+            if is_in_fenced_code_block(line_no - 1, fence_state):
+                continue
+            for pattern in PERSISTENCE_PATTERNS:
+                m = pattern.search(line)
+                if m and not has_negation_guard_nearby(content, content.find(line) + m.start()):
+                    level = effective_severity("major", rel_path)
+                    getattr(report, level)(
+                        f"RC-39: persistence pattern at line {line_no}: {m.group(0)[:80]}",
+                        rel_path, line_no,
+                    )
+                    issues += 1
+                    break
+
+        # RC-70 — Generic obfuscation with proximity-to-exec
+        for line_no, msg in find_obfuscated_exec(content, proximity_lines=3):
+            level = effective_severity("critical", rel_path)
+            getattr(report, level)(f"RC-70: {msg}", rel_path, line_no)
+            issues += 1
+    return issues
+
+
 def validate_security(plugin_path: Path, enable_tirith: bool = True) -> ValidationReport:
     """Run all security validations on a plugin directory.
 
@@ -1874,6 +2222,11 @@ def validate_security(plugin_path: Path, enable_tirith: bool = True) -> Validati
     phase1_issues = check_phase1_all(plugin_path, report)
     if phase1_issues == 0:
         report.passed("No Phase 1 critical-rule findings (RC-09/10/11/21/29/37/43/47/49/50/67)")
+
+    # --- Phase 2e extras — Cloud IMDS, persistence, obfuscated decode-then-exec ---
+    phase2e_issues = check_phase2e_extras(plugin_path, report)
+    if phase2e_issues == 0:
+        report.passed("No Phase 2e extras findings (RC-39 persistence, RC-65 cloud IMDS, RC-70 obfuscated exec)")
 
     # --- External scanners (optional) ---
 
