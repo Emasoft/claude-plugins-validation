@@ -987,6 +987,258 @@ DANGEROUS_FILES = {
     "ca.pem",
 }
 
+
+# =============================================================================
+# RC-83 / RC-84 / RC-100 / RC-16 — FP-Reduction Helpers (Phase 0)
+# =============================================================================
+#
+# These four complementary mechanisms suppress false positives BEFORE any new
+# security rule fires. They were introduced as Phase 0 of the security
+# mega-upgrade (TRDD-0f1f7889). Per the synthesis verdict, FP-reduction MUST
+# ship before any new rules — otherwise CPV's own self-validation would
+# drown in false hits on the validator regex source.
+#
+# 1. RC-83 — Code-fence tracker. Matches inside triple-backtick fenced blocks
+#    are usually documentation examples, not real attacks. The `build_fence_state`
+#    + `is_in_fenced_code_block` pair lets a check skip in-fence matches in O(1).
+#
+# 2. RC-83/100 — Negation guard. Looks for "never", "do not", "warning:",
+#    "caution:" within ±N chars of a match. Documentation that warns AGAINST
+#    a pattern would otherwise FP heavily. Source: skillscan, vetskill.
+#
+# 3. RC-16/83 — Placeholder secret + provider-host allowlist. Recognizes
+#    `your-api-key`, `<placeholder>`, `${VAR}`, and known SDK hosts so
+#    legitimate documentation snippets and SDK examples don't fire as
+#    credential / exfil findings. Source: skillward, aguara.
+#
+# 4. RC-84/100 — Defensive-context demotion. `is_test_path`, `is_doc_path`,
+#    `is_sample_file` plus `effective_severity` demote findings by one tier
+#    when the file is a test fixture, documentation, or .env.example /
+#    .template / .sample. Source: aguara, skillscan.
+#
+# CPV mode contract: programmatic checks call these helpers DIRECTLY. The
+# semantic-validator agent (opt-in opus) does NOT consume them — it has
+# its own FP-reduction via LLM judgment.
+
+
+def build_fence_state(content: str) -> list[bool]:
+    """Return list[bool] where index i is True if line i is inside a triple-backtick fenced block.
+
+    The fence-marker line itself (the line containing the opening or closing
+    ``` ) is reported as INSIDE the fence — so checks that skip in-fence lines
+    also skip the fence markers. Pass the same `fence_state` to every check on
+    the same content; lookup is O(1) per line.
+    """
+    in_fence = False
+    state: list[bool] = []
+    for line in content.split("\n"):
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            state.append(True)
+            continue
+        state.append(in_fence)
+    return state
+
+
+def is_in_fenced_code_block(line_index: int, fence_state: list[bool]) -> bool:
+    """Return True if `line_index` sits inside a triple-backtick fenced block.
+
+    `fence_state` is the output of `build_fence_state(content)`.
+    """
+    if not 0 <= line_index < len(fence_state):
+        return False
+    return fence_state[line_index]
+
+
+# RC-83 / RC-100 — Negation-guard regex.
+# Detects: never, don't, do not, must not, avoid, warning, caution, note —
+# followed by up to 40 chars (the warned-against content sits in those chars).
+NEGATION_GUARD = re.compile(
+    r"\b(?:never|don'?t|do\s+not|must\s+not|avoid|warning|caution|note)\b[^\n]{0,40}",
+    re.IGNORECASE,
+)
+
+
+def has_negation_guard_nearby(content: str, match_pos: int, window: int = 80) -> bool:
+    """Return True if a negation word appears within the preceding `window` chars.
+
+    Used to downgrade severity when documentation explicitly warns against a
+    pattern (e.g. CPV's own validator source quoting "never write 'ignore
+    previous instructions'").
+    """
+    start = max(0, match_pos - window)
+    return bool(NEGATION_GUARD.search(content[start: match_pos + 1]))
+
+
+# RC-16 / RC-83 — Placeholder secret recognition.
+# The leading prefix family + key/token/secret-noun pattern handles:
+#   - hyphen and underscore separators (your-api-key, your_api_key, my_token)
+#   - CamelCase (YourApiKey, MySecret) — matched as `Your`+`Api`
+#   - chained nouns (your_api_key matches `your_api`; the trailing `_key` is
+#     a separate occurrence)
+# The trailing `\b` was REMOVED because it failed on compound words where the
+# noun is followed by another word char (your_api_KEY → boundary after
+# `api` is between two word chars, so `\b` would not match).
+PLACEHOLDER_SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"\b(?:test|sample|demo|example|placeholder|fake|dummy|your|my)[-_]?"
+        r"(?:key|token|secret|api|password|credential)",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bsk-(?:test|proj-test|demo|example|placeholder)\b", re.IGNORECASE),
+    re.compile(r"<your[-_]?(?:api[-_]?)?(?:key|token|secret|password)>", re.IGNORECASE),
+    re.compile(r"\${[A-Z_]+_(?:API_KEY|TOKEN|SECRET|PASSWORD)}"),
+    re.compile(r"\$\{[A-Z_]+\}"),
+    re.compile(r"\bxxx+\b", re.IGNORECASE),
+    re.compile(r"\bredacted\b", re.IGNORECASE),
+    re.compile(r"\b\.{3}\b"),  # literal "..."
+)
+
+
+def is_placeholder_secret(text: str) -> bool:
+    """Return True if `text` appears to be a placeholder/example secret, not real.
+
+    Used by secret-detection checks to avoid flagging documentation examples
+    like `OPENAI_API_KEY="your-api-key-here"`.
+    """
+    return any(p.search(text) for p in PLACEHOLDER_SECRET_PATTERNS)
+
+
+# RC-83 — Provider-host whitelist for AI / SDK / package-registry / code-host
+# legitimate destinations. A finding pointing to one of these hosts is almost
+# always a legitimate SDK call, not data exfiltration.
+PROVIDER_HOSTS_WHITELIST: frozenset[str] = frozenset({
+    # AI providers — both FQDN and parent registrable domain (parent enables
+    # subdomain matching like cdn.api.openai.com → endswith ".openai.com")
+    "openai.com", "api.openai.com",
+    "anthropic.com", "api.anthropic.com", "claude.ai", "console.anthropic.com",
+    "googleapis.com", "api.gemini.google.com", "generativelanguage.googleapis.com",
+    "huggingface.co",
+    "cohere.ai", "api.cohere.ai", "cohere.com", "api.cohere.com",
+    "mistral.ai", "api.mistral.ai",
+    "together.ai", "api.together.ai",
+    "groq.com", "api.groq.com",
+    "deepinfra.com", "api.deepinfra.com",
+    "openrouter.ai", "api.openrouter.ai",
+    "replicate.com", "api.replicate.com",
+    "runpod.io", "api.runpod.io",
+    # Package registries — parent registrable enables CDN/mirror subdomains
+    "npmjs.org", "registry.npmjs.org",
+    "pypi.org",
+    "pythonhosted.org", "files.pythonhosted.org",
+    "rubygems.org",
+    "crates.io",
+    "terraform.io", "registry.terraform.io",
+    # Code hosting — parent registrable enables raw./api./objects./codeload. subdomains
+    "github.com", "githubusercontent.com",
+    "raw.githubusercontent.com", "objects.githubusercontent.com",
+    "codeload.github.com", "api.github.com",
+    "gitlab.com", "bitbucket.org",
+    # OS / distro update mirrors
+    "debian.org", "deb.debian.org",
+    "ubuntu.com", "archive.ubuntu.com",
+    "fedoraproject.org", "dl.fedoraproject.org",
+    "python.org", "downloads.python.org",
+    "nodejs.org",
+})
+
+
+def is_known_provider_host(host: str) -> bool:
+    """Return True if `host` is a recognized AI provider, package registry, or code-host.
+
+    Subdomain matching: `cdn.npmjs.org` and similar are accepted via suffix match.
+    """
+    host_lower = host.lower().strip()
+    if host_lower in PROVIDER_HOSTS_WHITELIST:
+        return True
+    return any(host_lower.endswith("." + base) for base in PROVIDER_HOSTS_WHITELIST)
+
+
+# RC-84 / RC-100 — Defensive-context path detection.
+# Findings in test, documentation, or sample/template paths get demoted by one
+# tier (effective_severity below). This is the difference between "CPV self-FPs
+# on its own validator regex source" and "CPV cleanly validates itself".
+TEST_PATH_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"(?:^|/)tests?(?:/|$)", re.IGNORECASE),
+    re.compile(r"(?:^|/)__tests?__/"),
+    re.compile(r"(?:^|/)spec(?:/|$)"),
+    re.compile(r"(?:^|/)e2e(?:/|$)"),
+    re.compile(r"(?:^|/)fixtures?(?:/|$)"),
+    re.compile(r"\.test\.[a-z]+$", re.IGNORECASE),
+    re.compile(r"\.spec\.[a-z]+$", re.IGNORECASE),
+    re.compile(r"_test\.[a-z]+$"),
+    re.compile(r"_spec\.[a-z]+$"),
+    re.compile(r"^test_.+\.py$"),
+)
+
+DOC_PATH_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\.md$", re.IGNORECASE),
+    re.compile(r"\.rst$", re.IGNORECASE),
+    re.compile(r"(?:^|/)docs?(?:/|$)", re.IGNORECASE),
+    re.compile(r"(?:^|/)documentation(?:/|$)", re.IGNORECASE),
+    re.compile(r"README", re.IGNORECASE),
+    re.compile(r"CHANGELOG", re.IGNORECASE),
+    re.compile(r"CONTRIBUTING", re.IGNORECASE),
+    re.compile(r"LICENSE", re.IGNORECASE),
+)
+
+SAMPLE_FILE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\.example$", re.IGNORECASE),
+    re.compile(r"\.template$", re.IGNORECASE),
+    re.compile(r"\.sample$", re.IGNORECASE),
+    re.compile(r"\.dist$", re.IGNORECASE),
+    re.compile(r"\.tpl$", re.IGNORECASE),
+    re.compile(r"\.example\.[a-z0-9]+$", re.IGNORECASE),
+    re.compile(r"\.sample\.[a-z0-9]+$", re.IGNORECASE),
+)
+
+
+def is_test_path(path: str) -> bool:
+    """Return True if `path` is in a test / spec / fixtures directory."""
+    return any(p.search(path) for p in TEST_PATH_PATTERNS)
+
+
+def is_doc_path(path: str) -> bool:
+    """Return True if `path` is documentation (markdown, rst, or docs/ directory)."""
+    return any(p.search(path) for p in DOC_PATH_PATTERNS)
+
+
+def is_sample_file(path: str) -> bool:
+    """Return True if `path` is a template/sample/example file (.env.example, etc.)."""
+    return any(p.search(path) for p in SAMPLE_FILE_PATTERNS)
+
+
+# Severity tier order (worst → least). Used by demote_severity().
+SEVERITY_TIERS: tuple[str, ...] = ("critical", "major", "minor", "warning", "info", "passed")
+
+
+def demote_severity(level: str, by: int = 1) -> str:
+    """Return `level` demoted by `by` tiers (clamped at 'passed').
+
+    Unknown levels are returned as-is (no demotion). Useful when a generic
+    helper does not know the exact level naming convention.
+    """
+    try:
+        idx = SEVERITY_TIERS.index(level.lower())
+    except ValueError:
+        return level
+    return SEVERITY_TIERS[min(idx + by, len(SEVERITY_TIERS) - 1)]
+
+
+def effective_severity(level: str, file_path: str) -> str:
+    """Compute effective severity given file context (RC-84 + RC-100 demotion).
+
+    Demotes by one tier when the finding is in a defensive context — test
+    fixture, documentation file, or sample / template / example file. The
+    three contexts do NOT stack — maximum demotion is one tier per finding.
+
+    A check that uses this MUST call it BEFORE invoking `report.<level>(...)`
+    and dispatch on the returned level via `getattr(report, returned_level)`.
+    """
+    if is_sample_file(file_path) or is_test_path(file_path) or is_doc_path(file_path):
+        return demote_severity(level, by=1)
+    return level
+
 # =============================================================================
 # Private Information Detection Patterns
 # =============================================================================
