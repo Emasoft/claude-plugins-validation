@@ -820,16 +820,27 @@ def should_skip_directory(dir_name: str) -> bool:
 # Patterns that indicate potential secrets/credentials
 # Note: Generic API Key pattern excludes env var placeholders like ${VAR} or $VAR
 SECRET_PATTERNS = [
-    (re.compile(r"AKIA[0-9A-Z]{16}"), "AWS Access Key"),
-    (re.compile(r"-----BEGIN (RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----"), "Private Key"),
-    (re.compile(r"ghp_[a-zA-Z0-9]{36}"), "GitHub Personal Access Token"),
-    (re.compile(r"sk-[a-zA-Z0-9]{20,}"), "API Key (sk-... format)"),
-    (re.compile(r"xox[baprs]-[0-9a-zA-Z-]+"), "Slack Token"),
+    # AWS access-key family (Phase 2b RC-12 — 7-prefix family per vetskill).
+    # Original AKIA + ASIA/AGPA/AIDA/AROA/ANPA/ANVA temporal/instance/role keys.
+    # The trailing `\b` was REMOVED — real keys end in mixed alphanumerics and
+    # the `\b` boundary fails when the surrounding char is also a word char
+    # (e.g. concatenated with a suffix in test fixtures or env-var sources).
+    (re.compile(r"\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|ANVA)[0-9A-Z]{16}"), "AWS Access Key"),
+    # Private Key family (Phase 2b RC-15 — added PGP per vexscan FILE-001)
+    (re.compile(r"-----BEGIN (RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----"), "Private Key"),
+    (re.compile(r"-----BEGIN PGP PRIVATE KEY BLOCK-----"), "PGP Private Key"),
+    # GitHub token family (Phase 2b RC-13 — added gho_/ghu_/ghs_/ghr_)
+    (re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[a-zA-Z0-9]{36,}\b"), "GitHub Personal Access Token"),
     (re.compile(r"github_pat_[a-zA-Z0-9_]{22,}"), "GitHub Fine-Grained Personal Access Token"),
-    (re.compile(r"AIza[0-9A-Za-z\-_]{35}"), "Google API Key"),
+    # OpenAI key family (Phase 2b RC-14 — added T3BlbkFJ fingerprint guard)
+    # The fingerprint pattern reduces FPs vs the bare sk- prefix
+    (re.compile(r"sk-[A-Za-z0-9]{20,}T3BlbkFJ[A-Za-z0-9]{20,}"), "OpenAI API Key (with T3BlbkFJ fingerprint)"),
+    (re.compile(r"\bsk-(?!proj-test|test-)[a-zA-Z0-9]{20,}\b"), "API Key (sk-... format)"),
     (re.compile(r"sk_live_[a-zA-Z0-9]{24,}"), "Stripe Secret Key"),
     (re.compile(r"pk_live_[a-zA-Z0-9]{24,}"), "Stripe Publishable Key"),
     (re.compile(r"sk-ant-[a-zA-Z0-9\-_]{80,}"), "Anthropic API Key"),
+    (re.compile(r"xox[baprs]-[0-9a-zA-Z-]+"), "Slack Token"),
+    (re.compile(r"AIza[0-9A-Za-z\-_]{35}"), "Google API Key"),
     (re.compile(r"npm_[a-zA-Z0-9]{36}"), "npm Access Token"),
     (re.compile(r"://[^:\s]+:[^@\s]+@[^\s]+"), "Database Connection String with Credentials"),
     (re.compile(r"SG\.[a-zA-Z0-9\-_]{22}\.[a-zA-Z0-9\-_]{43}"), "SendGrid API Key"),
@@ -839,7 +850,34 @@ SECRET_PATTERNS = [
     (re.compile(r"eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}"), "JWT Token"),
     # AWS Secret Access Key (40-char base64 string)
     (re.compile(r"aws_secret_access_key\s*[:=]\s*['\"]?[A-Za-z0-9/+=]{40}", re.I), "AWS Secret Access Key"),
+    # Phase 2b RC-13/14 — additional provider-specific tokens
+    (re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}\b"), "GitLab Personal Access Token"),
+    (re.compile(r"\bAKID[A-Za-z0-9]{32,}\b"), "Tencent Cloud SecretId"),
+    (re.compile(r"\bhf_[A-Za-z]{32,}\b"), "Hugging Face Token"),
 ]
+
+
+# Phase 2b RC-16 — broaden KNOWN_EXAMPLE_SECRETS / placeholder bank.
+# The original set was just 2 AWS examples. This expansion catches the
+# many placeholder forms surveyed scanners ship in their fixtures.
+EXTENDED_PLACEHOLDER_TOKENS: frozenset[str] = frozenset({
+    # AWS official examples
+    "AKIAIOSFODNN7EXAMPLE",
+    "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+    # OpenAI / Anthropic test keys
+    "sk-test", "sk-proj-test", "sk-demo", "sk-example",
+    "sk-ant-api03-EXAMPLE", "sk-ant-test",
+    # GitHub
+    "ghp_EXAMPLE_TOKEN_PLACEHOLDER",
+    "github_pat_EXAMPLE",
+    # Generic
+    "<YOUR_API_KEY>", "<your-api-key>", "<api-key>", "<YOUR_TOKEN>",
+    "your-api-key-here", "your_api_key_here",
+    "REPLACE_ME", "REPLACE-ME", "TODO", "TBD",
+    "REDACTED", "<REDACTED>", "[REDACTED]",
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "YOUR_KEY_HERE", "YOUR_SECRET_HERE",
+})
 
 # Known example/placeholder secrets from AWS documentation and tutorials
 # These are intentionally fake and appear in docs/tests — not real credentials
@@ -1725,6 +1763,154 @@ register_rule(RuleSchema(
     references=("aguara CRYPTO_001", "OWASP LLM10"),
     cwe="CWE-400",
     fp_guards=("Skip in doc/test files mentioning these as examples (RC-84)",),
+))
+
+# -----------------------------------------------------------------------------
+# Phase 2e RC-65 — Cloud IMDS (instance-metadata) endpoints + encoding variants
+# -----------------------------------------------------------------------------
+# Source: aguara SSRF_009-011 (RC-66 variants folded in here per TRDD audit)
+# Attack: SSRF or in-skill code that targets cloud metadata endpoints to
+# steal IAM credentials. Includes encoding variants that bypass naive
+# string-search rules (hex, decimal, octal IPv4 + IPv6 forms).
+CLOUD_IMDS_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # AWS
+    re.compile(r"\b169\.254\.169\.254\b"),
+    re.compile(r"\b0xa9fea9fe\b", re.IGNORECASE),  # 169.254.169.254 in hex
+    re.compile(r"\b2852039166\b"),  # 169.254.169.254 in decimal
+    re.compile(r"\b\[fd00:ec2::254\]"),  # AWS IPv6 IMDS
+    # GCP
+    re.compile(r"\bmetadata\.google\.internal\b", re.IGNORECASE),
+    re.compile(r"\bmetadata-google-internal\b", re.IGNORECASE),
+    re.compile(r"\b169\.254\.170\.2\b"),  # GCP IMDS variant
+    # Azure
+    re.compile(r"\b169\.254\.169\.254\b"),  # Azure shares same IP
+    re.compile(r"\bManagedIdentityExtension\b"),
+    # Alibaba Cloud
+    re.compile(r"\b100\.100\.100\.200\b"),
+    # Oracle Cloud
+    re.compile(r"\b192\.168\.0\.1\.metadata\b", re.IGNORECASE),
+    # ECS / Fargate (AWS task role endpoint)
+    re.compile(r"\b/v2/credentials/[a-f0-9-]{36}\b", re.IGNORECASE),
+    re.compile(r"\bECS_CONTAINER_METADATA_URI(?:_V[0-9]+)?\b"),
+)
+
+# -----------------------------------------------------------------------------
+# Phase 2e RC-39 — Persistence beyond plugin lifetime (cron / launchd / shell rc)
+# -----------------------------------------------------------------------------
+PERSISTENCE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # crontab (Unix scheduled task) — also handles parenthesized echo and
+    # quoted arguments: `(echo "...") | crontab`
+    re.compile(r"\bcrontab\s+(?:-e|-l|<<|<\s*\S)"),
+    re.compile(r"(?:^|[(\s;&|])\s*(?:echo|cat|printf)\s+[^\n|]*?\|\s*crontab\b"),
+    re.compile(r">>\s*/etc/(?:crontab|cron\.d/|cron\.daily/|cron\.hourly/)"),
+    # macOS launchd (LaunchDaemons / LaunchAgents)
+    re.compile(r"/Library/(?:LaunchDaemons|LaunchAgents)/", re.IGNORECASE),
+    re.compile(r"~/Library/LaunchAgents/", re.IGNORECASE),
+    re.compile(r"\blaunchctl\s+(?:load|bootstrap|start)\b"),
+    # systemd user service
+    re.compile(r"~/\.config/systemd/user/.+\.service"),
+    re.compile(r"\bsystemctl\s+--user\s+(?:enable|start)\b"),
+    # macOS login items via `defaults`
+    re.compile(r"\bdefaults\s+write\s+(?:com\.apple\.loginitems|loginwindow)", re.IGNORECASE),
+    # Shell rc append (.bashrc, .zshrc, .profile)
+    re.compile(r">>\s*~/\.(?:bash|zsh|prof)(?:rc|_profile|ile)\b"),
+    re.compile(r"echo\s+.*?>>\s*~/\.(?:bash|zsh|prof)"),
+    # Windows scheduled task
+    re.compile(r"\bschtasks(?:\.exe)?\s+/create\b", re.IGNORECASE),
+    # Windows registry Run key
+    re.compile(
+        r"\b(?:HKLM|HKCU|HKEY_(?:LOCAL_MACHINE|CURRENT_USER))\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+        re.IGNORECASE,
+    ),
+)
+
+# -----------------------------------------------------------------------------
+# Phase 2e RC-70 — Generic obfuscation (proximity-to-exec gating)
+# -----------------------------------------------------------------------------
+# Pattern: encoded payload (atob/Buffer.from/base64.b64decode) within ±3 lines
+# of an exec sink (eval/Function/exec/spawn/child_process). The check function
+# walks the file with a sliding window, not via single-pattern match.
+OBFUSCATION_DECODER_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\batob\s*\("),
+    re.compile(r"\bBuffer\.from\s*\(\s*['\"][A-Za-z0-9+/=]{20,}['\"]\s*,\s*['\"]base64['\"]"),
+    re.compile(r"\bbase64\.(?:b64decode|standard_b64decode|urlsafe_b64decode)\s*\("),
+    re.compile(r"\bdecode\s*\(\s*['\"]base64['\"]\s*\)"),
+    re.compile(r"\bcodecs\.decode\s*\(\s*['\"][^'\"]+['\"]\s*,\s*['\"]hex['\"]"),
+)
+EXEC_SINK_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\beval\s*\("),
+    re.compile(r"\bnew\s+Function\s*\("),
+    re.compile(r"\bexec\s*\("),
+    re.compile(r"\bsubprocess\.(?:run|Popen|call|check_output|check_call)\s*\("),
+    re.compile(r"\bos\.system\s*\("),
+    re.compile(r"\bchild_process\.(?:exec|spawn|fork|execFile)\s*\("),
+    re.compile(r"\bcompile\s*\("),
+    re.compile(r"\bImports?\.System\.exec"),
+)
+
+
+def find_obfuscated_exec(content: str, proximity_lines: int = 3) -> list[tuple[int, str]]:
+    """Return list of (line_number, message) for decoder + exec-sink within proximity.
+
+    A finding fires when:
+    1. A line matches an OBFUSCATION_DECODER_PATTERN, AND
+    2. Some line within ±proximity_lines matches an EXEC_SINK_PATTERN.
+
+    Both must be true for the finding to fire (RC-70 source: skillscan MAL-051).
+    """
+    lines = content.split("\n")
+    decoder_hits: list[int] = []
+    exec_hits: list[int] = []
+    for idx, line in enumerate(lines):
+        if any(p.search(line) for p in OBFUSCATION_DECODER_PATTERNS):
+            decoder_hits.append(idx)
+        if any(p.search(line) for p in EXEC_SINK_PATTERNS):
+            exec_hits.append(idx)
+
+    findings: list[tuple[int, str]] = []
+    for d_idx in decoder_hits:
+        for e_idx in exec_hits:
+            if abs(d_idx - e_idx) <= proximity_lines:
+                findings.append((
+                    d_idx + 1,
+                    f"obfuscated decode at line {d_idx + 1} within {abs(d_idx - e_idx)} lines of "
+                    f"exec sink at line {e_idx + 1}",
+                ))
+                break
+    return findings
+
+
+register_rule(RuleSchema(
+    rule_id="RC-65",
+    name="Cloud IMDS endpoint (with encoding variants)",
+    category="ssrf",
+    severity="MAJOR",
+    description="Cloud instance-metadata endpoint — IAM credential theft vector. Includes hex/decimal/IPv6 variants.",
+    references=("aguara SSRF_009-011", "RC-66 folded"),
+    cwe="CWE-918",
+    fp_guards=("Skip in test/doc files (RC-84)", "Skip in fenced code blocks (RC-83)"),
+))
+
+register_rule(RuleSchema(
+    rule_id="RC-39",
+    name="Persistence beyond plugin lifetime (cron/launchd/RC files/registry)",
+    category="persistence",
+    severity="MAJOR",
+    description="Modifies cron/launchd/systemd/shell-rc/Windows-Run for execution after plugin uninstall.",
+    references=("vexscan PERSIST-001", "emelyanowcom"),
+    cwe="CWE-506",
+    fp_guards=("Skip in test/doc files (RC-84)", "Skip in fenced code (RC-83)"),
+))
+
+register_rule(RuleSchema(
+    rule_id="RC-70",
+    name="Generic obfuscation with proximity-to-exec",
+    category="evasion",
+    severity="CRITICAL",
+    description="Base64/hex decoder within ±3 lines of an exec sink — likely encoded payload execution.",
+    references=("skillscan MAL-051", "RC-71 sibling"),
+    cwe="CWE-506",
+    fp_guards=("Skip in test/doc files (RC-84)", "Skip in fenced code (RC-83)"),
 ))
 
 
