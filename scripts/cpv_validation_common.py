@@ -1270,12 +1270,23 @@ def effective_severity(level: str, file_path: str) -> str:
     fixture, documentation file, or sample / template / example file. The
     three contexts do NOT stack — maximum demotion is one tier per finding.
 
+    Demotion is CLAMPED at the "warning" tier — `info` and `passed` are
+    not findings the orchestrator dispatches via `getattr(report, level)`
+    with file+line arguments, so demoting into them would crash the call
+    site. Callers that need INFO-tier reporting should use `report.info()`
+    directly, not via this helper.
+
     A check that uses this MUST call it BEFORE invoking `report.<level>(...)`
     and dispatch on the returned level via `getattr(report, returned_level)`.
     """
-    if is_sample_file(file_path) or is_test_path(file_path) or is_doc_path(file_path):
-        return demote_severity(level, by=1)
-    return level
+    if not (is_sample_file(file_path) or is_test_path(file_path) or is_doc_path(file_path)):
+        return level
+    demoted = demote_severity(level, by=1)
+    # Clamp at warning — never demote into info/passed (those have 2-arg
+    # signature and would crash the dispatch site).
+    if demoted in ("info", "passed"):
+        return "warning"
+    return demoted
 
 
 # =============================================================================

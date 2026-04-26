@@ -2241,20 +2241,233 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
     return issues
 
 
-def validate_security(plugin_path: Path, enable_tirith: bool = True) -> ValidationReport:
+# =============================================================================
+# Phase 5 — Specialist-tool delegation (RC-102)
+# =============================================================================
+#
+# Same external-binary pattern as check_cc_audit() and check_tirith_scanner().
+# Each adds hundreds of patterns "for free" without copying any source code.
+# All optional — emit a single WARNING when binary missing and skip.
+
+
+def check_trufflehog(plugin_path: Path, report: ValidationReport) -> int:
+    """Run trufflehog for credential detection if installed (RC-102 part 1).
+
+    trufflehog ships ~700 verified-secret detectors. CPV's SECRET_PATTERNS
+    has ~30. Delegating gives massive coverage without maintenance burden.
+    """
+    if not shutil.which("trufflehog"):
+        report.warning(
+            "trufflehog: binary not found — ~700 verified credential detectors skipped. "
+            "Install via 'brew install trufflehog' or 'go install github.com/trufflesecurity/trufflehog/v3@latest'."
+        )
+        return 0
+
+    issues = 0
+    try:
+        result = subprocess.run(
+            ["trufflehog", "filesystem", str(plugin_path), "--json", "--no-update", "--fail"],
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+    except subprocess.TimeoutExpired:
+        report.warning("trufflehog: timed out after 180s — scan aborted")
+        return 0
+    except FileNotFoundError:
+        report.warning("trufflehog: binary disappeared between probe and exec")
+        return 0
+
+    # trufflehog emits one JSON object per line for each detection
+    for raw_line in (result.stdout or "").splitlines():
+        raw_line = raw_line.strip()
+        if not raw_line.startswith("{"):
+            continue
+        try:
+            finding = json.loads(raw_line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(finding, dict):
+            continue
+        detector = finding.get("DetectorName") or finding.get("detector") or "?"
+        verified = finding.get("Verified") or finding.get("verified", False)
+        source_metadata = finding.get("SourceMetadata", {}) or {}
+        data = source_metadata.get("Data", {}) if isinstance(source_metadata, dict) else {}
+        filesystem = data.get("Filesystem", {}) if isinstance(data, dict) else {}
+        rel = filesystem.get("file", "?") if isinstance(filesystem, dict) else "?"
+        line_no = filesystem.get("line", 0) if isinstance(filesystem, dict) else 0
+
+        # Apply CPV's FP-reduction — demote in test/doc/sample contexts.
+        # Also skip CPV's own validator-source files (they contain regex
+        # patterns that look like secrets but are intentional).
+        if is_validator_script(rel):
+            continue
+        base_level = "critical" if verified else "major"
+        level = effective_severity(base_level, rel)
+        getattr(report, level)(
+            f"trufflehog {'VERIFIED' if verified else 'UNVERIFIED'} secret: detector={detector}",
+            rel, line_no,
+        )
+        issues += 1
+
+    if issues == 0 and result.returncode == 0:
+        report.passed("trufflehog: no findings (700+ verified-secret detectors clean)")
+    return issues
+
+
+def check_gitleaks(plugin_path: Path, report: ValidationReport) -> int:
+    """Run gitleaks for secret detection if installed (RC-102 part 2).
+
+    gitleaks ships ~150 secret detectors with regex+entropy heuristics.
+    Complements trufflehog (verified vs. heuristic) and CPV's own catalog.
+    """
+    if not shutil.which("gitleaks"):
+        report.warning(
+            "gitleaks: binary not found — ~150 secret detectors skipped. "
+            "Install via 'brew install gitleaks' or 'docker run --rm -v $(pwd):/src zricethezav/gitleaks'."
+        )
+        return 0
+
+    # gitleaks prefers --report-path for JSON output to a file
+    with tempfile.NamedTemporaryFile(suffix=".json", prefix="gitleaks-", delete=False, mode="w") as tmp:
+        tmp_path = tmp.name
+
+    issues = 0
+    try:
+        # `detect` subcommand scans the directory (no .git history needed)
+        subprocess.run(
+            ["gitleaks", "detect", "--source", str(plugin_path),
+             "--report-format", "json", "--report-path", tmp_path,
+             "--no-banner", "--exit-code", "0"],
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        try:
+            data = json.loads(Path(tmp_path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = []
+        if not isinstance(data, list):
+            data = []
+        for finding in data:
+            if not isinstance(finding, dict):
+                continue
+            rule_id = finding.get("RuleID") or finding.get("rule_id") or "?"
+            description = finding.get("Description") or finding.get("description") or rule_id
+            rel = finding.get("File") or finding.get("file") or "?"
+            line_no = finding.get("StartLine") or finding.get("startLine") or 0
+            # Skip CPV's own validator regex sources + apply FP-reduction
+            if is_validator_script(rel):
+                continue
+            level = effective_severity("major", rel)
+            getattr(report, level)(f"gitleaks {rule_id}: {description[:80]}", rel, line_no)
+            issues += 1
+    except subprocess.TimeoutExpired:
+        report.warning("gitleaks: timed out after 180s")
+    except FileNotFoundError:
+        report.warning("gitleaks: binary disappeared between probe and exec")
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+    if issues == 0:
+        report.passed("gitleaks: no findings (150+ secret detectors clean)")
+    return issues
+
+
+def check_semgrep(plugin_path: Path, report: ValidationReport) -> int:
+    """Run semgrep for static-analysis security checks if installed (RC-102 part 3).
+
+    semgrep ships thousands of rules across many ecosystems via the
+    p/security-audit and p/secrets rule packs. Use lightweight registry
+    rules so the call is bounded.
+    """
+    if not shutil.which("semgrep"):
+        report.warning(
+            "semgrep: binary not found — thousands of static-analysis rules skipped. "
+            "Install via 'brew install semgrep' or 'pipx install semgrep'."
+        )
+        return 0
+
+    issues = 0
+    try:
+        result = subprocess.run(
+            ["semgrep", "--config", "p/security-audit", "--config", "p/secrets",
+             "--json", "--quiet", "--no-rewrite-rule-ids",
+             "--metrics", "off", str(plugin_path)],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        report.warning("semgrep: timed out after 300s — scan aborted")
+        return 0
+    except FileNotFoundError:
+        report.warning("semgrep: binary disappeared between probe and exec")
+        return 0
+
+    if not (result.stdout or "").strip().startswith("{"):
+        if result.returncode == 0:
+            report.passed("semgrep: no findings (security-audit + secrets packs clean)")
+        return 0
+
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        report.info(f"semgrep: could not parse JSON output (exit {result.returncode})")
+        return 0
+
+    severity_map = {
+        "ERROR": "major",
+        "WARNING": "minor",
+        "INFO": "info",
+    }
+    for finding in data.get("results", []):
+        if not isinstance(finding, dict):
+            continue
+        rule_id = finding.get("check_id") or "?"
+        message = (finding.get("extra", {}) or {}).get("message", "")[:80]
+        severity = (finding.get("extra", {}) or {}).get("severity", "WARNING")
+        cpv_level = severity_map.get(severity, "warning")
+        rel = finding.get("path", "?")
+        try:
+            rel = str(Path(rel).resolve().relative_to(plugin_path.resolve()))
+        except (ValueError, OSError):
+            pass
+        line_no = (finding.get("start", {}) or {}).get("line", 0)
+        # Skip CPV's own validator regex sources + apply FP-reduction
+        if is_validator_script(rel):
+            continue
+        cpv_level_eff = effective_severity(cpv_level, rel)
+        getattr(report, cpv_level_eff)(f"semgrep {rule_id}: {message}", rel, line_no)
+        issues += 1
+
+    if issues == 0 and result.returncode == 0:
+        report.passed("semgrep: no findings (security-audit + secrets packs clean)")
+    return issues
+
+
+def validate_security(
+    plugin_path: Path,
+    enable_tirith: bool = True,
+    enable_trufflehog: bool = True,
+    enable_gitleaks: bool = True,
+    enable_semgrep: bool = True,
+) -> ValidationReport:
     """Run all security validations on a plugin directory.
 
     This function performs comprehensive security analysis including:
     Traditional: injection, path traversal, secrets, user paths, dangerous files, permissions
     AI-specific: prompt injection, data exfiltration, supply chain, credential harvest,
     sandbox escape, hook abuse, MCP abuse, agent impersonation, permission escalation
-    External: cc-audit (npx), tirith (PATH/docker/nix/install fallback, scan-only)
+    Phase 1-4 net-new: ~75 RC-NN rules (unicode, MCP, persistence, exfil, evasion, etc.)
+    External: cc-audit (npx), tirith (PATH/docker/nix), trufflehog, gitleaks, semgrep
 
     Args:
         plugin_path: Path to the plugin directory
-        enable_tirith: When False, skip the Check #17 tirith pass entirely.
-            Useful for offline runs, CI sandboxes that block container pulls,
-            or callers that have already run tirith out-of-band.
+        enable_tirith: When False, skip Check #17 tirith.
+        enable_trufflehog: When False, skip trufflehog (RC-102 part 1).
+        enable_gitleaks: When False, skip gitleaks (RC-102 part 2).
+        enable_semgrep: When False, skip semgrep (RC-102 part 3).
 
     Returns:
         ValidationReport with all security findings
@@ -2387,6 +2600,14 @@ def validate_security(plugin_path: Path, enable_tirith: bool = True) -> Validati
     if enable_tirith:
         check_tirith_scanner(plugin_path, report)
 
+    # Check 18-20 — Phase 5 specialist tools (RC-102). All optional.
+    if enable_trufflehog:
+        check_trufflehog(plugin_path, report)
+    if enable_gitleaks:
+        check_gitleaks(plugin_path, report)
+    if enable_semgrep:
+        check_semgrep(plugin_path, report)
+
     return report
 
 
@@ -2443,6 +2664,12 @@ Exit Codes:
             "sandboxes that block container pulls, or when tirith ran out of band."
         ),
     )
+    parser.add_argument("--no-trufflehog", action="store_true",
+                        help="Skip trufflehog (Phase 5 RC-102 part 1).")
+    parser.add_argument("--no-gitleaks", action="store_true",
+                        help="Skip gitleaks (Phase 5 RC-102 part 2).")
+    parser.add_argument("--no-semgrep", action="store_true",
+                        help="Skip semgrep (Phase 5 RC-102 part 3).")
 
     args = parser.parse_args()
 
@@ -2463,7 +2690,13 @@ Exit Codes:
         return 1
 
     # Run validation
-    report = validate_security(plugin_path, enable_tirith=not args.no_tirith)
+    report = validate_security(
+        plugin_path,
+        enable_tirith=not args.no_tirith,
+        enable_trufflehog=not args.no_trufflehog,
+        enable_gitleaks=not args.no_gitleaks,
+        enable_semgrep=not args.no_semgrep,
+    )
 
     # Output results
     if args.json:
