@@ -43,6 +43,8 @@ from typing import Any
 from cpv_validation_common import (
     CLOUD_IMDS_PATTERNS,
     CRYPTOMINING_PATTERNS,
+    PHASE4_PATTERNS,
+    disposition,
     DANGEROUS_FILES,
     ENV_BULK_HARVEST_PATTERNS,
     EXAMPLE_USERNAMES,
@@ -2078,6 +2080,37 @@ def check_phase1_all(plugin_path: Path, report: ValidationReport) -> int:
 # shell rc / Windows registry), RC-70 obfuscated decode-then-exec.
 
 
+def check_phase4_all(plugin_path: Path, report: ValidationReport) -> int:
+    """Phase 4 — minor / informational rules + verdict-tier classifier.
+
+    Single-pass iteration of PHASE4_PATTERNS plus the disposition() helper
+    (which doesn't produce findings — its output is in the report metadata).
+    """
+    issues = 0
+    for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
+        fence_state = build_fence_state(content)
+        for line_no, line in enumerate(content.split("\n"), start=1):
+            if is_in_fenced_code_block(line_no - 1, fence_state):
+                continue
+            for rule_id, severity, pattern, msg in PHASE4_PATTERNS:
+                m = pattern.search(line)
+                if not m:
+                    continue
+                if has_negation_guard_nearby(content, content.find(line) + m.start()):
+                    continue
+                level = effective_severity(severity.lower(), rel_path)
+                getattr(report, level)(
+                    f"{rule_id}: {msg.split(': ', 1)[-1] if ': ' in msg else msg} (line {line_no})",
+                    rel_path, line_no,
+                )
+                issues += 1
+
+    # RC-103 disposition is computed from the FINAL counts and added as INFO.
+    # We can't compute it now (more checks may follow); the orchestrator
+    # adds a disposition INFO line at the end of validate_security().
+    return issues
+
+
 def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
     """Phase 3 — single-pass iteration of PHASE3_PATTERNS across plugin files.
 
@@ -2321,6 +2354,25 @@ def validate_security(plugin_path: Path, enable_tirith: bool = True) -> Validati
     phase3_issues = check_phase3_all(plugin_path, report)
     if phase3_issues == 0:
         report.passed("No Phase 3 findings (~30 MAJOR net-new rules)")
+
+    # --- Phase 4 — Minor / informational + verdict-tier (RC-85/86/87/88/103/104) ---
+    phase4_issues = check_phase4_all(plugin_path, report)
+    if phase4_issues == 0:
+        report.passed("No Phase 4 findings (minor/info + observability)")
+
+    # --- RC-103 disposition — emitted as a single INFO line ---
+    counts = {
+        "CRITICAL": sum(1 for r in report.results if r.level == "CRITICAL"),
+        "MAJOR": sum(1 for r in report.results if r.level == "MAJOR"),
+        "MINOR": sum(1 for r in report.results if r.level == "MINOR"),
+        "WARNING": sum(1 for r in report.results if r.level == "WARNING"),
+    }
+    verdict = disposition(counts)
+    report.info(
+        f"RC-103 disposition: {verdict} (counts: "
+        f"CRITICAL={counts['CRITICAL']} MAJOR={counts['MAJOR']} "
+        f"MINOR={counts['MINOR']} WARNING={counts['WARNING']})"
+    )
 
     # --- External scanners (optional) ---
 
