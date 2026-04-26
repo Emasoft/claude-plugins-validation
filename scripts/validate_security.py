@@ -22,12 +22,15 @@ Security Checks Implemented:
 14. MCP Server Abuse Detection (non-localhost servers flagged as warning)
 15. Sandbox Escape Detection (--no-verify, git config modification, hook bypass)
 16. cc-audit External Scanner (100+ rules via npx, optional)
+17. Tirith External Scanner (terminal-security rules: homograph URLs, ANSI/bidi/zero-width
+    injection, pipe-to-shell, hidden Unicode, config poisoning — runs scan-only, no hooks)
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import stat
@@ -35,6 +38,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from cpv_validation_common import (
     DANGEROUS_FILES,
@@ -950,7 +954,7 @@ def check_dangerous_files(plugin_path: Path, report: ValidationReport) -> int:
     issues_found = 0
     gi = get_gitignore_filter(plugin_path)
 
-    for root, dirs, files in gi.walk(plugin_path):
+    for root, _dirs, files in gi.walk(plugin_path):
         for filename in files:
             if filename in DANGEROUS_FILES:
                 full_path = Path(root) / filename
@@ -966,7 +970,7 @@ def check_script_permissions(plugin_path: Path, report: ValidationReport) -> int
     issues_found = 0
     gi = get_gitignore_filter(plugin_path)
 
-    for root, dirs, files in gi.walk(plugin_path):
+    for root, _dirs, files in gi.walk(plugin_path):
         for filename in files:
             file_path = Path(root) / filename
             rel_path = file_path.relative_to(plugin_path)
@@ -1039,7 +1043,7 @@ def scan_all_files(plugin_path: Path, report: ValidationReport) -> dict[str, int
 
     gi = get_gitignore_filter(plugin_path)
 
-    for root, dirs, files in gi.walk(plugin_path):
+    for root, _dirs, files in gi.walk(plugin_path):
         for filename in files:
             file_path = Path(root) / filename
             rel_path = str(file_path.relative_to(plugin_path))
@@ -1290,16 +1294,244 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
     return issues_found
 
 
-def validate_security(plugin_path: Path) -> ValidationReport:
+# =============================================================================
+# Tirith External Scanner Integration (Check #17)
+# =============================================================================
+#
+# Tirith (https://github.com/sheeki03/tirith, AGPL-3.0) is invoked as an
+# external binary — no source code from tirith is copied or linked into cpv,
+# so the AGPL terms do not propagate. Only the SCAN feature is used; cpv
+# never installs shell hooks, MCP gateways, or AI-tool setup configs.
+
+# Official container image (any platform with Docker available)
+TIRITH_IMAGE = "ghcr.io/sheeki03/tirith"
+
+# Auto-install order: brew on macOS, then npm/cargo as cross-platform fallbacks.
+# Each entry is a (probe-binary, install-command) pair. The probe must be on
+# PATH; the install command runs only if the probe succeeds and the user has
+# not opted out via CPV_NO_TIRITH_INSTALL=1.
+_TIRITH_INSTALLERS: list[tuple[str, list[str]]] = [
+    ("brew", ["brew", "install", "sheeki03/tap/tirith"]),
+    ("npm", ["npm", "install", "-g", "tirith"]),
+    ("cargo", ["cargo", "install", "tirith"]),
+]
+
+
+def _resolve_tirith_runner() -> tuple[list[str], str] | None:
+    """Pick how to invoke tirith without modifying the user's environment.
+
+    Resolution order, per the user constraint that we should prefer remote
+    execution and only install as a last resort:
+
+    1. ``tirith`` already on PATH       -> direct invocation
+    2. ``docker`` on PATH               -> ``docker run --rm`` against the
+                                           official container image (zero
+                                           install footprint — image is
+                                           pulled to the local Docker cache
+                                           on first use, but nothing lands
+                                           on the host outside Docker)
+    3. ``nix`` on PATH                  -> ``nix run github:sheeki03/tirith``
+                                           (also runs without leaving binaries
+                                           in the user's shell PATH)
+    4. Auto-install (brew/npm/cargo)    -> only if no remote path worked AND
+                                           ``CPV_NO_TIRITH_INSTALL`` is unset
+
+    Returns a ``(prefix_args, mode_label)`` tuple. The caller appends the
+    tirith subcommand and arguments to ``prefix_args``. Returns ``None`` when
+    no path is reachable (caller emits a single advisory WARNING and skips).
+    """
+    if shutil.which("tirith"):
+        return (["tirith"], "local")
+
+    if shutil.which("docker"):
+        # The plugin path is mounted read-only inside the container at /scan.
+        # The mount path is appended by the caller because it depends on the
+        # specific plugin_path being scanned.
+        return (["docker", "run", "--rm", "-i", TIRITH_IMAGE], "docker")
+
+    if shutil.which("nix"):
+        return (["nix", "run", "github:sheeki03/tirith", "--"], "nix")
+
+    # No remote path — fall through to install attempt.
+    if os.environ.get("CPV_NO_TIRITH_INSTALL", "").strip().lower() in {"1", "true", "yes"}:
+        return None
+
+    for probe, install_cmd in _TIRITH_INSTALLERS:
+        if not shutil.which(probe):
+            continue
+        try:
+            subprocess.run(install_cmd, capture_output=True, text=True, timeout=300, check=False)
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            continue
+        # After install, re-probe PATH (npm/cargo write to ~/.npm/bin or
+        # ~/.cargo/bin which may not be on PATH for the current process).
+        if shutil.which("tirith"):
+            return (["tirith"], f"installed-{probe}")
+
+    return None
+
+
+def check_tirith_scanner(plugin_path: Path, report: ValidationReport) -> int:
+    """Run tirith's scan feature against the plugin and surface findings.
+
+    Tirith is an external scanner with rules cpv does not natively cover:
+    homograph domains, ANSI / bidi / zero-width injection, hidden Unicode,
+    config-file prompt-injection comments, and supply-chain pipe-to-shell
+    patterns in scripts. Only the ``tirith scan`` subcommand is invoked; the
+    scanner never touches the user's shell hooks, MCP configs, or AI-tool
+    setup state.
+
+    Returns the number of issues converted into report findings. Returns 0
+    when tirith is unavailable (and emits a single advisory WARNING) or when
+    the scan completes with no findings.
+    """
+    runner = _resolve_tirith_runner()
+    if runner is None:
+        report.warning(
+            "tirith: scanner not available and auto-install failed or disabled "
+            "(CPV_NO_TIRITH_INSTALL). Install via 'brew install sheeki03/tap/tirith', "
+            "'npm install -g tirith', 'cargo install tirith', or run with Docker "
+            "available so 'docker run --rm ghcr.io/sheeki03/tirith ...' can be used."
+        )
+        return 0
+
+    prefix, mode = runner
+
+    # Build the scan command. Docker mode bind-mounts the plugin path to /scan
+    # inside the container — same convention as the cc-audit integration uses
+    # for npx temp paths.
+    if mode == "docker":
+        # Insert the bind-mount BEFORE the image name (-v image is wrong).
+        # prefix is ["docker", "run", "--rm", "-i", TIRITH_IMAGE]
+        cmd = (
+            ["docker", "run", "--rm", "-v", f"{plugin_path}:/scan:ro", TIRITH_IMAGE]
+            + ["scan", "/scan", "--format", "json", "--ci"]
+        )
+    else:
+        cmd = prefix + ["scan", str(plugin_path), "--format", "json", "--ci"]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180, check=False)
+    except subprocess.TimeoutExpired:
+        report.warning(f"tirith ({mode}) timed out after 180s — scan aborted")
+        return 0
+    except FileNotFoundError:
+        report.warning(f"tirith ({mode}): runner binary disappeared between probe and exec — scan skipped")
+        return 0
+
+    # Parse JSON. Per tirith's docs, ``scan --format json`` writes JSON to
+    # stdout regardless of exit code. Exit codes: 0 = safe, 1 = block (high),
+    # 2 = warn, 3 = warn-with-ack. We treat all of them as informational
+    # signals and rely on the JSON content for the actual findings.
+    raw = result.stdout.strip()
+    if not raw:
+        if result.returncode == 0:
+            report.passed(f"tirith ({mode}): no findings (external scan clean)")
+        else:
+            err = (result.stderr or "").strip().splitlines()[-1:] or [""]
+            report.info(f"tirith ({mode}) returned exit {result.returncode} with no JSON output: {err[0][:100]}")
+        return 0
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        report.info(f"tirith ({mode}): could not parse JSON output ({e}); first 100 chars: {raw[:100]!r}")
+        return 0
+
+    # Tirith's scan JSON varies between versions — try a few shapes:
+    # * top-level list of findings
+    # * {"findings": [...]} or {"results": [...]} or {"verdicts": [...]}
+    # * SARIF-shape {"runs": [{"results": [...]}]}
+    findings: list = []
+    if isinstance(data, list):
+        findings = data
+    elif isinstance(data, dict):
+        for key in ("findings", "results", "verdicts", "issues"):
+            v = data.get(key)
+            if isinstance(v, list):
+                findings = v
+                break
+        if not findings and isinstance(data.get("runs"), list):
+            for run in data["runs"]:
+                if isinstance(run, dict) and isinstance(run.get("results"), list):
+                    findings.extend(run["results"])
+
+    if not findings:
+        if result.returncode == 0:
+            report.passed(f"tirith ({mode}): no findings (external scan clean)")
+        return 0
+
+    # Map tirith verdict / severity strings to cpv levels. Tirith documents
+    # high / medium / low / info severities and Allow/Block/Warn/WarnAck
+    # verdicts; we treat Block + high as MAJOR (not CRITICAL — tirith findings
+    # are advisory until the user confirms them; cpv stays conservative on its
+    # own findings).
+    severity_map = {
+        "critical": "critical",
+        "high": "major",
+        "block": "major",
+        "medium": "minor",
+        "warn": "minor",
+        "warnack": "minor",
+        "low": "warning",
+        "info": "info",
+        "informational": "info",
+        "allow": "info",
+    }
+
+    issues_found = 0
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        sev_raw = (
+            finding.get("severity")
+            or finding.get("level")
+            or finding.get("verdict")
+            or finding.get("kind")
+            or "warn"
+        )
+        sev = str(sev_raw).strip().lower()
+        cpv_level = severity_map.get(sev, "warning")
+        report_fn = getattr(report, cpv_level, report.warning)
+
+        rule_id = finding.get("rule") or finding.get("ruleId") or finding.get("rule_id") or finding.get("code") or "?"
+        msg = (
+            finding.get("message")
+            or finding.get("description")
+            or finding.get("title")
+            or finding.get("reason")
+            or "tirith finding"
+        )
+        loc_raw = finding.get("location")
+        loc: dict[str, Any] = loc_raw if isinstance(loc_raw, dict) else {}
+        file_ref = finding.get("file") or loc.get("file") or finding.get("path") or ""
+        line = finding.get("line") or loc.get("line") or 0
+        if not isinstance(line, int):
+            try:
+                line = int(line)
+            except (TypeError, ValueError):
+                line = 0
+
+        report_fn(f"tirith {rule_id}: {str(msg)[:120]}", file_ref, line)
+        issues_found += 1
+
+    return issues_found
+
+
+def validate_security(plugin_path: Path, enable_tirith: bool = True) -> ValidationReport:
     """Run all security validations on a plugin directory.
 
     This function performs comprehensive security analysis including:
     Traditional: injection, path traversal, secrets, user paths, dangerous files, permissions
     AI-specific: prompt injection, data exfiltration, supply chain, credential harvest,
     sandbox escape, hook abuse, MCP abuse, agent impersonation, permission escalation
+    External: cc-audit (npx), tirith (PATH/docker/nix/install fallback, scan-only)
 
     Args:
         plugin_path: Path to the plugin directory
+        enable_tirith: When False, skip the Check #17 tirith pass entirely.
+            Useful for offline runs, CI sandboxes that block container pulls,
+            or callers that have already run tirith out-of-band.
 
     Returns:
         ValidationReport with all security findings
@@ -1385,10 +1617,18 @@ def validate_security(plugin_path: Path) -> ValidationReport:
     if scan_stats["sandbox_escape_issues"] == 0:
         report.passed("No sandbox escape patterns detected")
 
-    # --- External scanner (optional) ---
+    # --- External scanners (optional) ---
 
     # Check 16: cc-audit external scanner (100+ rules, non-blocking if unavailable)
     check_cc_audit(plugin_path, report)
+
+    # Check 17: tirith external scanner (terminal-security rules, scan-only).
+    # Resolution order: PATH -> docker -> nix -> auto-install (brew/npm/cargo).
+    # Set CPV_NO_TIRITH_INSTALL=1 to disable the install fallback. Pass
+    # enable_tirith=False (or --no-tirith on the CLI) to skip the check
+    # entirely.
+    if enable_tirith:
+        check_tirith_scanner(plugin_path, report)
 
     return report
 
@@ -1412,6 +1652,9 @@ Security Checks Performed:
   5. Dangerous file detection (.env, credentials.json)
   6. Script permission check (executable, shebang, world-writable)
   7. Plugin-wide recursive scan of all text files
+  16. cc-audit external scanner (npx, optional)
+  17. tirith external scanner (PATH/docker/nix/auto-install; --no-tirith to skip;
+      CPV_NO_TIRITH_INSTALL=1 to disable install fallback)
 
 Exit Codes:
   0 - All checks passed
@@ -1435,6 +1678,14 @@ Exit Codes:
             "content folder that is not wrapped in a Claude Code plugin tree."
         ),
     )
+    parser.add_argument(
+        "--no-tirith",
+        action="store_true",
+        help=(
+            "Skip the tirith external scanner (Check #17). Use offline, in CI "
+            "sandboxes that block container pulls, or when tirith ran out of band."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -1455,7 +1706,7 @@ Exit Codes:
         return 1
 
     # Run validation
-    report = validate_security(plugin_path)
+    report = validate_security(plugin_path, enable_tirith=not args.no_tirith)
 
     # Output results
     if args.json:
