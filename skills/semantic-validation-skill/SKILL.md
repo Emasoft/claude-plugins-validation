@@ -12,80 +12,56 @@ allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep
 
 # Semantic Validation Skill
 
-Deep semantic analysis of skill and agent quality — things that automated scripts cannot check.
+Deep AI analysis. Opus 1M, ~10-50× tokens of script validation.
 
 ## Overview
 
-This skill performs AI-driven evaluation of:
-- Description triggering effectiveness (will it fire at the right time?)
-- Instruction clarity and completeness
-- Example quality (realistic, complete, covers failure paths)
-- Workflow completeness (start/end, branches, exit conditions)
-- Technical quality (exit codes, error handling, terminology)
-- Progressive disclosure effectiveness
-- Output pattern documentation
-- **Channel MCP server source-code security** (sender-gating, prompt-injection prevention — runs only when `plugin.json.channels` is non-empty)
+7 quality pillars (description triggering, clarity, examples, workflow, technical, disclosure, output) + 3 conditional security pillars. Produces Semantic Grade (A-F).
 
-**Cost**: Uses opus model. Only invoke when you need deep quality analysis beyond what scripts provide.
+**HARD SEPARATION — USER CHOICE:**
 
-This produces a **Semantic Grade (A-F)**, complementary to the **Syntactic Score (0-100)** from script validation. The two systems are independent — run syntactic validation first (cheap), then semantic validation only when needed.
+| Layer | Invoke | Tokens | Catches |
+|-------|--------|--------|---------|
+| **Programmatic** (default) | `/cpv-validate-plugin` | 0 | 95%+ via regex. Surfaces CANDIDATES, emits INFO — never escalates. |
+| **Semantic** (this skill, opt-in) | `/cpv-semantic-validation` | thousands–millions | The 5% residue: ambiguous injection, shadow features, subtle MCP-description injection. |
+
+Most projects publish-ready with programmatic alone. Never default-on.
 
 ## Prerequisites
 
-- Python 3.12+ with `pyyaml` installed
-- `uv` package manager
-- Skill or agent directory to analyze
+- Python 3.12+ with `pyyaml`, `uv` package manager, target skill/agent path
 
 ## Instructions
 
-1. Navigate to the claude-plugins-validation directory
-2. Run the command: `/cpv-semantic-validation <skill_or_agent_path>`
-3. Baseline script validation: `uv run python scripts/validate_skill_comprehensive.py "<skill_path>" --strict --report "$MAIN_ROOT/reports/validate_skill/$(date +%Y%m%d_%H%M%S%z)-baseline.md"`
-4. The agent reads the actual SKILL.md and agent .md files
-5. The agent evaluates 7 core semantic criteria plus 1 conditional pillar (Channel MCP Server Source-Code Security — only when `plugin.json.channels` is non-empty)
-6. Review the grade (A-F) and report at `$MAIN_ROOT/reports/semantic-validator/<ts±tz>-<slug>.md`
+1. Run baseline: `uv run python scripts/validate_skill_comprehensive.py "<path>" --strict --report "$MAIN_ROOT/reports/validate_skill/$(date +%Y%m%d_%H%M%S%z)-baseline.md"`
+2. Read SKILL.md / agent .md
+3. Evaluate 7 pillars + applicable conditional security pillars
+4. Write report → `$MAIN_ROOT/reports/semantic-validator/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`
+5. Return `[DONE] Grade: X. Report: <filepath>`
 
 ## Output
 
-- **Grade**: A-F letter grade based on semantic quality
-- **Criteria Results**: Pass/Partial/Fail for each of 7 core criteria, plus Pass/Partial/Fail/N/A for the conditional Channel Source Security pillar
-- **Report File**: `$MAIN_ROOT/reports/semantic-validator/<ts±tz>-<slug>.md` (main-repo root via `git worktree list | head -n1`). Per-component subfolder + local+GMT-offset timestamp. Both `reports/` and `reports_dev/` gitignored.
+- **Grade**: A-F. **Criteria**: Pass/Partial/Fail per pillar. **Report**: `$MAIN_ROOT/reports/semantic-validator/<ts±tz>-<slug>.md`. Both `reports/` and `reports_dev/` gitignored.
 
 ## Error Handling
 
-- If script validation fails with CRITICAL issues, semantic analysis is skipped — fix structural issues first.
-- If the skill path is invalid, the agent reports the error and exits.
+- If script validation fails CRITICAL → semantic skipped. Fix structure first.
+- Invalid path → report error, exit.
 
 ## Examples
 
-### Example 1: Validate a Skill Semantically
-
 ```
 /cpv-semantic-validation ./skills/my-skill/
-```
-
-### Example 2: Validate an Agent
-
-```
 /cpv-semantic-validation ./agents/my-agent.md
 ```
 
 ## Token Optimization
 
-- **Explicit opt-in only** — never run automatically. Opus, 10x cost.
-- **Run script baseline first** — syntactic check catches 90% of issues.
-- **Read only the target files** — not the entire plugin tree.
-- **Write full report to file** — return only grade + filepath.
-- **Prefer LLM Externalizer MCP** (`chat`, `code_task`) for file reads. Pass paths via `input_files_paths`.
+- Opt-in only. Run script baseline first (catches 90%). Read only target files. Write full report to disk; return only grade + filepath. Prefer LLM Externalizer MCP (`chat`, `code_task`) for file reads via `input_files_paths`.
 
-## Pillar: Channel MCP Server Source-Code Security
+## Conditional Pillar: Channel MCP Server Source-Code Security
 
-Runs only when `plugin.json.channels` is non-empty AND the plugin ships MCP server source code. Skip entirely for plugins with no channels.
-
-Two attack vectors only an LLM reading the server source can catch:
-
-1. Ungated inbound messages — no sender-ID allowlist => prompt-injection vector.
-2. Permission-relay without sender gating — `capabilities.experimental['claude/channel/permission']` declared without sender check => external senders can approve destructive tool calls.
+Runs only when `plugin.json.channels` is non-empty AND plugin ships MCP server source.
 
 Load [channel-source-security](references/channel-source-security.md):
 - Why This Pillar Exists
@@ -99,16 +75,35 @@ Load [channel-source-security](references/channel-source-security.md):
 - Opus prompt template
 - Rubric contribution
 
+## Conditional Pillar: Security Threat Catalog (AI Content Layer)
+
+19 categories from a 38-repo survey. Most have programmatic siblings; this is the LLM-judgment supplement.
+
+Load [security-threat-catalog](references/security-threat-catalog.md):
+- CAT-01–19 (19 threat categories below)
+- Severity reference · Opus prompt template · A-F rubric integration · Report format · References
+
+## Conditional Pillar: Truly-agent-class RCs (RC-49 partial + RC-77)
+
+Per "code first if accuracy permits", 5 of 7 originally-agent-class RCs reclassified to programmatic. Only RC-49 partial + RC-77 remain truly agent-class.
+
+Load [agent-rule-checks](references/agent-rule-checks.md):
+- Re-evaluation table (which RCs need LLM, which moved to programmatic)
+- RULE: RC-49 (partial agent-class) · RULE: RC-77 (truly agent-class)
+- LLM evaluation prompts · Aggregating into A-F rubric · Token-economy compliance
+- Independent operation modes · Implementation status · Source citations
+
 ## Resources
 
-- Semantic Validation Criteria — see `skills/fix-validation/references/skill-semantic-validation.md` for full criteria, rubrics, report format
-- `skill-validation-skill` — Script-based validation (cheap, fast)
-- `plugin-validation-skill` — Full plugin validation
+- Full criteria, rubrics, report format: `skills/fix-validation/references/skill-semantic-validation.md`
+- Cheap counterparts: `skill-validation-skill`, `plugin-validation-skill`
 
 ## Validation Checklist
+
 Copy this checklist and track your progress:
-- [ ] Confirm explicit user opt-in
-- [ ] Run semantic validation on target skill
-- [ ] Review A-F grade and per-criterion scores
-- [ ] Address failing criteria
-- [ ] If `plugin.json.channels` is non-empty, run the Channel MCP Server Source-Code Security pillar against every referenced MCP server source file
+
+- [ ] Explicit user opt-in
+- [ ] Baseline script validation first
+- [ ] Evaluate 7 pillars + conditionals
+- [ ] Review A-F grade
+- [ ] Report to `$MAIN_ROOT/reports/semantic-validator/`
