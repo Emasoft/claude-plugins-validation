@@ -42,13 +42,28 @@ from typing import Any
 
 from cpv_validation_common import (
     DANGEROUS_FILES,
+    ENV_BULK_HARVEST_PATTERNS,
     EXAMPLE_USERNAMES,
+    GTFOBIN_LOLBIN_PATTERNS,
     KNOWN_EXAMPLE_SECRETS,
+    MCP_DANGEROUS_ENV_KEYS,
+    MCP_DESCRIPTION_INJECTION_PREFILTER,
     SECRET_PATTERNS,
+    TIMEBOMB_PATTERNS,
     USER_PATH_PATTERNS,
     ValidationReport,
+    build_fence_state,
+    CRYPTOMINING_PATTERNS,
+    effective_severity,
+    find_tag_block_chars,
+    find_zero_width_chars,
     get_gitignore_filter,
+    has_mixed_script,
+    has_negation_guard_nearby,
     is_binary_file,
+    is_in_fenced_code_block,
+    is_pth_with_exec,
+    is_shadowed_tool_name,
     print_report_summary,
     print_results_by_level,
     save_report_and_print_summary,
@@ -1518,6 +1533,244 @@ def check_tirith_scanner(plugin_path: Path, report: ValidationReport) -> int:
     return issues_found
 
 
+# =============================================================================
+# Phase 1 — Critical net-new rule checks (RC-09/10/11/21/29/37/43/47/49/50/67)
+# =============================================================================
+#
+# Each check below scans plugin files for one rule class. All checks use
+# the Phase 0 FP-reduction layer:
+# * `is_validator_script(rel_path)` — skip CPV's own validator regex sources
+# * `effective_severity(level, rel_path)` — RC-84 demotion in test/doc/sample
+# * `is_in_fenced_code_block(line_idx, fence_state)` — RC-83 skip-in-fence
+# * `has_negation_guard_nearby(content, pos)` — RC-83 negation context
+#
+# Rule metadata + FP-guard documentation lives in `cpv_validation_common.py`
+# under the `RULE_REGISTRY` (RC-101 RuleSchema). This file owns orchestration
+# only — patterns and helpers come from the common module.
+
+
+def _iter_scannable_files(plugin_path: Path):
+    """Yield (file_path, rel_path, content) for every non-binary scannable file."""
+    gi = get_gitignore_filter(plugin_path)
+    for root, _dirs, files in gi.walk(plugin_path):
+        for filename in files:
+            file_path = Path(root) / filename
+            if is_binary_file(file_path):
+                continue
+            try:
+                content = file_path.read_text(encoding="utf-8", errors="ignore")
+            except (OSError, UnicodeDecodeError):
+                continue
+            rel_path = str(file_path.relative_to(plugin_path))
+            if is_validator_script(rel_path):
+                continue
+            yield file_path, rel_path, content
+
+
+def check_phase1_unicode_rules(plugin_path: Path, report: ValidationReport) -> int:
+    """RC-09 (zero-width), RC-10 (TAG block), RC-11 (mixed-script) — all pass."""
+    issues = 0
+    for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
+        # RC-09 — zero-width characters
+        for line_no, desc in find_zero_width_chars(content):
+            level = effective_severity("major", rel_path)
+            getattr(report, level)(
+                f"RC-09: zero-width Unicode at line {line_no} ({desc})",
+                rel_path, line_no,
+            )
+            issues += 1
+
+        # RC-10 — TAG block (always CRITICAL — no legitimate use)
+        for line_no, codepoint in find_tag_block_chars(content):
+            level = effective_severity("critical", rel_path)
+            getattr(report, level)(
+                f"RC-10: TAG character {codepoint} at line {line_no} (AsciiSmuggler vector)",
+                rel_path, line_no,
+            )
+            issues += 1
+
+        # RC-11 — mixed-script (only on identifier-shape tokens to avoid
+        # FP on prose that legitimately mixes scripts e.g. "Cyrillic 'а' is U+0430")
+        for line_no, line in enumerate(content.split("\n"), start=1):
+            for token in re.findall(r"[\w._-]{3,80}", line):
+                mixed, reason = has_mixed_script(token)
+                if mixed:
+                    level = effective_severity("critical", rel_path)
+                    getattr(report, level)(
+                        f"RC-11: mixed-script identifier '{token}' at line {line_no} ({reason})",
+                        rel_path, line_no,
+                    )
+                    issues += 1
+                    break  # one finding per line is enough
+    return issues
+
+
+def check_phase1_credential_rules(plugin_path: Path, report: ValidationReport) -> int:
+    """RC-21 — process.env / os.environ bulk harvest."""
+    issues = 0
+    for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
+        fence_state = build_fence_state(content)
+        for line_no, line in enumerate(content.split("\n"), start=1):
+            if is_in_fenced_code_block(line_no - 1, fence_state):
+                continue
+            for pattern in ENV_BULK_HARVEST_PATTERNS:
+                if pattern.search(line):
+                    level = effective_severity("major", rel_path)
+                    getattr(report, level)(
+                        f"RC-21: bulk env-var harvest at line {line_no}",
+                        rel_path, line_no,
+                    )
+                    issues += 1
+                    break
+    return issues
+
+
+def check_phase1_supply_chain_rules(plugin_path: Path, report: ValidationReport) -> int:
+    """RC-29 (.pth executable), RC-37 (GTFOBins/LOLBins), RC-67 (cryptomining)."""
+    issues = 0
+    for file_path, rel_path, content in _iter_scannable_files(plugin_path):
+        # RC-29 — .pth file with import/exec
+        if is_pth_with_exec(file_path.name, content):
+            level = effective_severity("critical", rel_path)
+            getattr(report, level)(
+                "RC-29: Python .pth file contains executable lines (import/exec) — runs at every interpreter startup",
+                rel_path, 1,
+            )
+            issues += 1
+
+        fence_state = build_fence_state(content)
+        for line_no, line in enumerate(content.split("\n"), start=1):
+            if is_in_fenced_code_block(line_no - 1, fence_state):
+                continue
+
+            # RC-37 — GTFOBins / LOLBins
+            for pattern in GTFOBIN_LOLBIN_PATTERNS:
+                m = pattern.search(line)
+                if m and not has_negation_guard_nearby(content, content.find(line) + m.start()):
+                    level = effective_severity("critical", rel_path)
+                    getattr(report, level)(
+                        f"RC-37: GTFOBin/LOLBin pattern at line {line_no}: {m.group(0)[:80]}",
+                        rel_path, line_no,
+                    )
+                    issues += 1
+                    break
+
+            # RC-67 — Cryptomining indicators
+            for pattern in CRYPTOMINING_PATTERNS:
+                m = pattern.search(line)
+                if m:
+                    level = effective_severity("critical", rel_path)
+                    getattr(report, level)(
+                        f"RC-67: cryptomining indicator at line {line_no}: {m.group(0)[:80]}",
+                        rel_path, line_no,
+                    )
+                    issues += 1
+                    break
+    return issues
+
+
+def check_phase1_evasion_rules(plugin_path: Path, report: ValidationReport) -> int:
+    """RC-43 — time-bomb / conditional activation."""
+    issues = 0
+    for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
+        fence_state = build_fence_state(content)
+        for line_no, line in enumerate(content.split("\n"), start=1):
+            if is_in_fenced_code_block(line_no - 1, fence_state):
+                continue
+            for pattern in TIMEBOMB_PATTERNS:
+                if pattern.search(line):
+                    level = effective_severity("critical", rel_path)
+                    getattr(report, level)(
+                        f"RC-43: time-bomb / conditional-activation at line {line_no}",
+                        rel_path, line_no,
+                    )
+                    issues += 1
+                    break
+    return issues
+
+
+def check_phase1_mcp_rules(plugin_path: Path, report: ValidationReport) -> int:
+    """RC-47 (env-var injection), RC-49 (description injection prefilter), RC-50 (tool-name shadowing).
+
+    Reads `.mcp.json` files in the plugin and inspects each declared MCP server.
+    Each server may declare:
+      - `command` / `args` — the binary to launch
+      - `env` — extra env vars passed to the server (RC-47 target)
+      - top-level keys are server names; their tool-list (if statically declared
+        via a non-standard `tools` block) is RC-49/RC-50 target. The MCP wire
+        protocol returns tools dynamically, so we scan only what's declared
+        in the manifest.
+    """
+    issues = 0
+    for mcp_path in plugin_path.rglob(".mcp.json"):
+        try:
+            data = json.loads(mcp_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        rel_path = str(mcp_path.relative_to(plugin_path))
+        servers = data.get("mcpServers", {})
+        if not isinstance(servers, dict):
+            continue
+        for server_name, server_cfg in servers.items():
+            if not isinstance(server_cfg, dict):
+                continue
+
+            # RC-47 — dangerous env keys
+            env_block = server_cfg.get("env", {})
+            if isinstance(env_block, dict):
+                for key in env_block:
+                    if key in MCP_DANGEROUS_ENV_KEYS:
+                        level = effective_severity("critical", rel_path)
+                        getattr(report, level)(
+                            f"RC-47: MCP server '{server_name}' sets dangerous env var {key} — "
+                            f"RCE on config load via dynamic-loader / runtime-hook hijack",
+                            rel_path, 0,
+                        )
+                        issues += 1
+
+            # RC-49 — description prefilter (declared tools block, if present)
+            tools = server_cfg.get("tools", [])
+            if isinstance(tools, list):
+                for tool in tools:
+                    if not isinstance(tool, dict):
+                        continue
+                    desc = str(tool.get("description", ""))
+                    for pattern in MCP_DESCRIPTION_INJECTION_PREFILTER:
+                        if pattern.search(desc):
+                            level = effective_severity("critical", rel_path)
+                            getattr(report, level)(
+                                f"RC-49: MCP tool '{tool.get('name', '?')}' description contains "
+                                f"prompt-injection signature — consider /cpv-semantic-validation for LLM judgment",
+                                rel_path, 0,
+                            )
+                            issues += 1
+                            break
+
+                    # RC-50 — tool-name shadowing
+                    tool_name = str(tool.get("name", ""))
+                    is_shadow, builtin = is_shadowed_tool_name(tool_name)
+                    if is_shadow:
+                        level = effective_severity("critical", rel_path)
+                        getattr(report, level)(
+                            f"RC-50: MCP tool name '{tool_name}' shadows Claude Code built-in '{builtin}' "
+                            f"— impersonation vector",
+                            rel_path, 0,
+                        )
+                        issues += 1
+    return issues
+
+
+def check_phase1_all(plugin_path: Path, report: ValidationReport) -> int:
+    """Run all Phase 1 critical rule checks and return total finding count."""
+    return (
+        check_phase1_unicode_rules(plugin_path, report)
+        + check_phase1_credential_rules(plugin_path, report)
+        + check_phase1_supply_chain_rules(plugin_path, report)
+        + check_phase1_evasion_rules(plugin_path, report)
+        + check_phase1_mcp_rules(plugin_path, report)
+    )
+
+
 def validate_security(plugin_path: Path, enable_tirith: bool = True) -> ValidationReport:
     """Run all security validations on a plugin directory.
 
@@ -1616,6 +1869,11 @@ def validate_security(plugin_path: Path, enable_tirith: bool = True) -> Validati
         report.passed("No credential harvesting patterns detected")
     if scan_stats["sandbox_escape_issues"] == 0:
         report.passed("No sandbox escape patterns detected")
+
+    # --- Phase 1 — Critical net-new rules (RC-09/10/11/21/29/37/43/47/49/50/67) ---
+    phase1_issues = check_phase1_all(plugin_path, report)
+    if phase1_issues == 0:
+        report.passed("No Phase 1 critical-rule findings (RC-09/10/11/21/29/37/43/47/49/50/67)")
 
     # --- External scanners (optional) ---
 
