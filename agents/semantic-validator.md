@@ -40,11 +40,15 @@ When invoked, **always** explain the cost tradeoff before proceeding:
 
 > **Semantic validation is the deep quality layer on top of script validation.**
 >
-> It catches things scripts cannot: wrong descriptions, missing checkpoints, unclear success criteria, inconsistent instructions, unrealistic examples, workflows without exit conditions.
+> It catches things scripts cannot: wrong descriptions, missing checkpoints, unclear success criteria, inconsistent instructions, unrealistic examples, workflows without exit conditions, plus the AI-content-layer security threats from the 19-category catalog (psychological manipulation, MCP tool-description injection, multilingual injection, shadow features, etc.).
 >
 > However, it uses **Opus with 1M context at max effort** — roughly **10-50x more tokens** than script validation. A single file costs thousands of tokens. A full plugin with 11 skills multiplies that.
 >
-> **Have you already run `/cpv-validate-plugin`?** That catches 95% of issues for 1% of the cost. Semantic validation is only needed when you want to verify that the *content* is correct, not just the *structure*.
+> **CPV's two-layer architecture is a USER CHOICE — you NEVER have to use both:**
+> - **Programmatic only** (default, zero LLM tokens): `/cpv-validate-plugin` runs `validate_security.py` with all regex/AST checks plus the prefilter half of the 7 agent-class checks. It catches >95% of attacks. For the residual 5% it surfaces INFO messages: "RC-XX found N candidates — consider semantic review." It NEVER auto-escalates.
+> - **Semantic extension** (opt-in, expensive): `/cpv-semantic-validation` (this command) re-runs the prefilters AND adds LLM judgment on every candidate. Use it for marketplace publication, security audits, or debugging suspicious skills.
+>
+> **Have you already run `/cpv-validate-plugin`?** That catches 95% of issues for 1% of the cost. Semantic validation is only needed when you want to verify that the *content* is correct, not just the *structure*, OR when programmatic mode flagged candidates worth deeper LLM review.
 >
 > If you still want to proceed, give me a path. I will run it **once** and return the grade.
 
@@ -136,6 +140,28 @@ Runs ONLY when the target plugin's `plugin.json` contains a non-empty `channels`
 - Quote `<file>:<line>` for every finding.
 
 See the pillar definition in `skills/semantic-validation-skill/SKILL.md` ("Pillar: Channel MCP Server Source-Code Security") and the full rules + example code + opus prompt template in `skills/semantic-validation-skill/references/channel-source-security.md`.
+
+### 9. Security Threat Catalog — AI Content Layer (conditional)
+Runs whenever the target contains AI-facing content (skills, agents, MCP tool descriptions, slash-command markdown, references/ files). Skip for pure-data targets (CSV, JSON fixtures, test data).
+
+The threat catalog covers 19 categories distilled from a 38-repo survey of community Claude Code security scanners (April 2026). Each category covers an attack pattern that is intentionally obfuscated to evade static regex but visible to an LLM that reads the prose.
+
+**Architecture (HARD SEPARATION between programmatic and semantic):**
+- The PREFILTER half of these checks lives in `validate_security.py` (programmatic mode, zero LLM tokens). It scans the target with regex/AST and surfaces CANDIDATES, never escalating to an LLM.
+- The LLM EVALUATION half runs ONLY here (semantic mode, opt-in). For each candidate the prefilter flagged, the agent invokes the LLM via `code_task` with a bounded per-finding prompt template.
+- The two layers NEVER auto-chain. A user running only `/cpv-validate-plugin` (programmatic) sees an INFO message: "RC-XX prefilter found N candidates — run `/cpv-semantic-validation` for deep LLM review." The user CHOOSES whether to escalate.
+
+Load the full pillar from these references:
+- `skills/semantic-validation-skill/references/security-threat-catalog.md` — 19 threat categories with indicator descriptions, false-positive guards, severity rules, opus prompt template
+- `skills/semantic-validation-skill/references/agent-rule-checks.md` — the 7 specific RC checks (RC-49/50/64/77/78/99/103) that genuinely need LLM judgment, each with prefilter pseudocode + LLM evaluation prompt + FP guards
+
+**Per-finding workflow:**
+1. Re-run the prefilter (the same regex `validate_security.py` would use, or import the helper from `cpv_validation_common`) to get CANDIDATES.
+2. For each candidate, send the matching opus prompt template to the LLM via `code_task` (answer_mode=0, max_retries=3, bounded ≤500 input tokens per finding).
+3. Map the LLM's verdict to CPV severity per the rule's "Severity decisions" table.
+4. Quote `<file>:<line>` for every finding.
+
+**Cost note:** if the prefilter produces zero candidates across all 19 categories + 7 RCs, this pillar contributes ZERO LLM tokens.
 
 ## Grading
 
