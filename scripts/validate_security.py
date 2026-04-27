@@ -2690,6 +2690,10 @@ Exit Codes:
     parser.add_argument("--sarif-out", type=Path, default=None,
                         help="Also emit findings as SARIF 2.1.0 JSON to the given path "
                              "(RC-105). Compatible with GitHub code scanning.")
+    parser.add_argument("--sbom-out", type=Path, default=None,
+                        help="Emit a CycloneDX 1.6 SBOM of declared dependencies to the "
+                             "given path (RC-106). Reads package.json, requirements*.txt, "
+                             "pyproject.toml, Cargo.toml, go.mod.")
 
     args = parser.parse_args()
 
@@ -2730,6 +2734,17 @@ Exit Codes:
             tool_version=plugin_version,
         )
         print(f"SARIF report written to {sarif_path}", file=sys.stderr)
+
+    # Optional CycloneDX SBOM (RC-106) — orthogonal to findings; reads manifests.
+    if args.sbom_out is not None:
+        from cpv_sbom_writer import write_sbom  # local import to keep cold-path cheap
+        plugin_version = _read_plugin_version(plugin_path)
+        sbom_path = write_sbom(
+            plugin_path,
+            args.sbom_out,
+            tool_version=plugin_version,
+        )
+        print(f"CycloneDX SBOM written to {sbom_path}", file=sys.stderr)
 
     # Output results
     if args.json:
