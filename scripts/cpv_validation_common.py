@@ -2638,6 +2638,66 @@ register_rule(RuleSchema(
 ))
 
 
+# =============================================================================
+# RC-73 / RC-74 / RC-75 — AST-based Python taint engine (Phase 10)
+# =============================================================================
+#
+# Implementation lives in scripts/cpv_taint_engine.py. The schemas below let
+# the rule-registry layer iterate / document them like every other RC-NN rule.
+
+register_rule(RuleSchema(
+    rule_id="RC-73",
+    name="Direct source-to-sink taint flow (1 hop)",
+    category="taint",
+    severity="MAJOR",
+    description=(
+        "External input (env vars, sys.argv, input(), etc.) reaches a "
+        "dangerous sink (exec/eval/os.system/subprocess shell=True/...) "
+        "without intermediate assignment."
+    ),
+    references=("synthesis catalog", "bandit", "semgrep"),
+    fp_guards=(
+        "Sanitizer recognition (shlex.quote, re.escape, int(), ...)",
+        "subprocess.run is only a sink with shell=True (otherwise array form is safe)",
+        "Function parameters treated as low-confidence sources only",
+    ),
+))
+
+register_rule(RuleSchema(
+    rule_id="RC-74",
+    name="Transitive source-to-sink taint flow (2+ hops)",
+    category="taint",
+    severity="MINOR",
+    description=(
+        "Same as RC-73 but the tainted value passes through one or more "
+        "intermediate variable assignments before reaching the sink."
+    ),
+    references=("synthesis catalog", "bandit"),
+    fp_guards=(
+        "Re-assignment with non-source value clears taint",
+        "Sanitizer call in the chain breaks propagation",
+    ),
+))
+
+register_rule(RuleSchema(
+    rule_id="RC-75",
+    name="Sanitizer recognition for taint chains",
+    category="taint",
+    severity="INFO",
+    description=(
+        "Recognized sanitizers (shlex.quote, shlex.split, re.escape, "
+        "html.escape, urllib.parse.quote, json.loads, yaml.safe_load, "
+        "ast.literal_eval, int/float/bool casts) clear taint. "
+        "No finding when a sanitizer interrupts the chain."
+    ),
+    references=("synthesis catalog",),
+    fp_guards=(
+        "Bypass detection: sanitizer must produce the assigned value, "
+        "not be called as a side-effect",
+    ),
+))
+
+
 # Private usernames to detect - automatically detected from system
 # These should never appear in published code
 def _get_private_usernames() -> set[str]:
