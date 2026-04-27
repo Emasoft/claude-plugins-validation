@@ -2081,6 +2081,35 @@ def check_phase1_all(plugin_path: Path, report: ValidationReport) -> int:
 # shell rc / Windows registry), RC-70 obfuscated decode-then-exec.
 
 
+def check_phase10_taint(plugin_path: Path, report: ValidationReport) -> int:
+    """Phase 10 — RC-73/74/75 AST-based Python taint analysis.
+
+    Per-file analysis (intentionally not cross-file). Catches:
+      RC-73: direct source-to-sink (e.g. `exec(os.environ.get('X'))`)
+      RC-74: transitive source-to-sink via N-hop assignments
+      RC-75: silently passes when sanitizers (shlex.quote, re.escape, ...)
+             interrupt the chain
+    """
+    from cpv_taint_engine import analyze_plugin  # local — keeps cold path cheap
+    issues = 0
+    findings_by_file = analyze_plugin(plugin_path)
+    for file_path, findings in findings_by_file.items():
+        try:
+            rel_path = str(file_path.relative_to(plugin_path))
+        except ValueError:
+            rel_path = str(file_path)
+        for f in findings:
+            severity = "major" if f.rule_id == "RC-73" else "minor"
+            level = effective_severity(severity, rel_path)
+            getattr(report, level)(
+                f"{f.rule_id}: tainted '{f.var_name}' from {f.source} reaches "
+                f"{f.sink} (hop_count={f.hop_count})",
+                rel_path, f.line,
+            )
+            issues += 1
+    return issues
+
+
 def check_phase9_stemmed_injection(plugin_path: Path, report: ValidationReport) -> int:
     """Phase 9 — RC-76 stemmed semantic injection classifier.
 
@@ -2604,6 +2633,11 @@ def validate_security(
     phase9_issues = check_phase9_stemmed_injection(plugin_path, report)
     if phase9_issues == 0:
         report.passed("No Phase 9 findings (RC-76 stemmed semantic injection)")
+
+    # --- Phase 10 — RC-73/74/75 AST-based Python taint engine ---
+    phase10_issues = check_phase10_taint(plugin_path, report)
+    if phase10_issues == 0:
+        report.passed("No Phase 10 findings (RC-73/74/75 taint source→sink)")
 
     # --- RC-103 disposition — emitted as a single INFO line ---
     counts = {
