@@ -2616,6 +2616,23 @@ def validate_security(
 # =============================================================================
 
 
+def _read_plugin_version(plugin_path: Path) -> str:
+    """Read the plugin's declared version from .claude-plugin/plugin.json.
+
+    Returns "0.0.0" if the manifest is missing or unparseable. Used to stamp
+    SARIF tool.driver.version so downstream consumers can correlate findings
+    with a specific plugin release.
+    """
+    manifest = plugin_path / ".claude-plugin" / "plugin.json"
+    if not manifest.is_file():
+        return "0.0.0"
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        return str(data.get("version", "0.0.0"))
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return "0.0.0"
+
+
 def main() -> int:
     """CLI entry point for standalone security validation."""
     parser = argparse.ArgumentParser(
@@ -2670,6 +2687,9 @@ Exit Codes:
                         help="Skip gitleaks (Phase 5 RC-102 part 2).")
     parser.add_argument("--no-semgrep", action="store_true",
                         help="Skip semgrep (Phase 5 RC-102 part 3).")
+    parser.add_argument("--sarif-out", type=Path, default=None,
+                        help="Also emit findings as SARIF 2.1.0 JSON to the given path "
+                             "(RC-105). Compatible with GitHub code scanning.")
 
     args = parser.parse_args()
 
@@ -2697,6 +2717,19 @@ Exit Codes:
         enable_gitleaks=not args.no_gitleaks,
         enable_semgrep=not args.no_semgrep,
     )
+
+    # Optional SARIF emit (RC-105) — always run when requested, regardless of
+    # whether the user also asked for stdout JSON or a markdown report.
+    if args.sarif_out is not None:
+        from cpv_sarif_writer import write_sarif  # local import to keep cold-path cheap
+        plugin_version = _read_plugin_version(plugin_path)
+        sarif_path = write_sarif(
+            report.results,
+            args.sarif_out,
+            plugin_path,
+            tool_version=plugin_version,
+        )
+        print(f"SARIF report written to {sarif_path}", file=sys.stderr)
 
     # Output results
     if args.json:
