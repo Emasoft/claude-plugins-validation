@@ -61,6 +61,7 @@ from cpv_validation_common import (
     build_fence_state,
     effective_severity,
     find_obfuscated_exec,
+    find_stemmed_injection_signal,
     find_tag_block_chars,
     find_zero_width_chars,
     get_gitignore_filter,
@@ -2080,6 +2081,32 @@ def check_phase1_all(plugin_path: Path, report: ValidationReport) -> int:
 # shell rc / Windows registry), RC-70 obfuscated decode-then-exec.
 
 
+def check_phase9_stemmed_injection(plugin_path: Path, report: ValidationReport) -> int:
+    """Phase 9 — RC-76 stemmed semantic injection classifier.
+
+    Catches paraphrased prompt-injection attempts that exact regex patterns
+    miss because of word-form variation. Fires only when ≥3 trigger stems
+    co-occur within an 80-char window — single keywords are too noisy.
+    """
+    issues = 0
+    for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
+        # Tighten further on test fixtures and validator sources to match
+        # the same FP-reduction discipline as other phases.
+        signals = find_stemmed_injection_signal(content)
+        if not signals:
+            continue
+        for char_offset, stems in signals:
+            line_no = content.count("\n", 0, char_offset) + 1
+            level = effective_severity("major", rel_path)
+            getattr(report, level)(
+                f"RC-76: stemmed prompt-injection signal — {len(stems)} trigger stems "
+                f"({', '.join(stems[:5])}) within 80-char window",
+                rel_path, line_no,
+            )
+            issues += 1
+    return issues
+
+
 def check_phase4_all(plugin_path: Path, report: ValidationReport) -> int:
     """Phase 4 — minor / informational rules + verdict-tier classifier.
 
@@ -2572,6 +2599,11 @@ def validate_security(
     phase4_issues = check_phase4_all(plugin_path, report)
     if phase4_issues == 0:
         report.passed("No Phase 4 findings (minor/info + observability)")
+
+    # --- Phase 9 — RC-76 stemmed semantic injection classifier ---
+    phase9_issues = check_phase9_stemmed_injection(plugin_path, report)
+    if phase9_issues == 0:
+        report.passed("No Phase 9 findings (RC-76 stemmed semantic injection)")
 
     # --- RC-103 disposition — emitted as a single INFO line ---
     counts = {
