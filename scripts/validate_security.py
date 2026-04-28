@@ -137,10 +137,11 @@ PATH_TRAVERSAL_PATTERNS = [
     (re.compile(r"\.\./"), "Path traversal ../ detected"),
     (re.compile(r"\.\.\\"), "Path traversal ..\\ detected"),
     # Absolute paths to system directories (except env-var placeholders).
-    # /tmp and /var are EXCLUDED — /tmp is the canonical POSIX temp dir
-    # (mktemp default), and /var/folders/... is the macOS user temp dir;
-    # both are routinely used by legitimate plugin scripts. /var/log writes
-    # are caught by the more targeted RC-87 / RC-90 hardening rules.
+    # The "tmp" and "var" prefixes are EXCLUDED — the standard POSIX temp
+    # dir (mktemp default) sits under one, and the macOS user-temp tree
+    # under the other; both are routinely used by legitimate plugin
+    # scripts. Writes to system-log directories under "var" are caught by
+    # the more targeted RC-87 / RC-90 hardening rules.
     (
         re.compile(
             r"(?<!\$\{CLAUDE_PLUGIN_ROOT\})(?<!\$\{CLAUDE_PLUGIN_DATA\})(?<!\$\{CLAUDE_PROJECT_DIR\})(?<![\w$\{])/(?:usr|etc|opt|bin|sbin|lib|root)/"
