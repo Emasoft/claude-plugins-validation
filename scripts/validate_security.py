@@ -136,10 +136,14 @@ PATH_TRAVERSAL_PATTERNS = [
     # Directory traversal
     (re.compile(r"\.\./"), "Path traversal ../ detected"),
     (re.compile(r"\.\.\\"), "Path traversal ..\\ detected"),
-    # Absolute paths (except environment variable placeholders)
+    # Absolute paths to system directories (except env-var placeholders).
+    # /tmp and /var are EXCLUDED — /tmp is the canonical POSIX temp dir
+    # (mktemp default), and /var/folders/... is the macOS user temp dir;
+    # both are routinely used by legitimate plugin scripts. /var/log writes
+    # are caught by the more targeted RC-87 / RC-90 hardening rules.
     (
         re.compile(
-            r"(?<!\$\{CLAUDE_PLUGIN_ROOT\})(?<!\$\{CLAUDE_PLUGIN_DATA\})(?<!\$\{CLAUDE_PROJECT_DIR\})(?<![\w$\{])/(?:usr|etc|var|tmp|opt|bin|sbin|lib|root)/"
+            r"(?<!\$\{CLAUDE_PLUGIN_ROOT\})(?<!\$\{CLAUDE_PLUGIN_DATA\})(?<!\$\{CLAUDE_PROJECT_DIR\})(?<![\w$\{])/(?:usr|etc|opt|bin|sbin|lib|root)/"
         ),
         "Absolute Unix system path detected",
     ),
@@ -306,8 +310,29 @@ DATA_EXFILTRATION_PATTERNS = [
 # Phase 2d (RC-26/27/28) added redirect operators (`>`), command separators
 # (`;`/`&&`), pip --no-deps + unhashed installs, and lifecycle script targeting.
 SUPPLY_CHAIN_PATTERNS = [
-    (re.compile(r"curl\s+.*\|\s*(?:sh|bash|zsh|python|python3|node)\b"), "Supply chain: curl piped to interpreter"),
-    (re.compile(r"wget\s+.*\|\s*(?:sh|bash|zsh|python|python3|node)\b"), "Supply chain: wget piped to interpreter"),
+    # Shell interpreters — always suspicious when fed via curl/wget.
+    # Benign forms (`bash --version`, `bash --help`) are extremely rare in
+    # plugin scripts and the cost of flagging them is far below the cost of
+    # missing a real `curl ... | bash` install attack.
+    (re.compile(r"curl\s+.*\|\s*(?:sh|bash|zsh|ksh)\b"), "Supply chain: curl piped to shell interpreter"),
+    (re.compile(r"wget\s+.*\|\s*(?:sh|bash|zsh|ksh)\b"), "Supply chain: wget piped to shell interpreter"),
+    # Language interpreters (python/node) — only fire when the invocation is
+    # clearly in exec mode. Skips read-only formatters such as
+    # `python3 -m json.tool`, `python -m pprint`, `node --version`.
+    # Exec markers: end-of-line, `-c CODE`, `-e CODE`, `-` (explicit stdin),
+    # `-m pip` (pip can install from URL), or shell separator after the cmd.
+    (
+        re.compile(
+            r"curl\s+.*\|\s*(?:python|python3|node)(?:\s*$|\s+-c\b|\s+-e\b|\s+-(?:\s|$)|\s+-m\s+pip\b|\s*[;&|<>])"
+        ),
+        "Supply chain: curl piped to language interpreter (exec mode)",
+    ),
+    (
+        re.compile(
+            r"wget\s+.*\|\s*(?:python|python3|node)(?:\s*$|\s+-c\b|\s+-e\b|\s+-(?:\s|$)|\s+-m\s+pip\b|\s*[;&|<>])"
+        ),
+        "Supply chain: wget piped to language interpreter (exec mode)",
+    ),
     (
         re.compile(r"pip\s+install\s+.*(?:https?://|git\+|--index-url\s+(?!https://pypi))"),
         "Supply chain: pip install from non-PyPI source",
@@ -540,6 +565,20 @@ def is_validator_script(file_path: str) -> bool:
     return ("validate_" in file_lower and file_lower.endswith(".py")) or "cpv_validation_common" in file_lower
 
 
+def is_js_ts_file(file_path: str) -> bool:
+    """JavaScript/TypeScript files use backticks for template literals.
+
+    Backticks in JS/TS source/config (e.g. eslint.config.mjs, *.ts, *.tsx)
+    are ES2015 template literals — the syntax for multi-line/interpolated
+    strings. They are NEVER POSIX command substitution. Skip the
+    backtick-pattern check on these files to avoid flagging code-quoted
+    references inside `// comments` and template strings.
+    """
+    return file_path.lower().endswith(
+        (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts", ".cts")
+    )
+
+
 def is_shell_like_file(file_path: str) -> bool:
     """Recognize files where shell syntax (command substitution, pipes) is expected.
 
@@ -694,6 +733,12 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
                     shell_exec_indicators = ("os.system", "os.popen", "subprocess", "shell=", "Popen", "check_output")
                     if not any(indicator in line for indicator in shell_exec_indicators):
                         continue
+                # JS/TS files use backticks for template literals (ES2015), never
+                # for POSIX command substitution. Skip backtick patterns there.
+                # `$(...)` is also valid JS (DOM helpers, jQuery) but is rare in
+                # plugin scripts; keep that pattern enabled for now.
+                if is_js_ts_file(file_path) and "`...`" in msg:
+                    continue
                 if pattern.search(line):
                     report.critical(f"{msg}: {line.strip()[:80]}", file_path, line_num)
                     issues_found += 1
