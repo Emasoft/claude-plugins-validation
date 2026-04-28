@@ -2581,7 +2581,7 @@ Examples:
     if params.marketplace:
         print(f"  Marketplace: {params.marketplace}")
     if params.self_marketplace:
-        print(f"  Layout: C (marketplace-in-plugin, self-referential)")
+        print("  Layout: C (marketplace-in-plugin, self-referential)")
     if args.dry_run:
         print(f"  {YELLOW}(dry-run mode){NC}")
     print()
