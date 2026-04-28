@@ -3075,3 +3075,41 @@ class TestPhase14UserConfigSchema:
         assert critical == []
         assert major == []
         assert minor == []
+
+
+# =============================================================================
+# Phase 15 (v2.31.0) — bundled slash-command collision check
+# =============================================================================
+
+
+class TestPhase15BundledSlashCollision:
+    """Plugin commands must not silently shadow built-in slash commands."""
+
+    def test_builtin_set_includes_recent_additions(self) -> None:
+        from cpv_validation_common import BUILTIN_SLASH_COMMANDS
+        # v2.1.110-121 era additions
+        for name in ("usage", "tui", "focus", "ultrareview", "loop", "proactive",
+                     "recap", "less-permission-prompts"):
+            assert name in BUILTIN_SLASH_COMMANDS, f"{name} missing from bundled list"
+
+    def test_command_named_loop_emits_warning(self, tmp_path: Path) -> None:
+        from validate_command import validate_command
+        cmd = tmp_path / "loop.md"
+        cmd.write_text(
+            "---\nname: loop\ndescription: my custom loop\n---\n\n"
+            "Body of the command.\n"
+        )
+        report = validate_command(cmd)
+        msgs = [r.message for r in report.results if r.level == "WARNING"]
+        assert any("collides with a built-in" in m and "/loop" in m for m in msgs)
+
+    def test_command_with_unique_name_no_warning(self, tmp_path: Path) -> None:
+        from validate_command import validate_command
+        cmd = tmp_path / "my-very-unique-name.md"
+        cmd.write_text(
+            "---\nname: my-very-unique-name\ndescription: x\n---\n\nbody\n"
+        )
+        report = validate_command(cmd)
+        msgs = [r.message for r in report.results if r.level == "WARNING"
+                and "collides with a built-in" in r.message]
+        assert msgs == []
