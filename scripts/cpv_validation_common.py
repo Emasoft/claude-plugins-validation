@@ -365,6 +365,32 @@ BUILTIN_AGENT_TYPES = {
     "Claude Code Guide",
 }
 
+# Bundled slash commands shipped by Claude Code (v2.1.121).
+# Plugin-shipped commands matching one of these names create a UI collision —
+# the namespaced form `/<plugin>:<name>` is the documented workaround.
+BUILTIN_SLASH_COMMANDS: frozenset[str] = frozenset({
+    # Core session / context
+    "clear", "rename", "resume", "compact", "context", "rewind", "memory", "recap",
+    # Auth + status
+    "login", "logout", "config", "doctor", "model", "effort", "init",
+    # Cost / usage
+    "usage", "cost", "stats", "extra-usage",
+    # UI / view
+    "tui", "focus", "skills", "color", "theme", "less-permission-prompts",
+    # Tool / MCP
+    "mcp", "plugin", "context", "review", "security-review",
+    # Loops + automation (v2.1.105 alias)
+    "loop", "proactive",
+    # Code-review + agent loops (v2.1.111+)
+    "ultrareview",
+    # Worktree + nav (v2.1.83+)
+    "add-dir", "status", "permissions", "permission-mode",
+    # Setup wizards
+    "setup-vertex", "setup-bedrock", "setup-token", "terminal-setup",
+    # Misc
+    "release-notes", "feedback", "bug", "help", "exit", "quit",
+})
+
 # Semantic version pattern for marketplace version fields
 SEMVER_PATTERN = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?(\+[a-zA-Z0-9.]+)?$")
 

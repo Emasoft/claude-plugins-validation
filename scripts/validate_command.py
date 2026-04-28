@@ -503,6 +503,23 @@ def validate_command(command_path: Path) -> CommandValidationReport:
     # Security checks
     validate_security(content, filename, report)
 
+    # v2.1.121 — collision check against bundled slash commands.
+    # Plugin-shipped commands invoke as `/<command-stem>` AND as
+    # `/<plugin>:<stem>` namespaced. The bare form collides with built-ins
+    # like `/clear`, `/usage`, `/loop`, `/ultrareview`, etc.
+    # Severity: WARNING — namespaced form still works; the collision only
+    # affects autocomplete UX.
+    from cpv_validation_common import BUILTIN_SLASH_COMMANDS
+    stem = command_path.stem.lower()
+    if stem in BUILTIN_SLASH_COMMANDS:
+        report.warning(
+            f"Command name '{stem}' collides with a built-in Claude Code "
+            f"slash command. Users typing /{stem} get the built-in; the "
+            f"plugin's command is only reachable via the namespaced form "
+            f"/<plugin>:{stem}. Consider renaming.",
+            filename,
+        )
+
     return report
 
 
