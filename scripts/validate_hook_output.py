@@ -210,6 +210,17 @@ HOOK_OUTPUT_EVENT_FIELDS: dict[str, frozenset[str]] = {
     "Setup": frozenset(),
     # hooks.md InstructionsLoaded — no specific output per L1789 area
     "InstructionsLoaded": frozenset(),
+    # v2.1.121 — UserPromptExpansion fires when a slash-command/MCP-prompt
+    # expands. Same decision-control shape as UserPromptSubmit.
+    "UserPromptExpansion": frozenset(
+        {"decision", "reason", "additionalContext"}
+    ),
+    # v2.1.121 — PostToolBatch fires AFTER all parallel tools resolve, BEFORE
+    # the next model call. Per hooks.md, supports decision/reason/additionalContext
+    # plus per-tool `updatedToolOutput`.
+    "PostToolBatch": frozenset(
+        {"decision", "reason", "additionalContext", "updatedToolOutput"}
+    ),
 }
 
 

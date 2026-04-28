@@ -378,6 +378,49 @@ def validate_argument_hint_field(frontmatter: dict[str, Any], report: Validation
     report.passed(f"'argument-hint' field present: {hint}", "SKILL.md")
 
 
+def validate_arguments_field(frontmatter: dict[str, Any], report: ValidationReport) -> list[str]:
+    """Validate the 'arguments' frontmatter field (v2.1.121).
+
+    Accepted forms (per skills.md):
+      arguments: issue branch              # space-separated string
+      arguments: ["issue", "branch"]       # YAML list
+
+    Returns the list of declared argument names so callers can cross-validate
+    `$<name>` substitutions in skill content.
+    """
+    if "arguments" not in frontmatter:
+        return []
+    raw = frontmatter["arguments"]
+    if isinstance(raw, str):
+        names = raw.split()
+    elif isinstance(raw, list):
+        if not all(isinstance(n, str) for n in raw):
+            report.major(
+                f"'arguments' list must contain only strings, got mixed types: {raw!r}",
+                "SKILL.md",
+            )
+            return []
+        names = list(raw)
+    else:
+        report.major(
+            f"'arguments' must be a space-separated string or YAML list, got {type(raw).__name__}",
+            "SKILL.md",
+        )
+        return []
+
+    # Validate each name is a valid identifier — required for `$<name>` substitution.
+    invalid = [n for n in names if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", n)]
+    if invalid:
+        report.major(
+            f"'arguments' names must be valid identifiers (letters/digits/underscores, "
+            f"starting with letter/underscore). Invalid: {invalid}",
+            "SKILL.md",
+        )
+
+    report.passed(f"'arguments' field present: {names}", "SKILL.md")
+    return [n for n in names if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", n)]
+
+
 def validate_hooks_field(frontmatter: dict[str, Any], report: ValidationReport) -> None:
     """Validate the 'hooks' frontmatter field."""
     if "hooks" not in frontmatter:
@@ -395,8 +438,18 @@ def validate_hooks_field(frontmatter: dict[str, Any], report: ValidationReport) 
     report.passed("'hooks' field present", "SKILL.md")
 
 
-def validate_skill_content(content: str, report: ValidationReport) -> None:
-    """Validate SKILL.md content (body after frontmatter)."""
+def validate_skill_content(
+    content: str,
+    report: ValidationReport,
+    declared_args: list[str] | None = None,
+) -> None:
+    """Validate SKILL.md content (body after frontmatter).
+
+    `declared_args` is the list of names declared via the frontmatter
+    `arguments:` field (v2.1.121). When provided, any `$<name>` substitution
+    in the body must match a declared name — otherwise the substitution
+    silently expands to the empty string at runtime.
+    """
     _, body, _ = parse_frontmatter(content)
 
     # Check for empty body
@@ -421,6 +474,33 @@ def validate_skill_content(content: str, report: ValidationReport) -> None:
         if "$ARGUMENTS" not in content:
             report.info(
                 "Task-oriented skill without $ARGUMENTS placeholder (arguments will be appended automatically)",
+                "SKILL.md",
+            )
+
+    # v2.1.121 — cross-validate `$<name>` substitutions against declared `arguments:`.
+    if declared_args is not None:
+        # Strip fenced code blocks first so that example $name references in
+        # documentation don't trigger the check.
+        stripped_body = re.sub(r"```.*?```", "", body, flags=re.DOTALL)
+        # Collect every $<name> occurrence.
+        # Must skip `$ARGUMENTS`, `${...}` (env-var form is handled separately),
+        # and `$<digit>` (positional form).
+        # Also skip $ followed by punctuation/end-of-string (false matches).
+        for m in re.finditer(r"\$([A-Za-z_][A-Za-z0-9_]*)\b", stripped_body):
+            name = m.group(1)
+            if name == "ARGUMENTS":
+                continue  # well-known
+            if name in declared_args:
+                continue  # explicitly declared
+            # Skip names that match known env vars used in skill substitution.
+            if name in {"CLAUDE_SESSION_ID", "CLAUDE_EFFORT", "CLAUDE_SKILL_DIR",
+                        "CLAUDE_PLUGIN_ROOT", "CLAUDE_PLUGIN_DATA", "CLAUDE_PROJECT_DIR"}:
+                continue
+            # Otherwise this is a likely-broken substitution.
+            report.major(
+                f"Skill content references `${name}` but '{name}' is not declared in "
+                f"frontmatter `arguments:`. The substitution will silently expand "
+                f"to the empty string at runtime.",
                 "SKILL.md",
             )
 
@@ -521,10 +601,15 @@ def validate_skill(skill_path: Path) -> SkillValidationReport:
         validate_allowed_tools_field(frontmatter, report)
         validate_model_field(frontmatter, report)
         validate_argument_hint_field(frontmatter, report)
+        # v2.1.121 — `arguments:` (separate from `argument-hint`) declares named
+        # positional args used by `$<name>` substitution in skill content.
+        declared_args = validate_arguments_field(frontmatter, report)
         validate_hooks_field(frontmatter, report)
+    else:
+        declared_args = []
 
-    # Validate content
-    validate_skill_content(content, report)
+    # Validate content (incl. cross-checking `$<name>` against declared_args)
+    validate_skill_content(content, report, declared_args=declared_args)
 
     # Validate directory structure
     validate_directory_structure(skill_path, report)

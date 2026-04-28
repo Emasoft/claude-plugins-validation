@@ -245,13 +245,17 @@ def level_to_severity(level: Level) -> int:
 # Hook Event Types
 # =============================================================================
 
-# All valid hook event types in Claude Code
+# All valid hook event types in Claude Code (aligned with v2.1.121).
+# Spec lists 28 events: 27 official + `Setup` retained internally for the
+# command/mcp_tool-only gating, kept here as legacy WARNING-only.
 VALID_HOOK_EVENTS = {
     "PreToolUse",
     "PostToolUse",
     "PostToolUseFailure",
     "PermissionRequest",
     "UserPromptSubmit",
+    "UserPromptExpansion",  # v2.1.121 era — fires when slash/MCP-prompt expands
+    "PostToolBatch",  # v2.1.121 era — after parallel tool batch resolves
     "Notification",
     "Stop",
     "SubagentStop",
@@ -260,7 +264,7 @@ VALID_HOOK_EVENTS = {
     "SessionEnd",
     "PreCompact",
     "PostCompact",  # v2.1.76 — fires after compaction completes
-    "Setup",  # [legacy — emits WARNING] not in hooks spec as of v2.1.109 — kept as legacy WARN only
+    "Setup",  # [legacy — emits WARNING] retained internally for gating only
     "TeammateIdle",
     "TaskCompleted",
     "ConfigChange",
@@ -275,6 +279,61 @@ VALID_HOOK_EVENTS = {
     "TaskCreated",  # v2.1.84 — fires when a task is created via TaskCreate tool
     "PermissionDenied",  # v2.1.89 — fires when auto mode classifier denies a tool call
 }
+
+# =============================================================================
+# Hook type allowlist + per-event compatibility matrix (v2.1.118+ added mcp_tool)
+# =============================================================================
+#
+# 5 hook types defined by hooks.md:
+#   command  — exec a process; stdout becomes hook output
+#   http     — POST JSON to a URL
+#   mcp_tool — invoke a tool on a connected MCP server (v2.1.118+)
+#   prompt   — synthesize a prompt response without executing code
+#   agent    — dispatch to a sub-agent
+#
+# Not every event accepts every type. SessionStart and Setup fire BEFORE
+# MCP servers connect, so only `command` and `mcp_tool` are supported.
+# Lifecycle/notification events do not support `prompt` or `agent`.
+
+VALID_HOOK_TYPES: frozenset[str] = frozenset({"command", "http", "mcp_tool", "prompt", "agent"})
+
+# Events that fire BEFORE MCP servers connect — only command + mcp_tool.
+HOOK_EVENTS_COMMAND_ONLY: frozenset[str] = frozenset({"SessionStart", "Setup"})
+
+# Events that DO NOT support `prompt` or `agent` types (per hooks.md grouping).
+HOOK_EVENTS_NO_PROMPT_OR_AGENT: frozenset[str] = frozenset({
+    "ConfigChange",
+    "CwdChanged",
+    "Elicitation",
+    "ElicitationResult",
+    "FileChanged",
+    "InstructionsLoaded",
+    "Notification",
+    "PermissionDenied",
+    "PostCompact",
+    "PreCompact",
+    "SessionEnd",
+    "StopFailure",
+    "SubagentStart",
+    "TeammateIdle",
+    "WorktreeCreate",
+    "WorktreeRemove",
+})
+
+
+def hook_types_allowed_for_event(event: str) -> frozenset[str]:
+    """Return the allowed hook types for the given event name.
+
+    Per hooks.md (v2.1.121):
+    - SessionStart / Setup: only `command` and `mcp_tool` (servers not yet connected).
+    - Lifecycle events (CwdChanged, ConfigChange, etc.): no `prompt` / `agent`.
+    - Tool events + UserPromptSubmit/Expansion + Stop family: full 5-type set.
+    """
+    if event in HOOK_EVENTS_COMMAND_ONLY:
+        return frozenset({"command", "mcp_tool"})
+    if event in HOOK_EVENTS_NO_PROMPT_OR_AGENT:
+        return frozenset({"command", "http", "mcp_tool"})
+    return VALID_HOOK_TYPES
 
 # =============================================================================
 # Common Constants
@@ -767,12 +826,14 @@ BINARY_EXTENSIONS = {
     ".sqlite3",
 }
 
-# Known Claude Code skill frontmatter fields (shared by skill validators)
+# Known Claude Code skill frontmatter fields (shared by skill validators).
+# Aligned with skills.md (v2.1.121) — 15 fields.
 SKILL_FRONTMATTER_FIELDS = {
     "name",
     "description",
     "when_to_use",  # v2.1.98+ — supplemental trigger guidance, concatenated with description up to 1,536 char cap
     "argument-hint",
+    "arguments",  # v2.1.121 — named positional args for `$<name>` substitution; space-separated string OR YAML list
     "disable-model-invocation",
     "user-invocable",
     "allowed-tools",
@@ -784,6 +845,26 @@ SKILL_FRONTMATTER_FIELDS = {
     "paths",  # v2.1.84 — YAML list of globs to restrict skill activation to matching files
     "shell",  # v2.1.84 — shell for !`command` blocks: "bash" (default) or "powershell"
 }
+
+# Skill template-substitution variables recognised by skills.md (v2.1.121).
+# Static set: keys never beginning with `$ARGUMENTS[`, `$<digit>` (positional),
+# or `$<name>` (when `<name>` matches a frontmatter `arguments:` entry).
+# These three patterns are recognised programmatically by the substitution
+# parser, not as literal strings.
+SKILL_SUBSTITUTION_VARS_LITERAL: frozenset[str] = frozenset({
+    "$ARGUMENTS",
+    "${CLAUDE_SESSION_ID}",
+    "${CLAUDE_EFFORT}",  # v2.1.120 — current effort level
+    "${CLAUDE_SKILL_DIR}",  # absolute path to the directory containing SKILL.md
+    "${CLAUDE_PLUGIN_ROOT}",  # plugin's root dir (env var, also resolves in skill content)
+    "${CLAUDE_PLUGIN_DATA}",  # plugin's per-user data dir
+    "${CLAUDE_PROJECT_DIR}",  # project root
+})
+
+# Pattern matchers for the dynamic substitution forms.
+SKILL_SUBSTITUTION_INDEXED_RE = re.compile(r"\$ARGUMENTS\[(\d+)\]")  # $ARGUMENTS[0]
+SKILL_SUBSTITUTION_POSITIONAL_RE = re.compile(r"\$(\d+)\b")  # $0, $1, $2 …
+SKILL_SUBSTITUTION_NAMED_RE = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)\b")  # $name (must match arguments: entry)
 
 
 def is_binary_file(file_path: Path) -> bool:

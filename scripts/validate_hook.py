@@ -77,14 +77,17 @@ EVENTS_WITHOUT_MATCHERS = {
     "CwdChanged",  # v2.1.83
 }
 
-# Valid hook types (v2.1.63+: "http" hooks POST JSON to a URL)
-VALID_HOOK_TYPES = {"command", "http", "prompt", "agent"}
+# Valid hook types (5 as of v2.1.118: command, http, mcp_tool, prompt, agent).
+VALID_HOOK_TYPES = {"command", "http", "mcp_tool", "prompt", "agent"}
 
-# Events that only support "command" or "http" hooks (not prompt or agent)
+# Events that only support "command", "http", and "mcp_tool" hooks
+# (no prompt / agent — lifecycle/notification events that don't support
+# prompt-synthesis or sub-agent dispatch).
 COMMAND_ONLY_EVENTS = {
     "ConfigChange",
     "InstructionsLoaded",
     "Notification",
+    "PermissionDenied",
     "PreCompact",
     "PostCompact",  # v2.1.76
     "SessionEnd",
@@ -98,13 +101,16 @@ COMMAND_ONLY_EVENTS = {
     "CwdChanged",  # v2.1.83
     "FileChanged",  # v2.1.83
     "TaskCreated",  # v2.1.84
+    "StopFailure",  # v2.1.78
 }
 
-# Events that only support "command" hooks — a STRICT subset of
-# COMMAND_ONLY_EVENTS. Per hooks.md L687 and L2109, SessionStart rejects
-# `http`, `prompt`, and `agent` hook types unconditionally.
+# Events that ONLY support `command` and `mcp_tool` hooks — strict subset.
+# Per hooks.md (v2.1.121), SessionStart and Setup fire BEFORE MCP servers
+# connect, so they reject `http`, `prompt`, and `agent` types. The `mcp_tool`
+# type is allowed but will report "not connected" on first run.
 COMMAND_STRICT_EVENTS = {
     "SessionStart",
+    "Setup",
 }
 
 # Common tool names for matcher validation hints
@@ -2196,6 +2202,55 @@ def validate_http_hook(
     return True
 
 
+def validate_mcp_tool_hook(
+    hook: dict[str, Any],
+    event_name: str,  # noqa: ARG001 — kept for symmetry with validate_http_hook
+    report: ValidationReport,
+) -> bool:
+    """Validate an mcp_tool-type hook (v2.1.118+: invoke a tool on a connected MCP server).
+
+    Required fields per hooks.md:
+      - server (string) — name of an already-connected MCP server
+      - tool   (string) — name of a tool exposed by that server
+
+    Optional fields:
+      - input (object) — argument map; supports ${tool_input.<field>} substitution
+                         from the hook's JSON input.
+
+    Cross-server resolution (verifying `server` matches a configured MCP server)
+    is left to the cross-source validator since hooks may be declared in
+    settings.json or hooks.json with different visibility into the MCP map.
+    """
+    missing: list[str] = []
+    for field_name in ("server", "tool"):
+        if field_name not in hook:
+            missing.append(field_name)
+    if missing:
+        report.critical(
+            f"mcp_tool hook missing required field(s): {', '.join(missing)}. "
+            "Required: server (MCP server name), tool (tool name)."
+        )
+        return False
+
+    server = hook["server"]
+    tool = hook["tool"]
+    if not isinstance(server, str) or not server.strip():
+        report.critical(f"mcp_tool hook 'server' must be a non-empty string, got {type(server).__name__}")
+        return False
+    if not isinstance(tool, str) or not tool.strip():
+        report.critical(f"mcp_tool hook 'tool' must be a non-empty string, got {type(tool).__name__}")
+        return False
+
+    # Optional input map — must be an object if present.
+    if "input" in hook:
+        input_val = hook["input"]
+        if not isinstance(input_val, dict):
+            report.major(f"mcp_tool hook 'input' must be an object, got {type(input_val).__name__}")
+
+    report.passed(f"mcp_tool hook: {server}/{tool}")
+    return True
+
+
 def validate_single_hook(
     hook: Any,
     event_name: str,
@@ -2219,18 +2274,21 @@ def validate_single_hook(
         return False
 
     # Validate hook type is allowed for this event
-    if event_name in COMMAND_STRICT_EVENTS and hook_type != "command":
-        # hooks.md L687/L2109 — SessionStart supports ONLY command hooks.
+    if event_name in COMMAND_STRICT_EVENTS and hook_type not in {"command", "mcp_tool"}:
+        # hooks.md (v2.1.121) — SessionStart and Setup fire BEFORE MCP servers
+        # connect, so they only accept `command` and `mcp_tool` hook types.
+        # `mcp_tool` will report "not connected" on first run; this is documented.
         hook_path_str = report.hook_path
         report.critical(
-            f"Event '{event_name}' only supports 'command' hooks, not '{hook_type}'. "
-            "Per hooks.md L687/L2109, http/prompt/agent hooks are not supported for this event.",
+            f"Event '{event_name}' only supports 'command' and 'mcp_tool' hooks, not '{hook_type}'. "
+            "Per hooks.md, http/prompt/agent hooks fire after MCP servers connect and so are not supported here.",
             hook_path_str,
         )
     elif hook_type in {"prompt", "agent"} and event_name in COMMAND_ONLY_EVENTS:
         hook_path_str = report.hook_path
         report.critical(
-            f"Event '{event_name}' only supports 'command' or 'http' hooks, not '{hook_type}'. Prompt and agent hooks are not supported for this event.",
+            f"Event '{event_name}' only supports 'command', 'http', and 'mcp_tool' hooks, not '{hook_type}'. "
+            "Prompt and agent hooks are not supported for this event.",
             hook_path_str,
         )
 
@@ -2259,6 +2317,9 @@ def validate_single_hook(
             return False
     elif hook_type == "http":
         if not validate_http_hook(hook, event_name, report):
+            return False
+    elif hook_type == "mcp_tool":
+        if not validate_mcp_tool_hook(hook, event_name, report):
             return False
     elif hook_type == "prompt":
         if not validate_prompt_hook(hook, event_name, report):

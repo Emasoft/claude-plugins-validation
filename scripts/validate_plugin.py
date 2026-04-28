@@ -831,9 +831,11 @@ def validate_manifest(
             )
 
     # Check for unknown fields — warn but don't block, as custom fields
-    # may be consumed by plugin scripts or external tooling
+    # may be consumed by plugin scripts or external tooling.
+    # Aligned with plugins-reference.md (v2.1.121).
     known_fields = {
         "name",
+        "$schema",  # v2.1.120 — JSON-Schema link, ignored at load time
         "version",
         "description",
         "author",
@@ -847,6 +849,7 @@ def validate_manifest(
         "hooks",
         "mcpServers",
         "outputStyles",
+        "themes",  # v2.1.118 — plugin-shipped theme JSON files under themes/
         "lspServers",
         "monitors",  # v2.1.105 — background monitor configs (monitors/monitors.json by default)
         "userConfig",  # User-configurable values prompted at enable time (v2.1.80)
