@@ -38,6 +38,10 @@ Audits existing plugin or marketplace repositories against CPV standards and aut
      - `agents` field with folder paths → list specific `.md` files instead
      - `hooks: "./hooks/hooks.json"` → remove the field (default file auto-loads) or point at non-default path
      - MCP/LSP same server name in 2 sources → consolidate into one source per name
+   - **Layout C consistency findings** (when both `plugin.json` and `marketplace.json` exist at the repo root):
+     - `plugin.json.name` ≠ marketplace self-entry name → align both
+     - `plugin.json.version` ≠ marketplace self-entry version → align (publish.py should bump both atomically)
+     - Self-entry source ≠ `"./"` → set to `"./"`
 
 Copy this checklist and track your progress:
 - [ ] Audit report reviewed

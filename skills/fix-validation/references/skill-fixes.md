@@ -126,8 +126,11 @@ description: "Use when the user needs to ..."
 **Root cause**: A field in the frontmatter is not recognized by the Claude Code CLI.
 **Fix**:
 1. Remove unrecognized fields, or verify they are intentional
-2. Known fields for Claude Code: `name`, `description`, `argument-hint`, `disable-model-invocation`, `user-invocable`, `allowed-tools`, `model`, `context`, `agent`, `hooks`
-3. Additional enterprise/OpenSpec fields: `license`, `metadata`, `compatibility`, `version`, `author`, `mode`, `tags`
+2. Known fields for Claude Code (15 fields, aligned with skills.md v2.1.121):
+   `name`, `description`, `when_to_use`, `argument-hint`, `arguments`, `disable-model-invocation`, `user-invocable`, `allowed-tools`, `model`, `context`, `agent`, `hooks`, `effort`, `paths`, `shell`
+3. New in v2.1.121: `arguments` declares named positional args used by `$<name>` substitution in skill body (space-separated string OR YAML list).
+4. Skill substitution variables: `$ARGUMENTS`, `$ARGUMENTS[N]`, `$N` (positional), `$<name>` (must match `arguments:`), `${CLAUDE_SESSION_ID}`, `${CLAUDE_EFFORT}` (v2.1.120), `${CLAUDE_SKILL_DIR}`, `${CLAUDE_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_DATA}`, `${CLAUDE_PROJECT_DIR}`. Undeclared `$<name>` refs silently expand to "" — CPV emits MAJOR.
+5. Additional enterprise/OpenSpec fields: `license`, `metadata`, `compatibility`, `version`, `author`, `mode`, `tags`
 
 ### MINOR: Deprecated field
 

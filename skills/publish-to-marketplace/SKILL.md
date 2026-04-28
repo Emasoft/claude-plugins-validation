@@ -18,20 +18,31 @@ user-invocable: false
 
 Publishes a validated Claude Code plugin to a GitHub-hosted marketplace repo. Configures notification workflow, PAT secret, and publish pipeline.
 
+Handles all three CPV layouts:
+- **Layout A** (separate plugin and marketplace repos) — full notify chain with `MARKETPLACE_PAT` and dispatch
+- **Layout B** (nested monorepo) — single repo, single tag, no cross-repo dispatch
+- **Layout C** (marketplace-in-plugin self-referential) — single repo with both manifests, single tag, no cross-repo dispatch (skips Phase 1 entirely)
+
 ## Prerequisites
 
 - Plugin repo with valid `.claude-plugin/plugin.json` (name, version, description)
 - `gh` CLI authenticated (`gh auth status`)
-- Marketplace repo exists with `marketplace.json` (see `canonical-pipeline` skill or use `/cpv-create` to set one up)
+- For Layout A: marketplace repo exists with `marketplace.json` (see `canonical-pipeline` skill or use `/cpv-create` to set one up)
+- For Layout C: same repo also has `.claude-plugin/marketplace.json` with self-entry
 - `uv` on PATH, plugin has `pyproject.toml`
 
 ## Instructions
 
-### Phase 0: Discover Marketplace
+### Phase 0: Detect layout and discover marketplace
 
-Ask the user for their marketplace repo coordinates (`<owner>/<marketplace-repo>`). Verify it exists: `gh repo view <owner>/<marketplace-repo> --json name`. All subsequent placeholders use these values.
+Detect the layout first:
+- `.claude-plugin/marketplace.json` exists in the plugin repo root → **Layout C** (skip Phase 1, proceed to Phase 2 directly)
+- Plugin repo is a subdir of a marketplace repo (`../.claude-plugin/marketplace.json` exists) → **Layout B** (no notify chain, skip Phase 1)
+- Otherwise → **Layout A** — ask the user for marketplace coordinates (`<owner>/<marketplace-repo>`). Verify it exists: `gh repo view <owner>/<marketplace-repo> --json name`. All subsequent placeholders use these values.
 
-### Phase 1: Configure Notification Pipeline
+### Phase 1: Configure Notification Pipeline (Layout A only)
+
+**SKIP this phase entirely for Layout B and Layout C** — both manifests live in the same repo, so a single push handles both. Go directly to Phase 2.
 
 1. **Create PAT**: Ask user for a GitHub PAT with `repo` scope. See publish-pipeline-guide (Resources) Section 1
 2. **Set secret**: `gh secret set MARKETPLACE_PAT --repo <owner>/<plugin-repo> --body "$MARKETPLACE_PAT"` (MUST use `--body` flag)
@@ -48,8 +59,12 @@ Ask the user for their marketplace repo coordinates (`<owner>/<marketplace-repo>
 
 8. **Run gate check**: `uv run python scripts/publish.py --gate` (verify quality gates pass)
 9. **Run publish**: `uv run python scripts/publish.py` — the bump type is auto-detected from git-cliff (feat → minor, fix → patch, BREAKING CHANGE → major). Force with `--patch`/`--minor`/`--major` only when the auto-detection picks the wrong level.
-10. **Verify dispatch**: Check marketplace repo Actions tab — `update-submodules.yml` should trigger within 30s
-11. **Verify marketplace.json**: Plugin version should update in marketplace repo
+   - **Layout C**: publish.py MUST bump BOTH `.claude-plugin/plugin.json::version` AND `.claude-plugin/marketplace.json::metadata.version` AND the self-entry's `version` in one atomic commit. Verify by reading both files post-bump.
+10. **Verify dispatch** (Layout A only): Check marketplace repo Actions tab — `update-submodules.yml` should trigger within 30s. Skip for Layout B/C.
+11. **Verify marketplace.json**:
+    - Layout A: plugin version updates in the SEPARATE marketplace repo via dispatch
+    - Layout B: plugin version updates in the SAME repo (the marketplace's own marketplace.json was edited as part of the push)
+    - Layout C: plugin version updates in the SAME repo's `.claude-plugin/marketplace.json` self-entry (verify name + version sync between both manifests)
 
 ### Phase 4: Enforce CI on GitHub (first publish only)
 
@@ -61,12 +76,14 @@ Ask the user for their marketplace repo coordinates (`<owner>/<marketplace-repo>
     Add `--dry-run` to preview. The script is idempotent — re-running is a no-op.
 
 Copy this checklist and track your progress:
-- [ ] PAT created and secret set
-- [ ] notify-marketplace.yml installed
+- [ ] Layout detected (A / B / C)
+- [ ] (Layout A only) PAT created and secret set
+- [ ] (Layout A only) notify-marketplace.yml installed
 - [ ] Consolidated ci.yml workflow present (lint + validate + test jobs)
 - [ ] publish.py + pre-push hook installed
+- [ ] (Layout C only) publish.py confirmed to bump both manifests atomically
 - [ ] First publish successful
-- [ ] Marketplace sync verified
+- [ ] Marketplace sync verified (Layout A: cross-repo dispatch; Layout B/C: same-repo update)
 - [ ] cpv-setup-branch-rules applied (CI required on GitHub)
 
 ## Output

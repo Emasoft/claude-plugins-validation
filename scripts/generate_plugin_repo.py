@@ -79,6 +79,7 @@ class PluginParams:
     marketplace: str = ""
     version: str = "0.1.0"
     language: str = "python"  # One of VALID_LANGUAGES
+    self_marketplace: bool = False  # Layout C: emit .claude-plugin/marketplace.json with self-entry
 
     @property
     def repo_name(self) -> str:
@@ -207,6 +208,37 @@ def gen_plugin_json(p: PluginParams) -> str:
     if p.github_owner:
         manifest["homepage"] = p.github_url
         manifest["repository"] = p.github_url
+    return json.dumps(manifest, indent=2) + "\n"
+
+
+def gen_self_marketplace_json(p: PluginParams) -> str:
+    """Generate .claude-plugin/marketplace.json with a single self-entry (Layout C)."""
+    self_entry: dict[str, object] = {
+        "name": p.name,
+        "source": "./",
+        "version": p.version,
+        "description": p.description,
+        "author": {
+            "name": p.author,
+            "email": p.author_email,
+        },
+        "license": p.license,
+    }
+    if p.github_owner:
+        self_entry["homepage"] = p.github_url
+        self_entry["repository"] = p.github_url
+    manifest: dict[str, object] = {
+        "name": p.name,
+        "owner": {
+            "name": p.author,
+            "email": p.author_email,
+        },
+        "metadata": {
+            "version": p.version,
+            "description": p.description,
+        },
+        "plugins": [self_entry],
+    }
     return json.dumps(manifest, indent=2) + "\n"
 
 
@@ -406,7 +438,13 @@ This plugin is available on the {p.marketplace} marketplace."""
 ### From Marketplace
 
 ```bash
-claude plugin install {p.name}@{p.marketplace}
+# 1. Add the marketplace (first time only)
+claude plugin marketplace add {owner}/{p.marketplace if p.marketplace else repo}
+
+# 2. Install the plugin
+claude plugin install {p.name}@{p.marketplace if p.marketplace else repo}
+
+# 3. Restart Claude Code (or run /reload-plugins) to activate
 ```
 
 {from_github}
@@ -420,8 +458,20 @@ claude plugin uninstall {p.name}
 ## Update
 
 ```bash
-claude plugin update {p.name}@{p.marketplace}
+claude plugin update {p.name}@{p.marketplace if p.marketplace else repo}
 ```
+
+## Troubleshooting
+
+| Issue | Resolution |
+|-------|------------|
+| Plugin not appearing after install | Restart Claude Code or run `/reload-plugins` |
+| Old version still showing after update | Restart Claude Code; if still stale, run `claude plugin update {p.name}` again |
+| Hook path not found after update | Re-run `uv run python scripts/publish.py --install-hook` |
+| `marketplace not found` error | Run `claude plugin marketplace update {p.marketplace if p.marketplace else repo}` to refresh |
+| Permission denied on script | Ensure scripts are executable: `chmod +x scripts/*.py` |
+| Import errors after install | Re-run `uv pip install -e .` to refresh the venv |
+| Session won't pick up new hooks | Restart required — `/reload-plugins` does NOT re-read project-scoped settings.json hooks |
 
 ## Usage
 
@@ -753,6 +803,52 @@ def update_plugin_json(root: Path, new_ver: str) -> tuple[bool, str]:
     except (json.JSONDecodeError, OSError) as e:
         return False, f"plugin.json update failed: {e}"
 
+def update_self_marketplace_json(root: Path, new_ver: str) -> tuple[bool, str]:
+    """Write version to .claude-plugin/marketplace.json (Layout C — both metadata and self-entry)."""
+    mp = root / ".claude-plugin" / "marketplace.json"
+    if not mp.is_file():
+        return False, "no marketplace.json (not Layout C)"
+    try:
+        data = json.loads(mp.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        return False, f"marketplace.json read failed: {e}"
+    # Bump metadata.version if present
+    metadata = data.get("metadata")
+    if isinstance(metadata, dict):
+        metadata["version"] = new_ver
+    # Bump the self-entry's version (the entry whose name matches plugin.json's name AND source is "./")
+    plugin_json_path = root / ".claude-plugin" / "plugin.json"
+    plugin_name: str | None = None
+    if plugin_json_path.is_file():
+        try:
+            pdata = json.loads(plugin_json_path.read_text(encoding="utf-8"))
+            plugin_name = pdata.get("name")
+        except (json.JSONDecodeError, OSError):
+            plugin_name = None
+    plugins = data.get("plugins")
+    bumped_entry = False
+    if isinstance(plugins, list):
+        for entry in plugins:
+            if not isinstance(entry, dict):
+                continue
+            entry_name = entry.get("name")
+            entry_source = entry.get("source")
+            is_self = (
+                (entry_name == plugin_name or plugin_name is None)
+                and entry_source in ("./", {"source": "directory", "path": "./"})
+            )
+            if is_self:
+                entry["version"] = new_ver
+                bumped_entry = True
+                break
+    try:
+        mp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    except OSError as e:
+        return False, f"marketplace.json write failed: {e}"
+    if bumped_entry:
+        return True, f"marketplace.json (metadata + self-entry) -> {new_ver}"
+    return True, f"marketplace.json (metadata only — no self-entry matched) -> {new_ver}"
+
 def update_pyproject_toml(root: Path, new_ver: str) -> tuple[bool, str]:
     """Write version to pyproject.toml."""
     pp = root / "pyproject.toml"
@@ -795,7 +891,8 @@ def update_python_versions(root: Path, new_ver: str) -> list[tuple[bool, str]]:
     return results
 
 def check_version_consistency(root: Path) -> tuple[bool, str]:
-    """Verify all version sources match."""
+    """Verify all version sources match. Includes marketplace.json metadata
+    and self-entry (Layout C) when present."""
     versions: dict[str, str | None] = {}
 
     # plugin.json
@@ -805,6 +902,28 @@ def check_version_consistency(root: Path) -> tuple[bool, str]:
             versions["plugin.json"] = json.loads(pj.read_text(encoding="utf-8")).get("version")
         except (json.JSONDecodeError, OSError):
             versions["plugin.json"] = None
+
+    # marketplace.json (Layout C) — both metadata.version and the self-entry's version
+    mp = root / ".claude-plugin" / "marketplace.json"
+    if mp.is_file():
+        try:
+            mp_data = json.loads(mp.read_text(encoding="utf-8"))
+            md = mp_data.get("metadata")
+            if isinstance(md, dict):
+                versions["marketplace.json:metadata"] = md.get("version")
+            plugins_arr = mp_data.get("plugins")
+            if isinstance(plugins_arr, list):
+                for entry in plugins_arr:
+                    if not isinstance(entry, dict):
+                        continue
+                    src = entry.get("source")
+                    if src == "./" or (
+                        isinstance(src, dict) and src.get("source") == "directory" and src.get("path") == "./"
+                    ):
+                        versions["marketplace.json:self-entry"] = entry.get("version")
+                        break
+        except (json.JSONDecodeError, OSError):
+            versions["marketplace.json"] = None
 
     # pyproject.toml
     pp = root / "pyproject.toml"
@@ -822,17 +941,27 @@ def check_version_consistency(root: Path) -> tuple[bool, str]:
     return False, f"Version mismatch: {details}"
 
 def do_bump(root: Path, new_ver: str, dry_run: bool = False) -> bool:
-    """Orchestrate all version updates."""
+    """Orchestrate all version updates. Detects Layout C (marketplace.json at repo root)
+    and bumps both manifests atomically when present."""
     cprint(f"\n{BOLD}Bumping to {new_ver}{' (dry-run)' if dry_run else ''}{NC}")
+
+    is_layout_c = (root / ".claude-plugin" / "marketplace.json").is_file()
 
     if dry_run:
         cprint(f"  Would update plugin.json -> {new_ver}")
+        if is_layout_c:
+            cprint(f"  Would update marketplace.json (metadata + self-entry, Layout C) -> {new_ver}")
         cprint(f"  Would update pyproject.toml -> {new_ver}")
         cprint(f"  Would update __version__ vars -> {new_ver}")
         return True
 
     ok1, msg1 = update_plugin_json(root, new_ver)
     cprint(f"  {'OK' if ok1 else 'FAIL'}: {msg1}")
+
+    ok_mp = True
+    if is_layout_c:
+        ok_mp, msg_mp = update_self_marketplace_json(root, new_ver)
+        cprint(f"  {'OK' if ok_mp else 'FAIL'}: {msg_mp}")
 
     ok2, msg2 = update_pyproject_toml(root, new_ver)
     cprint(f"  {'OK' if ok2 else 'FAIL'}: {msg2}")
@@ -841,7 +970,7 @@ def do_bump(root: Path, new_ver: str, dry_run: bool = False) -> bool:
     for ok, msg in py_results:
         cprint(f"  {'OK' if ok else 'FAIL'}: {msg}")
 
-    return ok1 and ok2
+    return ok1 and ok2 and ok_mp
 
 
 # -- Hook installer ------------------------------------------------------------
@@ -2213,6 +2342,9 @@ def generate_all_files(p: PluginParams) -> list[tuple[str, str, bool]]:
         (".claude-plugin/plugin.json", gen_plugin_json(p), False),
         (".gitignore", gen_gitignore(p), False),
     ]
+    # Layout C — also emit a self-referential marketplace manifest at repo root
+    if p.self_marketplace:
+        files.append((".claude-plugin/marketplace.json", gen_self_marketplace_json(p), False))
     # Language-specific project config
     if p.language == "python":
         files.extend(
@@ -2407,6 +2539,12 @@ Examples:
         default="python",
         help="Plugin language (default: python). Non-python emits a minimal scaffold.",
     )
+    parser.add_argument(
+        "--self-marketplace",
+        action="store_true",
+        help="Layout C: also emit .claude-plugin/marketplace.json with a self-entry "
+        "(source: \"./\"). Use when the repo should be both plugin and marketplace.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Preview files without writing")
 
     args = parser.parse_args()
@@ -2423,6 +2561,7 @@ Examples:
         marketplace=args.marketplace,
         version=args.version,
         language=args.language,
+        self_marketplace=args.self_marketplace,
     )
 
     target = args.target_dir.resolve()
@@ -2441,6 +2580,8 @@ Examples:
         print(f"  GitHub: {params.github_url}")
     if params.marketplace:
         print(f"  Marketplace: {params.marketplace}")
+    if params.self_marketplace:
+        print(f"  Layout: C (marketplace-in-plugin, self-referential)")
     if args.dry_run:
         print(f"  {YELLOW}(dry-run mode){NC}")
     print()
