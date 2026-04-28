@@ -15,7 +15,7 @@ Defines the standard files, workflows, hooks, and release pipeline that every Em
 ### Layout C specifics
 
 Layout C (marketplace-in-plugin) requires a slightly different release pipeline:
-- `publish.py` MUST bump THREE version slots in one atomic commit: `.claude-plugin/plugin.json::version`, `.claude-plugin/marketplace.json::metadata.version`, AND the self-entry's `version` in `marketplace.json::plugins[]`.
+- `publish.py` MUST bump THREE version slots in one atomic commit: `version` in `.claude-plugin/plugin.json`, `metadata.version` in `.claude-plugin/marketplace.json`, AND the self-entry's `version` in the same `marketplace.json`'s `plugins[]` array.
 - `notify-marketplace.yml` is NOT installed (no separate marketplace repo to notify).
 - A single tag `vX.Y.Z` covers both manifest changes.
 - `validate_marketplace.py --strict` runs alongside `validate_plugin.py --strict` in CI; both must pass before push.

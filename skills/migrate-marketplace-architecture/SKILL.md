@@ -16,38 +16,25 @@ user-invocable: false
 
 ## Overview
 
-Converts a non-CPV marketplace into one of three CPV-supported layouts:
-- **Layout A** — one GitHub repo per plugin + a marketplace hub
-- **Layout B** — nested single-repo with full discipline
-- **Layout C** — marketplace-in-plugin (one repo, both manifests colocated, self-referential)
-
-Preserves per-plugin git history and logs every decision.
+Converts a non-CPV marketplace into one of three CPV layouts: A (hub-and-spoke), B (nested single-repo), or C (marketplace-in-plugin self-referential). Preserves per-plugin git history and logs every decision.
 
 ## Prerequisites
 
-- `gh` CLI authenticated (BLOCKER for Layout A)
-- `git` >= 2.34 (for `git subtree split`)
-- Clean working tree
-- `uv` on PATH, `validate_marketplace.py` accessible
+- `gh` authenticated (BLOCKER for Layout A); `git` >= 2.34 (for subtree split); clean working tree; `uv` on PATH
 
 ## Instructions
 
-Full architectural migration with extensive `AskUserQuestion` interaction. Loaded only on an `architecture` finding or explicit user request.
+Architectural migration with `AskUserQuestion` interaction. Loaded only on an `architecture` finding or explicit user request.
 
-1. **Pre-migration audit** — see [pre-migration-audit](references/pre-migration-audit.md). Collect plugin inventory, detect collisions, verify disk and gh auth. Verdict must be READY.
-
-2. **Interrogate the user** — see [interrogation-playbook](references/interrogation-playbook.md). Target layout is ALWAYS the first question; never pick for the user.
-
-3. **Execute the migration**:
-   - **Layout A** — [layout-a-migration](references/layout-a-migration.md) (hub-and-spoke).
-   - **Layout B** — [layout-b-discipline](references/layout-b-discipline.md) (nested).
-   - **Layout C** — [layout-c-migration](references/layout-c-migration.md) (marketplace-in-plugin self-referential).
-
-4. **Wire auto-notification (Layout A only)** — for every new plugin repo, configure the auto-notify chain via `setup-marketplace-auto-notification` (pat-secret-setup, notify-workflow-template, receiver-workflow-template). Repeat per plugin. Layout B tags atomically and does NOT need cross-repo notification.
-
-5. **Verify** with `validate_marketplace.py --strict` and `validate_plugin.py --strict` on every new plugin. Fix every non-WARNING finding.
-
-6. **Write the migration log** at `$MAIN_ROOT/reports/migrate-marketplace-architecture/<ts±tz>-<slug>.md`.
+1. **Pre-migration audit** — [pre-migration-audit](references/pre-migration-audit.md). Verdict must be READY.
+2. **Interrogate** — [interrogation-playbook](references/interrogation-playbook.md). Target layout is the first question.
+3. **Execute**:
+   - **A** — [layout-a-migration](references/layout-a-migration.md)
+   - **B** — [layout-b-discipline](references/layout-b-discipline.md)
+   - **C** — [layout-c-migration](references/layout-c-migration.md)
+4. **Wire auto-notification (A only)** — `setup-marketplace-auto-notification`. B and C tag atomically.
+5. **Verify** with `validate_marketplace.py --strict` and `validate_plugin.py --strict`.
+6. **Write the migration log**.
 
 Copy this checklist and track your progress:
 
@@ -62,28 +49,29 @@ Copy this checklist and track your progress:
 
 ## Output
 
-- **Layout A**: N plugin repos + cleaned marketplace (github sources, `plugins/*` removed, tagged). Each repo wired for auto-notify.
-- **Layout B**: same repo with `publish.py`, `cliff.toml`, CI, `CHANGELOG.md`, `CONTRIBUTORS.md` (optional), one atomic commit tagged.
-- **Layout C**: same repo gains `.claude-plugin/marketplace.json` (or `.claude-plugin/plugin.json` if migrating from a marketplace-only repo), self-entry with `source: "./"`, name and version cross-aligned. Single `publish.py` bumps both manifests in one commit.
-- `$MAIN_ROOT/reports/migrate-marketplace-architecture/<ts±tz>-<slug>.md`
+- **A**: N plugin repos + cleaned marketplace (github sources, tagged), each wired for auto-notify.
+- **B**: same repo with `publish.py`, `cliff.toml`, CI, `CHANGELOG.md`, atomic commit tagged.
+- **C**: same repo gains the second manifest with self-entry (`source: "./"`), name+version aligned, `publish.py` bumps both atomically.
+- Migration log at `$MAIN_ROOT/reports/migrate-marketplace-architecture/<ts±tz>-<slug>.md`
 
 ## Error Handling
 
 | Error | Resolution |
 |-------|------------|
-| `gh auth status` fails | BLOCKER for Layout A — run `gh auth login`, re-audit. |
-| Working tree dirty | BLOCKER — commit or stash, re-audit. |
-| Name collision on GitHub | `AskUserQuestion`: rename, skip, or abort. |
-| User cancels mid-flow | Write partial log, exit cleanly. No orphan branches. |
-| Validation still INVALID | Fix each finding, re-run the validator. |
+| `gh auth status` fails | BLOCKER (Layout A) — `gh auth login`, re-audit |
+| Working tree dirty | BLOCKER — commit or stash, re-audit |
+| Name collision on GitHub | `AskUserQuestion`: rename, skip, or abort |
+| User cancels mid-flow | Write partial log, exit cleanly |
+| Validation INVALID | Fix each finding, re-run the validator |
 
 Never force-push or rewrite history. Forward-only commits.
 
 ## Examples
 
 **Input:** 5 nested plugins, no git tags, mixed authors.
-**Output (A):** 5 standalone repos + cleaned marketplace + per-repo notify chains.
+**Output (A):** 5 standalone repos + cleaned marketplace + notify chains.
 **Output (B):** Same repo with CPV discipline files and consolidated authors.
+**Output (C):** Single-plugin repo gains marketplace.json self-entry, version-synced.
 
 ## Resources
 
@@ -96,5 +84,5 @@ Never force-push or rewrite history. Forward-only commits.
 - [Layout B Discipline](references/layout-b-discipline.md)
   > Pre-Flight Checks · Scaffold publish.py · Scaffold cliff.toml · Scaffold validate.yml · Generate CHANGELOG.md · Consolidate Authorship · Why Layout B Does Not Need Auto-Notification · Preserve Guest Contributors · Single Atomic Commit · Tag the Marketplace · Verification · Rollback Recipe
 - [Layout C Migration](references/layout-c-migration.md)
-  > When to migrate to C · Plugin-only → C (add marketplace.json) · Marketplace-only → C (add plugin.json) · Self-entry construction · Name/version sync · Why Layout C Does Not Need Auto-Notification · Single Atomic Commit · Verification · Rollback Recipe
-- **Sibling skill**: `setup-marketplace-auto-notification` (loaded by plugin-creator and marketplace-fixer agents; wires per-plugin notify chain during Layout A migrations)
+  > When to migrate to C · Pre-Flight Checks · Migration paths (plugin-only or marketplace-only starting state) · Self-entry construction and version sync · publish.py and atomic commit · Verification and Rollback
+- Sibling: `setup-marketplace-auto-notification`

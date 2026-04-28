@@ -32,18 +32,18 @@ release automatically.
 
 1. **Create GitHub repo**: `gh repo create <owner>/<name> --public --clone`, then `cd` into it
 2. **Initialize plugin**: create standard files from plugin-repo-templates (see Resources)
-3. **(Layout C only) Add self-marketplace**: if the user picked Layout C, also create `.claude-plugin/marketplace.json` with a single self-entry pointing to `"./"`. Both manifests must share the same `name` and `version`.
-4. **Install workflows**: from plugin-workflows (see Resources) copy `ci.yml` (consolidated lint + validate + test) and `release.yml` to `.github/workflows/`. **Skip `notify-marketplace.yml` for Layout C** — there is no separate marketplace repo to notify (both manifests live in this repo).
-5. **Install git hooks**: run `uv run python scripts/publish.py --install-hook` (sets `core.hooksPath` to `git-hooks`)
-6. **Configure marketplace** (Layout A only): `uv run python scripts/set_marketplace_pat.py <owner>/<repo>` (skip if declined — see setup-marketplace-auto-notification). **Skip for Layout B and Layout C** — both manifests are already in the same repo.
-7. **Validate** (remote CPV from GitHub): `uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-remote-validate plugin . --strict` — fix ALL non-WARNING issues. Layout C also requires `validate_marketplace.py --strict` to clear name/version sync.
-8. **Commit and push**: stage all, commit "Initial plugin scaffold", push to `main`
+3. **(Layout C only) Add self-marketplace**: also create the marketplace manifest with a single self-entry, source `"./"`. Both manifests share the same `name` and `version`.
+4. **Install workflows**: copy `ci.yml` and `release.yml` from plugin-workflows. Skip `notify-marketplace.yml` for Layout B/C (no separate marketplace repo).
+5. **Install git hooks**: `uv run python scripts/publish.py --install-hook`
+6. **Configure marketplace** (Layout A only): `uv run python scripts/set_marketplace_pat.py <owner>/<repo>`. Skip for B/C.
+7. **Validate**: `uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-remote-validate plugin . --strict`. Layout C also runs `validate_marketplace.py --strict` for name/version sync.
+8. **Commit and push**: stage, commit "Initial plugin scaffold", push to `main`
 
 Copy this checklist and track your progress:
 
 - [ ] Create GitHub repo
 - [ ] Initialize plugin structure
-- [ ] (Layout C) Add `.claude-plugin/marketplace.json` self-entry, name+version aligned with plugin.json
+- [ ] (Layout C) Add self-marketplace manifest
 - [ ] Install CI/CD workflows (skip notify-marketplace.yml for B/C)
 - [ ] Install git hooks
 - [ ] Configure marketplace notification (Layout A only)
