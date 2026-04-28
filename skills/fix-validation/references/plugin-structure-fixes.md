@@ -174,7 +174,7 @@ root cause, and step-by-step fix instructions.
 **Root cause**: A field in plugin.json is not part of the known Claude Code plugin spec. This is not blocking — custom fields are allowed — but should be documented.
 **Fix**:
 1. If the field is needed by your plugin scripts, add a comment in README.md explaining its purpose.
-2. If it is a typo, correct it. Known fields are: `name`, `version`, `description`, `author`, `homepage`, `repository`, `license`, `keywords`, `commands`, `agents`, `skills`, `hooks`, `mcpServers`, `outputStyles`, `lspServers`.
+2. If it is a typo, correct it. Known fields (aligned with plugins-reference.md v2.1.121) are: `name`, `$schema` (v2.1.120), `version`, `description`, `author`, `homepage`, `repository`, `license`, `keywords`, `commands`, `agents`, `skills`, `hooks`, `mcpServers`, `outputStyles`, `themes` (v2.1.118), `lspServers`, `monitors` (v2.1.105), `userConfig`, `channels`, `dependencies`.
 3. If it is truly unused, remove it.
 
 ### MAJOR: Field 'repository' must be a string URL

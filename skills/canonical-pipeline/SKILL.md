@@ -10,7 +10,15 @@ user-invocable: false
 
 ## Overview
 
-Defines the standard files, workflows, hooks, and release pipeline that every Emasoft Claude Code plugin repository MUST have. Covers Python, JavaScript/TypeScript, Rust, Go, and Shell plugins.
+Defines the standard files, workflows, hooks, and release pipeline that every Emasoft Claude Code plugin repository MUST have. Covers Python, JavaScript/TypeScript, Rust, Go, and Shell plugins. Pipeline supports all three CPV layouts (A: separate plugin and marketplace repos; B: nested monorepo; C: marketplace-in-plugin self-referential single repo).
+
+### Layout C specifics
+
+Layout C (marketplace-in-plugin) requires a slightly different release pipeline:
+- `publish.py` MUST bump THREE version slots in one atomic commit: `.claude-plugin/plugin.json::version`, `.claude-plugin/marketplace.json::metadata.version`, AND the self-entry's `version` in `marketplace.json::plugins[]`.
+- `notify-marketplace.yml` is NOT installed (no separate marketplace repo to notify).
+- A single tag `vX.Y.Z` covers both manifest changes.
+- `validate_marketplace.py --strict` runs alongside `validate_plugin.py --strict` in CI; both must pass before push.
 
 ## Prerequisites
 

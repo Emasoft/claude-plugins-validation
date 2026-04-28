@@ -21,7 +21,12 @@ Automates creation and configuration of a GitHub-based marketplace repository fo
 
 ## Marketplace layout
 
-Two supported layouts: **A (hub-and-spoke)** — separate repos per plugin, entries `{"source":"github","repo":"owner/name"}`, preferred default; **B (nested monorepo)** — plugins as subdirs, entries `"./plugins/<name>"`. Agent defaults to suggesting A but follows user preference. Details: [marketplace-layouts.md](references/marketplace-layouts.md).
+Three supported layouts:
+- **A (hub-and-spoke)** — separate repos per plugin, entries `{"source":"github","repo":"owner/name"}`. Default for multi-plugin sets.
+- **B (nested monorepo)** — plugins as subdirs of marketplace repo, entries `"./plugins/<name>"`. Default when monorepo is desired.
+- **C (marketplace-in-plugin)** — ONE repo with both `plugin.json` AND `marketplace.json` at root, single self-entry `{"source": "./", "name": "<plugin-name>"}`. Default when packaging exactly one plugin and a separate marketplace repo would be overhead.
+
+Agent suggests Layout A for multi-plugin sets, Layout C for single-plugin repos, follows user preference otherwise. Details: [marketplace-layouts.md](references/marketplace-layouts.md).
 
 ## Prerequisites
 

@@ -1,7 +1,8 @@
 ---
 name: migrate-marketplace-architecture
 description: >
-  Convert a non-CPV marketplace to Layout A (hub-and-spoke) or Layout B (nested-with-discipline).
+  Convert a non-CPV marketplace between Layout A (hub-and-spoke), Layout B
+  (nested-with-discipline), and Layout C (marketplace-in-plugin self-referential).
   Use when migrating marketplace architecture. Loaded by marketplace-fixer agent.
 tags:
   - marketplace
@@ -15,7 +16,12 @@ user-invocable: false
 
 ## Overview
 
-Converts a non-CPV marketplace to Layout A (one GitHub repo per plugin) or Layout B (nested plus discipline). Preserves per-plugin git history and logs every decision.
+Converts a non-CPV marketplace into one of three CPV-supported layouts:
+- **Layout A** — one GitHub repo per plugin + a marketplace hub
+- **Layout B** — nested single-repo with full discipline
+- **Layout C** — marketplace-in-plugin (one repo, both manifests colocated, self-referential)
+
+Preserves per-plugin git history and logs every decision.
 
 ## Prerequisites
 
@@ -35,6 +41,7 @@ Full architectural migration with extensive `AskUserQuestion` interaction. Loade
 3. **Execute the migration**:
    - **Layout A** — [layout-a-migration](references/layout-a-migration.md) (hub-and-spoke).
    - **Layout B** — [layout-b-discipline](references/layout-b-discipline.md) (nested).
+   - **Layout C** — [layout-c-migration](references/layout-c-migration.md) (marketplace-in-plugin self-referential).
 
 4. **Wire auto-notification (Layout A only)** — for every new plugin repo, configure the auto-notify chain via `setup-marketplace-auto-notification` (pat-secret-setup, notify-workflow-template, receiver-workflow-template). Repeat per plugin. Layout B tags atomically and does NOT need cross-repo notification.
 
@@ -46,9 +53,9 @@ Copy this checklist and track your progress:
 
 - [ ] Pre-migration audit READY
 - [ ] Interrogation answers recorded
-- [ ] Target layout selected (A or B)
+- [ ] Target layout selected (A, B, or C)
 - [ ] Layout migration executed
-- [ ] Auto-notification wired for each new plugin repo (Layout A only)
+- [ ] Auto-notification wired for each new plugin repo (Layout A only — B and C tag atomically)
 - [ ] `validate_marketplace.py --strict` passes
 - [ ] Every plugin validates
 - [ ] Migration log written
@@ -57,6 +64,7 @@ Copy this checklist and track your progress:
 
 - **Layout A**: N plugin repos + cleaned marketplace (github sources, `plugins/*` removed, tagged). Each repo wired for auto-notify.
 - **Layout B**: same repo with `publish.py`, `cliff.toml`, CI, `CHANGELOG.md`, `CONTRIBUTORS.md` (optional), one atomic commit tagged.
+- **Layout C**: same repo gains `.claude-plugin/marketplace.json` (or `.claude-plugin/plugin.json` if migrating from a marketplace-only repo), self-entry with `source: "./"`, name and version cross-aligned. Single `publish.py` bumps both manifests in one commit.
 - `$MAIN_ROOT/reports/migrate-marketplace-architecture/<ts±tz>-<slug>.md`
 
 ## Error Handling
@@ -87,4 +95,6 @@ Never force-push or rewrite history. Forward-only commits.
   > Pre-Flight Checks · Per-Plugin Subtree Split · Per-Plugin Repo Creation · CPV Canonicalization · Per-Plugin Tagging · Per-Plugin Auto-Notify Setup · Marketplace.json Rewrite · Cleanup Commit · Verification · Rollback Recipe
 - [Layout B Discipline](references/layout-b-discipline.md)
   > Pre-Flight Checks · Scaffold publish.py · Scaffold cliff.toml · Scaffold validate.yml · Generate CHANGELOG.md · Consolidate Authorship · Why Layout B Does Not Need Auto-Notification · Preserve Guest Contributors · Single Atomic Commit · Tag the Marketplace · Verification · Rollback Recipe
+- [Layout C Migration](references/layout-c-migration.md)
+  > When to migrate to C · Plugin-only → C (add marketplace.json) · Marketplace-only → C (add plugin.json) · Self-entry construction · Name/version sync · Why Layout C Does Not Need Auto-Notification · Single Atomic Commit · Verification · Rollback Recipe
 - **Sibling skill**: `setup-marketplace-auto-notification` (loaded by plugin-creator and marketplace-fixer agents; wires per-plugin notify chain during Layout A migrations)

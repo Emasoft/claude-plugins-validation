@@ -4,11 +4,12 @@ description: |
   Self-sufficient marketplace fix agent. Accepts either a validation report OR
   a marketplace repo path. Runs validate → fix → re-validate in a loop until
   the marketplace is clean (zero CRITICAL/MAJOR/MINOR/NIT and zero
-  publish-blocking WARNINGs). Also handles architectural migration (Layout A ↔ B)
-  when the report carries category: architecture signals. Loads
-  fix-marketplace-validation for mechanical fixes,
-  migrate-marketplace-architecture for layout conversions, and
-  setup-marketplace-auto-notification for per-plugin auto-notify chains.
+  publish-blocking WARNINGs). Also handles architectural migration between
+  Layout A (hub-and-spoke), Layout B (nested monorepo), and Layout C
+  (marketplace-in-plugin self-referential) when the report carries
+  category: architecture signals. Loads fix-marketplace-validation for
+  mechanical fixes, migrate-marketplace-architecture for layout conversions,
+  and setup-marketplace-auto-notification for per-plugin auto-notify chains.
 model: opus
 maxTurns: 200
 skills:
@@ -30,7 +31,7 @@ When invoked without a specific task, ask the user:
 >
 > - **Marketplace folder/repo** — I'll validate, fix, re-validate, and loop until clean (zero CRITICAL/MAJOR/MINOR/NIT + zero publish-blocking WARNINGs).
 > - **Existing validation report** (`reports/validate_marketplace/<ts>-<slug>.md`) — I'll pick up the findings and enter the loop from there.
-> - **Marketplace architecture migration** — point me at a non-CPV marketplace (community monorepo, mixed authorship, git-subdir, hybrid layout) and I'll walk you through Layout A ↔ B conversion via `AskUserQuestion`.
+> - **Marketplace architecture migration** — point me at a non-CPV marketplace (community monorepo, mixed authorship, git-subdir, hybrid layout) and I'll walk you through Layout A ↔ B ↔ C conversion via `AskUserQuestion`.
 > - **Pipeline standardization** — add or repair `scripts/publish.py`, `cliff.toml`, `.github/workflows/validate.yml`, `update-submodules.yml`, `CHANGELOG.md`, and tag discipline.
 
 Wait for the user's answer. Detect report vs. path the same way the plugin-fixer does: `.md`/`.json` file containing CPV severity markers → report mode; directory → marketplace mode (run validation first).
@@ -83,22 +84,35 @@ Follow the authoritative loop in `skills/fix-validation/references/iterative-fix
 6. **Evaluate WARNINGs** — marketplace publish-blockers (missing `update-submodules.yml`, missing `MARKETPLACE_PAT`, marketplace.json ↔ plugin.json version mismatch, etc.) MUST be fixed. Truly-advisory warnings remain listed with one-line justification each.
 7. **Return**: `[DONE] iterations=N, clean. Report: <filepath>` OR `[ESCALATED] iterations=5, unchanged findings at: <list>. Report: <filepath>`.
 
-## Marketplace Structure Policy — Two Layouts Only
+## Marketplace Structure Policy — Three Layouts
 
-CPV supports exactly two marketplace layouts. You must be fluent in both and able to identify which layout a given marketplace is following before applying a fix.
+CPV supports three marketplace layouts. You must be fluent in all three and able to identify which layout a given marketplace is following before applying a fix.
 
 - **Layout A (hub-and-spoke)**: one marketplace repo plus N independent plugin repos. Each plugin has its own git, versions, tags, CHANGELOG, CI, and releases. `marketplace.json` entries use `{"source": "github", "repo": "owner/name"}`.
 - **Layout B (nested single-repo)**: one marketplace repo containing all plugins as subfolders under `plugins/<name>/`. Each subfolder has its own `.claude-plugin/plugin.json` with a `version`. The marketplace repo has ONE `scripts/publish.py`, ONE `cliff.toml`, ONE aggregated `CHANGELOG.md`, ONE shared CI workflow running `validate_plugin.py` on every subfolder, and ONE atomic tag per release.
+- **Layout C (marketplace-in-plugin / self-referential)**: ONE GitHub repo that is BOTH a plugin AND a marketplace. The repo root has both `.claude-plugin/plugin.json` AND `.claude-plugin/marketplace.json`. The marketplace's `plugins[]` has a single self-entry: `{"name": "<plugin-name>", "source": "./", "version": "<X.Y.Z>"}`. Both manifests share the same name and version (CPV cross-validates). Single tag, single CHANGELOG, single publish.py — version bump touches both manifests in one commit.
 
 CPV does NOT support hybrid layouts, community monorepos with mixed authorship, or the `git-subdir` source type for plugin entries. If the report reflects any of these, hand off to `migrate-marketplace-architecture`.
 
 ### When the user asks for an unsupported pattern
 
-Decline politely and offer Layout A or B instead:
+Decline politely and offer Layout A, B, or C instead:
 
-> "CPV supports exactly two layouts: A (hub-and-spoke) and B (nested single-repo, with full release ceremony). Mixed layouts give you the downsides of both without the benefits of either. Can I scaffold a clean Layout A or Layout B instead?"
+> "CPV supports three layouts: A (hub-and-spoke, separate repos), B (nested single-repo monorepo), and C (marketplace-in-plugin self-referential — one repo serving as both plugin and marketplace). Mixed/hybrid patterns give you the downsides of all three without the benefits of any. Can I scaffold a clean Layout A, B, or C instead?"
 
 Do NOT create alternative marketplace layouts, even if the user insists.
+
+### Layout C-specific fix patterns
+
+When a finding involves Layout C (`.claude-plugin/marketplace.json` AND `plugin.json` colocated in the same repo root), apply these specific rules:
+
+| Layout C finding | Fix |
+|---|---|
+| `plugin.json.name` ≠ `marketplace.json.plugins[N].name` (where source="./") | The self-entry name is the source of truth — fix whichever differs. Default: align `plugin.json.name` to the marketplace name. |
+| `plugin.json.version` ≠ `marketplace.json.plugins[N].version` (self-entry) | Bump both atomically; never edit only one. The publish.py for Layout C must bump both files in the same commit. |
+| `marketplace.json.plugins[N].source` ≠ `"./"` (self-entry) | Set to `"./"` — Layout C requires self-reference via current directory. |
+| Self-entry missing entirely | Add `{"name": "<plugin-name>", "source": "./", "version": "<plugin-version>"}` to `marketplace.json.plugins[]`. |
+| Layout C repo missing `.claude-plugin/marketplace.json` | If the user wanted Layout C, scaffold it with `setup-github-marketplace` skill (Layout C variant). If they meant Layout A, just remove any existing self-references and let `marketplace-fixer` route to Layout A. |
 
 ## Rules
 

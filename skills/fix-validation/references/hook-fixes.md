@@ -231,12 +231,15 @@ Prior editions of this document INCORRECTLY claimed hooks used milliseconds — 
 **Root cause**: An event name in the `"hooks"` object is not recognized by Claude Code.
 **Fix**:
 1. Check the event name for typos (names are case-sensitive)
-2. Valid event names are (all 26):
+2. Valid event names are (all 28 — 27 official + Setup legacy WARNING-only):
    - `PreToolUse`
    - `PostToolUse`
    - `PostToolUseFailure`
+   - `PostToolBatch` (v2.1.121 — fires after parallel tool batch resolves, before next model call)
    - `PermissionRequest`
+   - `PermissionDenied` (v2.1.89)
    - `UserPromptSubmit`
+   - `UserPromptExpansion` (v2.1.121 — fires when slash/MCP-prompt expands; can block expansion via decision: "block")
    - `Notification`
    - `Stop`
    - `StopFailure` (v2.1.78)
@@ -244,11 +247,12 @@ Prior editions of this document INCORRECTLY claimed hooks used milliseconds — 
    - `SubagentStart`
    - `SessionStart`
    - `SessionEnd`
-   - `PreCompact`
+   - `PreCompact` (can block by exit code 2 OR `{"decision": "block"}`)
    - `PostCompact` (v2.1.76)
-   - `Setup`
+   - `Setup` (legacy — runtime still recognises for command/mcp_tool gating)
    - `TeammateIdle`
    - `TaskCompleted`
+   - `TaskCreated` (v2.1.84)
    - `ConfigChange`
    - `WorktreeCreate`
    - `WorktreeRemove`
@@ -257,7 +261,6 @@ Prior editions of this document INCORRECTLY claimed hooks used milliseconds — 
    - `ElicitationResult` (v2.1.76)
    - `CwdChanged` (v2.1.83)
    - `FileChanged` (v2.1.83)
-   - `TaskCreated` (v2.1.84)
 3. **Wrong**: `"preToolUse"`, `"pre_tool_use"`, `"PreTooluse"`
 4. **Correct**: `"PreToolUse"`
 5. **New: Fuzzy matching** — the validator now suggests corrections for misspelled events. If you see `did you mean 'PreToolUse'?` in the error message, it detected a close match. Common typos:
@@ -557,34 +560,45 @@ Prior editions of this document INCORRECTLY claimed hooks used milliseconds — 
 
 ### CRITICAL: Invalid hook type
 
-**Error message**: `Invalid hook type: '{hook_type}'. Valid types: ['agent', 'command', 'prompt']`
+**Error message**: `Invalid hook type: '{hook_type}'. Valid types: ['agent', 'command', 'http', 'mcp_tool', 'prompt']`
 **Severity**: CRITICAL
-**Root cause**: The `"type"` field value is not one of the three valid types.
+**Root cause**: The `"type"` field value is not one of the five valid types (v2.1.118+).
 **Fix**:
-1. Use one of: `"command"`, `"prompt"`, `"agent"`
-2. **Wrong**: `"type": "shell"`, `"type": "script"`, `"type": "cmd"`
-3. **Correct**: `"type": "command"`
+1. Use one of: `"command"`, `"http"`, `"mcp_tool"`, `"prompt"`, `"agent"`
+2. **Wrong**: `"type": "shell"`, `"type": "script"`, `"type": "cmd"`, `"type": "mcp"`
+3. **Correct examples**:
+   - `{"type": "command", "command": "your-script.sh"}`
+   - `{"type": "mcp_tool", "server": "playwright", "tool": "screenshot"}`
+   - `{"type": "http", "url": "https://example.com/hook"}`
+
+`mcp_tool` (v2.1.118+) is the 5th hook type — invokes a tool on a connected MCP server. Required fields: `server`, `tool`. Optional: `input` (object; supports `${tool_input.field}` substitution from the hook's JSON input).
 
 ---
 
-### CRITICAL: Event only supports command hooks
+### CRITICAL: Event hook-type restriction
 
-**Error message**: `Event '{event_name}' only supports type 'command' hooks, not '{hook_type}'. Prompt and agent hooks are not supported for this event.`
+**Error message**: `Event '{event_name}' only supports 'command' and 'mcp_tool' hooks, not '{hook_type}'.` (SessionStart/Setup) OR `Event '{event_name}' only supports 'command', 'http', and 'mcp_tool' hooks, not '{hook_type}'. Prompt and agent hooks are not supported for this event.`
 **Severity**: CRITICAL
-**Root cause**: A `prompt` or `agent` hook type is used with an event that only supports `command` hooks.
+**Root cause**: The hook type is not allowed on this event. Per hooks.md (v2.1.121), events fall into three groups:
+
+1. **`command` + `mcp_tool` only** (fire BEFORE MCP servers connect):
+   - `SessionStart`, `Setup`
+   - `mcp_tool` hooks here will report "not connected" on first run.
+
+2. **`command` + `http` + `mcp_tool`** (no `prompt` / `agent`):
+   - `ConfigChange`, `CwdChanged`, `Elicitation`, `ElicitationResult`,
+   - `FileChanged`, `InstructionsLoaded`, `Notification`, `PermissionDenied`,
+   - `PostCompact`, `PreCompact`, `SessionEnd`, `StopFailure`,
+   - `SubagentStart`, `TaskCreated`, `TeammateIdle`, `WorktreeCreate`, `WorktreeRemove`
+
+3. **Full 5-type set** (command + http + mcp_tool + prompt + agent):
+   - `PermissionRequest`, `PostToolBatch`, `PostToolUse`, `PostToolUseFailure`,
+   - `PreToolUse`, `Stop`, `SubagentStop`, `TaskCompleted`,
+   - `UserPromptExpansion`, `UserPromptSubmit`
+
 **Fix**:
-1. The following events only support `type: "command"`:
-   - `ConfigChange`
-   - `Notification`
-   - `PreCompact`
-   - `SessionEnd`
-   - `SessionStart`
-   - `SubagentStart`
-   - `TeammateIdle`
-   - `WorktreeCreate`
-   - `WorktreeRemove`
-   - `InstructionsLoaded`
-2. Change the hook type to `"command"`:
+1. Identify which group your event belongs to.
+2. Change the hook type to one allowed for that event:
    ```json
    { "type": "command", "command": "your-script.sh" }
    ```

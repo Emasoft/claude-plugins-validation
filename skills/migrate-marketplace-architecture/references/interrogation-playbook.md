@@ -12,20 +12,47 @@
 
 ## Checklist
 
-- [ ] Target layout chosen (A or B) via AskUserQuestion — user's words recorded
+- [ ] Target layout chosen (A, B, or C) via AskUserQuestion — user's words recorded
 - [ ] Layout A: GitHub owner + visibility gathered
 - [ ] Layout B: primary author + email consolidated
+- [ ] Layout C: confirmed exactly one plugin in scope
 - [ ] Per-plugin metadata gathered (category, homepage, author, license)
 - [ ] Guest contributors handled (preserve or reassign)
 - [ ] Final confirmation from user BEFORE any destructive migration step
 
 ## Purpose
 
-Exact `AskUserQuestion` prompts the agent must use to gather user preferences before running any Layout A or Layout B migration. Do not invent defaults silently — every user decision is recorded in the migration log.
+Exact `AskUserQuestion` prompts the agent must use to gather user preferences before running any Layout A, B, or C migration. Do not invent defaults silently — every user decision is recorded in the migration log.
 
 ## Target layout selection
 
-ALWAYS the first question. Never pick for the user.
+ALWAYS the first question. Never pick for the user. **Layout C is offered ONLY when exactly one plugin is in scope** — multiple plugins disqualify it (the audit reports plugin count; Layout C requires count == 1).
+
+When N == 1:
+
+```
+AskUserQuestion:
+  question: >
+    This repo packages exactly one plugin. CPV supports three clean
+    layouts. Which do you prefer?
+
+    1. Layout A (hub-and-spoke) — give the plugin its own GitHub repo
+       and host it in a SEPARATE marketplace repo (one I create or one
+       you already own). Best when this plugin will eventually live
+       alongside others under the same marketplace.
+
+    2. Layout C (marketplace-in-plugin / self-referential) — keep
+       everything in this single repo. Add `.claude-plugin/marketplace.json`
+       (or `plugin.json`) so the repo is BOTH a plugin AND a marketplace.
+       Users `claude plugin marketplace add <owner>/<repo>` then install.
+       Best when this is the only plugin and you want minimum repo
+       overhead. Cannot host more plugins later without migrating.
+
+    3. Cancel — leave everything as-is and document the decision.
+  options: ["Layout A", "Layout C", "Cancel"]
+```
+
+When N >= 2:
 
 ```
 AskUserQuestion:
@@ -52,6 +79,8 @@ AskUserQuestion:
 ```
 
 If Cancel: write the migration log with the decision and exit.
+
+If user chose Layout C: skip the GitHub owner / primary author consolidation / per-plugin loops below — Layout C has exactly one plugin and one author. Jump straight to the per-plugin metadata section (category, homepage, license) for the single plugin, then to final confirmation. The Layout C migration is described in `layout-c-migration.md`.
 
 ## GitHub owner and visibility (Layout A only)
 
@@ -163,7 +192,7 @@ AskUserQuestion:
   question: >
     Ready to execute the migration plan below:
 
-    - Target layout: {A or B}
+    - Target layout: {A, B, or C}
     - Plugins to migrate: {N} ({list})
     - GitHub owner: {owner}
     - Primary author: {author}
