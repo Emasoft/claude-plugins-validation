@@ -2697,6 +2697,121 @@ register_rule(RuleSchema(
 ))
 
 
+# =============================================================================
+# CA-01 .. CA-06 — Prompt-cache audit rules (Phase 11)
+# =============================================================================
+#
+# Validates plugins against Anthropic's 6 prompt-caching rules surfaced
+# by ussumant/cache-audit (https://github.com/ussumant/cache-audit).
+# Plugins shipping hooks/skills/agents can silently break the prompt
+# cache for every user that installs them, multiplying API costs by
+# 5-10x. These rules catch the documented breakage patterns.
+#
+# Reference: "Lessons from Building Claude Code: Prompt Caching Is
+# Everything" by Thariq Shihipar (Anthropic).
+
+register_rule(RuleSchema(
+    rule_id="CA-01",
+    name="Static prompt prefix — no dynamic data in system prompt",
+    category="cache",
+    severity="MAJOR",
+    description=(
+        "Dynamic placeholders ({{TIMESTAMP}}, $(date), $(git status)) in plugin "
+        "CLAUDE.md, agent system-prompt, or skill SKILL.md re-tokenise the "
+        "cached prefix every session."
+    ),
+    references=("ussumant/cache-audit Rule 1", "Anthropic engineering"),
+    fp_guards=(
+        "Dynamic markers inside fenced code blocks are documentation, not active",
+        "{{CLAUDE_PROJECT_DIR}} and {{CLAUDE_PLUGIN_ROOT}} are static path placeholders",
+    ),
+))
+
+register_rule(RuleSchema(
+    rule_id="CA-02",
+    name="Hooks inject via additionalContext, not system-prompt edits",
+    category="cache",
+    severity="MAJOR",
+    description=(
+        "SessionStart / UserPromptSubmit / PreCompact hooks must emit JSON with "
+        "hookSpecificOutput.additionalContext, not write CLAUDE.md or settings.json "
+        "(those mutations bust the cached prefix)."
+    ),
+    references=("ussumant/cache-audit Rule 2", "Claude Code hooks reference"),
+    fp_guards=(
+        "Writes to user-data files under .claude/data/ are not cached prefix",
+        "Touching ~/.claude/CLAUDE.md from a non-cache hook (Stop, etc.) is benign",
+    ),
+))
+
+register_rule(RuleSchema(
+    rule_id="CA-03",
+    name="Tool-set stability — no add/remove mid-session",
+    category="cache",
+    severity="MAJOR",
+    description=(
+        "Hook scripts that flip allow/deny lists in settings.json, or that toggle "
+        "MCP servers, force a tool-schema re-tokenise on every turn."
+    ),
+    references=("ussumant/cache-audit Rule 3", "Claude Code MCP guide"),
+    fp_guards=(
+        "Lazy MCP discovery via ToolSearch is the recommended pattern, not a violation",
+        "PreToolUse hooks that block specific calls don't change the schema",
+    ),
+))
+
+register_rule(RuleSchema(
+    rule_id="CA-04",
+    name="Single model per conversation — switches via subagents only",
+    category="cache",
+    severity="MINOR",
+    description=(
+        "Skills declaring a `model:` field force an in-line model switch and "
+        "invalidate the cached prefix. Use an agent (fresh sub-conversation) "
+        "instead."
+    ),
+    references=("ussumant/cache-audit Rule 4",),
+    fp_guards=(
+        "Agent frontmatter `model:` is fine — agents start a fresh conversation",
+        "Skill `model:` is the problematic case (in-line switch)",
+    ),
+))
+
+register_rule(RuleSchema(
+    rule_id="CA-05",
+    name="Bounded dynamic-content size in hook output",
+    category="cache",
+    severity="MINOR",
+    description=(
+        "Hooks that dump unbounded `git status`, `find`, `ls -R`, or full-file "
+        "`cat` output can balloon to >40 KB per session — bound them with "
+        "--short, head -n N, or --maxdepth."
+    ),
+    references=("ussumant/cache-audit Rule 5",),
+    fp_guards=(
+        "Bounded commands (head -n N, grep -c, --short, --porcelain | head) are fine",
+        "WARNING-tier output: only emit when an unbounded pattern is the entire script body",
+    ),
+))
+
+register_rule(RuleSchema(
+    rule_id="CA-06",
+    name="Fork safety — compaction & subagent calls preserve prefix",
+    category="cache",
+    severity="WARNING",
+    description=(
+        "PreCompact / PostCompact / SubagentStart hooks must preserve the parent's "
+        "system-prompt + tool-schema prefix when forking — otherwise compaction "
+        "loses the cached prefix entirely."
+    ),
+    references=("ussumant/cache-audit Rule 6",),
+    fp_guards=(
+        "Most plugins don't ship compaction hooks — silent PASS is the norm",
+        "Built-in Claude Code compaction is correct by default",
+    ),
+))
+
+
 # Private usernames to detect - automatically detected from system
 # These should never appear in published code
 def _get_private_usernames() -> set[str]:
