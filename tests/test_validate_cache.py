@@ -26,9 +26,7 @@ from validate_cache import (  # noqa: E402
     scan_hook_for_unbounded_output,
     scan_plugin_for_cache,
     scan_skill_for_model_override,
-    scan_static_prefix,
 )
-
 
 # -----------------------------------------------------------------------------
 # Schema registration
