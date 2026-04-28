@@ -1100,3 +1100,50 @@ class TestCrossSourceDuplicateServerNames:
         assert ".mcp.json" in msg and "extra-mcp.json" in msg, (
             f"Expected message to name both sources (.mcp.json and the external file path), got: {msg}"
         )
+
+
+# =============================================================================
+# v2.1.121 spec sweep — alwaysLoad + headersHelper field allowlist
+# =============================================================================
+
+
+class TestV21SpecFieldAllowlist:
+    """Verify that v2.1.x MCP server config additions are recognized."""
+
+    def test_always_load_field_accepted_v2_1_121(self):
+        """alwaysLoad: true must NOT be flagged as an unknown field (v2.1.121)."""
+        from cpv_validation_common import ValidationReport  # noqa: PLC0415
+        from validate_mcp import validate_mcp_server  # noqa: PLC0415
+        report = ValidationReport()
+        validate_mcp_server(
+            "github",
+            {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "alwaysLoad": True},
+            report,
+        )
+        unknown_warnings = [
+            r for r in report.results
+            if r.level == "WARNING" and "alwaysLoad" in r.message and "Unknown field" in r.message
+        ]
+        assert unknown_warnings == [], (
+            f"alwaysLoad must be a known field per v2.1.121, got warnings: "
+            f"{[w.message for w in unknown_warnings]}"
+        )
+
+    def test_headers_helper_field_accepted(self):
+        """headersHelper must NOT be flagged as an unknown field (v2.1.85+)."""
+        from cpv_validation_common import ValidationReport  # noqa: PLC0415
+        from validate_mcp import validate_mcp_server  # noqa: PLC0415
+        report = ValidationReport()
+        validate_mcp_server(
+            "remote",
+            {"type": "http", "url": "https://example.com/mcp", "headersHelper": "/path/to/script.sh"},
+            report,
+        )
+        unknown_warnings = [
+            r for r in report.results
+            if r.level == "WARNING" and "headersHelper" in r.message and "Unknown field" in r.message
+        ]
+        assert unknown_warnings == [], (
+            f"headersHelper must be a known field per v2.1.85+, got warnings: "
+            f"{[w.message for w in unknown_warnings]}"
+        )

@@ -181,6 +181,7 @@ MANAGED_ONLY_KEYS: frozenset[str] = frozenset(
         "forceRemoteSettingsRefresh",
         "pluginTrustMessage",
         "strictKnownMarketplaces",
+        "wslInheritsWindowsSettings",  # v2.1.118 — WSL inherits Windows-side managed settings
     }
 )
 
@@ -322,6 +323,9 @@ KNOWN_SETTINGS_KEYS: frozenset[str] = frozenset(
         "disableAllHooks",  # v2.1.49 — companion toggle
         "voiceEnabled",  # v2.1.79
         "worktree",  # v2.1.76 — top-level object (sparsePaths, etc.)
+        # v2.33.x batch — keys added in CC v2.1.117–v2.1.121 spec sweep
+        "prUrlTemplate",  # v2.1.119 — custom code-review URL for footer PR badge
+        "wslInheritsWindowsSettings",  # v2.1.118 — WSL inherits Windows-side managed settings (managed-only)
     }
 )
 

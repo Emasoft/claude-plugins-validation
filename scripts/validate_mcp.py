@@ -54,8 +54,10 @@ KNOWN_SERVER_FIELDS = {
     "type",  # Transport type: stdio, sse, http
     "url",  # Required for http/sse servers
     "headers",  # HTTP headers for authentication
+    "headersHelper",  # v2.1.85 — script that emits headers (CLAUDE_CODE_MCP_SERVER_NAME/_URL)
     "timeout",  # Connection timeout
     "oauth",  # OAuth config object with clientId and callbackPort
+    "alwaysLoad",  # v2.1.121 — when true, all tools skip tool-search deferral
 }
 
 # Environment variable pattern: ${VAR} or ${VAR:-default}
