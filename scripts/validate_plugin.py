@@ -782,6 +782,94 @@ def validate_monitors_entries(
     )
 
 
+def validate_layout_c_consistency(
+    plugin_root: Path,
+    report: ValidationReport,
+) -> None:
+    """Validate Layout C (marketplace-in-plugin) cross-consistency.
+
+    Layout C exists when ONE root holds BOTH `.claude-plugin/plugin.json`
+    AND `.claude-plugin/marketplace.json`. The marketplace must list the
+    plugin's own name (self-reference) and version must match across the
+    two manifests.
+
+    Per references/marketplace-layouts.md§"Layout C", the rules are:
+      1. plugin.json.name MUST appear in marketplace.json.plugins[].name
+      2. The self-referenced plugin entry MUST use source: "./" (relative).
+      3. plugin.json.version MUST equal marketplace.json.plugins[<self>].version
+         (when both are set).
+
+    Severities are MAJOR for hard mismatches (would break install) and
+    MINOR for soft drift (cosmetic / future-confusion).
+    """
+    plugin_path = plugin_root / ".claude-plugin" / "plugin.json"
+    market_path = plugin_root / ".claude-plugin" / "marketplace.json"
+    if not plugin_path.is_file() or not market_path.is_file():
+        return  # Not Layout C — single-manifest plugins are unaffected.
+
+    try:
+        plugin_obj = json.loads(plugin_path.read_text(encoding="utf-8"))
+        market_obj = json.loads(market_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return  # Per-manifest validators already report parse errors.
+
+    plugin_name = plugin_obj.get("name") if isinstance(plugin_obj, dict) else None
+    plugin_version = plugin_obj.get("version") if isinstance(plugin_obj, dict) else None
+    if not plugin_name:
+        return  # Per-manifest validator already flagged missing name.
+
+    plugins_arr = market_obj.get("plugins") if isinstance(market_obj, dict) else None
+    if not isinstance(plugins_arr, list):
+        return
+
+    self_entry = None
+    for entry in plugins_arr:
+        if isinstance(entry, dict) and entry.get("name") == plugin_name:
+            self_entry = entry
+            break
+
+    if self_entry is None:
+        report.major(
+            f"Layout C: plugin.json declares name='{plugin_name}' but "
+            f"marketplace.json's plugins[] does not list a self-reference "
+            f"with that name. Add `{{name: '{plugin_name}', source: './'}}` "
+            f"to marketplace.json's plugins array, or remove marketplace.json "
+            f"if this is meant to be a plain plugin.",
+            ".claude-plugin/marketplace.json",
+        )
+        return
+
+    # Rule 2 — source must be "./" (relative)
+    src = self_entry.get("source")
+    src_ok = (
+        src == "./"
+        or src == "."
+        or (isinstance(src, str) and src.strip() in ("./", "."))
+    )
+    if not src_ok:
+        report.major(
+            f"Layout C: marketplace.json's self-reference for plugin "
+            f"'{plugin_name}' has source={src!r}; must be './' (relative) "
+            f"so install resolves to the same repo. Other source types "
+            f"would re-clone the repository.",
+            ".claude-plugin/marketplace.json",
+        )
+
+    # Rule 3 — version consistency
+    self_version = self_entry.get("version")
+    if (
+        plugin_version
+        and self_version
+        and plugin_version != self_version
+    ):
+        report.minor(
+            f"Layout C: plugin.json version '{plugin_version}' differs from "
+            f"marketplace.json plugins[{plugin_name}].version '{self_version}'. "
+            f"Bump both together to keep installation metadata consistent.",
+            ".claude-plugin/marketplace.json",
+        )
+
+
 def validate_manifest(
     plugin_root: Path,
     report: ValidationReport,
@@ -3651,6 +3739,8 @@ def main() -> int:
 
     validate_manifest(plugin_root, report, marketplace_only)
     validate_structure(plugin_root, report, marketplace_only)
+    # v2.32.0 — Layout C cross-validation (marketplace-in-plugin)
+    validate_layout_c_consistency(plugin_root, report)
     validate_commands(plugin_root, report)
     validate_agents(plugin_root, report)
     validate_hooks(plugin_root, report)

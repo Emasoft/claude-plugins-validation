@@ -1,10 +1,11 @@
-# Marketplace Layouts — Two Supported Architectures
+# Marketplace Layouts — Three Supported Architectures
 
 ## Table of Contents
 
 - [Overview](#overview)
 - [Layout A — Hub-and-Spoke (separate repos)](#layout-a--hub-and-spoke-separate-repos)
 - [Layout B — Nested single-repo (monorepo)](#layout-b--nested-single-repo-monorepo)
+- [Layout C — Marketplace-in-plugin (self-referential single repo)](#layout-c--marketplace-in-plugin-self-referential-single-repo)
 - [How Claude Code updates plugins in each layout](#how-claude-code-updates-plugins-in-each-layout)
 - [When to choose which](#when-to-choose-which)
 - [Rich metadata fields (author, homepage, license, category)](#rich-metadata-fields-author-homepage-license-category)
@@ -15,18 +16,23 @@
 
 ## Checklist
 
-- [ ] Pick a layout: A (hub-and-spoke) for independently-versioned plugins, B (nested) for monorepos
+- [ ] Pick a layout: A (hub-and-spoke) for independently-versioned plugins, B (nested) for monorepos, C (marketplace-in-plugin) for a single self-referential repo
 - [ ] Verify the choice with the user — never unilateral
-- [ ] Apply layout-specific template (separate plugin repos + hub OR nested subdirs)
+- [ ] Apply layout-specific template (separate plugin repos + hub OR nested subdirs OR self-referential)
 - [ ] Populate rich metadata (author, homepage, license, category) in every marketplace entry
 - [ ] Reject git-subdir requests — CPV does not emit it
 - [ ] For refactor between layouts, load `migrate-marketplace-architecture` skill
+- [ ] **Layout C only**: ensure plugin.json's `name` appears in marketplace.json's `plugins[]` (self-reference)
 
 ## Overview
 
-CPV supports exactly two marketplace layouts. Both are opinionated: each enforces proper release ceremony (tags, CHANGELOG, CI), single-author publishing, and one-way-to-do-it semantics. **No hybrids, no community-monorepos, no mixed layouts** — those patterns degrade discipline and trade the benefits of both layouts for the downsides of both.
+CPV supports three marketplace layouts. All three enforce proper release ceremony (tags, CHANGELOG, CI), single-author publishing, and one-way-to-do-it semantics within each layout.
 
-The agent must be fluent in both and follow the user's preference between A and B. If the user asks for a third option (mixed, hybrid, submodules, git-subdir), the agent should explain that CPV prefers a clean A or clean B and offer to scaffold one of those instead.
+**Layouts A and B are the canonical separated forms.** Layout C is a legitimate "marketplace-in-plugin" pattern where the same root directory serves both roles — a single repo that *is* a plugin AND also publishes a marketplace listing itself (and optionally siblings) as installable plugins. Useful when you want to ship one self-contained extension that participates in marketplace discovery without splitting into two repos.
+
+**Avoid:** mixed/community-monorepos that don't fit any of A/B/C, git-subdir, or split definitions where the plugin and marketplace manifests disagree about the plugin's identity.
+
+The agent must be fluent in all three and follow the user's preference. If the user asks for a fourth option (submodules, git-subdir, etc.), the agent should explain that CPV prefers a clean A, B, or C and offer to scaffold one of those instead.
 
 | Aspect | Layout A (Hub-and-Spoke) | Layout B (Nested) |
 |---|---|---|
@@ -119,6 +125,76 @@ Or equivalently as an object:
 3. **Validate every subfolder** with `validate_plugin.py <plugins/my-plugin-a>` before committing.
 4. **Shared CI**: one workflow in `.github/workflows/` runs `validate_plugin.py` against every subfolder. A failure in one plugin fails the whole repo.
 5. **Shared publish pipeline**: `scripts/publish.py` at the repo root bumps the repo version, then iterates over each `plugins/*/plugin.json` to update any plugins that changed since the last tag.
+
+## Layout C — Marketplace-in-plugin (self-referential single repo)
+
+A single repository that **is itself a plugin** AND **also publishes a marketplace** listing that same plugin (and optionally sibling plugins or external dependencies). The same root directory holds both manifests; the marketplace's `plugins[]` array contains an entry whose `name` matches the plugin's own `name` and whose `source` is a relative `./` reference.
+
+This is the right shape when you want a single self-contained extension to participate in marketplace discovery without splitting into two repositories. Common use cases:
+
+- A team utility plugin that other teams should install via `claude plugin marketplace add <repo>` followed by `claude plugin install <name>@<marketplace>` — same flow as third-party plugins, no "first install the plugin, then add the marketplace" two-step.
+- An internal organisation extension that wants to declare additional sibling plugins in its own marketplace (e.g. `core` plugin + `extras` plugin shipped together).
+- A demo/showcase repository where the plugin itself serves as living documentation for how to register a marketplace.
+
+```
+my-extension/                          (SINGLE repo — plugin + marketplace)
+├── .claude-plugin/
+│   ├── plugin.json                    — defines THIS repo as a plugin
+│   └── marketplace.json               — declares `my-extension` (same name) as one of its plugins
+├── agents/
+├── commands/
+├── hooks/
+├── skills/
+├── .github/workflows/validate.yml     — runs both validate_plugin AND validate_marketplace
+├── README.md
+└── CHANGELOG.md
+```
+
+`marketplace.json` self-reference (the plugin's own entry):
+
+```json
+{
+  "name": "my-extension",
+  "owner": {"name": "Author Name", "email": "..."},
+  "plugins": [
+    {
+      "name": "my-extension",
+      "source": "./",
+      "description": "...",
+      "version": "1.0.0",
+      "category": "...",
+      "tags": ["..."]
+    }
+  ]
+}
+```
+
+`plugin.json` (no special marker — looks like a standard plugin manifest):
+
+```json
+{
+  "name": "my-extension",
+  "version": "1.0.0",
+  "description": "...",
+  "author": {"name": "Author Name"}
+}
+```
+
+### Critical rules for Layout C
+
+1. **Manifests MUST agree on the plugin name.** `plugin.json` `name` and the matching marketplace.json `plugins[].name` MUST be identical. Any drift breaks `claude plugin install <name>@<marketplace>` resolution. CPV cross-validates this.
+2. **Marketplace `plugins[].source` for the self-reference MUST be `"./"`** (relative-path source pointing at the same root). Other source types (github, url) would create a duplicate clone of the same repo at install time.
+3. **Versioning is unified** — bump `plugin.json.version` AND keep `marketplace.json.plugins[<self>].version` in sync (CPV warns when they diverge). One git tag covers both manifests.
+4. **CI runs both validators**: `validate_plugin.py .` AND `validate_marketplace.py .` against the same root. The shared validate.yml workflow must succeed for both.
+5. **Sibling plugins (optional)** — if the marketplace also lists other plugins (different name from the repo), each sibling needs its own subdirectory with its own `.claude-plugin/plugin.json`. That hybrid is essentially Layout B + a self-reference. Use Layout B with no self-reference unless you genuinely need the marketplace-in-plugin semantic.
+6. **Single CHANGELOG** at the repo root covers both surfaces.
+7. **`plugin.json` and `marketplace.json` MUST have matching `version` fields** when both declare one. Checked by CPV cross-validation.
+
+### When NOT to use Layout C
+
+- Multiple plugins, different release cadences → use Layout A.
+- Multiple plugins, single release cadence, no self-publishing requirement → use Layout B.
+- Only Layout C when the *primary* shape is a single plugin that wants to be marketplace-installable from its own repo.
 
 ## How Claude Code updates plugins in each layout
 

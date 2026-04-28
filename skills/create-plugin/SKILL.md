@@ -14,7 +14,15 @@ Scaffolds complete Claude Code plugin or marketplace repositories with standard 
 
 ## Marketplace layout
 
-CPV supports two layouts — **Layout A (hub-and-spoke)** with one repo per plugin, or **Layout B (nested)** with plugins as subfolders inside the marketplace repo. Both work with Claude Code. Default to A for new marketplaces; follow the user's preference without argument. Full guide in [marketplace-layouts.md](references/marketplace-layouts.md).
+CPV supports three layouts:
+
+- **Layout A (hub-and-spoke)** — one repo per plugin + a separate marketplace hub repo
+- **Layout B (nested)** — plugins as subfolders inside the marketplace repo
+- **Layout C (marketplace-in-plugin)** — single self-referential repo that *is* a plugin AND publishes a marketplace listing itself
+
+All three work with Claude Code. Default to A for new marketplaces with multiple plugins; suggest Layout C when the user wants a single self-contained extension that's marketplace-installable from its own repo (no two-step install). Full guide in [marketplace-layouts.md](references/marketplace-layouts.md).
+
+For Layout C: scaffold with `generate_plugin_repo.py --self-marketplace` (alias of running both generators with cross-references) — see the marketplace-layouts reference for the exact manifest shape and the cross-validation rules CPV enforces.
 
 ## Prerequisites
 
