@@ -4,16 +4,10 @@
 
 - [When to migrate to C](#when-to-migrate-to-c)
 - [Pre-Flight Checks](#pre-flight-checks)
-- [Plugin-only → Layout C (add marketplace.json)](#plugin-only--layout-c-add-marketplacejson)
-- [Marketplace-only → Layout C (add plugin.json)](#marketplace-only--layout-c-add-pluginjson)
-- [Self-entry construction](#self-entry-construction)
-- [Name and version synchronization](#name-and-version-synchronization)
-- [Why Layout C Does Not Need Auto-Notification](#why-layout-c-does-not-need-auto-notification)
-- [publish.py adaptation for Layout C](#publishpy-adaptation-for-layout-c)
-- [Single Atomic Commit](#single-atomic-commit)
-- [Tag the Repository](#tag-the-repository)
-- [Verification](#verification)
-- [Rollback Recipe](#rollback-recipe)
+- [Migration paths (plugin-only or marketplace-only starting state)](#migration-paths-plugin-only-or-marketplace-only-starting-state)
+- [Self-entry construction and version sync](#self-entry-construction-and-version-sync)
+- [publish.py and atomic commit](#publishpy-and-atomic-commit)
+- [Verification and Rollback](#verification-and-rollback)
 
 ## Checklist
 
@@ -72,7 +66,9 @@ If the user is starting from:
 
 4. **Record the source-of-truth name and version** that will become the self-entry's identity. From `plugin.json` if present, otherwise from the existing single-plugin entry in `marketplace.json`.
 
-## Plugin-only → Layout C (add marketplace.json)
+## Migration paths (plugin-only or marketplace-only starting state)
+
+### Plugin-only → Layout C (add marketplace.json)
 
 Starting state: repo has `.claude-plugin/plugin.json`, ships one plugin, has no marketplace manifest.
 
@@ -108,7 +104,7 @@ Starting state: repo has `.claude-plugin/plugin.json`, ships one plugin, has no 
 
 3. **Validate cross-references**: `name` is identical in both manifests; `version` is identical. The `source: "./"` is the canonical Layout C marker.
 
-## Marketplace-only → Layout C (add plugin.json)
+### Marketplace-only → Layout C (add plugin.json)
 
 Starting state: repo has `.claude-plugin/marketplace.json` with a single entry pointing to a local path (e.g. `"./"` or `"./plugins/foo"`), but no `.claude-plugin/plugin.json` at the repo root.
 
@@ -131,7 +127,9 @@ Starting state: repo has `.claude-plugin/marketplace.json` with a single entry p
 
 4. **Update the marketplace entry** to `"source": "./"` (if it wasn't already).
 
-## Self-entry construction
+## Self-entry construction and version sync
+
+### Self-entry shape
 
 The single entry in `marketplace.json.plugins[]` for Layout C MUST satisfy:
 
@@ -145,7 +143,7 @@ The single entry in `marketplace.json.plugins[]` for Layout C MUST satisfy:
 
 CPV's `validate_layout_c_consistency` checks rules 1, 2, and 3. If any of these drift, validation fails with a CRITICAL category=architecture finding.
 
-## Name and version synchronization
+### Name and version synchronization
 
 This is the single most fragile invariant in Layout C. Whenever EITHER manifest changes, BOTH must change in the same commit. The standard `publish.py` for Layout C handles this — but if a contributor edits one manifest by hand without the other, CPV emits a CRITICAL on the next validation run.
 
@@ -153,13 +151,15 @@ To enforce the invariant:
 - Add a pre-commit hook that aborts when `plugin.json` is staged without `marketplace.json` (or vice versa) when the changed field is `name` or `version`. The standard CPV pre-push hook also catches this on push.
 - Document in the repo's CONTRIBUTING.md that Layout C requires lockstep edits to both manifests.
 
-## Why Layout C Does Not Need Auto-Notification
+### Why Layout C Does Not Need Auto-Notification
 
 Auto-notification (the `MARKETPLACE_PAT` + `notify-marketplace.yml` chain used in Layout A) exists to bridge a plugin repo and a SEPARATE marketplace repo. Layout C colocates both manifests in the SAME repo, so a single push updates both manifests atomically — there is no second repo to notify.
 
 Skip the entire `setup-marketplace-auto-notification` flow for Layout C migrations.
 
-## publish.py adaptation for Layout C
+## publish.py and atomic commit
+
+### publish.py adaptation for Layout C
 
 The Layout C `publish.py` differs from Layout A or B in two ways:
 1. The bump function modifies BOTH `.claude-plugin/plugin.json::version` AND `.claude-plugin/marketplace.json::metadata.version` AND `.claude-plugin/marketplace.json::plugins[N].version` (the self-entry).
@@ -167,7 +167,7 @@ The Layout C `publish.py` differs from Layout A or B in two ways:
 
 Use the template at `scripts/generate_plugin_repo.py::PUBLISH_PY_TEMPLATE_LAYOUT_C` (added in v2.33.0+; for older CPV versions, hand-adapt the standard template).
 
-## Single Atomic Commit
+### Single Atomic Commit
 
 The migration MUST land as one commit:
 
@@ -178,7 +178,7 @@ git commit -m "chore: migrate to Layout C (marketplace-in-plugin)"
 
 Never split the manifest creation from the publish.py update — a half-migrated repo trips CPV's category=architecture rule.
 
-## Tag the Repository
+### Tag the Repository
 
 ```bash
 NEW_VERSION=$(jq -r .version .claude-plugin/plugin.json)
@@ -186,7 +186,9 @@ git tag "v${NEW_VERSION}"
 git push origin HEAD --tags
 ```
 
-## Verification
+## Verification and Rollback
+
+### Verification
 
 ```bash
 uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" . --strict
@@ -198,7 +200,7 @@ Both must report zero CRITICAL/MAJOR/MINOR/NIT. Specifically check:
 - `version` matches in all three locations: `plugin.json.version`, `marketplace.json.metadata.version`, `marketplace.json.plugins[N].version`
 - The self-entry `source` is exactly `"./"`
 
-## Rollback Recipe
+### Rollback Recipe
 
 ```bash
 git reset --hard <pre-migration-sha>

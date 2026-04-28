@@ -17,16 +17,11 @@ user-invocable: false
 
 ## Overview
 
-Automates creation and configuration of a GitHub-based marketplace repository for Claude Code plugins. Handles CI/CD pipeline setup, batch plugin linking, and cross-marketplace migration.
+Automates creation of a GitHub-hosted Claude Code plugin marketplace. Handles CI/CD setup, batch plugin linking, and cross-marketplace migration.
 
 ## Marketplace layout
 
-Three supported layouts:
-- **A (hub-and-spoke)** — separate repos per plugin, entries `{"source":"github","repo":"owner/name"}`. Default for multi-plugin sets.
-- **B (nested monorepo)** — plugins as subdirs of marketplace repo, entries `"./plugins/<name>"`. Default when monorepo is desired.
-- **C (marketplace-in-plugin)** — ONE repo with both `plugin.json` AND `marketplace.json` at root, single self-entry `{"source": "./", "name": "<plugin-name>"}`. Default when packaging exactly one plugin and a separate marketplace repo would be overhead.
-
-Agent suggests Layout A for multi-plugin sets, Layout C for single-plugin repos, follows user preference otherwise. Details: [marketplace-layouts.md](references/marketplace-layouts.md).
+Three layouts: **A** (hub-and-spoke, separate repos), **B** (nested monorepo, subdirs), **C** (marketplace-in-plugin, single repo with both manifests, source="./"). Suggest A for multi-plugin sets, C for single-plugin repos. Details: [marketplace-layouts.md](references/marketplace-layouts.md).
 
 ## Prerequisites
 
@@ -66,7 +61,7 @@ PAT needs `repo`+`workflow`. Dispatch missing: confirm `notify-marketplace.yml` 
 ## Resources
 
 - [Marketplace Layouts](references/marketplace-layouts.md)
-  > Overview · Layout A — Hub-and-Spoke (separate repos) · Layout B — Nested single-repo (monorepo) · How Claude Code updates plugins in each layout · When to choose which · Rich metadata fields (author, homepage, license, category) · Why CPV does not use git-subdir · Encountering a non-CPV marketplace · Refactoring between layouts · Agent behavior summary
+  > Overview · Layout A — Hub-and-Spoke (separate repos) · Layout B — Nested single-repo (monorepo) · Layout C — Marketplace-in-plugin (self-referential single repo) · How Claude Code updates plugins in each layout · When to choose which · Rich metadata fields (author, homepage, license, category) · Why CPV does not use git-subdir · Encountering a non-CPV marketplace · Refactoring between layouts · Agent behavior summary
 - [Workflow Templates](references/workflow-templates.md)
   > Placeholder Reference · validate.yml (Marketplace CI) · update-submodules.yml (Dispatch Receiver) · notify-marketplace.yml.template (Plugin Side)
 - [Script Templates](references/script-templates.md)
@@ -82,7 +77,7 @@ PAT needs `repo`+`workflow`. Dispatch missing: confirm `notify-marketplace.yml` 
 
 ## Compiling Templates
 
-Replace `<placeholder-for-...>` tokens; verify with `grep -r 'placeholder-for-'`. README: use generate-readme.py.
+Replace `<placeholder-for-...>` tokens; verify with grep. README: use generate-readme.py.
 
 ## Token Optimization
 
