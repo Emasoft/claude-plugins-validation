@@ -2,11 +2,11 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
-## [2.34.0] - 2026-04-28
+## [2.34.1] - 2026-04-28
 
-### Features
+### Bug Fixes
 
-- Spec coverage sweep for CC v2.1.117–v2.1.121 — close 5 schema gaps
+- **fixer:** Add fix recipes for cache-audit, telemetry hazards, Layout C, slash collisions
 
 ### Miscellaneous Tasks
 
