@@ -18,6 +18,8 @@
 - [14. validate_encoding.py](#14-validate_encodingpy)
 - [15. validate_enterprise.py](#15-validate_enterprisepy)
 - [16. validate_scoring.py](#16-validate_scoringpy)
+- [17. validate_cache.py](#17-validate_cachepy)
+- [18. validate_telemetry.py — plugin-shipped env-var hazards](#18-validate_telemetrypy--plugin-shipped-env-var-hazards)
 
 ## Checklist
 
@@ -29,7 +31,7 @@
 
 ---
 
-Maps each **plugin-scope** CPV validator to its fix reference guide with section numbers. This index covers the 16 validators that operate on a single plugin directory. For marketplace-level validators (`validate_marketplace.py`, `validate_marketplace_pipeline.py`) see [marketplace-error-index.md](marketplace-error-index.md).
+Maps each **plugin-scope** CPV validator to its fix reference guide with section numbers. This index covers the 18 validators that operate on a single plugin directory. For marketplace-level validators (`validate_marketplace.py`, `validate_marketplace_pipeline.py`) see [marketplace-error-index.md](marketplace-error-index.md).
 
 Entries tagged `[NEW]` were added in recent releases (v2.11.x / v2.12.x) and correspond to items tracked in `docs_dev/validator_error_inventory_20260412.md`.
 
@@ -69,6 +71,9 @@ Primary fix guide: [plugin-structure-fixes.md](plugin-structure-fixes.md)
 | `hooks: "./hooks/hooks.json"` cascading MCP failure (upgraded WARNING→MAJOR) **[NEW 2026-04-18]** | plugin-structure-fixes §1 ("hooks points at the default file") |
 | Monitor tool recognition (valid) **[NEW]** | plugin-structure-fixes §4 (valid tool names) — Monitor (v2.1.98) is accepted in agent `tools:` |
 | Plugin-shipped agent restrictions (`hooks`/`mcpServers`/`permissionMode` forbidden) **[NEW]** | plugin-structure-fixes §4 (Agent frontmatter) |
+| `Layout C: self-entry name does not match plugin.json.name` (v2.32.0+, Phase 16, marketplace-in-plugin) **[NEW]** | plugin-structure-fixes §15 (Layout C) |
+| `Layout C: self-entry source is not "./"` (v2.32.0+) **[NEW]** | plugin-structure-fixes §15 (Layout C) |
+| `Layout C: version mismatch between plugin.json and marketplace.json` (v2.32.0+) **[NEW]** | plugin-structure-fixes §15 (Layout C) |
 
 Common crash-category CRITICALs (from `validate_scoring.py`) land here too when the plugin validator raises an exception.
 
@@ -199,6 +204,7 @@ Primary fix guide: [plugin-structure-fixes.md](plugin-structure-fixes.md) §3 (C
 | `argument-hint` field | plugin-structure-fixes §3 |
 | Content body after frontmatter | plugin-structure-fixes §3 |
 | Security: command injection / dangerous patterns | [security-fixes.md](security-fixes.md) §2 |
+| `Command name '<name>' collides with a built-in Claude Code slash command` (v2.31.0+, Phase 15) **[NEW]** | plugin-structure-fixes §16 (Bundled slash-command collision) |
 
 ---
 
@@ -379,3 +385,42 @@ Primary fix guide: [scoring-fixes.md](scoring-fixes.md)
 | Low aggregate scores | scoring-fixes §6 |
 
 `validate_scoring.py` is an orchestration validator — it runs the other validators and emits one CRITICAL per crashing subvalidator. Check the underlying validator (using its own fix guide entry above) before assuming a scoring bug.
+
+---
+
+## 17. validate_cache.py
+
+Added in v2.27.0 (Phase 11). Six rules covering Anthropic prompt-cache hygiene.
+
+Primary fix guide: [cache-fixes.md](cache-fixes.md)
+
+| Error topic | Fix guide section |
+|---|---|
+| `[CA-01] Static prefix violation` ({{TIMESTAMP}}/$(date)/inline dynamic in CLAUDE.md, agents, SKILL.md) | cache-fixes CA-01 |
+| `[CA-02] Hook writes to cached file` (SessionStart/UserPromptSubmit/PreCompact writing CLAUDE.md or settings.json) | cache-fixes CA-02 |
+| `[CA-03] Hook flips MCP/permission state` (mutating enabledMcpServers/disabledMcpServers/permissions.allow/deny) | cache-fixes CA-03 |
+| `[CA-04] SKILL.md model: frontmatter forces in-line model switch` | cache-fixes CA-04 |
+| `[CA-05] Hook script runs unbounded output command` (`git status`, `find`, `ls -laR`, `cat <large>`) | cache-fixes CA-05 |
+| `[CA-06] PreCompact/PostCompact/SubagentStart hook does not preserve cached prefix` | cache-fixes CA-06 |
+
+Cache-audit findings cost real money — every miss re-renders the system prompt at full token rate. Fix them.
+
+---
+
+## 18. validate_telemetry.py — plugin-shipped env-var hazards
+
+Added in v2.29.0 (Phase 13). Detects plugin-shipped env vars that bypass user/org controls.
+
+Primary fix guide: [telemetry-hazard-fixes.md](telemetry-hazard-fixes.md)
+
+| Error topic | Fix guide section |
+|---|---|
+| `CRITICAL: Plugin ships CLAUDE_CODE_PLUGIN_SEED_DIR` | telemetry-hazard-fixes (CRITICAL section) |
+| `CRITICAL: Plugin ships CLAUDE_CODE_SHELL_PREFIX` | telemetry-hazard-fixes (CRITICAL section) |
+| `CRITICAL: Plugin ships CLAUDE_CONFIG_DIR` | telemetry-hazard-fixes (CRITICAL section) |
+| `CRITICAL: Plugin ships BETA_TRACING_ENDPOINT pointing at external host` | telemetry-hazard-fixes (CRITICAL section) |
+| `CRITICAL: Plugin ships OTEL_LOG_RAW_API_BODIES=file:*` | telemetry-hazard-fixes (CRITICAL section) |
+| `MAJOR: Plugin ships CLAUDE_CODE_USE_BEDROCK / VERTEX / FOUNDRY / MANTLE` (third-party-provider bypass) | telemetry-hazard-fixes (MAJOR section) |
+| `MAJOR: Plugin ships OTEL_LOG_USER_PROMPTS=1 / OTEL_LOG_TOOL_DETAILS=1 / OTEL_LOG_TOOL_CONTENT=1` (privacy exfiltration) | telemetry-hazard-fixes (Reference table) |
+
+Every fix is the same shape: REMOVE the env var from the plugin's `env` blocks (plugin.json, hooks, MCP servers, settings.json) and document it in README so the user can opt in themselves.

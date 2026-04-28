@@ -21,14 +21,14 @@ Central lookup for the fix agent. Given a validation error, find the reference f
 
 ## Instructions
 
-1. Read the validation report for error messages with severity and file path
-2. Pick the correct split index based on which validator produced the report:
-   - `plugin-error-index.md` — for reports from `validate_plugin.py`, `validate_skill*.py`, `validate_hook.py`, `validate_agent.py`, `validate_command.py`, `validate_mcp.py`, `validate_lsp.py`, `validate_security.py`, `validate_rules.py`, `validate_xref.py`, `validate_settings_marketplace.py`, `validate_documentation.py`, `validate_encoding.py`, `validate_enterprise.py`, `validate_scoring.py`
-   - `marketplace-error-index.md` — for reports from `validate_marketplace.py` and `validate_marketplace_pipeline.py`
-3. Match the error in that index to the fix reference file it points to
-4. Open the fix guide and use its TOC to jump to the exact section for the error
+1. Read the validation report for severity, message, file path
+2. Pick the index based on the validator that produced the report:
+   - `plugin-error-index.md` — for any plugin-scope validator (validate_plugin/skill/hook/agent/command/mcp/lsp/security/rules/xref/settings_marketplace/documentation/encoding/enterprise/scoring/cache/telemetry)
+   - `marketplace-error-index.md` — for `validate_marketplace.py` and `validate_marketplace_pipeline.py`
+3. Match the error to the fix reference file it points to
+4. Open the fix guide; use its TOC to jump to the exact section
 
-For `category: architecture` findings, do NOT use this skill — defer to the `migrate-marketplace-architecture` skill, which owns the Layout A/B conversion workflow.
+For `category: architecture` findings, defer to the `migrate-marketplace-architecture` skill (Layout A/B/C conversion).
 
 Copy this checklist and track your progress:
 
@@ -39,39 +39,53 @@ Copy this checklist and track your progress:
 
 ## Output
 
-The fix agent logs to `$MAIN_ROOT/reports/plugin-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` at the **main-repo root** (first entry of `git worktree list`), never a linked worktree. Per-component subfolder + local-time+GMT-offset timestamp mandatory. Both `reports/` and `reports_dev/` gitignored.
+Fix log → `$MAIN_ROOT/reports/plugin-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` (main-repo root via `git worktree list`, not a worktree).
 
 ## Error Handling
 
-If no matching section is found in the reference file, search by error message keywords. If the reference file is missing, report the gap.
+If no matching section is found, search the reference by message keywords. If the reference file is missing, report the gap.
 
 ## Examples
 
-**Input:** `[MAJOR] Missing plugin.json` → plugin-structure-fixes §1
-**Input:** `[MAJOR] userConfig.<key> missing/invalid 'type'` → plugin-structure-fixes "userConfig schema invalid" (valid types: `{string,number,boolean,directory,file}`)
-**Input:** `[WARNING] architecture/recommend-restructure (7-signal)` → marketplace-error-index §3 → marketplace-fixes §9
+**Input:** validation report line `[MAJOR] Missing plugin.json`
+**Output:** open `plugin-structure-fixes.md §1` and apply the fix
 
-## Schema-parity contract
+**Input:** `[CA-01] Static prefix violation`
+**Output:** open `cache-fixes.md` CA-01
 
-CPV validates plugin sources; it does not install them. Schema rules mirror Claude Code's install-time validators, so a source with zero CPV findings should not trip a runtime schema error. Install can still fail for non-schema reasons. Full contract: [schema-parity-contract.md](references/schema-parity-contract.md).
+| Error | Fix guide |
+|---|---|
+| `[MAJOR] userConfig.<key> missing 'type'` | plugin-structure-fixes "userConfig schema invalid" |
+| `[CRITICAL] Plugin ships CLAUDE_CODE_PLUGIN_SEED_DIR` | telemetry-hazard-fixes |
+| `[CRITICAL] Layout C: self-entry source != "./"` | plugin-structure-fixes §15 |
+| `[WARNING] Command 'clear' collides with built-in` | plugin-structure-fixes §16 |
+| `[WARNING] architecture/recommend-restructure` | marketplace-fixes §9 |
+
+## Schema-parity
+
+CPV mirrors CC's install-time schema; zero findings should not trip a runtime schema error. Contract: [schema-parity-contract.md](references/schema-parity-contract.md).
 
 ## Resources
 
 - [Plugin Error Index](references/plugin-error-index.md)
-  > 1. validate_plugin.py · 2. validate_skill.py · 3. validate_skill_comprehensive.py · 4. validate_hook.py · 5. validate_agent.py · 6. validate_command.py · 7. validate_mcp.py · 8. validate_lsp.py · 9. validate_security.py · 10. validate_rules.py · 11. validate_xref.py · 12. validate_settings_marketplace.py · 13. validate_documentation.py · 14. validate_encoding.py · 15. validate_enterprise.py · 16. validate_scoring.py
+  > validate_plugin · validate_skill · validate_skill_comprehensive · validate_hook · validate_agent · validate_command · validate_mcp · validate_lsp · validate_security · validate_rules · validate_xref · validate_settings_marketplace · validate_documentation · validate_encoding · validate_enterprise · validate_scoring · validate_cache · validate_telemetry
 - [Marketplace Error Index](references/marketplace-error-index.md)
   > 1. validate_marketplace.py · 2. validate_marketplace_pipeline.py · 3. Architecture / Layout Migration Warnings (7 signals)
 - [Schema-Parity Contract](references/schema-parity-contract.md)
   > What CPV does · The contract · What this contract does NOT say · What IS covered · Validator-gap protocol · Historical incidents · Related
 - [Iterative Fix Loop](references/iterative-fix-loop.md)
-  > Why a loop · Algorithm · Entry points — plugin path vs report path · Termination and safety · WARNING evaluation rules · Publish-blocking warning categories · Truly advisory warnings · Output contract
+  > Why a loop · Algorithm · Entry points (plugin path vs report path) · Termination and safety · WARNING evaluation rules · Publish-blocking warning categories · Truly advisory warnings · Output contract
 - [Empirical Loading Bugs](references/empirical-loading-bugs.md)
-  > Path-form acceptance matrix · Override-vs-default semantics · Three silent footguns CC does NOT catch · CPV validators added 2026-04-18 · Anthropic docs corrections · Round 2 confirmations · Tests added · Untestable in headless mode · v2.23.2 false-positive sweep
+  > Path-form acceptance · Override-vs-default semantics · Three silent footguns · Validators added 2026-04-18 · Docs corrections · Round 2 confirmations · Tests added · Untestable in headless · v2.23.2 FP sweep
+- [Cache-Audit Fixes](references/cache-fixes.md)
+  > Overview · CA-01 Static prefix violation · CA-02 Hook writes to cached files · CA-03 Hook flips MCP/permission state · CA-04 SKILL.md `model:` forces switch · CA-05 Unbounded hook output · CA-06 Compaction hook does not preserve prefix
+- [Telemetry Hazard Fixes](references/telemetry-hazard-fixes.md)
+  > Overview · CRITICAL: PLUGIN_SEED_DIR · CRITICAL: SHELL_PREFIX · CRITICAL: CLAUDE_CONFIG_DIR · CRITICAL: BETA_TRACING_ENDPOINT (external) · CRITICAL: OTEL_LOG_RAW_API_BODIES=file:* · MAJOR: third-party-provider bypass · Reference: env vars plugins MUST NEVER ship
 
 ## MCP Server Bundling
 
-Place executables in `servers/`, reference via `${CLAUDE_PLUGIN_ROOT}/servers/<name>`. Names unique across sources.
+Executables in `servers/`, reference `${CLAUDE_PLUGIN_ROOT}/servers/<name>`. Unique names.
 
 ## Token Optimization
 
-Use `mcp__plugin_llm-externalizer_llm-externalizer__*` (chat / code_task / scan_folder / check_references) for bounded analysis. Always pass file paths via `input_files_paths`, never paste content.
+Use `mcp__plugin_llm-externalizer_llm-externalizer__*` for bounded analysis.
