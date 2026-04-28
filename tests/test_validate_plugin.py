@@ -3113,3 +3113,91 @@ class TestPhase15BundledSlashCollision:
         msgs = [r.message for r in report.results if r.level == "WARNING"
                 and "collides with a built-in" in r.message]
         assert msgs == []
+
+
+# =============================================================================
+# Phase 16 (v2.32.0) — Layout C cross-validation (marketplace-in-plugin)
+# =============================================================================
+
+
+class TestPhase16LayoutC:
+    """A repo that is BOTH a plugin AND a marketplace must self-reference."""
+
+    def _run_layout_c(self, tmp_path: Path, plugin_name: str = "demo",
+                      plugin_version: str = "1.0.0",
+                      market_self_version: str | None = None,
+                      market_self_source: str = "./",
+                      include_self: bool = True):  # type: ignore[no-untyped-def]
+        from cpv_validation_common import ValidationReport
+        plugin_dir = tmp_path / "demo-repo"
+        plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": plugin_name, "version": plugin_version, "description": "x"})
+        )
+        plugins_arr: list[dict] = []
+        if include_self:
+            entry: dict = {"name": plugin_name, "source": market_self_source}
+            if market_self_version is not None:
+                entry["version"] = market_self_version
+            plugins_arr.append(entry)
+        (plugin_dir / ".claude-plugin" / "marketplace.json").write_text(
+            json.dumps({
+                "name": plugin_name,
+                "owner": {"name": "x", "email": "x@example.com"},
+                "plugins": plugins_arr,
+            })
+        )
+        from validate_plugin import validate_layout_c_consistency
+        report = ValidationReport()
+        validate_layout_c_consistency(plugin_dir, report)
+        return report
+
+    def test_layout_c_well_formed_no_findings(self, tmp_path: Path) -> None:
+        report = self._run_layout_c(tmp_path)
+        critical = [r for r in report.results if r.level == "CRITICAL"]
+        major = [r for r in report.results if r.level == "MAJOR"]
+        assert critical == []
+        assert major == []
+
+    def test_layout_c_missing_self_reference_major(self, tmp_path: Path) -> None:
+        report = self._run_layout_c(tmp_path, include_self=False)
+        assert any(
+            "does not list a self-reference" in r.message
+            for r in report.results
+            if r.level == "MAJOR"
+        )
+
+    def test_layout_c_wrong_source_major(self, tmp_path: Path) -> None:
+        report = self._run_layout_c(
+            tmp_path, market_self_source="github://my-org/demo-repo"
+        )
+        assert any(
+            "must be './'" in r.message
+            for r in report.results
+            if r.level == "MAJOR"
+        )
+
+    def test_layout_c_version_drift_minor(self, tmp_path: Path) -> None:
+        report = self._run_layout_c(
+            tmp_path, plugin_version="1.0.0", market_self_version="1.1.0"
+        )
+        assert any(
+            "version" in r.message and "differs from" in r.message
+            for r in report.results
+            if r.level == "MINOR"
+        )
+
+    def test_layout_c_validator_skipped_for_plain_plugin(self, tmp_path: Path) -> None:
+        """Plain plugin (no marketplace.json) must not trigger Layout C checks."""
+        from cpv_validation_common import ValidationReport
+        from validate_plugin import validate_layout_c_consistency
+        plugin_dir = tmp_path / "plain"
+        plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "plain", "version": "0.1.0", "description": "x"})
+        )
+        report = ValidationReport()
+        validate_layout_c_consistency(plugin_dir, report)
+        assert report.results == []
