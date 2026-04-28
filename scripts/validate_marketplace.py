@@ -162,6 +162,25 @@ OPTIONAL_PLUGIN_FIELDS = {
     "userConfig",
     "channels",
     "monitors",
+    # v2.1.121 — additional manifest-schema fields callable from marketplace entries.
+    "themes",
+    # `$schema` is allowed at any JSON object that supports JSON-Schema validation
+    # (CC ignores the field at load time).
+    "$schema",
+}
+
+# Marketplace top-level fields per plugin-marketplaces.md (v2.1.121).
+# CPV uses this set to suppress "unknown field" INFOs on legitimate top-level
+# additions like `$schema` and `metadata.pluginRoot`.
+OPTIONAL_MARKETPLACE_TOP_LEVEL_FIELDS = {
+    "$schema",  # v2.1.120 — JSON-Schema link, ignored at load time
+    "description",  # also accepted under `metadata.description` for back-compat
+    "version",  # also accepted under `metadata.version` for back-compat
+    "metadata",  # holds pluginRoot + legacy description/version
+    "allowCrossMarketplaceDependenciesOn",  # v2.1.121 — cross-marketplace dep allowlist
+    "owner",  # already required, kept here for completeness
+    "plugins",  # already required
+    "name",  # already required
 }
 
 # Source-specific required fields

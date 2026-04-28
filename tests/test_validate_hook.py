@@ -111,28 +111,29 @@ def test_validate_single_hook_type_errors(tmp_path: Path):
     r2 = HookValidationReport()
     assert validate_single_hook({"type": "webhook", "command": "curl x"}, "PreToolUse", tmp_path, r2) is False
     assert any("Invalid hook type" in r.message for r in r2.results if r.level == "CRITICAL")
-    # SessionStart is command-STRICT (hooks.md L687/L2109) — prompt is rejected.
+    # SessionStart is command+mcp_tool only (hooks.md v2.1.121) — prompt is rejected.
     r3 = HookValidationReport()
     validate_single_hook({"type": "prompt", "prompt": "Do something"}, "SessionStart", tmp_path, r3)
     assert any(
-        "only supports 'command' hooks" in r.message
+        "only supports 'command' and 'mcp_tool' hooks" in r.message
         for r in r3.results
         if r.level == "CRITICAL"
     )
     # Prompt on a command-or-http event (Notification) — still CRITICAL with
-    # the legacy message wording.
+    # the updated message wording (now also mentions mcp_tool).
     r4 = HookValidationReport()
     validate_single_hook({"type": "prompt", "prompt": "Do something"}, "Notification", tmp_path, r4)
     assert any(
-        "only supports 'command' or 'http'" in r.message
+        "only supports 'command', 'http', and 'mcp_tool'" in r.message
         for r in r4.results
         if r.level == "CRITICAL"
     )
-    # v2.22.2 GAP-P2-C2: SessionStart also rejects http hooks (was silently passing).
+    # v2.22.2 GAP-P2-C2 (refined for v2.1.121): SessionStart now accepts both
+    # command AND mcp_tool. http remains rejected.
     r5 = HookValidationReport()
     validate_single_hook({"type": "http", "url": "https://x"}, "SessionStart", tmp_path, r5)
     assert any(
-        "only supports 'command' hooks" in r.message
+        "only supports 'command' and 'mcp_tool' hooks" in r.message
         for r in r5.results
         if r.level == "CRITICAL"
     ), "expected CRITICAL: SessionStart rejects http hooks"
@@ -663,13 +664,19 @@ def test_http_hook_no_unknown_field_warnings(tmp_path: Path):
 
 
 def test_postcompact_command_only(tmp_path: Path):
-    """PostCompact rejects prompt and agent type hooks with CRITICAL."""
+    """PostCompact rejects prompt and agent type hooks with CRITICAL.
+
+    v2.1.118+ added `mcp_tool` to PostCompact's allowed set, so the message
+    enumerates command/http/mcp_tool — but prompt/agent are still rejected.
+    """
     for bad_type, extra in [("prompt", {"prompt": "Summarise"}), ("agent", {"prompt": "Analyse"})]:
         hook = {"type": bad_type, **extra}
         r = HookValidationReport()
         validate_single_hook(hook, "PostCompact", tmp_path, r)
         assert any(
-            "only supports 'command' or 'http'" in res.message for res in r.results if res.level == "CRITICAL"
+            "only supports 'command', 'http', and 'mcp_tool'" in res.message
+            for res in r.results
+            if res.level == "CRITICAL"
         ), f"PostCompact should reject '{bad_type}' hooks"
 
 
@@ -2820,3 +2827,119 @@ class TestPass2HookFixes:
         assert (
             "as of v2.1.86" not in src_text
         ), "stale v2.1.86 citation left in validate_hook.py — CPV-P2-n6 not applied"
+
+
+# =============================================================================
+# Phase 12 (v2.28.0) — new hook events + new mcp_tool hook type
+# =============================================================================
+
+
+class TestPhase12NewHookEvents:
+    """v2.1.121 added UserPromptExpansion and PostToolBatch to the event list."""
+
+    def test_user_prompt_expansion_recognised(self) -> None:
+        """UserPromptExpansion is a valid event — must NOT be flagged as unknown."""
+        from cpv_validation_common import VALID_HOOK_EVENTS
+        assert "UserPromptExpansion" in VALID_HOOK_EVENTS
+
+    def test_post_tool_batch_recognised(self) -> None:
+        """PostToolBatch is a valid event — must NOT be flagged as unknown."""
+        from cpv_validation_common import VALID_HOOK_EVENTS
+        assert "PostToolBatch" in VALID_HOOK_EVENTS
+
+    def test_event_count_at_least_28(self) -> None:
+        """27 documented events + Setup legacy = 28 entries minimum."""
+        from cpv_validation_common import VALID_HOOK_EVENTS
+        assert len(VALID_HOOK_EVENTS) >= 28
+
+
+class TestPhase12NewHookType:
+    """v2.1.118+ added mcp_tool as the 5th hook type."""
+
+    def test_mcp_tool_in_valid_types(self) -> None:
+        from cpv_validation_common import VALID_HOOK_TYPES as common_types
+        assert "mcp_tool" in common_types
+
+    def test_validate_hook_accepts_mcp_tool(self) -> None:
+        from validate_hook import VALID_HOOK_TYPES
+        assert "mcp_tool" in VALID_HOOK_TYPES
+
+    def test_mcp_tool_hook_requires_server_and_tool(self, tmp_path: Path) -> None:
+        from validate_hook import validate_single_hook
+        # Missing server
+        r1 = HookValidationReport()
+        validate_single_hook({"type": "mcp_tool", "tool": "bash"}, "PreToolUse", tmp_path, r1)
+        assert any("missing required" in res.message and "server" in res.message
+                   for res in r1.results if res.level == "CRITICAL")
+        # Missing tool
+        r2 = HookValidationReport()
+        validate_single_hook({"type": "mcp_tool", "server": "playwright"}, "PreToolUse", tmp_path, r2)
+        assert any("missing required" in res.message and "tool" in res.message
+                   for res in r2.results if res.level == "CRITICAL")
+
+    def test_mcp_tool_hook_minimal_valid(self, tmp_path: Path) -> None:
+        """A well-formed mcp_tool hook on PreToolUse must pass."""
+        from validate_hook import validate_single_hook
+        r = HookValidationReport()
+        validate_single_hook(
+            {"type": "mcp_tool", "server": "playwright", "tool": "screenshot"},
+            "PreToolUse",
+            tmp_path,
+            r,
+        )
+        assert not any(res.level == "CRITICAL" for res in r.results)
+
+    def test_mcp_tool_hook_input_must_be_object(self, tmp_path: Path) -> None:
+        from validate_hook import validate_single_hook
+        r = HookValidationReport()
+        validate_single_hook(
+            {"type": "mcp_tool", "server": "x", "tool": "y", "input": "not an object"},
+            "PreToolUse",
+            tmp_path,
+            r,
+        )
+        assert any("'input' must be an object" in res.message for res in r.results if res.level == "MAJOR")
+
+    def test_mcp_tool_accepted_on_session_start(self, tmp_path: Path) -> None:
+        """Per hooks.md, SessionStart accepts both command AND mcp_tool."""
+        from validate_hook import validate_single_hook
+        r = HookValidationReport()
+        validate_single_hook(
+            {"type": "mcp_tool", "server": "x", "tool": "y"},
+            "SessionStart",
+            tmp_path,
+            r,
+        )
+        # Must NOT emit a "only supports" CRITICAL — mcp_tool is allowed here.
+        assert not any(
+            "only supports" in res.message
+            for res in r.results
+            if res.level == "CRITICAL"
+        )
+
+
+class TestPhase12HookTypeMatrix:
+    """The per-event hook-type matrix from cpv_validation_common."""
+
+    def test_session_start_only_accepts_command_and_mcp_tool(self) -> None:
+        from cpv_validation_common import hook_types_allowed_for_event
+        allowed = hook_types_allowed_for_event("SessionStart")
+        assert allowed == frozenset({"command", "mcp_tool"})
+
+    def test_post_tool_use_accepts_full_5_set(self) -> None:
+        from cpv_validation_common import hook_types_allowed_for_event
+        allowed = hook_types_allowed_for_event("PostToolUse")
+        assert allowed == frozenset({"command", "http", "mcp_tool", "prompt", "agent"})
+
+    def test_notification_excludes_prompt_and_agent(self) -> None:
+        from cpv_validation_common import hook_types_allowed_for_event
+        allowed = hook_types_allowed_for_event("Notification")
+        assert "prompt" not in allowed
+        assert "agent" not in allowed
+        assert "mcp_tool" in allowed
+
+    def test_user_prompt_expansion_full_5_set(self) -> None:
+        """UserPromptExpansion belongs to the prompt-flow group with full 5-type support."""
+        from cpv_validation_common import hook_types_allowed_for_event
+        allowed = hook_types_allowed_for_event("UserPromptExpansion")
+        assert allowed == frozenset({"command", "http", "mcp_tool", "prompt", "agent"})
