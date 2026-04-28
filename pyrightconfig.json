@@ -4,5 +4,16 @@
   "reportMissingImports": "warning",
   "typeCheckingMode": "basic",
   "include": ["scripts", "tests"],
-  "exclude": ["**/__pycache__", "**/.venv", "**/build", "**/dist"]
+  "exclude": ["**/__pycache__", "**/.venv", "**/build", "**/dist"],
+  "reportUnusedVariable": "none",
+  "executionEnvironments": [
+    {
+      "root": "tests",
+      "extraPaths": ["../scripts", "."]
+    },
+    {
+      "root": "scripts",
+      "extraPaths": ["."]
+    }
+  ]
 }

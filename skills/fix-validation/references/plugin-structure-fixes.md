@@ -1745,3 +1745,94 @@ Valid frontmatter fields: `name`, `description`, `keep-coding-instructions` (boo
 { "agent": "my-agent" }
 // Must have: agents/my-agent.md
 ```
+
+---
+
+## 15. Layout C consistency (marketplace-in-plugin) — Phase 16, v2.32.0+
+
+These rules fire only when both `.claude-plugin/plugin.json` AND `.claude-plugin/marketplace.json` exist at the SAME repo root (Layout C). They cross-validate the two manifests against each other.
+
+### CRITICAL: Layout C self-entry name does not match plugin.json name
+
+| Field | Value |
+|-------|-------|
+| **Script** | `validate_plugin.py::validate_layout_c_consistency` |
+| **Severity** | CRITICAL |
+| **Message** | `Layout C: self-entry name 'X' does not match plugin.json.name 'Y'` |
+| **Category** | architecture |
+
+**Fix:** Decide which name is canonical (usually `plugin.json.name`) and update the other file to match. The marketplace.json self-entry MUST have the same `name` as `plugin.json.name`.
+
+```json
+// .claude-plugin/plugin.json
+{ "name": "my-plugin", ... }
+
+// .claude-plugin/marketplace.json
+{
+  "plugins": [
+    { "name": "my-plugin", "source": "./", "version": "1.2.3" }
+  ]
+}
+```
+
+### CRITICAL: Layout C self-entry source is not "./"
+
+| Field | Value |
+|-------|-------|
+| **Script** | `validate_plugin.py::validate_layout_c_consistency` |
+| **Severity** | CRITICAL |
+| **Message** | `Layout C self-entry source is 'X', expected './'` |
+
+**Fix:** The self-entry's source MUST be exactly `"./"` (or the equivalent `{"source": "directory", "path": "./"}` object form).
+
+```json
+// WRONG
+{ "name": "my-plugin", "source": "./plugins/my-plugin" }
+
+// RIGHT
+{ "name": "my-plugin", "source": "./" }
+```
+
+### MAJOR: Layout C version drift between manifests
+
+| Field | Value |
+|-------|-------|
+| **Script** | `validate_plugin.py::validate_layout_c_consistency` |
+| **Severity** | MAJOR |
+| **Message** | `Layout C version mismatch: plugin.json=X, marketplace.json.metadata=Y, self-entry=Z` |
+
+**Fix:** Bump all three version slots to the same value. The standard `publish.py` from `generate_plugin_repo.py --self-marketplace` does this atomically. If you edited one manifest by hand, edit the other(s) to match.
+
+Three slots that MUST agree:
+- `.claude-plugin/plugin.json` → `version`
+- `.claude-plugin/marketplace.json` → `metadata.version`
+- `.claude-plugin/marketplace.json` → `plugins[N].version` (the self-entry, where source=="./")
+
+For the canonical fix recipe and migration paths, see [layout-c-migration.md](../../migrate-marketplace-architecture/references/layout-c-migration.md).
+
+---
+
+## 16. Bundled slash-command collision (Phase 15, v2.31.0+)
+
+### WARNING: Plugin command name collides with a built-in slash command
+
+| Field | Value |
+|-------|-------|
+| **Script** | `validate_command.py` |
+| **Severity** | WARNING |
+| **Message** | `Command name '<name>' collides with a built-in Claude Code slash command` |
+| **Common collisions** | `clear`, `compact`, `config`, `cost`, `doctor`, `exit`, `help`, `init`, `loop`, `model`, `permissions`, `plan`, `release`, `release-notes`, `resume`, `reload-plugins`, `restart`, `review`, `status`, `theme`, `ultrareview`, `usage` |
+
+**Why it matters:** When the user types `/clear` (or whatever name), Claude Code dispatches to the built-in handler — your plugin's command is shadowed and never runs. Even worse, the user can't reach it any other way unless they uninstall the colliding plugin.
+
+**Fix:** Rename the command to something namespaced or descriptive:
+
+```bash
+# WRONG: commands/clear.md (shadowed by /clear built-in)
+# RIGHT: commands/cache-clear.md  → /cache-clear
+# RIGHT: commands/myplugin-clear.md  → /myplugin-clear
+```
+
+If the plugin is named `myplugin`, prefix collision-prone names with `myplugin-`. If renaming breaks downstream users, consider if the command really needs to exist as a slash command at all — sometimes the work belongs in an agent or skill instead.
+
+The full list of built-in names CPV checks against is `cpv_validation_common::BUILTIN_SLASH_COMMANDS`.
