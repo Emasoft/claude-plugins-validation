@@ -2961,3 +2961,117 @@ class TestMarketplaceShortCircuit:
         assert "MARKETPLACE folder" not in result.stderr, (
             f"Hybrid plugin (with both manifests) should proceed, not bail. Got stderr: {result.stderr}"
         )
+
+
+# =============================================================================
+# Phase 14 (v2.30.0) — userConfig schema validation (v2.1.121 spec)
+# =============================================================================
+
+
+class TestPhase14UserConfigSchema:
+    """v2.1.121 — userConfig per-key schema with type enum + required fields."""
+
+    def _validate_uc(self, uc):  # type: ignore[no-untyped-def]
+        from cpv_validation_common import ValidationReport
+        from validate_plugin import validate_user_config_structure
+        report = ValidationReport()
+        validate_user_config_structure({"userConfig": uc}, report)
+        return list(report.results)
+
+    def test_required_fields_missing_major(self) -> None:
+        # No type, no title, no description.
+        results = self._validate_uc({"my_key": {"sensitive": True}})
+        msgs = [r.message for r in results if r.level == "MAJOR"]
+        assert any("missing required sub-field 'type'" in m for m in msgs)
+        assert any("missing required sub-field 'title'" in m for m in msgs)
+        assert any("missing required sub-field 'description'" in m for m in msgs)
+
+    def test_type_enum_string_valid(self) -> None:
+        results = self._validate_uc({"k": {"type": "string", "title": "T", "description": "D"}})
+        assert not any(r.level == "MAJOR" for r in results)
+
+    def test_type_enum_directory_valid(self) -> None:
+        results = self._validate_uc({"k": {"type": "directory", "title": "T", "description": "D"}})
+        assert not any(r.level == "MAJOR" for r in results)
+
+    def test_type_enum_file_valid(self) -> None:
+        results = self._validate_uc({"k": {"type": "file", "title": "T", "description": "D"}})
+        assert not any(r.level == "MAJOR" for r in results)
+
+    def test_type_enum_unknown_value_major(self) -> None:
+        results = self._validate_uc({"k": {"type": "uuid", "title": "T", "description": "D"}})
+        assert any(
+            "is not a valid type" in r.message and "uuid" in r.message
+            for r in results
+            if r.level == "MAJOR"
+        )
+
+    def test_min_max_on_non_number_minor(self) -> None:
+        results = self._validate_uc({
+            "k": {"type": "string", "title": "T", "description": "D", "min": 0, "max": 100}
+        })
+        minor_msgs = [r.message for r in results if r.level == "MINOR"]
+        assert any("min" in m and "only meaningful for type: number" in m for m in minor_msgs)
+        assert any("max" in m and "only meaningful for type: number" in m for m in minor_msgs)
+
+    def test_multiple_on_non_string_minor(self) -> None:
+        results = self._validate_uc({
+            "k": {"type": "number", "title": "T", "description": "D", "multiple": True}
+        })
+        assert any(
+            "multiple" in r.message and "only meaningful for type: string" in r.message
+            for r in results
+            if r.level == "MINOR"
+        )
+
+    def test_invalid_identifier_key_major(self) -> None:
+        results = self._validate_uc({
+            "1invalid_start_digit": {"type": "string", "title": "T", "description": "D"}
+        })
+        assert any(
+            "must be a valid identifier" in r.message
+            for r in results
+            if r.level == "MAJOR"
+        )
+
+    def test_unknown_subfield_minor(self) -> None:
+        results = self._validate_uc({
+            "k": {"type": "string", "title": "T", "description": "D", "regex": "^[A-Z]+$"}
+        })
+        assert any(
+            "regex" in r.message and "not a recognized sub-field" in r.message
+            for r in results
+            if r.level == "MINOR"
+        )
+
+    def test_complete_valid_config_no_findings(self) -> None:
+        results = self._validate_uc({
+            "api_url": {
+                "type": "string",
+                "title": "API URL",
+                "description": "Base URL for the API",
+                "default": "https://api.example.com",
+                "required": True,
+            },
+            "api_key": {
+                "type": "string",
+                "title": "API Key",
+                "description": "Auth token",
+                "sensitive": True,
+                "required": True,
+            },
+            "max_retries": {
+                "type": "number",
+                "title": "Max retries",
+                "description": "Maximum retry attempts",
+                "default": 3,
+                "min": 0,
+                "max": 10,
+            },
+        })
+        critical = [r for r in results if r.level == "CRITICAL"]
+        major = [r for r in results if r.level == "MAJOR"]
+        minor = [r for r in results if r.level == "MINOR"]
+        assert critical == []
+        assert major == []
+        assert minor == []

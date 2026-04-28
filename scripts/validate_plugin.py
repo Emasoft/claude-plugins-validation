@@ -291,14 +291,19 @@ def validate_dependencies(
         report.passed(f"'dependencies' schema valid: {len(deps)} entry(ies)", ".claude-plugin/plugin.json")
 
 
-def validate_user_config_structure(manifest: dict[str, Any], report: ValidationReport) -> None:
-    """Validate the ``userConfig`` root per plugins-reference.md:414-435.
+# v2.1.121 — userConfig per-key `type` enum (5 values).
+USER_CONFIG_TYPE_ENUM = frozenset({"string", "number", "boolean", "directory", "file"})
 
-    Each entry accepts optional ``description`` (string) and ``sensitive`` (bool).
-    Keys must be Python identifiers. Unknown sub-fields emit MINOR so typos
-    surface during validation. (This helper is complementary to the stricter
-    runtime-title check that lives inline in ``validate_manifest`` and keeps
-    existing plugins that rely on ``title``/``type``/``default`` healthy.)
+
+def validate_user_config_structure(manifest: dict[str, Any], report: ValidationReport) -> None:
+    """Validate the ``userConfig`` root per plugins-reference.md (v2.1.121).
+
+    Per-key fields:
+      Required: type, title, description
+      Optional: sensitive, required, default, multiple, min, max
+    Type enum: string | number | boolean | directory | file
+
+    Keys must be valid identifiers (CLAUDE_PLUGIN_OPTION_<KEY> env-var derivation).
     """
     if "userConfig" not in manifest:
         return
@@ -307,37 +312,104 @@ def validate_user_config_structure(manifest: dict[str, Any], report: ValidationR
         # The inline validator in validate_manifest already emits a MAJOR for
         # non-dict userConfig — no need to duplicate it here.
         return
-    # Sub-fields the runtime understands (title/type/default/sensitive/description);
-    # unknown keys beyond this set are MINOR.
-    known_sub = {"title", "description", "sensitive", "type", "default"}
+    # v2.1.121 spec — full sub-field set (9 fields total).
+    known_sub = frozenset({
+        "type", "title", "description",
+        "sensitive", "required", "default",
+        "multiple", "min", "max",
+    })
+    required_sub = frozenset({"type", "title", "description"})
     for key, entry in uc.items():
         if not isinstance(key, str) or not _IDENTIFIER_RE.match(key):
             report.major(
-                f"'userConfig.{key}' key must be a valid identifier "
-                "(plugins-reference.md:414-435)",
+                f"'userConfig.{key}' key must be a valid identifier — needed for the "
+                "CLAUDE_PLUGIN_OPTION_<KEY> env-var export",
                 ".claude-plugin/plugin.json",
             )
             continue
         if not isinstance(entry, dict):
             # Inline validator already reports a MAJOR — do not duplicate.
             continue
+
+        # v2.1.121 — required sub-fields.
+        for req in required_sub:
+            if req not in entry:
+                report.major(
+                    f"'userConfig.{key}' missing required sub-field '{req}' "
+                    "(spec requires type, title, description)",
+                    ".claude-plugin/plugin.json",
+                )
+
+        # type — enum validation.
+        if "type" in entry:
+            t = entry["type"]
+            if not isinstance(t, str):
+                report.major(
+                    f"'userConfig.{key}.type' must be a string, got {type(t).__name__}",
+                    ".claude-plugin/plugin.json",
+                )
+            elif t not in USER_CONFIG_TYPE_ENUM:
+                report.major(
+                    f"'userConfig.{key}.type' = {t!r} is not a valid type "
+                    f"(expected one of: {sorted(USER_CONFIG_TYPE_ENUM)})",
+                    ".claude-plugin/plugin.json",
+                )
+
+        # title — must be a non-empty string.
+        if "title" in entry:
+            title = entry["title"]
+            if not isinstance(title, str) or not title.strip():
+                report.major(
+                    f"'userConfig.{key}.title' must be a non-empty string",
+                    ".claude-plugin/plugin.json",
+                )
+
         # description — optional per spec; type-checked when present.
         if "description" in entry and not isinstance(entry["description"], str):
             report.major(
                 f"'userConfig.{key}.description' must be a string, got {type(entry['description']).__name__}",
                 ".claude-plugin/plugin.json",
             )
-        # sensitive — optional per spec; must be bool when present.
-        if "sensitive" in entry and not isinstance(entry["sensitive"], bool):
-            report.major(
-                f"'userConfig.{key}.sensitive' must be a boolean, got {type(entry['sensitive']).__name__}",
+
+        # sensitive / required / multiple — boolean.
+        for bool_field in ("sensitive", "required", "multiple"):
+            if bool_field in entry and not isinstance(entry[bool_field], bool):
+                report.major(
+                    f"'userConfig.{key}.{bool_field}' must be a boolean, got "
+                    f"{type(entry[bool_field]).__name__}",
+                    ".claude-plugin/plugin.json",
+                )
+
+        # min / max — only meaningful for type: number.
+        for num_field in ("min", "max"):
+            if num_field in entry:
+                v = entry[num_field]
+                if not isinstance(v, (int, float)) or isinstance(v, bool):
+                    report.major(
+                        f"'userConfig.{key}.{num_field}' must be a number, got "
+                        f"{type(v).__name__}",
+                        ".claude-plugin/plugin.json",
+                    )
+                elif entry.get("type") not in (None, "number"):
+                    report.minor(
+                        f"'userConfig.{key}.{num_field}' set on non-number type "
+                        f"({entry.get('type')!r}) — only meaningful for type: number",
+                        ".claude-plugin/plugin.json",
+                    )
+
+        # multiple is only meaningful for type: string per spec.
+        if entry.get("multiple") is True and entry.get("type") not in (None, "string"):
+            report.minor(
+                f"'userConfig.{key}.multiple' set on non-string type "
+                f"({entry.get('type')!r}) — only meaningful for type: string",
                 ".claude-plugin/plugin.json",
             )
+
         # Unknown sub-fields — MINOR so authors notice typos.
         for extra in set(entry.keys()) - known_sub:
             report.minor(
                 f"'userConfig.{key}.{extra}' is not a recognized sub-field "
-                "(recognized: title, description, sensitive, type, default)",
+                f"(recognized: {sorted(known_sub)})",
                 ".claude-plugin/plugin.json",
             )
 
