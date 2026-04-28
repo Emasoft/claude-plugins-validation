@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import sys
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -24,12 +23,14 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
-from cpv_validation_common import ValidationReport  # noqa: E402
 import validate_security  # noqa: E402
+from cpv_validation_common import ValidationReport  # noqa: E402
 from validate_security import (  # noqa: E402
     check_gitleaks,
     check_semgrep,
     check_trufflehog,
+)
+from validate_security import (
     validate_security as run_validate_security,
 )
 

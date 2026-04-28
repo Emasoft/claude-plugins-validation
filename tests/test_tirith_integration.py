@@ -28,7 +28,6 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 import validate_security  # noqa: E402
 from cpv_validation_common import ValidationReport  # noqa: E402
 
-
 # -----------------------------------------------------------------------------
 # _resolve_tirith_runner — pure resolution logic
 # -----------------------------------------------------------------------------
