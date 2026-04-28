@@ -14,15 +14,7 @@ Scaffolds complete Claude Code plugin or marketplace repositories with standard 
 
 ## Marketplace layout
 
-CPV supports three layouts:
-
-- **Layout A (hub-and-spoke)** — one repo per plugin + a separate marketplace hub repo
-- **Layout B (nested)** — plugins as subfolders inside the marketplace repo
-- **Layout C (marketplace-in-plugin)** — single self-referential repo that *is* a plugin AND publishes a marketplace listing itself
-
-All three work with Claude Code. Default to A for new marketplaces with multiple plugins; suggest Layout C when the user wants a single self-contained extension that's marketplace-installable from its own repo (no two-step install). Full guide in [marketplace-layouts.md](references/marketplace-layouts.md).
-
-For Layout C: scaffold with `generate_plugin_repo.py --self-marketplace` (alias of running both generators with cross-references) — see the marketplace-layouts reference for the exact manifest shape and the cross-validation rules CPV enforces.
+CPV supports three layouts: **A** (hub-and-spoke), **B** (nested), **C** (marketplace-in-plugin, self-referential). Default to A for multi-plugin sets; suggest C when one repo should be both plugin and marketplace. See [marketplace-layouts.md](references/marketplace-layouts.md).
 
 ## Prerequisites
 
@@ -105,7 +97,7 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/generate_marketplace_repo.py" /tmp/my-mkt 
 - [v2.1.80+ Plugin Features](references/v2-1-80-features.md)
   > Monitor tool · userConfig (plugin.json) · channels (plugin.json) · CLAUDE_PLUGIN_OPTION_<KEY> env vars · Inline marketplace (settings.json) · managed-settings.d/ drop-in directory · Plugin skill `name` field (v2.1.98)
 - [Marketplace Layouts](references/marketplace-layouts.md)
-  > Overview · Layout A — Hub-and-Spoke (separate repos) · Layout B — Nested single-repo (monorepo) · How Claude Code updates plugins in each layout · When to choose which · Rich metadata fields (author, homepage, license, category) · Why CPV does not use git-subdir · Encountering a non-CPV marketplace · Refactoring between layouts · Agent behavior summary
+  > Overview · Layout A — Hub-and-Spoke (separate repos) · Layout B — Nested single-repo (monorepo) · Layout C — Marketplace-in-plugin (self-referential single repo) · How Claude Code updates plugins in each layout · When to choose which · Rich metadata fields (author, homepage, license, category) · Why CPV does not use git-subdir · Encountering a non-CPV marketplace · Refactoring between layouts · Agent behavior summary
 
 ## MCP Server Bundling
 
