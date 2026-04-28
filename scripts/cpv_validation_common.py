@@ -668,6 +668,26 @@ VALID_PLUGIN_ENV_VARS = {
     "NO_PROXY",
     # Demo / dev-only
     "IS_DEMO",  # v2.1.0
+    # Phase 13 (v2.1.121) — beta-tracing + telemetry-helper additions
+    "ENABLE_BETA_TRACING_DETAILED",
+    "BETA_TRACING_ENDPOINT",
+    "ENABLE_ENHANCED_TELEMETRY_BETA",  # alias for CLAUDE_CODE_ENHANCED_TELEMETRY_BETA
+    # Skill content / hook-output substitutions (env-vars.md / skills.md v2.1.121)
+    "CLAUDE_EFFORT",  # v2.1.120 — current effort level (skills/hook substitution)
+    # Channel plugins (channels.md v2.1.121) — common token names
+    "TELEGRAM_BOT_TOKEN",
+    "DISCORD_BOT_TOKEN",
+    # Bash tool behaviour (tools-reference.md v2.1.121)
+    "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR",
+    # Settings/UI flags referenced in plugin docs
+    "CLAUDE_CODE_HIDE_CWD",  # v2.1.119 — hides cwd in startup logo
+    "DISABLE_UPDATES",  # v2.1.118 — strict superset of DISABLE_AUTOUPDATER
+    "AI_AGENT",  # v2.1.120 — set by CC for subprocess attribution
+    # Anthropic *_SUPPORTED_CAPABILITIES — spec-correct suffix
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES",
 }
 
 # Env var name pattern matching for dynamic plugin env vars.

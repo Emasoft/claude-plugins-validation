@@ -122,6 +122,44 @@ OTEL_ALL_ENV_VARS: frozenset[str] = frozenset(
         "OTEL_TRACES_EXPORT_INTERVAL",
         # Resource attributes
         "OTEL_RESOURCE_ATTRIBUTES",
+        # v2.1.111+ — full request/response bodies (CRITICAL when shipped)
+        "OTEL_LOG_RAW_API_BODIES",
+        # v2.1.117+ — debounce for the otelHeadersHelper refresh
+        "CLAUDE_CODE_OTEL_HEADERS_HELPER_DEBOUNCE_MS",
+        # v2.1.121 — beta tracing opt-ins. Plugin-shipped values are
+        # high-risk: ENABLE_BETA_TRACING_DETAILED forces verbose tracing
+        # (allowlist-gated for users), and BETA_TRACING_ENDPOINT routes
+        # detailed-beta tracing to a separate endpoint that bypasses
+        # OTEL_EXPORTER_OTLP_ENDPOINT — a covert exfil channel if external.
+        "ENABLE_BETA_TRACING_DETAILED",
+        "BETA_TRACING_ENDPOINT",
+        "CLAUDE_CODE_ENHANCED_TELEMETRY_BETA",
+        "ENABLE_ENHANCED_TELEMETRY_BETA",  # alias for above
+    }
+)
+
+# v2.1.121 — additional plugin-shipped env vars that ARE NOT OTEL but expose
+# the user to data-leak / supply-chain hazards if a plugin ships them.
+# These are flagged from the new validate_security.py phase-13 rules.
+PLUGIN_SHIPPED_HAZARD_ENV_VARS: frozenset[str] = frozenset(
+    {
+        # CRITICAL — shipping these gives the plugin author a runtime hook
+        # into every Bash invocation OR pre-seeds the plugin cache from
+        # an attacker-controlled location.
+        "CLAUDE_CODE_PLUGIN_SEED_DIR",  # CRITICAL: pre-seeds plugin cache
+        "CLAUDE_CODE_SHELL_PREFIX",  # CRITICAL: wraps every bash command
+        "CLAUDE_CONFIG_DIR",  # CRITICAL: relocates ~/.claude
+        # MAJOR — third-party-provider bypass: setting any of these
+        # silently routes traffic away from server-managed settings.
+        "CLAUDE_CODE_USE_BEDROCK",
+        "CLAUDE_CODE_USE_VERTEX",
+        "CLAUDE_CODE_USE_FOUNDRY",
+        "CLAUDE_CODE_USE_MANTLE",
+        # MAJOR — auto-memory writes can be redirected; spec REJECTS this
+        # in project settings.json (separate validate_settings.py rule).
+        # Listed here too for env-block coverage.
+        # MAJOR — beta tracing endpoint (CRITICAL if external).
+        "BETA_TRACING_ENDPOINT",
     }
 )
 
@@ -279,6 +317,65 @@ def _validate_env_block(
     label used in result messages.
     """
     for name, value in env.items():
+        # Phase-13 hazard env vars (non-OTEL but plugin-shipping is dangerous).
+        if name in PLUGIN_SHIPPED_HAZARD_ENV_VARS:
+            if name == "CLAUDE_CODE_PLUGIN_SEED_DIR":
+                report.critical(
+                    f"Plugin env sets {name}={value!r}. This pre-seeds the "
+                    "plugin install cache from a plugin-controlled directory "
+                    "— an attacker can use this to inject pre-staged plugins "
+                    "into the user's environment. NEVER ship this from a "
+                    "plugin; only admins should set it in managed-settings.",
+                    source,
+                )
+                continue
+            if name == "CLAUDE_CODE_SHELL_PREFIX":
+                report.critical(
+                    f"Plugin env sets {name}={value!r}. This wraps EVERY "
+                    "Bash tool invocation with the plugin's prefix command, "
+                    "giving the plugin author code execution on every shell "
+                    "call. Audit/MITM injection vector. Move to managed-settings.",
+                    source,
+                )
+                continue
+            if name == "CLAUDE_CONFIG_DIR":
+                report.critical(
+                    f"Plugin env sets {name}={value!r}. This relocates the "
+                    "user's entire ~/.claude directory; an attacker-controlled "
+                    "path can exfiltrate auth tokens, settings, and conversation "
+                    "history. Never ship this from a plugin.",
+                    source,
+                )
+                continue
+            if name in {"CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
+                        "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_USE_MANTLE"}:
+                report.major(
+                    f"Plugin env sets {name}={value!r}. Per server-managed-settings.md, "
+                    "this third-party-provider opt-in BYPASSES managed-settings — the "
+                    "user's organisation policies silently stop applying. The user "
+                    "must explicitly choose their model provider; do not set this "
+                    "from a plugin.",
+                    source,
+                )
+                continue
+            if name == "BETA_TRACING_ENDPOINT":
+                if _is_external_endpoint(value):
+                    report.critical(
+                        f"Plugin env sets {name} to an external URL "
+                        f"({value!r}). Beta tracing creates a SECOND telemetry "
+                        "channel separate from the OTLP endpoint, silently "
+                        "exfiltrating detailed traces to an attacker-controlled "
+                        "host. Never ship from a plugin.",
+                        source,
+                    )
+                else:
+                    report.major(
+                        f"Plugin env sets {name}. Detailed-beta tracing belongs "
+                        "in managed-settings.json, not plugin env.",
+                        source,
+                    )
+                continue
+
         if name not in OTEL_ALL_ENV_VARS:
             continue
 
@@ -302,6 +399,22 @@ def _validate_env_block(
                         "managed-settings.json.",
                         source,
                     )
+                continue
+            # v2.1.111+ — `OTEL_LOG_RAW_API_BODIES=file:<dir>` is a SEPARATE
+            # exfil mode: untruncated bodies written to disk (rather than
+            # inline 60 KB cap). Severity is at least as bad as `=1`.
+            if (
+                name == "OTEL_LOG_RAW_API_BODIES"
+                and isinstance(value, str)
+                and value.strip().startswith("file:")
+            ):
+                report.critical(
+                    f"Plugin env sets {name}={value!r}. The `file:<dir>` mode "
+                    "writes UNTRUNCATED API bodies to disk — at least as bad "
+                    "as `=1` for data leakage, plus the file path is plugin-"
+                    "controllable. Move telemetry configuration to managed-settings.",
+                    source,
+                )
                 continue
             # Shipped but disabled / placeholder — still a MINOR
             # because the plugin is mandating telemetry posture.

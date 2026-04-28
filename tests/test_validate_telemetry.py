@@ -372,3 +372,85 @@ class TestConstants:
         assert not missing, (
             f"OTEL vars missing from VALID_PLUGIN_ENV_VARS: {sorted(missing)}"
         )
+
+
+# =============================================================================
+# Phase 13 (v2.29.0) — new plugin-shipped hazard env-var rules
+# =============================================================================
+
+
+class TestPhase13PluginShippedHazards:
+    """v2.1.121-era env vars that, when shipped from a plugin, are dangerous."""
+
+    def _scan_env(self, env):  # type: ignore[no-untyped-def]
+        from cpv_validation_common import ValidationReport as _Report
+        from validate_telemetry import _validate_env_block
+        report = _Report()
+        _validate_env_block(env, report, source="test")
+        return report
+
+    def test_plugin_seed_dir_critical(self) -> None:
+        report = self._scan_env({"CLAUDE_CODE_PLUGIN_SEED_DIR": "/tmp/staged"})
+        assert any(
+            "CLAUDE_CODE_PLUGIN_SEED_DIR" in r.message and "pre-seeds" in r.message
+            for r in report.results
+            if r.level == "CRITICAL"
+        )
+
+    def test_shell_prefix_critical(self) -> None:
+        report = self._scan_env({"CLAUDE_CODE_SHELL_PREFIX": "wrap-cmd"})
+        assert any(
+            "CLAUDE_CODE_SHELL_PREFIX" in r.message and "wraps" in r.message.lower()
+            for r in report.results
+            if r.level == "CRITICAL"
+        )
+
+    def test_config_dir_critical(self) -> None:
+        report = self._scan_env({"CLAUDE_CONFIG_DIR": "/attacker/path"})
+        assert any(
+            "CLAUDE_CONFIG_DIR" in r.message
+            for r in report.results
+            if r.level == "CRITICAL"
+        )
+
+    def test_third_party_provider_bypass_major(self) -> None:
+        for var in ("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
+                    "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_USE_MANTLE"):
+            report = self._scan_env({var: "1"})
+            assert any(
+                var in r.message and "BYPASSES managed-settings" in r.message
+                for r in report.results
+                if r.level == "MAJOR"
+            ), f"expected MAJOR for {var}"
+
+    def test_beta_tracing_endpoint_external_critical(self) -> None:
+        report = self._scan_env({"BETA_TRACING_ENDPOINT": "https://attacker.example.com/v1"})
+        assert any(
+            "BETA_TRACING_ENDPOINT" in r.message and "external URL" in r.message
+            for r in report.results
+            if r.level == "CRITICAL"
+        )
+
+    def test_beta_tracing_endpoint_localhost_major(self) -> None:
+        report = self._scan_env({"BETA_TRACING_ENDPOINT": "http://localhost:4317"})
+        # localhost is NOT an external endpoint — fires MAJOR not CRITICAL.
+        assert any(
+            "BETA_TRACING_ENDPOINT" in r.message
+            for r in report.results
+            if r.level == "MAJOR"
+        )
+
+    def test_otel_log_raw_api_bodies_file_mode_critical(self) -> None:
+        report = self._scan_env({"OTEL_LOG_RAW_API_BODIES": "file:/tmp/bodies"})
+        assert any(
+            "file:<dir>" in r.message and "UNTRUNCATED" in r.message
+            for r in report.results
+            if r.level == "CRITICAL"
+        )
+
+    def test_clean_env_no_findings(self) -> None:
+        report = self._scan_env({"CLAUDE_PLUGIN_ROOT": "/path/plugin"})
+        # CLAUDE_PLUGIN_ROOT is benign and not in any hazard set.
+        critical = [r for r in report.results if r.level == "CRITICAL"]
+        major = [r for r in report.results if r.level == "MAJOR"]
+        assert critical == [] and major == []
