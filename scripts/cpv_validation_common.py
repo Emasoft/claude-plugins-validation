@@ -709,6 +709,7 @@ VALID_PLUGIN_ENV_VARS = {
     "CLAUDE_CODE_HIDE_CWD",  # v2.1.119 — hides cwd in startup logo
     "DISABLE_UPDATES",  # v2.1.118 — strict superset of DISABLE_AUTOUPDATER
     "AI_AGENT",  # v2.1.120 — set by CC for subprocess attribution
+    "CLAUDE_CODE_FORK_SUBAGENT",  # v2.1.117 — opt-in for forked subagents on external builds
     # Anthropic *_SUPPORTED_CAPABILITIES — spec-correct suffix
     "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES",
     "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES",

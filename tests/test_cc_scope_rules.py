@@ -152,6 +152,17 @@ class TestTaxonomyConstants:
         assert PROJECT_REJECTED_NESTED_KEYS
         assert SECRET_VALUE_PATTERNS
 
+    def test_v2_1_119_pr_url_template_in_known_settings(self) -> None:
+        """prUrlTemplate (v2.1.119) is a recognized top-level settings key."""
+        from cc_scope_rules import KNOWN_SETTINGS_KEYS  # noqa: PLC0415
+        assert "prUrlTemplate" in KNOWN_SETTINGS_KEYS
+
+    def test_v2_1_118_wsl_inherits_in_managed_only(self) -> None:
+        """wslInheritsWindowsSettings (v2.1.118) is a managed-only policy key."""
+        from cc_scope_rules import KNOWN_SETTINGS_KEYS  # noqa: PLC0415
+        assert "wslInheritsWindowsSettings" in MANAGED_ONLY_KEYS
+        assert "wslInheritsWindowsSettings" in KNOWN_SETTINGS_KEYS
+
 
 # =============================================================================
 # Secret detection
