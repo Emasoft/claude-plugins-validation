@@ -2685,10 +2685,9 @@ register_rule(RuleSchema(
     category="taint",
     severity="INFO",
     description=(
-        "Recognized sanitizers (shlex.quote, shlex.split, re.escape, "
-        "html.escape, urllib.parse.quote, json.loads, yaml.safe_load, "
-        "ast.literal_eval, int/float/bool casts) clear taint. "
-        "No finding when a sanitizer interrupts the chain."
+        "Recognized sanitizers (shlex.quote, re.escape, html.escape, "
+        "urllib.parse.quote, json.loads, ast.literal_eval, int/float/bool) "
+        "clear taint and break source-to-sink chains."
     ),
     references=("synthesis catalog",),
     fp_guards=(
