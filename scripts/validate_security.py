@@ -1332,13 +1332,22 @@ def is_js_ts_file(file_path: str, content: str | None = None) -> bool:
     return False
 
 
-def is_shell_like_file(file_path: str) -> bool:
+def is_shell_like_file(file_path: str, content: str | None = None) -> bool:
     """Recognize files where shell syntax (command substitution, pipes) is expected.
 
     Covers:
     - Shell script extensions (.sh, .bash, .zsh, .ksh)
     - Git hooks in git-hooks/ or .git/hooks/ directories (extensionless scripts)
     - GitHub Actions YAML (.yml/.yaml inside .github/workflows/)
+    - Shebang-detected shell scripts — files in `scripts/`, `bin/` etc.
+      with no extension but a `#!/.../sh|bash|zsh|ksh` shebang. Pre-push
+      hooks and other custom shell entry points are commonly shipped this
+      way; without shebang sniffing, every `$(git rev-parse ...)` they
+      contain would be flagged as RCE-suspicious.
+
+    Pass `content` to enable the shebang sniff. Without it, only
+    extension-based + path-based detection runs (preserves the existing
+    contract for callers that don't have content available).
     """
     file_lower = file_path.lower()
     # Normalize backslashes for consistent matching
@@ -1359,6 +1368,27 @@ def is_shell_like_file(file_path: str) -> bool:
             return True
         if "github-workflows/" in file_normalized:
             return True
+    # Common git-hook filenames in any directory (typically scripts/pre-push,
+    # scripts/pre-commit, etc.). Match against the basename so location
+    # doesn't matter. Hook names per githooks(5) — covers the standard set.
+    basename = file_normalized.rsplit("/", 1)[-1] if "/" in file_normalized else file_normalized
+    GIT_HOOK_BASENAMES = {
+        "pre-commit", "pre-push", "pre-rebase", "pre-receive",
+        "post-receive", "post-commit", "post-merge", "post-checkout",
+        "post-update", "commit-msg", "prepare-commit-msg",
+        "applypatch-msg", "pre-applypatch", "post-applypatch",
+        "update", "fsmonitor-watchman", "p4-pre-submit",
+        "post-rewrite", "sendemail-validate",
+    }
+    if basename in GIT_HOOK_BASENAMES:
+        return True
+    # Shebang sniff for extensionless shell scripts.
+    if content is not None:
+        first_line = content.split("\n", 1)[0] if content else ""
+        if first_line.startswith("#!"):
+            shebang = first_line.lower()
+            if any(rt in shebang for rt in ("/sh", "/bash", "/zsh", "/ksh", "/dash", "/ash")):
+                return True
     return False
 
 
@@ -1432,7 +1462,7 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
     is_markdown = file_lower.endswith((".md", ".mdx", ".markdown"))
 
     # Determine if file is a shell-like script - command substitution is expected
-    is_shell_script = is_shell_like_file(file_path)
+    is_shell_script = is_shell_like_file(file_path, content)
 
     # Determine if file is a test file - test files often have mock/example content
     # Handle both absolute (/tests/) and relative (tests/) paths, plus conftest.py
@@ -1498,19 +1528,34 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
             if is_backtick_rule:
                 if skip_command_sub:
                     continue
-                # Python: backticks are RST / docstring formatting unless they
-                # appear next to a shell-execution call.
-                if is_python_file:
-                    shell_exec_indicators = ("os.system", "os.popen", "subprocess", "shell=", "Popen", "check_output")
+                # The backtick-as-command-substitution construct is
+                # SHELL-ONLY. Every other major language uses backticks for
+                # something else:
+                #   • JS/TS: ES2015 template literals (`${var}`)
+                #   • Rust: doc-comment inline code (`//! ... ` / `/// ...`)
+                #   • Go: raw string literals (`...`)
+                #   • Python: reST docstring inline code
+                #   • Markdown / YAML / TOML / JSON5: code-formatting
+                # For non-shell-like source files, skip the backtick check
+                # UNLESS the line also contains a real shell-execution call
+                # (subprocess, system, popen, exec...). That's the only
+                # context where a backtick on a non-shell line could be a
+                # genuine command-substitution call (a programmer building a
+                # shell command and passing it to a shell-execution API).
+                if not is_shell_script:
+                    shell_exec_indicators = (
+                        # Python
+                        "os.system", "os.popen", "subprocess", "shell=",
+                        "Popen", "check_output", "check_call",
+                        # JS/Node
+                        "child_process", "execSync(", "spawn(",
+                        # Rust
+                        "Command::new", "std::process",
+                        # Go
+                        "exec.Command", "os/exec",
+                    )
                     if not any(indicator in line for indicator in shell_exec_indicators):
                         continue
-                # JS/TS: backticks are ES2015 template literals (`${var}` /
-                # tagged templates), NEVER POSIX command substitution. Suppress
-                # categorically — the language doesn't have shell-style backticks.
-                # `content` is passed so files like `bin/llm-ext` (no .js
-                # extension, `#!/usr/bin/env node` shebang) are detected too.
-                if is_js_ts_file(file_path, content):
-                    continue
             else:
                 # `$(...)` rule. Shell scripts legitimately use this — the
                 # whole reason we computed `skip_command_sub` above. The
@@ -1921,10 +1966,23 @@ def scan_for_user_paths(content: str, file_path: str, report: ValidationReport) 
         or "_test.py" in file_lower
         or "/tests/" in file_normalized
         or file_normalized.startswith("tests/")
+        or re.search(r"\.(?:test|spec)\.[mc]?[jt]sx?$", file_normalized)
     ):
         return 0
 
+    is_python = file_lower.endswith(".py")
+    is_js_ts = is_js_ts_file(file_path, content)
+    # Lines that ARE pattern definitions (regex sources, allow-lists,
+    # detector tables) match `/Users/[^/]+` on their own — the literal text
+    # inside the pattern body. Skip these the same way the credential
+    # harvest scanner does.
+    py_regex_re = re.compile(r"re\.compile\s*\(|RegExp\s*\(|regex\s*=\s*r['\"]")
+    js_regex_re = re.compile(r"/[^/\n]+/[gimsuy]*")
+
     for line_num, line in enumerate(lines, start=1):
+        # Skip pattern-definition lines.
+        if (is_python and py_regex_re.search(line)) or (is_js_ts and js_regex_re.search(line)):
+            continue
         for pattern in USER_PATH_PATTERNS:
             match = pattern.search(line)
             if match:
