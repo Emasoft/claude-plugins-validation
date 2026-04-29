@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-04-29T04:15:57+00:00",
+  "computed_at": "2026-04-29T04:28:39+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     "agents/marketplace-fixer.md": "sha256:254f3d77fccf11a5ecac29cd61cb670b33f3ac7fb1f12d18c853f10032830ef2",
@@ -66,7 +66,7 @@
     "scripts/manage_plugin.py": "sha256:a9f6551d2bff96f9fc2f78b136a15835953ebfd731510e79939439aecf3a16c4",
     "scripts/manage_registry.py": "sha256:61a915f598faa5ae774c66ee9b8ed75345a9dc0a317d75b5ec3902249e036a03",
     "scripts/manage_remote.py": "sha256:a4142540c469a978fdb80a91f863a28078db41db0f50ee5d71738f2777da44c5",
-    "scripts/publish.py": "sha256:ea05b62a4945530825be948fe18ac729b08ba5fad17be524d0e1e23ef8537512",
+    "scripts/publish.py": "sha256:cb76031455fc6cb5efbcd23082e865176fbf80ae27ea5849c28e945b510af5f0",
     "scripts/set_marketplace_pat.py": "sha256:8fda8388ebc7ce6f30f17fe3b3609478672db1125422fe9959eedb596bc1789e",
     "scripts/setup_branch_rules.py": "sha256:db50c15a8e82893e62add773c2f4c226dd755c9211d05fb3e13679308672494e",
     "scripts/setup_branch_rules_generic.py": "sha256:22566f89d6b49de6c213fc64506f2b7dd8342bb27e56bf6e02587ff0aa123b89",
