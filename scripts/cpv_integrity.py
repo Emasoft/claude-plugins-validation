@@ -112,9 +112,10 @@ def _read_cached_manifest(version: str | None) -> dict[str, object] | None:
     if not cache_path.is_file():
         return None
     try:
-        return json.loads(cache_path.read_text(encoding="utf-8"))
+        parsed = json.loads(cache_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _fetch_one(url: str, version: str | None) -> dict[str, object] | None:
@@ -123,15 +124,17 @@ def _fetch_one(url: str, version: str | None) -> dict[str, object] | None:
         req = Request(url, headers={"User-Agent": USER_AGENT})
         with urlopen(req, timeout=HTTP_TIMEOUT_SEC) as resp:  # noqa: S310 - hardcoded HTTPS
             data = resp.read().decode("utf-8")
-        manifest = json.loads(data)
+        parsed = json.loads(data)
     except (URLError, OSError, json.JSONDecodeError, TimeoutError):
+        return None
+    if not isinstance(parsed, dict):
         return None
     try:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         _cache_path_for_version(version).write_text(data, encoding="utf-8")
     except OSError:
         pass  # Cache write failures are non-fatal.
-    return manifest
+    return parsed
 
 
 def _fetch_github_manifest(
