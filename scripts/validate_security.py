@@ -1480,6 +1480,19 @@ def is_shell_like_file(file_path: str, content: str | None = None) -> bool:
             return True
         if "github-workflows/" in file_normalized:
             return True
+        # v2.45 FP2 — plugin skills routinely ship CI scaffolding under
+        # `skills/<skill>/templates/*.yml` / `skills/<skill>/scripts/*.yml`
+        # (e.g. amaa-cicd-design ships release-github.yml, ci-multi-platform.yml,
+        # docs-generate.yml, security-scan.yml). The user copies these
+        # into their `.github/workflows/` — they're declarative GitHub
+        # Actions, not runtime code, and `$(grep ...)` / `$(git describe
+        # ...)` in `run:` blocks is the correct shape. Recognise any
+        # `.yml/.yaml` whose path is under `templates/` or `scripts/`
+        # as shell-like for the command-substitution rule.
+        if "/templates/" in file_normalized or file_normalized.startswith("templates/"):
+            return True
+        if "/scripts/" in file_normalized or file_normalized.startswith("scripts/"):
+            return True
     # Common git-hook filenames in any directory (typically scripts/pre-push,
     # scripts/pre-commit, etc.). Match against the basename so location
     # doesn't matter. Hook names per githooks(5) — covers the standard set.
