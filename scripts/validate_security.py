@@ -3261,6 +3261,10 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
             if file_ref and cpv_self_scan_skip(str(file_ref)):
                 continue
 
+            # v2.43 — drop findings inside vendored / cached / build dirs.
+            if file_ref and _is_vendored_dep_path(str(file_ref)):
+                continue
+
             # Pattern-source skip: if the reported line is a regex
             # PATTERN DEFINITION (Python `re.compile(`, JS `/.../g`,
             # `RegExp(`), the literal-string match cc-audit fired on is
@@ -3858,23 +3862,125 @@ def check_phase10_taint(plugin_path: Path, report: ValidationReport) -> int:
     return issues
 
 
+_RC76_SOURCE_EXTENSIONS = (
+    ".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
+    ".go", ".rs", ".java", ".kt", ".swift", ".m", ".mm",
+    ".c", ".cc", ".cpp", ".cxx", ".h", ".hpp",
+    ".rb", ".php", ".cs", ".scala", ".clj", ".ex", ".exs",
+    ".sh", ".bash", ".zsh", ".fish", ".ps1",
+)
+_RC76_CHANGELOG_BASENAMES = frozenset({
+    "changelog.md", "changelog.markdown", "changelog.txt", "changelog.rst",
+    "changes.md", "changes.markdown", "changes.txt", "changes.rst",
+    "history.md", "history.markdown", "history.txt", "history.rst",
+    "news.md", "news.markdown", "news.txt", "news.rst",
+    "releasenotes.md", "release_notes.md", "release-notes.md",
+})
+
+# Vendored / cached / build-output directories that contain code the plugin
+# does NOT own. Every external scanner (trufflehog, gitleaks, semgrep,
+# cc-audit) flags transitive deps inside these trees as plugin findings,
+# but they belong to the dep ecosystem and are auto-installed at build
+# time. CPV's own scan loops use `get_gitignore_filter` which already
+# drops these paths; the external scanners do not, so we post-filter
+# their output. v2.43.
+_VENDORED_DEP_DIR_PARTS = frozenset({
+    "node_modules",
+    ".venv", "venv", "env", ".env",
+    "site-packages",
+    "__pycache__",
+    ".pnpm-store", ".yarn",
+    "vendor",
+    "dist", "build",
+    ".tox", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    ".git",
+    "target",
+})
+
+
+def _is_vendored_dep_path(file_path: str) -> bool:
+    """True if any directory segment matches a vendored / cache / build dir.
+
+    Used by the external-scanner post-filters (trufflehog, gitleaks,
+    semgrep, cc-audit) so a transitive dep's bundled README that
+    matches a credential-detector pattern doesn't surface as a
+    plugin-author finding. Only top-level segment match — substring
+    matches like `node_modules-helper.py` stay scanned.
+    """
+    if not file_path:
+        return False
+    normalized = file_path.replace("\\", "/").lower()
+    return any(f"/{part}/" in normalized or normalized.startswith(f"{part}/")
+               for part in _VENDORED_DEP_DIR_PARTS)
+
+
+def _rc76_is_source_code_file(rel_path: str) -> bool:
+    """RC-76 — source-code files (TS/JS/Python/Go/Rust/etc) trip the
+    stemmed-injection rule because LLM-tooling vocabulary
+    (prompt/system/instruct/token/output/...) appears legitimately in
+    variable / function / type names. Also covers `bin/`-style
+    extension-less shell scripts and CHANGELOG-style release-notes
+    files (which reference internals when the plugin is itself an
+    LLM tool but are not agent-doc instruction surfaces).
+    """
+    rel = rel_path.lower().replace("\\", "/")
+    if rel.endswith(_RC76_SOURCE_EXTENSIONS):
+        return True
+    if "/bin/" in rel or rel.startswith("bin/"):
+        return True
+    basename = rel.rsplit("/", 1)[-1]
+    if basename in _RC76_CHANGELOG_BASENAMES:
+        return True
+    return False
+
+
 def check_phase9_stemmed_injection(plugin_path: Path, report: ValidationReport) -> int:
     """Phase 9 — RC-76 stemmed semantic injection classifier.
 
     Catches paraphrased prompt-injection attempts that exact regex patterns
     miss because of word-form variation. Fires only when ≥3 trigger stems
     co-occur within an 80-char window — single keywords are too noisy.
+
+    v2.43 — source-code files (`.ts`/`.js`/`.py`/`.go`/etc) are demoted
+    because LLM-tooling source legitimately uses words like
+    `prompt`/`system`/`instruct`/`token` in variable, function, and
+    type names. Markdown / agent-doc / skill-body matches stay at the
+    declared severity because that is where the real prompt-injection
+    threat lives. The classifier path (`--with-classifier`) escalates
+    this to a four-tier verdict; the binary path used by default just
+    suppresses the source-file matches outright.
     """
     issues = 0
     for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
-        # Tighten further on test fixtures and validator sources to match
-        # the same FP-reduction discipline as other phases.
         signals = find_stemmed_injection_signal(content)
         if not signals:
             continue
+        is_source_file = _rc76_is_source_code_file(rel_path)
         for char_offset, stems in signals:
             line_no = content.count("\n", 0, char_offset) + 1
-            level = effective_severity("major", rel_path)
+            if _CLASSIFIER_ACTIVE:
+                # Classifier path — give RC-76 the same four-tier verdict
+                # ladder the v2.42 rules use. The classifier inspects the
+                # file role and the line, returning DEFINITE_FP for source
+                # extensions and REAL otherwise.
+                content_lines = content.split("\n")
+                line_text = (
+                    content_lines[line_no - 1] if 0 <= line_no - 1 < len(content_lines) else ""
+                )
+                surrounding = _surrounding_lines(content_lines, line_no - 1, window=2)
+                new_severity, _note = _classifier_decision(
+                    "RC-76", "major", line_text, surrounding,
+                    _file_role_from_path(rel_path), rel_path,
+                )
+                if new_severity is None:
+                    continue
+                level = effective_severity(new_severity, rel_path)
+            else:
+                # Binary guard — suppress on source-code extensions so
+                # the default path (no `--with-classifier`) also benefits.
+                if is_source_file:
+                    continue
+                level = effective_severity("major", rel_path)
             getattr(report, level)(
                 f"RC-76: stemmed prompt-injection signal — {len(stems)} trigger stems "
                 f"({', '.join(stems[:5])}) within 80-char window",
@@ -3986,8 +4092,32 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                 issues += 1
                 # Keep going — multiple Phase 3 rules can match a single line
 
-    # RC-30 typosquatting + RC-33 compromised packages from manifests
+    # RC-30 typosquatting + RC-33 compromised packages from manifests.
+    # `rglob` walks the entire tree including dependency / build / cache
+    # directories that the plugin doesn't own — `node_modules/` is the
+    # dominant FP source because every transitive dep ships its own
+    # package.json, none of which represent the PLUGIN's declared
+    # deps. Same for Python virtualenvs, vendored deps, and pnpm/yarn
+    # stores. Filter those paths out so RC-30/RC-33 only ever look at
+    # manifests the plugin author actually maintains.
+    _RC30_SKIP_DIR_PARTS = {
+        "node_modules",
+        ".venv", "venv", "env", ".env",
+        "site-packages",
+        "__pycache__",
+        ".pnpm-store", ".yarn",
+        "vendor",
+        "dist", "build",
+        ".tox", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+        ".git",
+    }
     for manifest_path in list(plugin_path.rglob("package.json")) + list(plugin_path.rglob("requirements*.txt")):
+        try:
+            rel_parts = manifest_path.relative_to(plugin_path).parts
+        except ValueError:
+            continue
+        if any(part in _RC30_SKIP_DIR_PARTS for part in rel_parts):
+            continue
         try:
             text = manifest_path.read_text(encoding="utf-8", errors="ignore")
         except OSError:
@@ -4169,6 +4299,13 @@ def check_trufflehog(plugin_path: Path, report: ValidationReport) -> int:
         # intentional pattern-source material).
         if cpv_self_scan_skip(rel):
             continue
+        # v2.43 — drop findings inside vendored / cached / build dirs
+        # (node_modules, .venv, site-packages, …). These are transitive
+        # deps' bundled tests / READMEs / typedef files that contain
+        # placeholder credentials by design — not the plugin author's
+        # responsibility.
+        if _is_vendored_dep_path(rel):
+            continue
         base_level = "critical" if verified else "major"
         level = effective_severity(base_level, rel)
         getattr(report, level)(
@@ -4231,6 +4368,9 @@ def check_gitleaks(plugin_path: Path, report: ValidationReport) -> int:
             # are FPs by construction; the hash gate stops a malicious
             # plugin from spoofing the path to evade detection.
             if cpv_self_scan_skip(rel):
+                continue
+            # v2.43 — drop findings inside vendored / cached / build dirs.
+            if _is_vendored_dep_path(rel):
                 continue
             level = effective_severity("major", rel)
             getattr(report, level)(f"gitleaks {rule_id}: {description[:80]}", rel, line_no)
@@ -4310,6 +4450,9 @@ def check_semgrep(plugin_path: Path, report: ValidationReport) -> int:
         # Skip CPV's own validator regex sources + tests + fixtures
         # under the same hash-gated self-scan rule applied elsewhere.
         if cpv_self_scan_skip(rel):
+            continue
+        # v2.43 — drop findings inside vendored / cached / build dirs.
+        if _is_vendored_dep_path(rel):
             continue
         cpv_level_eff = effective_severity(cpv_level, rel)
         getattr(report, cpv_level_eff)(f"semgrep {rule_id}: {message}", rel, line_no)

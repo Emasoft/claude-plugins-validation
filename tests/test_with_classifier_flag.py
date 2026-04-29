@@ -19,6 +19,7 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from cpv_validation_common import ValidationReport  # noqa: E402
 from validate_security import (  # noqa: E402
+    _is_vendored_dep_path,
     _set_classifier_active,
     check_phase1_credential_rules,
     check_phase2e_extras,
@@ -196,6 +197,38 @@ class TestRc93Wiring:
         check_phase3_all(plugin, report)
         # Hidden suffix in doc should still fire — that's the rule's purpose.
         assert _msgs(report, "RC-93")
+
+
+class TestVendoredDepPath:
+    """Verify the external-scanner path filter (v2.43)."""
+
+    def test_node_modules_match(self) -> None:
+        assert _is_vendored_dep_path("mcp-server/node_modules/zod/index.ts") is True
+        assert _is_vendored_dep_path("/abs/path/node_modules/x/y.js") is True
+
+    def test_venv_match(self) -> None:
+        assert _is_vendored_dep_path(".venv/lib/python3.12/site-packages/x.py") is True
+
+    def test_site_packages_match(self) -> None:
+        assert _is_vendored_dep_path("env/lib/site-packages/foo.py") is True
+
+    def test_dist_build_match(self) -> None:
+        assert _is_vendored_dep_path("dist/index.js") is True
+        assert _is_vendored_dep_path("build/main.bundle.js") is True
+
+    def test_target_dir_match_for_rust_cargo(self) -> None:
+        assert _is_vendored_dep_path("target/release/binary") is True
+
+    def test_normal_source_no_match(self) -> None:
+        assert _is_vendored_dep_path("src/main.py") is False
+        assert _is_vendored_dep_path("scripts/cli.py") is False
+
+    def test_substring_in_filename_no_match(self) -> None:
+        # `node_modules-helper.py` is a regular file, not a node_modules dir.
+        assert _is_vendored_dep_path("src/node_modules-helper.py") is False
+
+    def test_empty_path(self) -> None:
+        assert _is_vendored_dep_path("") is False
 
 
 class TestClassifierStateLifecycle:
