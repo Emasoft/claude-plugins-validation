@@ -2,11 +2,15 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
-## [2.34.1] - 2026-04-28
+## [2.35.0] - 2026-04-29
 
 ### Bug Fixes
 
-- **fixer:** Add fix recipes for cache-audit, telemetry hazards, Layout C, slash collisions
+- **tests:** Clean mypy non-blocking warnings (4 type annotations)
+
+### Features
+
+- **security:** Richer messages with unique RC codes (RC-110..156)
 
 ### Miscellaneous Tasks
 
