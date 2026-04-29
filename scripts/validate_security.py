@@ -1600,8 +1600,10 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
                 # text describing an env-var template). Skip unless there's
                 # a clear shell-execution call on the line.
                 if is_python_file:
-                    shell_exec_indicators = ("os.system", "os.popen", "subprocess", "shell=", "Popen", "check_output")
-                    if not any(indicator in line for indicator in shell_exec_indicators):
+                    py_shell_exec_indicators: tuple[str, ...] = (
+                        "os.system", "os.popen", "subprocess", "shell=", "Popen", "check_output",
+                    )
+                    if not any(indicator in line for indicator in py_shell_exec_indicators):
                         continue
 
             if pattern.search(line):
