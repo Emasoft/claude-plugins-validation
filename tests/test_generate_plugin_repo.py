@@ -48,9 +48,9 @@ from validate_plugin import validate_gitignore, validate_readme, validate_struct
 # =============================================================================
 
 
-def _default_params(**overrides) -> PluginParams:
+def _default_params(**overrides: object) -> PluginParams:
     """Create a PluginParams with sensible defaults, accepting overrides."""
-    defaults = {
+    defaults: dict[str, object] = {
         "name": "my-test-plugin",
         "description": "A test plugin for unit tests",
         "author": "Test Author",
@@ -62,7 +62,7 @@ def _default_params(**overrides) -> PluginParams:
         "version": "0.1.0",
     }
     defaults.update(overrides)
-    return PluginParams(**defaults)
+    return PluginParams(**defaults)  # type: ignore[arg-type]
 
 
 # =============================================================================

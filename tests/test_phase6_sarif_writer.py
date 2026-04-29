@@ -65,7 +65,7 @@ class TestSeverityMapping:
     def test_each_level_maps(self, tmp_path: Path, level: str, sarif_level: str) -> None:
         plugin = _make_plugin(tmp_path)
         report = ValidationReport()
-        report.add(level, "RC-50 sample message", file=str(plugin / "src/x.py"), line=10)
+        report.add(level, "RC-50 sample message", file=str(plugin / "src/x.py"), line=10)  # type: ignore[arg-type]
         sarif = results_to_sarif(report.results, plugin)
         results = sarif["runs"][0]["results"]
         assert len(results) == 1
