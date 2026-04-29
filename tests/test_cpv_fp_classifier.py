@@ -16,11 +16,10 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
-import cpv_fp_classifier  # noqa: E402
 from cpv_fp_classifier import (  # noqa: E402
+    RULE_CLASSIFIERS,
     Context,
     FindingVerdict,
-    RULE_CLASSIFIERS,
     apply_verdict,
     classify_rule,
     demote_severity,
