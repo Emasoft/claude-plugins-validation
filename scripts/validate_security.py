@@ -2461,12 +2461,100 @@ def scan_for_secrets(content: str, file_path: str, report: ValidationReport) -> 
                 # Skip known example/placeholder secrets (e.g. AWS docs AKIAIOSFODNN7EXAMPLE)
                 if matched_text in KNOWN_EXAMPLE_SECRETS:
                     continue
+                # v2.45 FP4 — broaden placeholder recognition. The
+                # `Generic API Key` / `Database Connection String`
+                # detectors fire on documentation strings like
+                # `export API_KEY="your-development-key"` and
+                # `DATABASE_URL: postgres://postgres:postgres@…`.
+                # These are example template values that real users
+                # will replace at runtime — they're never live
+                # credentials. Suppress via a substring check on
+                # the matched text + the surrounding line context.
+                if _is_placeholder_secret_line(matched_text, line):
+                    continue
                 # Mask the actual secret in the report
                 masked_line = line.strip()[:40] + "..." if len(line.strip()) > 40 else line.strip()
                 report.critical(f"{secret_type} detected: {masked_line}", file_path, line_num)
                 issues_found += 1
 
     return issues_found
+
+
+# v2.45 FP4 — Placeholder-secret line markers. These substrings appear
+# in documentation lines that USE template/placeholder values; they do
+# NOT appear in lines containing real credentials. Match on the LINE,
+# not the matched secret text — real test fixtures embed words like
+# "fake"/"test" inside pseudo-tokens (e.g. `AKIA44QH8DHBFAKEKEY1`)
+# which the existing tests rely on being detected.
+_PLACEHOLDER_LINE_MARKERS = (
+    # Hyphenated / underscored "your-...-key" style template values
+    "your-",
+    "your_",
+    # Bracket templates
+    "<your_",
+    "<your-",
+    "<api_key>",
+    "<api-key>",
+    "<api_token>",
+    "<api-token>",
+    "<token>",
+    "<secret>",
+    "<password>",
+    # Generic placeholder phrases (only as surrounding-line context;
+    # they tag the line as a doc template). Avoid bare "test"/"fake"/
+    # "demo"/"dummy" — those legitimately appear in fixture values.
+    "placeholder",
+    "changeme",
+    "change_me",
+    "change-me",
+    "replace_me",
+    "replace-me",
+    "redacted",
+    # Postgres / MySQL / Redis test-fixture connection strings. The
+    # username == password idiom and the dummy `localhost:5432/test`
+    # database name are universal CI-fixture giveaways.
+    "postgres://postgres:postgres",
+    "postgres://postgres:postgr",  # truncated example shown in tutorials
+    "mysql://root:password",
+    "mysql://root:root",
+    "mysql://test:test",
+    "redis://:password@",
+    "redis://:redis@",
+    "mongodb://admin:admin",
+    "mongodb://root:root",
+)
+
+
+def _is_placeholder_secret_line(matched_text: str, line: str) -> bool:
+    """v2.45 FP4 — True if the secret-pattern hit is a doc placeholder.
+
+    Three checks (all match on the LINE context — the matched_text
+    itself is allowed to contain words like "fake"/"test" without
+    triggering the skip, because real test fixtures use those):
+
+    1) The line contains a known placeholder line marker
+       (`your-`, `<api-key>`, `placeholder`, `changeme`,
+       `postgres://postgres:postgres@…`, etc.).
+    2) The matched text contains template-syntax brackets `<…>` AND
+       the inner text is a placeholder name (every char is
+       alpha/`-`/`_`). Catches `<YOUR_API_KEY>`, `<api-key>`.
+    3) The line contains a `your-…` or `your_…` HYPHENATED template
+       value (`export API_KEY="your-development-key"`).
+
+    Real secrets don't have placeholder substrings in their values.
+    If a real key happens to literally contain "example" as a token,
+    the false negative is acceptable.
+    """
+    line_lower = line.lower()
+    for needle in _PLACEHOLDER_LINE_MARKERS:
+        if needle in line_lower:
+            return True
+    # Template-bracket placeholder in the matched text: `<NAME>` where
+    # NAME is alpha/`-`/`_` (no spaces, no actual key bytes).
+    bracket_match = re.search(r"<([A-Za-z][A-Za-z0-9_\-]*)>", matched_text)
+    if bracket_match:
+        return True
+    return False
 
 
 def scan_for_user_paths(content: str, file_path: str, report: ValidationReport) -> int:
