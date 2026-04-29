@@ -1731,6 +1731,47 @@ def _rc93_is_markdown_table_row(line: str) -> bool:
     return False
 
 
+# v2.45 FP6 — JS/TS / Python import-statement shapes. When one of these
+# matches inside an AI-facing markdown file, the line is a documentation
+# snippet (a doc fragment showing what the import would look like, NOT
+# a live file operation). Used by `scan_for_path_traversal` to suppress
+# RC-110 / RC-112 hits on import lines that survive the fenced-block
+# detector — primarily because of nested-fence edge cases (e.g.
+# ```markdown ... ``` ... ``` ... ``` where the inner ``` toggles the
+# state and the next batch of lines look "outside" the fence even
+# though visually they're inside).
+_RC110_IMPORT_LINE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # ES module — `import { Foo } from '../bar'`, `import Foo from '../bar'`,
+    # `import * as Foo from '../bar'`, side-effect import `import '../bar'`.
+    re.compile(r"^\s*import\b[^;\n]*['\"](?:\.\.?/|\.\.?\\)"),
+    # ES module re-export — `export { Foo } from '../bar'`, `export * from '../bar'`.
+    re.compile(r"^\s*export\b[^;\n]*\bfrom\b\s*['\"](?:\.\.?/|\.\.?\\)"),
+    # CommonJS `require('../bar')`.
+    re.compile(r"^\s*(?:const|let|var)?\s*[A-Za-z_$][\w$]*\s*=?\s*require\s*\(\s*['\"](?:\.\.?/|\.\.?\\)"),
+    # Bare `require('../bar')` mid-line (e.g. assignment in narrative prose).
+    re.compile(r"\brequire\s*\(\s*['\"](?:\.\.?/|\.\.?\\)"),
+    # Dynamic `import('../bar')`.
+    re.compile(r"\bimport\s*\(\s*['\"](?:\.\.?/|\.\.?\\)"),
+    # Python — `from ..foo import Bar`, `from .foo import Bar`. The
+    # leading dots represent a relative import; while the literal
+    # `..` text isn't traversal, the RC-110 regex sees the chars and
+    # fires on doc snippets describing module layout.
+    re.compile(r"^\s*from\s+\.{1,2}[A-Za-z_]"),
+)
+
+
+def _rc110_is_import_statement_line(line: str) -> bool:
+    """v2.45 FP6 — True if the line is a JS/TS/Python import statement.
+
+    Suppresses RC-110 / RC-112 in AI-facing markdown where the line is
+    a documentation snippet showing what an import looks like. The
+    fenced-block detector handles the common case; this helper catches
+    the nested-fence edge case where the toggle-based detector
+    incorrectly marks an inner-fence line as "outside" a fence.
+    """
+    return any(pat.search(line) for pat in _RC110_IMPORT_LINE_PATTERNS)
+
+
 _RC21_SUBPROCESS_PREP_HINTS = (
     "subprocess.", "Popen(", "run(", "check_output(", "check_call(",
     "spawn(", "execve(", "execvp(", "execv(",
@@ -2229,6 +2270,23 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
         # used by RC-93 — it already handles raw rows AND quote-stripped
         # embedded rows.
         if is_ai_markdown and _rc93_is_markdown_table_row(line):
+            continue
+
+        # v2.45 FP6 — skip AI-facing-markdown lines that LOOK LIKE a
+        # JS/TS/Python import / export / require / from statement. These
+        # are documentation snippets explaining module structure (e.g.
+        # `import { PaymentService } from '../payment/service';` in a
+        # circular-dependency analysis doc). They are unambiguously
+        # static-analysis fixtures, not file-op call sites.
+        #
+        # Why this is needed in addition to the fenced-block skip:
+        # CommonMark fence detection toggles on every triple-backtick,
+        # so a markdown-explaining-markdown doc with NESTED fences
+        # (e.g. ```markdown … ``` … ``` … ```) ends up with the inner
+        # block's content marked as OUTSIDE the fence even though it
+        # is visually inside. The import-statement shape catches those
+        # exact lines without needing perfect fence parsing.
+        if is_ai_markdown and _rc110_is_import_statement_line(line):
             continue
 
         # v2.44 — pre-compute markdown link / inline-code spans for the
