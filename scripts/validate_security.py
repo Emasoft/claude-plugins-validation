@@ -85,9 +85,24 @@ from cpv_validation_common import (
 # Command substitution patterns - MUST be checked BEFORE any allowlist
 COMMAND_SUBSTITUTION_PATTERNS = [
     # $(command) - POSIX command substitution
-    (re.compile(r"\$\([^)]+\)"), "Command substitution $(...) detected"),
+    (
+        re.compile(r"\$\([^)]+\)"),
+        "Shell command substitution `$(...)` — the inner command runs and its "
+        "output is interpolated; if any operand crosses an attacker-controlled "
+        "boundary (env var, file content, network input) this becomes RCE. "
+        "Fix: prefer reading the value via API/file-read instead of shelling "
+        "out; if shelling out is unavoidable, validate inputs and quote "
+        "everything. Common-OK: read-only commands like `$(git rev-parse ...)` "
+        "in a controlled template",
+    ),
     # `command` - Legacy backtick command substitution
-    (re.compile(r"`[^`]+`"), "Command substitution `...` detected"),
+    (
+        re.compile(r"`[^`]+`"),
+        "Legacy backtick command substitution `…` — same RCE risk as `$(...)` "
+        "plus harder to nest safely. Fix: prefer `$(...)` for new code; for "
+        "non-shell text, wrap the value in code-fence formatting so the "
+        "scanner doesn't treat it as a shell construct",
+    ),
 ]
 
 # Variable expansion in unsafe contexts (unquoted)
@@ -107,25 +122,92 @@ UNSAFE_VARIABLE_PATTERNS = [
 
 # Pipe to shell patterns - extremely dangerous
 PIPE_TO_SHELL_PATTERNS = [
-    (re.compile(r"\|\s*sh\b"), "Pipe to sh detected"),
-    (re.compile(r"\|\s*bash\b"), "Pipe to bash detected"),
-    (re.compile(r"\|\s*zsh\b"), "Pipe to zsh detected"),
-    (re.compile(r"\|\s*ksh\b"), "Pipe to ksh detected"),
-    (re.compile(r"\|\s*source\b"), "Pipe to source detected"),
-    (re.compile(r"\|\s*\.\s"), "Pipe to dot (source) detected"),
+    (
+        re.compile(r"\|\s*sh\b"),
+        "[RC-114] Pipe-to-shell `| sh` — executes whatever produced the upstream "
+        "stdout, no signature/integrity check. Fix: download to a file, "
+        "verify checksum/signature, then invoke explicitly. Pattern catches "
+        "the classic `curl … | sh` install footgun",
+    ),
+    (
+        re.compile(r"\|\s*bash\b"),
+        "[RC-115] Pipe-to-shell `| bash` — same RCE risk as RC-114 with bash "
+        "explicitly named. Fix: download, verify, then `bash <file>`",
+    ),
+    (
+        re.compile(r"\|\s*zsh\b"),
+        "[RC-116] Pipe-to-shell `| zsh` — same RCE risk as RC-114 with zsh "
+        "explicitly named. Fix: download, verify, then `zsh <file>`",
+    ),
+    (
+        re.compile(r"\|\s*ksh\b"),
+        "[RC-117] Pipe-to-shell `| ksh` — same RCE risk as RC-114 with ksh "
+        "explicitly named. Fix: download, verify, then `ksh <file>`",
+    ),
+    (
+        re.compile(r"\|\s*source\b"),
+        "[RC-118] Pipe-to-source `| source` — like pipe-to-shell but loads "
+        "into the current shell context, also leaking env vars and aliases. "
+        "Fix: never source remote-fetched content; download, audit, source explicitly",
+    ),
+    (
+        re.compile(r"\|\s*\.\s"),
+        "[RC-119] Pipe-to-dot `| . ` (POSIX shorthand for `source`) — same "
+        "risk as RC-118. Fix: same as RC-118",
+    ),
 ]
 
 # Eval patterns - code execution risks
 EVAL_PATTERNS = [
-    (re.compile(r"\beval\s+"), "eval command detected"),
-    (re.compile(r"\bexec\s+"), "exec command detected"),
+    (
+        re.compile(r"\beval\s+"),
+        "[RC-120] Shell `eval` — runs an arbitrary string as code; if any "
+        "part is attacker-influenced this is direct RCE. Fix: replace with "
+        "explicit dispatch (case statement, function lookup table). Common-OK: "
+        "documentation that explains why `eval` is dangerous",
+    ),
+    (
+        re.compile(r"\bexec\s+"),
+        "[RC-121] Shell `exec <cmd>` — replaces the current shell with the "
+        "named command; if `<cmd>` is attacker-controlled this is RCE plus "
+        "loss of cleanup handlers. Fix: don't pass user input to exec; if "
+        "execvp-style replacement is genuinely needed, validate the command "
+        "name against an allowlist first",
+    ),
     # Python-specific
-    (re.compile(r"\beval\s*\("), "Python eval() detected"),
-    (re.compile(r"\bexec\s*\("), "Python exec() detected"),
-    (re.compile(r"\bcompile\s*\([^)]*\bexec\b"), "Python compile() with exec mode"),
+    (
+        re.compile(r"\beval\s*\("),
+        "[RC-122] Python `eval(…)` — evaluates an arbitrary Python expression; "
+        "trivial RCE if any operand crosses an attacker boundary. Fix: use "
+        "`ast.literal_eval` for data-only parsing, or write an explicit parser "
+        "for the format you actually need",
+    ),
+    (
+        re.compile(r"\bexec\s*\("),
+        "[RC-123] Python `exec(…)` — runs an arbitrary statement block; "
+        "trivial RCE if any operand crosses an attacker boundary. Fix: refactor "
+        "to call a real function. Common-OK: a documentation file explaining "
+        "what `exec()` does (CPV's own taint-engine source documents this)",
+    ),
+    (
+        re.compile(r"\bcompile\s*\([^)]*\bexec\b"),
+        "[RC-124] Python `compile(…, mode='exec')` — compiles arbitrary code "
+        "for later execution; same RCE class as RC-123 with deferred trigger. "
+        "Fix: same as RC-123",
+    ),
     # JavaScript-specific
-    (re.compile(r"\bFunction\s*\("), "JavaScript Function constructor (eval-like)"),
-    (re.compile(r"\bnew\s+Function\s*\("), "JavaScript new Function() (eval-like)"),
+    (
+        re.compile(r"\bFunction\s*\("),
+        "[RC-125] JavaScript `Function(…)` constructor — eval-equivalent in "
+        "JS; the string body is parsed as code. Fix: never construct Function "
+        "from user input. Common-OK: ESLint rule documentation matching this "
+        "pattern in its examples",
+    ),
+    (
+        re.compile(r"\bnew\s+Function\s*\("),
+        "[RC-126] JavaScript `new Function(…)` — eval-equivalent. Same fix "
+        "as RC-125",
+    ),
 ]
 
 # =============================================================================
@@ -134,8 +216,22 @@ EVAL_PATTERNS = [
 
 PATH_TRAVERSAL_PATTERNS = [
     # Directory traversal
-    (re.compile(r"\.\./"), "Path traversal ../ detected"),
-    (re.compile(r"\.\.\\"), "Path traversal ..\\ detected"),
+    (
+        re.compile(r"\.\./"),
+        "[RC-110] Directory traversal sequence `../` — appears in a path that "
+        "may be passed to file operations; if any segment is attacker-influenced "
+        "the result can read or write outside the intended directory tree. "
+        "Fix: anchor every relative path against a known root (Path.resolve() + "
+        "is_relative_to() check) before opening. Common-OK: glob/regex patterns, "
+        "config keys like `extraPaths: [\"../scripts\"]`, doc snippets",
+    ),
+    (
+        re.compile(r"\.\.\\"),
+        "[RC-111] Windows directory traversal sequence `..\\` — same risk as "
+        "RC-110 on Windows paths; backslash variant must be checked separately "
+        "because Path comparison is case- and separator-insensitive on Windows. "
+        "Fix: same as RC-110 — anchor and check is_relative_to()",
+    ),
     # Absolute paths to system directories (except env-var placeholders).
     # The "tmp" and "var" prefixes are EXCLUDED — the standard POSIX temp
     # dir (mktemp default) sits under one, and the macOS user-temp tree
@@ -146,10 +242,23 @@ PATH_TRAVERSAL_PATTERNS = [
         re.compile(
             r"(?<!\$\{CLAUDE_PLUGIN_ROOT\})(?<!\$\{CLAUDE_PLUGIN_DATA\})(?<!\$\{CLAUDE_PROJECT_DIR\})(?<![\w$\{])/(?:usr|etc|opt|bin|sbin|lib|root)/"
         ),
-        "Absolute Unix system path detected",
+        "[RC-112] Absolute Unix system path (`/usr|/etc|/opt|/bin|/sbin|/lib|/root`) "
+        "— hardcoding a host-specific system path makes the plugin non-portable "
+        "and may indicate a write into a system location it shouldn't touch. "
+        "Fix: use `${CLAUDE_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_DATA}`, or "
+        "`${CLAUDE_PROJECT_DIR}` for plugin-relative paths; for genuine system "
+        "config (proxy CA, OS-managed settings) keep the path but document why. "
+        "Common-OK: documentation describing where managed-settings.json lives, "
+        "regex source for security validators that intentionally match these paths",
     ),
     # Windows absolute paths
-    (re.compile(r"[A-Za-z]:\\"), "Windows absolute path detected"),
+    (
+        re.compile(r"[A-Za-z]:\\"),
+        "[RC-113] Windows absolute path (`C:\\…`) — same portability/leak concern "
+        "as RC-112 on Windows. Fix: use Path placeholders relative to "
+        "`${CLAUDE_PLUGIN_ROOT}` etc. Common-OK: documentation snippets "
+        "describing managed-settings.json location",
+    ),
 ]
 
 # =============================================================================
@@ -164,31 +273,61 @@ PROMPT_INJECTION_PATTERNS = [
     # Original 8 patterns
     (
         re.compile(r"ignore\s+(?:all\s+)?(?:previous|prior|above)\s+instructions?", re.IGNORECASE),
-        "Prompt injection: ignore previous instructions",
+        "[RC-127] Prompt injection — `ignore previous instructions` directive "
+        "in plugin-shipped content; if loaded into a Claude turn this would "
+        "attempt to override the system prompt. Fix: rephrase the documentation "
+        "(e.g. \"DO NOT use the phrase 'ignore previous instructions' in "
+        "skill content\"); for educational content explaining the attack, "
+        "wrap the example in backticks or a fenced code block",
     ),
-    (re.compile(r"you\s+are\s+now\s+(?:a|an)\b", re.IGNORECASE), "Prompt injection: identity override ('you are now')"),
+    (
+        re.compile(r"you\s+are\s+now\s+(?:a|an)\b", re.IGNORECASE),
+        "[RC-128] Prompt injection — identity override (`you are now a/an …`) "
+        "in plugin-shipped content; classic role-rewrite attack vector. Fix: "
+        "rephrase or wrap example in code fences",
+    ),
     (
         re.compile(
             r"(?:forget|disregard|override)\s+(?:all\s+)?(?:your|the)\s+(?:instructions?|rules?|guidelines?|constraints?)",
             re.IGNORECASE,
         ),
-        "Prompt injection: instruction override",
+        "[RC-129] Prompt injection — instruction-override directive "
+        "(`forget/disregard/override … instructions/rules/guidelines/constraints`); "
+        "attempts to wipe the system prompt. Fix: rephrase or fence",
     ),
     (
         re.compile(
             r"do\s+not\s+follow\s+(?:any|the)\s+(?:previous|above|prior)\s+(?:instructions?|rules?)", re.IGNORECASE
         ),
-        "Prompt injection: instruction negation",
+        "[RC-130] Prompt injection — instruction-negation directive "
+        "(`do not follow … previous instructions/rules`); negation-form of "
+        "RC-127. Fix: rephrase or fence",
     ),
     (
         re.compile(r"(?:system|hidden)\s*(?:prompt|instruction|message)\s*:", re.IGNORECASE),
-        "Prompt injection: fake system prompt marker",
+        "[RC-131] Prompt injection — fake system-prompt marker "
+        "(`system: …`, `hidden prompt: …`); pretends to be the privileged "
+        "system channel so the model treats following text as authoritative. "
+        "Fix: rephrase to plain words like \"system instructions\", or fence",
     ),
-    (re.compile(r"<\s*(?:system|instructions?|context)\s*>", re.IGNORECASE), "Prompt injection: fake XML system tag"),
-    (re.compile(r"\[INST\]|\[/INST\]|\[SYSTEM\]", re.IGNORECASE), "Prompt injection: fake instruction delimiters"),
+    (
+        re.compile(r"<\s*(?:system|instructions?|context)\s*>", re.IGNORECASE),
+        "[RC-132] Prompt injection — fake XML system tag "
+        "(`<system>`, `<instructions>`, `<context>`); mimics the structured "
+        "system-prompt boundary. Fix: rephrase or fence; for genuine XML "
+        "documentation use a fenced code block tagged ```xml",
+    ),
+    (
+        re.compile(r"\[INST\]|\[/INST\]|\[SYSTEM\]", re.IGNORECASE),
+        "[RC-133] Prompt injection — fake instruction delimiters "
+        "(`[INST]`, `[/INST]`, `[SYSTEM]`); mimic Llama-style chat-template "
+        "boundaries. Fix: rephrase or fence",
+    ),
     (
         re.compile(r"IMPORTANT:\s*(?:ignore|override|forget|disregard)", re.IGNORECASE),
-        "Prompt injection: IMPORTANT override",
+        "[RC-134] Prompt injection — `IMPORTANT:` urgency-prefix combined "
+        "with an override verb; emphasis-spam variant of RC-127/129. Fix: "
+        "rephrase the IMPORTANT block to remove the override verb, or fence",
     ),
     # Phase 2a — RC-01 paraphrase template (verb x noun x target with up to 3 intervening words)
     (
@@ -315,8 +454,19 @@ SUPPLY_CHAIN_PATTERNS = [
     # Benign forms (`bash --version`, `bash --help`) are extremely rare in
     # plugin scripts and the cost of flagging them is far below the cost of
     # missing a real `curl ... | bash` install attack.
-    (re.compile(r"curl\s+.*\|\s*(?:sh|bash|zsh|ksh)\b"), "Supply chain: curl piped to shell interpreter"),
-    (re.compile(r"wget\s+.*\|\s*(?:sh|bash|zsh|ksh)\b"), "Supply chain: wget piped to shell interpreter"),
+    (
+        re.compile(r"curl\s+.*\|\s*(?:sh|bash|zsh|ksh)\b"),
+        "[RC-136] Supply-chain attack — `curl … | sh/bash/zsh/ksh` install "
+        "footgun: downloads remote content and pipes directly to a shell "
+        "interpreter, no signature/integrity check, full RCE if the URL is "
+        "MITMed or the source is compromised. Fix: download to a file, verify "
+        "checksum/signature, then `bash <file>`",
+    ),
+    (
+        re.compile(r"wget\s+.*\|\s*(?:sh|bash|zsh|ksh)\b"),
+        "[RC-137] Supply-chain attack — `wget … | sh/bash/zsh/ksh` install "
+        "footgun: same RCE class as RC-136 with wget. Fix: same as RC-136",
+    ),
     # Language interpreters (python/node) — only fire when the invocation is
     # clearly in exec mode. Skips read-only formatters such as
     # `python3 -m json.tool`, `python -m pprint`, `node --version`.
@@ -326,29 +476,44 @@ SUPPLY_CHAIN_PATTERNS = [
         re.compile(
             r"curl\s+.*\|\s*(?:python|python3|node)(?:\s*$|\s+-c\b|\s+-e\b|\s+-(?:\s|$)|\s+-m\s+pip\b|\s*[;&|<>])"
         ),
-        "Supply chain: curl piped to language interpreter (exec mode)",
+        "[RC-138] Supply-chain attack — `curl … | python/node` in exec mode "
+        "(stdin/`-c`/`-e`/`-m pip`); same RCE class as RC-136 with a language "
+        "interpreter. Fix: download, audit, run explicitly. The exec-mode "
+        "guard already filters benign read-only formatters",
     ),
     (
         re.compile(
             r"wget\s+.*\|\s*(?:python|python3|node)(?:\s*$|\s+-c\b|\s+-e\b|\s+-(?:\s|$)|\s+-m\s+pip\b|\s*[;&|<>])"
         ),
-        "Supply chain: wget piped to language interpreter (exec mode)",
+        "[RC-139] Supply-chain attack — `wget … | python/node` in exec mode; "
+        "same as RC-138 with wget. Fix: same as RC-138",
     ),
     (
         re.compile(r"pip\s+install\s+.*(?:https?://|git\+|--index-url\s+(?!https://pypi))"),
-        "Supply chain: pip install from non-PyPI source",
+        "[RC-140] Supply-chain attack — `pip install` from non-PyPI source "
+        "(http(s) URL, `git+…`, or `--index-url` pointing somewhere other than "
+        "the canonical PyPI). The package is installed without PyPI's "
+        "checksum/signature trail. Fix: prefer the canonical PyPI; if you "
+        "MUST install from a URL, pin a commit hash and use `--require-hashes`",
     ),
     (
         re.compile(r"npm\s+install\s+.*(?:https?://|git\+|--registry\s+(?!https://registry\.npmjs))"),
-        "Supply chain: npm install from non-registry source",
+        "[RC-141] Supply-chain attack — `npm install` from non-npm-registry "
+        "source. Same risk as RC-140 in the JS ecosystem. Fix: same — prefer "
+        "the canonical npm registry; pin commit + use a lockfile",
     ),
     (
         re.compile(r"curl\s+.*-[oO]\s+.*&&\s*(?:chmod|sh|bash|python|node)\b"),
-        "Supply chain: curl download then execute",
+        "[RC-142] Supply-chain attack — `curl -o … && chmod/sh/bash/python/node` "
+        "(download-then-execute one-liner); skips integrity verification. "
+        "Fix: split into download + verify-signature + execute, with the "
+        "verify step refusing to proceed on mismatch",
     ),
     (
         re.compile(r"wget\s+.*-[oO]\s+.*&&\s*(?:chmod|sh|bash|python|node)\b"),
-        "Supply chain: wget download then execute",
+        "[RC-143] Supply-chain attack — `wget -O … && chmod/sh/bash/python/node` "
+        "(download-then-execute one-liner). Same as RC-142 with wget. "
+        "Fix: same as RC-142",
     ),
     # Phase 2d RC-26 — separator-based execution (no pipe, but `;`/`&&` connect)
     (
@@ -390,31 +555,57 @@ SUPPLY_CHAIN_PATTERNS = [
 # Phase 2c (RC-20) added Claude MEMORY/USER files, browser keystores, and
 # Windows vault per vexscan FILE-001..005.
 CREDENTIAL_HARVEST_PATTERNS = [
-    (re.compile(r"~/\.ssh/|/\.ssh/|SSH_KEY|id_rsa|id_ed25519"), "Credential access: SSH key file reference"),
+    (
+        re.compile(r"~/\.ssh/|/\.ssh/|SSH_KEY|id_rsa|id_ed25519"),
+        "[RC-144] Credential harvest — reference to SSH key file (`~/.ssh/`, "
+        "`id_rsa`, `id_ed25519`, `SSH_KEY` env var). Plugins should never "
+        "read user SSH keys. Fix: use `gh` / `git` CLI for git operations "
+        "(they handle auth) or ssh-agent-forwarding; if you genuinely need "
+        "to display the path in docs, fence it. Common-OK: documentation "
+        "telling users where THEIR keys live",
+    ),
     (
         re.compile(r"~/\.aws/|/\.aws/|AWS_SECRET|aws_secret_access_key", re.IGNORECASE),
-        "Credential access: AWS credentials reference",
+        "[RC-145] Credential harvest — reference to AWS credentials file or "
+        "secret-key env var. Fix: use AWS SDK's default credential chain "
+        "(don't read the file directly); for docs, fence the path",
     ),
     (
         re.compile(r"~/\.gitconfig|/\.gitconfig|GIT_TOKEN|GITHUB_TOKEN", re.IGNORECASE),
-        "Credential access: Git credentials reference",
+        "[RC-146] Credential harvest — reference to git config or GitHub "
+        "token env var. Fix: use `gh auth token` for GitHub auth, or read "
+        "the env var via the standard CC env-var passthrough; for docs, fence",
     ),
     (
         re.compile(r"~/\.npmrc|/\.npmrc|NPM_TOKEN|npm_token", re.IGNORECASE),
-        "Credential access: npm credentials reference",
+        "[RC-147] Credential harvest — reference to npm credentials file or "
+        "token env var. Fix: let npm CLI handle auth; for docs, fence",
     ),
     (
         re.compile(r"~/\.docker/|/\.docker/config\.json|DOCKER_PASSWORD", re.IGNORECASE),
-        "Credential access: Docker credentials reference",
+        "[RC-148] Credential harvest — reference to Docker credentials store. "
+        "Fix: use `docker login` and let the CLI manage credentials; for "
+        "docs, fence",
     ),
     (
         re.compile(r"~/\.kube/|/\.kube/config|KUBECONFIG", re.IGNORECASE),
-        "Credential access: Kubernetes config reference",
+        "[RC-149] Credential harvest — reference to Kubernetes kubeconfig. "
+        "Fix: use `kubectl` and let it pick up the user's KUBECONFIG; for "
+        "docs, fence",
     ),
-    (re.compile(r"~/\.gnupg/|/\.gnupg/|GPG_PASSPHRASE", re.IGNORECASE), "Credential access: GPG keyring reference"),
+    (
+        re.compile(r"~/\.gnupg/|/\.gnupg/|GPG_PASSPHRASE", re.IGNORECASE),
+        "[RC-150] Credential harvest — reference to GPG keyring or "
+        "GPG_PASSPHRASE env var. Fix: invoke `gpg` and let it prompt the "
+        "user's agent; for docs, fence",
+    ),
     (
         re.compile(r"(?:keychain|keyring|credential.?store|password.?store)", re.IGNORECASE),
-        "Credential access: system keystore reference",
+        "[RC-151] Credential harvest — reference to system keystore "
+        "(macOS Keychain, GNOME Keyring, KWallet, Windows credential store, "
+        "or `pass`-style password-store). Plugins should not read user "
+        "credentials directly. Fix: use the official CLI for the service "
+        "(it handles keystore lookup); for docs, fence the term",
     ),
     # Phase 2c (RC-20) — Claude memory/agent files (MEMORY.md, CLAUDE.md user
     # mode, ~/.claude/USER.md). Reading these from a plugin can extract user
@@ -454,16 +645,48 @@ CREDENTIAL_HARVEST_PATTERNS = [
 
 # Sandbox escape patterns — bypassing safety controls
 SANDBOX_ESCAPE_PATTERNS = [
-    (re.compile(r"--no-verify\b"), "Sandbox escape: --no-verify bypasses git hooks"),
+    (
+        re.compile(r"--no-verify\b"),
+        "[RC-152] Sandbox escape — `--no-verify` flag (`git push --no-verify`, "
+        "`git commit --no-verify`) bypasses pre-push / pre-commit hooks "
+        "including CPV's own publish gate. Fix: investigate why the hook "
+        "is failing and address it; never ship a plugin that recommends "
+        "`--no-verify` to its users",
+    ),
     (
         re.compile(r"git\s+config\s+.*(?:core\.hooksPath|core\.autocrlf|safe\.directory)"),
-        "Sandbox escape: git config modification",
+        "[RC-153] Sandbox escape — `git config` mutation of `core.hooksPath` "
+        "(redirects all hooks), `core.autocrlf` (silently rewrites line "
+        "endings), or `safe.directory` (suppresses unsafe-repo warnings). "
+        "Plugins must never mutate global git config silently. Fix: leave "
+        "git config alone; if the user genuinely needs different hooks "
+        "behavior, document the manual command",
     ),
-    (re.compile(r"--dangerously-skip-permissions\b"), "Permission escalation: dangerouslySkipPermissions flag"),
-    (re.compile(r"chmod\s+(?:777|a\+rwx)\b"), "Sandbox escape: chmod 777 (world-writable)"),
+    (
+        re.compile(r"--dangerously-skip-permissions\b"),
+        "[RC-154] Permission escalation — `--dangerously-skip-permissions` "
+        "(or its `dangerouslySkipPermissions` settings field) disables CC's "
+        "permission prompts wholesale. Plugins must NOT recommend this. "
+        "Fix: declare the specific permissions needed in `permissions.allow`; "
+        "for genuine worktree-isolation use cases, scope to the worktree "
+        "agent only and document the rationale",
+    ),
+    (
+        re.compile(r"chmod\s+(?:777|a\+rwx)\b"),
+        "[RC-155] Sandbox escape — `chmod 777` / `chmod a+rwx` makes the "
+        "target world-readable AND world-writable, defeating any per-user "
+        "permission boundary. Fix: use the most restrictive mode that "
+        "actually works (typically 644 for files, 755 for directories or "
+        "executables, 600 for secrets)",
+    ),
     (
         re.compile(r"(?:disable|bypass|skip)\s*(?:all\s+)?(?:hooks?|guard|safety|protection|sandbox)", re.IGNORECASE),
-        "Sandbox escape: safety bypass language",
+        "[RC-156] Sandbox escape — language pattern that talks about disabling, "
+        "bypassing, or skipping safety controls (hooks/guards/safety/protection/"
+        "sandbox). Often a sign of a script doing the disabling, sometimes a "
+        "doc warning users not to do it. Fix: if the script does it, remove; "
+        "if documentation, fence the example or rephrase to make the "
+        "warning explicit",
     ),
     # Phase 2d RC-34 — Reverse-shell variants in 7 languages + msfvenom + socat
     (
@@ -947,7 +1170,16 @@ def scan_for_user_paths(content: str, file_path: str, report: ValidationReport) 
             match = pattern.search(line)
             if match:
                 report.major(
-                    f"Hardcoded user path detected (use ${{CLAUDE_PLUGIN_ROOT}} instead): {match.group()}",
+                    f"[RC-135] Hardcoded user-home path (`{match.group()}`) "
+                    f"— absolute path containing a username (`/Users/<name>/…`, "
+                    f"`/home/<name>/…`, `C:\\Users\\<name>\\…`, `~/…`); the plugin "
+                    f"will break for every other user and may leak the developer's "
+                    f"identity in logs/diffs. Fix: replace with "
+                    f"`${{CLAUDE_PLUGIN_ROOT}}` (plugin's own folder), "
+                    f"`${{CLAUDE_PLUGIN_DATA}}` (writable per-plugin data), "
+                    f"`${{CLAUDE_PROJECT_DIR}}` (project root), or `~` "
+                    f"(POSIX home expansion). Common-OK: example output in docs, "
+                    f"test fixtures with deliberately-fake usernames",
                     file_path,
                     line_num,
                 )
