@@ -175,20 +175,26 @@ EVAL_PATTERNS = [
         "execvp-style replacement is genuinely needed, validate the command "
         "name against an allowlist first",
     ),
-    # Python-specific
+    # Python-specific. The leading `(?<![.\w])` lookbehind prevents matching
+    # method calls like `regex.exec(content)` (a JavaScript regex method —
+    # NOT the dangerous Python `exec()`) and identifier-suffixed names like
+    # `headerRe.exec(`. Only the bare top-level `eval(`/`exec(` builtin call
+    # is the RCE risk; method dispatch via `obj.exec()` is unrelated.
     (
-        re.compile(r"\beval\s*\("),
+        re.compile(r"(?<![.\w])eval\s*\("),
         "[RC-122] Python `eval(…)` — evaluates an arbitrary Python expression; "
         "trivial RCE if any operand crosses an attacker boundary. Fix: use "
         "`ast.literal_eval` for data-only parsing, or write an explicit parser "
         "for the format you actually need",
     ),
     (
-        re.compile(r"\bexec\s*\("),
+        re.compile(r"(?<![.\w])exec\s*\("),
         "[RC-123] Python `exec(…)` — runs an arbitrary statement block; "
         "trivial RCE if any operand crosses an attacker boundary. Fix: refactor "
         "to call a real function. Common-OK: a documentation file explaining "
-        "what `exec()` does (CPV's own taint-engine source documents this)",
+        "what `exec()` does (CPV's own taint-engine source documents this); "
+        "JavaScript `<regex>.exec(<str>)` is a regex-method call (no RCE) and "
+        "is excluded by the leading-context lookbehind",
     ),
     (
         re.compile(r"\bcompile\s*\([^)]*\bexec\b"),
@@ -1293,7 +1299,7 @@ def is_security_fix_reference(file_path: str) -> bool:
     return False
 
 
-def is_js_ts_file(file_path: str) -> bool:
+def is_js_ts_file(file_path: str, content: str | None = None) -> bool:
     """JavaScript/TypeScript files use backticks for template literals.
 
     Backticks in JS/TS source/config (e.g. eslint.config.mjs, *.ts, *.tsx)
@@ -1301,10 +1307,29 @@ def is_js_ts_file(file_path: str) -> bool:
     strings. They are NEVER POSIX command substitution. Skip the
     backtick-pattern check on these files to avoid flagging code-quoted
     references inside `// comments` and template strings.
+
+    Detection sources:
+
+    1. Extension match — `.js`, `.mjs`, `.cjs`, `.jsx`, `.ts`, `.tsx`,
+       `.mts`, `.cts`.
+    2. Shebang sniff — for executables under `bin/` etc. that ship without
+       an extension (e.g. `bin/llm-ext` with `#!/usr/bin/env node`). Many
+       Node CLIs are installed this way (npm, yarn, pnpm…), so the
+       extension-only heuristic misses a lot of real-world JS files. Pass
+       in the file's first line via the `content` arg to enable this.
     """
-    return file_path.lower().endswith(
+    if file_path.lower().endswith(
         (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts", ".cts")
-    )
+    ):
+        return True
+    if content is not None:
+        first_line = content.split("\n", 1)[0] if content else ""
+        if first_line.startswith("#!"):
+            shebang = first_line.lower()
+            # Node.js, Deno, Bun, ts-node — every common JS-runtime shebang.
+            if any(rt in shebang for rt in ("node", "deno", "bun", "ts-node", "tsx")):
+                return True
+    return False
 
 
 def is_shell_like_file(file_path: str) -> bool:
@@ -1438,6 +1463,13 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
     if is_markdown and is_ai_facing_markdown(file_path):
         skip_command_sub = True  # Backticks in .md are always formatting
 
+    # For markdown, build fence state ONCE so the `$(...)` rule can suppress
+    # findings inside fenced code blocks. Agent / command / skill docs
+    # legitimately quote shell snippets (e.g., `BACKUP="/tmp/foo.$(basename
+    # "$X")"`) inside ```bash blocks — those are documentation, not live
+    # code paths. Only injection text OUTSIDE fences carries real risk.
+    fence_state = build_fence_state(content) if is_markdown else None
+
     for line_num, line in enumerate(lines, start=1):
         # Skip comment-only lines in shell scripts
         stripped = line.strip()
@@ -1452,24 +1484,84 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
                 continue
 
         # Check command substitution (CRITICAL) - but not in shell scripts where it's expected
-        if not skip_command_sub:
-            for pattern, msg in COMMAND_SUBSTITUTION_PATTERNS:
-                # Python files don't have native backtick command substitution —
-                # backticks in .py are usually RST/docstring formatting. BUT backticks
-                # inside shell-execution calls (os.system, os.popen, subprocess) are real threats.
-                if is_python_file and "`...`" in msg:
+        for pattern, msg in COMMAND_SUBSTITUTION_PATTERNS:
+            # Identify the BACKTICK rule precisely. Both COMMAND_SUBSTITUTION_PATTERNS
+            # entries have `…` in their message text (the rule itself is *about* a
+            # backtick construct), so substring matching on a literal "`...`" was
+            # historically buggy — the message uses U+2026 ellipsis "…", not three
+            # ASCII dots. Match on the *pattern source* instead, which is unambiguous.
+            is_backtick_rule = pattern.pattern == r"`[^`]+`"
+
+            # Honor the per-file-type skips for the backtick rule only. The
+            # `$(...)` POSIX rule still runs across non-shell files because it
+            # legitimately resembles RCE outside shell context too.
+            if is_backtick_rule:
+                if skip_command_sub:
+                    continue
+                # Python: backticks are RST / docstring formatting unless they
+                # appear next to a shell-execution call.
+                if is_python_file:
                     shell_exec_indicators = ("os.system", "os.popen", "subprocess", "shell=", "Popen", "check_output")
                     if not any(indicator in line for indicator in shell_exec_indicators):
                         continue
-                # JS/TS files use backticks for template literals (ES2015), never
-                # for POSIX command substitution. Skip backtick patterns there.
-                # `$(...)` is also valid JS (DOM helpers, jQuery) but is rare in
-                # plugin scripts; keep that pattern enabled for now.
-                if is_js_ts_file(file_path) and "`...`" in msg:
+                # JS/TS: backticks are ES2015 template literals (`${var}` /
+                # tagged templates), NEVER POSIX command substitution. Suppress
+                # categorically — the language doesn't have shell-style backticks.
+                # `content` is passed so files like `bin/llm-ext` (no .js
+                # extension, `#!/usr/bin/env node` shebang) are detected too.
+                if is_js_ts_file(file_path, content):
                     continue
-                if pattern.search(line):
-                    report.critical(f"{msg}: {line.strip()[:80]}", file_path, line_num)
-                    issues_found += 1
+            else:
+                # `$(...)` rule. Shell scripts legitimately use this — the
+                # whole reason we computed `skip_command_sub` above. The
+                # backtick rule has its own per-language guards (Python,
+                # JS/TS); the `$(...)` rule respects shell-script context
+                # because that's where `$(cmd)` is the *correct* syntax.
+                if is_shell_script or is_test_file:
+                    continue
+                # In markdown, suppress findings INSIDE fenced
+                # code blocks — agent/skill docs legitimately quote shell
+                # snippets that contain `$(...)` as documentation, not as live
+                # execution. Outside fences, the construct is still flagged
+                # (a raw `$(rm -rf /)` in narrative text would be a real
+                # injection risk for an LLM-rendered doc).
+                if fence_state is not None and is_in_fenced_code_block(line_num - 1, fence_state):
+                    continue
+                # Markdown also wraps single-line examples in `inline code`.
+                # An author writing prose like:
+                #     **Shell safety:** double-quote variables (`$(date)`).
+                # is documenting, not executing. Detect every backtick-quoted
+                # span on the line and check whether the matched `$(...)`
+                # falls inside one — if so, suppress.
+                if is_markdown:
+                    m = pattern.search(line)
+                    if m:
+                        idx = m.start()
+                        in_inline_code = False
+                        in_segment = False
+                        seg_start = -1
+                        for i, ch in enumerate(line):
+                            if ch == "`":
+                                if in_segment and i > idx >= seg_start:
+                                    in_inline_code = True
+                                    break
+                                in_segment = not in_segment
+                                seg_start = i if in_segment else -1
+                        if in_inline_code:
+                            continue
+                # Python files don't have native shell command substitution.
+                # `$(...)` showing up in Python is almost always a docstring
+                # quoting a shell example (e.g. README snippets, error help
+                # text describing an env-var template). Skip unless there's
+                # a clear shell-execution call on the line.
+                if is_python_file:
+                    shell_exec_indicators = ("os.system", "os.popen", "subprocess", "shell=", "Popen", "check_output")
+                    if not any(indicator in line for indicator in shell_exec_indicators):
+                        continue
+
+            if pattern.search(line):
+                report.critical(f"{msg}: {line.strip()[:80]}", file_path, line_num)
+                issues_found += 1
 
         # Check pipe to shell (CRITICAL) - skip for markdown docs (code examples)
         if not is_markdown:
@@ -1489,6 +1581,22 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
                     # In Python files, skip shell-style eval/exec patterns (e.g. "exec " without parens)
                     # Only flag actual Python function calls: eval(...), exec(...)
                     if is_python_file and "command" in msg.lower():
+                        continue
+                    # JS/TS comment lines mention `exec failure`, `eval`, etc.
+                    # in prose. Comments are not code paths — suppress.
+                    if is_js_ts_file(file_path, content) and (
+                        stripped.startswith("//")
+                        or stripped.startswith("/*")
+                        or stripped.startswith("*")
+                    ):
+                        continue
+                    # Shell-style `exec <cmd>` rule (RC-121) — match expects
+                    # a real shell command after `exec`. In JS/TS source the
+                    # word "exec" is also used in many non-shell contexts:
+                    # `child.exec()` properties, error messages like "exec
+                    # failure", method names. Require a shell-script context
+                    # for the bare `exec <word>` pattern.
+                    if "RC-121" in msg and not is_shell_script:
                         continue
                     report.critical(f"{msg}: {line.strip()[:80]}", file_path, line_num)
                     issues_found += 1
@@ -1573,11 +1681,68 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
     ):
         return 0
 
+    is_js_ts = is_js_ts_file(file_path, content)
+    is_python_src = file_lower.endswith(".py")
+    # JS regex literals (e.g. `const re = /^\s*foo[\\:`"']\s*$/gm`) include
+    # characters that match Windows-path / unix-path patterns by accident.
+    # Detect them once per line so we can suppress matches that fall inside
+    # the regex source.
+    js_regex_literal_re = re.compile(r"/[^/\n]+/[gimsuy]*")
+
+    # Python docstring tracking — multi-line strings are line-bounded
+    # contexts where path text is documentation, not file ops. Sweep the
+    # file once to mark which line indices fall inside `"""…"""` /
+    # `'''…'''` blocks, so the per-line check can suppress matches there.
+    py_docstring_lines: set[int] = set()
+    if is_python_src:
+        in_doc = False
+        delim = None
+        for i, ln in enumerate(lines):
+            j = 0
+            while j < len(ln):
+                if not in_doc:
+                    if ln.startswith('"""', j):
+                        in_doc = True
+                        delim = '"""'
+                        j += 3
+                        continue
+                    if ln.startswith("'''", j):
+                        in_doc = True
+                        delim = "'''"
+                        j += 3
+                        continue
+                    j += 1
+                else:
+                    if delim is not None and ln.startswith(delim, j):
+                        in_doc = False
+                        delim = None
+                        j += 3
+                        continue
+                    j += 1
+            if in_doc:
+                py_docstring_lines.add(i)
+
     for line_num, line in enumerate(lines, start=1):
         # Skip comment-only lines
         stripped = line.strip()
         if stripped.startswith("#") and not stripped.startswith("#!"):
             continue
+
+        # JS/TS comments (//, /*, *) — same intent as the # skip for shell/python.
+        # The path strings inside JS/TS comments are documentation references
+        # (e.g. "// dist/cli.js → ../dist/index.js"), not live file operations.
+        if is_js_ts and (
+            stripped.startswith("//")
+            or stripped.startswith("/*")
+            or stripped.startswith("*")  # continuation of /** ... */ blocks
+        ):
+            continue
+
+        # JS/TS regex literals on the line — pre-compute their spans so the
+        # per-pattern loop can skip matches whose offset falls inside.
+        regex_spans: list[tuple[int, int]] = []
+        if is_js_ts:
+            regex_spans = [(m.start(), m.end()) for m in js_regex_literal_re.finditer(line)]
 
         # Skip shebang lines entirely - they legitimately reference system paths
         if stripped.startswith("#!"):
@@ -1589,11 +1754,24 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
 
         # Detect if this line is a Python string literal (help text, error messages, etc.)
         is_python_string_line = file_lower.endswith(".py") and ('"' in stripped or "'" in stripped)
+        # JS/TS string-literal detection — template literals (`…`), single
+        # and double quotes. Many path-shaped FPs come from JS escape
+        # sequences inside string content (e.g. "INSTRUCTIONS:\n" matches the
+        # Windows `[A-Z]:\` pattern because S:\n looks like a drive letter).
+        is_js_ts_string_line = is_js_ts and ("`" in stripped or "'" in stripped or '"' in stripped)
 
         for pattern, msg in PATH_TRAVERSAL_PATTERNS:
             match = pattern.search(line)
             if match:
                 matched_text = match.group(0)
+
+                # Skip if the match falls inside a JS regex literal — those
+                # contain colon/backslash/path-shaped chars by their nature
+                # and are pattern definitions, not live filesystem calls.
+                if regex_spans:
+                    m_start, m_end = match.start(), match.end()
+                    if any(rs <= m_start and m_end <= re_ for rs, re_ in regex_spans):
+                        continue
 
                 # Skip ..\ pattern when it's a Python string escape (e.g. "...\n" in f-strings)
                 if "..\\" in msg and "..\\" in matched_text:
@@ -1628,6 +1806,41 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
                     ):
                         continue
 
+                # Python docstring continuation lines — the multi-line
+                # string body itself is documentation. `../`, `/etc/`,
+                # `C:\…` showing up in module/function docstrings are
+                # always examples, never file ops.
+                if is_python_src and (line_num - 1) in py_docstring_lines:
+                    continue
+
+                # In JS/TS files, do the same for paths inside string literals.
+                # The Windows pattern's biggest FP source is escape sequences
+                # like `"INSTRUCTIONS:\n"` matching `[A-Za-z]:\`. Skip when
+                # the matched text is one of those escapes.
+                if is_js_ts and is_js_ts_string_line:
+                    if "Windows" in msg:
+                        # Validate the colon-backslash isn't a Windows drive
+                        # letter — drive letters are followed by `\` then a
+                        # filename char. Escape sequences (`\n`, `\r`, `\t`,
+                        # `\\`, `\"`) decode the byte after the backslash.
+                        m = re.search(r"([A-Za-z]):\\(.)", line)
+                        if m and m.group(2) in "nrtbfv0\\'\"`":
+                            continue
+                    if "Absolute Unix" in msg:
+                        # JS/TS string literals frequently contain literal
+                        # paths as documentation (`'/usr/bin/env'`,
+                        # `'#!/usr/bin/env node'`, error text, regex
+                        # sources). Skip when the line is clearly a
+                        # template/string literal rather than a real
+                        # filesystem call.
+                        if (
+                            "#!/" in line
+                            or stripped.startswith(("`", "'", '"'))
+                            or matched_text in line.split("`")[1::2]  # inside template literal segments
+                            or any(matched_text in seg for seg in re.findall(r"'[^']*'|\"[^\"]*\"", line))
+                        ):
+                            continue
+
                 report.critical(f"{msg}: {line.strip()[:80]}", file_path, line_num)
                 issues_found += 1
 
@@ -1642,14 +1855,18 @@ def scan_for_secrets(content: str, file_path: str, report: ValidationReport) -> 
     if is_validator_script(file_path):
         return 0
 
-    # Skip test files — they contain intentional example/mock secrets
-    # Handle both absolute (/tests/) and relative (tests/) paths
+    # Skip test files — they contain intentional example/mock secrets.
+    # Detection covers Python (`test_*.py`, `*_test.py`), JS/TS
+    # (`*.test.{js,ts,jsx,tsx,mjs,cjs}`, `*.spec.{js,ts,...}` —
+    # Mocha/Jest/Vitest convention), and any path under tests/. Tests
+    # are pattern fixtures by design; scanning them produces noise.
     file_normalized = file_lower.replace("\\", "/")
     if (
         "test_" in file_lower
         or "_test.py" in file_lower
         or "/tests/" in file_normalized
         or file_normalized.startswith("tests/")
+        or re.search(r"\.(?:test|spec)\.[mc]?[jt]sx?$", file_lower)
     ):
         return 0
 
@@ -1758,14 +1975,73 @@ def scan_for_prompt_injection(content: str, file_path: str, report: ValidationRe
     if is_validator_script(file_path):
         return 0
     file_normalized = file_lower.replace("\\", "/")
-    if "/tests/" in file_normalized or file_normalized.startswith("tests/"):
+    if (
+        "/tests/" in file_normalized
+        or file_normalized.startswith("tests/")
+        or re.search(r"\.(?:test|spec)\.[mc]?[jt]sx?$", file_normalized)
+    ):
         return 0
+
+    # Pre-compute fenced-code-block state for markdown — prompt-injection
+    # rules also apply educationally inside agent docs, where the
+    # "ignore previous instructions" example is wrapped in `inline code`
+    # or a ```fenced``` block to defang it. The rule's own help-text says
+    # "wrap the example in backticks or a fenced code block" — so honor
+    # that: if the matched span is INSIDE inline backticks or a fence,
+    # the author has already followed the recommendation.
+    is_md = file_lower.endswith((".md", ".mdx", ".markdown"))
+    fence_state = build_fence_state(content) if is_md else None
+
+    def _is_in_inline_backticks(line: str, m_start: int, m_end: int) -> bool:
+        """True if [m_start, m_end) lies between an unmatched-then-matched
+        pair of single backticks on the same line. Markdown's inline-code
+        is delimited by paired backticks; everything between them is
+        documentation, not live text the LLM should obey.
+
+        The bound check is ``seg_start <= m_start`` (not ``<``) because the
+        match commonly starts at the very first character after the opening
+        backtick — e.g. for ``\\`Ignore previous instructions\\``, the
+        opening backtick is at i, ``seg_start = i + 1`` lands on `I`, and
+        ``re.search`` returns ``m_start = i + 1`` exactly. ``<`` would miss
+        that case (off-by-one).
+        """
+        in_seg = False
+        seg_start = -1
+        for i, ch in enumerate(line):
+            if ch == "`":
+                if in_seg:
+                    if seg_start <= m_start and m_end <= i:
+                        return True
+                    in_seg = False
+                    seg_start = -1
+                else:
+                    in_seg = True
+                    seg_start = i + 1
+        return False
 
     issues_found = 0
     lines = content.split("\n")
     for line_num, line in enumerate(lines, start=1):
         for pattern, msg in PROMPT_INJECTION_PATTERNS:
-            if pattern.search(line):
+            m = pattern.search(line)
+            if m:
+                # Markdown: skip if defanged via fence or inline backticks.
+                if is_md:
+                    if fence_state is not None and is_in_fenced_code_block(line_num - 1, fence_state):
+                        continue
+                    if _is_in_inline_backticks(line, m.start(), m.end()):
+                        continue
+                # RC-131 fake-system-prompt-marker rule fires on text like
+                # `system:` or `hidden prompt:`. Class names ending in
+                # `…SystemMessage:` (OpenRouter API spec, OpenAI API spec)
+                # follow a CamelCase pattern that should NOT trigger —
+                # require a word boundary BEFORE the trigger word, not a
+                # CamelCase-letter context.
+                if "RC-131" in msg:
+                    # Look at the character immediately before the match.
+                    pre = line[m.start() - 1] if m.start() > 0 else ""
+                    if pre.isalpha():
+                        continue
                 report.critical(f"{msg}: {line.strip()[:80]}", file_path, line_num)
                 issues_found += 1
     return issues_found
@@ -1781,7 +2057,11 @@ def scan_for_data_exfiltration(content: str, file_path: str, report: ValidationR
     if file_lower.endswith((".md", ".mdx", ".markdown")) and not is_ai_facing_markdown(file_path):
         return 0
     file_normalized = file_lower.replace("\\", "/")
-    if "/tests/" in file_normalized or file_normalized.startswith("tests/"):
+    if (
+        "/tests/" in file_normalized
+        or file_normalized.startswith("tests/")
+        or re.search(r"\.(?:test|spec)\.[mc]?[jt]sx?$", file_normalized)
+    ):
         return 0
 
     issues_found = 0
@@ -1805,7 +2085,11 @@ def scan_for_supply_chain(content: str, file_path: str, report: ValidationReport
     if file_lower.endswith((".md", ".mdx", ".markdown")):
         return 0
     file_normalized = file_lower.replace("\\", "/")
-    if "/tests/" in file_normalized or file_normalized.startswith("tests/"):
+    if (
+        "/tests/" in file_normalized
+        or file_normalized.startswith("tests/")
+        or re.search(r"\.(?:test|spec)\.[mc]?[jt]sx?$", file_normalized)
+    ):
         return 0
     is_python = file_lower.endswith(".py")
 
@@ -1833,9 +2117,25 @@ def scan_for_credential_harvest(content: str, file_path: str, report: Validation
     if file_lower.endswith((".md", ".mdx", ".markdown")):
         return 0
     file_normalized = file_lower.replace("\\", "/")
-    if "/tests/" in file_normalized or file_normalized.startswith("tests/"):
+    if (
+        "/tests/" in file_normalized
+        or file_normalized.startswith("tests/")
+        or re.search(r"\.(?:test|spec)\.[mc]?[jt]sx?$", file_normalized)
+    ):
         return 0
     is_python = file_lower.endswith(".py")
+    is_js_ts = is_js_ts_file(file_path, content)
+
+    # A line is a "regex-pattern definition" when it contains either a
+    # JS/TS regex literal `/.../` (with optional flags) or a Python regex
+    # construction `re.compile(`. RC-145..148 fire on the LITERAL TEXT of
+    # credential identifiers (`AWS_ACCESS_KEY_ID`, `GITHUB_TOKEN`, …) — but
+    # such names ALSO appear naturally in regex sources that are *defining*
+    # a detector for those credentials (security tooling, this very file).
+    # Suppress matches in those contexts; the file is documenting the
+    # pattern, not using a real credential.
+    js_regex_re = re.compile(r"/[^/\n]+/[gimsuy]*")
+    py_regex_re = re.compile(r"re\.compile\s*\(|RegExp\s*\(|regex\s*=\s*r['\"]")
 
     issues_found = 0
     lines = content.split("\n")
@@ -1843,8 +2143,21 @@ def scan_for_credential_harvest(content: str, file_path: str, report: Validation
         stripped = line.strip()
         if stripped.startswith("#"):
             continue
+        # JS/TS comment lines — same intent as the # skip above.
+        if is_js_ts and (
+            stripped.startswith("//")
+            or stripped.startswith("/*")
+            or stripped.startswith("*")
+        ):
+            continue
         # Skip Python string literals (templates, help text, CI workflows)
         if is_python and _is_python_string_context(stripped):
+            continue
+        # Skip lines that ARE regex-pattern definitions (JS/TS or Python).
+        # The literal text "GITHUB_TOKEN" inside `[/ghr_[A-Za-z0-9]{36}/g,
+        # "GITHUB_TOKEN"]` is a label paired with a regex source that
+        # detects the token format, not a usage of an actual token.
+        if (is_js_ts and js_regex_re.search(line)) or (is_python and py_regex_re.search(line)):
             continue
         for pattern, msg in CREDENTIAL_HARVEST_PATTERNS:
             if pattern.search(line):
@@ -1861,7 +2174,11 @@ def scan_for_sandbox_escape(content: str, file_path: str, report: ValidationRepo
     if file_lower.endswith((".md", ".mdx", ".markdown")):
         return 0
     file_normalized = file_lower.replace("\\", "/")
-    if "/tests/" in file_normalized or file_normalized.startswith("tests/"):
+    if (
+        "/tests/" in file_normalized
+        or file_normalized.startswith("tests/")
+        or re.search(r"\.(?:test|spec)\.[mc]?[jt]sx?$", file_normalized)
+    ):
         return 0
     is_python = file_lower.endswith(".py")
 
