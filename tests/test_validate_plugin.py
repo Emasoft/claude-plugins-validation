@@ -2373,7 +2373,8 @@ class TestEmpiricalDocsBugsAdded20260418:
     """
 
     def _make_plugin_dir(self, tmp_path: Path, manifest: dict) -> Path:
-        plugin_dir = tmp_path / manifest.get("name", "p")
+        name = str(manifest.get("name", "p"))
+        plugin_dir = tmp_path / name
         (plugin_dir / ".claude-plugin").mkdir(parents=True)
         (plugin_dir / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest))
         return plugin_dir

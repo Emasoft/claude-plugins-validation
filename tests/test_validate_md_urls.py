@@ -54,8 +54,8 @@ class _FakeResponse:
     def __enter__(self) -> _FakeResponse:
         return self
 
-    def __exit__(self, *a: object) -> bool:
-        return False
+    def __exit__(self, *a: object) -> None:
+        return None
 
 
 def _warnings(report: ValidationReport) -> list[str]:
@@ -478,7 +478,8 @@ class TestValidateMdUrlsCacheAndSkips:
         from cpv_validation_common import _sanitize_url
 
         safe = _sanitize_url("https://github.com/Emasoft/test-pkg")
-        cache = {safe: True}
+        assert safe is not None
+        cache: dict[str, bool] = {safe: True}
 
         report = ValidationReport()
         with patch("urllib.request.urlopen", side_effect=fake_urlopen):
@@ -497,7 +498,8 @@ class TestValidateMdUrlsCacheAndSkips:
         from cpv_validation_common import _sanitize_url
 
         safe = _sanitize_url("https://github.com/Emasoft/dead-link")
-        cache = {safe: False}
+        assert safe is not None
+        cache: dict[str, bool] = {safe: False}
 
         report = ValidationReport()
         with patch("urllib.request.urlopen", side_effect=fake_urlopen):
