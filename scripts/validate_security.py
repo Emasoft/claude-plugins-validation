@@ -1675,6 +1675,55 @@ _RC87_PURE_VERSION_LINE_RE = re.compile(
 )
 
 
+# v2.45 FP8 — Project-history doc basenames. CHANGELOG / HISTORY /
+# NEWS / README files are ALWAYS prose ABOUT the project — they may
+# narrate "added support for 192.168.0.0/16 detection" without the IP
+# ever being live config. The generic doc-demotion already drops them
+# major→minor; this list demotes them one more tier (minor→nit), which
+# is appropriate because these specific files are by-convention
+# project narrative, not config.
+_RC87_HISTORY_DOC_BASENAMES = frozenset({
+    "changelog",
+    "changelog.md",
+    "changelog.rst",
+    "changelog.txt",
+    "changes",
+    "changes.md",
+    "changes.txt",
+    "history",
+    "history.md",
+    "history.rst",
+    "history.txt",
+    "news",
+    "news.md",
+    "news.rst",
+    "news.txt",
+    "readme",
+    "readme.md",
+    "readme.rst",
+    "readme.txt",
+    "release-notes",
+    "release-notes.md",
+    "release_notes.md",
+    "releases",
+    "releases.md",
+})
+
+
+def _rc87_is_history_doc(file_path: str) -> bool:
+    """v2.45 FP8 — True if `file_path`'s basename is a CHANGELOG /
+    HISTORY / NEWS / README.
+
+    Used by the RC-87 emit site to demote one additional tier (after
+    the generic doc demotion already applied via `effective_severity`).
+    These files are the canonical "history of the project" surface —
+    they narrate features that were added/removed, including IP-shaped
+    text, but the IPs are never live config.
+    """
+    base = file_path.lower().replace("\\", "/").rsplit("/", 1)[-1]
+    return base in _RC87_HISTORY_DOC_BASENAMES
+
+
 def _rc87_is_semver_context(line: str, file_path: str) -> bool:
     """RC-87 RFC-1918/loopback IP — skip when the match is inside a
     package-manager dependency or version field.
@@ -4445,6 +4494,25 @@ def check_phase4_all(plugin_path: Path, report: ValidationReport) -> int:
                     if rule_id == "RC-87" and _rc87_is_semver_context(line, rel_path):
                         continue
                     level = effective_severity(severity.lower(), rel_path)
+                # v2.45 FP8 — RC-87 in CHANGELOG / HISTORY / NEWS /
+                # README is project narrative, never live config.
+                # Demote one extra tier on top of the generic doc
+                # demotion already applied by `effective_severity`.
+                # `demote_severity` doesn't know about NIT (nit isn't
+                # in SEVERITY_TIERS), so do the mapping inline:
+                # major→minor→nit→info; warning is already as
+                # demoted as `effective_severity` can take it, so
+                # demote to nit explicitly to differentiate
+                # narrative-doc findings from real warnings.
+                if rule_id == "RC-87" and _rc87_is_history_doc(rel_path):
+                    if level == "minor":
+                        level = "nit"
+                    elif level == "warning":
+                        level = "nit"
+                    elif level == "major":
+                        level = "minor"
+                    # CRITICAL stays critical — narrative docs
+                    # quoting link-local IPs is still notable.
                 getattr(report, level)(
                     f"{rule_id}: {msg.split(': ', 1)[-1] if ': ' in msg else msg} (line {line_no})",
                     rel_path, line_no,
@@ -4503,6 +4571,16 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                     if rule_id == "RC-22" and plugin_is_clipboard_domain:
                         continue
                     level = effective_severity(severity.lower(), rel_path)
+                # v2.45 FP8 — RC-87 in CHANGELOG / HISTORY / NEWS /
+                # README is project narrative, never live config.
+                # Demote one extra tier (see Phase 4 site for rationale).
+                if rule_id == "RC-87" and _rc87_is_history_doc(rel_path):
+                    if level == "minor":
+                        level = "nit"
+                    elif level == "warning":
+                        level = "nit"
+                    elif level == "major":
+                        level = "minor"
                 getattr(report, level)(
                     f"{rule_id}: {msg.split(': ', 1)[-1] if ': ' in msg else msg} (line {line_no})",
                     rel_path, line_no,
