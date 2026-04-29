@@ -2795,9 +2795,78 @@ def scan_for_data_exfiltration(content: str, file_path: str, report: ValidationR
             continue
         for pattern, msg in DATA_EXFILTRATION_PATTERNS:
             if pattern.search(line):
+                # v2.45 FP5 — suppress data-exfil findings whose URL
+                # host is a legitimate dev/LLM API endpoint. Plugins
+                # that talk to OpenRouter, Anthropic, OpenAI, GitHub,
+                # PyPI, npm, etc. are the EXPECTED traffic; flagging
+                # them as exfiltration buries the real signal in
+                # noise. The host check is a suffix match so
+                # subdomains (raw.githubusercontent.com,
+                # api.openai.com) are recognised. The DNS-tunneling
+                # rule (RC-18/19) is intentionally NOT suppressed by
+                # the allowlist — DNS tunneling doesn't go through
+                # a known API host.
+                if "DNS tunneling" not in msg and _line_targets_legit_api_host(line):
+                    continue
                 report.warning(f"{msg}: {stripped[:80]}", file_path, line_num)
                 issues_found += 1
     return issues_found
+
+
+# v2.45 FP5 — Legitimate LLM / dev / package-registry API host suffixes.
+# When a data-exfil-shaped call (`fetch(...)`, `requests.post(...)`)
+# targets one of these hosts, it's the plugin's expected control plane
+# traffic, not exfiltration. Suffix match (`.openai.com` matches
+# `api.openai.com`).
+_LEGIT_API_HOST_SUFFIXES = (
+    # LLM providers
+    "openai.com",
+    "openrouter.ai",
+    "anthropic.com",
+    "claude.ai",
+    "huggingface.co",
+    "cohere.ai",
+    "cohere.com",
+    "mistral.ai",
+    "perplexity.ai",
+    "groq.com",
+    "together.ai",
+    "together.xyz",
+    # Code hosts
+    "github.com",
+    "api.github.com",
+    "raw.githubusercontent.com",
+    "githubusercontent.com",
+    "gitlab.com",
+    "bitbucket.org",
+    # Package registries
+    "pypi.org",
+    "npmjs.com",
+    "npmjs.org",
+    "registry.npmjs.org",
+    "rubygems.org",
+    "crates.io",
+    "packagist.org",
+    "rust-lang.org",
+    "nodejs.org",
+    "python.org",
+)
+
+
+def _line_targets_legit_api_host(line: str) -> bool:
+    """v2.45 FP5 — True if the line's URL targets a legitimate API host.
+
+    Extracts every `https?://...` URL in the line and tests whether the
+    host (everything before the first `/` after the scheme) ends with
+    one of `_LEGIT_API_HOST_SUFFIXES`. Suffix match handles arbitrary
+    subdomains (`api.openai.com`, `raw.githubusercontent.com`).
+    """
+    for url_match in re.finditer(r"https?://([A-Za-z0-9.\-]+)", line):
+        host = url_match.group(1).lower()
+        for suffix in _LEGIT_API_HOST_SUFFIXES:
+            if host == suffix or host.endswith("." + suffix):
+                return True
+    return False
 
 
 def scan_for_supply_chain(content: str, file_path: str, report: ValidationReport) -> int:
