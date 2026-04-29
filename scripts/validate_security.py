@@ -1093,6 +1093,14 @@ _DEV_SCRATCH_DIR_PARTS = (
     "/reports_dev/",
     "/reports/",
     "/design/tasks/",
+    # v2.45 FP3 — Claude Code chat history exports (raw transcripts,
+    # gitignored, never executed) and anthropic_dev/ (vendored Anthropic
+    # docs / env-var references downloaded for development reference,
+    # never executed). External scanners (cc-audit, gitleaks) flag the
+    # literal `chmod` / `ANTHROPIC_API_KEY` text inside these dumps as
+    # active-attack content, but they're inert documentation.
+    "/.claude/chat_history/",
+    "/anthropic_dev/",
 )
 
 
@@ -1515,6 +1523,46 @@ def is_shell_like_file(file_path: str, content: str | None = None) -> bool:
             if any(rt in shebang for rt in ("/sh", "/bash", "/zsh", "/ksh", "/dash", "/ash")):
                 return True
     return False
+
+
+def _md_is_agent_body(file_normalized: str) -> bool:
+    """v2.45 FP3 — True if `file_normalized` is a top-level agent body.
+
+    Agent bodies are .md files DIRECTLY under `/agents/` (or whose path
+    starts `agents/`). Sub-references (`agents/foo/references/x.md`,
+    `agents/foo/scripts/y.md`) are documentation, not the agent's
+    instruction surface — the model loads them as supplemental guidance,
+    not as the prompt itself.
+
+    `file_normalized` is expected to already be lowercased and use `/`
+    separators (caller normalises).
+    """
+    parts = file_normalized.split("/")
+    # Find the LAST occurrence of "agents" so nested paths (e.g.
+    # "plugin/agents/foo.md") are recognised even when the plugin layout
+    # adds a leading parent dir.
+    try:
+        idx = len(parts) - 1 - parts[::-1].index("agents")
+    except ValueError:
+        return False
+    # Body shape: agents/<basename>.md exactly (one path segment after
+    # `agents/`).
+    return idx == len(parts) - 2
+
+
+def _md_is_command_body(file_normalized: str) -> bool:
+    """v2.45 FP3 — True if `file_normalized` is a top-level command body.
+
+    Same shape as `_md_is_agent_body` but for `/commands/`. Command
+    bodies are .md files DIRECTLY under `commands/` (e.g.
+    `commands/cpv-validate.md`). Subdirs are docs.
+    """
+    parts = file_normalized.split("/")
+    try:
+        idx = len(parts) - 1 - parts[::-1].index("commands")
+    except ValueError:
+        return False
+    return idx == len(parts) - 2
 
 
 def is_ai_facing_markdown(file_path: str) -> bool:
@@ -3376,6 +3424,36 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
             # v2.44 — drop findings inside gitignored dev-scratch dirs.
             if file_ref and _is_dev_scratch_path(str(file_ref)):
                 continue
+
+            # v2.45 FP3 — drop cc-audit findings on documentation
+            # markdown. cc-audit flags shell-command text inside .md
+            # files (`chmod 755 design/`, `echo 'export
+            # JAVA_HOME=…' >> ~/.zshrc`) as live attack content, but
+            # documentation / reference / troubleshooting / changelog
+            # markdown is talking ABOUT shell commands, not running
+            # them. The model ingesting a reference doc never
+            # executes the snippet — it consumes it as guidance.
+            #
+            # Carve-out: SKILL.md / agent body / command body MAY
+            # carry instructions the model interprets directly. Keep
+            # cc-audit's signal on those exact files. Everything
+            # else (references/, troubleshooting.md, design specs,
+            # changelogs, READMEs, chat-history exports) is doc.
+            if file_ref and str(file_ref).lower().endswith((".md", ".mdx", ".markdown")):
+                f_norm = str(file_ref).lower().replace("\\", "/")
+                f_basename = f_norm.rsplit("/", 1)[-1] if "/" in f_norm else f_norm
+                # Executable AI-facing markdown: SKILL.md, agent
+                # body (file directly under /agents/), command body
+                # (file directly under /commands/). Only these are
+                # the model's instruction surface — everything
+                # else is doc.
+                is_executable_md = (
+                    f_basename == "skill.md"
+                    or _md_is_agent_body(f_norm)
+                    or _md_is_command_body(f_norm)
+                )
+                if not is_executable_md:
+                    continue
 
             # Pattern-source skip: if the reported line is a regex
             # PATTERN DEFINITION (Python `re.compile(`, JS `/.../g`,
