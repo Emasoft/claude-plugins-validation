@@ -100,8 +100,46 @@ def sha256_of_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def _git_tracked_files(plugin_root: Path) -> set[str] | None:
+    """Return the set of git-tracked files (relative paths) for plugin_root.
+
+    The manifest MUST only include files that exist in the published git
+    repo — otherwise CI's fresh checkout will hash a smaller fileset than
+    the local manifest expects, and `verify_self_integrity` flags the
+    delta as a tampered/deleted file. Local-only files (`.DS_Store`,
+    `.idea/*`, `.vscode/*`, build artifacts that escape `skip_dirs`)
+    silently land in the manifest when developer-machine state diverges
+    from the gitignore.
+
+    Returns None if `git ls-files` is unavailable — in which case we
+    fall back to the directory walk + skip_dirs heuristic.
+    """
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(plugin_root), "ls-files"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        if result.returncode != 0:
+            return None
+        # ls-files emits POSIX-separated paths, one per line.
+        return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def compute_manifest(plugin_root: Path) -> dict[str, object]:
-    """Walk plugin_root, hash every self-scan-eligible file, return manifest dict."""
+    """Walk plugin_root, hash every self-scan-eligible file, return manifest dict.
+
+    Honours `git ls-files` so untracked / gitignored files (`.DS_Store`,
+    macOS metadata, IDE state) never enter the manifest. The published
+    manifest must only describe files that exist in the public repo, or
+    a clean clone (CI's fresh checkout, or any user pulling the plugin)
+    will fail integrity verification on the missing-locally delta.
+    """
     files: dict[str, str] = {}
 
     # Skip these dirs entirely — never useful to hash venvs, build artifacts,
@@ -113,6 +151,8 @@ def compute_manifest(plugin_root: Path) -> dict[str, object]:
         "samples_dev", "scripts_dev", "tests_dev", "examples_dev", "docs_dev",
     }
 
+    tracked = _git_tracked_files(plugin_root)
+
     for path in plugin_root.rglob("*"):
         if not path.is_file():
             continue
@@ -120,11 +160,18 @@ def compute_manifest(plugin_root: Path) -> dict[str, object]:
         rel = path.relative_to(plugin_root)
         if any(part in skip_dirs for part in rel.parts):
             continue
-        rel_path = str(rel)
+        rel_path = str(rel).replace("\\", "/")
         if not is_self_scan_eligible(rel_path):
             continue
         # Never hash the manifest itself.
         if rel.name == MANIFEST_NAME:
+            continue
+        # If git ls-files succeeded, only include tracked files. This is
+        # the contract: the published manifest describes the published
+        # source. Untracked local files (`.DS_Store`, IDE droppings)
+        # never enter the manifest, so they can never cause an
+        # integrity-mismatch FP on a clean checkout.
+        if tracked is not None and rel_path not in tracked:
             continue
         try:
             digest = sha256_of_file(path)

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-04-29T10:14:56+00:00",
+  "computed_at": "2026-04-29T10:20:19+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     "agents/marketplace-fixer.md": "sha256:254f3d77fccf11a5ecac29cd61cb670b33f3ac7fb1f12d18c853f10032830ef2",
@@ -48,7 +48,7 @@
     "design/tasks/TRDD-feb72fa4-906f-4bed-9f14-febbdae54bb1-multi-hook-precedence.md": "sha256:f9520df0867d7fe0f0885e3619f8ac00df9d609cec6dc7795285ef607660089a",
     "scripts/_minimal_yaml.py": "sha256:c765ed921f40633e30ca2af87eb1c2e42f11c17c890bd543e153ac39078a73bb",
     "scripts/cc_scope_rules.py": "sha256:7ba37825dd2d6a186eb0cadb1036f53581b4b2dba47e5e847f9f68baa899b4d1",
-    "scripts/compute_cpv_self_hashes.py": "sha256:1ff767d5c7fbbc8dfc0a03581a79d55bf116dc3b83bc8faad3b12f0ca159ce19",
+    "scripts/compute_cpv_self_hashes.py": "sha256:f09fecd4abb795121c31fc1d2617f6ce72102065cb8a1abba1747e33188068c4",
     "scripts/cpv_integrity.py": "sha256:c15fa49b0f27239bf1c1f54b0a7bd2f6beb05162bf8941de300b4b8ceb0c8ae5",
     "scripts/cpv_management_common.py": "sha256:8f1d19814d34aeae18e43721cfa1218bf2c62fb76ef05b5d6dd3b876ae3b5f2b",
     "scripts/cpv_sarif_writer.py": "sha256:a59e34f0b30d05d3dfb50afe04c449267ea1a77f4dafdcda609da45dc13c02da",
@@ -197,7 +197,6 @@
     "skills/skill-validation-skill/references/validation-rules.md": "sha256:c3183c4a87d16108b572b7b81ca4f463e2302f3af6ac2448e5b258e0fda30d16",
     "skills/standardize-plugin/SKILL.md": "sha256:baf7ec77f052ad48b7e22081e93a63a4cdfc30af00792848d04821efdbc9088e",
     "skills/standardize-plugin/references/pipeline-rules.md": "sha256:05ae52d861e6a208a7688c055452c2830c2bdab12c4679c2cad4ba206b22ca79",
-    "templates/.DS_Store": "sha256:1d5a3eee7e9fee07883931caf81e1539f24aa23493f339094b5b5ae22297379e",
     "templates/README-marketplace.md": "sha256:0d4a8d4d4979b2a01f172d8a5f6fa591d19e233398da7227b7c1ce85b6d9d663",
     "templates/github-workflows/notify-marketplace.yml": "sha256:1cbb8eda111fe884af4569d23be91f36e18458d99bb904c20654ea164cfa7fd7",
     "templates/github-workflows/update-submodules.yml": "sha256:397d312c4299033f001d1b40c71f0d7fed6138e6a131c9ead969428139dc4705",
