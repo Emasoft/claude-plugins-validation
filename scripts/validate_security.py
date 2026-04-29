@@ -1932,11 +1932,10 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
 
                 # Known-safe absolute path allowlist. These are standard
                 # POSIX interpreter / install locations that EVERY UNIX
-                # plugin uses. They're not "non-portable" the way
-                # `/Users/dave/work/proj/foo` is — they exist on every
+                # plugin uses. They're not non-portable the way
+                # per-developer home paths are — they exist on every
                 # macOS, Linux, BSD, WSL. Suppress RC-112 here. The rule
-                # still fires on truly host-specific roots like
-                # `/var/lib/<my-app>`, `/opt/<vendor>/<product>`, etc.
+                # still fires on truly host-specific roots elsewhere.
                 if "Absolute Unix" in msg:
                     KNOWN_SAFE_PATHS: tuple[str, ...] = (
                         "/bin/sh",
@@ -1954,7 +1953,7 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
                         "/bin/false",
                         "/bin/pwd",
                         "/usr/bin/env",
-                        "/usr/local/bin",  # standard Homebrew / install path
+                        "/usr/local/bin",
                     )
                     if any(safe in matched_text or safe in line for safe in KNOWN_SAFE_PATHS):
                         continue
