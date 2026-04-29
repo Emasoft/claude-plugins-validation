@@ -70,9 +70,12 @@ from cpv_validation_common import (
     has_negation_guard_nearby,
     is_binary_file,
     is_compromised_package,
+    is_doc_path,
     is_in_fenced_code_block,
     is_pth_with_exec,
+    is_sample_file,
     is_shadowed_tool_name,
+    is_test_path,
     is_typosquat,
     print_report_summary,
     print_results_by_level,
@@ -846,6 +849,99 @@ _CPV_SELF_HASH_REPORTED_MODIFIED: set[str] = set()
 _CPV_SELF_HASH_NOTICE_REPORT: ValidationReport | None = None
 
 CPV_SELF_HASH_MANIFEST_NAME = ".cpv-self-hashes.json"
+
+
+# v2.42 — context-aware classifier wiring (TRDD-fe006962). When active,
+# every finding for a rule that has a registered classifier is routed
+# through `cpv_fp_classifier.classify_rule` and the verdict is
+# translated via `apply_verdict` into either the declared severity, a
+# demoted severity, or a suppression. Off by default — set by
+# `validate_security(..., with_classifier=True)`. The plugin meta dict
+# is loaded once at activation time and reused for every classifier
+# call so the per-finding overhead stays in O(1) substring matching.
+_CLASSIFIER_ACTIVE: bool = False
+_CLASSIFIER_PLUGIN_META: dict = {}
+
+
+def _file_role_from_path(rel_path: str) -> str:
+    """Map a plugin-relative path to the classifier's role taxonomy.
+
+    Mirrors `cpv_validation_common.is_test_path` / `is_doc_path` /
+    `is_sample_file` so the classifier sees the same role string the
+    rest of CPV uses for severity demotion.
+    """
+    rel = rel_path.replace("\\", "/").lower()
+    if "/tests/fixtures/" in rel or rel.startswith("tests/fixtures/"):
+        return "fixture"
+    if is_test_path(rel_path):
+        return "test"
+    if is_doc_path(rel_path):
+        return "doc"
+    if is_sample_file(rel_path):
+        return "sample"
+    return "source"
+
+
+def _set_classifier_active(active: bool, plugin_root: Path | None = None) -> None:
+    """Toggle the classifier and pre-load `plugin.json` for `Context.plugin_meta`."""
+    global _CLASSIFIER_ACTIVE, _CLASSIFIER_PLUGIN_META
+    _CLASSIFIER_ACTIVE = active
+    if active and plugin_root is not None:
+        # Imported lazily so a CPV install without `cpv_fp_classifier_rules`
+        # (e.g. partial deploy) still runs in legacy v2.41-binary-guard mode.
+        try:
+            from cpv_fp_classifier_rules import load_plugin_meta  # noqa: PLC0415
+            _CLASSIFIER_PLUGIN_META = load_plugin_meta(plugin_root)
+        except ImportError:
+            _CLASSIFIER_ACTIVE = False
+            _CLASSIFIER_PLUGIN_META = {}
+    else:
+        _CLASSIFIER_PLUGIN_META = {}
+
+
+def _classifier_decision(
+    rule_id: str,
+    declared_severity: str,
+    line: str,
+    surrounding_lines: tuple[str, ...] | list[str],
+    file_role: str,
+    file_path: str,
+) -> tuple[str | None, str]:
+    """Run the classifier for `rule_id` (if active) and return (severity, note).
+
+    `severity is None` → suppress the finding entirely.
+    `severity == declared_severity` → emit at the declared level.
+    Anything else → emit at the demoted (or escalated) level.
+
+    `note` is a short human-readable rationale; callers can append it
+    to the message or ignore it. When the classifier is inactive or
+    the rule has no registered classifier, returns the declared
+    severity unchanged with an empty note (legacy behaviour).
+    """
+    if not _CLASSIFIER_ACTIVE:
+        return declared_severity, ""
+    try:
+        from cpv_fp_classifier import (  # noqa: PLC0415
+            Context,
+            apply_verdict,
+            classify_rule,
+        )
+    except ImportError:
+        return declared_severity, ""
+
+    ctx = Context(
+        rule_id=rule_id,
+        matched_text=line,
+        line_number=0,
+        line=line,
+        surrounding_lines=tuple(surrounding_lines),
+        file_role=file_role,
+        file_path=file_path,
+        plugin_meta=_CLASSIFIER_PLUGIN_META,
+    )
+    verdict = classify_rule(rule_id, ctx)
+    action = apply_verdict(verdict, declared_severity)
+    return action.report_severity, action.note
 
 
 def _set_cpv_self_scan(
@@ -3553,13 +3649,24 @@ def check_phase1_credential_rules(plugin_path: Path, report: ValidationReport) -
                 continue
             for pattern in ENV_BULK_HARVEST_PATTERNS:
                 if pattern.search(line):
-                    # v2.41.0 — `os.environ.copy()` / `dict(os.environ)`
-                    # used as subprocess env-prep is a benign idiom; only
-                    # iteration / serialization is the real exfil signal.
                     surrounding = _surrounding_lines(content_lines, line_no - 1, window=4)
-                    if _rc21_is_subprocess_prep(line, surrounding):
-                        break
-                    level = effective_severity("major", rel_path)
+                    # v2.42 — opt-in classifier path (TRDD-fe006962). When
+                    # active, the per-rule classifier subsumes the v2.41
+                    # binary `_rc21_is_subprocess_prep` guard and can also
+                    # demote (LIKELY_FP → MINOR) instead of suppressing.
+                    if _CLASSIFIER_ACTIVE:
+                        severity, _note = _classifier_decision(
+                            "RC-21", "major", line, surrounding,
+                            _file_role_from_path(rel_path), rel_path,
+                        )
+                        if severity is None:
+                            break
+                        level = effective_severity(severity, rel_path)
+                    else:
+                        # v2.41.0 binary guard: subprocess env-prep is FP.
+                        if _rc21_is_subprocess_prep(line, surrounding):
+                            break
+                        level = effective_severity("major", rel_path)
                     getattr(report, level)(
                         f"RC-21: bulk env-var harvest at line {line_no}",
                         rel_path, line_no,
@@ -3786,7 +3893,8 @@ def check_phase4_all(plugin_path: Path, report: ValidationReport) -> int:
     issues = 0
     for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
         fence_state = build_fence_state(content)
-        for line_no, line in enumerate(content.split("\n"), start=1):
+        content_lines = content.split("\n")
+        for line_no, line in enumerate(content_lines, start=1):
             if is_in_fenced_code_block(line_no - 1, fence_state):
                 continue
             for rule_id, severity, pattern, msg in PHASE4_PATTERNS:
@@ -3795,14 +3903,24 @@ def check_phase4_all(plugin_path: Path, report: ValidationReport) -> int:
                     continue
                 if has_negation_guard_nearby(content, content.find(line) + m.start()):
                     continue
-                # v2.41.0 — RC-87 RFC-1918/loopback IP guard: dependency
-                # version strings in package.json / pyproject.toml /
-                # Cargo.toml routinely look like internal IPs (e.g.
-                # `"@types/node": "^10.0.5"`). Suppress on those filenames
-                # and on any obvious `"<dep>": "<semver>"` shape.
-                if rule_id == "RC-87" and _rc87_is_semver_context(line, rel_path):
-                    continue
-                level = effective_severity(severity.lower(), rel_path)
+                # v2.42 — opt-in classifier path for RC-87.
+                if _CLASSIFIER_ACTIVE and rule_id == "RC-87":
+                    surrounding = _surrounding_lines(content_lines, line_no - 1, window=4)
+                    new_severity, _note = _classifier_decision(
+                        rule_id, severity.lower(), line, surrounding,
+                        _file_role_from_path(rel_path), rel_path,
+                    )
+                    if new_severity is None:
+                        continue
+                    level = effective_severity(new_severity, rel_path)
+                else:
+                    # v2.41.0 — RC-87 RFC-1918/loopback IP binary guard:
+                    # dependency version strings in package.json /
+                    # pyproject.toml / Cargo.toml routinely look like
+                    # internal IPs (e.g. `"@types/node": "^10.0.5"`).
+                    if rule_id == "RC-87" and _rc87_is_semver_context(line, rel_path):
+                        continue
+                    level = effective_severity(severity.lower(), rel_path)
                 getattr(report, level)(
                     f"{rule_id}: {msg.split(': ', 1)[-1] if ': ' in msg else msg} (line {line_no})",
                     rel_path, line_no,
@@ -3839,14 +3957,28 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                     continue
                 if has_negation_guard_nearby(content, content.find(line) + m.start()):
                     continue
-                # v2.41.0 — per-rule context-aware FP guards.
-                if rule_id == "RC-87" and _rc87_is_semver_context(line, rel_path):
-                    continue
-                if rule_id == "RC-93" and _rc93_is_markdown_table_row(line):
-                    continue
-                if rule_id == "RC-22" and plugin_is_clipboard_domain:
-                    continue
-                level = effective_severity(severity.lower(), rel_path)
+                # v2.42 — opt-in classifier path for rules with a registered
+                # classifier (RC-22, RC-93 in this loop). When active, the
+                # classifier subsumes the v2.41 binary guards and can also
+                # demote-instead-of-suppress.
+                if _CLASSIFIER_ACTIVE and rule_id in ("RC-22", "RC-93"):
+                    surrounding = _surrounding_lines(content_lines, line_no - 1, window=4)
+                    new_severity, _note = _classifier_decision(
+                        rule_id, severity.lower(), line, surrounding,
+                        _file_role_from_path(rel_path), rel_path,
+                    )
+                    if new_severity is None:
+                        continue
+                    level = effective_severity(new_severity, rel_path)
+                else:
+                    # v2.41.0 — per-rule context-aware FP guards (binary).
+                    if rule_id == "RC-87" and _rc87_is_semver_context(line, rel_path):
+                        continue
+                    if rule_id == "RC-93" and _rc93_is_markdown_table_row(line):
+                        continue
+                    if rule_id == "RC-22" and plugin_is_clipboard_domain:
+                        continue
+                    level = effective_severity(severity.lower(), rel_path)
                 getattr(report, level)(
                     f"{rule_id}: {msg.split(': ', 1)[-1] if ': ' in msg else msg} (line {line_no})",
                     rel_path, line_no,
@@ -3927,14 +4059,23 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
             for pattern in CLOUD_IMDS_PATTERNS:
                 m = pattern.search(line)
                 if m and not has_negation_guard_nearby(content, content.find(line) + m.start()):
-                    # v2.41.0 — skip when the IMDS literal is part of a
-                    # detector's denylist/blocklist set definition (a
-                    # validator listing bad endpoints, not code calling
-                    # them).
                     surrounding = _surrounding_lines(content_lines, line_no - 1, window=4)
-                    if _rc65_is_pattern_source(line, surrounding):
-                        break
-                    level = effective_severity("major", rel_path)
+                    # v2.42 — opt-in classifier path. The classifier
+                    # re-uses `_rc65_is_pattern_source` semantics under
+                    # the hood and adds the four-tier verdict ladder.
+                    if _CLASSIFIER_ACTIVE:
+                        new_severity, _note = _classifier_decision(
+                            "RC-65", "major", line, surrounding,
+                            _file_role_from_path(rel_path), rel_path,
+                        )
+                        if new_severity is None:
+                            break
+                        level = effective_severity(new_severity, rel_path)
+                    else:
+                        # v2.41.0 binary guard: denylist set definition is FP.
+                        if _rc65_is_pattern_source(line, surrounding):
+                            break
+                        level = effective_severity("major", rel_path)
                     getattr(report, level)(
                         f"RC-65: cloud IMDS endpoint at line {line_no}: {m.group(0)}",
                         rel_path, line_no,
@@ -4185,6 +4326,7 @@ def validate_security(
     enable_trufflehog: bool = True,
     enable_gitleaks: bool = True,
     enable_semgrep: bool = True,
+    with_classifier: bool = False,
 ) -> ValidationReport:
     """Run all security validations on a plugin directory.
 
@@ -4201,11 +4343,22 @@ def validate_security(
         enable_trufflehog: When False, skip trufflehog (RC-102 part 1).
         enable_gitleaks: When False, skip gitleaks (RC-102 part 2).
         enable_semgrep: When False, skip semgrep (RC-102 part 3).
+        with_classifier: When True, route every finding for rules with a
+            registered classifier (RC-21/22/65/87/93 in v2.42) through the
+            context-aware classifier in `cpv_fp_classifier`. The classifier
+            can demote (LIKELY_FP → one severity tier down) or suppress
+            (DEFINITE_FP → not reported). Off by default — gives the legacy
+            v2.41 binary-guard behaviour. See TRDD-fe006962.
 
     Returns:
         ValidationReport with all security findings
     """
     report = ValidationReport()
+    # Make the classifier flag and the plugin-meta dict visible to the
+    # phase-specific scan helpers via module-level globals — same pattern
+    # the self-scan flag uses, so the overhead per finding stays in the
+    # check rather than crossing every function boundary.
+    _set_classifier_active(with_classifier, plugin_path)
 
     # Verify plugin path exists
     if not plugin_path.exists():
@@ -4472,6 +4625,16 @@ Exit Codes:
                         help="Emit a CycloneDX 1.6 SBOM of declared dependencies to the "
                              "given path (RC-106). Reads package.json, requirements*.txt, "
                              "pyproject.toml, Cargo.toml, go.mod.")
+    parser.add_argument(
+        "--with-classifier",
+        action="store_true",
+        help="Route findings for rules with a registered context-aware "
+             "classifier (RC-21/22/65/87/93 in v2.42) through the FP/TP "
+             "disambiguator. The classifier can demote a finding one "
+             "severity tier (LIKELY_FP) or suppress it entirely "
+             "(DEFINITE_FP). Off by default — preserves legacy v2.41 "
+             "binary-guard behaviour. See TRDD-fe006962.",
+    )
 
     args = parser.parse_args()
 
@@ -4498,6 +4661,7 @@ Exit Codes:
         enable_trufflehog=not args.no_trufflehog,
         enable_gitleaks=not args.no_gitleaks,
         enable_semgrep=not args.no_semgrep,
+        with_classifier=args.with_classifier,
     )
 
     # Optional SARIF emit (RC-105) — always run when requested, regardless of

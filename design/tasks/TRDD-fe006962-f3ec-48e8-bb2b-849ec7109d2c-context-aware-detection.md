@@ -3,9 +3,10 @@
 **TRDD ID:** `fe006962-f3ec-48e8-bb2b-849ec7109d2c`
 **Filename:** `design/tasks/TRDD-fe006962-f3ec-48e8-bb2b-849ec7109d2c-context-aware-detection.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
-**Status:** Not started
+**Status:** In progress — v1 shipped 2026-04-29 in v2.42 (Steps 1+2+3 complete for RC-21/22/65/87/93; Step 4 demote-only — escalation gated behind future `--extreme` flag)
 **Priority:** Medium (security quality gate, not blocking)
 **Created:** 2026-04-29
+**v1 release:** 2026-04-29 — `--with-classifier` opt-in flag, `cpv_fp_classifier` infra, `cpv_fp_classifier_rules` for 5 v2.41 rules, `bench_fp_classifier.py` corpus harness, `tests/fixtures/fp_corpus/` with 25 TP + 25 FP exemplars (100% precision/recall on bench)
 
 ## User's request (verbatim)
 
