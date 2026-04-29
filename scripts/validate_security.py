@@ -1718,7 +1718,20 @@ def _rc93_is_markdown_table_row(line: str) -> bool:
         return True
     # Strip outer string-literal quotes (Python `"..."`, JS template `` `...` ``,
     # single-quote, raw-string prefix) so an embedded table still matches.
+    # v2.45 FP7 — also strip trailing list/array punctuation (`,`, `;`,
+    # `+`) and a trailing newline-escape (`\n`) so a Python list element
+    # like `"  | Result | Action |",` or `"| col |\n"+` matches the
+    # table-row shape after quote-stripping.
     inner = stripped
+    # Strip trailing list-construction punctuation FIRST so the string
+    # closer `"` is the new tail, then quote-stripping below removes it.
+    while inner and inner[-1] in ",;+ \t":
+        inner = inner[:-1]
+    # Strip a trailing escape sequence like `\n` that often follows the
+    # table-row text in Python-built markdown reports
+    # (`"| col |\n"` is the most common shape).
+    if inner.endswith("\\n"):
+        inner = inner[:-2]
     for prefix in ('r"', "r'", 'f"', "f'", 'b"', "b'"):
         if inner.startswith(prefix):
             inner = inner[len(prefix):]
