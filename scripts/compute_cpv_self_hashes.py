@@ -36,8 +36,8 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from validate_security import (  # noqa: E402
-    is_validator_script,
     is_security_fix_reference,
+    is_validator_script,
 )
 
 MANIFEST_NAME = ".cpv-self-hashes.json"
