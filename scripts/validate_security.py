@@ -904,7 +904,12 @@ def _set_cpv_self_scan(
 
         if manifest is None:
             if notice_report is not None:
-                notice_report.major(
+                # Demoted from MAJOR to INFO: this is operational telemetry
+                # (network unreachable / non-CPV target without GitHub
+                # access), not a security finding. The "scan everything as
+                # safe default" already protects the user; the message just
+                # explains why scanning is fully on.
+                notice_report.info(
                     f"[RC-163] CPV self-scan: target plugin claims to be "
                     f"`claude-plugins-validation` (or has the signature files) "
                     f"but is NOT the running validator instance, AND the GitHub "
@@ -1072,7 +1077,12 @@ def cpv_self_scan_skip(file_path: str) -> bool:
             and file_normalized not in _CPV_SELF_HASH_REPORTED_MISSING
         ):
             _CPV_SELF_HASH_REPORTED_MISSING.add(file_normalized)
-            _CPV_SELF_HASH_NOTICE_REPORT.minor(
+            # Manifest-coverage gap is operational telemetry, not a security
+            # finding — the file gets scanned normally regardless. Demoted
+            # from MINOR to INFO in v2.41.0 because external plugins kept
+            # accumulating noise from CPV's own files when run from a
+            # different working directory.
+            _CPV_SELF_HASH_NOTICE_REPORT.info(
                 f"[RC-161] CPV self-scan: file `{file_normalized}` matches a "
                 f"self-scan pattern but is not in the hash manifest; scanning "
                 f"normally. Fix: regenerate the manifest with "
@@ -1489,6 +1499,169 @@ def _line_is_pattern_definition(file_ref: str, line_number: int) -> bool:
     except (OSError, ValueError):
         pass
     return False
+
+
+# v2.41.0 — per-rule context guards. Each helper answers the same shape of
+# question: "given the matched line, is this match a known-benign context?"
+# Returning True means the rule should suppress the finding for THIS match
+# while continuing to fire on other matches. The guards are intentionally
+# narrow — see TRDD-fe006962 for the broader context-aware classifier work.
+
+_RC87_DEPVERSION_RE = re.compile(
+    r"\"[^\"]*(?:version|engines?|peerDeps?|deps?|@types|@[a-z][a-z0-9-]+/)"
+    r"[^\"]*\"\s*:\s*\"[\^~>=<]?\s*\d",
+    re.IGNORECASE,
+)
+_RC87_PURE_VERSION_LINE_RE = re.compile(
+    r"^\s*\"version\"\s*:\s*\"[\^~>=<]?\s*\d",
+    re.IGNORECASE,
+)
+
+
+def _rc87_is_semver_context(line: str, file_path: str) -> bool:
+    """RC-87 RFC-1918/loopback IP — skip when the match is inside a
+    package-manager dependency or version field.
+
+    Lockfiles are already skipped by `is_lockfile`, but `package.json`,
+    `pyproject.toml`, `Cargo.toml`, etc. legitimately contain X.Y.Z
+    version strings that match the broad IP regex (`10.[0-9.]+`,
+    `192.168.[0-9.]+`). Suppressing on those filenames OR on a
+    `"<key>": "<X.Y.Z>"` JSON shape eliminates the FP cluster without
+    losing TPs in scripts/source files.
+    """
+    file_lower = file_path.lower().replace("\\", "/")
+    basename = file_lower.rsplit("/", 1)[-1]
+    if basename in {
+        "package.json", "pyproject.toml", "cargo.toml",
+        "composer.json", "gemfile", "build.gradle", "build.gradle.kts",
+        "pubspec.yaml", "mix.exs", "deno.json", "bun.lock.json",
+    }:
+        return True
+    if _RC87_PURE_VERSION_LINE_RE.match(line) or _RC87_DEPVERSION_RE.search(line):
+        return True
+    return False
+
+
+def _rc93_is_markdown_table_row(line: str) -> bool:
+    """RC-93 ≥30-contiguous-spaces — skip markdown table rows.
+
+    Markdown column alignment (`| col1 | col2     |`) and pre-formatted
+    output blocks (`╔══...══╗`) routinely produce long runs of whitespace
+    that aren't visual deception. The signal is that the line is bookended
+    by `|` (table row) or contains pipe-table separators (`|---|`).
+    """
+    stripped = line.strip()
+    if stripped.startswith("|") and stripped.endswith("|") and stripped.count("|") >= 2:
+        return True
+    if re.match(r"^\s*\|\s*[-:]+\s*(?:\|\s*[-:]+\s*)+\|?\s*$", line):
+        return True
+    return False
+
+
+_RC21_SUBPROCESS_PREP_HINTS = (
+    "subprocess.", "Popen(", "run(", "check_output(", "check_call(",
+    "spawn(", "execve(", "execvp(", "execv(",
+    "child_process.", "execFile(", "exec(",
+)
+
+
+def _rc21_is_subprocess_prep(line: str, surrounding_lines: list[str]) -> bool:
+    """RC-21 bulk env-var harvest — skip `os.environ.copy()` /
+    `dict(os.environ)` when the resulting variable feeds a subprocess
+    invocation within the next 5 lines (idiomatic env-prep, not exfil).
+    """
+    matched = line.strip()
+    if not (
+        "os.environ.copy()" in matched
+        or "dict(os.environ" in matched
+    ):
+        return False
+    for nearby in surrounding_lines:
+        if any(hint in nearby for hint in _RC21_SUBPROCESS_PREP_HINTS):
+            return True
+        if "env=" in nearby or "env =" in nearby:
+            return True
+    return False
+
+
+_RC65_PATTERN_SOURCE_HINTS = (
+    "_PATTERNS", "_PATTERN", "_RULES", "_HOSTS",
+    "denylist", "blocklist", "blacklist", "deny_list", "block_list",
+    "unsafe_hosts", "unsafe_urls", "blocked_hosts", "imds_hosts",
+    "PRIVATE_IP", "INTERNAL_IP", "LINK_LOCAL",
+    "DETECT_", "DETECTOR_",
+)
+
+
+_RC65_NETWORK_CALL_HINTS = (
+    "requests.", "urlopen(", "urllib.", "http.client", "httpx.", "aiohttp.",
+    "fetch(", "axios.", "got(", "needle.", "superagent.",
+    ".get(", ".post(", ".put(", ".delete(", ".patch(",
+    "curl ", "wget ", "Invoke-WebRequest", "Invoke-RestMethod",
+    "request(", "open(",
+)
+
+
+def _rc65_is_pattern_source(line: str, surrounding_lines: list[str]) -> bool:
+    """RC-65 cloud IMDS endpoint — skip when the IP literal is part of a
+    detector's denylist/blocklist set definition (the validator listing
+    bad endpoints to detect, not code calling them).
+
+    A line that looks like a pattern source (denylist set member, regex
+    literal, sample fixture) is suppressed only if it ALSO does not
+    contain a network-call indicator. `requests.get('http://169.254.169.254/...')`
+    is a network call, so even though the IP is in a string literal it
+    must NOT be suppressed.
+    """
+    if any(hint in line for hint in _RC65_NETWORK_CALL_HINTS):
+        return False
+    if any(hint in line for hint in _RC65_PATTERN_SOURCE_HINTS):
+        return True
+    blob = "\n".join(surrounding_lines)
+    if any(hint in blob for hint in _RC65_PATTERN_SOURCE_HINTS):
+        return True
+    return False
+
+
+def _surrounding_lines(content_lines: list[str], idx: int, window: int = 4) -> list[str]:
+    """Return up to `window` lines on either side of `idx` (0-based)."""
+    lo = max(0, idx - window)
+    hi = min(len(content_lines), idx + window + 1)
+    return content_lines[lo:idx] + content_lines[idx + 1:hi]
+
+
+_CLIPBOARD_DOMAIN_HINTS = (
+    "clipboard", "pasteboard", "copy-paste", "copy/paste",
+    "pbcopy", "pbpaste", "xclip", "xsel",
+)
+
+
+def _plugin_claims_clipboard_domain(plugin_path: Path) -> bool:
+    """RC-22 clipboard read — skip when the plugin's manifest declares
+    clipboard handling as core functionality. Reads plugin.json's
+    `description` and `keywords` fields (case-insensitive substring
+    match against a small allowlist). This matches what reviewers do
+    by hand: a plugin literally named 'universal-clipboard' is
+    expected to read the clipboard.
+    """
+    pjson = plugin_path / ".claude-plugin" / "plugin.json"
+    if not pjson.is_file():
+        pjson = plugin_path / "plugin.json"
+        if not pjson.is_file():
+            return False
+    try:
+        meta = json.loads(pjson.read_text(encoding="utf-8", errors="ignore"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    haystack_parts = []
+    for k in ("name", "description", "keywords", "category"):
+        v = meta.get(k)
+        if isinstance(v, str):
+            haystack_parts.append(v)
+        elif isinstance(v, list):
+            haystack_parts.extend(str(x) for x in v if isinstance(x, str))
+    haystack = " ".join(haystack_parts).lower()
+    return any(hint in haystack for hint in _CLIPBOARD_DOMAIN_HINTS)
 
 
 def scan_for_injection(content: str, file_path: str, report: ValidationReport) -> int:
@@ -3374,11 +3547,18 @@ def check_phase1_credential_rules(plugin_path: Path, report: ValidationReport) -
     issues = 0
     for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
         fence_state = build_fence_state(content)
-        for line_no, line in enumerate(content.split("\n"), start=1):
+        content_lines = content.split("\n")
+        for line_no, line in enumerate(content_lines, start=1):
             if is_in_fenced_code_block(line_no - 1, fence_state):
                 continue
             for pattern in ENV_BULK_HARVEST_PATTERNS:
                 if pattern.search(line):
+                    # v2.41.0 — `os.environ.copy()` / `dict(os.environ)`
+                    # used as subprocess env-prep is a benign idiom; only
+                    # iteration / serialization is the real exfil signal.
+                    surrounding = _surrounding_lines(content_lines, line_no - 1, window=4)
+                    if _rc21_is_subprocess_prep(line, surrounding):
+                        break
                     level = effective_severity("major", rel_path)
                     getattr(report, level)(
                         f"RC-21: bulk env-var harvest at line {line_no}",
@@ -3615,6 +3795,13 @@ def check_phase4_all(plugin_path: Path, report: ValidationReport) -> int:
                     continue
                 if has_negation_guard_nearby(content, content.find(line) + m.start()):
                     continue
+                # v2.41.0 — RC-87 RFC-1918/loopback IP guard: dependency
+                # version strings in package.json / pyproject.toml /
+                # Cargo.toml routinely look like internal IPs (e.g.
+                # `"@types/node": "^10.0.5"`). Suppress on those filenames
+                # and on any obvious `"<dep>": "<semver>"` shape.
+                if rule_id == "RC-87" and _rc87_is_semver_context(line, rel_path):
+                    continue
                 level = effective_severity(severity.lower(), rel_path)
                 getattr(report, level)(
                     f"{rule_id}: {msg.split(': ', 1)[-1] if ': ' in msg else msg} (line {line_no})",
@@ -3636,9 +3823,14 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
     * RC-33 compromised-package check — exact-match lookup on the same
     """
     issues = 0
+    # Domain-aware suppressions are evaluated once per plugin: a plugin that
+    # literally claims to be a clipboard helper should not be flagged for
+    # reading the clipboard. See `_plugin_claims_clipboard_domain`.
+    plugin_is_clipboard_domain = _plugin_claims_clipboard_domain(plugin_path)
     for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
         fence_state = build_fence_state(content)
-        for line_no, line in enumerate(content.split("\n"), start=1):
+        content_lines = content.split("\n")
+        for line_no, line in enumerate(content_lines, start=1):
             if is_in_fenced_code_block(line_no - 1, fence_state):
                 continue
             for rule_id, severity, pattern, msg in PHASE3_PATTERNS:
@@ -3646,6 +3838,13 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                 if not m:
                     continue
                 if has_negation_guard_nearby(content, content.find(line) + m.start()):
+                    continue
+                # v2.41.0 — per-rule context-aware FP guards.
+                if rule_id == "RC-87" and _rc87_is_semver_context(line, rel_path):
+                    continue
+                if rule_id == "RC-93" and _rc93_is_markdown_table_row(line):
+                    continue
+                if rule_id == "RC-22" and plugin_is_clipboard_domain:
                     continue
                 level = effective_severity(severity.lower(), rel_path)
                 getattr(report, level)(
@@ -3719,14 +3918,22 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
     issues = 0
     for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
         fence_state = build_fence_state(content)
+        content_lines = content.split("\n")
 
         # RC-65 — Cloud IMDS endpoints (with encoding variants)
-        for line_no, line in enumerate(content.split("\n"), start=1):
+        for line_no, line in enumerate(content_lines, start=1):
             if is_in_fenced_code_block(line_no - 1, fence_state):
                 continue
             for pattern in CLOUD_IMDS_PATTERNS:
                 m = pattern.search(line)
                 if m and not has_negation_guard_nearby(content, content.find(line) + m.start()):
+                    # v2.41.0 — skip when the IMDS literal is part of a
+                    # detector's denylist/blocklist set definition (a
+                    # validator listing bad endpoints, not code calling
+                    # them).
+                    surrounding = _surrounding_lines(content_lines, line_no - 1, window=4)
+                    if _rc65_is_pattern_source(line, surrounding):
+                        break
                     level = effective_severity("major", rel_path)
                     getattr(report, level)(
                         f"RC-65: cloud IMDS endpoint at line {line_no}: {m.group(0)}",

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-04-29T10:20:19+00:00",
+  "computed_at": "2026-04-29T12:01:54+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     "agents/marketplace-fixer.md": "sha256:254f3d77fccf11a5ecac29cd61cb670b33f3ac7fb1f12d18c853f10032830ef2",
@@ -45,6 +45,7 @@
     "design/tasks/TRDD-e2b17a61-e6f0-4bff-ac9e-feb3a7cd046b-settings-json-marketplace-validator.md": "sha256:6423d1b500559be34f4f556688f30033b8d7957bd2eeb9ce2fddf51c5849f4de",
     "design/tasks/TRDD-e3e74f69-e41c-4b0f-841c-69f066614b6f-validate-telemetry.md": "sha256:9a8c3e174028eff127ac01a2000617584996230d8c6310a05b312465cede97b4",
     "design/tasks/TRDD-f4e2d385-b37d-4f9e-b2c8-4940958b474a-scope-deep-validation.md": "sha256:9f13fc2a035337971ecb24ac2da27b26a68ac4693fd599f443e1f0dc15df8876",
+    "design/tasks/TRDD-fe006962-f3ec-48e8-bb2b-849ec7109d2c-context-aware-detection.md": "sha256:23de2f31e5789748cc0574223743fd6073c351ebd3a8da7b443af79d3f0bc9ee",
     "design/tasks/TRDD-feb72fa4-906f-4bed-9f14-febbdae54bb1-multi-hook-precedence.md": "sha256:f9520df0867d7fe0f0885e3619f8ac00df9d609cec6dc7795285ef607660089a",
     "scripts/_minimal_yaml.py": "sha256:c765ed921f40633e30ca2af87eb1c2e42f11c17c890bd543e153ac39078a73bb",
     "scripts/cc_scope_rules.py": "sha256:7ba37825dd2d6a186eb0cadb1036f53581b4b2dba47e5e847f9f68baa899b4d1",
@@ -94,7 +95,7 @@
     "scripts/validate_project_scope.py": "sha256:7aaa9182febcee46c483ffd321ed56920a01ff36f3a1bc7edbf5a8aa7ac24360",
     "scripts/validate_rules.py": "sha256:2ae08e20e6d32d65b897dc9818ef61f33986f8b5ecf5247d3fa364c7b609d0c5",
     "scripts/validate_scoring.py": "sha256:aefdcbd653aefee1d600c1a25236511e261c9dfcca88d01abd02aad158ce2907",
-    "scripts/validate_security.py": "sha256:fe4da677af45bc41ce13f6f77eab437bce64d5509eccdb9ef80e06a4455d3cad",
+    "scripts/validate_security.py": "sha256:d2eeadd5158253395c6dfd1cc4a068972889b1e7ab08929aac033805e15b1c57",
     "scripts/validate_settings_marketplace.py": "sha256:ad8456286dae9498252bf95a10fa8cf304e7f9436c843e2c4f37dca15c679c6d",
     "scripts/validate_skill.py": "sha256:67b97fbb922350d427cc087cda6bbfffa5b83d90b86fcde5a68c7cdbd7912883",
     "scripts/validate_skill_comprehensive.py": "sha256:43017bf1bca73347c103eb81ef63bd25e461001edd3759263f72cb4f0b705d2b",
@@ -217,6 +218,7 @@
     "tests/test_cpv_validation_common.py": "sha256:c9c3bf318c588e84524561eeb99d9b13d64dd075f4182d488a16463249a0f9dc",
     "tests/test_extended_linting.py": "sha256:ad4133e28d2dd7120fef6d7d52a0dd24c5ff64e8147d224121db481f4e96cb81",
     "tests/test_fp_reduction.py": "sha256:fab0422224c7a8c3bc2e5e1269eabb895f51361469bd5412d06c1ff65b32fbe6",
+    "tests/test_fp_v241_guards.py": "sha256:66db43add5c5b9c785206acb7cd743e2ac16e22441052105919d075e5a62a197",
     "tests/test_generate_marketplace_repo.py": "sha256:75ca832af2b1f2fbcda7cbeb73fd1b6819d3a74be675c00d78243627108bb01e",
     "tests/test_generate_plugin_repo.py": "sha256:56d4de3eb64963f8c1477a81a12a72de22f75ecb0c67abcc684ab588bdf12935",
     "tests/test_gitignore_filter.py": "sha256:6709548b5e52ca5e2a2882d4ce0a5bb245370de887a99bd11e1b8185d7d02801",
