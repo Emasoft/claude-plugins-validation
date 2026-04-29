@@ -2158,6 +2158,18 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
         if is_ai_markdown and line_num in md_fence_lines:
             continue
 
+        # v2.45 FP1 — skip AI-facing-markdown lines whose shape is a pipe
+        # table row (`| col1 | col2 |`). Table cells are prose
+        # documentation describing CLI flags / argument defaults / file
+        # locations (e.g. ``| `--design-dir` | No | default: ../design |``).
+        # The model never executes a markdown table row as a path
+        # operation, so the RC-110 / RC-112 hits inside table cells are
+        # always FPs. Reuse the same `_rc93_is_markdown_table_row` helper
+        # used by RC-93 — it already handles raw rows AND quote-stripped
+        # embedded rows.
+        if is_ai_markdown and _rc93_is_markdown_table_row(line):
+            continue
+
         # v2.44 — pre-compute markdown link / inline-code spans for the
         # current line (cheap; only when scanning AI-facing markdown).
         md_skip_spans: list[tuple[int, int]] = []
