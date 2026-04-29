@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "computed_at": "2026-04-29T03:06:26+00:00",
+  "computed_at": "2026-04-29T03:11:22+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
-    "scripts/cpv_integrity.py": "sha256:04404e73baab2e25ad7e343def2c290579dc1a598157dcabd48d5763fc2cc58b",
+    "scripts/cpv_integrity.py": "sha256:c02bd0ac6184ef0027afc5c0444aea032562729c7c43af8c8c09ffd06093a05d",
     "scripts/cpv_management_common.py": "sha256:8f1d19814d34aeae18e43721cfa1218bf2c62fb76ef05b5d6dd3b876ae3b5f2b",
     "scripts/cpv_sarif_writer.py": "sha256:a59e34f0b30d05d3dfb50afe04c449267ea1a77f4dafdcda609da45dc13c02da",
     "scripts/cpv_sbom_writer.py": "sha256:946bc0059db7a1792edbb0899397cbd73a69a513bdd5e90478dfecbd3c520f2b",
