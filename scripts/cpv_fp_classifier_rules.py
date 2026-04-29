@@ -265,6 +265,57 @@ def classify_rc87(ctx: Context) -> FindingVerdict:
 _RC93_TABLE_SEPARATOR_RE = re.compile(r"^\s*\|\s*[-:]+\s*(?:\|\s*[-:]+\s*)+\|?\s*$")
 
 
+# -----------------------------------------------------------------------------
+# RC-76 — stemmed prompt-injection signal
+# -----------------------------------------------------------------------------
+
+_RC76_SOURCE_EXTENSIONS = (
+    ".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
+    ".go", ".rs", ".java", ".kt", ".swift", ".m", ".mm",
+    ".c", ".cc", ".cpp", ".cxx", ".h", ".hpp",
+    ".rb", ".php", ".cs", ".scala", ".clj", ".ex", ".exs",
+    ".sh", ".bash", ".zsh", ".fish", ".ps1",
+)
+
+
+@register_classifier("RC-76")
+def classify_rc76(ctx: Context) -> FindingVerdict:
+    """Stemmed prompt-injection signal — source code is FP, agent docs are TP.
+
+    The rule fires on >=3 trigger-stem co-occurrence within 80 chars.
+    The dominant FP is LLM-tooling source code where words like
+    `prompt`/`system`/`instruct`/`token`/`output` are vocabulary
+    (variable names, function parameters, type fields). The TP signal
+    is the same stems appearing in agent-doc / skill-body content
+    that the model executes as instructions.
+
+    Strategy:
+    * Source-extension files (`.ts`/`.js`/`.py`/`.go`/etc) →
+      DEFINITE_FP — the stems are vocabulary, not instruction.
+    * Files in `bin/` (extension-less shell scripts) → DEFINITE_FP.
+    * Test / fixture roles → DEFINITE_FP.
+    * Doc role → REAL — the doc IS instruction-shaped.
+    * Other → REAL.
+    """
+    file_path_lower = ctx.file_path.lower().replace("\\", "/")
+    if file_path_lower.endswith(_RC76_SOURCE_EXTENSIONS):
+        return FindingVerdict.DEFINITE_FP
+    if "/bin/" in file_path_lower or file_path_lower.startswith("bin/"):
+        return FindingVerdict.DEFINITE_FP
+    basename = file_path_lower.rsplit("/", 1)[-1]
+    if basename in {
+        "changelog.md", "changelog.markdown", "changelog.txt", "changelog.rst",
+        "changes.md", "changes.markdown", "changes.txt", "changes.rst",
+        "history.md", "history.markdown", "history.txt", "history.rst",
+        "news.md", "news.markdown", "news.txt", "news.rst",
+        "releasenotes.md", "release_notes.md", "release-notes.md",
+    }:
+        return FindingVerdict.DEFINITE_FP
+    if ctx.file_role in ("fixture", "test"):
+        return FindingVerdict.DEFINITE_FP
+    return FindingVerdict.REAL
+
+
 @register_classifier("RC-93")
 def classify_rc93(ctx: Context) -> FindingVerdict:
     """≥30 contiguous spaces — markdown table column padding is FP.
