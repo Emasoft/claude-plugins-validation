@@ -105,7 +105,7 @@ def test_validate_skill_runs_without_pyyaml(tmp_path: Path) -> None:
         [sys.executable, str(REPO_ROOT / "scripts" / "validate_skill.py"), str(skill_dir), "--json"],
         capture_output=True,
         text=True,
-        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "CPV_SKIP_GITHUB_INTEGRITY": "1"},
         check=False,
     )
 

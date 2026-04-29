@@ -48,20 +48,46 @@ def is_self_scan_eligible(rel_path: str) -> bool:
     """Mirror of `cpv_self_scan_skip` minus the runtime active-flag check.
 
     Used to enumerate which files NEED a hash entry in the manifest. Must
-    stay in sync with `validate_security.cpv_self_scan_skip`.
+    stay in sync with `validate_security._is_self_scan_eligible`.
     """
     if is_validator_script(rel_path):
         return True
     if is_security_fix_reference(rel_path):
         return True
-    file_normalized = rel_path.lower().replace("\\", "/").lstrip("/")
-    if file_normalized.startswith("tests/"):
-        basename = file_normalized.rsplit("/", 1)[-1]
-        if basename.startswith(
-            ("test_validate_security", "test_phase", "test_fp_reduction")
-        ):
-            return True
-    if "/semantic-validation-skill/references/" in ("/" + file_normalized):
+    file_normalized = rel_path.lower().replace("\\", "/")
+    basename = file_normalized.rsplit("/", 1)[-1] if "/" in file_normalized else file_normalized
+    if basename.startswith("test_") and basename.endswith(".py"):
+        return True
+    if "/tests/fixtures/" in file_normalized or file_normalized.startswith("tests/fixtures/"):
+        return True
+    if "/semantic-validation-skill/references/" in file_normalized:
+        return True
+    if (
+        "/skills/" in file_normalized
+        and "/references/" in file_normalized
+        and basename.endswith(".md")
+    ):
+        return True
+    if (
+        ("/agents/" in file_normalized or file_normalized.startswith("agents/"))
+        and basename.endswith(".md")
+    ):
+        return True
+    if (
+        ("/commands/" in file_normalized or file_normalized.startswith("commands/"))
+        and basename.endswith(".md")
+    ):
+        return True
+    if (
+        ("/skills/" in file_normalized or file_normalized.startswith("skills/"))
+        and basename.endswith(".md")
+    ):
+        return True
+    if "/templates/" in file_normalized or file_normalized.startswith("templates/"):
+        return True
+    if "/design/tasks/" in file_normalized and basename.startswith("trdd-"):
+        return True
+    if "/docs_dev/" in file_normalized:
         return True
     return False
 

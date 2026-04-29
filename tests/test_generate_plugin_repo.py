@@ -927,6 +927,9 @@ class TestLayoutCGeneration:
         p = _default_params(self_marketplace=True)
         generate_plugin_repo(target, p)
         validator = scripts_dir / "validate_plugin.py"
+        # Note: PYTEST_CURRENT_TEST is inherited by the subprocess and
+        # auto-bypasses cpv_integrity.verify_self_integrity(). No env
+        # plumbing needed here.
         result = subprocess.run(
             ["python3", str(validator), str(target), "--strict", "--no-color"],
             capture_output=True, text=True, check=False,
