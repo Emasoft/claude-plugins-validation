@@ -699,7 +699,15 @@ def print_json(report: SkillValidationReport) -> None:
 
 
 def main() -> int:
-    """Main entry point."""
+    """Main entry point.
+
+    First action: verify CPV's own source has not been tampered with
+    by checking each validator file's SHA256 against the GitHub
+    canonical manifest. Exits with code 2 on mismatch.
+    """
+    from cpv_integrity import verify_self_integrity  # noqa: PLC0415
+    verify_self_integrity(quiet=True)
+
     if _USING_FALLBACK_YAML:
         print(
             "Note: pyyaml not found in this venv — using minimal frontmatter parser. "
