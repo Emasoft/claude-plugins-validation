@@ -136,7 +136,13 @@ class TestTrufflehogParsing:
         assert passed
 
     def test_validator_script_skipped(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Findings in CPV's own validator-source files are skipped."""
+        """Findings in CPV's own validator-source files are skipped — but ONLY
+        when self-scan is active AND the file's hash matches the canonical
+        manifest. The fake plugin under test isn't CPV (no self-scan
+        activation), so a same-named file at `scripts/validate_security.py`
+        must STILL be reported. This is the security improvement of v2.37.0:
+        name-only spoofing no longer evades scanning.
+        """
         monkeypatch.setattr(validate_security.shutil, "which", lambda name: f"/usr/local/bin/{name}")
         sample = json.dumps({
             "DetectorName": "AWS",
@@ -146,9 +152,15 @@ class TestTrufflehogParsing:
         monkeypatch.setattr(validate_security.subprocess, "run",
                              lambda *a, **kw: _FakeCompletedProcess(stdout=sample, returncode=1))
         report = ValidationReport()
-        check_trufflehog(_make_plugin(tmp_path), report)
+        plugin = _make_plugin(tmp_path)
+        # Self-scan must NOT be active for this fake plugin.
+        validate_security._set_cpv_self_scan(False, plugin_root=plugin, notice_report=None)
+        check_trufflehog(plugin, report)
         critical = [r for r in report.results if r.level == "CRITICAL"]
-        assert not critical, "validator-script findings must be suppressed"
+        assert critical, (
+            "name-only suppression must NOT apply when self-scan is inactive; "
+            "the spoofable path-based skip was removed in v2.37.0."
+        )
 
 
 class TestGitleaksParsing:
@@ -175,6 +187,12 @@ class TestGitleaksParsing:
         assert majors
 
     def test_validator_script_skipped(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """v2.37.0 hardening: gitleaks findings on files merely *named* like
+        a CPV validator are NOT suppressed unless self-scan is active and
+        the file's hash matches the canonical manifest. This prevents a
+        malicious plugin from evading gitleaks by parking its payload at
+        `scripts/validate_security.py`.
+        """
         monkeypatch.setattr(validate_security.shutil, "which", lambda name: f"/usr/local/bin/{name}")
         sample = [{
             "RuleID": "x",
@@ -190,9 +208,12 @@ class TestGitleaksParsing:
 
         monkeypatch.setattr(validate_security.subprocess, "run", fake_run)
         report = ValidationReport()
-        check_gitleaks(_make_plugin(tmp_path), report)
+        plugin = _make_plugin(tmp_path)
+        # Self-scan inactive → name-based spoofing must NOT evade.
+        validate_security._set_cpv_self_scan(False, plugin_root=plugin, notice_report=None)
+        check_gitleaks(plugin, report)
         msgs = [r for r in report.results if "gitleaks" in r.message and r.level in ("CRITICAL", "MAJOR", "MINOR")]
-        assert not msgs
+        assert msgs, "spoofed validate_security.py must be scanned, not silently skipped"
 
 
 class TestSemgrepParsing:
