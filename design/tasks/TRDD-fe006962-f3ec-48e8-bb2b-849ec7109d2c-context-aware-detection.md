@@ -38,7 +38,7 @@ removes signal along with noise. We need to distinguish, not just suppress.
 | RC-76 (stemmed prompt-injection signal) | `"Code analysis with code-review system prompt"` (LLM-tooling docs) | An untrusted skill body co-locating the same stems in narrative form |
 | RC-87 (RFC-1918 IP) | `"@types/node": "^22.0.0"` (npm semver matching `\b22\.\d+\.\d+\.\d+\b`) | Hardcoded `192.168.1.42` in production config |
 | RC-127 (ignore-previous-instructions) | Agent doc DEFENDING against the phrase, with the phrase quoted | Skill content that actually contains the phrase as live instruction |
-| RC-135 (hardcoded user-home path) | `/Users/name/...` placeholder in pss-commands docs | `/Users/dave/work/proj/foo` in a real plugin script |
+| RC-135 (hardcoded user-home path) | `/Users/name/...` placeholder in pss-commands docs | A real developer-home prefix (e.g. `Users/<actual-name>/work/<repo>/<file>`) committed in a runtime plugin script |
 
 ## Goal
 
