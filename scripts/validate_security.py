@@ -29,6 +29,7 @@ Security Checks Implemented:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -778,15 +779,299 @@ SANDBOX_ESCAPE_PATTERNS = [
 # =============================================================================
 
 
+def is_cpv_self_scan(plugin_path: Path) -> bool:
+    """Detect whether the target plugin path IS the CPV plugin itself.
+
+    The security validator's own source contains every detection pattern
+    it knows how to match (regex sources, taint engine docs, fix-validation
+    references, security TRDDs). When CPV scans itself, those literal
+    pattern definitions self-match and produce thousands of false-positive
+    CRITICALs.
+
+    This check identifies CPV regardless of where it's deployed (dev
+    checkout, `~/.claude/plugins/cache/`, vendored copy, fork) using two
+    independent signals — either is enough:
+
+    1. **plugin.json identity** — `.claude-plugin/plugin.json::name` equals
+       `claude-plugins-validation`. Survives forks that keep the name.
+    2. **Signature files** — the path contains BOTH
+       `scripts/cpv_validation_common.py` AND `scripts/validate_plugin.py`.
+       Survives forks that rename the plugin.
+
+    Either signal returning True flips the entire scan into "self-scan
+    mode" — the per-file scanners then treat fix-validation references,
+    cpv_*.py modules, and security tests as documentation rather than
+    source. Other plugins are unaffected because they cannot satisfy
+    either signal accidentally.
+    """
+    # Signal 1 — plugin.json name match
+    plugin_json = plugin_path / ".claude-plugin" / "plugin.json"
+    if plugin_json.is_file():
+        try:
+            data = json.loads(plugin_json.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and data.get("name") == "claude-plugins-validation":
+                return True
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Signal 2 — both signature scripts present
+    sig1 = plugin_path / "scripts" / "cpv_validation_common.py"
+    sig2 = plugin_path / "scripts" / "validate_plugin.py"
+    if sig1.is_file() and sig2.is_file():
+        return True
+
+    return False
+
+
+# Module-level cache: set when validate_security() detects self-scan mode.
+# Per-file scanners read this to apply CPV-only exclusions without
+# threading the flag through every signature.
+_CPV_SELF_SCAN_ACTIVE: bool = False
+_CPV_SELF_HASH_MANIFEST: dict[str, str] = {}
+_CPV_SELF_PLUGIN_ROOT: Path | None = None
+_CPV_SELF_HASH_REPORTED_MISSING: set[str] = set()
+_CPV_SELF_HASH_REPORTED_MODIFIED: set[str] = set()
+_CPV_SELF_HASH_NOTICE_REPORT: ValidationReport | None = None
+
+CPV_SELF_HASH_MANIFEST_NAME = ".cpv-self-hashes.json"
+
+
+def _set_cpv_self_scan(
+    active: bool,
+    plugin_root: Path | None = None,
+    notice_report: ValidationReport | None = None,
+) -> None:
+    """Set the module-level CPV-self-scan flag and load the hash manifest.
+
+    Called by validate_security() once per scan. Loads `.cpv-self-hashes.json`
+    if present so cpv_self_scan_skip() can verify each candidate file's
+    SHA256 against the canonical hash before allowing the skip — a defense
+    against name-only spoofing.
+
+    `notice_report` (when supplied) receives one INFO/MAJOR per integrity
+    anomaly so reviewers see modified or unhashed self-scan candidates.
+    """
+    global _CPV_SELF_SCAN_ACTIVE, _CPV_SELF_HASH_MANIFEST, _CPV_SELF_PLUGIN_ROOT
+    global _CPV_SELF_HASH_NOTICE_REPORT
+    _CPV_SELF_SCAN_ACTIVE = active
+    _CPV_SELF_PLUGIN_ROOT = plugin_root if active else None
+    _CPV_SELF_HASH_MANIFEST = {}
+    _CPV_SELF_HASH_REPORTED_MISSING.clear()
+    _CPV_SELF_HASH_REPORTED_MODIFIED.clear()
+    _CPV_SELF_HASH_NOTICE_REPORT = notice_report if active else None
+
+    if not active or plugin_root is None:
+        return
+
+    manifest_path = plugin_root / CPV_SELF_HASH_MANIFEST_NAME
+    if not manifest_path.is_file():
+        if notice_report is not None:
+            notice_report.major(
+                f"[RC-160] CPV self-scan: hash manifest "
+                f"`{CPV_SELF_HASH_MANIFEST_NAME}` not found at plugin root. "
+                f"Without the manifest CPV cannot verify which files are "
+                f"genuine validator source vs. spoofed lookalikes; falling back "
+                f"to scanning every file. Fix: regenerate the manifest with "
+                f"`uv run python scripts/compute_cpv_self_hashes.py`."
+            )
+        return
+
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        files = data.get("files", {})
+        if isinstance(files, dict):
+            for k, v in files.items():
+                if isinstance(k, str) and isinstance(v, str):
+                    _CPV_SELF_HASH_MANIFEST[k.replace("\\", "/")] = v
+    except (json.JSONDecodeError, OSError) as e:
+        if notice_report is not None:
+            notice_report.major(
+                f"[RC-160] CPV self-scan: hash manifest "
+                f"`{CPV_SELF_HASH_MANIFEST_NAME}` could not be parsed ({e}); "
+                f"falling back to scanning every file. Fix: regenerate with "
+                f"`uv run python scripts/compute_cpv_self_hashes.py`."
+            )
+
+
+def _sha256_file(path: Path) -> str | None:
+    try:
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except (OSError, PermissionError):
+        return None
+
+
+def cpv_self_scan_skip(file_path: str) -> bool:
+    """Return True if `file_path` should be skipped during a CPV-self-scan.
+
+    Two-stage check:
+
+    1. **Name-based eligibility** — does the path match a CPV-internal
+       file pattern (validator script, fix-validation reference, security
+       test, semantic-validation reference)? If not, no skip.
+    2. **Hash verification** — compute the file's actual SHA256 and look
+       it up in `.cpv-self-hashes.json`. Only skip if the hash matches
+       the canonical value. Hash mismatch (file modified) or missing
+       entry → don't skip; the file is scanned normally.
+
+    This defends against name-spoofing: a malicious plugin that names a
+    file `cpv_taint_engine.py` cannot evade the security scan by relying
+    on the name match — the hash check fails and the file is scanned.
+    """
+    if not _CPV_SELF_SCAN_ACTIVE:
+        return False
+    if not _is_self_scan_eligible(file_path):
+        return False
+
+    # Hash verification — must match the canonical entry to skip.
+    if _CPV_SELF_PLUGIN_ROOT is None:
+        return False
+    file_normalized = file_path.replace("\\", "/").lstrip("/")
+    expected = _CPV_SELF_HASH_MANIFEST.get(file_normalized)
+    if expected is None:
+        # File matches the pattern but has no manifest entry — possibly
+        # a new/renamed file the manifest wasn't regenerated for. Don't
+        # skip; report once per file so reviewers refresh the manifest.
+        if (
+            _CPV_SELF_HASH_NOTICE_REPORT is not None
+            and file_normalized not in _CPV_SELF_HASH_REPORTED_MISSING
+        ):
+            _CPV_SELF_HASH_REPORTED_MISSING.add(file_normalized)
+            _CPV_SELF_HASH_NOTICE_REPORT.minor(
+                f"[RC-161] CPV self-scan: file `{file_normalized}` matches a "
+                f"self-scan pattern but is not in the hash manifest; scanning "
+                f"normally. Fix: regenerate the manifest with "
+                f"`uv run python scripts/compute_cpv_self_hashes.py` (the "
+                f"manifest must be refreshed after any change to the "
+                f"validator source set)."
+            )
+        return False
+
+    actual = _sha256_file(_CPV_SELF_PLUGIN_ROOT / file_normalized)
+    if actual is None:
+        return False
+    expected_hex = expected.split(":", 1)[-1] if expected.startswith("sha256:") else expected
+    if actual != expected_hex:
+        # Hash mismatch — file was modified. Could be a legitimate edit
+        # in progress or a spoofed lookalike. Either way we DON'T skip;
+        # scan it as if it were a normal plugin file. Report once.
+        if (
+            _CPV_SELF_HASH_NOTICE_REPORT is not None
+            and file_normalized not in _CPV_SELF_HASH_REPORTED_MODIFIED
+        ):
+            _CPV_SELF_HASH_REPORTED_MODIFIED.add(file_normalized)
+            _CPV_SELF_HASH_NOTICE_REPORT.warning(
+                f"[RC-162] CPV self-scan: file `{file_normalized}` matches "
+                f"a self-scan pattern but its SHA256 differs from the manifest "
+                f"entry — scanning normally. If you edited this file, "
+                f"regenerate the manifest with "
+                f"`uv run python scripts/compute_cpv_self_hashes.py` and "
+                f"re-run; otherwise treat the contents as untrusted."
+            )
+        return False
+
+    return True
+
+
+def _is_self_scan_eligible(file_path: str) -> bool:
+    """Path-only eligibility check — does this file LOOK like a CPV-internal
+    pattern source? Same logic the manifest computation uses, so the two
+    sets stay in lockstep.
+
+    NOT a security check on its own — must be combined with hash verification.
+    """
+    if is_validator_script(file_path):
+        return True
+    if is_security_fix_reference(file_path):
+        return True
+    file_normalized = file_path.lower().replace("\\", "/").lstrip("/")
+    if file_normalized.startswith("tests/"):
+        basename = file_normalized.rsplit("/", 1)[-1]
+        if basename.startswith(("test_validate_security", "test_phase", "test_fp_reduction")):
+            return True
+    if "/semantic-validation-skill/references/" in ("/" + file_normalized):
+        return True
+    return False
+
+
 def is_validator_script(file_path: str) -> bool:
     """Check if file is a validator script that contains intentional pattern definitions.
 
     Validator scripts contain regex patterns, example shebangs, and documentation
     that would trigger false positives. These are safe to skip for certain checks.
+
+    Recognises:
+    - Any `validate_*.py` (the per-validator scripts CPV ships, plus equivalent
+      naming in other plugins).
+    - CPV-internal helper modules whose names start with `cpv_` (taint engine,
+      SARIF writer, scope rules, validation common, etc.) — these define the
+      security patterns and would self-match.
+    - `lint_files.py`-style linter wrappers that iterate over rule definitions.
     """
     file_lower = file_path.lower()
-    # Validator scripts that contain intentional pattern definitions
-    return ("validate_" in file_lower and file_lower.endswith(".py")) or "cpv_validation_common" in file_lower
+    if "validate_" in file_lower and file_lower.endswith(".py"):
+        return True
+    # Match basenames like cpv_validation_common.py, cpv_taint_engine.py,
+    # cpv_sarif_writer.py, cpv_scope_rules.py — anything prefixed `cpv_`
+    # in the validator suite.
+    basename = file_lower.rsplit("/", 1)[-1] if "/" in file_lower else file_lower
+    if basename.startswith("cpv_") and basename.endswith(".py"):
+        return True
+    if basename in ("lint_files.py",):
+        return True
+    return False
+
+
+def is_security_fix_reference(file_path: str) -> bool:
+    """Check if file is a security-fix reference doc that necessarily documents patterns.
+
+    CPV ships fix-validation reference markdown files that EXPLAIN security
+    rules (CA-01 cache-audit, RC-110 path traversal, etc.) by quoting their
+    detection patterns. Scanning these for the same patterns would always
+    self-match. Same applies to TRDD design docs that record security
+    decisions.
+
+    Returns True for paths matching:
+    - `*/fix-validation/references/*.md` (CPV fix recipes)
+    - `*/design/tasks/TRDD-*-security*.md` (CPV security TRDDs)
+    - `*/cache-fixes.md`, `*/security-fixes.md`, `*/telemetry-hazard-fixes.md`
+      anywhere they live (covers re-vendored copies in other plugins)
+    """
+    file_normalized = file_path.lower().replace("\\", "/")
+    if "/fix-validation/references/" in file_normalized:
+        return True
+    if "/design/tasks/" in file_normalized and (
+        "security" in file_normalized or "trdd-" in file_normalized
+    ):
+        return True
+    basename = file_normalized.rsplit("/", 1)[-1] if "/" in file_normalized else file_normalized
+    if basename in (
+        "cache-fixes.md",
+        "security-fixes.md",
+        "telemetry-hazard-fixes.md",
+        "mcp-fixes.md",
+        "hook-fixes.md",
+        "skill-fixes.md",
+        "plugin-structure-fixes.md",
+        "encoding-fixes.md",
+        "enterprise-fixes.md",
+        "marketplace-fixes.md",
+        "lsp-fixes.md",
+        "settings-marketplace-fixes.md",
+        "rules-fixes.md",
+        "xref-fixes.md",
+        "scoring-fixes.md",
+        "documentation-fixes.md",
+        "code-quality-fixes.md",
+        "empirical-loading-bugs.md",
+        "schema-parity-contract.md",
+        "iterative-fix-loop.md",
+    ):
+        return True
+    return False
 
 
 def is_js_ts_file(file_path: str) -> bool:
@@ -1646,6 +1931,15 @@ def scan_all_files(plugin_path: Path, report: ValidationReport) -> dict[str, int
 
             # Skip binary files
             if is_binary_file(file_path):
+                stats["files_skipped"] += 1
+                continue
+
+            # CPV self-scan: skip files that necessarily document the
+            # security patterns CPV detects (validator scripts, fix-validation
+            # references, security tests). Active only when the target IS the
+            # CPV plugin itself (recognized by plugin.json name OR signature
+            # files — see is_cpv_self_scan).
+            if cpv_self_scan_skip(rel_path):
                 stats["files_skipped"] += 1
                 continue
 
@@ -2817,6 +3111,27 @@ def validate_security(
         report.critical(f"Plugin path is not a directory: {plugin_path}")
         return report
 
+    # Detect whether the target IS the CPV plugin itself (any deployment
+    # location). When True, per-file scanners skip CPV's own pattern-defining
+    # source (validator scripts, fix-validation references, security-test
+    # fixtures) — those files necessarily contain every detection pattern
+    # CPV knows about, and scanning them always self-matches.
+    #
+    # The skip is gated by SHA256 verification against `.cpv-self-hashes.json`
+    # so name-based spoofing cannot evade the scan, and tampering with the
+    # validator source itself shows up as a "modified, scanning normally"
+    # warning rather than a silent skip.
+    self_scan = is_cpv_self_scan(plugin_path)
+    _set_cpv_self_scan(self_scan, plugin_root=plugin_path, notice_report=report)
+    if self_scan:
+        report.info(
+            "CPV self-scan mode active — skipping CPV-internal pattern-defining "
+            "source (validator scripts, fix-validation references, security tests) "
+            "after SHA256 verification against .cpv-self-hashes.json. Files that "
+            "match the name pattern but fail hash check (modified or spoofed) are "
+            "scanned normally."
+        )
+
     report.info(f"Starting security scan of: {plugin_path}")
 
     # --- Traditional checks ---
@@ -2978,7 +3293,21 @@ def _read_plugin_version(plugin_path: Path) -> str:
 
 
 def main() -> int:
-    """CLI entry point for standalone security validation."""
+    """CLI entry point for standalone security validation.
+
+    First action: verify CPV's own source has not been tampered with by
+    checking each validator file's SHA256 against the GitHub-published
+    canonical manifest for the running version. On mismatch, exits with
+    code 2 and refuses to run — a tampered validator cannot be trusted
+    to produce honest findings.
+
+    Set `CPV_SKIP_GITHUB_INTEGRITY=1` to bypass for development.
+    """
+    # FIRST: verify validator integrity against GitHub canonical hashes.
+    # Done before argparse so even `--help` is gated by integrity.
+    from cpv_integrity import verify_self_integrity  # noqa: PLC0415
+    verify_self_integrity(quiet=True)
+
     parser = argparse.ArgumentParser(
         description="Security validation for Claude Code plugins",
         formatter_class=argparse.RawDescriptionHelpFormatter,

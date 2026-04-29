@@ -3621,7 +3621,16 @@ def _format_no_plugin_found_hint(plugin_root: Path) -> str:
 
 
 def main() -> int:
-    """Main entry point."""
+    """Main entry point.
+
+    First action: verify CPV's own source has not been tampered with
+    by checking each validator file's SHA256 against the GitHub
+    canonical manifest for the running plugin version. Exits with
+    code 2 on mismatch — a tampered validator cannot be trusted.
+    """
+    from cpv_integrity import verify_self_integrity  # noqa: PLC0415
+    verify_self_integrity(quiet=True)
+
     check_remote_execution_guard()
 
     parser = argparse.ArgumentParser(
