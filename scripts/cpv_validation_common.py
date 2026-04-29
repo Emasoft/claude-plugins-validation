@@ -972,8 +972,20 @@ SECRET_PATTERNS = [
     (re.compile(r"npm_[a-zA-Z0-9]{36}"), "npm Access Token"),
     (re.compile(r"://[^:\s]+:[^@\s]+@[^\s]+"), "Database Connection String with Credentials"),
     (re.compile(r"SG\.[a-zA-Z0-9\-_]{22}\.[a-zA-Z0-9\-_]{43}"), "SendGrid API Key"),
-    # Generic API key pattern excludes environment variable placeholders (${VAR} or $VAR)
-    (re.compile(r"api[_-]?key['\"]?\s*[:=]\s*['\"](?!\$[\{A-Z_])[^'\"]{20,}['\"]", re.I), "Generic API Key"),
+    # Generic API key pattern excludes:
+    #   • Environment variable placeholders: `${VAR}`, `$VAR`
+    #   • Claude Code plugin-option ENV NAMES: `CLAUDE_PLUGIN_OPTION_<KEY>`
+    #     — these are env-var NAMES the plugin reads, not credential VALUES.
+    #   • Provider env-var name allusions: `OPENROUTER_API_KEY`, `OPENAI_API_KEY`,
+    #     `ANTHROPIC_API_KEY`, etc. — common in config templates.
+    (re.compile(
+        r"api[_-]?key['\"]?\s*[:=]\s*['\"]"
+        r"(?!\$[\{A-Z_]|CLAUDE_PLUGIN_OPTION_|process\.env\.|"
+        r"OPENAI_API_KEY|OPENROUTER_API_KEY|ANTHROPIC_API_KEY|AZURE_API_KEY|"
+        r"GOOGLE_API_KEY|HUGGINGFACE_API_KEY|<|\{)"
+        r"[^'\"]{20,}['\"]",
+        re.I,
+    ), "Generic API Key"),
     # JWT tokens (base64url-encoded header.payload, signature optional)
     (re.compile(r"eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}"), "JWT Token"),
     # AWS Secret Access Key (40-char base64 string)
