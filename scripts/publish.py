@@ -73,7 +73,15 @@ def get_plugin_root() -> Path:
 def run(cmd: list[str], cwd: Path, *, check: bool = True) -> subprocess.CompletedProcess[str]:
     """Run a command, print it, stream output, and fail fast on error."""
     print(f"  $ {' '.join(cmd)}")
-    result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=600)
+    # Bypass the GitHub-anchored CPV self-integrity gate during publish:
+    # we are explicitly emitting a NEW version that, by definition, will
+    # differ from whatever was last published. The gate is a safety net
+    # for END USERS running the validator, not for the maintainer cutting
+    # a release. Without this bypass every Gate (4/5/6) would refuse to
+    # run with exit 2 because the in-tree validator hashes won't match
+    # the previous tag's manifest.
+    env = {**os.environ, "CPV_SKIP_GITHUB_INTEGRITY": "1"}
+    result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=600, env=env)
     if result.stdout.strip():
         print(result.stdout.strip())
     if result.stderr.strip():
