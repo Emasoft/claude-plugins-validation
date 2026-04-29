@@ -2493,7 +2493,13 @@ PHASE4_PATTERNS: list[tuple[str, str, "re.Pattern[str]", str]] = [
     # RC-87 — SSRF / external IP (suspicious-IP detection beyond the cloud-IMDS list)
     # The 0.0.0.0/0 + private-RFC-1918 + link-local ranges most often appear
     # in attack code that wants to bypass an "is this localhost?" check.
-    ("RC-87", "MINOR",
+    # Loopback (127.x.x.x) is intentionally NIT — the rule's own help text
+    # says "usually fine but worth flagging", so it should never block
+    # validation. v2.44 — demoted from MINOR to NIT to drop it out of the
+    # default-output count on plugins that legitimately bind to localhost
+    # (CozoDB, MCP servers, dev databases). The signal is preserved for
+    # `--strict` runs and `--verbose`.
+    ("RC-87", "NIT",
      re.compile(r"\b127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\b"),
      "RC-87: hardcoded loopback IP (127.x.x.x) — usually fine but worth flagging"),
     ("RC-87", "MINOR",

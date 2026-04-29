@@ -1645,9 +1645,25 @@ def _rc93_is_markdown_table_row(line: str) -> bool:
     output blocks (`╔══...══╗`) routinely produce long runs of whitespace
     that aren't visual deception. The signal is that the line is bookended
     by `|` (table row) or contains pipe-table separators (`|---|`).
+
+    v2.44 — also recognizes table rows EMBEDDED IN string literals,
+    e.g. Python source generating a markdown report:
+        "| Result    | Action     |"
+    The outer quotes wrap the table syntax but the content is still
+    table-shaped column alignment, not visual-deception payload.
     """
     stripped = line.strip()
     if stripped.startswith("|") and stripped.endswith("|") and stripped.count("|") >= 2:
+        return True
+    # Strip outer string-literal quotes (Python `"..."`, JS template `` `...` ``,
+    # single-quote, raw-string prefix) so an embedded table still matches.
+    inner = stripped
+    for prefix in ('r"', "r'", 'f"', "f'", 'b"', "b'"):
+        if inner.startswith(prefix):
+            inner = inner[len(prefix):]
+            break
+    inner = inner.strip("\"'`").strip()
+    if inner.startswith("|") and inner.endswith("|") and inner.count("|") >= 2:
         return True
     if re.match(r"^\s*\|\s*[-:]+\s*(?:\|\s*[-:]+\s*)+\|?\s*$", line):
         return True
@@ -2106,11 +2122,50 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
             if in_doc:
                 py_docstring_lines.add(i)
 
+    # v2.44 — for AI-facing markdown (skills, agents, commands), pre-compute
+    # the spans of markdown links `[label](path)` and inline-code spans
+    # `` `path` ``. Path matches inside those spans are documentation
+    # references, not instruction-shaped attack vectors. Other markdown
+    # files are already excluded above.
+    is_ai_markdown = (
+        file_lower.endswith((".md", ".mdx", ".markdown")) and is_ai_facing_markdown(file_path)
+    )
+    md_link_re = re.compile(r"\[[^\]]*\]\(([^)]+)\)") if is_ai_markdown else None
+    md_inline_code_re = re.compile(r"`[^`\n]+`") if is_ai_markdown else None
+    # Pre-compute fenced-code-block line set for AI-facing markdown so the
+    # path-pattern loop can skip the developer-doc code samples. The spec
+    # examples and snippet imports inside fences (`import { x } from
+    # '../y'`, `"extends": "../../tsconfig.json"`) are documentation, not
+    # the agent's instruction surface — the model never executes them.
+    md_fence_lines: set[int] = set()
+    if is_ai_markdown:
+        from cpv_validation_common import build_fence_state, is_in_fenced_code_block  # noqa: PLC0415
+        fence_state = build_fence_state(content)
+        for i in range(len(lines)):
+            if is_in_fenced_code_block(i, fence_state):
+                md_fence_lines.add(i + 1)  # convert to 1-based
+
     for line_num, line in enumerate(lines, start=1):
         # Skip comment-only lines
         stripped = line.strip()
         if stripped.startswith("#") and not stripped.startswith("#!"):
             continue
+
+        # v2.44 — skip AI-facing-markdown lines that fall inside a fenced
+        # code block. The fence is the model's signal that "this is a
+        # snippet, not an instruction" — every path inside is example
+        # / demo content, not an attacker-controlled path operation.
+        if is_ai_markdown and line_num in md_fence_lines:
+            continue
+
+        # v2.44 — pre-compute markdown link / inline-code spans for the
+        # current line (cheap; only when scanning AI-facing markdown).
+        md_skip_spans: list[tuple[int, int]] = []
+        if is_ai_markdown:
+            if md_link_re is not None:
+                md_skip_spans.extend((m.start(1), m.end(1)) for m in md_link_re.finditer(line))
+            if md_inline_code_re is not None:
+                md_skip_spans.extend((m.start(), m.end()) for m in md_inline_code_re.finditer(line))
 
         # C-family comments (//, ///, //!, /*, *) — covers JS/TS, Rust,
         # Go, C/C++, Swift, Kotlin, Java, C#. Path strings inside these
@@ -2157,6 +2212,17 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
                 if regex_spans:
                     m_start, m_end = match.start(), match.end()
                     if any(rs <= m_start and m_end <= re_ for rs, re_ in regex_spans):
+                        continue
+
+                # v2.44 — in AI-facing markdown, skip matches that fall
+                # inside a markdown link target `[label](path)` or
+                # inside an inline-code span `` `path` ``. Both shapes
+                # are doc references, not live filesystem calls. The
+                # rule still fires on bare `../` in skill prose, which
+                # is the genuine attack-surface case.
+                if md_skip_spans:
+                    m_start, m_end = match.start(), match.end()
+                    if any(ls <= m_start and m_end <= le for ls, le in md_skip_spans):
                         continue
 
                 # Skip ..\ pattern when it's a Python string escape (e.g. "...\n" in f-strings)
@@ -3264,6 +3330,9 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
             # v2.43 — drop findings inside vendored / cached / build dirs.
             if file_ref and _is_vendored_dep_path(str(file_ref)):
                 continue
+            # v2.44 — drop findings inside gitignored dev-scratch dirs.
+            if file_ref and _is_dev_scratch_path(str(file_ref)):
+                continue
 
             # Pattern-source skip: if the reported line is a regex
             # PATTERN DEFINITION (Python `re.compile(`, JS `/.../g`,
@@ -4305,6 +4374,13 @@ def check_trufflehog(plugin_path: Path, report: ValidationReport) -> int:
         # placeholder credentials by design — not the plugin author's
         # responsibility.
         if _is_vendored_dep_path(rel):
+            continue
+        # v2.44 — drop findings inside gitignored dev-scratch dirs
+        # (docs_dev/, reports/, scripts_dev/, design/tasks/, …). Those
+        # paths legitimately quote credentials as fixture / audit
+        # examples and are never shipped, so any external-scanner hit
+        # in them is operational noise, not a security finding.
+        if _is_dev_scratch_path(rel):
             continue
         base_level = "critical" if verified else "major"
         level = effective_severity(base_level, rel)
