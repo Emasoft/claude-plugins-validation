@@ -2443,6 +2443,24 @@ def scan_for_user_paths(content: str, file_path: str, report: ValidationReport) 
         for pattern in USER_PATH_PATTERNS:
             match = pattern.search(line)
             if match:
+                # v2.45 — skip when the matched username is a known
+                # placeholder (`user`, `dev`, `name`, `your-name`, …).
+                # The rule's own help text labels these as "Common-OK:
+                # example output in docs, test fixtures with deliberately-
+                # fake usernames" but the implementation never actually
+                # consulted `EXAMPLE_USERNAMES`. Extracts the username
+                # via `re.search` against the same `[^/\\s]+` group the
+                # patterns use; substring-match against the allowlist.
+                matched = match.group(0)
+                username_match = re.search(
+                    r"(?:/Users/|/home/|[A-Za-z]:[\\/]Users[\\/]?)([^/\\\s]+)",
+                    matched,
+                    re.IGNORECASE,
+                )
+                if username_match:
+                    candidate = username_match.group(1).lower().strip()
+                    if candidate in EXAMPLE_USERNAMES:
+                        continue
                 report.major(
                     f"[RC-135] Hardcoded user-home path (`{match.group()}`) "
                     f"— absolute path containing a username (`/Users/<name>/…`, "
