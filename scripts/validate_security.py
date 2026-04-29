@@ -121,38 +121,44 @@ UNSAFE_VARIABLE_PATTERNS = [
     ),
 ]
 
-# Pipe to shell patterns - extremely dangerous
+# Pipe to shell patterns - extremely dangerous. Every pattern uses
+# `(?<!\|)` to reject the logical-OR prefix `||` — `if x || sh.foo()`
+# in Rust/JS/Go is not a shell pipe.
 PIPE_TO_SHELL_PATTERNS = [
     (
-        re.compile(r"\|\s*sh\b"),
+        re.compile(r"(?<!\|)\|\s*sh\b"),
         "[RC-114] Pipe-to-shell `| sh` — executes whatever produced the upstream "
         "stdout, no signature/integrity check. Fix: download to a file, "
         "verify checksum/signature, then invoke explicitly. Pattern catches "
         "the classic `curl … | sh` install footgun",
     ),
     (
-        re.compile(r"\|\s*bash\b"),
+        re.compile(r"(?<!\|)\|\s*bash\b"),
         "[RC-115] Pipe-to-shell `| bash` — same RCE risk as RC-114 with bash "
         "explicitly named. Fix: download, verify, then `bash <file>`",
     ),
     (
-        re.compile(r"\|\s*zsh\b"),
+        re.compile(r"(?<!\|)\|\s*zsh\b"),
         "[RC-116] Pipe-to-shell `| zsh` — same RCE risk as RC-114 with zsh "
         "explicitly named. Fix: download, verify, then `zsh <file>`",
     ),
     (
-        re.compile(r"\|\s*ksh\b"),
+        re.compile(r"(?<!\|)\|\s*ksh\b"),
         "[RC-117] Pipe-to-shell `| ksh` — same RCE risk as RC-114 with ksh "
         "explicitly named. Fix: download, verify, then `ksh <file>`",
     ),
     (
-        re.compile(r"\|\s*source\b"),
+        # `(?<!\|)` rejects `||` (logical OR) followed by the identifier
+        # `source` — common in Rust/JS/Go where `if x || source.foo()` is
+        # not a shell pipe. Real shell pipe-to-source is always a single
+        # `|` followed by optional whitespace and `source`.
+        re.compile(r"(?<!\|)\|\s*source\b"),
         "[RC-118] Pipe-to-source `| source` — like pipe-to-shell but loads "
         "into the current shell context, also leaking env vars and aliases. "
         "Fix: never source remote-fetched content; download, audit, source explicitly",
     ),
     (
-        re.compile(r"\|\s*\.\s"),
+        re.compile(r"(?<!\|)\|\s*\.\s"),
         "[RC-119] Pipe-to-dot `| . ` (POSIX shorthand for `source`) — same "
         "risk as RC-118. Fix: same as RC-118",
     ),
@@ -1446,6 +1452,45 @@ def _line_is_string_assignment(line: str) -> bool:
     return bool(re.match(r"[A-Za-z_][A-Za-z0-9_]*\s*=\s*(?:'''|\"\"\"|r'''|r\"\"\")", stripped))
 
 
+_PATTERN_DEFINITION_HINTS = (
+    "re.compile(", "re.match(", "re.search(",
+    "RegExp(",
+    "regex.compile(",
+    'r"', "r'",            # Python raw-string literal at start of regex
+)
+_PATTERN_DEFINITION_RE = re.compile(r"/[^/\n]+/[gimsuy]*")  # JS regex literal
+
+
+def _line_is_pattern_definition(file_ref: str, line_number: int) -> bool:
+    """True if line `line_number` of `file_ref` is a regex pattern
+    definition (Python `re.compile(...)`, JS `/.../g`, or `RegExp(...)`).
+
+    External scanners (cc-audit, gitleaks, trufflehog, semgrep) flag the
+    LITERAL TEXT of credential markers / sandbox-escape patterns / etc.
+    inside the BODY of a regex source — but pattern bodies are detector
+    code, not exploit payloads. This helper opens the file at the
+    reported line and inspects the surrounding text. Returns False on
+    any I/O error (don't suppress on uncertainty).
+    """
+    try:
+        path = Path(file_ref)
+        if not path.is_file():
+            return False
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            for i, ln in enumerate(f, start=1):
+                if i == line_number:
+                    if any(hint in ln for hint in _PATTERN_DEFINITION_HINTS):
+                        return True
+                    if _PATTERN_DEFINITION_RE.search(ln):
+                        return True
+                    return False
+                if i > line_number:
+                    break
+    except (OSError, ValueError):
+        pass
+    return False
+
+
 def scan_for_injection(content: str, file_path: str, report: ValidationReport) -> int:
     """Scan content for injection patterns. Returns count of issues found.
 
@@ -1562,7 +1607,7 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
                 # backtick rule has its own per-language guards (Python,
                 # JS/TS); the `$(...)` rule respects shell-script context
                 # because that's where `$(cmd)` is the *correct* syntax.
-                if is_shell_script or is_test_file:
+                if skip_command_sub:
                     continue
                 # In markdown, suppress findings INSIDE fenced
                 # code blocks — agent/skill docs legitimately quote shell
@@ -1622,7 +1667,10 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
                     issues_found += 1
 
         # Check eval patterns (CRITICAL) - skip for markdown docs (code examples)
-        if not is_markdown:
+        # Also skip test files entirely — `f"exec(open('{path}').read())"` in
+        # tests/unit/test_*.py is a deliberate test fixture, not a runtime
+        # threat.
+        if not is_markdown and not is_test_file:
             for pattern, msg in EVAL_PATTERNS:
                 if pattern.search(line):
                     # In Python files, skip shell-style eval/exec patterns (e.g. "exec " without parens)
@@ -1637,13 +1685,15 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
                         or stripped.startswith("*")
                     ):
                         continue
-                    # Shell-style `exec <cmd>` rule (RC-121) — match expects
-                    # a real shell command after `exec`. In JS/TS source the
-                    # word "exec" is also used in many non-shell contexts:
-                    # `child.exec()` properties, error messages like "exec
-                    # failure", method names. Require a shell-script context
-                    # for the bare `exec <word>` pattern.
-                    if "RC-121" in msg and not is_shell_script:
+                    # Shell-style `exec <cmd>` and `eval <code>` rules
+                    # (RC-120/RC-121) — bare-word rules that match the
+                    # English word in non-shell prose. The classic FPs are:
+                    #   • "Run PSS, generate eval task files under …"  (.py)
+                    #   • "// 1. spawn error (git not on PATH, exec failure)" (.ts)
+                    # In all of these the command is plain English, not a
+                    # shell-control construct. Restrict to shell-like files
+                    # where the bare-word pattern carries real meaning.
+                    if ("RC-120" in msg or "RC-121" in msg) and not is_shell_script:
                         continue
                     report.critical(f"{msg}: {line.strip()[:80]}", file_path, line_num)
                     issues_found += 1
@@ -1728,8 +1778,26 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
     ):
         return 0
 
+    # Skip git-internal files entirely. A `.git` file in a submodule
+    # directory contains literal `gitdir: ../.git/modules/<name>` paths
+    # — that's git's own bookkeeping, not a directory-traversal call.
+    # Same for any path under `.git/`, `.gitmodules`, etc.
+    if (
+        basename == ".git"
+        or basename == ".gitmodules"
+        or "/.git/" in file_normalized
+        or file_normalized.startswith(".git/")
+    ):
+        return 0
+
     is_js_ts = is_js_ts_file(file_path, content)
     is_python_src = file_lower.endswith(".py")
+    # Rust source — uses `//`, `///`, `//!`, `/* */` for comments, same
+    # as JS/TS for the line-level skip pattern. Doc-comments (`///`,
+    # `//!`) routinely contain path examples like
+    # `exe_dir/../VERSION` describing the search algorithm.
+    is_rust_src = file_lower.endswith(".rs")
+    is_c_family = is_js_ts or is_rust_src or file_lower.endswith((".c", ".cc", ".cpp", ".h", ".hpp", ".go", ".swift", ".kt", ".java", ".cs"))
     # JS regex literals (e.g. `const re = /^\s*foo[\\:`"']\s*$/gm`) include
     # characters that match Windows-path / unix-path patterns by accident.
     # Detect them once per line so we can suppress matches that fall inside
@@ -1775,13 +1843,15 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
         if stripped.startswith("#") and not stripped.startswith("#!"):
             continue
 
-        # JS/TS comments (//, /*, *) — same intent as the # skip for shell/python.
-        # The path strings inside JS/TS comments are documentation references
-        # (e.g. "// dist/cli.js → ../dist/index.js"), not live file operations.
-        if is_js_ts and (
+        # C-family comments (//, ///, //!, /*, *) — covers JS/TS, Rust,
+        # Go, C/C++, Swift, Kotlin, Java, C#. Path strings inside these
+        # comments are documentation (e.g. "// dist/cli.js → ../dist/index.js"
+        # in JS, "/// Search order: exe_dir/../VERSION" in Rust), not
+        # live file operations.
+        if is_c_family and (
             stripped.startswith("//")
             or stripped.startswith("/*")
-            or stripped.startswith("*")  # continuation of /** ... */ blocks
+            or stripped.startswith("*")
         ):
             continue
 
@@ -1860,6 +1930,35 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
                 if is_python_src and (line_num - 1) in py_docstring_lines:
                     continue
 
+                # Known-safe absolute path allowlist. These are standard
+                # POSIX interpreter / install locations that EVERY UNIX
+                # plugin uses. They're not "non-portable" the way
+                # `/Users/dave/work/proj/foo` is — they exist on every
+                # macOS, Linux, BSD, WSL. Suppress RC-112 here. The rule
+                # still fires on truly host-specific roots like
+                # `/var/lib/<my-app>`, `/opt/<vendor>/<product>`, etc.
+                if "Absolute Unix" in msg:
+                    KNOWN_SAFE_PATHS: tuple[str, ...] = (
+                        "/bin/sh",
+                        "/bin/bash",
+                        "/bin/zsh",
+                        "/bin/dash",
+                        "/bin/ksh",
+                        "/bin/cat",
+                        "/bin/cp",
+                        "/bin/mv",
+                        "/bin/rm",
+                        "/bin/ls",
+                        "/bin/echo",
+                        "/bin/true",
+                        "/bin/false",
+                        "/bin/pwd",
+                        "/usr/bin/env",
+                        "/usr/local/bin",  # standard Homebrew / install path
+                    )
+                    if any(safe in matched_text or safe in line for safe in KNOWN_SAFE_PATHS):
+                        continue
+
                 # In JS/TS files, do the same for paths inside string literals.
                 # The Windows pattern's biggest FP source is escape sequences
                 # like `"INSTRUCTIONS:\n"` matching `[A-Za-z]:\`. Skip when
@@ -1887,6 +1986,30 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
                             or any(matched_text in seg for seg in re.findall(r"'[^']*'|\"[^\"]*\"", line))
                         ):
                             continue
+                    # Same defang for the `../` traversal rule: when the
+                    # matched text is INSIDE a quoted string (single,
+                    # double, or template), it's hardcoded data and not
+                    # an attacker-controlled path-segment concatenation.
+                    # Real CWE-23 happens at the API boundary (open(),
+                    # readFile, fs.read, …) with attacker input; literal
+                    # string content embedded as JSON / docstring is not
+                    # that boundary.
+                    if "Directory traversal" in msg:
+                        if (
+                            matched_text in line.split("`")[1::2]  # template literal
+                            or any(matched_text in seg for seg in re.findall(r"'[^']*'|\"[^\"]*\"", line))
+                        ):
+                            continue
+
+                # Rust source — the same defang as JS/TS for paths inside
+                # string literals. Rust uses single/double quotes and
+                # `r"raw strings"` for path literals; `dir.join("../VERSION")`
+                # is a HARDCODED parent-relative lookup, not an attacker
+                # path traversal. Real attacker-input traversal would
+                # show up at the I/O boundary with a runtime variable.
+                if is_rust_src and ('"' in stripped or "'" in stripped):
+                    if any(matched_text in seg for seg in re.findall(r"'[^']*'|\"[^\"]*\"", line)):
+                        continue
 
                 report.critical(f"{msg}: {line.strip()[:80]}", file_path, line_num)
                 issues_found += 1
@@ -2079,17 +2202,46 @@ def scan_for_prompt_injection(content: str, file_path: str, report: ValidationRe
                     seg_start = i + 1
         return False
 
+    def _is_in_quoted_string(line: str, m_start: int, m_end: int) -> bool:
+        """True if the match falls inside a `"…"` or `'…'` quoted span on
+        the same line. Markdown narrative often quotes the
+        prompt-injection phrase as an example: e.g.
+            **A PR description that says "ignore previous instructions"**.
+        That's documentation, not live instructions. Same paired-delimiter
+        scan as the backtick variant; tracks both quote chars
+        independently so a quote inside backticks (or vice versa) doesn't
+        confuse the scanner.
+        """
+        for quote_ch in ('"', "'"):
+            in_seg = False
+            seg_start = -1
+            for i, ch in enumerate(line):
+                if ch == quote_ch:
+                    if in_seg:
+                        if seg_start <= m_start and m_end <= i:
+                            return True
+                        in_seg = False
+                        seg_start = -1
+                    else:
+                        in_seg = True
+                        seg_start = i + 1
+        return False
+
     issues_found = 0
     lines = content.split("\n")
     for line_num, line in enumerate(lines, start=1):
         for pattern, msg in PROMPT_INJECTION_PATTERNS:
             m = pattern.search(line)
             if m:
-                # Markdown: skip if defanged via fence or inline backticks.
+                # Markdown: skip if defanged via fence, inline backticks,
+                # or a paired-quote string. Quoted examples in prose are
+                # documentation, not instructions.
                 if is_md:
                     if fence_state is not None and is_in_fenced_code_block(line_num - 1, fence_state):
                         continue
                     if _is_in_inline_backticks(line, m.start(), m.end()):
+                        continue
+                    if _is_in_quoted_string(line, m.start(), m.end()):
                         continue
                 # RC-131 fake-system-prompt-marker rule fires on text like
                 # `system:` or `hidden prompt:`. Class names ending in
@@ -2219,8 +2371,53 @@ def scan_for_credential_harvest(content: str, file_path: str, report: Validation
         # detects the token format, not a usage of an actual token.
         if (is_js_ts and js_regex_re.search(line)) or (is_python and py_regex_re.search(line)):
             continue
+        # Skip argparse / click / typer style ENV-VAR-NAME defaults:
+        #   parser.add_argument("--token", default="GITHUB_TOKEN")
+        #   click.option("--token", envvar="GITHUB_TOKEN")
+        # The string "GITHUB_TOKEN" here is the NAME of an env var the
+        # CLI will look up — not a credential. Same for `os.environ.get("GITHUB_TOKEN")`
+        # and `os.getenv("GITHUB_TOKEN")` patterns: these are reads, not
+        # writes/leaks. Skip the line if it pairs the literal token name
+        # with one of those declarative APIs.
+        if any(api in line for api in (
+            "default=", "envvar=", "env=",
+            "os.environ.get", "os.getenv",
+            "process.env.", "process.env[",
+            "std::env::var", "env::var",
+        )):
+            continue
+        # Skip env-var-mapping configs: `OPENROUTER_API_KEY: "CLAUDE_PLUGIN_OPTION_..."`,
+        # `"AWS_SECRET_ACCESS_KEY": process.env.AWS_SECRET_ACCESS_KEY`. Both
+        # sides of the colon/equals reference the same NAME (or a known
+        # placeholder); no credential value is being declared.
+        if "CLAUDE_PLUGIN_OPTION_" in line or "process.env." in line:
+            continue
         for pattern, msg in CREDENTIAL_HARVEST_PATTERNS:
-            if pattern.search(line):
+            m = pattern.search(line)
+            if m:
+                # Skip when the keyword (`keychain`, `gnome-keyring`, …)
+                # is inside a string-CONTAINMENT check rather than a
+                # file-open call. Rust `msg.contains("keychain")`, JS
+                # `text.includes("keychain")`, Python `"keychain" in s`
+                # — these are INSPECTING text for the keyword, not
+                # opening a keystore. The whole line is the signal:
+                #   • contains `.contains(`  / `.includes(`         → match
+                #   • Python `"keyword" in <var>` (no open/read)    → match
+                # Real credential harvest goes through I/O APIs
+                # (open, read_text, fs.readFileSync, …) — those
+                # remain flagged.
+                io_apis = (
+                    "open(", "read_text(", "Path(", "with open",
+                    "fs.readFile", "fs.read", "readFileSync",
+                    "std::fs::read", "fs::File::open",
+                )
+                has_io = any(api in line for api in io_apis)
+                if not has_io and (
+                    ".contains(" in line
+                    or ".includes(" in line
+                    or re.search(r"['\"](?:[^'\"]+)['\"]\s+in\s+\w", line)
+                ):
+                    continue
                 report.critical(f"{msg}: {stripped[:80]}", file_path, line_num)
                 issues_found += 1
     return issues_found
@@ -2798,6 +2995,19 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
             if file_ref and cpv_self_scan_skip(str(file_ref)):
                 continue
 
+            # Pattern-source skip: if the reported line is a regex
+            # PATTERN DEFINITION (Python `re.compile(`, JS `/.../g`,
+            # `RegExp(`), the literal-string match cc-audit fired on is
+            # a detector body, not real-world payload. Same logic as our
+            # internal gitleaks/trufflehog/credential-harvest skip.
+            if (
+                file_ref
+                and isinstance(line, int)
+                and line > 0
+                and _line_is_pattern_definition(file_ref, line)
+            ):
+                continue
+
             cpv_level = severity_map.get(severity, "warning")
             report_fn = getattr(report, cpv_level)
             report_fn(f"cc-audit {rule_id}: {str(message)[:100]}", file_ref, line if isinstance(line, int) else 0)
@@ -3065,6 +3275,32 @@ def check_tirith_scanner(plugin_path: Path, report: ValidationReport) -> int:
 # only — patterns and helpers come from the common module.
 
 
+_LOCKFILE_BASENAMES = frozenset({
+    "uv.lock", "pipfile.lock", "poetry.lock", "pdm.lock",
+    "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
+    "cargo.lock", "gemfile.lock", "composer.lock", "mix.lock",
+    "go.sum", "deno.lock", "bun.lock", "bun.lockb",
+})
+
+
+def is_lockfile(file_path: str) -> bool:
+    """Recognize package-manager lockfiles by basename.
+
+    Lockfiles are auto-generated dependency manifests. Their content is
+    machine-controlled and consists of package names, versions, and
+    integrity hashes — every name pattern (uv.lock contains
+    `name = "anthropic"`, package-lock.json contains `"name": "system"`
+    for various deps) trips the agent-identity-spoofing / hardcoded-name
+    rules. They're not part of the plugin's runtime attack surface;
+    skipping them avoids the entire FP class. RC-30/RC-33
+    (typosquatting / compromised packages) read these files separately
+    via direct rglob and parse them as data, so this skip only applies
+    to the regex-pattern catalog.
+    """
+    basename = file_path.lower().replace("\\", "/").rsplit("/", 1)[-1]
+    return basename in _LOCKFILE_BASENAMES
+
+
 def _iter_scannable_files(plugin_path: Path):
     """Yield (file_path, rel_path, content) for every non-binary scannable file.
 
@@ -3072,6 +3308,13 @@ def _iter_scannable_files(plugin_path: Path):
     `is_validator_script` would let dev-scratch dirs (docs_dev/,
     design/tasks/, …) and hash-verified fix-validation references slip
     through and produce the same FPs the main scan loop suppresses.
+
+    Also skips lockfiles — every regex pattern in the security catalog
+    that scans file content (e.g. RC-59 agent-name spoofing) trips on
+    dependency names like `name = "anthropic"`. Lockfiles are not part
+    of the runtime attack surface and the rules that DO need them
+    (RC-30, RC-33) parse them as data via direct rglob, not via this
+    iterator.
     """
     gi = get_gitignore_filter(plugin_path)
     for root, _dirs, files in gi.walk(plugin_path):
@@ -3085,6 +3328,8 @@ def _iter_scannable_files(plugin_path: Path):
                 continue
             rel_path = str(file_path.relative_to(plugin_path))
             if cpv_self_scan_skip(rel_path):
+                continue
+            if is_lockfile(rel_path):
                 continue
             yield file_path, rel_path, content
 

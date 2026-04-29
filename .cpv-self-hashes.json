@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-04-29T07:04:52+00:00",
+  "computed_at": "2026-04-29T10:01:19+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     "agents/marketplace-fixer.md": "sha256:254f3d77fccf11a5ecac29cd61cb670b33f3ac7fb1f12d18c853f10032830ef2",
@@ -55,7 +55,7 @@
     "scripts/cpv_sbom_writer.py": "sha256:946bc0059db7a1792edbb0899397cbd73a69a513bdd5e90478dfecbd3c520f2b",
     "scripts/cpv_taint_engine.py": "sha256:8ca379faf90bf76a32ef951c8d23419e9e5be3e7720f9cd4d47689a919033ac2",
     "scripts/cpv_token_cost.py": "sha256:e35d69c393c37794798615c473e67bf89f48d9d27f901f5221f0fc426aaa0ef5",
-    "scripts/cpv_validation_common.py": "sha256:1d75d6907ffea6f2a07150a25be41a1ffef37818bf79dd36102ab496315549f8",
+    "scripts/cpv_validation_common.py": "sha256:cfd3f7b34ada47d0b37080280eb32285e2521b088b675ef77c732e49b7673c78",
     "scripts/detect_lockfiles.py": "sha256:17c03bd5d381395f6348a7a2b8c2d4df99422cabdd600b98fe7be0b01ebb6971",
     "scripts/generate_marketplace_repo.py": "sha256:d48c4d64f318fd15d2fb3e21278cd6cb7ab1715f52fc994b0fc9d8bc88fa1356",
     "scripts/generate_plugin_repo.py": "sha256:a22fd7d1c7614fceed1c342de138a4b4148ff2851020ba76d79e536a76a95faf",
@@ -94,7 +94,7 @@
     "scripts/validate_project_scope.py": "sha256:7aaa9182febcee46c483ffd321ed56920a01ff36f3a1bc7edbf5a8aa7ac24360",
     "scripts/validate_rules.py": "sha256:2ae08e20e6d32d65b897dc9818ef61f33986f8b5ecf5247d3fa364c7b609d0c5",
     "scripts/validate_scoring.py": "sha256:aefdcbd653aefee1d600c1a25236511e261c9dfcca88d01abd02aad158ce2907",
-    "scripts/validate_security.py": "sha256:4c0fadcf756386c1de46a1b265677410faac30ac84b420553e6502f3e98c25e9",
+    "scripts/validate_security.py": "sha256:3ca6fbccae0686efce74cbd871c81576f8749cac60f8589dd78930b63ebe786c",
     "scripts/validate_settings_marketplace.py": "sha256:ad8456286dae9498252bf95a10fa8cf304e7f9436c843e2c4f37dca15c679c6d",
     "scripts/validate_skill.py": "sha256:67b97fbb922350d427cc087cda6bbfffa5b83d90b86fcde5a68c7cdbd7912883",
     "scripts/validate_skill_comprehensive.py": "sha256:43017bf1bca73347c103eb81ef63bd25e461001edd3759263f72cb4f0b705d2b",
