@@ -2055,6 +2055,85 @@ _RC21_SUBPROCESS_PREP_HINTS = (
 )
 
 
+_VARIABLE_ANCHORED_PATH_PREFIX_RE = re.compile(
+    r"""
+    (?:                       # ANY of the shell-variable shapes:
+        \$\{[A-Za-z_][A-Za-z0-9_]*\}        # ${VAR}
+      | \$\([^)]+\)                         # $(cmd) command substitution
+      | \$[A-Za-z_][A-Za-z0-9_]*            # $VAR
+      | %[A-Za-z_][A-Za-z0-9_]*%            # %VAR%   (Windows cmd)
+      | %\{[A-Za-z_][A-Za-z0-9_]*\}         # %{VAR}  (some templating)
+    )
+    /                         # path separator
+    (?:[^\s/"'`]+/)*          # zero or more leaf segments
+    \.\.                      # the `..` traversal segment
+    """,
+    re.VERBOSE,
+)
+
+
+def _is_variable_anchored_path(line: str, match_start: int) -> bool:
+    """GENERAL: True when the `../` (or `..\\`) match at `match_start` is
+    DOWNSTREAM of a shell-variable expansion that anchors the path base.
+
+    Rationale: paths like `${SCRIPT_DIR}/../lib`, `$VAULT/../self`,
+    `${PLUGIN_ROOT}/../shared` are NOT attacker-influenced traversal —
+    the anchor is a script-managed variable and the traversal navigates
+    relative to it. Same class of "the developer knows where the base is"
+    that the RC-110 help text already calls out as Common-OK for
+    `extraPaths: ['../scripts']`.
+
+    The predicate looks LEFT of the match position for any of the
+    canonical shell-variable shapes (`${VAR}`, `$VAR`, `$(cmd)`, `%VAR%`,
+    `%{VAR}`) followed by `/` and ending with `..`. If found, the path
+    is variable-anchored.
+
+    Real attacker patterns have NO variable anchor before `../`:
+        open("../" + user_input + "/etc/passwd")     # no anchor — flagged
+        path = request.args["p"] + "../../etc"       # no anchor — flagged
+    """
+    if match_start <= 0:
+        return False
+    # Look at the prefix up to and including the matched `..` position.
+    # We allow the `..` to appear anywhere after the variable+`/` anchor.
+    prefix = line[: match_start + 2]  # include `..`
+    return bool(_VARIABLE_ANCHORED_PATH_PREFIX_RE.search(prefix))
+
+
+_VARIABLE_ANCHORED_ABSOLUTE_RE = re.compile(
+    r"""
+    (?:                       # ANY shell-variable shape on the LEFT
+        \$\{[A-Za-z_][A-Za-z0-9_]*\}        # ${VAR}
+      | \$\([^)]+\)                         # $(cmd)
+      | \$[A-Za-z_][A-Za-z0-9_]*            # $VAR
+      | %[A-Za-z_][A-Za-z0-9_]*%            # %VAR%
+    )
+    """,
+    re.VERBOSE,
+)
+
+
+def _is_variable_anchored_absolute_path(line: str, match_start: int) -> bool:
+    """GENERAL: True when the absolute-path match at `match_start` is
+    INSIDE or DOWNSTREAM of a shell-variable expansion.
+
+    Rationale: a path like `"${CCPM_DIR}/lib/project-paths.sh"` matches
+    the literal `/lib/...` system-path regex, but the actual path at
+    runtime depends entirely on `${CCPM_DIR}`'s value — the `/lib/` is
+    a sub-component of a parametric path, NOT a hardcoded host root.
+
+    The predicate fires when ANY shell-variable expansion (`${VAR}`,
+    `$VAR`, `$(cmd)`, `%VAR%`) appears LEFT of the matched span on the
+    same line. Conservative: a real attacker pattern that hardcodes
+    `/etc/passwd` will not have a variable expansion preceding it on
+    the line.
+    """
+    if match_start <= 0:
+        return False
+    prefix = line[:match_start]
+    return bool(_VARIABLE_ANCHORED_ABSOLUTE_RE.search(prefix))
+
+
 def _rc21_is_subprocess_prep(line: str, surrounding_lines: list[str]) -> bool:
     """RC-21 bulk env-var harvest — skip `os.environ.copy()` /
     `dict(os.environ)` when the resulting variable feeds a subprocess
@@ -2719,6 +2798,47 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
                 # always examples, never file ops.
                 if is_python_src and (line_num - 1) in py_docstring_lines:
                     continue
+
+                # GENERAL: variable-anchored shell paths — `${VAR}/../X`,
+                # `$VAR/../X`, `"${VAR}/lib/file"` — are NOT directory-
+                # traversal calls. The base IS a shell variable reference,
+                # so the resolved path is determined at expansion time by
+                # the value of `$VAR`. The traversal segment `../`
+                # navigates relative to that anchor (typically
+                # `${SCRIPT_DIR}/..` = script's parent dir, the canonical
+                # idiom for "find sibling lib/").
+                #
+                # The Common-OK clause in RC-110's own help text already
+                # acknowledges this: "config keys like `extraPaths:
+                # ['../scripts']`, doc snippets". Variable-anchored paths
+                # are the same class of "the developer knows where the
+                # base is" usage. Real attacker traversal looks like
+                # `open(user_input + "../etc/passwd")` — no anchor.
+                #
+                # Predicate matches:
+                #   ${SCRIPT_DIR}/../lib    ${PLUGIN_ROOT}/../tests
+                #   $VAULT/../self          $HOME/../shared
+                #   "${BASE}/../include"    '$BASE/../include'
+                if _is_variable_anchored_path(line, match.start()):
+                    continue
+
+                # GENERAL: variable-anchored absolute paths. A path like
+                # `${CCPM_DIR}/lib/foo.sh` matches `/lib/` literally but
+                # the path is parametric — the runtime base is whatever
+                # `${CCPM_DIR}` expands to. Same semantics as the
+                # `${VAR}/../X` skip above for RC-110 traversal: the
+                # developer is anchoring the path to a script-managed
+                # variable, NOT hardcoding `/lib/` as a system root.
+                #
+                # Predicate matches when ANY shell-variable expansion
+                # appears LEFT of the matched system-path text on the
+                # same line:
+                #   source "${SCRIPT_DIR}/lib/project.sh"     -> skip
+                #   include $PROJECT/usr/share/data            -> skip
+                #   open("/usr/local/bin/myapp")               -> still flagged
+                if "Absolute" in msg or "system absolute" in msg.lower():
+                    if _is_variable_anchored_absolute_path(line, match.start()):
+                        continue
 
                 # Known-safe absolute path allowlist. These are standard
                 # POSIX interpreter / install locations that EVERY UNIX
