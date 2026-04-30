@@ -1817,6 +1817,47 @@ def _rc87_is_semver_context(line: str, file_path: str) -> bool:
     return False
 
 
+def _is_box_drawing_char(ch: str) -> bool:
+    """True for any Unicode codepoint in the Box Drawing block (U+2500..U+257F)
+    or the Block Elements block (U+2580..U+259F).
+
+    These two blocks together cover every glyph used to draw boxes, frames,
+    rules, and shading in a fixed-width CLI panel: simple `─│┌┐└┘`,
+    double-line `═║╔╗╚╝╠╣╬`, heavy `━┃┏┓┗┛`, half-blocks `▀▄`, shading
+    `░▒▓`, full block `█`, etc.
+
+    Using the codepoint range is GENERAL — it covers every glyph the Unicode
+    standard reserves for box-drawing, including ones that may be added in
+    future Unicode versions. Hardcoded character lists silently miss new
+    chars. Reference: https://www.unicode.org/charts/PDF/U2500.pdf
+    https://www.unicode.org/charts/PDF/U2580.pdf
+    """
+    if not ch:
+        return False
+    cp = ord(ch)
+    return 0x2500 <= cp <= 0x259F
+
+
+def _is_box_drawing_row(text: str) -> bool:
+    """True when `text` opens AND closes with a box-drawing character and
+    contains at least 2 box-drawing characters total.
+
+    GENERAL predicate (replaces the v2.46 hardcoded 36-char allowlist).
+    The shape is: a fixed-width terminal banner row, identical in spirit to
+    a markdown `|...|` row but with Unicode borders. CLI status panels, ASCII
+    art tables, dashboard frames — every flavor that uses U+2500..U+259F.
+
+    Counting only borders (not interior padding) keeps the predicate
+    conservative: a stray `─` in prose won't satisfy `>=2` matches at the
+    line endpoints.
+    """
+    if not text:
+        return False
+    if not (_is_box_drawing_char(text[0]) and _is_box_drawing_char(text[-1])):
+        return False
+    return sum(1 for ch in text if _is_box_drawing_char(ch)) >= 2
+
+
 def _rc93_is_markdown_table_row(line: str) -> bool:
     """RC-93 ≥30-contiguous-spaces — skip markdown table rows.
 
@@ -1843,18 +1884,12 @@ def _rc93_is_markdown_table_row(line: str) -> bool:
     stripped = line.strip()
     if stripped.startswith("|") and stripped.endswith("|") and stripped.count("|") >= 2:
         return True
-    # v2.46 FP-O — Unicode box-drawing row (full-set: vertical, corners,
-    # tee, horizontal). Skip when the line opens AND closes with one of
-    # these characters and contains at least 2 such borders. The inner
-    # padding is column alignment, identical in spirit to a `|...|`
-    # markdown row.
-    _BOX_BORDER_CHARS = "║╔╗╚╝╠╣╦╩╬═│┌┐└┘├┤┬┴┼─┃┏┓┗┛┣┫┳┻╋━"
-    if (
-        stripped
-        and stripped[0] in _BOX_BORDER_CHARS
-        and stripped[-1] in _BOX_BORDER_CHARS
-        and sum(1 for ch in stripped if ch in _BOX_BORDER_CHARS) >= 2
-    ):
+    # GENERAL: Unicode box-drawing detection by codepoint range, not hardcoded
+    # char list. Box-drawing block is U+2500–U+257F. Block elements (full
+    # block, half blocks, shading) live in U+2580–U+259F. Both are used for
+    # CLI banners and ASCII status panels — same shape as a markdown
+    # `|...|` row, just with Unicode borders.
+    if _is_box_drawing_row(stripped):
         return True
     # v2.46 FP-O — also handle Python/JS string-literal-wrapped box rows
     # like `"║ FOO     ║"` or `lines.append("║ FOO     ║")` or
@@ -1865,12 +1900,7 @@ def _rc93_is_markdown_table_row(line: str) -> bool:
     # earlier prefix-strip didn't cover.
     for quote_match in re.finditer(r'(?:["\'`])(.*?)(?:["\'`])', stripped):
         inner_content = quote_match.group(1).strip()
-        if (
-            inner_content
-            and inner_content[0] in _BOX_BORDER_CHARS
-            and inner_content[-1] in _BOX_BORDER_CHARS
-            and sum(1 for ch in inner_content if ch in _BOX_BORDER_CHARS) >= 2
-        ):
+        if _is_box_drawing_row(inner_content):
             return True
     # Strip outer string-literal quotes (Python `"..."`, JS template `` `...` ``,
     # single-quote, raw-string prefix) so an embedded table still matches.
