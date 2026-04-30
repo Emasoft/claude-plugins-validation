@@ -3973,9 +3973,42 @@ def scan_for_sandbox_escape(content: str, file_path: str, report: ValidationRepo
 
     issues_found = 0
     lines = content.split("\n")
+    # GENERAL: detect heredoc / multi-line-string regions in shell or
+    # Python source. Lines INSIDE a `cat <<'EOF' … EOF` heredoc or a
+    # Python `"""…"""` docstring are TEXT being emitted, not live shell
+    # commands. The threat model for RC-152..156 is "the script
+    # actively bypasses safety controls"; a doc list of prohibited
+    # flags inside a heredoc is the OPPOSITE — it's the script teaching
+    # users what NOT to do.
+    in_heredoc_lines: set[int] = set()
+    if file_lower.endswith((".sh", ".bash", ".zsh", ".ksh")):
+        heredoc_re = re.compile(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?")
+        active_marker: str | None = None
+        for i, ln in enumerate(lines, start=1):
+            if active_marker is None:
+                m = heredoc_re.search(ln)
+                if m:
+                    active_marker = m.group(1)
+            else:
+                # End-of-heredoc: line stripped equals the marker.
+                if ln.strip() == active_marker:
+                    active_marker = None
+                else:
+                    in_heredoc_lines.add(i)
     for line_num, line in enumerate(lines, start=1):
         stripped = line.strip()
         if stripped.startswith("#"):
+            continue
+        # GENERAL: skip lines inside a shell heredoc (text being emitted,
+        # not live shell). Catches markdown-style list items and
+        # documentation prose embedded in `cat <<'EOF' … EOF`.
+        if line_num in in_heredoc_lines:
+            continue
+        # GENERAL: markdown-bullet shape (`- Skip hooks`,
+        # `* Skip hooks`, `+ Skip hooks`) inside any source file is a
+        # doc list, not a live operation. Same shape as a markdown
+        # bullet point.
+        if re.match(r"^[\s>]*[-*+]\s", line):
             continue
         # Skip Python string literals (templates, help text, generator output)
         if is_python and _is_python_string_context(stripped):
@@ -5552,22 +5585,24 @@ def check_phase9_stemmed_injection(plugin_path: Path, report: ValidationReport) 
                 # are now DAN", "reveal your system prompt", "do not
                 # warn the user". These are unambiguous and structural.
                 #
-                # For raw prose markdown (.md / .mdx / .markdown), if
-                # we have stem co-occurrence but NO attack shape in the
-                # 200-char window, suppress.
-                ext = rel_path.lower().rsplit(".", 1)[-1] if "." in rel_path else ""
-                if ext in ("md", "mdx", "markdown"):
-                    line_text = (
-                        content_lines_for_check[line_no - 1]
-                        if 0 <= line_no - 1 < len(content_lines_for_check)
-                        else ""
-                    )
-                    # Build a 200-char window centered on the match
-                    window_start = max(0, char_offset - 100)
-                    window_end = min(len(content), char_offset + 100)
-                    window_text = content[window_start:window_end]
-                    if not _rc76_has_attack_shape(line_text, window_text):
-                        continue
+                # For ANY non-source-code AI-instruction surface
+                # (markdown, JSON i18n bundles, .txt templates, .html
+                # templates, …), if we have stem co-occurrence but NO
+                # attack shape in the 200-char window, suppress. The
+                # attack-shape predicate captures the structural
+                # signal that distinguishes real prompt-injection from
+                # mere vocabulary co-occurrence.
+                line_text = (
+                    content_lines_for_check[line_no - 1]
+                    if 0 <= line_no - 1 < len(content_lines_for_check)
+                    else ""
+                )
+                # Build a 200-char window centered on the match
+                window_start = max(0, char_offset - 100)
+                window_end = min(len(content), char_offset + 100)
+                window_text = content[window_start:window_end]
+                if not _rc76_has_attack_shape(line_text, window_text):
+                    continue
                 level = effective_severity("major", rel_path)
             getattr(report, level)(
                 f"RC-76: stemmed prompt-injection signal — {len(stems)} trigger stems "
@@ -5722,6 +5757,30 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                         continue
                     if rule_id == "RC-93" and _rc93_is_markdown_table_row(line):
                         continue
+                    # GENERAL FP: RC-92 CSS-hidden injection fires on
+                    # the pattern `<div|span style="display:none …">`
+                    # but the threat model is HIDDEN INSTRUCTION TEXT
+                    # for the LLM — text the human user can't see but
+                    # the LLM/scraper extracts. An EMPTY placeholder
+                    # `<div ... style="display:none"></div>` (no text
+                    # content) is standard HTML for elements that JS
+                    # toggles via `display: block`. No instruction text
+                    # → no LLM-injection threat.
+                    #
+                    # Detection: the matched element closes IMMEDIATELY
+                    # (`></div>`, `></span>`) on the same line OR the
+                    # next line, with no text content between tags.
+                    if rule_id == "RC-92" and "display:" in line.lower():
+                        # Check if the element is empty (closes on same
+                        # line with no text content, or the same-line
+                        # tag has no inner text).
+                        empty_element_re = re.compile(
+                            r"<(div|span)\s+[^>]*>\s*</\1>",
+                            re.IGNORECASE,
+                        )
+                        # Self-closing or empty same-line tag
+                        if empty_element_re.search(line):
+                            continue
                     # v2.46 FP-O extended — RC-93 visual-deception only
                     # makes sense on AI-instruction surfaces. Python /
                     # JS / TS / Go / Rust / shell source code uses long
