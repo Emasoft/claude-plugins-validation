@@ -1120,6 +1120,12 @@ _DEV_SCRATCH_DIR_PARTS = (
     # active-attack content, but they're inert documentation.
     "/.claude/chat_history/",
     "/anthropic_dev/",
+    # v2.46 — Claude Code worktree directories. Each worktree is a
+    # FULL CLONE of the source tree at a different branch. Findings
+    # in `<plugin>/.claude/worktrees/<id>/...` are duplicates of
+    # findings in the main tree (same file content, just different
+    # checkout). Skip them.
+    "/.claude/worktrees/",
 )
 
 
@@ -5324,6 +5330,21 @@ def check_gitleaks(plugin_path: Path, report: ValidationReport) -> int:
                 continue
             # v2.44 — drop findings inside gitignored dev-scratch dirs.
             if _is_dev_scratch_path(rel):
+                continue
+            # v2.46 — drop findings inside test files. Test files
+            # legitimately use placeholder tokens for fixtures
+            # (`const FAKE_TOKEN = "ghs_..."`). The internal scan
+            # already skips these; the gitleaks output post-filter
+            # should match.
+            rel_lower = (rel or "").lower().replace("\\", "/")
+            if (
+                "/tests/" in rel_lower
+                or rel_lower.startswith("tests/")
+                or re.search(r"\.(?:test|spec)\.[mc]?[jt]sx?$", rel_lower)
+                or re.search(r"\.(?:test|spec)\.py$", rel_lower)
+                or "/test_" in rel_lower
+                or "_test.py" in rel_lower
+            ):
                 continue
             # v2.46 FP-K — gitleaks fires on placeholder tokens in
             # documentation snippets like
