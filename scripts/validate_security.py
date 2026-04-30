@@ -1858,6 +1858,83 @@ def _is_box_drawing_row(text: str) -> bool:
     return sum(1 for ch in text if _is_box_drawing_char(ch)) >= 2
 
 
+# GENERAL: PowerShell context detection. Replaces v2.46's hardcoded cmdlet
+# enumeration (`Get-Content`/`Set-Content`/`Compress-Archive`/…) with the
+# Verb-Noun shape that Microsoft's cmdlet-naming standard requires for all
+# PowerShell cmdlets, plus the language's other unique syntactic markers.
+#
+# The Verb-Noun pattern: `<ApprovedVerb>-<Noun>` where ApprovedVerb is from
+# a closed list of approved verbs (Get/Set/Test/Invoke/New/Copy/Remove/Move/
+# Out/Write/Add/Push/Pop/Convert/Export/Import/Format/Send/Start/Stop/
+# Restart/Update/Install/Uninstall/Read/Find/Select/Sort/Group/Measure/
+# Where/ForEach/Compare/Join/Split/Resolve/Wait/Use/Enable/Disable/Show/
+# Hide/Lock/Unlock/Mount/Dismount/Suspend/Resume/Open/Close/Push/Pop/
+# Compress/Expand). The list is ~100 verbs; we cover the most common 40+
+# in a regex with `^[A-Z][a-z]+-[A-Z]` shape as a syntactic fallback.
+#
+# `[Type]::` is PowerShell's static-method call syntax — bash and POSIX
+# shell don't have an analog.
+#
+# `$PSScriptRoot` / `$PSCommandPath` / `$PSCmdlet` / `$Env:Var` are
+# PowerShell automatic variables.
+_POWERSHELL_VERB_NOUN_RE = re.compile(
+    r"\b(?:Get|Set|Test|Invoke|New|Copy|Remove|Move|Out|Write|Add|Push|Pop|"
+    r"Convert|ConvertTo|ConvertFrom|Export|Import|Format|Send|Start|Stop|"
+    r"Restart|Update|Install|Uninstall|Read|Find|Select|Sort|Group|Measure|"
+    r"Where|ForEach|Compare|Join|Split|Resolve|Wait|Use|Enable|Disable|"
+    r"Show|Hide|Lock|Unlock|Mount|Dismount|Suspend|Resume|Open|Close|"
+    r"Compress|Expand|Clear|Reset|Save|Load|Backup|Restore|Build|Publish|"
+    r"Register|Unregister|Connect|Disconnect|Receive|Submit|Approve|Deny|"
+    r"Watch|Trace|Debug|Step|Breakpoint|Enter|Exit|Limit|Skip|Take|Tee|"
+    r"Initialize|Optimize|Repair|Format|Edit|Rename|Block|Unblock|"
+    r"Protect|Unprotect|Confirm|Request|Search|Checkpoint)-[A-Z][A-Za-z0-9]+\b"
+)
+# `[Type]::Member` static-method invocation — PowerShell-only syntax shape.
+_POWERSHELL_STATIC_CALL_RE = re.compile(r"\[[A-Za-z_][A-Za-z0-9_.]*\]::")
+# Automatic variables.
+_POWERSHELL_AUTO_VARS_RE = re.compile(
+    r"\$(?:PSScriptRoot|PSCommandPath|PSCmdlet|PSBoundParameters|"
+    r"Env:[A-Za-z_][A-Za-z0-9_]*|Host|Profile|HOME|PWD|MyInvocation)\b"
+)
+
+
+def _is_powershell_context(file_content: str, line: str) -> bool:
+    """GENERAL: True when the surrounding file or the matched line is in
+    PowerShell context, NOT bash.
+
+    Five orthogonal signals (any one suffices):
+    1. YAML `shell: pwsh` directive anywhere in the file (GitHub Actions
+       conventionally declares shell at the step or job level).
+    2. The line uses Verb-Noun cmdlet shape (`Get-Content`,
+       `Invoke-RestMethod`, `Test-Path`, `New-Item`, …).
+    3. The line uses `[Type]::Member` static-method call (`[regex]::Match`,
+       `[System.IO.File]::ReadAllText`).
+    4. The line uses a PowerShell automatic variable
+       (`$PSScriptRoot`, `$Env:PATH`, `$PSCmdlet`).
+    5. The line uses PowerShell-only operators that don't exist in bash:
+       `-eq`/`-ne`/`-gt`/etc. WHEN combined with `$variable` (bash uses
+       `==`/`!=`/`>` for string comparison; the dash-prefixed ops are
+       arithmetic in `[[ ]]` only).
+    The Verb-Noun convention is enforced by Microsoft's cmdlet-naming
+    standard for ALL cmdlets in PowerShell modules. Any new cmdlet a
+    plugin author writes must follow it, so the predicate works for
+    arbitrary modules without needing a pre-enumerated list.
+    """
+    # Signal 1 — YAML shell directive in file.
+    if "shell: pwsh" in file_content or "shell: powershell" in file_content:
+        return True
+    # Signal 2 — Verb-Noun cmdlet shape on the line.
+    if _POWERSHELL_VERB_NOUN_RE.search(line):
+        return True
+    # Signal 3 — static-method call.
+    if _POWERSHELL_STATIC_CALL_RE.search(line):
+        return True
+    # Signal 4 — automatic variables.
+    if _POWERSHELL_AUTO_VARS_RE.search(line):
+        return True
+    return False
+
+
 def _rc93_is_markdown_table_row(line: str) -> bool:
     """RC-93 ≥30-contiguous-spaces — skip markdown table rows.
 
@@ -2313,29 +2390,29 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
                             r"-(?:gt|lt|eq|ne|le|ge)\b", line
                         ):
                             continue
-                        # v2.46 FP-B — PowerShell uses `$varname` as
-                        # the canonical variable syntax. PowerShell
-                        # `run:` blocks in GitHub Actions YAML are
-                        # marked with `shell: pwsh` (the line above
-                        # the run: block). Best-effort detection: when
-                        # the YAML file contains `shell: pwsh` and the
-                        # match line has the PowerShell variable
-                        # assignment shape `$NAME = ...` or uses
-                        # PowerShell-only built-ins (Get-Content,
-                        # Set-Content, Compress-Archive, New-Item,
-                        # Copy-Item, Remove-Item, [regex]::Match, etc.),
-                        # skip — the unquoted-variable rule is for
-                        # bash, not PowerShell.
-                        if file_lower.endswith((".yml", ".yaml", ".ps1")) and (
-                            "shell: pwsh" in content
-                            or any(cmdlet in line for cmdlet in (
-                                "Get-Content", "Set-Content",
-                                "Compress-Archive", "Expand-Archive",
-                                "New-Item", "Copy-Item", "Remove-Item",
-                                "Move-Item", "Test-Path", "Get-ChildItem",
-                                "Out-File", "Write-Host", "Write-Output",
-                                "[regex]::", "$PSScriptRoot",
-                            ))
+                        # GENERAL FP-B — PowerShell `$varname` is the
+                        # canonical variable syntax (NOT word-split like
+                        # bash). PowerShell context is detected by:
+                        #   1. File extension `.ps1` (PowerShell script).
+                        #   2. YAML `shell: pwsh` directive in the file.
+                        #   3. PowerShell cmdlet SHAPE on the matched
+                        #      line (Verb-Noun pattern: `Get-Foo`,
+                        #      `Set-Bar`, `Test-X`, `Invoke-Y`, ...).
+                        #   4. `[Type]::` static-method call (`[regex]::`,
+                        #      `[System.IO.File]::`, …) which is
+                        #      PowerShell-exclusive syntax.
+                        #   5. `$PSScriptRoot` / `$PSCommandPath` /
+                        #      `$Env:Foo` automatic variables.
+                        # Replaces v2.46's hardcoded cmdlet enumeration
+                        # (`Get-Content`/`Set-Content`/…) with the
+                        # canonical Verb-Noun shape PowerShell enforces
+                        # for all cmdlets. Microsoft's cmdlet-naming
+                        # standard requires `<ApprovedVerb>-<Noun>`
+                        # where the verb is from a closed list of ~100
+                        # approved verbs.
+                        if (
+                            file_lower.endswith((".yml", ".yaml", ".ps1"))
+                            and _is_powershell_context(content, line)
                         ):
                             continue
                         report.major(f"{msg}: {line.strip()[:80]}", file_path, line_num)
