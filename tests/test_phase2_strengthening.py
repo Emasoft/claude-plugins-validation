@@ -915,6 +915,55 @@ class TestIsPowerShellContextGeneral:
         assert _is_powershell_context(yml, "$x = $y")
 
 
+class TestIsVariableAnchoredPathGeneral:
+    """v2.47 — RC-110 must not fire on paths anchored to a shell variable.
+
+    `_is_variable_anchored_path(line, match_start)` returns True when the
+    `..` traversal segment is preceded by a shell-variable expansion
+    that anchors the path base. The base IS NOT attacker-influenced;
+    the `../` is the canonical "go up from script's dir" idiom.
+    """
+
+    @pytest.mark.parametrize("line", [
+        # Shell variable anchors — every shape
+        '"${SCRIPT_DIR}/../lib/file.sh"',
+        '"${PLUGIN_ROOT}/../shared"',
+        '"${VAULT}/../self"',
+        '$VAULT/../self',
+        "$BASE/../include",
+        "${HOME}/../shared",
+        "${ROOT_DIR}/../etc/conf",
+        "$(pwd)/../parent",
+        '"${MY_DIR}/../lib/utils.sh"',
+        # Multi-segment between anchor and ../
+        '"${BASE}/lib/../include"',
+        # Variable bracketed
+        "${BASE}/../",
+        # Single-quoted shell
+        "'${BASE}/../include'",
+    ])
+    def test_variable_anchored_skipped(self, line: str) -> None:
+        from validate_security import _is_variable_anchored_path
+        # Find the position of `..` in the line
+        pos = line.find("..")
+        assert pos > 0, "test setup error"
+        assert _is_variable_anchored_path(line, pos), f"expected anchored: {line!r}"
+
+    @pytest.mark.parametrize("line", [
+        # Real traversal — no variable anchor before `..`
+        'open("../etc/passwd")',
+        'fs.readFileSync("../../../config")',
+        '"../../etc/shadow"',
+        'path.join("..", req.params.id)',
+        'open(user_input + "../foo")',
+    ])
+    def test_unanchored_traversal_still_flagged(self, line: str) -> None:
+        from validate_security import _is_variable_anchored_path
+        pos = line.find("..")
+        assert pos > 0
+        assert not _is_variable_anchored_path(line, pos), f"unexpected anchored: {line!r}"
+
+
 # -----------------------------------------------------------------------------
 # v2.46 FP-E — RC-40/41/42 (`>>` redirect) inside Python f-string skipped
 # -----------------------------------------------------------------------------
