@@ -2721,7 +2721,13 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
         if not is_markdown:
             if not (is_python_file and ('"' in stripped or "'" in stripped)):
                 for pattern, msg in UNSAFE_VARIABLE_PATTERNS:
-                    if pattern.search(line):
+                    # Capture the match object once so the boolean-chain
+                    # check below can read .start() without re-running
+                    # `pattern.search(line)` (which Pyright treats as
+                    # `Match | None` even though we already know it
+                    # matched). Re-searching is also wasted work.
+                    m = pattern.search(line)
+                    if m is not None:
                         # v2.46 FP-C — bash arithmetic comparisons
                         # `[[ $VAR -gt N ]]`, `[[ $VAR -lt 0 ]]`,
                         # `[[ $VAR -eq 0 ]]`, etc. are SAFE — `[[ ]]`
@@ -2781,7 +2787,7 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
                         # That's the boolean-chain shape; a real
                         # injection bug `$ATTACKER_INPUT --do-thing`
                         # has arguments after the variable.
-                        if "Unquoted variable expansion" in msg and _is_bash_boolean_chain(line, pattern.search(line).start()):
+                        if "Unquoted variable expansion" in msg and _is_bash_boolean_chain(line, m.start()):
                             continue
                         report.major(f"{msg}: {line.strip()[:80]}", file_path, line_num)
                         issues_found += 1
