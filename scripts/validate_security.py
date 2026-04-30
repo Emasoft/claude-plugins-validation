@@ -2417,6 +2417,7 @@ def _rc63_is_markdown_anti_pattern_bullet(
 #      have an H1 like `# Response Templates` followed by H2/H3 sections
 #      that lack the stem.
 _RC02_DOC_ROLE_STEMS: tuple[str, ...] = (
+    # Original stems from v2.48 sweep
     "behaviour",
     "behavior",
     "procedure",
@@ -2436,6 +2437,62 @@ _RC02_DOC_ROLE_STEMS: tuple[str, ...] = (
     "example",
     "walk-through",
     "walkthrough",
+    # v2.48 broaden — every canonical documentation-section spelling that
+    # describes what code DOES (never directs the model). These all label
+    # documentation regions that are STRUCTURALLY descriptive, never
+    # imperative/directive. The full canonical set covers overview /
+    # architecture / design / principles / conventions / rules /
+    # instructions / notes / tips / gotchas / responsibilities / state /
+    # lifecycle / requirements / outcomes — the universe of "this
+    # describes how the system behaves" doc tropes.
+    "overview",
+    "summary",
+    "architecture",
+    "design",
+    "principle",
+    "principles",
+    "convention",
+    "conventions",
+    "rule",
+    "rules",
+    "instructions",
+    "instruction",
+    "note",
+    "notes",
+    "tip",
+    "tips",
+    "important",
+    "caveat",
+    "caveats",
+    "gotcha",
+    "gotchas",
+    "troubleshooting",
+    "description",
+    "interface",
+    "contract",
+    "responsibility",
+    "responsibilities",
+    "role",
+    "roles",
+    "mode",
+    "modes",
+    "policy",
+    "policies",
+    "strategy",
+    "strategies",
+    "protocol",
+    "protocols",
+    "state",
+    "states",
+    "lifecycle",
+    "result",
+    "results",
+    "expectation",
+    "expectations",
+    "outcome",
+    "outcomes",
+    "requirement",
+    "requirements",
 )
 _RC02_DOC_ROLE_RE = re.compile(
     "|".join(re.escape(s) for s in _RC02_DOC_ROLE_STEMS),
@@ -2453,6 +2510,13 @@ def _md_has_doc_role_heading(
     closest) because a file's H1 often establishes the doc role
     (`# Response Templates`) while subordinate H2/H3 sections describe
     individual entries (`## Work Request Acknowledgment`).
+
+    Additionally: the file's FIRST heading (typically the H1) is checked
+    unconditionally regardless of distance. The H1 establishes the file's
+    overall topic — once a file is titled `# Instructions` or
+    `# Procedures`, every prose conditional inside it inherits that
+    documentation framing. Without this fallback, long doc files would
+    re-emit FPs whenever a section spans more than 30 lines.
     """
     n = len(content_lines)
     start = line_idx - 1
@@ -2464,6 +2528,13 @@ def _md_has_doc_role_heading(
             heading_text = content_lines[i]
             if _RC02_DOC_ROLE_RE.search(heading_text):
                 return True
+    # H1-fallback: the file's first heading establishes the overall topic.
+    # Search the file's prefix (up to line_idx) for the FIRST markdown
+    # heading and check whether it contains a doc-role stem. This is
+    # bounded — once the first heading is found, the loop exits.
+    for i in range(0, min(line_idx, n)):
+        if _MD_HEADING_RE.match(content_lines[i]):
+            return bool(_RC02_DOC_ROLE_RE.search(content_lines[i]))
     return False
 
 
@@ -2476,8 +2547,8 @@ def _rc02_is_md_doc_role_section(
     Predicate (general, plugin-agnostic):
       - File ends `.md` / `.markdown`
       - ANY preceding heading within ≤30 lines contains a doc-role stem
-        from `_RC02_DOC_ROLE_STEMS` (procedure / phase / step / algorithm /
-        template / etc.)
+        from `_RC02_DOC_ROLE_STEMS`, OR the file's FIRST heading (H1)
+        contains a doc-role stem.
 
     A `# Evil Agent` heading in the lookback window does NOT match — only
     doc-role stems suppress the finding. `line_idx` is 0-based.
