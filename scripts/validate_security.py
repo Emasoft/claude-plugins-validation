@@ -1761,10 +1761,48 @@ def _rc93_is_markdown_table_row(line: str) -> bool:
         "| Result    | Action     |"
     The outer quotes wrap the table syntax but the content is still
     table-shaped column alignment, not visual-deception payload.
+
+    v2.46 FP-O — also recognizes Unicode box-drawing rows commonly used
+    in CLI banners and ASCII art status panels:
+        "║ PLAN APPROVED                       ║"
+        "╔══════════════════╗"
+    These appear inside Python `lines.append("║...║")` calls for terminal
+    output — same shape as markdown tables but with U+2551/U+2554/etc.
+    instead of `|`. The padding inside is column-alignment whitespace,
+    not off-screen-text deception.
     """
     stripped = line.strip()
     if stripped.startswith("|") and stripped.endswith("|") and stripped.count("|") >= 2:
         return True
+    # v2.46 FP-O — Unicode box-drawing row (full-set: vertical, corners,
+    # tee, horizontal). Skip when the line opens AND closes with one of
+    # these characters and contains at least 2 such borders. The inner
+    # padding is column alignment, identical in spirit to a `|...|`
+    # markdown row.
+    _BOX_BORDER_CHARS = "║╔╗╚╝╠╣╦╩╬═│┌┐└┘├┤┬┴┼─┃┏┓┗┛┣┫┳┻╋━"
+    if (
+        stripped
+        and stripped[0] in _BOX_BORDER_CHARS
+        and stripped[-1] in _BOX_BORDER_CHARS
+        and sum(1 for ch in stripped if ch in _BOX_BORDER_CHARS) >= 2
+    ):
+        return True
+    # v2.46 FP-O — also handle Python/JS string-literal-wrapped box rows
+    # like `"║ FOO     ║"` or `lines.append("║ FOO     ║")` or
+    # `print(f"║ FOO    ║")`. Use a regex to locate the OUTERMOST quoted
+    # region and check whether its content opens/closes with a box-border
+    # char. This is robust to leading function-call boilerplate
+    # (`lines.append(`, `report.append(`, `print(`, etc.) that the
+    # earlier prefix-strip didn't cover.
+    for quote_match in re.finditer(r'(?:["\'`])(.*?)(?:["\'`])', stripped):
+        inner_content = quote_match.group(1).strip()
+        if (
+            inner_content
+            and inner_content[0] in _BOX_BORDER_CHARS
+            and inner_content[-1] in _BOX_BORDER_CHARS
+            and sum(1 for ch in inner_content if ch in _BOX_BORDER_CHARS) >= 2
+        ):
+            return True
     # Strip outer string-literal quotes (Python `"..."`, JS template `` `...` ``,
     # single-quote, raw-string prefix) so an embedded table still matches.
     # v2.45 FP7 — also strip trailing list/array punctuation (`,`, `;`,
