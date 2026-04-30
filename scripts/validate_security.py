@@ -5170,6 +5170,31 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
             if file_ref and _is_dev_scratch_path(str(file_ref)):
                 continue
 
+            # v2.48 P-2 sibling — drop findings on Python test files.
+            # Pytest test files (test_*.py, *_test.py, conftest.py, anything
+            # under tests/) ship with fixture strings containing the very
+            # tokens the rules detect, so the test can verify the detector
+            # fires. cc-audit grep-matches the file content directly,
+            # missing these as fixtures. Other CPV scanners (RC-37 in
+            # `check_phase1_supply_chain_rules`, RC-21 / RC-65 in their
+            # respective phase scanners) already early-exit on
+            # `_is_test_file_path`; this brings cc-audit in line.
+            if file_ref and _is_test_file_path(str(file_ref)):
+                continue
+            # v2.48 P-3 — drop findings on rule-corpus markdown.
+            # `is_fp_corpus_markdown` requires both directory shape AND
+            # an in-file marker, so coincidental `fixtures/` markdown
+            # without a corpus marker remains scanned.
+            if file_ref:
+                try:
+                    fpath = Path(str(file_ref))
+                    if fpath.is_file() and fpath.stat().st_size < 2_000_000:
+                        body = fpath.read_text(encoding="utf-8", errors="ignore")
+                        if is_fp_corpus_markdown(str(file_ref), body):
+                            continue
+                except OSError:
+                    pass
+
             # v2.45 FP3 — drop cc-audit findings on documentation
             # markdown. cc-audit flags shell-command text inside .md
             # files (`chmod 755 design/`, `echo 'export
