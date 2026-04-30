@@ -2244,6 +2244,127 @@ def _rc93_is_markdown_table_row(line: str) -> bool:
     return False
 
 
+# v2.48 P1 — RC-63 markdown bullet inside an anti-pattern / DO-NOT block
+# is documenting a behaviour the persona DOES NOT exhibit, NOT a directive
+# instructing the agent to skip confirmation. Same structural shape as the
+# v2.46 CLI-flag-help skip but for markdown documentation.
+#
+# Predicate fires when ALL of:
+#   1. File extension is `.md` / `.markdown`
+#   2. The matching line is a markdown bullet (regular `-`/`*`/`+` or
+#      `1.` numbered, optionally inside a blockquote prefix `> `)
+#   3. The surrounding context contains an "anti-pattern framer" stem,
+#      where the surrounding context is the union of:
+#        a. The ±5-line window around the matching line, AND
+#        b. The closest preceding `^#{1,6}\s` heading within ≤30 lines
+_RC63_MD_BULLET_RE = re.compile(r"^[\s>]*(?:[-*+]|\d+\.)\s")
+_RC63_NEGATION_STEMS: tuple[str, ...] = (
+    "does not",
+    "do not",
+    "never",
+    "anti-pattern",
+    "anti pattern",
+    "antipattern",
+    "forbidden",
+    "wrong way",
+    "must not",
+    "should not",
+    "avoid",
+    "incorrect",
+    "bad practice",
+    "what not",
+    "what x does not",
+)
+_RC63_NEGATION_RE = re.compile(
+    "|".join(re.escape(s) for s in _RC63_NEGATION_STEMS),
+    re.IGNORECASE,
+)
+_MD_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s")
+
+
+def _md_lookback_heading(content_lines: list[str], line_idx: int, max_lookback: int = 30) -> str | None:
+    """Return the closest preceding markdown heading (level 1-6) text,
+    searched up to `max_lookback` lines back from `line_idx` (0-based).
+
+    `line_idx` is itself excluded; we walk lines `[line_idx-1 … max(0,
+    line_idx-max_lookback)]`. Returns the heading line VERBATIM (with
+    leading `#` markers) or None if no heading found in the window.
+
+    Lines inside fenced code blocks should not be considered as headings,
+    but a backwards walk crossing a fence boundary is still acceptable
+    here — the caller already pre-filters fenced lines for the matching
+    line itself.
+    """
+    start = line_idx - 1
+    end = max(0, line_idx - max_lookback)
+    for i in range(start, end - 1, -1):
+        if i < 0 or i >= len(content_lines):
+            continue
+        if _MD_HEADING_RE.match(content_lines[i]):
+            return content_lines[i]
+    return None
+
+
+def _md_block_negation_context(
+    content_lines: list[str], line_idx: int, window: int = 5, heading_lookback: int = 30,
+) -> bool:
+    """True if the markdown context around line `line_idx` (0-based)
+    contains an anti-pattern / DO-NOT framer.
+
+    Two windows checked:
+      - The ±`window`-line block surrounding the matching line.
+      - All preceding `^#{1,6}\\s` headings within `heading_lookback`
+        lines back (we walk every heading found, not just the closest,
+        because a file may have an H1 like `# What X Does NOT Do` followed
+        by an H2 that lacks the stem).
+    """
+    n = len(content_lines)
+    lo = max(0, line_idx - window)
+    hi = min(n, line_idx + window + 1)
+    block_text = "\n".join(content_lines[lo:hi])
+    if _RC63_NEGATION_RE.search(block_text):
+        return True
+    # Walk every heading in the lookback window, not just the closest.
+    start = line_idx - 1
+    end = max(0, line_idx - heading_lookback)
+    for i in range(start, end - 1, -1):
+        if i < 0 or i >= n:
+            continue
+        if _MD_HEADING_RE.match(content_lines[i]):
+            heading_text = content_lines[i]
+            if _RC63_NEGATION_RE.search(heading_text):
+                return True
+    return False
+
+
+def _rc63_is_markdown_anti_pattern_bullet(
+    rel_path: str, content_lines: list[str], line_idx: int,
+) -> bool:
+    """RC-63 FP guard for markdown documentation that lists what an agent /
+    persona DOES NOT do.
+
+    Predicate (general, plugin-agnostic):
+      - File ends `.md` / `.markdown`
+      - Matching line is a markdown bullet (`-`, `*`, `+`, or `\\d+.`)
+        with optional blockquote `>` prefix
+      - The ±5-line window OR any preceding heading within ≤30 lines
+        contains a negation marker stem (`do not`, `never`, `anti-pattern`,
+        `forbidden`, `wrong way`, `must not`, `should not`, `avoid`,
+        `incorrect`, `bad practice`, `what not`)
+
+    `line_idx` is 0-based.
+    """
+    rel_lower = rel_path.lower()
+    if not (rel_lower.endswith(".md") or rel_lower.endswith(".markdown")):
+        return False
+    if line_idx < 0 or line_idx >= len(content_lines):
+        return False
+    line = content_lines[line_idx]
+    if not _RC63_MD_BULLET_RE.match(line):
+        return False
+    return _md_block_negation_context(content_lines, line_idx)
+
+
 # v2.45 FP6 — JS/TS / Python import-statement shapes. When one of these
 # matches inside an AI-facing markdown file, the line is a documentation
 # snippet (a doc fragment showing what the import would look like, NOT
@@ -6030,6 +6151,17 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                         # Reuse the existing markdown-table helper.
                         if _rc93_is_markdown_table_row(line) and re.search(
                             r"--[a-z][a-z0-9-]+", line, re.IGNORECASE
+                        ):
+                            continue
+                        # v2.48 P1 — markdown bullet inside an anti-pattern
+                        # / DO-NOT block describes a behaviour the persona
+                        # DOES NOT exhibit, NOT a directive instructing
+                        # the agent. Predicate: file is .md AND line is a
+                        # bullet AND surrounding context contains a
+                        # negation-marker stem. See
+                        # `_rc63_is_markdown_anti_pattern_bullet`.
+                        if _rc63_is_markdown_anti_pattern_bullet(
+                            rel_path, content_lines, line_no - 1,
                         ):
                             continue
                     level = effective_severity(severity.lower(), rel_path)
