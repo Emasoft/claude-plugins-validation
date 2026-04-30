@@ -1057,6 +1057,12 @@ EXAMPLE_USERNAMES = {
     "your",
     "my",
     "[^/\\s]+",  # Regex pattern in code
+    # v2.46 FP-K — literal `...` placeholder commonly used in
+    # docstring schemas and JSON examples to indicate elision:
+    #   "settingsPath": "/Users/.../.llm-externalizer/settings.yaml"
+    # The triple-dot is a deliberate placeholder, not a real path.
+    "...",
+    "…",  # Unicode horizontal ellipsis (U+2026)
 }
 
 # Patterns for hardcoded user paths (should use ${CLAUDE_PLUGIN_ROOT} instead)
