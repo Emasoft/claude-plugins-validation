@@ -2100,7 +2100,6 @@ def _is_bash_boolean_chain(line: str, match_start: int) -> bool:
     var_search = re.search(r"\$[A-Za-z_][A-Za-z0-9_]*", line[match_start:])
     if var_search is None:
         return False
-    var_start = match_start + var_search.start()
     var_end = match_start + var_search.end()
     rest = line[var_end:].lstrip()
     # Right-of-token: must be a chain operator or end-of-line.

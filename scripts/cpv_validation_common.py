@@ -4599,7 +4599,7 @@ def scan_directory_for_private_info(
 
         walker = _raw_walk()
 
-    for dirpath, dirnames, filenames in walker:
+    for dirpath, _dirnames, filenames in walker:
         rel_dir = Path(dirpath).relative_to(root_path)
 
         for filename in filenames:
@@ -4768,7 +4768,7 @@ def validate_no_absolute_paths(
 
         walker = _raw_walk()
 
-    for dirpath, dirnames, filenames in walker:
+    for dirpath, _dirnames, filenames in walker:
         rel_dir = Path(dirpath).relative_to(root_path)
 
         for filename in filenames:
