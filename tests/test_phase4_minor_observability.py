@@ -27,6 +27,14 @@ def _assert_pattern_matches(rule_id: str, text: str) -> None:
     assert matched, f"expected {rule_id} match on {text!r}"
 
 
+def _assert_pattern_does_not_match(rule_id: str, text: str) -> None:
+    matched = any(
+        rid == rule_id and pat.search(text)
+        for rid, _sev, pat, _msg in PHASE4_PATTERNS
+    )
+    assert not matched, f"expected NO {rule_id} match on {text!r}"
+
+
 def _make_plugin(tmp_path: Path, files: dict[str, str]) -> Path:
     plugin = tmp_path / "demo"
     (plugin / ".claude-plugin").mkdir(parents=True)
@@ -75,6 +83,30 @@ class TestRC87SsrfIp:
 
     def test_link_local_outside_imds(self) -> None:
         _assert_pattern_matches("RC-87", "169.254.5.5")
+
+    @pytest.mark.parametrize("text", [
+        # v2.46 FP-A — Python float literals must NOT match the IPv4 regex.
+        # The previous regex `\b10\.[0-9.]+\b` matched `10.0` because the
+        # tail `[0-9.]+` allowed any digit-or-dot run. Real IPv4 needs all
+        # four octets. These cases were FPs in 5 of the 7 emasoft plugins.
+        "QUICK_CHECK: float = 10.0",
+        "max_score: float = 10.0,",
+        "weighted_sum += (cat_score.score / 10.0) * weight * 100",
+        "weighted_sum += (cat_score.score / 10.0)",
+        "(the user's v2.10.0 feature request)",
+        "as of v2.10.0):",
+        # SemVer-shaped strings that are definitely not IPs
+        "version = '10.0'",
+        "engines: '>=10.0'",
+        # Two-octet strings that look like IPs but aren't
+        "192.168 prefix",
+        "172.16.x.y prefix",
+    ])
+    def test_no_fp_on_floats_and_partial_ip_strings(self, text: str) -> None:
+        """RC-87 must NOT fire on Python float literals like `10.0`,
+        SemVer strings like `v2.10.0`, or partial IP-shaped text.
+        Real IPv4 has 4 octets — anything shorter is not an IP."""
+        _assert_pattern_does_not_match("RC-87", text)
 
 
 # -----------------------------------------------------------------------------

@@ -2502,11 +2502,28 @@ PHASE4_PATTERNS: list[tuple[str, str, "re.Pattern[str]", str]] = [
     ("RC-87", "NIT",
      re.compile(r"\b127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\b"),
      "RC-87: hardcoded loopback IP (127.x.x.x) — usually fine but worth flagging"),
+    # v2.46 FP-A — IPv4 needs all 4 octets. The previous `[0-9.]+`
+    # tail matched floats (`10.0`, `2.10.0`) and SemVer strings,
+    # producing massive FPs in code that uses `10.0` as a numeric
+    # literal or version. Require `D.D.D.D` with each octet a 1-3
+    # digit number. Negative lookahead `(?!\d)` prevents matching
+    # the "10.0.0.255" prefix of "10.0.0.2550" (would-be IP-shaped
+    # but invalid). The trailing-dot check `(?!\.)` prevents the
+    # match from extending into a SemVer suffix (`10.0.0.0.5`).
     ("RC-87", "MINOR",
-     re.compile(r"\b(?:10\.[0-9.]+|172\.(?:1[6-9]|2[0-9]|3[01])\.[0-9.]+|192\.168\.[0-9.]+)\b"),
+     re.compile(
+         r"\b(?:"
+         r"10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}"
+         r"|172\.(?:1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}"
+         r"|192\.168\.[0-9]{1,3}\.[0-9]{1,3}"
+         r")(?!\.?\d)"
+     ),
      "RC-87: hardcoded RFC-1918 private IP — review for environment leakage"),
     ("RC-87", "MAJOR",
-     re.compile(r"\b169\.254\.(?!169\.254\b|170\.2\b)[0-9.]+\b"),
+     re.compile(
+         r"\b169\.254\.(?!169\.254\b|170\.2\b)"
+         r"[0-9]{1,3}\.[0-9]{1,3}(?!\.?\d)"
+     ),
      "RC-87: link-local IP outside known IMDS endpoints (RC-65)"),
 
     # RC-88 — Suspicious TLDs / URL shorteners / dev tunnels
