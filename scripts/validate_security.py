@@ -2365,6 +2365,96 @@ def _rc63_is_markdown_anti_pattern_bullet(
     return _md_block_negation_context(content_lines, line_idx)
 
 
+# v2.48 P2 — RC-02 prose-conditional inside a markdown documentation
+# section is describing orchestrator behaviour / procedure flow, not an
+# attack-style time-bomb. RC-02 fires on `if X then Y` co-occurrences;
+# real prompt injection lives in agent bodies that direct the model. A
+# documentation file under `## Procedure`, `## Phase 6`, `## Algorithm`,
+# `## Response Templates`, etc. is structurally NOT an injection
+# surface — it's documenting what the orchestrator does in response to
+# user input.
+#
+# Predicate fires when ALL of:
+#   1. File extension is `.md` / `.markdown`
+#   2. ANY heading within ≤30 lines back contains a documentation-role
+#      stem from `_RC02_DOC_ROLE_STEMS`. We walk every heading found in
+#      the lookback window (not just the closest) because files often
+#      have an H1 like `# Response Templates` followed by H2/H3 sections
+#      that lack the stem.
+_RC02_DOC_ROLE_STEMS: tuple[str, ...] = (
+    "behaviour",
+    "behavior",
+    "procedure",
+    "phase",
+    "step",
+    "guidance",
+    "usage",
+    "algorithm",
+    "flow",
+    "pipeline",
+    "parameters",
+    "output",
+    "report format",
+    "template",
+    "response template",
+    "notification template",
+    "example",
+    "walk-through",
+    "walkthrough",
+)
+_RC02_DOC_ROLE_RE = re.compile(
+    "|".join(re.escape(s) for s in _RC02_DOC_ROLE_STEMS),
+    re.IGNORECASE,
+)
+
+
+def _md_has_doc_role_heading(
+    content_lines: list[str], line_idx: int, max_lookback: int = 30,
+) -> bool:
+    """True if any preceding markdown heading within `max_lookback` lines
+    contains a documentation-role stem.
+
+    Walks every `^#{1,6}\\s` heading in the lookback window (NOT just the
+    closest) because a file's H1 often establishes the doc role
+    (`# Response Templates`) while subordinate H2/H3 sections describe
+    individual entries (`## Work Request Acknowledgment`).
+    """
+    n = len(content_lines)
+    start = line_idx - 1
+    end = max(0, line_idx - max_lookback)
+    for i in range(start, end - 1, -1):
+        if i < 0 or i >= n:
+            continue
+        if _MD_HEADING_RE.match(content_lines[i]):
+            heading_text = content_lines[i]
+            if _RC02_DOC_ROLE_RE.search(heading_text):
+                return True
+    return False
+
+
+def _rc02_is_md_doc_role_section(
+    rel_path: str, content_lines: list[str], line_idx: int,
+) -> bool:
+    """RC-02 FP guard for markdown documentation sections that describe
+    orchestrator / procedure behaviour.
+
+    Predicate (general, plugin-agnostic):
+      - File ends `.md` / `.markdown`
+      - ANY preceding heading within ≤30 lines contains a doc-role stem
+        from `_RC02_DOC_ROLE_STEMS` (procedure / phase / step / algorithm /
+        template / etc.)
+
+    A `# Evil Agent` heading in the lookback window does NOT match — only
+    doc-role stems suppress the finding. `line_idx` is 0-based.
+    """
+    rel_lower = rel_path.lower()
+    if not (rel_lower.endswith(".md") or rel_lower.endswith(".markdown")):
+        return False
+    if line_idx < 0 or line_idx >= len(content_lines):
+        return False
+    return _md_has_doc_role_heading(content_lines, line_idx)
+
+
 # v2.45 FP6 — JS/TS / Python import-statement shapes. When one of these
 # matches inside an AI-facing markdown file, the line is a documentation
 # snippet (a doc fragment showing what the import would look like, NOT
@@ -6092,6 +6182,18 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                             _is_python_string_context(line.strip())
                             or line_no in py_docstring_lines
                         )
+                    ):
+                        continue
+                    # v2.48 P2 — RC-02 prose-conditional inside a markdown
+                    # documentation section is describing orchestrator
+                    # procedure flow, NOT an attack-style time-bomb.
+                    # Predicate: file is .md AND a preceding heading
+                    # within ≤30 lines contains a doc-role stem
+                    # (procedure / phase / step / algorithm / template /
+                    # etc.). Real prompt-injection lives in agent bodies
+                    # without doc-role headings.
+                    if rule_id == "RC-02" and _rc02_is_md_doc_role_section(
+                        rel_path, content_lines, line_no - 1,
                     ):
                         continue
                     # v2.46 FP-D — RC-63 fires on the literal phrase
