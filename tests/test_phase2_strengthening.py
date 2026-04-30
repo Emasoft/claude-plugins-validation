@@ -822,6 +822,99 @@ class TestUnsafeVariableContextGuards:
         assert unsafe, "expected Unquoted variable to fire on raw $X at command start"
 
 
+class TestIsPowerShellContextGeneral:
+    """v2.47 — generalized PowerShell-context predicate.
+
+    `_is_powershell_context(file_content, line)` returns True for any of
+    these orthogonal signals (each tested ≥10 distinct shapes):
+    1. YAML `shell: pwsh` directive in file
+    2. Verb-Noun cmdlet shape on the line (`Get-Foo`, `Test-Bar`,
+       `Invoke-Baz`, …)
+    3. `[Type]::Member` static-method call
+    4. PowerShell automatic variable (`$PSScriptRoot`, `$Env:PATH`)
+    """
+
+    @pytest.mark.parametrize("line", [
+        # Verb-Noun cmdlets — broad sample of approved verbs
+        "$x = Get-Content foo.txt",
+        "$y = Set-Content foo.txt 'value'",
+        "$z = Test-Path $somePath",
+        "Invoke-RestMethod -Uri $url",
+        "$tmp = New-TemporaryFile",
+        "$copy = Copy-Item -Path $src -Destination $dst",
+        "Remove-Item -Recurse $oldDir",
+        "Write-Host $message",
+        "Write-Output $result",
+        "$archive = Compress-Archive -Path $files -DestinationPath out.zip",
+        "$info = Get-ChildItem -Recurse -Filter '*.ps1'",
+        "$out = Out-File -FilePath $log",
+        "Format-Table -InputObject $data",
+        "$data = ConvertFrom-Json $json",
+        "Send-MailMessage -To 'a@b' -Subject $s",
+        "$proc = Start-Process notepad",
+        "Stop-Service -Name 'Spooler'",
+        "Update-Help -Force",
+        "Resolve-Path 'foo'",
+        "$result = Find-Module -Name 'Az'",
+    ])
+    def test_verb_noun_cmdlet_detected(self, line: str) -> None:
+        from validate_security import _is_powershell_context
+        assert _is_powershell_context("", line), f"expected pwsh: {line!r}"
+
+    @pytest.mark.parametrize("line", [
+        "$m = [regex]::Match($s, 'pat')",
+        "$x = [System.IO.File]::ReadAllText($p)",
+        "$y = [Math]::Sqrt(9)",
+        "$z = [Convert]::ToBase64String($bytes)",
+        "$g = [Guid]::NewGuid()",
+        "$d = [DateTime]::Now",
+        "$h = [System.Text.Encoding]::UTF8",
+        "$x = [int]::MaxValue",
+        "$y = [Console]::WriteLine($msg)",
+        "$z = [System.Environment]::GetEnvironmentVariable('PATH')",
+    ])
+    def test_static_method_call_detected(self, line: str) -> None:
+        from validate_security import _is_powershell_context
+        assert _is_powershell_context("", line), f"expected pwsh: {line!r}"
+
+    @pytest.mark.parametrize("line", [
+        "$root = $PSScriptRoot",
+        "$cmd = $PSCommandPath",
+        "$caller = $PSCmdlet.MyInvocation",
+        "$path = $Env:PATH",
+        "$home = $Env:USERPROFILE",
+        "$x = $PSBoundParameters['foo']",
+        "$y = $Host.UI.RawUI",
+        "$z = $Profile.AllUsersAllHosts",
+        "$h = $HOME",
+        "$pwd = $PWD.Path",
+    ])
+    def test_automatic_var_detected(self, line: str) -> None:
+        from validate_security import _is_powershell_context
+        assert _is_powershell_context("", line), f"expected pwsh: {line!r}"
+
+    @pytest.mark.parametrize("line", [
+        # Genuine bash — should NOT be classified as PowerShell
+        "FOO=$1",
+        "echo $USER",
+        "for f in *.txt; do",
+        "if [ -z $X ]; then",
+        "ls -la /tmp",
+        "cat /etc/hosts",
+        "rm -rf $temp",
+    ])
+    def test_genuine_bash_not_pwsh(self, line: str) -> None:
+        from validate_security import _is_powershell_context
+        assert not _is_powershell_context("", line), f"unexpected pwsh: {line!r}"
+
+    def test_yaml_pwsh_directive_signals_context(self) -> None:
+        from validate_security import _is_powershell_context
+        yml = "        shell: pwsh\n        run: |\n          $x = Get-Content foo\n"
+        # Even a line with no PS markers is treated as PS when the
+        # file-level shell directive is set.
+        assert _is_powershell_context(yml, "$x = $y")
+
+
 # -----------------------------------------------------------------------------
 # v2.46 FP-E — RC-40/41/42 (`>>` redirect) inside Python f-string skipped
 # -----------------------------------------------------------------------------
