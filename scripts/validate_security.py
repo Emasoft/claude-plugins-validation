@@ -1156,6 +1156,96 @@ _PYTEST_TEST_FILE_RE = re.compile(
 )
 
 
+# v2.48 P-3 — FP-corpus markdown predicate.
+#
+# A file is a "rule-corpus" markdown iff:
+#   1. Path's basename ends in `.md`
+#   2. Path contains a directory segment matching the corpus-dir regex
+#      (`fp_corpus`, `fp-corpus`, `fp_fixtures`, `fixtures/fp`,
+#      `fixtures/tp`)
+#   3. The first 5 lines contain a structural marker:
+#      - `# RC-\d+ corpus` / `# RC-\d+ — ...`
+#      - `## TP examples` / `## FP examples` / `## TP exemplars`
+#      - `# false-positive corpus` / `# true-positive`
+#      - YAML frontmatter `corpus_kind: tp|fp`
+#
+# When all three hold, the file is a benchmark corpus by construction —
+# the validator's regex catalog firing on its lines is meaningless noise,
+# because the file is a labelled set of TP/FP examples that the bench
+# harness expects to fire on (TP) or NOT fire on (FP).
+#
+# Wired as a file-level early-skip: the whole .md file is skipped from
+# security scanning when the markers are present. This means every rule
+# (RC-21, RC-22, RC-65, RC-76, RC-87, RC-93, …) is suppressed for the
+# file uniformly, with no per-rule wiring needed.
+
+_FP_CORPUS_DIR_RE = re.compile(
+    r"(?:^|/)(?:fp[_\-]corpus|fp[_\-]fixtures|fixtures/(?:fp|tp))(?:/|$)",
+    re.IGNORECASE,
+)
+_FP_CORPUS_MARKER_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # `# RC-99 — short rule description` (the README format)
+    re.compile(r"^\s*#\s*RC-\d+\b", re.IGNORECASE),
+    re.compile(r"^\s*#\s*[A-Z]{2,4}-\d+\b", re.IGNORECASE),
+    # `# RC-21 corpus` / `# false-positive corpus` / `# true-positive corpus`
+    re.compile(r"^\s*#+\s*(?:false[\-_ ]positive|true[\-_ ]positive)\b", re.IGNORECASE),
+    re.compile(r"^\s*#+\s*\S+\s+corpus\b", re.IGNORECASE),
+    # `## TP exemplars` / `## TP examples` / `## FP exemplars` / `## FP examples`
+    re.compile(r"^\s*#+\s*(?:TP|FP)\s+(?:exemplars?|examples?)\b", re.IGNORECASE),
+    re.compile(
+        r"^\s*#+\s*(?:true[\-_ ]positives?|false[\-_ ]positives?)\b",
+        re.IGNORECASE,
+    ),
+    # YAML frontmatter `corpus_kind: tp|fp` (HTML comment style allowed
+    # too: `<!-- corpus-kind: tp -->`)
+    re.compile(r"^\s*corpus[_\-]kind\s*:\s*(?:tp|fp)\b", re.IGNORECASE),
+    re.compile(
+        r"^\s*<!--\s*corpus[_\-]kind\s*:\s*(?:tp|fp)\b",
+        re.IGNORECASE,
+    ),
+)
+
+
+def is_fp_corpus_markdown(
+    file_path: str, content: str | list[str] | None = None,
+) -> bool:
+    """v2.48 P-3 — True iff `file_path` is a rule-corpus markdown file.
+
+    The predicate is conservative: ALL THREE conditions must hold —
+    `.md` extension, corpus-shaped directory path, and a structural
+    marker in the first 5 lines. A markdown file in `fixtures/` lacking
+    a marker is NOT skipped (could be unrelated documentation). A
+    markdown file with a marker but outside any `fp_corpus` directory
+    is NOT skipped (could be coincidental terminology).
+
+    `content` is optional — when None, the predicate returns based only
+    on path shape (which is INSUFFICIENT) and falls back to False to
+    avoid false-skips. Callers wanting the full predicate must supply
+    content (raw string or pre-split lines). The first 5 non-empty
+    lines are inspected for any of `_FP_CORPUS_MARKER_PATTERNS`.
+    """
+    norm = file_path.lower().replace("\\", "/")
+    if not (norm.endswith(".md") or norm.endswith(".markdown")):
+        return False
+    if not _FP_CORPUS_DIR_RE.search(norm):
+        return False
+    if content is None:
+        return False
+    lines = content.split("\n") if isinstance(content, str) else content
+    # Inspect the first 5 NON-EMPTY lines (frontmatter / heading shape
+    # tolerates blank line at top).
+    inspected = 0
+    for ln in lines:
+        if not ln.strip():
+            continue
+        inspected += 1
+        if inspected > 5:
+            break
+        if any(pat.match(ln) for pat in _FP_CORPUS_MARKER_PATTERNS):
+            return True
+    return False
+
+
 def is_test_file_parametrize_body(
     file_path: str, content: str | list[str] | None, line_no: int,
 ) -> bool:
@@ -5445,6 +5535,12 @@ def _iter_scannable_files(plugin_path: Path):
     of the runtime attack surface and the rules that DO need them
     (RC-30, RC-33) parse them as data via direct rglob, not via this
     iterator.
+
+    v2.48 P-3 — FP-corpus markdown files (rule-corpus benchmarks under
+    `fp_corpus/` or `fixtures/fp/` etc., with a structural TP/FP-shape
+    marker in their first 5 lines) are skipped. The bench harness
+    already validates these files; the security scanner re-emitting on
+    them is duplicate noise.
     """
     gi = get_gitignore_filter(plugin_path)
     for root, _dirs, files in gi.walk(plugin_path):
@@ -5460,6 +5556,9 @@ def _iter_scannable_files(plugin_path: Path):
             if cpv_self_scan_skip(rel_path):
                 continue
             if is_lockfile(rel_path):
+                continue
+            # v2.48 P-3 — rule-corpus markdown is benchmark fixture.
+            if is_fp_corpus_markdown(rel_path, content):
                 continue
             yield file_path, rel_path, content
 
