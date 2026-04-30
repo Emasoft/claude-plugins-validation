@@ -964,6 +964,100 @@ class TestIsVariableAnchoredPathGeneral:
         assert not _is_variable_anchored_path(line, pos), f"unexpected anchored: {line!r}"
 
 
+class TestI18nFilePathGeneral:
+    """v2.47 — RC-11 mixed-script must skip i18n / locale / translation files.
+
+    `_is_i18n_file_path(rel_path)` returns True for paths whose
+    SEGMENTS or BASENAME mark them as translations:
+    1. Path segment in {locales, locale, i18n, lang, languages,
+       translations, intl}
+    2. Basename has ISO 639-1 language-code suffix (.ru.md, .zh-CN.md,
+       -ja.md, .ko.json, …)
+    """
+
+    @pytest.mark.parametrize("path", [
+        # Path-segment shapes
+        "locales/en.json",
+        "locales/ru.json",
+        "locales/zh-CN.json",
+        "locale/ja.json",
+        "i18n/ko/messages.json",
+        "lang/de.po",
+        "languages/fr.json",
+        "translations/es.po",
+        "intl/it.json",
+        # Language-code basename shapes
+        "README.ru.md",
+        "README.zh.md",
+        "guides/setup-zh-CN.md",
+        "guides/prompt-cache-guide-ru.md",
+        "guide.ja.md",
+        "messages.ko.json",
+        "docs/intro.de.md",
+    ])
+    def test_i18n_paths_recognized(self, path: str) -> None:
+        from validate_security import _is_i18n_file_path
+        assert _is_i18n_file_path(path), f"expected i18n: {path!r}"
+
+    @pytest.mark.parametrize("path", [
+        # Real source files — should NOT be flagged as i18n
+        "src/index.ts",
+        "scripts/build.sh",
+        "agents/my-agent.md",
+        "skills/foo/SKILL.md",
+        "README.md",
+        "CHANGELOG.md",
+        ".claude-plugin/plugin.json",
+    ])
+    def test_real_paths_not_i18n(self, path: str) -> None:
+        from validate_security import _is_i18n_file_path
+        assert not _is_i18n_file_path(path), f"unexpected i18n: {path!r}"
+
+
+class TestAcronymCompoundGeneral:
+    """v2.47 — RC-11 mixed-script must skip Latin-acronym + non-Latin-word
+    compound terminology, the canonical idiom for technical jargon in
+    Cyrillic / CJK / Arabic / Greek / etc. languages.
+    """
+
+    @pytest.mark.parametrize("token", [
+        # Russian — Latin acronym + Cyrillic descriptor
+        "API-вызов",
+        "API-вызовы",
+        "JSON-файл",
+        "HTML-дашборд",
+        "MCP-инструментов",
+        "AI-кодинга",
+        "AI-провайдеры",
+        "Bash-инструмента",
+        "Bash-скрипты",
+        "Git-инструкции",
+        "commit-потоков",
+        # Greek
+        "API-κλήση",
+        "JSON-αρχείο",
+        # No-separator (escape-sequence prefix)
+        "nКэш",
+        "tШаблон",
+        "rРабота",
+    ])
+    def test_compound_idioms_not_flagged(self, token: str) -> None:
+        from validate_security import _is_acronym_compound
+        assert _is_acronym_compound(token), f"expected compound: {token!r}"
+
+    @pytest.mark.parametrize("token", [
+        # Real homograph attacks — Cyrillic INSIDE a Latin word
+        "pаypal",      # Cyrillic а
+        "gооgle",      # Cyrillic о
+        "miсrosoft",   # Cyrillic с
+        "amаzon",      # Cyrillic а
+        "githuЬ",      # Cyrillic Ь
+    ])
+    def test_homograph_attacks_still_flagged(self, token: str) -> None:
+        from validate_security import _is_acronym_compound
+        assert not _is_acronym_compound(token), f"unexpected compound: {token!r}"
+
+
 # -----------------------------------------------------------------------------
 # v2.46 FP-E — RC-40/41/42 (`>>` redirect) inside Python f-string skipped
 # -----------------------------------------------------------------------------

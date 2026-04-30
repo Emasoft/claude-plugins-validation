@@ -1817,6 +1817,166 @@ def _rc87_is_semver_context(line: str, file_path: str) -> bool:
     return False
 
 
+_TEST_PATH_RE = re.compile(
+    r"(?:"
+    r"(?:^|/)tests?/"          # /test/ or /tests/ segment
+    r"|(?:^|/)__tests?__/"     # /__tests__/ Jest convention
+    r"|(?:^|/)spec/"           # /spec/ RSpec / Jasmine
+    r"|(?:^|/)e2e/"            # end-to-end test directory
+    r"|(?:^|/)conftest\.py$"   # pytest conftest
+    r"|(?:^|/)test_[A-Za-z0-9_]+\.py$"        # pytest test_*.py
+    r"|(?:^|/)[A-Za-z0-9_]+_test\.py$"        # Go-style _test.py
+    r"|(?:^|/)[A-Za-z0-9_.\-]+\.test\."        # foo.test.ts/.test.js/.test.py
+    r"|(?:^|/)[A-Za-z0-9_.\-]+\.spec\."        # foo.spec.ts/.spec.js
+    r"|(?:^|/)test-[A-Za-z0-9_.\-]+\."          # test-foo.ts
+    r"|(?:^|/)fixture[s]?/"                    # /fixtures/ test data dir
+    r")"
+)
+
+
+_I18N_DIR_RE = re.compile(
+    r"(?:^|/)(?:locales?|i18n|lang|languages?|translations?|intl)/"
+)
+# Language-code suffix: `<basename>.<lang>.<ext>` or
+# `<basename>.<lang>-<COUNTRY>.<ext>`. Common examples:
+#   README.ru.md       README.zh-CN.md
+#   guide.ja.md        messages.es-ES.json
+#   prompt-cache-guide-ru.md  (with hyphen — also catch this)
+_I18N_LANG_SUFFIX_RE = re.compile(
+    r"(?:[._-])"                                 # separator
+    r"(?:"
+    # ISO 639-1 two-letter codes commonly used for translations.
+    r"ar|az|bg|bn|ca|cs|da|de|el|en|es|et|fa|fi|fr|gu|he|hi|hr|hu|id|it|"
+    r"ja|kk|kn|ko|lt|lv|ml|mr|ms|nb|nl|no|pl|pt|ro|ru|si|sk|sl|sq|sr|sv|"
+    r"sw|ta|te|th|tr|uk|ur|vi|zh"
+    r")"
+    r"(?:[-_][a-z]{2,3})?"                       # optional country code (lowercased path)
+    r"\.[a-z0-9]+$"                              # extension
+)
+
+
+def _is_i18n_file_path(rel_path: str) -> bool:
+    """GENERAL: True for files whose path/basename signals translation
+    content (locales/, i18n/, README.<lang>.md, guide-<lang>.md, etc.).
+
+    Signals:
+    1. Any path segment is one of: locales, locale, i18n, lang,
+       languages, translations, intl
+    2. The basename has a language-code suffix matching ISO 639-1
+       (ru/zh/ja/ko/de/fr/es/it/…) optionally with country code,
+       e.g. README.ru.md, prompt-cache-guide-zh-CN.md.
+
+    These files legitimately contain Latin-acronym + non-Latin-word
+    compound terminology (`API-вызов`, `JSON-файл`, `HTML-페이지`)
+    that is the canonical way to render technical jargon in those
+    languages — NOT a homograph attack.
+    """
+    if not rel_path:
+        return False
+    p = rel_path.replace("\\", "/").lower()
+    if _I18N_DIR_RE.search(p):
+        return True
+    # Test the basename suffix
+    basename = p.rsplit("/", 1)[-1]
+    return bool(_I18N_LANG_SUFFIX_RE.search(basename))
+
+
+def _is_acronym_compound(token: str) -> bool:
+    """GENERAL: True for tokens of shape
+    `<ASCII-acronym><sep><non-Latin-word>` — the canonical idiom for
+    rendering a technical acronym in a non-Latin-script language.
+
+    Examples that match:
+      API-вызов        (Russian "API call")
+      JSON-файл        (Russian "JSON file")
+      HTML-페이지       (Korean "HTML page")
+      MCP-серверов     (Russian "MCP servers")
+      HTTP-リクエスト   (Japanese "HTTP request")
+      nКэш             (escape-sequence prefix `\\n` + Russian "Cache")
+
+    Pattern: ASCII letters (the acronym, typically 1-10 chars) +
+    optional separator (`-` or `_` or `.`) + non-Latin letters. The
+    two halves do NOT mix scripts inside themselves — the acronym is
+    pure Latin, the descriptor is pure non-Latin. Real homograph
+    attacks have INTRA-segment mixing (`pаypal` with Cyrillic `а`),
+    NOT inter-segment.
+
+    The tokenization regex `[\\w._-]{3,80}` joins Latin escape-sequence
+    chars (`\\n`, `\\t`, `\\r`) with following non-Latin words because
+    `\\w` matches both `n` and Cyrillic letters. Result: spurious
+    tokens like `nКэш` (`\\n` + Russian "Кэш"). These follow the same
+    "Latin prefix + non-Latin word" idiom and are not homographs.
+    """
+    # Match: ASCII word (acronym or escape-prefix), optional separator,
+    # non-Latin word.
+    m = re.match(
+        r"^([A-Za-z][A-Za-z0-9]{0,9})"   # Latin acronym/prefix (1-10 chars)
+        r"([-_.]?)"                       # optional separator
+        r"([^\sA-Za-z]+)$",               # non-Latin descriptor
+        token,
+    )
+    if m is None:
+        return False
+    latin_prefix, separator, descriptor = m.group(1), m.group(2), m.group(3)
+    # Reject if descriptor contains Latin letters at all (defensive).
+    if re.search(r"[A-Za-z]", descriptor):
+        return False
+    # GENERAL signal to distinguish compound terms from homograph attacks:
+    #
+    # Homograph attacks substitute a SINGLE non-Latin glyph that looks
+    # like a Latin char inside a normal-looking word: `pаypal`,
+    # `gооgle`, `githuЬ`. Pattern: Latin word with 1-2 non-Latin chars
+    # at the END (or interior — but tokenization splits interior).
+    # Specifically: the non-Latin part is SHORT (1-2 chars) and there's
+    # NO separator, AND the Latin part is the bulk of the token (≥4
+    # chars) — signalling the attacker is masking a brand/word.
+    #
+    # Compound terms have either:
+    #   - A separator (`API-вызов`, `JSON-файл`)  — explicit boundary
+    #   - A non-Latin descriptor that is ≥3 chars (a real word, not a
+    #     single substituted glyph) AND is longer than the Latin prefix
+    #     OR the Latin prefix is short (escape-sequence single char
+    #     like `\nКэш`)
+    has_separator = bool(separator)
+    descriptor_is_word = len(descriptor) >= 3
+    latin_is_short_prefix = len(latin_prefix) <= 2
+    # Compound recognition:
+    if has_separator and descriptor_is_word:
+        return True   # `API-вызов`, `JSON-файл`
+    if not has_separator:
+        # No separator — be conservative. Only accept when:
+        #   (a) Latin prefix is a single char or short escape (≤2),
+        #       AND descriptor is a real word (≥3 chars). Captures
+        #       `nКэш`, `tШаблон`.
+        if latin_is_short_prefix and descriptor_is_word:
+            return True
+    return False
+
+
+def _is_test_file_path(rel_path: str) -> bool:
+    """GENERAL: True if `rel_path` is by convention a test file.
+
+    Single source of truth replacing the duplicated chains:
+      "test_" in file_lower
+      or "_test.py" in file_lower
+      or "/tests/" in file_normalized
+      or file_normalized.startswith("tests/")
+      or "/conftest.py" in file_normalized
+      or file_normalized == "conftest.py"
+
+    spread across 4+ scan functions. Recognizes:
+    - `tests/`, `test/`, `__tests__/`, `spec/`, `e2e/`, `fixtures/` dirs
+    - `test_X.py`, `X_test.py` (pytest / Go conventions)
+    - `X.test.{ts,js,py,...}`, `X.spec.{ts,js,...}` (Jest / Mocha)
+    - `test-X.ext` (xUnit conventions)
+    - `conftest.py`
+    """
+    if not rel_path:
+        return False
+    p = rel_path.replace("\\", "/")
+    return bool(_TEST_PATH_RE.search(p))
+
+
 def _is_box_drawing_char(ch: str) -> bool:
     """True for any Unicode codepoint in the Box Drawing block (U+2500..U+257F)
     or the Block Elements block (U+2580..U+259F).
@@ -2392,6 +2552,41 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
                     )
                     if not any(indicator in line for indicator in py_shell_exec_indicators):
                         continue
+
+                # GENERAL: JS/TS template-literal context. JS/TS use
+                # backtick template literals with `${expr}` for
+                # interpolation. A shell-style `$(...)` token inside such
+                # a template is just LITERAL TEXT (the backslash-escaped
+                # `\$(` or the literal `$(` followed by characters that
+                # don't form a JS template substitution). It's NOT a
+                # shell-execution call site unless the line ALSO calls
+                # a child_process / exec / spawn / Command API.
+                #
+                # Real attack pattern: `child_process.execSync(\`$(rm -rf /)\`)`
+                #   — has `execSync`/`exec`/`spawn` indicator → fires.
+                # Doc/AST-builder pattern: `result += \`$(${cmd})\``
+                #   — no shell-exec call on line → skip.
+                if is_js_ts_file(file_path, content):
+                    js_shell_exec_indicators: tuple[str, ...] = (
+                        "child_process", "execSync(", "exec(", "spawn(",
+                        "execFile(", "spawnSync(", "fork(",
+                    )
+                    if not any(indicator in line for indicator in js_shell_exec_indicators):
+                        continue
+
+                # GENERAL: text-template / .txt / .tmpl / .template files
+                # are non-executable text — they describe a future shell
+                # invocation but the file itself is not run. Same logic
+                # as the markdown skip: the model never executes a `.txt`
+                # template, the harness substitutes placeholders and
+                # passes the result to its own controlled invocation.
+                _NON_EXECUTABLE_TEMPLATE_EXT = (
+                    ".txt", ".tmpl", ".template",
+                    ".tmpl.sh", ".sh.tmpl",
+                    ".j2", ".jinja", ".jinja2", ".mustache",
+                )
+                if file_lower.endswith(_NON_EXECUTABLE_TEMPLATE_EXT):
+                    continue
 
             if pattern.search(line):
                 report.critical(f"{msg}: {line.strip()[:80]}", file_path, line_num)
@@ -4653,10 +4848,33 @@ def check_phase1_unicode_rules(plugin_path: Path, report: ValidationReport) -> i
 
         # RC-11 — mixed-script (only on identifier-shape tokens to avoid
         # FP on prose that legitimately mixes scripts e.g. "Cyrillic 'а' is U+0430")
+        #
+        # GENERAL i18n exemption: i18n locale files / per-language docs
+        # (`locales/ru.json`, `README.ru.md`, `guides/setup-zh.md`,
+        # `i18n/ja/messages.json`, …) legitimately contain compound
+        # terminology where a Latin acronym is combined with a
+        # non-Latin word (`API-вызов` "API call", `JSON-файл` "JSON
+        # file", `MCP-инструменты` "MCP tools", `HTML-페이지` "HTML
+        # page"). Russian, Japanese, Korean, Greek docs all use this
+        # convention.
+        #
+        # Detection: file path contains `locales/`, `i18n/`, `lang/`,
+        # `translations/`, OR basename has language-code segment
+        # (`README.ru.md`, `guide.zh-cn.md`, `messages.ja.json`).
+        is_i18n_file = _is_i18n_file_path(rel_path)
         for line_no, line in enumerate(content.split("\n"), start=1):
             for token in re.findall(r"[\w._-]{3,80}", line):
                 mixed, reason = has_mixed_script(token)
                 if mixed:
+                    # GENERAL: skip "Latin acronym + hyphen/underscore +
+                    # non-Latin word" compound. This is how non-Latin
+                    # languages canonically describe APIs/protocols/
+                    # standards: the protocol name keeps its Latin
+                    # acronym (API/JSON/HTML/HTTP/MCP) and the
+                    # descriptor uses the local script
+                    # (`API-вызов`/`JSON-файл`/`HTML-페이지`).
+                    if is_i18n_file or _is_acronym_compound(token):
+                        continue
                     level = effective_severity("critical", rel_path)
                     getattr(report, level)(
                         f"RC-11: mixed-script identifier '{token}' at line {line_no} ({reason})",
@@ -4720,6 +4938,15 @@ def check_phase1_supply_chain_rules(plugin_path: Path, report: ValidationReport)
     """RC-29 (.pth executable), RC-37 (GTFOBins/LOLBins), RC-67 (cryptomining)."""
     issues = 0
     for file_path, rel_path, content in _iter_scannable_files(plugin_path):
+        # GENERAL: skip test files & test fixtures. Test suites for
+        # security tools (cc-safety-net, cpv itself, gitleaks-checkers,
+        # etc.) ship with FIXTURE STRINGS containing the very patterns
+        # they detect — `ruby -e "exec(...)"`, `perl -e "system(...)"`,
+        # `curl | bash` — so the test can verify the detector fires.
+        # Without this skip, those plugins land 100% MAJOR FPs by
+        # construction.
+        if _is_test_file_path(rel_path):
+            continue
         # RC-29 — .pth file with import/exec
         if is_pth_with_exec(file_path.name, content):
             level = effective_severity("critical", rel_path)
