@@ -1540,12 +1540,18 @@ def is_shell_like_file(file_path: str, content: str | None = None) -> bool:
     }
     if basename in GIT_HOOK_BASENAMES:
         return True
-    # Shebang sniff for extensionless shell scripts.
+    # Shebang sniff for extensionless shell scripts. Both forms:
+    # 1. Direct path: `#!/bin/bash`, `#!/usr/bin/zsh`, `#!/sbin/sh`
+    # 2. POSIX env form: `#!/usr/bin/env bash`, `#!/bin/env zsh` — the
+    #    interpreter name is a whitespace-separated token AFTER `env`,
+    #    so a `/bash` substring check misses it.
     if content is not None:
         first_line = content.split("\n", 1)[0] if content else ""
         if first_line.startswith("#!"):
             shebang = first_line.lower()
             if any(rt in shebang for rt in ("/sh", "/bash", "/zsh", "/ksh", "/dash", "/ash")):
+                return True
+            if re.search(r"\benv\s+(?:bash|sh|zsh|ksh|dash|ash)\b", shebang):
                 return True
     return False
 
