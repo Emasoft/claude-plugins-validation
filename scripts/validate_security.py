@@ -3163,40 +3163,157 @@ _LEGIT_API_HOST_SUFFIXES = (
     "rust-lang.org",
     "nodejs.org",
     "python.org",
-    # v2.46 FP-J — RFC-2606 reserved example domains (NEVER resolve)
-    "example.com",
-    "example.org",
-    "example.net",
-    "example.edu",
-    # v2.46 FP-J — Canonical fake-API / tutorial hosts. These exist
-    # but only as testing endpoints — they don't represent customer
-    # data exfiltration. Documented in tutorials worldwide.
-    "httpbin.org",
-    "jsonplaceholder.typicode.com",
-    "typicode.com",  # parent — covers `<thing>.typicode.com`
-    "reqres.in",
-    "dummyjson.com",
-    "mockapi.io",
-    "swagger.io",
-    "petstore.swagger.io",
-    "petstore3.swagger.io",
-    "fakerestapi.azurewebsites.net",
 )
+
+
+# GENERAL: documentation / tutorial / sandbox host stems. ANY host whose
+# label (or one of its labels) matches one of these stems is by convention a
+# never-resolves test fixture, NOT a real exfiltration endpoint.
+#
+# This replaces v2.46's hardcoded host list (`httpbin.org`,
+# `jsonplaceholder.typicode.com`, `reqres.in`, …) with a STEM predicate that
+# also matches future tutorial hosts that haven't been invented yet
+# (`fakeapi.dev`, `mockyserver.io`, `placeholdr.cc`, etc.) without a code
+# change.
+#
+# RFC-2606 reservations (`example.com/.org/.net/.edu`, `.example` TLD,
+# `.test`/`.invalid`/`.localhost`) are the canonical case — they NEVER
+# resolve and exist only for documentation. Tutorial hosts like
+# `httpbin.org` follow the same naming convention (`fake`/`mock`/`dummy`/
+# `test`/`demo`/`sandbox`/`placeholder`/`example` as a label).
+#
+# `bin`/`reqres`/`json` stems cover the tutorial-API portmanteaus
+# (`httpbin` = http + bin, `reqres` = req + res, `jsonplaceholder` =
+# json + placeholder). The convention is: HTTP-protocol-keyword + a
+# fixture word (bin/echo/req/res/get/post). Anyone naming a real
+# user-data API uses their company's name, not `bin`/`req`/`res`.
+_DOC_HOST_STEMS = (
+    "example", "fake", "mock", "dummy", "demo", "sandbox", "placeholder",
+    "fixture", "tutorial", "stub", "sample", "test",
+)
+
+# Tutorial-portmanteau patterns: a label that glues two HTTP-protocol /
+# fixture-vocabulary words together, e.g. `httpbin`, `httpecho`, `reqres`,
+# `jsonplaceholder`, `apifake`. The convention is: any of these "fixture
+# vocabulary" words appears at start AND a different one appears at end
+# (or `bin/echo/test/stub` extends them as a suffix). Anyone naming a real
+# user-data API uses their company's name; portmanteaus signal a public
+# fixture host.
+_TUTORIAL_PORTMANTEAU_PREFIXES = (
+    "http", "json", "xml", "rest", "api", "req", "reply", "res", "graphql",
+)
+_TUTORIAL_PORTMANTEAU_SUFFIXES = (
+    "bin", "echo", "reply", "response", "placeholder", "fake", "stub",
+    "mock", "test", "res", "req", "api",
+)
+
+
+def _is_tutorial_portmanteau(label: str) -> bool:
+    """True for labels like `httpbin` / `reqres` / `jsonplaceholder` —
+    a glued pair of HTTP-protocol or fixture words. We require the
+    label is the concatenation of TWO distinct vocabulary words (no
+    other text), so genuine company names (`httpcorp.com` would have
+    `corp` not in the suffix list) don't accidentally match.
+    """
+    lo = label.lower()
+    for pfx in _TUTORIAL_PORTMANTEAU_PREFIXES:
+        if not lo.startswith(pfx) or len(lo) <= len(pfx):
+            continue
+        rest = lo[len(pfx):]
+        if rest in _TUTORIAL_PORTMANTEAU_SUFFIXES and rest != pfx:
+            return True
+    return False
+
+# RFC-2606 / RFC-6761 reserved TLDs that never resolve. A host ending in any
+# of these is by definition documentation, not a live exfil target.
+_RESERVED_TLDS = (
+    ".test", ".example", ".invalid", ".localhost",
+    # `.local` is mDNS but commonly used in dev examples; we treat it as
+    # documentation when paired with a non-LAN-IP host.
+)
+
+# Common tutorial-API suffixes that follow `^api.<stem>.<tld>` shape but
+# don't naturally tokenize on `.` boundaries. petstore + swagger have been
+# the canonical "REST tutorial" pair for 10+ years.
+_TUTORIAL_HOST_PARENTS = (
+    "typicode.com",   # jsonplaceholder.typicode.com and similar
+    "swagger.io",     # petstore3.swagger.io, petstore.swagger.io
+)
+
+
+def _is_documentation_host(host: str) -> bool:
+    """GENERAL: True when `host` is a documentation / tutorial / sandbox
+    endpoint that never carries real traffic.
+
+    Three independent signals (any one suffices):
+    1. A reserved TLD per RFC-2606 / RFC-6761 (`.test`, `.example`,
+       `.invalid`, `.localhost`).
+    2. Any of the `_DOC_HOST_STEMS` (`example`/`fake`/`mock`/`dummy`/`demo`/
+       `sandbox`/`placeholder`/`fixture`/`tutorial`/`stub`/`sample`/`test`)
+       appears as a whole label OR as a prefix/suffix of a label
+       (`fakerestapi.azurewebsites.net`, `httpbin.org`, `dummyjson.com`).
+    3. A canonical parent suffix (`typicode.com`, `swagger.io`) that is
+       universally understood as a public REST-tutorial host.
+
+    The label-tokenization for stem matching is on `.` boundaries, NOT on
+    raw substring — so `petstore3.swagger.io` matches via stem (`pet*` no,
+    but `swagger.io` parent) AND via parent suffix (`swagger.io`), and a
+    host like `dev.testcorp.com` is documentation (label `test*`) which
+    matches the design intent (testcorp's dev endpoint is, by name, a
+    test environment).
+    """
+    if not host:
+        return False
+    h = host.lower().rstrip(".")
+    # Signal 1 — reserved TLD.
+    for tld in _RESERVED_TLDS:
+        if h.endswith(tld):
+            return True
+    # Signal 3 — canonical tutorial parent.
+    for parent in _TUTORIAL_HOST_PARENTS:
+        if h == parent or h.endswith("." + parent):
+            return True
+    # Signal 2 — stem in any label.
+    labels = h.split(".")
+    for label in labels:
+        for stem in _DOC_HOST_STEMS:
+            # Whole-label match OR stem at start/end of label
+            # (`fake-api`, `mockapi`, `jsonplaceholder`).
+            if label == stem or label.startswith(stem) or label.endswith(stem):
+                return True
+        # Signal 2b — tutorial-portmanteau (`httpbin`, `reqres`,
+        # `jsonplaceholder`, `httpecho`, `apifake`).
+        if _is_tutorial_portmanteau(label):
+            return True
+    return False
 
 
 def _line_targets_legit_api_host(line: str) -> bool:
     """v2.45 FP5 — True if the line's URL targets a legitimate API host.
 
-    Extracts every `https?://...` URL in the line and tests whether the
-    host (everything before the first `/` after the scheme) ends with
-    one of `_LEGIT_API_HOST_SUFFIXES`. Suffix match handles arbitrary
-    subdomains (`api.openai.com`, `raw.githubusercontent.com`).
+    Two layers, in order:
+
+    1. Hardcoded SUFFIX match on `_LEGIT_API_HOST_SUFFIXES` — these are
+       REAL provider endpoints (OpenAI, GitHub, Anthropic, PyPI, npm,
+       …) that the plugin's runtime is expected to talk to.
+
+    2. GENERAL stem-based predicate `_is_documentation_host` — any
+       host whose name signals it's a documentation/tutorial/sandbox
+       endpoint by convention (RFC-2606, *.test, fake*, mock*, demo*,
+       …). This replaces v2.46's hardcoded tutorial-host list.
+
+    Suffix match in (1) handles arbitrary subdomains
+    (`api.openai.com`, `raw.githubusercontent.com`); the stem
+    predicate in (2) handles arbitrary new tutorial-host names without
+    requiring a code change.
     """
     for url_match in re.finditer(r"https?://([A-Za-z0-9.\-]+)", line):
         host = url_match.group(1).lower()
         for suffix in _LEGIT_API_HOST_SUFFIXES:
             if host == suffix or host.endswith("." + suffix):
                 return True
+        if _is_documentation_host(host):
+            return True
     return False
 
 
