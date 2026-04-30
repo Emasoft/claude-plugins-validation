@@ -1118,6 +1118,44 @@ class TestBashBooleanChainGeneral:
                 return
 
 
+class TestUnsafeVarBooleanChainNoneGuard:
+    """Regression for the line 2784 None-deref bug.
+
+    The pre-fix code re-ran ``pattern.search(line)`` inside the
+    boolean-chain branch and called ``.start()`` on the result without
+    a None check. Pyright correctly flagged this as
+    reportOptionalMemberAccess. The fix captures the match once at the
+    top of the loop and reuses it.
+
+    This regression test drives ``scan_for_injection`` end-to-end with
+    a bash line that hits ``"Unquoted variable expansion"`` so that
+    the boolean-chain branch is exercised. If the call ever regresses
+    to a re-search and the regex were to behave non-deterministically
+    (e.g. a future regex with ``\\b`` lookarounds and a state-bearing
+    cache), this test would catch the AttributeError immediately.
+    """
+
+    def test_unquoted_var_boolean_chain_does_not_raise(self) -> None:
+        from validate_security import scan_for_injection
+        from cpv_validation_common import ValidationReport
+        # Shell line that matches UNSAFE_VARIABLE_PATTERNS AND triggers
+        # the boolean-chain branch — exactly the pre-fix crash path.
+        content = "if $has_x && $has_y; then\n  do_thing\nfi\n"
+        report = ValidationReport()
+        # Must not raise AttributeError — the bug was that
+        # `pattern.search(line).start()` could be called on None.
+        result = scan_for_injection(content, "test.sh", report)
+        # Boolean-chain SHOULD be skipped, so no MAJOR finding from
+        # "Unquoted variable expansion" on this line.
+        unquoted_findings = [
+            r for r in report.results
+            if r.level == "MAJOR" and "Unquoted variable expansion" in r.message
+        ]
+        assert unquoted_findings == [], \
+            f"boolean-chain should be skipped, got: {unquoted_findings!r}"
+        assert isinstance(result, int)
+
+
 # -----------------------------------------------------------------------------
 # v2.46 FP-E — RC-40/41/42 (`>>` redirect) inside Python f-string skipped
 # -----------------------------------------------------------------------------
