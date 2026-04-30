@@ -82,6 +82,7 @@ from cpv_validation_common import (
     print_results_by_level,
     save_report_and_print_summary,
 )
+from cpv_pattern_source_predicate import is_pattern_source_line
 
 # =============================================================================
 # Injection Detection Patterns
@@ -1147,6 +1148,40 @@ def _is_dev_scratch_path(rel_or_abs: str) -> bool:
     """
     p = "/" + rel_or_abs.lower().replace("\\", "/").lstrip("/")
     return any(part in p for part in _DEV_SCRATCH_DIR_PARTS)
+
+
+def cpv_self_scan_skip_line(
+    file_path: str, content: str | list[str] | None, line_no: int,
+) -> bool:
+    """Return True if a specific (file, line_no) pair should be skipped
+    during a CPV-self-scan.
+
+    This is the line-aware companion to `cpv_self_scan_skip(file_path)`.
+    It returns True when EITHER:
+      - the per-file hash-anchored skip already fires (file's content
+        is unchanged from the manifest), OR
+      - the v2.48 P-1 pattern-source-line predicate fires (the line is
+        structurally part of a rule declaration — catalog literal,
+        rule-id-tagged docstring/comment, or pattern-collection
+        suffix).
+
+    The two checks compose as an OR — either signal alone is enough to
+    suppress the line. The per-line predicate does NOT replace the
+    hash-anchored skip; it AUGMENTS it for files whose hashes have
+    drifted (e.g. mid-edit, or running with `CPV_SKIP_GITHUB_INTEGRITY=1`
+    against an unreleased commit set).
+
+    `content` may be the raw file string, a pre-split list of lines, or
+    None (in which case only the file-level skip is consulted — i.e.
+    callers without line context still get the legacy behaviour).
+    """
+    if cpv_self_scan_skip(file_path):
+        return True
+    if not _CPV_SELF_SCAN_ACTIVE:
+        return False
+    if content is None:
+        return False
+    return is_pattern_source_line(content, line_no, file_path)
 
 
 def cpv_self_scan_skip(file_path: str) -> bool:
@@ -4910,6 +4945,18 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
             # cpv_self_scan_skip handles the abs→rel normalization.
             if file_ref and cpv_self_scan_skip(str(file_ref)):
                 continue
+            # v2.48 P-1 — augment with per-line pattern-source predicate
+            # for cc-audit findings whose file's hash has drifted (or
+            # wasn't in the manifest). Read the file and check the line.
+            if file_ref and isinstance(line, int) and line > 0:
+                try:
+                    fpath = Path(str(file_ref))
+                    if fpath.is_file() and fpath.stat().st_size < 2_000_000:
+                        body = fpath.read_text(encoding="utf-8", errors="ignore")
+                        if cpv_self_scan_skip_line(str(file_ref), body, int(line)):
+                            continue
+                except OSError:
+                    pass
 
             # v2.43 — drop findings inside vendored / cached / build dirs.
             if file_ref and _is_vendored_dep_path(str(file_ref)):
@@ -5372,6 +5419,9 @@ def check_phase1_credential_rules(plugin_path: Path, report: ValidationReport) -
         for line_no, line in enumerate(content_lines, start=1):
             if is_in_fenced_code_block(line_no - 1, fence_state):
                 continue
+            # v2.48 P-1 — pattern-source predicate.
+            if cpv_self_scan_skip_line(rel_path, content_lines, line_no):
+                continue
             for pattern in ENV_BULK_HARVEST_PATTERNS:
                 if pattern.search(line):
                     # v2.46 — widen the surrounding window to 30 lines.
@@ -5435,8 +5485,12 @@ def check_phase1_supply_chain_rules(plugin_path: Path, report: ValidationReport)
             issues += 1
 
         fence_state = build_fence_state(content)
-        for line_no, line in enumerate(content.split("\n"), start=1):
+        content_lines_phase2c = content.split("\n")
+        for line_no, line in enumerate(content_lines_phase2c, start=1):
             if is_in_fenced_code_block(line_no - 1, fence_state):
+                continue
+            # v2.48 P-1 — pattern-source predicate.
+            if cpv_self_scan_skip_line(rel_path, content_lines_phase2c, line_no):
                 continue
 
             # RC-37 — GTFOBins / LOLBins
@@ -5470,8 +5524,12 @@ def check_phase1_evasion_rules(plugin_path: Path, report: ValidationReport) -> i
     issues = 0
     for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
         fence_state = build_fence_state(content)
-        for line_no, line in enumerate(content.split("\n"), start=1):
+        content_lines_phase1e = content.split("\n")
+        for line_no, line in enumerate(content_lines_phase1e, start=1):
             if is_in_fenced_code_block(line_no - 1, fence_state):
+                continue
+            # v2.48 P-1 — pattern-source predicate.
+            if cpv_self_scan_skip_line(rel_path, content_lines_phase1e, line_no):
                 continue
             for pattern in TIMEBOMB_PATTERNS:
                 if pattern.search(line):
@@ -5977,6 +6035,11 @@ def check_phase4_all(plugin_path: Path, report: ValidationReport) -> int:
         for line_no, line in enumerate(content_lines, start=1):
             if is_in_fenced_code_block(line_no - 1, fence_state):
                 continue
+            # v2.48 P-1 — pattern-source predicate (see Phase 3 site
+            # for full rationale). Same OR-augmentation of the
+            # hash-anchored self-scan skip.
+            if cpv_self_scan_skip_line(rel_path, content_lines, line_no):
+                continue
             for rule_id, severity, pattern, msg in PHASE4_PATTERNS:
                 m = pattern.search(line)
                 if not m:
@@ -6082,6 +6145,14 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                     py_docstring_lines.add(i + 1)  # 1-based
         for line_no, line in enumerate(content_lines, start=1):
             if is_in_fenced_code_block(line_no - 1, fence_state):
+                continue
+            # v2.48 P-1 — augment hash-anchored self-scan skip with a
+            # per-line pattern-source predicate. Suppresses lines that
+            # are structurally part of a rule declaration (catalog
+            # literal, rule-id-tagged docstring/comment, ALL_CAPS
+            # pattern-collection member). When the predicate fires,
+            # ALL Phase 3 rules are suppressed for this line.
+            if cpv_self_scan_skip_line(rel_path, content_lines, line_no):
                 continue
             for rule_id, severity, pattern, msg in PHASE3_PATTERNS:
                 m = pattern.search(line)
@@ -6378,6 +6449,9 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
         for line_no, line in enumerate(content_lines, start=1):
             if is_in_fenced_code_block(line_no - 1, fence_state):
                 continue
+            # v2.48 P-1 — pattern-source predicate.
+            if cpv_self_scan_skip_line(rel_path, content_lines, line_no):
+                continue
             for pattern in CLOUD_IMDS_PATTERNS:
                 m = pattern.search(line)
                 if m and not has_negation_guard_nearby(content, content.find(line) + m.start()):
@@ -6406,8 +6480,12 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
                     break
 
         # RC-39 — Persistence
-        for line_no, line in enumerate(content.split("\n"), start=1):
+        content_lines_persistence = content.split("\n")
+        for line_no, line in enumerate(content_lines_persistence, start=1):
             if is_in_fenced_code_block(line_no - 1, fence_state):
+                continue
+            # v2.48 P-1 — pattern-source predicate.
+            if cpv_self_scan_skip_line(rel_path, content_lines_persistence, line_no):
                 continue
             for pattern in PERSISTENCE_PATTERNS:
                 m = pattern.search(line)
