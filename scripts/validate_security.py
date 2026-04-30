@@ -4327,14 +4327,18 @@ def check_phase1_credential_rules(plugin_path: Path, report: ValidationReport) -
                 continue
             for pattern in ENV_BULK_HARVEST_PATTERNS:
                 if pattern.search(line):
-                    # v2.46 — widen the surrounding window to 15 lines.
+                    # v2.46 — widen the surrounding window to 30 lines.
                     # The `env = os.environ.copy()` idiom is often set
                     # early in a function, then mutated through several
                     # `if`/conditional blocks (`env["GIT_TOKEN"] = ...`)
                     # before being passed to `subprocess.run(env=env)`
-                    # 10+ lines later. The v2.41 window=4 missed these.
+                    # 10-25 lines later. The v2.41 window=4 was way
+                    # too narrow; even the initial v2.46 widening to
+                    # 15 missed real-world cross-compile builders that
+                    # set DOCKER env vars between copy and run. 30
+                    # lines is enough to cover the longest prep blocks.
                     surrounding_classifier = _surrounding_lines(content_lines, line_no - 1, window=4)
-                    surrounding_subproc = _surrounding_lines(content_lines, line_no - 1, window=15)
+                    surrounding_subproc = _surrounding_lines(content_lines, line_no - 1, window=30)
                     # v2.42 — opt-in classifier path (TRDD-fe006962). When
                     # active, the per-rule classifier subsumes the v2.41
                     # binary `_rc21_is_subprocess_prep` guard and can also
@@ -5221,9 +5225,18 @@ def check_gitleaks(plugin_path: Path, report: ValidationReport) -> int:
 
     issues = 0
     try:
-        # `detect` subcommand scans the directory (no .git history needed)
+        # `detect` subcommand scans the directory. Use `--no-git` to
+        # scan ONLY the working tree (not history). Without it,
+        # gitleaks walks the full commit history and reports findings
+        # on files that were renamed / deleted in current HEAD —
+        # ghosts that the plugin author cannot fix without
+        # rewriting history (which CPV must NEVER recommend). v2.46
+        # FP-K — eliminates 6 stale `eaa-api-research/...` findings
+        # in architect-agent that were from a `eaa-`→`amaa-` rename
+        # 100+ commits ago.
         subprocess.run(
             ["gitleaks", "detect", "--source", str(plugin_path),
+             "--no-git",  # working-tree only, no history
              "--report-format", "json", "--report-path", tmp_path,
              "--no-banner", "--exit-code", "0"],
             capture_output=True,
@@ -5255,6 +5268,21 @@ def check_gitleaks(plugin_path: Path, report: ValidationReport) -> int:
             # v2.43 — drop findings inside vendored / cached / build dirs.
             if _is_vendored_dep_path(rel):
                 continue
+            # v2.44 — drop findings inside gitignored dev-scratch dirs.
+            if _is_dev_scratch_path(rel):
+                continue
+            # v2.46 FP-K — gitleaks fires on placeholder tokens in
+            # documentation snippets like
+            # `curl -H "Authorization: Bearer YOUR_API_KEY"`. The
+            # `YOUR_API_KEY` / `YOUR_TOKEN` placeholders are obvious
+            # examples — not real credentials. Read the actual file
+            # line at the reported location and skip if it contains
+            # a known placeholder pattern. The check is conservative
+            # (only fires on the exact `YOUR_*` / `<your-*>` /
+            # `<token>` shapes that doc tutorials use); real
+            # accidentally-leaked tokens DO get flagged.
+            if line_no and _gitleaks_line_is_placeholder_secret(plugin_path, rel, line_no):
+                continue
             level = effective_severity("major", rel)
             getattr(report, level)(f"gitleaks {rule_id}: {description[:80]}", rel, line_no)
             issues += 1
@@ -5268,6 +5296,58 @@ def check_gitleaks(plugin_path: Path, report: ValidationReport) -> int:
     if issues == 0:
         report.passed("gitleaks: no findings (150+ secret detectors clean)")
     return issues
+
+
+# v2.46 FP-K — placeholder-secret patterns that documentation
+# snippets use to teach how to call an authenticated API. These
+# are NOT real credentials (they contain literal `YOUR_*` /
+# `<token>` / `your-api-key` markers).
+_GITLEAKS_PLACEHOLDER_TOKENS_RE = re.compile(
+    r"(?:"
+    # YOUR_* uppercase env-var-style names
+    r"\bYOUR_(?:API_KEY|TOKEN|SECRET|PASSWORD|ACCESS_KEY|CLIENT_SECRET|WEBHOOK_URL|JWT|BEARER)\b"
+    # `<X>` bracket placeholders — `<api-key>`, `<your-token>`, `<JWT>`, etc.
+    r"|<(?:your[-_]?)?(?:api[-_]?)?(?:key|token|secret|password|bearer|jwt)>"
+    # bare `your-X` / `your_X` lowercase forms
+    r"|\byour[-_](?:api[-_]?)?(?:key|token|secret|password|bearer)\b"
+    # `sk-test`, `sk-demo`, `sk-example`, `sk-placeholder` (OpenAI-style)
+    r"|\bsk-(?:test|proj-test|demo|example|placeholder)\b"
+    # `XXX_HERE` literals
+    r"|\b(?:TOKEN|API_KEY|SECRET|PASSWORD)_?HERE\b"
+    # `REPLACE_ME` / `REDACTED` / `xxxxxxxx+`
+    r"|\bREPLACE_ME\b|\bREDACTED\b|\bxxxxxxxx+\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _gitleaks_line_is_placeholder_secret(plugin_path: Path, rel: str, line_no: int) -> bool:
+    """v2.46 FP-K — True if the line at `rel:line_no` (or ±1 line for
+    multi-line `curl ... \\` constructs) contains an obvious
+    placeholder marker like `YOUR_API_KEY` or `<token>`. Used to
+    suppress gitleaks/trufflehog FPs in API documentation snippets
+    that teach how to authenticate.
+
+    The ±1 window catches the canonical curl-auth-header shape:
+        line N:   curl -X GET "https://api.example.com/x" \\
+        line N+1:   -H "Authorization: Bearer YOUR_API_KEY"
+    where gitleaks reports the curl line (N) but the placeholder
+    sits on the continuation line (N+1)."""
+    try:
+        path = (plugin_path / rel) if not Path(rel).is_absolute() else Path(rel)
+        if not path.is_file():
+            return False
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            lines = f.readlines()
+        # Check the reported line and the immediate ±1 neighbors
+        for offset in (0, 1, -1, 2):
+            target_idx = line_no - 1 + offset
+            if 0 <= target_idx < len(lines):
+                if _GITLEAKS_PLACEHOLDER_TOKENS_RE.search(lines[target_idx]):
+                    return True
+    except (OSError, ValueError):
+        pass
+    return False
 
 
 def check_semgrep(plugin_path: Path, report: ValidationReport) -> int:

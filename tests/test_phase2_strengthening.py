@@ -809,3 +809,99 @@ class TestRC21SubprocessPrepWidenedWindow:
         check_phase1_credential_rules(plugin, report)
         rc21 = _msgs(report, "RC-21")
         assert rc21, "expected RC-21 to fire on real env harvest"
+
+
+# -----------------------------------------------------------------------------
+# v2.46 FP-K — `/Users/.../` literal placeholder + gitleaks placeholder
+# -----------------------------------------------------------------------------
+
+
+class TestRC135LiteralEllipsisPlaceholder:
+    """v2.46 FP-K — `/Users/.../path` is a literal triple-dot
+    redaction placeholder commonly used in docstring schemas and
+    JSON examples. RC-135 must treat `...` as an example username,
+    not an actual user path."""
+
+    def test_literal_triple_dot_in_python_docstring(self, tmp_path: Path) -> None:
+        from validate_security import scan_for_user_paths
+        py_content = (
+            '"""Output schema:\n'
+            '\n'
+            '    {\n'
+            '      "settingsPath": "/Users/.../.foo/settings.yaml",\n'
+            '      "cachePath": "/Users/.../.foo/cache.json",\n'
+            '    }\n'
+            '"""\n'
+        )
+        report = ValidationReport()
+        scan_for_user_paths(py_content, "scripts/state.py", report)
+        rc135 = [r.message for r in report.results if "RC-135" in r.message]
+        assert not rc135, f"unexpected RC-135 on /Users/.../ placeholder: {rc135}"
+
+    def test_real_username_path_still_fires(self, tmp_path: Path) -> None:
+        from validate_security import scan_for_user_paths
+        # An actual user path with a real username MUST still be flagged
+        py_content = (
+            'CACHE = "/Users/emanuelesabetta/.cache/foo/data.json"\n'
+        )
+        report = ValidationReport()
+        scan_for_user_paths(py_content, "scripts/cache.py", report)
+        rc135 = [r.message for r in report.results if "RC-135" in r.message]
+        assert rc135, "expected RC-135 to fire on real user path"
+
+
+class TestGitleaksPlaceholderFilter:
+    """v2.46 FP-K — gitleaks fires on placeholder tokens like
+    `Authorization: Bearer YOUR_API_KEY` in API documentation
+    snippets. Suppress when the line (or the line above the
+    reported one, for multi-line `curl ... \\` constructs)
+    contains a known placeholder marker."""
+
+    def test_placeholder_token_pattern_recognized(self) -> None:
+        # Exposes the regex via the helper for direct testing.
+        from validate_security import _GITLEAKS_PLACEHOLDER_TOKENS_RE
+        for placeholder in (
+            "YOUR_API_KEY", "YOUR_TOKEN", "YOUR_SECRET", "YOUR_PASSWORD",
+            "YOUR_BEARER", "YOUR_ACCESS_KEY", "YOUR_CLIENT_SECRET",
+            "<your-api-key>", "<your-token>", "<api-key>", "<token>",
+            "your-api-key", "your_token", "your-secret",
+            "TOKEN_HERE", "API_KEY_HERE", "SECRET_HERE", "REPLACE_ME",
+            "<JWT>", "<TOKEN>", "<API_KEY>",
+            "xxxxxxxxxxxx",
+            "sk-test", "sk-demo", "sk-example", "sk-placeholder",
+        ):
+            assert _GITLEAKS_PLACEHOLDER_TOKENS_RE.search(
+                f'-H "Authorization: Bearer {placeholder}"'
+            ), f"expected placeholder {placeholder!r} to be recognized"
+
+    def test_real_token_not_recognized(self) -> None:
+        from validate_security import _GITLEAKS_PLACEHOLDER_TOKENS_RE
+        # Real-shape API tokens MUST NOT match the placeholder regex.
+        for real_shape in (
+            "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",  # GitHub PAT
+            "AKIAIOSFODNN7EXAMPLE",                       # AWS access-key
+            "AIzaSyDmK4XYZ-1234567890abcdefghij",         # Google API
+            "xoxb-1234567890-1234567890-abcdefghijklmnop",  # Slack
+        ):
+            assert not _GITLEAKS_PLACEHOLDER_TOKENS_RE.search(
+                f'-H "Authorization: Bearer {real_shape}"'
+            ), f"unexpected placeholder match on real token shape {real_shape!r}"
+
+    def test_multi_line_curl_continuation_skipped(self, tmp_path: Path) -> None:
+        # Real shape: gitleaks reports the curl line (N) but the
+        # placeholder is on the continuation line (N+1).
+        from validate_security import _gitleaks_line_is_placeholder_secret
+        plugin = tmp_path / "demo"
+        plugin.mkdir()
+        f = plugin / "doc.md"
+        f.write_text(
+            "## Auth Example\n"
+            "\n"
+            "```bash\n"
+            'curl -X GET "https://api.example.com/endpoint" \\\n'
+            '  -H "Authorization: Bearer YOUR_API_KEY"\n'
+            "```\n"
+        )
+        # gitleaks reports the curl line (line 4 in this example);
+        # placeholder is on line 5. The ±1 window catches it.
+        assert _gitleaks_line_is_placeholder_secret(plugin, "doc.md", 4)
