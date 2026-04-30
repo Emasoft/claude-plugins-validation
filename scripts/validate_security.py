@@ -2556,6 +2556,17 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
     if is_validator:
         return 0
 
+    # v2.48 — non-executable data files (lockfiles, research/dataset
+    # paths, CSV/TSV, .ipynb). Injection-shape strings ($(...), `...`)
+    # are ubiquitous in dataset descriptions and notebook outputs.
+    if (
+        is_lockfile(file_path)
+        or _is_research_data_path(file_path)
+        or _is_tabular_data_file(file_path)
+        or _is_jupyter_notebook(file_path)
+    ):
+        return 0
+
     # Python files never use backtick command substitution — backticks are RST/docstring formatting
     is_python_file = file_lower.endswith(".py")
 
@@ -2867,6 +2878,16 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
     # Skip path checks for documentation markdown — contains examples
     # But scan AI-facing markdown (skills, agents, commands) — these are the attack surface
     if file_lower.endswith((".md", ".mdx", ".markdown")) and not is_ai_facing_markdown(file_path):
+        return 0
+
+    # v2.48 — non-executable data files (lockfiles, research/dataset
+    # paths, CSV/TSV, .ipynb). See predicate docstrings for invariant.
+    if (
+        is_lockfile(file_path)
+        or _is_research_data_path(file_path)
+        or _is_tabular_data_file(file_path)
+        or _is_jupyter_notebook(file_path)
+    ):
         return 0
 
     # Skip path checks for test files - they contain example data
@@ -3281,6 +3302,17 @@ def scan_for_secrets(content: str, file_path: str, report: ValidationReport) -> 
     if is_validator_script(file_path):
         return 0
 
+    # v2.48 — non-executable data files (lockfiles, research, CSV/TSV,
+    # .ipynb). DB-conn `://x:y@z` pattern matches Google-Fonts URLs
+    # and dataset rows by accident.
+    if (
+        is_lockfile(file_path)
+        or _is_research_data_path(file_path)
+        or _is_tabular_data_file(file_path)
+        or _is_jupyter_notebook(file_path)
+    ):
+        return 0
+
     # Skip test files — they contain intentional example/mock secrets.
     # Detection covers Python (`test_*.py`, `*_test.py`), JS/TS
     # (`*.test.{js,ts,jsx,tsx,mjs,cjs}`, `*.spec.{js,ts,...}` —
@@ -3426,6 +3458,15 @@ def scan_for_user_paths(content: str, file_path: str, report: ValidationReport) 
     # Skip documentation markdown — contains example paths
     # But scan AI-facing markdown — hardcoded user paths in prompts break portability
     if file_lower.endswith((".md", ".mdx", ".markdown")) and not is_ai_facing_markdown(file_path):
+        return 0
+
+    # v2.48 — non-executable data files (lockfiles, research, CSV/TSV, .ipynb).
+    if (
+        is_lockfile(file_path)
+        or _is_research_data_path(file_path)
+        or _is_tabular_data_file(file_path)
+        or _is_jupyter_notebook(file_path)
+    ):
         return 0
 
     # Skip test files
@@ -3629,6 +3670,14 @@ def scan_for_data_exfiltration(content: str, file_path: str, report: ValidationR
     # Skip documentation markdown — contains code examples
     # But scan AI-facing markdown — exfiltration patterns in prompts are real threats
     if file_lower.endswith((".md", ".mdx", ".markdown")) and not is_ai_facing_markdown(file_path):
+        return 0
+    # v2.48 — non-executable data files.
+    if (
+        is_lockfile(file_path)
+        or _is_research_data_path(file_path)
+        or _is_tabular_data_file(file_path)
+        or _is_jupyter_notebook(file_path)
+    ):
         return 0
     file_normalized = file_lower.replace("\\", "/")
     if (
@@ -3870,6 +3919,14 @@ def scan_for_supply_chain(content: str, file_path: str, report: ValidationReport
         return 0
     if file_lower.endswith((".md", ".mdx", ".markdown")):
         return 0
+    # v2.48 — non-executable data files.
+    if (
+        is_lockfile(file_path)
+        or _is_research_data_path(file_path)
+        or _is_tabular_data_file(file_path)
+        or _is_jupyter_notebook(file_path)
+    ):
+        return 0
     file_normalized = file_lower.replace("\\", "/")
     if (
         "/tests/" in file_normalized
@@ -3901,6 +3958,15 @@ def scan_for_credential_harvest(content: str, file_path: str, report: Validation
     if is_validator_script(file_path):
         return 0
     if file_lower.endswith((".md", ".mdx", ".markdown")):
+        return 0
+    # v2.48 — non-executable data files. Adversarial training datasets
+    # DELIBERATELY contain ~/.ssh/, id_rsa, GITHUB_TOKEN strings.
+    if (
+        is_lockfile(file_path)
+        or _is_research_data_path(file_path)
+        or _is_tabular_data_file(file_path)
+        or _is_jupyter_notebook(file_path)
+    ):
         return 0
     file_normalized = file_lower.replace("\\", "/")
     if (
@@ -4021,6 +4087,14 @@ def scan_for_sandbox_escape(content: str, file_path: str, report: ValidationRepo
     if is_validator_script(file_path):
         return 0
     if file_lower.endswith((".md", ".mdx", ".markdown")):
+        return 0
+    # v2.48 — non-executable data files.
+    if (
+        is_lockfile(file_path)
+        or _is_research_data_path(file_path)
+        or _is_tabular_data_file(file_path)
+        or _is_jupyter_notebook(file_path)
+    ):
         return 0
     file_normalized = file_lower.replace("\\", "/")
     if (
