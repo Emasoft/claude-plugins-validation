@@ -456,8 +456,26 @@ DATA_EXFILTRATION_PATTERNS = [
         "Data exfiltration: hardcoded webhook host (RC-17 — discord/slack/telegram/etc.)",
     ),
     # Phase 2c — DNS tunneling pattern (long subdomain queries with base64-shape labels)
+    # v2.46 FP-I — Must require URL/DNS context to avoid matching long
+    # markdown filenames in links and filesystem paths. The previous
+    # regex `[A-Za-z0-9+/=]{40,}` matched paths
+    # (`apps/myapp.png` after stripping spaces) and link filenames
+    # (`(release-automation-part1-complete-workflow.md)`). Real DNS
+    # tunneling shows up after `://` or as bare hostnames in `dig`/
+    # `nslookup`/`host` calls. Requires either a URL prefix
+    # (`(?:https?://|//|@)`) or a DNS-resolution-tool prefix
+    # (`(?:dig|nslookup|host|drill|kdig)\s+`) before the long-label
+    # match. Keep the `+/=` chars (base64 padding — tunneling PoCs
+    # actually use them in subdomain labels) but DROP `/` from the
+    # char class so paths can't match. Also drop `_` and `-` (URL-safe
+    # base64) to keep the match conservative — false-negative on URL-
+    # safe-base64 tunneling is an acceptable trade for eliminating
+    # ~146 FPs across docs.
     (
-        re.compile(r"\b[A-Za-z0-9+/=]{40,}\.(?:[a-z0-9-]{1,63}\.){0,4}[a-z]{2,}\b"),
+        re.compile(
+            r"(?:(?:https?://|//|@)|(?:\b(?:dig|nslookup|host|drill|kdig)\s+))"
+            r"[A-Za-z0-9+=]{40,}\.(?:[a-z0-9-]{1,63}\.){0,4}[a-z]{2,}\b"
+        ),
         "Data exfiltration: long-label DNS pattern (RC-18/19 — possible DNS tunneling)",
     ),
 ]
@@ -2976,6 +2994,14 @@ def scan_for_data_exfiltration(content: str, file_path: str, report: ValidationR
 # targets one of these hosts, it's the plugin's expected control plane
 # traffic, not exfiltration. Suffix match (`.openai.com` matches
 # `api.openai.com`).
+#
+# v2.46 FP-J — also includes RFC-2606 reserved example domains
+# (`example.com`, `example.org`, `example.net`, the `.example` TLD)
+# that NEVER resolve, and the canonical fake-API hosts that
+# tutorials use for testing (`httpbin.org`, `jsonplaceholder.
+# typicode.com`, `reqres.in`, `dummyjson.com`, `mockapi.io`,
+# `swagger.io/petstore`). A `fetch("https://api.example.com/...")`
+# in a doc snippet is teaching, not exfiltration.
 _LEGIT_API_HOST_SUFFIXES = (
     # LLM providers
     "openai.com",
@@ -3008,6 +3034,24 @@ _LEGIT_API_HOST_SUFFIXES = (
     "rust-lang.org",
     "nodejs.org",
     "python.org",
+    # v2.46 FP-J — RFC-2606 reserved example domains (NEVER resolve)
+    "example.com",
+    "example.org",
+    "example.net",
+    "example.edu",
+    # v2.46 FP-J — Canonical fake-API / tutorial hosts. These exist
+    # but only as testing endpoints — they don't represent customer
+    # data exfiltration. Documented in tutorials worldwide.
+    "httpbin.org",
+    "jsonplaceholder.typicode.com",
+    "typicode.com",  # parent — covers `<thing>.typicode.com`
+    "reqres.in",
+    "dummyjson.com",
+    "mockapi.io",
+    "swagger.io",
+    "petstore.swagger.io",
+    "petstore3.swagger.io",
+    "fakerestapi.azurewebsites.net",
 )
 
 
