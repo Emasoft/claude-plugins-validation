@@ -2200,6 +2200,15 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
                     # where the bare-word pattern carries real meaning.
                     if ("RC-120" in msg or "RC-121" in msg) and not is_shell_script:
                         continue
+                    # v2.46 FP-H — JS-specific rules RC-125 (Function()) and
+                    # RC-126 (new Function()) match in Python files when a
+                    # docstring or comment mentions `Function(...)` for type
+                    # annotation (`predicate: Function(node_id) -> bool`)
+                    # or callable hints. Python `Function()` is just a
+                    # capitalized identifier — there is no language-level
+                    # "Function constructor" in Python. Restrict to JS/TS.
+                    if ("RC-125" in msg or "RC-126" in msg) and not is_js_ts_file(file_path, content):
+                        continue
                     report.critical(f"{msg}: {line.strip()[:80]}", file_path, line_num)
                     issues_found += 1
 
@@ -3173,6 +3182,24 @@ def scan_for_credential_harvest(content: str, file_path: str, report: Validation
         # sides of the colon/equals reference the same NAME (or a known
         # placeholder); no credential value is being declared.
         if "CLAUDE_PLUGIN_OPTION_" in line or "process.env." in line:
+            continue
+        # v2.46 FP-G — GitHub Actions canonical secrets-passthrough.
+        # Lines like `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}` or
+        # `AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}` are the
+        # CORRECT, idiomatic, GitHub-recommended way to pass repo
+        # secrets to a workflow step. The right-hand side reads the
+        # GitHub-managed secret store via the `secrets.X` expression —
+        # there is NO credential value embedded; the actual value is
+        # injected at runtime by the GitHub Actions runner. Suppress
+        # when the line contains `${{ secrets.<X> }}` syntax.
+        if re.search(r"\$\{\{\s*secrets\.\w+\s*\}\}", line):
+            continue
+        # v2.46 FP-G — also skip when the line is INSIDE a YAML
+        # `env:` block referencing a GitHub Actions step output
+        # `${{ steps.<id>.outputs.<name> }}` or job output
+        # `${{ needs.<id>.outputs.<name> }}` — those are also runtime
+        # injections, not credentials.
+        if re.search(r"\$\{\{\s*(?:steps|needs|env|inputs|github)\.[\w.]+\s*\}\}", line):
             continue
         for pattern, msg in CREDENTIAL_HARVEST_PATTERNS:
             m = pattern.search(line)
@@ -4720,6 +4747,63 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                         continue
                     if rule_id == "RC-22" and plugin_is_clipboard_domain:
                         continue
+                    # v2.46 FP-F — RC-31 unpinned action — the regex matches
+                    # `uses: foo@master` in YAML, but commented-out example
+                    # blocks (`#       - uses: foo@master`) are not live
+                    # workflow steps. Skip when the line is a YAML comment.
+                    if rule_id == "RC-31" and line.lstrip().startswith("#"):
+                        continue
+                    # v2.46 FP-D — RC-63 fires on the literal phrase
+                    # "Skip confirmation" inside CLI flag declarations like
+                    # `parser.add_argument("--force", help="Skip confirmation
+                    # prompt")` and inside USAGE example comments like
+                    # `# Overwrite an existing plugin (skip confirmation)`.
+                    # Both are documenting the EXISTENCE of a `--force` flag,
+                    # not invoking it autonomously. Skip when the matched
+                    # line:
+                    #   1. Contains argparse `add_argument`/`add_option` /
+                    #      Click `option`/`argument` / Typer `Option`
+                    #      declarations
+                    #   2. Is inside a `help=`, `description=`, or `usage=`
+                    #      kwarg literal
+                    #   3. Is a Python comment line `^\s*#`
+                    #   4. Is inside a triple-quoted Python docstring
+                    #      (best-effort detection: line is inside or after
+                    #      a `"""` opener within the same physical line OR
+                    #      surrounded by `"""`)
+                    # We check the simpler conditions only, matching what the
+                    # cluster of FPs in the wild looks like.
+                    if rule_id == "RC-63":
+                        if any(api in line for api in (
+                            "add_argument(", "add_option(", "click.option(",
+                            "click.argument(", "typer.option(", "typer.argument(",
+                        )):
+                            continue
+                        if any(kw in line for kw in (
+                            "help=", "description=", "usage=", "epilog=",
+                            "metavar=",
+                        )):
+                            continue
+                        if line.lstrip().startswith("#"):
+                            continue
+                        # Inside a Python docstring single-line
+                        # (`""" --force ... """`) or a docstring-mid-block
+                        # line ("    --force         Skip confirmation prompt")
+                        # — best-effort: the line is heavily indented AND
+                        # mentions a CLI flag name `--<word>` somewhere in
+                        # nearby lines. Approximate by skipping when the
+                        # line starts with at least 4 spaces AND contains a
+                        # `--<word>` flag name literal nearby.
+                        if line.startswith("    ") and re.search(r"--[a-z][a-z0-9-]+", line, re.IGNORECASE):
+                            continue
+                        # v2.46 FP-D — also skip markdown table rows that
+                        # document a `--force`/`--yes` flag (e.g.
+                        # `| --force | No | Skip confirmation prompt |`).
+                        # Reuse the existing markdown-table helper.
+                        if _rc93_is_markdown_table_row(line) and re.search(
+                            r"--[a-z][a-z0-9-]+", line, re.IGNORECASE
+                        ):
+                            continue
                     level = effective_severity(severity.lower(), rel_path)
                 # v2.45 FP8 — RC-87 in CHANGELOG / HISTORY / NEWS /
                 # README is project narrative, never live config.
