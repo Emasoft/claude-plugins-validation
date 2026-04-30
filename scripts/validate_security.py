@@ -4382,6 +4382,48 @@ _RC76_CHANGELOG_BASENAMES = frozenset({
     "releasenotes.md", "release_notes.md", "release-notes.md",
 })
 
+# v2.46 FP-L — Plain-config / ignore-pattern files. These are read
+# by the harness or build tools as config, never by the LLM as
+# instructions. RC-76's stemmed-injection rule is FP-by-construction
+# here because words like `secret`, `leak`, `ignore`, `rules`,
+# `forget` appear legitimately in comments / patterns
+# (`# secrets that leaked into logs`, `*.rules`, `forget-me-not/`).
+_RC76_NON_AI_CONFIG_BASENAMES = frozenset({
+    ".gitignore",
+    ".dockerignore",
+    ".npmignore",
+    ".eslintignore",
+    ".prettierignore",
+    ".gcloudignore",
+    ".helmignore",
+    ".gitattributes",
+    ".editorconfig",
+    ".env.example",
+    ".env.sample",
+    ".env.template",
+    "license",
+    "license.md",
+    "license.txt",
+    "license.rst",
+    "licence",
+    "licence.md",
+    "licence.txt",
+    "copying",
+    "copying.txt",
+    "notice",
+    "notice.txt",
+    "authors",
+    "authors.md",
+    "authors.txt",
+    "contributors",
+    "contributors.md",
+    "contributors.txt",
+    "code_of_conduct.md",
+    "code-of-conduct.md",
+    "contributing.md",
+    "security.md",
+})
+
 # Vendored / cached / build-output directories that contain code the plugin
 # does NOT own. Every external scanner (trufflehog, gitleaks, semgrep,
 # cc-audit) flags transitive deps inside these trees as plugin findings,
@@ -4427,6 +4469,16 @@ def _rc76_is_source_code_file(rel_path: str) -> bool:
     extension-less shell scripts and CHANGELOG-style release-notes
     files (which reference internals when the plugin is itself an
     LLM tool but are not agent-doc instruction surfaces).
+
+    v2.46 FP-L — also skip plain-config / ignore files
+    (`.gitignore`, `.dockerignore`, `.npmignore`, `LICENSE`,
+    `pyproject.toml`, `package.json`, etc.). These are NEVER part of
+    an LLM's instruction surface; the harness reads them as config.
+    Words like `secret`, `leak`, `rules`, `ignore`, `forget` appear
+    legitimately in their comments (`# secrets that leaked into
+    logs`) and in patterns (`/secrets/`). The 80-char co-occurrence
+    rule is paranoid for AI-facing prose, but FPs by construction
+    on these surfaces.
     """
     rel = rel_path.lower().replace("\\", "/")
     if rel.endswith(_RC76_SOURCE_EXTENSIONS):
@@ -4435,6 +4487,10 @@ def _rc76_is_source_code_file(rel_path: str) -> bool:
         return True
     basename = rel.rsplit("/", 1)[-1]
     if basename in _RC76_CHANGELOG_BASENAMES:
+        return True
+    # v2.46 FP-L — plain-config / ignore files. These are pattern-only
+    # and never AI-instruction surfaces.
+    if basename in _RC76_NON_AI_CONFIG_BASENAMES:
         return True
     return False
 
@@ -4461,8 +4517,20 @@ def check_phase9_stemmed_injection(plugin_path: Path, report: ValidationReport) 
         if not signals:
             continue
         is_source_file = _rc76_is_source_code_file(rel_path)
+        content_lines_for_check = content.split("\n")
         for char_offset, stems in signals:
             line_no = content.count("\n", 0, char_offset) + 1
+            # v2.46 FP-M — skip markdown table rows. A row like
+            # `| Concern | How It's Handled |` legitimately co-mentions
+            # security stems (`token`, `rules`, `skip`) when the table
+            # describes the plugin's own security/behavior tradeoffs.
+            # The 80-char window catches column text that isn't an
+            # instruction surface for an LLM. Reuses the markdown-table
+            # detector so the box-drawing variants are skipped too.
+            if 0 <= line_no - 1 < len(content_lines_for_check):
+                check_line = content_lines_for_check[line_no - 1]
+                if _rc93_is_markdown_table_row(check_line):
+                    continue
             if _CLASSIFIER_ACTIVE:
                 # Classifier path — give RC-76 the same four-tier verdict
                 # ladder the v2.42 rules use. The classifier inspects the
