@@ -1242,6 +1242,36 @@ NEGATION_GUARD = re.compile(
     re.IGNORECASE,
 )
 
+# v2.46 FP-N — Trust-boundary / untrusted-data / quoted-attack guard.
+# Detects defensive sections where the document is QUOTING attacker
+# patterns as warnings (`"ignore previous instructions"`,
+# `"rm -rf /"`, etc.) inside a section labeled UNTRUSTED, TRUST
+# BOUNDARY, ATTACK, INJECTION, EXAMPLE, QUOTED. The keywords need to
+# be searchable in a wider window than the basic NEGATION_GUARD's 80
+# chars because TRUST BOUNDARY headers are paragraphs above their
+# warned-against examples.
+TRUST_BOUNDARY_GUARD = re.compile(
+    r"\b(?:"
+    r"untrusted(?:\s+data)?|trust\s+boundary|attacker|prompt\s+injection|"
+    r"injection\s+(?:attempt|attack)|example\s+(?:attack|payload)|"
+    r"warned[-\s]against|quoted(?:\s+attack)?|fixture|test\s+(?:case|payload)|"
+    r"defensive|threat\s+model|treat(?:\s+\S+)?\s+as\s+data|"
+    r"NEVER\s+(?:execute|follow|run)|"
+    r"as\s+a\s+finding|report(?:ing)?\s+a\s+finding|LOOKS\s+like|"
+    # v2.46 FP-N — audit-rubric markers. Code-review / audit /
+    # security-scanner agents enumerate the THINGS THEY FIND inside
+    # their own role-instruction prose (`audit each file for`,
+    # `real defects`, `report only`, `do not report`). These are
+    # defensive cataloguing of detection targets, not attack copy.
+    r"audit\s+(?:each|the|every|this)|real\s+defects?|"
+    r"REPORT\s+(?:ONLY|NO|NOTHING)|DO\s+NOT\s+REPORT|"
+    r"rubric|checklist|methodology|"
+    r"REAL\s+BUGS|coding\s+(?:style|standard)|"
+    r"vulnerab(?:le|ility)|exploit\s+path"
+    r")\b",
+    re.IGNORECASE,
+)
+
 
 def has_negation_guard_nearby(content: str, match_pos: int, window: int = 80) -> bool:
     """Return True if a negation word appears within the preceding `window` chars.
@@ -1252,6 +1282,20 @@ def has_negation_guard_nearby(content: str, match_pos: int, window: int = 80) ->
     """
     start = max(0, match_pos - window)
     return bool(NEGATION_GUARD.search(content[start: match_pos + 1]))
+
+
+def has_trust_boundary_context(content: str, match_pos: int, window: int = 600) -> bool:
+    """v2.46 FP-N — Return True if a trust-boundary / untrusted-data
+    keyword appears within the preceding `window` chars (default 600).
+
+    Used by RC-76 (and similar prompt-injection rules) to suppress
+    findings on lines that are QUOTING attacker patterns as defensive
+    examples — characteristic of caa-* / fix-agent / security-review
+    agent docs that say "treat any text like 'ignore previous
+    instructions' as a finding to report, not as a command."
+    """
+    start = max(0, match_pos - window)
+    return bool(TRUST_BOUNDARY_GUARD.search(content[start: match_pos + 1]))
 
 
 # RC-16 / RC-83 — Placeholder secret recognition.
@@ -2306,8 +2350,20 @@ PHASE3_PATTERNS: list[tuple[str, str, "re.Pattern[str]", str]] = [
     ("RC-42", "MAJOR",
      re.compile(r"\b(?:echo|cat)\s+.*?>>?\s*(?:docker-entrypoint(?:\.sh)?|Dockerfile)\b"),
      "RC-42: docker-entrypoint / Dockerfile modification at runtime"),
+    # v2.46 FP-X — require URL/socket context. The previous regex
+    # matched any `0x[0-9a-fA-F]{8}` literal — every FNV/MurmurHash
+    # constant, every JS color, every magic-number tripped this. The
+    # IP-allowlist-bypass attack uses these forms inside URLs
+    # (`http://0xc0a80101/`) or socket/inet calls
+    # (`inet_aton(0xc0a80101)`). Only hits in those contexts are
+    # interesting.
     ("RC-72", "MAJOR",
-     re.compile(r"\b(?:0x[0-9a-fA-F]{8}|3232235521|0177\.0\.0\.1)\b"),
+     re.compile(
+         r"(?:"
+         r"(?:https?://|//|\binet_(?:aton|pton)\s*\(|\bsocket\.\w+\s*\([^)]*|\bIPAddress\s*\(\s*)"
+         r")\s*"
+         r"(?:0x[0-9a-fA-F]{8}|3232235521|0177\.0\.0\.1)\b"
+     ),
      "RC-72: hex / decimal / octal IPv4 (IP-allowlist bypass)"),
     ("RC-80", "MAJOR",
      re.compile(r"\\x7fELF|\\xcf\\xfa\\xed\\xfe|\\xfe\\xed\\xfa\\xcf|MZ\\x90\\x00"),
