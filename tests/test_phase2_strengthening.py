@@ -1058,6 +1058,66 @@ class TestAcronymCompoundGeneral:
         assert not _is_acronym_compound(token), f"unexpected compound: {token!r}"
 
 
+class TestBashBooleanChainGeneral:
+    """v2.47 — bash boolean-function chain idiom must not trip
+    'Unquoted variable expansion' MAJOR.
+
+    Pattern: `$func` standing alone as a command in an `if`/`while`/
+    `&&`/`||` chain — bash treats the variable's value as a command
+    name and uses its exit status. The word-splitting that the
+    unquoted-variable rule catches is INTENTIONAL here.
+    """
+
+    @pytest.mark.parametrize("line", [
+        "if $has_x && $has_y; then",
+        "if $has_a && $has_b && $has_c; then",
+        "$has_z && do_action",
+        "$has_w || skip_action",
+        "$has_search_mcp && details=\"${details}foo, \"",
+        "$has_obs_dir || details=\"${details}bar, \"",
+        "if $has_methodology_dir && $has_methodology_moc; then",
+        "$has_methodology_dir && break",
+        "$has_obs_dir && checks_passed=$((checks_passed + 1))",
+        "if $has_search_mcp || $has_search_cli; then",
+        "$has_x && return 0",
+        "$has_y || exit 1",
+    ])
+    def test_boolean_chain_skipped(self, line: str) -> None:
+        import re
+        from validate_security import (
+            _is_bash_boolean_chain,
+            UNSAFE_VARIABLE_PATTERNS,
+        )
+        # Find the matched $VAR position via the actual pattern
+        for pattern, msg in UNSAFE_VARIABLE_PATTERNS:
+            m = pattern.search(line)
+            if m:
+                assert _is_bash_boolean_chain(line, m.start()), \
+                    f"expected boolean chain: {line!r}"
+                return
+        pytest.fail(f"no UNSAFE_VARIABLE pattern matched: {line!r}")
+
+    @pytest.mark.parametrize("line", [
+        # Real injection bugs — $VAR with arguments after, or in
+        # command position with no chain context
+        "$USER_INPUT --do-stuff",
+        "$ATTACKER --evil",
+        "$NAME arg1 arg2",
+    ])
+    def test_real_injection_still_flagged(self, line: str) -> None:
+        import re
+        from validate_security import (
+            _is_bash_boolean_chain,
+            UNSAFE_VARIABLE_PATTERNS,
+        )
+        for pattern, msg in UNSAFE_VARIABLE_PATTERNS:
+            m = pattern.search(line)
+            if m:
+                assert not _is_bash_boolean_chain(line, m.start()), \
+                    f"unexpected boolean chain: {line!r}"
+                return
+
+
 # -----------------------------------------------------------------------------
 # v2.46 FP-E — RC-40/41/42 (`>>` redirect) inside Python f-string skipped
 # -----------------------------------------------------------------------------
