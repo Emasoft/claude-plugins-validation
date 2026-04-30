@@ -5551,6 +5551,39 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
     for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
         fence_state = build_fence_state(content)
         content_lines = content.split("\n")
+        # Pre-compute Python docstring line numbers (1-based) for
+        # this file. Lines INSIDE a `"""…"""` / `'''…'''` block are
+        # documentation, NOT runtime code. Phase 3 rules
+        # (RC-02/03/63) fire on prose patterns that are intentionally
+        # quoted in docstrings explaining how a CLI flag behaves.
+        py_docstring_lines: set[int] = set()
+        if rel_path.lower().endswith(".py"):
+            in_doc = False
+            delim: str | None = None
+            for i, ln in enumerate(content_lines):
+                j = 0
+                while j < len(ln):
+                    if not in_doc:
+                        if ln.startswith('"""', j):
+                            in_doc = True
+                            delim = '"""'
+                            j += 3
+                            continue
+                        if ln.startswith("'''", j):
+                            in_doc = True
+                            delim = "'''"
+                            j += 3
+                            continue
+                        j += 1
+                    else:
+                        if delim is not None and ln.startswith(delim, j):
+                            in_doc = False
+                            delim = None
+                            j += 3
+                            continue
+                        j += 1
+                if in_doc:
+                    py_docstring_lines.add(i + 1)  # 1-based
         for line_no, line in enumerate(content_lines, start=1):
             if is_in_fenced_code_block(line_no - 1, fence_state):
                 continue
@@ -5625,7 +5658,10 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                     if (
                         rule_id in ("RC-02", "RC-03")
                         and rel_path.lower().endswith(".py")
-                        and _is_python_string_context(line.strip())
+                        and (
+                            _is_python_string_context(line.strip())
+                            or line_no in py_docstring_lines
+                        )
                     ):
                         continue
                     # v2.46 FP-D — RC-63 fires on the literal phrase
@@ -5661,14 +5697,22 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                             continue
                         if line.lstrip().startswith("#"):
                             continue
-                        # Inside a Python docstring single-line
-                        # (`""" --force ... """`) or a docstring-mid-block
-                        # line ("    --force         Skip confirmation prompt")
-                        # — best-effort: the line is heavily indented AND
-                        # mentions a CLI flag name `--<word>` somewhere in
-                        # nearby lines. Approximate by skipping when the
-                        # line starts with at least 4 spaces AND contains a
-                        # `--<word>` flag name literal nearby.
+                        # GENERAL: line is inside a Python `"""…"""`
+                        # docstring. Module/function docstrings are
+                        # documentation — they're allowed to QUOTE the
+                        # `--force` flag's behavior without that being
+                        # the script autonomously skipping
+                        # confirmation. The dedicated docstring-line
+                        # tracker handles all docstring shapes (top-
+                        # level module, class, function, multi-line
+                        # block).
+                        if line_no in py_docstring_lines:
+                            continue
+                        # Best-effort: heavily-indented docstring-mid-block
+                        # line ("    --force         Skip confirmation
+                        # prompt") — covers cases where the docstring
+                        # tracker missed (e.g. file with no module
+                        # docstring but inline help-text strings).
                         if line.startswith("    ") and re.search(r"--[a-z][a-z0-9-]+", line, re.IGNORECASE):
                             continue
                         # v2.46 FP-D — also skip markdown table rows that
