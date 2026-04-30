@@ -2365,6 +2365,61 @@ def _is_variable_anchored_absolute_path(line: str, match_start: int) -> bool:
     return bool(_VARIABLE_ANCHORED_ABSOLUTE_RE.search(prefix))
 
 
+# =============================================================================
+# v2.48 — File-context predicates (research datasets, CSV/TSV data,
+# Jupyter notebooks, lockfiles). These are GENERAL: each predicate
+# matches a structural shape, never a specific plugin's path.
+# =============================================================================
+
+_RESEARCH_DATA_SEGMENTS: frozenset[str] = frozenset({
+    "datasets", "dataset", "fixtures", "fixture",
+    "corpus", "corpora", "samples", "exemplars",
+    "benchmarks", "benchmark", "golden", "snapshots",
+    "research", "examples_data",
+})
+
+
+def _is_research_data_path(rel_path: str) -> bool:
+    """GENERAL: True when `rel_path` lives under a research/data
+    directory (datasets/, fixtures/, samples/, benchmarks/,
+    research/, …). Such files are non-executable training/reference
+    data; the plugin's runtime never reaches them. Adversarial
+    classifier datasets DELIBERATELY contain attack-shaped strings
+    (`~/.ssh/`, `/etc/`, `/usr/`) so a downstream model learns to
+    flag them — every security rule firing on every row is FP-by-
+    construction here.
+    """
+    if not rel_path:
+        return False
+    segments = rel_path.replace("\\", "/").lower().split("/")
+    return any(seg in _RESEARCH_DATA_SEGMENTS for seg in segments)
+
+
+def _is_tabular_data_file(rel_path: str) -> bool:
+    """GENERAL: True when the file extension marks it as CSV/TSV/PSV
+    tabular data. Rows in such files routinely contain URLs, font
+    names, and other strings that shape-match secret/path regexes
+    by accident (e.g. Google Fonts URLs `:wght@300` matches
+    `://user:pass@host` DB-conn pattern). The plugin runtime never
+    executes a CSV row.
+    """
+    if not rel_path:
+        return False
+    return rel_path.lower().endswith((".csv", ".tsv", ".psv", ".tab"))
+
+
+def _is_jupyter_notebook(rel_path: str) -> bool:
+    """GENERAL: True when the file is a `.ipynb` Jupyter notebook.
+    Notebooks are JSON envelopes wrapping cell content; the JSON-
+    encoded `\\n`/`\\t` escapes shape-match `[A-Za-z]:\\\\` Windows-
+    path patterns. A plugin's loader never reads `.ipynb`; they're
+    research/tutorial artifacts living alongside runtime code.
+    """
+    if not rel_path:
+        return False
+    return rel_path.lower().endswith(".ipynb")
+
+
 def _rc21_is_subprocess_prep(line: str, surrounding_lines: list[str]) -> bool:
     """RC-21 bulk env-var harvest — skip `os.environ.copy()` /
     `dict(os.environ)` when the resulting variable feeds a subprocess
