@@ -5378,6 +5378,84 @@ def _rc76_is_security_audit_role(rel_path: str) -> bool:
     return any(kw in part for kw in role_keywords for part in parts)
 
 
+# GENERAL: RC-76 attack-shape signals. RC-76 by itself just looks for
+# >=3 stem co-occurrences in an 80-char window — that's a NOISE
+# detector. To upgrade a stem co-occurrence to a real prompt-injection
+# finding, we want to ALSO see at least one of these structural signals
+# in or near the line:
+#
+# 1. **Jailbreak imperatives**: "ignore previous", "ignore all
+#    instructions", "disregard the above", "forget everything",
+#    "override instructions", "pretend you", "act as", "you are now",
+#    "switch persona", "DAN mode", "developer mode".
+# 2. **Second-person directives + system override**: "you must …
+#    instructions", "your task is to ignore", "your real instructions",
+#    etc. — second-person + override semantics.
+# 3. **Quoted role-play hints** that shift LLM context: "the system
+#    prompt is …", "previous instructions said …", "respond only with",
+#    "do not include", "do not warn".
+# 4. **System-prompt leakage requests**: "tell me your system prompt",
+#    "reveal your instructions", "what are your rules", "print the
+#    above", "echo your prompt".
+#
+# These shapes are the ACTUAL prompt-injection threat. A line that has
+# 3 stem co-occurrences but NO attack shape is documentation /
+# explanatory prose — the rule should not fire on it in agent/skill
+# bodies that legitimately describe security topics.
+_RC76_ATTACK_SHAPE_RE = re.compile(
+    r"(?:"
+    # Jailbreak imperatives
+    r"\bignore\s+(?:all\s+)?(?:previous|prior|the\s+above|above|earlier)\b"
+    r"|\bdisregard\s+(?:all\s+)?(?:previous|prior|the\s+above|above|earlier)\b"
+    r"|\bforget\s+(?:all|everything|prior|the\s+above)\b"
+    r"|\boverride\s+(?:the\s+|all\s+)?(?:instructions?|prompt|rules|system)\b"
+    r"|\bpretend\s+(?:you|to\s+be)\b"
+    r"|\bact\s+as\s+(?:if|though|a)\b"
+    r"|\byou\s+are\s+now\b"
+    r"|\b(?:DAN|jailbreak|developer)\s+mode\b"
+    # System-prompt leakage requests
+    r"|\b(?:reveal|tell\s+me|print|echo|show|output)\s+(?:your|the)\s+(?:system\s+)?(?:prompt|instructions|rules)\b"
+    r"|\bwhat\s+(?:are|were)\s+your\s+(?:original\s+)?(?:instructions|rules|prompt)\b"
+    # Override semantics with second-person
+    r"|\byour\s+(?:real|actual|true)\s+(?:instructions?|task|goal|prompt)\b"
+    r"|\bnew\s+(?:instructions?|prompt|rules)\s*[:.]?\s*$"
+    # Refusal-suppression imperatives
+    r"|\bdo\s+not\s+(?:warn|refuse|disclose|mention)\b"
+    r"|\brespond\s+only\s+with\b"
+    r"|\bnever\s+say\s+(?:no|i\s+can'?t|i\s+cannot)\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _rc76_has_attack_shape(line: str, surrounding: str) -> bool:
+    """GENERAL: True when `line` (or its 200-char surrounding context)
+    contains a structural prompt-injection signal beyond mere stem
+    co-occurrence.
+
+    Stem co-occurrence by itself is NOISE — the same vocabulary lives
+    in legitimate documentation about prompt design, security topics,
+    instruction tuning, etc. A REAL prompt-injection attack has an
+    additional structural signal: a jailbreak imperative ("ignore
+    previous"), a system-prompt leakage request ("tell me your
+    instructions"), an override-semantics phrase ("your real task"),
+    or a refusal-suppression imperative ("do not warn").
+
+    We test BOTH the matched line and a small window of surrounding
+    text (200 chars) so multi-line attack shapes don't slip through.
+
+    For agent/skill/command/plugin-readme files, this predicate is
+    REQUIRED for RC-76 to fire. For raw prose documentation
+    (like a tutorial about security), the absence of attack shape
+    means RC-76 is FP and should be suppressed.
+    """
+    if _RC76_ATTACK_SHAPE_RE.search(line):
+        return True
+    if surrounding and _RC76_ATTACK_SHAPE_RE.search(surrounding):
+        return True
+    return False
+
+
 def check_phase9_stemmed_injection(plugin_path: Path, report: ValidationReport) -> int:
     """Phase 9 — RC-76 stemmed semantic injection classifier.
 
@@ -5458,6 +5536,38 @@ def check_phase9_stemmed_injection(plugin_path: Path, report: ValidationReport) 
                 # security keywords by design. Suppress all RC-76.
                 if is_security_audit_role:
                     continue
+                # GENERAL FP-Q: in ALL ai-instruction-surface markdown,
+                # RC-76 requires an actual ATTACK-SHAPE signal in or
+                # near the line. The 80-char co-occurrence rule was
+                # designed to catch obfuscated paraphrased attacks, but
+                # without a structural attack shape (jailbreak
+                # imperative, system-prompt leakage request, override-
+                # semantics phrase, refusal-suppression imperative), a
+                # stem co-occurrence is just NOISE — the same
+                # vocabulary lives in legit documentation about prompt
+                # engineering, security topics, instruction tuning,
+                # tool-use design, etc.
+                #
+                # Real attacks: "ignore previous instructions", "you
+                # are now DAN", "reveal your system prompt", "do not
+                # warn the user". These are unambiguous and structural.
+                #
+                # For raw prose markdown (.md / .mdx / .markdown), if
+                # we have stem co-occurrence but NO attack shape in the
+                # 200-char window, suppress.
+                ext = rel_path.lower().rsplit(".", 1)[-1] if "." in rel_path else ""
+                if ext in ("md", "mdx", "markdown"):
+                    line_text = (
+                        content_lines_for_check[line_no - 1]
+                        if 0 <= line_no - 1 < len(content_lines_for_check)
+                        else ""
+                    )
+                    # Build a 200-char window centered on the match
+                    window_start = max(0, char_offset - 100)
+                    window_end = min(len(content), char_offset + 100)
+                    window_text = content[window_start:window_end]
+                    if not _rc76_has_attack_shape(line_text, window_text):
+                        continue
                 level = effective_severity("major", rel_path)
             getattr(report, level)(
                 f"RC-76: stemmed prompt-injection signal — {len(stems)} trigger stems "
