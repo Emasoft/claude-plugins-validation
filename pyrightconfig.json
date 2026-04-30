@@ -1,5 +1,7 @@
 {
   "pythonVersion": "3.12",
+  "venvPath": ".",
+  "venv": ".venv",
   "extraPaths": ["scripts", "tests"],
   "reportMissingImports": "warning",
   "typeCheckingMode": "basic",
@@ -9,11 +11,12 @@
   "executionEnvironments": [
     {
       "root": "tests",
-      "extraPaths": ["../scripts", "."]
+      "extraPaths": ["scripts", "tests"],
+      "reportUnusedVariable": "none"
     },
     {
       "root": "scripts",
-      "extraPaths": ["."]
+      "extraPaths": ["scripts"]
     }
   ]
 }
