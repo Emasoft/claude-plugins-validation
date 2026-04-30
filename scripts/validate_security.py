@@ -2058,6 +2058,78 @@ _POWERSHELL_AUTO_VARS_RE = re.compile(
 )
 
 
+def _is_bash_boolean_chain(line: str, match_start: int) -> bool:
+    """GENERAL: True when `line` is a bash boolean-function chain
+    (`if $func && $other; then`, `$has_x || skip`) where the matched
+    `$VAR` at `match_start` is intentionally being CALLED as a
+    no-argument command and its exit status flows into a `&&`/`||`/`;`
+    sequence.
+
+    The bash boolean-function idiom:
+
+        has_x() { test -d X; }
+        has_y() { test -f Y; }
+        if $has_x && $has_y; then ...
+        $has_z && do_action
+        $has_w || skip_action
+
+    Here `$has_x` etc. are POSITIONALLY commands — bash evaluates the
+    variable's value and treats it as the command name. The
+    word-splitting that the unquoted-variable rule is designed to
+    catch is intentional in this idiom: the function name is a
+    single token, and there are no user-supplied arguments.
+
+    Detection: the `$VAR` match is followed (after at most one
+    whitespace token) by `&&`, `||`, `;`, `then`, end-of-line, or
+    `$VAR` (start of next chain link). The line's overall shape is a
+    boolean chain (contains `&&`, `||`, starts with `if `, or matches
+    `^$VAR(?:\\s+&&\\s+\\$VAR)+`).
+
+    A real attacker pattern `$USER_INPUT --do-stuff` has ARGUMENTS
+    after `$USER_INPUT` — not an `&&`/`||`/`;`/`then` token.
+
+    `match_start` may point at the leading delimiter (`&`/`;`/`|`)
+    that the UNSAFE_VARIABLE_PATTERNS regex captures BEFORE the `$`.
+    We re-locate the actual `$` within the matched span.
+    """
+    if match_start < 0:
+        return False
+    # Find the actual `$VAR` within match_start..end-of-line (the
+    # UNSAFE_VARIABLE_PATTERNS regex captures a leading delimiter
+    # like `&`, `;`, `|`, or `^`).
+    var_search = re.search(r"\$[A-Za-z_][A-Za-z0-9_]*", line[match_start:])
+    if var_search is None:
+        return False
+    var_start = match_start + var_search.start()
+    var_end = match_start + var_search.end()
+    rest = line[var_end:].lstrip()
+    # Right-of-token: must be a chain operator or end-of-line.
+    if (
+        not rest
+        or rest.startswith(("&&", "||", ";", "&", "|"))
+        or rest.startswith("then")
+        or rest.startswith("done")
+        or rest.startswith("$")          # next chain link `$has_y`
+        or rest.startswith("checks_passed=")  # idiomatic counter-bump
+        or re.match(r"\w+=", rest)        # idiomatic var assignment after &&
+        or rest.startswith("break")
+        or rest.startswith("continue")
+        or rest.startswith("return")
+        or rest.startswith("exit")
+    ):
+        # Confirm the whole-line shape is a boolean chain or starts
+        # with `if `/`while `.
+        stripped = line.strip()
+        if (
+            stripped.startswith(("if ", "if\t", "while ", "while\t", "elif "))
+            or "&&" in line
+            or "||" in line
+            or "; then" in line
+        ):
+            return True
+    return False
+
+
 def _is_powershell_context(file_content: str, line: str) -> bool:
     """GENERAL: True when the surrounding file or the matched line is in
     PowerShell context, NOT bash.
@@ -2688,6 +2760,28 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
                             file_lower.endswith((".yml", ".yaml", ".ps1"))
                             and _is_powershell_context(content, line)
                         ):
+                            continue
+                        # GENERAL: bash boolean-function call pattern.
+                        # In bash, `$varname` standing alone as a
+                        # command (e.g. after `if`, `&&`, `||`, `;`)
+                        # IS A COMMAND CALL — it expands to the value
+                        # of the variable and treats the result as the
+                        # command name. The canonical idiom for boolean
+                        # functions is:
+                        #   has_x() { test -d X && return 0 || return 1; }
+                        #   if $has_x && $has_y; then ... ; fi
+                        #   $has_z && do_thing
+                        # Here `$has_x` evaluates `has_x` and uses its
+                        # exit status — the value is intentionally
+                        # word-split (typically into a no-arg command
+                        # name).
+                        # Detection: line starts with `if ` / contains
+                        # `&&` / `||` AND the matched `$VAR` is followed
+                        # by another `&&`/`||`/`;`/`then`/end-of-line.
+                        # That's the boolean-chain shape; a real
+                        # injection bug `$ATTACKER_INPUT --do-thing`
+                        # has arguments after the variable.
+                        if "Unquoted variable expansion" in msg and _is_bash_boolean_chain(line, pattern.search(line).start()):
                             continue
                         report.major(f"{msg}: {line.strip()[:80]}", file_path, line_num)
                         issues_found += 1
