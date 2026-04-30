@@ -1676,6 +1676,50 @@ def _line_is_pattern_definition(file_ref: str, line_number: int) -> bool:
     return False
 
 
+# v2.46 — Status-report message detection. CPV (and similar validators)
+# emits report.passed("No X detected") / report.warning("Y issue") /
+# print("Z found") strings as part of normal validation output. These
+# strings contain rule keywords by design — `"No sandbox escape
+# patterns detected"` mentions "sandbox escape" in plain English so
+# the user knows what was checked. cc-audit and similar scanners flag
+# such lines because the literal text matches their patterns; suppress
+# this whole class.
+_STATUS_REPORT_HINTS = (
+    "report.passed(", "report.warning(", "report.info(",
+    "report.minor(", "report.nit(", "report.major(",
+    "report.critical(", "report.add(",
+    "console.log(", "console.warn(", "console.error(",
+    "logger.info(", "logger.warning(", "logger.error(",
+    "log.info(", "log.warn(", "log.error(",
+    "echo \"", "echo '",
+    "print(", "println!(", "eprintln!(",
+)
+
+
+def _line_is_status_report_message(file_ref: str, line_number: int) -> bool:
+    """True if line `line_number` of `file_ref` is a status-report
+    message like `report.passed("...")`, `print("...")`, etc.
+
+    These lines contain rule keywords as part of the user-facing
+    description of what was validated, not as live payloads. External
+    scanners that match on the literal string body of those calls
+    produce FPs by construction.
+    """
+    try:
+        path = Path(file_ref)
+        if not path.is_file():
+            return False
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            for i, ln in enumerate(f, start=1):
+                if i == line_number:
+                    return any(hint in ln for hint in _STATUS_REPORT_HINTS)
+                if i > line_number:
+                    break
+    except (OSError, ValueError):
+        pass
+    return False
+
+
 # v2.41.0 — per-rule context guards. Each helper answers the same shape of
 # question: "given the matched line, is this match a known-benign context?"
 # Returning True means the rule should suppress the finding for THIS match
@@ -2218,6 +2262,45 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
             if not (is_python_file and ('"' in stripped or "'" in stripped)):
                 for pattern, msg in UNSAFE_VARIABLE_PATTERNS:
                     if pattern.search(line):
+                        # v2.46 FP-C — bash arithmetic comparisons
+                        # `[[ $VAR -gt N ]]`, `[[ $VAR -lt 0 ]]`,
+                        # `[[ $VAR -eq 0 ]]`, etc. are SAFE — `[[ ]]`
+                        # treats `-gt`/`-lt`/`-eq`/`-ne`/`-le`/`-ge`
+                        # as numeric operators that don't word-split
+                        # the operand. This is bash idiomatic and
+                        # documented behavior. The rule should still
+                        # fire on STRING comparisons `[[ $VAR == "x" ]]`
+                        # where word-splitting matters, but the
+                        # numeric ops are safe.
+                        if "comparison" in msg.lower() and re.search(
+                            r"-(?:gt|lt|eq|ne|le|ge)\b", line
+                        ):
+                            continue
+                        # v2.46 FP-B — PowerShell uses `$varname` as
+                        # the canonical variable syntax. PowerShell
+                        # `run:` blocks in GitHub Actions YAML are
+                        # marked with `shell: pwsh` (the line above
+                        # the run: block). Best-effort detection: when
+                        # the YAML file contains `shell: pwsh` and the
+                        # match line has the PowerShell variable
+                        # assignment shape `$NAME = ...` or uses
+                        # PowerShell-only built-ins (Get-Content,
+                        # Set-Content, Compress-Archive, New-Item,
+                        # Copy-Item, Remove-Item, [regex]::Match, etc.),
+                        # skip — the unquoted-variable rule is for
+                        # bash, not PowerShell.
+                        if file_lower.endswith((".yml", ".yaml", ".ps1")) and (
+                            "shell: pwsh" in content
+                            or any(cmdlet in line for cmdlet in (
+                                "Get-Content", "Set-Content",
+                                "Compress-Archive", "Expand-Archive",
+                                "New-Item", "Copy-Item", "Remove-Item",
+                                "Move-Item", "Test-Path", "Get-ChildItem",
+                                "Out-File", "Write-Host", "Write-Output",
+                                "[regex]::", "$PSScriptRoot",
+                            ))
+                        ):
+                            continue
                         report.major(f"{msg}: {line.strip()[:80]}", file_path, line_num)
                         issues_found += 1
 
@@ -3854,6 +3937,21 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
             ):
                 continue
 
+            # v2.46 — also skip cc-audit findings on REPORT-STATUS lines
+            # like `report.passed("No sandbox escape patterns detected")`,
+            # `report.warning("..."), `report.info("...")`, `print("No
+            # X detected")`. These are STATUS MESSAGES describing what
+            # the validator just checked — the literal string contains
+            # the rule name as part of the description. The validator's
+            # OWN status output is not a payload.
+            if (
+                file_ref
+                and isinstance(line, int)
+                and line > 0
+                and _line_is_status_report_message(file_ref, line)
+            ):
+                continue
+
             cpv_level = severity_map.get(severity, "warning")
             report_fn = getattr(report, cpv_level)
             report_fn(f"cc-audit {rule_id}: {str(message)[:100]}", file_ref, line if isinstance(line, int) else 0)
@@ -4229,14 +4327,21 @@ def check_phase1_credential_rules(plugin_path: Path, report: ValidationReport) -
                 continue
             for pattern in ENV_BULK_HARVEST_PATTERNS:
                 if pattern.search(line):
-                    surrounding = _surrounding_lines(content_lines, line_no - 1, window=4)
+                    # v2.46 — widen the surrounding window to 15 lines.
+                    # The `env = os.environ.copy()` idiom is often set
+                    # early in a function, then mutated through several
+                    # `if`/conditional blocks (`env["GIT_TOKEN"] = ...`)
+                    # before being passed to `subprocess.run(env=env)`
+                    # 10+ lines later. The v2.41 window=4 missed these.
+                    surrounding_classifier = _surrounding_lines(content_lines, line_no - 1, window=4)
+                    surrounding_subproc = _surrounding_lines(content_lines, line_no - 1, window=15)
                     # v2.42 — opt-in classifier path (TRDD-fe006962). When
                     # active, the per-rule classifier subsumes the v2.41
                     # binary `_rc21_is_subprocess_prep` guard and can also
                     # demote (LIKELY_FP → MINOR) instead of suppressing.
                     if _CLASSIFIER_ACTIVE:
                         severity, _note = _classifier_decision(
-                            "RC-21", "major", line, surrounding,
+                            "RC-21", "major", line, surrounding_classifier,
                             _file_role_from_path(rel_path), rel_path,
                         )
                         if severity is None:
@@ -4244,7 +4349,7 @@ def check_phase1_credential_rules(plugin_path: Path, report: ValidationReport) -
                         level = effective_severity(severity, rel_path)
                     else:
                         # v2.41.0 binary guard: subprocess env-prep is FP.
-                        if _rc21_is_subprocess_prep(line, surrounding):
+                        if _rc21_is_subprocess_prep(line, surrounding_subproc):
                             break
                         level = effective_severity("major", rel_path)
                     getattr(report, level)(
@@ -4745,6 +4850,14 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                         continue
                     if rule_id == "RC-93" and _rc93_is_markdown_table_row(line):
                         continue
+                    # v2.46 FP-O extended — RC-93 visual-deception only
+                    # makes sense on AI-instruction surfaces. Python /
+                    # JS / TS / Go / Rust / shell source code uses long
+                    # whitespace runs for column-alignment of comments
+                    # and dict keys, not deception. Reuse the same
+                    # source-file gate that RC-76 uses.
+                    if rule_id == "RC-93" and _rc76_is_source_code_file(rel_path):
+                        continue
                     if rule_id == "RC-22" and plugin_is_clipboard_domain:
                         continue
                     # v2.46 FP-F — RC-31 unpinned action — the regex matches
@@ -4752,6 +4865,39 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                     # blocks (`#       - uses: foo@master`) are not live
                     # workflow steps. Skip when the line is a YAML comment.
                     if rule_id == "RC-31" and line.lstrip().startswith("#"):
+                        continue
+                    # v2.46 FP-E — RC-40/41/42 (`>>` redirects to ssh
+                    # authorized_keys / .git/hooks / Dockerfile) are
+                    # CRITICAL when written as live shell commands but
+                    # FP-by-construction when matched inside a Python
+                    # `print()`/`cprint()` f-string that is REPORTING on
+                    # a copy that already happened (not a redirect). The
+                    # match in `cprint(f"... -> .git/hooks/pre-push")`
+                    # finds `> .git/hooks/...` because `->` includes a
+                    # `>`. Apply the existing Python-string-context
+                    # detector to Python source.
+                    if (
+                        rule_id in ("RC-40", "RC-41", "RC-42")
+                        and rel_path.lower().endswith(".py")
+                        and _is_python_string_context(line.strip())
+                    ):
+                        continue
+                    # v2.46 FP-N — RC-02/RC-03 prose-conditional /
+                    # coercive-authority detection should not fire on
+                    # user-facing hint strings inside a Python list
+                    # literal `["- If you see X, ensure Y", ...]`. The
+                    # regex matches `if you see X` followed by any
+                    # word starting with `do`/`then`/etc. — `Docker`
+                    # starts with `Do` so the rule fires on plain
+                    # English help text. Skip Python string contexts
+                    # for these prose-injection rules. (Real prompt
+                    # injection lives in markdown agent/skill bodies,
+                    # not in Python source.)
+                    if (
+                        rule_id in ("RC-02", "RC-03")
+                        and rel_path.lower().endswith(".py")
+                        and _is_python_string_context(line.strip())
+                    ):
                         continue
                     # v2.46 FP-D — RC-63 fires on the literal phrase
                     # "Skip confirmation" inside CLI flag declarations like
