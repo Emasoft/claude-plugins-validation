@@ -64,11 +64,15 @@ If no exact match is found, fuzzy matching is used (e.g., `cpt-validate` → `cp
 | Option | Description |
 |--------|-------------|
 | `--strict` | Treat NIT issues as blocking (exit 4) |
-| `--verbose` | Show all checks including passed |
-| `--json` | Output results as JSON |
-| `--report PATH` | Save full output to file, print compact summary to stdout |
+| `--verbose` | Show all checks including passed; expands the report-file body |
+| `--json` | Output results as JSON (skips the auto-saved report file) |
+| `--report PATH` | Write the aggregated report to PATH explicitly |
 | `--marketplace-only` | Skip plugin.json requirement for marketplace-only repos |
 | `--skip-platform-checks [PLATFORM...]` | Skip platform-specific checks (e.g., `--skip-platform-checks windows`) |
+
+> **Default output is path-only.** Without `--json` or `--report`, `validate_security.py` auto-saves the aggregated report to `$CLAUDE_PROJECT_DIR/reports/security/<TS>-<plugin>.md` and prints **only** the compact summary (counts table + verdict + plugin path + report path). Findings are bucketed by `(level, rule_id)` so each vulnerability TYPE shows its full explanation exactly once with a count and capped file:line list — token-bounded reports, no findings ever silently dropped.
+
+> **External scanners always run.** Six external scanners run on every invocation: cc-audit, tirith, trufflehog, gitleaks, semgrep, and the Cisco AI Defense skill-scanner (programmatic-only, no API-key engines). There are no `--no-*` opt-out flags. Each scanner self-skips with an INFO advisory if its source binary cannot be resolved. Env knobs: `CPV_NO_TIRITH_INSTALL=1` disables tirith's auto-install fallback; `CPV_CISCO_SCAN_TIMEOUT_S=<seconds>` overrides the 600s Cisco-scan default. See the project README for the full scanner inventory with source-URL links.
 
 ## What Gets Validated
 

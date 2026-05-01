@@ -67,7 +67,22 @@ Through extensive empirical testing of Claude Code's plugin loader (April 2026),
 
 All five rules are documented with empirical evidence in [`skills/fix-validation/references/empirical-loading-bugs.md`](skills/fix-validation/references/empirical-loading-bugs.md) (13 test plugin scenarios, debug-log excerpts, runtime probes).
 
-All checks run as pure Python -- no API calls, no tokens consumed, no data sent anywhere.
+All in-process checks run as pure Python — no API calls, no tokens consumed, no data sent anywhere.
+
+### External Security Scanners (always-run, programmatic-only)
+
+`validate_security.py` orchestrates **six external scanners** alongside its in-process rule packs. Each is invoked unconditionally on every scan and self-skips with an INFO advisory when its source binary cannot be resolved on PATH or installed from its source URL. There is **no opt-out flag** — preventing a caller from accidentally silencing coverage. The `enable_*` keyword arguments on `validate_security()` survive only as test-isolation knobs.
+
+| # | Scanner | Source | What it adds | Resolution path |
+|---|---------|--------|--------------|-----------------|
+| 16 | **cc-audit** | [cc-audit/cc-audit](https://github.com/cc-audit/cc-audit) | 100+ AI-specific threat rules tailored to Claude Code plugins | `npx --yes @cc-audit/cc-audit` (auto-fetches from npm) |
+| 17 | **tirith** | [PortSwigger/tirith](https://github.com/PortSwigger/tirith) | Terminal-security, homograph domains, ANSI/bidi/zero-width injection, hidden Unicode, supply-chain pipe-to-shell | PATH → docker → nix → auto-install (brew/npm/cargo); set `CPV_NO_TIRITH_INSTALL=1` to disable the install fallback |
+| 18 | **trufflehog** | [trufflesecurity/trufflehog](https://github.com/trufflesecurity/trufflehog) | ~700 verified-secret detectors (Stripe, Slack, AWS, GitHub, …) | `brew install trufflehog` or `go install github.com/trufflesecurity/trufflehog/v3@latest` |
+| 19 | **gitleaks** | [gitleaks/gitleaks](https://github.com/gitleaks/gitleaks) | ~150 secret detectors with regex+entropy heuristics, complements trufflehog | `brew install gitleaks` or `docker run --rm -v $(pwd):/src zricethezav/gitleaks` |
+| 20 | **semgrep** | [semgrep/semgrep](https://github.com/semgrep/semgrep) | Thousands of static-analysis rules via the `p/security-audit` and `p/secrets` rule packs | `brew install semgrep` or `pipx install semgrep` |
+| 21 | **Cisco AI Defense skill-scanner** | [cisco-ai-defense/skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) | Static (YAML+YARA), Bytecode, Pipeline (command taint), Behavioral (AST dataflow), Trigger (vague-description) — programmatic-only mode (no LLM/Meta/VirusTotal/AI Defense cloud, all of which need API keys) | `uvx --from cisco-ai-skill-scanner skill-scanner` (auto-fetches from PyPI on first run; set `CPV_CISCO_SCAN_TIMEOUT_S=<sec>` to override the 600s default) |
+
+Every external scanner's findings are routed through the same self-scan filter chain CPV applies to its own rules (`cpv_self_scan_skip` → vendored-deps → dev-scratch → test-files → FP-corpus markdown → per-line catalog/docstring/comment pattern-source predicate). This guarantees that scanning CPV with CPV — or scanning any plugin that ships its own rule catalogs — never surfaces the catalog source as a finding. The aggregator then groups all findings by `(level, rule_id)` so each vulnerability TYPE shows its full explanation exactly once, followed by an occurrence count and a capped file:line list — bounded report size, no findings ever silently dropped.
 
 ### Claude Code Documentation
 
@@ -168,11 +183,15 @@ These flags work with all validators:
 
 | Flag | What It Does |
 |------|-------------|
-| `--verbose` or `-v` | Show all results, including checks that passed. |
-| `--report PATH` | Save full report to a file; print compact summary to terminal. |
+| `--verbose` or `-v` | Show all results, including INFO and PASSED. Also expands the report-file body. |
+| `--report PATH` | Write the aggregated report to PATH explicitly. |
 | `--json` | Output as JSON (for scripts and CI/CD). |
 | `--strict` | Treat NIT-level issues as failures too. |
 | `--marketplace-only` | Skip `plugin.json` requirement (for marketplace-only distribution). |
+
+> **Default output is path-only.** Without `--json` or `--report`, `validate_security.py` auto-saves the aggregated report to `$CLAUDE_PROJECT_DIR/reports/security/<timestamp>-<plugin>.md` (or `$TMPDIR/reports/security/...` when `CLAUDE_PROJECT_DIR` is unset, e.g. on a remote `uvx` invocation) and prints **only** the compact summary (counts table + verdict + plugin path + report path) to stdout. This guarantees that an agent invoking the validator gets a tiny, predictable stdout payload that never floods its context window.
+
+> **External scanners always run.** There are no `--no-tirith` / `--no-trufflehog` / `--no-gitleaks` / `--no-semgrep` opt-out flags. Each external scanner self-skips with an INFO advisory if its source binary cannot be resolved on PATH or installed from its source URL. Set `CPV_NO_TIRITH_INSTALL=1` to disable tirith's auto-install fallback in CI sandboxes that block container pulls; set `CPV_CISCO_SCAN_TIMEOUT_S=<seconds>` to override the 600s default for very large trees. See [External Security Scanners](#external-security-scanners-always-run-programmatic-only) above for the full inventory.
 
 ### Reading the Results
 
