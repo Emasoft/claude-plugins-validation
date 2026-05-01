@@ -75,6 +75,15 @@ uv run python scripts/validate_marketplace.py          /path/to/marketplace --re
 uv run python scripts/validate_xref.py                 /path/to/plugin --report "$MAIN_ROOT/reports/validate_xref/$TS-$SLUG.md"
 uv run python scripts/validate_documentation.py        /path/to/plugin --report "$MAIN_ROOT/reports/validate_documentation/$TS-$SLUG.md"
 uv run python scripts/validate_security.py             /path/to/plugin --report "$MAIN_ROOT/reports/validate_security/$TS-$SLUG.md"
+# `validate_security.py` is the most comprehensive checker — in-process AI/security rule packs
+# PLUS six external scanners that always run (no opt-out flags) and self-skip when their
+# source binary is unreachable: cc-audit (npx), tirith (PATH/docker/nix), trufflehog/gitleaks/
+# semgrep (PATH or installer), Cisco AI Defense skill-scanner (uvx remote, programmatic-only —
+# no API-key engines). Without `--report`, the script auto-saves to
+# `$CLAUDE_PROJECT_DIR/reports/security/<TS>-<plugin>.md` and prints ONLY the compact summary
+# to stdout (path-only) so an agent invoking it never gets flooded.
+# Env knobs: `CPV_NO_TIRITH_INSTALL=1` disables tirith's auto-install fallback;
+# `CPV_CISCO_SCAN_TIMEOUT_S=<seconds>` overrides the 600s Cisco-scan default.
 uv run python scripts/validate_rules.py                /path/to/plugin --report "$MAIN_ROOT/reports/validate_rules/$TS-$SLUG.md"
 uv run python scripts/validate_enterprise.py           /path/to/plugin --report "$MAIN_ROOT/reports/validate_enterprise/$TS-$SLUG.md"
 uv run python scripts/validate_encoding.py             /path/to/plugin --report "$MAIN_ROOT/reports/validate_encoding/$TS-$SLUG.md"
