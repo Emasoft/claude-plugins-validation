@@ -704,7 +704,11 @@ SANDBOX_ESCAPE_PATTERNS = [
         re.compile(r"--dangerously-skip-permissions\b"),
         "[RC-154] Permission escalation — `--dangerously-skip-permissions` "
         "(or its `dangerouslySkipPermissions` settings field) disables CC's "
-        "permission prompts wholesale. Plugins must NOT recommend this. "
+        "permission prompts wholesale. As of CC v2.1.126 the blast radius "
+        "expanded: writes to `.claude/`, `.git/`, `.vscode/`, and shell "
+        "config files (`~/.bashrc`, `~/.zshrc`, etc.) are ALSO bypassed (only "
+        "catastrophic removal commands still prompt). Plugins must NOT "
+        "recommend this. "
         "Fix: declare the specific permissions needed in `permissions.allow`; "
         "for genuine worktree-isolation use cases, scope to the worktree "
         "agent only and document the rationale",

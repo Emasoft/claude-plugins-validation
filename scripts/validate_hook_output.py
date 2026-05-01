@@ -163,8 +163,10 @@ HOOK_OUTPUT_EVENT_FIELDS: dict[str, frozenset[str]] = {
         }
     ),
     # hooks.md L1177-1182
+    # v2.1.121 generalized hookSpecificOutput.updatedToolOutput from MCP-only
+    # to all tools — both names accepted (legacy + new).
     "PostToolUse": frozenset(
-        {"decision", "reason", "additionalContext", "updatedMCPToolOutput"}
+        {"decision", "reason", "additionalContext", "updatedMCPToolOutput", "updatedToolOutput"}
     ),
     # hooks.md L1234
     "PostToolUseFailure": frozenset({"additionalContext"}),

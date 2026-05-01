@@ -318,6 +318,7 @@ KNOWN_SETTINGS_KEYS: frozenset[str] = frozenset(
         "disableDeepLinkRegistration",  # v2.1.83
         "keychainFallback",  # sensitive-credential keychain fallback
         "allowManagedDomainsOnly",  # v2.1.69 — managed domain allowlist
+        "allowManagedReadPathsOnly",  # v2.1.126 — managed read-path allowlist (sibling of allowManagedDomainsOnly)
         "language",  # v2.1.0 — e.g. "japanese"
         "disallowAllHooks",  # v2.1.49
         "disableAllHooks",  # v2.1.49 — companion toggle

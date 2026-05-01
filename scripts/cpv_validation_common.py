@@ -602,6 +602,7 @@ VALID_PLUGIN_ENV_VARS = {
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_BASE_URL",
     "ANTHROPIC_BEDROCK_BASE_URL",
+    "ANTHROPIC_BEDROCK_SERVICE_TIER",  # v2.1.122 — Bedrock service tier (default/flex/priority)
     "ANTHROPIC_BETAS",  # v2.1.98 — beta opt-ins as env var
     "ANTHROPIC_CUSTOM_HEADERS",
     "ANTHROPIC_VERTEX_BASE_URL",
@@ -710,6 +711,7 @@ VALID_PLUGIN_ENV_VARS = {
     "DISABLE_UPDATES",  # v2.1.118 — strict superset of DISABLE_AUTOUPDATER
     "AI_AGENT",  # v2.1.120 — set by CC for subprocess attribution
     "CLAUDE_CODE_FORK_SUBAGENT",  # v2.1.117 — opt-in for forked subagents on external builds
+    "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",  # v2.1.126 — host-managed deployment marker (Bedrock/Vertex/Foundry)
     # Anthropic *_SUPPORTED_CAPABILITIES — spec-correct suffix
     "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES",
     "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES",
