@@ -247,6 +247,74 @@ class TestScanForPathTraversal:
             f"Shell printf `:\\n` escape must not trigger RC-113; got {win_msgs}"
         )
 
+    def test_path_traversal_skips_shell_grep_E_pattern_source(self):
+        """RC-110 / RC-112 / RC-113 should NOT flag path text inside `grep -E '...'` pattern source."""
+        # FP from nyldn (octopus): `grep -E "^\*\*Schema:\*\*"` contains
+        # `:\*` matching the Windows-path regex; the `*` is a regex
+        # escape inside grep's pattern source, not a Windows folder.
+        # Also FP from tzachbon (smart-ralph): `grep -E '^[^#]*/home/'`
+        # contains `/home/` matching RC-135 — but it's a regex source,
+        # not a live path.
+        content = (
+            "#!/usr/bin/env bash\n"
+            'schema=$(grep -E "^\\*\\*Schema:\\*\\*" "$STATE_FILE" | sed \'s/^Schema: //\')\n'
+            'if grep -E \'^[^#]*/home/|^[^#]*/usr/|^[^#]*/opt/\' "$script" | grep -q .; then\n'
+            '  echo "found"\n'
+            'fi\n'
+        )
+        report = ValidationReport()
+        count = scan_for_path_traversal(content, "scripts/hook-linter.sh", report)
+        win_or_path = [r for r in report.results
+                       if r.level == "CRITICAL" and (
+                           "Windows" in r.message
+                           or "Absolute Unix" in r.message
+                           or "Directory traversal" in r.message
+                       )]
+        assert win_or_path == [], (
+            f"Shell `grep -E '...'` pattern-source lines must not trigger "
+            f"path-traversal rules; got {[r.message for r in win_or_path]}"
+        )
+
+    def test_user_paths_skips_shell_grep_E_pattern_source(self):
+        """RC-135 should NOT flag `/Users/[^/]*/` pattern-source inside `grep -E '...'`."""
+        # FP from nyldn (octopus): `validate-no-hardcoded-paths.sh` IS A
+        # SECURITY-CHECKER SCRIPT that uses `grep -E "/Users/[^/]*/"` to
+        # find hardcoded user paths in OTHER files. The script's own
+        # grep regex pattern matches `/Users/[^/]*/`, which RC-135
+        # treats as a hardcoded user path — exactly the kind of
+        # pattern-source FP the existing Python `re.compile()` skip
+        # handles for Python files.
+        content = (
+            "#!/usr/bin/env bash\n"
+            'hardcoded=$(git ls-files | xargs grep -n "/Users/[^/]*/\\|/home/[^/]*/" 2>/dev/null)\n'
+        )
+        report = ValidationReport()
+        count = scan_for_user_paths(content, "scripts/validate-no-hardcoded-paths.sh", report)
+        rc135_msgs = [r for r in report.results
+                      if r.level == "MAJOR" and "RC-135" in r.message]
+        assert rc135_msgs == [], (
+            f"Shell `grep -E '/Users/...'` pattern-source must not fire RC-135; "
+            f"got {[r.message for r in rc135_msgs]}"
+        )
+
+    def test_path_traversal_still_fires_on_real_grep_call(self):
+        """Bare `grep <pattern> /etc/passwd` STILL flags `/etc/` — not regex source."""
+        # Regression: the predicate must require a regex/pattern argument
+        # shape (`-E`, `-P`, quoted regex), NOT just any grep command.
+        # `grep foo /etc/passwd` reads the file `/etc/passwd` — the path
+        # is a live filesystem operand.
+        content = (
+            "#!/usr/bin/env bash\n"
+            "grep root /etc/passwd\n"
+        )
+        report = ValidationReport()
+        count = scan_for_path_traversal(content, "scripts/check-passwd.sh", report)
+        sys_msgs = [r for r in report.results
+                    if r.level == "CRITICAL" and "Absolute Unix" in r.message]
+        assert len(sys_msgs) >= 1, (
+            f"Real `grep root /etc/passwd` MUST still fire RC-112; got {report.results}"
+        )
+
 
 class TestScanForSecrets:
     """Tests for the scan_for_secrets function -- AWS keys, JWT, private keys, GitHub tokens."""

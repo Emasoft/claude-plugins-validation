@@ -2341,6 +2341,87 @@ def _is_powershell_context(file_content: str, line: str) -> bool:
     return False
 
 
+# GENERAL — shell regex / pattern-arg detector. POSIX shell tools that
+# accept regex / glob arguments routinely embed path-shaped fragments
+# inside their pattern source: `grep -E '^[^#]*/home/'`, `sed
+# 's/\*\*Schema:\*\* //'`, `awk '/^.users/.../'`. The path-traversal
+# and absolute-path rules see those as live path operations, but the
+# pattern body is detector code — it never reaches a filesystem call.
+#
+# Hints anchor on the COMMAND-NAME shape the shell uses to introduce a
+# regex argument:
+#   - `grep -E ` / `grep -P ` / `egrep ` / `grep -e ` / `grep -E"…"`
+#   - `sed 's/` / `sed -E 's/` / `sed -e 's/`
+#   - `awk '/.../{...}'` / `awk -F'…'` / `awk -v …`
+#   - `find <path> -regex …` / `find <path> -name '…'` (glob source)
+#   - `tr 'A-Z' 'a-z'`           (transliteration table — also pattern data)
+#
+# Detection is line-shape based: ANY of these cmd-name tokens appearing
+# on the line is enough to mark the line as pattern-source. This covers
+# both bare `grep -E '…'` and pipe forms `cmd | grep -E '…' | sed …`.
+_SHELL_PATTERN_HINTS_RE = re.compile(
+    # `grep` / `egrep` with REGEX-mode flag (-E, -P, -G, -e) — these flags
+    # indicate the next argument is regex source. `grep -F` (fixed string)
+    # is NOT in the flag set because it disables regex; same for plain
+    # `grep <pattern> <file>` which uses BRE but doesn't carry the
+    # explicit regex-flag signal we want to anchor on.
+    r"(?:^|[\s|;&\$\(])(?:e?grep)\s+(?:-[A-Za-z]*[EePG][A-Za-z]*\s+)+"
+    # Bare `egrep` is regex by definition.
+    r"|(?:^|[\s|;&\$\(])egrep\s+['\"]"
+    # `grep <flags> '<quoted-pattern-with-regex-metachar>'` — when the
+    # quoted argument carries an unambiguous regex shape (`[…]` char
+    # class, `\|` BRE alternation, `\(…\)` BRE group, `^`/`$` anchors,
+    # `.*`/`.+`/`?`), the bare grep IS using regex even without -E.
+    # The detector requires the metachar to appear inside the FIRST
+    # quoted argument after grep — a literal grep `grep "alice" file`
+    # without those chars stays unmarked.
+    r"|(?:^|[\s|;&\$\(])(?:e?grep)\s+(?:-[A-Za-z]+\s+)*['\"][^'\"]*"
+    r"(?:\[[^\]]*\]|\\[|()|\^|\$[^A-Za-z_]|\.\*|\.\+|\.\?|\\\.)"
+    # `sed s/…/…/` (substitute) — the only sed form that takes a regex
+    # source. Optional flags between sed and the s-command. The regex
+    # body is delimited by the char immediately after `s` (here `/`).
+    r"|(?:^|[\s|;&\$\(])sed\s+(?:-[A-Za-z]+\s+)*['\"]?[sS]/"
+    # `awk` with explicit pattern body (`/regex/{…}`), -F field separator,
+    # or BEGIN/END script blocks — all signal a script with regex source.
+    r"|(?:^|[\s|;&\$\(])awk\s+(?:-[A-Za-z]+\s+|-v\s+\S+\s+|[-]\S+\s+)*['\"]?(?:/|\{|BEGIN|END)"
+    # `find` with -regex / -name / -path / -iname / -ipath / -wholename —
+    # all take a glob/regex pattern argument.
+    r"|(?:^|[\s|;&\$\(])find\s+\S+\s+(?:-[A-Za-z]+\s+\S*\s+)*-(?:regex|iregex|name|iname|path|ipath|wholename)\s+"
+)
+
+
+def _is_shell_regex_source_line(line: str) -> bool:
+    r"""GENERAL: True iff `line` invokes a POSIX shell regex/pattern tool
+    (`grep -E`, `sed 's/…/…/'`, `awk '/…/{…}'`, `find … -regex …`,
+    `find … -name '…'`).
+
+    Such lines embed regex / glob fragments — including path-shaped
+    sequences (`/home/`, `/Users/[^/]+`, `:\*`, `../`) — as PATTERN
+    SOURCE inside the tool's argument string. The pattern body never
+    crosses a filesystem call; only its semantic match against the
+    target file does.
+
+    The path-traversal / system-path / hardcoded-username scanners
+    treat those substrings as live path operations and produce FPs by
+    construction. The skip suppresses the match when the line shape
+    is unambiguously a regex-tool invocation.
+
+    The detector is intentionally narrow on COMMAND SHAPE:
+      - `grep` must be followed by flags AND/OR a quoted regex (the
+        `e?grep` covers both `grep` and `egrep`)
+      - `sed` must be followed by `s/…/…/` (substitute) — the only sed
+        form that takes a regex source
+      - `awk` must be followed by `'/…/'` (pattern), `-F'…'` (FS), or
+        `BEGIN`/`END` blocks (typical script shape)
+      - `find` must be followed by `-regex`/`-name`/`-path`
+
+    A bare `grep foo` (no -E flag, no regex shape) does NOT match. The
+    rule is "this line uses a regex / pattern source", not "this line
+    mentions grep".
+    """
+    return bool(_SHELL_PATTERN_HINTS_RE.search(line))
+
+
 def _match_inside_quoted_span(line: str, m_start: int, m_end: int) -> bool:
     """GENERAL: True iff the byte range `[m_start, m_end)` lies inside a
     paired-quote span (`"…"` or `'…'`) on the same line.
@@ -3517,6 +3598,13 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
     # `exe_dir/../VERSION` describing the search algorithm.
     is_rust_src = file_lower.endswith(".rs")
     is_c_family = is_js_ts or is_rust_src or file_lower.endswith((".c", ".cc", ".cpp", ".h", ".hpp", ".go", ".swift", ".kt", ".java", ".cs"))
+    # GENERAL — shell-script context. Required for the per-line
+    # `_is_shell_regex_source_line` predicate below: `grep -E '…'`,
+    # `sed 's/…/…/'`, `awk '/…/{…}'` are bash builtins, not generic
+    # regex syntax. We only fire the regex-source skip in shell-like
+    # files (sh / bash / zsh / ksh / extensionless POSIX scripts via
+    # shebang sniff).
+    is_shell_script = is_shell_like_file(file_path, content)
     # JS regex literals (e.g. `const re = /^\s*foo[\\:`"']\s*$/gm`) include
     # characters that match Windows-path / unix-path patterns by accident.
     # Detect them once per line so we can suppress matches that fall inside
@@ -3664,10 +3752,25 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
         # Windows `[A-Z]:\` pattern because S:\n looks like a drive letter).
         is_js_ts_string_line = is_js_ts and ("`" in stripped or "'" in stripped or '"' in stripped)
 
+        # GENERAL — shell `grep -E`, `sed 's/…/…/'`, `awk '/…/{…}'`,
+        # `find … -regex …` lines treat their argument as REGEX /
+        # GLOB SOURCE. A `/Users/`, `/home/`, `/etc/`, `:\*`, `../`
+        # in the pattern body is detector code, not a live path call.
+        # Only fire the per-line predicate when the file is shell-like
+        # (sh/bash/zsh/…); other languages don't have these tools as
+        # bare-word builtins.
+        is_shell_regex_line = is_shell_script and _is_shell_regex_source_line(line)
+
         for pattern, msg in PATH_TRAVERSAL_PATTERNS:
             match = pattern.search(line)
             if match:
                 matched_text = match.group(0)
+
+                # Skip when the line is a shell regex/pattern source:
+                # the matched path text lives inside the pattern body of
+                # `grep -E '…'`, `sed 's/…/…/'`, etc.
+                if is_shell_regex_line:
+                    continue
 
                 # Skip if the match falls inside a JS regex literal — those
                 # contain colon/backslash/path-shaped chars by their nature
@@ -4091,6 +4194,9 @@ def scan_for_user_paths(content: str, file_path: str, report: ValidationReport) 
 
     is_python = file_lower.endswith(".py")
     is_js_ts = is_js_ts_file(file_path, content)
+    # GENERAL — shell-script context for the regex-source skip (RC-135
+    # in `grep -E '/Users/[^/]*/'` and similar tool arguments).
+    is_shell_script = is_shell_like_file(file_path, content)
     # Lines that ARE pattern definitions (regex sources, allow-lists,
     # detector tables) match `/Users/[^/]+` on their own — the literal text
     # inside the pattern body. Skip these the same way the credential
@@ -4101,6 +4207,12 @@ def scan_for_user_paths(content: str, file_path: str, report: ValidationReport) 
     for line_num, line in enumerate(lines, start=1):
         # Skip pattern-definition lines.
         if (is_python and py_regex_re.search(line)) or (is_js_ts and js_regex_re.search(line)):
+            continue
+        # GENERAL — shell-script lines that USE the path text as a
+        # `grep -E '/Users/…'` / `sed 's/^.users/…'` / etc. PATTERN
+        # SOURCE. The path body is detector code — never reaches a
+        # filesystem call. Same predicate used by `scan_for_path_traversal`.
+        if is_shell_script and _is_shell_regex_source_line(line):
             continue
         for pattern in USER_PATH_PATTERNS:
             match = pattern.search(line)
