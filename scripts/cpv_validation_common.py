@@ -3562,9 +3562,16 @@ class ValidationReport:
         """Add a passed check."""
         self.add("PASSED", message, file)
 
-    def info(self, message: str, file: str | None = None) -> None:
-        """Add an info message."""
-        self.add("INFO", message, file)
+    def info(self, message: str, file: str | None = None, line: int | None = None) -> None:
+        """Add an info message.
+
+        ``line`` is accepted for symmetry with ``warning()`` / ``minor()`` /
+        ``nit()`` so callers that demote a finding to INFO via
+        ``getattr(report, level)(msg, file, line)`` don't need a special
+        case. The line is recorded on the result and rendered in the
+        per-finding line whenever present.
+        """
+        self.add("INFO", message, file, line)
 
     def warning(self, message: str, file: str | None = None, line: int | None = None) -> None:
         """Add a warning — always reported, never blocks validation (even in --strict)."""

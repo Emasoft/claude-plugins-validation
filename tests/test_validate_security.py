@@ -1256,6 +1256,62 @@ class TestIssue15ScanAllFilesSafetyLimits:
         stats = scan_one_target(plugin_dir)
         assert isinstance(stats, dict)
 
+    def test_scan_step_log_populated_after_validate_security(self, tmp_path):
+        """validate_security() populates a step log with one entry per step.
+
+        The log is the source of truth for the per-scan coverage table
+        the CLI prints. Every step (in-process scanner + external scanner)
+        must show up in the log with a status of COMPLETED / RAN / SKIPPED
+        / FAILED.
+        """
+        from validate_security import (
+            format_scan_step_table,
+            get_scan_step_log,
+            validate_security,
+        )
+
+        plugin_dir = tmp_path / "test-plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            '{"name": "test-plugin", "version": "1.0.0"}'
+        )
+
+        # Test isolation: turn off external scanners so we deterministically
+        # get SKIPPED rows for them.
+        validate_security(
+            plugin_dir,
+            enable_tirith=False,
+            enable_trufflehog=False,
+            enable_gitleaks=False,
+            enable_semgrep=False,
+        )
+        steps = get_scan_step_log()
+        # We expect 27 steps (1..27); allow for any future additions but
+        # require at least the documented 27.
+        assert len(steps) >= 27, (
+            f"Expected at least 27 steps, got {len(steps)}: "
+            f"{[s['name'] for s in steps]}"
+        )
+        # Every step must have a known status.
+        for s in steps:
+            assert s["status"] in {"COMPLETED", "RAN", "SKIPPED", "FAILED"}, (
+                f"Step {s['num']} ({s['name']}) has bad status {s['status']!r}"
+            )
+        # Steps 23-26 (tirith / trufflehog / gitleaks / semgrep) MUST be
+        # SKIPPED because we turned them off.
+        for step_num in (23, 24, 25, 26):
+            step = next(s for s in steps if s["num"] == step_num)
+            assert step["status"] == "SKIPPED", (
+                f"Step {step_num} should be SKIPPED with enable_*=False; "
+                f"got {step['status']}"
+            )
+        # Table must render without raising.
+        table = format_scan_step_table(steps)
+        assert "Status" in table
+        assert "[--] SKIPPED" in table  # we forced 4 skipped
+        assert "[OK] COMPLETED" in table
+
     def test_env_var_overrides_max_scan_bytes(self, tmp_path, monkeypatch):
         """CPV_MAX_SCAN_BYTES env var overrides the default."""
         # Reload the module under a tighter cap so we can verify the override
