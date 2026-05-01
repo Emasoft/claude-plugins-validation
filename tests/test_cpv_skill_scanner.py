@@ -357,7 +357,12 @@ class TestRunCiscoScan:
 
 
 class _FakeReport:
-    """Minimal duck-type matching ValidationReport's per-severity setters."""
+    """Minimal duck-type matching ValidationReport's per-severity setters.
+
+    Mirrors ValidationReport's real signatures from cpv_validation_common.py:
+    info() takes (message, file) — NO line — while critical/major/minor/nit
+    accept the full (message, file, line) triple.
+    """
 
     def __init__(self) -> None:
         self.entries: list[tuple[str, str, str, int | None]] = []
@@ -374,8 +379,11 @@ class _FakeReport:
     def nit(self, msg: str, f: str, line: int | None) -> None:
         self.entries.append(("nit", msg, f, line))
 
-    def info(self, msg: str, f: str, line: int | None) -> None:
-        self.entries.append(("info", msg, f, line))
+    def info(self, msg: str, f: str) -> None:
+        # NOTE: real ValidationReport.info() has signature (message, file=None)
+        # with NO line parameter. The fake mirrors that exactly so the test
+        # catches any drift in cpv_skill_scanner's call sites.
+        self.entries.append(("info", msg, f, None))
 
 
 class TestReportFindings:

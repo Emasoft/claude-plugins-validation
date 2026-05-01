@@ -4117,6 +4117,31 @@ _PLACEHOLDER_LINE_MARKERS = (
     "redis://:redis@",
     "mongodb://admin:admin",
     "mongodb://root:root",
+    # GENERAL — Universal placeholder credential idioms in
+    # documentation. The literal English words `username`, `password`,
+    # `pass` as VALUES (not as field NAMES) are unambiguous tutorial
+    # markers — no real credential ever uses these as the secret value.
+    # Common shapes:
+    #   http://username:password@proxy.example.com   (proxy docs)
+    #   socks5://user:pass@host                      (proxy docs)
+    #   postgres://admin:password@host               (DB docs)
+    #   mongodb://user:password@host                 (DB docs)
+    "://username:password@",
+    "://user:pass@",
+    "://user:password@",
+    "://admin:password@",
+    "://admin:admin@",
+    "://root:password@",
+    ":password@",         # any scheme, with literal "password"
+    ":secret@",           # any scheme, with literal "secret"
+    # GENERAL — Bash / shell env-var passthrough in connection-string
+    # body. The value `${TOKEN}` is bash variable expansion, never a
+    # literal credential. Common shapes:
+    #   https://oauth2:${GITHUB_TOKEN}@github.com/...
+    #   https://${USER}:${PASSWORD}@host
+    #   amqp://${RMQ_USER}:${RMQ_PASS}@broker
+    ":${",                # any `:${` — env var as password
+    ":$(",                # any `:$(...)` — command substitution as password
 )
 
 
@@ -4148,6 +4173,17 @@ def _is_placeholder_secret_line(matched_text: str, line: str) -> bool:
     # NAME is alpha/`-`/`_` (no spaces, no actual key bytes).
     bracket_match = re.search(r"<([A-Za-z][A-Za-z0-9_\-]*)>", matched_text)
     if bracket_match:
+        return True
+    # GENERAL — Python f-string / template-string interpolation
+    # placeholder in the matched text. Shapes:
+    #   f"postgresql://{user}:{password}@{host}"     (Python f-string)
+    #   f"postgresql://{os.environ['PGUSER']}:..."   (Python f-string + env)
+    #   `mysql://${user}:${pass}@${host}`            (JS template literal)
+    # The interpolation `{...}` / `${...}` is RUNTIME-evaluated; the
+    # template body is not a credential. Detect by `{` and `}` both
+    # appearing inside the matched secret text — real keys can't
+    # contain unescaped braces.
+    if "{" in matched_text and "}" in matched_text:
         return True
     return False
 

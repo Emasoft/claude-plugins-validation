@@ -163,16 +163,25 @@ def test_check_tirith_unavailable_emits_one_warning(monkeypatch: pytest.MonkeyPa
 
 
 # -----------------------------------------------------------------------------
-# CLI integration — --no-tirith opt-out
+# CLI integration — tirith always runs (no opt-out flag)
 # -----------------------------------------------------------------------------
 
 
-def test_no_tirith_flag_skips_external_scan(tmp_path: Path) -> None:
-    """``--no-tirith`` must short-circuit Check #17 entirely.
+def test_tirith_always_runs_via_cli(tmp_path: Path) -> None:
+    """tirith ALWAYS runs from the CLI — there is no opt-out flag.
+
+    The validator was changed so external scanners are no longer optional.
+    Each scanner self-skips with an INFO marker if its source binary cannot
+    be resolved on PATH or installed from its source URL.
 
     Reproducer: build a minimal plugin tree, run validate_security.py with
-    ``--no-tirith`` plus ``CPV_NO_TIRITH_INSTALL=1``, then confirm no
-    tirith-related messages appear in the JSON report.
+    ``CPV_NO_TIRITH_INSTALL=1`` (suppresses auto-install). When tirith is
+    absent from PATH, the scan still INVOKES the tirith check — the check
+    self-skips and emits a "tirith: scanner not available" message. That
+    presence is the contract we now assert.
+
+    The legacy ``--no-tirith`` flag was removed; passing it would cause an
+    argparse "unrecognized arguments" error.
     """
     plugin = tmp_path / "demo-plugin"
     (plugin / ".claude-plugin").mkdir(parents=True)
@@ -186,7 +195,6 @@ def test_no_tirith_flag_skips_external_scan(tmp_path: Path) -> None:
             sys.executable,
             str(REPO_ROOT / "scripts" / "validate_security.py"),
             str(plugin),
-            "--no-tirith",
             "--json",
         ],
         capture_output=True,
@@ -198,13 +206,51 @@ def test_no_tirith_flag_skips_external_scan(tmp_path: Path) -> None:
     assert result.returncode in (0, 1, 2, 3), (
         f"unexpected exit {result.returncode}\nstderr: {result.stderr}"
     )
-    # No tirith messages — neither findings ("tirith {rule}: ...") nor
-    # advisory warnings ("tirith (mode): ...", "tirith: scanner not...") —
-    # may appear when --no-tirith is set. Match on the message-prefix forms
-    # rather than substring "tirith" because pytest's tmp_path embeds the
-    # test name (which contains "tirith") into directory paths.
+    # tirith runs unconditionally now. When the scanner binary is absent and
+    # auto-install is disabled, the check_tirith_scanner step self-skips and
+    # emits an advisory message starting with "tirith". That advisory IS the
+    # signal we use to confirm the check ran end-to-end.
     import json as _json
     payload = _json.loads(result.stdout)
     messages = [r.get("message", "") for r in payload.get("results", [])]
-    forbidden = [m for m in messages if m.lower().startswith("tirith")]
-    assert not forbidden, f"Found tirith messages despite --no-tirith opt-out: {forbidden}"
+    tirith_msgs = [m for m in messages if m.lower().startswith("tirith")]
+    # Either the tirith check ran and self-skipped (one of: scanner not
+    # available, install disabled, install failed) OR — when an operator
+    # has tirith available locally — it produced findings/PASSED messages.
+    # Either way we expect at least one tirith-prefixed message to confirm
+    # the always-runs contract.
+    assert tirith_msgs, (
+        "Expected at least one 'tirith' message confirming the check ran. "
+        "External scanners are now non-optional; the check should self-skip "
+        "with an advisory rather than being silently bypassed."
+    )
+
+
+def test_legacy_no_tirith_flag_is_rejected(tmp_path: Path) -> None:
+    """Old ``--no-tirith`` flag was removed; argparse must reject it.
+
+    Tests the negative side of the contract change: callers passing the
+    legacy opt-out flag get an explicit error rather than silently having
+    the flag ignored. This guarantees no caller ever thinks they're
+    skipping the scanner when in fact they aren't.
+    """
+    plugin = tmp_path / "demo-plugin"
+    (plugin / ".claude-plugin").mkdir(parents=True)
+    (plugin / ".claude-plugin" / "plugin.json").write_text(
+        '{"name": "demo", "version": "0.0.1"}\n'
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "validate_security.py"),
+            str(plugin),
+            "--no-tirith",
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "unrecognized arguments" in result.stderr or "--no-tirith" in result.stderr
