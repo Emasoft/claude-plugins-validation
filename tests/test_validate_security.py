@@ -1133,3 +1133,156 @@ class TestFalsePositiveReduction:
         scan_for_supply_chain(content, "plugin/exec.sh", report)
         critical = [r for r in report.results if r.level == "CRITICAL" and "Supply-chain" in r.message or "Supply chain" in r.message]
         assert critical, "Bare `curl | python3` must still fire"
+
+
+class TestIssue15ScanAllFilesSafetyLimits:
+    """Issue #15: scan_all_files() must not deadlock on pathological files.
+
+    Layer A — per-file size cap (default 8 MiB, env-overridable).
+    Layer B — single split via _split_lines identity cache.
+    Layer C — public scan_one_target() helper with optional SIGALRM timeout.
+    """
+
+    def test_oversize_file_skipped_with_warning(self, tmp_path):
+        """A file larger than MAX_SCAN_BYTES is skipped + counted + warned."""
+        from validate_security import MAX_SCAN_BYTES, scan_all_files
+
+        plugin_dir = tmp_path / "test-plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            '{"name": "test-plugin", "version": "1.0.0"}'
+        )
+        # Pathological file just over the cap
+        big_file = plugin_dir / "huge.js"
+        big_file.write_text("a" * (MAX_SCAN_BYTES + 1))
+
+        report = ValidationReport()
+        stats = scan_all_files(plugin_dir, report)
+
+        assert stats["oversize_skipped"] == 1, (
+            f"Expected 1 oversize-skip, got {stats['oversize_skipped']}"
+        )
+        assert stats["files_skipped"] >= 1
+        warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
+        assert any("File too large" in m for m in warning_msgs), (
+            f"Expected oversize WARNING; got {warning_msgs!r}"
+        )
+
+    def test_normal_file_not_skipped_by_size_cap(self, tmp_path):
+        """A normal-sized file passes the size check and gets scanned."""
+        from validate_security import scan_all_files
+
+        plugin_dir = tmp_path / "test-plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            '{"name": "test-plugin", "version": "1.0.0"}'
+        )
+        # Innocuous content well under any cap
+        (plugin_dir / "app.py").write_text(
+            "def hello():\n    print('hello')\n"
+        )
+
+        report = ValidationReport()
+        stats = scan_all_files(plugin_dir, report)
+
+        assert stats["oversize_skipped"] == 0
+        assert stats["files_scanned"] >= 1, (
+            f"Normal file should have been scanned; stats={stats}"
+        )
+
+    def test_split_lines_caches_identical_content_object(self):
+        """_split_lines returns the SAME list object on repeated calls with
+        the same content (id-keyed cache hit)."""
+        from validate_security import _split_lines
+
+        # Hold a single str ref so id() is stable
+        content = "line1\nline2\nline3\n"
+        l1 = _split_lines(content)
+        l2 = _split_lines(content)
+        l3 = _split_lines(content)
+        assert l1 is l2 is l3, (
+            "Identity-cached split must return the SAME list across "
+            "consecutive calls with the same content object — that's the "
+            "whole point of the optimization"
+        )
+        assert l1 == ["line1", "line2", "line3", ""]
+
+    def test_split_lines_recomputes_on_different_content(self):
+        """Cache is one-slot — a different content invalidates the cache."""
+        from validate_security import _split_lines
+
+        content_a = "a1\na2"
+        content_b = "b1\nb2\nb3"
+        la = _split_lines(content_a)
+        lb = _split_lines(content_b)
+        # Different content → different list contents
+        assert la == ["a1", "a2"]
+        assert lb == ["b1", "b2", "b3"]
+        # Calling on content_a again recomputes (cache was replaced by lb)
+        la2 = _split_lines(content_a)
+        assert la2 == ["a1", "a2"]
+
+    def test_scan_one_target_helper_runs_without_timeout(self, tmp_path):
+        """scan_one_target() with no timeout delegates straight to scan_all_files."""
+        from validate_security import scan_one_target
+
+        plugin_dir = tmp_path / "test-plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            '{"name": "test-plugin", "version": "1.0.0"}'
+        )
+        (plugin_dir / "module.py").write_text("x = 1\n")
+
+        stats = scan_one_target(plugin_dir, timeout_seconds=None)
+        # Same shape as scan_all_files
+        assert "files_scanned" in stats
+        assert "oversize_skipped" in stats
+
+    def test_scan_one_target_helper_creates_report_when_none(self, tmp_path):
+        """scan_one_target() creates a fresh ValidationReport if none passed."""
+        from validate_security import scan_one_target
+
+        plugin_dir = tmp_path / "test-plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            '{"name": "test-plugin", "version": "1.0.0"}'
+        )
+
+        # No report passed — must not raise
+        stats = scan_one_target(plugin_dir)
+        assert isinstance(stats, dict)
+
+    def test_env_var_overrides_max_scan_bytes(self, tmp_path, monkeypatch):
+        """CPV_MAX_SCAN_BYTES env var overrides the default."""
+        # Reload the module under a tighter cap so we can verify the override
+        # without writing a giant file.
+        monkeypatch.setenv("CPV_MAX_SCAN_BYTES", "1024")
+        import importlib
+
+        import validate_security as vs_mod
+        importlib.reload(vs_mod)
+        try:
+            assert vs_mod.MAX_SCAN_BYTES == 1024
+
+            plugin_dir = tmp_path / "test-plugin"
+            plugin_dir.mkdir()
+            (plugin_dir / ".claude-plugin").mkdir()
+            (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+                '{"name": "test-plugin", "version": "1.0.0"}'
+            )
+            (plugin_dir / "medium.txt").write_text("x" * 2048)  # > 1 KiB cap
+
+            report = ValidationReport()
+            stats = vs_mod.scan_all_files(plugin_dir, report)
+            assert stats["oversize_skipped"] == 1, (
+                f"With cap=1024, the 2 KiB file must be oversize-skipped; "
+                f"got stats={stats}"
+            )
+        finally:
+            # Restore default for subsequent tests in the same pytest session
+            monkeypatch.delenv("CPV_MAX_SCAN_BYTES", raising=False)
+            importlib.reload(vs_mod)

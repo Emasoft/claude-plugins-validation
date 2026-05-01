@@ -86,6 +86,65 @@ from cpv_validation_common import (
 )
 
 # =============================================================================
+# Per-file safety limits (issue #15 — scan_all_files() deadlock prevention)
+# =============================================================================
+
+# Per-file size cap — files larger than this are skipped with a WARNING and
+# counted as `oversize_skipped`. Pathological inputs (50MB minified JS bundles,
+# concatenated SQL dumps, etc.) make every per-line scanner explode into huge
+# per-line list allocations 9+ times per file (one per scanner) — the worker
+# pins a CPU core indefinitely while making zero scanning progress. The 8 MiB
+# default comfortably covers every realistic plugin source file; minified
+# bundles and SQL dumps almost always exceed it. Override via env var when
+# scanning a corpus that legitimately contains larger source files (e.g.
+# embedded datasets in a plugin package).
+DEFAULT_MAX_SCAN_BYTES = 8 * 1024 * 1024  # 8 MiB
+MAX_SCAN_BYTES = int(os.environ.get("CPV_MAX_SCAN_BYTES", str(DEFAULT_MAX_SCAN_BYTES)))
+
+
+# Identity-keyed one-shot cache for the per-file line split (issue #15 — split
+# the file content ONCE, not 9 times). Previously each of the 9 scanner
+# functions split the content independently, allocating 9 huge per-line lists
+# for the same content. With this cache, `_split_lines(content)` returns the
+# cached list when called repeatedly with the same `content` object during one
+# file's scan pass, dropping that 9× overhead to 1×.
+#
+# We key by `id(content)` because Python `str` is unhashable for our purposes
+# (a 50MB content hash would itself be O(N)) and `scan_all_files()` keeps the
+# same `content` reference alive across all 9 scanner calls — `id()` is stable
+# for that lifetime and uniquely identifies the in-flight content object.
+#
+# The cache is one-slot (the most recent content), keyed by id, dropped on
+# the next call with a different id. This is correct because `scan_all_files`
+# processes files sequentially per worker and finishes all 9 scans on one
+# content before moving on; there is no concurrent access pattern that would
+# need a multi-slot cache.
+_split_lines_last_id: int | None = None
+_split_lines_last_value: list[str] = []
+
+
+def _split_lines(text: str) -> list[str]:
+    """Return `text.split("\\n")`, cached by id(text) for one shot.
+
+    Drops 9× duplicate `str.split("\\n")` allocations to 1× per file. The
+    cache holds only the most recently-split text's lines — when called
+    with a different `text` object, the cache is replaced.
+
+    Thread-safety: this helper is process-local (one cache per worker
+    process). Worker processes run their own copy and never share state, so
+    no lock is required. Inside a single worker, the helper is invoked
+    sequentially across the 9 scanners on the same `text` ref.
+    """
+    global _split_lines_last_id, _split_lines_last_value
+    cid = id(text)
+    if cid == _split_lines_last_id:
+        return _split_lines_last_value
+    _split_lines_last_value = text.split("\n")
+    _split_lines_last_id = cid
+    return _split_lines_last_value
+
+
+# =============================================================================
 # Injection Detection Patterns
 # =============================================================================
 
@@ -1235,7 +1294,7 @@ def is_fp_corpus_markdown(
         return False
     if content is None:
         return False
-    lines = content.split("\n") if isinstance(content, str) else content
+    lines = _split_lines(content) if isinstance(content, str) else content
     # Inspect the first 5 NON-EMPTY lines (frontmatter / heading shape
     # tolerates blank line at top).
     inspected = 0
@@ -3112,7 +3171,7 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
     so we only flag command substitution in non-shell files where it's unexpected.
     """
     issues_found = 0
-    lines = content.split("\n")
+    lines = _split_lines(content)
 
     file_lower = file_path.lower()
 
@@ -3511,7 +3570,7 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
     We skip path checks for markdown documentation to avoid false positives.
     """
     issues_found = 0
-    lines = content.split("\n")
+    lines = _split_lines(content)
 
     file_lower = file_path.lower()
 
@@ -4050,7 +4109,7 @@ def scan_for_secrets(content: str, file_path: str, report: ValidationReport) -> 
         return 0
 
     issues_found = 0
-    lines = content.split("\n")
+    lines = _split_lines(content)
 
     for line_num, line in enumerate(lines, start=1):
         for pattern, secret_type in SECRET_PATTERNS:
@@ -4199,7 +4258,7 @@ def scan_for_user_paths(content: str, file_path: str, report: ValidationReport) 
     trigger false positives. We skip those files.
     """
     issues_found = 0
-    lines = content.split("\n")
+    lines = _split_lines(content)
 
     file_lower = file_path.lower()
 
@@ -4392,7 +4451,7 @@ def scan_for_prompt_injection(content: str, file_path: str, report: ValidationRe
         return False
 
     issues_found = 0
-    lines = content.split("\n")
+    lines = _split_lines(content)
     for line_num, line in enumerate(lines, start=1):
         for pattern, msg in PROMPT_INJECTION_PATTERNS:
             m = pattern.search(line)
@@ -4449,7 +4508,7 @@ def scan_for_data_exfiltration(content: str, file_path: str, report: ValidationR
         return 0
 
     issues_found = 0
-    lines = content.split("\n")
+    lines = _split_lines(content)
     for line_num, line in enumerate(lines, start=1):
         stripped = line.strip()
         if stripped.startswith("#"):
@@ -4698,7 +4757,7 @@ def scan_for_supply_chain(content: str, file_path: str, report: ValidationReport
     is_python = file_lower.endswith(".py")
 
     issues_found = 0
-    lines = content.split("\n")
+    lines = _split_lines(content)
     for line_num, line in enumerate(lines, start=1):
         stripped = line.strip()
         if stripped.startswith("#"):
@@ -4759,7 +4818,7 @@ def scan_for_credential_harvest(content: str, file_path: str, report: Validation
     py_regex_re = re.compile(r"re\.compile\s*\(|RegExp\s*\(|regex\s*=\s*r['\"]")
 
     issues_found = 0
-    lines = content.split("\n")
+    lines = _split_lines(content)
     for line_num, line in enumerate(lines, start=1):
         stripped = line.strip()
         if stripped.startswith("#"):
@@ -4875,7 +4934,7 @@ def scan_for_sandbox_escape(content: str, file_path: str, report: ValidationRepo
     is_python = file_lower.endswith(".py")
 
     issues_found = 0
-    lines = content.split("\n")
+    lines = _split_lines(content)
     # GENERAL: detect heredoc / multi-line-string regions in shell or
     # Python source. Lines INSIDE a `cat <<'EOF' … EOF` heredoc or a
     # Python `"""…"""` docstring are TEXT being emitted, not live shell
@@ -5206,10 +5265,18 @@ def scan_all_files(plugin_path: Path, report: ValidationReport) -> dict[str, int
     """Recursively scan all text files in the plugin for security issues.
 
     Returns a dictionary with counts of issues found by category.
+
+    Per-file safety: files larger than ``MAX_SCAN_BYTES`` (default 8 MiB,
+    overridable via ``CPV_MAX_SCAN_BYTES``) are skipped with a WARNING and
+    counted as ``oversize_skipped``. This prevents the worker-deadlock
+    pathology documented in issue #15 where pathologically large files
+    (50MB minified bundles, concatenated SQL dumps) pin a worker for tens
+    of minutes while the per-line scanners thrash on huge allocations.
     """
     stats = {
         "files_scanned": 0,
         "files_skipped": 0,
+        "oversize_skipped": 0,
         "injection_issues": 0,
         "path_traversal_issues": 0,
         "secret_issues": 0,
@@ -5239,6 +5306,26 @@ def scan_all_files(plugin_path: Path, report: ValidationReport) -> dict[str, int
             # CPV plugin itself (recognized by plugin.json name OR signature
             # files — see is_cpv_self_scan).
             if cpv_self_scan_skip(rel_path):
+                stats["files_skipped"] += 1
+                continue
+
+            # Per-file size cap (issue #15) — pathological files cause the
+            # 9 per-line scanners to thrash on huge allocations and deadlock
+            # the worker. Stat-and-skip is O(1); the actual read+scan would
+            # be O(N) per scanner × 9 scanners.
+            try:
+                fsize = file_path.stat().st_size
+            except OSError:
+                fsize = 0
+            if fsize > MAX_SCAN_BYTES:
+                report.warning(
+                    f"File too large to scan ({fsize:,} bytes > "
+                    f"{MAX_SCAN_BYTES:,} cap); skipped to avoid scanner "
+                    f"deadlock. Override via CPV_MAX_SCAN_BYTES env var "
+                    f"if this file genuinely needs scanning.",
+                    rel_path,
+                )
+                stats["oversize_skipped"] += 1
                 stats["files_skipped"] += 1
                 continue
 
@@ -5288,6 +5375,78 @@ IDE_CONFIG_PATHS: tuple[str, ...] = (
     ".zed/settings.json",
     ".zed/tasks.json",
 )
+
+
+def scan_one_target(
+    target: Path,
+    report: ValidationReport | None = None,
+    *,
+    timeout_seconds: int | None = None,
+) -> dict[str, int]:
+    """Public orchestrator-friendly entry point that wraps scan_all_files.
+
+    Issue #15 — orchestrators that fan `scan_all_files` out across many
+    targets (e.g. one per skill folder in a 200K-target corpus) used to
+    have to re-implement their own SIGALRM-based timeout guard around the
+    private API. This helper exposes a documented surface that does the
+    right thing by default.
+
+    Args:
+        target: Path to the plugin/skill directory to scan.
+        report: Optional ValidationReport. If None, a fresh one is created.
+        timeout_seconds: Optional wall-clock timeout per target. When set,
+            installs a SIGALRM that raises ``TimeoutError`` if the scan
+            takes longer than ``timeout_seconds``. Caller is expected to
+            run in a process pool worker — SIGALRM is process-local on
+            POSIX. Pass ``None`` (default) to disable the timeout (suitable
+            when the per-file ``MAX_SCAN_BYTES`` cap is sufficient).
+
+    Returns:
+        The same stats dict shape as ``scan_all_files``.
+
+    Raises:
+        TimeoutError: when ``timeout_seconds`` is set and the scan exceeds
+            the wall-clock budget.
+
+    Notes:
+        - On Windows ``signal.SIGALRM`` is not available; if
+          ``timeout_seconds`` is requested on a non-POSIX platform, the
+          helper logs a WARNING and proceeds without the timer (the per-
+          file ``MAX_SCAN_BYTES`` cap is still active).
+        - The per-file size cap (``MAX_SCAN_BYTES``, default 8 MiB) is
+          applied unconditionally — it is the primary defense against the
+          deadlock pathology and works across all platforms.
+    """
+    if report is None:
+        report = ValidationReport()
+
+    if timeout_seconds is None:
+        return scan_all_files(target, report)
+
+    # POSIX-only signal-based timeout. Windows lacks SIGALRM.
+    import signal as _signal
+
+    if not hasattr(_signal, "SIGALRM"):
+        report.warning(
+            f"Per-target timeout requested ({timeout_seconds}s) but "
+            f"signal.SIGALRM is not available on this platform. The "
+            f"per-file MAX_SCAN_BYTES cap remains active.",
+            str(target),
+        )
+        return scan_all_files(target, report)
+
+    def _alarm_handler(_signum: int, _frame: object) -> None:
+        raise TimeoutError(
+            f"scan_one_target({target}) exceeded {timeout_seconds}s"
+        )
+
+    prev_handler = _signal.signal(_signal.SIGALRM, _alarm_handler)
+    _signal.alarm(timeout_seconds)
+    try:
+        return scan_all_files(target, report)
+    finally:
+        _signal.alarm(0)
+        _signal.signal(_signal.SIGALRM, prev_handler)
 
 
 def scan_ide_config_files(plugin_path: Path, report: ValidationReport) -> dict[str, int]:
@@ -5939,7 +6098,7 @@ def check_phase1_unicode_rules(plugin_path: Path, report: ValidationReport) -> i
         # source). Each rule below consults this so attack tokens that
         # are pattern-fixtures (parametrize body) or rule-catalog
         # literals don't fire as live findings.
-        content_lines = content.split("\n")
+        content_lines = _split_lines(content)
         # RC-09 — zero-width characters
         for line_no, desc in find_zero_width_chars(content):
             if cpv_self_scan_skip_line(rel_path, content_lines, line_no):
@@ -6012,7 +6171,7 @@ def check_phase1_credential_rules(plugin_path: Path, report: ValidationReport) -
     issues = 0
     for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
         fence_state = build_fence_state(content)
-        content_lines = content.split("\n")
+        content_lines = _split_lines(content)
         for line_no, line in enumerate(content_lines, start=1):
             if is_in_fenced_code_block(line_no - 1, fence_state):
                 continue
@@ -6082,7 +6241,7 @@ def check_phase1_supply_chain_rules(plugin_path: Path, report: ValidationReport)
             issues += 1
 
         fence_state = build_fence_state(content)
-        content_lines_phase2c = content.split("\n")
+        content_lines_phase2c = _split_lines(content)
         for line_no, line in enumerate(content_lines_phase2c, start=1):
             if is_in_fenced_code_block(line_no - 1, fence_state):
                 continue
@@ -6121,7 +6280,7 @@ def check_phase1_evasion_rules(plugin_path: Path, report: ValidationReport) -> i
     issues = 0
     for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
         fence_state = build_fence_state(content)
-        content_lines_phase1e = content.split("\n")
+        content_lines_phase1e = _split_lines(content)
         for line_no, line in enumerate(content_lines_phase1e, start=1):
             if is_in_fenced_code_block(line_no - 1, fence_state):
                 continue
@@ -6523,7 +6682,7 @@ def check_phase9_stemmed_injection(plugin_path: Path, report: ValidationReport) 
         # files. Path-name detection covers caa-security-review-agent.
         # md, skill-security-audit/, plugin-security-audit/, etc.
         is_security_audit_role = _rc76_is_security_audit_role(rel_path)
-        content_lines_for_check = content.split("\n")
+        content_lines_for_check = _split_lines(content)
         for char_offset, stems in signals:
             line_no = content.count("\n", 0, char_offset) + 1
             # v2.46 FP-M — skip markdown table rows. A row like
@@ -6554,7 +6713,7 @@ def check_phase9_stemmed_injection(plugin_path: Path, report: ValidationReport) 
                 # ladder the v2.42 rules use. The classifier inspects the
                 # file role and the line, returning DEFINITE_FP for source
                 # extensions and REAL otherwise.
-                content_lines = content.split("\n")
+                content_lines = _split_lines(content)
                 line_text = (
                     content_lines[line_no - 1] if 0 <= line_no - 1 < len(content_lines) else ""
                 )
@@ -6628,7 +6787,7 @@ def check_phase4_all(plugin_path: Path, report: ValidationReport) -> int:
     issues = 0
     for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
         fence_state = build_fence_state(content)
-        content_lines = content.split("\n")
+        content_lines = _split_lines(content)
         for line_no, line in enumerate(content_lines, start=1):
             if is_in_fenced_code_block(line_no - 1, fence_state):
                 continue
@@ -6706,7 +6865,7 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
     plugin_is_clipboard_domain = _plugin_claims_clipboard_domain(plugin_path)
     for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
         fence_state = build_fence_state(content)
-        content_lines = content.split("\n")
+        content_lines = _split_lines(content)
         # Pre-compute Python docstring line numbers (1-based) for
         # this file. Lines INSIDE a `"""…"""` / `'''…'''` block are
         # documentation, NOT runtime code. Phase 3 rules
@@ -7040,7 +7199,7 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
     issues = 0
     for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
         fence_state = build_fence_state(content)
-        content_lines = content.split("\n")
+        content_lines = _split_lines(content)
 
         # RC-65 — Cloud IMDS endpoints (with encoding variants)
         for line_no, line in enumerate(content_lines, start=1):
@@ -7077,7 +7236,7 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
                     break
 
         # RC-39 — Persistence
-        content_lines_persistence = content.split("\n")
+        content_lines_persistence = _split_lines(content)
         for line_no, line in enumerate(content_lines_persistence, start=1):
             if is_in_fenced_code_block(line_no - 1, fence_state):
                 continue
