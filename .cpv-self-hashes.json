@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-01T06:03:27+00:00",
+  "computed_at": "2026-05-01T06:04:29+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     "agents/cache-optimizer-agent.md": "sha256:f1ef238f1aa0b85fb7e76173436ee55b7f440f4732089482e986ad022cdf008d",
@@ -109,7 +109,7 @@
     "scripts/validate_skill_comprehensive.py": "sha256:43017bf1bca73347c103eb81ef63bd25e461001edd3759263f72cb4f0b705d2b",
     "scripts/validate_telemetry.py": "sha256:dc931c28c61f415377ca925a1b4e8d45762cbb533511383f551bd19ed218387b",
     "scripts/validate_xref.py": "sha256:0703e98b05be153cf156ed630d0db57ec59d8f9fca574f6706ba619e997b4594",
-    "skills/cache-validation-skill/SKILL.md": "sha256:2c264d445d59fb9bb8603c21952965801203531e599ac008ddeb51c7ee6e8de6",
+    "skills/cache-validation-skill/SKILL.md": "sha256:748d7c547164ac9b3fbf5811f5a7747af89c3d80b60a62cf532a2d284259b6ec",
     "skills/canonical-pipeline/SKILL.md": "sha256:e7849147e20aff6958bebfe52a8663ab76082bf79f721b612b65a440dc0ab69f",
     "skills/canonical-pipeline/references/detailed-standard.md": "sha256:a887bf09a9383dae1a3af83c3716330f46388fe52e516eea57037c344a4d005d",
     "skills/canonical-pipeline/references/pipeline-rules.md": "sha256:c0663f722dcaa700bfec66fd6c86ad5add00c24b3af5289d6b20c542c4426d36",
@@ -231,7 +231,7 @@
     "tests/test_branch_rules_install_bash.py": "sha256:6c0a8f0005d1426e27eae20a23f106d7f5e29be35b524a50cef4e9d9c8141f7b",
     "tests/test_bump_version.py": "sha256:ed5479f6e69f885d466ff56855adaf8e7a2d1fe105224aadf8f814b803059fc2",
     "tests/test_cc_scope_rules.py": "sha256:9ade07746ed2dae32e8459e1e9281705b4bcfd3f4c9e659bb32daf67a12c2d47",
-    "tests/test_consolidation_v211.py": "sha256:b5bdb1e6b6aaa3617cc0786086fafbd88c984f8360c0f0dec5476bfd4ba8f6ad",
+    "tests/test_consolidation_v211.py": "sha256:3990dd39fdf25442a7d02f7c7e4ab7dc8c08d483fe6f16a994e21f074e01063e",
     "tests/test_cpv_fp_classifier.py": "sha256:1a324f9dee44a0335fd55ce13ced635f8f401e6942b29373956aeeca40348efc",
     "tests/test_cpv_fp_classifier_rules.py": "sha256:786cac22940fdc4855a093f154494799958b1e1468e6219eb26ccd8fa56959ed",
     "tests/test_cpv_management_common.py": "sha256:df22f1e07725cb38d17d59e55252d1ddac25d01d66b7e06725530d36e0ff66ae",
