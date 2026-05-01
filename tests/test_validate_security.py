@@ -129,6 +129,42 @@ class TestScanForInjection:
             f"Real `curl URL | bash` MUST still fire RC-115; got {report.results}"
         )
 
+    def test_rc121_skips_find_exec_primary(self):
+        """RC-121 (`exec <cmd>`) should NOT flag `find ... -exec rm -f`."""
+        # FP from gmickel (flow-next): `find "$DIR" -depth -type f -exec rm -f {} \;`
+        # is the find COMMAND-LINE PRIMARY `-exec`, not the shell builtin.
+        content = (
+            "#!/usr/bin/env bash\n"
+            'find "$TEST_DIR" -depth -type f -exec rm -f {} \\; 2>/dev/null || true\n'
+            'find "$TEST_DIR" -depth -type d -exec rmdir {} \\; 2>/dev/null || true\n'
+        )
+        report = ValidationReport()
+        count = scan_for_injection(content, "scripts/cleanup.sh", report)
+        rc121_msgs = [r for r in report.results
+                      if r.level == "CRITICAL" and "RC-121" in r.message]
+        assert rc121_msgs == [], (
+            f"`-exec` find primary must not trigger RC-121; "
+            f"got {[r.message for r in rc121_msgs]}"
+        )
+
+    def test_rc121_still_fires_on_bare_shell_exec(self):
+        """RC-121 STILL fires on bare `exec <cmd>` — shell process replacement."""
+        # Regression: predicate must not nuke real shell `exec` calls.
+        # Bare `exec python3 ...` is a real shell-builtin invocation
+        # (process replacement); only the hyphen-prefixed `-exec` form
+        # is the find primary.
+        content = (
+            "#!/usr/bin/env bash\n"
+            'exec "$ATTACKER_INPUT"\n'
+        )
+        report = ValidationReport()
+        count = scan_for_injection(content, "scripts/wrapper.sh", report)
+        rc121_msgs = [r for r in report.results
+                      if r.level == "CRITICAL" and "RC-121" in r.message]
+        assert len(rc121_msgs) >= 1, (
+            f"Bare shell `exec <cmd>` MUST still fire RC-121; got {report.results}"
+        )
+
 
 class TestScanForPathTraversal:
     """Tests for the scan_for_path_traversal function."""
