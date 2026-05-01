@@ -35,20 +35,22 @@ Wait for the user's answer before doing anything destructive.
 
 ### Phase 1 — Audit
 
-Run the cache validator. Anchor the report path to `${CLAUDE_PROJECT_DIR}` (a real env var Claude Code exports into every Bash subprocess); fall back to the main worktree root via `git worktree list` when needed. Both the assignment AND the use must happen IN THE SAME Bash tool call — shell variables do NOT persist across separate Bash tool calls.
+Run the cache validator. Anchor the report path to `$MAIN_ROOT` — the **main checkout root** (first entry of `git worktree list`), NEVER the linked worktree's own root. The worktree's local `./reports/` is gitignored and disappears when the worktree is removed/merged, so writing reports there loses the audit trail. `${CLAUDE_PROJECT_DIR}` resolves to the WORKTREE root when Claude Code is launched inside a linked worktree, so it is only safe as a fallback for non-git contexts.
+
+Both the assignment AND the use must happen IN THE SAME Bash tool call — shell variables do NOT persist across separate Bash tool calls.
 
 ```bash
-# All of this is ONE Bash tool call. ROOT is a per-call shell variable.
-ROOT="${CLAUDE_PROJECT_DIR:-$(git worktree list 2>/dev/null | head -n1 | awk '{print $1}')}"
-[ -z "$ROOT" ] && ROOT="$(pwd)"
+# All of this is ONE Bash tool call.
+MAIN_ROOT="$(git worktree list 2>/dev/null | head -n1 | awk '{print $1}')"
+[ -z "$MAIN_ROOT" ] && MAIN_ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"   # fallback only for non-git
 TS="$(date +%Y%m%d_%H%M%S%z)"
 SLUG="$(basename "<plugin_or_project_path>")"
-REPORT="$ROOT/reports/cache/${TS}-${SLUG}.md"
+REPORT="$MAIN_ROOT/reports/cache/${TS}-${SLUG}.md"
 mkdir -p "$(dirname "$REPORT")"
 uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_cache.py" "<plugin_or_project_path>" --report "$REPORT"
 ```
 
-`${CLAUDE_PROJECT_DIR}` and `${CLAUDE_PLUGIN_ROOT}` are real env vars Claude Code exports — they survive across separate Bash tool calls without re-assignment. `ROOT` is a per-Bash-call shell variable; if a later Phase needs the same path, RE-ASSIGN it at the top of that Bash call rather than relying on it persisting.
+`${CLAUDE_PROJECT_DIR}` and `${CLAUDE_PLUGIN_ROOT}` are real env vars Claude Code exports across every Bash subprocess. `MAIN_ROOT` is a per-Bash-call shell variable; if a later Phase needs the main-repo root, RE-COMPUTE it at the top of that Bash call rather than relying on it persisting.
 
 The script prints only the compact summary + path. Read the report file with `Read` to get the per-rule details.
 
@@ -102,4 +104,4 @@ Max 2 lines back. Never paste code, scan output, or long lists.
 
 ## Reporting (HARD)
 
-When you finish, output ONLY the one-line summary above. The full audit + fix detail belongs in the report file under `${CLAUDE_PROJECT_DIR}/reports/cache/<timestamp>-<slug>-final.md`. Never paste code blocks, file diffs, or long lists into your reply — those flood the calling agent's context window for no reason.
+When you finish, output ONLY the one-line summary above. The full audit + fix detail belongs in the report file under `$MAIN_ROOT/reports/cache/<timestamp>-<slug>-final.md` (where `MAIN_ROOT` is resolved as in Phase 1 — first entry of `git worktree list`, NEVER the linked worktree's own root). Never paste code blocks, file diffs, or long lists into your reply — those flood the calling agent's context window for no reason.

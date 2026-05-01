@@ -7737,6 +7737,61 @@ def validate_security(
 # =============================================================================
 
 
+def _resolve_report_root() -> Path:
+    """Resolve the canonical report root for auto-generated report paths.
+
+    Anchors reports to the **main checkout root** (first entry of
+    ``git worktree list``) so they survive when a linked worktree is
+    removed/merged. ``./reports/`` is gitignored everywhere; writing
+    inside a worktree's local copy loses the audit trail.
+
+    Resolution order:
+      1. ``git worktree list | head -1`` — the main checkout root.
+         Inside a linked worktree, ``CLAUDE_PROJECT_DIR`` resolves to
+         the WORKTREE root (not the main checkout), which is precisely
+         the case this primary path defends against.
+      2. ``$CLAUDE_PROJECT_DIR`` — fallback when the cwd is not a git
+         repo at all (still useful for one-off scans of bare folders
+         or skill-only trees).
+      3. ``$TMPDIR`` — last resort on a remote ``uvx`` invocation
+         where neither git nor ``CLAUDE_PROJECT_DIR`` is usable.
+
+    Mirrors the convention documented in
+    ``~/.claude/CLAUDE.md`` and
+    ``~/.claude/rules/agent-reports-location.md`` and matches the
+    bash prologue every other CPV agent uses
+    (``plugin-validator``, ``semantic-validator``,
+    ``marketplace-fixer``, ``skill-validation-agent``).
+    """
+    try:
+        completed = subprocess.run(
+            ["git", "worktree", "list"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        completed = None
+    if completed and completed.returncode == 0 and completed.stdout.strip():
+        first_line = completed.stdout.strip().splitlines()[0]
+        candidate = first_line.split()[0] if first_line else ""
+        if candidate:
+            try:
+                resolved = Path(candidate).resolve()
+                if resolved.is_dir():
+                    return resolved
+            except OSError:
+                pass
+    project_dir = os.environ.get("CLAUDE_PROJECT_DIR")
+    if project_dir:
+        try:
+            return Path(project_dir).resolve()
+        except OSError:
+            pass
+    return Path(tempfile.gettempdir())
+
+
 def _read_plugin_version(plugin_path: Path) -> str:
     """Read the plugin's declared version from .claude-plugin/plugin.json.
 
@@ -7923,15 +7978,21 @@ Exit Codes:
         if args.report:
             report_path = Path(args.report)
         else:
-            # Auto-default report path. Resolves to the running plugin's
-            # repo when invoked locally; falls back to /tmp on a remote
-            # uvx invocation where CLAUDE_PROJECT_DIR is unset.
+            # Auto-default report path. Resolution order:
+            #   1. main checkout root from `git worktree list` — anchors
+            #      reports to the primary working tree so they survive
+            #      when a linked worktree gets removed/merged. The
+            #      worktree's local `./reports/` is gitignored
+            #      everywhere, so writing there loses the audit trail.
+            #   2. CLAUDE_PROJECT_DIR — only as fallback when not in a
+            #      git context. Inside a linked worktree,
+            #      CLAUDE_PROJECT_DIR resolves to the WORKTREE root,
+            #      not the main checkout — that's why it's the
+            #      fallback, not the primary.
+            #   3. $TMPDIR — last resort on a remote uvx invocation
+            #      where neither git nor CLAUDE_PROJECT_DIR is usable.
             ts = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d_%H%M%S%z")
-            base_root = (
-                Path(os.environ.get("CLAUDE_PROJECT_DIR", "")).resolve()
-                if os.environ.get("CLAUDE_PROJECT_DIR")
-                else Path(tempfile.gettempdir())
-            )
+            base_root = _resolve_report_root()
             slug = plugin_path.name or "plugin"
             report_path = base_root / "reports" / "security" / f"{ts}-{slug}.md"
 

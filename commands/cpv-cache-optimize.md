@@ -59,7 +59,7 @@ The cache-optimizer agent returns ONLY:
 [DONE|PARTIAL|FAILED] <summary>. Report: <abs-path-to-final-report>
 ```
 
-The full per-rule fix list and diff stats live in the report file at `${CLAUDE_PROJECT_DIR}/reports/cache/<TS>-<slug>-final.md`. Path-only return so the calling agent's context never gets flooded.
+The full per-rule fix list and diff stats live in the report file at `$MAIN_ROOT/reports/cache/<TS>-<slug>-final.md`, where `MAIN_ROOT` is the **main checkout root** (first entry of `git worktree list`) — never the linked worktree's own root. Anchoring to the main checkout is the only way the report survives when the worktree is removed/merged, since `./reports/` is gitignored everywhere. Path-only return so the calling agent's context never gets flooded.
 
 ## Related
 

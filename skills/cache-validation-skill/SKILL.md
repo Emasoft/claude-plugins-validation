@@ -23,7 +23,7 @@ This skill is the agent-facing wrapper around `scripts/validate_cache.py`. It do
 
 The cache validator follows the same I/O contract as the security validator so any agent that loads this skill knows what to expect:
 
-- **Default output is path-only.** Without `--json` or `--report`, the script auto-saves the aggregated report to `${CLAUDE_PROJECT_DIR}/reports/cache/<timestamp>-<slug>.md` and prints **only** the compact summary (counts table + verdict + plugin path + report path) to stdout. The agent reads the report file when it needs the details.
+- **Default output is path-only.** Without `--json` or `--report`, the script auto-saves the aggregated report to a default path and prints **only** the compact summary (counts table + verdict + plugin path + report path) to stdout. The agent reads the report file when it needs the details. The default location follows `${CLAUDE_PROJECT_DIR}/reports/cache/<timestamp>-<slug>.md` if `CLAUDE_PROJECT_DIR` is set; the agent should override the script's default with `--report "${MAIN_ROOT}/reports/cache/<TS>-<slug>.md"` (where `MAIN_ROOT` comes from `git worktree list`) so reports anchor to the main checkout and survive worktree removal.
 - **Aggregated reporting.** Findings group by `(level, rule_id)` so each CA rule's full explanation appears once, followed by a count and capped file:line list — token-bounded.
 - **Self-scan filter chain.** The validator skips files marked as catalog/test/dev-scratch (`cpv_self_scan_skip`, `_is_vendored_dep_path`, `_is_dev_scratch_path`, `_is_test_file_path`, `is_fp_corpus_markdown`) so a plugin that ships its own validator catalogs doesn't trigger CA findings on its own catalogs.
 
@@ -40,7 +40,14 @@ The cache validator follows the same I/O contract as the security validator so a
 
 ## Audit workflow (read-only)
 
-1. Build a timestamped report path: `${CLAUDE_PROJECT_DIR}/reports/cache/$(date +%Y%m%d_%H%M%S%z)-<slug>.md`. `${CLAUDE_PROJECT_DIR}` is a real env var Claude Code exports into every Bash subprocess AND a substitution Claude resolves before the body is shown to the LLM, so it works whether the agent uses it as substitution-text or inside a Bash tool call. Use a worktree-aware override (`MAIN_ROOT="$(git worktree list | head -n1 | awk '{print $1}')"`) only inside the Bash tool call below if the agent specifically needs to anchor reports to the main checkout instead of a linked worktree's local copy.
+1. Anchor the report path to the **main checkout root** (first entry of `git worktree list`), NEVER a linked worktree's own root. The worktree's local `./reports/` is gitignored and disappears when the worktree is removed/merged, so reports written there lose the audit trail. `${CLAUDE_PROJECT_DIR}` resolves to the WORKTREE root inside a linked worktree — only safe as a fallback for non-git contexts. Inside ONE Bash tool call, define MAIN_ROOT then build the path:
+   ```bash
+   MAIN_ROOT="$(git worktree list | head -n1 | awk '{print $1}')"
+   [ -z "${MAIN_ROOT}" ] && MAIN_ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"   # fallback for non-git
+   REPORT="${MAIN_ROOT}/reports/cache/$(date +%Y%m%d_%H%M%S%z)-<slug>.md"
+   mkdir -p "$(dirname "$REPORT")"
+   ```
+   This is the canonical pattern from `~/.claude/CLAUDE.md` + `~/.claude/rules/agent-reports-location.md` and matches what every other CPV agent uses (`plugin-validator`, `semantic-validator`, `marketplace-fixer`, `skill-validation-agent`).
 3. Run:
    ```bash
    uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_cache.py" <plugin_or_project_path> --report <report_path>
