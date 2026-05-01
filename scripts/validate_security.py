@@ -3693,19 +3693,69 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
                     if any(safe in matched_text or safe in line for safe in KNOWN_SAFE_PATHS):
                         continue
 
-                # In JS/TS files, do the same for paths inside string literals.
-                # The Windows pattern's biggest FP source is escape sequences
-                # like `"INSTRUCTIONS:\n"` matching `[A-Za-z]:\`. Skip when
-                # the matched text is one of those escapes.
+                # GENERAL — Windows-drive-letter regex `[A-Za-z]:\` collides
+                # with C-style string-literal escape sequences. The most
+                # common FP shape is a string ending in a colon followed by
+                # `\n` / `\r` / `\t` / `\b` / `\f` / `\v` / `\0` /
+                # `\\` / `\"` / `\'` / `\`` :
+                #     "Failed to clear lock:\n{e.Message}"   (C#)
+                #     "If using version control:\n"          (C# concat)
+                #     "import os\n"                          (.json string)
+                #     "...:\n\nSQLite Version:\n"            (C#)
+                # These are byte-after-backslash escape sequences, NOT
+                # `C:\Windows\System32`-style Windows drive letters. A
+                # Windows drive letter is ALWAYS followed by a path-shaped
+                # character (alpha / digit / `_` / `\` / `.` / space / `(`),
+                # never by an escape-only letter (`a/b/f/n/r/t/v/0`) or
+                # quote / backtick.
+                #
+                # The skip only fires when:
+                #   1. the language uses C-style string literals
+                #      (JS/TS/JSX, Rust, C/C++/C#, Java/Kotlin/Swift/Go)
+                #      OR the file is a JSON document, and
+                #   2. the matched line carries a quote (`'`, `"`, `` ` ``)
+                #      indicating a string-literal context, and
+                #   3. the byte after the colon-backslash is in the
+                #      escape-only character class.
+                #
+                # Real Windows-path findings (`C:\Users\…`, `D:\Program
+                # Files\…`) keep firing because the next byte is alpha or
+                # backslash — not in the escape-only class.
+                #
+                # Also covers JSON (`.json`) — JSON strings are a strict
+                # subset of C/C++/JS escape syntax, so the same predicate
+                # works without a separate path.
+                #
+                # Shell-like files (.sh, .bash, .zsh, …) also qualify
+                # because POSIX `printf`, `sed`, `awk`, and `echo -e`
+                # interpret `\n` / `\r` / `\t` etc. inside single/double
+                # quoted argument strings — `printf 'Error:\n'` matches
+                # the Windows-drive-letter regex on `r:\n` even though
+                # there is no `C:\…` path anywhere.
+                _is_cstyle_escape_lang = (
+                    is_c_family
+                    or file_lower.endswith(".json")
+                    or is_shell_like_file(file_path, content)
+                )
+                _line_has_quote = (
+                    "`" in stripped or "'" in stripped or '"' in stripped
+                )
+                if (
+                    "Windows" in msg
+                    and _is_cstyle_escape_lang
+                    and _line_has_quote
+                ):
+                    m = re.search(r"([A-Za-z]):\\(.)", line)
+                    # `nrtbfv0` are escape-only — no Windows folder name
+                    # starts with these letters at the segment boundary
+                    # without surrounding alphas (the regex group catches
+                    # the FIRST char). `\\` is double-backslash (escape for
+                    # one literal backslash). `'`, `"`, `` ` `` close the
+                    # string literal — the colon-backslash is escaping a
+                    # quote, not introducing a path.
+                    if m and m.group(2) in "nrtbfv0\\'\"`":
+                        continue
                 if is_js_ts and is_js_ts_string_line:
-                    if "Windows" in msg:
-                        # Validate the colon-backslash isn't a Windows drive
-                        # letter — drive letters are followed by `\` then a
-                        # filename char. Escape sequences (`\n`, `\r`, `\t`,
-                        # `\\`, `\"`) decode the byte after the backslash.
-                        m = re.search(r"([A-Za-z]):\\(.)", line)
-                        if m and m.group(2) in "nrtbfv0\\'\"`":
-                            continue
                     if "Absolute Unix" in msg:
                         # JS/TS string literals frequently contain literal
                         # paths as documentation (`'/usr/bin/env'`,
