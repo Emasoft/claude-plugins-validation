@@ -1219,7 +1219,7 @@ fence):
 Example README pattern:
 
 ```markdown
-[![CI](https://img.shields.io/…)](https://github.com/…)
+[![CI](https://img.shields.io/...)](https://github.com/...)
 ```
 ````
 
