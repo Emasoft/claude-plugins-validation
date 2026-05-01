@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-01T13:08:11+00:00",
+  "computed_at": "2026-05-01T13:28:04+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     "agents/cache-optimizer-agent.md": "sha256:f1ef238f1aa0b85fb7e76173436ee55b7f440f4732089482e986ad022cdf008d",
@@ -103,7 +103,7 @@
     "scripts/validate_project_scope.py": "sha256:7aaa9182febcee46c483ffd321ed56920a01ff36f3a1bc7edbf5a8aa7ac24360",
     "scripts/validate_rules.py": "sha256:2ae08e20e6d32d65b897dc9818ef61f33986f8b5ecf5247d3fa364c7b609d0c5",
     "scripts/validate_scoring.py": "sha256:aefdcbd653aefee1d600c1a25236511e261c9dfcca88d01abd02aad158ce2907",
-    "scripts/validate_security.py": "sha256:ccaad9c44d508748330803f0a4ff88de65395a6ce979da4dfea373021a086925",
+    "scripts/validate_security.py": "sha256:a8ac65e161d49609c8696d744f2dd8f5251412e4407e417015c946db50004b90",
     "scripts/validate_settings_marketplace.py": "sha256:ad8456286dae9498252bf95a10fa8cf304e7f9436c843e2c4f37dca15c679c6d",
     "scripts/validate_skill.py": "sha256:edc437a070373c64bada730a6cdaed1fc5ba76e156d487c88af0c230e4819e24",
     "scripts/validate_skill_comprehensive.py": "sha256:833f5459d2b8cd8b0501cc575748bbc16a8acce36e8da8a18c0578b52ac05025",

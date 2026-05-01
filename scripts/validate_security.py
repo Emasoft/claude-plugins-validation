@@ -89,6 +89,20 @@ from cpv_validation_common import (
 # Per-file safety limits (issue #15 — scan_all_files() deadlock prevention)
 # =============================================================================
 
+# Always-skip basenames — runtime artifacts that other tools (Cisco
+# skill-scanner, cc-audit, semgrep, etc.) leave behind in plugin trees.
+# These are NOT plugin source: they're scan output dumps that contain
+# every pattern the source-scanner ever flagged (literal `eval(...)`,
+# `curl ... | sh`, `/Users/foo/...` etc. quoted in JSON snippets).
+# Scanning them produces a flood of FPs against the SAME rules that
+# already fired against the actual source. Skip them at the file-walk
+# level so the per-line scanners never see them.
+ALWAYS_SKIP_BASENAMES: frozenset[str] = frozenset({
+    ".cpv-cisco-scan.json",   # Cisco skill-scanner output (CPV runs the scanner)
+    ".cpv-self-hashes.json",  # CPV's own integrity manifest (lots of long hex)
+})
+
+
 # Per-file size cap — files larger than this are skipped with a WARNING and
 # counted as `oversize_skipped`. Pathological inputs (50MB minified JS bundles,
 # concatenated SQL dumps, etc.) make every per-line scanner explode into huge
@@ -217,6 +231,23 @@ def format_scan_step_table(steps: list[dict[str, Any]] | None = None) -> str:
             f"{s['findings']:>8} | {coverage} |"
         )
     return "\n".join(lines)
+
+
+def _is_always_skip_basename(file_ref: str) -> bool:
+    """Return True iff `file_ref`'s basename is in ALWAYS_SKIP_BASENAMES.
+
+    Helper for external-scanner parsers (cc-audit, trufflehog, gitleaks,
+    semgrep, tirith, Cisco) to filter out runtime-artifact files at the
+    finding level — same skip the in-process scanners apply at the
+    file-walk level. Without this, an external scanner re-runs after a
+    Cisco scan would surface findings against the leftover
+    `.cpv-cisco-scan.json` dump.
+
+    Empty / falsy refs return False.
+    """
+    if not file_ref:
+        return False
+    return Path(str(file_ref)).name in ALWAYS_SKIP_BASENAMES
 
 
 def _split_lines(text: str) -> list[str]:
@@ -5396,6 +5427,15 @@ def scan_all_files(plugin_path: Path, report: ValidationReport) -> dict[str, int
                 stats["files_skipped"] += 1
                 continue
 
+            # Always-skip runtime artifacts (Cisco scan output, CPV
+            # integrity manifest). These contain literal pattern strings
+            # quoted in JSON (`"eval("`, `"curl … | sh"`, `/Users/...`)
+            # — scanning them produces a flood of FPs against the SAME
+            # rules that already fired on the real source.
+            if filename in ALWAYS_SKIP_BASENAMES:
+                stats["files_skipped"] += 1
+                continue
+
             # CPV self-scan: skip files that necessarily document the
             # security patterns CPV detects (validator scripts, fix-validation
             # references, security tests). Active only when the target IS the
@@ -5710,6 +5750,14 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
             message = finding.get("message", finding.get("description", "unknown"))
             file_ref = finding.get("file", finding.get("location", {}).get("file", ""))
             line = finding.get("line", finding.get("location", {}).get("line", 0))
+
+            # Always-skip well-known runtime artifacts (Cisco scan output,
+            # CPV integrity manifest). Same rationale as the in-process
+            # scanners — these files are scan dumps quoting every pattern
+            # the source-scanner ever flagged, and cc-audit will happily
+            # re-flag them on a re-scan.
+            if file_ref and Path(str(file_ref)).name in ALWAYS_SKIP_BASENAMES:
+                continue
 
             # CPV self-scan: skip cc-audit findings on files the running CPV
             # has marked as canonical (validator source / fix-validation refs
@@ -6073,6 +6121,8 @@ def check_tirith_scanner(plugin_path: Path, report: ValidationReport) -> int:
         # markdown as tirith findings.
         if file_ref:
             f_str = str(file_ref)
+            if _is_always_skip_basename(f_str):
+                continue
             if cpv_self_scan_skip(f_str):
                 continue
             if _is_vendored_dep_path(f_str):
@@ -6169,7 +6219,21 @@ def _iter_scannable_files(plugin_path: Path):
     for root, _dirs, files in gi.walk(plugin_path):
         for filename in files:
             file_path = Path(root) / filename
+            # Always-skip well-known runtime artifacts (Cisco scan dump,
+            # CPV integrity manifest). Same rationale as scan_all_files —
+            # these are scan-output files, not plugin source.
+            if filename in ALWAYS_SKIP_BASENAMES:
+                continue
             if is_binary_file(file_path):
+                continue
+            # Per-file size cap (issue #15) — applies to every phase scanner
+            # too, not just scan_all_files. Pathological files would otherwise
+            # hang the phase scanners' inner loops the same way.
+            try:
+                fsize = file_path.stat().st_size
+            except OSError:
+                fsize = 0
+            if fsize > MAX_SCAN_BYTES:
                 continue
             try:
                 content = file_path.read_text(encoding="utf-8", errors="ignore")
@@ -7419,6 +7483,10 @@ def check_trufflehog(plugin_path: Path, report: ValidationReport) -> int:
         # under the same hash-gated self-scan rule (they contain regex
         # patterns and example tokens that look like secrets but are
         # intentional pattern-source material).
+        # Always-skip leftover scan artifacts first (Cisco scan dump,
+        # CPV integrity manifest) — they quote every pattern verbatim.
+        if _is_always_skip_basename(rel):
+            continue
         if cpv_self_scan_skip(rel):
             continue
         # v2.43 — drop findings inside vendored / cached / build dirs
@@ -7524,6 +7592,8 @@ def check_gitleaks(plugin_path: Path, report: ValidationReport) -> int:
             # tokens, fix-validation references with example secrets)
             # are FPs by construction; the hash gate stops a malicious
             # plugin from spoofing the path to evade detection.
+            if _is_always_skip_basename(rel):
+                continue
             if cpv_self_scan_skip(rel):
                 continue
             # v2.43 — drop findings inside vendored / cached / build dirs.
@@ -7688,6 +7758,8 @@ def check_semgrep(plugin_path: Path, report: ValidationReport) -> int:
         line_no = (finding.get("start", {}) or {}).get("line", 0)
         # Skip CPV's own validator regex sources + tests + fixtures
         # under the same hash-gated self-scan rule applied elsewhere.
+        if _is_always_skip_basename(rel):
+            continue
         if cpv_self_scan_skip(rel):
             continue
         # v2.43 — drop findings inside vendored / cached / build dirs.
@@ -8068,6 +8140,8 @@ def validate_security(
         """
         if not file_path:
             return False
+        if _is_always_skip_basename(file_path):
+            return True
         if cpv_self_scan_skip(file_path):
             return True
         if _is_vendored_dep_path(file_path):
