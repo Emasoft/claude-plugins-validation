@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -293,13 +293,28 @@ def report_findings(
     result: CiscoScanResult,
     plugin_path: Path,
     report: Any,
+    should_skip: "Callable[[str, int | None], bool] | None" = None,
 ) -> int:
     """Adapt a CiscoScanResult into ValidationReport.<severity>(...) calls.
 
-    Returns the count of findings appended (0 if the scanner was skipped).
+    Returns the count of findings appended (0 if the scanner was skipped
+    or if `should_skip` filtered every finding out).
+
     The `report` argument is duck-typed against ValidationReport — only
     `.critical(msg, file, line)`, `.major(...)`, `.minor(...)`, `.nit(...)`,
     `.info(...)` are required, matching the existing CPV report API.
+
+    `should_skip` is the per-finding filter callback. Signature:
+    `(absolute_or_relative_file_path: str, line: int | None) -> bool`.
+    Return True to drop the finding. Used by CPV's main() to wire in the
+    self-scan / vendored-dep / dev-scratch / test-file / corpus filters
+    so the Cisco scanner doesn't surface CPV's own rule catalogs as
+    findings when CPV is scanning itself. The callback receives the
+    finding's REPORTED file path verbatim (already a string); CPV's
+    helpers handle abs↔rel normalisation internally.
+
+    Without a callback every finding is reported — keeps the wrapper
+    stand-alone usable outside CPV.
     """
     if not result.invoked:
         # Scanner was unavailable or timed out: surface as INFO so the
@@ -315,6 +330,12 @@ def report_findings(
     for finding in result.findings:
         line = finding.line_number
         rel_file = _relativise(finding.file_path, plugin_path)
+        # Apply the host's filter chain. The full reported file path
+        # (which may be absolute) is passed first because CPV's
+        # cpv_self_scan_skip uses substring matching that works on
+        # both abs and rel forms.
+        if should_skip is not None and should_skip(finding.file_path or rel_file, line):
+            continue
         message = f"[cisco {finding.rule_id}] {finding.message}".strip()
         if finding.severity == "info":
             # ValidationReport.info() doesn't accept a line number.
