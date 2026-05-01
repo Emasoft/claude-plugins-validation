@@ -299,10 +299,10 @@ def report_findings(
     if not result.invoked:
         # Scanner was unavailable or timed out: surface as INFO so the
         # operator knows external coverage was missing for this run.
+        # ValidationReport.info() takes (message, file=None) — no `line`.
         report.info(
             f"Cisco skill-scanner skipped — {result.skipped_reason}",
             "<external-scanner>",
-            None,
         )
         return 0
 
@@ -311,8 +311,12 @@ def report_findings(
         line = finding.line_number
         rel_file = _relativise(finding.file_path, plugin_path)
         message = f"[cisco {finding.rule_id}] {finding.message}".strip()
-        method = getattr(report, finding.severity, None) or report.minor
-        method(message, rel_file, line)
+        if finding.severity == "info":
+            # ValidationReport.info() doesn't accept a line number.
+            report.info(message, rel_file)
+        else:
+            method = getattr(report, finding.severity, None) or report.minor
+            method(message, rel_file, line)
         appended += 1
     return appended
 
