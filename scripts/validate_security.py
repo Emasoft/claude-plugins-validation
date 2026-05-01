@@ -5807,6 +5807,37 @@ def check_tirith_scanner(plugin_path: Path, report: ValidationReport) -> int:
             except (TypeError, ValueError):
                 line = 0
 
+        # Self-scan / vendored / dev-scratch / test-file / corpus filters.
+        # tirith hands back absolute paths; cpv_self_scan_skip handles the
+        # abs→rel normalisation. The same filter ladder cc-audit uses is
+        # applied here so CPV scanning itself doesn't surface its own rule
+        # catalogs, regex sources, parametrize fixtures, or FP-corpus
+        # markdown as tirith findings.
+        if file_ref:
+            f_str = str(file_ref)
+            if cpv_self_scan_skip(f_str):
+                continue
+            if _is_vendored_dep_path(f_str):
+                continue
+            if _is_dev_scratch_path(f_str):
+                continue
+            if _is_test_file_path(f_str):
+                continue
+            # Per-line catalog/docstring/comment pattern-source skip.
+            if isinstance(line, int) and line > 0:
+                try:
+                    fpath = Path(f_str)
+                    if fpath.is_file() and fpath.stat().st_size < 2_000_000:
+                        body = fpath.read_text(encoding="utf-8", errors="ignore")
+                        if cpv_self_scan_skip_line(f_str, body, int(line)):
+                            continue
+                        # FP-corpus markdown skip (file-level, requires
+                        # both directory shape AND in-file marker).
+                        if is_fp_corpus_markdown(f_str, body):
+                            continue
+                except OSError:
+                    pass
+
         report_fn(f"tirith {rule_id}: {str(msg)[:120]}", file_ref, line)
         issues_found += 1
 
@@ -7146,6 +7177,25 @@ def check_trufflehog(plugin_path: Path, report: ValidationReport) -> int:
         # in them is operational noise, not a security finding.
         if _is_dev_scratch_path(rel):
             continue
+        # Test-file skip — fixture tokens like `const FAKE = "ghs_..."`
+        # in `test_*.py` / `*.test.ts` / `tests/fixtures/...` exist by
+        # construction. The in-process secret scanners already early-
+        # exit on _is_test_file_path; aligning trufflehog with that
+        # contract eliminates the matching FPs here too.
+        if _is_test_file_path(rel):
+            continue
+        # FP-corpus markdown skip (file-level, requires both
+        # directory shape AND in-file marker — coincidental
+        # `fixtures/` markdown without a corpus marker is NOT
+        # skipped).
+        try:
+            fpath = plugin_path / rel
+            if fpath.is_file() and fpath.stat().st_size < 2_000_000:
+                body = fpath.read_text(encoding="utf-8", errors="ignore")
+                if is_fp_corpus_markdown(rel, body):
+                    continue
+        except OSError:
+            pass
         base_level = "critical" if verified else "major"
         level = effective_severity(base_level, rel)
         getattr(report, level)(
@@ -7385,6 +7435,31 @@ def check_semgrep(plugin_path: Path, report: ValidationReport) -> int:
         # v2.43 — drop findings inside vendored / cached / build dirs.
         if _is_vendored_dep_path(rel):
             continue
+        # v2.44 — drop findings inside gitignored dev-scratch dirs
+        # (docs_dev/, reports/, scripts_dev/, design/tasks/, …) so
+        # private workspace content never triggers semgrep noise.
+        if _is_dev_scratch_path(rel):
+            continue
+        # Drop findings inside test files. Test bodies routinely use
+        # the very tokens semgrep flags (`subprocess.run(shell=True, …)`
+        # in `test_*.py` to assert detection); the in-process scanners
+        # already early-exit on _is_test_file_path, this aligns
+        # semgrep with that contract.
+        if _is_test_file_path(rel):
+            continue
+        # FP-corpus markdown skip (file-level, requires both directory
+        # shape AND in-file marker) so corpus exemplars don't fire.
+        try:
+            fpath = plugin_path / rel
+            if fpath.is_file() and fpath.stat().st_size < 2_000_000:
+                body = fpath.read_text(encoding="utf-8", errors="ignore")
+                if is_fp_corpus_markdown(rel, body):
+                    continue
+                # Per-line catalog/docstring/comment pattern-source skip.
+                if isinstance(line_no, int) and line_no > 0 and cpv_self_scan_skip_line(rel, body, int(line_no)):
+                    continue
+        except OSError:
+            pass
         cpv_level_eff = effective_severity(cpv_level, rel)
         getattr(report, cpv_level_eff)(f"semgrep {rule_id}: {message}", rel, line_no)
         issues += 1
@@ -7618,8 +7693,41 @@ def validate_security(
     # is not on PATH or the cisco-ai-skill-scanner package cannot be
     # resolved at its PyPI source URL. See scripts/cpv_skill_scanner.py.
     from cpv_skill_scanner import run_cisco_scan, report_findings  # noqa: PLC0415
+
+    def _cisco_should_skip(file_path: str, line: int | None) -> bool:
+        """Apply CPV's full self-scan filter chain to each Cisco finding.
+
+        Without this, Cisco scanning CPV itself would surface CPV's own
+        rule catalogs, regex sources, parametrize fixtures, and FP-corpus
+        markdown as findings — exactly the noise the in-process scanners
+        already filter out via cpv_self_scan_skip / vendored / dev_scratch
+        / test_file / fp-corpus / pattern-source-line predicates.
+        """
+        if not file_path:
+            return False
+        if cpv_self_scan_skip(file_path):
+            return True
+        if _is_vendored_dep_path(file_path):
+            return True
+        if _is_dev_scratch_path(file_path):
+            return True
+        if _is_test_file_path(file_path):
+            return True
+        if isinstance(line, int) and line > 0:
+            try:
+                fpath = Path(file_path)
+                if fpath.is_file() and fpath.stat().st_size < 2_000_000:
+                    body = fpath.read_text(encoding="utf-8", errors="ignore")
+                    if cpv_self_scan_skip_line(file_path, body, int(line)):
+                        return True
+                    if is_fp_corpus_markdown(file_path, body):
+                        return True
+            except OSError:
+                pass
+        return False
+
     cisco_result = run_cisco_scan(plugin_path)
-    report_findings(cisco_result, plugin_path, report)
+    report_findings(cisco_result, plugin_path, report, should_skip=_cisco_should_skip)
 
     return report
 
