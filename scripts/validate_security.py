@@ -123,6 +123,102 @@ _split_lines_last_id: int | None = None
 _split_lines_last_value: list[str] = []
 
 
+# =============================================================================
+# Per-scan step-status tracker (visibility for which steps actually ran)
+# =============================================================================
+#
+# Issue: it was unclear from the compact summary whether the scanner
+# actually ran every step on every file, or silently skipped large parts of
+# the work. The step log captures, for each numbered step in
+# `validate_security()`, exactly one of:
+#
+#   - "COMPLETED" — step ran end-to-end on the target tree
+#   - "RAN"       — external scanner ran (clean or with findings)
+#   - "SKIPPED"   — step was deliberately not run (e.g. external scanner's
+#                   binary is missing, or test isolation knob was off)
+#   - "FAILED"    — step started but raised / timed out before completing
+#
+# `validate_security()` resets the log at start, populates it inline as
+# each step runs, and exposes `get_scan_step_log()` / `format_scan_step_table()`
+# so the CLI can render a table next to the report path. The log is a
+# module-level global because the natural place to fill it is inside each
+# step in `validate_security()` — wrapping it in a class would force every
+# existing caller through a refactor for no extra benefit. Process-local;
+# `_reset_scan_step_log()` clears it for each new top-level call.
+
+_scan_step_log: list[dict[str, Any]] = []
+
+
+def _reset_scan_step_log() -> None:
+    """Clear the per-scan step log. Called at the top of validate_security()."""
+    global _scan_step_log
+    _scan_step_log = []
+
+
+def _record_step(
+    num: int,
+    name: str,
+    status: str,
+    *,
+    findings: int = 0,
+    files: str = "",
+    details: str = "",
+) -> None:
+    """Append one step's status to the per-scan step log.
+
+    Args:
+        num: Step number (1..N) — preserves order in the rendered table.
+        name: Short human-readable name (e.g. "Injection scan").
+        status: One of "COMPLETED" / "RAN" / "SKIPPED" / "FAILED".
+        findings: Number of issues this step contributed to the report.
+        files: File coverage summary (e.g. "53 scanned, 2 skipped").
+        details: Free-form note explaining a SKIPPED/FAILED status.
+    """
+    _scan_step_log.append({
+        "num": num,
+        "name": name,
+        "status": status,
+        "findings": findings,
+        "files": files,
+        "details": details,
+    })
+
+
+def get_scan_step_log() -> list[dict[str, Any]]:
+    """Return a snapshot of the most-recent scan's step log."""
+    return list(_scan_step_log)
+
+
+def format_scan_step_table(steps: list[dict[str, Any]] | None = None) -> str:
+    """Render the step log as a Markdown table.
+
+    Returns the empty string when there are no steps to render (caller can
+    short-circuit on falsy result).
+    """
+    if steps is None:
+        steps = _scan_step_log
+    if not steps:
+        return ""
+    glyph = {
+        "COMPLETED": "[OK] COMPLETED",
+        "RAN":       "[OK] RAN",
+        "SKIPPED":   "[--] SKIPPED",
+        "FAILED":    "[!!] FAILED",
+    }
+    lines = [
+        "| #  | Step                                  | Status         | Findings | Files / Details |",
+        "|----|---------------------------------------|----------------|---------:|-----------------|",
+    ]
+    for s in steps:
+        status = glyph.get(s["status"], s["status"])
+        coverage = s.get("files") or s.get("details") or ""
+        lines.append(
+            f"| {s['num']:>2} | {s['name']:<37} | {status:<14} | "
+            f"{s['findings']:>8} | {coverage} |"
+        )
+    return "\n".join(lines)
+
+
 def _split_lines(text: str) -> list[str]:
     """Return `text.split("\\n")`, cached by id(text) for one shot.
 
@@ -7671,6 +7767,7 @@ def validate_security(
         ValidationReport with all security findings
     """
     report = ValidationReport()
+    _reset_scan_step_log()
     # Make the classifier flag and the plugin-meta dict visible to the
     # phase-specific scan helpers via module-level globals — same pattern
     # the self-scan flag uses, so the overhead per finding stays in the
@@ -7680,10 +7777,14 @@ def validate_security(
     # Verify plugin path exists
     if not plugin_path.exists():
         report.critical(f"Plugin path does not exist: {plugin_path}")
+        _record_step(0, "Validate target path", "FAILED",
+                     details=f"Path does not exist: {plugin_path}")
         return report
 
     if not plugin_path.is_dir():
         report.critical(f"Plugin path is not a directory: {plugin_path}")
+        _record_step(0, "Validate target path", "FAILED",
+                     details=f"Path is not a directory: {plugin_path}")
         return report
 
     # Detect whether the target IS the CPV plugin itself (any deployment
@@ -7715,11 +7816,17 @@ def validate_security(
     dangerous_count = check_dangerous_files(plugin_path, report)
     if dangerous_count == 0:
         report.passed("No dangerous files detected")
+    _record_step(1, "Dangerous file detection", "COMPLETED",
+                 findings=dangerous_count,
+                 files=".env / credentials.json / .ssh/ etc.")
 
     # Check 2: Script permissions
     permission_issues = check_script_permissions(plugin_path, report)
     if permission_issues == 0:
         report.passed("All scripts have proper permissions")
+    _record_step(2, "Script permission check", "COMPLETED",
+                 findings=permission_issues,
+                 files="*.sh / *.py executables")
 
     # Check 3-11: Full content scan (traditional + AI-specific)
     scan_stats = scan_all_files(plugin_path, report)
@@ -7732,11 +7839,17 @@ def validate_security(
     scan_stats["secret_issues"] += ide_stats["secret_issues"]
 
     # Report scan statistics
-    report.info(
-        f"Scanned {scan_stats['files_scanned']} files, "
-        f"skipped {scan_stats['files_skipped']} binary files "
-        f"(IDE config: {ide_stats['files_scanned']} scanned, {ide_stats['files_skipped']} skipped)"
+    files_scanned = scan_stats["files_scanned"]
+    files_skipped = scan_stats["files_skipped"]
+    oversize_skipped = scan_stats.get("oversize_skipped", 0)
+    files_summary = (
+        f"{files_scanned} scanned, {files_skipped} skipped"
+        + (f" ({oversize_skipped} oversize > {MAX_SCAN_BYTES // (1024*1024)} MiB)"
+           if oversize_skipped else "")
+        + f"; +{ide_stats['files_scanned']} IDE configs scanned"
+        + (f", {ide_stats['files_skipped']} skipped" if ide_stats['files_skipped'] else "")
     )
+    report.info(f"Scanned {files_scanned} files, skipped {files_skipped} ({files_summary})")
 
     # Add passed messages for clean traditional categories
     if scan_stats["injection_issues"] == 0:
@@ -7748,22 +7861,53 @@ def validate_security(
     if scan_stats["user_path_issues"] == 0:
         report.passed("No hardcoded user paths detected")
 
+    # Record per-scanner step status. scan_all_files dispatches to 9
+    # scanners on the same content; we report each as its own step so
+    # the operator sees coverage per category.
+    _record_step(3,  "Injection scan",          "COMPLETED",
+                 findings=scan_stats["injection_issues"],         files=files_summary)
+    _record_step(4,  "Path-traversal scan",     "COMPLETED",
+                 findings=scan_stats["path_traversal_issues"],    files=files_summary)
+    _record_step(5,  "Secret scan",             "COMPLETED",
+                 findings=scan_stats["secret_issues"],            files=files_summary)
+    _record_step(6,  "User-path scan",          "COMPLETED",
+                 findings=scan_stats["user_path_issues"],         files=files_summary)
+    _record_step(7,  "Prompt-injection scan",   "COMPLETED",
+                 findings=scan_stats["prompt_injection_issues"],  files=files_summary)
+    _record_step(8,  "Data-exfiltration scan",  "COMPLETED",
+                 findings=scan_stats["exfiltration_issues"],      files=files_summary)
+    _record_step(9,  "Supply-chain scan",       "COMPLETED",
+                 findings=scan_stats["supply_chain_issues"],      files=files_summary)
+    _record_step(10, "Credential-harvest scan", "COMPLETED",
+                 findings=scan_stats["credential_harvest_issues"], files=files_summary)
+    _record_step(11, "Sandbox-escape scan",     "COMPLETED",
+                 findings=scan_stats["sandbox_escape_issues"],    files=files_summary)
+    _record_step(12, "IDE-config scan",         "COMPLETED",
+                 findings=ide_stats["secret_issues"],
+                 files=f"{ide_stats['files_scanned']} scanned, {ide_stats['files_skipped']} skipped")
+
     # --- AI-specific file-level checks ---
 
-    # Check 12: Hook abuse (external URLs, supply chain in hooks)
+    # Check 13: Hook abuse (external URLs, supply chain in hooks)
     hook_issues = check_hook_abuse(plugin_path, report)
     if hook_issues == 0:
         report.passed("No hook abuse patterns detected")
+    _record_step(13, "Hook-abuse scan", "COMPLETED",
+                 findings=hook_issues, files="hooks/*.json + .json hook files")
 
-    # Check 13: MCP server abuse (non-localhost connections)
+    # Check 14: MCP server abuse (non-localhost connections)
     mcp_issues = check_mcp_abuse(plugin_path, report)
     if mcp_issues == 0:
         report.passed("No MCP server abuse detected")
+    _record_step(14, "MCP-server-abuse scan", "COMPLETED",
+                 findings=mcp_issues, files=".mcp.json + plugin.json mcpServers")
 
-    # Check 14: Permission escalation (overly broad permissions)
+    # Check 15: Permission escalation (overly broad permissions)
     escalation_issues = check_permission_escalation(plugin_path, report)
     if escalation_issues == 0:
         report.passed("No permission escalation detected")
+    _record_step(15, "Permission-escalation scan", "COMPLETED",
+                 findings=escalation_issues, files="settings.json + plugin.json permissions")
 
     # Add passed messages for clean AI-specific categories
     if scan_stats["prompt_injection_issues"] == 0:
@@ -7781,31 +7925,45 @@ def validate_security(
     phase1_issues = check_phase1_all(plugin_path, report)
     if phase1_issues == 0:
         report.passed("No Phase 1 critical-rule findings (RC-09/10/11/21/29/37/43/47/49/50/67)")
+    _record_step(16, "Phase 1 — critical RC rules", "COMPLETED",
+                 findings=phase1_issues,
+                 files="RC-09/10/11/21/29/37/43/47/49/50/67")
 
     # --- Phase 2e extras — Cloud IMDS, persistence, obfuscated decode-then-exec ---
     phase2e_issues = check_phase2e_extras(plugin_path, report)
     if phase2e_issues == 0:
         report.passed("No Phase 2e extras findings (RC-39 persistence, RC-65 cloud IMDS, RC-70 obfuscated exec)")
+    _record_step(17, "Phase 2e — extras", "COMPLETED",
+                 findings=phase2e_issues,
+                 files="RC-39 persistence, RC-65 IMDS, RC-70 obfuscated-exec")
 
     # --- Phase 3 — ~30 MAJOR net-new rules ---
     phase3_issues = check_phase3_all(plugin_path, report)
     if phase3_issues == 0:
         report.passed("No Phase 3 findings (~30 MAJOR net-new rules)")
+    _record_step(18, "Phase 3 — ~30 MAJOR RC rules", "COMPLETED",
+                 findings=phase3_issues, files="~30 MAJOR rules")
 
     # --- Phase 4 — Minor / informational + verdict-tier (RC-85/86/87/88/103/104) ---
     phase4_issues = check_phase4_all(plugin_path, report)
     if phase4_issues == 0:
         report.passed("No Phase 4 findings (minor/info + observability)")
+    _record_step(19, "Phase 4 — minor + observability", "COMPLETED",
+                 findings=phase4_issues, files="RC-85/86/87/88/103/104")
 
     # --- Phase 9 — RC-76 stemmed semantic injection classifier ---
     phase9_issues = check_phase9_stemmed_injection(plugin_path, report)
     if phase9_issues == 0:
         report.passed("No Phase 9 findings (RC-76 stemmed semantic injection)")
+    _record_step(20, "Phase 9 — stemmed semantic injection", "COMPLETED",
+                 findings=phase9_issues, files="RC-76")
 
     # --- Phase 10 — RC-73/74/75 AST-based Python taint engine ---
     phase10_issues = check_phase10_taint(plugin_path, report)
     if phase10_issues == 0:
         report.passed("No Phase 10 findings (RC-73/74/75 taint source→sink)")
+    _record_step(21, "Phase 10 — Python taint engine", "COMPLETED",
+                 findings=phase10_issues, files="RC-73/74/75 source-sink")
 
     # --- RC-103 disposition — emitted as a single INFO line ---
     counts = {
@@ -7830,27 +7988,70 @@ def validate_security(
     # The `enable_*` keyword arguments survive only as test-isolation
     # knobs for hermetic unit tests — production callers pass True.
 
-    # Check 16: cc-audit external scanner (100+ rules; runs via npx,
+    # Check 22: cc-audit external scanner (100+ rules; runs via npx,
     # self-skips when the npm package cannot be fetched).
-    check_cc_audit(plugin_path, report)
+    if shutil.which("npx"):
+        cc_count = check_cc_audit(plugin_path, report)
+        _record_step(22, "External: cc-audit (100+ AI rules)", "RAN",
+                     findings=cc_count,
+                     files="npx @cc-audit/cc-audit (auto-fetched)")
+    else:
+        check_cc_audit(plugin_path, report)  # still emits the WARNING for the user
+        _record_step(22, "External: cc-audit (100+ AI rules)", "SKIPPED",
+                     details="`npx` not on PATH — install Node.js to enable")
 
-    # Check 17: tirith external scanner (terminal-security rules,
+    # Check 23: tirith external scanner (terminal-security rules,
     # scan-only). Resolution order: PATH → docker → nix → auto-install
     # (brew/npm/cargo). Set CPV_NO_TIRITH_INSTALL=1 to disable the
     # install fallback in CI sandboxes that block container pulls.
     if enable_tirith:
-        check_tirith_scanner(plugin_path, report)
+        report_len_before = len(report.results)
+        tirith_count = check_tirith_scanner(plugin_path, report)
+        # Inspect newly-added results to determine RAN vs SKIPPED.
+        new_results = report.results[report_len_before:]
+        unavail = any(
+            "tirith" in (r.message or "").lower() and (
+                "not found" in r.message.lower()
+                or "unavailable" in r.message.lower()
+                or "skipped" in r.message.lower()
+            )
+            for r in new_results
+        )
+        _record_step(
+            23, "External: tirith (terminal-security)",
+            "SKIPPED" if unavail else "RAN",
+            findings=tirith_count,
+            files="PATH → docker → nix → auto-install" if not unavail else "",
+            details=("tirith binary unavailable — see WARNING above"
+                     if unavail else ""),
+        )
+    else:
+        _record_step(23, "External: tirith (terminal-security)", "SKIPPED",
+                     details="enable_tirith=False (test isolation knob)")
 
-    # Checks 18-20 — Phase 5 specialist tools (RC-102). Each invocation
+    # Checks 24-26 — Phase 5 specialist tools (RC-102). Each invocation
     # self-skips when the binary is missing AND no install path succeeds.
-    if enable_trufflehog:
-        check_trufflehog(plugin_path, report)
-    if enable_gitleaks:
-        check_gitleaks(plugin_path, report)
-    if enable_semgrep:
-        check_semgrep(plugin_path, report)
+    for step_num, name, scanner_fn, enabled, binary_hint in (
+        (24, "External: trufflehog (~700 secret rules)", check_trufflehog, enable_trufflehog, "trufflehog"),
+        (25, "External: gitleaks (~150 secret rules)",   check_gitleaks,   enable_gitleaks,   "gitleaks"),
+        (26, "External: semgrep (p/security-audit)",     check_semgrep,    enable_semgrep,    "semgrep"),
+    ):
+        if not enabled:
+            _record_step(step_num, name, "SKIPPED",
+                         details=f"enable_{binary_hint}=False (test isolation knob)")
+            continue
+        if not shutil.which(binary_hint):
+            scanner_fn(plugin_path, report)  # let it emit the WARNING
+            _record_step(step_num, name, "SKIPPED",
+                         details=f"`{binary_hint}` not on PATH (install via brew/pipx/etc.)")
+            continue
+        report_len_before = len(report.results)
+        count = scanner_fn(plugin_path, report)
+        _record_step(step_num, name, "RAN",
+                     findings=count,
+                     files=f"{binary_hint} (PATH binary)")
 
-    # Check 21 — Cisco AI Defense skill-scanner via uvx remote.
+    # Check 27 — Cisco AI Defense skill-scanner via uvx remote.
     # Programmatic-only mode (no API-key engines). Self-skips when uvx
     # is not on PATH or the cisco-ai-skill-scanner package cannot be
     # resolved at its PyPI source URL. See scripts/cpv_skill_scanner.py.
@@ -7888,8 +8089,44 @@ def validate_security(
                 pass
         return False
 
-    cisco_result = run_cisco_scan(plugin_path)
-    report_findings(cisco_result, plugin_path, report, should_skip=_cisco_should_skip)
+    if not shutil.which("uvx"):
+        # uvx unavailable — record SKIPPED and do not even spawn the run.
+        _record_step(27, "External: Cisco AI Defense (skill-scanner)", "SKIPPED",
+                     details="`uvx` not on PATH — install with `pip install uv`")
+    else:
+        report_len_before = len(report.results)
+        cisco_result = run_cisco_scan(plugin_path)
+        report_findings(cisco_result, plugin_path, report, should_skip=_cisco_should_skip)
+        new_results = report.results[report_len_before:]
+        # Detect "uvx package failed to resolve / cisco binary unavailable" via
+        # the WARNING messages run_cisco_scan / report_findings emit.
+        unavail = any(
+            ("cisco" in (r.message or "").lower() or "skill-scanner" in (r.message or "").lower())
+            and ("unavailable" in r.message.lower() or "not found" in r.message.lower()
+                 or "skipped" in r.message.lower() or "failed to resolve" in r.message.lower())
+            for r in new_results
+        )
+        timed_out = any(
+            "timeout" in (r.message or "").lower() and "cisco" in (r.message or "").lower()
+            for r in new_results
+        )
+        cisco_findings = sum(
+            1 for r in new_results
+            if r.level in ("CRITICAL", "MAJOR", "MINOR", "NIT")
+        )
+        if timed_out:
+            status = "FAILED"
+            details = "Cisco scanner timed out (override CPV_CISCO_SCAN_TIMEOUT_S)"
+        elif unavail:
+            status = "SKIPPED"
+            details = "Cisco scanner unavailable — see WARNING above"
+        else:
+            status = "RAN"
+            details = ""
+        _record_step(27, "External: Cisco AI Defense (skill-scanner)", status,
+                     findings=cisco_findings,
+                     files="uvx --from cisco-ai-skill-scanner" if status == "RAN" else "",
+                     details=details)
 
     return report
 
@@ -7971,6 +8208,242 @@ def _read_plugin_version(plugin_path: Path) -> str:
         return "0.0.0"
 
 
+def _resolve_marketplace_plugins(spec: str) -> tuple[str, list[Path], list[str]]:
+    """Resolve a `--marketplace` spec to a list of plugin directories.
+
+    Returns ``(label, plugin_dirs, skipped_reasons)`` where ``label`` is a
+    human-readable name for the marketplace, ``plugin_dirs`` is the list
+    of plugin root paths to scan, and ``skipped_reasons`` is a list of
+    "<plugin-name>: <reason>" lines for entries that could not be located
+    (typically: declared in marketplace.json but not present in the local
+    cache).
+
+    Supported spec forms:
+      - Local path to a marketplace root containing
+        ``.claude-plugin/marketplace.json`` — plugins are resolved
+        relative to the marketplace root per the manifest's ``source``
+        fields. ``relative-path`` entries are joined to the marketplace
+        root; entries with non-local sources fall back to cache lookup.
+      - Local path to a plugins-cache root (e.g.
+        ``~/.claude/plugins/cache/<marketplace-name>/``) — every
+        ``<plugin-name>/<latest-version>/`` subdir is treated as a plugin.
+      - ``github:owner/repo`` or ``https://github.com/owner/repo`` — the
+        marketplace.json is fetched via ``gh api``, plugin entries are
+        located in the local cache under
+        ``~/.claude/plugins/cache/<repo-basename>/<plugin>/<latest>/``;
+        any plugin not present in the cache is added to
+        ``skipped_reasons`` and not scanned.
+    """
+    skipped: list[str] = []
+    plugin_dirs: list[Path] = []
+
+    # --- Github URL / shorthand ---------------------------------------
+    is_github = spec.startswith("github:") or spec.startswith("https://github.com/")
+    if is_github:
+        if spec.startswith("github:"):
+            slug = spec[len("github:"):].strip("/")
+        else:
+            slug = spec[len("https://github.com/"):].strip("/")
+        # Expect exactly owner/repo
+        parts = slug.split("/")
+        if len(parts) < 2:
+            raise ValueError(f"Bad GitHub marketplace spec: {spec!r}")
+        owner, repo = parts[0], parts[1]
+        # Fetch marketplace.json via gh api
+        completed = subprocess.run(
+            ["gh", "api", f"repos/{owner}/{repo}/contents/.claude-plugin/marketplace.json"],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(
+                f"gh api failed for {owner}/{repo}: {completed.stderr.strip()[:200]}"
+            )
+        # Response is a JSON object with base64-encoded content
+        meta = json.loads(completed.stdout)
+        import base64 as _b64  # noqa: PLC0415
+        manifest_text = _b64.b64decode(meta["content"]).decode("utf-8")
+        manifest = json.loads(manifest_text)
+        cache_root = Path.home() / ".claude" / "plugins" / "cache" / repo
+        for entry in manifest.get("plugins", []):
+            name = entry.get("name") or entry.get("plugin") or "<unnamed>"
+            plugin_cache = cache_root / name
+            if not plugin_cache.is_dir():
+                skipped.append(f"{name}: not in local cache ({plugin_cache})")
+                continue
+            # Pick the latest version subdir (lexicographic on semver works
+            # well-enough for this use case; ties broken by mtime).
+            versions = sorted(
+                [v for v in plugin_cache.iterdir() if v.is_dir()],
+                key=lambda p: (p.name, p.stat().st_mtime),
+            )
+            if not versions:
+                skipped.append(f"{name}: cache dir has no version subdirs")
+                continue
+            plugin_dirs.append(versions[-1])
+        return f"github:{owner}/{repo}", plugin_dirs, skipped
+
+    # --- Local path: either a marketplace root or a plugins-cache root --
+    root = Path(spec).expanduser().resolve()
+    if not root.is_dir():
+        raise ValueError(f"Marketplace path is not a directory: {root}")
+
+    manifest_path = root / ".claude-plugin" / "marketplace.json"
+    if manifest_path.is_file():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for entry in manifest.get("plugins", []):
+            name = entry.get("name") or "<unnamed>"
+            source = entry.get("source")
+            sub_path: Path | None = None
+            if isinstance(source, dict) and source.get("type") == "relative-path":
+                sub_path = (root / source.get("path", name)).resolve()
+            elif source == "./":
+                # Layout C — marketplace IS the plugin
+                sub_path = root
+            elif isinstance(source, str) and not source.startswith(("github", "git", "url:", "npm:")):
+                sub_path = (root / source).resolve()
+            if sub_path and sub_path.is_dir():
+                plugin_dirs.append(sub_path)
+            else:
+                skipped.append(f"{name}: source not local-resolvable ({source!r})")
+        return f"local:{root.name}", plugin_dirs, skipped
+
+    # No marketplace.json — assume plugins-cache layout (`<plugin>/<version>/`)
+    for plugin_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+        versions = sorted(
+            [v for v in plugin_dir.iterdir() if v.is_dir()],
+            key=lambda p: (p.name, p.stat().st_mtime),
+        )
+        if not versions:
+            skipped.append(f"{plugin_dir.name}: no version subdirs")
+            continue
+        plugin_dirs.append(versions[-1])
+    return f"cache:{root.name}", plugin_dirs, skipped
+
+
+def _plugin_label_from_dir(plugin_dir: Path) -> str:
+    """Resolve a human-friendly plugin label from a plugin directory.
+
+    For plugins-cache layouts (`<plugin>/<version>/`), `plugin_dir.name`
+    is the version (e.g. `2.46.3`) and the plugin name lives one level
+    up. For everything else `plugin_dir.name` already IS the plugin name.
+
+    Returns ``"<plugin>@<version>"`` for cache-layout entries and just
+    ``"<plugin>"`` otherwise.
+    """
+    parent = plugin_dir.parent
+    # Heuristic: cache layout has a numeric / semver-ish version segment
+    # (e.g. "2.46.3", "0.3.9"). If the leaf looks like a version AND the
+    # parent has other version subdirs OR the parent matches the plugin
+    # name pattern, treat it as cache-layout.
+    looks_like_version = bool(re.match(r"^\d+(\.\d+)*([-+].+)?$", plugin_dir.name))
+    if looks_like_version and parent.is_dir():
+        return f"{parent.name}@{plugin_dir.name}"
+    return plugin_dir.name
+
+
+def _run_marketplace_scan(args: argparse.Namespace) -> int:
+    """Iterate every plugin in the resolved marketplace and run validate_security.
+
+    Writes a TIMESTAMPED master report file containing the master summary
+    table + every per-plugin step table + per-plugin findings count, and
+    prints the same content to stdout. Returns the worst exit code across
+    all plugins (so CI can gate on the union of findings).
+
+    The report path follows the canonical CPV convention:
+      ``$MAIN_ROOT/reports/security/marketplace_<TS>-<label>.md``
+    where ``$MAIN_ROOT`` is the main checkout root (first entry of
+    ``git worktree list``) so the report survives worktree merges/removals.
+    """
+    try:
+        label, plugin_dirs, skipped = _resolve_marketplace_plugins(args.marketplace)
+    except (ValueError, RuntimeError, json.JSONDecodeError) as exc:
+        print(f"Error resolving marketplace {args.marketplace!r}: {exc}", file=sys.stderr)
+        return 1
+
+    # Build report path (timestamped, anchored to main checkout root).
+    ts = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d_%H%M%S%z")
+    safe_label = re.sub(r"[^A-Za-z0-9._-]+", "-", label)
+    report_path = (
+        _resolve_report_root() / "reports" / "security" /
+        f"marketplace_{ts}-{safe_label}.md"
+    )
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Build report body in-memory, also tee'd to stdout.
+    body_lines: list[str] = []
+
+    def emit(line: str = "") -> None:
+        print(line)
+        body_lines.append(line)
+
+    emit(f"# Marketplace scan report — {label}")
+    emit(f"Generated: {ts}")
+    emit("")
+    emit(f"Plugins to scan: {len(plugin_dirs)}; "
+         f"skipped at resolution: {len(skipped)}")
+    if skipped:
+        emit("Resolution-skipped:")
+        for line in skipped:
+            emit(f"  - {line}")
+    emit("")
+
+    worst_exit = 0
+    summary_rows: list[tuple[str, int, int, int, int, int, int]] = []
+
+    for plugin_dir in plugin_dirs:
+        plugin_label = _plugin_label_from_dir(plugin_dir)
+        emit(f"## {plugin_label}")
+        emit(f"Path: `{plugin_dir}`")
+        emit("")
+        report = validate_security(
+            plugin_dir,
+            enable_tirith=True,
+            enable_trufflehog=True,
+            enable_gitleaks=True,
+            enable_semgrep=True,
+            with_classifier=args.with_classifier,
+        )
+        step_table = format_scan_step_table(get_scan_step_log())
+        if step_table:
+            emit(step_table)
+            emit("")
+        counts = {
+            "CRITICAL": sum(1 for r in report.results if r.level == "CRITICAL"),
+            "MAJOR":    sum(1 for r in report.results if r.level == "MAJOR"),
+            "MINOR":    sum(1 for r in report.results if r.level == "MINOR"),
+            "NIT":      sum(1 for r in report.results if r.level == "NIT"),
+            "WARNING":  sum(1 for r in report.results if r.level == "WARNING"),
+        }
+        ec = report.exit_code_strict() if args.strict else report.exit_code
+        worst_exit = max(worst_exit, ec)
+        summary_rows.append((
+            plugin_label, counts["CRITICAL"], counts["MAJOR"],
+            counts["MINOR"], counts["NIT"], counts["WARNING"], ec,
+        ))
+        emit(
+            f"**Plugin {plugin_label}**: "
+            f"CRITICAL={counts['CRITICAL']} MAJOR={counts['MAJOR']} "
+            f"MINOR={counts['MINOR']} NIT={counts['NIT']} "
+            f"WARNING={counts['WARNING']} exit={ec}"
+        )
+        emit("")
+
+    emit(f"## Marketplace summary — {label}")
+    emit("")
+    emit("| Plugin                                            | CRITICAL | MAJOR | MINOR | NIT | WARNING | Exit |")
+    emit("|---------------------------------------------------|---------:|------:|------:|----:|--------:|-----:|")
+    for name, c, M, m, n, w, ec in summary_rows:
+        emit(f"| {name:<49} | {c:>8} | {M:>5} | {m:>5} | "
+             f"{n:>3} | {w:>7} | {ec:>4} |")
+    emit("")
+    emit(f"**Worst exit code:** {worst_exit} (worst-of-all-plugins)")
+    emit("")
+    emit(f"Report saved: `{report_path}`")
+
+    report_path.write_text("\n".join(body_lines) + "\n", encoding="utf-8")
+    return worst_exit
+
+
 def main() -> int:
     """CLI entry point for standalone security validation.
 
@@ -8018,7 +8491,27 @@ Exit Codes:
   3 - MINOR issues found (recommended to fix)
         """,
     )
-    parser.add_argument("plugin_path", type=Path, help="Path to the plugin directory to validate")
+    parser.add_argument("plugin_path", type=Path, nargs="?", default=None,
+                        help="Path to the plugin directory to validate. Mutually "
+                             "exclusive with --marketplace.")
+    parser.add_argument(
+        "--marketplace",
+        type=str,
+        default=None,
+        help=(
+            "Scan EVERY plugin in the given marketplace. Accepts: "
+            "(a) local path to a marketplace root (auto-detects "
+            "`.claude-plugin/marketplace.json` OR a plugins-cache layout "
+            "with `<plugin>/<version>/` subdirs); "
+            "(b) a github URL like `https://github.com/owner/repo` or "
+            "shorthand `github:owner/repo` — the script reads the remote "
+            "marketplace.json via `gh api`, then runs each plugin from its "
+            "local cache under `~/.claude/plugins/cache/<marketplace-name>/` "
+            "if installed, or skips it with a SKIPPED row if not. "
+            "Renders one step-status table per plugin plus a master "
+            "summary at the end."
+        ),
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="Show all results including INFO and PASSED")
     parser.add_argument("--json", action="store_true", help="Output results as JSON")
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
@@ -8058,6 +8551,19 @@ Exit Codes:
     )
 
     args = parser.parse_args()
+
+    # --- Marketplace mode (--marketplace) -------------------------------
+    # When set, iterate every plugin in the marketplace, scan each, and
+    # render one step-status table per plugin plus a master summary.
+    if args.marketplace is not None:
+        if args.plugin_path is not None:
+            print("Error: --marketplace and plugin_path are mutually exclusive.",
+                  file=sys.stderr)
+            return 1
+        return _run_marketplace_scan(args)
+
+    if args.plugin_path is None:
+        parser.error("plugin_path is required unless --marketplace is given")
 
     # Resolve to absolute path so relative_to() works correctly
     plugin_path = args.plugin_path.resolve()
@@ -8158,7 +8664,19 @@ Exit Codes:
             slug = plugin_path.name or "plugin"
             report_path = base_root / "reports" / "security" / f"{ts}-{slug}.md"
 
+        # Snapshot the per-scan step log NOW (before save_* runs and
+        # potentially clears any module state). The same snapshot is used
+        # both inside the report file body and on stdout next to the path.
+        step_log_snapshot = get_scan_step_log()
+        step_table = format_scan_step_table(step_log_snapshot)
+
         def _print_full(report, verbose=False):
+            # Step coverage table goes FIRST in the report body so the
+            # reader knows up-front which steps actually ran.
+            if step_table:
+                print("## Scan Coverage — per-step status\n")
+                print(step_table)
+                print()
             print_report_summary(report, "Security Validation Report")
             # Use the aggregated printer instead of the flat per-finding
             # one — keeps the file body bounded by distinct-rule count
@@ -8168,6 +8686,13 @@ Exit Codes:
         save_report_and_print_summary(
             report, report_path, "Security Validation", _print_full, args.verbose, plugin_path=args.plugin_path
         )
+
+        # Surface the step table to stdout too — it answers the operator's
+        # question "did the scanner actually run every step on every file?"
+        # without forcing them to open the report file.
+        if step_table:
+            print("\nScan coverage — per-step status:")
+            print(step_table)
 
     if args.strict:
         return report.exit_code_strict()
