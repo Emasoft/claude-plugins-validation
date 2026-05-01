@@ -2,11 +2,11 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
-## [2.46.2] - 2026-05-01
+## [2.46.3] - 2026-05-01
 
 ### Bug Fixes
 
-- **refs:** Replace U+2026 ellipsis in placeholder shields/github URLs
+- Resolve issue #15 — scan_all_files() worker deadlock on pathological files
 
 ### Miscellaneous Tasks
 
