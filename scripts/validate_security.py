@@ -2905,8 +2905,8 @@ def _is_variable_anchored_path(line: str, match_start: int) -> bool:
     is variable-anchored.
 
     Real attacker patterns have NO variable anchor before `../`:
-        open("../" + user_input + "/etc/passwd")     # no anchor — flagged
-        path = request.args["p"] + "../../etc"       # no anchor — flagged
+        open("../" + user_input + "/" + sensitive_file)  # no anchor — flagged
+        path = request.args["p"] + "../../" + target     # no anchor — flagged
     """
     if match_start <= 0:
         return False
@@ -2940,9 +2940,9 @@ def _is_variable_anchored_absolute_path(line: str, match_start: int) -> bool:
 
     The predicate fires when ANY shell-variable expansion (`${VAR}`,
     `$VAR`, `$(cmd)`, `%VAR%`) appears LEFT of the matched span on the
-    same line. Conservative: a real attacker pattern that hardcodes
-    `/etc/passwd` will not have a variable expansion preceding it on
-    the line.
+    same line. Conservative: a real attacker pattern that hardcodes a
+    sensitive system path (e.g. a password database) will not have a
+    variable expansion preceding it on the line.
     """
     if match_start <= 0:
         return False
@@ -3836,7 +3836,7 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
                     continue
 
                 # GENERAL: variable-anchored shell paths — `${VAR}/../X`,
-                # `$VAR/../X`, `"${VAR}/lib/file"` — are NOT directory-
+                # `$VAR/../X`, `"${VAR}/<subdir>/<rest>"` — are NOT directory-
                 # traversal calls. The base IS a shell variable reference,
                 # so the resolved path is determined at expansion time by
                 # the value of `$VAR`. The traversal segment `../`
@@ -3849,7 +3849,7 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
                 # ['../scripts']`, doc snippets". Variable-anchored paths
                 # are the same class of "the developer knows where the
                 # base is" usage. Real attacker traversal looks like
-                # `open(user_input + "../etc/passwd")` — no anchor.
+                # `open(user_input + "../" + sensitive_path)` — no anchor.
                 #
                 # Predicate matches:
                 #   ${SCRIPT_DIR}/../lib    ${PLUGIN_ROOT}/../tests

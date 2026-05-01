@@ -1,83 +1,116 @@
 ---
 name: cache-validation-skill
-description: Validate Claude Code plugins / projects against Anthropic's prompt-cache invalidation patterns (CA-01..CA-06). Loaded by cache-optimizer-agent for both audit and fix workflows.
-when_to_use: When auditing a plugin or project for prompt-cache regressions before release, or when an existing scan flagged CA-01..CA-06 issues that need fixing. Always loaded by cache-optimizer-agent; never invoke directly.
+description: Validate plugins / projects against Anthropic's prompt-cache invalidation patterns (CA-01..CA-06). Loaded by cache-optimizer-agent. Use when auditing for cache regressions or fixing CA-01..CA-06 findings.
+when_to_use: When auditing a plugin or project for prompt-cache regressions before release, or fixing an existing CA-01..CA-06 scan finding. Always loaded by cache-optimizer-agent; never invoke directly.
 user-invocable: false
-allowed-tools: Read, Bash, Glob, Grep, Edit, Write
+allowed-tools: Read, Bash(uv:*), Bash(git:*), Bash(mkdir:*), Bash(date:*), Glob, Grep, Edit, Write
 ---
 
-# Cache-Audit Skill (loaded by cache-optimizer)
+# Cache-Audit Skill (loaded by cache-optimizer-agent)
 
 ## Overview
 
-Anthropic's prompt cache caches the rendered system-prompt prefix — `CLAUDE.md`, cached agent/skill bodies, and settings-derived blocks. The cache is invalidated whenever ANY byte in that prefix changes. A 200K-token system-prompt cache MISS costs ~10x normal token rate vs a HIT. CPV's cache-audit rule pack catches the six documented patterns that silently break caching, force expensive re-renders, or fork the cached prompt into many distinct cache keys (one per session).
+Anthropic's prompt cache caches the rendered system-prompt prefix —
+`CLAUDE.md`, cached agent/skill bodies, and settings-derived blocks. The
+cache is invalidated whenever ANY byte in that prefix changes. A 200K-token
+prefix cache MISS costs ~10x normal token rate vs a HIT. CPV's cache-audit
+rule pack catches the six documented patterns that silently break caching
+or fork the cached prompt into many distinct keys.
 
-This skill is the agent-facing wrapper around `scripts/validate_cache.py`. It documents the validator's contract, the six rules, and how the cache-optimizer agent should consume the report.
+Per-rule severity, catch description, and fix-recipe pointer live in
+[references/ca-rules.md](references/ca-rules.md):
+
+- CA-01 — dynamic placeholders in cached content
+- CA-02 — SessionStart / UserPromptSubmit / PreCompact write CLAUDE.md or settings
+- CA-03 — hook scripts flip permissions / enabledMcpServers between turns
+- CA-04 — `model:` frontmatter forces in-line model switch
+- CA-05 — hook scripts run unbounded-output commands
+- CA-06 — PreCompact / PostCompact / SubagentStart hooks don't preserve prefix
+- Why these specific six
 
 ## Prerequisites
 
-- A Claude Code plugin directory OR a project root that uses Claude Code (`.claude/` configs, `CLAUDE.md`).
-- `uv` available on PATH so the validator can run via `uv run python scripts/validate_cache.py`.
+- A Claude Code plugin directory OR a project root that uses Claude Code.
+- `uv` available on PATH so the validator can run via
+  `uv run python scripts/validate_cache.py`.
 
-## Scanner contract (mirrors `validate_security.py`)
+## Scanner contract
 
-The cache validator follows the same I/O contract as the security validator so any agent that loads this skill knows what to expect:
+Same I/O contract as `validate_security.py`:
 
-- **Default output is path-only.** Without `--json` or `--report`, the script auto-saves the aggregated report to a default path and prints **only** the compact summary (counts table + verdict + plugin path + report path) to stdout. The agent reads the report file when it needs the details. The default location follows `${CLAUDE_PROJECT_DIR}/reports/cache/<timestamp>-<slug>.md` if `CLAUDE_PROJECT_DIR` is set; the agent should override the script's default with `--report "${MAIN_ROOT}/reports/cache/<TS>-<slug>.md"` (where `MAIN_ROOT` comes from `git worktree list`) so reports anchor to the main checkout and survive worktree removal.
-- **Aggregated reporting.** Findings group by `(level, rule_id)` so each CA rule's full explanation appears once, followed by a count and capped file:line list — token-bounded.
-- **Self-scan filter chain.** The validator skips files marked as catalog/test/dev-scratch (`cpv_self_scan_skip`, `_is_vendored_dep_path`, `_is_dev_scratch_path`, `_is_test_file_path`, `is_fp_corpus_markdown`) so a plugin that ships its own validator catalogs doesn't trigger CA findings on its own catalogs.
+- **Default output is path-only.** Without `--json` / `--report` the
+  script auto-saves the report and prints only the compact summary
+  (counts + verdict + paths) to stdout.
+- **Aggregated reporting.** Findings group by `(level, rule_id)` so each
+  rule's full explanation appears once with a count + capped file:line
+  list.
+- **Self-scan filter chain.** Skips catalog / test / dev-scratch files
+  (`cpv_self_scan_skip`, `_is_vendored_dep_path`, `_is_dev_scratch_path`,
+  `_is_test_file_path`, `is_fp_corpus_markdown`).
 
-## The six rules
+## Instructions
 
-| Rule | Severity | What it catches | Fix reference |
-|---|---|---|---|
-| **CA-01** | MAJOR | Dynamic placeholders in cached content (`{{TIMESTAMP}}`, `$(date)`, `${RANDOM}`, etc.) inside `CLAUDE.md`, `agents/*.md`, `skills/*/SKILL.md` | `skills/fix-validation/references/cache-fixes.md#ca-01` |
-| **CA-02** | MAJOR | `SessionStart` / `UserPromptSubmit` / `PreCompact` hooks that WRITE to `CLAUDE.md` or `settings.json` | `cache-fixes.md#ca-02` |
-| **CA-03** | MAJOR | Hook scripts that flip `permissions.allow` / `permissions.deny` / `enabledMcpServers` between turns | `cache-fixes.md#ca-03` |
-| **CA-04** | MINOR | `SKILL.md model:` frontmatter forcing in-line model switch (use a dedicated agent instead) | `cache-fixes.md#ca-04` |
-| **CA-05** | MINOR | Hook scripts running unbounded-output commands (`git status`, `find`, `ls -laR`, `cat <large-file>`) without size caps | `cache-fixes.md#ca-05` |
-| **CA-06** | WARNING | `PreCompact` / `PostCompact` / `SubagentStart` hooks that don't preserve the cached prefix | `cache-fixes.md#ca-06` |
+Do steps 1–4 in ONE Bash tool call so shell variables persist:
 
-## Audit workflow (read-only)
+1. Resolve `MAIN_ROOT` to the **main checkout root** (first entry of
+   `git worktree list`). NEVER the worktree's own root — its
+   `./reports/` is gitignored and disappears on merge.
+2. Build the report path under `${MAIN_ROOT}/reports/cache/`.
+3. `mkdir -p` the parent.
+4. Run `validate_cache.py` with `--report`.
+5. Read summary from stdout, details from the report file.
+6. (Fix workflow only — cache-optimizer-agent.) Group findings by
+   CA-NN, apply `cache-fixes.md#ca-nn` from
+   `skills/fix-validation/references/`, re-run, iterate until VALID.
 
-1. Anchor the report path to the **main checkout root** (first entry of `git worktree list`), NEVER a linked worktree's own root. The worktree's local `./reports/` is gitignored and disappears when the worktree is removed/merged, so reports written there lose the audit trail. `${CLAUDE_PROJECT_DIR}` resolves to the WORKTREE root inside a linked worktree — only safe as a fallback for non-git contexts. Inside ONE Bash tool call, define MAIN_ROOT then build the path:
-   ```bash
-   MAIN_ROOT="$(git worktree list | head -n1 | awk '{print $1}')"
-   [ -z "${MAIN_ROOT}" ] && MAIN_ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"   # fallback for non-git
-   REPORT="${MAIN_ROOT}/reports/cache/$(date +%Y%m%d_%H%M%S%z)-<slug>.md"
-   mkdir -p "$(dirname "$REPORT")"
-   ```
-   This is the canonical pattern from `~/.claude/CLAUDE.md` + `~/.claude/rules/agent-reports-location.md` and matches what every other CPV agent uses (`plugin-validator`, `semantic-validator`, `marketplace-fixer`, `skill-validation-agent`).
-3. Run:
-   ```bash
-   uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_cache.py" <plugin_or_project_path> --report <report_path>
-   ```
-4. Read the compact summary from stdout and the full per-rule aggregated report from the report file.
+```bash
+MAIN_ROOT="$(git worktree list | head -n1 | awk '{print $1}')"
+[ -z "${MAIN_ROOT}" ] && MAIN_ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+REPORT="${MAIN_ROOT}/reports/cache/$(date +%Y%m%d_%H%M%S%z)-<slug>.md"
+mkdir -p "$(dirname "$REPORT")"
+uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_cache.py" \
+  <plugin_or_project_path> --report "$REPORT"
+```
 
-## Fix workflow (cache-optimizer only)
+## Examples
 
-When the agent has read a report and decided to fix issues:
+```bash
+# Audit a plugin (or any project root with CLAUDE.md / .claude/)
+uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_cache.py" \
+  ~/Code/my-plugin/ --report "$REPORT"
+```
 
-1. Group findings by rule (CA-NN) so the same fix recipe is applied to every occurrence at once.
-2. For each rule, follow `skills/fix-validation/references/cache-fixes.md#ca-nn`.
-3. Apply edits via `Edit` tool. Re-read each file before each edit (auto-compaction may have stale state).
-4. Re-run `validate_cache.py` after each batch. Iterate until verdict = VALID.
-5. If the user asked for broader cache-aware improvements (skills/agents/commands/CLAUDE.md/rules), proceed beyond strict CA-01..CA-06:
-   - Identify cached content that could be made smaller without losing semantic value
-   - Move dynamic content out of cached prefix into hook output (`additionalContext`)
-   - Split bloated `CLAUDE.md` into a small cached core + larger uncached references
-   - Audit `model:` frontmatter across skills (per CA-04, prefer agent-level model switches)
-   - Document the cache-cost rationale in a `## Cache Notes` block at the end of `CLAUDE.md` so future maintainers don't regress
+## Error Handling
+
+- **`uv` missing on PATH** — exit code 4. Install via
+  `curl -LsSf https://astral.sh/uv/install.sh | sh`.
+- **Target has no `.claude/` and no `CLAUDE.md`** — INFO + "no cached
+  content to audit".
+- **Report-path unwritable** — exit 4 + prints the bad path.
+- **`MAIN_ROOT` empty (no git)** — the prologue's fallback handles this:
+  `[ -z "${MAIN_ROOT}" ] && MAIN_ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"`.
 
 ## Output
 
-When called for AUDIT only: return the report path.
-When called for FIX: return the new report path AFTER fixes plus the diff stats (commits made, findings before/after).
+- AUDIT call: return the report path.
+- FIX call: return the new report path AFTER fixes plus the diff stats
+  (commits made, findings before/after).
+
+## Checklist
+
+Copy this checklist and track your progress:
+
+- [ ] Resolve `MAIN_ROOT` via `git worktree list | head -n1`
+- [ ] Build report path under `${MAIN_ROOT}/reports/cache/<TS>-<slug>.md`
+- [ ] `mkdir -p` the parent directory
+- [ ] Run `validate_cache.py --report` against the target
+- [ ] Read summary from stdout, details from the report file
+- [ ] (Fix only) Re-run after each batch until verdict = VALID
 
 ## Resources
 
-- `scripts/validate_cache.py` — the validator (CA-01..CA-06 implementation)
-- `skills/fix-validation/references/cache-fixes.md` — per-rule fix recipes
-- `tests/test_validate_cache.py` — 36 tests covering positive + negative for each rule
-- *"Lessons from Building Claude Code: Prompt Caching Is Everything"* — Thariq Shihipar (Anthropic), the underlying reference
-- [ussumant/cache-audit](https://github.com/ussumant/cache-audit) — the open-source corpus the rule pack derives from
+- `scripts/validate_cache.py` — validator
+- [references/ca-rules.md](references/ca-rules.md) — per-rule details
+- `skills/fix-validation/references/cache-fixes.md` — fix recipes
+- `tests/test_validate_cache.py` — 36 tests
+- [ussumant/cache-audit](https://github.com/ussumant/cache-audit) — corpus

@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """v2.48 P-2 — Pytest parametrize-body predicate.
 
 A line lies inside a `@pytest.mark.parametrize(` decorator's argument

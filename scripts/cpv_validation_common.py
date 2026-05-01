@@ -4333,25 +4333,25 @@ def print_results_by_level(report: ValidationReport, verbose: bool = False) -> N
 # Regex catalog for extracting the rule identifier from a finding's
 # message. Each external scanner prefixes its findings differently;
 # a single regex per source keeps the parser linear and predictable.
-import re as _re_agg  # local alias to avoid colliding with module-scoped `re`
+# (Uses module-top `import re`; no local re-import needed.)
 
-_RULE_ID_PATTERNS: tuple[tuple[str, "_re_agg.Pattern[str]"], ...] = (
+_RULE_ID_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
     # CPV native rules: `[RC-21]` / `[RC-021]` (zero-padded variant)
-    ("rc", _re_agg.compile(r"^\[?(RC-\d{2,3})\]?\s*[:\-]?\s*", _re_agg.IGNORECASE)),
+    ("rc", re.compile(r"^\[?(RC-\d{2,3})\]?\s*[:\-]?\s*", re.IGNORECASE)),
     # Cisco scanner: `[cisco static.injection.v1] ...`
-    ("cisco", _re_agg.compile(r"^\[cisco\s+([^\]]+)\]\s*", _re_agg.IGNORECASE)),
+    ("cisco", re.compile(r"^\[cisco\s+([^\]]+)\]\s*", re.IGNORECASE)),
     # External scanners: `gitleaks <ruleid>:`, `trufflehog <ruleid>:`,
     # `semgrep <ruleid>:`, `cc-audit <ruleid>:`, `tirith <ruleid>:`.
     # Whitespace between the source and the colon-delimited rule id.
     (
         "external",
-        _re_agg.compile(
+        re.compile(
             r"^(gitleaks|trufflehog|semgrep|cc-audit|tirith)\s+([^\s:]+)\s*[:\-]",
-            _re_agg.IGNORECASE,
+            re.IGNORECASE,
         ),
     ),
     # Bare CWE / OWASP-LLM identifiers.
-    ("cwe", _re_agg.compile(r"^(CWE-\d+|OWASP-LLM\d+)\s*[:\-]?\s*", _re_agg.IGNORECASE)),
+    ("cwe", re.compile(r"^(CWE-\d+|OWASP-LLM\d+)\s*[:\-]?\s*", re.IGNORECASE)),
     # Scanner status / advisory lines without a rule id, e.g.
     # "trufflehog: no findings", "gitleaks: binary not found",
     # "Cisco skill-scanner skipped — uvx not on PATH". These end up in
@@ -4360,9 +4360,9 @@ _RULE_ID_PATTERNS: tuple[tuple[str, "_re_agg.Pattern[str]"], ...] = (
     # source instead of an unbucketed OTHER bag.
     (
         "scanner-status",
-        _re_agg.compile(
+        re.compile(
             r"^(trufflehog|gitleaks|semgrep|cc-audit|tirith|cisco)(?:\s+skill-scanner)?\b",
-            _re_agg.IGNORECASE,
+            re.IGNORECASE,
         ),
     ),
 )
@@ -4437,7 +4437,7 @@ def print_results_aggregated(
     is what makes the report safe to pipe into a downstream LLM agent's
     context.
     """
-    levels_visible = ("CRITICAL", "MAJOR", "MINOR", "NIT", "WARNING")
+    levels_visible: tuple[str, ...] = ("CRITICAL", "MAJOR", "MINOR", "NIT", "WARNING")
     if verbose:
         levels_visible = (*levels_visible, "INFO", "PASSED")
 

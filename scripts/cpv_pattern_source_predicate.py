@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """v2.48 P-1 — Pattern-source line predicate.
 
 Augments the hash-anchored `cpv_self_scan_skip()` with a content-derived
