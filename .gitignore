@@ -59,6 +59,10 @@ Thumbs.db
 reports/
 reports_dev/
 
+# Cisco AI Defense skill-scanner runtime artifact (full plugin scan output;
+# token-heavy and project-private)
+.cpv-cisco-scan.json
+
 # Node
 node_modules/
 
