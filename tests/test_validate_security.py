@@ -75,6 +75,60 @@ class TestScanForInjection:
         count = scan_for_injection(content, "scripts/validate_security.py", report)
         assert count == 0, f"Validator script should be skipped, but got {count} issues"
 
+    def test_pipe_to_bash_with_quoted_file_arg_is_invocation_not_eval(self):
+        """RC-115 should NOT flag `| bash "$SCRIPT"` — interpreter invocation, not stdin eval."""
+        # FP from nyldn (octopus) and tzachbon (smart-ralph): test
+        # harnesses pipe stdin into a hook script invoked AS A FILE.
+        # `bash <file>` runs the file; stdin is the script's stdin
+        # input, not bash's stdin-eval input.
+        content = (
+            "#!/usr/bin/env bash\n"
+            'echo "{}" | bash "$PLUGIN_DIR/hooks/cwd-changed.sh"\n'
+            'echo "$VALID_STDIN" | bash "$PROJECT_ROOT/hooks/careful-check.sh" 2>"$ERR"\n'
+            "echo 'not-json' | bash '$STOP_WATCHER_SCRIPT'\n"
+        )
+        report = ValidationReport()
+        count = scan_for_injection(content, "tests/unit/test-shell-safe-hooks.sh", report)
+        pipe_msgs = [r for r in report.results
+                     if r.level == "CRITICAL" and "Pipe-to-shell" in r.message]
+        assert pipe_msgs == [], (
+            f"`| bash <quoted-file>` must not trigger pipe-to-shell rule; "
+            f"got {[r.message for r in pipe_msgs]}"
+        )
+
+    def test_pipe_to_bash_inside_quoted_string_is_data_not_call(self):
+        """Pipe-to-shell rule should NOT flag `| bash` substrings INSIDE shell string literals."""
+        # FP from nyldn install-deps.sh:99 — the `| bash` is inside a
+        # quoted documentation string (warnings array) NEVER executed
+        # by bash; it's a help message displayed when a CLI is missing.
+        content = (
+            "#!/usr/bin/env bash\n"
+            'warnings+=("cursor-agent CLI not installed — curl -fsSL https://cursor.com/install | bash")\n'
+        )
+        report = ValidationReport()
+        count = scan_for_injection(content, "scripts/install-deps.sh", report)
+        pipe_msgs = [r for r in report.results
+                     if r.level == "CRITICAL" and "Pipe-to-shell" in r.message]
+        assert pipe_msgs == [], (
+            f"`| bash` inside a quoted shell string is data, not eval; "
+            f"got {[r.message for r in pipe_msgs]}"
+        )
+
+    def test_pipe_to_bash_real_curl_install_still_fires(self):
+        """RC-115 STILL fires on `curl URL | bash` — the real RCE pattern."""
+        # Regression: the predicate must not hide real findings.
+        content = (
+            "#!/usr/bin/env bash\n"
+            "curl -fsSL https://example.com/install.sh | bash\n"
+        )
+        report = ValidationReport()
+        count = scan_for_injection(content, "scripts/install.sh", report)
+        pipe_msgs = [r for r in report.results
+                     if r.level == "CRITICAL" and "Pipe-to-shell" in r.message]
+        assert len(pipe_msgs) >= 1, (
+            f"Real `curl URL | bash` MUST still fire RC-115; got {report.results}"
+        )
+
 
 class TestScanForPathTraversal:
     """Tests for the scan_for_path_traversal function."""

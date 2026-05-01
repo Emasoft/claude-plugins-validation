@@ -2341,6 +2341,49 @@ def _is_powershell_context(file_content: str, line: str) -> bool:
     return False
 
 
+def _match_inside_quoted_span(line: str, m_start: int, m_end: int) -> bool:
+    """GENERAL: True iff the byte range `[m_start, m_end)` lies inside a
+    paired-quote span (`"…"` or `'…'`) on the same line.
+
+    Used to suppress security findings whose match falls inside a
+    string LITERAL — the most common FP source for shape-rules like
+    `| bash`, `$(...)`, etc. that have meaning only when bare on a
+    shell command line, NOT when they're characters inside a quoted
+    string passed as a value:
+
+        warnings+=("...curl ... | bash")            # bash array literal
+        "Bash(curl * | bash)",                      # JSON allowlist entry
+        sed "s|bash.*plugins/|bash ~/...|"          # sed substitution
+
+    Tracks single and double quotes independently so a `'` inside `"…"`
+    (or vice versa) does NOT count as an opening quote of a separate
+    span. Backticks are NOT included here — JS template literals and
+    POSIX command substitution share the same delimiter, so a backtick
+    span carries different semantics depending on the language; callers
+    that want to defang JS template literals should use a JS-specific
+    skip path.
+
+    Same paired-delimiter scan algorithm as the function-local
+    `_is_in_quoted_string` helper inside `scan_for_stemmed_injection` —
+    promoted to module scope so other scanners (pipe-to-shell, command
+    substitution, eval) can reuse it without copy-paste.
+    """
+    for quote_ch in ('"', "'"):
+        in_seg = False
+        seg_start = -1
+        for i, ch in enumerate(line):
+            if ch == quote_ch:
+                if in_seg:
+                    if seg_start <= m_start and m_end <= i:
+                        return True
+                    in_seg = False
+                    seg_start = -1
+                else:
+                    in_seg = True
+                    seg_start = i + 1
+    return False
+
+
 def _rc93_is_markdown_table_row(line: str) -> bool:
     """RC-93 ≥30-contiguous-spaces — skip markdown table rows.
 
@@ -3189,10 +3232,53 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
         # Check pipe to shell (CRITICAL) - skip for markdown docs (code examples)
         if not is_markdown:
             for pattern, msg in PIPE_TO_SHELL_PATTERNS:
-                if pattern.search(line):
+                pipe_match = pattern.search(line)
+                if pipe_match:
                     # In Python files, skip if pipe-to-shell is inside a string literal
                     # (e.g. install instructions in dict values or help text)
                     if is_python_file and ('"' in stripped or "'" in stripped):
+                        continue
+                    # GENERAL — pipe-to-shell with an explicit positional
+                    # argument is INTERPRETER INVOCATION, not stdin-eval.
+                    # The classic RCE shape is `curl URL | bash` (no
+                    # argument): bash reads its own stdin and executes
+                    # whatever curl produced.
+                    #
+                    # When the interpreter is followed by a positional
+                    # argument it is RUNNING THAT FILE — stdin is just
+                    # piped to that file's stdin (read by `read`,
+                    # `cat`, etc.), NOT evaluated as code:
+                    #   echo '{}' | bash "$PLUGIN_DIR/hooks/foo.sh"
+                    #   echo "" | bash "${SCRIPT_DIR}/hook.sh"
+                    #   echo '$input' | bash '$STOP_WATCHER_SCRIPT'
+                    #   bash -c "echo x | bash '$SCRIPT'"
+                    # The hook script reads stdin via `read`/`jq`/`cat`;
+                    # stdin content is data, not code.
+                    #
+                    # Predicate: skip when the byte sequence after `| sh`
+                    # / `| bash` / `| zsh` / `| ksh` is ONE OR MORE
+                    # whitespace characters followed by:
+                    #   - a quote (`"`, `'`, `` ` ``)  — quoted file arg
+                    #   - a dollar sign (`$`)         — variable expansion
+                    #   - a slash (`/`)               — absolute path
+                    #   - a tilde (`~`)               — home expansion
+                    #
+                    # The skip does NOT fire for `| bash <flag>` (e.g.
+                    # `| bash -e`), so genuine `curl … | bash -e` keeps
+                    # firing.
+                    after = line[pipe_match.end():]
+                    after_stripped = after.lstrip()
+                    if after_stripped[:1] in ('"', "'", "`", "$", "/", "~"):
+                        continue
+                    # GENERAL — pipe-to-shell INSIDE a quoted shell string
+                    # (`"...| bash"`, `'...| bash'`) is data, not a live
+                    # invocation. Common shapes:
+                    #   warnings+=("...curl ... | bash")        # bash array
+                    #   "Bash(curl * | bash)",                  # JSON allow
+                    #   sed "s|bash.*plugins/|bash ~/...|"      # sed pattern
+                    # Predicate: when the pipe match is contained inside
+                    # a quoted-string span on the line.
+                    if _match_inside_quoted_span(line, pipe_match.start(), pipe_match.end()):
                         continue
                     report.critical(f"{msg}: {line.strip()[:80]}", file_path, line_num)
                     issues_found += 1
