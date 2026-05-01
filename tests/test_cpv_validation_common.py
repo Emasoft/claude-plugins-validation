@@ -1397,6 +1397,41 @@ class TestV2_1_120_to_126Additions:
         assert "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST" in VALID_PLUGIN_ENV_VARS
         assert is_valid_plugin_env_var("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST") is True
 
+    def test_uncertain_in_docs_rules_hard_demote_to_warning(self):
+        """effective_severity hard-demotes UNCERTAIN_IN_DOCS_RULES to warning in docs.
+
+        User rule: "reduce to warnings all the issues that are not 100%
+        sure". The UNCERTAIN_IN_DOCS_RULES set lists rule IDs whose
+        pattern intersects heavily with legitimate documentation language
+        (RFC-style MUST, math notation Z_α, doc-quoted curl|sh install
+        commands, "system prompt:" in skill docs explaining prompts).
+        When such a rule fires in a doc/test/sample context, hard-demote
+        to "warning" instead of the default one-tier demotion.
+        """
+        from cpv_validation_common import UNCERTAIN_IN_DOCS_RULES, effective_severity
+
+        # CRITICAL → warning when the rule is in UNCERTAIN_IN_DOCS_RULES
+        # AND the file is a doc.
+        for rid in ("RC-11", "RC-37", "RC-76", "RC-87", "RC-93", "RC-131",
+                    "RC-114", "RC-115", "RC-136", "RC-03", "RC-63"):
+            assert rid in UNCERTAIN_IN_DOCS_RULES, (
+                f"Expected {rid} in UNCERTAIN_IN_DOCS_RULES"
+            )
+            assert effective_severity("critical", "README.md", rule_id=rid) == "warning"
+            assert effective_severity("critical", "docs/install.md", rule_id=rid) == "warning"
+            assert effective_severity("major",    "agents/x.md",    rule_id=rid) == "warning"
+
+        # Rules NOT in the set get the default ONE-tier demotion.
+        # RC-21 is not in UNCERTAIN_IN_DOCS_RULES.
+        assert effective_severity("critical", "README.md", rule_id="RC-21") == "major"
+        assert effective_severity("major",    "README.md", rule_id="RC-21") == "minor"
+
+        # Non-doc files: the UNCERTAIN_IN_DOCS rule_id has NO effect.
+        # Real script source must keep its severity.
+        for rid in ("RC-114", "RC-115", "RC-136"):
+            assert effective_severity("critical", "scripts/install.sh", rule_id=rid) == "critical"
+            assert effective_severity("critical", "src/install.py",     rule_id=rid) == "critical"
+
     def test_allow_managed_read_paths_only_in_known_settings(self):
         """v2.1.126: ``allowManagedReadPathsOnly`` is the read-path sibling
         of the existing ``allowManagedDomainsOnly`` setting. Must be in

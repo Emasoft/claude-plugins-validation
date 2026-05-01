@@ -1455,12 +1455,60 @@ def demote_severity(level: str, by: int = 1) -> str:
     return SEVERITY_TIERS[min(idx + by, len(SEVERITY_TIERS) - 1)]
 
 
-def effective_severity(level: str, file_path: str) -> str:
+# Rule-id allowlist: rules whose pattern fires in narrative documentation
+# almost-always as a false positive. When a rule in this set fires against
+# a doc/test/sample file, we hard-demote to "warning" (not just one tier
+# down) — the user explicitly asked: "reduce to warnings all the issues
+# that are not 100% sure". These rules' patterns intersect heavily with
+# legitimate documentation language:
+#
+#   RC-03  — "MUST" emphasis (RFC-style normative language is everywhere)
+#   RC-11  — mixed-script identifiers (math notation `Z_α` in technical docs)
+#   RC-37  — GTFOBin/LOLBin patterns (literal command examples in docs)
+#   RC-63  — "do not ask user" autonomy phrases (CLI flag docs / FAQs)
+#   RC-76  — stemmed prompt-injection trigger stems (skill docs that
+#            DOCUMENT how to handle prompt injection legitimately use
+#            "ignore", "previous", "instruct", "override" within an
+#            80-char window when explaining the attack)
+#   RC-87  — hardcoded loopback IP (already labelled "usually fine but
+#            worth flagging" in its own message)
+#   RC-93  — ≥30 contiguous spaces (JSON / YAML / table formatting)
+#   RC-131 — "system prompt:" / "hidden prompt:" marker (skill docs that
+#            explain system prompts contain these words)
+#   RC-114 / RC-115 / RC-136 — `curl … | sh|bash` install footgun (every
+#            README that documents how to install a tool quotes the
+#            upstream's recommended one-liner — e.g. uv, bun, fnm, mise)
+#
+# Rules NOT in this set keep their default one-tier demotion in docs.
+# Add to this set conservatively: a rule belongs here only when its
+# pattern firing in pure narrative text is more likely a doc artifact
+# than a real attack on the agent's instructions.
+UNCERTAIN_IN_DOCS_RULES: frozenset[str] = frozenset({
+    "RC-03",
+    "RC-11",
+    "RC-37",
+    "RC-63",
+    "RC-76",
+    "RC-87",
+    "RC-93",
+    "RC-114",
+    "RC-115",
+    "RC-131",
+    "RC-136",
+})
+
+
+def effective_severity(level: str, file_path: str, rule_id: str | None = None) -> str:
     """Compute effective severity given file context (RC-84 + RC-100 demotion).
 
     Demotes by one tier when the finding is in a defensive context — test
     fixture, documentation file, or sample / template / example file. The
     three contexts do NOT stack — maximum demotion is one tier per finding.
+
+    When ``rule_id`` is provided AND the rule is in
+    ``UNCERTAIN_IN_DOCS_RULES`` AND the file is a doc/test/sample, hard-
+    demote to "warning" (not just one tier down). This matches the user
+    rule "reduce to warnings all the issues that are not 100% sure".
 
     Demotion is CLAMPED at the "warning" tier — `info` and `passed` are
     not findings the orchestrator dispatches via `getattr(report, level)`
@@ -1471,8 +1519,14 @@ def effective_severity(level: str, file_path: str) -> str:
     A check that uses this MUST call it BEFORE invoking `report.<level>(...)`
     and dispatch on the returned level via `getattr(report, returned_level)`.
     """
-    if not (is_sample_file(file_path) or is_test_path(file_path) or is_doc_path(file_path)):
+    in_defensive_context = (
+        is_sample_file(file_path) or is_test_path(file_path) or is_doc_path(file_path)
+    )
+    if not in_defensive_context:
         return level
+    if rule_id is not None and rule_id in UNCERTAIN_IN_DOCS_RULES:
+        # Hard-demote to warning regardless of starting tier.
+        return "warning"
     demoted = demote_severity(level, by=1)
     # Clamp at warning — never demote into info/passed (those have 2-arg
     # signature and would crash the dispatch site).
