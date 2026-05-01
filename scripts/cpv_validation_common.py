@@ -4316,6 +4316,174 @@ def print_results_by_level(report: ValidationReport, verbose: bool = False) -> N
                     print(f"  {format_result(result)}")
 
 
+# =============================================================================
+# Aggregated reporting — token-efficient grouping by rule_id
+# =============================================================================
+#
+# Why: a verbose flat list of 400 individual findings can balloon a
+# stdout/file report to 50+ KB and burn an enormous chunk of any
+# downstream LLM agent's context window. The aggregated view groups by
+# (level, rule_id) so each rule's full explanation is shown ONCE,
+# followed by a count and a capped list of file:line occurrences.
+# Rule explanations are preserved exactly — the savings come from
+# eliminating message-text repetition, not from summarising it away.
+
+# Regex catalog for extracting the rule identifier from a finding's
+# message. Each external scanner prefixes its findings differently;
+# a single regex per source keeps the parser linear and predictable.
+import re as _re_agg  # local alias to avoid colliding with module-scoped `re`
+
+_RULE_ID_PATTERNS: tuple[tuple[str, "_re_agg.Pattern[str]"], ...] = (
+    # CPV native rules: `[RC-21]` / `[RC-021]` (zero-padded variant)
+    ("rc", _re_agg.compile(r"^\[?(RC-\d{2,3})\]?\s*[:\-]?\s*", _re_agg.IGNORECASE)),
+    # Cisco scanner: `[cisco static.injection.v1] ...`
+    ("cisco", _re_agg.compile(r"^\[cisco\s+([^\]]+)\]\s*", _re_agg.IGNORECASE)),
+    # External scanners: `gitleaks <ruleid>:`, `trufflehog <ruleid>:`,
+    # `semgrep <ruleid>:`, `cc-audit <ruleid>:`, `tirith <ruleid>:`.
+    # Whitespace between the source and the colon-delimited rule id.
+    (
+        "external",
+        _re_agg.compile(
+            r"^(gitleaks|trufflehog|semgrep|cc-audit|tirith)\s+([^\s:]+)\s*[:\-]",
+            _re_agg.IGNORECASE,
+        ),
+    ),
+    # Bare CWE / OWASP-LLM identifiers.
+    ("cwe", _re_agg.compile(r"^(CWE-\d+|OWASP-LLM\d+)\s*[:\-]?\s*", _re_agg.IGNORECASE)),
+    # Scanner status / advisory lines without a rule id, e.g.
+    # "trufflehog: no findings", "gitleaks: binary not found",
+    # "Cisco skill-scanner skipped — uvx not on PATH". These end up in
+    # one bucket per scanner so the operator sees a single "scanner
+    # ran clean" / "scanner unavailable" / "scanner timed out" line per
+    # source instead of an unbucketed OTHER bag.
+    (
+        "scanner-status",
+        _re_agg.compile(
+            r"^(trufflehog|gitleaks|semgrep|cc-audit|tirith|cisco)(?:\s+skill-scanner)?\b",
+            _re_agg.IGNORECASE,
+        ),
+    ),
+)
+
+
+def _extract_rule_id(message: str) -> str:
+    """Extract the canonical rule identifier from a finding's message.
+
+    Returns "OTHER" when no recognised prefix matches — those findings
+    aggregate together under one bucket so the aggregator never silently
+    loses anything. The returned string is the bucketing key, not the
+    message; the full message text is still preserved verbatim by the
+    caller.
+    """
+    for kind, pattern in _RULE_ID_PATTERNS:
+        m = pattern.match(message)
+        if m is None:
+            continue
+        if kind == "external":
+            # Two capture groups: source name + rule id. Format as
+            # "scanner:ruleid" so downstream readers can tell which
+            # tool emitted the finding without reading every entry.
+            return f"{m.group(1).lower()}:{m.group(2)}"
+        if kind == "cisco":
+            return f"cisco:{m.group(1).strip()}"
+        if kind == "scanner-status":
+            # Scanner-status messages get one bucket per scanner so
+            # "scanner ran clean" / "scanner unavailable" / "scanner
+            # timed out" lines aggregate together rather than each
+            # being its own OTHER entry.
+            return f"{m.group(1).lower()}:status"
+        return m.group(1).upper()
+    return "OTHER"
+
+
+def _aggregation_key(result: "ValidationResult") -> tuple[str, str]:
+    """(rule_id, normalised-message-stem) tuple used to bucket findings.
+
+    Two findings with the same rule_id but different message bodies
+    (e.g. one cc-audit RC mapping to multiple distinct sub-rules)
+    bucket separately so the explanation per stem is preserved.
+    """
+    rule_id = _extract_rule_id(result.message)
+    # Normalise the message stem: strip the rule prefix + collapse
+    # whitespace + truncate to 120 chars so near-identical messages
+    # bucket together but distinct attack descriptions stay separate.
+    stripped = result.message
+    for _kind, pattern in _RULE_ID_PATTERNS:
+        m = pattern.match(stripped)
+        if m is not None:
+            stripped = stripped[m.end():]
+            break
+    stem = " ".join(stripped.split())[:120]
+    return rule_id, stem
+
+
+def print_results_aggregated(
+    report: "ValidationReport",
+    *,
+    verbose: bool = False,
+    max_occurrences_per_bucket: int = 10,
+) -> None:
+    """Print findings grouped by (level, rule_id, message-stem).
+
+    For each bucket the explanation appears once; below it sits a count
+    and the first ``max_occurrences_per_bucket`` file:line occurrences
+    (others get summarised as "+N more" so no finding is ever silently
+    dropped). PASSED and INFO levels are still suppressed when
+    ``verbose=False`` — same contract as ``print_results_by_level``.
+
+    Output stays roughly O(distinct-rules) instead of O(findings), which
+    is what makes the report safe to pipe into a downstream LLM agent's
+    context.
+    """
+    levels_visible = ("CRITICAL", "MAJOR", "MINOR", "NIT", "WARNING")
+    if verbose:
+        levels_visible = (*levels_visible, "INFO", "PASSED")
+
+    # First pass: bucket by (level, rule_id, stem). Preserve insertion
+    # order within each level so the first-seen example wins as the
+    # explanation anchor.
+    buckets: dict[str, dict[tuple[str, str], list["ValidationResult"]]] = {
+        lvl: {} for lvl in levels_visible
+    }
+    for result in report.results:
+        if result.level not in buckets:
+            continue
+        key = _aggregation_key(result)
+        buckets[result.level].setdefault(key, []).append(result)
+
+    # Second pass: emit per-level sections with the per-rule grouping.
+    for level in levels_visible:
+        per_rule = buckets[level]
+        if not per_rule:
+            continue
+        total = sum(len(v) for v in per_rule.values())
+        annotation = ""
+        if level == "NIT":
+            annotation = " [blocks in --strict]"
+        elif level == "WARNING":
+            annotation = " [non-blocking]"
+        print(
+            f"\n{COLORS[level]}--- {level} ISSUES "
+            f"({total} across {len(per_rule)} rule"
+            f"{'s' if len(per_rule) != 1 else ''}){annotation}{COLORS['RESET']}"
+        )
+        for (rule_id, stem), occurrences in per_rule.items():
+            count = len(occurrences)
+            anchor = occurrences[0]
+            # Show the EXPLANATION (full message of the first
+            # occurrence) once. This is the per-vulnerability-type
+            # description the user explicitly asked us to keep.
+            print(f"  [{rule_id}] {anchor.message} ({count} occurrence{'s' if count != 1 else ''})")
+            # Then the file:line list, capped.
+            shown = occurrences[:max_occurrences_per_bucket]
+            for occ in shown:
+                loc = f"{occ.file}:{occ.line}" if occ.file and occ.line else (occ.file or "<no file>")
+                print(f"      - {loc}")
+            remaining = count - len(shown)
+            if remaining > 0:
+                print(f"      … +{remaining} more occurrence{'s' if remaining != 1 else ''} (same rule, omitted to save tokens)")
+
+
 def _print_fixer_recommendation(report: ValidationReport, report_path: Path | None) -> None:
     """Print a prominent recommendation to run the CPV fixer when fixable issues exist.
 
