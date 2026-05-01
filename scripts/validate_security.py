@@ -38,6 +38,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -7784,23 +7785,58 @@ Exit Codes:
         )
         print(f"CycloneDX SBOM written to {sbom_path}", file=sys.stderr)
 
-    # Output results
+    # Output results.
+    #
+    # Path-only mode is the DEFAULT now: every invocation auto-saves the
+    # full aggregated report to disk and emits ONLY the compact summary
+    # (counts table + verdict + plugin path + report path) to stdout.
+    # This guarantees that any agent invoking this script — local or
+    # remote (uvx) — gets a bounded, predictable stdout payload that
+    # never floods its context window. The agent reads the report file
+    # only when the user asks for details.
+    #
+    # The aggregator groups findings by (level, rule_id, message-stem)
+    # so each vulnerability TYPE gets its full explanation exactly once,
+    # followed by an occurrence count and a capped file:line list. No
+    # finding is silently dropped — overflow occurrences are summarised
+    # as "+N more" with the rule still named.
+    #
+    # Opt-outs:
+    #   --json        : emit raw to_dict() JSON (intended for tools, not agents)
+    #   --report PATH : write the report to PATH explicitly (no default location)
+    #   --verbose     : also include INFO and PASSED in the report file body
     if args.json:
         output = report.to_dict()
         output["plugin_path"] = str(plugin_path)
         print(json.dumps(output, indent=2))
-    elif args.report:
+    else:
+        from cpv_validation_common import print_results_aggregated  # noqa: PLC0415
+
+        if args.report:
+            report_path = Path(args.report)
+        else:
+            # Auto-default report path. Resolves to the running plugin's
+            # repo when invoked locally; falls back to /tmp on a remote
+            # uvx invocation where CLAUDE_PROJECT_DIR is unset.
+            ts = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d_%H%M%S%z")
+            base_root = (
+                Path(os.environ.get("CLAUDE_PROJECT_DIR", "")).resolve()
+                if os.environ.get("CLAUDE_PROJECT_DIR")
+                else Path(tempfile.gettempdir())
+            )
+            slug = plugin_path.name or "plugin"
+            report_path = base_root / "reports" / "security" / f"{ts}-{slug}.md"
 
         def _print_full(report, verbose=False):
             print_report_summary(report, "Security Validation Report")
-            print_results_by_level(report, verbose=verbose)
+            # Use the aggregated printer instead of the flat per-finding
+            # one — keeps the file body bounded by distinct-rule count
+            # rather than total-finding count.
+            print_results_aggregated(report, verbose=verbose)
 
         save_report_and_print_summary(
-            report, Path(args.report), "Security Validation", _print_full, args.verbose, plugin_path=args.plugin_path
+            report, report_path, "Security Validation", _print_full, args.verbose, plugin_path=args.plugin_path
         )
-    else:
-        print_results_by_level(report, verbose=args.verbose)
-        print_report_summary(report, title=f"Security Validation: {plugin_path.name}")
 
     if args.strict:
         return report.exit_code_strict()
