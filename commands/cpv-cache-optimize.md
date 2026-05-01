@@ -59,7 +59,7 @@ The cache-optimizer agent returns ONLY:
 [DONE|PARTIAL|FAILED] <summary>. Report: <abs-path-to-final-report>
 ```
 
-The full per-rule fix list and diff stats live in the report file at `${MAIN_ROOT}/reports/cache/<TS>-<slug>-final.md`. Path-only return so the calling agent's context never gets flooded.
+The full per-rule fix list and diff stats live in the report file at `${CLAUDE_PROJECT_DIR}/reports/cache/<TS>-<slug>-final.md`. Path-only return so the calling agent's context never gets flooded.
 
 ## Related
 

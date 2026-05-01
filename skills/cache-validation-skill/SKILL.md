@@ -40,8 +40,7 @@ The cache validator follows the same I/O contract as the security validator so a
 
 ## Audit workflow (read-only)
 
-1. Determine `MAIN_ROOT` from the running git worktree (or `CLAUDE_PROJECT_DIR` when not a git repo).
-2. Build a timestamped report path: `${MAIN_ROOT}/reports/cache/$(date +%Y%m%d_%H%M%S%z)-<slug>.md` (the `${...}` braces tell the skill validator this is a shell-resolved variable, not a Claude `$<name>` substitution).
+1. Build a timestamped report path: `${CLAUDE_PROJECT_DIR}/reports/cache/$(date +%Y%m%d_%H%M%S%z)-<slug>.md`. `${CLAUDE_PROJECT_DIR}` is a real env var Claude Code exports into every Bash subprocess AND a substitution Claude resolves before the body is shown to the LLM, so it works whether the agent uses it as substitution-text or inside a Bash tool call. Use a worktree-aware override (`MAIN_ROOT="$(git worktree list | head -n1 | awk '{print $1}')"`) only inside the Bash tool call below if the agent specifically needs to anchor reports to the main checkout instead of a linked worktree's local copy.
 3. Run:
    ```bash
    uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_cache.py" <plugin_or_project_path> --report <report_path>
