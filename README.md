@@ -325,7 +325,7 @@ The semantic validator always warns about the cost and asks for confirmation bef
 
 ### Slash Commands
 
-20 commands — 12 run scripts directly (zero AI tokens), 6 spawn an agent, 2 are specialized utility scripts.
+22 commands — 13 run scripts directly (zero AI tokens), 7 spawn an agent, 2 are specialized utility scripts.
 
 #### Script Commands (free — no AI tokens)
 
@@ -333,6 +333,7 @@ The semantic validator always warns about the cost and asks for confirmation bef
 |---------|--------------|
 | `/cpv-validate-plugin <path>` | **Full validation** -- runs all 20 sub-validators |
 | `/cpv-validate-skill <path>` | Skill validation (190+ rules) |
+| `/cpv-validate-cache <path>` | **Cache-audit** — runs `validate_cache.py` against a plugin OR project root. Catches the six documented Anthropic prompt-cache invalidation patterns (CA-01..CA-06) that silently multiply per-turn API costs by 5-10x. Default output is path-only. See [the cache section above](#external-security-scanners-always-run-programmatic-only) for context, and [`commands/cpv-validate-cache.md`](commands/cpv-validate-cache.md) for the per-rule reference. |
 | `/cpv-validate-github-plugin <owner/repo>` | Validate a GitHub plugin without installing |
 | `/cpv-validate-github-marketplace <owner/repo>` | Validate a GitHub marketplace without registering |
 | `/cpv-validate-project-scope <path>` | Validate git-tracked (project-scope) Claude Code config under a project: `.claude/settings.json`, `.mcp.json`, agents, skills, commands, rules, `CLAUDE.md`, tracked hooks/mcp/lsp subtrees. **v2.21.0+:** every tracked element now runs the FULL per-element validator pipeline (same as `cpv-validate-plugin`). Rejects `autoMemoryDirectory`, managed-only keys, secrets in env, absolute home paths. |
@@ -353,6 +354,7 @@ The semantic validator always warns about the cost and asks for confirmation bef
 | `/cpv-create` | plugin-creator | Interactive: create plugins, marketplaces, publish to GitHub |
 | `/cpv-fix-validation <report>` | plugin-fixer | Fixes **plugin** validation issues from a report |
 | `/cpv-fix-marketplace-validation <report>` | marketplace-fixer | Fixes **marketplace** validation issues and runs architectural migrations |
+| `/cpv-cache-optimize <path-or-report> [--broader]` | cache-optimizer-agent | **Cache-aware optimizer.** Runs the full validate → fix → re-validate loop for prompt-cache rules (CA-01..CA-06). With `--broader`, also performs cache-aware refactoring of the plugin's skills / agents / commands / `CLAUDE.md` / rules — works on any project that uses Claude Code, not just plugins. Each material refactor is approved via `AskUserQuestion` before the edit lands. |
 | `/cpv-semantic-validation <path>` | semantic-validator | Deep AI quality analysis (Opus, expensive, explicit opt-in) |
 
 #### Specialized Utility Commands
