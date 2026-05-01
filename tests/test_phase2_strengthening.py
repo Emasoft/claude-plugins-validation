@@ -654,6 +654,98 @@ class TestRC145CredentialHarvestSkips:
 
 
 # -----------------------------------------------------------------------------
+# v2.49 P6 — Database connection-string detector must skip universal
+# placeholder credential idioms (`username:password`, `oauth2:${TOKEN}@`)
+# and template interpolation (`{user}:{pass}@`)
+# -----------------------------------------------------------------------------
+
+
+class TestDBConnectionStringPlaceholders:
+    """Database Connection String detector should treat these as templates,
+    not credentials:
+
+    1. Tutorial placeholder credentials — literal English words `username`,
+       `password`, `pass`, `secret`, `admin`, `root` as the secret VALUE
+       (not a field name). Common shapes from proxy / DB connection docs.
+    2. Bash env-var passthrough — `://oauth2:${GITHUB_TOKEN}@host`,
+       `://user:${PASS}@host`. The `${VAR}` is runtime expansion.
+    3. Template interpolation — Python f-string `f"://{u}:{p}@host"` or
+       JS template literal `` `://${u}:${p}@host` ``. Curly braces in
+       the matched text are an unambiguous template-syntax signal.
+    """
+
+    def test_username_password_proxy_doc_skipped(self) -> None:
+        # FP from gmickel (flow-next): proxy.md docs containing
+        # `export HTTP_PROXY="http://username:password@proxy.example.com"`
+        # — the literal `username:password` is a tutorial placeholder.
+        content = (
+            'To use an authenticated HTTP proxy:\n'
+            '\n'
+            '```bash\n'
+            'export HTTP_PROXY="http://username:password@proxy.example.com:8080"\n'
+            '```\n'
+        )
+        report = ValidationReport()
+        from validate_security import scan_for_secrets
+        scan_for_secrets(content, "skills/browser/references/proxy.md", report)
+        db_msgs = _msgs(report, "Database Connection")
+        assert not db_msgs, (
+            f"`username:password` proxy doc placeholder must not fire; got {db_msgs}"
+        )
+
+    def test_oauth2_env_var_passthrough_skipped(self) -> None:
+        # FP from ed3dai (prompt-security-hardening/SKILL.md): example
+        # showing `https://oauth2:${GITHUB_TOKEN}@github.com/...` as a
+        # canonical authenticated git-remote shape. The `${GITHUB_TOKEN}`
+        # is runtime env expansion, not a credential value.
+        content = (
+            'To configure git authentication via env var:\n'
+            '\n'
+            '```bash\n'
+            'echo "https://oauth2:${GITHUB_TOKEN}@github.com/org/repo.git"\n'
+            '```\n'
+        )
+        report = ValidationReport()
+        from validate_security import scan_for_secrets
+        scan_for_secrets(content, "skills/git-auth/SKILL.md", report)
+        db_msgs = _msgs(report, "Database Connection")
+        assert not db_msgs, (
+            f"`oauth2:${{TOKEN}}@` env passthrough must not fire; got {db_msgs}"
+        )
+
+    def test_python_fstring_db_url_skipped(self) -> None:
+        # FP from timescale (postgres_docs.py): Python f-string
+        # `db_uri = f"postgresql://{os.environ['PGUSER']}:{...}@host"`
+        # is template interpolation — runtime values, not literal creds.
+        content = (
+            'def get_db_uri():\n'
+            '    return f"postgresql://{os.environ[\'PGUSER\']}:{os.environ[\'PGPASS\']}@host:5432/db"\n'
+        )
+        report = ValidationReport()
+        from validate_security import scan_for_secrets
+        scan_for_secrets(content, "ingest/db_helpers.py", report)
+        db_msgs = _msgs(report, "Database Connection")
+        assert not db_msgs, (
+            f"Python f-string `://{{u}}:{{p}}@host` must not fire; got {db_msgs}"
+        )
+
+    def test_real_hardcoded_db_string_still_fires(self) -> None:
+        # Regression: real hardcoded credentials MUST still fire.
+        # A literal `://prod_user:prod_token_xyz@db.example.com` with
+        # no placeholder shape, no env passthrough, no template interp.
+        content = (
+            'DATABASE_URL = "postgres://prod_user:realPasswordABC123@db.example.com:5432/app"\n'
+        )
+        report = ValidationReport()
+        from validate_security import scan_for_secrets
+        scan_for_secrets(content, "src/config.py", report)
+        db_msgs = _msgs(report, "Database Connection")
+        assert db_msgs, (
+            f"Real `://prod_user:realPassword@host` MUST still fire; got {report.results}"
+        )
+
+
+# -----------------------------------------------------------------------------
 # v2.46 FP-H — RC-125 / RC-126 (JS Function() ctor) must NOT fire on
 # Python type-annotation docstrings
 # -----------------------------------------------------------------------------
