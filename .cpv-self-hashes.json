@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-01T06:35:45+00:00",
+  "computed_at": "2026-05-01T08:16:21+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     "agents/cache-optimizer-agent.md": "sha256:f1ef238f1aa0b85fb7e76173436ee55b7f440f4732089482e986ad022cdf008d",
@@ -110,6 +110,7 @@
     "scripts/validate_telemetry.py": "sha256:dc931c28c61f415377ca925a1b4e8d45762cbb533511383f551bd19ed218387b",
     "scripts/validate_xref.py": "sha256:0703e98b05be153cf156ed630d0db57ec59d8f9fca574f6706ba619e997b4594",
     "skills/cache-validation-skill/SKILL.md": "sha256:ae50af43bb4ffbc39cfbea9ada58ffccfbd8e4997b367d4cf0eefd8da886fcb0",
+    "skills/cache-validation-skill/references/ca-rules.md": "sha256:d36dc591cc4c4851415181878a055948b95ab349fc2a2a0fae100dede30488f7",
     "skills/canonical-pipeline/SKILL.md": "sha256:e7849147e20aff6958bebfe52a8663ab76082bf79f721b612b65a440dc0ab69f",
     "skills/canonical-pipeline/references/detailed-standard.md": "sha256:a887bf09a9383dae1a3af83c3716330f46388fe52e516eea57037c344a4d005d",
     "skills/canonical-pipeline/references/pipeline-rules.md": "sha256:c0663f722dcaa700bfec66fd6c86ad5add00c24b3af5289d6b20c542c4426d36",
@@ -163,6 +164,7 @@
     "skills/plugin-validation-skill/references/official-docs-urls.md": "sha256:9da0ca8a04ecace6e54de80da74c1cc9bcc597c0303edf78352cf9cdd1e716b5",
     "skills/plugin-validation-skill/references/pipeline-validation.md": "sha256:75248185095fe98b748a5bae8a40aa9126b9ead141c4279688e233f5a414ae88",
     "skills/plugin-validation-skill/references/plugin-structure.md": "sha256:e99c3469787e50cbf3ad28259df09d4a8065eadd1caf0de9cd03d634ca499cb2",
+    "skills/plugin-validation-skill/references/security-validator-contract.md": "sha256:f192dc3f360967625956a399187d835facf2a4d74d70fa41a54b6a7459709994",
     "skills/plugin-validation-skill/references/skill-validation.md": "sha256:3598b8eae2215cb6a6d1b9e81c49bd542d0e7b6b4bf10d54b9ae77781b824f47",
     "skills/plugin-validation-skill/references/troubleshooting-python-scripts.md": "sha256:e2a9e8180c1cdafbc3ad81336ae877d93007e90716e9d5ee2656424ee4a5d150",
     "skills/plugin-validation-skill/references/validation-checklist.md": "sha256:2a543a238835bfb9740f7c5d7ea40a417333974e79e029623ec5a1e4c7681aef",
@@ -256,7 +258,7 @@
     "tests/test_new_validation_checks.py": "sha256:f6995ead00a19dc91e3f0ed0cbcb7dc76edeb34ddae6f6fe60efa5791dbf1b26",
     "tests/test_phase10_taint_engine.py": "sha256:5fa16975c95c6ec96e728b4872f25b76ccf76caf8b51712df832684d60251928",
     "tests/test_phase1_critical_rules.py": "sha256:9a286d49b1c1e868cf28a549f9168bb6d8e9478fa64f3f7b2f14273f411af1f8",
-    "tests/test_phase2_strengthening.py": "sha256:aa58f939100f60c807310bffa872d49e17a70e515ba6791aad842888e21c1d0e",
+    "tests/test_phase2_strengthening.py": "sha256:24a419eba8e602bf722a675c6dd38c0509e2b9932df23fba1d6d4e5b9087ef92",
     "tests/test_phase3_major_rules.py": "sha256:60fbe58d847e9a8b33c22626639486bfd6c7e3c9fd8c466e351042bf11464b80",
     "tests/test_phase4_minor_observability.py": "sha256:87b4878acb1ea94aaa442c703746b047d73c5b5133bbe6c72bbfc755e3087662",
     "tests/test_phase5_specialist_delegation.py": "sha256:38a9e6835029010eb4925c252b9e3a4e0f1fcaee2bcf6acc2fd87d62cb5aa194",
