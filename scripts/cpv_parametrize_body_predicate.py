@@ -45,8 +45,6 @@ from __future__ import annotations
 
 import re
 from typing import Final
-from weakref import WeakValueDictionary
-
 
 _PARAMETRIZE_DECORATOR_RE: Final[re.Pattern[str]] = re.compile(
     # `@pytest.mark.parametrize(`, `@parametrize(`, `@mark.parametrize(`,

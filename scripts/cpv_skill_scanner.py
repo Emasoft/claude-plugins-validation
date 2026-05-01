@@ -24,6 +24,7 @@ Reference scan command (assembled by `build_scan_command()`):
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from collections.abc import Callable, Iterable
@@ -46,9 +47,8 @@ _CISCO_TO_CPV_SEVERITY: dict[str, str] = {
 # Default 10 minutes covers most plugin sizes (cold-start uvx download
 # of the ~90 transitive deps eats the first 60-120s on a fresh machine).
 # Override via CPV_CISCO_SCAN_TIMEOUT_S=<seconds> for very large trees.
-import os as _os_skill_scan
 DEFAULT_TIMEOUT_SECONDS = int(
-    _os_skill_scan.environ.get("CPV_CISCO_SCAN_TIMEOUT_S", "600")
+    os.environ.get("CPV_CISCO_SCAN_TIMEOUT_S", "600")
 )
 
 # Pinned to a major-version range. Bumping this is an explicit decision so

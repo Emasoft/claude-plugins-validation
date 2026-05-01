@@ -22,13 +22,15 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
-from cpv_validation_common import ValidationReport  # noqa: E402
-from cpv_pattern_source_predicate import is_pattern_source_line  # noqa: E402
 from cpv_parametrize_body_predicate import (  # noqa: E402
     clear_cache as _clear_parametrize_cache,
+)
+from cpv_parametrize_body_predicate import (
     compute_parametrize_body_lines,
     is_parametrize_body_line,
 )
+from cpv_pattern_source_predicate import is_pattern_source_line  # noqa: E402
+from cpv_validation_common import ValidationReport  # noqa: E402
 from validate_security import (  # noqa: E402
     _md_block_negation_context,
     _md_has_doc_role_heading,
@@ -782,7 +784,7 @@ class TestParametrizeBodyPredicate:
             'def test_pair(a, b):\n'
             '    pass\n'
         )
-        body = compute_parametrize_body_lines(content)
+        compute_parametrize_body_lines(content)
         # Lines 1..5 in body. Line 3 has the attack pattern.
         assert is_parametrize_body_line(content, 3) is True
         assert is_parametrize_body_line(content, 4) is True
@@ -801,7 +803,7 @@ class TestParametrizeBodyPredicate:
             'def test_long(payload):\n'
             '    pass\n'
         )
-        body = compute_parametrize_body_lines(content)
+        compute_parametrize_body_lines(content)
         # All decorator + body lines should be in the set (1..40 or so).
         # Easier check: assert line 20 is in body, def line is not.
         assert is_parametrize_body_line(content, 20) is True

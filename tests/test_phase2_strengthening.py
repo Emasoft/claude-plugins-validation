@@ -1259,10 +1259,9 @@ class TestBashBooleanChainGeneral:
         "$has_y || exit 1",
     ])
     def test_boolean_chain_skipped(self, line: str) -> None:
-        import re
         from validate_security import (
-            _is_bash_boolean_chain,
             UNSAFE_VARIABLE_PATTERNS,
+            _is_bash_boolean_chain,
         )
         # Find the matched $VAR position via the actual pattern
         for pattern, msg in UNSAFE_VARIABLE_PATTERNS:
@@ -1281,10 +1280,9 @@ class TestBashBooleanChainGeneral:
         "$NAME arg1 arg2",
     ])
     def test_real_injection_still_flagged(self, line: str) -> None:
-        import re
         from validate_security import (
-            _is_bash_boolean_chain,
             UNSAFE_VARIABLE_PATTERNS,
+            _is_bash_boolean_chain,
         )
         for pattern, msg in UNSAFE_VARIABLE_PATTERNS:
             m = pattern.search(line)
@@ -1312,8 +1310,8 @@ class TestUnsafeVarBooleanChainNoneGuard:
     """
 
     def test_unquoted_var_boolean_chain_does_not_raise(self) -> None:
-        from validate_security import scan_for_injection
         from cpv_validation_common import ValidationReport
+        from validate_security import scan_for_injection
         # Shell line that matches UNSAFE_VARIABLE_PATTERNS AND triggers
         # the boolean-chain branch — exactly the pre-fix crash path.
         content = "if $has_x && $has_y; then\n  do_thing\nfi\n"

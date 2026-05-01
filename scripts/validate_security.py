@@ -42,6 +42,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from cpv_parametrize_body_predicate import is_parametrize_body_line
+from cpv_pattern_source_predicate import is_pattern_source_line
 from cpv_validation_common import (
     CLOUD_IMDS_PATTERNS,
     CRYPTOMINING_PATTERNS,
@@ -80,11 +82,8 @@ from cpv_validation_common import (
     is_test_path,
     is_typosquat,
     print_report_summary,
-    print_results_by_level,
     save_report_and_print_summary,
 )
-from cpv_pattern_source_predicate import is_pattern_source_line
-from cpv_parametrize_body_predicate import is_parametrize_body_line
 
 # =============================================================================
 # Injection Detection Patterns
@@ -7696,7 +7695,7 @@ def validate_security(
     # Programmatic-only mode (no API-key engines). Self-skips when uvx
     # is not on PATH or the cisco-ai-skill-scanner package cannot be
     # resolved at its PyPI source URL. See scripts/cpv_skill_scanner.py.
-    from cpv_skill_scanner import run_cisco_scan, report_findings  # noqa: PLC0415
+    from cpv_skill_scanner import report_findings, run_cisco_scan  # noqa: PLC0415
 
     def _cisco_should_skip(file_path: str, line: int | None) -> bool:
         """Apply CPV's full self-scan filter chain to each Cisco finding.
