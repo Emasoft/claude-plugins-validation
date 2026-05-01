@@ -75,8 +75,8 @@ All in-process checks run as pure Python — no API calls, no tokens consumed, n
 
 | # | Scanner | Source | What it adds | Resolution path |
 |---|---------|--------|--------------|-----------------|
-| 16 | **cc-audit** | [cc-audit/cc-audit](https://github.com/cc-audit/cc-audit) | 100+ AI-specific threat rules tailored to Claude Code plugins | `npx --yes @cc-audit/cc-audit` (auto-fetches from npm) |
-| 17 | **tirith** | [PortSwigger/tirith](https://github.com/PortSwigger/tirith) | Terminal-security, homograph domains, ANSI/bidi/zero-width injection, hidden Unicode, supply-chain pipe-to-shell | PATH → docker → nix → auto-install (brew/npm/cargo); set `CPV_NO_TIRITH_INSTALL=1` to disable the install fallback |
+| 16 | **cc-audit** | [ryo-ebata/cc-audit](https://github.com/ryo-ebata/cc-audit) | 100+ AI-specific threat rules tailored to Claude Code plugins | `npx --yes @cc-audit/cc-audit` (auto-fetches from npm) |
+| 17 | **tirith** | [sheeki03/tirith](https://github.com/sheeki03/tirith) | Terminal-security, homograph domains, ANSI/bidi/zero-width injection, hidden Unicode, supply-chain pipe-to-shell | PATH → docker → nix → auto-install (brew/npm/cargo); set `CPV_NO_TIRITH_INSTALL=1` to disable the install fallback |
 | 18 | **trufflehog** | [trufflesecurity/trufflehog](https://github.com/trufflesecurity/trufflehog) | ~700 verified-secret detectors (Stripe, Slack, AWS, GitHub, …) | `brew install trufflehog` or `go install github.com/trufflesecurity/trufflehog/v3@latest` |
 | 19 | **gitleaks** | [gitleaks/gitleaks](https://github.com/gitleaks/gitleaks) | ~150 secret detectors with regex+entropy heuristics, complements trufflehog | `brew install gitleaks` or `docker run --rm -v $(pwd):/src zricethezav/gitleaks` |
 | 20 | **semgrep** | [semgrep/semgrep](https://github.com/semgrep/semgrep) | Thousands of static-analysis rules via the `p/security-audit` and `p/secrets` rule packs | `brew install semgrep` or `pipx install semgrep` |

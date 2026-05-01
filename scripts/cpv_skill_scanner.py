@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Cisco AI Defense skill-scanner wrapper.
 
 Invokes https://github.com/cisco-ai-defense/skill-scanner via `uvx` and
