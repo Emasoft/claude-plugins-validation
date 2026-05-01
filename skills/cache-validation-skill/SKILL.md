@@ -1,7 +1,7 @@
 ---
 name: cache-validation-skill
-description: Validate Claude Code plugins / projects against Anthropic's prompt-cache invalidation patterns (CA-01..CA-06). Loaded by the cache-optimizer agent for both audit and fix workflows.
-when_to_use: When auditing a plugin or project for prompt-cache regressions before release, or when an existing scan flagged CA-01..CA-06 issues that need fixing. Always loaded by cache-optimizer; never invoke directly.
+description: Validate Claude Code plugins / projects against Anthropic's prompt-cache invalidation patterns (CA-01..CA-06). Loaded by cache-optimizer-agent for both audit and fix workflows.
+when_to_use: When auditing a plugin or project for prompt-cache regressions before release, or when an existing scan flagged CA-01..CA-06 issues that need fixing. Always loaded by cache-optimizer-agent; never invoke directly.
 user-invocable: false
 allowed-tools: Read, Bash, Glob, Grep, Edit, Write
 ---
