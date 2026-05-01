@@ -6316,7 +6316,7 @@ def check_phase1_unicode_rules(plugin_path: Path, report: ValidationReport) -> i
                     # (`API-вызов`/`JSON-файл`/`HTML-페이지`).
                     if is_i18n_file or _is_acronym_compound(token):
                         continue
-                    level = effective_severity("critical", rel_path)
+                    level = effective_severity("critical", rel_path, rule_id="RC-11")
                     getattr(report, level)(
                         f"RC-11: mixed-script identifier '{token}' at line {line_no} ({reason})",
                         rel_path, line_no,
@@ -6363,12 +6363,12 @@ def check_phase1_credential_rules(plugin_path: Path, report: ValidationReport) -
                         )
                         if severity is None:
                             break
-                        level = effective_severity(severity, rel_path)
+                        level = effective_severity(severity, rel_path, rule_id="RC-21")
                     else:
                         # v2.41.0 binary guard: subprocess env-prep is FP.
                         if _rc21_is_subprocess_prep(line, surrounding_subproc):
                             break
-                        level = effective_severity("major", rel_path)
+                        level = effective_severity("major", rel_path, rule_id="RC-21")
                     getattr(report, level)(
                         f"RC-21: bulk env-var harvest at line {line_no}",
                         rel_path, line_no,
@@ -6413,7 +6413,7 @@ def check_phase1_supply_chain_rules(plugin_path: Path, report: ValidationReport)
             for pattern in GTFOBIN_LOLBIN_PATTERNS:
                 m = pattern.search(line)
                 if m and not has_negation_guard_nearby(content, content.find(line) + m.start()):
-                    level = effective_severity("critical", rel_path)
+                    level = effective_severity("critical", rel_path, rule_id="RC-37")
                     getattr(report, level)(
                         f"RC-37: GTFOBin/LOLBin pattern at line {line_no}: {m.group(0)[:80]}",
                         rel_path, line_no,
@@ -6567,7 +6567,7 @@ def check_phase10_taint(plugin_path: Path, report: ValidationReport) -> int:
             rel_path = str(file_path)
         for f in findings:
             severity = "major" if f.rule_id == "RC-73" else "minor"
-            level = effective_severity(severity, rel_path)
+            level = effective_severity(severity, rel_path, rule_id=f.rule_id)
             getattr(report, level)(
                 f"{f.rule_id}: tainted '{f.var_name}' from {f.source} reaches "
                 f"{f.sink} (hop_count={f.hop_count})",
@@ -6928,7 +6928,7 @@ def check_phase9_stemmed_injection(plugin_path: Path, report: ValidationReport) 
                 window_text = content[window_start:window_end]
                 if not _rc76_has_attack_shape(line_text, window_text):
                     continue
-                level = effective_severity("major", rel_path)
+                level = effective_severity("major", rel_path, rule_id="RC-76")
             getattr(report, level)(
                 f"RC-76: stemmed prompt-injection signal — {len(stems)} trigger stems "
                 f"({', '.join(stems[:5])}) within 80-char window",
@@ -6979,7 +6979,7 @@ def check_phase4_all(plugin_path: Path, report: ValidationReport) -> int:
                     # internal IPs (e.g. `"@types/node": "^10.0.5"`).
                     if rule_id == "RC-87" and _rc87_is_semver_context(line, rel_path):
                         continue
-                    level = effective_severity(severity.lower(), rel_path)
+                    level = effective_severity(severity.lower(), rel_path, rule_id=rule_id)
                 # v2.45 FP8 — RC-87 in CHANGELOG / HISTORY / NEWS /
                 # README is project narrative, never live config.
                 # Demote one extra tier on top of the generic doc
@@ -7088,7 +7088,7 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                     )
                     if new_severity is None:
                         continue
-                    level = effective_severity(new_severity, rel_path)
+                    level = effective_severity(new_severity, rel_path, rule_id=rule_id)
                 else:
                     # v2.41.0 — per-rule context-aware FP guards (binary).
                     if rule_id == "RC-87" and _rc87_is_semver_context(line, rel_path):
@@ -7253,7 +7253,7 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                             rel_path, content_lines, line_no - 1,
                         ):
                             continue
-                    level = effective_severity(severity.lower(), rel_path)
+                    level = effective_severity(severity.lower(), rel_path, rule_id=rule_id)
                 # v2.45 FP8 — RC-87 in CHANGELOG / HISTORY / NEWS /
                 # README is project narrative, never live config.
                 # Demote one extra tier (see Phase 4 site for rationale).
