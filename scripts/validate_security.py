@@ -3289,7 +3289,8 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
         # threat.
         if not is_markdown and not is_test_file:
             for pattern, msg in EVAL_PATTERNS:
-                if pattern.search(line):
+                eval_match = pattern.search(line)
+                if eval_match:
                     # In Python files, skip shell-style eval/exec patterns (e.g. "exec " without parens)
                     # Only flag actual Python function calls: eval(...), exec(...)
                     if is_python_file and "command" in msg.lower():
@@ -3312,6 +3313,21 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
                     # where the bare-word pattern carries real meaning.
                     if ("RC-120" in msg or "RC-121" in msg) and not is_shell_script:
                         continue
+                    # GENERAL — RC-121 `\bexec\s+` collides with the
+                    # `find ... -exec` primary, where `-exec` is a
+                    # FIND COMMAND-LINE OPTION, not the shell `exec`
+                    # builtin. Real shape:
+                    #   find "$DIR" -depth -type f -exec rm -f {} \;
+                    #   find . -name '*.tmp' -exec mv {} /tmp/ \;
+                    # The `\b` boundary in the regex doesn't reject the
+                    # leading `-`, so the match still fires. Skip when
+                    # the matched `exec` is preceded by `-` on the
+                    # same line — `-exec` is unambiguously the find
+                    # primary, not the shell builtin.
+                    if "RC-121" in msg:
+                        ms = eval_match.start()
+                        if ms > 0 and line[ms - 1] == "-":
+                            continue
                     # v2.46 FP-H — JS-specific rules RC-125 (Function()) and
                     # RC-126 (new Function()) match in Python files when a
                     # docstring or comment mentions `Function(...)` for type
