@@ -558,3 +558,48 @@ class TestCLIEntrypoint:
             check=False,
         )
         assert proc.returncode == 2, proc.stderr
+
+
+class TestPostToolUseUpdatedToolOutput:
+    """v2.1.121: hookSpecificOutput.updatedToolOutput generalized from MCP-only
+    to all tools. Both `updatedMCPToolOutput` (legacy) and `updatedToolOutput`
+    (new) must be accepted on PostToolUse.
+    """
+
+    def test_updated_tool_output_accepted(self):
+        """PostToolUse with updatedToolOutput (new, all-tools) is accepted."""
+        payload = {
+            "hookSpecificOutput": {
+                "hookEventName": "PostToolUse",
+                "updatedToolOutput": "(tool output replacement)",
+            }
+        }
+        report = validate_output_payload("PostToolUse", payload)
+        assert not report.has_major
+        assert not report.has_critical
+
+    def test_updated_mcp_tool_output_still_accepted(self):
+        """Regression guard: legacy updatedMCPToolOutput still accepted."""
+        payload = {
+            "hookSpecificOutput": {
+                "hookEventName": "PostToolUse",
+                "updatedMCPToolOutput": "(mcp output replacement)",
+            }
+        }
+        report = validate_output_payload("PostToolUse", payload)
+        assert not report.has_major
+        assert not report.has_critical
+
+    def test_unknown_post_tool_use_key_still_flagged(self):
+        """Genuinely unknown PostToolUse key still produces a finding."""
+        payload = {
+            "hookSpecificOutput": {
+                "hookEventName": "PostToolUse",
+                "totallyMadeUpKey": "...",
+            }
+        }
+        report = validate_output_payload("PostToolUse", payload)
+        # Either major or critical depending on validator severity policy.
+        assert report.has_major or report.has_critical or any(
+            "totallyMadeUpKey" in r.message for r in report.results
+        )

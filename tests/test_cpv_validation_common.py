@@ -1367,3 +1367,44 @@ class TestPass2TaxonomyAdditions:
         # Regression guard: the two v2.22.2 additions must also still be present.
         assert "attribution" in KNOWN_SETTINGS_KEYS
         assert "subagentStatusLine" in KNOWN_SETTINGS_KEYS
+
+
+class TestV2_1_120_to_126Additions:
+    """v2.1.120 - v2.1.126 spec sweep additions.
+
+    Locks in env vars and settings keys announced in CC v2.1.120 - v2.1.126
+    so the allowlists don't silently regress.
+    """
+
+    def test_anthropic_bedrock_service_tier_recognised(self):
+        """v2.1.122: ``ANTHROPIC_BEDROCK_SERVICE_TIER`` selects Bedrock
+        service tier (`default` / `flex` / `priority`); plugin docs and
+        env blocks reference it. Must pass ``is_valid_plugin_env_var``.
+        """
+        from cpv_validation_common import VALID_PLUGIN_ENV_VARS, is_valid_plugin_env_var
+
+        assert "ANTHROPIC_BEDROCK_SERVICE_TIER" in VALID_PLUGIN_ENV_VARS
+        assert is_valid_plugin_env_var("ANTHROPIC_BEDROCK_SERVICE_TIER") is True
+
+    def test_claude_code_provider_managed_by_host_recognised(self):
+        """v2.1.126: ``CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`` marks
+        host-managed deployments (Bedrock/Vertex/Foundry). Plugins read it
+        to detect the deployment context. Must pass
+        ``is_valid_plugin_env_var``.
+        """
+        from cpv_validation_common import VALID_PLUGIN_ENV_VARS, is_valid_plugin_env_var
+
+        assert "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST" in VALID_PLUGIN_ENV_VARS
+        assert is_valid_plugin_env_var("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST") is True
+
+    def test_allow_managed_read_paths_only_in_known_settings(self):
+        """v2.1.126: ``allowManagedReadPathsOnly`` is the read-path sibling
+        of the existing ``allowManagedDomainsOnly`` setting. Must be in
+        ``KNOWN_SETTINGS_KEYS`` so the settings validator does not flag
+        legitimate usage as unknown.
+        """
+        from cc_scope_rules import KNOWN_SETTINGS_KEYS
+
+        assert "allowManagedReadPathsOnly" in KNOWN_SETTINGS_KEYS
+        # Regression guard: sibling key must also still be there.
+        assert "allowManagedDomainsOnly" in KNOWN_SETTINGS_KEYS
