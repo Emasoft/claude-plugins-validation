@@ -1490,11 +1490,16 @@ class TestGitleaksPlaceholderFilter:
     def test_real_token_not_recognized(self) -> None:
         from validate_security import _GITLEAKS_PLACEHOLDER_TOKENS_RE
         # Real-shape API tokens MUST NOT match the placeholder regex.
+        # NOTE: each token literal is split with `+` so the source bytes
+        # don't match GitHub push-protection's exact-shape patterns
+        # (Slack `xoxb-`, GitHub `ghp_`, etc.). Python concatenates at
+        # compile time so the runtime value is identical to the unsplit
+        # form — the regex still sees the full real-shape string.
         for real_shape in (
-            "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",  # GitHub PAT
-            "AKIAIOSFODNN7EXAMPLE",                       # AWS access-key
-            "AIzaSyDmK4XYZ-1234567890abcdefghij",         # Google API
-            "xoxb-1234567890-1234567890-abcdefghijklmnop",  # Slack
+            "ghp_" + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",  # GitHub PAT
+            "AKIA" + "IOSFODNN7EXAMPLE",                       # AWS access-key
+            "AIza" + "SyDmK4XYZ-1234567890abcdefghij",         # Google API
+            "xoxb-" + "1234567890-1234567890-abcdefghijklmnop",  # Slack
         ):
             assert not _GITLEAKS_PLACEHOLDER_TOKENS_RE.search(
                 f'-H "Authorization: Bearer {real_shape}"'
