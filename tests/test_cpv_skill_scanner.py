@@ -10,8 +10,8 @@ via monkeypatch so the suite stays hermetic — no network, no uvx download.
 from __future__ import annotations
 
 import json
-import sys
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -22,7 +22,6 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import cpv_skill_scanner as css  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Severity mapping

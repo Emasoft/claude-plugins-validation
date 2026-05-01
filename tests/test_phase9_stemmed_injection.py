@@ -191,11 +191,11 @@ class TestSignalShape:
 # LICENSE, etc.) and markdown table rows are skipped.
 # -----------------------------------------------------------------------------
 
+from cpv_validation_common import ValidationReport  # noqa: E402
 from validate_security import (  # noqa: E402
     _rc76_is_source_code_file,
     check_phase9_stemmed_injection,
 )
-from cpv_validation_common import ValidationReport  # noqa: E402
 
 
 def _make_plugin_for_phase9(tmp_path: Path, files: dict[str, str]) -> Path:

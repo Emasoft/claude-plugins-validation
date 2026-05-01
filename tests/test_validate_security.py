@@ -88,7 +88,7 @@ class TestScanForInjection:
             "echo 'not-json' | bash '$STOP_WATCHER_SCRIPT'\n"
         )
         report = ValidationReport()
-        count = scan_for_injection(content, "tests/unit/test-shell-safe-hooks.sh", report)
+        scan_for_injection(content, "tests/unit/test-shell-safe-hooks.sh", report)
         pipe_msgs = [r for r in report.results
                      if r.level == "CRITICAL" and "Pipe-to-shell" in r.message]
         assert pipe_msgs == [], (
@@ -106,7 +106,7 @@ class TestScanForInjection:
             'warnings+=("cursor-agent CLI not installed — curl -fsSL https://cursor.com/install | bash")\n'
         )
         report = ValidationReport()
-        count = scan_for_injection(content, "scripts/install-deps.sh", report)
+        scan_for_injection(content, "scripts/install-deps.sh", report)
         pipe_msgs = [r for r in report.results
                      if r.level == "CRITICAL" and "Pipe-to-shell" in r.message]
         assert pipe_msgs == [], (
@@ -122,7 +122,7 @@ class TestScanForInjection:
             "curl -fsSL https://example.com/install.sh | bash\n"
         )
         report = ValidationReport()
-        count = scan_for_injection(content, "scripts/install.sh", report)
+        scan_for_injection(content, "scripts/install.sh", report)
         pipe_msgs = [r for r in report.results
                      if r.level == "CRITICAL" and "Pipe-to-shell" in r.message]
         assert len(pipe_msgs) >= 1, (
@@ -139,7 +139,7 @@ class TestScanForInjection:
             'find "$TEST_DIR" -depth -type d -exec rmdir {} \\; 2>/dev/null || true\n'
         )
         report = ValidationReport()
-        count = scan_for_injection(content, "scripts/cleanup.sh", report)
+        scan_for_injection(content, "scripts/cleanup.sh", report)
         rc121_msgs = [r for r in report.results
                       if r.level == "CRITICAL" and "RC-121" in r.message]
         assert rc121_msgs == [], (
@@ -158,7 +158,7 @@ class TestScanForInjection:
             'exec "$ATTACKER_INPUT"\n'
         )
         report = ValidationReport()
-        count = scan_for_injection(content, "scripts/wrapper.sh", report)
+        scan_for_injection(content, "scripts/wrapper.sh", report)
         rc121_msgs = [r for r in report.results
                       if r.level == "CRITICAL" and "RC-121" in r.message]
         assert len(rc121_msgs) >= 1, (
@@ -190,7 +190,7 @@ class TestScanForPathTraversal:
             ' $"Failed to clear lock:\\n{e.Message}", "OK");\n'
         )
         report = ValidationReport()
-        count = scan_for_path_traversal(content, "plugin/Editor/Foo.cs", report)
+        scan_for_path_traversal(content, "plugin/Editor/Foo.cs", report)
         win_msgs = [r for r in report.results
                     if r.level == "CRITICAL" and "Windows" in r.message]
         assert win_msgs == [], (
@@ -209,7 +209,7 @@ class TestScanForPathTraversal:
             '  ]\n'
         )
         report = ValidationReport()
-        count = scan_for_path_traversal(content, "skill/data/examples.json", report)
+        scan_for_path_traversal(content, "skill/data/examples.json", report)
         win_msgs = [r for r in report.results
                     if r.level == "CRITICAL" and "Windows" in r.message]
         assert win_msgs == [], (
@@ -222,7 +222,7 @@ class TestScanForPathTraversal:
         # `"C:\\Windows\\System32"` -> path-shaped char `W` after `\` -> still fires.
         content = '                    string sysPath = "C:\\Windows\\System32";\n'
         report = ValidationReport()
-        count = scan_for_path_traversal(content, "plugin/Editor/Foo.cs", report)
+        scan_for_path_traversal(content, "plugin/Editor/Foo.cs", report)
         win_msgs = [r for r in report.results
                     if r.level == "CRITICAL" and "Windows" in r.message]
         assert len(win_msgs) >= 1, (
@@ -240,7 +240,7 @@ class TestScanForPathTraversal:
             "printf '\\n⚠️  Broken references detected:\\n' >&2\n"
         )
         report = ValidationReport()
-        count = scan_for_path_traversal(content, "hooks/quality-gate.sh", report)
+        scan_for_path_traversal(content, "hooks/quality-gate.sh", report)
         win_msgs = [r for r in report.results
                     if r.level == "CRITICAL" and "Windows" in r.message]
         assert win_msgs == [], (
@@ -263,7 +263,7 @@ class TestScanForPathTraversal:
             'fi\n'
         )
         report = ValidationReport()
-        count = scan_for_path_traversal(content, "scripts/hook-linter.sh", report)
+        scan_for_path_traversal(content, "scripts/hook-linter.sh", report)
         win_or_path = [r for r in report.results
                        if r.level == "CRITICAL" and (
                            "Windows" in r.message
@@ -289,7 +289,7 @@ class TestScanForPathTraversal:
             'hardcoded=$(git ls-files | xargs grep -n "/Users/[^/]*/\\|/home/[^/]*/" 2>/dev/null)\n'
         )
         report = ValidationReport()
-        count = scan_for_user_paths(content, "scripts/validate-no-hardcoded-paths.sh", report)
+        scan_for_user_paths(content, "scripts/validate-no-hardcoded-paths.sh", report)
         rc135_msgs = [r for r in report.results
                       if r.level == "MAJOR" and "RC-135" in r.message]
         assert rc135_msgs == [], (
@@ -308,7 +308,7 @@ class TestScanForPathTraversal:
             "grep root /etc/passwd\n"
         )
         report = ValidationReport()
-        count = scan_for_path_traversal(content, "scripts/check-passwd.sh", report)
+        scan_for_path_traversal(content, "scripts/check-passwd.sh", report)
         sys_msgs = [r for r in report.results
                     if r.level == "CRITICAL" and "Absolute Unix" in r.message]
         assert len(sys_msgs) >= 1, (
