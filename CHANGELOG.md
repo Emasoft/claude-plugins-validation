@@ -2,19 +2,80 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
-## [2.45.0] - 2026-04-29
+## [2.46.0] - 2026-05-01
 
 ### Bug Fixes
 
-- **RC-135:** Wire EXAMPLE_USERNAMES allowlist into hardcoded-user-path scan
-- **RC-110:** Skip pipe-table rows in AI-facing markdown (FP1 v2.45)
-- **injection:** Treat templates/*.yml + scripts/*.yml as shell-like (FP2 v2.45)
-- **cc-audit:** Skip findings on doc markdown + chat_history/anthropic_dev (FP3 v2.45)
-- **secrets:** Add placeholder-secret allowlist (your-*, postgres://postgres:postgres, <api-key>) (FP4 v2.45)
-- **exfil:** Allowlist OpenRouter/Anthropic/GitHub/PyPI/npm hosts (FP5 v2.45)
-- **RC-110:** Skip JS/TS/Python import statements in markdown (FP6 v2.45)
-- **RC-93:** Strip trailing list-punctuation in markdown-table helper (FP7 v2.45)
-- **RC-87:** Demote RFC-1918 in CHANGELOG/README to NIT (FP8 v2.45)
+- **RC-87:** Require all 4 octets in IPv4 regex (FP-A v2.46)
+- **RC-93:** Skip Unicode box-drawing rows in CLI banners (FP-O v2.46)
+- **RC-76:** Skip non-AI config files and markdown table rows (FP-L+M v2.46)
+- **exfil:** Allowlist example/sandbox hosts + DNS-context-only tunneling (FP-J+I v2.46)
+- **security:** YAML/Python context guards for RC-31/63/125/146 (FP-D+F+G+H v2.46)
+- **security:** Widen RC-21 window + RC-93 source skip + RC-41/02/03 string ctx (FP-B+C+E+N v2.46)
+- **security:** RC-135 ellipsis + gitleaks --no-git + placeholder filter (FP-K v2.46)
+- **security:** RC-76 trust-boundary + audit-role + RC-72 URL-context (FP-N v2.46)
+- **security:** Gitleaks/cc-audit skip worktrees and test files (v2.46)
+- Guard re-search in unquoted-var boolean-chain branch (line 2784)
+- **external-scanners:** Apply CPV self-scan filter chain to tirith + Cisco + semgrep + trufflehog
+- **cache-files:** Anchor reports to MAIN_ROOT (main checkout) not worktree root
+- **validate_skill:** Allow shell-var $UPPERCASE refs in skill body
+- **consolidation:** Bump command count to 22; clean cache-validation-skill description
+- **strict:** Clean validate_plugin --strict — zero MAJOR/MINOR/NIT
+
+### Documentation
+
+- Add diversity-corpus manifest for v2.47 generalization sweep
+- **corpus:** Add diversity-corpus-v3 manifest (17 plugins)
+- **scanners:** Document always-run external scanners + path-only default across README/skill/agent/command
+- **env-vars:** Prefer ${CLAUDE_PROJECT_DIR} over shell-only $MAIN_ROOT in cache files + README updates
+
+### Features
+
+- **cisco-scan:** Add Cisco AI Defense skill-scanner wrapper module
+- **external-scanners:** Always run; remove --no-* opt-out flags; wire Cisco
+- **report:** Aggregate by rule, default to path-only stdout, bump Cisco timeout
+- **cache:** Add /cpv-validate-cache + /cpv-cache-optimize + cache-validation-skill + cache-optimizer-agent
+- **spec:** Coverage sweep for CC v2.1.120–v2.1.126
+
+### Miscellaneous Tasks
+
+- Post-v2.45 housekeeping (uv.lock + .serena config)
+- **pyright:** Fix extraPaths resolution and pin venv
+- Refresh .cpv-self-hashes.json for v2.1.120–v2.1.126 spec sweep
+- Gitignore .cpv-cisco-scan.json runtime artifact
+- **lint:** Pre-publish lint cleanup (ruff + markdownlint)
+
+### Refactor
+
+- **RC-93:** Generalize box-drawing detection via Unicode block range
+- **exfil:** Generalize doc-host predicate beyond hardcoded list
+- **RC-21:** Generalize PowerShell-context via Verb-Noun cmdlet shape
+- **RC-110/RC-112:** Variable-anchored path predicate
+- I18n compound terms + JS template literals + test/template files
+- **unquoted-var:** Bash boolean-function chain idiom
+- **RC-02/03/63:** Generalize Python docstring detection
+- **RC-76:** Require attack-shape signal in markdown bodies
+- Shell heredoc + bullet-list + RC-92 empty-element + RC-76 all-files
+- Drop unused var_start; rename dirnames to _dirnames
+- Add file-context predicates (research/CSV/ipynb)
+- Wire data-file predicates into 7 scanners
+- **shell-context:** Match POSIX env-form shebang `#!/usr/bin/env bash`
+- **RC-63:** General predicate for markdown anti-pattern bullets
+- **RC-02:** General predicate for markdown documentation context
+- **catalog-source:** General predicate to skip rule-source lines
+- **RC-02:** Broaden doc-role stems and add H1-fallback
+- **parametrize-body:** Suppress findings on pytest fixture bodies
+- **fp-corpus-md:** File-level skip for benchmark corpus markdown
+- **cc-audit:** Align external scanner with internal test-file gate
+- **RC-113:** Generalize Windows-path escape-sequence skip to all c-style-string langs
+- **pipe-to-shell:** Skip RC-114..119 when interpreter has explicit file argument
+- **RC-121:** Skip find -exec primary (hyphen-prefixed exec)
+- **path-traversal:** Skip shell regex-source lines (grep -E / sed s/ / awk / find -name)
+- **RC-145..149:** Broaden test-file detection + skip .example/.sample templates
+
+### Testing
+
+- **P6:** Add regression tests for DB connection-string placeholder skip
 
 ---
 *Generated by [git-cliff](https://git-cliff.org)*
