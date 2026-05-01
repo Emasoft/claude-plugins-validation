@@ -478,10 +478,18 @@ def validate_skill_content(
             )
 
     # v2.1.121 — cross-validate `$<name>` substitutions against declared `arguments:`.
+    #
+    # Convention: skill arguments declared via `arguments:` are lowercase
+    # snake_case (because they appear in YAML and human-readable docs). Shell
+    # variables are conventionally UPPER_SNAKE_CASE (`$MAIN_ROOT`, `$REPORT`,
+    # `$PWD`, etc.). We use that convention as the discriminator so a skill
+    # author can freely document shell-variable usage without tripping a
+    # "missing declared argument" finding.
     if declared_args is not None:
-        # Strip fenced code blocks first so that example $name references in
-        # documentation don't trigger the check.
+        # Strip fenced code blocks AND inline backtick spans first so that
+        # `$VAR` examples in documentation don't trigger the check.
         stripped_body = re.sub(r"```.*?```", "", body, flags=re.DOTALL)
+        stripped_body = re.sub(r"`[^`\n]*`", "", stripped_body)
         # Collect every $<name> occurrence.
         # Must skip `$ARGUMENTS`, `${...}` (env-var form is handled separately),
         # and `$<digit>` (positional form).
@@ -495,6 +503,14 @@ def validate_skill_content(
             # Skip names that match known env vars used in skill substitution.
             if name in {"CLAUDE_SESSION_ID", "CLAUDE_EFFORT", "CLAUDE_SKILL_DIR",
                         "CLAUDE_PLUGIN_ROOT", "CLAUDE_PLUGIN_DATA", "CLAUDE_PROJECT_DIR"}:
+                continue
+            # ALL_UPPERCASE names are shell-variable convention, NOT skill-arg
+            # convention. Skill args are lowercase snake_case. So `$MAIN_ROOT`,
+            # `$REPORT`, `$TIMESTAMP`, `$PWD`, `$HOME`, etc. are user-defined or
+            # standard shell variables and not subject to the `$<name>` skill-arg
+            # expansion contract. `name.isupper()` is True iff the name contains
+            # at least one cased char and all cased chars are uppercase.
+            if name.isupper():
                 continue
             # Otherwise this is a likely-broken substitution.
             report.major(

@@ -783,3 +783,115 @@ class TestMainEntryPoint:
         result = main()
         # Should return integer exit code
         assert isinstance(result, int)
+
+
+class TestNamedArgSubstitutionShellVarHeuristic:
+    """Tests for the $<name> substitution check shell-variable heuristic.
+
+    The check is meant to catch undeclared skill arguments (which silently
+    expand to "" at runtime). It must NOT trigger on:
+      - $VAR references inside fenced code blocks
+      - $VAR references inside inline backtick spans
+      - ALL_UPPERCASE shell-variable names ($MAIN_ROOT, $REPORT, $PWD, etc.)
+      - Known Claude env vars ($CLAUDE_PROJECT_DIR, $CLAUDE_PLUGIN_ROOT, etc.)
+    """
+
+    def test_undeclared_lowercase_arg_is_flagged(self):
+        """Undeclared lowercase $myarg in body should still be flagged."""
+        content = "---\nname: my-skill\n---\nThe value of $myarg drives the flow.\n"
+        report = _make_report()
+        validate_skill_content(content, report, declared_args=[])
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("$myarg" in m and "not declared" in m for m in major_msgs)
+
+    def test_declared_lowercase_arg_passes(self):
+        """Declared lowercase $myarg in body should NOT be flagged."""
+        content = "---\nname: my-skill\n---\nThe value of $myarg drives the flow.\n"
+        report = _make_report()
+        validate_skill_content(content, report, declared_args=["myarg"])
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not any("$myarg" in m for m in major_msgs)
+
+    def test_uppercase_shell_var_is_skipped(self):
+        """ALL_UPPERCASE $MAIN_ROOT outside backticks must NOT be flagged."""
+        content = (
+            "---\nname: my-skill\n---\n"
+            "Anchor reports to $MAIN_ROOT, which is the main checkout root.\n"
+        )
+        report = _make_report()
+        validate_skill_content(content, report, declared_args=[])
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not any("MAIN_ROOT" in m for m in major_msgs)
+
+    def test_common_uppercase_shell_vars_skipped(self):
+        """$REPORT, $TIMESTAMP, $TS, $PWD, $HOME must NOT be flagged."""
+        content = (
+            "---\nname: my-skill\n---\n"
+            "Set $REPORT, $TIMESTAMP, $TS, $PWD, $HOME — all shell vars.\n"
+        )
+        report = _make_report()
+        validate_skill_content(content, report, declared_args=[])
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        for var in ("REPORT", "TIMESTAMP", "TS", "PWD", "HOME"):
+            assert not any(f"${var}" in m for m in major_msgs), f"${var} was wrongly flagged"
+
+    def test_inline_backtick_span_is_stripped(self):
+        """`$myarg` inside inline backticks must NOT be flagged."""
+        content = (
+            "---\nname: my-skill\n---\n"
+            "The substitution `$myarg` is documented as an example.\n"
+        )
+        report = _make_report()
+        validate_skill_content(content, report, declared_args=[])
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not any("$myarg" in m and "not declared" in m for m in major_msgs)
+
+    def test_fenced_code_block_is_stripped(self):
+        """$myarg inside ```bash fenced block must NOT be flagged."""
+        content = (
+            "---\nname: my-skill\n---\n"
+            "```bash\nrun --flag $myarg\n```\n"
+        )
+        report = _make_report()
+        validate_skill_content(content, report, declared_args=[])
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not any("$myarg" in m and "not declared" in m for m in major_msgs)
+
+    def test_known_env_vars_skipped(self):
+        """$CLAUDE_PROJECT_DIR, $CLAUDE_PLUGIN_ROOT, etc. must NOT be flagged."""
+        content = (
+            "---\nname: my-skill\n---\n"
+            "Use $CLAUDE_PROJECT_DIR for project root and $CLAUDE_PLUGIN_ROOT for plugin.\n"
+        )
+        report = _make_report()
+        validate_skill_content(content, report, declared_args=[])
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        for var in ("CLAUDE_PROJECT_DIR", "CLAUDE_PLUGIN_ROOT"):
+            assert not any(f"${var}" in m for m in major_msgs)
+
+    def test_arguments_placeholder_skipped(self):
+        """$ARGUMENTS is well-known and must never be flagged."""
+        content = "---\nname: my-skill\n---\nThe full args: $ARGUMENTS\n"
+        report = _make_report()
+        validate_skill_content(content, report, declared_args=[])
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not any("$ARGUMENTS" in m for m in major_msgs)
+
+    def test_brace_form_already_safe(self):
+        """${MAIN_ROOT} brace form was always safe (regex doesn't match {)."""
+        content = (
+            "---\nname: my-skill\n---\n"
+            "Anchor to ${MAIN_ROOT}/reports — brace form.\n"
+        )
+        report = _make_report()
+        validate_skill_content(content, report, declared_args=[])
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not any("MAIN_ROOT" in m for m in major_msgs)
+
+    def test_mixed_case_undeclared_arg_still_flagged(self):
+        """$MyArg (mixed case, not lowercase, not all-upper) should be flagged."""
+        content = "---\nname: my-skill\n---\nThe value of $myArg drives the flow.\n"
+        report = _make_report()
+        validate_skill_content(content, report, declared_args=[])
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("$myArg" in m and "not declared" in m for m in major_msgs)
