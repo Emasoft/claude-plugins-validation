@@ -386,9 +386,17 @@ class ComprehensiveSkillReport(BaseValidationReport):
         """Add a passed check with optional category."""
         self.add("PASSED", message, file, category=category, score=3)
 
-    def info(self, message: str, file: str | None = None, category: str | None = None) -> None:
-        """Add an info message with optional category."""
-        self.add("INFO", message, file, category=category, score=2)
+    def info(self, message: str, file: str | None = None, line: int | None = None, category: str | None = None) -> None:
+        """Add an info message with optional category.
+
+        ``line`` is accepted for Liskov compatibility with the parent
+        ValidationReport.info() (added so demote-to-info paths can call
+        ``getattr(report, level)(msg, file, line)`` uniformly). The
+        per-skill comprehensive scorer doesn't track line for INFO, so
+        the value is forwarded to ``self.add`` and stored on the result
+        for any consumer that wants it.
+        """
+        self.add("INFO", message, file, line, category=category, score=2)
 
     def nit(self, message: str, file: str | None = None, line: int | None = None, category: str | None = None) -> None:
         """Add a nit issue -- blocks only in --strict mode."""
