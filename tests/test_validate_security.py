@@ -91,6 +91,72 @@ class TestScanForPathTraversal:
         critical_msgs = [r for r in report.results if r.level == "CRITICAL"]
         assert len(critical_msgs) >= 2
 
+    def test_rc113_skips_cstyle_escape_in_csharp(self):
+        """RC-113 (Windows path) should NOT flag `:\\n` escapes in C# string literals."""
+        # FP from Dev-GOM (Unity-editor-toolkit): C# `$"Failed:\n{e.Message}"`
+        # is string interpolation + newline escape, not a C:\Windows path.
+        content = (
+            '                    EditorUtility.DisplayDialog("Error",'
+            ' $"Failed to clear lock:\\n{e.Message}", "OK");\n'
+        )
+        report = ValidationReport()
+        count = scan_for_path_traversal(content, "plugin/Editor/Foo.cs", report)
+        win_msgs = [r for r in report.results
+                    if r.level == "CRITICAL" and "Windows" in r.message]
+        assert win_msgs == [], (
+            f"C# `:\\n` escape must not trigger RC-113; got {win_msgs}"
+        )
+
+    def test_rc113_skips_cstyle_escape_in_json(self):
+        """RC-113 should NOT flag `:\\n` escapes in JSON string values (.json)."""
+        # FP from wshobson (llm-application-dev): JSON value contains
+        # `def is_palindrome(s: str) -> bool:\n    """Check..."""` — the
+        # `s:\n` substring matches `[A-Za-z]:\` but is JSON escape,
+        # not a Windows path.
+        content = (
+            '  "examples": [\n'
+            '    {"output": "def f(s: str) -> bool:\\n    return True"}\n'
+            '  ]\n'
+        )
+        report = ValidationReport()
+        count = scan_for_path_traversal(content, "skill/data/examples.json", report)
+        win_msgs = [r for r in report.results
+                    if r.level == "CRITICAL" and "Windows" in r.message]
+        assert win_msgs == [], (
+            f"JSON `:\\n` escape must not trigger RC-113; got {win_msgs}"
+        )
+
+    def test_rc113_still_detects_real_windows_path_in_csharp(self):
+        """RC-113 should STILL flag a genuine `C:\\Windows\\…` path in C# strings."""
+        # Regression: the escape-skip predicate must not nuke real findings.
+        # `"C:\\Windows\\System32"` -> path-shaped char `W` after `\` -> still fires.
+        content = '                    string sysPath = "C:\\Windows\\System32";\n'
+        report = ValidationReport()
+        count = scan_for_path_traversal(content, "plugin/Editor/Foo.cs", report)
+        win_msgs = [r for r in report.results
+                    if r.level == "CRITICAL" and "Windows" in r.message]
+        assert len(win_msgs) >= 1, (
+            f"Real `C:\\Windows` path must still trigger RC-113; got {report.results}"
+        )
+
+    def test_rc113_skips_printf_escape_in_shell_script(self):
+        """RC-113 should NOT flag `:\\n` escapes inside shell printf/sed strings."""
+        # FP from nyldn (octopus): `printf '\\n⚠️  Broken references detected:\\n'`
+        # contains `s:\n` substring matching `[A-Za-z]:\` — purely a printf
+        # escape sequence, no Windows path involved.
+        content = (
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "printf '\\n⚠️  Broken references detected:\\n' >&2\n"
+        )
+        report = ValidationReport()
+        count = scan_for_path_traversal(content, "hooks/quality-gate.sh", report)
+        win_msgs = [r for r in report.results
+                    if r.level == "CRITICAL" and "Windows" in r.message]
+        assert win_msgs == [], (
+            f"Shell printf `:\\n` escape must not trigger RC-113; got {win_msgs}"
+        )
+
 
 class TestScanForSecrets:
     """Tests for the scan_for_secrets function -- AWS keys, JWT, private keys, GitHub tokens."""
