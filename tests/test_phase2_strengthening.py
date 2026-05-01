@@ -570,6 +570,90 @@ class TestRC146GitHubSecretsPassthrough:
 
 
 # -----------------------------------------------------------------------------
+# v2.49 P5 — RC-145..149 credential-harvest must skip hyphenated test
+# files (`test-foo.py`) and `.example.json` config templates
+# -----------------------------------------------------------------------------
+
+
+class TestRC145CredentialHarvestSkips:
+    """v2.49 P5 — broader test-file detection + `.example.*` template skip
+    for the credential-harvest scanner.
+
+    Two FP shapes that the previous narrow check missed:
+      1. Hyphenated test files (`test-check-bash-secrets.py`) — the
+         existing check matched only `tests/`, `*.test.*`, `*.spec.*`;
+         the path-based `_is_test_file_path()` predicate also recognises
+         `test-<name>.<ext>` (xUnit / npm convention) and is the
+         CANONICAL test-file detector elsewhere in the validator.
+      2. `.example.json` / `.sample.yaml` config templates — these are
+         documentation by convention, illustrating env-var passthrough
+         shapes (`"GITHUB_TOKEN": "${GITHUB_TOKEN}"`); the value is the
+         user's runtime env var, not an embedded credential.
+    """
+
+    def test_hyphenated_test_file_skipped(self) -> None:
+        # FP from ed3dai (ed3d-hook-security-hardening): the test file
+        # `test-check-bash-secrets.py` is a hyphenated test fixture
+        # (matches the xUnit `test-<name>` convention recognised by
+        # `_is_test_file_path`). It DELIBERATELY contains GITHUB_TOKEN
+        # references as inputs to the security checker it tests.
+        content = (
+            'def test_check_token():\n'
+            '    test("printenv GITHUB_TOKEN", "printenv GITHUB_TOKEN", "deny")\n'
+            '    test("git clone with token", "git clone https://${GITHUB_TOKEN}@github.com/x/y", "deny")\n'
+        )
+        report = ValidationReport()
+        scan_for_credential_harvest(
+            content,
+            "plugins/foo/hooks/test-check-bash-secrets.py",
+            report,
+        )
+        rc146 = _msgs(report, "[RC-146]")
+        assert not rc146, (
+            f"hyphenated test file (`test-foo.py`) must be skipped; got {rc146}"
+        )
+
+    def test_example_json_template_skipped(self) -> None:
+        # FP from rohitg00 (pro-workflow): `mcp-config.example.json`
+        # demonstrates the canonical mcpServers env-var passthrough
+        # shape `"GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"`.
+        # The value is bash env expansion at runtime, never a literal
+        # credential. `.example.*` files are documentation templates
+        # by convention.
+        content = (
+            '{\n'
+            '  "mcpServers": {\n'
+            '    "github": {\n'
+            '      "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}" }\n'
+            '    }\n'
+            '  }\n'
+            '}\n'
+        )
+        report = ValidationReport()
+        scan_for_credential_harvest(
+            content, "mcp-config.example.json", report,
+        )
+        rc146 = _msgs(report, "[RC-146]")
+        assert not rc146, (
+            f"`.example.json` template must be skipped; got {rc146}"
+        )
+
+    def test_real_hardcoded_token_in_production_file_still_fires(self) -> None:
+        # Regression: the broader skip predicates must NOT mask a real
+        # production-file hardcoded token. A non-test, non-example
+        # Python file with a literal token MUST still fire RC-146.
+        content = (
+            'GITHUB_TOKEN = "ghp_actualHardcodedTokenABC1234567890"\n'
+        )
+        report = ValidationReport()
+        scan_for_credential_harvest(content, "src/auth.py", report)
+        rc146 = _msgs(report, "[RC-146]")
+        assert rc146, (
+            f"production-file hardcoded token MUST still fire RC-146; got {report.results}"
+        )
+
+
+# -----------------------------------------------------------------------------
 # v2.46 FP-H — RC-125 / RC-126 (JS Function() ctor) must NOT fire on
 # Python type-annotation docstrings
 # -----------------------------------------------------------------------------

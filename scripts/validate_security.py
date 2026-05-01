@@ -4690,11 +4690,19 @@ def scan_for_credential_harvest(content: str, file_path: str, report: Validation
     ):
         return 0
     file_normalized = file_lower.replace("\\", "/")
-    if (
-        "/tests/" in file_normalized
-        or file_normalized.startswith("tests/")
-        or re.search(r"\.(?:test|spec)\.[mc]?[jt]sx?$", file_normalized)
-    ):
+    # GENERAL — broader test-file detection (covers hyphenated `test-foo.py`
+    # which the previous narrow check missed). Re-uses the canonical
+    # `_is_test_file_path` predicate. Test files routinely contain
+    # mock credentials and env-var references as fixture data.
+    if _is_test_file_path(file_normalized):
+        return 0
+    # GENERAL — `*.example.*` and `*.sample.*` files are documentation
+    # templates by convention. They demonstrate HOW to set env vars and
+    # config keys, not actual credentials. Same logic as the existing
+    # markdown-skip: example files are instruction surface but not
+    # credential surface.
+    basename_lc = file_normalized.rsplit("/", 1)[-1]
+    if re.search(r"\.example(?:\.[^.]+)*$|\.sample(?:\.[^.]+)*$", basename_lc):
         return 0
     is_python = file_lower.endswith(".py")
     is_js_ts = is_js_ts_file(file_path, content)
@@ -7368,10 +7376,16 @@ def validate_security(
 
     Args:
         plugin_path: Path to the plugin directory
-        enable_tirith: When False, skip Check #17 tirith.
-        enable_trufflehog: When False, skip trufflehog (RC-102 part 1).
-        enable_gitleaks: When False, skip gitleaks (RC-102 part 2).
-        enable_semgrep: When False, skip semgrep (RC-102 part 3).
+        enable_tirith: Internal-only test isolation knob. The CLI no
+            longer exposes a `--no-tirith` opt-out — external scanners
+            run unconditionally and self-skip when their source binary
+            cannot be resolved. Tests pass `False` here for hermetic
+            unit isolation; production callers should leave it `True`.
+        enable_trufflehog: Internal-only test isolation knob; same
+            contract as `enable_tirith` (no CLI opt-out, scanner runs
+            unconditionally and self-skips on absent binary).
+        enable_gitleaks: Internal-only test isolation knob (same).
+        enable_semgrep: Internal-only test isolation knob (same).
         with_classifier: When True, route every finding for rules with a
             registered classifier (RC-21/22/65/87/93 in v2.42) through the
             context-aware classifier in `cpv_fp_classifier`. The classifier
@@ -7533,26 +7547,42 @@ def validate_security(
         f"MINOR={counts['MINOR']} WARNING={counts['WARNING']})"
     )
 
-    # --- External scanners (optional) ---
+    # --- External scanners (always run; each self-skips on absent source) ---
+    #
+    # The CLI no longer exposes opt-out flags. Every external scanner is
+    # invoked unconditionally; each `check_*` function gracefully degrades
+    # to an INFO advisory ("scanner X unavailable: <reason>") when its
+    # binary cannot be resolved on PATH or installed from its source URL.
+    # The `enable_*` keyword arguments survive only as test-isolation
+    # knobs for hermetic unit tests — production callers pass True.
 
-    # Check 16: cc-audit external scanner (100+ rules, non-blocking if unavailable)
+    # Check 16: cc-audit external scanner (100+ rules; runs via npx,
+    # self-skips when the npm package cannot be fetched).
     check_cc_audit(plugin_path, report)
 
-    # Check 17: tirith external scanner (terminal-security rules, scan-only).
-    # Resolution order: PATH -> docker -> nix -> auto-install (brew/npm/cargo).
-    # Set CPV_NO_TIRITH_INSTALL=1 to disable the install fallback. Pass
-    # enable_tirith=False (or --no-tirith on the CLI) to skip the check
-    # entirely.
+    # Check 17: tirith external scanner (terminal-security rules,
+    # scan-only). Resolution order: PATH → docker → nix → auto-install
+    # (brew/npm/cargo). Set CPV_NO_TIRITH_INSTALL=1 to disable the
+    # install fallback in CI sandboxes that block container pulls.
     if enable_tirith:
         check_tirith_scanner(plugin_path, report)
 
-    # Check 18-20 — Phase 5 specialist tools (RC-102). All optional.
+    # Checks 18-20 — Phase 5 specialist tools (RC-102). Each invocation
+    # self-skips when the binary is missing AND no install path succeeds.
     if enable_trufflehog:
         check_trufflehog(plugin_path, report)
     if enable_gitleaks:
         check_gitleaks(plugin_path, report)
     if enable_semgrep:
         check_semgrep(plugin_path, report)
+
+    # Check 21 — Cisco AI Defense skill-scanner via uvx remote.
+    # Programmatic-only mode (no API-key engines). Self-skips when uvx
+    # is not on PATH or the cisco-ai-skill-scanner package cannot be
+    # resolved at its PyPI source URL. See scripts/cpv_skill_scanner.py.
+    from cpv_skill_scanner import run_cisco_scan, report_findings  # noqa: PLC0415
+    cisco_result = run_cisco_scan(plugin_path)
+    report_findings(cisco_result, plugin_path, report)
 
     return report
 
@@ -7607,9 +7637,17 @@ Security Checks Performed:
   5. Dangerous file detection (.env, credentials.json)
   6. Script permission check (executable, shebang, world-writable)
   7. Plugin-wide recursive scan of all text files
-  16. cc-audit external scanner (npx, optional)
-  17. tirith external scanner (PATH/docker/nix/auto-install; --no-tirith to skip;
-      CPV_NO_TIRITH_INSTALL=1 to disable install fallback)
+  16. cc-audit external scanner (npx remote fetch — always runs unless
+      the package can't be resolved at its source URL)
+  17. tirith external scanner (PATH/docker/nix/auto-install — always runs
+      unless every resolution path fails;
+      CPV_NO_TIRITH_INSTALL=1 to disable the install fallback)
+  18. trufflehog (always runs — skipped only if the binary cannot be
+      located on PATH or auto-installed from its release URL)
+  19. gitleaks   (always runs — same skip rule as trufflehog)
+  20. semgrep    (always runs — same skip rule as trufflehog)
+  21. Cisco AI Defense skill-scanner via uvx remote (always runs unless
+      uvx is missing or the package is unreachable at its PyPI source)
 
 Exit Codes:
   0 - All checks passed
@@ -7633,20 +7671,12 @@ Exit Codes:
             "content folder that is not wrapped in a Claude Code plugin tree."
         ),
     )
-    parser.add_argument(
-        "--no-tirith",
-        action="store_true",
-        help=(
-            "Skip the tirith external scanner (Check #17). Use offline, in CI "
-            "sandboxes that block container pulls, or when tirith ran out of band."
-        ),
-    )
-    parser.add_argument("--no-trufflehog", action="store_true",
-                        help="Skip trufflehog (Phase 5 RC-102 part 1).")
-    parser.add_argument("--no-gitleaks", action="store_true",
-                        help="Skip gitleaks (Phase 5 RC-102 part 2).")
-    parser.add_argument("--no-semgrep", action="store_true",
-                        help="Skip semgrep (Phase 5 RC-102 part 3).")
+    # External scanners are no longer opt-out — they ALWAYS run. Each
+    # check_* function gracefully degrades to an INFO marker ("scanner
+    # X unavailable: <reason>") when the binary cannot be resolved at
+    # its source URL (PATH lookup → package manager → release download).
+    # The CPV_NO_TIRITH_INSTALL=1 env var still disables tirith's
+    # auto-install fallback if the operator's CI cannot pull containers.
     parser.add_argument("--sarif-out", type=Path, default=None,
                         help="Also emit findings as SARIF 2.1.0 JSON to the given path "
                              "(RC-105). Compatible with GitHub code scanning.")
@@ -7683,13 +7713,14 @@ Exit Codes:
         )
         return 1
 
-    # Run validation
+    # Run validation. External scanners always run; each one self-skips
+    # if its source binary/package cannot be resolved (no opt-out flags).
     report = validate_security(
         plugin_path,
-        enable_tirith=not args.no_tirith,
-        enable_trufflehog=not args.no_trufflehog,
-        enable_gitleaks=not args.no_gitleaks,
-        enable_semgrep=not args.no_semgrep,
+        enable_tirith=True,
+        enable_trufflehog=True,
+        enable_gitleaks=True,
+        enable_semgrep=True,
         with_classifier=args.with_classifier,
     )
 
