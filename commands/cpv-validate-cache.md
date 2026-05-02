@@ -93,6 +93,42 @@ The validator walks the tree, applies CA-01..CA-06 in order, and writes a per-ru
 /cpv-validate-cache /path/to/my/project/
 ```
 
+## Post-validate fix prompt (mandatory)
+
+After printing the validation summary, print the following 6-row Unicode
+table verbatim and wait for the user's number. Do NOT skip — even on
+PASS / VALID, the user always gets the explicit "fix N or end" choice.
+NEVER ask "what's next?" generically.
+
+```
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ # ┃ Action                                          ┃ What it does                                                          ┃ Severities the fixer will touch ┃
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 1 │ Fix ALL issues (incl. WARNING)                  │ Dispatch the cache-optimizer-agent on every finding in the report     │ CA-01..CA-06 + WARNING           │
+│ 2 │ Fix NIT and higher                              │ Skip WARNING-only findings                                            │ CA-01..CA-05 (no CA-06 WARNING)  │
+│ 3 │ Fix MINOR and higher                            │ Skip NIT and WARNING                                                  │ CA-01..CA-05                     │
+│ 4 │ Fix MAJOR and higher                            │ Only fix prefix-invalidating CA rules (CA-01/02/03)                   │ CA-01+CA-02+CA-03                │
+│ 5 │ Fix CRITICAL only                               │ Cache rules have no CRITICAL — falls back to MAJOR set                │ CA-01+CA-02+CA-03                │
+│ 0 │ End                                             │ Done — exit without running the fixer                                 │ —                                │
+└───┴─────────────────────────────────────────────────┴───────────────────────────────────────────────────────────────────────┴──────────────────────────────────┘
+Type a number to choose:
+```
+
+On `0` → reply `Done.` and stop.
+
+On `1`-`5` → dispatch the **cache-optimizer-agent** with the report path
+and the chosen `min_severity`:
+
+| Row | min_severity | Agent prompt template                                                              |
+|-----|--------------|------------------------------------------------------------------------------------|
+| 1   | `WARNING`    | `Fix every cache finding in <REPORT_PATH>. min_severity=WARNING.`                  |
+| 2   | `NIT`        | `Fix cache findings in <REPORT_PATH>. min_severity=NIT.`                           |
+| 3   | `MINOR`      | `Fix cache findings in <REPORT_PATH>. min_severity=MINOR.`                         |
+| 4   | `MAJOR`      | `Fix cache findings in <REPORT_PATH>. min_severity=MAJOR.`                         |
+| 5   | `CRITICAL`   | `Fix cache findings in <REPORT_PATH>. min_severity=MAJOR (CA has no CRITICAL).`    |
+
+After the agent returns, reply `Done.` and stop.
+
 ## Related
 
 - `/cpv-cache-optimize` — Interactive agent that validates AND fixes the issues, plus broader cache-aware improvements to the plugin's skills/agents/commands/CLAUDE.md.
