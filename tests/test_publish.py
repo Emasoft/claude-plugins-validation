@@ -449,13 +449,59 @@ def test_bypass_guard_passes_with_clean_env(monkeypatch):
     assert rc == 0
 
 
-def test_print_gates_lists_all_14_gates(capsys):
-    """print_gates prints all gates (0-13) with descriptions."""
+def test_print_gates_lists_all_15_gates(capsys):
+    """print_gates prints all gates (0-14) with descriptions.
+
+    Issue #18 added Gate 9 ("Refresh .cpv-self-hashes.json"); existing
+    gates 9-13 renumbered to 10-14.
+    """
     publish.print_gates()
     out = capsys.readouterr().out
-    for i in range(14):
+    for i in range(15):
         assert f"Gate {i}:" in out
     assert "WARNING is the only severity" in out
+
+
+def test_gate_9_is_integrity_manifest_refresh():
+    """Gate 9 must regenerate .cpv-self-hashes.json (issue #18 regression).
+
+    Before this gate existed, every release between manifest refreshes
+    shipped a stale manifest and fresh marketplace installs hit
+    `cpv_integrity` ABORT immediately. Pin the gate's existence and
+    label so it can't silently regress.
+    """
+    label, desc = publish.GATES[9]
+    assert label == "Gate 9"
+    assert "self-hashes" in desc.lower() or "integrity" in desc.lower()
+    assert "issue #18" in desc.lower()
+
+
+def test_stage_refresh_self_hashes_skips_when_script_missing(monkeypatch, tmp_path, capsys):
+    """When compute_cpv_self_hashes.py is absent (non-CPV plugins), the gate
+    skips with a YELLOW warning instead of failing — other plugins generated
+    by plugin-creator don't ship the integrity manifest."""
+    # tmp_path has no scripts/compute_cpv_self_hashes.py
+    rc = publish.stage_refresh_self_hashes(tmp_path)
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "compute_cpv_self_hashes.py not found" in err
+
+
+def test_stage_refresh_self_hashes_runs_script_when_present(monkeypatch, tmp_path):
+    """When the script exists, the gate invokes it via uv run."""
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "compute_cpv_self_hashes.py").write_text("# placeholder", encoding="utf-8")
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, cwd, *, check=True, **kwargs):
+        calls.append(list(cmd))
+        return _completed(returncode=0)
+
+    monkeypatch.setattr(publish, "run", fake_run)
+    rc = publish.stage_refresh_self_hashes(tmp_path)
+    assert rc == 0
+    assert any("compute_cpv_self_hashes.py" in str(arg) for c in calls for arg in c)
 
 
 # ── Pipeline order + git-cliff wiring ───────────────────────────────────────
@@ -494,21 +540,29 @@ class TestCpvPublishPipelineOrder:
         assert label == "Gate 8"
         assert "bump" in desc.lower()
 
-    def test_gate_9_is_changelog_with_git_cliff_bump_unreleased(self):
-        """Gate 9 must be the changelog stage, explicitly using git-cliff --bump --unreleased."""
-        label, desc = publish.GATES[9]
-        assert label == "Gate 9"
+    def test_gate_10_is_changelog_with_git_cliff_bump_unreleased(self):
+        """Gate 10 must be the changelog stage, explicitly using git-cliff --bump --unreleased.
+
+        Issue #18 inserted the manifest-refresh gate at slot 9, pushing
+        the existing changelog gate to slot 10.
+        """
+        label, desc = publish.GATES[10]
+        assert label == "Gate 10"
         assert "git-cliff" in desc.lower()
         assert "--bump" in desc
         assert "--unreleased" in desc
         assert "--tag" in desc
 
-    def test_gates_10_to_13_run_commit_tag_push_release(self):
-        """Gates 10-13 must run commit → tag → push → github release in that order."""
-        assert "commit" in publish.GATES[10][1].lower()
-        assert "tag" in publish.GATES[11][1].lower()
-        assert "push" in publish.GATES[12][1].lower()
-        assert "release" in publish.GATES[13][1].lower()
+    def test_gates_11_to_14_run_commit_tag_push_release(self):
+        """Gates 11-14 must run commit → tag → push → github release in that order.
+
+        Issue #18 inserted the manifest-refresh gate at slot 9, pushing the
+        existing commit/tag/push/release gates from 10-13 to 11-14.
+        """
+        assert "commit" in publish.GATES[11][1].lower()
+        assert "tag" in publish.GATES[12][1].lower()
+        assert "push" in publish.GATES[13][1].lower()
+        assert "release" in publish.GATES[14][1].lower()
 
 
 class TestCpvStageChangelogUsesBumpUnreleased:
