@@ -2,30 +2,16 @@
 
 ## Table of Contents
 
-- [Common shell prologue](#common-shell-prologue)
-- [Top-level menu (8 categories + Cancel)](#top-level-menu-8-categories--cancel)
-- [1. Validate](#1-validate)
-- [2. Validate from GitHub](#2-validate-from-github)
-- [3. Fix](#3-fix)
-- [4. Create](#4-create)
-- [5. Manage](#5-manage)
-- [6. GitHub setup](#6-github-setup)
-- [7. Deep semantic analysis (opus, expensive)](#7-deep-semantic-analysis-opus-expensive)
-- [8. Help / About](#8-help--about)
-- [Cancel / Exit semantics](#cancel--exit-semantics)
-- [Argument-prompt etiquette](#argument-prompt-etiquette)
-- [Error handling](#error-handling)
-- [Token budget](#token-budget)
+- [Shell prologue](#shell-prologue)
+- [Menu definitions](#menu-definitions)
+- [Etiquette and error handling](#etiquette-and-error-handling)
 
-Full menu definition. Each leaf has:
-- **arg-prompts**: questions to ask the user via `AskUserQuestion` before executing
-- **execution**: the exact bash to run (always via the launcher)
-- **fallback**: alternate command if the primary path fails
+## Shell prologue
 
-Every menu and sub-menu MUST include a **Cancel / Exit** option.
-Every sub-menu MUST also include a **Back** option that returns to the parent menu.
-
-## Common shell prologue
+Full menu definition. Each leaf has these three keys (arg-prompts /
+execution / fallback). Every menu and sub-menu MUST include a Cancel /
+Exit option; every sub-menu MUST also include a Back option that
+returns to the parent menu.
 
 Every leaf that produces a report uses this prologue:
 
@@ -42,7 +28,7 @@ mkdir -p "$MAIN_ROOT/reports/<component>"
 REPORT_FILE="$MAIN_ROOT/reports/<component>/$TS-$SLUG.md"
 ```
 
-## Top-level menu (8 categories + Cancel)
+### Top-level menu (8 categories + Cancel)
 
 `AskUserQuestion` options:
 1. **Validate** — Run a CPV validator (plugin/skill/cache/marketplace/scope/component)
@@ -57,7 +43,9 @@ REPORT_FILE="$MAIN_ROOT/reports/<component>/$TS-$SLUG.md"
 
 ---
 
-## 1. Validate
+## Menu definitions
+
+### 1. Validate
 
 `AskUserQuestion` options:
 1. **Plugin** — Full plugin validation (190+ rules, all 17 sub-validators)
@@ -131,7 +119,7 @@ REPORT_FILE="$MAIN_ROOT/reports/<component>/$TS-$SLUG.md"
 
 ---
 
-## 2. Validate from GitHub
+### 2. Validate from GitHub
 
 1. **Plugin from GitHub** (owner/repo)
 2. **Marketplace from GitHub** (owner/repo)
@@ -164,7 +152,7 @@ REPORT_FILE="$MAIN_ROOT/reports/<component>/$TS-$SLUG.md"
 
 ---
 
-## 3. Fix
+### 3. Fix
 
 1. **Fix plugin findings** — from a report file OR a plugin path (uses plugin-fixer agent)
 2. **Fix marketplace findings** — from a report OR marketplace path (uses marketplace-fixer agent)
@@ -189,7 +177,7 @@ REPORT_FILE="$MAIN_ROOT/reports/<component>/$TS-$SLUG.md"
 
 ---
 
-## 4. Create
+### 4. Create
 
 1. **Scaffold a new plugin** (uses plugin-creator agent)
 2. **Scaffold a new marketplace** (uses plugin-creator agent — marketplace branch)
@@ -208,7 +196,7 @@ REPORT_FILE="$MAIN_ROOT/reports/<component>/$TS-$SLUG.md"
 
 ---
 
-## 5. Manage
+### 5. Manage
 
 1. **List installed plugins**
 2. **Install / update / enable / disable** (dispatches plugin-manager agent)
@@ -278,7 +266,7 @@ REPORT_FILE="$MAIN_ROOT/reports/<component>/$TS-$SLUG.md"
 
 ---
 
-## 6. GitHub setup
+### 6. GitHub setup
 
 1. **Branch protection rules (current repo)**
 2. **Branch protection rules (generic owner/repo)**
@@ -302,7 +290,7 @@ REPORT_FILE="$MAIN_ROOT/reports/<component>/$TS-$SLUG.md"
 
 ---
 
-## 7. Deep semantic analysis (opus, expensive)
+### 7. Deep semantic analysis (opus, expensive)
 
 1. **Confirm + run on a path**
 2. **Back**
@@ -317,7 +305,7 @@ REPORT_FILE="$MAIN_ROOT/reports/<component>/$TS-$SLUG.md"
 
 ---
 
-## 8. Help / About
+### 8. Help / About
 
 1. **Category overview (one-liner per category)**
 2. **List every CPV command with description**
@@ -346,7 +334,9 @@ REPORT_FILE="$MAIN_ROOT/reports/<component>/$TS-$SLUG.md"
 
 ---
 
-## Cancel / Exit semantics
+## Etiquette and error handling
+
+### Cancel / Exit semantics
 
 At ANY menu level, picking "Cancel / Exit" → the orchestrator MUST:
 1. Stop all further menu prompts.
@@ -356,7 +346,7 @@ At ANY menu level, picking "Cancel / Exit" → the orchestrator MUST:
 "Back" semantics: at any sub-menu level, picking "Back" → re-present the
 PARENT menu (typically the top-level menu).
 
-## Argument-prompt etiquette
+### Argument-prompt etiquette
 
 - ALWAYS ask required arguments via `AskUserQuestion` (NEVER infer them).
 - If the user provides an invalid path → re-ask with a hint, do not abort.
@@ -365,7 +355,7 @@ PARENT menu (typically the top-level menu).
 - For paths, ALWAYS resolve `~` to `$HOME` and expand environment
   variables before invoking bash.
 
-## Error handling
+### Error handling
 
 - If `${CLAUDE_PLUGIN_ROOT}` is unset → abort with:
   > "CPV plugin not installed in this session. Install via
@@ -376,7 +366,7 @@ PARENT menu (typically the top-level menu).
 - If `AskUserQuestion` itself fails → fall back to a plain text prompt
   asking the user to paste their choice (last resort).
 
-## Token budget
+### Token budget
 
 - Never paste a full report into the response. Always return the
   report-file path and a 3-line summary (verdict + counts + path).

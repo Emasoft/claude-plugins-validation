@@ -24,6 +24,7 @@ ALSO includes a "Back" option (returns to the parent menu).
 ## Menu tree
 
 Full tree, per-leaf arg prompts, and exact bash recipes: [menu-tree](references/menu-tree.md).
+> Shell prologue · Menu definitions · Etiquette and error handling
 
 Top-level categories (each is a sub-menu — see references for leaves):
 1. **Validate** — plugin / skill / cache / marketplace / local-scope / project-scope / component
@@ -72,6 +73,7 @@ shell.
 ## Resources
 
 - [menu-tree](references/menu-tree.md) — full tree + per-leaf recipes.
+  > Shell prologue · Menu definitions · Etiquette and error handling
 
 ## Checklist
 

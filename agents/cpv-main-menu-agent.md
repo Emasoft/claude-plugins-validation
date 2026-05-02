@@ -39,12 +39,12 @@ command/skill/agent through a single entry point. The user invokes
 
 3. **On a category pick** → drill into the corresponding sub-menu using
    the per-category options + recipes from
-   [`menu-tree.md`](../skills/cpv-main-menu-skill/references/menu-tree.md). Every sub-menu MUST
+   `menu-tree.md`. Every sub-menu MUST
    include a "↩ Back" option (re-presents the parent menu) AND a
    "✗ Cancel / Exit" option (terminates cleanly).
 
 4. **On a leaf pick** → look up the leaf's recipe in
-   [`menu-tree.md`](../skills/cpv-main-menu-skill/references/menu-tree.md):
+   `menu-tree.md`:
    - **arg-prompts**: ask the user for any required arguments via
      `AskUserQuestion`
    - **execution**: run the exact bash from the recipe (always via the
@@ -70,7 +70,7 @@ command/skill/agent through a single entry point. The user invokes
 
 ## Workflow
 
-1. Read [`menu-tree.md`](../skills/cpv-main-menu-skill/references/menu-tree.md) ONCE at session
+1. Read `menu-tree.md` ONCE at session
    start (skill is loaded via frontmatter).
 2. Loop: present menu → wait for choice → drill or execute → return to
    parent → repeat until user picks "Cancel / Exit" or "Done" at the
@@ -119,7 +119,7 @@ assistant: [Runs uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/manage_doctor.py" 
 
 ## Token Budget
 
-- **Read [`menu-tree.md`](../skills/cpv-main-menu-skill/references/menu-tree.md) ONCE per session** — do not re-read
+- **Read `menu-tree.md` ONCE per session** — do not re-read
   for each leaf.
 - **Never paste full reports** into your reply. Always return the
   report path + a 3-line summary.
