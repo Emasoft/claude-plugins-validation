@@ -107,6 +107,20 @@ def check_remote_execution_guard() -> None:
 
     if is_remote:
         script_name = os.path.basename(sys.argv[0])
+        alias = script_name.replace(".py", "")
+        # Strip optional `validate_` / `manage_` prefix to suggest the short
+        # alias the launcher's --help advertises (e.g. `plugin` instead of
+        # `validate_plugin`). Both forms resolve, but the short form is the
+        # documented default.
+        short_alias = alias
+        for prefix in ("validate_", "manage_"):
+            if alias.startswith(prefix):
+                short_alias = alias[len(prefix):]
+                break
+        # `validate_skill_comprehensive` → `skill` (special case — the file
+        # name carries the historical `_comprehensive` suffix).
+        if alias == "validate_skill_comprehensive":
+            short_alias = "skill"
         print(
             f"ERROR: {script_name} is being run from a remote location without "
             f"the environment isolation launcher.\n\n"
@@ -119,11 +133,43 @@ def check_remote_execution_guard() -> None:
             f"claude-plugins-validation@emasoft-plugins`.\n\n"
             f"Instead of:\n"
             f"  python3 {scripts_dir}/{script_name} /path/to/target\n\n"
-            f"Use:\n"
-            f"  python3 {scripts_dir}/remote_validation.py {script_name.replace('.py', '')} /path/to/target",
+            f"Use the canonical launcher invocation (with environment isolation):\n"
+            f"  CLAUDE_PRIVATE_USERNAMES=\"$(whoami)\" uv run --with pyyaml \\\n"
+            f"    python {scripts_dir}/remote_validation.py {short_alias} /path/to/target\n\n"
+            f"Or with the full alias (also works):\n"
+            f"  python3 {scripts_dir}/remote_validation.py {alias} /path/to/target",
             file=sys.stderr,
         )
         sys.exit(1)
+
+
+def launcher_epilog(short_alias: str) -> str:
+    """Standard argparse epilog that points users at the canonical launcher.
+
+    Every CPV validator/manager script should include this in its
+    ArgumentParser:
+
+        parser = argparse.ArgumentParser(
+            ...,
+            epilog=launcher_epilog("plugin"),
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+        )
+
+    The epilog tells users that the canonical way to run this script —
+    especially when invoked from the plugin cache or via a Claude Code
+    slash command — is through `remote_validation.py <alias>`. Direct
+    invocation works only from a CPV development checkout.
+    """
+    return (
+        "Canonical invocation (always via the launcher — environment isolation):\n"
+        '  CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \\\n'
+        f'    python "${{CLAUDE_PLUGIN_ROOT}}/scripts/remote_validation.py" {short_alias} <target>\n\n'
+        "Direct invocation of this script is supported ONLY from a CPV development\n"
+        "checkout. From the plugin cache (or any remote location without\n"
+        "CLAUDE_PLUGIN_ROOT set), the environment-isolation guard refuses with a\n"
+        "'remote location' error — use the launcher instead.\n\n"
+        "Run `remote_validation.py --help` to see all available aliases."
+    )
 
 
 # =============================================================================

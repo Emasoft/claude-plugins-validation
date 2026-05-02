@@ -813,10 +813,11 @@ def main() -> int:
     Returns:
         Exit code (0=ok, 1=critical, 2=major, 3=minor)
     """
+    from cpv_validation_common import launcher_epilog
     parser = argparse.ArgumentParser(
         description="Validate documentation files in a Claude Code plugin.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Checks: README structure, broken links, code blocks, image refs, heading hierarchy.",
+        epilog="Checks: README structure, broken links, code blocks, image refs, heading hierarchy.\n\n" + launcher_epilog("docs"),
     )
     parser.add_argument("plugin_path", help="Path to the plugin directory")
     parser.add_argument(

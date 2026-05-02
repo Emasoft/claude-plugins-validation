@@ -587,6 +587,7 @@ def main() -> int:
     """Main entry point for ``cpv-validate-cache``."""
     check_remote_execution_guard()
 
+    from cpv_validation_common import launcher_epilog
     parser = argparse.ArgumentParser(
         description="Validate prompt-cache discipline (CA-01..CA-06) for a Claude Code plugin",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -603,7 +604,8 @@ Exit codes:
   0 - No blocking issues
   2 - MAJOR issues (CA-01 / CA-02 / CA-03)
   3 - MINOR issues (CA-04 / CA-05)
-""",
+
+""" + launcher_epilog("cache"),
     )
     parser.add_argument("target", help="Path to a plugin directory")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show PASSED/INFO results")

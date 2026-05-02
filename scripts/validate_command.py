@@ -634,10 +634,11 @@ def print_json(report: CommandValidationReport) -> None:
 
 def main() -> int:
     """Main entry point."""
+    from cpv_validation_common import launcher_epilog
     parser = argparse.ArgumentParser(
         description="Validate a Claude Code command file or directory of commands.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Example: uv run python scripts/validate_command.py commands/",
+        epilog=launcher_epilog("command"),
     )
     parser.add_argument("path", help="Path to command .md file or commands/ directory")
     parser.add_argument(

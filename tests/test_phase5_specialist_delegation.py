@@ -1,4 +1,4 @@
-"""Tests for Phase 5 specialist-tool delegation (RC-102 — trufflehog/gitleaks/semgrep).
+"""Tests for Phase 5 specialist-tool delegation (RC-102 — trufflehog/semgrep).
 
 Each external scanner check follows the same pattern as cc-audit and tirith:
 * shutil.which() probe
@@ -9,6 +9,10 @@ Each external scanner check follows the same pattern as cc-audit and tirith:
 
 These tests use monkeypatched subprocess.run so they don't require any
 of the binaries actually installed.
+
+v2.48 — gitleaks tests removed: gitleaks integration was dropped because
+trufflehog (~700 detectors, --concurrency parallelism) provides superset
+coverage with reliable parallel scans (gitleaks crashed under parallelism).
 """
 
 from __future__ import annotations
@@ -26,7 +30,6 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 import validate_security  # noqa: E402
 from cpv_validation_common import ValidationReport  # noqa: E402
 from validate_security import (  # noqa: E402
-    check_gitleaks,
     check_semgrep,
     check_trufflehog,
 )
@@ -61,14 +64,6 @@ class TestBinaryMissing:
         check_trufflehog(plugin, report)
         warnings = [r.message for r in report.results if r.level == "WARNING"]
         assert any("trufflehog" in w and "not found" in w for w in warnings)
-
-    def test_gitleaks_missing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(validate_security.shutil, "which", lambda name: None)
-        report = ValidationReport()
-        plugin = _make_plugin(tmp_path)
-        check_gitleaks(plugin, report)
-        warnings = [r.message for r in report.results if r.level == "WARNING"]
-        assert any("gitleaks" in w and "not found" in w for w in warnings)
 
     def test_semgrep_missing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(validate_security.shutil, "which", lambda name: None)
@@ -163,57 +158,10 @@ class TestTrufflehogParsing:
         )
 
 
-class TestGitleaksParsing:
-    def test_finding_major(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(validate_security.shutil, "which", lambda name: f"/usr/local/bin/{name}")
-        sample = [{
-            "RuleID": "aws-access-token",
-            "Description": "AWS access token",
-            "File": "src/foo.py",
-            "StartLine": 42,
-        }]
-
-        def fake_run(*a: Any, **kw: Any) -> _FakeCompletedProcess:
-            # gitleaks writes to a file specified in args; mimic that
-            for arg in a[0]:
-                if isinstance(arg, str) and arg.endswith(".json"):
-                    Path(arg).write_text(json.dumps(sample))
-            return _FakeCompletedProcess(returncode=0)
-
-        monkeypatch.setattr(validate_security.subprocess, "run", fake_run)
-        report = ValidationReport()
-        check_gitleaks(_make_plugin(tmp_path), report)
-        majors = [r for r in report.results if r.level == "MAJOR" and "gitleaks" in r.message]
-        assert majors
-
-    def test_validator_script_skipped(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """v2.37.0 hardening: gitleaks findings on files merely *named* like
-        a CPV validator are NOT suppressed unless self-scan is active and
-        the file's hash matches the canonical manifest. This prevents a
-        malicious plugin from evading gitleaks by parking its payload at
-        `scripts/validate_security.py`.
-        """
-        monkeypatch.setattr(validate_security.shutil, "which", lambda name: f"/usr/local/bin/{name}")
-        sample = [{
-            "RuleID": "x",
-            "File": "scripts/validate_security.py",
-            "StartLine": 1,
-        }]
-
-        def fake_run(*a: Any, **kw: Any) -> _FakeCompletedProcess:
-            for arg in a[0]:
-                if isinstance(arg, str) and arg.endswith(".json"):
-                    Path(arg).write_text(json.dumps(sample))
-            return _FakeCompletedProcess(returncode=0)
-
-        monkeypatch.setattr(validate_security.subprocess, "run", fake_run)
-        report = ValidationReport()
-        plugin = _make_plugin(tmp_path)
-        # Self-scan inactive → name-based spoofing must NOT evade.
-        validate_security._set_cpv_self_scan(False, plugin_root=plugin, notice_report=None)
-        check_gitleaks(plugin, report)
-        msgs = [r for r in report.results if "gitleaks" in r.message and r.level in ("CRITICAL", "MAJOR", "MINOR")]
-        assert msgs, "spoofed validate_security.py must be scanned, not silently skipped"
+# v2.48 — TestGitleaksParsing class removed: gitleaks integration was
+# dropped in favor of trufflehog (superset coverage + parallel-safe via
+# --concurrency). The check_gitleaks function and its placeholder-secret
+# helpers no longer exist.
 
 
 class TestSemgrepParsing:
@@ -236,7 +184,7 @@ class TestSemgrepParsing:
 
 
 # -----------------------------------------------------------------------------
-# CLI flag integration — --no-trufflehog / --no-gitleaks / --no-semgrep
+# CLI flag integration — --no-trufflehog / --no-semgrep
 # -----------------------------------------------------------------------------
 
 
@@ -244,16 +192,15 @@ class TestCliFlags:
     def test_no_trufflehog_skips_the_check(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         # Skip ALL external + Phase 1+ checks for isolation; only verify
         # that enable_trufflehog=False suppresses the trufflehog WARNING.
+        # v2.48 — `enable_gitleaks` removed (gitleaks integration deleted).
         monkeypatch.setattr(validate_security.shutil, "which", lambda name: None)
         plugin = _make_plugin(tmp_path)
         report = run_validate_security(
             plugin,
             enable_tirith=False,
             enable_trufflehog=False,
-            enable_gitleaks=False,
             enable_semgrep=False,
         )
         warnings = [r.message for r in report.results if r.level == "WARNING"]
         assert not any("trufflehog" in w for w in warnings)
-        assert not any("gitleaks" in w for w in warnings)
         assert not any("semgrep" in w for w in warnings)

@@ -194,18 +194,27 @@ Always consult `plugin-validation-skill` for structure references and re-run `va
 
 ## Scripts
 
-All at `${CLAUDE_PLUGIN_ROOT}/scripts/`. Run with `uv run "${CLAUDE_PLUGIN_ROOT}/scripts/<script>" <args>`.
+All at `${CLAUDE_PLUGIN_ROOT}/scripts/`. **VALIDATORS** must always be invoked via the launcher (NEVER directly — environment-isolation guard refuses):
 
-| Script | Purpose |
-|---|---|
-| `generate_plugin_repo.py` | Scaffold a complete plugin repo with all standard files |
-| `generate_marketplace_repo.py` | Scaffold a marketplace hub repo (pointers to plugin repos) |
-| `standardize_plugin.py` | Audit and fix an existing plugin repo to match standards |
-| `standardize_marketplace.py` | Audit and fix an existing marketplace repo |
-| `validate_plugin.py` | Validate plugin passes all 190+ rules |
-| `validate_marketplace.py` | Validate marketplace structure |
-| `manage_github_validate.py` | Validate a GitHub plugin/marketplace without installing |
-| `bump_version.py` | Bump plugin version (patch/minor/major) |
+```bash
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" <alias> <args>
+```
+
+**SCAFFOLD/STANDARDIZE/UTILITY scripts** (no environment-isolation guard) can be invoked directly with `uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/<script>" <args>`.
+
+| Script | Purpose | Invocation |
+|---|---|---|
+| `generate_plugin_repo.py` | Scaffold a complete plugin repo with all standard files | direct |
+| `generate_marketplace_repo.py` | Scaffold a marketplace hub repo | direct |
+| `standardize_plugin.py` | Audit and fix an existing plugin repo to match standards | launcher: `standardize` |
+| `standardize_marketplace.py` | Audit and fix an existing marketplace repo | launcher: `standardize_marketplace` |
+| `validate_plugin.py` | Validate plugin passes all 190+ rules | launcher: `plugin` |
+| `validate_marketplace.py` | Validate marketplace structure | launcher: `marketplace` |
+| `validate_security.py` | Security scan (5 external scanners + AI rules) | launcher: `security` |
+| `validate_cache.py` | Prompt-cache invalidation audit (CA-01..CA-06) | launcher: `cache` |
+| `manage_github_validate.py` | Validate a GitHub plugin/marketplace without installing | launcher: `github` |
+| `bump_version.py` | Bump plugin version (patch/minor/major) | direct |
+| `manage_doctor.py` | Health-check + `--install-scanners` for all 5 external scanners + fclones | launcher: `doctor` or direct (`--install-scanners` only) |
 
 ## Workflow: Publish Plugin as GitHub Repo
 
@@ -215,9 +224,9 @@ The pre-push hook runs `--strict` and blocks on CRITICAL, MAJOR, MINOR, and NIT.
 
 ### Steps
 
-1. **Validate** (`--strict`, installed CPV — Claude Code sets `${CLAUDE_PLUGIN_ROOT}` when running agents):
-   `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" <folder> --strict --verbose`
-2. **Standardize**: `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" <folder> --fix` — adds missing files
+1. **Validate** (`--strict`, installed CPV via launcher — Claude Code sets `${CLAUDE_PLUGIN_ROOT}` when running agents):
+   `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" plugin <folder> --strict --verbose`
+2. **Standardize**: `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" standardize <folder> --fix` — adds missing files
 3. **FIX ALL ISSUES** (CRITICAL → MAJOR → MINOR → NIT): **Always delegate to the `plugin-fixer` agent** (via `/cpv-fix-validation <report-path-or-plugin-path>`) rather than improvising ad-hoc patches. The fixer accepts either the existing report or the plugin path directly, runs the full validate→fix→re-validate loop itself, and returns when clean (zero findings above WARNING + zero publish-blocking warnings). It owns the error-to-fix mapping and keeps up with install-time schema drift (e.g. runtime-only Zod rules like `userConfig.<key>.type` required, which the docs omit). Common fixes it applies:
    - **`userConfig.<key>` missing `type` / invalid `type`** → add `"type": "<inferred>"`. Field-name heuristics: `*_interval|*_seconds|*_timeout|*_threshold|*_count|*_days|*_port|max_*|min_*` → `number`; `enable_*|disable_*|use_*|is_*|has_*` → `boolean`; `*_dir|workspace_dir` (absolute path) → `directory`; `*_file|config_file` (absolute path) → `file`; everything else (repo slugs, URLs, tokens, relative paths) → `string`. Only the 5 runtime types `{string, number, boolean, directory, file}` are accepted. Reject `integer`, `array`, `object` — they pass JSON-Schema but Claude Code rejects them at install.
    - **`userConfig.<key>` missing `title`** → add a human-readable title derived from the key
@@ -335,3 +344,32 @@ See the **plugin-management** skill for the full list of 19 hard-won lessons fro
 
 ## TOKEN OPTIMIZATION
 Use `mcp__plugin_llm-externalizer_llm-externalizer__*` tools for bounded tasks. Always pass file paths via `input_files_paths`.
+
+## Examples
+
+<example>
+user: Make my plugin at ~/dev/my-plugin/ deployable end-to-end.
+assistant: Resolving the plugin root and gap-detecting against the 6-point definition.
+[Path Resolution Protocol confirms ~/dev/my-plugin/ as plugin root]
+[Validate via launcher: 2 MINOR (no CRITICAL/MAJOR)]
+[Standardize via launcher --fix: adds missing .gitignore entries]
+[Detect: no git remote → asks user for owner → gh repo create]
+[Detects no marketplace → asks via AskUserQuestion which marketplace to use, picks Layout C]
+[Sets up notify-marketplace.yml + MARKETPLACE_PAT via set_marketplace_pat.py]
+[Runs publish.py → bumps version → triggers dispatch]
+[Polls until marketplace.json reflects new version]
+✓ Plugin is deployment-ready. Plugin repo + marketplace at github.com/owner/my-plugin.
+Run `claude plugin marketplace add owner/my-plugin && claude plugin install my-plugin@my-plugin` to install.
+</example>
+
+<example>
+user: Create a new plugin called "lint-checker" from scratch and ship it as Layout C.
+assistant: I'll scaffold a Layout C self-referential plugin (one repo serves as both plugin and marketplace).
+[generate_plugin_repo.py --self-marketplace lint-checker]
+[Plugin scaffolded with .claude-plugin/plugin.json AND .claude-plugin/marketplace.json (self-entry)]
+[Validate via launcher: clean]
+[git init + initial commit + gh repo create owner/lint-checker --public --source . --push]
+[publish.py --install-hook installs the pre-push gate]
+✓ Layout C plugin is ready. Single repo handles plugin + marketplace.
+Run `claude plugin marketplace add owner/lint-checker && claude plugin install lint-checker@lint-checker --scope user`.
+</example>

@@ -26,7 +26,7 @@ Deep AI analysis. Opus 1M, ~10-50× tokens of script validation.
 
 ## Instructions
 
-1. Run baseline: `uv run python scripts/validate_skill_comprehensive.py "<path>" --strict --report "$MAIN_ROOT/reports/validate_skill/$(date +%Y%m%d_%H%M%S%z)-baseline.md"`
+1. Run baseline via launcher (alias `skill`) — see [references/launcher-invocation.md](references/launcher-invocation.md). Direct invocation refused.
 2. Read SKILL.md / agent .md
 3. Evaluate 7 pillars + applicable conditional security pillars
 4. Write report → `$MAIN_ROOT/reports/semantic-validator/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`

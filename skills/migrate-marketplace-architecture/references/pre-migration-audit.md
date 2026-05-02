@@ -80,7 +80,7 @@ Layout A these paths become the `--prefix` argument for `git subtree split`.
 must fix the manifests before migrating, because Layout A tags each new repo
 at `v<version>` and Layout B needs versions for the consolidated CHANGELOG.
 
-**Fix command**: `uv run python scripts/validate_plugin.py plugins/<name>` to
+**Fix command** (via launcher — direct invocation refused by environment-isolation guard): `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" plugin plugins/<name>` to
 see the exact field gaps, then edit `plugin.json` manually.
 
 ## 4. Already-Migrated Detection

@@ -1063,12 +1063,15 @@ def run_linting(repo_root: Path) -> bool:
 
 def main() -> int:
     """Lint all files in a repository (read-only). Returns 0 if pass, 1 if fail."""
+    from cpv_validation_common import launcher_epilog
     parser = argparse.ArgumentParser(
         description="Read-only file linting for plugin repositories.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Supports 15 languages: Python, JavaScript, Shell, Go, Rust, "
             "Markdown, JSON, YAML, Dockerfile, XML, CSS, HTML, SQL, TOML, PowerShell. "
-            "All checks are read-only — no files are modified."
+            "All checks are read-only — no files are modified.\n\n"
+            + launcher_epilog("lint")
         ),
     )
     parser.add_argument(

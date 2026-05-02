@@ -82,8 +82,15 @@ class CiscoScanResult:
 
 
 def is_uvx_available() -> bool:
-    """True iff `uvx` is on PATH. Cisco scanner needs uvx to run remotely."""
-    return shutil.which("uvx") is not None
+    """True iff a launcher for the Cisco skill-scanner is available.
+
+    v2.48 — accepts EITHER the persistent ``skill-scanner`` binary (created
+    by ``uv tool install cisco-ai-skill-scanner``) OR the ephemeral ``uvx``
+    fallback. The persistent path skips the ~5-10s uvx resolution cost on
+    every scan, which dominates the per-target startup overhead in
+    marketplace bulk scans.
+    """
+    return shutil.which("skill-scanner") is not None or shutil.which("uvx") is not None
 
 
 def build_scan_command(
@@ -106,12 +113,21 @@ def build_scan_command(
     The `--lenient` flag is REQUIRED for Claude Code plugins because they
     don't ship a `SKILL.md`; the scanner falls back to scanning markdown
     files in the directory.
+
+    v2.48 — prefers the persistent ``skill-scanner`` binary (installed via
+    ``uv tool install cisco-ai-skill-scanner``) over the ephemeral
+    ``uvx --from cisco-ai-skill-scanner skill-scanner`` resolution. The
+    persistent path saves ~5-10s of resolve cost per invocation, which
+    matters in marketplace bulk scans that spawn N invocations.
     """
-    cmd: list[str] = [
-        "uvx",
-        "--from",
-        package_spec,
-        "skill-scanner",
+    if shutil.which("skill-scanner"):
+        # Persistent install path — direct binary call.
+        prefix: list[str] = ["skill-scanner"]
+    else:
+        # Ephemeral uvx fallback — slower but works without a prior install.
+        prefix = ["uvx", "--from", package_spec, "skill-scanner"]
+
+    cmd: list[str] = prefix + [
         "scan-all",
         str(plugin_path),
         "--recursive",

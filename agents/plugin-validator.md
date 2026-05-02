@@ -46,9 +46,13 @@ uv run python -c "import getpass; print(getpass.getuser())"
 ```
 If auto-detection fails, ask the user. Pass via: `CLAUDE_PRIVATE_USERNAMES="username"`.
 
-## Validation Scripts
+## Validation Scripts (canonical invocation — ALWAYS via remote_validation.py)
 
-Every report path follows `$MAIN_ROOT/reports/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`. Resolve `$MAIN_ROOT` and compose the path with this prologue before running any validator:
+CPV scripts in the plugin cache REFUSE to run when invoked directly — they require the environment-isolation launcher `remote_validation.py`. The launcher accepts short aliases (`plugin`, `skill`, `marketplace`, `security`, `hook`, `mcp`, `agent`, `command`, `lsp`, `xref`, `docs`, `encoding`, `rules`, `enterprise`, `scoring`, `lint`, `local-scope`, `project-scope`) and forwards every other arg to the underlying script.
+
+Use `${CLAUDE_PLUGIN_ROOT}` (set by Claude Code at agent-invocation time) — it points at the locally-installed CPV plugin's current version. Do NOT hand-resolve cache paths with `find` or `ls`.
+
+Every report path follows `$MAIN_ROOT/reports/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`. Compose the path with this prologue before running any validator:
 
 ```bash
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -58,6 +62,7 @@ else
 fi
 TS="$(date +%Y%m%d_%H%M%S%z)"
 SLUG="$(basename "$TARGET_PATH")"
+LAUNCHER="${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py"
 mkdir -p "$MAIN_ROOT/reports/<component>"
 ```
 
@@ -65,37 +70,40 @@ Then run any of these (substitute the matching `<component>` — each script get
 
 ```bash
 # Full plugin validation (component: validate_plugin)
-CLAUDE_PRIVATE_USERNAMES="$USER" uv run python scripts/validate_plugin.py /path/to/plugin --report "$MAIN_ROOT/reports/validate_plugin/$TS-$SLUG.md"
+CLAUDE_PRIVATE_USERNAMES="$USER" uv run --with pyyaml python "$LAUNCHER" plugin /path/to/plugin --report "$MAIN_ROOT/reports/validate_plugin/$TS-$SLUG.md"
 
 # Per-component validators (one component per script — never lump them into one folder)
-uv run python scripts/validate_skill_comprehensive.py /path/to/skill --report "$MAIN_ROOT/reports/validate_skill/$TS-$SLUG.md"
-uv run python scripts/validate_hook.py                 /path/to/hooks.json --report "$MAIN_ROOT/reports/validate_hook/$TS-$SLUG.md"
-uv run python scripts/validate_mcp.py                  /path/to/plugin --report "$MAIN_ROOT/reports/validate_mcp/$TS-$SLUG.md"
-uv run python scripts/validate_marketplace.py          /path/to/marketplace --report "$MAIN_ROOT/reports/validate_marketplace/$TS-$SLUG.md"
-uv run python scripts/validate_xref.py                 /path/to/plugin --report "$MAIN_ROOT/reports/validate_xref/$TS-$SLUG.md"
-uv run python scripts/validate_documentation.py        /path/to/plugin --report "$MAIN_ROOT/reports/validate_documentation/$TS-$SLUG.md"
-uv run python scripts/validate_security.py             /path/to/plugin --report "$MAIN_ROOT/reports/validate_security/$TS-$SLUG.md"
-# `validate_security.py` is the most comprehensive checker — in-process AI/security rule packs
-# PLUS six external scanners that always run (no opt-out flags) and self-skip when their
-# source binary is unreachable: cc-audit (npx), tirith (PATH/docker/nix), trufflehog/gitleaks/
-# semgrep (PATH or installer), Cisco AI Defense skill-scanner (uvx remote, programmatic-only —
-# no API-key engines). Without `--report`, the script auto-saves to
-# `$CLAUDE_PROJECT_DIR/reports/security/<TS>-<plugin>.md` and prints ONLY the compact summary
-# to stdout (path-only) so an agent invoking it never gets flooded.
-# Env knobs: `CPV_NO_TIRITH_INSTALL=1` disables tirith's auto-install fallback;
-# `CPV_CISCO_SCAN_TIMEOUT_S=<seconds>` overrides the 600s Cisco-scan default.
-uv run python scripts/validate_rules.py                /path/to/plugin --report "$MAIN_ROOT/reports/validate_rules/$TS-$SLUG.md"
-uv run python scripts/validate_enterprise.py           /path/to/plugin --report "$MAIN_ROOT/reports/validate_enterprise/$TS-$SLUG.md"
-uv run python scripts/validate_encoding.py             /path/to/plugin --report "$MAIN_ROOT/reports/validate_encoding/$TS-$SLUG.md"
-uv run python scripts/validate_scoring.py              /path/to/plugin --report "$MAIN_ROOT/reports/validate_scoring/$TS-$SLUG.md"
-uv run python scripts/validate_command.py              /path/to/plugin --report "$MAIN_ROOT/reports/validate_command/$TS-$SLUG.md"
-uv run python scripts/validate_agent.py                /path/to/plugin --report "$MAIN_ROOT/reports/validate_agent/$TS-$SLUG.md"
-uv run python scripts/validate_lsp.py                  /path/to/plugin --report "$MAIN_ROOT/reports/validate_lsp/$TS-$SLUG.md"
-uv run python scripts/lint_files.py                    /path/to/plugin --report "$MAIN_ROOT/reports/lint/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" skill          /path/to/skill --report "$MAIN_ROOT/reports/validate_skill/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" hook           /path/to/hooks.json --report "$MAIN_ROOT/reports/validate_hook/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" mcp            /path/to/plugin --report "$MAIN_ROOT/reports/validate_mcp/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" marketplace    /path/to/marketplace --report "$MAIN_ROOT/reports/validate_marketplace/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" xref           /path/to/plugin --report "$MAIN_ROOT/reports/validate_xref/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" docs           /path/to/plugin --report "$MAIN_ROOT/reports/validate_documentation/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" security       /path/to/plugin --report "$MAIN_ROOT/reports/validate_security/$TS-$SLUG.md"
+# `security` is the most comprehensive checker — in-process AI/security rule packs PLUS five
+# external scanners (v2.48: gitleaks dropped, trufflehog covers the same detectors with
+# parallel-safe concurrency): cc-audit (npx → persistent), tirith (PATH/docker/nix),
+# trufflehog (PATH), semgrep (PATH), Cisco AI Defense skill-scanner (persistent
+# `skill-scanner` → uvx fallback). Always run, no opt-out flags. Self-skip when binary
+# unreachable. v2.48 `--marketplace <spec>` mode stages all plugins, dedups via fclones,
+# scans corpus once, and buckets findings per-plugin. v2.48 also accepts URL/archive
+# specs (`https://github.com/owner/repo`, `*.zip`, `*.tar.gz`) — auto-clone/extract
+# to tmpdir, scan, cleanup. v2.48 `--loose` (alias `--bare-folder`) bypasses the
+# .claude-plugin/ precondition for flat skill packs. Env knobs: `CPV_NO_TIRITH_INSTALL=1`,
+# `CPV_NO_FCLONES_INSTALL=1`, `CPV_CISCO_SCAN_TIMEOUT_S=<seconds>`. Run
+# `cpv-doctor --install-scanners` to pre-install every external scanner.
+uv run --with pyyaml python "$LAUNCHER" rules          /path/to/plugin --report "$MAIN_ROOT/reports/validate_rules/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" enterprise     /path/to/plugin --report "$MAIN_ROOT/reports/validate_enterprise/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" encoding       /path/to/plugin --report "$MAIN_ROOT/reports/validate_encoding/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" scoring        /path/to/plugin --report "$MAIN_ROOT/reports/validate_scoring/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" command        /path/to/plugin --report "$MAIN_ROOT/reports/validate_command/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" agent          /path/to/plugin --report "$MAIN_ROOT/reports/validate_agent/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" lsp            /path/to/plugin --report "$MAIN_ROOT/reports/validate_lsp/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" lint           /path/to/plugin --report "$MAIN_ROOT/reports/lint/$TS-$SLUG.md"
 
 # Scope validators (validate .claude/ + .mcp.json + CLAUDE.md under a project path)
-uv run python scripts/validate_project_scope.py /path/to/project --report "$MAIN_ROOT/reports/validate_project_scope/$TS-$SLUG.md"
-uv run python scripts/validate_local_scope.py   /path/to/project --report "$MAIN_ROOT/reports/validate_local_scope/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" project-scope  /path/to/project --report "$MAIN_ROOT/reports/validate_project_scope/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" local-scope    /path/to/project --report "$MAIN_ROOT/reports/validate_local_scope/$TS-$SLUG.md"
 ```
 
 ## Exit Codes
@@ -132,7 +140,7 @@ uv run python scripts/validate_local_scope.py   /path/to/project --report "$MAIN
 
 <example>
 user: Validate my-plugin before release
-assistant: [Runs: uv run python scripts/validate_plugin.py ./my-plugin --verbose --report "$MAIN_ROOT/reports/validate_plugin/20260421_183012+0200-my-plugin.md"]
+assistant: [Runs: uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" plugin ./my-plugin --verbose --report "$MAIN_ROOT/reports/validate_plugin/20260421_183012+0200-my-plugin.md"]
 Plugin Validation: FAIL (major)
   CRITICAL:0 | MAJOR:1 | MINOR:2 | PASSED:154
   Report: reports/validate_plugin/20260421_183012+0200-my-plugin.md

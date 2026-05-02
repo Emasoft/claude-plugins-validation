@@ -3063,6 +3063,7 @@ def main() -> int:
     from cpv_integrity import verify_self_integrity  # noqa: PLC0415
     verify_self_integrity(quiet=True)
 
+    from cpv_validation_common import launcher_epilog
     parser = argparse.ArgumentParser(
         description="Validate Claude Code plugin marketplace configuration",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -3077,7 +3078,8 @@ Examples:
   %(prog)s ./my-marketplace
   %(prog)s ./my-marketplace/marketplace.json --verbose
   %(prog)s ./my-marketplace --json
-        """,
+
+""" + launcher_epilog("marketplace"),
     )
     parser.add_argument(
         "marketplace_path",

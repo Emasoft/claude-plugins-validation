@@ -43,7 +43,10 @@ Supported source types:
 ## Execution
 
 ```bash
-uv run python scripts/validate_settings_marketplace.py "$ARG" --strict
+# Always invoke via the launcher for environment isolation:
+CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
+  python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" \
+  settings-marketplace "$ARG" --strict
 ```
 
 ## Related

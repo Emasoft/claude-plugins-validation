@@ -413,8 +413,8 @@ After the marketplace repository is updated (either automatically via dispatch o
 7. **Source Reachability** -- Plugin source repositories must be accessible and contain valid `plugin.json`
 8. **Documentation** -- README must contain Installation, Update, Uninstall, and Troubleshooting sections
 
-Run validation locally:
+Run validation locally via the launcher (NEVER call `validate_marketplace.py` directly from the cache — environment-isolation guard refuses):
 
 ```bash
-uv run python scripts/validate_marketplace.py /path/to/marketplace --verbose
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" marketplace /path/to/marketplace --verbose
 ```

@@ -813,26 +813,28 @@ def fix_missing_files(
 
 def main() -> int:
     """Parse CLI arguments, run audit, optionally fix missing files."""
+    from cpv_validation_common import launcher_epilog
     parser = argparse.ArgumentParser(
         description="Audit and standardize a Claude Code plugin repo against CPV standards.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
+Examples (always invoke via the launcher):
   # Audit only (report gaps)
-  uv run scripts/standardize_plugin.py /path/to/plugin
+  uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" standardize /path/to/plugin
 
   # Audit + fix missing files (never overwrites existing)
-  uv run scripts/standardize_plugin.py /path/to/plugin --fix
+  uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" standardize /path/to/plugin --fix
 
   # Dry-run fix (show what would be created)
-  uv run scripts/standardize_plugin.py /path/to/plugin --fix --dry-run
+  uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" standardize /path/to/plugin --fix --dry-run
 
   # Save detailed report to file
-  uv run scripts/standardize_plugin.py /path/to/plugin --report audit.md
+  uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" standardize /path/to/plugin --report audit.md
 
   # Also run full CPV validation
-  uv run scripts/standardize_plugin.py /path/to/plugin --validate
-""",
+  uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" standardize /path/to/plugin --validate
+
+""" + launcher_epilog("standardize"),
     )
     parser.add_argument("plugin_path", type=Path, help="Path to the plugin repository root")
     parser.add_argument("--fix", action="store_true", help="Generate missing standard files from templates")

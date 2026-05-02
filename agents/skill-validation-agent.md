@@ -51,7 +51,11 @@ fi
 mkdir -p "$MAIN_ROOT/reports/validate_skill"
 REPORT_FILE="$MAIN_ROOT/reports/validate_skill/$(date +%Y%m%d_%H%M%S%z)-$(basename "<skill_path>").md"
 
-uv run python scripts/validate_skill_comprehensive.py "<skill_path>" [--strict] [--openspec] [--pillars] [--verbose] --report "$REPORT_FILE"
+# ALWAYS via the launcher — direct invocation of validate_skill_comprehensive.py
+# from the plugin cache fails with "remote location" environment-isolation error.
+CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
+  python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" \
+  skill "<skill_path>" [--strict] [--openspec] [--pillars] [--verbose] --report "$REPORT_FILE"
 ```
 
 ## Rules
@@ -78,7 +82,7 @@ uv run python scripts/validate_skill_comprehensive.py "<skill_path>" [--strict] 
 
 <example>
 user: Validate my-skill with strict mode
-assistant: [Runs: uv run python scripts/validate_skill_comprehensive.py ./my-skill --strict --verbose --report "$MAIN_ROOT/reports/validate_skill/20260421_183012+0200-my-skill.md"]
+assistant: [Runs: uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" skill ./my-skill --strict --verbose --report "$MAIN_ROOT/reports/validate_skill/20260421_183012+0200-my-skill.md"]
 Skill Validation: FAIL (major)
   CRITICAL:0 | MAJOR:1 | MINOR:2 | PASSED:15
   Report: reports/validate_skill/20260421_183012+0200-my-skill.md

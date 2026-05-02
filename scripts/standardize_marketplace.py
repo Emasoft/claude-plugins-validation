@@ -394,20 +394,22 @@ def audit_marketplace(marketplace_dir: Path, fix: bool, dry_run: bool) -> int:
 
 def main() -> int:
     """Parse arguments and run the marketplace audit."""
+    from cpv_validation_common import launcher_epilog
     parser = argparse.ArgumentParser(
         description="Audit and standardize a marketplace repository to match CPV standards.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
+Examples (always invoke via the launcher):
   # Audit only (no changes)
-  uv run scripts/standardize_marketplace.py /path/to/marketplace
+  uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" standardize_marketplace /path/to/marketplace
 
   # Audit and generate missing standard files
-  uv run scripts/standardize_marketplace.py /path/to/marketplace --fix
+  uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" standardize_marketplace /path/to/marketplace --fix
 
   # Preview what --fix would generate without writing
-  uv run scripts/standardize_marketplace.py /path/to/marketplace --fix --dry-run
-""",
+  uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" standardize_marketplace /path/to/marketplace --fix --dry-run
+
+""" + launcher_epilog("standardize_marketplace"),
     )
 
     parser.add_argument(

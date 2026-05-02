@@ -10,22 +10,23 @@ user-invocable: true
 
 Validates a complete Claude Code plugin directory with all components.
 
+## ONE-LINER (use this — do not invent your own bash)
+
+```bash
+CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
+  python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" \
+  plugin "$PLUGIN_PATH" --report "$REPORT_FILE"
+```
+
+This is the **only** correct way to invoke plugin validation. Do NOT call `validate_plugin.py` directly from `~/.claude/plugins/cache/...` — the launcher's environment-isolation guard will refuse with a "remote location" error. The `${CLAUDE_PLUGIN_ROOT}` variable is set automatically by Claude Code at command-invocation time and points at the **locally-installed CPV plugin** under the cache (e.g. `~/.claude/plugins/cache/<marketplace>/claude-plugins-validation/<latest-version>/`).
+
+Do NOT search for the script with `find`, do NOT browse `~/.claude/plugins/cache/`, do NOT pick a version yourself. `${CLAUDE_PLUGIN_ROOT}` already points at the right version.
+
 ## Privacy Check (REQUIRED)
 
-Before running validation, you MUST check for private path detection:
-
-1. **Auto-detect username**:
-   ```bash
-   uv run python -c "import getpass; print(getpass.getuser())"
-   ```
-
-2. **If auto-detection fails**, use `AskUserQuestion` to ask the user:
-   > "To detect accidental private path leaks, what is your system username?"
-
-3. **Pass username to validation script** via environment variable:
-   ```bash
-   CLAUDE_PRIVATE_USERNAMES="username" uv run python scripts/validate_plugin.py ...
-   ```
+The one-liner above already injects `CLAUDE_PRIVATE_USERNAMES="$(whoami)"`. If `$(whoami)` is unreliable in your shell, use `AskUserQuestion` to ask the user:
+> "To detect accidental private path leaks, what is your system username?"
+and substitute the result into the env var.
 
 ## Usage
 
@@ -72,7 +73,7 @@ If no exact match is found, fuzzy matching is used (e.g., `cpt-validate` → `cp
 
 > **Default output is path-only.** Without `--json` or `--report`, `validate_security.py` auto-saves the aggregated report to `$CLAUDE_PROJECT_DIR/reports/security/<TS>-<plugin>.md` and prints **only** the compact summary (counts table + verdict + plugin path + report path). Findings are bucketed by `(level, rule_id)` so each vulnerability TYPE shows its full explanation exactly once with a count and capped file:line list — token-bounded reports, no findings ever silently dropped.
 >
-> **External scanners always run.** Six external scanners run on every invocation: cc-audit, tirith, trufflehog, gitleaks, semgrep, and the Cisco AI Defense skill-scanner (programmatic-only, no API-key engines). There are no `--no-*` opt-out flags. Each scanner self-skips with an INFO advisory if its source binary cannot be resolved. Env knobs: `CPV_NO_TIRITH_INSTALL=1` disables tirith's auto-install fallback; `CPV_CISCO_SCAN_TIMEOUT_S=<seconds>` overrides the 600s Cisco-scan default. See the project README for the full scanner inventory with source-URL links.
+> **External scanners always run.** Five external scanners run on every invocation (v2.48 — gitleaks dropped because trufflehog covers the same detector set with parallel-safe concurrency): cc-audit, tirith, trufflehog, semgrep, and the Cisco AI Defense skill-scanner (programmatic-only, no API-key engines). There are no `--no-*` opt-out flags. Each scanner self-skips with an INFO advisory if its source binary cannot be resolved. Env knobs: `CPV_NO_TIRITH_INSTALL=1` disables tirith's auto-install fallback; `CPV_CISCO_SCAN_TIMEOUT_S=<seconds>` overrides the 600s Cisco-scan default; `CPV_NO_FCLONES_INSTALL=1` disables the silent fclones autoinstall used by `--marketplace`. Run `cpv-doctor --install-scanners` to pre-install every scanner with one command. See the project README for the full scanner inventory with source-URL links.
 
 ## What Gets Validated
 
@@ -187,15 +188,31 @@ mkdir -p "$REPORT_DIR"
 REPORT_FILE="$REPORT_DIR/$(date +%Y%m%d_%H%M%S%z)-$(basename "$PLUGIN_PATH").md"
 ```
 
-When running from the CPV plugin directory (has pyproject.toml with pyyaml):
+### Canonical invocation (always via the remote-validation launcher)
+
+CPV scripts ship inside the plugin cache (`~/.claude/plugins/cache/<marketplace>/claude-plugins-validation/<version>/scripts/`). When invoked directly, `validate_plugin.py` refuses to run with the error "validate_plugin.py is being run from a remote location without the environment isolation launcher." That guard exists to prevent the **target plugin's** local config files (pyproject.toml, .mypy.ini, stale copies of `cpv_validation_common.py`) from interfering with the validator. The fix is to **always** launch through `remote_validation.py`, which sets up an isolated environment before importing the actual validator module.
+
+The launcher accepts short aliases (`plugin`, `skill`, `marketplace`, `security`, …) and forwards every other arg to the underlying script. Use `${CLAUDE_PLUGIN_ROOT}` (set by Claude Code at skill invocation) to resolve the launcher path:
+
 ```bash
-uv run python scripts/validate_plugin.py "$PLUGIN_PATH" $OPTIONS --report "$REPORT_FILE"
+CLAUDE_PRIVATE_USERNAMES="$USERNAME" uv run --with pyyaml \
+  python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" \
+  plugin "$PLUGIN_PATH" $OPTIONS --report "$REPORT_FILE"
 ```
 
-When running from another plugin's directory (no pyproject.toml), use `--with` to provide pyyaml:
-```bash
-uv run --with pyyaml python scripts/validate_plugin.py . $OPTIONS --report "$REPORT_FILE"
-```
+Aliases for related validators (same launcher pattern, different first arg):
+
+| Alias | Underlying script | Purpose |
+|---|---|---|
+| `plugin` | validate_plugin.py | full plugin validation (this command) |
+| `skill` | validate_skill_comprehensive.py | single-skill validation |
+| `security` | validate_security.py | security scan only (also auto-runs as part of `plugin`) |
+| `marketplace` | validate_marketplace.py | marketplace.json structural check |
+| `agent` | validate_agent.py | agent-only validation |
+| `command` | validate_command.py | command-only validation |
+| `hook` | validate_hook.py | hook-config validation |
+
+If you somehow have CPV's source tree at hand (development checkout, NOT the cache), you may invoke `scripts/validate_plugin.py` directly — the launcher guard only fires when run from a remote location with no `CLAUDE_PLUGIN_ROOT` env var.
 
 ## Related Commands
 

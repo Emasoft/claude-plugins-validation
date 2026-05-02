@@ -268,7 +268,7 @@ gh secret set MARKETPLACE_PAT --repo OWNER/PLUGIN-REPO --body "ghp_YOUR_TOKEN"
 **Cause:** The fine-grained personal access token has passed its expiration date.
 
 **Fix:**
-1. Generate a new token at `https://github.com/settings/tokens?type=beta`
+1. Generate a new fine-grained token (full guide: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens). Direct URL requires login: `https://github.com/settings/tokens?type=beta`
 2. Update the secret in every plugin repository that uses it:
    ```bash
    gh secret set MARKETPLACE_PAT --repo OWNER/PLUGIN-REPO --body "ghp_NEW_TOKEN"

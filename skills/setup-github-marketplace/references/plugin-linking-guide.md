@@ -88,7 +88,7 @@ jq '.plugins += [{
 
 ```bash
 # Run marketplace validation to catch any configuration errors
-uv run python scripts/validate_marketplace.py /path/to/marketplace-repo --verbose
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" marketplace /path/to/marketplace-repo --verbose
 ```
 
 ### Step 6: Regenerate the README
@@ -134,7 +134,7 @@ In the plugin repository, remove `.github/workflows/notify-marketplace.yml` and 
 ### Step 4: Validate and Commit
 
 ```bash
-uv run python scripts/validate_marketplace.py /path/to/marketplace-repo --verbose
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" marketplace /path/to/marketplace-repo --verbose
 git add .claude-plugin/marketplace.json README.md
 git commit -m "chore: remove PLUGIN-NAME from marketplace"
 git push
@@ -206,8 +206,8 @@ The `MARKETPLACE_PAT` (Personal Access Token) allows the plugin repository's not
 
 ### Creating the Token
 
-1. Go to **GitHub Settings > Developer settings > Personal access tokens > Fine-grained tokens**
-   URL: `https://github.com/settings/tokens?type=beta`
+1. Go to **GitHub Settings > Developer settings > Personal access tokens > Fine-grained tokens** (full public guide: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
+   Direct URL requires login: `https://github.com/settings/tokens?type=beta`
 2. Click **Generate new token**
 3. Configure:
    - **Token name**: `marketplace-notify` (or any descriptive name)
@@ -454,8 +454,8 @@ The version field should match the version you set in Step 1.
 6. **Validate both marketplaces:**
 
    ```bash
-   uv run python scripts/validate_marketplace.py /tmp/source-marketplace --verbose
-   uv run python scripts/validate_marketplace.py /tmp/target-marketplace --verbose
+   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" marketplace /tmp/source-marketplace --verbose
+   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" marketplace /tmp/target-marketplace --verbose
    ```
 
 7. **Test notification chain** -- push a test commit to a migrated plugin and verify the TARGET marketplace updates:
@@ -559,7 +559,7 @@ for PLUGIN in "${PLUGINS[@]}"; do
 done
 
 # Validate the marketplace after all plugins are added
-uv run python scripts/validate_marketplace.py /path/to/marketplace-repo --verbose
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" marketplace /path/to/marketplace-repo --verbose
 
 # Regenerate README
 uv run python scripts/generate-readme.py

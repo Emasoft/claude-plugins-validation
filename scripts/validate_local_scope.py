@@ -1359,12 +1359,14 @@ def main() -> int:
     """Command-line entry point for ``cpv-validate-local-scope``."""
     check_remote_execution_guard()
 
+    from cpv_validation_common import launcher_epilog
     parser = argparse.ArgumentParser(
         description=(
             "Validate non-git-tracked (local-scope) Claude Code configuration "
             "under <project_path>."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=launcher_epilog("local-scope"),
     )
     parser.add_argument("path", help="Path to the project root directory to validate")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show INFO and PASSED results")

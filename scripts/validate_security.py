@@ -236,11 +236,11 @@ def format_scan_step_table(steps: list[dict[str, Any]] | None = None) -> str:
 def _is_always_skip_basename(file_ref: str) -> bool:
     """Return True iff `file_ref`'s basename is in ALWAYS_SKIP_BASENAMES.
 
-    Helper for external-scanner parsers (cc-audit, trufflehog, gitleaks,
-    semgrep, tirith, Cisco) to filter out runtime-artifact files at the
-    finding level — same skip the in-process scanners apply at the
-    file-walk level. Without this, an external scanner re-runs after a
-    Cisco scan would surface findings against the leftover
+    Helper for external-scanner parsers (cc-audit, trufflehog, semgrep,
+    tirith, Cisco — v2.48 dropped gitleaks) to filter out runtime-artifact
+    files at the finding level — same skip the in-process scanners apply
+    at the file-walk level. Without this, an external scanner re-runs
+    after a Cisco scan would surface findings against the leftover
     `.cpv-cisco-scan.json` dump.
 
     Empty / falsy refs return False.
@@ -1307,7 +1307,7 @@ _DEV_SCRATCH_DIR_PARTS = (
     # v2.45 FP3 — Claude Code chat history exports (raw transcripts,
     # gitignored, never executed) and anthropic_dev/ (vendored Anthropic
     # docs / env-var references downloaded for development reference,
-    # never executed). External scanners (cc-audit, gitleaks) flag the
+    # never executed). External scanners (cc-audit, trufflehog) flag the
     # literal `chmod` / `ANTHROPIC_API_KEY` text inside these dumps as
     # active-attack content, but they're inert documentation.
     "/.claude/chat_history/",
@@ -5664,14 +5664,26 @@ def scan_ide_config_files(plugin_path: Path, report: ValidationReport) -> dict[s
 def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
     """Run cc-audit external scanner if available (optional, non-blocking).
 
-    Uses npx @cc-audit/cc-audit to scan for AI-specific threats with 100+ rules.
+    v2.48 — prefer the persistent ``cc-audit`` binary on PATH (installed via
+    ``npm install -g @cc-audit/cc-audit`` by ``cpv-doctor --install-scanners``)
+    so we skip the ~5-15s ``npx --yes`` resolve cost on every scan. Fall back
+    to ``npx --yes @cc-audit/cc-audit`` when no persistent binary is present.
+
     Output is saved to a temp JSON file to avoid context bloat, then parsed.
-    Returns the number of issues found. Returns 0 if cc-audit is not installed.
+    Returns the number of issues found. Returns 0 if neither path is available.
     """
-    # Check if npx is available
-    if not shutil.which("npx"):
+    # Resolve the launch prefix: persistent binary (faster) > npx (slower).
+    persistent = shutil.which("cc-audit")
+    npx_path = shutil.which("npx")
+    if persistent:
+        launcher: list[str] = ["cc-audit"]
+    elif npx_path:
+        launcher = ["npx", "--yes", "@cc-audit/cc-audit"]
+    else:
         report.warning(
-            "cc-audit: npx not found — 100+ additional security rules skipped. Install Node.js to enable: https://nodejs.org/"
+            "cc-audit: not found — 100+ additional security rules skipped. "
+            "Run `cpv-doctor --install-scanners` (preferred) or "
+            "`npm install -g @cc-audit/cc-audit`."
         )
         return 0
 
@@ -5685,7 +5697,7 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
     created_config = False
     if not config_file.exists():
         subprocess.run(
-            ["npx", "--yes", "@cc-audit/cc-audit", "init", str(plugin_path)],
+            launcher + ["init", str(plugin_path)],
             capture_output=True,
             text=True,
             timeout=30,
@@ -5694,10 +5706,7 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
 
     try:
         result = subprocess.run(
-            [
-                "npx",
-                "--yes",
-                "@cc-audit/cc-audit",
+            launcher + [
                 "check",
                 str(plugin_path),
                 "-t",
@@ -7445,9 +7454,19 @@ def check_trufflehog(plugin_path: Path, report: ValidationReport) -> int:
         return 0
 
     issues = 0
+    # v2.48 — explicit --concurrency leverages trufflehog's internal goroutine
+    # pool. Default is 8; we request `os.cpu_count() or 4` so dedicated 12+
+    # core machines see the full benefit. This is the parallelism win that
+    # gitleaks (removed in v2.48) could not provide — gitleaks crashed under
+    # parallel scans, while trufflehog uses goroutines safely by design.
+    truffle_concurrency = max(1, (os.cpu_count() or 4))
     try:
         result = subprocess.run(
-            ["trufflehog", "filesystem", str(plugin_path), "--json", "--no-update", "--fail"],
+            [
+                "trufflehog", "filesystem", str(plugin_path),
+                "--json", "--no-update", "--fail",
+                f"--concurrency={truffle_concurrency}",
+            ],
             capture_output=True,
             text=True,
             timeout=180,
@@ -7533,167 +7552,6 @@ def check_trufflehog(plugin_path: Path, report: ValidationReport) -> int:
     if issues == 0 and result.returncode == 0:
         report.passed("trufflehog: no findings (700+ verified-secret detectors clean)")
     return issues
-
-
-def check_gitleaks(plugin_path: Path, report: ValidationReport) -> int:
-    """Run gitleaks for secret detection if installed (RC-102 part 2).
-
-    gitleaks ships ~150 secret detectors with regex+entropy heuristics.
-    Complements trufflehog (verified vs. heuristic) and CPV's own catalog.
-    """
-    if not shutil.which("gitleaks"):
-        report.warning(
-            "gitleaks: binary not found — ~150 secret detectors skipped. "
-            "Install via 'brew install gitleaks' or 'docker run --rm -v $(pwd):/src zricethezav/gitleaks'."
-        )
-        return 0
-
-    # gitleaks prefers --report-path for JSON output to a file
-    with tempfile.NamedTemporaryFile(suffix=".json", prefix="gitleaks-", delete=False, mode="w") as tmp:
-        tmp_path = tmp.name
-
-    issues = 0
-    try:
-        # `detect` subcommand scans the directory. Use `--no-git` to
-        # scan ONLY the working tree (not history). Without it,
-        # gitleaks walks the full commit history and reports findings
-        # on files that were renamed / deleted in current HEAD —
-        # ghosts that the plugin author cannot fix without
-        # rewriting history (which CPV must NEVER recommend). v2.46
-        # FP-K — eliminates 6 stale `eaa-api-research/...` findings
-        # in architect-agent that were from a `eaa-`→`amaa-` rename
-        # 100+ commits ago.
-        subprocess.run(
-            ["gitleaks", "detect", "--source", str(plugin_path),
-             "--no-git",  # working-tree only, no history
-             "--report-format", "json", "--report-path", tmp_path,
-             "--no-banner", "--exit-code", "0"],
-            capture_output=True,
-            text=True,
-            timeout=180,
-        )
-        try:
-            data = json.loads(Path(tmp_path).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            data = []
-        if not isinstance(data, list):
-            data = []
-        for finding in data:
-            if not isinstance(finding, dict):
-                continue
-            rule_id = finding.get("RuleID") or finding.get("rule_id") or "?"
-            description = finding.get("Description") or finding.get("description") or rule_id
-            rel = finding.get("File") or finding.get("file") or "?"
-            line_no = finding.get("StartLine") or finding.get("startLine") or 0
-            # Skip CPV's own validator regex sources + tests/fixtures
-            # under the same hash-gated self-scan rule applied elsewhere.
-            # gitleaks operates on the raw file tree so its findings on
-            # CPV-internal pattern fixtures (test_phase*.py with sample
-            # tokens, fix-validation references with example secrets)
-            # are FPs by construction; the hash gate stops a malicious
-            # plugin from spoofing the path to evade detection.
-            if _is_always_skip_basename(rel):
-                continue
-            if cpv_self_scan_skip(rel):
-                continue
-            # v2.43 — drop findings inside vendored / cached / build dirs.
-            if _is_vendored_dep_path(rel):
-                continue
-            # v2.44 — drop findings inside gitignored dev-scratch dirs.
-            if _is_dev_scratch_path(rel):
-                continue
-            # v2.46 — drop findings inside test files. Test files
-            # legitimately use placeholder tokens for fixtures
-            # (`const FAKE_TOKEN = "ghs_..."`). The internal scan
-            # already skips these; the gitleaks output post-filter
-            # should match.
-            rel_lower = (rel or "").lower().replace("\\", "/")
-            if (
-                "/tests/" in rel_lower
-                or rel_lower.startswith("tests/")
-                or re.search(r"\.(?:test|spec)\.[mc]?[jt]sx?$", rel_lower)
-                or re.search(r"\.(?:test|spec)\.py$", rel_lower)
-                or "/test_" in rel_lower
-                or "_test.py" in rel_lower
-            ):
-                continue
-            # v2.46 FP-K — gitleaks fires on placeholder tokens in
-            # documentation snippets like
-            # `curl -H "Authorization: Bearer YOUR_API_KEY"`. The
-            # `YOUR_API_KEY` / `YOUR_TOKEN` placeholders are obvious
-            # examples — not real credentials. Read the actual file
-            # line at the reported location and skip if it contains
-            # a known placeholder pattern. The check is conservative
-            # (only fires on the exact `YOUR_*` / `<your-*>` /
-            # `<token>` shapes that doc tutorials use); real
-            # accidentally-leaked tokens DO get flagged.
-            if line_no and _gitleaks_line_is_placeholder_secret(plugin_path, rel, line_no):
-                continue
-            level = effective_severity("major", rel)
-            getattr(report, level)(f"gitleaks {rule_id}: {description[:80]}", rel, line_no)
-            issues += 1
-    except subprocess.TimeoutExpired:
-        report.warning("gitleaks: timed out after 180s")
-    except FileNotFoundError:
-        report.warning("gitleaks: binary disappeared between probe and exec")
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
-
-    if issues == 0:
-        report.passed("gitleaks: no findings (150+ secret detectors clean)")
-    return issues
-
-
-# v2.46 FP-K — placeholder-secret patterns that documentation
-# snippets use to teach how to call an authenticated API. These
-# are NOT real credentials (they contain literal `YOUR_*` /
-# `<token>` / `your-api-key` markers).
-_GITLEAKS_PLACEHOLDER_TOKENS_RE = re.compile(
-    r"(?:"
-    # YOUR_* uppercase env-var-style names
-    r"\bYOUR_(?:API_KEY|TOKEN|SECRET|PASSWORD|ACCESS_KEY|CLIENT_SECRET|WEBHOOK_URL|JWT|BEARER)\b"
-    # `<X>` bracket placeholders — `<api-key>`, `<your-token>`, `<JWT>`, etc.
-    r"|<(?:your[-_]?)?(?:api[-_]?)?(?:key|token|secret|password|bearer|jwt)>"
-    # bare `your-X` / `your_X` lowercase forms
-    r"|\byour[-_](?:api[-_]?)?(?:key|token|secret|password|bearer)\b"
-    # `sk-test`, `sk-demo`, `sk-example`, `sk-placeholder` (OpenAI-style)
-    r"|\bsk-(?:test|proj-test|demo|example|placeholder)\b"
-    # `XXX_HERE` literals
-    r"|\b(?:TOKEN|API_KEY|SECRET|PASSWORD)_?HERE\b"
-    # `REPLACE_ME` / `REDACTED` / `xxxxxxxx+`
-    r"|\bREPLACE_ME\b|\bREDACTED\b|\bxxxxxxxx+\b"
-    r")",
-    re.IGNORECASE,
-)
-
-
-def _gitleaks_line_is_placeholder_secret(plugin_path: Path, rel: str, line_no: int) -> bool:
-    """v2.46 FP-K — True if the line at `rel:line_no` (or ±1 line for
-    multi-line `curl ... \\` constructs) contains an obvious
-    placeholder marker like `YOUR_API_KEY` or `<token>`. Used to
-    suppress gitleaks/trufflehog FPs in API documentation snippets
-    that teach how to authenticate.
-
-    The ±1 window catches the canonical curl-auth-header shape:
-        line N:   curl -X GET "https://api.example.com/x" \\
-        line N+1:   -H "Authorization: Bearer YOUR_API_KEY"
-    where gitleaks reports the curl line (N) but the placeholder
-    sits on the continuation line (N+1)."""
-    try:
-        path = (plugin_path / rel) if not Path(rel).is_absolute() else Path(rel)
-        if not path.is_file():
-            return False
-        with open(path, "r", encoding="utf-8", errors="ignore") as f:
-            lines = f.readlines()
-        # Check the reported line and the immediate ±1 neighbors
-        for offset in (0, 1, -1, 2):
-            target_idx = line_no - 1 + offset
-            if 0 <= target_idx < len(lines):
-                if _GITLEAKS_PLACEHOLDER_TOKENS_RE.search(lines[target_idx]):
-                    return True
-    except (OSError, ValueError):
-        pass
-    return False
 
 
 def check_semgrep(plugin_path: Path, report: ValidationReport) -> int:
@@ -7803,7 +7661,6 @@ def validate_security(
     plugin_path: Path,
     enable_tirith: bool = True,
     enable_trufflehog: bool = True,
-    enable_gitleaks: bool = True,
     enable_semgrep: bool = True,
     with_classifier: bool = False,
 ) -> ValidationReport:
@@ -7814,7 +7671,7 @@ def validate_security(
     AI-specific: prompt injection, data exfiltration, supply chain, credential harvest,
     sandbox escape, hook abuse, MCP abuse, agent impersonation, permission escalation
     Phase 1-4 net-new: ~75 RC-NN rules (unicode, MCP, persistence, exfil, evasion, etc.)
-    External: cc-audit (npx), tirith (PATH/docker/nix), trufflehog, gitleaks, semgrep
+    External: cc-audit (npx), tirith (PATH/docker/nix), trufflehog, semgrep, Cisco
 
     Args:
         plugin_path: Path to the plugin directory
@@ -7826,7 +7683,6 @@ def validate_security(
         enable_trufflehog: Internal-only test isolation knob; same
             contract as `enable_tirith` (no CLI opt-out, scanner runs
             unconditionally and self-skips on absent binary).
-        enable_gitleaks: Internal-only test isolation knob (same).
         enable_semgrep: Internal-only test isolation knob (same).
         with_classifier: When True, route every finding for rules with a
             registered classifier (RC-21/22/65/87/93 in v2.42) through the
@@ -7845,6 +7701,32 @@ def validate_security(
     # the self-scan flag uses, so the overhead per finding stays in the
     # check rather than crossing every function boundary.
     _set_classifier_active(with_classifier, plugin_path)
+
+    # v2.48 — silent autoinstall of fclones (the dedup helper used by Phase
+    # 4's marketplace bulk scanner). Idempotent: if fclones is already on
+    # PATH this is essentially a no-op shutil.which() probe. The first-run
+    # autoinstall happens here so users never have to think about it
+    # (`brew install fclones` on macOS, `snap install fclones` on Linux,
+    # GitHub-release download on Windows). Set CPV_NO_FCLONES_INSTALL=1 in
+    # the environment to skip the autoinstall — CPV degrades gracefully
+    # without dedup. The actual fclones invocation happens inside
+    # `cpv_dedup.run_fclones()` which is called by the marketplace
+    # orchestrator (Phase 4) and the per-plugin staging pipeline.
+    #
+    # NOTE: pytest sets PYTEST_CURRENT_TEST as an env var while a test runs.
+    # Skip the autoinstall under pytest to avoid interactions with tests
+    # that monkeypatch ``shutil.which`` / ``subprocess.run`` globally.
+    # The test suite still exercises ensure_fclones() directly via
+    # test_cpv_install_scanners.py.
+    if not os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get(
+        "CPV_NO_FCLONES_INSTALL"
+    ):
+        try:
+            from cpv_install_scanners import ensure_fclones  # noqa: PLC0415
+            ensure_fclones()
+        except (ImportError, OSError, RuntimeError):
+            # Defensive: never let the install module raise into the scan path.
+            pass
 
     # Verify plugin path exists
     if not plugin_path.exists():
@@ -8101,12 +7983,15 @@ def validate_security(
         _record_step(23, "External: tirith (terminal-security)", "SKIPPED",
                      details="enable_tirith=False (test isolation knob)")
 
-    # Checks 24-26 — Phase 5 specialist tools (RC-102). Each invocation
+    # Checks 24-25 — Phase 5 specialist tools (RC-102). Each invocation
     # self-skips when the binary is missing AND no install path succeeds.
+    # v2.48 — gitleaks removed: trufflehog (~700 detectors, --concurrency
+    # parallelism) supersedes it. gitleaks did not support reliable parallel
+    # scans and crashed under load; trufflehog covers a strict superset of
+    # the detectors gitleaks shipped, with verified-credential validation.
     for step_num, name, scanner_fn, enabled, binary_hint in (
         (24, "External: trufflehog (~700 secret rules)", check_trufflehog, enable_trufflehog, "trufflehog"),
-        (25, "External: gitleaks (~150 secret rules)",   check_gitleaks,   enable_gitleaks,   "gitleaks"),
-        (26, "External: semgrep (p/security-audit)",     check_semgrep,    enable_semgrep,    "semgrep"),
+        (25, "External: semgrep (p/security-audit)",     check_semgrep,    enable_semgrep,    "semgrep"),
     ):
         if not enabled:
             _record_step(step_num, name, "SKIPPED",
@@ -8163,10 +8048,17 @@ def validate_security(
                 pass
         return False
 
-    if not shutil.which("uvx"):
-        # uvx unavailable — record SKIPPED and do not even spawn the run.
-        _record_step(27, "External: Cisco AI Defense (skill-scanner)", "SKIPPED",
-                     details="`uvx` not on PATH — install with `pip install uv`")
+    # v2.48 — prefer the persistent ``skill-scanner`` binary (created by
+    # ``uv tool install cisco-ai-skill-scanner``) over the ephemeral uvx
+    # resolution. cpv_skill_scanner.build_scan_command() picks the right
+    # launcher; here we only need ANY launcher (persistent OR uvx) to be
+    # available before we can run the scan.
+    if not (shutil.which("skill-scanner") or shutil.which("uvx")):
+        # Neither launcher available — record SKIPPED and do not even spawn the run.
+        _record_step(26, "External: Cisco AI Defense (skill-scanner)", "SKIPPED",
+                     details="neither `skill-scanner` nor `uvx` on PATH — "
+                             "run `cpv-doctor --install-scanners` or "
+                             "`pip install uv && uv tool install cisco-ai-skill-scanner`")
     else:
         report_len_before = len(report.results)
         cisco_result = run_cisco_scan(plugin_path)
@@ -8197,7 +8089,7 @@ def validate_security(
         else:
             status = "RAN"
             details = ""
-        _record_step(27, "External: Cisco AI Defense (skill-scanner)", status,
+        _record_step(26, "External: Cisco AI Defense (skill-scanner)", status,
                      findings=cisco_findings,
                      files="uvx --from cisco-ai-skill-scanner" if status == "RAN" else "",
                      details=details)
@@ -8415,19 +8307,196 @@ def _plugin_label_from_dir(plugin_dir: Path) -> str:
     return plugin_dir.name
 
 
-def _run_marketplace_scan(args: argparse.Namespace) -> int:
-    """Iterate every plugin in the resolved marketplace and run validate_security.
+def _bucket_canonical_findings_into_plugins(
+    plugin_reports: dict[str, ValidationReport],
+    dedup_map: dict[Path, list[Path]],
+    plugin_paths: dict[str, Path],
+    original_paths: dict[str, Path],
+) -> int:
+    """v2.48 Phase 4 — propagate canonical-file findings to all dup members.
 
-    Writes a TIMESTAMPED master report file containing the master summary
-    table + every per-plugin step table + per-plugin findings count, and
-    prints the same content to stdout. Returns the worst exit code across
-    all plugins (so CI can gate on the union of findings).
+    When the corpus dedup deletes plugin2/skills/SKILL.md (because it was
+    a duplicate of plugin1's), plugin2's per-plugin scan won't see that
+    file. This helper closes the coverage gap: for every finding emitted on
+    a canonical file that belonged to a dedup group, copy the finding into
+    the report of every plugin that originally contained a member.
 
-    The report path follows the canonical CPV convention:
-      ``$MAIN_ROOT/reports/security/marketplace_<TS>-<label>.md``
-    where ``$MAIN_ROOT`` is the main checkout root (first entry of
-    ``git worktree list``) so the report survives worktree merges/removals.
+    The copy gets its `file` field rewritten to the original (cache) path
+    of the duplicate so the user sees a path inside their own plugin, not
+    a path inside the staging area.
+
+    Args:
+        plugin_reports: ``{safe-plugin-name: ValidationReport}`` — the
+            per-plugin reports already populated by ``validate_security``.
+        dedup_map: From ``cpv_dedup.run_fclones`` — ``{canonical_path:
+            [all_member_paths]}``. Member paths point under the staging
+            tree (NOT into the cache).
+        plugin_paths: From ``stage_marketplace`` — ``{safe-name:
+            staged-plugin-root}``. Used to determine which plugin a member
+            path falls under.
+        original_paths: From ``stage_marketplace`` — ``{safe-name:
+            original-plugin-root}``. Used to rewrite member paths into
+            user-visible paths inside the source tree.
+
+    Returns:
+        Total number of propagated findings (added across all plugin
+        reports). Zero when ``dedup_map`` is empty or none of the
+        findings landed on a canonical file.
     """
+    if not dedup_map:
+        return 0
+
+    # Reverse lookup: which plugin owns each member path?
+    # Build {member_str: (safe_name, original_root)} for fast prefix match.
+    plugin_by_stage_root: list[tuple[str, str, Path]] = sorted(
+        [
+            (str(stage_root), safe_name, original_paths.get(safe_name, stage_root))
+            for safe_name, stage_root in plugin_paths.items()
+        ],
+        key=lambda x: -len(x[0]),  # longest prefix wins
+    )
+
+    def _owner_of(member_path: Path) -> tuple[str, Path] | None:
+        member_str = str(member_path)
+        for stage_root_str, safe_name, original_root in plugin_by_stage_root:
+            if member_str == stage_root_str or member_str.startswith(stage_root_str + os.sep):
+                return safe_name, original_root
+        return None
+
+    # Reverse-index: {canonical_path: list[(safe_name, member_path_in_stage,
+    # original_root)]} — exclude the canonical itself from propagation.
+    canonical_member_owners: dict[Path, list[tuple[str, Path, Path]]] = {}
+    for canonical, members in dedup_map.items():
+        owners: list[tuple[str, Path, Path]] = []
+        for member in members:
+            if member == canonical:
+                continue
+            owner_info = _owner_of(member)
+            if owner_info is None:
+                continue
+            safe_name, original_root = owner_info
+            owners.append((safe_name, member, original_root))
+        if owners:
+            canonical_member_owners[canonical] = owners
+
+    if not canonical_member_owners:
+        return 0
+
+    propagated_count = 0
+    for safe_name, report in plugin_reports.items():
+        # Walk this plugin's findings; for any whose file matches a
+        # canonical we tracked, propagate to peer plugins.
+        for r in list(report.results):  # snapshot — we may mutate other reports
+            if not r.file:
+                continue
+            try:
+                finding_path = Path(r.file)
+            except (ValueError, TypeError):
+                continue
+            owners = canonical_member_owners.get(finding_path) or []
+            if not owners:
+                continue
+            # The finding lives inside `safe_name` (the canonical owner).
+            # Propagate to each peer owner.
+            stage_root_for_canonical = plugin_paths.get(safe_name)
+            if stage_root_for_canonical is None:
+                continue
+            try:
+                rel_inside_canonical = finding_path.relative_to(stage_root_for_canonical)
+            except ValueError:
+                continue
+            for peer_name, _peer_member_path, peer_original_root in owners:
+                if peer_name == safe_name:
+                    continue
+                peer_report = plugin_reports.get(peer_name)
+                if peer_report is None:
+                    continue
+                # Rewrite path: peer_original_root + same relative path.
+                peer_path_str = str(peer_original_root / rel_inside_canonical)
+                peer_report.results.append(
+                    type(r)(
+                        level=r.level,
+                        message=r.message,
+                        file=peer_path_str,
+                        line=r.line,
+                        phase=r.phase,
+                        fixable=r.fixable,
+                        fix_id=r.fix_id,
+                        category=r.category,
+                        suggestion=(
+                            (r.suggestion or "")
+                            + (" [propagated from cross-plugin duplicate]")
+                        ).strip(),
+                    )
+                )
+                propagated_count += 1
+    return propagated_count
+
+
+def _rewrite_finding_paths_to_original(
+    report: ValidationReport,
+    staged_root: Path,
+    original_root: Path,
+) -> None:
+    """Rewrite each finding's `file` from the staged path to the original.
+
+    External scanners (trufflehog, semgrep, Cisco) emit absolute paths under
+    the staging tree. Internal scanners typically emit relative paths
+    (relative to the plugin root) which work for either tree because the
+    relative structure is identical. This helper handles both cases:
+      * Absolute paths under ``staged_root`` → rewrite to ``original_root``
+      * Relative paths or paths outside staging → leave unchanged
+    """
+    staged_str = str(staged_root)
+    original_str = str(original_root)
+    for r in report.results:
+        if not r.file:
+            continue
+        if r.file.startswith(staged_str + os.sep):
+            r.file = original_str + r.file[len(staged_str):]
+        elif r.file == staged_str:
+            r.file = original_str
+
+
+def _run_marketplace_scan(args: argparse.Namespace) -> int:
+    """v2.48 Phase 4 — stage all plugins, dedup once, scan each, bucket back.
+
+    The previous (sequential) implementation ran ``validate_security`` on
+    each plugin in turn, paying the per-target startup cost N times for
+    every external scanner (cc-audit, trufflehog, semgrep, Cisco). On a
+    real marketplace (e.g. ai-maestro-plugins, 30+ plugins, ~1.8K duplicate
+    files, ~21 MB cross-plugin redundancy), this dominated wall-clock.
+
+    The new pipeline:
+      1. Stage every plugin under one shared tmpdir via hardlinks (zero-copy
+         on same-fs; copy-fallback on EXDEV; symlink-fallback for very large
+         cross-fs trees with dedup-by-deletion disabled).
+      2. Run fclones ONCE on the corpus root → dedup_map of duplicates.
+      3. Delete non-canonical hardlinks from staging (safe — the cache
+         hardlink count stays >= 1).
+      4. Scan each plugin's (now-deduped) staging subdir individually.
+         Per-plugin context (plugin.json, agents/) is preserved so cc-audit
+         and tirith continue to work.
+      5. Rewrite finding paths from staged → original so the report shows
+         user-visible paths inside the cache.
+      6. Bucket canonical findings: for any finding on a canonical file
+         that had peer copies in other plugins, replicate the finding into
+         every peer's report (with paths rewritten to point inside the
+         peer's cache copy). No coverage hole from dedup.
+      7. Emit per-plugin step tables + dedup-summary section + master
+         summary table. Master report path unchanged:
+         ``$MAIN_ROOT/reports/security/marketplace_<TS>-<label>.md``.
+
+    Returns the worst exit code across all plugins (so CI gates work as
+    before).
+    """
+    # Local imports keep the cold path (no marketplace) cheap.
+    from cpv_dedup import apply_dedup, run_fclones  # noqa: PLC0415
+    from cpv_staging import (  # noqa: PLC0415
+        cleanup_staging,
+        stage_marketplace,
+    )
+
     try:
         label, plugin_dirs, skipped = _resolve_marketplace_plugins(args.marketplace)
     except (ValueError, RuntimeError, json.JSONDecodeError) as exc:
@@ -8461,61 +8530,189 @@ def _run_marketplace_scan(args: argparse.Namespace) -> int:
             emit(f"  - {line}")
     emit("")
 
-    worst_exit = 0
-    summary_rows: list[tuple[str, int, int, int, int, int, int]] = []
+    if not plugin_dirs:
+        emit("No plugins to scan after resolution. Exiting cleanly.")
+        report_path.write_text("\n".join(body_lines) + "\n", encoding="utf-8")
+        return 0
 
-    for plugin_dir in plugin_dirs:
-        plugin_label = _plugin_label_from_dir(plugin_dir)
-        emit(f"## {plugin_label}")
-        emit(f"Path: `{plugin_dir}`")
-        emit("")
-        report = validate_security(
-            plugin_dir,
-            enable_tirith=True,
-            enable_trufflehog=True,
-            enable_gitleaks=True,
-            enable_semgrep=True,
-            with_classifier=args.with_classifier,
-        )
-        step_table = format_scan_step_table(get_scan_step_log())
-        if step_table:
-            emit(step_table)
+    # ── Phase 1: stage everything under one tmpdir ───────────────────
+    # The label-resolver maps a plugin path to a stable, collision-resistant
+    # safe name we can use as the staging subdir. Reusing the existing
+    # `_plugin_label_from_dir` keeps the user-facing names consistent.
+    safe_name_for: dict[Path, str] = {}
+
+    def _name_resolver(p: Path) -> str:
+        label = _plugin_label_from_dir(p)
+        safe_name_for[p] = label
+        return label
+
+    mp_result = stage_marketplace(plugin_dirs, name_resolver=_name_resolver)
+
+    try:
+        # Build user-friendly mapping: original cache path → safe-name.
+        # We need both lookups (orig→name, name→orig) downstream.
+        # mp_result already provides plugin_paths and original_paths.
+
+        if mp_result.skipped_reasons:
+            emit("Staging-skipped:")
+            for line in mp_result.skipped_reasons:
+                emit(f"  - {line}")
             emit("")
-        counts = {
-            "CRITICAL": sum(1 for r in report.results if r.level == "CRITICAL"),
-            "MAJOR":    sum(1 for r in report.results if r.level == "MAJOR"),
-            "MINOR":    sum(1 for r in report.results if r.level == "MINOR"),
-            "NIT":      sum(1 for r in report.results if r.level == "NIT"),
-            "WARNING":  sum(1 for r in report.results if r.level == "WARNING"),
-        }
-        ec = report.exit_code_strict() if args.strict else report.exit_code
-        worst_exit = max(worst_exit, ec)
-        summary_rows.append((
-            plugin_label, counts["CRITICAL"], counts["MAJOR"],
-            counts["MINOR"], counts["NIT"], counts["WARNING"], ec,
-        ))
-        emit(
-            f"**Plugin {plugin_label}**: "
-            f"CRITICAL={counts['CRITICAL']} MAJOR={counts['MAJOR']} "
-            f"MINOR={counts['MINOR']} NIT={counts['NIT']} "
-            f"WARNING={counts['WARNING']} exit={ec}"
-        )
+
+        # ── Phase 2: dedup the corpus ──────────────────────────────
+        dedup_files_removed = 0
+        dedup_bytes_saved = 0
+        dedup_groups = 0
+        dedup_elapsed = 0.0
+        dedup_skipped_reason = ""
+        dedup_result = run_fclones(mp_result.stage_root)
+        if dedup_result.attempted and dedup_result.succeeded:
+            dedup_groups = len(dedup_result.dedup_map)
+            dedup_elapsed = dedup_result.fclones_elapsed_seconds
+            if mp_result.supports_deletion:
+                dedup_files_removed, dedup_bytes_saved = apply_dedup(
+                    dedup_result.dedup_map
+                )
+            else:
+                dedup_skipped_reason = (
+                    f"dedup-by-deletion skipped (mode={mp_result.mode}); "
+                    "cross-fs symlink staging is read-only safe"
+                )
+        else:
+            dedup_skipped_reason = (
+                dedup_result.skipped_reason
+                or "fclones unavailable; scan proceeds without dedup"
+            )
+
+        emit("## Dedup summary (corpus-wide via fclones)")
+        emit("")
+        emit(f"- Total files staged: {mp_result.files_staged:,}")
+        emit(f"- Total bytes staged: {mp_result.bytes_staged:,}")
+        emit(f"- Duplicate groups found: {dedup_groups:,}")
+        emit(f"- Duplicate files removed from staging: {dedup_files_removed:,}")
+        emit(f"- Bytes saved (scanner I/O reduction): {dedup_bytes_saved:,}")
+        emit(f"- fclones elapsed: {dedup_elapsed:.2f}s")
+        emit(f"- Staging mode: {mp_result.mode}")
+        if dedup_skipped_reason:
+            emit(f"- NOTE: {dedup_skipped_reason}")
         emit("")
 
-    emit(f"## Marketplace summary — {label}")
-    emit("")
-    emit("| Plugin                                            | CRITICAL | MAJOR | MINOR | NIT | WARNING | Exit |")
-    emit("|---------------------------------------------------|---------:|------:|------:|----:|--------:|-----:|")
-    for name, c, M, m, n, w, ec in summary_rows:
-        emit(f"| {name:<49} | {c:>8} | {M:>5} | {m:>5} | "
-             f"{n:>3} | {w:>7} | {ec:>4} |")
-    emit("")
-    emit(f"**Worst exit code:** {worst_exit} (worst-of-all-plugins)")
-    emit("")
-    emit(f"Report saved: `{report_path}`")
+        # ── Phase 3: per-plugin scan on the deduped staging ────────
+        worst_exit = 0
+        summary_rows: list[tuple[str, int, int, int, int, int, int]] = []
+        plugin_reports: dict[str, ValidationReport] = {}
+        plugin_step_tables: dict[str, str] = {}
 
-    report_path.write_text("\n".join(body_lines) + "\n", encoding="utf-8")
-    return worst_exit
+        for safe_name, staged_path in mp_result.plugin_paths.items():
+            original_path = mp_result.original_paths[safe_name]
+            emit(f"## {safe_name}")
+            emit(f"Path: `{original_path}`")
+            emit(f"Staged: `{staged_path}`")
+            emit("")
+            report = validate_security(
+                staged_path,
+                enable_tirith=True,
+                enable_trufflehog=True,
+                enable_semgrep=True,
+                with_classifier=args.with_classifier,
+            )
+            # Snapshot the per-plugin step table BEFORE the next plugin's
+            # `validate_security` call resets the module-global step log.
+            plugin_step_tables[safe_name] = format_scan_step_table(get_scan_step_log())
+            # Rewrite paths from staged → original so reports show
+            # user-visible paths inside the cache.
+            _rewrite_finding_paths_to_original(report, staged_path, original_path)
+            plugin_reports[safe_name] = report
+
+        # ── Phase 4: bucket canonical findings into peer plugins ──
+        propagated = _bucket_canonical_findings_into_plugins(
+            plugin_reports,
+            dedup_result.dedup_map if dedup_result.succeeded else {},
+            mp_result.plugin_paths,
+            mp_result.original_paths,
+        )
+        if propagated:
+            emit(f"_Bucketing: {propagated} finding(s) propagated from "
+                 f"canonical files to peer plugins that originally contained "
+                 f"a copy of the same content._")
+            emit("")
+
+        # ── Phase 5: emit per-plugin sections + summary ───────────
+        for safe_name, report in plugin_reports.items():
+            step_table = plugin_step_tables.get(safe_name, "")
+            if step_table:
+                emit(f"### {safe_name} — scan steps")
+                emit(step_table)
+                emit("")
+            counts = {
+                "CRITICAL": sum(1 for r in report.results if r.level == "CRITICAL"),
+                "MAJOR":    sum(1 for r in report.results if r.level == "MAJOR"),
+                "MINOR":    sum(1 for r in report.results if r.level == "MINOR"),
+                "NIT":      sum(1 for r in report.results if r.level == "NIT"),
+                "WARNING":  sum(1 for r in report.results if r.level == "WARNING"),
+            }
+            ec = report.exit_code_strict() if args.strict else report.exit_code
+            worst_exit = max(worst_exit, ec)
+            summary_rows.append((
+                safe_name, counts["CRITICAL"], counts["MAJOR"],
+                counts["MINOR"], counts["NIT"], counts["WARNING"], ec,
+            ))
+            emit(
+                f"**Plugin {safe_name}**: "
+                f"CRITICAL={counts['CRITICAL']} MAJOR={counts['MAJOR']} "
+                f"MINOR={counts['MINOR']} NIT={counts['NIT']} "
+                f"WARNING={counts['WARNING']} exit={ec}"
+            )
+            emit("")
+
+        emit(f"## Marketplace summary — {label}")
+        emit("")
+        emit("| Plugin                                            | CRITICAL | MAJOR | MINOR | NIT | WARNING | Exit |")
+        emit("|---------------------------------------------------|---------:|------:|------:|----:|--------:|-----:|")
+        for name, c, M, m, n, w, ec in summary_rows:
+            emit(f"| {name:<49} | {c:>8} | {M:>5} | {m:>5} | "
+                 f"{n:>3} | {w:>7} | {ec:>4} |")
+        emit("")
+        emit(f"**Worst exit code:** {worst_exit} (worst-of-all-plugins)")
+        emit("")
+        emit(f"Report saved: `{report_path}`")
+
+        report_path.write_text("\n".join(body_lines) + "\n", encoding="utf-8")
+        return worst_exit
+    finally:
+        cleanup_staging(mp_result.stage_root)
+
+
+def _extract_raw_positional_arg(argv: list[str]) -> str | None:
+    """Find the first non-option argument in argv (the positional plugin_path).
+
+    Skips ``argv[0]`` (the script name) and any leading options. Stops at
+    the first arg that doesn't start with ``-`` and isn't the value of a
+    preceding option. Returns None if no positional was supplied.
+
+    Used by main() to recover the RAW spelling of the plugin_path argument
+    (URLs like ``https://github.com/owner/repo`` get path-normalized by
+    argparse's ``type=Path`` to ``https:/github.com/owner/repo`` — losing
+    the double slash that URL detectors require).
+    """
+    # Options that take a value (CPV's flags). Their values must be skipped.
+    value_taking_options = {
+        "--marketplace", "--sarif-out", "--sbom-out",
+    }
+    skip_next = False
+    for arg in argv[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in value_taking_options:
+            skip_next = True
+            continue
+        if arg.startswith("--") and "=" in arg:
+            continue  # `--foo=bar` form, no separate value to skip
+        if arg.startswith("-"):
+            continue  # boolean flag
+        return arg
+    return None
 
 
 def main() -> int:
@@ -8533,6 +8730,7 @@ def main() -> int:
     # Done before argparse so even `--help` is gated by integrity.
     from cpv_integrity import verify_self_integrity  # noqa: PLC0415
     verify_self_integrity(quiet=True)
+    from cpv_validation_common import launcher_epilog as _launcher_epilog  # noqa: PLC0415
 
     parser = argparse.ArgumentParser(
         description="Security validation for Claude Code plugins",
@@ -8552,10 +8750,10 @@ Security Checks Performed:
       unless every resolution path fails;
       CPV_NO_TIRITH_INSTALL=1 to disable the install fallback)
   18. trufflehog (always runs — skipped only if the binary cannot be
-      located on PATH or auto-installed from its release URL)
-  19. gitleaks   (always runs — same skip rule as trufflehog)
-  20. semgrep    (always runs — same skip rule as trufflehog)
-  21. Cisco AI Defense skill-scanner via uvx remote (always runs unless
+      located on PATH or auto-installed from its release URL;
+      uses --concurrency=cpu_count for parallel scans)
+  19. semgrep    (always runs — same skip rule as trufflehog)
+  20. Cisco AI Defense skill-scanner via uvx remote (always runs unless
       uvx is missing or the package is unreachable at its PyPI source)
 
 Exit Codes:
@@ -8563,11 +8761,20 @@ Exit Codes:
   1 - CRITICAL issues found (must fix)
   2 - MAJOR issues found (should fix)
   3 - MINOR issues found (recommended to fix)
-        """,
+        """ + "\n" + _launcher_epilog("security"),
     )
+    # v2.48 — accepts a directory path (default) OR a GitHub URL OR a
+    # local archive (.zip / .tar.gz / etc.). URL/archive detection runs
+    # against the raw sys.argv spelling before argparse path-normalization
+    # so `https://github.com/owner/repo` keeps its double slash. See
+    # main() for the auto-ingest step.
     parser.add_argument("plugin_path", type=Path, nargs="?", default=None,
-                        help="Path to the plugin directory to validate. Mutually "
-                             "exclusive with --marketplace.")
+                        help="Path to the plugin directory, GitHub URL "
+                             "(`https://github.com/owner/repo` or `github:owner/repo`), "
+                             "or local archive (`*.zip`, `*.tar.gz`, `*.tgz`, `*.tar.bz2`, "
+                             "`*.tar.xz`, `*.tar`). URLs are cloned to a tmpdir, archives "
+                             "are extracted to a tmpdir, and both are scanned then cleaned "
+                             "up automatically. Mutually exclusive with --marketplace.")
     parser.add_argument(
         "--marketplace",
         type=str,
@@ -8594,10 +8801,12 @@ Exit Codes:
     )
     parser.add_argument(
         "--bare-folder",
+        "--loose",  # v2.48 alias for skill packs / flat *.md collections
         action="store_true",
         help=(
             "Bypass the .claude-plugin/ precondition. Use to scan a bare skill or "
-            "content folder that is not wrapped in a Claude Code plugin tree."
+            "content folder that is not wrapped in a Claude Code plugin tree. "
+            "Aliased as --loose for symmetry with `cpv-validate-loose` workflows."
         ),
     )
     # External scanners are no longer opt-out — they ALWAYS run. Each
@@ -8639,32 +8848,95 @@ Exit Codes:
     if args.plugin_path is None:
         parser.error("plugin_path is required unless --marketplace is given")
 
-    # Resolve to absolute path so relative_to() works correctly
-    plugin_path = args.plugin_path.resolve()
-
-    # Verify this is a plugin directory
-    if not plugin_path.is_dir():
-        print(f"Error: {plugin_path} is not a directory", file=sys.stderr)
-        return 1
-    if not args.bare_folder and not (plugin_path / ".claude-plugin").is_dir():
-        print(
-            f"Error: No Claude Code plugin found at {plugin_path}\n"
-            "Expected a .claude-plugin/ directory. Use --bare-folder to scan a "
-            "skill folder or any other directory tree without that precondition.",
-            file=sys.stderr,
-        )
-        return 1
-
-    # Run validation. External scanners always run; each one self-skips
-    # if its source binary/package cannot be resolved (no opt-out flags).
-    report = validate_security(
-        plugin_path,
-        enable_tirith=True,
-        enable_trufflehog=True,
-        enable_gitleaks=True,
-        enable_semgrep=True,
-        with_classifier=args.with_classifier,
+    # v2.48 — auto-detect URL or archive in the positional argument and
+    # ingest to a tmpdir before scanning. The tmpdir is cleaned up in the
+    # ``finally`` block at the end of main(). Local paths flow unchanged.
+    # We grab the RAW spec from sys.argv (not from the path-normalized
+    # args.plugin_path) so `https://github.com/owner/repo` keeps its
+    # double slash for URL detection.
+    raw_spec = _extract_raw_positional_arg(sys.argv) or str(args.plugin_path)
+    from cpv_staging import (  # noqa: PLC0415
+        cleanup_staging,
+        ingest_archive,
+        ingest_github_url,
+        looks_like_archive,
+        looks_like_github_url,
     )
+    ingest_result = None  # set when we ingested from URL/archive
+    try:
+        if looks_like_github_url(raw_spec):
+            try:
+                ingest_result = ingest_github_url(raw_spec)
+            except (ValueError, RuntimeError) as exc:
+                print(f"Error ingesting GitHub URL {raw_spec!r}: {exc}",
+                      file=sys.stderr)
+                return 1
+            plugin_path = ingest_result.target.resolve()
+        elif looks_like_archive(raw_spec):
+            try:
+                ingest_result = ingest_archive(raw_spec)
+            except (FileNotFoundError, ValueError, RuntimeError) as exc:
+                print(f"Error ingesting archive {raw_spec!r}: {exc}",
+                      file=sys.stderr)
+                return 1
+            plugin_path = ingest_result.target.resolve()
+        else:
+            # Plain local path — use the argparse-normalized Path.
+            plugin_path = args.plugin_path.resolve()
+
+        # Verify this is a plugin directory
+        if not plugin_path.is_dir():
+            print(f"Error: {plugin_path} is not a directory", file=sys.stderr)
+            return 1
+        if not args.bare_folder and not (plugin_path / ".claude-plugin").is_dir():
+            # v2.48 — auto-detect a likely flat skill pack and suggest --loose.
+            # Heuristic: 5+ *.md files at any depth AND no plugin.json AND no
+            # canonical skills/<name>/SKILL.md tree → looks like a skill pack.
+            md_count = 0
+            try:
+                for md in plugin_path.rglob("*.md"):
+                    if md.is_file():
+                        md_count += 1
+                        if md_count >= 5:
+                            break
+            except OSError:
+                pass
+            has_canonical_skill = any(
+                (plugin_path / "skills").is_dir()
+                and any(p.is_dir() and (p / "SKILL.md").is_file()
+                        for p in (plugin_path / "skills").iterdir())
+                for _ in [None]
+            ) if (plugin_path / "skills").is_dir() else False
+            looks_like_skill_pack = md_count >= 5 and not has_canonical_skill
+            hint = ""
+            if looks_like_skill_pack:
+                hint = (
+                    "\nHINT: This directory contains "
+                    f"{md_count}+ *.md files but no plugin.json and no canonical "
+                    "skills/<name>/SKILL.md layout — it looks like a flat skill "
+                    "pack. Re-run with --loose to scan it."
+                )
+            print(
+                f"Error: No Claude Code plugin found at {plugin_path}\n"
+                "Expected a .claude-plugin/ directory. Use --bare-folder (or its "
+                "v2.48 alias --loose) to scan a skill folder or any other directory "
+                f"tree without that precondition.{hint}",
+                file=sys.stderr,
+            )
+            return 1
+
+        # Run validation. External scanners always run; each one self-skips
+        # if its source binary/package cannot be resolved (no opt-out flags).
+        report = validate_security(
+            plugin_path,
+            enable_tirith=True,
+            enable_trufflehog=True,
+            enable_semgrep=True,
+            with_classifier=args.with_classifier,
+        )
+    finally:
+        if ingest_result is not None:
+            cleanup_staging(ingest_result.tmpdir)
 
     # Optional SARIF emit (RC-105) — always run when requested, regardless of
     # whether the user also asked for stdout JSON or a markdown report.

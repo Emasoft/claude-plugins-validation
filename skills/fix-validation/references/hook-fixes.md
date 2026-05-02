@@ -748,7 +748,7 @@ Prior editions of this document INCORRECTLY claimed hooks used milliseconds — 
 2. Check the file extension and path are correct
 3. If using `${CLAUDE_PLUGIN_ROOT}`, pass `--plugin-root` when validating:
    ```bash
-   uv run python scripts/validate_hook.py hooks.json --plugin-root /path/to/plugin
+   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" hook hooks.json --plugin-root /path/to/plugin
    ```
 4. Ensure the script has been committed and is part of the plugin/project
 
@@ -1155,7 +1155,7 @@ The validator warns when a value looks accidentally milliseconds-scaled (> 10000
 1. Verify the script file exists: `ls -la path/to/script.sh`
 2. If using environment variables, pass `--plugin-root` during validation:
    ```bash
-   uv run python scripts/validate_hook.py hooks.json --plugin-root ./my-plugin
+   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" hook hooks.json --plugin-root ./my-plugin
    ```
 3. Ensure the script is included in your plugin or project
 4. Check for typos in the filename and extension

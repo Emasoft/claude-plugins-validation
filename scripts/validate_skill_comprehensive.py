@@ -2677,7 +2677,12 @@ def print_json(report: ValidationReport) -> None:
 
 def main() -> int:
     """Main entry point."""
-    parser = argparse.ArgumentParser(description="Comprehensive skill validator with 190+ validation rules")
+    from cpv_validation_common import launcher_epilog
+    parser = argparse.ArgumentParser(
+        description="Comprehensive skill validator with 190+ validation rules",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=launcher_epilog("skill"),
+    )
     parser.add_argument("skill_path", help="Path to the skill directory")
     parser.add_argument(
         "--verbose",

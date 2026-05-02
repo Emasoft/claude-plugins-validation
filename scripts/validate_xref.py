@@ -707,23 +707,20 @@ def main() -> int:
     Returns:
         Exit code (0=OK, 1=CRITICAL, 2=MAJOR, 3=MINOR)
     """
+    from cpv_validation_common import launcher_epilog
     parser = argparse.ArgumentParser(
         description="Validate cross-references between Claude Code plugin components",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Checks: agent Task() refs, command-agent refs, version sync, hook script paths.
 
-Examples:
-    uv run python scripts/validate_xref.py /path/to/plugin
-    uv run python scripts/validate_xref.py /path/to/plugin --verbose
-    uv run python scripts/validate_xref.py /path/to/plugin --json
-
 Exit codes:
     0 - All checks passed
     1 - CRITICAL issues found
     2 - MAJOR issues found
     3 - MINOR issues found
-        """,
+
+""" + launcher_epilog("xref"),
     )
     parser.add_argument(
         "plugin_path",

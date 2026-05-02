@@ -43,7 +43,13 @@ Do NOT route the user away to a separate validator step. You own the full loop.
 
 Run this loop until termination. Max 5 iterations by default; each iteration capped at ~5 minutes.
 
-1. **Validate** — run `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" <plugin-root> --strict --report <tmp.md>`. Read the report and the `SUMMARY:` line.
+1. **Validate** — run via the launcher (NEVER call `validate_plugin.py` directly — the launcher's environment-isolation guard will refuse with a "remote location" error):
+   ```bash
+   CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
+     python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" \
+     plugin <plugin-root> --strict --report <tmp.md>
+   ```
+   Read the report and the `SUMMARY:` line.
 2. **Collect findings** — all CRITICAL / MAJOR / MINOR / NIT entries.
 3. **If findings are non-empty** → apply fixes in priority order (CRITICAL → MAJOR → MINOR → NIT) using the `fix-validation` skill's error-to-fix routing. Go to step 1.
 4. **If findings are empty** → evaluate remaining WARNINGs against the publish-blocker rules in `skills/fix-validation/references/iterative-fix-loop.md`. Split into `blocking` and `advisory`.
@@ -74,7 +80,7 @@ You receive **either** a report file path (e.g., `reports/validate_plugin/202604
 Follow the authoritative loop in `skills/fix-validation/references/iterative-fix-loop.md`. The short form:
 
 1. **Resolve the target** — if you got a directory, apply the Path Resolution Protocol. If you got a report file, parse it and identify the plugin root it came from.
-2. **Validate (if needed)** — if you have no fresh report, run `validate_plugin.py --strict --report <tmp.md>` now.
+2. **Validate (if needed)** — if you have no fresh report, run via the launcher: `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" plugin <plugin-root> --strict --report <tmp.md>` (NEVER call `validate_plugin.py` directly — environment-isolation guard refuses).
 3. **Fix batch** — read the findings, route each to the fix-validation skill's error-to-fix mapping, apply Edit operations in priority order (CRITICAL → MAJOR → MINOR → NIT).
 4. **Re-validate** — always. Even after a single fix. Stale reports are the #1 cause of wrong fixes.
 5. **Repeat** — until the findings set is empty.
@@ -117,7 +123,7 @@ Marketplace-level CI/CD (marketplace workflow files, auto-notification receivers
 - **Fix in priority order within a batch**: CRITICAL → MAJOR → MINOR → NIT. Re-validate BEFORE starting the next batch.
 - **Fix ALL non-WARNING issues** — the pre-push hook blocks on CRITICAL, MAJOR, MINOR, AND NIT. Zero tolerance in the final report.
 - **Evaluate every WARNING** — do not skip blindly. Publish-blocker warnings (missing CI, missing `notify-marketplace.yml`, missing `publish.py`, version mismatch across manifests, dependency version not satisfiable, declared `platform:` vs. script extensions mismatch, etc.) MUST be fixed. Truly-advisory warnings remain listed in the final report with a one-line justification each. Classification rules: `iterative-fix-loop.md` §WARNING-evaluation-rules.
-- When running CPV scripts, always use `uv run --with pyyaml python` prefix.
+- **NEVER call validate_*.py scripts directly from the plugin cache.** ALWAYS go through the launcher: `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" <alias> <args>`. Aliases: `plugin`, `skill`, `hook`, `agent`, `command`, `mcp`, `lsp`, `marketplace`, `security`, `cache`, `xref`, `docs`, `encoding`, `rules`, `enterprise`, `scoring`, `lint`, `local-scope`, `project-scope`. The direct invocation will fail with "remote location" environment-isolation error.
 - **ALWAYS write fix log** to `$MAIN_ROOT/reports/plugin-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` containing the iteration-by-iteration history, per-batch diffs, and the final advisory-warning list. Return only a one-line summary to the caller.
 - **Loop safety**: max 5 iterations. Stop + escalate if iteration N produces the same finding set as N-1, or if 5 is reached. Never lower severity, add ignore rules, or patch the validator to converge.
 
@@ -204,5 +210,16 @@ user: Fix issues in reports/validate_plugin/20260421_183012+0200-my-plugin.md
 assistant: Reading the report file...
 Found 3 issues: 1 MAJOR, 2 MINOR.
 [Reads report, consults fix guide, applies fixes]
+[Re-runs validator: clean]
 [DONE] fixed 3 of 3 issues. Report: reports/plugin-fixer/20260421_184530+0200-my-plugin.md
+</example>
+
+<example>
+user: Fix ~/Code/my-plugin/
+assistant: I'll resolve the plugin path, validate, fix, and re-validate in a loop.
+[Path Resolution Protocol confirms ~/Code/my-plugin/ is a valid plugin root]
+[Iteration 1: 5 findings (1 CRITICAL, 2 MAJOR, 2 MINOR) → fixes applied]
+[Iteration 2: 1 MINOR remaining → fixed]
+[Iteration 3: 0 findings, 2 advisory WARNINGs only]
+[DONE] iterations=3, clean. Report: reports/plugin-fixer/20260421_191205+0200-my-plugin.md
 </example>

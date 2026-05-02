@@ -19,14 +19,10 @@ Validates Claude Code plugins against 190+ structural and quality rules covering
 
 ## Instructions
 
-1. Set `CLAUDE_PRIVATE_USERNAMES="your_username"` if needed (usually auto-detected)
-2. Run the validator:
-   ```bash
-   uv run python scripts/validate_plugin.py /path/to/plugin --report "$MAIN_ROOT/reports/validate_plugin/$(date +%Y%m%d_%H%M%S%z)-<slug>.md"
-   ```
-3. Review compact summary (always use `--report` to save details to file)
-4. Fix issues: CRITICAL > MAJOR > MINOR (use `/cpv-fix-validation <report_path>` for plugin reports, `/cpv-fix-marketplace-validation <report_path>` for marketplace reports)
-5. Re-run until exit code 0
+1. Run via the launcher (see [launcher-invocation.md](references/launcher-invocation.md) for the canonical one-liner — NEVER call `validate_plugin.py` directly).
+2. Review compact summary (always use `--report` to save details to file).
+3. Fix issues: CRITICAL > MAJOR > MINOR (use `/cpv-fix-validation <report_path>`).
+4. Re-run until exit code 0.
 
 ## Output
 
@@ -45,10 +41,19 @@ Validates Claude Code plugins against 190+ structural and quality rules covering
 
 ## Examples
 
-```bash
-uv run python scripts/validate_plugin.py /path/to/plugin --verbose --report "$MAIN_ROOT/reports/validate_plugin/$(date +%Y%m%d_%H%M%S%z)-<slug>.md"
-uv run python scripts/validate_skill_comprehensive.py /path/to/skill/ --strict --report "$MAIN_ROOT/reports/validate_skill/$(date +%Y%m%d_%H%M%S%z)-<slug>.md"
-```
+See [launcher-invocation.md](references/launcher-invocation.md) for the one-liner and full alias table (25+ aliases).
+
+Example 1:
+- Input: `... plugin ~/Code/my-plugin/ --report ...`
+- Output: `Plugin Validation: PASS. CRITICAL=0 MAJOR=0 MINOR=2 PASSED=155`
+
+Example 2:
+- Input: `... skill ./skills/my-skill/ --strict --report ...`
+- Output: `Skill Validation: PASS. Score 85/100`
+
+Example 3:
+- Input: `... cache ~/Code/my-plugin/ --report ...`
+- Output: `Cache Audit: VALID (no CA-NN findings)`
 
 ## Resources
 
@@ -83,20 +88,20 @@ uv run python scripts/validate_skill_comprehensive.py /path/to/skill/ --strict -
 - [Troubleshooting](references/troubleshooting-python-scripts.md)
   > Bash Arithmetic Exit Codes · Unused Variable Warnings - Pyright/ruff · Missing Python Dependencies - ModuleNotFoundError · Git Hook Not Running · Plugin JSON Missing Required Fields · Ruff Linting - Unused Variable Error · Marketplace Plugin Source Format · Version Consistency Between Plugins and Marketplace · Git Tag Already Exists Error · subprocess.run Output Truncation · Best Practices Summary · Quick Diagnostic Commands
 
-- [Security Validator Contract](references/security-validator-contract.md) - `validate_security.py` I/O contract, six external scanners, self-scan filter parity, env knobs
+- [Security Validator Contract](references/security-validator-contract.md) - `validate_security.py` I/O contract, five external scanners, pre-scan dedup pipeline, self-scan filter parity, env knobs
   - Path-only stdout by default
   - Aggregated reporting
-  - Six external scanners always run
+  - Five external scanners always run (v2.48: gitleaks dropped — trufflehog supersets it)
+  - Pre-scan dedup pipeline (v2.48 — fclones runs first on every scan)
   - Self-scan filter parity
-  - Env knobs
+  - Env knobs (CPV_NO_FCLONES_INSTALL, CPV_NO_TIRITH_INSTALL, CPV_CISCO_SCAN_TIMEOUT_S)
 
 ## Token Optimization
 
-Always `--report <path>` — share path, don't read. One script per run.
-Prefer LLM Externalizer MCP for report analysis to save context tokens.
+Always `--report <path>`. Use LLM Externalizer for report analysis.
 
 ## Checklist
 Copy this checklist and track your progress:
-- [ ] Run validate_plugin.py --verbose --report
+- [ ] Run launcher with `--verbose --report`
 - [ ] Fix CRITICAL > MAJOR > MINOR
 - [ ] Re-run until exit 0
