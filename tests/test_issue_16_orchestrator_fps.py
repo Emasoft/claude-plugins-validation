@@ -27,7 +27,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import cpv_validation_common as cvc  # noqa: E402
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
