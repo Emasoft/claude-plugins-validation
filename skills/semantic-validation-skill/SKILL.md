@@ -27,6 +27,7 @@ Deep AI analysis. Opus 1M, ~10-50× tokens of script validation.
 ## Instructions
 
 1. Run baseline via launcher (alias `skill`) — see [references/launcher-invocation.md](references/launcher-invocation.md). Direct invocation refused.
+   > The one-liner · Why the launcher is mandatory · Direct invocation (development only)
 2. Read SKILL.md / agent .md
 3. Evaluate 7 pillars + applicable conditional security pillars
 4. Write report → `$MAIN_ROOT/reports/semantic-validator/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`
@@ -50,7 +51,7 @@ Deep AI analysis. Opus 1M, ~10-50× tokens of script validation.
 
 ## Token Optimization
 
-Opt-in only. Baseline first (90% catch rate). Read target files only. Write report to disk; return grade + filepath. Prefer LLM Externalizer MCP for file reads.
+Opt-in only. Baseline first. Write report to disk; return grade + filepath.
 
 ## Conditional Pillar: Channel MCP Server Source-Code Security
 

@@ -41,6 +41,7 @@ CPV supports three layouts: **A** (hub-and-spoke), **B** (nested), **C** (market
 
 3. **After generation**:
    - Validate via launcher (alias `plugin`) — see [references/launcher-invocation.md](references/launcher-invocation.md). Direct invocation refused.
+     > The one-liner · Why the launcher is mandatory · Direct invocation (development only)
    - Fix ALL issues (CRITICAL, MAJOR, MINOR, NIT) — only WARNINGs may remain
    - Init git: `cd <target-dir> && git init && git add -A && git commit -m "Initial scaffold"`
    - Create repo: `gh repo create <owner>/<name> --public --source . --push`
@@ -101,8 +102,8 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/generate_marketplace_repo.py" /tmp/my-mkt 
 
 ## MCP Server Bundling
 
-Place bundled MCP executables in **`servers/`** (docs convention), reference as `${CLAUDE_PLUGIN_ROOT}/servers/<name>`. Server names unique across sources. See `skills/fix-validation/references/empirical-loading-bugs.md` for 5 silent footguns CPV catches.
+Place bundled MCP executables in `servers/`, reference as `${CLAUDE_PLUGIN_ROOT}/servers/<name>`. Unique names per server. See `empirical-loading-bugs.md` for footguns.
 
 ## Token Optimization
 
-Use `mcp__plugin_llm-externalizer_llm-externalizer__*` for bounded analysis. Pass paths via `input_files_paths`.
+Use `mcp__plugin_llm-externalizer_llm-externalizer__*` for bounded work.

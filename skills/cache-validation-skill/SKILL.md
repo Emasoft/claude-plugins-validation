@@ -51,6 +51,7 @@ Same I/O contract as `validate_security.py`:
 ## Instructions
 
 1. Read [references/launcher-invocation.md](references/launcher-invocation.md) for the canonical bash one-liner (alias `cache`).
+   > The one-liner · Why the launcher is mandatory · Direct invocation (development only)
 2. Resolve `MAIN_ROOT` via `git worktree list | head -n1`.
 3. Run the launcher with `--report "$MAIN_ROOT/reports/validate_cache/<TS>-<slug>.md"`.
 4. Read the compact summary from stdout, full details from the report file.

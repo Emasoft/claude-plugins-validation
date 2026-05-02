@@ -20,6 +20,7 @@ Validates Claude Code plugins against 190+ structural and quality rules covering
 ## Instructions
 
 1. Run via the launcher (see [launcher-invocation.md](references/launcher-invocation.md) for the canonical one-liner — NEVER call `validate_plugin.py` directly).
+   > Why the launcher is mandatory · The one-liner (use this verbatim) · Full alias table · Direct invocation (development only)
 2. Review compact summary (always use `--report` to save details to file).
 3. Fix issues: CRITICAL > MAJOR > MINOR (use `/cpv-fix-validation <report_path>`).
 4. Re-run until exit code 0.
@@ -42,6 +43,7 @@ Validates Claude Code plugins against 190+ structural and quality rules covering
 ## Examples
 
 See [launcher-invocation.md](references/launcher-invocation.md) for the one-liner and full alias table (25+ aliases).
+> Why the launcher is mandatory · The one-liner (use this verbatim) · Full alias table · Direct invocation (development only)
 
 Example 1:
 - Input: `... plugin ~/Code/my-plugin/ --report ...`
@@ -91,10 +93,10 @@ Example 3:
 - [Security Validator Contract](references/security-validator-contract.md) - `validate_security.py` I/O contract, five external scanners, pre-scan dedup pipeline, self-scan filter parity, env knobs
   - Path-only stdout by default
   - Aggregated reporting
-  - Five external scanners always run (v2.48: gitleaks dropped — trufflehog supersets it)
-  - Pre-scan dedup pipeline (v2.48 — fclones runs first on every scan)
+  - Five external scanners always run
+  - Pre-scan dedup pipeline (v2.48)
   - Self-scan filter parity
-  - Env knobs (CPV_NO_FCLONES_INSTALL, CPV_NO_TIRITH_INSTALL, CPV_CISCO_SCAN_TIMEOUT_S)
+  - Env knobs
 
 ## Token Optimization
 
