@@ -292,10 +292,10 @@ def verify_self_integrity(
     if mismatches:
         print(
             "\n" + "=" * 70 + "\n"
-            "[CPV integrity] CRITICAL: validator source has been MODIFIED\n"
+            "[CPV integrity] CRITICAL: integrity manifest mismatch\n"
             + "=" * 70 + "\n"
             f"The following {len(mismatches)} CPV-internal file(s) differ from "
-            "the canonical version published on GitHub:\n",
+            "the canonical manifest published on GitHub:\n",
             file=sys.stderr,
         )
         for rel_path, expected_hex, actual in mismatches[:50]:
@@ -311,13 +311,59 @@ def verify_self_integrity(
         if len(mismatches) > 50:
             print(f"  …and {len(mismatches) - 50} more", file=sys.stderr)
 
+        # Issue #18: distinguish three drift scenarios + offer the
+        # known-clean-version recovery path explicitly.
         print(
-            "\nIf you legitimately modified the validator (e.g. for development),\n"
-            "set `CPV_SKIP_GITHUB_INTEGRITY=1` in your environment to bypass\n"
-            "this check. Otherwise the validator may have been tampered with —\n"
-            "DO NOT trust its findings. Reinstall CPV from a clean clone:\n"
-            "    rm -rf ~/.claude/plugins/cache/<marketplace>/claude-plugins-validation/\n"
-            "    claude plugin update claude-plugins-validation@<marketplace>\n"
+            "\nThree scenarios produce this error — distinguish them before acting:\n"
+            "\n"
+            "  1. RELEASE-SHIPPED DRIFT (most common on a fresh install).\n"
+            "     The CPV release pipeline forgot to refresh the manifest before\n"
+            "     tagging this version. Nothing on your end is wrong. Workaround:\n"
+            "     run an OLDER cached version that does match its manifest:\n",
+            file=sys.stderr,
+        )
+        # Auto-discover sibling cached versions and print exact commands.
+        try:
+            cache_root = plugin_root.parent
+            siblings = sorted(
+                (p for p in cache_root.iterdir()
+                 if p.is_dir() and p.name != plugin_root.name),
+                reverse=True,
+            )
+            current_version = _read_local_plugin_version(plugin_root) or "?"
+            if siblings:
+                print(
+                    f"     You have these other cached versions next to v{current_version}:",
+                    file=sys.stderr,
+                )
+                for sib in siblings[:5]:
+                    sib_launcher = sib / "scripts" / "remote_validation.py"
+                    print(
+                        f"       python3 \"{sib_launcher}\" <subcommand> <args>",
+                        file=sys.stderr,
+                    )
+            else:
+                print(
+                    "     (no sibling cached versions found — you only have this one)",
+                    file=sys.stderr,
+                )
+        except OSError:
+            pass
+
+        print(
+            "\n  2. LEGITIMATE LOCAL MODIFICATIONS (CPV development / fork).\n"
+            "     If YOU edited any of the listed files (working on a fork, debug\n"
+            "     instrumentation, etc.), set the bypass env var:\n"
+            "       export CPV_SKIP_GITHUB_INTEGRITY=1\n"
+            "\n"
+            "  3. TAMPERING (rare but possible).\n"
+            "     If you didn't modify anything AND the listed files include the\n"
+            "     security validator (validate_security.py, validate_plugin.py,\n"
+            "     cpv_integrity.py itself), do NOT trust this install. Reinstall:\n"
+            "       rm -rf ~/.claude/plugins/cache/<marketplace>/claude-plugins-validation/\n"
+            "       claude plugin update claude-plugins-validation@<marketplace>\n"
+            "\n"
+            "Tracking: https://github.com/Emasoft/claude-plugins-validation/issues/18\n"
             + "=" * 70 + "\n",
             file=sys.stderr,
         )
