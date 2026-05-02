@@ -14,6 +14,7 @@ All individual validators should import from this module to ensure consistency.
 from __future__ import annotations
 
 import fnmatch
+import functools
 import getpass
 import json
 import os
@@ -987,6 +988,199 @@ def should_skip_directory(dir_name: str) -> bool:
             if fnmatch.fnmatch(dir_name, skip_pattern):
                 return True
     return False
+
+
+# =============================================================================
+# Issue #16 helpers — vendored-path skip + npm-shape detection + cpv config
+# =============================================================================
+
+# Conventional vendored-code root directory names. Paths under any of these
+# subtrees are skipped from path-based, link-based, and content-based rules
+# because they hold third-party code the plugin author shouldn't modify.
+# Matches the same set used by scripts/cpv_codemod.py (issue #17).
+VENDORED_DIR_NAMES: frozenset[str] = frozenset({
+    "external",
+    "vendor",
+    "vendored",
+    "third_party",
+    "third-party",
+    "node_modules",
+    ".venv",
+    "venv",
+    "dist",
+    "build",
+    ".git",
+    "__pycache__",
+})
+
+# npm-package shape regex (issue #16 category C). Strings matching any of
+# these forms are NOT paths and must be excluded from backtick-to-link
+# detection:
+#   * @scope/name           e.g. @google/design.md, @babel/core.md
+#   * @scope/name@version   e.g. @babel/standalone@7.29.0
+#   * name@version          e.g. react@18.3.1, lodash@4.17.21
+#   * id/version            e.g. diagram-ir/1.0, my-schema/2.3
+_NPM_SHAPE_RE = re.compile(
+    r"^("
+    r"@[a-z0-9][\w.-]*/[a-z0-9][\w.-]*(@[\w.-]+)?"
+    r"|[a-z0-9][\w.-]*@[\w.-]+"
+    r"|[a-z0-9][\w.-]*/\d+\.\d+"
+    r")$",
+    re.IGNORECASE,
+)
+
+
+@functools.lru_cache(maxsize=128)
+def _read_gitmodules_paths(plugin_root_str: str) -> frozenset[str]:
+    """Return paths declared in `<plugin_root>/.gitmodules` (cached)."""
+    plugin_root = Path(plugin_root_str)
+    gm = plugin_root / ".gitmodules"
+    if not gm.is_file():
+        return frozenset()
+    paths: set[str] = set()
+    for line in gm.read_text(encoding="utf-8", errors="replace").splitlines():
+        m = re.match(r"^\s*path\s*=\s*(.+?)\s*$", line)
+        if m:
+            paths.add(m.group(1).strip().rstrip("/"))
+    return frozenset(paths)
+
+
+@functools.lru_cache(maxsize=128)
+def _load_cpv_config_cached(plugin_root_str: str) -> dict[str, object]:
+    """Load the optional `cpv` block from `<plugin_root>/.claude-plugin/plugin.json`.
+
+    Returns an empty dict if the manifest is missing or has no `cpv` block.
+    Maintainers can add per-plugin opt-outs:
+
+      {"cpv": {"exclude_paths":         ["external/", "vendor/"],
+               "allow_root_dirs":       ["external", "SKILLS-TO-INTEGRATE"],
+               "allow_orchestrator_traversal": "skills/amw-design-principles",
+               "skill_size_severity":   "warning",
+               "max_chars":             12000,
+               "max_lines":             800}}
+    """
+    manifest = Path(plugin_root_str) / ".claude-plugin" / "plugin.json"
+    if not manifest.is_file():
+        return {}
+    try:
+        raw = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    cpv_block = raw.get("cpv", {})
+    return cpv_block if isinstance(cpv_block, dict) else {}
+
+
+def load_cpv_config(plugin_root: Path) -> dict[str, object]:
+    """Public wrapper around the cached config loader."""
+    return _load_cpv_config_cached(str(plugin_root.resolve()))
+
+
+def is_vendored_path(rel_path: Path | str, plugin_root: Path) -> bool:
+    """True if a path lives under a vendored / submodule subtree.
+
+    Skips the path from path-based, link-based, content-based rules. Honors:
+      1. Hard-coded VENDORED_DIR_NAMES (external/, vendor/, node_modules/, ...)
+      2. Submodule paths declared in .gitmodules
+      3. Per-plugin `cpv.exclude_paths` declared in plugin.json
+    """
+    rel = Path(rel_path) if not isinstance(rel_path, Path) else rel_path
+    parts = rel.parts
+    for part in parts:
+        if part in VENDORED_DIR_NAMES:
+            return True
+    rel_str = str(rel).rstrip("/")
+    submodules = _read_gitmodules_paths(str(plugin_root.resolve()))
+    for sm in submodules:
+        if rel_str == sm or rel_str.startswith(sm + "/"):
+            return True
+    cpv_config = load_cpv_config(plugin_root)
+    raw_exclude = cpv_config.get("exclude_paths", [])
+    if isinstance(raw_exclude, list):
+        for entry in raw_exclude:
+            if isinstance(entry, str):
+                excl = entry.strip().rstrip("/")
+                if excl and (rel_str == excl or rel_str.startswith(excl + "/")):
+                    return True
+    return False
+
+
+def is_npm_package_shape(text: str) -> bool:
+    """True if the string looks like an npm package id, NOT a filesystem path.
+
+    Issue #16 category C: skip strings like `@google/design.md`,
+    `react@18.3.1`, `diagram-ir/1.0` from backtick-to-link conversions.
+    """
+    return bool(_NPM_SHAPE_RE.match(text.strip()))
+
+
+def description_has_trigger_phrases(description: str) -> bool:
+    """True if a skill `description:` contains explicit trigger-phrase markers.
+
+    Issue #16 category E: when a description packs trigger phrases like
+    "use when …", "trigger with …", "include keywords …", the length cap
+    should be raised — these phrases earn the longer description.
+    """
+    if not description:
+        return False
+    text = description.lower()
+    markers = (
+        "use when",
+        "use this when",
+        "trigger with",
+        "trigger when",
+        "use this skill when",
+        "include keywords",
+        "useful when",
+        "invoke when",
+    )
+    return any(marker in text for marker in markers)
+
+
+def is_orchestrator_skill(skill_name: str, skills_root: Path, threshold: int = 3) -> bool:
+    """True if `skill_name` is referenced by ≥`threshold` sibling skills via `../`.
+
+    Issue #16 category A: when an orchestrator skill owns shared rules
+    that ≥3 sibling skills reference via parent-traversal, the
+    `../<orchestrator>/` references should be downgraded from MAJOR to MINOR
+    (or skipped entirely) — they are intentional architectural shared-library
+    references, not portability bugs.
+
+    The detection is lightweight: scan every sibling SKILL.md once, count
+    references to `../<skill_name>/`, return True if the count is ≥threshold.
+    """
+    if not skills_root.is_dir():
+        return False
+    target_marker = f"../{skill_name}/"
+    consumer_count = 0
+    for sibling in skills_root.iterdir():
+        if not sibling.is_dir() or sibling.name == skill_name:
+            continue
+        skill_md = sibling / "SKILL.md"
+        if not skill_md.is_file():
+            continue
+        try:
+            text = skill_md.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if target_marker in text:
+            consumer_count += 1
+            if consumer_count >= threshold:
+                return True
+    return False
+
+
+def has_numbered_prose_steps(section_text: str, min_count: int = 3) -> bool:
+    """True if a section uses numbered-prose enumeration (e.g. "1. Do X. 2. Do Y.").
+
+    Issue #16 category I: numbered-prose lists are valid Instructions
+    formats — the validator's "no checklist pattern" finding should accept
+    either `- [ ] Do X` checkboxes OR `1. Do X` numbered prose.
+    """
+    if not section_text:
+        return False
+    pattern = re.compile(r"^\s*\d+\.\s+\S", re.MULTILINE)
+    matches = pattern.findall(section_text)
+    return len(matches) >= min_count
 
 
 # =============================================================================
@@ -5329,12 +5523,23 @@ def validate_toc_embedding(
     for bt_match in _BACKTICK_REF_RE.finditer(md_content):
         bt_path_str = bt_match.group(1)
 
+        # Issue #16 category C: skip npm-package shapes — `@scope/name`,
+        # `name@version`, `id/version` are NOT filesystem paths.
+        if is_npm_package_shape(bt_path_str):
+            continue
+
         # Determine the line number of this backtick reference
         bt_start = bt_match.start()
         bt_line_num = md_content[:bt_start].count("\n")
 
         # Skip if inside a fenced code block
         if bt_line_num in fenced_lines:
+            continue
+
+        # Issue #16 category F: skip references that target a vendored
+        # subtree (external/, vendor/, node_modules/, third_party/, …,
+        # plus .gitmodules paths and per-plugin cpv.exclude_paths).
+        if is_vendored_path(Path(bt_path_str), base_dir):
             continue
 
         # Resolve the referenced file path (same logic as markdown links)
@@ -5974,7 +6179,23 @@ def validate_md_urls(
         """
         try:
             req = urllib.request.Request(url, method=method)
-            req.add_header("User-Agent", "Mozilla/5.0 (compatible; CPV-LinkChecker/1.0)")
+            # Issue #16 category G: Google Fonts (and a few other CDNs)
+            # gate by User-Agent; an obviously-bot UA gets HTTP 400 even
+            # when the resource exists. A full browser-shaped UA gets 200.
+            # We intentionally identify as a real Chrome to maximise
+            # compatibility while keeping an "AppleWebKit/CPV-link" trail
+            # in server logs for sysadmins who want to filter our traffic.
+            req.add_header(
+                "User-Agent",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/121.0.0.0 Safari/537.36 CPV-LinkChecker/1.0",
+            )
+            req.add_header(
+                "Accept",
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            )
+            req.add_header("Accept-Language", "en-US,en;q=0.5")
             with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
                 return (resp.status, None)
         except urllib.error.HTTPError as e:

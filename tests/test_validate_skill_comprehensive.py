@@ -1538,21 +1538,53 @@ class TestReferenceFilesValidation:
         assert any("Nested references directory" in r.message for r in report.results)
 
     def test_long_reference_file_without_toc_flagged(self, tmp_path):
-        """Reference file without TOC in first 200 chars should be MINOR."""
+        """Reference file without TOC in first 200 chars should be MINOR.
+
+        Issue #16 category D: the rule applies only to files >=500 lines —
+        short technique files don't need a TOC. Updated fixture to 600 lines
+        so the MINOR fires.
+        """
         from validate_skill_comprehensive import validate_reference_files
 
         skill_dir = tmp_path / "my-skill"
         skill_dir.mkdir()
         refs_dir = skill_dir / "references"
         refs_dir.mkdir()
-        long_content = "# Long Reference\n\n" + ("Content line.\n" * 150)
+        long_content = "# Long Reference\n\n" + ("Content line.\n" * 600)
         (refs_dir / "big-reference.md").write_text(long_content)
 
         report = ValidationReport(skill_path=str(skill_dir))
         validate_reference_files(skill_dir, report)
         toc_results = [r for r in report.results if "no table of contents" in r.message]
-        assert toc_results, "Expected a TOC warning"
+        assert toc_results, "Expected a TOC warning for the 600-line file"
         assert toc_results[0].level == "MINOR"
+
+    def test_short_reference_file_without_toc_emits_info_only(self, tmp_path):
+        """Issue #16 category D: short reference files (<500 lines) without TOC
+        emit INFO not MINOR — short technique files don't benefit from a TOC."""
+        from validate_skill_comprehensive import validate_reference_files
+
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        refs_dir = skill_dir / "references"
+        refs_dir.mkdir()
+        # 150 lines — well under the 500-line threshold
+        short_content = "# Short Reference\n\n" + ("Content line.\n" * 150)
+        (refs_dir / "tech-001.md").write_text(short_content)
+
+        report = ValidationReport(skill_path=str(skill_dir))
+        validate_reference_files(skill_dir, report)
+        # NO MINOR for the missing TOC — it's an INFO instead
+        minor_results = [
+            r for r in report.results
+            if r.level == "MINOR" and "no table of contents" in r.message
+        ]
+        assert not minor_results, "Short ref files (<500 lines) must NOT emit MINOR for missing TOC"
+        info_results = [
+            r for r in report.results
+            if "without TOC" in r.message and "OK for short files" in r.message
+        ]
+        assert info_results, "Expected INFO advisory for the short-file TOC exemption"
 
     def test_long_reference_file_with_toc_passes(self, tmp_path):
         """Reference file with TOC in first 200 chars should pass."""
