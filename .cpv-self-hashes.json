@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-02T20:53:35+00:00",
+  "computed_at": "2026-05-02T23:52:11+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     "agents/cache-optimizer-agent.md": "sha256:b0f8e0619569cc2b04587e8b251f9ad2f9a8e8227da071953aa56f78c72c0553",
@@ -43,12 +43,14 @@
     "design/tasks/TRDD-26f7fbfc-8472-47ca-8a00-e4be0b29bb67-v2-1-80-plugin-features-docs.md": "sha256:1ff1c24dfde3a2b5a429c69ad89d2a4f8505122aaaa492796e2158b9136ef6ac",
     "design/tasks/TRDD-2be75e88-3c23-4c91-9e4e-5ce315b497dc-scope-validators.md": "sha256:6aba8e45a304a4b8b33177decdc271a7e1677098d7b5e09903f132f73cabff68",
     "design/tasks/TRDD-479cde0c-c781-4bfb-b62a-fbf40e91523f-v2.22-claude-code-compliance.md": "sha256:8a7d7492195071cda0ad883b521e9c9ab61dd8b4ee19625f10a7363ac5db39c3",
+    "design/tasks/TRDD-793ac32a-6ccf-4628-aa6c-952218e06477-strip-dev-parts.md": "sha256:a5867de3f009a73d3c68ab1c0ca78e450ae33685f7746d40c77373db501c1b02",
     "design/tasks/TRDD-79638eb6-bf72-4627-ab35-984ca5255041-drift-detection-autodetect.md": "sha256:f1dad24de964caba7c9cbf68222a9434f96c2d74ed5e85b359c8ffd4d8421627",
     "design/tasks/TRDD-83ab59e7-899a-4178-9c53-00e3c7b33651-multi-language-generator.md": "sha256:c209bdacdbbf76b47fee7dab89e6e96086d8a65468c157a0a7d85eb6cf3b792d",
     "design/tasks/TRDD-8ccb9337-e6e5-4371-8c4c-5cf64f4d5eb9-ide-config-secret-scan.md": "sha256:4ec999f65da81d4392d6a731ef7d723fd4399350c2a2876ea6731ad57c48bc14",
     "design/tasks/TRDD-9065109a-fd99-48b9-b895-8f91be725d2d-zero-config-publish-pipeline.md": "sha256:a3a92d80ff69668efb705feaa4fae210d294d4fb3951406ecce8b8d5fcd48008",
     "design/tasks/TRDD-b5e44619-1a90-4caa-84da-f5717d7cc27e-universal-publish-and-auth.md": "sha256:3ac86a673c6b7cbee9e4ed16b8cf054923aed3354bc81cb5322926d848189078",
     "design/tasks/TRDD-b934f65c-8978-41e5-a08f-82ce19d073b1-local-marketplace-devlink.md": "sha256:b11f908d7917da6366475108b4819f4c098789334cb9d311c85eaf73a19ac925",
+    "design/tasks/TRDD-bbff5bc5-d52f-4318-85c1-d6d37f629d85-publish-auth-standard.md": "sha256:3973d2b352bde2324421bb5039cb2f0f85d264e697064dff8a2aca1635e82856",
     "design/tasks/TRDD-cf57bf86-641b-4ef5-a450-ec361ec9ece2-hook-output-validation.md": "sha256:578d063f5635f641a099eb4a602982324b4e940b3c1efd691e4c5a285b4c3128",
     "design/tasks/TRDD-e2b17a61-e6f0-4bff-ac9e-feb3a7cd046b-settings-json-marketplace-validator.md": "sha256:6423d1b500559be34f4f556688f30033b8d7957bd2eeb9ce2fddf51c5849f4de",
     "design/tasks/TRDD-e3e74f69-e41c-4b0f-841c-69f066614b6f-validate-telemetry.md": "sha256:9a8c3e174028eff127ac01a2000617584996230d8c6310a05b312465cede97b4",
