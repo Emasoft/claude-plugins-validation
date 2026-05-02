@@ -573,19 +573,30 @@ def stage_bypass_guard() -> int:
 
 
 def stage_check_working_tree(plugin_root: Path) -> int:
-    """Gate 1: clean working tree check. Auto-commits uv.lock if only diff."""
+    """Gate 1: clean working tree check. Auto-commits uv.lock if only diff.
+
+    `git status --porcelain` emits one line per change with the format
+    ``XY filename`` (2-char status + 1 space + filename). The filename
+    starts at column 3, so the canonical slice is ``line[3:]``.
+
+    DO NOT pre-strip per line — for unstaged-only changes git emits
+    " M uv.lock" with a leading space (column 0 is empty, column 1 is
+    the worktree status). Calling ``.strip()`` would shift the slice
+    by one and produce "v.lock" instead of "uv.lock", silently breaking
+    the auto-commit branch.
+    """
     print(f"\n{BLUE}═══ Gate 1: Check working tree ═══{NC}")
     result = run(["git", "status", "--porcelain"], cwd=plugin_root, check=False)
-    dirty = result.stdout.strip()
-    if dirty:
-        dirty_files = {line[3:] for line in dirty.splitlines() if line.strip()}
+    dirty_lines = [line for line in result.stdout.splitlines() if line]
+    if dirty_lines:
+        dirty_files = {line[3:] for line in dirty_lines if len(line) >= 4}
         if dirty_files == {"uv.lock"}:
             print(f"{YELLOW}Auto-committing uv.lock (modified by uv run){NC}")
             run(["git", "add", "uv.lock"], cwd=plugin_root)
             run(["git", "commit", "-m", "chore: update uv.lock"], cwd=plugin_root)
         else:
             print(f"{RED}✗ Uncommitted changes detected. Commit or stash first.{NC}", file=sys.stderr)
-            print(dirty)
+            print("\n".join(dirty_lines))
             return 1
     print(f"{GREEN}✓ Working tree clean{NC}")
     return 0

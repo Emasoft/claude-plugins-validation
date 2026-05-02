@@ -611,3 +611,110 @@ class TestCpvDetectBumpType:
         monkeypatch.setattr(publish.subprocess, "run",
                             lambda *a, **k: self._fake_run(stdout="v1.2.3"))
         assert publish.detect_bump_type(tmp_path) == "patch"
+
+
+# ── stage_check_working_tree tests (regression for porcelain leading-space bug) ──
+
+
+class TestStageCheckWorkingTree:
+    """Gate 1 must parse `git status --porcelain` correctly.
+
+    Regression: an earlier version called `.strip()` on the whole stdout
+    BEFORE slicing each line at index 3. For unstaged-only changes git
+    emits ' M filename' (leading space because column 0 is empty), and
+    the outer strip removed that space, shifting the slice to start one
+    character into the filename — so 'uv.lock' became 'v.lock' and the
+    auto-commit branch never fired. Tests below pin both code paths.
+    """
+
+    def test_clean_tree_passes(self, monkeypatch, tmp_path, capsys):
+        """No dirty lines → exit 0, no auto-commit."""
+        monkeypatch.setattr(publish, "run", lambda *a, **k: _completed(stdout=""))
+        rc = publish.stage_check_working_tree(tmp_path)
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Working tree clean" in out
+
+    def test_unstaged_uv_lock_only_triggers_auto_commit(self, monkeypatch, tmp_path, capsys):
+        """' M uv.lock' (leading space, unstaged) must auto-commit, not block."""
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, cwd, *, check=True, **kwargs):
+            calls.append(list(cmd))
+            if cmd[:3] == ["git", "status", "--porcelain"]:
+                # NOTE the leading space — this is what git emits for
+                # unstaged-only changes. The bug fixed in v2.49.0 was
+                # that .strip() removed this space, making line[3:]
+                # produce 'v.lock' instead of 'uv.lock'.
+                return _completed(stdout=" M uv.lock\n")
+            return _completed(returncode=0)
+
+        monkeypatch.setattr(publish, "run", fake_run)
+        rc = publish.stage_check_working_tree(tmp_path)
+        assert rc == 0
+        # auto-commit branch must have run `git add uv.lock` + `git commit`
+        assert ["git", "add", "uv.lock"] in calls
+        assert any(c[:2] == ["git", "commit"] for c in calls)
+        out = capsys.readouterr().out
+        assert "Auto-committing uv.lock" in out
+
+    def test_staged_uv_lock_only_triggers_auto_commit(self, monkeypatch, tmp_path, capsys):
+        """'M  uv.lock' (M then space, staged) must also auto-commit."""
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, cwd, *, check=True, **kwargs):
+            calls.append(list(cmd))
+            if cmd[:3] == ["git", "status", "--porcelain"]:
+                return _completed(stdout="M  uv.lock\n")
+            return _completed(returncode=0)
+
+        monkeypatch.setattr(publish, "run", fake_run)
+        rc = publish.stage_check_working_tree(tmp_path)
+        assert rc == 0
+        assert ["git", "add", "uv.lock"] in calls
+
+    def test_other_dirty_file_blocks(self, monkeypatch, tmp_path, capsys):
+        """Any file other than uv.lock dirty → exit 1, no auto-commit."""
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, cwd, *, check=True, **kwargs):
+            calls.append(list(cmd))
+            if cmd[:3] == ["git", "status", "--porcelain"]:
+                return _completed(stdout=" M scripts/publish.py\n")
+            return _completed(returncode=0)
+
+        monkeypatch.setattr(publish, "run", fake_run)
+        rc = publish.stage_check_working_tree(tmp_path)
+        assert rc == 1
+        # MUST NOT have auto-committed
+        assert ["git", "add", "uv.lock"] not in calls
+        err = capsys.readouterr().err
+        assert "Uncommitted changes" in err
+
+    def test_uv_lock_plus_other_blocks(self, monkeypatch, tmp_path, capsys):
+        """uv.lock alone auto-commits, but uv.lock + any other file must block."""
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, cwd, *, check=True, **kwargs):
+            calls.append(list(cmd))
+            if cmd[:3] == ["git", "status", "--porcelain"]:
+                return _completed(stdout=" M uv.lock\n M README.md\n")
+            return _completed(returncode=0)
+
+        monkeypatch.setattr(publish, "run", fake_run)
+        rc = publish.stage_check_working_tree(tmp_path)
+        assert rc == 1
+        assert ["git", "add", "uv.lock"] not in calls
+
+    def test_short_porcelain_line_is_skipped_safely(self, monkeypatch, tmp_path):
+        """Defensive: malformed short line (<4 chars) must not crash on slice."""
+
+        def fake_run(cmd, cwd, *, check=True, **kwargs):
+            if cmd[:3] == ["git", "status", "--porcelain"]:
+                return _completed(stdout="??\n M uv.lock\n")
+            return _completed(returncode=0)
+
+        monkeypatch.setattr(publish, "run", fake_run)
+        # The "??" line is filtered (len < 4), only " M uv.lock" counts → auto-commit.
+        rc = publish.stage_check_working_tree(tmp_path)
+        assert rc == 0
