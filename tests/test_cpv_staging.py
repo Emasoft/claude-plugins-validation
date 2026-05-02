@@ -12,7 +12,6 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -20,7 +19,6 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import cpv_staging as staging  # noqa: E402
-
 
 # ── stage_target happy path (hardlinks) ──────────────────────────
 
@@ -130,8 +128,6 @@ class TestStageTargetCrossFsFallback:
         (target / "a").write_text("x" * 50)
 
         # Make hardlink_tree raise EXDEV on the first call.
-        original_hardlink_tree = staging.hardlink_tree
-
         call_count = {"n": 0}
 
         def fake_hardlink_tree(src: Path, dst: Path):
