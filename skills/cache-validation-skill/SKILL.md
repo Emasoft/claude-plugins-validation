@@ -18,15 +18,8 @@ rule pack catches the six documented patterns that silently break caching
 or fork the cached prompt into many distinct keys.
 
 Per-rule severity, catch description, and fix-recipe pointer live in
-[references/ca-rules.md](references/ca-rules.md):
-
-- CA-01 — dynamic placeholders in cached content
-- CA-02 — SessionStart / UserPromptSubmit / PreCompact write CLAUDE.md or settings
-- CA-03 — hook scripts flip permissions / enabledMcpServers between turns
-- CA-04 — `model:` frontmatter forces in-line model switch
-- CA-05 — hook scripts run unbounded-output commands
-- CA-06 — PreCompact / PostCompact / SubagentStart hooks don't preserve prefix
-- Why these specific six
+[references/ca-rules.md](references/ca-rules.md). Full TOC of every
+rule is embedded under "Resources" at the bottom of this file.
 
 ## Prerequisites
 
@@ -36,17 +29,9 @@ Per-rule severity, catch description, and fix-recipe pointer live in
 
 ## Scanner contract
 
-Same I/O contract as `validate_security.py`:
-
-- **Default output is path-only.** Without `--json` / `--report` the
-  script auto-saves the report and prints only the compact summary
-  (counts + verdict + paths) to stdout.
-- **Aggregated reporting.** Findings group by `(level, rule_id)` so each
-  rule's full explanation appears once with a count + capped file:line
-  list.
-- **Self-scan filter chain.** Skips catalog / test / dev-scratch files
-  (`cpv_self_scan_skip`, `_is_vendored_dep_path`, `_is_dev_scratch_path`,
-  `_is_test_file_path`, `is_fp_corpus_markdown`).
+Same I/O contract as `validate_security.py`: path-only stdout (auto-save
+report, print compact summary), aggregated `(level, rule_id)` grouping,
+self-scan filter chain (skips catalog / test / dev-scratch files).
 
 ## Instructions
 
@@ -97,6 +82,7 @@ Copy this checklist and track your progress:
 
 - `scripts/validate_cache.py` — validator
 - [references/ca-rules.md](references/ca-rules.md) — per-rule details
+  > CA-01 — dynamic placeholders in cached content · CA-02 — SessionStart / UserPromptSubmit / PreCompact write CLAUDE.md or settings · CA-03 — hook scripts flip permissions / enabledMcpServers between turns · CA-04 — `model:` frontmatter forces in-line model switch · CA-05 — hook scripts run unbounded-output commands · CA-06 — PreCompact / PostCompact / SubagentStart hooks don't preserve prefix · Why these specific six
 - `skills/fix-validation/references/cache-fixes.md` — fix recipes
 - `tests/test_validate_cache.py` — 36 tests
 - [ussumant/cache-audit](https://github.com/ussumant/cache-audit) — corpus

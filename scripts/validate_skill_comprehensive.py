@@ -1951,6 +1951,15 @@ def validate_content_patterns(body: str, report: ValidationReport, strict_mode: 
     # Issue #16 category I: a numbered-prose step list ("1. Do X. 2. Do Y. ...")
     # is ALSO a valid Instructions format. Both formats describe ordered
     # workflows; the distinction is purely cosmetic. Accept either.
+    #
+    # Severity: MINOR — fires on every skill, NOT gated on strict_mode.
+    # Without a checklist (or numbered-prose equivalent), neither the
+    # skill itself nor any consumer (an agent, a command, another
+    # reference file) can detect when the skill's goal has been
+    # accomplished. The progressive-discovery algorithm uses these
+    # ordered steps to drive the "did I finish?" check. A skill without
+    # one is genuinely incomplete, not just stylistically off, so the
+    # rule must fire universally.
     checklist_matches = RE_CHECKLIST.findall(body)
     if checklist_matches:
         report.passed(
@@ -1964,11 +1973,13 @@ def validate_content_patterns(body: str, report: ValidationReport, strict_mode: 
             "SKILL.md",
             category="Content Patterns",
         )
-    elif strict_mode:
+    else:
         report.minor(
-            "No checklist or numbered-prose step list found (best practice: "
-            "use either '- [ ]' checkboxes OR '1. step' numbered prose for "
-            "complex workflows)",
+            "No checklist or numbered-prose step list found — without one, "
+            "neither the skill nor any consumer can detect when the skill's "
+            "goal has been accomplished. Add either '- [ ]' checkboxes OR "
+            "'1. step' numbered prose covering the workflow's terminating "
+            "conditions.",
             "SKILL.md",
             category="Content Patterns",
         )

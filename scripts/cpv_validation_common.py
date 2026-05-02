@@ -5461,10 +5461,16 @@ def validate_toc_embedding(
         if embedded_count == len(toc_headings):
             refs_with_toc += 1
         elif is_list_item:
-            # Ambiguous: link in a list item could be a TOC title that
-            # happens to link to a .md file, or a genuine reference.
-            # Report as WARNING since we cannot tell which it is.
-            report.warning(
+            # Even when the link sits in a list item, a missing-or-partial
+            # TOC breaks progressive discovery — the unembedded headings
+            # become invisible to agents. The "ambiguous list item could
+            # be a TOC title" exception was too generous: in practice it
+            # almost always IS a real reference, just formatted as a list
+            # entry. Treat it as MINOR (same severity as the standalone
+            # branch below). If the line genuinely IS a TOC title rather
+            # than a reference, the fix is to drop the markdown link
+            # (the message body explains how).
+            report.minor(
                 f"Link to '{ref_path.name}' in a list entry of {rel_file} "
                 f"has {embedded_count}/{len(toc_headings)} TOC headings "
                 f"embedded. SKILL.md must copy the COMPLETE TOC of each "

@@ -12,23 +12,21 @@ user-invocable: false
 
 ## Overview
 
-Central lookup for the fix agent. Given a validation error, find the reference file with fix instructions. All fix guides are in `references/`.
+Central lookup for the fix agent. Maps each validation error to the reference file with fix instructions. All fix guides are in `references/`.
 
 ## Prerequisites
 
-- A validation report from `/cpv-validate-plugin` or `/cpv-validate-skill`
-- Access to the `references/` directory
+- A validation report from a `/cpv-validate-*` command
+- Access to `references/`
 
 ## Instructions
 
-1. Read the validation report for severity, message, file path
-2. Pick the index based on the validator that produced the report:
-   - `plugin-error-index.md` — for any plugin-scope validator (validate_plugin/skill/hook/agent/command/mcp/lsp/security/rules/xref/settings_marketplace/documentation/encoding/enterprise/scoring/cache/telemetry)
-   - `marketplace-error-index.md` — for `validate_marketplace.py` and `validate_marketplace_pipeline.py`
-3. Match the error to the fix reference file it points to
-4. Open the fix guide; use its TOC to jump to the exact section
+1. Read the validation report for severity, message, file path.
+2. Pick the index: `plugin-error-index.md` for plugin-scope validators; `marketplace-error-index.md` for marketplace.
+3. Match the error to the fix reference file it points to.
+4. Open the fix guide; use its TOC to jump to the exact section.
 
-For `category: architecture` findings, defer to the `migrate-marketplace-architecture` skill (Layout A/B/C conversion).
+For `category: architecture`, defer to `migrate-marketplace-architecture`.
 
 Copy this checklist and track your progress:
 
@@ -47,45 +45,46 @@ If no matching section is found, search the reference by message keywords. If th
 
 ## Examples
 
-**Input:** validation report line `[MAJOR] Missing plugin.json`
-**Output:** open `plugin-structure-fixes.md §1` and apply the fix
+```
+Input:  [MAJOR] Missing plugin.json
+Output: open plugin-structure-fixes §1, follow the recipe
+```
 
-**Input:** `[CA-01] Static prefix violation`
-**Output:** open `cache-fixes.md` CA-01
+```
+Input:  [CA-01] Static prefix violation in agents/foo.md line 12
+Output: open cache-fixes.md CA-01, replace {{TIMESTAMP}} with static literal
+```
 
 | Error | Fix guide |
 |---|---|
-| `[MAJOR] userConfig.<key> missing 'type'` | plugin-structure-fixes "userConfig schema invalid" |
-| `[CRITICAL] Plugin ships CLAUDE_CODE_PLUGIN_SEED_DIR` | telemetry-hazard-fixes |
-| `[CRITICAL] Layout C: self-entry source != "./"` | plugin-structure-fixes §15 |
-| `[WARNING] Command 'clear' collides with built-in` | plugin-structure-fixes §16 |
-| `[WARNING] architecture/recommend-restructure` | marketplace-fixes §9 |
+| `[MAJOR] Missing plugin.json` | plugin-structure-fixes §1 |
+| `[CA-01] Static prefix violation` | cache-fixes.md CA-01 |
+| `[MAJOR] userConfig.<key> missing 'type'` | plugin-structure-fixes |
+| `[CRITICAL] PLUGIN_SEED_DIR` | telemetry-hazard-fixes |
+| `[CRITICAL] Layout C self-entry` | plugin-structure-fixes §15 |
+| `[WARNING] recommend-restructure` | marketplace-fixes §9 |
 
 ## Schema-parity
 
-CPV mirrors CC's install-time schema; zero findings should not trip a runtime schema error. Contract: [schema-parity-contract.md](references/schema-parity-contract.md).
+CPV mirrors CC's install-time schema. Contract: [schema-parity-contract.md](references/schema-parity-contract.md).
 
 ## Resources
 
 - [Plugin Error Index](references/plugin-error-index.md)
-  > validate_plugin · validate_skill · validate_skill_comprehensive · validate_hook · validate_agent · validate_command · validate_mcp · validate_lsp · validate_security · validate_rules · validate_xref · validate_settings_marketplace · validate_documentation · validate_encoding · validate_enterprise · validate_scoring · validate_cache · validate_telemetry
+  > 1. validate_plugin.py · 2. validate_skill.py · 3. validate_skill_comprehensive.py · 4. validate_hook.py · 5. validate_agent.py · 6. validate_command.py · 7. validate_mcp.py · 8. validate_lsp.py · 9. validate_security.py · 10. validate_rules.py · 11. validate_xref.py · 12. validate_settings_marketplace.py · 13. validate_documentation.py · 14. validate_encoding.py · 15. validate_enterprise.py · 16. validate_scoring.py · 17. validate_cache.py · 18. validate_telemetry.py — plugin-shipped env-var hazards
 - [Marketplace Error Index](references/marketplace-error-index.md)
   > 1. validate_marketplace.py · 2. validate_marketplace_pipeline.py · 3. Architecture / Layout Migration Warnings (7 signals)
 - [Schema-Parity Contract](references/schema-parity-contract.md)
   > What CPV does · The contract · What this contract does NOT say · What IS covered · Validator-gap protocol · Historical incidents · Related
 - [Iterative Fix Loop](references/iterative-fix-loop.md)
-  > Why a loop · Algorithm · Entry points (plugin path vs report path) · Termination and safety · WARNING evaluation rules · Publish-blocking warning categories · Truly advisory warnings · Output contract
+  > Why a loop · Algorithm · Entry points — plugin path vs report path · Termination and safety · WARNING evaluation rules · Publish-blocking warning categories · Truly advisory warnings · Output contract
 - [Empirical Loading Bugs](references/empirical-loading-bugs.md)
-  > Path-form acceptance · Override-vs-default semantics · Three silent footguns · Validators added 2026-04-18 · Docs corrections · Round 2 confirmations · Tests added · Untestable in headless · v2.23.2 FP sweep
+  > Path-form acceptance matrix · Override-vs-default semantics · Three silent footguns CC does NOT catch · CPV validators added 2026-04-18 · Anthropic docs corrections · Round 2 confirmations · Tests added · Untestable in headless mode · v2.23.2 false-positive sweep
 - [Cache-Audit Fixes](references/cache-fixes.md)
-  > Overview · CA-01 Static prefix violation · CA-02 Hook writes to cached files · CA-03 Hook flips MCP/permission state · CA-04 SKILL.md `model:` forces switch · CA-05 Unbounded hook output · CA-06 Compaction hook does not preserve prefix
+  > Overview · CA-01 — Static prefix violation in cached content · CA-02 — Hook writes to cached files (CLAUDE.md / settings.json) · CA-03 — Hook flips MCP server enabled/disabled or permission allow/deny · CA-04 — SKILL.md `model:` frontmatter forces in-line model switch · CA-05 — Hook script runs unbounded output commands · CA-06 — Compaction/SubagentStart hook does not preserve cached prefix
 - [Telemetry Hazard Fixes](references/telemetry-hazard-fixes.md)
-  > Overview · CRITICAL: PLUGIN_SEED_DIR · CRITICAL: SHELL_PREFIX · CRITICAL: CLAUDE_CONFIG_DIR · CRITICAL: BETA_TRACING_ENDPOINT (external) · CRITICAL: OTEL_LOG_RAW_API_BODIES=file:* · MAJOR: third-party-provider bypass · Reference: env vars plugins MUST NEVER ship
+  > Overview · CRITICAL: Plugin ships CLAUDE_CODE_PLUGIN_SEED_DIR · CRITICAL: Plugin ships CLAUDE_CODE_SHELL_PREFIX · CRITICAL: Plugin ships CLAUDE_CONFIG_DIR · CRITICAL: Plugin ships BETA_TRACING_ENDPOINT pointing at external host · CRITICAL: Plugin ships OTEL_LOG_RAW_API_BODIES set to a file URL · MAJOR: Plugin ships third-party-provider bypass env var · Reference: env vars plugins MUST NEVER ship
 
 ## MCP Server Bundling
 
-Executables in `servers/`, reference `${CLAUDE_PLUGIN_ROOT}/servers/<name>`. Unique names.
-
-## Token Optimization
-
-Use `mcp__plugin_llm-externalizer_llm-externalizer__*` for bounded analysis.
+Bundled MCP executables go in `servers/`, referenced as `${CLAUDE_PLUGIN_ROOT}/servers/<name>`. Unique names.
