@@ -142,7 +142,11 @@ _BACKTICK_PATH_RE = re.compile(
     r"`([^`\n]+\.(?:md|py|js|ts|json|yaml|yml|toml|sh|html|css))`"
 )
 _NPM_PACKAGE_RE = re.compile(
-    r"^(@[a-z0-9][\w.-]*/[a-z0-9][\w.-]*|[a-z0-9][\w.-]*@[\w.-]+|[a-z0-9][\w.-]*/\d+\.\d+)$",
+    r"^("
+    r"@[a-z0-9][\w.-]*/[a-z0-9][\w.-]*(@[\w.-]+)?"
+    r"|[a-z0-9][\w.-]*@[\w.-]+"
+    r"|[a-z0-9][\w.-]*/\d+\.\d+"
+    r")$",
     re.IGNORECASE,
 )
 

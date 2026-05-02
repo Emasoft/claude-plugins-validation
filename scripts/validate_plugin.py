@@ -49,6 +49,8 @@ from cpv_validation_common import (
     COLORS,
     ValidationReport,
     check_remote_execution_guard,
+    is_vendored_path,
+    load_cpv_config,
     resolve_tool_command,
     save_report_and_print_summary,
     validate_component_name,
@@ -1685,8 +1687,19 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
             # Submodule pattern: subdirectory named after the plugin itself.
             # Common in Layout B nested marketplaces and dev-cached plugins.
             continue
+        # Issue #16 category H: skip vendoring-conventional roots
+        # (external/, vendor/, third_party/, node_modules/, etc.) AND any
+        # directory listed as a submodule in .gitmodules. Also honor
+        # `cpv.allow_root_dirs` allow-list in plugin.json for explicit
+        # opt-out of edge-case directory names.
+        if is_vendored_path(Path(dirname), plugin_root):
+            continue
+        cpv_cfg = load_cpv_config(plugin_root)
+        allow_roots = cpv_cfg.get("allow_root_dirs", [])
+        if isinstance(allow_roots, list) and dirname in allow_roots:
+            continue
         report.warning(
-            f"Non-standard directory '{dirname}/' — not part of the plugin spec. If needed by plugin scripts, consider documenting its purpose in README."
+            f"Non-standard directory '{dirname}/' — not part of the plugin spec. If needed by plugin scripts, consider documenting its purpose in README. (Add to cpv.allow_root_dirs in plugin.json to silence.)"
         )
 
     # Validate plugin-shipped settings.json if present
