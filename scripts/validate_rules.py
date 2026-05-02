@@ -442,10 +442,11 @@ def print_json(report: ValidationReport) -> None:
 
 def main() -> int:
     """Main entry point."""
+    from cpv_validation_common import launcher_epilog
     parser = argparse.ArgumentParser(
         description="Validate Claude Code rule files in a rules/ directory.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Example: uv run python scripts/validate_rules.py rules/",
+        epilog=launcher_epilog("rules"),
     )
     parser.add_argument("path", help="Path to rules/ directory or plugin root")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show all results")

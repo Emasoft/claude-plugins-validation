@@ -26,10 +26,10 @@ Script-based validation of structure, frontmatter, content, and pillars. For sem
 
 ## Instructions
 
-1. Navigate to the claude-plugins-validation directory
-2. Run basic validation:
+1. (`${CLAUDE_PLUGIN_ROOT}` is set automatically by Claude Code at agent invocation — points at the locally-installed CPV plugin)
+2. Run basic validation via the launcher (NEVER call `validate_skill_comprehensive.py` directly from the cache — environment-isolation guard refuses):
    ```bash
-   uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --report $MAIN_ROOT/reports/validate_skill/$(date +%Y%m%d_%H%M%S%z)-<slug>.md
+   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" skill path/to/skill/ --report $MAIN_ROOT/reports/validate_skill/$(date +%Y%m%d_%H%M%S%z)-<slug>.md
    ```
 3. Optionally add mode flags: `--strict` (Nixtla), `--openspec` (AgentSkills whitelist), `--pillars` (8+1 for lang-*/convert-*)
 4. Review the compact summary output (full report saved to file via `--report`)
@@ -57,13 +57,13 @@ Script-based validation of structure, frontmatter, content, and pillars. For sem
 ### Example 1: Basic Validation
 
 ```bash
-uv run python scripts/validate_skill_comprehensive.py ./skills/my-skill/ --report $MAIN_ROOT/reports/validate_skill/$(date +%Y%m%d_%H%M%S%z)-<slug>.md
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" skill ./skills/my-skill/ --report $MAIN_ROOT/reports/validate_skill/$(date +%Y%m%d_%H%M%S%z)-<slug>.md
 ```
 
 ### Example 2: Full Validation with Pillars
 
 ```bash
-uv run python scripts/validate_skill_comprehensive.py ./skills/lang-rust-dev/ --strict --pillars --verbose --report $MAIN_ROOT/reports/validate_skill/$(date +%Y%m%d_%H%M%S%z)-<slug>.md
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" skill ./skills/lang-rust-dev/ --strict --pillars --verbose --report $MAIN_ROOT/reports/validate_skill/$(date +%Y%m%d_%H%M%S%z)-<slug>.md
 ```
 
 ## Resources

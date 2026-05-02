@@ -193,8 +193,8 @@ A fine grained PAT scoped this narrowly is strictly safer than a classic
 
 ## Creating the PAT
 
-Classic PAT:
-1. Go to `https://github.com/settings/tokens`.
+Classic PAT (full guide: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens):
+1. Sign in to GitHub, then click your avatar → Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token (classic). (Direct URL requires login: `https://github.com/settings/tokens`)
 2. Click "Generate new token" then "Generate new token (classic)".
 3. Note: `Marketplace auto notify <plugin-name>`.
 4. Expiration: 90 days (rotation is required; see below).
@@ -202,8 +202,8 @@ Classic PAT:
 6. Click Generate.
 7. Copy the token immediately — it is shown only once.
 
-Fine grained PAT:
-1. Go to `https://github.com/settings/personal-access-tokens/new`.
+Fine grained PAT (full guide: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens):
+1. Sign in to GitHub, then click your avatar → Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token. (Direct URL requires login: `https://github.com/settings/personal-access-tokens/new`)
 2. Resource owner: the user or org that owns the marketplace repo.
 3. Repository access: "Only select repositories" then pick the marketplace.
 4. Repository permissions: Contents=RW, Actions=RW, Metadata=R.
@@ -280,7 +280,7 @@ Recommended rotation schedule: **every 90 days**.
 1. Create a new PAT (classic or fine grained) with the same scopes.
 2. Update the secret on BOTH repos using `gh secret set` — see above.
 3. Wait for at least one notify cycle to confirm the new token works.
-4. Delete the old PAT from `https://github.com/settings/tokens`.
+4. Delete the old PAT from your GitHub Developer settings → Personal access tokens. (Direct URL requires login: `https://github.com/settings/tokens`. Public docs: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
 
 Classic PATs support setting the same name twice; fine grained PATs
 require a unique note per token, so include a rotation counter

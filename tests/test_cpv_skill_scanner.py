@@ -89,7 +89,13 @@ class TestBuildScanCommand:
         }
         assert forbidden.isdisjoint(cmd), f"forbidden API-key flag in argv: {cmd}"
 
-    def test_required_invocation_shape(self, tmp_path: Path) -> None:
+    def test_required_invocation_shape_uvx_fallback(
+        self, tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+    ) -> None:
+        """v2.48 — when no persistent ``skill-scanner`` binary is on PATH,
+        the launcher falls back to ``uvx --from cisco-ai-skill-scanner``."""
+        # Force the uvx fallback path (no persistent install).
+        monkeypatch.setattr(css.shutil, "which", lambda name: None)
         out = tmp_path / "out.json"
         cmd = css.build_scan_command(tmp_path, json_output_path=out)
         assert cmd[:3] == ["uvx", "--from", "cisco-ai-skill-scanner"]
@@ -106,6 +112,31 @@ class TestBuildScanCommand:
         assert "json" in cmd
         assert "--output-json" in cmd
         assert str(out) in cmd
+
+    def test_required_invocation_shape_persistent_install(
+        self, tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+    ) -> None:
+        """v2.48 — when the persistent ``skill-scanner`` binary IS on PATH
+        (created by ``uv tool install cisco-ai-skill-scanner``), the launcher
+        uses it directly and skips the ``uvx --from`` resolve cost (~5-10s
+        per invocation)."""
+        monkeypatch.setattr(
+            css.shutil, "which",
+            lambda name: "/Users/test/.local/bin/skill-scanner" if name == "skill-scanner" else None,
+        )
+        out = tmp_path / "out.json"
+        cmd = css.build_scan_command(tmp_path, json_output_path=out)
+        # Direct binary call — no uvx prefix.
+        assert cmd[0] == "skill-scanner"
+        assert "uvx" not in cmd
+        assert "--from" not in cmd
+        # Same downstream args as before.
+        assert "scan-all" in cmd
+        assert str(tmp_path) in cmd
+        assert "--recursive" in cmd
+        assert "--lenient" in cmd
+        assert "--use-behavioral" in cmd
+        assert "--use-trigger" in cmd
 
     def test_behavioral_flag_can_be_disabled(self, tmp_path: Path) -> None:
         cmd = css.build_scan_command(
@@ -126,7 +157,15 @@ class TestBuildScanCommand:
         idx = cmd.index("--policy")
         assert cmd[idx + 1] == "strict"
 
-    def test_package_spec_override(self, tmp_path: Path) -> None:
+    def test_package_spec_override(
+        self, tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+    ) -> None:
+        """``package_spec`` only takes effect when the launcher falls back to
+        ``uvx --from <spec>``. The persistent ``skill-scanner`` binary uses
+        whichever version was previously installed via ``uv tool install`` and
+        ignores ``package_spec`` — so we must force the uvx path for this
+        test by mocking the persistent binary as absent."""
+        monkeypatch.setattr(css.shutil, "which", lambda name: None)
         cmd = css.build_scan_command(
             tmp_path,
             json_output_path=tmp_path / "o.json",

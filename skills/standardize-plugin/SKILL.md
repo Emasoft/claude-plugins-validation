@@ -22,13 +22,13 @@ Audits existing plugin or marketplace repositories against CPV standards and aut
 
 1. **Audit a Plugin**:
    ```bash
-   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" <plugin-path> [--report report.md]
+   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" standardize <plugin-path> [--report report.md]
    ```
    Checks: 190+ validation rules, pipeline readiness, file inventory, .gitignore, README badges.
 
 2. **Fix a Plugin** (generates missing files, does NOT modify existing code):
    ```bash
-   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" <plugin-path> --fix [--dry-run]
+   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" standardize <plugin-path> --fix [--dry-run]
    ```
 
 3. **After --fix**, manually fix remaining issues:
@@ -51,7 +51,7 @@ Copy this checklist and track your progress:
 
 4. **Audit/Fix a Marketplace**:
    ```bash
-   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_marketplace.py" <path> [--fix] [--dry-run]
+   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" standardize_marketplace <path> [--fix] [--dry-run]
    ```
 
 ## Output
@@ -72,13 +72,13 @@ Copy this checklist and track your progress:
 
 **Audit:**
 ```bash
-uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" ./my-plugin/
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" standardize ./my-plugin/
 ```
 
 **Fix and re-validate:**
 ```bash
-uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" ./my-plugin/ --fix
-uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" ./my-plugin/ --strict
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" standardize ./my-plugin/ --fix
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" plugin ./my-plugin/ --strict
 ```
 
 ## Resources

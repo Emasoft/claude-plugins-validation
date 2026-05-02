@@ -81,9 +81,11 @@ class TestCommandCount:
           (TRDD-2be75e88 phases 2 and 3).
         v2.46.0 added: cpv-validate-cache (audit-only) and cpv-cache-optimize
           (cache-optimizer agent — audit + fix CA-01..CA-06 invalidation rules).
+        v2.48.0 added: cpv-main-menu (single-entry menu routing all CPV
+          commands via interactive AskUserQuestion sub-menus).
         """
         md_files = list(COMMANDS_DIR.glob("*.md"))
-        assert len(md_files) == 22, f"Expected 22 commands, found {len(md_files)}: {sorted(f.name for f in md_files)}"
+        assert len(md_files) == 23, f"Expected 23 commands, found {len(md_files)}: {sorted(f.name for f in md_files)}"
 
 
 class TestDirectScriptCommands:

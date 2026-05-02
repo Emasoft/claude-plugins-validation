@@ -1461,23 +1461,20 @@ def format_text_report(report: PipelineValidationReport, verbose: bool = False) 
 
 def main() -> int:
     """Main entry point for CLI."""
+    from cpv_validation_common import launcher_epilog
     parser = argparse.ArgumentParser(
         description="Validate marketplace publishing pipeline automation",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Checks: GitHub Actions workflows, CI scripts, validation pipeline, deployment config.
 
-Examples:
-  %(prog)s /path/to/marketplace
-  %(prog)s /path/to/marketplace --verbose
-  %(prog)s /path/to/marketplace --json
-
 Exit Codes:
   0 - Score >= 90 (A grade) - Pipeline fully operational
   1 - Score >= 70 (B/C grade) - Minor gaps, mostly functional
   2 - Score >= 60 (D grade) - Manual updates required
   3 - Score < 60 (F grade) - Pipeline broken
-        """,
+
+""" + launcher_epilog("validate_marketplace_pipeline"),
     )
     parser.add_argument(
         "marketplace_path",

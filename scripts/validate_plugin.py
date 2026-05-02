@@ -3633,10 +3633,14 @@ def main() -> int:
 
     check_remote_execution_guard()
 
+    from cpv_validation_common import launcher_epilog
     parser = argparse.ArgumentParser(
         description="Validate a Claude Code plugin against all validation rules.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="This is the main entry point. It orchestrates all 17 sub-validators.\nExample: uv run python scripts/validate_plugin.py . --strict --verbose",
+        epilog=(
+            "This is the main entry point. It orchestrates all 17 sub-validators.\n\n"
+            + launcher_epilog("plugin")
+        ),
     )
     parser.add_argument(
         "--verbose",

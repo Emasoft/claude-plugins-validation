@@ -31,8 +31,8 @@ Per-rule severity, catch description, and fix-recipe pointer live in
 ## Prerequisites
 
 - A Claude Code plugin directory OR a project root that uses Claude Code.
-- `uv` available on PATH so the validator can run via
-  `uv run python scripts/validate_cache.py`.
+- `uv` available on PATH so the validator can run via the launcher
+  (`uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" cache <path>`).
 
 ## Scanner contract
 
@@ -50,34 +50,19 @@ Same I/O contract as `validate_security.py`:
 
 ## Instructions
 
-Do steps 1–4 in ONE Bash tool call so shell variables persist:
-
-1. Resolve `MAIN_ROOT` to the **main checkout root** (first entry of
-   `git worktree list`). NEVER the worktree's own root — its
-   `./reports/` is gitignored and disappears on merge.
-2. Build the report path under `${MAIN_ROOT}/reports/cache/`.
-3. `mkdir -p` the parent.
-4. Run `validate_cache.py` with `--report`.
-5. Read summary from stdout, details from the report file.
-6. (Fix workflow only — cache-optimizer-agent.) Group findings by
-   CA-NN, apply `cache-fixes.md#ca-nn` from
-   `skills/fix-validation/references/`, re-run, iterate until VALID.
-
-```bash
-MAIN_ROOT="$(git worktree list | head -n1 | awk '{print $1}')"
-[ -z "${MAIN_ROOT}" ] && MAIN_ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
-REPORT="${MAIN_ROOT}/reports/cache/$(date +%Y%m%d_%H%M%S%z)-<slug>.md"
-mkdir -p "$(dirname "$REPORT")"
-uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_cache.py" \
-  <plugin_or_project_path> --report "$REPORT"
-```
+1. Read [references/launcher-invocation.md](references/launcher-invocation.md) for the canonical bash one-liner (alias `cache`).
+2. Resolve `MAIN_ROOT` via `git worktree list | head -n1`.
+3. Run the launcher with `--report "$MAIN_ROOT/reports/validate_cache/<TS>-<slug>.md"`.
+4. Read the compact summary from stdout, full details from the report file.
+5. (Fix workflow only — cache-optimizer-agent.) Group findings by CA-NN, apply `cache-fixes.md#ca-nn` from `skills/fix-validation/references/`, re-run, iterate until VALID.
 
 ## Examples
 
 ```bash
 # Audit a plugin (or any project root with CLAUDE.md / .claude/)
-uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_cache.py" \
-  ~/Code/my-plugin/ --report "$REPORT"
+CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
+  python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" \
+  cache ~/Code/my-plugin/ --report "$REPORT"
 ```
 
 ## Error Handling
@@ -101,9 +86,9 @@ uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_cache.py" \
 Copy this checklist and track your progress:
 
 - [ ] Resolve `MAIN_ROOT` via `git worktree list | head -n1`
-- [ ] Build report path under `${MAIN_ROOT}/reports/cache/<TS>-<slug>.md`
+- [ ] Build report path under `${MAIN_ROOT}/reports/validate_cache/<TS>-<slug>.md`
 - [ ] `mkdir -p` the parent directory
-- [ ] Run `validate_cache.py --report` against the target
+- [ ] Run via launcher: `python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" cache <path> --report <path>`
 - [ ] Read summary from stdout, details from the report file
 - [ ] (Fix only) Re-run after each batch until verdict = VALID
 

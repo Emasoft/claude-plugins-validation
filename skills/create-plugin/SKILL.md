@@ -40,7 +40,7 @@ CPV supports three layouts: **A** (hub-and-spoke), **B** (nested), **C** (market
    ```
 
 3. **After generation**:
-   - Validate: `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" <target-dir> --strict`
+   - Validate via launcher (alias `plugin`) — see [references/launcher-invocation.md](references/launcher-invocation.md). Direct invocation refused.
    - Fix ALL issues (CRITICAL, MAJOR, MINOR, NIT) — only WARNINGs may remain
    - Init git: `cd <target-dir> && git init && git add -A && git commit -m "Initial scaffold"`
    - Create repo: `gh repo create <owner>/<name> --public --source . --push`

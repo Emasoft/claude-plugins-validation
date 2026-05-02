@@ -66,10 +66,13 @@ Only these situations justify the cost:
 
 ## Workflow
 
-1. **Run script validation first** (cheap baseline — ALWAYS do this):
+1. **Run script validation first** (cheap baseline — ALWAYS do this; via the launcher, not directly):
    ```bash
-   uv run python scripts/validate_skill_comprehensive.py "<path>" --strict --report "$MAIN_ROOT/reports/validate_skill/$(date +%Y%m%d_%H%M%S%z)-semantic-baseline.md"
+   CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
+     python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" \
+     skill "<path>" --strict --report "$MAIN_ROOT/reports/validate_skill/$(date +%Y%m%d_%H%M%S%z)-semantic-baseline.md"
    ```
+   NEVER call `validate_skill_comprehensive.py` directly from the plugin cache — environment-isolation guard refuses with "remote location" error.
 2. **Read the actual SKILL.md / agent .md files** for semantic evaluation
 3. **Evaluate each criterion** below (Pass / Partial / Fail)
 4. **Grade A-F** based on semantic quality gates

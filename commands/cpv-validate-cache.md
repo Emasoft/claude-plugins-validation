@@ -46,13 +46,26 @@ These rules sit on top of the project's general security/structure validators â€
 
 ## Workflow
 
-The command runs:
+### Canonical invocation (always via the remote-validation launcher)
 
 ```bash
-uv run python "${CLAUDE_PLUGIN_ROOT:-.}/scripts/validate_cache.py" <plugin_or_project_path>
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  MAIN_ROOT="$(git worktree list | head -n1 | awk '{print $1}')"
+else
+  MAIN_ROOT="${CLAUDE_PROJECT_DIR:-$PWD}"
+fi
+REPORT_DIR="$MAIN_ROOT/reports/validate_cache"
+mkdir -p "$REPORT_DIR"
+REPORT_FILE="$REPORT_DIR/$(date +%Y%m%d_%H%M%S%z)-$(basename "$TARGET_PATH").md"
+
+CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
+  python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" \
+  cache "$TARGET_PATH" $OPTIONS --report "$REPORT_FILE"
 ```
 
-with the report path defaulted to `${CLAUDE_PROJECT_DIR}/reports/cache/$(date +%Y%m%d_%H%M%S%z)-<slug>.md`. The validator walks the tree, applies CA-01..CA-06 in order, and writes a per-rule aggregated report. The summary printed to stdout includes the per-severity counts, the verdict, the plugin path, and the report path.
+> The `cache` alias forwards to `validate_cache.py` via the launcher, which sets up environment isolation. Do NOT call `validate_cache.py` directly from `~/.claude/plugins/cache/...` â€” the script will refuse with a "remote location" error. `${CLAUDE_PLUGIN_ROOT}` is set automatically and points at the locally-installed CPV plugin.
+
+The validator walks the tree, applies CA-01..CA-06 in order, and writes a per-rule aggregated report. The summary printed to stdout includes the per-severity counts, the verdict, the plugin path, and the report path.
 
 ## Exit Codes
 

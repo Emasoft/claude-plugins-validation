@@ -197,7 +197,7 @@ jobs:
 
 ### Phase 2: Plugin Structure Validation
 ```
-□ 2.1 Run validator: uv run python scripts/validate_plugin.py . --verbose
+□ 2.1 Run validator: uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" plugin . --verbose
 □ 2.2 Verify exit code 0 (or 3 for MINOR-only)
 □ 2.3 Check for CRITICAL issues (must fix)
 □ 2.4 Check for MAJOR issues (should fix)
@@ -264,7 +264,7 @@ jobs:
 **Issue: "Push blocked but I can't see why"**
 ```bash
 python3 .git/hooks/pre-push
-uv run python scripts/validate_plugin.py . --verbose
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" plugin . --verbose
 ```
 
 **Issue: "Unfixable lint issues remain"**
@@ -321,7 +321,7 @@ uv run python scripts/standardize_plugin.py . --fix
 
 ```bash
 # Validate plugin with focus on pipeline integrity
-uv run python scripts/validate_marketplace_pipeline.py /path/to/marketplace --verbose
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" validate_marketplace_pipeline /path/to/marketplace --verbose
 
 # Output interpretation:
 # ✓ Marketplace structure valid
@@ -336,7 +336,7 @@ uv run python scripts/validate_marketplace_pipeline.py /path/to/marketplace --ve
 ### Example: Setup Pipeline for New Marketplace
 
 ```bash
-uv run python scripts/validate_marketplace_pipeline.py /path/to/marketplace --verbose
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" validate_marketplace_pipeline /path/to/marketplace --verbose
 uv run python scripts/setup_marketplace_automation.py /path/to/marketplace --setup-all
 # Test with small change and push
 ```
@@ -352,5 +352,5 @@ gh secret set MARKETPLACE_PAT --repo OWNER/new-plugin
 git add .gitmodules new-plugin .claude-plugin/marketplace.json
 git commit -m "feat: Add new-plugin to marketplace"
 git push
-uv run python scripts/validate_marketplace_pipeline.py . --verbose
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" validate_marketplace_pipeline . --verbose
 ```

@@ -152,12 +152,14 @@ If the unbounded output is genuinely needed (rare), redirect it to a file and ha
 
 ## Verification
 
-After applying any cache-audit fix:
+After applying any cache-audit fix (always via the launcher — direct script call refused by environment-isolation guard):
 
 ```bash
-uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_cache.py" <plugin-root> --strict
+CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
+  python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" \
+  cache <plugin-root> --strict
 ```
 
-All CA-NN findings should clear. If you also touched a hook script, run `validate_hook.py --strict` to confirm the hook still parses.
+All CA-NN findings should clear. If you also touched a hook script, also run the hook validator: `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" hook <plugin-root>/hooks/hooks.json --strict`.
 
 For empirical confirmation that cache hits are happening at runtime, look for `cache_creation_input_tokens` and `cache_read_input_tokens` in the API response telemetry — a cache hit shows a high `cache_read` and low `cache_creation`.

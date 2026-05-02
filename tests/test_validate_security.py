@@ -1279,18 +1279,20 @@ class TestIssue15ScanAllFilesSafetyLimits:
 
         # Test isolation: turn off external scanners so we deterministically
         # get SKIPPED rows for them.
+        # v2.48 — gitleaks removed; trufflehog now covers ~700 detectors with
+        # `--concurrency` parallelism (gitleaks crashed under parallel scans).
         validate_security(
             plugin_dir,
             enable_tirith=False,
             enable_trufflehog=False,
-            enable_gitleaks=False,
             enable_semgrep=False,
         )
         steps = get_scan_step_log()
-        # We expect 27 steps (1..27); allow for any future additions but
-        # require at least the documented 27.
-        assert len(steps) >= 27, (
-            f"Expected at least 27 steps, got {len(steps)}: "
+        # We expect 26 steps (1..26); allow for any future additions but
+        # require at least the documented 26 (v2.48: gitleaks removed,
+        # net -1 from the previous 27).
+        assert len(steps) >= 26, (
+            f"Expected at least 26 steps, got {len(steps)}: "
             f"{[s['name'] for s in steps]}"
         )
         # Every step must have a known status.
@@ -1298,9 +1300,10 @@ class TestIssue15ScanAllFilesSafetyLimits:
             assert s["status"] in {"COMPLETED", "RAN", "SKIPPED", "FAILED"}, (
                 f"Step {s['num']} ({s['name']}) has bad status {s['status']!r}"
             )
-        # Steps 23-26 (tirith / trufflehog / gitleaks / semgrep) MUST be
-        # SKIPPED because we turned them off.
-        for step_num in (23, 24, 25, 26):
+        # Steps 23-25 (tirith / trufflehog / semgrep) MUST be SKIPPED because
+        # we turned them off. (Step 26 = Cisco scanner; runs unconditionally if
+        # uvx is on PATH and isn't gated by enable_* flags.)
+        for step_num in (23, 24, 25):
             step = next(s for s in steps if s["num"] == step_num)
             assert step["status"] == "SKIPPED", (
                 f"Step {step_num} should be SKIPPED with enable_*=False; "
@@ -1309,7 +1312,7 @@ class TestIssue15ScanAllFilesSafetyLimits:
         # Table must render without raising.
         table = format_scan_step_table(steps)
         assert "Status" in table
-        assert "[--] SKIPPED" in table  # we forced 4 skipped
+        assert "[--] SKIPPED" in table  # we forced 3 skipped
         assert "[OK] COMPLETED" in table
 
     def test_env_var_overrides_max_scan_bytes(self, tmp_path, monkeypatch):

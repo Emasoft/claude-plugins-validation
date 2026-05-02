@@ -123,9 +123,9 @@ These CRITICAL messages appear when a sub-validator raises an unexpected excepti
 **Source**: `validate_scoring.py` — `run_all_validators()`
 **What it means**: `validate_plugin.py` raised an unhandled exception. This typically means the plugin directory has a severely malformed structure that prevents even basic parsing.
 **How to fix**:
-1. Run `validate_plugin.py` directly to see the full error:
+1. Run plugin validation via the launcher to see the full error (NEVER call `validate_plugin.py` directly from the cache — environment-isolation guard refuses):
    ```bash
-   uv run python scripts/validate_plugin.py path/to/plugin --verbose
+   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" plugin path/to/plugin --verbose
    ```
 2. Common causes:
    - `plugin.json` is missing or contains invalid JSON
@@ -139,9 +139,9 @@ These CRITICAL messages appear when a sub-validator raises an unexpected excepti
 **Source**: `validate_scoring.py` — `run_all_validators()`
 **What it means**: `validate_security.py` raised an unhandled exception.
 **How to fix**:
-1. Run security validation directly:
+1. Run security validation via the launcher:
    ```bash
-   uv run python scripts/validate_security.py path/to/plugin --verbose
+   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" security path/to/plugin --verbose
    ```
 2. Common causes:
    - File permissions preventing scanning
@@ -155,9 +155,9 @@ These CRITICAL messages appear when a sub-validator raises an unexpected excepti
 **Source**: `validate_scoring.py` — `run_all_validators()`
 **What it means**: `validate_hook.py` raised an unhandled exception while processing `hooks/hooks.json`.
 **How to fix**:
-1. Run hook validation directly:
+1. Run hook validation via the launcher:
    ```bash
-   uv run python scripts/validate_hook.py path/to/plugin/hooks/hooks.json --verbose
+   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" hook path/to/plugin/hooks/hooks.json --verbose
    ```
 2. Common causes:
    - `hooks.json` is invalid JSON
@@ -170,9 +170,9 @@ These CRITICAL messages appear when a sub-validator raises an unexpected excepti
 **Source**: `validate_scoring.py` — `run_all_validators()`
 **What it means**: `validate_mcp.py` raised an unhandled exception while processing `.mcp.json`.
 **How to fix**:
-1. Run MCP validation directly:
+1. Run MCP validation via the launcher:
    ```bash
-   uv run python scripts/validate_mcp.py path/to/plugin --verbose
+   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" mcp path/to/plugin --verbose
    ```
 2. Common causes:
    - `.mcp.json` is invalid JSON
@@ -185,9 +185,9 @@ These CRITICAL messages appear when a sub-validator raises an unexpected excepti
 **Source**: `validate_scoring.py` — `run_all_validators()`
 **What it means**: `validate_agent.py` raised an unhandled exception while processing an agent `.md` file.
 **How to fix**:
-1. Run agent validation directly:
+1. Run agent validation via the launcher:
    ```bash
-   uv run python scripts/validate_agent.py path/to/plugin/agents/my-agent.md --verbose
+   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" agent path/to/plugin/agents/my-agent.md --verbose
    ```
 2. Common causes:
    - Agent `.md` file has encoding issues (not valid UTF-8)
@@ -200,9 +200,9 @@ These CRITICAL messages appear when a sub-validator raises an unexpected excepti
 **Source**: `validate_scoring.py` — `run_all_validators()`
 **What it means**: `validate_skill.py` raised an unhandled exception while processing a skill directory.
 **How to fix**:
-1. Run skill validation directly:
+1. Run skill validation via the launcher:
    ```bash
-   uv run python scripts/validate_skill.py path/to/plugin/skills/my-skill --verbose
+   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" skill path/to/plugin/skills/my-skill --verbose
    ```
 2. Common causes:
    - `SKILL.md` has encoding issues
@@ -215,9 +215,9 @@ These CRITICAL messages appear when a sub-validator raises an unexpected excepti
 **Source**: `validate_scoring.py` — `run_all_validators()`
 **What it means**: `validate_command.py` raised an unhandled exception while processing a command `.md` file.
 **How to fix**:
-1. Run command validation directly:
+1. Run command validation via the launcher:
    ```bash
-   uv run python scripts/validate_command.py path/to/plugin/commands/my-command.md --verbose
+   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" command path/to/plugin/commands/my-command.md --verbose
    ```
 2. Common causes:
    - Command `.md` file has encoding issues

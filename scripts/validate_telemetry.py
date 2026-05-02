@@ -629,6 +629,7 @@ def main() -> int:
     """Main entry point for ``cpv-validate-telemetry``."""
     check_remote_execution_guard()
 
+    from cpv_validation_common import launcher_epilog
     parser = argparse.ArgumentParser(
         description="Validate OTEL telemetry supply-chain risks in a plugin "
         "or settings.json file",
@@ -646,7 +647,8 @@ Exit codes:
   1 - CRITICAL issues
   2 - MAJOR issues
   3 - MINOR issues
-""",
+
+""" + launcher_epilog("telemetry"),
     )
     parser.add_argument(
         "target",

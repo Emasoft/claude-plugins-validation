@@ -363,7 +363,7 @@ Findings use the **same severity** as secrets found elsewhere in the plugin — 
    .idea/workspace.xml
    ```
 4. If the secret was already committed, **rotate the secret** — assume it is compromised. Use `git filter-repo` or GitHub's [secret scanning](https://docs.github.com/en/code-security/secret-scanning/about-secret-scanning) to clean the git history.
-5. Re-run the security validator: `uv run python scripts/validate_security.py <plugin>`.
+5. Re-run the security validator via the launcher (direct script call refused): `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" security <plugin>`.
 
 ### [MINOR] Cannot read IDE config file: {rel_path} ({error})
 

@@ -71,16 +71,26 @@ All in-process checks run as pure Python — no API calls, no tokens consumed, n
 
 ### External Security Scanners (always-run, programmatic-only)
 
-`validate_security.py` orchestrates **six external scanners** alongside its in-process rule packs. Each is invoked unconditionally on every scan and self-skips with an INFO advisory when its source binary cannot be resolved on PATH or installed from its source URL. There is **no opt-out flag** — preventing a caller from accidentally silencing coverage. The `enable_*` keyword arguments on `validate_security()` survive only as test-isolation knobs.
+`validate_security.py` orchestrates **five external scanners** alongside its in-process rule packs. Each is invoked unconditionally on every scan and self-skips with an INFO advisory when its source binary cannot be resolved on PATH or installed from its source URL. There is **no opt-out flag** — preventing a caller from accidentally silencing coverage. The `enable_*` keyword arguments on `validate_security()` survive only as test-isolation knobs.
 
 | # | Scanner | Source | What it adds | Resolution path |
 |---|---------|--------|--------------|-----------------|
-| 16 | **cc-audit** | [ryo-ebata/cc-audit](https://github.com/ryo-ebata/cc-audit) | 100+ AI-specific threat rules tailored to Claude Code plugins | `npx --yes @cc-audit/cc-audit` (auto-fetches from npm) |
-| 17 | **tirith** | [sheeki03/tirith](https://github.com/sheeki03/tirith) | Terminal-security, homograph domains, ANSI/bidi/zero-width injection, hidden Unicode, supply-chain pipe-to-shell | PATH → docker → nix → auto-install (brew/npm/cargo); set `CPV_NO_TIRITH_INSTALL=1` to disable the install fallback |
-| 18 | **trufflehog** | [trufflesecurity/trufflehog](https://github.com/trufflesecurity/trufflehog) | ~700 verified-secret detectors (Stripe, Slack, AWS, GitHub, …) | `brew install trufflehog` or `go install github.com/trufflesecurity/trufflehog/v3@latest` |
-| 19 | **gitleaks** | [gitleaks/gitleaks](https://github.com/gitleaks/gitleaks) | ~150 secret detectors with regex+entropy heuristics, complements trufflehog | `brew install gitleaks` or `docker run --rm -v $(pwd):/src zricethezav/gitleaks` |
-| 20 | **semgrep** | [semgrep/semgrep](https://github.com/semgrep/semgrep) | Thousands of static-analysis rules via the `p/security-audit` and `p/secrets` rule packs | `brew install semgrep` or `pipx install semgrep` |
-| 21 | **Cisco AI Defense skill-scanner** | [cisco-ai-defense/skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) | Static (YAML+YARA), Bytecode, Pipeline (command taint), Behavioral (AST dataflow), Trigger (vague-description) — programmatic-only mode (no LLM/Meta/VirusTotal/AI Defense cloud, all of which need API keys) | `uvx --from cisco-ai-skill-scanner skill-scanner` (auto-fetches from PyPI on first run; set `CPV_CISCO_SCAN_TIMEOUT_S=<sec>` to override the 600s default) |
+| 16 | **cc-audit** | [ryo-ebata/cc-audit](https://github.com/ryo-ebata/cc-audit) | 100+ AI-specific threat rules tailored to Claude Code plugins | persistent `cc-audit` (preferred — `npm install -g @cc-audit/cc-audit`) → `npx --yes @cc-audit/cc-audit` fallback |
+| 17 | **tirith** | [sheeki03/tirith](https://github.com/sheeki03/tirith) | Terminal-security, homograph domains, ANSI/bidi/zero-width injection, hidden Unicode, supply-chain pipe-to-shell | PATH → docker → nix → auto-install (pipx/brew/npm/cargo); set `CPV_NO_TIRITH_INSTALL=1` to disable the install fallback |
+| 18 | **trufflehog** | [trufflesecurity/trufflehog](https://github.com/trufflesecurity/trufflehog) | ~700 verified-secret detectors (Stripe, Slack, AWS, GitHub, …) — runs with `--concurrency=cpu_count` for parallel scans | `brew install trufflehog` or `go install github.com/trufflesecurity/trufflehog/v3@latest` |
+| 19 | **semgrep** | [semgrep/semgrep](https://github.com/semgrep/semgrep) | Thousands of static-analysis rules via the `p/security-audit` and `p/secrets` rule packs | `brew install semgrep` or `pipx install semgrep` |
+| 20 | **Cisco AI Defense skill-scanner** | [cisco-ai-defense/skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) | Static (YAML+YARA), Bytecode, Pipeline (command taint), Behavioral (AST dataflow), Trigger (vague-description) — programmatic-only mode (no LLM/Meta/VirusTotal/AI Defense cloud, all of which need API keys) | persistent `skill-scanner` (preferred — `uv tool install cisco-ai-skill-scanner`) → `uvx --from cisco-ai-skill-scanner skill-scanner` fallback (set `CPV_CISCO_SCAN_TIMEOUT_S=<sec>` to override the 600s default) |
+
+> **v2.48 — gitleaks removed.** trufflehog (~700 detectors with `--concurrency` parallel-scan support) provides superset coverage. gitleaks shipped ~150 detectors and crashed under reliable parallel scanning, so it has been retired from the external-scanner roster.
+
+> **v2.48 — `cpv-doctor --install-scanners`.** A new batch installer fetches every scanner CPV uses with one command (silent and idempotent). It also installs **fclones** ([pkolaczk/fclones](https://github.com/pkolaczk/fclones)), a Rust-based duplicate-file finder used as the first step of every CPV scan to skip duplicate files (cross-plugin shared READMEs, vendored libs, identical SKILL.md templates). Per-platform cascade: macOS = `brew install fclones`, Linux = `snap install fclones` then `cargo install fclones`, Windows = GitHub-release download then `cargo install fclones`. Per-tool opt-outs: `CPV_NO_<TOOL>_INSTALL=1` (e.g. `CPV_NO_FCLONES_INSTALL=1`).
+
+> **v2.48 — URL / archive ingestion + loose mode.** The positional argument now accepts:
+> - **GitHub URLs**: `https://github.com/owner/repo` or shorthand `github:owner/repo` — cloned with `gh repo clone --depth 1` to a tmpdir, scanned, then cleaned up automatically.
+> - **Local archives**: `*.zip`, `*.tar.gz`, `*.tgz`, `*.tar.bz2`, `*.tar.xz`, `*.tar` — extracted to a tmpdir (with path-traversal protection), scanned, cleaned up.
+> - **Loose mode** for flat skill packs: `--loose` (alias for `--bare-folder`) bypasses the `.claude-plugin/` precondition. CPV auto-detects flat packs (5+ `*.md` files, no `plugin.json`, no canonical `skills/<name>/SKILL.md` layout) and prints a HINT recommending `--loose` in the error message.
+
+> **v2.48 — Marketplace tree-scan-once with dedup.** `--marketplace <spec>` now stages every plugin under one tmpdir, runs `fclones` ONCE on the entire corpus, deletes duplicate hardlinks (cache untouched — hardlinks share inodes safely), then scans each plugin's deduped staging. Findings on canonical files automatically propagate to peer plugins that originally contained a copy of the same content (no coverage hole from dedup). Real-world: ai-maestro-plugins (10 plugins) sees ~1,849 duplicate files / ~21 MB saved per scan run.
 
 Every external scanner's findings are routed through the same self-scan filter chain CPV applies to its own rules (`cpv_self_scan_skip` → vendored-deps → dev-scratch → test-files → FP-corpus markdown → per-line catalog/docstring/comment pattern-source predicate). This guarantees that scanning CPV with CPV — or scanning any plugin that ships its own rule catalogs — never surfaces the catalog source as a finding. The aggregator then groups all findings by `(level, rule_id)` so each vulnerability TYPE shows its full explanation exactly once, followed by an occurrence count and a capped file:line list — bounded report size, no findings ever silently dropped.
 
@@ -158,12 +168,14 @@ Any of these can be passed as the first argument to `cpv-remote-validate`. Short
 |---------|----------------|
 | `plugin` | **Everything.** Runs all 20 sub-validators + linting. Start here. |
 | `skill` | **Skills.** SKILL.md frontmatter, required sections, description quality. 190+ rules. |
-| `hook` | **Hooks.** 27 event types, 4 hook types, script paths, bash portability. |
+| `hook` | **Hooks.** 28 event types, 5 hook types (incl. v2.1.118+ `mcp_tool`), script paths, bash portability. |
 | `agent` | **Agents.** Frontmatter fields, naming, tools, model, skills. |
 | `command` | **Commands.** Frontmatter, tool names, arguments, naming. |
-| `security` | **Security.** Injection, path traversal, secrets, prompt injection, exfiltration. |
+| `security` | **Security.** Injection, path traversal, secrets, prompt injection, exfiltration. v2.48: 5 external scanners + fclones cross-plugin dedup. |
+| `cache` | **Prompt-cache audit (v2.27.0+).** CA-01..CA-06 — dynamic placeholders, hook mutations, model-fork, unbounded output. |
+| `telemetry` | **OTEL telemetry supply-chain risks.** otelHeadersHelper, OTEL_LOG_RAW_API_BODIES, OTEL_LOG_USER_PROMPTS in plugin env. |
 | `scoring` | **Quality score.** Weighted across structure, docs, security, testing. |
-| `marketplace` | **Marketplace.** Manifest structure, plugin entries, source references. Supports Layout A (hub-and-spoke) and Layout B (nested). |
+| `marketplace` | **Marketplace.** Manifest structure, plugin entries, source references. Supports Layouts A/B/C. |
 | `settings-marketplace` | **Inline marketplace in settings.** Validates `marketplaces` entries embedded in Claude Code settings files. |
 | `local-scope` | **Local scope.** (v2.21.0+) Validates non-git-tracked `.claude/` elements under a project — `settings.local.json`, gitignored agents/skills/commands/rules, `enabledPlugins` from local settings. Each tracked element is passed to the FULL per-element validator. |
 | `project-scope` | **Project scope.** (v2.21.0+) Validates git-tracked `.claude/` elements — `settings.json`, tracked agents/skills/commands/rules/hooks, `.mcp.json`, `CLAUDE.md`. Same deep per-element pipeline. |
@@ -174,8 +186,9 @@ Any of these can be passed as the first argument to `cpv-remote-validate`. Short
 | `encoding` | **Encoding.** UTF-8, BOM, line endings, binary detection. |
 | `rules` | **Rules.** Structure and content of rules/*.md files. |
 | `xref` | **Cross-references.** Agent refs, versions, scripts. |
-| `doctor` | **Health check.** Plugins, settings, marketplaces. |
+| `doctor` | **Health check.** Plugins, settings, marketplaces. `--install-scanners` (v2.48) installs all 5 external scanners + fclones with one command. |
 | `lint` | **Lint only.** All 15 languages (Python, JS, Shell, Go, Rust, etc.). |
+| `standardize` | **Audit + fix.** Standardize a plugin against CPV pipeline conventions (CI/CD, hooks, publish.py). |
 
 ### Options
 
@@ -191,7 +204,7 @@ These flags work with all validators:
 
 > **Default output is path-only.** Without `--json` or `--report`, `validate_security.py` auto-saves the aggregated report to `$CLAUDE_PROJECT_DIR/reports/security/<timestamp>-<plugin>.md` (or `$TMPDIR/reports/security/...` when `CLAUDE_PROJECT_DIR` is unset, e.g. on a remote `uvx` invocation) and prints **only** the compact summary (counts table + verdict + plugin path + report path) to stdout. This guarantees that an agent invoking the validator gets a tiny, predictable stdout payload that never floods its context window.
 >
-> **External scanners always run.** There are no `--no-tirith` / `--no-trufflehog` / `--no-gitleaks` / `--no-semgrep` opt-out flags. Each external scanner self-skips with an INFO advisory if its source binary cannot be resolved on PATH or installed from its source URL. Set `CPV_NO_TIRITH_INSTALL=1` to disable tirith's auto-install fallback in CI sandboxes that block container pulls; set `CPV_CISCO_SCAN_TIMEOUT_S=<seconds>` to override the 600s default for very large trees. See [External Security Scanners](#external-security-scanners-always-run-programmatic-only) above for the full inventory.
+> **External scanners always run.** There are no `--no-tirith` / `--no-trufflehog` / `--no-semgrep` opt-out flags. Each external scanner self-skips with an INFO advisory if its source binary cannot be resolved on PATH or installed from its source URL. Set `CPV_NO_TIRITH_INSTALL=1` to disable tirith's auto-install fallback in CI sandboxes that block container pulls; set `CPV_CISCO_SCAN_TIMEOUT_S=<seconds>` to override the 600s default for very large trees. See [External Security Scanners](#external-security-scanners-always-run-programmatic-only) above for the full inventory.
 
 ### Reading the Results
 
@@ -387,26 +400,36 @@ The semantic validator always warns about the cost and asks for confirmation bef
 
 | Script | Purpose |
 |--------|---------|
-| `validate_plugin.py` | Main orchestrator -- runs all 20 sub-validators |
-| `validate_skill_comprehensive.py` | Comprehensive skill validator (190+ rules) |
-| `validate_hook.py` | Hook configuration validator |
-| `validate_agent.py` | Agent definition validator |
-| `validate_command.py` | Command definition validator |
-| `validate_mcp.py` | MCP server config validator |
-| `validate_lsp.py` | LSP server config validator |
-| `validate_marketplace.py` | Marketplace manifest validator (supports Layout A and Layout B) |
-| `validate_marketplace_pipeline.py` | Marketplace release pipeline validator (publish.py, CI, CHANGELOG) |
-| `validate_settings_marketplace.py` | Inline marketplace-in-settings validator |
-| `validate_security.py` | Security vulnerability scanner |
-| `validate_scoring.py` | Quality score calculator |
-| `validate_enterprise.py` | Enterprise compliance validator |
-| `validate_documentation.py` | Documentation quality checker |
-| `validate_encoding.py` | File encoding validator |
-| `validate_rules.py` | Rules directory validator |
-| `validate_xref.py` | Cross-reference validator |
-| `validate_skill.py` | Basic skill validator |
-| `validate_local_scope.py` | Local-scope `.claude/` validator (v2.21.0+) — non-git-tracked settings/agents/skills/commands/rules + enabledPlugins |
-| `validate_project_scope.py` | Project-scope `.claude/` validator (v2.21.0+) — git-tracked settings/agents/skills/commands/rules + tracked hooks/mcp/lsp subtrees |
+> **Always invoke validators via the launcher.** Direct invocation from
+> the plugin cache is refused by `check_remote_execution_guard()`.
+> Use `python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" <alias> <target>`.
+> See [Canonical Launcher Invocation](#canonical-launcher-invocation) below
+> or `python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" --help` for
+> the full alias table.
+
+| Script | Launcher alias | Purpose |
+|--------|---|---------|
+| `validate_plugin.py` | `plugin` | Main orchestrator -- runs all 20 sub-validators |
+| `validate_skill_comprehensive.py` | `skill` | Comprehensive skill validator (190+ rules) |
+| `validate_hook.py` | `hook` | Hook configuration validator (28 events, 5 types) |
+| `validate_agent.py` | `agent` | Agent definition validator |
+| `validate_command.py` | `command` | Command definition validator |
+| `validate_mcp.py` | `mcp` | MCP server config validator |
+| `validate_lsp.py` | `lsp` | LSP server config validator |
+| `validate_marketplace.py` | `marketplace` | Marketplace manifest validator (Layouts A/B/C) |
+| `validate_marketplace_pipeline.py` | `validate_marketplace_pipeline` | Marketplace release pipeline validator (publish.py, CI, CHANGELOG) |
+| `validate_settings_marketplace.py` | `settings-marketplace` | Inline marketplace-in-settings validator |
+| `validate_security.py` | `security` | Security vulnerability scanner (5 external scanners + fclones dedup) |
+| `validate_cache.py` | `cache` | Prompt-cache invalidation audit (CA-01..CA-06, v2.27.0+) |
+| `validate_telemetry.py` | `telemetry` | OTEL telemetry supply-chain risk validator |
+| `validate_scoring.py` | `scoring` | Quality score calculator |
+| `validate_enterprise.py` | `enterprise` | Enterprise compliance validator |
+| `validate_documentation.py` | `docs` | Documentation quality checker |
+| `validate_encoding.py` | `encoding` | File encoding validator |
+| `validate_rules.py` | `rules` | Rules directory validator |
+| `validate_xref.py` | `xref` | Cross-reference validator |
+| `validate_local_scope.py` | `local-scope` | Local-scope `.claude/` validator (v2.21.0+) — non-git-tracked settings/agents/skills/commands/rules + enabledPlugins |
+| `validate_project_scope.py` | `project-scope` | Project-scope `.claude/` validator (v2.21.0+) — git-tracked settings/agents/skills/commands/rules + tracked hooks/mcp/lsp subtrees |
 
 </details>
 

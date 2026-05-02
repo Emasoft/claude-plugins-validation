@@ -24,9 +24,9 @@ Scripts at `${CLAUDE_PLUGIN_ROOT}/scripts/` for the full plugin lifecycle.
 2. **Update**: `uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --update ./plugin-v2/ my-mkt`
 3. **Uninstall**: `uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --uninstall name@mkt`
 4. **Enable/Disable**: `uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --enable <plugin> [--scope local]`
-5. **Validate**: `uv run "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" ./plugin/`
-6. **List/Search**: `uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_registry.py" --list` or `--search <query>`
-7. **Doctor**: `uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_doctor.py" [--verbose] [--fix]`
+5. **Validate** (via launcher — direct script call refused): `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" plugin ./plugin/`
+6. **List/Search** (via launcher): `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" registry --list` or `--search <query>`
+7. **Doctor** (via launcher; or direct for `--install-scanners`): `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" doctor [--verbose] [--fix]` — for `--install-scanners` (installs all 5 external security scanners + fclones), use `uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/manage_doctor.py" --install-scanners`
 8. **Bump version**: `uv run "${CLAUDE_PLUGIN_ROOT}/scripts/bump_version.py" --patch|--minor|--major`
 
 Smart plugin name resolution — accepts: `plugin-name`, `plugin-name@marketplace`, `plugin-name@owner/marketplace`.

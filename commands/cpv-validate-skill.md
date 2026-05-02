@@ -10,13 +10,23 @@ user-invocable: true
 
 Validates a skill directory using the comprehensive skill validator (190+ rules).
 
+## ONE-LINER (use this — do not invent your own bash)
+
+```bash
+CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
+  python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" \
+  skill "$SKILL_PATH" --report "$REPORT_FILE"
+```
+
+This is the **only** correct way to invoke skill validation. Do NOT call `validate_skill_comprehensive.py` directly from `~/.claude/plugins/cache/...` — the launcher's environment-isolation guard will refuse with a "remote location" error. The `${CLAUDE_PLUGIN_ROOT}` variable is set automatically by Claude Code at command-invocation time and points at the **locally-installed CPV plugin** under the cache (e.g. `~/.claude/plugins/cache/<marketplace>/claude-plugins-validation/<latest-version>/`).
+
+Do NOT search for the script with `find`, do NOT browse `~/.claude/plugins/cache/`, do NOT pick a version yourself. `${CLAUDE_PLUGIN_ROOT}` already points at the right version.
+
 ## Privacy Check (REQUIRED)
 
-Before running validation, ensure private path detection is configured:
-
-1. **Auto-detect username**: `uv run python -c "import getpass; print(getpass.getuser())"`
-2. **If auto-detection fails**, ask the user for their system username
-3. **Pass to script**: `CLAUDE_PRIVATE_USERNAMES="username" uv run python scripts/...`
+The one-liner above already injects `CLAUDE_PRIVATE_USERNAMES="$(whoami)"`. If `$(whoami)` is unreliable in your shell, use `AskUserQuestion` to ask the user:
+> "To detect accidental private path leaks, what is your system username?"
+and substitute the result into the env var.
 
 ## Usage
 
@@ -151,6 +161,8 @@ Uses standard CPV severity levels and exit codes. With `--report`, saves full ou
 
 > **Report location (mandatory):** `$MAIN_ROOT/reports/validate_skill/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`. `$MAIN_ROOT` is the **main-repo root** — never a linked worktree's own path. Both `reports/` and `reports_dev/` are gitignored.
 
+Canonical shell prologue (resolves the main-repo root correctly from any worktree):
+
 ```bash
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   MAIN_ROOT="$(git worktree list | head -n1 | awk '{print $1}')"
@@ -160,11 +172,17 @@ fi
 REPORT_DIR="$MAIN_ROOT/reports/validate_skill"
 mkdir -p "$REPORT_DIR"
 REPORT_FILE="$REPORT_DIR/$(date +%Y%m%d_%H%M%S%z)-$(basename "$SKILL_PATH").md"
-
-uv run python scripts/validate_skill_comprehensive.py "$SKILL_PATH" $OPTIONS --report "$REPORT_FILE"
 ```
 
-Where `$SKILL_PATH` is the provided path and `$OPTIONS` are the flags passed.
+### Canonical invocation (always via the remote-validation launcher)
+
+```bash
+CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
+  python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" \
+  skill "$SKILL_PATH" $OPTIONS --report "$REPORT_FILE"
+```
+
+The launcher's `skill` alias forwards to `validate_skill_comprehensive.py` with environment isolation. `$OPTIONS` are the flags passed (`--strict`, `--openspec`, `--pillars`, `--verbose`, `--json`).
 
 ## Related Commands
 

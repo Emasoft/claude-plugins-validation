@@ -45,9 +45,13 @@ MAIN_ROOT="$(git worktree list 2>/dev/null | head -n1 | awk '{print $1}')"
 [ -z "$MAIN_ROOT" ] && MAIN_ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"   # fallback only for non-git
 TS="$(date +%Y%m%d_%H%M%S%z)"
 SLUG="$(basename "<plugin_or_project_path>")"
-REPORT="$MAIN_ROOT/reports/cache/${TS}-${SLUG}.md"
+REPORT="$MAIN_ROOT/reports/validate_cache/${TS}-${SLUG}.md"
 mkdir -p "$(dirname "$REPORT")"
-uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_cache.py" "<plugin_or_project_path>" --report "$REPORT"
+# ALWAYS go through the launcher — direct invocation of validate_cache.py
+# from the plugin cache will fail with "remote location" environment-isolation error.
+CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
+  python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" \
+  cache "<plugin_or_project_path>" --report "$REPORT"
 ```
 
 `${CLAUDE_PROJECT_DIR}` and `${CLAUDE_PLUGIN_ROOT}` are real env vars Claude Code exports across every Bash subprocess. `MAIN_ROOT` is a per-Bash-call shell variable; if a later Phase needs the main-repo root, RE-COMPUTE it at the top of that Bash call rather than relying on it persisting.
@@ -64,7 +68,7 @@ Re-read each file BEFORE editing it (auto-compaction may have stale state in you
 
 ### Phase 3 — Re-validate
 
-Re-run `validate_cache.py` against the same target. Iterate until verdict = VALID. If a rule keeps re-firing after a fix, STOP and report the residual issue with a written explanation rather than guessing further fixes.
+Re-run the validator (via the same launcher invocation as Phase 1) against the same target. Iterate until verdict = VALID. If a rule keeps re-firing after a fix, STOP and report the residual issue with a written explanation rather than guessing further fixes.
 
 ### Phase 4 — Broader cache-aware improvements (only if the user asked)
 
@@ -104,4 +108,26 @@ Max 2 lines back. Never paste code, scan output, or long lists.
 
 ## Reporting (HARD)
 
-When you finish, output ONLY the one-line summary above. The full audit + fix detail belongs in the report file under `$MAIN_ROOT/reports/cache/<timestamp>-<slug>-final.md` (where `MAIN_ROOT` is resolved as in Phase 1 — first entry of `git worktree list`, NEVER the linked worktree's own root). Never paste code blocks, file diffs, or long lists into your reply — those flood the calling agent's context window for no reason.
+When you finish, output ONLY the one-line summary above. The full audit + fix detail belongs in the report file under `$MAIN_ROOT/reports/validate_cache/<timestamp>-<slug>-final.md` (where `MAIN_ROOT` is resolved as in Phase 1 — first entry of `git worktree list`, NEVER the linked worktree's own root). Never paste code blocks, file diffs, or long lists into your reply — those flood the calling agent's context window for no reason.
+
+## Examples
+
+<example>
+user: Optimize cache for ~/Code/my-plugin/
+assistant: I'll audit, fix, and re-validate.
+[Phase 1: launcher → cache audit reports CA-01 (3 findings), CA-04 (1 finding)]
+[Phase 2: applies cache-fixes.md#ca-01 (removes {{TIMESTAMP}} from CLAUDE.md), commits]
+[Phase 2: applies cache-fixes.md#ca-04 (removes model: from SKILL.md, suggests dedicated agent), commits]
+[Phase 3: re-validates → verdict VALID]
+[DONE] 4 of 4 findings fixed. Report: reports/validate_cache/20260421_184530+0200-my-plugin-final.md
+</example>
+
+<example>
+user: cache-optimize ~/Code/my-plugin/ --broader
+assistant: I'll do CA-01..CA-06 first, then ask before each Phase-4 refactor.
+[Phase 1-3: audit + fix + re-validate clean]
+[Phase 4: AskUserQuestion proposes splitting CLAUDE.md (12k chars) → cached core + 3 references/]
+[On approval: applies the split, commits, re-validates]
+[Appends ## Cache Notes block to CLAUDE.md documenting rationale]
+[DONE] CA-rules clean + 1 broader refactor applied. Report: reports/validate_cache/20260421_192015+0200-my-plugin-broader-final.md
+</example>

@@ -509,9 +509,11 @@ def print_results(report: ValidationReport, verbose: bool = False) -> None:
 
 def main() -> int:
     """Main entry point."""
+    from cpv_validation_common import launcher_epilog
     parser = argparse.ArgumentParser(
         description="Validate the extraKnownMarketplaces block of a Claude Code settings.json file.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=launcher_epilog("settings-marketplace"),
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Show all results")
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block")

@@ -139,7 +139,12 @@ def audit_github_marketplace(repo: str) -> int:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="GitHub plugin/marketplace validation")
+    from cpv_validation_common import launcher_epilog
+    parser = argparse.ArgumentParser(
+        description="GitHub plugin/marketplace validation",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=launcher_epilog("github"),
+    )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--plugin", type=str, help="Validate a GitHub plugin (owner/repo)")
     group.add_argument("--marketplace", type=str, help="Validate a GitHub marketplace (owner/repo)")

@@ -397,7 +397,7 @@ def validate_marketplace_json(repo_root: Path) -> tuple[bool, str]:
     )
     if code == 0:
         return True, ""
-    return False, "Run: uv run python scripts/validate_marketplace.py . --verbose"
+    return False, "Run: uv run --with pyyaml python ${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py marketplace . --verbose"
 
 
 def validate_plugin_json(file_path: Path) -> tuple[bool, str]:

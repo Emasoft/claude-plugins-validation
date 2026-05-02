@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import List, Tuple
 
@@ -585,11 +586,75 @@ def do_doctor(verbose: bool = False, fix: bool = False):
     print()
 
 
+def do_install_scanners() -> int:
+    """Install every external scanner CPV uses, silently. v2.48 entry point.
+
+    Idempotent: scanners already on PATH are reported "available" without
+    re-installing. Per-platform install cascades live in
+    ``cpv_install_scanners`` and are silent (capture_output=True) — the user
+    never sees brew/snap/cargo chatter. Returns the number of scanners that
+    are NOT available after the run, so CI gates can `exit $?` cleanly.
+
+    Tools installed:
+      * fclones — pre-scan dedup helper (brew/snap/cargo/GitHub-release)
+      * cc-audit — npm-installed AI-rules scanner
+      * trufflehog — Go-binary verified-secret scanner (~700 detectors)
+      * semgrep — Python static analyzer
+      * tirith — terminal-security scanner (pipx → brew/npm/cargo cascade)
+      * skill-scanner — Cisco AI Defense (uv tool install)
+
+    Per-tool opt-out: ``CPV_NO_<TOOL>_INSTALL=1`` skips that tool's autoinstall
+    and reports it as unavailable (CPV degrades gracefully — every scanner
+    self-skips when its binary is missing).
+    """
+    # Local import keeps the doctor's normal-path startup cheap.
+    from cpv_install_scanners import install_all_scanners  # noqa: PLC0415
+
+    print(f"\n{BOLD}Installing CPV external scanners...{NC}\n")
+    statuses = install_all_scanners()
+
+    width = max(len(name) for name in statuses)
+    not_available = 0
+    for name, available in statuses.items():
+        if available:
+            ok(f"  {name:<{width}}  available on PATH")
+        else:
+            warn(f"  {name:<{width}}  NOT available — install attempt failed or opted out")
+            not_available += 1
+
+    print()
+    if not_available == 0:
+        ok("All 6 scanners ready. CPV will run at full speed.")
+    else:
+        warn(
+            f"{not_available} scanner(s) unavailable. CPV will still run but with degraded "
+            "coverage / no dedup. See README §External Security Scanners for manual install."
+        )
+    print()
+    return not_available
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Plugin health check")
+    from cpv_validation_common import launcher_epilog
+    parser = argparse.ArgumentParser(
+        description="Plugin health check",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=launcher_epilog("doctor"),
+    )
     parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed validation")
     parser.add_argument("--fix", action="store_true", help="Auto-fix orphaned entries in settings files")
+    parser.add_argument(
+        "--install-scanners",
+        action="store_true",
+        help=(
+            "v2.48 — install every external scanner CPV uses (fclones, cc-audit, "
+            "trufflehog, semgrep, tirith, Cisco skill-scanner). Silent and "
+            "idempotent. Set CPV_NO_<TOOL>_INSTALL=1 to skip a specific tool."
+        ),
+    )
     args = parser.parse_args()
+    if args.install_scanners:
+        sys.exit(do_install_scanners())
     do_doctor(verbose=args.verbose, fix=args.fix)
 
 

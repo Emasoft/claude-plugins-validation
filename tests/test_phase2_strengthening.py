@@ -1463,63 +1463,9 @@ class TestRC135LiteralEllipsisPlaceholder:
         assert rc135, "expected RC-135 to fire on real user path"
 
 
-class TestGitleaksPlaceholderFilter:
-    """v2.46 FP-K — gitleaks fires on placeholder tokens like
-    `Authorization: Bearer YOUR_API_KEY` in API documentation
-    snippets. Suppress when the line (or the line above the
-    reported one, for multi-line `curl ... \\` constructs)
-    contains a known placeholder marker."""
-
-    def test_placeholder_token_pattern_recognized(self) -> None:
-        # Exposes the regex via the helper for direct testing.
-        from validate_security import _GITLEAKS_PLACEHOLDER_TOKENS_RE
-        for placeholder in (
-            "YOUR_API_KEY", "YOUR_TOKEN", "YOUR_SECRET", "YOUR_PASSWORD",
-            "YOUR_BEARER", "YOUR_ACCESS_KEY", "YOUR_CLIENT_SECRET",
-            "<your-api-key>", "<your-token>", "<api-key>", "<token>",
-            "your-api-key", "your_token", "your-secret",
-            "TOKEN_HERE", "API_KEY_HERE", "SECRET_HERE", "REPLACE_ME",
-            "<JWT>", "<TOKEN>", "<API_KEY>",
-            "xxxxxxxxxxxx",
-            "sk-test", "sk-demo", "sk-example", "sk-placeholder",
-        ):
-            assert _GITLEAKS_PLACEHOLDER_TOKENS_RE.search(
-                f'-H "Authorization: Bearer {placeholder}"'
-            ), f"expected placeholder {placeholder!r} to be recognized"
-
-    def test_real_token_not_recognized(self) -> None:
-        from validate_security import _GITLEAKS_PLACEHOLDER_TOKENS_RE
-        # Real-shape API tokens MUST NOT match the placeholder regex.
-        # NOTE: each token literal is split with `+` so the source bytes
-        # don't match GitHub push-protection's exact-shape patterns
-        # (Slack `xoxb-`, GitHub `ghp_`, etc.). Python concatenates at
-        # compile time so the runtime value is identical to the unsplit
-        # form — the regex still sees the full real-shape string.
-        for real_shape in (
-            "ghp_" + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",  # GitHub PAT
-            "AKIA" + "IOSFODNN7EXAMPLE",                       # AWS access-key
-            "AIza" + "SyDmK4XYZ-1234567890abcdefghij",         # Google API
-            "xoxb-" + "1234567890-1234567890-abcdefghijklmnop",  # Slack
-        ):
-            assert not _GITLEAKS_PLACEHOLDER_TOKENS_RE.search(
-                f'-H "Authorization: Bearer {real_shape}"'
-            ), f"unexpected placeholder match on real token shape {real_shape!r}"
-
-    def test_multi_line_curl_continuation_skipped(self, tmp_path: Path) -> None:
-        # Real shape: gitleaks reports the curl line (N) but the
-        # placeholder is on the continuation line (N+1).
-        from validate_security import _gitleaks_line_is_placeholder_secret
-        plugin = tmp_path / "demo"
-        plugin.mkdir()
-        f = plugin / "doc.md"
-        f.write_text(
-            "## Auth Example\n"
-            "\n"
-            "```bash\n"
-            'curl -X GET "https://api.example.com/endpoint" \\\n'
-            '  -H "Authorization: Bearer YOUR_API_KEY"\n'
-            "```\n"
-        )
-        # gitleaks reports the curl line (line 4 in this example);
-        # placeholder is on line 5. The ±1 window catches it.
-        assert _gitleaks_line_is_placeholder_secret(plugin, "doc.md", 4)
+# v2.48 — TestGitleaksPlaceholderFilter removed: gitleaks integration was
+# removed in this release because trufflehog (~700 detectors, parallel-safe
+# via --concurrency) provides superset coverage with reliable parallelism.
+# The placeholder-secret regex and helper that lived in validate_security.py
+# (`_GITLEAKS_PLACEHOLDER_TOKENS_RE`, `_gitleaks_line_is_placeholder_secret`)
+# were only used by `check_gitleaks` and are gone with it.

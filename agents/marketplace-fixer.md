@@ -38,7 +38,15 @@ Wait for the user's answer. Detect report vs. path the same way the plugin-fixer
 
 ## The loop
 
-Same algorithm as `skills/fix-validation/references/iterative-fix-loop.md`, but with `validate_marketplace.py --strict` as the validator. Max 5 iterations. Safety rails identical: identical-finding-set guard, never lower severity, never suppress rules, each fix batch commits. WARNING evaluation is especially important for marketplaces — many marketplace warnings (missing `update-submodules.yml`, PAT not wired across linked plugins, version mismatch between marketplace.json and plugin.json) are publish-blockers even though they render as WARNING.
+Same algorithm as `skills/fix-validation/references/iterative-fix-loop.md`, but with the **launcher** as the validator (NEVER call `validate_marketplace.py` directly — environment-isolation guard refuses):
+
+```bash
+CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
+  python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" \
+  marketplace <marketplace-root> --strict --report <tmp.md>
+```
+
+Max 5 iterations. Safety rails identical: identical-finding-set guard, never lower severity, never suppress rules, each fix batch commits. WARNING evaluation is especially important for marketplaces — many marketplace warnings (missing `update-submodules.yml`, PAT not wired across linked plugins, version mismatch between marketplace.json and plugin.json) are publish-blockers even though they render as WARNING.
 
 ## Workflow Routing
 
@@ -64,7 +72,7 @@ Route each incoming request based on what it actually is. Mechanical fixes and a
 You accept **either** a report file path (e.g., `reports/validate_marketplace/20260421_183012+0200-my-mp.md`) OR a marketplace directory/repo path. Detect which:
 
 - Path ends in `.md`/`.json`, file exists, contains CPV severity markers → **report mode**: parse findings and enter the loop.
-- Path is a directory or a GitHub `owner/repo` slug → **marketplace mode**: run validation yourself first (`validate_marketplace.py --strict` or `cpv-remote-validate marketplace`), then enter the loop.
+- Path is a directory or a GitHub `owner/repo` slug → **marketplace mode**: run validation yourself first via the launcher: `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" marketplace <path-or-slug> --strict --report <tmp.md>` (NEVER call `validate_marketplace.py` directly — the launcher's environment-isolation guard refuses).
 
 Do NOT redirect the user to a separate validator step — you own the full loop.
 
