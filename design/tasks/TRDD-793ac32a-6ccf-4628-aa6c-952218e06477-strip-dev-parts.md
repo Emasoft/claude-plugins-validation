@@ -327,5 +327,5 @@ functionality of any existing plugin.
   related but orthogonal)
 - TRDD-91a98c92 — publish.py authentication standard (sibling TRDD;
   see filename `TRDD-bbff5bc5-...-publish-auth-standard.md`)
-- PSS source: `/Users/emanuelesabetta/Code/PERFECT_SKILL_SUGGESTER/perfect-skill-suggester/`
+- PSS source: `<dev-root>/PERFECT_SKILL_SUGGESTER/perfect-skill-suggester/`
 - PSS .gitmodules pattern: `[submodule "rust"] path = rust  url = https://github.com/Emasoft/pss-rust-engine.git`
