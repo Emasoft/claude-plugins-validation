@@ -33,13 +33,22 @@ option by typing the number in their next message. NEVER use
 ### Canonical layout
 
 - **Header row** uses heavy box-drawing characters (`┏━┳━┓` / `┡━╇━┩`).
-- **Data rows** use light characters (`│ │ │` / `├─┼─┤`).
+- **Data rows** use light characters (`│ │ │`).
+- **Row separators between EVERY data row** (`├─┼─┤`) — this makes long
+  multi-column tables readable. NO exceptions: every row gets a separator
+  above and below, even when descriptions are one line.
 - **Footer** is a single line below the table: `Type a number to choose:`.
 - **Cancel / Exit** is ALWAYS the LAST row, numbered `0`.
-- **Back** (sub-menus only) is the second-to-last row, numbered `9` (or `B` if `9` is taken — but `0` for cancel and `9` for back is the canonical pair).
+- **Back** (sub-menus only) is the second-to-last row, numbered `B` (a
+  letter, so it doesn't collide with multi-digit option numbers like
+  `9`/`19`/`24` in long menus). Both `0` and `B` are case-insensitive.
 - Column widths fit the longest entry; pad with spaces.
-- Three columns standard: `#` (1-2 chars) / `Option` / `What it does`. Add a 4th column for `Pros / Cons / Cost / Risk` only when it adds value (e.g. semantic-validation cost warning).
-- Use full-width separators where the table is wider than 80 chars.
+- Standard columns: `#` (1-3 chars wide) / `Option` / `What it does`. Add
+  a 4th column for `Pros / Cons / Cost / Risk / When to pick` whenever it
+  helps the user choose (semantic-validation cost, security scanner
+  inventory, etc.).
+- Use full-width separators wider than 80 chars when needed; do not
+  truncate descriptions to fit a narrow window — the user can scroll.
 
 ### Reference template (paste into the agent's output verbatim, then customize)
 
@@ -48,15 +57,60 @@ option by typing the number in their next message. NEVER use
 ┃ # ┃ Option               ┃ What it does                                           ┃
 ┡━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
 │ 1 │ <option name>        │ <one-line description>                                 │
+├───┼──────────────────────┼────────────────────────────────────────────────────────┤
 │ 2 │ <option name>        │ <one-line description>                                 │
+├───┼──────────────────────┼────────────────────────────────────────────────────────┤
 │ … │                      │                                                        │
-│ 9 │ Back                 │ Return to the previous menu                            │
+├───┼──────────────────────┼────────────────────────────────────────────────────────┤
+│ B │ Back                 │ Return to the previous menu                            │
+├───┼──────────────────────┼────────────────────────────────────────────────────────┤
 │ 0 │ Cancel / Exit        │ Terminate without action                               │
 └───┴──────────────────────┴────────────────────────────────────────────────────────┘
-Type a number to choose:
+Type a number (or B for back, 0 to cancel):
 ```
 
-For top-level menus (no parent), drop the `Back` row.
+For top-level menus (no parent), drop the `B — Back` row but keep `0`.
+
+### Project-type auto-detection (helper for path-accepting leaves)
+
+Whenever a Validate / Fix / Cache / Security leaf accepts a path, the
+orchestrator MUST first probe the path to decide what it is:
+
+```bash
+TARGET="<user-supplied-path>"
+PLUGIN_HERE=0; MULTI_PLUGIN=0; SUBMODULES=0; MARKETPLACE_HERE=0
+[ -f "$TARGET/.claude-plugin/plugin.json" ] && PLUGIN_HERE=1
+[ -f "$TARGET/.claude-plugin/marketplace.json" ] && MARKETPLACE_HERE=1
+# Multi-plugin workspace: 2+ children each containing .claude-plugin/plugin.json
+N_CHILD_PLUGINS=$(find "$TARGET" -mindepth 2 -maxdepth 3 -type f -name 'plugin.json' \
+  -path '*/.claude-plugin/*' 2>/dev/null | wc -l | tr -d ' ')
+[ "$N_CHILD_PLUGINS" -ge 2 ] && MULTI_PLUGIN=1
+# Submodules: .gitmodules present at root
+[ -f "$TARGET/.gitmodules" ] && SUBMODULES=1
+```
+
+Then act based on the flags:
+
+- **Single plugin** (`PLUGIN_HERE=1`, `MULTI_PLUGIN=0`) → proceed with the
+  validation directly on `$TARGET`.
+- **Single marketplace** (`MARKETPLACE_HERE=1`, `PLUGIN_HERE=0`) → proceed
+  with marketplace validation.
+- **Layout C** (`PLUGIN_HERE=1` AND `MARKETPLACE_HERE=1`) → tell the user
+  this is a marketplace-in-plugin layout and ask which view they want via
+  a small numbered table (`1 — As a plugin / 2 — As a marketplace / 0 — Cancel`).
+- **Multi-plugin workspace** (`MULTI_PLUGIN=1`) → list the child plugins as
+  rows in a numbered table and let the user pick one OR pick `A — Scan all`
+  to iterate every child.
+- **Has git submodules** (`SUBMODULES=1`) → list the submodule paths in a
+  numbered table; let the user pick one or `A — Scan all submodules`. Also
+  include a row for "Treat root as a single plugin" (in case the submodules
+  are unrelated to the validation goal).
+- **None of the above** (no `.claude-plugin/`, no submodules, multiple `*.md`
+  files at any depth) → suggest `--loose` mode and offer to run a flat-pack
+  scan via `validate_security.py --loose` (v2.48+).
+
+The detection MUST run BEFORE invoking any validator. The user MUST always
+have a `0 — Cancel / Exit` option in any sub-table the detection presents.
 
 ## Menu definitions
 
@@ -89,28 +143,78 @@ generic §3.9 "do something else" table). This is non-negotiable: the user
 always gets the explicit "fix N or end" choice after a validation, never
 just "what's next?".
 
-### 3.1 Validate sub-menu
+### 3.1 Validate sub-menu (24 explicit choices + Back + Cancel)
+
+When the user reaches this menu, the orchestrator first prints this
+table. Every option that takes a path triggers the **project-type
+auto-detection** (see "Project-type auto-detection" above) BEFORE
+invoking the underlying validator.
 
 ```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Validator                   ┃ What it does                                                      ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Plugin                      │ Full plugin validation (190+ rules, all 17 sub-validators)        │
-│ 2 │ Skill                       │ Single SKILL.md (frontmatter + structure + 190+ rules)            │
-│ 3 │ Cache                       │ Prompt-cache invalidation patterns CA-01..CA-06                   │
-│ 4 │ Marketplace settings inline │ extraKnownMarketplaces block in settings.json                     │
-│ 5 │ Local scope                 │ Non-git-tracked .claude/ (settings.local.json, gitignored elts)   │
-│ 6 │ Project scope               │ Git-tracked .claude/ (settings.json, agents/skills/commands)      │
-│ 7 │ Component                   │ Specific element (hook/mcp/agent/command/security/encoding/etc.)  │
-│ 9 │ Back                        │ Return to top-level menu                                          │
-│ 0 │ Cancel / Exit               │ Terminate without action                                          │
-└───┴─────────────────────────────┴───────────────────────────────────────────────────────────────────┘
-Type a number to choose:
+┏━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ #  ┃ What to validate                                ┃ What it does                                                                          ┃
+┡━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│  1 │ Plugin (full, all 17 sub-validators)            │ Validate every component of a plugin directory                                        │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│  2 │ Skill                                           │ Single SKILL.md (frontmatter + structure + 190+ rules)                                │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│  3 │ Agent                                           │ Single agent .md (frontmatter, model, tools, examples, 2+ <example> blocks)          │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│  4 │ Command                                         │ Single command .md (frontmatter, agent ref, allowed-tools, argument-hint)             │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│  5 │ Hook                                            │ hooks.json structure + matchers + 28 valid event names + script linting               │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│  6 │ MCP server                                      │ .mcp.json or inline mcpServers (transport, env, security checks)                      │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│  7 │ LSP server                                      │ lspServers in plugin.json (binary path, init args, transport)                         │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│  8 │ Output-style                                    │ .claude/output-styles/*.md frontmatter (validated via project-scope alias)            │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│  9 │ Rule (Cursor-style .md rule files)              │ .claude/rules/*.md frontmatter + content                                              │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│ 10 │ Marketplace — LOCAL folder                      │ marketplace.json + plugin entries on disk                                             │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│ 11 │ Marketplace — REMOTE GitHub (owner/repo)        │ Clone github:owner/repo with --depth 1, validate, clean up                            │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│ 12 │ Marketplace — REMOTE arbitrary git URL          │ git clone any URL (gitlab/bitbucket/self-hosted/SSH/HTTPS), validate, clean up        │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│ 13 │ Settings: extraKnownMarketplaces inline         │ The block inside settings.json (different schema from marketplace.json)               │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│ 14 │ Project scope (.claude/ git-tracked)            │ settings.json, agents/skills/commands/rules/output-styles, .mcp.json                  │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│ 15 │ Local scope (.claude/ non-tracked)              │ settings.local.json, gitignored elements, ~/.claude.json per-project state            │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│ 16 │ Security — sub-menu                             │ Drill into security-only scans (full pass, single scanner, marketplace-wide, etc.)    │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│ 17 │ Cache — sub-menu                                │ Drill into cache-pattern audits (CA-01..CA-06) and cache-aware refactor              │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│ 18 │ Cross-references (xref)                         │ Stale links between agents/skills/commands; broken `references/`                      │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│ 19 │ Documentation                                   │ README, frontmatter docs, structure rules                                             │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│ 20 │ Encoding                                        │ UTF-8 / BOM / line endings on all .md/.json/.yaml                                     │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│ 21 │ Enterprise                                      │ Compliance / governance / managed-settings.d/ schema                                  │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│ 22 │ Scoring                                         │ Auto-scoring system check (severity rollups, exit-code wiring)                        │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│ 23 │ Lint pass (ruff/mypy/shellcheck)                │ Lint every Python/Bash script in the plugin's scripts/ folder                         │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│ 24 │ Telemetry hazards                               │ CRITICAL env-var leak rules (PLUGIN_SEED_DIR, SHELL_PREFIX, …)                        │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│  B │ Back                                            │ Return to top-level menu                                                              │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│  0 │ Cancel / Exit                                   │ Terminate without action                                                              │
+└────┴─────────────────────────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────┘
+Type a number (or B for back, 0 to cancel):
 ```
 
-#### 3.1.1 Plugin
+All leaves below FIRST run the project-type detection (see top of file)
+on the resolved path, then drill in. Per-leaf recipes:
 
-- **arg-prompt**: `Path to the plugin to validate? (e.g. ~/Code/my-plugin/ or just the plugin name for auto-discovery)`
+#### 3.1.1 Plugin (full)
+
+- **arg-prompt**: `Path to the plugin? (e.g. ~/Code/my-plugin/ — or just the plugin name for auto-discovery)`
 - **execution**:
   ```bash
   CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
@@ -126,48 +230,203 @@ Type a number to choose:
     python "$LAUNCHER" skill "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_skill/$TS-$SLUG.md"
   ```
 
-#### 3.1.3 Cache (CA-01..CA-06)
+#### 3.1.3 Agent
 
-- **arg-prompt**: `Path to plugin OR project root? (cache audit works on any directory with CLAUDE.md / .claude/)`
+- **arg-prompt**: `Path to the agent .md file? (e.g. ./agents/my-agent.md)`
 - **execution**:
   ```bash
-  CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
-    python "$LAUNCHER" cache "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_cache/$TS-$SLUG.md"
+  uv run --with pyyaml python "$LAUNCHER" agent "$TARGET_PATH" \
+    --report "$MAIN_ROOT/reports/validate_agent/$TS-$SLUG.md"
   ```
 
-#### 3.1.4 Marketplace settings inline
+#### 3.1.4 Command
+
+- **arg-prompt**: `Path to the command .md file? (e.g. ./commands/my-command.md)`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" command "$TARGET_PATH" \
+    --report "$MAIN_ROOT/reports/validate_command/$TS-$SLUG.md"
+  ```
+
+#### 3.1.5 Hook
+
+- **arg-prompt**: `Path to hooks.json (or to the plugin root containing hooks/hooks.json)?`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" hook "$TARGET_PATH" \
+    --report "$MAIN_ROOT/reports/validate_hook/$TS-$SLUG.md"
+  ```
+
+#### 3.1.6 MCP server
+
+- **arg-prompt**: `Path to the plugin (or to .mcp.json directly)?`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" mcp "$TARGET_PATH" \
+    --report "$MAIN_ROOT/reports/validate_mcp/$TS-$SLUG.md"
+  ```
+
+#### 3.1.7 LSP server
+
+- **arg-prompt**: `Path to the plugin?`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" lsp "$TARGET_PATH" \
+    --report "$MAIN_ROOT/reports/validate_lsp/$TS-$SLUG.md"
+  ```
+
+#### 3.1.8 Output-style
+
+- **arg-prompt**: `Path to the project root? (validates .claude/output-styles/*.md frontmatter via the project-scope alias)`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" project-scope "$TARGET_PATH" \
+    --report "$MAIN_ROOT/reports/validate_project_scope/$TS-$SLUG.md"
+  ```
+- **note**: there is no dedicated `validate_output_style.py`; output-style
+  files are checked as part of `project-scope` validation.
+
+#### 3.1.9 Rule (Cursor-style .md rule files)
+
+- **arg-prompt**: `Path to the plugin (or directly to a .claude/rules/ folder)?`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" rules "$TARGET_PATH" \
+    --report "$MAIN_ROOT/reports/validate_rules/$TS-$SLUG.md"
+  ```
+
+#### 3.1.10 Marketplace — LOCAL folder
+
+- **arg-prompt**: `Path to the marketplace folder? (containing .claude-plugin/marketplace.json)`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" marketplace "$TARGET_PATH" --strict \
+    --report "$MAIN_ROOT/reports/validate_marketplace/$TS-$SLUG.md"
+  ```
+
+#### 3.1.11 Marketplace — REMOTE GitHub
+
+- **arg-prompt**: `GitHub spec? (owner/repo or https://github.com/owner/repo)`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" github --marketplace "$REPO" \
+    --report "$MAIN_ROOT/reports/validate_github_marketplace/$TS-$(echo "$REPO" | tr '/' '_').md"
+  ```
+
+#### 3.1.12 Marketplace — REMOTE arbitrary git URL (gitlab/bitbucket/self-hosted/SSH)
+
+- **arg-prompt**: `Git URL? (any URL git can clone — https://gitlab.example.com/group/repo, git@host:org/repo.git, etc.)`
+- **execution**: clone, validate, clean up:
+  ```bash
+  TMPDIR_X=$(mktemp -d -t cpv-mkt-XXXXXX)
+  trap 'rm -rf "$TMPDIR_X"' EXIT
+  i=0; until git -c http.lowSpeedLimit=100 -c http.lowSpeedTime=300 clone --depth 1 "$GIT_URL" "$TMPDIR_X/repo"; do
+    i=$((i+1)); [ $i -ge 30 ] && exit 1; sleep 6
+  done
+  uv run --with pyyaml python "$LAUNCHER" marketplace "$TMPDIR_X/repo" --strict \
+    --report "$MAIN_ROOT/reports/validate_marketplace/$TS-$(basename "$GIT_URL" .git).md"
+  ```
+- **note**: respects `~/.claude/rules/github-timeouts.md` retry pattern. The
+  temp checkout is cleaned up via the `trap` regardless of validation
+  outcome.
+
+#### 3.1.13 Settings: extraKnownMarketplaces inline
 
 - **arg-prompt**: `Path to settings.json containing the inline marketplaces block?`
 - **execution**:
   ```bash
-  CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
-    python "$LAUNCHER" settings-marketplace "$TARGET_PATH" --strict --report "$MAIN_ROOT/reports/validate_settings_marketplace/$TS-$SLUG.md"
+  uv run --with pyyaml python "$LAUNCHER" settings-marketplace "$TARGET_PATH" --strict \
+    --report "$MAIN_ROOT/reports/validate_settings_marketplace/$TS-$SLUG.md"
   ```
 
-#### 3.1.5 Local scope (.claude/local)
+#### 3.1.14 Project scope
 
-- **arg-prompt**: `Path to the project root? (validates non-git-tracked elements: settings.local.json, gitignored agents/skills/commands)`
+- **arg-prompt**: `Path to the project root? (validates git-tracked elements: settings.json, agents/skills/commands/rules/output-styles, .mcp.json)`
 - **execution**:
   ```bash
-  CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
-    python "$LAUNCHER" local-scope "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_local_scope/$TS-$SLUG.md"
+  uv run --with pyyaml python "$LAUNCHER" project-scope "$TARGET_PATH" \
+    --report "$MAIN_ROOT/reports/validate_project_scope/$TS-$SLUG.md"
   ```
 
-#### 3.1.6 Project scope (.claude/git-tracked)
+#### 3.1.15 Local scope
 
-- **arg-prompt**: `Path to the project root? (validates git-tracked elements: settings.json, agents/skills/commands)`
+- **arg-prompt**: `Path to the project root? (validates non-git-tracked elements: settings.local.json, gitignored components, ~/.claude.json per-project state)`
 - **execution**:
   ```bash
-  CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
-    python "$LAUNCHER" project-scope "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_project_scope/$TS-$SLUG.md"
+  uv run --with pyyaml python "$LAUNCHER" local-scope "$TARGET_PATH" \
+    --report "$MAIN_ROOT/reports/validate_local_scope/$TS-$SLUG.md"
   ```
 
-#### 3.1.7 Component
+#### 3.1.16 Security — drill into sub-menu
 
-- **arg-prompts** (two questions, in order):
-  1. `Which component? (hook / mcp / agent / command / security / encoding / rules / xref / docs / enterprise / scoring / lsp)`
-  2. `Path to the plugin?`
-- **execution**: same launcher pattern with the chosen alias.
+See §3.16 below.
+
+#### 3.1.17 Cache — drill into sub-menu
+
+See §3.17 below.
+
+#### 3.1.18 Cross-references (xref)
+
+- **arg-prompt**: `Path to the plugin?`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" xref "$TARGET_PATH" \
+    --report "$MAIN_ROOT/reports/validate_xref/$TS-$SLUG.md"
+  ```
+
+#### 3.1.19 Documentation
+
+- **arg-prompt**: `Path to the plugin?`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" docs "$TARGET_PATH" \
+    --report "$MAIN_ROOT/reports/validate_documentation/$TS-$SLUG.md"
+  ```
+
+#### 3.1.20 Encoding
+
+- **arg-prompt**: `Path to the plugin?`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" encoding "$TARGET_PATH" \
+    --report "$MAIN_ROOT/reports/validate_encoding/$TS-$SLUG.md"
+  ```
+
+#### 3.1.21 Enterprise
+
+- **arg-prompt**: `Path to the plugin?`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" enterprise "$TARGET_PATH" \
+    --report "$MAIN_ROOT/reports/validate_enterprise/$TS-$SLUG.md"
+  ```
+
+#### 3.1.22 Scoring
+
+- **arg-prompt**: `Path to the plugin?`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" scoring "$TARGET_PATH" \
+    --report "$MAIN_ROOT/reports/validate_scoring/$TS-$SLUG.md"
+  ```
+
+#### 3.1.23 Lint pass
+
+- **arg-prompt**: `Path to the plugin?`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" lint "$TARGET_PATH" \
+    --report "$MAIN_ROOT/reports/lint/$TS-$SLUG.md"
+  ```
+
+#### 3.1.24 Telemetry hazards
+
+- **arg-prompt**: `Path to the plugin?`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" telemetry "$TARGET_PATH" \
+    --report "$MAIN_ROOT/reports/validate_telemetry/$TS-$SLUG.md"
+  ```
 
 ---
 
@@ -469,6 +728,175 @@ Type a number to choose:
 
 ---
 
+### 3.16 Security sub-menu (drilled into from §3.1.16)
+
+```
+┏━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ #  ┃ Security scan target                            ┃ What it does                                                                                       ┃
+┡━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│  1 │ Single plugin (full security pass)              │ All in-process rule packs + 5 external scanners (cc-audit, tirith, trufflehog, semgrep, Cisco)     │
+├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  2 │ Single plugin from GitHub URL                   │ Auto-clone github.com URL → security pass → cleanup (v2.48 direct URL ingestion)                  │
+├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  3 │ Single plugin from arbitrary git URL            │ git clone any URL (gitlab/SSH/self-hosted) → security pass → cleanup                              │
+├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  4 │ Single plugin from local archive (.zip/.tar.gz) │ Extract → security pass → cleanup (v2.48 archive ingestion)                                       │
+├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  5 │ Marketplace (every plugin, tree-scan-once)      │ v2.48 architecture: stage all plugins, fclones-dedup, run scanners ONCE, bucket per-plugin         │
+├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  6 │ Loose / flat skill pack (--loose)               │ Skip the .claude-plugin/ precondition for SKILL_*.md packs                                        │
+├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  7 │ Single scanner only (cc-audit)                  │ Only cc-audit (skip tirith/trufflehog/semgrep/Cisco/internal)                                     │
+├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  8 │ Single scanner only (tirith)                    │ Only tirith policy engine                                                                          │
+├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  9 │ Single scanner only (trufflehog)                │ Only trufflehog secret scanner (--concurrency on, gitleaks dropped in v2.48)                      │
+├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 10 │ Single scanner only (semgrep)                   │ Only semgrep with p/security-audit + p/secrets rule packs                                         │
+├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 11 │ Single scanner only (Cisco AI Defense)          │ Only the Cisco AI Defense skill-scanner (programmatic engines, no API key needed)                 │
+├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 12 │ Telemetry hazards only                          │ Per-plugin env-var leak rules (PLUGIN_SEED_DIR, SHELL_PREFIX, OTEL_LOG_RAW_API_BODIES=file:*…)     │
+├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  B │ Back                                            │ Return to the Validate sub-menu                                                                    │
+├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  0 │ Cancel / Exit                                   │ Terminate without action                                                                           │
+└────┴─────────────────────────────────────────────────┴────────────────────────────────────────────────────────────────────────────────────────────────────┘
+Type a number (or B for back, 0 to cancel):
+```
+
+#### 3.16.1 Single plugin (full security pass)
+
+- **arg-prompt**: `Path to the plugin?`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" security "$TARGET_PATH" \
+    --report "$MAIN_ROOT/reports/validate_security/$TS-$SLUG.md"
+  ```
+
+#### 3.16.2 Plugin from github.com URL
+
+- **arg-prompt**: `GitHub URL? (https://github.com/owner/repo or owner/repo)`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" security "https://github.com/$REPO" \
+    --report "$MAIN_ROOT/reports/validate_security/$TS-$(echo "$REPO" | tr '/' '_').md"
+  ```
+
+#### 3.16.3 Plugin from arbitrary git URL
+
+- **arg-prompt**: `Git URL? (gitlab.example.com, git@host:org/repo.git, etc.)`
+- **execution**: clone-then-scan with retry-loop (see 3.1.12).
+
+#### 3.16.4 Plugin from local archive
+
+- **arg-prompt**: `Path to the .zip / .tar.gz / .tgz / .tar.bz2 / .tar.xz / .tar archive?`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" security "$ARCHIVE_PATH" \
+    --report "$MAIN_ROOT/reports/validate_security/$TS-$(basename "$ARCHIVE_PATH").md"
+  ```
+
+#### 3.16.5 Marketplace tree-scan-once
+
+- **arg-prompt**: `Marketplace spec? (local path, github:owner/repo, or arbitrary git URL)`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" security --marketplace "$SPEC" \
+    --report "$MAIN_ROOT/reports/validate_security/$TS-marketplace-$(echo "$SPEC" | tr '/:' '_').md"
+  ```
+
+#### 3.16.6 Loose / flat skill pack
+
+- **arg-prompt**: `Path to the flat skill pack? (folder of SKILL_*.md / *.md files without .claude-plugin/)`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" security "$TARGET_PATH" --loose \
+    --report "$MAIN_ROOT/reports/validate_security/$TS-loose-$SLUG.md"
+  ```
+
+#### 3.16.7..3.16.11 Single-scanner modes
+
+- **arg-prompts** (in order): `Path to the plugin?`
+- **execution** (substitute `<scanner>` with `cc-audit`, `tirith`, `trufflehog`, `semgrep`, or `cisco`):
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" security "$TARGET_PATH" \
+    --only-scanner <scanner> \
+    --report "$MAIN_ROOT/reports/validate_security/$TS-<scanner>-$SLUG.md"
+  ```
+- **note**: `--only-scanner` is the v2.48 flag to short-circuit the scanner
+  matrix; if it doesn't exist on the installed CPV version, fall back to
+  the full pass and surface a one-line note that single-scanner isolation
+  isn't available on this version.
+
+#### 3.16.12 Telemetry hazards only
+
+See §3.1.24 — same recipe.
+
+---
+
+### 3.17 Cache sub-menu (drilled into from §3.1.17)
+
+```
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ # ┃ Cache action                                  ┃ What it does                                                                                     ┃
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 1 │ Audit only (CA-01..CA-06)                     │ Pure read-only audit, produces report with per-rule findings                                     │
+├───┼───────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 2 │ Audit + auto-fix (loop)                       │ Audit, then dispatch cache-optimizer-agent to fix CA-01..CA-06 in priority order                 │
+├───┼───────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 3 │ Audit + broader cache-aware refactoring       │ Audit, fix CA-01..CA-06, then dispatch Phase 4 broader improvements (CLAUDE.md split, etc.)      │
+├───┼───────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 4 │ Apply --strict (MINOR + WARNING block too)    │ Same as 1 but exit non-zero when CA-04/05 (MINOR) or CA-06 (WARNING) findings exist              │
+├───┼───────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 5 │ Audit project root (not a plugin)             │ For project trees: scans .claude/ + CLAUDE.md (no .claude-plugin/ precondition)                  │
+├───┼───────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ B │ Back                                          │ Return to the Validate sub-menu                                                                  │
+├───┼───────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 0 │ Cancel / Exit                                 │ Terminate without action                                                                         │
+└───┴───────────────────────────────────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────┘
+Type a number (or B for back, 0 to cancel):
+```
+
+#### 3.17.1 Audit only
+
+- Same as §3.1.3 (legacy numbering — kept for compatibility).
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" cache "$TARGET_PATH" \
+    --report "$MAIN_ROOT/reports/validate_cache/$TS-$SLUG.md"
+  ```
+
+#### 3.17.2 Audit + auto-fix
+
+- **arg-prompt**: `Path to plugin or project root?`
+- **execution**: dispatch the **cache-optimizer-agent** with the path. The
+  agent runs Phase 1 (audit) → Phase 2 (fix) → Phase 3 (re-validate)
+  internally.
+
+#### 3.17.3 Audit + broader refactoring
+
+- **arg-prompt**: `Path to plugin or project root?`
+- **execution**: dispatch the **cache-optimizer-agent** with the path AND
+  the explicit `broader` keyword in the prompt. The agent runs Phase 1-3
+  and THEN Phase 4 (CLAUDE.md split, dynamic-content migration, etc.).
+
+#### 3.17.4 Strict mode
+
+- **arg-prompt**: `Path to plugin or project root?`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" cache "$TARGET_PATH" --strict \
+    --report "$MAIN_ROOT/reports/validate_cache/$TS-strict-$SLUG.md"
+  ```
+
+#### 3.17.5 Project root (not a plugin)
+
+- Same recipe as 3.17.1 — the validator auto-handles project vs plugin
+  trees and skips the `.claude-plugin/` precondition when not present.
+
+---
+
 ### 3.10 Post-validate fix menu (MANDATORY after every Validate / Validate-from-GitHub leaf)
 
 This table replaces §3.9 for ALL validate flows. It MUST be printed
@@ -530,8 +958,11 @@ At ANY menu level, picking `0` (Cancel / Exit) → the orchestrator MUST:
 
 ### Back semantics
 
-In a sub-menu, picking `9` (Back) → re-print the PARENT menu's table
-(typically 3.0 top-level). At the top-level menu there is no `9` row.
+In a sub-menu, picking `B` / `b` (Back) → re-print the PARENT menu's
+table (typically 3.0 top-level). At the top-level menu there is no `B`
+row. Some legacy sub-menus may still use `9` for Back where there is no
+collision risk — both `B` and a numeric Back row work, but `B` is
+preferred for any menu with more than 9 options.
 
 ### Argument-prompt etiquette
 
@@ -544,9 +975,15 @@ In a sub-menu, picking `9` (Back) → re-print the PARENT menu's table
 ### Number-parsing rules
 
 - Strip surrounding whitespace from the user's reply.
-- Take the FIRST integer found in the reply (so `1` and `1.` and `1)` all match row 1).
-- If the user types text not starting with a digit but matching an option name (case-insensitive substring match on the `Option` column), accept it.
-- Otherwise: print `Invalid choice. Pick a number from the table.` and re-print the SAME table (do not jump back to top-level).
+- Accept the literal letters `B` / `b` (Back) and `A` / `a` (Scan-all,
+  used in detection sub-tables) — case-insensitive — before falling
+  through to integer parsing.
+- Take the FIRST integer found in the reply (so `1` and `1.` and `1)` all
+  match row 1; `12` matches row 12, NOT row 1).
+- If the user types text not starting with a digit/B/A but matching an
+  option name (case-insensitive substring match on the `Option` column),
+  accept it.
+- Otherwise: print `Invalid choice. Pick a number from the table (or B for back, 0 to cancel).` and re-print the SAME table (do not jump back to top-level).
 
 ### Error handling
 
