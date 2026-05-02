@@ -3,7 +3,14 @@
 **TRDD ID:** `fa70f9b8-90c6-471b-883e-053b527991b4`
 **Filename:** `design/tasks/TRDD-fa70f9b8-90c6-471b-883e-053b527991b4-flaky-test-main-verbose.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
-**Status:** Open — root cause not yet identified.
+**Status:** RESOLVED 2026-05-02 (v2.49.1) — flake no longer reproduces. Four
+consecutive `pytest tests/` runs all passed cleanly (3853 tests each, 3.5–7.5
+min wall-clock). Root cause was never isolated, but the flake disappeared
+after the v2.48 cleanup pass that touched several validate_security global-
+state surfaces (cpv_self_scan_skip cache, classifier-state lifecycle in
+test_with_classifier_flag.py, reports-folder-write retry path). One of those
+fixes evidently neutralised the polluter as a side-effect. Leaving the
+investigation notes below for posterity in case the flake re-surfaces.
 
 ## Symptom
 
