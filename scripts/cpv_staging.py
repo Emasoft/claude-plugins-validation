@@ -290,18 +290,18 @@ def _walk_and_apply(
         rel_root = Path(root).relative_to(src)
         out_root = dst / rel_root
         out_root.mkdir(parents=True, exist_ok=True)
-        for d in list(dirs):
-            (out_root / d).mkdir(parents=True, exist_ok=True)
+        for subdir in list(dirs):
+            (out_root / subdir).mkdir(parents=True, exist_ok=True)
         for name in names:
-            s = Path(root) / name
-            d = out_root / name
+            src_file = Path(root) / name
+            dst_file = out_root / name
             try:
-                n = on_file(s, d)
+                n = on_file(src_file, dst_file)
                 if n > 0:
                     files += 1
                     bytes_ += n
             except OSError as exc:
-                skipped.append(f"{s}: {exc!r}")
+                skipped.append(f"{src_file}: {exc!r}")
     return files, bytes_, skipped
 
 

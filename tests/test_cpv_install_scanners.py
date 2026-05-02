@@ -30,7 +30,6 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import cpv_install_scanners as cis  # noqa: E402
 
-
 # ── _opt_out helper ──────────────────────────────────────────────────
 
 
@@ -179,7 +178,10 @@ class TestEnsureFclones:
         monkeypatch.delenv("CPV_NO_FCLONES_INSTALL", raising=False)
         monkeypatch.setattr(cis.platform, "system", lambda: "Linux")
 
-        which_lookup = {"fclones": [None, "/snap/bin/fclones"], "snap": "/usr/bin/snap"}
+        which_lookup: dict[str, list[str | None] | str | None] = {
+            "fclones": [None, "/snap/bin/fclones"],
+            "snap": "/usr/bin/snap",
+        }
         which_calls: dict[str, int] = {}
 
         def fake_which(name: str) -> str | None:
@@ -188,7 +190,8 @@ class TestEnsureFclones:
             if name in which_lookup:
                 value = which_lookup[name]
                 if isinstance(value, list):
-                    return value[count] if count < len(value) else value[-1]
+                    item = value[count] if count < len(value) else value[-1]
+                    return item
                 return value
             return None
 
@@ -252,7 +255,12 @@ class TestEnsureCcAudit:
 
         monkeypatch.setattr(cis.shutil, "which", fake_which)
         run_calls: list[list[str]] = []
-        monkeypatch.setattr(cis, "_silent_run", lambda argv, **kw: run_calls.append(argv) or True)
+
+        def fake_run(argv: list[str], **kw: Any) -> bool:
+            run_calls.append(argv)
+            return True
+
+        monkeypatch.setattr(cis, "_silent_run", fake_run)
         cis.ensure_cc_audit()
         assert run_calls[0] == ["npm", "install", "-g", "@cc-audit/cc-audit"]
 
@@ -279,7 +287,12 @@ class TestEnsureCiscoSkillScanner:
 
         monkeypatch.setattr(cis.shutil, "which", fake_which)
         run_calls: list[list[str]] = []
-        monkeypatch.setattr(cis, "_silent_run", lambda argv, **kw: run_calls.append(argv) or True)
+
+        def fake_run(argv: list[str], **kw: Any) -> bool:
+            run_calls.append(argv)
+            return True
+
+        monkeypatch.setattr(cis, "_silent_run", fake_run)
         cis.ensure_cisco_skill_scanner()
         assert run_calls[0] == ["uv", "tool", "install", "cisco-ai-skill-scanner"]
 

@@ -279,25 +279,25 @@ def _extract_fclones_binary(archive_path: Path, dest_dir: Path) -> bool:
     try:
         if suffix == ".zip":
             with zipfile.ZipFile(archive_path) as zf:
-                for member in zf.namelist():
-                    base = Path(member).name
+                for zip_name in zf.namelist():
+                    base = Path(zip_name).name
                     if base.lower().startswith("fclones"):
                         target = dest_dir / base
-                        with zf.open(member) as src, open(target, "wb") as dst:
-                            shutil.copyfileobj(src, dst)
+                        with zf.open(zip_name) as zsrc, open(target, "wb") as dst:
+                            shutil.copyfileobj(zsrc, dst)
                         target.chmod(0o755)
                         return target.exists()
         else:  # .tar.gz / .tgz
             with tarfile.open(archive_path, "r:gz") as tf:
-                for member in tf.getmembers():
-                    base = Path(member.name).name
-                    if base.lower().startswith("fclones") and member.isfile():
+                for tar_member in tf.getmembers():
+                    base = Path(tar_member.name).name
+                    if base.lower().startswith("fclones") and tar_member.isfile():
                         target = dest_dir / base
-                        src = tf.extractfile(member)
-                        if src is None:
+                        tsrc = tf.extractfile(tar_member)
+                        if tsrc is None:
                             continue
                         with open(target, "wb") as dst:
-                            shutil.copyfileobj(src, dst)
+                            shutil.copyfileobj(tsrc, dst)
                         target.chmod(0o755)
                         return target.exists()
     except (zipfile.BadZipFile, tarfile.TarError, OSError):

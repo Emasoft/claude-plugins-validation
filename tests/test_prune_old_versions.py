@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -23,7 +22,6 @@ from manage_doctor import (  # noqa: E402
     find_active_versions,
     find_cached_versions,
 )
-
 
 # ── _semver_sort_key ──────────────────────────────────────────────
 
