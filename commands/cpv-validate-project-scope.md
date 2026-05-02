@@ -164,6 +164,34 @@ uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/validate_project_scope.py" \
 - `/cpv-validate-settings-marketplace` — validates the
   `extraKnownMarketplaces` block specifically.
 
+## Post-validate fix prompt (mandatory)
+
+After printing the validation summary, print the following 6-row Unicode
+table verbatim and wait for the user's number. Do NOT skip — even on
+PASS / VALID, the user always gets the explicit "fix N or end" choice.
+NEVER ask "what's next?" generically.
+
+```
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ # ┃ Action                                          ┃ What it does                                                          ┃ Severities the fixer will touch ┃
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 1 │ Fix ALL issues (incl. WARNING)                  │ Dispatch the plugin-fixer agent on every finding in the report        │ CRITICAL+MAJOR+MINOR+NIT+WARNING │
+│ 2 │ Fix NIT and higher                              │ Skip WARNING-only findings                                            │ CRITICAL+MAJOR+MINOR+NIT         │
+│ 3 │ Fix MINOR and higher                            │ Skip NIT and WARNING                                                  │ CRITICAL+MAJOR+MINOR             │
+│ 4 │ Fix MAJOR and higher                            │ Only fix the publish-blockers (and CRITICALs)                         │ CRITICAL+MAJOR                   │
+│ 5 │ Fix CRITICAL only                               │ Strictest mode — fix the loaders/security blockers and nothing else   │ CRITICAL                         │
+│ 0 │ End                                             │ Done — exit without running the fixer                                 │ —                                │
+└───┴─────────────────────────────────────────────────┴───────────────────────────────────────────────────────────────────────┴──────────────────────────────────┘
+Type a number to choose:
+```
+
+On `0` → reply `Done.` and stop.
+
+On `1`-`5` → dispatch the **plugin-fixer** agent with the report path
+and the chosen `min_severity` (templates as in `/cpv-validate-plugin`).
+
+After the fixer agent returns, reply `Done.` and stop.
+
 ## References
 
 - https://code.claude.com/docs/en/settings.md
