@@ -368,7 +368,15 @@ my-skill --verbose
         assert len(report.results) == 0
 
     def test_validate_toc_embedding_list_item_with_toc_not_embedded(self, tmp_path: Path):
-        """Link in list item to file with TOC but no embedding produces WARNING (ambiguous)."""
+        """Link in list item to file with TOC but no embedding produces MINOR.
+
+        REGRESSION (2026-05-02 per user feedback on issue #18): the
+        previous behavior was WARNING because list items could be
+        ambiguous (TOC title vs reference). In practice they almost
+        always ARE references, and a missing-or-partial TOC breaks
+        progressive discovery either way. Severity is now MINOR — same
+        as the standalone reference branch.
+        """
         ref_dir = tmp_path / "references"
         ref_dir.mkdir()
 
@@ -395,7 +403,8 @@ Advanced content...
 Troubleshooting content...
 """)
 
-        # Link is in a list item — could be an embedded TOC title or a reference
+        # Link is in a list item — used to be reported as WARNING (ambiguous);
+        # now reported as MINOR because progressive discovery breaks regardless.
         skill_content = """\
 # My Skill
 
@@ -413,14 +422,13 @@ Use the skill like this...
         report = ValidationReport()
         validate_toc_embedding(skill_content, skill_path, tmp_path, report)
 
-        # Should get WARNING (not MINOR) because the link is ambiguous —
-        # it's in a list item and could be a TOC title or a reference
+        # Should get MINOR (severity-bumped from WARNING per user feedback)
         warning_results = [r for r in report.results if r.level == "WARNING"]
         minor_results = [r for r in report.results if r.level == "MINOR"]
-        assert len(warning_results) == 1, f"Expected 1 WARNING, got {len(warning_results)}"
-        assert len(minor_results) == 0, "Should be WARNING not MINOR for list items"
-        assert "config-guide.md" in warning_results[0].message
-        assert "ambiguity" in warning_results[0].message.lower()
+        assert len(minor_results) == 1, f"Expected 1 MINOR, got {len(minor_results)}"
+        assert len(warning_results) == 0, "Severity bumped from WARNING to MINOR"
+        assert "config-guide.md" in minor_results[0].message
+        assert "ambiguity" in minor_results[0].message.lower()
 
     def test_validate_toc_embedding_list_item_with_toc_embedded(self, tmp_path: Path):
         """Link in list item to file with TOC and TOC IS embedded produces PASSED."""
