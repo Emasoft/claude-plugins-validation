@@ -214,10 +214,11 @@ REPORT_FILE="$MAIN_ROOT/reports/<component>/$TS-$SLUG.md"
 2. **Install / update / enable / disable** (dispatches plugin-manager agent)
 3. **Doctor (health check)**
 4. **Install all external scanners** (one-shot batch install — `cpv-doctor --install-scanners`)
-5. **Bump version (current plugin)**
-6. **Show CPV version**
-7. **Back**
-8. **Cancel / Exit**
+5. **Prune old plugin cache versions** (free disk space — keeps active version, deletes older)
+6. **Bump version (current plugin)**
+7. **Show CPV version**
+8. **Back**
+9. **Cancel / Exit**
 
 ### 5.1 List installed plugins
 
@@ -247,7 +248,20 @@ REPORT_FILE="$MAIN_ROOT/reports/<component>/$TS-$SLUG.md"
   ```
 - **note**: This is the ONLY direct invocation of `manage_doctor.py` — `--install-scanners` is a one-shot bootstrap that doesn't need the launcher's environment isolation (it just calls platform package managers).
 
-### 5.5 Bump version (current plugin)
+### 5.5 Prune old plugin cache versions (v2.48)
+
+- **arg-prompts**: "First show DRY-RUN preview? (yes/no — recommended yes)" then if yes, show output and ask "Proceed with actual deletion? (yes/no)". Also ask "Keep how many newest versions per plugin? (default: 1)"
+- **execution** (dry-run preview):
+  ```bash
+  uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/manage_doctor.py" --prune-dry-run --prune-keep $KEEP_N
+  ```
+- **execution** (actual delete):
+  ```bash
+  uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/manage_doctor.py" --prune-old-versions --prune-keep $KEEP_N
+  ```
+- **note**: Direct invocation of `manage_doctor.py` is intentional (one-shot operation, no validator imports). The active version (whichever Claude Code's `enabledPlugins` references) is always kept, even if older than another cached version.
+
+### 5.6 Bump version (current plugin)
 
 - **arg-prompts**: "Bump type? (patch / minor / major)"
 - **execution**:
@@ -255,7 +269,7 @@ REPORT_FILE="$MAIN_ROOT/reports/<component>/$TS-$SLUG.md"
   uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/bump_version.py" --$BUMP_TYPE
   ```
 
-### 5.6 Show CPV version
+### 5.7 Show CPV version
 
 - **execution**:
   ```bash
@@ -328,7 +342,7 @@ REPORT_FILE="$MAIN_ROOT/reports/<component>/$TS-$SLUG.md"
 
 ### 8.3 Show CPV plugin version
 
-- **execution**: same as 5.6.
+- **execution**: same as 5.7.
 
 ---
 

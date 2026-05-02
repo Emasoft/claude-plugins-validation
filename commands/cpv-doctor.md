@@ -38,4 +38,26 @@ This direct invocation is intentional — `--install-scanners` is a one-shot boo
 
 **Opt-out env vars**: `CPV_NO_FCLONES_INSTALL=1`, `CPV_NO_TIRITH_INSTALL=1`. Failed installs emit a one-line WARNING and continue (CPV degrades gracefully — fclones missing just disables dedup, scans still run).
 
+## v2.48 — Prune older plugin cache versions
+
+`claude plugin update` downloads the new version but **never deletes
+older ones**. Over time the cache grows to many GB. Use cpv-doctor to
+clean up:
+
+```bash
+# DRY-RUN first — list what WOULD be deleted (safe, no changes)
+uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/manage_doctor.py" --prune-dry-run
+
+# Actually delete (after confirming the dry-run output)
+uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/manage_doctor.py" --prune-old-versions
+
+# Keep N newest versions per plugin (default: 1 = current only)
+uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/manage_doctor.py" --prune-old-versions --prune-keep 2
+```
+
+The active version (whichever Claude Code references in
+`enabledPlugins`) is **always** kept, even if older than another cached
+version. Re-install will re-populate the cache from the marketplace if
+you later need a pruned version.
+
 See the **plugin-management** skill for full details.
