@@ -76,29 +76,18 @@ Copy this checklist and track your progress:
 | Validation fails after generation | Run `standardize --fix`, then fix remaining issues manually |
 | `ModuleNotFoundError: yaml` | Use `uv run --with pyyaml python` when outside CPV venv |
 
-## Examples
-
-**Create plugin:**
-```bash
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/generate_plugin_repo.py" /tmp/my-plugin \
-  --name my-plugin --description "My awesome plugin" \
-  --author "Me" --author-email "me@example.com" --github-owner MyGitHub
-```
-
-**Create marketplace:**
-```bash
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/generate_marketplace_repo.py" /tmp/my-mkt \
-  --name my-marketplace --owner-name "My Org" --github-owner MyGitHub
-```
-
 ## Resources
 
-- [Pipeline Rules](references/pipeline-rules.md) — mandatory rules for all plugin operations
-  > Pre-Push Hook: The Quality Gate · Fix-All Mandate · Running CPV Scripts · Processing Validation Output · GitHub Secrets · CI Workflow Dependencies · Marketplace Notification · All Scripts Are Python · Binary Plugins · README Requirements · Pre-Publish Local Dry-Run
+- [Examples](references/examples.md)
+  > Create plugin · Create marketplace
+- [Pipeline Rules](references/pipeline-rules.md)
+  > Pre-Push Hook: The Quality Gate · Fix-All Mandate · Running CPV Scripts · Processing Validation Output · GitHub Secrets · CI Workflow Dependencies · Marketplace Notification · All Scripts Are Python · Binary Plugins · README Requirements · Pre-Publish Local Dry-Run · Post-Push CI Verification · Mega-Linter Configuration
 - [v2.1.80+ Plugin Features](references/v2-1-80-features.md)
   > Monitor tool · userConfig (plugin.json) · channels (plugin.json) · CLAUDE_PLUGIN_OPTION_<KEY> env vars · Inline marketplace (settings.json) · managed-settings.d/ drop-in directory · Plugin skill `name` field (v2.1.98)
 - [Marketplace Layouts](references/marketplace-layouts.md)
   > Overview · Layout A — Hub-and-Spoke (separate repos) · Layout B — Nested single-repo (monorepo) · Layout C — Marketplace-in-plugin (self-referential single repo) · How Claude Code updates plugins in each layout · When to choose which · Rich metadata fields (author, homepage, license, category) · Why CPV does not use git-subdir · Encountering a non-CPV marketplace · Refactoring between layouts · Agent behavior summary
+- [Dev-stripping](references/dev-stripping.md)
+  > Why this exists · When NOT to use
 
 ## MCP Server Bundling
 
@@ -107,3 +96,13 @@ Place bundled MCP executables in `servers/`, reference as `${CLAUDE_PLUGIN_ROOT}
 ## Token Optimization
 
 Use `mcp__plugin_llm-externalizer_llm-externalizer__*` for bounded work.
+
+## Examples
+
+See [examples.md](references/examples.md).
+> Create plugin · Create marketplace
+
+## Dev-stripping (TRDD-793ac32a)
+
+`generate_plugin_repo.py --strip-dev` (default) emits a `cpv.strip` block. See [dev-stripping.md](references/dev-stripping.md).
+> Why this exists · When NOT to use
