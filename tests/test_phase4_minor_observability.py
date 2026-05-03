@@ -225,7 +225,6 @@ class TestCheckPhase4All:
         report = ValidationReport()
         check_phase4_all(plugin, report)
         # DIAGNOSTIC (TEMPORARY — for CI Heisenbug): dump everything if assert fails.
-        import os
         import sys
         try:
             assert any("RC-88" in r.message for r in report.results)
@@ -233,6 +232,8 @@ class TestCheckPhase4All:
             print("\n=== DIAGNOSTIC test_phase4_fires_on_real_file ===", file=sys.stderr)
             print(f"plugin path: {plugin}", file=sys.stderr)
             print(f"plugin exists: {plugin.exists()}", file=sys.stderr)
+            print(f"plugin resolved: {plugin.resolve()}", file=sys.stderr)
+            print(f"plugin == plugin.resolve(): {plugin == plugin.resolve()}", file=sys.stderr)
             print("plugin contents:", file=sys.stderr)
             for p in plugin.rglob("*"):
                 print(f"  {p.relative_to(plugin)} (file={p.is_file()}, size={p.stat().st_size if p.exists() else '-'})", file=sys.stderr)
@@ -240,10 +241,19 @@ class TestCheckPhase4All:
             for r in report.results:
                 print(f"  level={r.level} message={r.message[:120]!r}", file=sys.stderr)
             print(f"sys.platform: {sys.platform}", file=sys.stderr)
-            print(f"PYTEST_CURRENT_TEST: {os.environ.get('PYTEST_CURRENT_TEST', '<unset>')}", file=sys.stderr)
-            print(f"PLUGIN_SKIP_GITHUB_INTEGRITY: {os.environ.get('PLUGIN_SKIP_GITHUB_INTEGRITY', '<unset>')}", file=sys.stderr)
-            from validate_security import _CPV_SELF_SCAN_ACTIVE  # noqa: PLC0415
+            from validate_security import _CPV_SELF_SCAN_ACTIVE, _iter_scannable_files  # noqa: PLC0415
             print(f"_CPV_SELF_SCAN_ACTIVE: {_CPV_SELF_SCAN_ACTIVE}", file=sys.stderr)
+            print("_iter_scannable_files yields:", file=sys.stderr)
+            yielded = list(_iter_scannable_files(plugin))
+            print(f"  count={len(yielded)}", file=sys.stderr)
+            for fp, rel, content in yielded:
+                print(f"  rel={rel!r} content={content[:80]!r}", file=sys.stderr)
+            # Now try ALSO with resolved path and see if it differs
+            print("_iter_scannable_files(plugin.resolve()) yields:", file=sys.stderr)
+            yielded2 = list(_iter_scannable_files(plugin.resolve()))
+            print(f"  count={len(yielded2)}", file=sys.stderr)
+            for fp, rel, content in yielded2:
+                print(f"  rel={rel!r} content={content[:80]!r}", file=sys.stderr)
             print("=== END DIAGNOSTIC ===", file=sys.stderr)
             raise
 
