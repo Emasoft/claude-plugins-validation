@@ -224,7 +224,28 @@ class TestCheckPhase4All:
         })
         report = ValidationReport()
         check_phase4_all(plugin, report)
-        assert any("RC-88" in r.message for r in report.results)
+        # DIAGNOSTIC (TEMPORARY — for CI Heisenbug): dump everything if assert fails.
+        import os
+        import sys
+        try:
+            assert any("RC-88" in r.message for r in report.results)
+        except AssertionError:
+            print("\n=== DIAGNOSTIC test_phase4_fires_on_real_file ===", file=sys.stderr)
+            print(f"plugin path: {plugin}", file=sys.stderr)
+            print(f"plugin exists: {plugin.exists()}", file=sys.stderr)
+            print("plugin contents:", file=sys.stderr)
+            for p in plugin.rglob("*"):
+                print(f"  {p.relative_to(plugin)} (file={p.is_file()}, size={p.stat().st_size if p.exists() else '-'})", file=sys.stderr)
+            print(f"report.results count: {len(report.results)}", file=sys.stderr)
+            for r in report.results:
+                print(f"  level={r.level} message={r.message[:120]!r}", file=sys.stderr)
+            print(f"sys.platform: {sys.platform}", file=sys.stderr)
+            print(f"PYTEST_CURRENT_TEST: {os.environ.get('PYTEST_CURRENT_TEST', '<unset>')}", file=sys.stderr)
+            print(f"PLUGIN_SKIP_GITHUB_INTEGRITY: {os.environ.get('PLUGIN_SKIP_GITHUB_INTEGRITY', '<unset>')}", file=sys.stderr)
+            from validate_security import _CPV_SELF_SCAN_ACTIVE  # noqa: PLC0415
+            print(f"_CPV_SELF_SCAN_ACTIVE: {_CPV_SELF_SCAN_ACTIVE}", file=sys.stderr)
+            print("=== END DIAGNOSTIC ===", file=sys.stderr)
+            raise
 
     def test_clean_plugin_no_phase4_findings(self, tmp_path: Path) -> None:
         plugin = _make_plugin(tmp_path, {
