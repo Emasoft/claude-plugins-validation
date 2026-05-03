@@ -969,26 +969,30 @@ def generate_marketplace_repo(
     mj_data = _marketplace_json(name, owner_name, description, plugins)
     write_json(target_dir / ".claude-plugin" / "marketplace.json", mj_data, dry_run)
 
-    # 2. README.md
-    readme_content = _readme(name, description, github_owner, plugins)
+    # 2. README.md — route through the LOCAL template when github_owner is
+    # empty (no remote, no badges, no workflow links).
+    if github_owner:
+        readme_content = _readme(name, description, github_owner, plugins)
+    else:
+        readme_content = _readme_local(name, description, plugins)
     write_file(target_dir / "README.md", readme_content, dry_run)
 
     # 3. .gitignore
     write_file(target_dir / ".gitignore", _gitignore(), dry_run)
 
-    # 4. .github/workflows/validate.yml
-    write_file(
-        target_dir / ".github" / "workflows" / "validate.yml",
-        _validate_workflow(),
-        dry_run,
-    )
-
-    # 5. .github/workflows/update-catalog.yml
-    write_file(
-        target_dir / ".github" / "workflows" / "update-catalog.yml",
-        _update_catalog_workflow(name),
-        dry_run,
-    )
+    # 4 + 5. .github/workflows/ — only emitted in github mode. Local-only
+    # marketplaces (no github_owner) skip CI scaffolding entirely.
+    if github_owner:
+        write_file(
+            target_dir / ".github" / "workflows" / "validate.yml",
+            _validate_workflow(),
+            dry_run,
+        )
+        write_file(
+            target_dir / ".github" / "workflows" / "update-catalog.yml",
+            _update_catalog_workflow(name),
+            dry_run,
+        )
 
     # 6. scripts/update_catalog.py
     write_file(
@@ -1079,8 +1083,15 @@ Examples:
     )
     parser.add_argument(
         "--github-owner",
-        required=True,
-        help="GitHub username or org (e.g. 'my-org')",
+        default="",
+        help=(
+            "GitHub username or org (e.g. 'my-org'). "
+            "If empty, the marketplace is scaffolded in LOCAL-ONLY mode: "
+            "no .github/workflows/, no badges, README routes through the "
+            "local-only template. Useful for marketplaces that won't be "
+            "published to GitHub (private dev catalogs, project-internal "
+            "marketplaces, etc.)."
+        ),
     )
     parser.add_argument(
         "--add-plugin",
