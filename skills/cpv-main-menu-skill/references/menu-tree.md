@@ -62,6 +62,8 @@ option by typing the number in their next message. NEVER use
 ├───┼──────────────────────┼────────────────────────────────────────────────────────┤
 │ … │                      │                                                        │
 ├───┼──────────────────────┼────────────────────────────────────────────────────────┤
+│ A │ Ask the agent        │ Let the agent suggest the best next action right now   │
+├───┼──────────────────────┼────────────────────────────────────────────────────────┤
 │ B │ Back                 │ Return to the previous menu                            │
 ├───┼──────────────────────┼────────────────────────────────────────────────────────┤
 │ 0 │ Cancel / Exit        │ Terminate without action                               │
@@ -118,30 +120,110 @@ have a `0 — Cancel / Exit` option in any sub-table the detection presents.
 
 Claude Code's interactive UI does NOT let the user submit an empty
 response — they cannot just "press Enter" to accept a default. So every
-leaf that needs a path / name / URL MUST first print this 3-row mini-menu
-and route based on the user's number:
+leaf that needs a path / name / URL MUST first print a small mini-menu
+and route based on the user's number.
+
+The mini-menu is **context-aware**: row 1 is always the most likely
+choice for what $PWD looks like RIGHT NOW. The orchestrator inspects the
+current directory before drawing the menu and picks the right shape from
+the cases below.
+
+#### Detection (run before drawing the menu)
 
 ```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Path source                                                ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Current project folder ($PWD)                              │
-│ 2 │ Enter path / plugin name / URL manually                    │
-│ 0 │ Cancel / Exit                                              │
-└───┴────────────────────────────────────────────────────────────┘
-Type a number to choose:
+1. Layout C       — root has BOTH .claude-plugin/plugin.json
+                    AND .claude-plugin/marketplace.json
+2. Marketplace    — root has ONLY .claude-plugin/marketplace.json
+3. Plugin         — root has ONLY .claude-plugin/plugin.json
+4. Multi-plugin   — root has N >= 2 immediate subdirs each containing
+                    .claude-plugin/plugin.json (sibling-plugin layout)
+5. Plain folder   — none of the above
 ```
 
-**Routing**:
-  - `1` → `TARGET=$(pwd)`. The orchestrator continues with that as the path.
-  - `2` → ask `Enter the path / name / URL:` as a plain-text prompt.
-    The user MUST type at least one character. Capture as `TARGET`.
+#### Case 1 — Layout C (nested marketplace-in-plugin)
+
+```
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ # ┃ What to scan                                                               ┃
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 1 │ Whole repo (marketplace AND its bundled plugin together)                   │
+│ 2 │ Just the plugin part of this repo                                          │
+│ 3 │ Just the marketplace part of this repo                                     │
+│ 4 │ Type a different path / name / URL                                         │
+│ A │ Ask the agent for a recommendation                                         │
+│ 0 │ Cancel / Exit                                                              │
+└───┴────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Case 2 — Marketplace only
+
+```
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ # ┃ What to scan                                                               ┃
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 1 │ This marketplace AND every plugin it lists                                 │
+│ 2 │ Just the marketplace listing (skip the plugins)                            │
+│ 3 │ Type a different path / name / URL                                         │
+│ A │ Ask the agent for a recommendation                                         │
+│ 0 │ Cancel / Exit                                                              │
+└───┴────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Case 3 — Plugin only (most common)
+
+```
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ # ┃ What to scan                                                               ┃
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 1 │ This plugin (the one in the current folder)                                │
+│ 2 │ Type a different path / name / URL                                         │
+│ A │ Ask the agent for a recommendation                                         │
+│ 0 │ Cancel / Exit                                                              │
+└───┴────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Case 4 — Multi-plugin project (N >= 2 sibling plugin subdirs)
+
+The orchestrator lists the plugin names it found, capped at the first 6
+for readability — `(plus K more)` if more than 6.
+
+```
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ # ┃ What to scan                                                               ┃
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 1 │ All 4 plugins under this folder (alpha, beta, gamma, delta)                │
+│ 2 │ Pick just one of them                                                      │
+│ 3 │ Type a different path / name / URL                                         │
+│ A │ Ask the agent for a recommendation                                         │
+│ 0 │ Cancel / Exit                                                              │
+└───┴────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Case 5 — Plain folder (default fallback)
+
+```
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ # ┃ What to scan                                                               ┃
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 1 │ Treat the current folder as the target                                     │
+│ 2 │ Type a different path / name / URL                                         │
+│ A │ Ask the agent for a recommendation                                         │
+│ 0 │ Cancel / Exit                                                              │
+└───┴────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Routing (applies to every case)
+
+  - The number that maps to "this project / this plugin / this folder"
+    sets `TARGET=$(pwd)` (or, for Layout C and Multi-plugin cases, the
+    derived sub-target). The orchestrator continues with that path.
+  - The number labelled "Type a different path / name / URL" asks
+    `Enter the path / name / URL:` as a plain-text prompt. The user MUST
+    type at least one character. Capture as `TARGET`.
   - `0` → `Cancelled — no actions taken.` and stop.
 
-The same pattern applies whether the leaf needs a local plugin path, a
-marketplace path, a GitHub `owner/repo`, or a full URL — the prompt
-text on row `2` adapts to the leaf's needs but the table shape stays
-identical.
+Always put the most-likely choice on row 1 — that lets the user pick the
+common path with a single keystroke.
 
 For leaves that need MULTIPLE path-shaped inputs (e.g. report path AND
 plugin path), repeat the mini-menu once per input.
@@ -151,23 +233,71 @@ that's the value captured by this mini-menu.
 
 ---
 
-### 3.0 Top-level menu (8 categories + Cancel)
+### 3.0b "Ask the agent" shortcut (MANDATORY — present on EVERY menu)
+
+Every menu in §3.0, §3.1, …, §3.10, and the §3.0a path-source mini-menus
+MUST include a row labeled `A` immediately before the `0 — Cancel / Exit`
+row. The row reads:
+
+```
+│ A │ Ask the agent for a recommendation              │ Let the agent suggest the best next action right now                  │
+```
+
+(Exact column widths vary per menu; the orchestrator pads with trailing
+spaces so the row matches the table's content-row width.)
+
+**Routing for `A`**:
+
+The agent looks at:
+  1. What the user did most recently (last command, last validation
+     report, last error, etc.).
+  2. The current $PWD context (Layout C / marketplace / plugin /
+     multi-plugin / plain folder — see §3.0a detection).
+  3. Any unresolved findings on disk (recent validation reports under
+     `reports/`, open TRDDs under `design/tasks/`, etc.).
+  4. The menu the user is currently looking at (so the recommendation
+     stays contextually relevant — never suggests "fix" when the user
+     is in the "create" sub-menu, etc.).
+
+The agent then prints ONE recommendation in plain language:
+
+```
+Recommendation: <action> — because <one-line reason>.
+Type the menu number to accept, or pick a different option.
+```
+
+The recommendation is text-only; the user still types a number to
+proceed. The agent NEVER auto-runs the recommended action — that would
+violate Rule 1 (no proactive project work without explicit user
+permission).
+
+If the agent can't decide (insufficient signal), it prints:
+
+```
+Not enough signal to recommend — pick the option that best matches
+what you'd like to do.
+```
+
+---
+
+### 3.0 Top-level menu (9 categories + Cancel)
 
 ```
 ┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ # ┃ Category                ┃ What it does                                                          ┃
 ┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Validate                │ Run a CPV validator (plugin/skill/cache/marketplace/scope/component)  │
-│ 2 │ Validate from GitHub    │ Clone owner/repo to tmpdir, scan, clean up                            │
-│ 3 │ Fix                     │ Apply mechanical fixes from a validation report                       │
-│ 4 │ Create                  │ Scaffold a new plugin or marketplace from scratch                     │
-│ 5 │ Manage                  │ List, install, doctor, install scanners, bump version                 │
-│ 6 │ GitHub setup            │ Branch protection rules, link plugin to marketplace                   │
-│ 7 │ Deep semantic analysis  │ Opus A-F grading (expensive — confirms cost first)                    │
-│ 8 │ Help / About            │ Category overview, command list, CPV version                          │
-│ 0 │ Cancel / Exit           │ Terminate without action                                              │
+│ 1 │ Validate                │ Check that a plugin or marketplace is well-formed                     │
+│ 2 │ Validate from GitHub    │ Check a plugin or marketplace hosted on GitHub (no local clone needed)│
+│ 3 │ Fix                     │ Auto-fix issues that a previous validation found                      │
+│ 4 │ Create                  │ Make a new plugin or marketplace from scratch                         │
+│ 5 │ Manage                  │ List installed plugins, install / update, health-check, bump version  │
+│ 6 │ GitHub setup            │ Branch-protection rules, link plugin to marketplace                   │
+│ 7 │ Deep semantic analysis  │ AI-graded quality review (slow + expensive — confirms cost first)     │
+│ 8 │ Help / About            │ Show the menu overview, list of commands, version                     │
+│ A │ Ask the agent           │ Let the agent suggest the best next action right now                  │
+│ 0 │ Cancel / Exit           │ Stop without doing anything                                           │
 └───┴─────────────────────────┴───────────────────────────────────────────────────────────────────────┘
-Type a number to choose:
+Type a number (or A to ask the agent) to choose:
 ```
 
 ---
@@ -195,57 +325,59 @@ one-keystroke shortcut for "validate the project I'm currently in".
 ┏━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ #  ┃ What to validate                                ┃ What it does                                                                          ┃
 ┡━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│  1 │ Plugin (full, all 17 sub-validators)            │ Validate every component of a plugin directory                                        │
+│  1 │ Whole plugin (every check we have)              │ Run all 17 checks on a plugin folder                                                  │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│  2 │ Skill                                           │ Single SKILL.md (frontmatter + structure + 190+ rules)                                │
+│  2 │ One SKILL.md file                               │ Header (frontmatter), structure, and content rules                                    │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│  3 │ Agent                                           │ Single agent .md (frontmatter, model, tools, examples, 2+ <example> blocks)           │
+│  3 │ One agent .md file                              │ Header, model, tools, examples (2+ <example> blocks)                                  │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│  4 │ Command                                         │ Single command .md (frontmatter, agent ref, allowed-tools, argument-hint)             │
+│  4 │ One command .md file                            │ Header, target agent, tool allowlist, argument hint                                   │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│  5 │ Hook                                            │ hooks.json structure + matchers + 28 valid event names + script linting               │
+│  5 │ Hook                                            │ hooks.json layout + event names + the scripts the hook calls                          │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│  6 │ MCP server                                      │ .mcp.json or inline mcpServers (transport, env, security checks)                      │
+│  6 │ MCP server                                      │ MCP server setup (transport, env vars, security checks)                               │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│  7 │ LSP server                                      │ lspServers in plugin.json (binary path, init args, transport)                         │
+│  7 │ LSP server                                      │ Language-server setup in plugin.json                                                  │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│  8 │ Output-style                                    │ .claude/output-styles/*.md frontmatter (validated via project-scope alias)            │
+│  8 │ Output-style                                    │ Output-style files in .claude/output-styles/                                          │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│  9 │ Rule (Cursor-style .md rule files)              │ .claude/rules/*.md frontmatter + content                                              │
+│  9 │ Rule files (.claude/rules/*.md)                 │ Rule-file headers and content                                                         │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│ 10 │ Marketplace — LOCAL folder                      │ marketplace.json + plugin entries on disk                                             │
+│ 10 │ Marketplace — local folder                      │ A marketplace folder on this machine                                                  │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│ 11 │ Marketplace — REMOTE GitHub (owner/repo)        │ Clone github:owner/repo with --depth 1, validate, clean up                            │
+│ 11 │ Marketplace — GitHub (owner/repo)               │ A marketplace from a GitHub repo (cloned to a tmp dir, then deleted)                  │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│ 12 │ Marketplace — REMOTE arbitrary git URL          │ git clone any URL (gitlab/bitbucket/self-hosted/SSH/HTTPS), validate, clean up        │
+│ 12 │ Marketplace — any git URL                       │ A marketplace from any git URL (GitLab, Bitbucket, SSH, self-hosted)                  │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│ 13 │ Settings: extraKnownMarketplaces inline         │ The block inside settings.json (different schema from marketplace.json)               │
+│ 13 │ Inline marketplaces in settings.json            │ Marketplace blocks pasted directly into Claude Code's settings.json                   │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│ 14 │ Project scope (.claude/ git-tracked)            │ settings.json, agents/skills/commands/rules/output-styles, .mcp.json                  │
+│ 14 │ Project-level Claude config (git-tracked)       │ Files in .claude/ that ARE checked into git (settings.json, agents, …)                │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│ 15 │ Local scope (.claude/ non-tracked)              │ settings.local.json, gitignored elements, ~/.claude.json per-project state            │
+│ 15 │ Local-only Claude config (not in git)           │ settings.local.json + ~/.claude.json per-project state (not in git)                   │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│ 16 │ Security — sub-menu                             │ Drill into security-only scans (full pass, single scanner, marketplace-wide, etc.)    │
+│ 16 │ Security checks (sub-menu)                      │ Open the security-only sub-menu (one scanner, marketplace-wide, etc.)                 │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│ 17 │ Cache — sub-menu                                │ Drill into cache-pattern audits (CA-01..CA-06) and cache-aware refactor               │
+│ 17 │ Prompt-cache checks (sub-menu)                  │ Open the cache-pattern sub-menu (cache-friendly refactor, etc.)                       │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│ 18 │ Cross-references (xref)                         │ Stale links between agents/skills/commands; broken `references/`                      │
+│ 18 │ Broken links between files                      │ Stale references between agents / skills / commands and their reference files         │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│ 19 │ Documentation                                   │ README, frontmatter docs, structure rules                                             │
+│ 19 │ Documentation                                   │ README + doc structure rules                                                          │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│ 20 │ Encoding                                        │ UTF-8 / BOM / line endings on all .md/.json/.yaml                                     │
+│ 20 │ File encoding                                   │ UTF-8, BOM marker, line endings on every .md / .json / .yaml file                     │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│ 21 │ Enterprise                                      │ Compliance / governance / managed-settings.d/ schema                                  │
+│ 21 │ Enterprise                                      │ Compliance / governance / IT-managed-settings rules                                   │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│ 22 │ Scoring                                         │ Auto-scoring system check (severity rollups, exit-code wiring)                        │
+│ 22 │ Self-check the scoring system                   │ Verify CPV's own pass / fail / severity logic still works                             │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│ 23 │ Lint pass (ruff/mypy/shellcheck)                │ Lint every Python/Bash script in the plugin's scripts/ folder                         │
+│ 23 │ Lint scripts (ruff / mypy / shellcheck)         │ Run linters on every Python and Bash script the plugin ships                          │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│ 24 │ Telemetry hazards                               │ CRITICAL env-var leak rules (PLUGIN_SEED_DIR, SHELL_PREFIX, …)                        │
+│ 24 │ Risky env-var usage                             │ Telemetry-leak rules (PLUGIN_SEED_DIR, SHELL_PREFIX, OTEL_LOG_RAW_API_BODIES, …)      │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│  B │ Back                                            │ Return to top-level menu                                                              │
+│  A │ Ask the agent for a recommendation              │ Let the agent suggest the best next action right now                                  │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│  0 │ Cancel / Exit                                   │ Terminate without action                                                              │
+│  B │ Back                                            │ Go back to the top-level menu                                                         │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│  0 │ Cancel / Exit                                   │ Stop without doing anything                                                           │
 └────┴─────────────────────────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────┘
 Type a number (or B for back, 0 to cancel):
 ```
@@ -474,14 +606,15 @@ See §3.17 below.
 ### 3.2 Validate from GitHub sub-menu
 
 ```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Source                    ┃ What it does                                                      ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Plugin from GitHub        │ Clone owner/repo, validate plugin, clean up                       │
-│ 2 │ Marketplace from GitHub   │ Clone owner/repo, validate marketplace, clean up                  │
-│ 9 │ Back                      │ Return to top-level menu                                          │
-│ 0 │ Cancel / Exit             │ Terminate without action                                          │
-└───┴───────────────────────────┴───────────────────────────────────────────────────────────────────┘
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ # ┃ Source                    ┃ What it does                                                          ┃
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 1 │ Plugin from GitHub        │ Check a plugin from a GitHub repo (cloned to a tmp dir, then deleted) │
+│ 2 │ Marketplace from GitHub   │ Check a marketplace from a GitHub repo (tmp clone + cleanup)          │
+│ 9 │ Back                      │ Go back to the top-level menu                                         │
+│ A │ Ask the agent             │ Let the agent suggest the best next action right now                  │
+│ 0 │ Cancel / Exit             │ Stop without doing anything                                           │
+└───┴───────────────────────────┴───────────────────────────────────────────────────────────────────────┘
 Type a number to choose:
 ```
 
@@ -519,11 +652,12 @@ Type a number to choose:
 ┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ # ┃ Operation                ┃ What it does                                                       ┃
 ┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Fix plugin findings      │ From a report file OR a plugin path (uses plugin-fixer agent)      │
-│ 2 │ Fix marketplace findings │ From a report OR marketplace path (uses marketplace-fixer agent)   │
-│ 3 │ Cache optimize           │ Audit + fix loop for CA-01..CA-06 (uses cache-optimizer-agent)     │
-│ 9 │ Back                     │ Return to top-level menu                                           │
-│ 0 │ Cancel / Exit            │ Terminate without action                                           │
+│ 1 │ Fix plugin issues        │ From a report file OR a plugin folder (uses the plugin-fixer agent)│
+│ 2 │ Fix marketplace issues   │ From a report file OR a marketplace folder (uses marketplace-fixer)│
+│ 3 │ Optimize prompt cache    │ Audit + auto-fix the cache patterns (uses cache-optimizer-agent)   │
+│ 9 │ Back                     │ Go back to the top-level menu                                      │
+│ A │ Ask the agent            │ Let the agent suggest the best next action right now               │
+│ 0 │ Cancel / Exit            │ Stop without doing anything                                        │
 └───┴──────────────────────────┴────────────────────────────────────────────────────────────────────┘
 Type a number to choose:
 ```
@@ -553,10 +687,11 @@ Type a number to choose:
 ┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ # ┃ Scaffold                    ┃ What it does                                                     ┃
 ┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Scaffold a new plugin       │ Generate full plugin repo (uses plugin-creator agent)            │
-│ 2 │ Scaffold a new marketplace  │ Generate marketplace hub (uses plugin-creator agent)             │
-│ 9 │ Back                        │ Return to top-level menu                                         │
-│ 0 │ Cancel / Exit               │ Terminate without action                                         │
+│ 1 │ New plugin                  │ Make a fresh plugin repo from scratch (uses the plugin-creator)  │
+│ 2 │ New marketplace             │ Make a fresh marketplace repo from scratch (uses plugin-creator) │
+│ 9 │ Back                        │ Go back to the top-level menu                                    │
+│ A │ Ask the agent               │ Let the agent suggest the best next action right now             │
+│ 0 │ Cancel / Exit               │ Stop without doing anything                                      │
 └───┴─────────────────────────────┴──────────────────────────────────────────────────────────────────┘
 Type a number to choose:
 ```
@@ -586,19 +721,20 @@ Type a number to choose:
 ┃ # ┃ Operation                         ┃ What it does                                                    ┃
 ┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
 │ 1 │ List installed plugins            │ Show every plugin Claude Code knows about                       │
-│ 2 │ Install / update / enable / dis   │ Dispatches plugin-manager agent (its First Contact menu picks)  │
-│ 3 │ Doctor (health check)             │ Probe registry, settings, cache for orphans                     │
-│ 4 │ Install all external scanners     │ Batch-install cc-audit/tirith/trufflehog/semgrep/Cisco/fclones  │
-│ 5 │ Prune old plugin cache versions   │ Free disk space — keep active version, delete older             │
-│ 6 │ Bump version + publish            │ patch / minor / major (delegates to publish.py)                 │
-│ 7 │ Show CPV version                  │ Read .claude-plugin/plugin.json                                 │
-│ 8 │ Refresh README AUTO-COMPONENTS    │ Re-render the plugin README components table from filesystem    │
-│10 │ Standardize plugin (force-tpl)    │ Force-overwrite publish.py + CI + retry helpers from canonical  │
-│11 │ Add component (skill/agent/cmd)   │ Add new skill/agent/command/hook/mcp to an existing plugin      │
-│12 │ Strip dev parts (submodule)       │ Move tests/ to per-plugin git submodule (PSS pattern)           │
-│13 │ Migrate marketplace (source.url)  │ Normalize source.url to source.repo + detect dead 404 entries   │
-│ 9 │ Back                              │ Return to top-level menu                                        │
-│ 0 │ Cancel / Exit                     │ Terminate without action                                        │
+│ 2 │ Install / update / enable / off   │ Hand off to the plugin-manager agent (it asks what you want)    │
+│ 3 │ Health check                      │ Look for problems in the plugin registry, settings, and cache   │
+│ 4 │ Install external scanners         │ Install all the security scanners CPV uses (cc-audit, etc.)     │
+│ 5 │ Prune old cached plugin versions  │ Free disk space — keep the active version, delete older ones    │
+│ 6 │ Bump version + publish            │ Bump patch / minor / major and run the publish pipeline         │
+│ 7 │ Show CPV version                  │ Read the version from .claude-plugin/plugin.json                │
+│ 8 │ Refresh plugin README             │ Re-build the plugin's auto-generated README sections            │
+│10 │ Standardize plugin                │ Re-write the plugin's publish.py + CI + retry helpers           │
+│11 │ Add component                     │ Add a new skill / agent / command / hook / mcp to a plugin      │
+│12 │ Move tests to a sub-repo          │ Move tests/ into a separate git submodule (PSS pattern)         │
+│13 │ Migrate marketplace.json          │ Normalize old source.url entries and detect dead 404 entries    │
+│ 9 │ Back                              │ Go back to the top-level menu                                   │
+│ A │ Ask the agent                     │ Let the agent suggest the best next action right now            │
+│ 0 │ Cancel / Exit                     │ Stop without doing anything                                     │
 └───┴───────────────────────────────────┴─────────────────────────────────────────────────────────────────┘
 Type a number to choose:
 ```
@@ -753,11 +889,12 @@ Type a number to choose:
 ┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ # ┃ Operation                            ┃ What it does                                              ┃
 ┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Branch protection (current repo)     │ Apply rules to the repo of `git remote get-url origin`    │
-│ 2 │ Branch protection (generic owner/rp) │ Apply rules to a different owner/repo                     │
-│ 3 │ Link plugin to a marketplace         │ Add the plugin to a marketplace's plugin list             │
-│ 9 │ Back                                 │ Return to top-level menu                                  │
-│ 0 │ Cancel / Exit                        │ Terminate without action                                  │
+│ 1 │ Protect this repo's branches         │ Apply branch-protection rules to the repo of `origin`     │
+│ 2 │ Protect another repo's branches      │ Apply branch-protection rules to any owner/repo           │
+│ 3 │ Link a plugin to a marketplace       │ Register a plugin in a marketplace's plugin list          │
+│ 9 │ Back                                 │ Go back to the top-level menu                             │
+│ A │ Ask the agent                        │ Let the agent suggest the best next action right now      │
+│ 0 │ Cancel / Exit                        │ Stop without doing anything                               │
 └───┴──────────────────────────────────────┴───────────────────────────────────────────────────────────┘
 Type a number to choose:
 ```
@@ -786,9 +923,10 @@ Type a number to choose:
 ┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ # ┃ Operation                  ┃ What it does                                                     ┃ Cost                    ┃
 ┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Confirm + run on a path    │ Opus A-F semantic grading of a skill / agent / whole plugin      │ 10-50× normal scan cost │
-│ 9 │ Back                       │ Return to top-level menu                                         │ —                       │
-│ 0 │ Cancel / Exit              │ Terminate without action                                         │ —                       │
+│ 1 │ Confirm + run on a path    │ AI-graded quality review (A-F) of a skill / agent / whole plugin │ 10-50x a normal scan    │
+│ 9 │ Back                       │ Go back to the top-level menu                                    │ —                       │
+│ A │ Ask the agent              │ Let the agent suggest the best next action right now             │ —                       │
+│ 0 │ Cancel / Exit              │ Stop without doing anything                                      │ —                       │
 └───┴────────────────────────────┴──────────────────────────────────────────────────────────────────┴─────────────────────────┘
 Type a number to choose:
 ```
@@ -808,11 +946,12 @@ Type a number to choose:
 ┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ # ┃ Help topic                          ┃ What it shows                                             ┃
 ┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Category overview                   │ Re-print the 8-row top-level table                        │
-│ 2 │ List every CPV command              │ Walk commands/cpv-*.md and print name + description       │
-│ 3 │ Show CPV plugin version             │ Read .claude-plugin/plugin.json                           │
-│ 9 │ Back                                │ Return to top-level menu                                  │
-│ 0 │ Cancel / Exit                       │ Terminate without action                                  │
+│ 1 │ Show the top-level menu             │ Re-print the main menu (the 8 categories)                 │
+│ 2 │ List every CPV command              │ Print the name + description of every /cpv-* command      │
+│ 3 │ Show CPV version                    │ Read the version from .claude-plugin/plugin.json          │
+│ 9 │ Back                                │ Go back to the top-level menu                             │
+│ A │ Ask the agent                       │ Let the agent suggest the best next action right now      │
+│ 0 │ Cancel / Exit                       │ Stop without doing anything                               │
 └───┴─────────────────────────────────────┴───────────────────────────────────────────────────────────┘
 Type a number to choose:
 ```
@@ -847,7 +986,8 @@ table and wait for the user's number:
 ┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ # ┃ Next                        ┃ What it does                                                   ┃
 ┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Do something else           │ Return to top-level menu                                       │
+│ 1 │ Do something else           │ Go back to the top-level menu                                  │
+│ A │ Ask the agent               │ Let the agent suggest the best next action right now           │
 │ 0 │ Done (exit)                 │ Reply `Done.` and stop                                         │
 └───┴─────────────────────────────┴────────────────────────────────────────────────────────────────┘
 Type a number to choose:
@@ -885,9 +1025,11 @@ Type a number to choose:
 ├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
 │ 12 │ Telemetry hazards only                          │ Per-plugin env-var leak rules (PLUGIN_SEED_DIR, SHELL_PREFIX, OTEL_LOG_RAW_API_BODIES=file:*…)     │
 ├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  B │ Back                                            │ Return to the Validate sub-menu                                                                    │
+│  A │ Ask the agent for a recommendation              │ Let the agent suggest the best next action right now                                               │
 ├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  0 │ Cancel / Exit                                   │ Terminate without action                                                                           │
+│  B │ Back                                            │ Go back to the Validate sub-menu                                                                   │
+├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  0 │ Cancel / Exit                                   │ Stop without doing anything                                                                        │
 └────┴─────────────────────────────────────────────────┴────────────────────────────────────────────────────────────────────────────────────────────────────┘
 Type a number (or B for back, 0 to cancel):
 ```
@@ -978,9 +1120,11 @@ See §3.1.24 — same recipe.
 ├───┼───────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
 │ 5 │ Audit project root (not a plugin)             │ For project trees: scans .claude/ + CLAUDE.md (no .claude-plugin/ precondition)                  │
 ├───┼───────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ B │ Back                                          │ Return to the Validate sub-menu                                                                  │
+│ A │ Ask the agent for a recommendation            │ Let the agent suggest the best next action right now                                             │
 ├───┼───────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ 0 │ Cancel / Exit                                 │ Terminate without action                                                                         │
+│ B │ Back                                          │ Go back to the Validate sub-menu                                                                 │
+├───┼───────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 0 │ Cancel / Exit                                 │ Stop without doing anything                                                                      │
 └───┴───────────────────────────────────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────┘
 Type a number (or B for back, 0 to cancel):
 ```
@@ -1045,6 +1189,7 @@ user always sees the menu and is never auto-deflected.
 │ 3 │ Fix MINOR and higher                            │ Skip NIT and WARNING                                                  │ CRITICAL+MAJOR+MINOR             │
 │ 4 │ Fix MAJOR and higher                            │ Only fix the publish-blockers (and CRITICALs)                         │ CRITICAL+MAJOR                   │
 │ 5 │ Fix CRITICAL only                               │ Strictest mode — fix the loaders/security blockers and nothing else   │ CRITICAL                         │
+│ A │ Ask the agent                                   │ Let the agent suggest the best next action right now                  │ —                                │
 │ 0 │ End                                             │ Done — exit without running the fixer                                 │ —                                │
 └───┴─────────────────────────────────────────────────┴───────────────────────────────────────────────────────────────────────┴──────────────────────────────────┘
 Type a number to choose:
