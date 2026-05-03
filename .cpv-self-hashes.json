@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-03T16:33:58+00:00",
+  "computed_at": "2026-05-03T18:46:57+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     "agents/cache-optimizer-agent.md": "sha256:b0f8e0619569cc2b04587e8b251f9ad2f9a8e8227da071953aa56f78c72c0553",
@@ -138,7 +138,7 @@
     "skills/canonical-pipeline/references/pipeline-rules.md": "sha256:c0663f722dcaa700bfec66fd6c86ad5add00c24b3af5289d6b20c542c4426d36",
     "skills/canonical-pipeline/references/v2-1-80-features.md": "sha256:1ca8a9dd13d78e9f89c4c969b38f4a0a005c083e16789e6b4ee7f467e19d50e6",
     "skills/cpv-main-menu-skill/SKILL.md": "sha256:0e6876425bb18d5189b46546c00cb9db6a6bb46f4d8e9831dcdf188c7fc9ac63",
-    "skills/cpv-main-menu-skill/references/menu-tree.md": "sha256:2e5a99d05bf4eaad7024bcbf84a2794602e6f61026c23a0e19870e33d2291873",
+    "skills/cpv-main-menu-skill/references/menu-tree.md": "sha256:9f239e43c3516239d04df3df7a58514ffd2905889c8b90e4d32cd6c502190865",
     "skills/create-plugin/SKILL.md": "sha256:70a6cfeb5052b0561215567d4372cb9f905d3af411f792975a6434bf34eb7ef6",
     "skills/create-plugin/references/dev-stripping.md": "sha256:04616980266569ce59caf5397a9b2eee6d457c764eaaf4151172fbdb569dac0f",
     "skills/create-plugin/references/examples.md": "sha256:828381ff3159784df8bbf269b30630439b8a93966676b104ad6a6f7fc0647ed1",
