@@ -391,3 +391,129 @@ def _validate_safe_name(name: str, label: str) -> str:
         err(f"Invalid {label} name: '{name}' — must not start with '.' or '-'")
         sys.exit(1)
     return name
+
+
+# ── Marker-block helpers (Phase 5: README auto-maintenance) ───────────────
+
+
+# Module-private regex helper. Imported into refresh_readme.py via
+# `from cpv_management_common import _re_marker` for the --check path
+# that needs to inspect the file directly without rewriting.
+import re as _re_marker  # noqa: E402  (intentional: section-local import)
+
+
+def replace_marker_block(
+    file_path: Path,
+    marker_id: str,
+    new_content: str,
+    *,
+    create_if_missing: bool = False,
+) -> tuple[bool, str]:
+    """Replace text between `<!-- BEGIN AUTO-{marker_id} -->` and
+    `<!-- END AUTO-{marker_id} -->` with `new_content`. Idempotent.
+
+    The marker comments are preserved; only the body between them is
+    rewritten. This pattern lets agents auto-refresh sections of a README
+    without clobbering the user's surrounding prose.
+
+    Returns (changed, status):
+      * (True, "updated") — markers found, content differed, file rewritten.
+      * (False, "unchanged") — markers found, content already matched.
+      * (False, "missing") — markers not present and create_if_missing=False.
+      * (True, "appended") — markers not present, create_if_missing=True,
+        block appended to end of file.
+
+    Raises FileNotFoundError if file_path does not exist (unless
+    create_if_missing=True, in which case the file is created).
+    """
+    begin_marker = f"<!-- BEGIN AUTO-{marker_id} -->"
+    end_marker = f"<!-- END AUTO-{marker_id} -->"
+    new_block = f"{begin_marker}\n{new_content.rstrip()}\n{end_marker}\n"
+
+    if not file_path.exists():
+        if create_if_missing:
+            file_path.write_text(new_block, encoding="utf-8")
+            return True, "created"
+        raise FileNotFoundError(file_path)
+
+    text = file_path.read_text(encoding="utf-8")
+    pattern = _re_marker.compile(
+        f"{_re_marker.escape(begin_marker)}.*?{_re_marker.escape(end_marker)}\n?",
+        flags=_re_marker.DOTALL,
+    )
+    match = pattern.search(text)
+    if match is None:
+        if not create_if_missing:
+            return False, "missing"
+        # Append the block at the end of the file with a leading blank line.
+        if not text.endswith("\n"):
+            text += "\n"
+        text += "\n" + new_block
+        file_path.write_text(text, encoding="utf-8")
+        return True, "appended"
+
+    # Compare existing body to the new body. Strip whitespace differences
+    # so trivial reformats don't trigger a rewrite.
+    existing = match.group(0)
+    if existing.strip() == new_block.strip():
+        return False, "unchanged"
+    new_text = text[: match.start()] + new_block + text[match.end() :]
+    file_path.write_text(new_text, encoding="utf-8")
+    return True, "updated"
+
+
+def detect_components(plugin_root: Path) -> dict[str, list[str]]:
+    """Return a per-component-folder list of names found in plugin_root.
+
+    Conservatively classifies files in known component dirs:
+      agents/   → agent name (basename without .md)
+      skills/   → skill name (each subdir with SKILL.md)
+      commands/ → command name (basename without .md)
+      hooks/    → ["hooks.json"] if present (hooks themselves are in JSON)
+
+    Returns {component_dir: [name1, name2, ...]} sorted alphabetically.
+    Empty / missing dirs are omitted from the dict.
+    """
+    out: dict[str, list[str]] = {}
+    agents = plugin_root / "agents"
+    if agents.is_dir():
+        names = sorted(p.stem for p in agents.glob("*.md") if p.is_file())
+        if names:
+            out["agents"] = names
+    skills = plugin_root / "skills"
+    if skills.is_dir():
+        names = sorted(
+            p.name for p in skills.iterdir()
+            if p.is_dir() and (p / "SKILL.md").is_file()
+        )
+        if names:
+            out["skills"] = names
+    commands = plugin_root / "commands"
+    if commands.is_dir():
+        names = sorted(p.stem for p in commands.glob("*.md") if p.is_file())
+        if names:
+            out["commands"] = names
+    hooks_json = plugin_root / "hooks" / "hooks.json"
+    if hooks_json.is_file():
+        out["hooks"] = ["hooks.json"]
+    mcp_json = plugin_root / ".mcp.json"
+    if mcp_json.is_file():
+        out["mcpServers"] = [".mcp.json"]
+    return out
+
+
+def render_components_table(components: dict[str, list[str]]) -> str:
+    """Render the auto-detected components as a markdown table.
+
+    Empty input → returns a single line ("(no components detected)").
+    """
+    if not components:
+        return "_(no components detected — add files to agents/, skills/, commands/, hooks/, or .mcp.json)_"
+    lines = [
+        "| Component | Count | Names |",
+        "|---|---:|---|",
+    ]
+    for comp_dir, names in sorted(components.items()):
+        names_str = ", ".join(f"`{n}`" for n in names)
+        lines.append(f"| `{comp_dir}/` | {len(names)} | {names_str} |")
+    return "\n".join(lines)
