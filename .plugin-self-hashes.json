@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-03T07:24:59+00:00",
+  "computed_at": "2026-05-03T07:40:35+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     "agents/cache-optimizer-agent.md": "sha256:b0f8e0619569cc2b04587e8b251f9ad2f9a8e8227da071953aa56f78c72c0553",
@@ -55,7 +55,7 @@
     "design/tasks/TRDD-e2b17a61-e6f0-4bff-ac9e-feb3a7cd046b-settings-json-marketplace-validator.md": "sha256:6423d1b500559be34f4f556688f30033b8d7957bd2eeb9ce2fddf51c5849f4de",
     "design/tasks/TRDD-e3e74f69-e41c-4b0f-841c-69f066614b6f-validate-telemetry.md": "sha256:9a8c3e174028eff127ac01a2000617584996230d8c6310a05b312465cede97b4",
     "design/tasks/TRDD-f4e2d385-b37d-4f9e-b2c8-4940958b474a-scope-deep-validation.md": "sha256:9f13fc2a035337971ecb24ac2da27b26a68ac4693fd599f443e1f0dc15df8876",
-    "design/tasks/TRDD-fa70f9b8-90c6-471b-883e-053b527991b4-flaky-test-main-verbose.md": "sha256:875eadd4d33ea66f32e266c1afd3def0572ffbf2f554e0f77195f6052465b3d4",
+    "design/tasks/TRDD-fa70f9b8-90c6-471b-883e-053b527991b4-flaky-test-main-verbose.md": "sha256:50e373fe2298a1c2e40d2cb777053cbb604be90fcba8f38da296878421d20b85",
     "design/tasks/TRDD-fe006962-f3ec-48e8-bb2b-849ec7109d2c-context-aware-detection.md": "sha256:6ce5e6ad781e643b4be23a017f6d2c74b3d1f5649d687d42e36b54b5c2aead41",
     "design/tasks/TRDD-feb72fa4-906f-4bed-9f14-febbdae54bb1-multi-hook-precedence.md": "sha256:f9520df0867d7fe0f0885e3619f8ac00df9d609cec6dc7795285ef607660089a",
     "scripts/_minimal_yaml.py": "sha256:c765ed921f40633e30ca2af87eb1c2e42f11c17c890bd543e153ac39078a73bb",
@@ -288,7 +288,7 @@
     "tests/test_phase1_critical_rules.py": "sha256:9a286d49b1c1e868cf28a549f9168bb6d8e9478fa64f3f7b2f14273f411af1f8",
     "tests/test_phase2_strengthening.py": "sha256:66a31fac8d24cb459c0ba9e29230443d69e495cb3704185798b90fc1d3307006",
     "tests/test_phase3_major_rules.py": "sha256:60fbe58d847e9a8b33c22626639486bfd6c7e3c9fd8c466e351042bf11464b80",
-    "tests/test_phase4_minor_observability.py": "sha256:2945f5f2cbcb96e4fc64f1a367581638c9f6152ca70bf9f02f3c5d7c9866e133",
+    "tests/test_phase4_minor_observability.py": "sha256:f9bcc710516583fcd61eeaf049b23464c420a9079346be42c88a42ca1eff22fb",
     "tests/test_phase5_specialist_delegation.py": "sha256:adf4901f6e87008ad8713fa64abb5d58a0167ba5ad42610841b90abe6b0259b9",
     "tests/test_phase6_sarif_writer.py": "sha256:e16c4038a3b2d1706e60672da65a019a434c7396d59ac6fbd16a7c6099da0e94",
     "tests/test_phase7_sbom_writer.py": "sha256:13e815508254cd5a796420c9d6f210411cefea6cd28fc8cdcd0448897cac0de3",
