@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-03T18:46:57+00:00",
+  "computed_at": "2026-05-03T19:07:52+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     "agents/cache-optimizer-agent.md": "sha256:b0f8e0619569cc2b04587e8b251f9ad2f9a8e8227da071953aa56f78c72c0553",
@@ -138,7 +138,7 @@
     "skills/canonical-pipeline/references/pipeline-rules.md": "sha256:c0663f722dcaa700bfec66fd6c86ad5add00c24b3af5289d6b20c542c4426d36",
     "skills/canonical-pipeline/references/v2-1-80-features.md": "sha256:1ca8a9dd13d78e9f89c4c969b38f4a0a005c083e16789e6b4ee7f467e19d50e6",
     "skills/cpv-main-menu-skill/SKILL.md": "sha256:0e6876425bb18d5189b46546c00cb9db6a6bb46f4d8e9831dcdf188c7fc9ac63",
-    "skills/cpv-main-menu-skill/references/menu-tree.md": "sha256:9f239e43c3516239d04df3df7a58514ffd2905889c8b90e4d32cd6c502190865",
+    "skills/cpv-main-menu-skill/references/menu-tree.md": "sha256:4f4197018171e02f065fdb5e0e8843303300f8b83e62a2df7e3790d21f6602db",
     "skills/create-plugin/SKILL.md": "sha256:70a6cfeb5052b0561215567d4372cb9f905d3af411f792975a6434bf34eb7ef6",
     "skills/create-plugin/references/dev-stripping.md": "sha256:04616980266569ce59caf5397a9b2eee6d457c764eaaf4151172fbdb569dac0f",
     "skills/create-plugin/references/examples.md": "sha256:828381ff3159784df8bbf269b30630439b8a93966676b104ad6a6f7fc0647ed1",
@@ -295,6 +295,7 @@
     "tests/test_manage_registry.py": "sha256:17b001ba6be5af5d3351c2d480402dab735a6703161385108c74912b37ecb043",
     "tests/test_manage_remote.py": "sha256:9117bdc58831a0b7ffc082739baf6006af8fa4dc9d44a7036741e6deceea29d1",
     "tests/test_marketplace_bucketing.py": "sha256:1952f305e073255ec4228d009c5975d827f5363dda13e2d25dcfb130cb664021",
+    "tests/test_menu_tree_borders.py": "sha256:f6573ba60d65402f0f41f6fca284ceb2a3bf931069818f0b0bbe7bcdf1f2d72e",
     "tests/test_migrate_marketplace.py": "sha256:9e8734b0d87a688a7dcf71365d0ffb99e10020a5d80a3040c965af6b3b8fa71c",
     "tests/test_minimal_yaml.py": "sha256:e91c453db4995a0850351004872fcceedebe2e8c14287e93e8b29bb8ea7182b1",
     "tests/test_naming_validation.py": "sha256:e75c566ddf6abf8e00eeeb58ce58db8281b3a161e1a8fb168934698063a87e5b",
