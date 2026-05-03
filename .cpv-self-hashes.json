@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-03T16:03:23+00:00",
+  "computed_at": "2026-05-03T16:14:15+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     "agents/cache-optimizer-agent.md": "sha256:b0f8e0619569cc2b04587e8b251f9ad2f9a8e8227da071953aa56f78c72c0553",
@@ -23,6 +23,7 @@
     "commands/cpv-list-plugins.md": "sha256:f1d148c55018d80fe8dc2ed6b86d3a5684106fe00617314cf9d8883ad3a74c45",
     "commands/cpv-main-menu.md": "sha256:0f6cf5c22a0ac251ec693a3f4cab5bb358f0fca6660c36c70ce3f77e03602e4a",
     "commands/cpv-manage.md": "sha256:248b01a3726909b401455493a8f140f552bdea4335bbaf7ff8e609cfa160fbb4",
+    "commands/cpv-migrate-marketplace.md": "sha256:75d37a7fb43cca4c2adfdae5f94cb24b1c62d251dd317e27e070b5d59fffcc8d",
     "commands/cpv-refresh-readme.md": "sha256:680beaad10a4d3f47b50b3fa5d4b958952e0a4f3a75ff014a39a9dedc458790a",
     "commands/cpv-semantic-validation.md": "sha256:7786718334af02eb5934186cc1c894435082b4e88931231b105bdb4df4dfe8e8",
     "commands/cpv-setup-branch-rules-generic.md": "sha256:809962ac7609ba1ff07f50483f3e16276bc02f76c41a138d8c608b88d93e6bf3",
@@ -260,7 +261,7 @@
     "tests/test_branch_rules_install_bash.py": "sha256:6c0a8f0005d1426e27eae20a23f106d7f5e29be35b524a50cef4e9d9c8141f7b",
     "tests/test_bump_version.py": "sha256:c7e27e3841e120bd6dc866a40e9edf60b0183c95692b65af71000526e8b0bc4f",
     "tests/test_cc_scope_rules.py": "sha256:9ade07746ed2dae32e8459e1e9281705b4bcfd3f4c9e659bb32daf67a12c2d47",
-    "tests/test_consolidation_v211.py": "sha256:fee9e4e5e9c05d51abe2d41f77fd60e2f096bf97df5e4831e6399ff89befe591",
+    "tests/test_consolidation_v211.py": "sha256:6e6c80f5a654272effb06045aa292932051e9ed1f79987ef679b447fa5cea778",
     "tests/test_cpv_codemod.py": "sha256:e6e7ebab3102e1bf63c75cc3b269296a1d97e8167e83d1b13f06b26c4c6378d3",
     "tests/test_cpv_dedup.py": "sha256:98b0b8ad1663b936c17b30e4f337ffd1716b11e3b33d9abe170293851caccd7d",
     "tests/test_cpv_fp_classifier.py": "sha256:1a324f9dee44a0335fd55ce13ced635f8f401e6942b29373956aeeca40348efc",
@@ -292,6 +293,7 @@
     "tests/test_manage_registry.py": "sha256:17b001ba6be5af5d3351c2d480402dab735a6703161385108c74912b37ecb043",
     "tests/test_manage_remote.py": "sha256:9117bdc58831a0b7ffc082739baf6006af8fa4dc9d44a7036741e6deceea29d1",
     "tests/test_marketplace_bucketing.py": "sha256:1952f305e073255ec4228d009c5975d827f5363dda13e2d25dcfb130cb664021",
+    "tests/test_migrate_marketplace.py": "sha256:9e8734b0d87a688a7dcf71365d0ffb99e10020a5d80a3040c965af6b3b8fa71c",
     "tests/test_minimal_yaml.py": "sha256:e91c453db4995a0850351004872fcceedebe2e8c14287e93e8b29bb8ea7182b1",
     "tests/test_naming_validation.py": "sha256:e75c566ddf6abf8e00eeeb58ce58db8281b3a161e1a8fb168934698063a87e5b",
     "tests/test_new_pipeline_rules.py": "sha256:3fd9b1fbc1c67afc91f4f84d622860019c04a551febdfbfd2c07f1816c8fdf86",
