@@ -98,8 +98,9 @@ from cpv_validation_common import (
 # already fired against the actual source. Skip them at the file-walk
 # level so the per-line scanners never see them.
 ALWAYS_SKIP_BASENAMES: frozenset[str] = frozenset({
-    ".cpv-cisco-scan.json",   # Cisco skill-scanner output (CPV runs the scanner)
-    ".cpv-self-hashes.json",  # CPV's own integrity manifest (lots of long hex)
+    ".cpv-cisco-scan.json",     # Cisco skill-scanner output (CPV runs the scanner)
+    ".plugin-self-hashes.json", # plugin integrity manifest (TRDD-bbff5bc5 canonical)
+    ".cpv-self-hashes.json",    # legacy compat copy (removed in v2.53.0)
 })
 
 
@@ -1059,7 +1060,12 @@ _CPV_SELF_HASH_REPORTED_MISSING: set[str] = set()
 _CPV_SELF_HASH_REPORTED_MODIFIED: set[str] = set()
 _CPV_SELF_HASH_NOTICE_REPORT: ValidationReport | None = None
 
-CPV_SELF_HASH_MANIFEST_NAME = ".cpv-self-hashes.json"
+# TRDD-bbff5bc5: new canonical manifest filename. The legacy alias is kept
+# for one release so any tooling that imports the old constant name keeps
+# working. Both removed in v2.53.0.
+PLUGIN_SELF_HASH_MANIFEST_NAME = ".plugin-self-hashes.json"
+PLUGIN_SELF_HASH_MANIFEST_NAME_LEGACY = ".cpv-self-hashes.json"
+CPV_SELF_HASH_MANIFEST_NAME = PLUGIN_SELF_HASH_MANIFEST_NAME_LEGACY  # deprecated alias
 
 
 # v2.42 — context-aware classifier wiring (TRDD-fe006962). When active,
@@ -1166,9 +1172,10 @@ def _set_cpv_self_scan(
     sources, picked by trust level:
 
     1. **Target IS the running CPV** — same plugin_root as where this
-       module was loaded from. The local `.cpv-self-hashes.json` is
+       module was loaded from. The local `.plugin-self-hashes.json`
+       (or legacy `.cpv-self-hashes.json` for one release) is
        trustworthy because the running CPV was already integrity-verified
-       against GitHub at startup (see cpv_integrity.verify_self_integrity).
+       against GitHub at startup (see _plugin_verify_hashes.verify_self_integrity).
 
     2. **Target claims to be CPV but is a DIFFERENT directory** — could
        be a malicious plugin spoofing the name + signature files + local
@@ -1194,7 +1201,7 @@ def _set_cpv_self_scan(
 
     if is_running_cpv:
         # Trust the local manifest — running CPV's integrity was already
-        # verified against GitHub at startup by cpv_integrity.
+        # verified against GitHub at startup by _plugin_verify_hashes.
         manifest = _load_local_manifest(target_root, notice_report)
     else:
         # Target claims to be CPV but isn't the validator instance running.
@@ -1204,7 +1211,7 @@ def _set_cpv_self_scan(
         # malicious plugin that spoofed its identity.
         target_version = _read_target_version(target_root)
         try:
-            from cpv_integrity import fetch_canonical_manifest  # noqa: PLC0415
+            from _plugin_verify_hashes import fetch_canonical_manifest  # noqa: PLC0415
             manifest = fetch_canonical_manifest(target_version)
         except ImportError:
             manifest = None
@@ -1241,17 +1248,28 @@ def _load_local_manifest(
     plugin_root: Path,
     notice_report: ValidationReport | None,
 ) -> dict[str, object] | None:
-    """Read the local `.cpv-self-hashes.json` from plugin_root."""
-    manifest_path = plugin_root / CPV_SELF_HASH_MANIFEST_NAME
-    if not manifest_path.is_file():
+    """Read the local `.plugin-self-hashes.json` from plugin_root.
+
+    TRDD-bbff5bc5: prefer the new filename, fall back to the legacy
+    `.cpv-self-hashes.json` for one release. The legacy fallback is
+    removed in v2.53.0.
+    """
+    new_path = plugin_root / PLUGIN_SELF_HASH_MANIFEST_NAME
+    legacy_path = plugin_root / PLUGIN_SELF_HASH_MANIFEST_NAME_LEGACY
+    if new_path.is_file():
+        manifest_path = new_path
+    elif legacy_path.is_file():
+        manifest_path = legacy_path
+    else:
         if notice_report is not None:
             notice_report.major(
                 f"[RC-160] CPV self-scan: hash manifest "
-                f"`{CPV_SELF_HASH_MANIFEST_NAME}` not found at plugin root. "
+                f"`{PLUGIN_SELF_HASH_MANIFEST_NAME}` not found at plugin root "
+                f"(also checked legacy `{PLUGIN_SELF_HASH_MANIFEST_NAME_LEGACY}`). "
                 f"Without the manifest CPV cannot verify which files are "
                 f"genuine validator source vs. spoofed lookalikes; falling back "
                 f"to scanning every file. Fix: regenerate the manifest with "
-                f"`uv run python scripts/compute_cpv_self_hashes.py`."
+                f"`uv run python scripts/_plugin_compute_hashes.py`."
             )
         return None
     try:
@@ -1261,9 +1279,9 @@ def _load_local_manifest(
         if notice_report is not None:
             notice_report.major(
                 f"[RC-160] CPV self-scan: hash manifest "
-                f"`{CPV_SELF_HASH_MANIFEST_NAME}` could not be parsed ({e}); "
+                f"`{manifest_path.name}` could not be parsed ({e}); "
                 f"falling back to scanning every file. Fix: regenerate with "
-                f"`uv run python scripts/compute_cpv_self_hashes.py`."
+                f"`uv run python scripts/_plugin_compute_hashes.py`."
             )
         return None
 
@@ -1325,7 +1343,7 @@ def _is_dev_scratch_path(rel_or_abs: str) -> bool:
     """True for files inside a gitignored dev-scratch / design-spec dir.
 
     These dirs (docs_dev/, scripts_dev/, design/tasks/, …) are NEVER
-    shipped — they're listed in compute_cpv_self_hashes.py's `skip_dirs`
+    shipped — they're listed in _plugin_compute_hashes.py's `skip_dirs`
     so they have no manifest entry. They're also documentation by
     example: audit reports in docs_dev/ legitimately quote secret-pattern
     fixtures, TRDDs in design/tasks/ describe wire formats that include
@@ -1516,15 +1534,16 @@ def cpv_self_scan_skip(file_path: str) -> bool:
     1. **Dev-scratch shortcut** — if the file lives in a gitignored
        dev-scratch directory (docs_dev/, design/tasks/, scripts_dev/,
        …), skip unconditionally. These dirs aren't in the hash manifest
-       (compute_cpv_self_hashes.py skips them), they're not shipped,
+       (_plugin_compute_hashes.py skips them), they're not shipped,
        and they exist purely to document patterns by example.
     2. **Name-based eligibility** — does the path match a CPV-internal
        file pattern (validator script, fix-validation reference, security
        test, semantic-validation reference)? If not, no skip.
     3. **Hash verification** — compute the file's actual SHA256 and look
-       it up in `.cpv-self-hashes.json`. Only skip if the hash matches
-       the canonical value. Hash mismatch (file modified) or missing
-       entry → don't skip; the file is scanned normally.
+       it up in `.plugin-self-hashes.json` (or legacy
+       `.cpv-self-hashes.json` for one release). Only skip if the hash
+       matches the canonical value. Hash mismatch (file modified) or
+       missing entry → don't skip; the file is scanned normally.
 
     Stages 2+3 defend against name-spoofing: a malicious plugin that
     names a file `cpv_taint_engine.py` cannot evade the security scan by
@@ -1574,7 +1593,7 @@ def cpv_self_scan_skip(file_path: str) -> bool:
                 f"[RC-161] CPV self-scan: file `{file_normalized}` matches a "
                 f"self-scan pattern but is not in the hash manifest; scanning "
                 f"normally. Fix: regenerate the manifest with "
-                f"`uv run python scripts/compute_cpv_self_hashes.py` (the "
+                f"`uv run python scripts/_plugin_compute_hashes.py` (the "
                 f"manifest must be refreshed after any change to the "
                 f"validator source set)."
             )
@@ -1598,7 +1617,7 @@ def cpv_self_scan_skip(file_path: str) -> bool:
                 f"a self-scan pattern but its SHA256 differs from the manifest "
                 f"entry — scanning normally. If you edited this file, "
                 f"regenerate the manifest with "
-                f"`uv run python scripts/compute_cpv_self_hashes.py` and "
+                f"`uv run python scripts/_plugin_compute_hashes.py` and "
                 f"re-run; otherwise treat the contents as untrusted."
             )
         return False
@@ -1711,7 +1730,9 @@ def is_validator_script(file_path: str) -> bool:
       `standardize_*.py`. These emit publish.py templates and shell
       examples as Python triple-quoted strings.
     - Pipeline scripts: `publish.py`, `smart_exec.py`, `lint_files.py`,
-      `compute_cpv_self_hashes.py`, `cc_scope_rules.py`, `_minimal_yaml.py`.
+      `_plugin_compute_hashes.py` (canonical, TRDD-bbff5bc5),
+      `compute_cpv_self_hashes.py` (legacy alias, removed in v2.53.0),
+      `cc_scope_rules.py`, `_minimal_yaml.py`.
     """
     file_lower = file_path.lower().replace("\\", "/")
     basename = file_lower.rsplit("/", 1)[-1] if "/" in file_lower else file_lower
@@ -1732,7 +1753,10 @@ def is_validator_script(file_path: str) -> bool:
         "publish.py",
         "smart_exec.py",
         "lint_files.py",
-        "compute_cpv_self_hashes.py",
+        "_plugin_compute_hashes.py",  # TRDD-bbff5bc5 canonical
+        "_plugin_verify_hashes.py",   # TRDD-bbff5bc5 canonical
+        "compute_cpv_self_hashes.py", # legacy alias (removed in v2.53.0)
+        "cpv_integrity.py",           # legacy alias (removed in v2.53.0)
         "cc_scope_rules.py",
         "_minimal_yaml.py",
         "detect_lockfiles.py",
@@ -7747,17 +7771,18 @@ def validate_security(
     # fixtures) — those files necessarily contain every detection pattern
     # CPV knows about, and scanning them always self-matches.
     #
-    # The skip is gated by SHA256 verification against `.cpv-self-hashes.json`
-    # so name-based spoofing cannot evade the scan, and tampering with the
-    # validator source itself shows up as a "modified, scanning normally"
-    # warning rather than a silent skip.
+    # The skip is gated by SHA256 verification against `.plugin-self-hashes.json`
+    # (or the legacy `.cpv-self-hashes.json` for one release) so name-based
+    # spoofing cannot evade the scan, and tampering with the validator source
+    # itself shows up as a "modified, scanning normally" warning rather than
+    # a silent skip.
     self_scan = is_cpv_self_scan(plugin_path)
     _set_cpv_self_scan(self_scan, plugin_root=plugin_path, notice_report=report)
     if self_scan:
         report.info(
             "CPV self-scan mode active — skipping CPV-internal pattern-defining "
             "source (validator scripts, fix-validation references, security tests) "
-            "after SHA256 verification against .cpv-self-hashes.json. Files that "
+            "after SHA256 verification against .plugin-self-hashes.json. Files that "
             "match the name pattern but fail hash check (modified or spoofed) are "
             "scanned normally."
         )
@@ -8724,11 +8749,13 @@ def main() -> int:
     code 2 and refuses to run — a tampered validator cannot be trusted
     to produce honest findings.
 
-    Set `CPV_SKIP_GITHUB_INTEGRITY=1` to bypass for development.
+    Set `PLUGIN_SKIP_GITHUB_INTEGRITY=1` (preferred) or
+    `CPV_SKIP_GITHUB_INTEGRITY=1` (legacy alias, removed in v2.53.0) to
+    bypass for development.
     """
     # FIRST: verify validator integrity against GitHub canonical hashes.
     # Done before argparse so even `--help` is gated by integrity.
-    from cpv_integrity import verify_self_integrity  # noqa: PLC0415
+    from _plugin_verify_hashes import verify_self_integrity  # noqa: PLC0415
     verify_self_integrity(quiet=True)
     from cpv_validation_common import launcher_epilog as _launcher_epilog  # noqa: PLC0415
 

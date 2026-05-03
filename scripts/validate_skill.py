@@ -721,7 +721,7 @@ def main() -> int:
     by checking each validator file's SHA256 against the GitHub
     canonical manifest. Exits with code 2 on mismatch.
     """
-    from cpv_integrity import verify_self_integrity  # noqa: PLC0415
+    from _plugin_verify_hashes import verify_self_integrity  # noqa: PLC0415
     verify_self_integrity(quiet=True)
 
     if _USING_FALLBACK_YAML:

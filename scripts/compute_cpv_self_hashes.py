@@ -1,225 +1,64 @@
 #!/usr/bin/env python3
-"""Compute SHA256 hashes of every CPV file eligible for self-scan exclusion.
+"""DEPRECATED — renamed to scripts/_plugin_compute_hashes.py in v2.51.0.
 
-The CPV security validator skips its own pattern-defining source files
-(validator scripts, fix-validation references, security tests) when
-scanning the CPV plugin itself. Without integrity protection, any file
-named like a CPV file would be skipped — name-based detection is
-spoofable.
+Removed in v2.53.0. See TRDD-bbff5bc5 (publish.py auth standard).
 
-This script computes SHA256 hashes of every file that would be skipped
-in CPV self-scan mode and writes them to `.cpv-self-hashes.json`. The
-validator then verifies each candidate file's hash against the manifest
-before skipping. Hash mismatch → file gets scanned normally.
+This module is a thin re-export shim that forwards every public name
+to `_plugin_compute_hashes`. A one-shot DeprecationWarning is emitted
+on first import per process.
 
-Run before every commit / push. The publish.py pipeline calls this as
-part of its pre-push gate.
-
-Usage:
-    uv run python scripts/compute_cpv_self_hashes.py [<plugin_root>]
-
-Default plugin root is the parent of `scripts/`. Writes the manifest
-to `<plugin_root>/.cpv-self-hashes.json`. Exit code 0 on success.
+The new `_plugin_compute_hashes.py` writes BOTH `.plugin-self-hashes.json`
+(canonical) AND `.cpv-self-hashes.json` (legacy compat copy) on every
+invocation, so existing publish pipelines that invoke this script via
+its old path continue to produce both files.
 """
 from __future__ import annotations
 
-import hashlib
-import json
-import sys
-from datetime import datetime, timezone
-from pathlib import Path
+import sys as _sys
+import warnings as _w
+from pathlib import Path as _Path
 
-# Re-use the validator's own classification helpers so this script
-# stays in lockstep with what cpv_self_scan_skip() actually skips.
-SCRIPTS_DIR = Path(__file__).parent
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
-
-from validate_security import (  # noqa: E402
-    is_security_fix_reference,
-    is_validator_script,
+_w.warn(
+    "scripts/compute_cpv_self_hashes.py is renamed to scripts/_plugin_compute_hashes.py "
+    "(TRDD-bbff5bc5). Update your invocation to use the new path — the legacy name "
+    "is removed in v2.53.0.",
+    DeprecationWarning,
+    stacklevel=2,
 )
 
-MANIFEST_NAME = ".cpv-self-hashes.json"
-MANIFEST_VERSION = 1
+# Make the new sibling module importable when this shim is loaded by
+# absolute path (e.g. publish.py invokes `python scripts/compute_cpv_self_hashes.py`)
+# — sys.path may not contain scripts/ in that case.
+_SCRIPTS_DIR = _Path(__file__).parent
+if str(_SCRIPTS_DIR) not in _sys.path:
+    _sys.path.insert(0, str(_SCRIPTS_DIR))
 
+from _plugin_compute_hashes import (  # noqa: F401,E402  (re-export)
+    MANIFEST_NAME_LEGACY,
+    MANIFEST_NAME_NEW,
+    MANIFEST_VERSION,
+    compute_manifest,
+    is_self_scan_eligible,
+    main,
+    sha256_of_file,
+    write_manifest,
+)
 
-def is_self_scan_eligible(rel_path: str) -> bool:
-    """Mirror of `cpv_self_scan_skip` minus the runtime active-flag check.
+# Backwards-compat constant (some test fixtures reference MANIFEST_NAME).
+MANIFEST_NAME = MANIFEST_NAME_LEGACY
 
-    Used to enumerate which files NEED a hash entry in the manifest. Must
-    stay in sync with `validate_security._is_self_scan_eligible`.
-    """
-    if is_validator_script(rel_path):
-        return True
-    if is_security_fix_reference(rel_path):
-        return True
-    file_normalized = rel_path.lower().replace("\\", "/")
-    basename = file_normalized.rsplit("/", 1)[-1] if "/" in file_normalized else file_normalized
-    if basename.startswith("test_") and basename.endswith(".py"):
-        return True
-    if "/tests/fixtures/" in file_normalized or file_normalized.startswith("tests/fixtures/"):
-        return True
-    if "/semantic-validation-skill/references/" in file_normalized:
-        return True
-    if (
-        "/skills/" in file_normalized
-        and "/references/" in file_normalized
-        and basename.endswith(".md")
-    ):
-        return True
-    if (
-        ("/agents/" in file_normalized or file_normalized.startswith("agents/"))
-        and basename.endswith(".md")
-    ):
-        return True
-    if (
-        ("/commands/" in file_normalized or file_normalized.startswith("commands/"))
-        and basename.endswith(".md")
-    ):
-        return True
-    if (
-        ("/skills/" in file_normalized or file_normalized.startswith("skills/"))
-        and basename.endswith(".md")
-    ):
-        return True
-    if "/templates/" in file_normalized or file_normalized.startswith("templates/"):
-        return True
-    if "/design/tasks/" in file_normalized and basename.startswith("trdd-"):
-        return True
-    if "/docs_dev/" in file_normalized:
-        return True
-    return False
-
-
-def sha256_of_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def _git_tracked_files(plugin_root: Path) -> set[str] | None:
-    """Return the set of git-tracked files (relative paths) for plugin_root.
-
-    The manifest MUST only include files that exist in the published git
-    repo — otherwise CI's fresh checkout will hash a smaller fileset than
-    the local manifest expects, and `verify_self_integrity` flags the
-    delta as a tampered/deleted file. Local-only files (`.DS_Store`,
-    `.idea/*`, `.vscode/*`, build artifacts that escape `skip_dirs`)
-    silently land in the manifest when developer-machine state diverges
-    from the gitignore.
-
-    Returns None if `git ls-files` is unavailable — in which case we
-    fall back to the directory walk + skip_dirs heuristic.
-    """
-    import subprocess
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(plugin_root), "ls-files"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-        if result.returncode != 0:
-            return None
-        # ls-files emits POSIX-separated paths, one per line.
-        return {line.strip() for line in result.stdout.splitlines() if line.strip()}
-    except (OSError, subprocess.SubprocessError):
-        return None
-
-
-def compute_manifest(plugin_root: Path) -> dict[str, object]:
-    """Walk plugin_root, hash every self-scan-eligible file, return manifest dict.
-
-    Honours `git ls-files` so untracked / gitignored files (`.DS_Store`,
-    macOS metadata, IDE state) never enter the manifest. The published
-    manifest must only describe files that exist in the public repo, or
-    a clean clone (CI's fresh checkout, or any user pulling the plugin)
-    will fail integrity verification on the missing-locally delta.
-    """
-    files: dict[str, str] = {}
-
-    # Skip these dirs entirely — never useful to hash venvs, build artifacts,
-    # cache, git internals.
-    skip_dirs = {
-        ".git", ".venv", "venv", "__pycache__", "node_modules",
-        "dist", "build", ".pytest_cache", ".mypy_cache", ".ruff_cache",
-        "reports", "reports_dev", "downloads_dev", "libs_dev", "builds_dev",
-        "samples_dev", "scripts_dev", "tests_dev", "examples_dev", "docs_dev",
-    }
-
-    tracked = _git_tracked_files(plugin_root)
-
-    for path in plugin_root.rglob("*"):
-        if not path.is_file():
-            continue
-        # Filter out anything inside a skipped directory.
-        rel = path.relative_to(plugin_root)
-        if any(part in skip_dirs for part in rel.parts):
-            continue
-        rel_path = str(rel).replace("\\", "/")
-        if not is_self_scan_eligible(rel_path):
-            continue
-        # Never hash the manifest itself.
-        if rel.name == MANIFEST_NAME:
-            continue
-        # If git ls-files succeeded, only include tracked files. This is
-        # the contract: the published manifest describes the published
-        # source. Untracked local files (`.DS_Store`, IDE droppings)
-        # never enter the manifest, so they can never cause an
-        # integrity-mismatch FP on a clean checkout.
-        if tracked is not None and rel_path not in tracked:
-            continue
-        try:
-            digest = sha256_of_file(path)
-        except (OSError, PermissionError):
-            continue
-        files[rel_path] = f"sha256:{digest}"
-
-    return {
-        "version": MANIFEST_VERSION,
-        "computed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "purpose": (
-            "Hash manifest of files the CPV security validator skips during "
-            "self-scan mode. The validator verifies each file's actual SHA256 "
-            "against this manifest before skipping. Hash mismatch → the file "
-            "gets scanned normally, defeating name-only spoofing."
-        ),
-        "files": dict(sorted(files.items())),
-    }
-
-
-def write_manifest(plugin_root: Path, manifest: dict[str, object]) -> Path:
-    """Write the manifest atomically (tmp + rename)."""
-    out_path = plugin_root / MANIFEST_NAME
-    tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
-    payload = json.dumps(manifest, indent=2, sort_keys=False) + "\n"
-    tmp_path.write_text(payload, encoding="utf-8")
-    tmp_path.replace(out_path)
-    return out_path
-
-
-def main(argv: list[str] | None = None) -> int:
-    args = argv if argv is not None else sys.argv[1:]
-    if args:
-        plugin_root = Path(args[0]).resolve()
-    else:
-        plugin_root = SCRIPTS_DIR.parent.resolve()
-
-    if not plugin_root.is_dir():
-        print(f"ERROR: plugin root not found: {plugin_root}", file=sys.stderr)
-        return 1
-
-    manifest = compute_manifest(plugin_root)
-    out_path = write_manifest(plugin_root, manifest)
-    files_block = manifest["files"]
-    file_count = len(files_block) if isinstance(files_block, dict) else 0
-    print(f"Wrote {out_path} ({file_count} hashes)")
-    return 0
+__all__ = [
+    "MANIFEST_NAME",
+    "MANIFEST_NAME_LEGACY",
+    "MANIFEST_NAME_NEW",
+    "MANIFEST_VERSION",
+    "compute_manifest",
+    "is_self_scan_eligible",
+    "main",
+    "sha256_of_file",
+    "write_manifest",
+]
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _sys.exit(main())

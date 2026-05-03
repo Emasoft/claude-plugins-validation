@@ -47,7 +47,7 @@ for p in /Users/emanuelesabetta/Code/CCProjectManager/ccpm \
          /tmp/diversity_corpus/claude-code-safety-net \
          /tmp/diversity_corpus/arscontexta \
          /tmp/diversity_corpus/modularity; do
-  CPV_SKIP_GITHUB_INTEGRITY=1 \
+  PLUGIN_SKIP_GITHUB_INTEGRITY=1 \
     python3 scripts/validate_security.py "$p"
 done
 ```
