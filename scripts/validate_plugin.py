@@ -3641,7 +3641,7 @@ def main() -> int:
     canonical manifest for the running plugin version. Exits with
     code 2 on mismatch — a tampered validator cannot be trusted.
     """
-    from cpv_integrity import verify_self_integrity  # noqa: PLC0415
+    from _plugin_verify_hashes import verify_self_integrity  # noqa: PLC0415
     verify_self_integrity(quiet=True)
 
     check_remote_execution_guard()

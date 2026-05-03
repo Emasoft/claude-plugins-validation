@@ -70,6 +70,114 @@ def get_plugin_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def _parse_owner_repo_from_remote(remote_url: str) -> tuple[str, str] | None:
+    """Extract (owner, repo) from `git@host:owner/repo.git` or
+    `https://host/owner/repo[.git]`. Returns None on unparseable input.
+    """
+    if not remote_url:
+        return None
+    # Strip optional `.git` suffix and trailing slashes.
+    url = remote_url.strip().rstrip("/")
+    if url.endswith(".git"):
+        url = url[:-4]
+    # Match: anything ending in `:owner/repo` or `/owner/repo`.
+    match = re.search(r"[:/]([^:/\s]+)/([^/\s]+)$", url)
+    if not match:
+        return None
+    return match.group(1), match.group(2)
+
+
+def _ensure_gh_auth(owner: str, repo: str) -> None:
+    """Verify `gh` CLI is installed, authenticated, and has push permission.
+
+    Called BEFORE every push gate (commit+tag push, GitHub release).
+    Exits 1 with actionable message on any of four failure modes:
+      1. gh not installed.
+      2. gh installed but not authenticated (`gh auth status` exits non-zero).
+      3. Authenticated but no push permission on owner/repo.
+      4. Authenticated but to multiple hosts/accounts and active account
+         differs from the one with push perms (warns + suggests `gh auth switch`).
+
+    Per TRDD-bbff5bc5 §4.1, this function:
+      - NEVER invokes `gh auth token` (PAT non-leakage; tokens never enter
+        publish.py memory or stderr/stdout).
+      - Uses only `gh auth status` (which doesn't print tokens) and
+        `gh api repos/<owner>/<repo> --jq .permissions.push`.
+      - Captures all subprocess output via capture_output=True so token-shaped
+        strings (if any leaked from gh) cannot reach the parent's stdio.
+
+    SSH-only setups: gh CLI does NOT manage SSH keys. If the user pushes via
+    SSH (`git remote get-url origin` starts with `git@`), gh's
+    `repos/<owner>/<repo>/.permissions.push` API call is still the source
+    of truth for whether the gh-authenticated user CAN push — even if the
+    actual `git push` will use SSH. This function therefore covers SSH
+    users too because it asks "does this gh identity have push perms?",
+    not "what transport will git use?". A missing SSH key is downstream
+    and out of scope for this precheck.
+    """
+    gh_bin = shutil.which("gh")
+    if gh_bin is None:
+        print(
+            f"\n{RED}✗ gh CLI not installed.{NC}\n"
+            f"{YELLOW}  Install: brew install gh{NC}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # 1. Check authentication. Capture both streams so token-shaped strings
+    #    (if any) never leak to our stdio.
+    status = subprocess.run(
+        [gh_bin, "auth", "status"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    if status.returncode != 0:
+        print(
+            f"\n{RED}✗ gh CLI not authenticated.{NC}\n"
+            f"{YELLOW}  Run: gh auth login --hostname github.com --git-protocol https{NC}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # 2. Check push permission via the GitHub API. `--jq .permissions.push`
+    #    extracts the boolean directly so we don't have to parse JSON.
+    perms = subprocess.run(
+        [gh_bin, "api", f"repos/{owner}/{repo}", "--jq", ".permissions.push"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    if perms.returncode != 0 or perms.stdout.strip() != "true":
+        # Try to identify which gh user is active so the maintainer can
+        # diagnose multi-account confusion. We parse `gh auth status`
+        # stdout/stderr (combined) rather than running a separate command.
+        active_login = ""
+        for line in (status.stdout + status.stderr).splitlines():
+            line = line.strip()
+            # gh prints `Logged in to github.com account <login> (keyring)`
+            if "account " in line and ("Logged in" in line or "Active" in line):
+                m = re.search(r"account\s+(\S+)", line)
+                if m:
+                    active_login = m.group(1)
+                    break
+        login_str = f" '{active_login}'" if active_login else ""
+        print(
+            f"\n{RED}✗ gh user{login_str} has no push permission on "
+            f"{owner}/{repo}.{NC}\n"
+            f"{YELLOW}  Diagnose:{NC}\n"
+            f"{YELLOW}    1. Ask the repo owner to add you as a collaborator with write access.{NC}\n"
+            f"{YELLOW}    2. If you have multiple gh accounts, list them: gh auth status{NC}\n"
+            f"{YELLOW}       and switch to the one with push perms: gh auth switch --hostname github.com{NC}\n"
+            f"{YELLOW}    3. If you authenticated with a fine-grained token, verify it grants{NC}\n"
+            f"{YELLOW}       'Contents: write' on this repo.{NC}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
 def run(cmd: list[str], cwd: Path, *, check: bool = True) -> subprocess.CompletedProcess[str]:
     """Run a command, print it, stream output, and fail fast on error."""
     print(f"  $ {' '.join(cmd)}")
@@ -80,7 +188,15 @@ def run(cmd: list[str], cwd: Path, *, check: bool = True) -> subprocess.Complete
     # a release. Without this bypass every Gate (4/5/6) would refuse to
     # run with exit 2 because the in-tree validator hashes won't match
     # the previous tag's manifest.
-    env = {**os.environ, "CPV_SKIP_GITHUB_INTEGRITY": "1"}
+    # Set BOTH env-var names (TRDD-bbff5bc5): new canonical
+    # PLUGIN_SKIP_GITHUB_INTEGRITY plus legacy CPV_SKIP_GITHUB_INTEGRITY for
+    # backward compat with v2.50.x verifier shims that may still be invoked
+    # transitively by spawned subprocesses. Legacy name removed in v2.53.0.
+    env = {
+        **os.environ,
+        "PLUGIN_SKIP_GITHUB_INTEGRITY": "1",
+        "CPV_SKIP_GITHUB_INTEGRITY": "1",
+    }
     result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=600, env=env)
     if result.stdout.strip():
         print(result.stdout.strip())
@@ -303,8 +419,9 @@ GATES: list[tuple[str, str]] = [
     ("Gate 8", "Bump version (auto from git-cliff, overridable via --major/--minor/--patch)"),
     (
         "Gate 9",
-        "Refresh .cpv-self-hashes.json (compute_cpv_self_hashes.py) — issue #18: stale "
-        "manifest causes integrity-mismatch abort on fresh marketplace installs",
+        "Refresh .plugin-self-hashes.json (_plugin_compute_hashes.py; legacy "
+        ".cpv-self-hashes.json compat copy also written) — issue #18: stale manifest "
+        "causes integrity-mismatch abort on fresh marketplace installs",
     ),
     ("Gate 10", "Generate CHANGELOG.md + release notes (git-cliff --bump --unreleased --tag)"),
     ("Gate 11", "Commit bump + manifest refresh + changelog"),
@@ -1046,23 +1163,37 @@ def stage_update_readme_badge(plugin_root: Path, old_version: str, new_version: 
 
 
 def stage_refresh_self_hashes(plugin_root: Path) -> int:
-    """Gate 9: regenerate `.cpv-self-hashes.json` from the current source.
+    """Gate 9: regenerate `.plugin-self-hashes.json` from the current source.
 
-    CPV's `cpv_integrity.py` fetches the GitHub-pinned manifest at
-    runtime and aborts when the cache files don't match. Without this
-    gate, every release between manifest refreshes ships a stale
-    manifest and fresh marketplace installs hit the abort
-    immediately (issue #18).
+    CPV's `_plugin_verify_hashes.py` (formerly `cpv_integrity.py`) fetches
+    the GitHub-pinned manifest at runtime and aborts when the cache files
+    don't match. Without this gate, every release between manifest
+    refreshes ships a stale manifest and fresh marketplace installs hit
+    the abort immediately (issue #18).
+
+    Per TRDD-bbff5bc5, the gate prefers the new script name
+    `_plugin_compute_hashes.py` and falls back to the legacy
+    `compute_cpv_self_hashes.py` for one release while v2.50.x cached
+    plugins are still in the wild. The new script writes BOTH
+    `.plugin-self-hashes.json` AND `.cpv-self-hashes.json` (bytes-identical
+    compat copy) so v2.50.x cached clients keep verifying successfully.
 
     The gate is CPV-specific. Other plugins generated by plugin-creator
     don't ship a self-hashes manifest and therefore don't need this
     gate in their own publish.py.
     """
-    print(f"\n{BLUE}═══ Gate 9: Refresh .cpv-self-hashes.json ═══{NC}")
-    script = plugin_root / "scripts" / "compute_cpv_self_hashes.py"
-    if not script.is_file():
+    print(f"\n{BLUE}═══ Gate 9: Refresh .plugin-self-hashes.json ═══{NC}")
+    # TRDD-bbff5bc5: prefer the new script name, fall back to legacy.
+    script_new = plugin_root / "scripts" / "_plugin_compute_hashes.py"
+    script_legacy = plugin_root / "scripts" / "compute_cpv_self_hashes.py"
+    if script_new.is_file():
+        script = script_new
+    elif script_legacy.is_file():
+        script = script_legacy
+    else:
         print(
-            f"{YELLOW}⚠ scripts/compute_cpv_self_hashes.py not found — "
+            f"{YELLOW}⚠ scripts/_plugin_compute_hashes.py not found "
+            f"(also checked legacy scripts/compute_cpv_self_hashes.py) — "
             f"skipping integrity-manifest refresh (this is fine for non-CPV "
             f"plugins){NC}",
             file=sys.stderr,
@@ -1129,8 +1260,45 @@ def stage_changelog(plugin_root: Path, tag_name: str, new_version: str) -> tuple
     return 0, release_notes_file
 
 
+def _resolve_owner_repo(plugin_root: Path) -> tuple[str, str]:
+    """Read `git config remote.origin.url` and parse owner/repo. Exit 1 on failure.
+
+    Used by Gates 13 and 14 to scope the gh-auth precheck to the actual push
+    target. Per TRDD-bbff5bc5 §4.1, the precheck must verify push perms on
+    THIS specific repo, not just "any gh auth status passes".
+    """
+    result = subprocess.run(
+        ["git", "config", "--get", "remote.origin.url"],
+        cwd=plugin_root,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        print(
+            f"\n{RED}✗ Could not read remote.origin.url for {plugin_root}.{NC}\n"
+            f"{YELLOW}  Run: git remote add origin <url>{NC}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    parsed = _parse_owner_repo_from_remote(result.stdout.strip())
+    if parsed is None:
+        print(
+            f"\n{RED}✗ Could not parse owner/repo from remote URL: {result.stdout.strip()!r}{NC}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return parsed
+
+
 def stage_commit_tag_push(plugin_root: Path, tag_name: str) -> int:
-    """Gates 11-13: commit, tag, push."""
+    """Gates 11-13: commit, tag, push.
+
+    TRDD-bbff5bc5 §5: gh-auth precheck runs at the top of Gate 13 (before
+    the first `git push`) to give the maintainer an actionable error
+    message BEFORE git tries the network round-trip and fails opaquely.
+    """
     print(f"\n{BLUE}═══ Gate 11: Commit version bump + manifest refresh + changelog ═══{NC}")
     run(["git", "add", "-A"], cwd=plugin_root)
     run(["git", "commit", "-m", f"chore(release): {tag_name}"], cwd=plugin_root)
@@ -1139,6 +1307,10 @@ def stage_commit_tag_push(plugin_root: Path, tag_name: str) -> int:
     run(["git", "tag", "-a", tag_name, "-m", f"Release {tag_name}"], cwd=plugin_root)
     print(f"{GREEN}✓ Tag {tag_name} created{NC}")
     print(f"\n{BLUE}═══ Gate 13: Push to origin (branch + tags) ═══{NC}")
+    # TRDD-bbff5bc5: gh-auth precheck — fail fast with actionable error if
+    # the maintainer's gh CLI is missing/unauthed/lacks push perm.
+    owner, repo = _resolve_owner_repo(plugin_root)
+    _ensure_gh_auth(owner, repo)
     run(["git", "push", "origin", "HEAD"], cwd=plugin_root)
     run(["git", "push", "origin", tag_name], cwd=plugin_root)
     print(f"{GREEN}✓ Pushed branch and tag {tag_name}{NC}")
@@ -1146,7 +1318,12 @@ def stage_commit_tag_push(plugin_root: Path, tag_name: str) -> int:
 
 
 def stage_github_release(plugin_root: Path, tag_name: str, release_notes_file: Path) -> int:
-    """Gate 14: create GitHub release with notes. Warns (not errors) if gh missing."""
+    """Gate 14: create GitHub release with notes. Warns (not errors) if gh missing.
+
+    TRDD-bbff5bc5 §5: gh-auth precheck runs before `gh release create` to
+    surface auth issues with an actionable hint instead of a generic
+    `gh release` failure.
+    """
     print(f"\n{BLUE}═══ Gate 14: Create GitHub release ═══{NC}")
     gh_bin = shutil.which("gh")
     if gh_bin is None:
@@ -1156,6 +1333,12 @@ def stage_github_release(plugin_root: Path, tag_name: str, release_notes_file: P
             file=sys.stderr,
         )
         return 0
+    # TRDD-bbff5bc5: precheck before the release call. Even though Gate 13's
+    # precheck already passed, the maintainer's auth state could change
+    # mid-pipeline (token revoked, account switched). Fast re-check costs
+    # one HTTP roundtrip and prevents a cryptic gh-release failure.
+    owner, repo = _resolve_owner_repo(plugin_root)
+    _ensure_gh_auth(owner, repo)
     gh_result = run(
         [
             gh_bin,

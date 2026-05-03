@@ -87,6 +87,8 @@ rule catalogs never surfaces the catalog source as a finding.
 - `CPV_NO_FCLONES_INSTALL=1` — disables the silent fclones autoinstall.
 - `CPV_CISCO_SCAN_TIMEOUT_S=<seconds>` — overrides the 600s Cisco-scan
   default.
-- `CPV_SKIP_GITHUB_INTEGRITY=1` — bypasses the manifest-anchored
+- `PLUGIN_SKIP_GITHUB_INTEGRITY=1` — bypasses the manifest-anchored
   self-integrity check (development only — never set this in
-  production).
+  production). Legacy alias `CPV_SKIP_GITHUB_INTEGRITY=1` honored
+  for one release with a deprecation note (TRDD-bbff5bc5; alias
+  removed in v2.53.0).

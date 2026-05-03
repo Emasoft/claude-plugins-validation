@@ -74,7 +74,7 @@ EOF
 cd /path/to/claude-plugins-validation
 ls -d ~/Code/diversity-plugins-v3/*/ | xargs -P 6 -I{} bash -c '
   name=$(basename "{}")
-  CPV_SKIP_GITHUB_INTEGRITY=1 timeout 120 \
+  PLUGIN_SKIP_GITHUB_INTEGRITY=1 timeout 120 \
     uv run scripts/validate_security.py "{}" \
     > "/tmp/cpv-v3-scans/${name}.txt" 2>&1
 '
