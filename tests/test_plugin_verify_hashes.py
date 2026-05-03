@@ -23,7 +23,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import _plugin_compute_hashes  # noqa: E402
 import _plugin_verify_hashes  # noqa: E402
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
