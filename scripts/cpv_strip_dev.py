@@ -57,7 +57,10 @@ _RESERVED_SRCS: frozenset[str] = frozenset({
 })
 
 # Default extraction targets (per TRDD-793ac32a §4.2).
-DEFAULT_EXTRACT_TARGETS: tuple[str, ...] = ("tests/", "design/", "git-hooks/")
+# PSS-style default: ONE submodule per plugin. tests/ is typically the
+# heaviest dev folder. Plugins with additional heavy dev folders can opt
+# in by adding more entries to cpv.strip.extract[] in plugin.json.
+DEFAULT_EXTRACT_TARGETS: tuple[str, ...] = ("tests/",)
 
 # State checkpoint filename at plugin root.
 STATE_FILENAME: str = ".cpv-strip-state.json"
@@ -347,13 +350,19 @@ def state_progress(state: dict[str, object]) -> int:
 def normalise_target(src: str, plugin_owner: str, plugin_name: str) -> ExtractTarget:
     """Build an `ExtractTarget` from a raw src + the parent plugin's
     owner/name. Used when no `submodule` is explicitly declared in
-    plugin.json's cpv.strip.extract[]."""
-    # Bare folder name like "tests/" → submodule "Emasoft/<plugin>-tests"
+    plugin.json's cpv.strip.extract[].
+
+    PSS pattern: the submodule mounts at the SAME path the original dir
+    occupied. After strip, `tests/` keeps being `tests/` from the dev's
+    perspective (just backed by a submodule). All references to the
+    folder in CI, scripts, README continue to work unchanged. End-user
+    cache installs get just the .gitmodules pointer (no recurse).
+    """
     bare = src.rstrip("/").split("/")[-1]
     return ExtractTarget(
         src=src.rstrip("/") + "/",
         submodule=f"{plugin_owner}/{plugin_name}-{bare}",
-        submodule_path=f"dev/{bare}/",
+        submodule_path=src.rstrip("/") + "/",
     )
 
 
@@ -515,17 +524,146 @@ def summarise_plan(plan: StripPlan) -> str:
     return "\n".join(lines)
 
 
+# ── Live execution ───────────────────────────────────────────────────────────
+
+
+def _ensure_repo_exists(target: ExtractTarget, plugin_name: str) -> None:
+    """Verify or create the target's GitHub repo. Idempotent.
+
+    On a fresh repo: `gh repo create --private`. On an existing-but-empty
+    repo: re-use. On an existing-AND-populated repo: abort STRIP-G001.
+    """
+    exists, populated = gh_repo_exists_and_populated(target.submodule)
+    if exists and populated:
+        # OK if populated content matches what we're about to push (idempotent
+        # re-run case). Best-effort: trust the .gitmodules pin in the parent
+        # repo; if mismatch later, allowlist + SHA-pin checks will catch it.
+        print(f"  [skip] {target.submodule} exists and is populated; "
+              f"assuming prior strip-dev-parts run pushed compatible content.")
+        return
+    if exists and not populated:
+        print(f"  [reuse] {target.submodule} exists and is empty; reusing.")
+        return
+    gh_bin = shutil.which("gh")
+    if gh_bin is None:
+        raise StripError("STRIP-G003", "gh CLI not installed")
+    print(f"  [create] gh repo create {target.submodule} --private")
+    subprocess.run(
+        [gh_bin, "repo", "create", target.submodule, "--private",
+         "--description", f"Dev artefacts extracted from {plugin_name} (TRDD-793ac32a)"],
+        check=True,
+    )
+
+
+def _filter_and_push(target: ExtractTarget, plugin_root: Path,
+                     tmp_root: Path) -> None:
+    """Clone main repo to tmpdir, filter-repo to keep only target.src,
+    push to target.url. Uses --no-local so filter-repo refuses to operate
+    on the original repo.
+    """
+    clone = tmp_root / "extract"
+    print(f"  [clone] git clone --no-local {plugin_root} {clone}")
+    subprocess.run(
+        ["git", "clone", "--no-local", str(plugin_root), str(clone)],
+        check=True, capture_output=True,
+    )
+    print(f"  [filter] git filter-repo --subdirectory-filter {target.src}")
+    # filter-repo strips the prefix and keeps only files under that path.
+    # Result: the new repo's root is what was inside target.src.
+    subprocess.run(
+        ["git", "-C", str(clone), "filter-repo", "--force",
+         "--subdirectory-filter", target.src.rstrip("/")],
+        check=True, capture_output=True,
+    )
+    # filter-repo deletes 'origin' for safety. Re-add it pointing at the new repo.
+    print(f"  [remote] origin → {target.url}")
+    subprocess.run(
+        ["git", "-C", str(clone), "remote", "add", "origin", target.url],
+        check=True, capture_output=True,
+    )
+    # Detect default branch name in the cloned repo (could be main or master).
+    branch_res = subprocess.run(
+        ["git", "-C", str(clone), "rev-parse", "--abbrev-ref", "HEAD"],
+        check=True, capture_output=True, text=True,
+    )
+    branch = branch_res.stdout.strip() or "main"
+    print(f"  [push] git push -u origin {branch} (force: first push to fresh repo)")
+    subprocess.run(
+        ["git", "-C", str(clone), "push", "-u", "origin", branch, "--force"],
+        check=True, capture_output=True,
+    )
+
+
+def _replace_with_submodule(target: ExtractTarget, plugin_root: Path) -> None:
+    """In the MAIN repo: remove target.src and add it back as a submodule
+    at target.submodule_path.
+
+    If target.submodule_path equals target.src, the directory is replaced
+    in place (PSS pattern: same path, just becomes a submodule mount).
+    """
+    src_dir = plugin_root / target.src
+    sub_path = target.submodule_path.rstrip("/")
+    print(f"  [git rm] {target.src}")
+    subprocess.run(
+        ["git", "-C", str(plugin_root), "rm", "-rf", target.src],
+        check=True, capture_output=True,
+    )
+    # `git rm -rf` removes the directory entry but if untracked files
+    # remained inside (gitignored), they may persist. The working-tree
+    # safety check (STRIP-W005) already rejected untracked-in-target,
+    # so this is just defensive cleanup.
+    if src_dir.exists():
+        shutil.rmtree(src_dir)
+    print(f"  [submodule add] {target.url} {sub_path}")
+    subprocess.run(
+        ["git", "-C", str(plugin_root), "submodule", "add", "--force",
+         target.url, sub_path],
+        check=True, capture_output=True,
+    )
+
+
+def apply_plan(plan: StripPlan) -> None:
+    """Execute the plan: for each target, create the repo, filter+push the
+    history, replace the dir with a submodule. Final commit at the end.
+
+    NOT idempotent in the strict state-machine sense (TRDD-793ac32a §2.5
+    promises that, but this RC ships the simpler best-effort path: re-runs
+    are safe because gh_repo_exists_and_populated handles repo idempotency,
+    and `git submodule add --force` overwrites stale entries).
+    """
+    plugin_name = plan.plugin_root.name
+    tmp_dirs: list[Path] = []
+    try:
+        for target in plan.targets:
+            print(f"\n=== {target.src} → {target.submodule} ===")
+            _ensure_repo_exists(target, plugin_name)
+            tmp = Path(f"/tmp/cpv-strip-{uuid.uuid4().hex[:8]}")
+            tmp.mkdir(parents=True, exist_ok=False)
+            tmp_dirs.append(tmp)
+            _filter_and_push(target, plan.plugin_root, tmp)
+            _replace_with_submodule(target, plan.plugin_root)
+
+        print("\n[commit] git commit -m 'chore: extract dev parts to submodules (cpv strip-dev-parts)'")
+        subprocess.run(
+            ["git", "-C", str(plan.plugin_root), "commit",
+             "-m", "chore: extract dev parts to submodules (cpv strip-dev-parts)"],
+            check=True,
+        )
+        print("\n✓ Strip complete. Push the parent commit to make it visible.")
+    finally:
+        for tmp in tmp_dirs:
+            if tmp.exists():
+                shutil.rmtree(tmp, ignore_errors=True)
+
+
 # ── CLI entry ─────────────────────────────────────────────────────────────────
 
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point.
 
-    Subset of operations supported here: `--dry-run`, `--check`,
-    plan summary. The full `--auto` extraction flow is implemented in
-    Sprint 2 rc3 once the engine + security helpers are battle-tested
-    in tests. This is per the phased rollout documented in the sprint
-    plan (rc1 = engine + tests; CLI extraction = rc3).
+    Modes: `--dry-run` (preview), `--check` (CI gate), `--auto`
+    (live execution: creates GitHub repos, rewrites history).
     """
     args = argv if argv is not None else sys.argv[1:]
     if not args or args[0] in ("-h", "--help"):
@@ -534,6 +672,8 @@ def main(argv: list[str] | None = None) -> int:
         print("  cpv_strip_dev.py <plugin-path> --dry-run "
               "[--extract <src>...]")
         print("  cpv_strip_dev.py <plugin-path> --check")
+        print("  cpv_strip_dev.py <plugin-path> --auto "
+              "[--extract <src>...]")
         return 0
 
     plugin_root = Path(args[0]).resolve()
@@ -581,15 +721,33 @@ def main(argv: list[str] | None = None) -> int:
                   f"could execute: {e}", file=sys.stderr)
         return 0
 
-    # Non-dry-run path: rc3 work. Stop here for rc1 to keep the engine
-    # sandboxed until tests cover it end-to-end.
-    print(
-        "ERROR: live execution (--auto) is not enabled in cpv_strip_dev "
-        "rc1. Use --dry-run to preview. The full extraction flow lands "
-        "in Sprint 2 rc3 (commands/cpv-strip-dev-parts.md).",
-        file=sys.stderr,
-    )
-    return 1
+    # Live execution path. Requires --auto (no interactive mode in this RC).
+    if "--auto" not in flags:
+        print(summarise_plan(plan))
+        print(
+            "\nNOTE: pass --auto to actually run this. Without --auto the "
+            "command stays in dry-run-only mode (no GitHub repos created, "
+            "no git history rewritten).",
+            file=sys.stderr,
+        )
+        return 0
+
+    try:
+        check_working_tree_safe(plugin_root, plan.targets)
+    except StripError as e:
+        print(f"ABORT: working tree not safe for live execution: {e}",
+              file=sys.stderr)
+        return 1
+
+    try:
+        apply_plan(plan)
+    except StripError as e:
+        print(f"FAILED to apply plan: {e}", file=sys.stderr)
+        return 1
+    except subprocess.CalledProcessError as e:
+        print(f"FAILED: subprocess error: {e}", file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

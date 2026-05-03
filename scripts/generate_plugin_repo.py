@@ -213,24 +213,22 @@ def gen_plugin_json(p: PluginParams) -> str:
     # Lets the user run `cpv strip-dev-parts` later without editing
     # plugin.json — the block is the configuration the engine reads.
     if p.strip_dev:
+        # PSS-style: ONE submodule per plugin (not three). Default extracts
+        # tests/ only — typically the heaviest dev folder. design/ and
+        # git-hooks/ are tiny (<300 KB combined) and stay in the main repo.
+        # Plugin authors can add more extract entries by hand if their
+        # plugin has additional heavy dev folders worth stripping.
+        owner = p.github_owner or "<owner>"
         manifest["cpv"] = {
             "strip": {
                 "extract": [
                     {
                         "src": "tests/",
-                        "submodule": (
-                            f"{p.github_owner}/{p.repo_name}-tests"
-                            if p.github_owner else f"<owner>/{p.repo_name}-tests"
-                        ),
-                        "submodule_path": "dev/tests/",
-                    },
-                    {
-                        "src": "design/",
-                        "submodule": (
-                            f"{p.github_owner}/{p.repo_name}-design"
-                            if p.github_owner else f"<owner>/{p.repo_name}-design"
-                        ),
-                        "submodule_path": "dev/design/",
+                        "submodule": f"{owner}/{p.repo_name}-tests",
+                        "submodule_path": "tests/",
+                        # PSS pattern: submodule mounts at the same path
+                        # as the original folder, so all references in
+                        # CI / scripts / README continue to work unchanged.
                     },
                 ],
                 "require_url_allowlist": True,

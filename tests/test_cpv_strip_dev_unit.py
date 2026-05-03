@@ -245,14 +245,15 @@ def test_state_progress_recognises_states(tmp_path):
 
 
 def test_build_plan_uses_defaults_when_no_config(tmp_path):
+    """PSS-style default: ONE submodule per plugin (tests/ only)."""
     plugin = _make_plugin(tmp_path, files={
-        "tests/x.py": "x", "design/y.md": "y", "git-hooks/pre-push": "h",
+        "tests/x.py": "x",
     })
     plan = csd.build_plan(plugin)
     srcs = {t.src for t in plan.targets}
-    assert "tests/" in srcs
-    assert "design/" in srcs
-    assert "git-hooks/" in srcs
+    assert srcs == {"tests/"}, (
+        f"Default extract should be tests/ only (PSS pattern), got {srcs}"
+    )
 
 
 def test_build_plan_explicit_targets_override_config(tmp_path):
@@ -316,10 +317,11 @@ def test_build_plan_rejects_invalid_src_in_config(tmp_path):
 
 
 def test_normalise_target_uses_owner_plugin_convention():
+    """PSS pattern: submodule mounts at the SAME path as the original dir."""
     t = csd.normalise_target("tests/", "Emasoft", "myplugin")
     assert t.src == "tests/"
     assert t.submodule == "Emasoft/myplugin-tests"
-    assert t.submodule_path == "dev/tests/"
+    assert t.submodule_path == "tests/"
 
 
 def test_normalise_target_strips_trailing_slash():
@@ -369,9 +371,13 @@ def test_main_check_passes_when_dev_parts_absent(tmp_path, capsys):
     assert rc == 1  # build_plan fails because tests/ doesn't exist
 
 
-def test_main_blocks_live_run_with_clear_message(tmp_path, capsys):
+def test_main_without_auto_falls_through_to_dry_run(tmp_path, capsys):
+    """Without --auto, --extract still prints the plan and exits 0
+    instead of executing destructive operations.
+    """
     plugin = _make_plugin(tmp_path, files={"tests/x.py": "x"})
     rc = csd.main([str(plugin), "--extract", "tests/"])
-    assert rc == 1
-    err = capsys.readouterr().err
-    assert "rc1" in err or "not enabled" in err
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "Plan for" in captured.out
+    assert "--auto" in captured.err
