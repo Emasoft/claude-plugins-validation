@@ -373,3 +373,43 @@ assistant: I'll scaffold a Layout C self-referential plugin (one repo serves as 
 ✓ Layout C plugin is ready. Single repo handles plugin + marketplace.
 Run `claude plugin marketplace add owner/lint-checker && claude plugin install lint-checker@lint-checker --scope user`.
 </example>
+
+## Dev-stripping (TRDD-793ac32a — Sprint 2)
+
+When creating a NEW plugin from scratch, ask the user whether to enable
+dev-stripping. The default is recommended ON for the install-size win
+(~12 MB saved per cache install) but ships only the rc-2 enforcement
+and rc-3 metadata in plugin.json — the actual extraction (`--auto`) is
+deferred until rc-3 lands.
+
+### Menu (use Unicode table, NOT AskUserQuestion)
+
+```
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Dev-stripping (TRDD-793ac32a) — default = (1) Standard            ┃
+┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫
+┃ N │ Choice                                                       ┃
+┣━━━━┼─────────────────────────────────────────────────────────────┫
+┃ 1 │ Standard — emit cpv.strip block (tests/ + design/) in plugin.json
+┃ 2 │ Aggressive — also stage git-hooks/ for extraction
+┃ 3 │ Legacy — keep everything in MAIN repo (discouraged)
+┃ 0 │ Cancel
+┗━━━━┴─────────────────────────────────────────────────────────────┘
+```
+
+Choosing 1 or 2 makes `generate_plugin_repo.py` add the `cpv.strip`
+block to the generated plugin.json — `cpv strip-dev-parts` (when rc-3
+ships) will then read it as configuration. No GitHub repos are created
+at scaffold time; the user runs `cpv strip-dev-parts` later when ready.
+
+### Implementation
+
+Pass `--strip-dev` (default) to `generate_plugin_repo.py`. Negate via
+`--no-strip-dev` for option (3).
+
+### Why default-ON
+
+* New plugins start with the right structure
+* Reviewers see the `cpv.strip` block in plugin.json from day 1
+* Migration to actual submodules is just `cpv strip-dev-parts` later
+* Zero downside: no submodules created until the user opts in

@@ -1075,6 +1075,35 @@ def load_cpv_config(plugin_root: Path) -> dict[str, object]:
     return _load_cpv_config_cached(str(plugin_root.resolve()))
 
 
+def load_strip_config(plugin_root: Path) -> dict[str, object]:
+    """Return the `cpv.strip` block from plugin.json (or {}).
+
+    TRDD-793ac32a: the strip-dev-parts feature is configured per-plugin
+    via this block. Schema:
+
+        {"cpv": {"strip": {
+            "extract": [
+                {"src": "tests/", "submodule": "owner/<plugin>-tests",
+                 "submodule_path": "dev/tests/",
+                 "submodule_commit_sha": "0123abc..."}
+            ],
+            "keep_in_main":            ["tests/fixtures/small-snippets/"],
+            "keep_dev_configs":        false,
+            "symlinks_for_devs":       true,
+            "allowed_submodule_urls":  ["https://github.com/Emasoft/*"],
+            "require_url_allowlist":   true
+        }}}
+
+    Returns an empty dict if the plugin has no cpv.strip block. Both
+    `validate_plugin.py` (publish-time allowlist rule) and
+    `cpv_strip_dev.py` (the engine) consume this loader so they stay
+    in lockstep on parsing.
+    """
+    cpv = load_cpv_config(plugin_root)
+    strip = cpv.get("strip")
+    return strip if isinstance(strip, dict) else {}
+
+
 def is_vendored_path(rel_path: Path | str, plugin_root: Path) -> bool:
     """True if a path lives under a vendored / submodule subtree.
 

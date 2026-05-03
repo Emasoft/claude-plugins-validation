@@ -80,6 +80,7 @@ class PluginParams:
     version: str = "0.1.0"
     language: str = "python"  # One of VALID_LANGUAGES
     self_marketplace: bool = False  # Layout C: emit .claude-plugin/marketplace.json with self-entry
+    strip_dev: bool = True  # TRDD-793ac32a: emit cpv.strip block in plugin.json (default ON)
 
     @property
     def repo_name(self) -> str:
@@ -208,6 +209,33 @@ def gen_plugin_json(p: PluginParams) -> str:
     if p.github_owner:
         manifest["homepage"] = p.github_url
         manifest["repository"] = p.github_url
+    # TRDD-793ac32a: emit cpv.strip block when --strip-dev (default).
+    # Lets the user run `cpv strip-dev-parts` later without editing
+    # plugin.json — the block is the configuration the engine reads.
+    if p.strip_dev:
+        manifest["cpv"] = {
+            "strip": {
+                "extract": [
+                    {
+                        "src": "tests/",
+                        "submodule": (
+                            f"{p.github_owner}/{p.repo_name}-tests"
+                            if p.github_owner else f"<owner>/{p.repo_name}-tests"
+                        ),
+                        "submodule_path": "dev/tests/",
+                    },
+                    {
+                        "src": "design/",
+                        "submodule": (
+                            f"{p.github_owner}/{p.repo_name}-design"
+                            if p.github_owner else f"<owner>/{p.repo_name}-design"
+                        ),
+                        "submodule_path": "dev/design/",
+                    },
+                ],
+                "require_url_allowlist": True,
+            }
+        }
     return json.dumps(manifest, indent=2) + "\n"
 
 
@@ -2545,6 +2573,24 @@ Examples:
         help="Layout C: also emit .claude-plugin/marketplace.json with a self-entry "
         "(source: \"./\"). Use when the repo should be both plugin and marketplace.",
     )
+    # TRDD-793ac32a: dev-stripping. Default ON — emits cpv.strip block in
+    # plugin.json so the user can run `cpv strip-dev-parts` later. The actual
+    # extraction is NOT done at scaffold time; only the configuration.
+    parser.add_argument(
+        "--strip-dev",
+        dest="strip_dev",
+        action="store_true",
+        default=True,
+        help="(default) Emit cpv.strip block in plugin.json so dev-only "
+        "folders can later be moved to per-plugin git submodules via "
+        "`cpv strip-dev-parts` (TRDD-793ac32a). Saves ~12 MB per cache install.",
+    )
+    parser.add_argument(
+        "--no-strip-dev",
+        dest="strip_dev",
+        action="store_false",
+        help="Disable dev-stripping config (legacy mode — keep all dev parts in MAIN repo).",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Preview files without writing")
 
     args = parser.parse_args()
@@ -2562,6 +2608,7 @@ Examples:
         version=args.version,
         language=args.language,
         self_marketplace=args.self_marketplace,
+        strip_dev=args.strip_dev,
     )
 
     target = args.target_dir.resolve()

@@ -2883,6 +2883,63 @@ def _category_has_matching_artifact(plugin_root: Path, patterns: list[str]) -> b
     return False
 
 
+def validate_strip_gitmodules(plugin_root: Path, report: ValidationReport) -> None:
+    """TRDD-793ac32a — validate `.gitmodules` URL allowlist.
+
+    Plugins that use the strip-dev-parts pattern (tests/ → submodule)
+    expose a `.gitmodules` URL surface that is normally trusted with no
+    defense (PSS pattern). CPV adds:
+
+      * URL-shape rules (no userinfo, no `..`, scheme in {https,ssh},
+        no backslash/newline) → CRITICAL on violation (STRIP-G010)
+      * Per-plugin allowlist via `cpv.strip.allowed_submodule_urls`
+        → CRITICAL on alien URL (STRIP-G011)
+      * Default rule when allowlist is absent: same owner as parent OR
+        `Emasoft` (transitional shared-dev repos) → CRITICAL on alien
+        owner (STRIP-G013)
+      * Opt-out via `cpv.strip.require_url_allowlist=false` → WARNING
+        for traceability (STRIP-G014)
+      * Recorded `submodule_commit_sha` cross-check vs git index
+        → CRITICAL on mismatch (STRIP-G015)
+
+    No-op when `.gitmodules` is absent. Skips silently when CPV's own
+    `cpv_validate_gitmodules` module cannot be imported (degraded but
+    not blocking — the engine ALSO runs the same check at strip time).
+    """
+    gm = plugin_root / ".gitmodules"
+    if not gm.is_file():
+        return
+    try:
+        import sys as _sys
+        from pathlib import Path as _Path
+        scripts_dir = str(_Path(__file__).resolve().parent)
+        if scripts_dir not in _sys.path:
+            _sys.path.insert(0, scripts_dir)
+        from cpv_validate_gitmodules import validate_gitmodules  # noqa: PLC0415
+    except ImportError:
+        # Engine helper missing — degraded mode (no allowlist enforcement).
+        report.minor(
+            ".gitmodules present but cpv_validate_gitmodules.py missing — "
+            "URL allowlist not enforced this run (TRDD-793ac32a). Update CPV "
+            "to a version that ships the engine."
+        )
+        return
+
+    findings = validate_gitmodules(plugin_root)
+    for f in findings:
+        msg = f"[{f.code}] submodule={f.submodule_name!r} {f.message}"
+        if f.severity == "CRITICAL":
+            report.critical(msg)
+        elif f.severity == "WARNING":
+            report.warning(msg)
+        else:
+            report.minor(msg)
+    if not findings:
+        report.passed(
+            ".gitmodules URLs pass the strip-dev-parts allowlist (TRDD-793ac32a)"
+        )
+
+
 def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
     """Validate that the plugin has a .gitignore with essential patterns.
 
@@ -3780,6 +3837,7 @@ def main() -> int:
     validate_license(plugin_root, report)
     validate_no_local_paths(plugin_root, report)
     validate_gitignore(plugin_root, report)
+    validate_strip_gitmodules(plugin_root, report)
     validate_cross_platform(plugin_root, report)
     # Check for stale ~/.claude/settings.local.json — should not exist at user level
     _check_stale_user_settings_local(report)
