@@ -541,19 +541,24 @@ Type a number to choose:
 ### 3.5 Manage sub-menu
 
 ```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Operation                       ┃ What it does                                                   ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ List installed plugins          │ Show every plugin Claude Code knows about                      │
-│ 2 │ Install / update / enable / dis │ Dispatches plugin-manager agent (its First Contact menu picks) │
-│ 3 │ Doctor (health check)           │ Probe registry, settings, cache for orphans                    │
-│ 4 │ Install all external scanners   │ Batch-install cc-audit/tirith/trufflehog/semgrep/Cisco/fclones │
-│ 5 │ Prune old plugin cache versions │ Free disk space — keep active version, delete older            │
-│ 6 │ Bump version (current plugin)   │ patch / minor / major (uses bump_version.py)                   │
-│ 7 │ Show CPV version                │ Read .claude-plugin/plugin.json                                │
-│ 9 │ Back                            │ Return to top-level menu                                       │
-│ 0 │ Cancel / Exit                   │ Terminate without action                                       │
-└───┴─────────────────────────────────┴────────────────────────────────────────────────────────────────┘
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ # ┃ Operation                         ┃ What it does                                                    ┃
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 1 │ List installed plugins            │ Show every plugin Claude Code knows about                       │
+│ 2 │ Install / update / enable / dis   │ Dispatches plugin-manager agent (its First Contact menu picks)  │
+│ 3 │ Doctor (health check)             │ Probe registry, settings, cache for orphans                     │
+│ 4 │ Install all external scanners     │ Batch-install cc-audit/tirith/trufflehog/semgrep/Cisco/fclones  │
+│ 5 │ Prune old plugin cache versions   │ Free disk space — keep active version, delete older             │
+│ 6 │ Bump version + publish            │ patch / minor / major (delegates to publish.py)                 │
+│ 7 │ Show CPV version                  │ Read .claude-plugin/plugin.json                                 │
+│ 8 │ Refresh README AUTO-COMPONENTS    │ Re-render the plugin README components table from filesystem    │
+│10 │ Standardize plugin (force-tpl)    │ Force-overwrite publish.py + CI + retry helpers from canonical  │
+│11 │ Add component (skill/agent/cmd)   │ Add new skill/agent/command/hook/mcp to an existing plugin      │
+│12 │ Strip dev parts (submodule)       │ Move tests/ to per-plugin git submodule (PSS pattern)           │
+│13 │ Migrate marketplace (source.url)  │ Normalize source.url → source.repo + detect dead 404 entries    │
+│ 9 │ Back                              │ Return to top-level menu                                        │
+│ 0 │ Cancel / Exit                     │ Terminate without action                                        │
+└───┴───────────────────────────────────┴─────────────────────────────────────────────────────────────────┘
 Type a number to choose:
 ```
 
@@ -603,13 +608,17 @@ Type a number to choose:
   ```
 - **note**: The active version (whichever Claude Code's `enabledPlugins` references) is always kept, even if older than another cached version.
 
-#### 3.5.6 Bump version (current plugin)
+#### 3.5.6 Bump version + publish (current plugin)
 
 - **arg-prompt**: `Bump type? (patch / minor / major)`
-- **execution**:
+- **execution** (TRDD-bbff5bc5: publish.py is the canonical entry point):
   ```bash
-  uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/bump_version.py" --$BUMP_TYPE
+  uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/publish.py" --$BUMP_TYPE
   ```
+- **note**: This runs the FULL pipeline — bump + manifest refresh +
+  CHANGELOG + commit + push + GitHub release. For a local-only bump
+  without push, the user should call `bump_version.py` directly (it's
+  now a thin wrapper around `publish.bump_semver`).
 
 #### 3.5.7 Show CPV version
 
@@ -617,6 +626,84 @@ Type a number to choose:
   ```bash
   cat "${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])'
   ```
+
+#### 3.5.8 Refresh README AUTO-COMPONENTS (Phase 5, v2.57.0+)
+
+- **arg-prompt**: `Plugin path? (default: cwd)`
+- **execution**:
+  ```bash
+  uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/refresh_readme.py" "$PATH"
+  ```
+- **note**: Adds `<!-- BEGIN AUTO-COMPONENTS -->` block on first run;
+  subsequent runs preserve placement and only update the body.
+
+#### 3.5.10 Standardize plugin (force-templates) (Phase 2, v2.55.0+)
+
+- **arg-prompt**: `Plugin path?`
+- **arg-prompt**: `Run in --check mode first? (yes/no — recommended yes)`
+- **execution** (check mode):
+  ```bash
+  uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" \
+    standardize "$PATH" --fix --dry-run --force-templates
+  ```
+- **execution** (apply):
+  ```bash
+  uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" \
+    standardize "$PATH" --fix --force-templates
+  ```
+- **note**: OVERWRITES infrastructure files (publish.py, ci/release/notify
+  workflows, retry helpers, pre-push hook, cliff.toml, .mega-linter.yml)
+  with the canonical CPV templates. Backs up each existing copy to
+  `<file>.bak`. README, pyproject.toml, .gitignore are NEVER force-written.
+
+#### 3.5.11 Add component (Phase 10, v2.61.0+)
+
+- **arg-prompts** (in order):
+  1. `Plugin path?`
+  2. `Component type? (skill / agent / command / hook / mcp)`
+  3. `Name? (for skill/agent/command/mcp)`
+  4. `Description?`
+  5. `(if hook)` `Event name? (e.g. PreToolUse, Stop)` and `Command to run?`
+  6. `(if mcp)` `Stdio command OR HTTP URL?`
+- **execution**:
+  ```bash
+  uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/add_component.py" "$PATH" \
+    --type "$TYPE" --name "$NAME" --description "$DESC" [--allowed-tools ...]
+  ```
+
+#### 3.5.12 Strip dev parts (submodule) (Phase 2, v2.52.0+)
+
+- **arg-prompts** (in order):
+  1. `Plugin path?`
+  2. `Mode? (dry-run / check / auto)`
+- **execution** (dry-run, no destructive ops):
+  ```bash
+  uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_strip_dev.py" "$PATH" --dry-run
+  ```
+- **execution** (auto — DESTRUCTIVE):
+  ```bash
+  uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_strip_dev.py" "$PATH" --auto
+  ```
+- **note**: --auto creates a `<owner>/<plugin>-tests` private GitHub repo,
+  filters its history into the new repo, replaces the tests/ dir with a
+  submodule mount. Idempotent state machine resumes crashed runs.
+  ALWAYS run --dry-run first.
+
+#### 3.5.13 Migrate marketplace (source.url → source.repo) (Phase 2.6, v2.59.0+)
+
+- **arg-prompts** (in order):
+  1. `Marketplace root path? (containing .claude-plugin/marketplace.json)`
+  2. `Run in --check mode first? (yes/no — recommended yes)`
+- **execution** (check mode — exits 1 if migrations would change file):
+  ```bash
+  uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/migrate_marketplace.py" "$PATH" --check
+  ```
+- **execution** (apply atomically):
+  ```bash
+  uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/migrate_marketplace.py" "$PATH"
+  ```
+- **note**: Probes each plugin entry's GitHub repo via `gh api` (retry-wrapped).
+  Dead 404 entries are surfaced but NOT removed automatically — user decides.
 
 ---
 

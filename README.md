@@ -358,10 +358,14 @@ The semantic validator always warns about the cost and asks for confirmation bef
 | `/cpv-validate-local-scope <path>` | Validate non-git-tracked (local-scope) Claude Code config under a project: `.claude/settings.local.json`, `CLAUDE.local.md`, gitignored agents/skills/commands/rules, per-project MCP state in `~/.claude.json`, and locally-enabled plugins from `enabledPlugins`. **v2.21.0+:** deep per-element pipeline runs even on untracked content; absolute-path rules remain relaxed (personal paths OK), but managed-only/global-config keys are still rejected. |
 | `/cpv-doctor` | Health-check installed plugins, settings, marketplaces |
 | `/cpv-list-plugins` | List installed plugins with version and status |
-| `/cpv-bump-version <path>` | Bump plugin version (patch, minor, major) |
+| `/cpv-bump-version <path>` | Bump plugin version + run the full publish pipeline (TRDD-bbff5bc5: `publish.py --patch/--minor/--major`) |
 | `/cpv-setup-branch-rules <owner/repo>` | Create/update the GitHub ruleset that enforces CI as a required status check (server-side gate — idempotent, auto-detects plugin vs marketplace, preserves existing bot bypass actors) |
 | `/cpv-setup-branch-rules-generic <owner/repo> --check "job-name"` | Project-agnostic variant that works on ANY GitHub repo (not just CPV plugins). Requires explicit `--check` contexts, no hardcoded defaults. Also available as `uvx branch-rules-install` or as a self-contained bash script (`scripts/branch_rules_install.sh`) that you can drop into any project folder — only `gh` + `jq` required, no Python. |
 | `/cpv-version` | Show CPV version |
+| `/cpv-strip-dev-parts <path> --dry-run` | **Phase 2 (v2.52.0+).** Move dev-only artefacts (default: `tests/`) to a per-plugin git submodule. PSS pattern — saves install size for plugins with heavy fixture trees. Always preview with `--dry-run` before `--auto`. State-machine resumes crashed runs. |
+| `/cpv-refresh-readme <path>` | **Phase 5 (v2.57.0+).** Auto-refresh the `<!-- BEGIN AUTO-COMPONENTS -->` block in a plugin's README from the filesystem. `--check` mode exits 1 if the README would change (CI gate). |
+| `/cpv-add-component <path> --type ... --name ...` | **Phase 10 (v2.61.0+).** Add a new skill / agent / command / hook / mcp to an existing plugin without re-running the generator. Stubs include valid frontmatter that passes validate_plugin out of the box. |
+| `/cpv-migrate-marketplace <path>` | **Phase 2.6 (v2.59.0+).** Normalize an existing marketplace.json: convert `source.url` → canonical `source.repo` form, probe each entry for live-ness via `gh api` (retry-wrapped), surface 404 dead repos. Atomic write. |
 
 #### Agent Commands (interactive — uses AI tokens)
 
