@@ -671,13 +671,26 @@ def _current_repo_slug(plugin_root: Path) -> str | None:
 
 
 def stage_bypass_guard() -> int:
-    """Gate 0: reject any env var that could bypass checks."""
+    """Gate 0: reject any env var that could bypass checks.
+
+    TRDD-bbff5bc5 §6.1: the canonical names are PLUGIN_SKIP_* / PLUGIN_FORCE_*
+    / PLUGIN_BYPASS_*. The CPV_SKIP_* names are kept as legacy aliases for
+    one release to ease migration of plugins still on v2.50.x.
+    """
     forbidden = [
+        # New canonical names (TRDD-bbff5bc5)
+        "PLUGIN_SKIP_TESTS",
+        "PLUGIN_SKIP_LINT",
+        "PLUGIN_SKIP_VALIDATE",
+        "PLUGIN_FORCE_PUBLISH",
+        "PLUGIN_BYPASS_CHECKS",
+        # Legacy aliases — removed in next release.
         "CPV_SKIP_TESTS",
         "CPV_SKIP_LINT",
         "CPV_SKIP_VALIDATE",
         "CPV_FORCE_PUBLISH",
         "CPV_BYPASS_CHECKS",
+        # Generic bypass attempts — always rejected.
         "SKIP_TESTS",
         "SKIP_LINT",
         "SKIP_VALIDATE",

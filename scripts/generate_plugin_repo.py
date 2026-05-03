@@ -736,6 +736,36 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Load gh / git retry wrappers from the sibling module so every push +
+# `gh release create` survives transient github.com hiccups (the retry
+# pattern from ~/.claude/rules/github-timeouts.md). Shipped verbatim
+# from the canonical CPV install via gen_cpv_network_resilience_py().
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+try:
+    from cpv_network_resilience import gh_with_retry, git_with_retry
+except ImportError:
+    # Fallback: scripts/cpv_network_resilience.py was not shipped with this
+    # plugin (older scaffold). Define no-op shims so publish.py still works,
+    # but warn so the user knows to refresh via `cpv standardize --force-templates`.
+    print(
+        "[publish.py] WARNING: scripts/cpv_network_resilience.py missing — "
+        "network calls will not auto-retry on transient errors. "
+        "Run `cpv standardize --force-templates` to refresh.",
+        file=sys.stderr,
+    )
+    def gh_with_retry(cmd, **kwargs):  # type: ignore[no-redef]
+        kwargs.pop("max_attempts", None)
+        kwargs.pop("backoff", None)
+        kwargs.setdefault("check", True)
+        kwargs.setdefault("capture_output", False)
+        return subprocess.run(cmd, **kwargs)
+    def git_with_retry(cmd, **kwargs):  # type: ignore[no-redef]
+        kwargs.pop("max_attempts", None)
+        kwargs.pop("backoff", None)
+        kwargs.setdefault("check", True)
+        kwargs.setdefault("capture_output", False)
+        return subprocess.run(cmd, **kwargs)
+
 # -- ANSI colors ---------------------------------------------------------------
 
 
@@ -776,6 +806,82 @@ def get_repo_root() -> Path:
     r = subprocess.run(["git", "rev-parse", "--show-toplevel"],
                        capture_output=True, text=True, check=True)
     return Path(r.stdout.strip())
+
+
+# -- gh-auth precheck (TRDD-bbff5bc5) ---------------------------------------
+
+
+def _parse_owner_repo_from_remote(remote_url: str) -> tuple[str, str] | None:
+    """Extract (owner, repo) from `git@host:owner/repo.git` or
+    `https://host/owner/repo[.git]`. Returns None on unparseable input.
+    """
+    if not remote_url:
+        return None
+    url = remote_url.strip().rstrip("/")
+    if url.endswith(".git"):
+        url = url[:-4]
+    match = re.search(r"[:/]([^:/\s]+)/([^/\s]+)$", url)
+    if not match:
+        return None
+    return match.group(1), match.group(2)
+
+
+def _resolve_owner_repo(plugin_root: Path) -> tuple[str, str]:
+    """Read remote.origin.url, parse (owner, repo). Exit 1 on failure."""
+    result = subprocess.run(
+        ["git", "config", "--get", "remote.origin.url"],
+        cwd=str(plugin_root), capture_output=True, text=True, timeout=10, check=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        cprint(f"  {RED}Could not read remote.origin.url. Run: git remote add origin <url>{NC}")
+        sys.exit(1)
+    parsed = _parse_owner_repo_from_remote(result.stdout.strip())
+    if parsed is None:
+        cprint(f"  {RED}Could not parse owner/repo from remote URL: {result.stdout.strip()!r}{NC}")
+        sys.exit(1)
+    return parsed
+
+
+def _ensure_gh_auth(owner: str, repo: str) -> None:
+    """Verify gh CLI installed + authenticated + push perm on owner/repo.
+
+    Called BEFORE every push gate. Exits 1 on any of: gh missing, not
+    authed, no push permission. Per TRDD-bbff5bc5 §4.1: never invokes
+    `gh auth token`; uses only `gh auth status` and `gh api` so PAT-shaped
+    strings cannot leak to stdout/stderr.
+    """
+    gh_bin = shutil.which("gh")
+    if gh_bin is None:
+        cprint(f"  {RED}gh CLI not installed. Install: brew install gh{NC}")
+        sys.exit(1)
+    status = subprocess.run(
+        [gh_bin, "auth", "status"],
+        capture_output=True, text=True, timeout=15, check=False,
+    )
+    if status.returncode != 0:
+        cprint(f"  {RED}gh CLI not authenticated.{NC}")
+        cprint(f"  {YELLOW}Run: gh auth login --hostname github.com --git-protocol https{NC}")
+        sys.exit(1)
+    perms = subprocess.run(
+        [gh_bin, "api", f"repos/{owner}/{repo}", "--jq", ".permissions.push"],
+        capture_output=True, text=True, timeout=15, check=False,
+    )
+    if perms.returncode != 0 or perms.stdout.strip() != "true":
+        active_login = ""
+        for line in (status.stdout + status.stderr).splitlines():
+            line = line.strip()
+            if "account " in line and ("Logged in" in line or "Active" in line):
+                m = re.search(r"account\s+(\S+)", line)
+                if m:
+                    active_login = m.group(1)
+                    break
+        login_str = f" '{active_login}'" if active_login else ""
+        cprint(f"  {RED}gh user{login_str} has no push permission on {owner}/{repo}.{NC}")
+        cprint(f"  {YELLOW}Diagnose:{NC}")
+        cprint(f"  {YELLOW}  1. Ask the repo owner to add you as a collaborator with write access.{NC}")
+        cprint(f"  {YELLOW}  2. If you have multiple gh accounts: gh auth status; gh auth switch{NC}")
+        cprint(f"  {YELLOW}  3. If using a fine-grained token: ensure 'Contents: write' on this repo.{NC}")
+        sys.exit(1)
 
 
 # -- Semver --------------------------------------------------------------------
@@ -1303,11 +1409,20 @@ def run_gate(root: Path) -> int:
 # -- Pipeline stages -----------------------------------------------------------
 
 def stage_bypass_guard() -> None:
-    """Step 0: Reject any env var that could bypass a check. No exceptions."""
+    """Step 0: Reject any env var that could bypass a check. No exceptions.
+
+    TRDD-bbff5bc5 §6.1: the canonical names are PLUGIN_SKIP_*; CPV_SKIP_*
+    are kept as legacy aliases for one release.
+    """
     cprint(f"\n{BOLD}[0/11] Checking for bypass attempts...{NC}")
     forbidden = [
+        # New canonical names (TRDD-bbff5bc5)
+        "PLUGIN_SKIP_TESTS", "PLUGIN_SKIP_LINT", "PLUGIN_SKIP_VALIDATE",
+        "PLUGIN_FORCE_PUBLISH", "PLUGIN_BYPASS_CHECKS",
+        # Legacy aliases — removed in next release.
         "CPV_SKIP_TESTS", "CPV_SKIP_LINT", "CPV_SKIP_VALIDATE",
         "CPV_FORCE_PUBLISH", "CPV_BYPASS_CHECKS",
+        # Generic bypass attempts — always rejected.
         "SKIP_TESTS", "SKIP_LINT", "SKIP_VALIDATE", "NO_VERIFY",
     ]
     attempted = [v for v in forbidden if os.environ.get(v)]
@@ -1792,7 +1907,12 @@ def stage_changelog(root: Path, new_ver: str, dry_run: bool) -> None:
     cprint(f"  {GREEN}CHANGELOG.md updated with {tag}.{NC}")
 
 def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
-    """Step 9: Commit, tag, push."""
+    """Step 9: Commit, tag, push.
+
+    TRDD-bbff5bc5 §5: gh-auth precheck runs BEFORE the first push so the
+    user gets an actionable error if their gh CLI is unauthed/lacks push
+    perm — instead of an opaque git push failure mid-pipeline.
+    """
     cprint(f"\n{BOLD}[10/11] Committing and pushing...{NC}")
     tag = f"v{new_ver}"
     if dry_run:
@@ -1803,11 +1923,27 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
     run(["git", "add", "-A"], cwd=root)
     run(["git", "commit", "-m", f"chore: bump version to {new_ver}"], cwd=root)
     run(["git", "tag", "-a", tag, "-m", f"Release {tag}"], cwd=root)
-    run(["git", "push", "origin", "HEAD", "--tags"], cwd=root)
+    # gh-auth precheck — fail fast with actionable error if gh missing/unauthed.
+    owner, repo = _resolve_owner_repo(root)
+    _ensure_gh_auth(owner, repo)
+    # Retry-wrap the push: a single transient github.com hiccup used to
+    # leave the repo in a half-published state. git_with_retry tolerates
+    # up to GIT_MAX_ATTEMPTS × GIT_BACKOFF_SEC of transient errors and
+    # returns immediately on a permanent error (4xx, non-fast-forward).
+    cprint(f"  {BLUE}$ git push origin HEAD --tags{NC}")
+    git_with_retry(
+        ["git", "push", "origin", "HEAD", "--tags"],
+        cwd=str(root), capture_output=False,
+    )
     cprint(f"  {GREEN}Pushed {tag}.{NC}")
 
 def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
-    """Step 10: Create GitHub release via gh CLI."""
+    """Step 10: Create GitHub release via gh CLI.
+
+    TRDD-bbff5bc5 §5: re-runs the gh-auth precheck before `gh release
+    create` so an auth state change between gates 10 and 11 (token
+    revoked, account switched) surfaces as an actionable error.
+    """
     cprint(f"\n{BOLD}[11/11] Creating GitHub release...{NC}")
     tag = f"v{new_ver}"
     if not shutil.which("gh"):
@@ -1816,12 +1952,18 @@ def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
     if dry_run:
         cprint(f"  Would create release: {tag}")
         return
+    owner, repo = _resolve_owner_repo(root)
+    _ensure_gh_auth(owner, repo)
     changelog_file = root / "CHANGELOG.md"
     args = ["gh", "release", "create", tag, "--title", tag, "--generate-notes"]
     if changelog_file.is_file():
         args.extend(["--notes-file", str(changelog_file)])
-    result = run(args, cwd=root, check=False)
-    # Check returncode before claiming success
+    cprint(f"  {BLUE}$ {' '.join(args)}{NC}")
+    result = gh_with_retry(args, cwd=str(root), check=False, capture_output=True)
+    if result.stdout and result.stdout.strip():
+        cprint(result.stdout.strip())
+    if result.stderr and result.stderr.strip():
+        print(result.stderr.strip(), file=sys.stderr)
     if result.returncode != 0:
         cprint(f"  {RED}Failed to create release (exit code {result.returncode}).{NC}")
     else:
@@ -1923,6 +2065,20 @@ def main() -> int:
 if __name__ == "__main__":
     sys.exit(main())
 '''
+
+
+def gen_cpv_network_resilience_py() -> str:
+    """Emit scripts/cpv_network_resilience.py for the new plugin.
+
+    The new plugin's publish.py imports gh_with_retry / git_with_retry from
+    this module to apply the documented retry pattern (~/.claude/rules/
+    github-timeouts.md) to its own pushes and gh release calls. Shipping
+    a verbatim copy keeps every plugin byte-identical on the resilience
+    surface, so a fix landed in CPV propagates via `cpv standardize
+    --force-templates` to every plugin in one go.
+    """
+    src = Path(__file__).resolve().parent / "cpv_network_resilience.py"
+    return src.read_text(encoding="utf-8")
 
 
 def gen_setup_hooks_py() -> str:
@@ -2405,6 +2561,8 @@ def generate_all_files(p: PluginParams) -> list[tuple[str, str, bool]]:
             [
                 ("scripts/__init__.py", gen_scripts_init(p), False),
                 ("scripts/publish.py", gen_publish_py(p), True),
+                ("scripts/cpv_network_resilience.py",
+                 gen_cpv_network_resilience_py(), True),
                 ("scripts/setup-hooks.py", gen_setup_hooks_py(), True),
                 ("hooks/hooks.json", gen_hooks_json(p), False),
                 ("git-hooks/pre-push", gen_pre_push_hook(p), True),
