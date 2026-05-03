@@ -12,6 +12,7 @@ use `unicodedata.east_asian_width()` to correctly classify each char.
 This test is preventive: any future menu edit that breaks border
 alignment will fail this test before reaching the user's terminal.
 """
+
 from __future__ import annotations
 
 import unicodedata
@@ -28,10 +29,10 @@ BOX_TOP_LEFT = "┏"
 BOX_TOP_RIGHT = "┓"
 BOX_BOTTOM_LEFT = "└"
 BOX_BOTTOM_RIGHT = "┘"
-BOX_HEAVY_T_BOTTOM = "┳"   # heavy top-border T
-BOX_LIGHT_T_TOP = "┴"      # light bottom-border T
-BOX_HEAVY_PIPE = "┃"       # heavy vertical (header rows)
-BOX_LIGHT_PIPE = "│"       # light vertical (body rows)
+BOX_HEAVY_T_BOTTOM = "┳"  # heavy top-border T
+BOX_LIGHT_T_TOP = "┴"  # light bottom-border T
+BOX_HEAVY_PIPE = "┃"  # heavy vertical (header rows)
+BOX_LIGHT_PIPE = "│"  # light vertical (body rows)
 
 
 def display_width(text: str) -> int:
@@ -92,14 +93,10 @@ def test_every_table_has_consistent_row_widths():
         widths = [display_width(line) for line in table]
         if len(set(widths)) > 1:
             ref = widths[0]
-            offenders = [
-                f"  line {i + 1}: width={w} text={table[i]!r}"
-                for i, w in enumerate(widths) if w != ref
-            ]
+            offenders = [f"  line {i + 1}: width={w} text={table[i]!r}" for i, w in enumerate(widths) if w != ref]
             failures.append(
                 f"Table #{idx} (starts: {table[0][:60]!r}) has inconsistent "
-                f"row widths. Reference (top border) = {ref}. Offenders:\n"
-                + "\n".join(offenders)
+                f"row widths. Reference (top border) = {ref}. Offenders:\n" + "\n".join(offenders)
             )
 
     assert not failures, "Border-alignment failures:\n\n" + "\n\n".join(failures)
@@ -121,8 +118,7 @@ def test_unicode_wide_chars_in_menu_tables():
                     found[ch] = found.get(ch, 0) + 1
     if found:
         msg = "\n".join(
-            f"  {ch!r} (U+{ord(ch):04X}, eaw={unicodedata.east_asian_width(ch)}): "
-            f"{count} occurrences"
+            f"  {ch!r} (U+{ord(ch):04X}, eaw={unicodedata.east_asian_width(ch)}): {count} occurrences"
             for ch, count in sorted(found.items(), key=lambda kv: -kv[1])
         )
         print(f"\n[diagnostic] East-Asian wide chars in menu tables:\n{msg}")
