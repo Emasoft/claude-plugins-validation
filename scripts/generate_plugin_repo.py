@@ -17,6 +17,7 @@ Usage:
 import argparse
 import json
 import os
+import shutil
 import stat
 import sys
 from dataclasses import dataclass
@@ -63,6 +64,190 @@ NC = "\033[0m" if _USE_COLOR else ""
 
 
 VALID_LANGUAGES = {"python", "js", "ts", "rust", "go", "deno"}
+
+
+# ── Phase 6: single-input slurp helpers ───────────────────────────────────
+
+
+def _read_md_frontmatter(path: Path) -> dict[str, str]:
+    """Return the YAML-ish frontmatter of a .md file as a flat dict.
+
+    Stops at the closing `---` line. Uses a tiny line-by-line parser
+    instead of pyyaml so this script stays dependency-free for the
+    callers that import it without a venv.
+    """
+    if not path.is_file():
+        return {}
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if not text.startswith("---\n"):
+        return {}
+    body = text[4:]
+    end = body.find("\n---")
+    if end < 0:
+        return {}
+    fm: dict[str, str] = {}
+    for line in body[:end].splitlines():
+        if ":" not in line or line.startswith("#"):
+            continue
+        key, _, value = line.partition(":")
+        fm[key.strip()] = value.strip()
+    return fm
+
+
+def _classify_md(path: Path) -> str:
+    """Return 'skill' / 'command' / 'agent' for a .md file.
+
+    Heuristic order:
+      1. Filename `SKILL.md` → skill (will be placed under skills/<parent>/).
+      2. Frontmatter has `allowed-tools:` → command (per CC spec, only
+         commands declare allowed-tools).
+      3. Default → agent (the catch-all bucket; agents have the richest
+         frontmatter surface).
+    """
+    if path.name == "SKILL.md":
+        return "skill"
+    fm = _read_md_frontmatter(path)
+    if "allowed-tools" in fm:
+        return "command"
+    return "agent"
+
+
+def _slurp_one(target_root: Path, src: Path, kind: str) -> int:
+    """Copy `src` into the right component folder of `target_root`.
+
+    `kind` is one of: 'skill', 'agent', 'command', 'mcp', 'scripts'.
+    Returns the number of files copied.
+    """
+    n = 0
+    if kind == "skill":
+        # If src is a directory containing SKILL.md, copy whole tree.
+        # If src is a SKILL.md file, copy under skills/<parent-dir-name>/.
+        if src.is_dir() and (src / "SKILL.md").is_file():
+            dest = target_root / "skills" / src.name
+            dest.mkdir(parents=True, exist_ok=True)
+            for f in src.rglob("*"):
+                if f.is_file():
+                    rel = f.relative_to(src)
+                    dest_f = dest / rel
+                    dest_f.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(f, dest_f)
+                    n += 1
+            print(f"  [slurp] skill {src} → {dest.relative_to(target_root)}/ ({n} files)")
+        elif src.is_file() and src.name == "SKILL.md":
+            # Use parent dir name OR the skill's `name:` frontmatter.
+            fm = _read_md_frontmatter(src)
+            skill_name = fm.get("name") or src.parent.name or "imported-skill"
+            dest_dir = target_root / "skills" / skill_name
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest_dir / "SKILL.md")
+            n = 1
+            print(f"  [slurp] skill {src} → skills/{skill_name}/SKILL.md")
+        else:
+            print(f"  [slurp] {YELLOW}WARN{NC} --skill {src}: not a SKILL.md or skill dir; skipped")
+        return n
+
+    if kind in ("agent", "command"):
+        if not src.is_file() or src.suffix != ".md":
+            print(f"  [slurp] {YELLOW}WARN{NC} --{kind} {src}: not a .md file; skipped")
+            return 0
+        sub = "agents" if kind == "agent" else "commands"
+        dest_dir = target_root / sub
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest_f = dest_dir / src.name
+        shutil.copy2(src, dest_f)
+        print(f"  [slurp] {kind} {src} → {sub}/{src.name}")
+        return 1
+
+    if kind == "mcp":
+        # Either a directory containing .mcp.json OR the .mcp.json itself.
+        if src.is_dir():
+            mcp = src / ".mcp.json"
+            if not mcp.is_file():
+                print(f"  [slurp] {YELLOW}WARN{NC} --mcp-server {src}: no .mcp.json found; skipped")
+                return 0
+            shutil.copy2(mcp, target_root / ".mcp.json")
+            n += 1
+            # Also copy any sibling files referenced by .mcp.json (best-effort).
+            for f in src.rglob("*"):
+                if f.is_file() and f.name != ".mcp.json":
+                    rel = f.relative_to(src)
+                    dest_f = target_root / "mcp-server" / rel
+                    dest_f.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(f, dest_f)
+                    n += 1
+            print(f"  [slurp] mcp {src} → .mcp.json + {n - 1} sidecar files")
+        elif src.is_file() and src.name == ".mcp.json":
+            shutil.copy2(src, target_root / ".mcp.json")
+            n = 1
+            print(f"  [slurp] mcp {src} → .mcp.json")
+        else:
+            print(f"  [slurp] {YELLOW}WARN{NC} --mcp-server {src}: not a .mcp.json file or dir; skipped")
+        return n
+
+    if kind == "scripts":
+        if not src.is_dir():
+            print(f"  [slurp] {YELLOW}WARN{NC} --scripts {src}: not a directory; skipped")
+            return 0
+        dest_dir = target_root / "scripts"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        for f in src.iterdir():
+            if f.is_file():
+                shutil.copy2(f, dest_dir / f.name)
+                n += 1
+        print(f"  [slurp] scripts {src} → scripts/ ({n} files)")
+        return n
+
+    return 0
+
+
+def _do_slurp(
+    target_root: Path,
+    *,
+    from_paths: list[Path],
+    skill_paths: list[Path],
+    agent_paths: list[Path],
+    command_paths: list[Path],
+    mcp_paths: list[Path],
+    scripts_paths: list[Path],
+) -> int:
+    """Apply all --from / --skill / --agent / --command / --mcp-server /
+    --scripts flags to `target_root`. Returns total files copied.
+
+    --from PATH is auto-classified via _classify_md (for .md files) or
+    inferred from the filename (.mcp.json → mcp; directory of scripts
+    → scripts; SKILL.md → skill).
+    """
+    total = 0
+    for p in from_paths:
+        if not p.exists():
+            print(f"  [slurp] {YELLOW}WARN{NC} --from {p}: does not exist; skipped")
+            continue
+        if p.is_file() and p.name == ".mcp.json":
+            kind = "mcp"
+        elif p.is_file() and p.suffix == ".md":
+            kind = _classify_md(p)
+        elif p.is_dir() and (p / "SKILL.md").is_file():
+            kind = "skill"
+        elif p.is_dir() and (p / ".mcp.json").is_file():
+            kind = "mcp"
+        elif p.is_dir():
+            kind = "scripts"
+        else:
+            print(f"  [slurp] {YELLOW}WARN{NC} --from {p}: cannot classify; skipped")
+            continue
+        total += _slurp_one(target_root, p, kind)
+
+    for p in skill_paths:
+        total += _slurp_one(target_root, p, "skill")
+    for p in agent_paths:
+        total += _slurp_one(target_root, p, "agent")
+    for p in command_paths:
+        total += _slurp_one(target_root, p, "command")
+    for p in mcp_paths:
+        total += _slurp_one(target_root, p, "mcp")
+    for p in scripts_paths:
+        total += _slurp_one(target_root, p, "scripts")
+    return total
 
 
 @dataclass
@@ -2749,6 +2934,37 @@ Examples:
     )
     parser.add_argument("--dry-run", action="store_true", help="Preview files without writing")
 
+    # ── Phase 6: single-input slurp flags ────────────────────────────────
+    # Each --skill/--agent/--command/--mcp-server/--scripts copies its
+    # input into the right component folder of the new plugin. --from PATH
+    # auto-classifies (best-effort): SKILL.md → skill; .md with
+    # `allowed-tools:` frontmatter → command; .md with `tools:`/no
+    # allowed-tools → agent; .mcp.json → MCP server; directory of scripts
+    # → scripts/. Multiple flags can be combined.
+    slurp_grp = parser.add_argument_group("slurp inputs (Phase 6)")
+    slurp_grp.add_argument("--from", dest="from_path", type=Path, action="append",
+                           default=[], metavar="PATH",
+                           help="Auto-classify and copy a file or folder into the new plugin "
+                           "(may repeat). SKILL.md → skill; .md with allowed-tools → command; "
+                           ".md without → agent; .mcp.json → MCP config; directory → scripts/.")
+    slurp_grp.add_argument("--skill", type=Path, action="append", default=[],
+                           metavar="PATH",
+                           help="Copy SKILL.md (or folder containing SKILL.md) into "
+                           "skills/<name>/. May repeat.")
+    slurp_grp.add_argument("--agent", type=Path, action="append", default=[],
+                           metavar="PATH",
+                           help="Copy a .md agent file into agents/. May repeat.")
+    slurp_grp.add_argument("--command", type=Path, action="append", default=[],
+                           metavar="PATH",
+                           help="Copy a .md command file into commands/. May repeat.")
+    slurp_grp.add_argument("--mcp-server", type=Path, action="append", default=[],
+                           metavar="PATH",
+                           help="Copy .mcp.json (or a directory containing one) into "
+                           "the plugin root. May repeat.")
+    slurp_grp.add_argument("--scripts", type=Path, action="append", default=[],
+                           metavar="DIR",
+                           help="Copy all files from DIR into scripts/. May repeat.")
+
     args = parser.parse_args()
 
     # Build params
@@ -2791,10 +3007,28 @@ Examples:
 
     created = generate_plugin_repo(target, params, dry_run=args.dry_run)
 
+    # ── Phase 6: post-scaffold slurp of user-provided inputs ─────────
+    slurp_count = 0
+    if not args.dry_run:
+        slurp_count = _do_slurp(
+            target,
+            from_paths=args.from_path,
+            skill_paths=args.skill,
+            agent_paths=args.agent,
+            command_paths=args.command,
+            mcp_paths=args.mcp_server,
+            scripts_paths=args.scripts,
+        )
+    elif any([args.from_path, args.skill, args.agent, args.command,
+              args.mcp_server, args.scripts]):
+        print(f"  {YELLOW}(dry-run: --from / --skill / --agent / --command / "
+              f"--mcp-server / --scripts inputs are NOT slurped){NC}")
+
     # Summary
     file_count = sum(1 for f in created if not f.endswith("/"))
     dir_count = sum(1 for f in created if f.endswith("/"))
-    print(f"\n{GREEN}{BOLD}Done!{NC} Created {file_count} files in {dir_count} directories.")
+    extra = f" + {slurp_count} slurped from --from/--skill/--agent/etc" if slurp_count else ""
+    print(f"\n{GREEN}{BOLD}Done!{NC} Created {file_count} files in {dir_count} directories{extra}.")
 
     if not args.dry_run:
         print(f"\n{BOLD}Next steps:{NC}")
