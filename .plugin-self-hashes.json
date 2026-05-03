@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-03T15:30:52+00:00",
+  "computed_at": "2026-05-03T15:42:34+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     "agents/cache-optimizer-agent.md": "sha256:b0f8e0619569cc2b04587e8b251f9ad2f9a8e8227da071953aa56f78c72c0553",
@@ -78,7 +78,7 @@
     "scripts/cpv_sbom_writer.py": "sha256:946bc0059db7a1792edbb0899397cbd73a69a513bdd5e90478dfecbd3c520f2b",
     "scripts/cpv_skill_scanner.py": "sha256:3d23fe82800cff5916350d4cd8864713870f3bbe4e821bd53e78c287c82cbd49",
     "scripts/cpv_staging.py": "sha256:0aecda8160cdf0e417ba6ee5a7cc19b0aa4626390ba78e125b1d60c87518225d",
-    "scripts/cpv_strip_dev.py": "sha256:f19dbde1b2cd72cc777f3d2f56552fb84fbbcc22530e6ba43990c49f762b86d3",
+    "scripts/cpv_strip_dev.py": "sha256:8f01eef6c0d08be7d25f5379f74bfc14044e620b6493750ed3a3e8f9b3bd50f4",
     "scripts/cpv_taint_engine.py": "sha256:8ca379faf90bf76a32ef951c8d23419e9e5be3e7720f9cd4d47689a919033ac2",
     "scripts/cpv_token_cost.py": "sha256:e35d69c393c37794798615c473e67bf89f48d9d27f901f5221f0fc426aaa0ef5",
     "scripts/cpv_validate_gitmodules.py": "sha256:2703af5ff96379e01b9dbadf8f5da34fb29db958c333a1fb849ccecc115d4436",
@@ -271,7 +271,7 @@
     "tests/test_cpv_skill_scanner.py": "sha256:47049520b0704a061e0a49281e780df03d071b976a983e96ae230f1f77c6ff61",
     "tests/test_cpv_staging.py": "sha256:b3c5ae6935b36ca08a6ff96075ade83b2987acad6770b4a0cd5237043c1bdf5d",
     "tests/test_cpv_strip_dev_e2e.py": "sha256:a5749471656242d33b9b2deff1ac2f1acaaa07388cd41308ba3bfdafdd0fcf44",
-    "tests/test_cpv_strip_dev_unit.py": "sha256:085537785749e14e04e05ed9b23232b2726c8d28ce68960f069b77cddf63911f",
+    "tests/test_cpv_strip_dev_unit.py": "sha256:10aef9d7b728f8ca3fb4a453079dbd1ca4036d23fe823cfefe9447e862096424",
     "tests/test_cpv_validate_gitmodules.py": "sha256:70a980d2da113ce8c8b6cfb5ce2b4af3bd28b06ae0a0f2bd9b62d5dd412a0627",
     "tests/test_cpv_validation_common.py": "sha256:54696e43883485704bb84ebeac00be1ec3de0fabcc94e842944dcb57140b9374",
     "tests/test_extended_linting.py": "sha256:ad4133e28d2dd7120fef6d7d52a0dd24c5ff64e8147d224121db481f4e96cb81",
