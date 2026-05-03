@@ -409,7 +409,7 @@ Pass `--strip-dev` (default) to `generate_plugin_repo.py`. Negate via
 
 ### Why default-ON
 
-* New plugins start with the right structure
-* Reviewers see the `cpv.strip` block in plugin.json from day 1
-* Migration to actual submodules is just `cpv strip-dev-parts` later
-* Zero downside: no submodules created until the user opts in
+- New plugins start with the right structure
+- Reviewers see the `cpv.strip` block in plugin.json from day 1
+- Migration to actual submodules is just `cpv strip-dev-parts` later
+- Zero downside: no submodules created until the user opts in
