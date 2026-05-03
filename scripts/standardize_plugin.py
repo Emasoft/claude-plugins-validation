@@ -679,6 +679,7 @@ _FILE_TO_GENERATOR: dict[str, str] = {
     "cliff.toml": "gen_cliff_toml",
     ".mega-linter.yml": "gen_mega_linter_yml",
     "scripts/publish.py": "gen_publish_py",
+    "scripts/cpv_network_resilience.py": "gen_cpv_network_resilience_py",
     "git-hooks/pre-push": "gen_pre_push_hook",
     ".github/workflows/ci.yml": "gen_ci_yml",
     ".github/workflows/release.yml": "gen_release_yml",
@@ -688,17 +689,44 @@ _FILE_TO_GENERATOR: dict[str, str] = {
 # Files that should have the executable bit set
 _EXECUTABLE_FILES: set[str] = {
     "scripts/publish.py",
+    "scripts/cpv_network_resilience.py",
     "git-hooks/pre-push",
+}
+
+# Files safe to OVERWRITE in --force-templates mode. These are pure
+# infrastructure (publish pipeline, CI, retry helpers, hook scripts) that
+# the user is not expected to customise — keeping them in lockstep with
+# the canonical CPV standard is the whole point of TRDD-bbff5bc5. README
+# / pyproject.toml / .gitignore stay user-owned and are NEVER force-written.
+_FORCE_TEMPLATE_FILES: set[str] = {
+    "scripts/publish.py",
+    "scripts/cpv_network_resilience.py",
+    "git-hooks/pre-push",
+    ".github/workflows/ci.yml",
+    ".github/workflows/release.yml",
+    ".github/workflows/notify-marketplace.yml",
+    "cliff.toml",
+    ".mega-linter.yml",
 }
 
 
 def fix_missing_files(
-    plugin_path: Path, results: list[AuditItem], dry_run: bool = False, marketplace: str | None = None
+    plugin_path: Path,
+    results: list[AuditItem],
+    dry_run: bool = False,
+    marketplace: str | None = None,
+    force_templates: bool = False,
 ) -> list[str]:
     """Generate missing standard files using templates from generate_plugin_repo.
 
-    Only creates files that do not already exist. Never overwrites existing files.
-    If marketplace is provided (owner/repo), patches notify-marketplace.yml with the values.
+    By default: only creates files that do not already exist (never overwrites).
+    With force_templates=True: ALSO overwrites files in _FORCE_TEMPLATE_FILES
+    (publish.py, ci/release/notify workflows, retry helpers, pre-push hook,
+    cliff.toml, .mega-linter.yml). Existing copies are backed up to
+    `<file>.bak` before being replaced. README / pyproject.toml / .gitignore
+    are NEVER force-overwritten — those stay user-owned.
+
+    If marketplace is provided (owner/repo), patches notify-marketplace.yml.
     Returns list of created (or would-create in dry-run) file paths.
     """
     import importlib
@@ -709,7 +737,17 @@ def fix_missing_files(
         if item.category == "files" and item.status in ("MISSING",) and item.name in _FILE_TO_GENERATOR:
             missing_files.add(item.name)
 
-    if not missing_files:
+    # Force-overwrite mode: ALSO regenerate _FORCE_TEMPLATE_FILES even when
+    # they already exist. Skipped when force_templates=False (default).
+    force_overwrite: set[str] = set()
+    if force_templates:
+        for rel in _FORCE_TEMPLATE_FILES:
+            if rel in _FILE_TO_GENERATOR:
+                force_overwrite.add(rel)
+        # Drop any missing-files duplicates so we don't process them twice.
+        force_overwrite -= missing_files
+
+    if not missing_files and not force_overwrite:
         print(f"  {GREEN}No fixable missing files.{NC}")
         return []
 
@@ -732,7 +770,14 @@ def fix_missing_files(
 
     created: list[str] = []
 
-    for rel_path in sorted(missing_files):
+    # Process missing-then-force so the [create] / [overwrite] markers in the
+    # output reflect the actual operation.
+    process_set: list[tuple[str, str]] = (
+        [(p, "create") for p in sorted(missing_files)]
+        + [(p, "overwrite") for p in sorted(force_overwrite)]
+    )
+
+    for rel_path, op_kind in process_set:
         gen_func_name = _FILE_TO_GENERATOR[rel_path]
         gen_func = getattr(gen_module, gen_func_name)
 
@@ -749,8 +794,9 @@ def fix_missing_files(
         is_executable = rel_path in _EXECUTABLE_FILES
 
         if dry_run:
+            tag = f"[dry-run] Would {op_kind}"
             print(
-                f"  {BLUE}[dry-run]{NC} Would create {file_path} ({len(content)} bytes)"
+                f"  {BLUE}{tag}{NC} {file_path} ({len(content)} bytes)"
                 f"{' [exec]' if is_executable else ''}"
             )
             created.append(str(file_path))
@@ -758,6 +804,15 @@ def fix_missing_files(
 
         # Create parent directories
         file_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # On overwrite, save a .bak alongside the original so the user can
+        # diff / restore if the new template breaks something specific to
+        # their plugin. Backup is silent — listed in the output line below.
+        backup_str = ""
+        if op_kind == "overwrite" and file_path.is_file():
+            bak = file_path.with_suffix(file_path.suffix + ".bak")
+            bak.write_bytes(file_path.read_bytes())
+            backup_str = f" (backup: {bak.name})"
 
         # Write the file
         file_path.write_text(content, encoding="utf-8")
@@ -774,7 +829,11 @@ def fix_missing_files(
             patched = patched.replace("MARKETPLACE_REPO: 'my-plugins-marketplace'", f"MARKETPLACE_REPO: '{repo}'")
             file_path.write_text(patched, encoding="utf-8")
 
-        print(f"  {GREEN}Created:{NC} {file_path}{' [exec]' if is_executable else ''}")
+        verb = "Overwrote" if op_kind == "overwrite" else "Created"
+        print(
+            f"  {GREEN}{verb}:{NC} {file_path}"
+            f"{' [exec]' if is_executable else ''}{backup_str}"
+        )
         created.append(str(file_path))
 
     # Also create missing component directories
@@ -846,6 +905,18 @@ Examples (always invoke via the launcher):
         help="Marketplace owner/repo for notify-marketplace.yml (e.g., Emasoft/emasoft-plugins)",
     )
     parser.add_argument("--validate", action="store_true", help="Also run validate_plugin.py for full validation")
+    parser.add_argument(
+        "--force-templates",
+        action="store_true",
+        help=(
+            "OVERWRITE infrastructure files (publish.py, ci/release/notify "
+            "workflows, retry helpers, pre-push hook, cliff.toml, .mega-linter.yml) "
+            "with the canonical CPV templates. Existing copies are backed up to "
+            "<file>.bak before being replaced. README, pyproject.toml, .gitignore "
+            "are NEVER force-written. Use this to propagate TRDD-bbff5bc5 changes "
+            "to existing plugins. Implies --fix."
+        ),
+    )
 
     args = parser.parse_args()
     plugin_path: Path = args.plugin_path.resolve()
@@ -872,10 +943,18 @@ Examples (always invoke via the launcher):
     if args.report:
         save_report_to_file(results, plugin_path, args.report.resolve())
 
-    # Fix mode — generate missing files
-    if args.fix:
-        print(f"{BOLD}Fix Mode{NC} {'(dry-run)' if args.dry_run else ''}")
-        created = fix_missing_files(plugin_path, results, dry_run=args.dry_run, marketplace=args.marketplace)
+    # Fix mode — generate missing files. --force-templates implies --fix.
+    if args.fix or args.force_templates:
+        mode_label = " (dry-run)" if args.dry_run else ""
+        if args.force_templates:
+            mode_label += " [FORCE TEMPLATES]"
+        print(f"{BOLD}Fix Mode{NC}{mode_label}")
+        created = fix_missing_files(
+            plugin_path, results,
+            dry_run=args.dry_run,
+            marketplace=args.marketplace,
+            force_templates=args.force_templates,
+        )
         if created and not args.dry_run:
             # Re-run audit after fixes to show updated status
             print(f"\n{BOLD}Post-fix audit:{NC}")
