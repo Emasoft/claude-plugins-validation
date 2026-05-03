@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-03T15:53:44+00:00",
+  "computed_at": "2026-05-03T16:03:23+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     "agents/cache-optimizer-agent.md": "sha256:b0f8e0619569cc2b04587e8b251f9ad2f9a8e8227da071953aa56f78c72c0553",
@@ -86,7 +86,7 @@
     "scripts/cpv_validation_common.py": "sha256:24a1d5838df96946e6550c8274677ba895377e45e366a79652124afbf5d270c8",
     "scripts/detect_lockfiles.py": "sha256:17c03bd5d381395f6348a7a2b8c2d4df99422cabdd600b98fe7be0b01ebb6971",
     "scripts/generate_marketplace_repo.py": "sha256:d48c4d64f318fd15d2fb3e21278cd6cb7ab1715f52fc994b0fc9d8bc88fa1356",
-    "scripts/generate_plugin_repo.py": "sha256:1474bd16708dd5175952d97336ced7e2e873dca8f07258969651e4a4f952e2e9",
+    "scripts/generate_plugin_repo.py": "sha256:4414a18640e3a5f882dc51ef3d2784a3d09adfff7074215d521d93bd5a72b186",
     "scripts/lint_files.py": "sha256:33f6a3be3216ded1e50b508ae85f9a9a77061ea6d2283cdd6310954644c004c1",
     "scripts/manage_doctor.py": "sha256:aee097a13479bbfe898699ac8b52bddf02b2ac3393106a0de0354713b6eea127",
     "scripts/manage_github_validate.py": "sha256:3815122e0b6c491040ecb406f5b879f5a62f4b90c195d6f9f87c7ac9a19d7bbb",
@@ -281,6 +281,7 @@
     "tests/test_fp_v248_predicates.py": "sha256:f567406e940e139020e90a645e6acd5efba457287e07010bc24b4122caf0e456",
     "tests/test_generate_marketplace_repo.py": "sha256:75ca832af2b1f2fbcda7cbeb73fd1b6819d3a74be675c00d78243627108bb01e",
     "tests/test_generate_plugin_repo.py": "sha256:f4adc31cf74dc7c2f3ecf9709fc0d4aac026728c9e28209fc2d017ff3be4090e",
+    "tests/test_generate_plugin_slurp.py": "sha256:3c5d48c7e2573f61051c0d05123653c328d3e5d31292a658a979dd3e627902d0",
     "tests/test_gitignore_filter.py": "sha256:6709548b5e52ca5e2a2882d4ce0a5bb245370de887a99bd11e1b8185d7d02801",
     "tests/test_issue_16_orchestrator_fps.py": "sha256:c493a3b644aa19933f934c676d6159c11b8ed5ebb7544a244e32e6a7b81df203",
     "tests/test_legacy_integrity_fallback.py": "sha256:9ce71d08a3e09eb36160e072b508492ac58820685229947e9a8201113dc0bc3e",
