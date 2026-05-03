@@ -69,8 +69,8 @@ AGENT_COMMANDS = {
 class TestCommandCount:
     """Verify total command count after consolidation."""
 
-    def test_total_command_count_is_25(self):
-        """commands/ directory should contain exactly 25 .md files.
+    def test_total_command_count_is_26(self):
+        """commands/ directory should contain exactly 26 .md files.
 
         Originally 13 after consolidation (8 direct + 5 agent).
         v2.12.13 added: cpv-link-plugin, cpv-validate-settings-marketplace.
@@ -87,9 +87,11 @@ class TestCommandCount:
         v2.52.0 added: cpv-strip-dev-parts (TRDD-793ac32a — extract dev folders
           to per-plugin git submodules so Claude Code shallow-clone installs
           shrink ~12 MB).
+        v2.57.0 added: cpv-refresh-readme (Phase 5 — auto-refresh AUTO-COMPONENTS
+          marker block in plugin/marketplace READMEs).
         """
         md_files = list(COMMANDS_DIR.glob("*.md"))
-        assert len(md_files) == 25, f"Expected 25 commands, found {len(md_files)}: {sorted(f.name for f in md_files)}"
+        assert len(md_files) == 26, f"Expected 26 commands, found {len(md_files)}: {sorted(f.name for f in md_files)}"
 
 
 class TestDirectScriptCommands:
