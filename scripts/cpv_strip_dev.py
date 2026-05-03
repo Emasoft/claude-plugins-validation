@@ -39,10 +39,17 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+
+# Network-resilience helpers — wrap gh CLI / git push in retry-on-transient
+# loops. Imported via sibling lookup so cpv_strip_dev stays usable when
+# called as a script (sys.path may not include the scripts/ folder).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from cpv_network_resilience import gh_with_retry, git_with_retry  # noqa: E402
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -334,8 +341,13 @@ def clear_state(plugin_root: Path) -> None:
 
 def state_progress(state: dict[str, object]) -> int:
     """Return the int index in _STATE_ORDER for the saved state.
-    Returns 0 (INIT) if state is missing or unrecognised."""
-    raw = state.get("state")
+    Returns 0 (INIT) if state is missing or unrecognised.
+
+    Honours both legacy `state` and canonical `current_state` keys so
+    older state files keep deserialising. New writes always use
+    `current_state` (TRDD-793ac32a §2.5 canonical name).
+    """
+    raw = state.get("current_state") or state.get("state")
     if not isinstance(raw, str):
         return 0
     try:
@@ -506,6 +518,12 @@ def summarise_plan(plan: StripPlan) -> str:
             f"    - src={t.src!r:20s} → submodule={t.submodule!r} "
             f"path={t.submodule_path!r}"
         )
+        # Heuristic recommendation — surface but never auto-skip targets.
+        # The user's explicit cpv.strip.extract[] config wins; this is just
+        # advice when the dry-run plan looks like a waste of effort.
+        worth, reason = should_strip_target(t, plan.plugin_root)
+        marker = "✓" if worth else "⚠"
+        lines.append(f"      {marker} {reason}")
     lines.append("Steps that would execute (in order):")
     for i, t in enumerate(plan.targets, start=1):
         lines.append(
@@ -524,23 +542,96 @@ def summarise_plan(plan: StripPlan) -> str:
     return "\n".join(lines)
 
 
+# ── Needs-strip heuristic (TRDD-793ac32a §2.7) ───────────────────────────────
+
+
+# Thresholds chosen empirically:
+#  - 256 KB: typical CPV plugin's tests/ exceeds this when fixtures or
+#    snapshot files appear; smaller tests/ gives < 1 MB savings on the
+#    cache install — not worth the operational overhead of a separate repo.
+#  - 20 files: fewer files than this means the dev folder is a stub or
+#    pure docs — also not worth stripping.
+NEEDS_STRIP_BYTES_MIN: int = 256 * 1024
+NEEDS_STRIP_FILES_MIN: int = 20
+
+
+def should_strip_target(target: ExtractTarget, plugin_root: Path,
+                        ) -> tuple[bool, str]:
+    """Return (worth-stripping, reason).
+
+    Heuristic: a target is worth stripping ONLY if BOTH thresholds are
+    crossed (size AND file count). This avoids creating throwaway repos
+    for plugins whose tests/ is just a stub or only contains a couple of
+    smoke tests.
+
+    Reason string is always populated for surfacing to the user via
+    --dry-run output / --check report.
+    """
+    src_dir = plugin_root / target.src
+    if not src_dir.is_dir():
+        return False, f"source path {target.src!r} does not exist (cannot strip nothing)"
+
+    total_bytes = 0
+    total_files = 0
+    for path in src_dir.rglob("*"):
+        if path.is_file():
+            try:
+                total_bytes += path.stat().st_size
+                total_files += 1
+            except OSError:
+                continue
+
+    size_kb = total_bytes / 1024
+    if total_bytes < NEEDS_STRIP_BYTES_MIN and total_files < NEEDS_STRIP_FILES_MIN:
+        return False, (
+            f"{target.src!r} is small ({size_kb:.1f} KB, {total_files} files) — "
+            f"under both {NEEDS_STRIP_BYTES_MIN // 1024} KB and {NEEDS_STRIP_FILES_MIN} files. "
+            f"Skip stripping (savings not worth the operational cost of a separate repo)."
+        )
+    return True, (
+        f"{target.src!r} is heavy enough to strip ({size_kb:.1f} KB, "
+        f"{total_files} files) — over the {NEEDS_STRIP_BYTES_MIN // 1024} KB / "
+        f"{NEEDS_STRIP_FILES_MIN}-file threshold."
+    )
+
+
 # ── Live execution ───────────────────────────────────────────────────────────
 
 
 def _ensure_repo_exists(target: ExtractTarget, plugin_name: str) -> None:
     """Verify or create the target's GitHub repo. Idempotent.
 
-    On a fresh repo: `gh repo create --private`. On an existing-but-empty
-    repo: re-use. On an existing-AND-populated repo: abort STRIP-G001.
+    On a fresh repo: `gh repo create --private` (retry-wrapped).
+    On an existing-but-empty repo: re-use. On an existing-AND-populated
+    repo: if `target.submodule_commit_sha` is pinned in plugin.json,
+    verify the remote HEAD matches; otherwise abort STRIP-G001 to refuse
+    silent overwrite of squatter content.
     """
     exists, populated = gh_repo_exists_and_populated(target.submodule)
     if exists and populated:
-        # OK if populated content matches what we're about to push (idempotent
-        # re-run case). Best-effort: trust the .gitmodules pin in the parent
-        # repo; if mismatch later, allowlist + SHA-pin checks will catch it.
-        print(f"  [skip] {target.submodule} exists and is populated; "
-              f"assuming prior strip-dev-parts run pushed compatible content.")
-        return
+        # SHA-pin check: only safe to reuse if the pin matches HEAD.
+        if target.submodule_commit_sha:
+            head_sha = _gh_remote_head_sha(target.submodule)
+            if head_sha and head_sha == target.submodule_commit_sha:
+                print(
+                    f"  [reuse] {target.submodule} exists, populated, and HEAD "
+                    f"matches pinned SHA {head_sha[:8]}; reusing."
+                )
+                return
+            raise StripError(
+                "STRIP-G001",
+                f"{target.submodule} exists and is populated, but HEAD ({head_sha or 'unknown'}) "
+                f"does not match pinned cpv.strip.extract[].submodule_commit_sha "
+                f"({target.submodule_commit_sha[:8]}). Refusing to overwrite. "
+                f"Either bump the pin OR delete the remote repo and rerun.",
+            )
+        raise StripError(
+            "STRIP-G001",
+            f"{target.submodule} exists and is populated. Refusing to silently "
+            f"overwrite — either pin the expected SHA via "
+            f"cpv.strip.extract[].submodule_commit_sha (and run `cpv strip-dev-parts "
+            f"--auto` again to verify) OR delete the remote repo and rerun.",
+        )
     if exists and not populated:
         print(f"  [reuse] {target.submodule} exists and is empty; reusing.")
         return
@@ -548,28 +639,46 @@ def _ensure_repo_exists(target: ExtractTarget, plugin_name: str) -> None:
     if gh_bin is None:
         raise StripError("STRIP-G003", "gh CLI not installed")
     print(f"  [create] gh repo create {target.submodule} --private")
-    subprocess.run(
+    gh_with_retry(
         [gh_bin, "repo", "create", target.submodule, "--private",
          "--description", f"Dev artefacts extracted from {plugin_name} (TRDD-793ac32a)"],
         check=True,
     )
 
 
+def _gh_remote_head_sha(submodule: str) -> str | None:
+    """Return the remote HEAD commit SHA via `gh api`, or None on failure.
+
+    Used by _ensure_repo_exists to verify a SHA pin matches before re-using
+    an existing populated repo.
+    """
+    gh_bin = shutil.which("gh")
+    if gh_bin is None:
+        return None
+    res = subprocess.run(
+        [gh_bin, "api", f"repos/{submodule}/commits", "--jq", ".[0].sha"],
+        capture_output=True, text=True, timeout=20, check=False,
+    )
+    if res.returncode != 0:
+        return None
+    sha = (res.stdout or "").strip()
+    return sha if sha else None
+
+
 def _filter_and_push(target: ExtractTarget, plugin_root: Path,
                      tmp_root: Path) -> None:
     """Clone main repo to tmpdir, filter-repo to keep only target.src,
     push to target.url. Uses --no-local so filter-repo refuses to operate
-    on the original repo.
+    on the original repo. Push is retry-wrapped against transient hiccups.
     """
     clone = tmp_root / "extract"
     print(f"  [clone] git clone --no-local {plugin_root} {clone}")
-    subprocess.run(
+    git_with_retry(
         ["git", "clone", "--no-local", str(plugin_root), str(clone)],
         check=True, capture_output=True,
     )
     print(f"  [filter] git filter-repo --subdirectory-filter {target.src}")
-    # filter-repo strips the prefix and keeps only files under that path.
-    # Result: the new repo's root is what was inside target.src.
+    # filter-repo is a single-shot operation, not network-dependent. No retry.
     subprocess.run(
         ["git", "-C", str(clone), "filter-repo", "--force",
          "--subdirectory-filter", target.src.rstrip("/")],
@@ -588,7 +697,7 @@ def _filter_and_push(target: ExtractTarget, plugin_root: Path,
     )
     branch = branch_res.stdout.strip() or "main"
     print(f"  [push] git push -u origin {branch} (force: first push to fresh repo)")
-    subprocess.run(
+    git_with_retry(
         ["git", "-C", str(clone), "push", "-u", "origin", branch, "--force"],
         check=True, capture_output=True,
     )
@@ -623,33 +732,81 @@ def _replace_with_submodule(target: ExtractTarget, plugin_root: Path) -> None:
 
 
 def apply_plan(plan: StripPlan) -> None:
-    """Execute the plan: for each target, create the repo, filter+push the
-    history, replace the dir with a submodule. Final commit at the end.
+    """Execute the plan with idempotent state-machine recovery.
 
-    NOT idempotent in the strict state-machine sense (TRDD-793ac32a §2.5
-    promises that, but this RC ships the simpler best-effort path: re-runs
-    are safe because gh_repo_exists_and_populated handles repo idempotency,
-    and `git submodule add --force` overwrites stale entries).
+    Per TRDD-793ac32a §2.5, each transition is checkpointed to
+    `.cpv-strip-state.json` BEFORE being attempted, so a crashed run can
+    resume from the last successful state. Re-running this function with
+    a saved state skips work that's already done:
+
+        INIT → REPO_VERIFIED → CONTENT_PUSHED → SUBMODULE_ADDED → COMMITTED → DONE
+
+    State is per-target. The state file tracks `current_target_index` and
+    `current_state` so the loop knows where to pick up.
     """
     plugin_name = plan.plugin_root.name
+    state = load_state(plan.plugin_root) or {}
+    raw_idx = state.get("current_target_index", 0) if state else 0
+    saved_idx = int(raw_idx) if isinstance(raw_idx, (int, str)) and str(raw_idx).isdigit() else 0
+    raw_state = state.get("current_state") if state else None
+    saved_state = str(raw_state) if isinstance(raw_state, str) else StripState.INIT.value
+
     tmp_dirs: list[Path] = []
     try:
-        for target in plan.targets:
+        for idx, target in enumerate(plan.targets):
+            # Resume: skip targets already fully committed in a prior run.
+            if idx < saved_idx:
+                print(f"\n=== {target.src} → {target.submodule} ===  [SKIP — already committed in prior run]")
+                continue
             print(f"\n=== {target.src} → {target.submodule} ===")
-            _ensure_repo_exists(target, plugin_name)
-            tmp = Path(f"/tmp/cpv-strip-{uuid.uuid4().hex[:8]}")
-            tmp.mkdir(parents=True, exist_ok=False)
-            tmp_dirs.append(tmp)
-            _filter_and_push(target, plan.plugin_root, tmp)
-            _replace_with_submodule(target, plan.plugin_root)
 
-        print("\n[commit] git commit -m 'chore: extract dev parts to submodules (cpv strip-dev-parts)'")
-        subprocess.run(
-            ["git", "-C", str(plan.plugin_root), "commit",
-             "-m", "chore: extract dev parts to submodules (cpv strip-dev-parts)"],
-            check=True,
+            # Reset state markers when moving past saved target.
+            cur_state = saved_state if idx == saved_idx else StripState.INIT.value
+            saved_state = StripState.INIT.value  # only the resumed target uses the saved value
+            saved_idx = idx                       # keep idx aligned for next iter
+
+            # Step A: ensure repo exists (idempotent).
+            if state_progress({"current_state": cur_state}) < state_progress({"current_state": StripState.REPO_VERIFIED.value}):
+                save_state(plan.plugin_root, {"current_target_index": idx, "current_state": StripState.INIT.value})
+                _ensure_repo_exists(target, plugin_name)
+                save_state(plan.plugin_root, {"current_target_index": idx, "current_state": StripState.REPO_VERIFIED.value})
+                cur_state = StripState.REPO_VERIFIED.value
+
+            # Step B: clone + filter-repo + push.
+            if state_progress({"current_state": cur_state}) < state_progress({"current_state": StripState.CONTENT_PUSHED.value}):
+                tmp = Path(tempfile.mkdtemp(prefix=f"cpv-strip-{uuid.uuid4().hex[:8]}-"))
+                tmp_dirs.append(tmp)
+                _filter_and_push(target, plan.plugin_root, tmp)
+                save_state(plan.plugin_root, {"current_target_index": idx, "current_state": StripState.CONTENT_PUSHED.value})
+                cur_state = StripState.CONTENT_PUSHED.value
+
+            # Step C: git rm + submodule add.
+            if state_progress({"current_state": cur_state}) < state_progress({"current_state": StripState.SUBMODULE_ADDED.value}):
+                _replace_with_submodule(target, plan.plugin_root)
+                save_state(plan.plugin_root, {"current_target_index": idx, "current_state": StripState.SUBMODULE_ADDED.value})
+
+        # Step D: final commit (only if there are submodule changes staged).
+        commit_msg = "chore: extract dev parts to submodules (cpv strip-dev-parts)"
+        print(f"\n[commit] git commit -m '{commit_msg}'")
+        diff_check = subprocess.run(
+            ["git", "-C", str(plan.plugin_root), "diff", "--cached", "--name-only"],
+            capture_output=True, text=True, check=False,
         )
+        if not diff_check.stdout.strip():
+            print("  (nothing staged — skipping commit)")
+        else:
+            subprocess.run(
+                ["git", "-C", str(plan.plugin_root), "commit", "-m", commit_msg],
+                check=True,
+            )
+
+        save_state(plan.plugin_root, {
+            "current_target_index": len(plan.targets),
+            "current_state": StripState.DONE.value,
+        })
         print("\n✓ Strip complete. Push the parent commit to make it visible.")
+        # Clear state on full success so the next run starts fresh.
+        clear_state(plan.plugin_root)
     finally:
         for tmp in tmp_dirs:
             if tmp.exists():

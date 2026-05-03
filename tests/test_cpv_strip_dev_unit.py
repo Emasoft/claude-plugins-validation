@@ -381,3 +381,48 @@ def test_main_without_auto_falls_through_to_dry_run(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "Plan for" in captured.out
     assert "--auto" in captured.err
+
+
+# ── should_strip_target heuristic ────────────────────────────────────────────
+
+
+def test_should_strip_target_skips_tiny_dir(tmp_path):
+    """A 200-byte / 5-file tests/ is below both thresholds → don't strip."""
+    plugin = _make_plugin(tmp_path, files={
+        "tests/test_a.py": "a",
+        "tests/test_b.py": "b",
+        "tests/test_c.py": "c",
+    })
+    target = csd.normalise_target("tests/", "Emasoft", "demo")
+    worth, reason = csd.should_strip_target(target, plugin)
+    assert worth is False
+    assert "small" in reason.lower()
+
+
+def test_should_strip_target_recommends_when_large(tmp_path):
+    """A tests/ with 30 files of 10KB each clears both thresholds → strip."""
+    files = {f"tests/test_{i:02d}.py": "x" * 10_000 for i in range(30)}
+    plugin = _make_plugin(tmp_path, files=files)
+    target = csd.normalise_target("tests/", "Emasoft", "demo")
+    worth, reason = csd.should_strip_target(target, plugin)
+    assert worth is True
+    assert "heavy" in reason.lower() or "over" in reason.lower()
+
+
+def test_should_strip_target_handles_missing_src(tmp_path):
+    plugin = _make_plugin(tmp_path)  # no tests/
+    target = csd.normalise_target("tests/", "Emasoft", "demo")
+    worth, reason = csd.should_strip_target(target, plugin)
+    assert worth is False
+    assert "does not exist" in reason
+
+
+# ── State-machine resume ─────────────────────────────────────────────────────
+
+
+def test_state_progress_int_arithmetic():
+    """state_progress returns higher numbers for later states."""
+    assert csd.state_progress({"current_state": csd.StripState.INIT.value}) == 0
+    assert csd.state_progress({"current_state": csd.StripState.REPO_VERIFIED.value}) > 0
+    assert (csd.state_progress({"current_state": csd.StripState.DONE.value})
+            > csd.state_progress({"current_state": csd.StripState.SUBMODULE_ADDED.value}))
