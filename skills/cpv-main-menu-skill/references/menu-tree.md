@@ -53,9 +53,9 @@ option by typing the number in their next message. NEVER use
 ### Reference template (paste into the agent's output verbatim, then customize)
 
 ```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ # ┃ Option               ┃ What it does                                           ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
 │ 1 │ <option name>        │ <one-line description>                                 │
 ├───┼──────────────────────┼────────────────────────────────────────────────────────┤
 │ 2 │ <option name>        │ <one-line description>                                 │
@@ -114,12 +114,49 @@ have a `0 — Cancel / Exit` option in any sub-table the detection presents.
 
 ## Menu definitions
 
+### 3.0a Path-source mini-menu (MANDATORY before every path-required leaf)
+
+Claude Code's interactive UI does NOT let the user submit an empty
+response — they cannot just "press Enter" to accept a default. So every
+leaf that needs a path / name / URL MUST first print this 3-row mini-menu
+and route based on the user's number:
+
+```
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ # ┃ Path source                                                ┃
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 1 │ Current project folder ($PWD)                              │
+│ 2 │ Enter path / plugin name / URL manually                    │
+│ 0 │ Cancel / Exit                                              │
+└───┴────────────────────────────────────────────────────────────┘
+Type a number to choose:
+```
+
+**Routing**:
+  - `1` → `TARGET=$(pwd)`. The orchestrator continues with that as the path.
+  - `2` → ask `Enter the path / name / URL:` as a plain-text prompt.
+    The user MUST type at least one character. Capture as `TARGET`.
+  - `0` → `Cancelled — no actions taken.` and stop.
+
+The same pattern applies whether the leaf needs a local plugin path, a
+marketplace path, a GitHub `owner/repo`, or a full URL — the prompt
+text on row `2` adapts to the leaf's needs but the table shape stays
+identical.
+
+For leaves that need MULTIPLE path-shaped inputs (e.g. report path AND
+plugin path), repeat the mini-menu once per input.
+
+When the orchestrator references `TARGET` in execution snippets below,
+that's the value captured by this mini-menu.
+
+---
+
 ### 3.0 Top-level menu (8 categories + Cancel)
 
 ```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ # ┃ Category                ┃ What it does                                                          ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
 │ 1 │ Validate                │ Run a CPV validator (plugin/skill/cache/marketplace/scope/component)  │
 │ 2 │ Validate from GitHub    │ Clone owner/repo to tmpdir, scan, clean up                            │
 │ 3 │ Fix                     │ Apply mechanical fixes from a validation report                       │
@@ -150,15 +187,19 @@ table. Every option that takes a path triggers the **project-type
 auto-detection** (see "Project-type auto-detection" above) BEFORE
 invoking the underlying validator.
 
+The **path-source mini-menu (§3.0a)** is invoked for every leaf that
+needs a path — its row 1 ("Current project folder $PWD") is the
+one-keystroke shortcut for "validate the project I'm currently in".
+
 ```
-┏━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┏━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ #  ┃ What to validate                                ┃ What it does                                                                          ┃
-┡━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+┡━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
 │  1 │ Plugin (full, all 17 sub-validators)            │ Validate every component of a plugin directory                                        │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
 │  2 │ Skill                                           │ Single SKILL.md (frontmatter + structure + 190+ rules)                                │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│  3 │ Agent                                           │ Single agent .md (frontmatter, model, tools, examples, 2+ <example> blocks)          │
+│  3 │ Agent                                           │ Single agent .md (frontmatter, model, tools, examples, 2+ <example> blocks)           │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
 │  4 │ Command                                         │ Single command .md (frontmatter, agent ref, allowed-tools, argument-hint)             │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
@@ -186,7 +227,7 @@ invoking the underlying validator.
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
 │ 16 │ Security — sub-menu                             │ Drill into security-only scans (full pass, single scanner, marketplace-wide, etc.)    │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│ 17 │ Cache — sub-menu                                │ Drill into cache-pattern audits (CA-01..CA-06) and cache-aware refactor              │
+│ 17 │ Cache — sub-menu                                │ Drill into cache-pattern audits (CA-01..CA-06) and cache-aware refactor               │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
 │ 18 │ Cross-references (xref)                         │ Stale links between agents/skills/commands; broken `references/`                      │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
@@ -433,9 +474,9 @@ See §3.17 below.
 ### 3.2 Validate from GitHub sub-menu
 
 ```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ # ┃ Source                    ┃ What it does                                                      ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
 │ 1 │ Plugin from GitHub        │ Clone owner/repo, validate plugin, clean up                       │
 │ 2 │ Marketplace from GitHub   │ Clone owner/repo, validate marketplace, clean up                  │
 │ 9 │ Back                      │ Return to top-level menu                                          │
@@ -475,9 +516,9 @@ Type a number to choose:
 ### 3.3 Fix sub-menu
 
 ```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ # ┃ Operation                ┃ What it does                                                       ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
 │ 1 │ Fix plugin findings      │ From a report file OR a plugin path (uses plugin-fixer agent)      │
 │ 2 │ Fix marketplace findings │ From a report OR marketplace path (uses marketplace-fixer agent)   │
 │ 3 │ Cache optimize           │ Audit + fix loop for CA-01..CA-06 (uses cache-optimizer-agent)     │
@@ -509,9 +550,9 @@ Type a number to choose:
 ### 3.4 Create sub-menu
 
 ```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ # ┃ Scaffold                    ┃ What it does                                                     ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
 │ 1 │ Scaffold a new plugin       │ Generate full plugin repo (uses plugin-creator agent)            │
 │ 2 │ Scaffold a new marketplace  │ Generate marketplace hub (uses plugin-creator agent)             │
 │ 9 │ Back                        │ Return to top-level menu                                         │
@@ -541,9 +582,9 @@ Type a number to choose:
 ### 3.5 Manage sub-menu
 
 ```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ # ┃ Operation                         ┃ What it does                                                    ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
 │ 1 │ List installed plugins            │ Show every plugin Claude Code knows about                       │
 │ 2 │ Install / update / enable / dis   │ Dispatches plugin-manager agent (its First Contact menu picks)  │
 │ 3 │ Doctor (health check)             │ Probe registry, settings, cache for orphans                     │
@@ -555,7 +596,7 @@ Type a number to choose:
 │10 │ Standardize plugin (force-tpl)    │ Force-overwrite publish.py + CI + retry helpers from canonical  │
 │11 │ Add component (skill/agent/cmd)   │ Add new skill/agent/command/hook/mcp to an existing plugin      │
 │12 │ Strip dev parts (submodule)       │ Move tests/ to per-plugin git submodule (PSS pattern)           │
-│13 │ Migrate marketplace (source.url)  │ Normalize source.url → source.repo + detect dead 404 entries    │
+│13 │ Migrate marketplace (source.url)  │ Normalize source.url to source.repo + detect dead 404 entries   │
 │ 9 │ Back                              │ Return to top-level menu                                        │
 │ 0 │ Cancel / Exit                     │ Terminate without action                                        │
 └───┴───────────────────────────────────┴─────────────────────────────────────────────────────────────────┘
@@ -629,27 +670,27 @@ Type a number to choose:
 
 #### 3.5.8 Refresh README AUTO-COMPONENTS (Phase 5, v2.57.0+)
 
-- **arg-prompt**: `Plugin path? (default: cwd)`
+- **path-source**: per §3.0a (its row 1 = "current project folder $PWD")
 - **execution**:
   ```bash
-  uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/refresh_readme.py" "$PATH"
+  uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/refresh_readme.py" "$TARGET"
   ```
 - **note**: Adds `<!-- BEGIN AUTO-COMPONENTS -->` block on first run;
   subsequent runs preserve placement and only update the body.
 
 #### 3.5.10 Standardize plugin (force-templates) (Phase 2, v2.55.0+)
 
-- **arg-prompt**: `Plugin path?`
+- **path-source**: per §3.0a (its row 1 = "current project folder $PWD")
 - **arg-prompt**: `Run in --check mode first? (yes/no — recommended yes)`
 - **execution** (check mode):
   ```bash
   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" \
-    standardize "$PATH" --fix --dry-run --force-templates
+    standardize "$TARGET" --fix --dry-run --force-templates
   ```
 - **execution** (apply):
   ```bash
   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" \
-    standardize "$PATH" --fix --force-templates
+    standardize "$TARGET" --fix --force-templates
   ```
 - **note**: OVERWRITES infrastructure files (publish.py, ci/release/notify
   workflows, retry helpers, pre-push hook, cliff.toml, .mega-linter.yml)
@@ -658,31 +699,30 @@ Type a number to choose:
 
 #### 3.5.11 Add component (Phase 10, v2.61.0+)
 
-- **arg-prompts** (in order):
-  1. `Plugin path?`
-  2. `Component type? (skill / agent / command / hook / mcp)`
-  3. `Name? (for skill/agent/command/mcp)`
-  4. `Description?`
-  5. `(if hook)` `Event name? (e.g. PreToolUse, Stop)` and `Command to run?`
-  6. `(if mcp)` `Stdio command OR HTTP URL?`
+- **path-source**: per §3.0a (its row 1 = "current project folder $PWD")
+- **arg-prompts** (in order, after the path-source mini-menu):
+  1. `Component type? (skill / agent / command / hook / mcp)`
+  2. `Name? (for skill/agent/command/mcp)`
+  3. `Description?`
+  4. `(if hook)` `Event name? (e.g. PreToolUse, Stop)` and `Command to run?`
+  5. `(if mcp)` `Stdio command OR HTTP URL?`
 - **execution**:
   ```bash
-  uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/add_component.py" "$PATH" \
+  uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/add_component.py" "$TARGET" \
     --type "$TYPE" --name "$NAME" --description "$DESC" [--allowed-tools ...]
   ```
 
 #### 3.5.12 Strip dev parts (submodule) (Phase 2, v2.52.0+)
 
-- **arg-prompts** (in order):
-  1. `Plugin path?`
-  2. `Mode? (dry-run / check / auto)`
+- **path-source**: per §3.0a (its row 1 = "current project folder $PWD")
+- **arg-prompt**: `Mode? (dry-run / check / auto)`
 - **execution** (dry-run, no destructive ops):
   ```bash
-  uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_strip_dev.py" "$PATH" --dry-run
+  uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_strip_dev.py" "$TARGET" --dry-run
   ```
 - **execution** (auto — DESTRUCTIVE):
   ```bash
-  uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_strip_dev.py" "$PATH" --auto
+  uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_strip_dev.py" "$TARGET" --auto
   ```
 - **note**: --auto creates a `<owner>/<plugin>-tests` private GitHub repo,
   filters its history into the new repo, replaces the tests/ dir with a
@@ -691,16 +731,16 @@ Type a number to choose:
 
 #### 3.5.13 Migrate marketplace (source.url → source.repo) (Phase 2.6, v2.59.0+)
 
-- **arg-prompts** (in order):
-  1. `Marketplace root path? (containing .claude-plugin/marketplace.json)`
-  2. `Run in --check mode first? (yes/no — recommended yes)`
+- **path-source**: per §3.0a (row 2 prompt text: `Enter the marketplace
+  root path (containing .claude-plugin/marketplace.json):`)
+- **arg-prompt**: `Run in --check mode first? (yes/no — recommended yes)`
 - **execution** (check mode — exits 1 if migrations would change file):
   ```bash
-  uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/migrate_marketplace.py" "$PATH" --check
+  uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/migrate_marketplace.py" "$TARGET" --check
   ```
 - **execution** (apply atomically):
   ```bash
-  uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/migrate_marketplace.py" "$PATH"
+  uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/migrate_marketplace.py" "$TARGET"
   ```
 - **note**: Probes each plugin entry's GitHub repo via `gh api` (retry-wrapped).
   Dead 404 entries are surfaced but NOT removed automatically — user decides.
@@ -710,9 +750,9 @@ Type a number to choose:
 ### 3.6 GitHub setup sub-menu
 
 ```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ # ┃ Operation                            ┃ What it does                                              ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
 │ 1 │ Branch protection (current repo)     │ Apply rules to the repo of `git remote get-url origin`    │
 │ 2 │ Branch protection (generic owner/rp) │ Apply rules to a different owner/repo                     │
 │ 3 │ Link plugin to a marketplace         │ Add the plugin to a marketplace's plugin list             │
@@ -743,9 +783,9 @@ Type a number to choose:
 ### 3.7 Deep semantic analysis (opus, EXPENSIVE)
 
 ```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ # ┃ Operation                  ┃ What it does                                                     ┃ Cost                    ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━┩
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━┩
 │ 1 │ Confirm + run on a path    │ Opus A-F semantic grading of a skill / agent / whole plugin      │ 10-50× normal scan cost │
 │ 9 │ Back                       │ Return to top-level menu                                         │ —                       │
 │ 0 │ Cancel / Exit              │ Terminate without action                                         │ —                       │
@@ -765,9 +805,9 @@ Type a number to choose:
 ### 3.8 Help / About sub-menu
 
 ```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ # ┃ Help topic                          ┃ What it shows                                             ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
 │ 1 │ Category overview                   │ Re-print the 8-row top-level table                        │
 │ 2 │ List every CPV command              │ Walk commands/cpv-*.md and print name + description       │
 │ 3 │ Show CPV plugin version             │ Read .claude-plugin/plugin.json                           │
@@ -804,9 +844,9 @@ After a Create / Manage / GitHub-setup / Help leaf finishes, print this 2-row
 table and wait for the user's number:
 
 ```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ # ┃ Next                        ┃ What it does                                                   ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
 │ 1 │ Do something else           │ Return to top-level menu                                       │
 │ 0 │ Done (exit)                 │ Reply `Done.` and stop                                         │
 └───┴─────────────────────────────┴────────────────────────────────────────────────────────────────┘
@@ -818,30 +858,30 @@ Type a number to choose:
 ### 3.16 Security sub-menu (drilled into from §3.1.16)
 
 ```
-┏━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┏━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ #  ┃ Security scan target                            ┃ What it does                                                                                       ┃
-┡━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+┡━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
 │  1 │ Single plugin (full security pass)              │ All in-process rule packs + 5 external scanners (cc-audit, tirith, trufflehog, semgrep, Cisco)     │
 ├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  2 │ Single plugin from GitHub URL                   │ Auto-clone github.com URL → security pass → cleanup (v2.48 direct URL ingestion)                  │
+│  2 │ Single plugin from GitHub URL                   │ Auto-clone github.com URL → security pass → cleanup (v2.48 direct URL ingestion)                   │
 ├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  3 │ Single plugin from arbitrary git URL            │ git clone any URL (gitlab/SSH/self-hosted) → security pass → cleanup                              │
+│  3 │ Single plugin from arbitrary git URL            │ git clone any URL (gitlab/SSH/self-hosted) → security pass → cleanup                               │
 ├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  4 │ Single plugin from local archive (.zip/.tar.gz) │ Extract → security pass → cleanup (v2.48 archive ingestion)                                       │
+│  4 │ Single plugin from local archive (.zip/.tar.gz) │ Extract → security pass → cleanup (v2.48 archive ingestion)                                        │
 ├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
 │  5 │ Marketplace (every plugin, tree-scan-once)      │ v2.48 architecture: stage all plugins, fclones-dedup, run scanners ONCE, bucket per-plugin         │
 ├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  6 │ Loose / flat skill pack (--loose)               │ Skip the .claude-plugin/ precondition for SKILL_*.md packs                                        │
+│  6 │ Loose / flat skill pack (--loose)               │ Skip the .claude-plugin/ precondition for SKILL_*.md packs                                         │
 ├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  7 │ Single scanner only (cc-audit)                  │ Only cc-audit (skip tirith/trufflehog/semgrep/Cisco/internal)                                     │
+│  7 │ Single scanner only (cc-audit)                  │ Only cc-audit (skip tirith/trufflehog/semgrep/Cisco/internal)                                      │
 ├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
 │  8 │ Single scanner only (tirith)                    │ Only tirith policy engine                                                                          │
 ├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  9 │ Single scanner only (trufflehog)                │ Only trufflehog secret scanner (--concurrency on, gitleaks dropped in v2.48)                      │
+│  9 │ Single scanner only (trufflehog)                │ Only trufflehog secret scanner (--concurrency on, gitleaks dropped in v2.48)                       │
 ├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ 10 │ Single scanner only (semgrep)                   │ Only semgrep with p/security-audit + p/secrets rule packs                                         │
+│ 10 │ Single scanner only (semgrep)                   │ Only semgrep with p/security-audit + p/secrets rule packs                                          │
 ├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ 11 │ Single scanner only (Cisco AI Defense)          │ Only the Cisco AI Defense skill-scanner (programmatic engines, no API key needed)                 │
+│ 11 │ Single scanner only (Cisco AI Defense)          │ Only the Cisco AI Defense skill-scanner (programmatic engines, no API key needed)                  │
 ├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
 │ 12 │ Telemetry hazards only                          │ Per-plugin env-var leak rules (PLUGIN_SEED_DIR, SHELL_PREFIX, OTEL_LOG_RAW_API_BODIES=file:*…)     │
 ├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
@@ -925,9 +965,9 @@ See §3.1.24 — same recipe.
 ### 3.17 Cache sub-menu (drilled into from §3.1.17)
 
 ```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ # ┃ Cache action                                  ┃ What it does                                                                                     ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
 │ 1 │ Audit only (CA-01..CA-06)                     │ Pure read-only audit, produces report with per-rule findings                                     │
 ├───┼───────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
 │ 2 │ Audit + auto-fix (loop)                       │ Audit, then dispatch cache-optimizer-agent to fix CA-01..CA-06 in priority order                 │
@@ -997,9 +1037,9 @@ nothing to fix when dispatched, and the fixer will exit clean — but the
 user always sees the menu and is never auto-deflected.
 
 ```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Action                                          ┃ What it does                                                          ┃ Severities the fixer will touch ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ # ┃ Action                                          ┃ What it does                                                          ┃ Severities the fixer will touch  ┃
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
 │ 1 │ Fix ALL issues (incl. WARNING)                  │ Dispatch the cpv-fixer agent on every finding in the report           │ CRITICAL+MAJOR+MINOR+NIT+WARNING │
 │ 2 │ Fix NIT and higher                              │ Skip WARNING-only findings                                            │ CRITICAL+MAJOR+MINOR+NIT         │
 │ 3 │ Fix MINOR and higher                            │ Skip NIT and WARNING                                                  │ CRITICAL+MAJOR+MINOR             │
