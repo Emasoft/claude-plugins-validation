@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-03T16:14:15+00:00",
+  "computed_at": "2026-05-03T16:24:18+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     "agents/cache-optimizer-agent.md": "sha256:b0f8e0619569cc2b04587e8b251f9ad2f9a8e8227da071953aa56f78c72c0553",
@@ -86,7 +86,7 @@
     "scripts/cpv_validate_gitmodules.py": "sha256:2703af5ff96379e01b9dbadf8f5da34fb29db958c333a1fb849ccecc115d4436",
     "scripts/cpv_validation_common.py": "sha256:24a1d5838df96946e6550c8274677ba895377e45e366a79652124afbf5d270c8",
     "scripts/detect_lockfiles.py": "sha256:17c03bd5d381395f6348a7a2b8c2d4df99422cabdd600b98fe7be0b01ebb6971",
-    "scripts/generate_marketplace_repo.py": "sha256:d48c4d64f318fd15d2fb3e21278cd6cb7ab1715f52fc994b0fc9d8bc88fa1356",
+    "scripts/generate_marketplace_repo.py": "sha256:443e4080ac717814f97d7fa82b44c540eff5c5edca8def77a8b6cff90a534f9e",
     "scripts/generate_plugin_repo.py": "sha256:4414a18640e3a5f882dc51ef3d2784a3d09adfff7074215d521d93bd5a72b186",
     "scripts/lint_files.py": "sha256:33f6a3be3216ded1e50b508ae85f9a9a77061ea6d2283cdd6310954644c004c1",
     "scripts/manage_doctor.py": "sha256:aee097a13479bbfe898699ac8b52bddf02b2ac3393106a0de0354713b6eea127",
