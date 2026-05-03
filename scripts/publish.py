@@ -37,6 +37,7 @@ from pathlib import Path
 # when publish.py is invoked directly (e.g. `uv run python scripts/publish.py`).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from cpv_network_resilience import gh_with_retry, git_with_retry  # noqa: E402
 from cpv_validation_common import build_report_path  # noqa: E402
 
 # ── ANSI colors ──────────────────────────────────────────────────────────────
@@ -1311,8 +1312,24 @@ def stage_commit_tag_push(plugin_root: Path, tag_name: str) -> int:
     # the maintainer's gh CLI is missing/unauthed/lacks push perm.
     owner, repo = _resolve_owner_repo(plugin_root)
     _ensure_gh_auth(owner, repo)
-    run(["git", "push", "origin", "HEAD"], cwd=plugin_root)
-    run(["git", "push", "origin", tag_name], cwd=plugin_root)
+    # Phase 1 (Sprint 3): both pushes wrapped in retry so a transient
+    # github.com hiccup doesn't leave a half-published release (commit
+    # local-only, tag local-only, or branch pushed without tag).
+    push_env = {
+        **os.environ,
+        "PLUGIN_SKIP_GITHUB_INTEGRITY": "1",
+        "CPV_SKIP_GITHUB_INTEGRITY": "1",
+    }
+    print("  $ git push origin HEAD")
+    git_with_retry(
+        ["git", "push", "origin", "HEAD"],
+        cwd=plugin_root, env=push_env, capture_output=False,
+    )
+    print(f"  $ git push origin {tag_name}")
+    git_with_retry(
+        ["git", "push", "origin", tag_name],
+        cwd=plugin_root, env=push_env, capture_output=False,
+    )
     print(f"{GREEN}✓ Pushed branch and tag {tag_name}{NC}")
     return 0
 
@@ -1339,20 +1356,33 @@ def stage_github_release(plugin_root: Path, tag_name: str, release_notes_file: P
     # one HTTP roundtrip and prevents a cryptic gh-release failure.
     owner, repo = _resolve_owner_repo(plugin_root)
     _ensure_gh_auth(owner, repo)
-    gh_result = run(
-        [
-            gh_bin,
-            "release",
-            "create",
-            tag_name,
-            "--title",
-            f"Release {tag_name}",
-            "--notes-file",
-            str(release_notes_file),
-        ],
+    # Phase 1 (Sprint 3): retry-wrap the release creation. Transient github.com
+    # hiccups during the gh release POST are common and easy to recover from
+    # — if the tag is already on origin (Gate 13 passed), gh release create
+    # is idempotent in the sense that a retry on the same tag either succeeds
+    # (release didn't exist yet) OR returns a permanent "already exists"
+    # error which our classifier treats as non-transient and surfaces.
+    print(f"  $ gh release create {tag_name} ...")
+    gh_release_cmd = [
+        gh_bin,
+        "release",
+        "create",
+        tag_name,
+        "--title",
+        f"Release {tag_name}",
+        "--notes-file",
+        str(release_notes_file),
+    ]
+    gh_result = gh_with_retry(
+        gh_release_cmd,
         cwd=plugin_root,
         check=False,
+        capture_output=True,
     )
+    if gh_result.stdout and gh_result.stdout.strip():
+        print(gh_result.stdout.strip())
+    if gh_result.stderr and gh_result.stderr.strip():
+        print(gh_result.stderr.strip(), file=sys.stderr)
     if gh_result.returncode == 0:
         print(f"{GREEN}✓ GitHub release {tag_name} published{NC}")
     else:

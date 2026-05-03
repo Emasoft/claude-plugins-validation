@@ -77,6 +77,7 @@ def _build_synthetic_plugin(tmp_path: Path, version: str = "1.0.0", *, with_pypr
         "gitignore_filter.py",
         "cpv_validation_common.py",
         "cpv_management_common.py",
+        "cpv_network_resilience.py",
     ):
         src = PROJECT_ROOT / "scripts" / name
         if src.is_file():
