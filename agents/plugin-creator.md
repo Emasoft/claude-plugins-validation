@@ -390,22 +390,23 @@ deferred until rc-3 lands.
 ┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫
 ┃ N │ Choice                                                       ┃
 ┣━━━━┼─────────────────────────────────────────────────────────────┫
-┃ 1 │ Standard — emit cpv.strip block (tests/ + design/) in plugin.json
-┃ 2 │ Aggressive — also stage git-hooks/ for extraction
-┃ 3 │ Legacy — keep everything in MAIN repo (discouraged)
+┃ 1 │ Standard (PSS pattern) — one cpv.strip entry for tests/
+┃ 2 │ Legacy — keep everything in MAIN repo (discouraged)
 ┃ 0 │ Cancel
 ┗━━━━┴─────────────────────────────────────────────────────────────┘
 ```
 
-Choosing 1 or 2 makes `generate_plugin_repo.py` add the `cpv.strip`
-block to the generated plugin.json — `cpv strip-dev-parts` (when rc-3
-ships) will then read it as configuration. No GitHub repos are created
-at scaffold time; the user runs `cpv strip-dev-parts` later when ready.
+Choosing 1 makes `generate_plugin_repo.py` add the `cpv.strip` block
+to plugin.json with ONE extract entry (`tests/`) — matching PSS's
+single-submodule pattern. `cpv strip-dev-parts --auto` reads this block
+as configuration when the user runs it later. No GitHub repos are
+created at scaffold time. Plugins with additional heavy dev folders
+worth stripping can add more extract entries by hand.
 
 ### Implementation
 
 Pass `--strip-dev` (default) to `generate_plugin_repo.py`. Negate via
-`--no-strip-dev` for option (3).
+`--no-strip-dev` for option (2).
 
 ### Why default-ON
 

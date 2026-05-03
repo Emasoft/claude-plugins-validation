@@ -1,10 +1,11 @@
 ---
 name: cpv-strip-dev-parts
 description: |
-  Move dev-only artefacts (tests/, design/, git-hooks/) from a plugin's MAIN
-  repo into per-plugin git submodules. Implements TRDD-793ac32a — saves
-  ~12 MB per cache install by exploiting Claude Code's no-recurse-submodules
-  shallow clone (PSS pattern).
+  Move dev-only artefacts (default: tests/) from a plugin's MAIN repo
+  into a per-plugin git submodule. Implements TRDD-793ac32a — exploits
+  Claude Code's no-recurse-submodules shallow clone (PSS pattern).
+  ONE submodule per plugin by default; add more to cpv.strip.extract[]
+  in plugin.json if your plugin has additional heavy dev folders.
 allowed-tools: Bash(uv:*), Bash(git:*), Bash(gh:*), Read, Write, Edit
 user-invocable: true
 ---
@@ -45,18 +46,23 @@ cpv strip-dev-parts <plugin-path> --check
 cpv strip-dev-parts <plugin-path> --restore
 ```
 
-## Default extraction targets
+## Default extraction target
 
-Per TRDD-793ac32a §4.2:
+Per the PSS pattern (verified empirically) — ONE submodule per plugin:
 
 | Target | Submodule (auto-named) | Submodule path |
 |---|---|---|
-| `tests/` | `<owner>/<plugin>-tests` | `dev/tests/` |
-| `design/` | `<owner>/<plugin>-design` | `dev/design/` |
-| `git-hooks/` | (same as `dev/tests/` repo) | `dev/git-hooks/` |
+| `tests/` | `<owner>/<plugin>-tests` | `tests/` (same path) |
 
-Override via `cpv.strip.extract[]` in `plugin.json` — see §5 of
-TRDD-793ac32a for the full schema.
+The submodule mounts at the SAME path as the original folder, so all
+references in CI / scripts / README continue to work unchanged for devs
+(after `git submodule update --init`). End-user installs get only the
+.gitmodules pointer (no recurse-submodules in Claude Code's installer).
+
+design/ and git-hooks/ are tiny (<300 KB combined) and intentionally
+stay in the main repo. Add more entries to `cpv.strip.extract[]` in
+`plugin.json` if your plugin has additional heavy dev folders worth
+stripping. See §5 of TRDD-793ac32a for the full schema.
 
 ## Security model
 

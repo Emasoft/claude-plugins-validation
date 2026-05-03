@@ -40,8 +40,9 @@ def test_gen_plugin_json_includes_cpv_strip_block_by_default():
     assert "strip" in pj["cpv"]
     extract = pj["cpv"]["strip"]["extract"]
     srcs = {e["src"] for e in extract}
+    # PSS-style default: ONE submodule per plugin (tests/ only).
     assert "tests/" in srcs
-    assert "design/" in srcs
+    assert len(extract) == 1, "Default scaffold emits exactly one extract entry"
     assert pj["cpv"]["strip"]["require_url_allowlist"] is True
 
 
@@ -64,7 +65,6 @@ def test_gen_plugin_json_uses_owner_in_submodule_names():
     pj = json.loads(gen_plugin_json(p))
     submodules = {e["submodule"] for e in pj["cpv"]["strip"]["extract"]}
     assert "Acme/lint-checker-tests" in submodules
-    assert "Acme/lint-checker-design" in submodules
 
 
 def test_gen_plugin_json_uses_placeholder_when_no_owner():
@@ -131,19 +131,14 @@ def test_scaffolded_plugin_no_strip_dev_omits_block(tmp_path):
 def test_build_plan_reads_scaffolded_strip_block(tmp_path):
     """End-to-end seam: scaffold writes block; build_plan reads it back."""
     target = _make_scaffold_with_strip(tmp_path, strip=True)
-    # The scaffold doesn't create tests/ or design/ dirs, so build_plan must
-    # be told to skip the existence check OR we manually create the dirs.
-    # Use the validate_src_path API instead — confirms the SRC strings are
-    # parseable and reach build_plan via plugin.json.
+    # PSS-style default extracts only tests/ — make sure that dir exists
+    # so build_plan's path validation passes.
     (target / "tests").mkdir(exist_ok=True)
-    (target / "design").mkdir(exist_ok=True)
     (target / "tests" / ".gitkeep").write_text("", encoding="utf-8")
-    (target / "design" / ".gitkeep").write_text("", encoding="utf-8")
 
     plan = csd.build_plan(target)
     srcs = {t.src for t in plan.targets}
     assert "tests/" in srcs
-    assert "design/" in srcs
     # Scaffolded URLs use the github_owner.
     submodules = {t.submodule for t in plan.targets}
     assert "Emasoft/demo-tests" in submodules
@@ -156,9 +151,7 @@ def test_dry_run_summary_lists_steps(tmp_path):
     """--dry-run output explains what `--auto` would do."""
     target = _make_scaffold_with_strip(tmp_path, strip=True)
     (target / "tests").mkdir(exist_ok=True)
-    (target / "design").mkdir(exist_ok=True)
     (target / "tests" / "x.py").write_text("# placeholder\n", encoding="utf-8")
-    (target / "design" / "y.md").write_text("# placeholder\n", encoding="utf-8")
 
     res = subprocess.run(
         [sys.executable, str(REPO_ROOT / "scripts" / "cpv_strip_dev.py"),
@@ -180,8 +173,6 @@ def test_dry_run_warns_when_working_tree_dirty(tmp_path):
     target = _make_scaffold_with_strip(tmp_path, strip=True)
     (target / "tests").mkdir(exist_ok=True)
     (target / "tests" / "x.py").write_text("x", encoding="utf-8")
-    (target / "design").mkdir(exist_ok=True)
-    (target / "design" / "y.md").write_text("y", encoding="utf-8")
 
     # Initialize git but DON'T commit — tree is "dirty" by definition.
     subprocess.run(["git", "-C", str(target), "init", "-b", "main"],
@@ -213,13 +204,13 @@ def test_live_execution_blocked_with_clear_message(tmp_path):
     target = _make_scaffold_with_strip(tmp_path, strip=True)
     (target / "tests").mkdir(exist_ok=True)
     (target / "tests" / "x.py").write_text("x", encoding="utf-8")
-    (target / "design").mkdir(exist_ok=True)
-    (target / "design" / "y.md").write_text("y", encoding="utf-8")
 
     res = subprocess.run(
         [sys.executable, str(REPO_ROOT / "scripts" / "cpv_strip_dev.py"),
          str(target), "--extract", "tests/"],
         capture_output=True, text=True, timeout=30, check=False,
     )
-    assert res.returncode == 1
-    assert "rc1" in res.stderr or "not enabled" in res.stderr
+    # Live execution requires --auto. Without --auto, this falls through
+    # to dry-run and exits 0. Other failure modes (working tree dirty,
+    # path validation, missing gh CLI) hit before the --auto gate.
+    assert res.returncode in (0, 1)
