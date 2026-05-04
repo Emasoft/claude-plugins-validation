@@ -63,6 +63,10 @@ reports_dev/
 # token-heavy and project-private)
 .cpv-cisco-scan.json
 
+# ai-maestro-janitor runtime state (per-machine: heartbeat timestamps,
+# safe-delete logs, dedupe seen-files). Never source.
+.janitor/
+
 # Trashcan — janitor-safe-delete moves removed items here.
 # The dated batch dirs are ignored, but .gitkeep + README.txt are
 # tracked so the trashcan survives `git clean -fdx` and fresh clones.
