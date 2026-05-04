@@ -116,7 +116,7 @@ def check_remote_execution_guard() -> None:
         short_alias = alias
         for prefix in ("validate_", "manage_"):
             if alias.startswith(prefix):
-                short_alias = alias[len(prefix):]
+                short_alias = alias[len(prefix) :]
                 break
         # `validate_skill_comprehensive` → `skill` (special case — the file
         # name carries the historical `_comprehensive` suffix).
@@ -135,7 +135,7 @@ def check_remote_execution_guard() -> None:
             f"Instead of:\n"
             f"  python3 {scripts_dir}/{script_name} /path/to/target\n\n"
             f"Use the canonical launcher invocation (with environment isolation):\n"
-            f"  CLAUDE_PRIVATE_USERNAMES=\"$(whoami)\" uv run --with pyyaml \\\n"
+            f'  CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \\\n'
             f"    python {scripts_dir}/remote_validation.py {short_alias} /path/to/target\n\n"
             f"Or with the full alias (also works):\n"
             f"  python3 {scripts_dir}/remote_validation.py {alias} /path/to/target",
@@ -348,24 +348,26 @@ VALID_HOOK_TYPES: frozenset[str] = frozenset({"command", "http", "mcp_tool", "pr
 HOOK_EVENTS_COMMAND_ONLY: frozenset[str] = frozenset({"SessionStart", "Setup"})
 
 # Events that DO NOT support `prompt` or `agent` types (per hooks.md grouping).
-HOOK_EVENTS_NO_PROMPT_OR_AGENT: frozenset[str] = frozenset({
-    "ConfigChange",
-    "CwdChanged",
-    "Elicitation",
-    "ElicitationResult",
-    "FileChanged",
-    "InstructionsLoaded",
-    "Notification",
-    "PermissionDenied",
-    "PostCompact",
-    "PreCompact",
-    "SessionEnd",
-    "StopFailure",
-    "SubagentStart",
-    "TeammateIdle",
-    "WorktreeCreate",
-    "WorktreeRemove",
-})
+HOOK_EVENTS_NO_PROMPT_OR_AGENT: frozenset[str] = frozenset(
+    {
+        "ConfigChange",
+        "CwdChanged",
+        "Elicitation",
+        "ElicitationResult",
+        "FileChanged",
+        "InstructionsLoaded",
+        "Notification",
+        "PermissionDenied",
+        "PostCompact",
+        "PreCompact",
+        "SessionEnd",
+        "StopFailure",
+        "SubagentStart",
+        "TeammateIdle",
+        "WorktreeCreate",
+        "WorktreeRemove",
+    }
+)
 
 
 def hook_types_allowed_for_event(event: str) -> frozenset[str]:
@@ -381,6 +383,7 @@ def hook_types_allowed_for_event(event: str) -> frozenset[str]:
     if event in HOOK_EVENTS_NO_PROMPT_OR_AGENT:
         return frozenset({"command", "http", "mcp_tool"})
     return VALID_HOOK_TYPES
+
 
 # =============================================================================
 # Common Constants
@@ -415,28 +418,67 @@ BUILTIN_AGENT_TYPES = {
 # Bundled slash commands shipped by Claude Code (v2.1.121).
 # Plugin-shipped commands matching one of these names create a UI collision —
 # the namespaced form `/<plugin>:<name>` is the documented workaround.
-BUILTIN_SLASH_COMMANDS: frozenset[str] = frozenset({
-    # Core session / context
-    "clear", "rename", "resume", "compact", "context", "rewind", "memory", "recap",
-    # Auth + status
-    "login", "logout", "config", "doctor", "model", "effort", "init",
-    # Cost / usage
-    "usage", "cost", "stats", "extra-usage",
-    # UI / view
-    "tui", "focus", "skills", "color", "theme", "less-permission-prompts",
-    # Tool / MCP
-    "mcp", "plugin", "context", "review", "security-review",
-    # Loops + automation (v2.1.105 alias)
-    "loop", "proactive",
-    # Code-review + agent loops (v2.1.111+)
-    "ultrareview",
-    # Worktree + nav (v2.1.83+)
-    "add-dir", "status", "permissions", "permission-mode",
-    # Setup wizards
-    "setup-vertex", "setup-bedrock", "setup-token", "terminal-setup",
-    # Misc
-    "release-notes", "feedback", "bug", "help", "exit", "quit",
-})
+BUILTIN_SLASH_COMMANDS: frozenset[str] = frozenset(
+    {
+        # Core session / context
+        "clear",
+        "rename",
+        "resume",
+        "compact",
+        "context",
+        "rewind",
+        "memory",
+        "recap",
+        # Auth + status
+        "login",
+        "logout",
+        "config",
+        "doctor",
+        "model",
+        "effort",
+        "init",
+        # Cost / usage
+        "usage",
+        "cost",
+        "stats",
+        "extra-usage",
+        # UI / view
+        "tui",
+        "focus",
+        "skills",
+        "color",
+        "theme",
+        "less-permission-prompts",
+        # Tool / MCP
+        "mcp",
+        "plugin",
+        "context",
+        "review",
+        "security-review",
+        # Loops + automation (v2.1.105 alias)
+        "loop",
+        "proactive",
+        # Code-review + agent loops (v2.1.111+)
+        "ultrareview",
+        # Worktree + nav (v2.1.83+)
+        "add-dir",
+        "status",
+        "permissions",
+        "permission-mode",
+        # Setup wizards
+        "setup-vertex",
+        "setup-bedrock",
+        "setup-token",
+        "terminal-setup",
+        # Misc
+        "release-notes",
+        "feedback",
+        "bug",
+        "help",
+        "exit",
+        "quit",
+    }
+)
 
 # Semantic version pattern for marketplace version fields
 SEMVER_PATTERN = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?(\+[a-zA-Z0-9.]+)?$")
@@ -947,15 +989,17 @@ SKILL_FRONTMATTER_FIELDS = {
 # or `$<name>` (when `<name>` matches a frontmatter `arguments:` entry).
 # These three patterns are recognised programmatically by the substitution
 # parser, not as literal strings.
-SKILL_SUBSTITUTION_VARS_LITERAL: frozenset[str] = frozenset({
-    "$ARGUMENTS",
-    "${CLAUDE_SESSION_ID}",
-    "${CLAUDE_EFFORT}",  # v2.1.120 — current effort level
-    "${CLAUDE_SKILL_DIR}",  # absolute path to the directory containing SKILL.md
-    "${CLAUDE_PLUGIN_ROOT}",  # plugin's root dir (env var, also resolves in skill content)
-    "${CLAUDE_PLUGIN_DATA}",  # plugin's per-user data dir
-    "${CLAUDE_PROJECT_DIR}",  # project root
-})
+SKILL_SUBSTITUTION_VARS_LITERAL: frozenset[str] = frozenset(
+    {
+        "$ARGUMENTS",
+        "${CLAUDE_SESSION_ID}",
+        "${CLAUDE_EFFORT}",  # v2.1.120 — current effort level
+        "${CLAUDE_SKILL_DIR}",  # absolute path to the directory containing SKILL.md
+        "${CLAUDE_PLUGIN_ROOT}",  # plugin's root dir (env var, also resolves in skill content)
+        "${CLAUDE_PLUGIN_DATA}",  # plugin's per-user data dir
+        "${CLAUDE_PROJECT_DIR}",  # project root
+    }
+)
 
 # Pattern matchers for the dynamic substitution forms.
 SKILL_SUBSTITUTION_INDEXED_RE = re.compile(r"\$ARGUMENTS\[(\d+)\]")  # $ARGUMENTS[0]
@@ -998,20 +1042,22 @@ def should_skip_directory(dir_name: str) -> bool:
 # subtrees are skipped from path-based, link-based, and content-based rules
 # because they hold third-party code the plugin author shouldn't modify.
 # Matches the same set used by scripts/cpv_codemod.py (issue #17).
-VENDORED_DIR_NAMES: frozenset[str] = frozenset({
-    "external",
-    "vendor",
-    "vendored",
-    "third_party",
-    "third-party",
-    "node_modules",
-    ".venv",
-    "venv",
-    "dist",
-    "build",
-    ".git",
-    "__pycache__",
-})
+VENDORED_DIR_NAMES: frozenset[str] = frozenset(
+    {
+        "external",
+        "vendor",
+        "vendored",
+        "third_party",
+        "third-party",
+        "node_modules",
+        ".venv",
+        "venv",
+        "dist",
+        "build",
+        ".git",
+        "__pycache__",
+    }
+)
 
 # npm-package shape regex (issue #16 category C). Strings matching any of
 # these forms are NOT paths and must be excluded from backtick-to-link
@@ -1249,14 +1295,17 @@ SECRET_PATTERNS = [
     #     — these are env-var NAMES the plugin reads, not credential VALUES.
     #   • Provider env-var name allusions: `OPENROUTER_API_KEY`, `OPENAI_API_KEY`,
     #     `ANTHROPIC_API_KEY`, etc. — common in config templates.
-    (re.compile(
-        r"api[_-]?key['\"]?\s*[:=]\s*['\"]"
-        r"(?!\$[\{A-Z_]|CLAUDE_PLUGIN_OPTION_|process\.env\.|"
-        r"OPENAI_API_KEY|OPENROUTER_API_KEY|ANTHROPIC_API_KEY|AZURE_API_KEY|"
-        r"GOOGLE_API_KEY|HUGGINGFACE_API_KEY|<|\{)"
-        r"[^'\"]{20,}['\"]",
-        re.I,
-    ), "Generic API Key"),
+    (
+        re.compile(
+            r"api[_-]?key['\"]?\s*[:=]\s*['\"]"
+            r"(?!\$[\{A-Z_]|CLAUDE_PLUGIN_OPTION_|process\.env\.|"
+            r"OPENAI_API_KEY|OPENROUTER_API_KEY|ANTHROPIC_API_KEY|AZURE_API_KEY|"
+            r"GOOGLE_API_KEY|HUGGINGFACE_API_KEY|<|\{)"
+            r"[^'\"]{20,}['\"]",
+            re.I,
+        ),
+        "Generic API Key",
+    ),
     # JWT tokens (base64url-encoded header.payload, signature optional)
     (re.compile(r"eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}"), "JWT Token"),
     # AWS Secret Access Key (40-char base64 string)
@@ -1271,24 +1320,40 @@ SECRET_PATTERNS = [
 # Phase 2b RC-16 — broaden KNOWN_EXAMPLE_SECRETS / placeholder bank.
 # The original set was just 2 AWS examples. This expansion catches the
 # many placeholder forms surveyed scanners ship in their fixtures.
-EXTENDED_PLACEHOLDER_TOKENS: frozenset[str] = frozenset({
-    # AWS official examples
-    "AKIAIOSFODNN7EXAMPLE",
-    "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-    # OpenAI / Anthropic test keys
-    "sk-test", "sk-proj-test", "sk-demo", "sk-example",
-    "sk-ant-api03-EXAMPLE", "sk-ant-test",
-    # GitHub
-    "ghp_EXAMPLE_TOKEN_PLACEHOLDER",
-    "github_pat_EXAMPLE",
-    # Generic
-    "<YOUR_API_KEY>", "<your-api-key>", "<api-key>", "<YOUR_TOKEN>",
-    "your-api-key-here", "your_api_key_here",
-    "REPLACE_ME", "REPLACE-ME", "TODO", "TBD",
-    "REDACTED", "<REDACTED>", "[REDACTED]",
-    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-    "YOUR_KEY_HERE", "YOUR_SECRET_HERE",
-})
+EXTENDED_PLACEHOLDER_TOKENS: frozenset[str] = frozenset(
+    {
+        # AWS official examples
+        "AKIAIOSFODNN7EXAMPLE",
+        "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        # OpenAI / Anthropic test keys
+        "sk-test",
+        "sk-proj-test",
+        "sk-demo",
+        "sk-example",
+        "sk-ant-api03-EXAMPLE",
+        "sk-ant-test",
+        # GitHub
+        "ghp_EXAMPLE_TOKEN_PLACEHOLDER",
+        "github_pat_EXAMPLE",
+        # Generic
+        "<YOUR_API_KEY>",
+        "<your-api-key>",
+        "<api-key>",
+        "<YOUR_TOKEN>",
+        "your-api-key-here",
+        "your_api_key_here",
+        "REPLACE_ME",
+        "REPLACE-ME",
+        "TODO",
+        "TBD",
+        "REDACTED",
+        "<REDACTED>",
+        "[REDACTED]",
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "YOUR_KEY_HERE",
+        "YOUR_SECRET_HERE",
+    }
+)
 
 # Known example/placeholder secrets from AWS documentation and tutorials
 # These are intentionally fake and appear in docs/tests — not real credentials
@@ -1552,7 +1617,7 @@ def has_negation_guard_nearby(content: str, match_pos: int, window: int = 80) ->
     previous instructions'").
     """
     start = max(0, match_pos - window)
-    return bool(NEGATION_GUARD.search(content[start: match_pos + 1]))
+    return bool(NEGATION_GUARD.search(content[start : match_pos + 1]))
 
 
 def has_trust_boundary_context(content: str, match_pos: int, window: int = 600) -> bool:
@@ -1566,7 +1631,7 @@ def has_trust_boundary_context(content: str, match_pos: int, window: int = 600) 
     instructions' as a finding to report, not as a command."
     """
     start = max(0, match_pos - window)
-    return bool(TRUST_BOUNDARY_GUARD.search(content[start: match_pos + 1]))
+    return bool(TRUST_BOUNDARY_GUARD.search(content[start : match_pos + 1]))
 
 
 # RC-16 / RC-83 — Placeholder secret recognition.
@@ -1606,40 +1671,69 @@ def is_placeholder_secret(text: str) -> bool:
 # RC-83 — Provider-host whitelist for AI / SDK / package-registry / code-host
 # legitimate destinations. A finding pointing to one of these hosts is almost
 # always a legitimate SDK call, not data exfiltration.
-PROVIDER_HOSTS_WHITELIST: frozenset[str] = frozenset({
-    # AI providers — both FQDN and parent registrable domain (parent enables
-    # subdomain matching like cdn.api.openai.com → endswith ".openai.com")
-    "openai.com", "api.openai.com",
-    "anthropic.com", "api.anthropic.com", "claude.ai", "console.anthropic.com",
-    "googleapis.com", "api.gemini.google.com", "generativelanguage.googleapis.com",
-    "huggingface.co",
-    "cohere.ai", "api.cohere.ai", "cohere.com", "api.cohere.com",
-    "mistral.ai", "api.mistral.ai",
-    "together.ai", "api.together.ai",
-    "groq.com", "api.groq.com",
-    "deepinfra.com", "api.deepinfra.com",
-    "openrouter.ai", "api.openrouter.ai",
-    "replicate.com", "api.replicate.com",
-    "runpod.io", "api.runpod.io",
-    # Package registries — parent registrable enables CDN/mirror subdomains
-    "npmjs.org", "registry.npmjs.org",
-    "pypi.org",
-    "pythonhosted.org", "files.pythonhosted.org",
-    "rubygems.org",
-    "crates.io",
-    "terraform.io", "registry.terraform.io",
-    # Code hosting — parent registrable enables raw./api./objects./codeload. subdomains
-    "github.com", "githubusercontent.com",
-    "raw.githubusercontent.com", "objects.githubusercontent.com",
-    "codeload.github.com", "api.github.com",
-    "gitlab.com", "bitbucket.org",
-    # OS / distro update mirrors
-    "debian.org", "deb.debian.org",
-    "ubuntu.com", "archive.ubuntu.com",
-    "fedoraproject.org", "dl.fedoraproject.org",
-    "python.org", "downloads.python.org",
-    "nodejs.org",
-})
+PROVIDER_HOSTS_WHITELIST: frozenset[str] = frozenset(
+    {
+        # AI providers — both FQDN and parent registrable domain (parent enables
+        # subdomain matching like cdn.api.openai.com → endswith ".openai.com")
+        "openai.com",
+        "api.openai.com",
+        "anthropic.com",
+        "api.anthropic.com",
+        "claude.ai",
+        "console.anthropic.com",
+        "googleapis.com",
+        "api.gemini.google.com",
+        "generativelanguage.googleapis.com",
+        "huggingface.co",
+        "cohere.ai",
+        "api.cohere.ai",
+        "cohere.com",
+        "api.cohere.com",
+        "mistral.ai",
+        "api.mistral.ai",
+        "together.ai",
+        "api.together.ai",
+        "groq.com",
+        "api.groq.com",
+        "deepinfra.com",
+        "api.deepinfra.com",
+        "openrouter.ai",
+        "api.openrouter.ai",
+        "replicate.com",
+        "api.replicate.com",
+        "runpod.io",
+        "api.runpod.io",
+        # Package registries — parent registrable enables CDN/mirror subdomains
+        "npmjs.org",
+        "registry.npmjs.org",
+        "pypi.org",
+        "pythonhosted.org",
+        "files.pythonhosted.org",
+        "rubygems.org",
+        "crates.io",
+        "terraform.io",
+        "registry.terraform.io",
+        # Code hosting — parent registrable enables raw./api./objects./codeload. subdomains
+        "github.com",
+        "githubusercontent.com",
+        "raw.githubusercontent.com",
+        "objects.githubusercontent.com",
+        "codeload.github.com",
+        "api.github.com",
+        "gitlab.com",
+        "bitbucket.org",
+        # OS / distro update mirrors
+        "debian.org",
+        "deb.debian.org",
+        "ubuntu.com",
+        "archive.ubuntu.com",
+        "fedoraproject.org",
+        "dl.fedoraproject.org",
+        "python.org",
+        "downloads.python.org",
+        "nodejs.org",
+    }
+)
 
 
 def is_known_provider_host(host: str) -> bool:
@@ -1752,19 +1846,21 @@ def demote_severity(level: str, by: int = 1) -> str:
 # Add to this set conservatively: a rule belongs here only when its
 # pattern firing in pure narrative text is more likely a doc artifact
 # than a real attack on the agent's instructions.
-UNCERTAIN_IN_DOCS_RULES: frozenset[str] = frozenset({
-    "RC-03",
-    "RC-11",
-    "RC-37",
-    "RC-63",
-    "RC-76",
-    "RC-87",
-    "RC-93",
-    "RC-114",
-    "RC-115",
-    "RC-131",
-    "RC-136",
-})
+UNCERTAIN_IN_DOCS_RULES: frozenset[str] = frozenset(
+    {
+        "RC-03",
+        "RC-11",
+        "RC-37",
+        "RC-63",
+        "RC-76",
+        "RC-87",
+        "RC-93",
+        "RC-114",
+        "RC-115",
+        "RC-131",
+        "RC-136",
+    }
+)
 
 
 def effective_severity(level: str, file_path: str, rule_id: str | None = None) -> str:
@@ -1788,9 +1884,7 @@ def effective_severity(level: str, file_path: str, rule_id: str | None = None) -
     A check that uses this MUST call it BEFORE invoking `report.<level>(...)`
     and dispatch on the returned level via `getattr(report, returned_level)`.
     """
-    in_defensive_context = (
-        is_sample_file(file_path) or is_test_path(file_path) or is_doc_path(file_path)
-    )
+    in_defensive_context = is_sample_file(file_path) or is_test_path(file_path) or is_doc_path(file_path)
     if not in_defensive_context:
         return level
     if rule_id is not None and rule_id in UNCERTAIN_IN_DOCS_RULES:
@@ -1822,6 +1916,7 @@ class RuleSchema:
     do NOT use this schema (they predate it). The orchestration layer iterates
     `RULE_REGISTRY` to filter by id / category / severity and produce reports.
     """
+
     rule_id: str  # e.g. "RC-09", "RC-101"
     name: str  # short human title
     category: str  # "unicode" | "mcp" | "supply-chain" | "credentials" | ...
@@ -1889,16 +1984,18 @@ def find_zero_width_chars(text: str) -> list[tuple[int, str]]:
     return findings
 
 
-register_rule(RuleSchema(
-    rule_id="RC-09",
-    name="Zero-width Unicode characters",
-    category="unicode",
-    severity="MAJOR",
-    description="Invisible Unicode (ZWSP/ZWNJ/ZWJ/BOM/WJ) used to hide instructions in AI-facing content.",
-    references=("felipeinf/skillRx", "LichAmnesia/skill-lint", "vetskill"),
-    cwe="CWE-1007",
-    fp_guards=("Skip when in fenced code block (RC-83)", "Skip when in test/fixture path (RC-84)"),
-))
+register_rule(
+    RuleSchema(
+        rule_id="RC-09",
+        name="Zero-width Unicode characters",
+        category="unicode",
+        severity="MAJOR",
+        description="Invisible Unicode (ZWSP/ZWNJ/ZWJ/BOM/WJ) used to hide instructions in AI-facing content.",
+        references=("felipeinf/skillRx", "LichAmnesia/skill-lint", "vetskill"),
+        cwe="CWE-1007",
+        fp_guards=("Skip when in fenced code block (RC-83)", "Skip when in test/fixture path (RC-84)"),
+    )
+)
 
 # -----------------------------------------------------------------------------
 # RC-10 — TAG character block (U+E0000–U+E007F)
@@ -1922,16 +2019,18 @@ def find_tag_block_chars(text: str) -> list[tuple[int, str]]:
     return findings
 
 
-register_rule(RuleSchema(
-    rule_id="RC-10",
-    name="TAG character block (U+E0000–U+E01EF)",
-    category="unicode",
-    severity="CRITICAL",
-    description="Invisible TAG characters used to smuggle hidden text past humans (AsciiSmuggler).",
-    references=("aguara", "vetskill"),
-    cwe="CWE-1007",
-    fp_guards=("None — no legitimate use of TAG block in AI content. Always flag.",),
-))
+register_rule(
+    RuleSchema(
+        rule_id="RC-10",
+        name="TAG character block (U+E0000–U+E01EF)",
+        category="unicode",
+        severity="CRITICAL",
+        description="Invisible TAG characters used to smuggle hidden text past humans (AsciiSmuggler).",
+        references=("aguara", "vetskill"),
+        cwe="CWE-1007",
+        fp_guards=("None — no legitimate use of TAG block in AI content. Always flag.",),
+    )
+)
 
 # -----------------------------------------------------------------------------
 # RC-11 — Homoglyph / mixed-script confusable
@@ -1969,16 +2068,18 @@ def has_mixed_script(text: str) -> tuple[bool, str]:
     return (False, "")
 
 
-register_rule(RuleSchema(
-    rule_id="RC-11",
-    name="Homoglyph / mixed-script confusable",
-    category="unicode",
-    severity="CRITICAL",
-    description="Mixed-script identifiers (Latin + Cyrillic/Greek/Armenian) — homoglyph attack vector.",
-    references=("aguara", "vetskill"),
-    cwe="CWE-1007",
-    fp_guards=("Skip in doc files containing intentional language examples (RC-84)",),
-))
+register_rule(
+    RuleSchema(
+        rule_id="RC-11",
+        name="Homoglyph / mixed-script confusable",
+        category="unicode",
+        severity="CRITICAL",
+        description="Mixed-script identifiers (Latin + Cyrillic/Greek/Armenian) — homoglyph attack vector.",
+        references=("aguara", "vetskill"),
+        cwe="CWE-1007",
+        fp_guards=("Skip in doc files containing intentional language examples (RC-84)",),
+    )
+)
 
 # -----------------------------------------------------------------------------
 # RC-21 — process.env / os.environ bulk harvest
@@ -1998,16 +2099,18 @@ ENV_BULK_HARVEST_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\b(?:list|tuple|set)\s*\(\s*os\.environ"),
 )
 
-register_rule(RuleSchema(
-    rule_id="RC-21",
-    name="process.env / os.environ bulk harvest",
-    category="credentials",
-    severity="MAJOR",
-    description="Bulk-iteration over environment variables — single-call secret exfiltration.",
-    references=("aguara CRED_004",),
-    cwe="CWE-200",
-    fp_guards=("Skip in test fixtures (RC-84)", "Skip in doc files (RC-84)"),
-))
+register_rule(
+    RuleSchema(
+        rule_id="RC-21",
+        name="process.env / os.environ bulk harvest",
+        category="credentials",
+        severity="MAJOR",
+        description="Bulk-iteration over environment variables — single-call secret exfiltration.",
+        references=("aguara CRED_004",),
+        cwe="CWE-200",
+        fp_guards=("Skip in test fixtures (RC-84)", "Skip in doc files (RC-84)"),
+    )
+)
 
 # -----------------------------------------------------------------------------
 # RC-29 — Python .pth executable file
@@ -2026,16 +2129,18 @@ def is_pth_with_exec(filename: str, content: str) -> bool:
     return bool(PTH_EXEC_RE.search(content))
 
 
-register_rule(RuleSchema(
-    rule_id="RC-29",
-    name="Python .pth executable file",
-    category="supply-chain",
-    severity="CRITICAL",
-    description="Python .pth file with import/exec — runs at every interpreter startup (litellm@1.82.7 vector).",
-    references=("aguara SC-09",),
-    cwe="CWE-94",
-    fp_guards=("Comment-only .pth (no import/exec) is benign and skipped",),
-))
+register_rule(
+    RuleSchema(
+        rule_id="RC-29",
+        name="Python .pth executable file",
+        category="supply-chain",
+        severity="CRITICAL",
+        description="Python .pth file with import/exec — runs at every interpreter startup (litellm@1.82.7 vector).",
+        references=("aguara SC-09",),
+        cwe="CWE-94",
+        fp_guards=("Comment-only .pth (no import/exec) is benign and skipped",),
+    )
+)
 
 # -----------------------------------------------------------------------------
 # RC-37 — GTFOBins / LOLBins / macOS osascript / Windows LOLBins
@@ -2067,16 +2172,21 @@ GTFOBIN_LOLBIN_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\brundll32(?:\.exe)?\s+\S+,\s*\w+", re.IGNORECASE),
 )
 
-register_rule(RuleSchema(
-    rule_id="RC-37",
-    name="GTFOBins / LOLBins (Unix + macOS + Windows)",
-    category="sandbox-escape",
-    severity="CRITICAL",
-    description="Legit system utilities repurposed for arbitrary execution / sandbox escape.",
-    references=("aguara SUPPLY_007", "vexscan SANDBOX-007", "RC-97 folded"),
-    cwe="CWE-78",
-    fp_guards=("Skip in shell-like files where these are documented examples (RC-83 fence)", "Negation guard (RC-83)"),
-))
+register_rule(
+    RuleSchema(
+        rule_id="RC-37",
+        name="GTFOBins / LOLBins (Unix + macOS + Windows)",
+        category="sandbox-escape",
+        severity="CRITICAL",
+        description="Legit system utilities repurposed for arbitrary execution / sandbox escape.",
+        references=("aguara SUPPLY_007", "vexscan SANDBOX-007", "RC-97 folded"),
+        cwe="CWE-78",
+        fp_guards=(
+            "Skip in shell-like files where these are documented examples (RC-83 fence)",
+            "Negation guard (RC-83)",
+        ),
+    )
+)
 
 # -----------------------------------------------------------------------------
 # RC-43 — Time-bomb / conditional activation
@@ -2090,7 +2200,9 @@ TIMEBOMB_PATTERNS: tuple[re.Pattern[str], ...] = (
     # date-conditional: if Date.now() > X, if datetime.now() > X
     re.compile(r"\bif\s*\(?\s*(?:Date\.now\(\)|new\s+Date\(\)|datetime\.now\(\)|time\.time\(\))\s*[><]"),
     # hostname-conditional
-    re.compile(r"\bif\s*\(?\s*(?:os\.uname\(\)\.nodename|os\.hostname\(\)|process\.env\.HOSTNAME|socket\.gethostname\(\))\s*=="),
+    re.compile(
+        r"\bif\s*\(?\s*(?:os\.uname\(\)\.nodename|os\.hostname\(\)|process\.env\.HOSTNAME|socket\.gethostname\(\))\s*=="
+    ),
     # username-conditional. The os.environ.get('USER') form has a trailing
     # closing paren before the comparison; the env-var-attribute forms do not.
     re.compile(
@@ -2106,16 +2218,18 @@ TIMEBOMB_PATTERNS: tuple[re.Pattern[str], ...] = (
     ),
 )
 
-register_rule(RuleSchema(
-    rule_id="RC-43",
-    name="Time-bomb / conditional activation",
-    category="evasion",
-    severity="CRITICAL",
-    description="Code branch gated on date/hostname/username/env — designed-in evasion of analysis.",
-    references=("yidun", "vexscan BACK-001"),
-    cwe="CWE-506",
-    fp_guards=("Skip in test files (RC-84)", "Skip when in fenced code (RC-83)"),
-))
+register_rule(
+    RuleSchema(
+        rule_id="RC-43",
+        name="Time-bomb / conditional activation",
+        category="evasion",
+        severity="CRITICAL",
+        description="Code branch gated on date/hostname/username/env — designed-in evasion of analysis.",
+        references=("yidun", "vexscan BACK-001"),
+        cwe="CWE-506",
+        fp_guards=("Skip in test files (RC-84)", "Skip when in fenced code (RC-83)"),
+    )
+)
 
 # -----------------------------------------------------------------------------
 # RC-47 — MCP env-var injection (LD_PRELOAD / NODE_OPTIONS / etc.)
@@ -2125,32 +2239,45 @@ register_rule(RuleSchema(
 # var (LD_PRELOAD, DYLD_INSERT_LIBRARIES, NODE_OPTIONS=--require, etc.)
 # that runs attacker code at server startup before any tool is even called.
 # RCE-on-config-load.
-MCP_DANGEROUS_ENV_KEYS: frozenset[str] = frozenset({
-    # POSIX dynamic-loader hijacks
-    "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT",
-    "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH", "DYLD_FRAMEWORK_PATH",
-    # Node.js startup hooks
-    "NODE_OPTIONS",
-    # Python startup hooks
-    "PYTHONSTARTUP", "PYTHONPATH",
-    # PERL5 / Ruby startup hooks
-    "PERL5OPT", "PERL5LIB", "RUBYOPT", "RUBYLIB",
-    # JVM
-    "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS",
-    # Generic process injection
-    "INJECT_LIB",
-})
+MCP_DANGEROUS_ENV_KEYS: frozenset[str] = frozenset(
+    {
+        # POSIX dynamic-loader hijacks
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "LD_AUDIT",
+        "DYLD_INSERT_LIBRARIES",
+        "DYLD_LIBRARY_PATH",
+        "DYLD_FRAMEWORK_PATH",
+        # Node.js startup hooks
+        "NODE_OPTIONS",
+        # Python startup hooks
+        "PYTHONSTARTUP",
+        "PYTHONPATH",
+        # PERL5 / Ruby startup hooks
+        "PERL5OPT",
+        "PERL5LIB",
+        "RUBYOPT",
+        "RUBYLIB",
+        # JVM
+        "JAVA_TOOL_OPTIONS",
+        "_JAVA_OPTIONS",
+        # Generic process injection
+        "INJECT_LIB",
+    }
+)
 
-register_rule(RuleSchema(
-    rule_id="RC-47",
-    name="MCP env-var injection (LD_PRELOAD / NODE_OPTIONS / etc.)",
-    category="mcp",
-    severity="CRITICAL",
-    description="MCP server env block sets dynamic-loader / runtime-hook env var — RCE on config load.",
-    references=("yidun", "agentvet"),
-    cwe="CWE-426",
-    fp_guards=("None — these env vars have no legitimate use in plugin MCP configs",),
-))
+register_rule(
+    RuleSchema(
+        rule_id="RC-47",
+        name="MCP env-var injection (LD_PRELOAD / NODE_OPTIONS / etc.)",
+        category="mcp",
+        severity="CRITICAL",
+        description="MCP server env block sets dynamic-loader / runtime-hook env var — RCE on config load.",
+        references=("yidun", "agentvet"),
+        cwe="CWE-426",
+        fp_guards=("None — these env vars have no legitimate use in plugin MCP configs",),
+    )
+)
 
 # -----------------------------------------------------------------------------
 # RC-49 (PARTIAL — programmatic prefilter only) — MCP description injection
@@ -2173,16 +2300,18 @@ MCP_DESCRIPTION_INJECTION_PREFILTER: tuple[re.Pattern[str], ...] = (
     ),
 )
 
-register_rule(RuleSchema(
-    rule_id="RC-49",
-    name="MCP tool-description prompt injection (prefilter)",
-    category="mcp",
-    severity="CRITICAL",
-    description="MCP tool description contains LLM-instructions instead of describing the tool.",
-    references=("aguara MCP-005", "vexscan MCP-009", "agentaudit TP_INJECT_011"),
-    cwe="CWE-94",
-    fp_guards=("Negation guard (RC-83)", "Skip in CPV's own validator-source files"),
-))
+register_rule(
+    RuleSchema(
+        rule_id="RC-49",
+        name="MCP tool-description prompt injection (prefilter)",
+        category="mcp",
+        severity="CRITICAL",
+        description="MCP tool description contains LLM-instructions instead of describing the tool.",
+        references=("aguara MCP-005", "vexscan MCP-009", "agentaudit TP_INJECT_011"),
+        cwe="CWE-94",
+        fp_guards=("Negation guard (RC-83)", "Skip in CPV's own validator-source files"),
+    )
+)
 
 # -----------------------------------------------------------------------------
 # RC-50 — MCP tool-name shadowing
@@ -2192,16 +2321,45 @@ register_rule(RuleSchema(
 # Code built-in (read_file / write_file / bash / grep / edit). When tool
 # resolution chooses the MCP version, the attacker intercepts what the
 # agent thought was a built-in operation.
-SHADOWED_TOOL_NAMES: frozenset[str] = frozenset({
-    "read_file", "write_file", "edit", "str_replace", "create_file", "multi_edit",
-    "bash", "shell", "exec", "run_command", "powershell",
-    "grep", "glob", "search", "find_files",
-    "view", "show", "list_directory", "ls",
-    "git", "git_commit", "git_push", "git_status",
-    "fetch", "http_get", "http_post", "webfetch",
-    "task", "agent", "skill",
-    "read", "write", "edit", "ask_user", "ask_user_question",
-})
+SHADOWED_TOOL_NAMES: frozenset[str] = frozenset(
+    {
+        "read_file",
+        "write_file",
+        "edit",
+        "str_replace",
+        "create_file",
+        "multi_edit",
+        "bash",
+        "shell",
+        "exec",
+        "run_command",
+        "powershell",
+        "grep",
+        "glob",
+        "search",
+        "find_files",
+        "view",
+        "show",
+        "list_directory",
+        "ls",
+        "git",
+        "git_commit",
+        "git_push",
+        "git_status",
+        "fetch",
+        "http_get",
+        "http_post",
+        "webfetch",
+        "task",
+        "agent",
+        "skill",
+        "read",
+        "write",
+        "edit",
+        "ask_user",
+        "ask_user_question",
+    }
+)
 
 
 def is_shadowed_tool_name(name: str) -> tuple[bool, str | None]:
@@ -2210,6 +2368,7 @@ def is_shadowed_tool_name(name: str) -> tuple[bool, str | None]:
     Matching: exact, NFKC-normalized exact, or Levenshtein ≤ 1.
     """
     import unicodedata
+
     name_lower = name.lower().strip()
     if name_lower in SHADOWED_TOOL_NAMES:
         return (True, name_lower)
@@ -2253,16 +2412,18 @@ def _levenshtein_at_most_one(a: str, b: str) -> bool:
     return True
 
 
-register_rule(RuleSchema(
-    rule_id="RC-50",
-    name="MCP tool-name shadowing",
-    category="mcp",
-    severity="CRITICAL",
-    description="MCP tool name matches (or near-matches) a Claude Code built-in — impersonation vector.",
-    references=("aguara MCP-006", "agentvet", "GoPlusSecurity/agentguard"),
-    cwe="CWE-1021",
-    fp_guards=("Domain-specific reads like read_file_pdf are typically benign — flag ambiguous-only",),
-))
+register_rule(
+    RuleSchema(
+        rule_id="RC-50",
+        name="MCP tool-name shadowing",
+        category="mcp",
+        severity="CRITICAL",
+        description="MCP tool name matches (or near-matches) a Claude Code built-in — impersonation vector.",
+        references=("aguara MCP-006", "agentvet", "GoPlusSecurity/agentguard"),
+        cwe="CWE-1021",
+        fp_guards=("Domain-specific reads like read_file_pdf are typically benign — flag ambiguous-only",),
+    )
+)
 
 # -----------------------------------------------------------------------------
 # RC-67 — Cryptomining indicators
@@ -2280,16 +2441,18 @@ CRYPTOMINING_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\b4[1-9A-HJ-NP-Za-km-z]{94}\b"),
 )
 
-register_rule(RuleSchema(
-    rule_id="RC-67",
-    name="Cryptomining indicators (xmrig / stratum / Monero address)",
-    category="abuse",
-    severity="CRITICAL",
-    description="Cryptomining binary or pool URL or wallet address — silent abuse of user's compute.",
-    references=("aguara CRYPTO_001", "OWASP LLM10"),
-    cwe="CWE-400",
-    fp_guards=("Skip in doc/test files mentioning these as examples (RC-84)",),
-))
+register_rule(
+    RuleSchema(
+        rule_id="RC-67",
+        name="Cryptomining indicators (xmrig / stratum / Monero address)",
+        category="abuse",
+        severity="CRITICAL",
+        description="Cryptomining binary or pool URL or wallet address — silent abuse of user's compute.",
+        references=("aguara CRYPTO_001", "OWASP LLM10"),
+        cwe="CWE-400",
+        fp_guards=("Skip in doc/test files mentioning these as examples (RC-84)",),
+    )
+)
 
 # -----------------------------------------------------------------------------
 # Phase 2e RC-65 — Cloud IMDS (instance-metadata) endpoints + encoding variants
@@ -2397,47 +2560,55 @@ def find_obfuscated_exec(content: str, proximity_lines: int = 3) -> list[tuple[i
     for d_idx in decoder_hits:
         for e_idx in exec_hits:
             if abs(d_idx - e_idx) <= proximity_lines:
-                findings.append((
-                    d_idx + 1,
-                    f"obfuscated decode at line {d_idx + 1} within {abs(d_idx - e_idx)} lines of "
-                    f"exec sink at line {e_idx + 1}",
-                ))
+                findings.append(
+                    (
+                        d_idx + 1,
+                        f"obfuscated decode at line {d_idx + 1} within {abs(d_idx - e_idx)} lines of "
+                        f"exec sink at line {e_idx + 1}",
+                    )
+                )
                 break
     return findings
 
 
-register_rule(RuleSchema(
-    rule_id="RC-65",
-    name="Cloud IMDS endpoint (with encoding variants)",
-    category="ssrf",
-    severity="MAJOR",
-    description="Cloud instance-metadata endpoint — IAM credential theft vector. Includes hex/decimal/IPv6 variants.",
-    references=("aguara SSRF_009-011", "RC-66 folded"),
-    cwe="CWE-918",
-    fp_guards=("Skip in test/doc files (RC-84)", "Skip in fenced code blocks (RC-83)"),
-))
+register_rule(
+    RuleSchema(
+        rule_id="RC-65",
+        name="Cloud IMDS endpoint (with encoding variants)",
+        category="ssrf",
+        severity="MAJOR",
+        description="Cloud instance-metadata endpoint — IAM credential theft vector. Includes hex/decimal/IPv6 variants.",
+        references=("aguara SSRF_009-011", "RC-66 folded"),
+        cwe="CWE-918",
+        fp_guards=("Skip in test/doc files (RC-84)", "Skip in fenced code blocks (RC-83)"),
+    )
+)
 
-register_rule(RuleSchema(
-    rule_id="RC-39",
-    name="Persistence beyond plugin lifetime (cron/launchd/RC files/registry)",
-    category="persistence",
-    severity="MAJOR",
-    description="Modifies cron/launchd/systemd/shell-rc/Windows-Run for execution after plugin uninstall.",
-    references=("vexscan PERSIST-001", "emelyanowcom"),
-    cwe="CWE-506",
-    fp_guards=("Skip in test/doc files (RC-84)", "Skip in fenced code (RC-83)"),
-))
+register_rule(
+    RuleSchema(
+        rule_id="RC-39",
+        name="Persistence beyond plugin lifetime (cron/launchd/RC files/registry)",
+        category="persistence",
+        severity="MAJOR",
+        description="Modifies cron/launchd/systemd/shell-rc/Windows-Run for execution after plugin uninstall.",
+        references=("vexscan PERSIST-001", "emelyanowcom"),
+        cwe="CWE-506",
+        fp_guards=("Skip in test/doc files (RC-84)", "Skip in fenced code (RC-83)"),
+    )
+)
 
-register_rule(RuleSchema(
-    rule_id="RC-70",
-    name="Generic obfuscation with proximity-to-exec",
-    category="evasion",
-    severity="CRITICAL",
-    description="Base64/hex decoder within ±3 lines of an exec sink — likely encoded payload execution.",
-    references=("skillscan MAL-051", "RC-71 sibling"),
-    cwe="CWE-506",
-    fp_guards=("Skip in test/doc files (RC-84)", "Skip in fenced code (RC-83)"),
-))
+register_rule(
+    RuleSchema(
+        rule_id="RC-70",
+        name="Generic obfuscation with proximity-to-exec",
+        category="evasion",
+        severity="CRITICAL",
+        description="Base64/hex decoder within ±3 lines of an exec sink — likely encoded payload execution.",
+        references=("skillscan MAL-051", "RC-71 sibling"),
+        cwe="CWE-506",
+        fp_guards=("Skip in test/doc files (RC-84)", "Skip in fenced code (RC-83)"),
+    )
+)
 
 
 # =============================================================================
@@ -2460,221 +2631,344 @@ PHASE3_PATTERNS: list[tuple[str, str, "re.Pattern[str]", str]] = [
     # (RC-07 covered in Phase 2a; RC-02 + RC-43 differ — RC-02 is prose form,
     # RC-43 is code-form already in Phase 1)
     # -------------------------------------------------------------------------
-    ("RC-02", "MAJOR",
-     re.compile(
-         r"\b(?:if|when|once)\s+(?:you\s+(?:see|notice|encounter)|the\s+user\s+(?:says|asks|requests))\s+"
-         r"[\"'\w][^\n]{2,80}\s*[,;:]?\s*(?:then|do|please|first)",
-         re.IGNORECASE,
-     ),
-     "RC-02: prose conditional / time-bomb prompt injection"),
-    ("RC-03", "MAJOR",
-     re.compile(
-         r"\b(?:URGENT|EMERGENCY|critical|immediate)\s*[:!]?\s*"
-         r"(?:lives|safety|health|future|company|user)\s+(?:depend|hinge|rely)\s+on",
-         re.IGNORECASE,
-     ),
-     "RC-03: coercive authority / urgency manipulation"),
-    ("RC-03", "MAJOR",
-     re.compile(r"\byou\s+MUST\s+(?:do|comply|follow|obey|execute)\b"),
-     "RC-03: coercive authority — emphasized MUST"),
-    ("RC-05", "MAJOR",
-     re.compile(
-         r"\bas\s+(?:a|an|the)\s+(?:developer|admin(?:istrator)?|owner|operator|maintainer)\s+"
-         r"(?:with\s+)?(?:full|all|unrestricted|elevated|privileged)\s+(?:access|permissions?|rights?|capabilities)",
-         re.IGNORECASE,
-     ),
-     "RC-05: role-priority / capability-claim impersonation"),
-    ("RC-08", "MAJOR",
-     re.compile(
-         r"\b(?:Anthropic|OpenAI|the\s+team|Claude\s+team|engineers?)\s+"
-         r"(?:have\s+|has\s+)?(?:updated|changed|removed|disabled|modified)\s+"
-         r"(?:your|the)\s+(?:policy|guidelines?|safety|restrictions?|behavior|alignment)",
-         re.IGNORECASE,
-     ),
-     "RC-08: Anthropic / system-admin false-authority impersonation"),
-    ("RC-25", "MAJOR",
-     re.compile(
-         r"!\[[^\]]*\]\(https?://[^\s)]+(?:\?|&)(?:[a-z_]+=[^&\s)]*&?){2,}\)",
-         re.IGNORECASE,
-     ),
-     "RC-25: markdown image beacon (URL with multiple query params — exfil channel)"),
-    ("RC-90", "MAJOR",
-     re.compile(
-         r"\[(?:IMPORTANT|SYSTEM|ADMIN|ALERT|CRITICAL|URGENT|MUST|REQUIRED)\]\s*[:!]?\s*"
-         r"(?:ignore|disregard|forget|override|bypass|reveal|show|execute|run)",
-         re.IGNORECASE,
-     ),
-     "RC-90: IMPORTANT-tag / bracket amplification of injection imperative"),
-    ("RC-91", "MAJOR",
-     re.compile(
-         r"<!--\s*(?:ignore|disregard|forget|override|execute|run|do\s+not\s+show)[^\n]{1,200}-->",
-         re.IGNORECASE,
-     ),
-     "RC-91: hidden HTML comment containing action verb"),
-    ("RC-92", "MAJOR",
-     re.compile(
-         r"<(?:div|span)\s+[^>]*style=[\"'][^\"']*"
-         r"(?:display:\s*none|visibility:\s*hidden|opacity:\s*0|color:\s*(?:white|#fff)|font-size:\s*0)",
-         re.IGNORECASE,
-     ),
-     "RC-92: CSS-hidden injection (display:none, opacity:0, color:white)"),
-    ("RC-92", "MAJOR",
-     re.compile(r"<details\s+open\s*=\s*[\"']?false[\"']?>"),
-     "RC-92: collapsible <details> element with hidden content"),
-    ("RC-93", "MAJOR",
-     re.compile(r"\S\s{30,}\S"),
-     "RC-93: line with ≥30 contiguous spaces — visual deception (off-screen text)"),
-    ("RC-99", "CRITICAL",
-     re.compile(r"忽略.*?(?:指令|规则|说明|提示)"),
-     "RC-99: Mandarin prompt injection (忽略...指令)"),
-    ("RC-99", "CRITICAL",
-     re.compile(r"无视.*?(?:之前|以上|系统)"),
-     "RC-99: Mandarin prompt injection (无视...之前/以上/系统)"),
-    ("RC-99", "CRITICAL",
-     re.compile(r"以前の.*?(?:指示|ルール|ガイドライン).*?(?:無視|忘れ)"),
-     "RC-99: Japanese prompt injection (以前の...指示/ルール/ガイドライン...無視/忘れ)"),
-    ("RC-99", "CRITICAL",
-     re.compile(r"이전.*?(?:지시|규칙|지침).*?(?:무시|잊)"),
-     "RC-99: Korean prompt injection"),
-    ("RC-99", "CRITICAL",
-     re.compile(
-         r"\b(?:olvida|ignora|olvide|ignore)\s+(?:las?|los?)\s+"
-         r"instrucci[oó]n(?:es)?\s+(?:anterior(?:es)?|previa(?:s)?)",
-         re.IGNORECASE,
-     ),
-     "RC-99: Spanish prompt injection"),
-    ("RC-99", "CRITICAL",
-     re.compile(r"\bignorez\s+(?:les\s+)?instructions?\s+pr[eé]c[eé]dent(?:es)?", re.IGNORECASE),
-     "RC-99: French prompt injection"),
-    ("RC-99", "CRITICAL",
-     re.compile(
-         r"\b(?:ignoriere|vergiss)\s+(?:die\s+)?(?:vorherigen?|vorigen?)\s+(?:Anweisungen|Regeln)",
-         re.IGNORECASE,
-     ),
-     "RC-99: German prompt injection"),
-    ("RC-99", "CRITICAL",
-     re.compile(
-         r"(?:Игнорируй|Забудь)\s+(?:все\s+)?предыдущие\s+(?:инструкции|указания)",
-         re.IGNORECASE,
-     ),
-     "RC-99: Russian prompt injection"),
-    ("RC-99", "CRITICAL",
-     re.compile(r"تجاهل\s+(?:كل\s+)?التعليمات\s+السابقة"),
-     "RC-99: Arabic prompt injection"),
-    ("RC-108", "MAJOR",
-     re.compile(
-         r"<!--\s*\[\s*INSTRUCT(?:ION)?S?\s*\]\s*[\s\S]{1,500}-->",
-         re.IGNORECASE,
-     ),
-     "RC-108: comment-hidden injection bracket — LLMs read comments, regex misses them"),
-
+    (
+        "RC-02",
+        "MAJOR",
+        re.compile(
+            r"\b(?:if|when|once)\s+(?:you\s+(?:see|notice|encounter)|the\s+user\s+(?:says|asks|requests))\s+"
+            r"[\"'\w][^\n]{2,80}\s*[,;:]?\s*(?:then|do|please|first)",
+            re.IGNORECASE,
+        ),
+        "RC-02: prose conditional / time-bomb prompt injection",
+    ),
+    (
+        "RC-03",
+        "MAJOR",
+        re.compile(
+            r"\b(?:URGENT|EMERGENCY|critical|immediate)\s*[:!]?\s*"
+            r"(?:lives|safety|health|future|company|user)\s+(?:depend|hinge|rely)\s+on",
+            re.IGNORECASE,
+        ),
+        "RC-03: coercive authority / urgency manipulation",
+    ),
+    (
+        "RC-03",
+        "MAJOR",
+        re.compile(r"\byou\s+MUST\s+(?:do|comply|follow|obey|execute)\b"),
+        "RC-03: coercive authority — emphasized MUST",
+    ),
+    (
+        "RC-05",
+        "MAJOR",
+        re.compile(
+            r"\bas\s+(?:a|an|the)\s+(?:developer|admin(?:istrator)?|owner|operator|maintainer)\s+"
+            r"(?:with\s+)?(?:full|all|unrestricted|elevated|privileged)\s+(?:access|permissions?|rights?|capabilities)",
+            re.IGNORECASE,
+        ),
+        "RC-05: role-priority / capability-claim impersonation",
+    ),
+    (
+        "RC-08",
+        "MAJOR",
+        re.compile(
+            r"\b(?:Anthropic|OpenAI|the\s+team|Claude\s+team|engineers?)\s+"
+            r"(?:have\s+|has\s+)?(?:updated|changed|removed|disabled|modified)\s+"
+            r"(?:your|the)\s+(?:policy|guidelines?|safety|restrictions?|behavior|alignment)",
+            re.IGNORECASE,
+        ),
+        "RC-08: Anthropic / system-admin false-authority impersonation",
+    ),
+    (
+        "RC-25",
+        "MAJOR",
+        re.compile(
+            r"!\[[^\]]*\]\(https?://[^\s)]+(?:\?|&)(?:[a-z_]+=[^&\s)]*&?){2,}\)",
+            re.IGNORECASE,
+        ),
+        "RC-25: markdown image beacon (URL with multiple query params — exfil channel)",
+    ),
+    (
+        "RC-90",
+        "MAJOR",
+        re.compile(
+            r"\[(?:IMPORTANT|SYSTEM|ADMIN|ALERT|CRITICAL|URGENT|MUST|REQUIRED)\]\s*[:!]?\s*"
+            r"(?:ignore|disregard|forget|override|bypass|reveal|show|execute|run)",
+            re.IGNORECASE,
+        ),
+        "RC-90: IMPORTANT-tag / bracket amplification of injection imperative",
+    ),
+    (
+        "RC-91",
+        "MAJOR",
+        re.compile(
+            r"<!--\s*(?:ignore|disregard|forget|override|execute|run|do\s+not\s+show)[^\n]{1,200}-->",
+            re.IGNORECASE,
+        ),
+        "RC-91: hidden HTML comment containing action verb",
+    ),
+    (
+        "RC-92",
+        "MAJOR",
+        re.compile(
+            r"<(?:div|span)\s+[^>]*style=[\"'][^\"']*"
+            r"(?:display:\s*none|visibility:\s*hidden|opacity:\s*0|color:\s*(?:white|#fff)|font-size:\s*0)",
+            re.IGNORECASE,
+        ),
+        "RC-92: CSS-hidden injection (display:none, opacity:0, color:white)",
+    ),
+    (
+        "RC-92",
+        "MAJOR",
+        re.compile(r"<details\s+open\s*=\s*[\"']?false[\"']?>"),
+        "RC-92: collapsible <details> element with hidden content",
+    ),
+    (
+        "RC-93",
+        "MAJOR",
+        re.compile(r"\S\s{30,}\S"),
+        "RC-93: line with ≥30 contiguous spaces — visual deception (off-screen text)",
+    ),
+    (
+        "RC-99",
+        "CRITICAL",
+        re.compile(r"忽略.*?(?:指令|规则|说明|提示)"),
+        "RC-99: Mandarin prompt injection (忽略...指令)",
+    ),
+    (
+        "RC-99",
+        "CRITICAL",
+        re.compile(r"无视.*?(?:之前|以上|系统)"),
+        "RC-99: Mandarin prompt injection (无视...之前/以上/系统)",
+    ),
+    (
+        "RC-99",
+        "CRITICAL",
+        re.compile(r"以前の.*?(?:指示|ルール|ガイドライン).*?(?:無視|忘れ)"),
+        "RC-99: Japanese prompt injection (以前の...指示/ルール/ガイドライン...無視/忘れ)",
+    ),
+    ("RC-99", "CRITICAL", re.compile(r"이전.*?(?:지시|규칙|지침).*?(?:무시|잊)"), "RC-99: Korean prompt injection"),
+    (
+        "RC-99",
+        "CRITICAL",
+        re.compile(
+            r"\b(?:olvida|ignora|olvide|ignore)\s+(?:las?|los?)\s+"
+            r"instrucci[oó]n(?:es)?\s+(?:anterior(?:es)?|previa(?:s)?)",
+            re.IGNORECASE,
+        ),
+        "RC-99: Spanish prompt injection",
+    ),
+    (
+        "RC-99",
+        "CRITICAL",
+        re.compile(r"\bignorez\s+(?:les\s+)?instructions?\s+pr[eé]c[eé]dent(?:es)?", re.IGNORECASE),
+        "RC-99: French prompt injection",
+    ),
+    (
+        "RC-99",
+        "CRITICAL",
+        re.compile(
+            r"\b(?:ignoriere|vergiss)\s+(?:die\s+)?(?:vorherigen?|vorigen?)\s+(?:Anweisungen|Regeln)",
+            re.IGNORECASE,
+        ),
+        "RC-99: German prompt injection",
+    ),
+    (
+        "RC-99",
+        "CRITICAL",
+        re.compile(
+            r"(?:Игнорируй|Забудь)\s+(?:все\s+)?предыдущие\s+(?:инструкции|указания)",
+            re.IGNORECASE,
+        ),
+        "RC-99: Russian prompt injection",
+    ),
+    ("RC-99", "CRITICAL", re.compile(r"تجاهل\s+(?:كل\s+)?التعليمات\s+السابقة"), "RC-99: Arabic prompt injection"),
+    (
+        "RC-108",
+        "MAJOR",
+        re.compile(
+            r"<!--\s*\[\s*INSTRUCT(?:ION)?S?\s*\]\s*[\s\S]{1,500}-->",
+            re.IGNORECASE,
+        ),
+        "RC-108: comment-hidden injection bracket — LLMs read comments, regex misses them",
+    ),
     # -------------------------------------------------------------------------
     # Phase 3b — MCP / agent extras (RC-46/48/51/52/53/54/55/56/57/58/59/60/63)
     # -------------------------------------------------------------------------
-    ("RC-46", "MAJOR",
-     re.compile(r"--(?:no-sandbox|allow-dangerous|disable-web-security|insecure)\b"),
-     "RC-46: MCP / browser security-disabling argument"),
-    ("RC-48", "CRITICAL",
-     re.compile(r"\"args\"\s*:\s*\[[^\]]*[\";]\s*(?:rm\s|curl\s|wget\s|sh\s)"),
-     "RC-48: MCP args contains shell metacharacters / command injection vector"),
-    ("RC-48", "CRITICAL",
-     re.compile(r"\"args\"\s*:\s*\[[^\]]*[\$`][\(<]"),
-     "RC-48: MCP args contains shell substitution `$( ` or `<( `"),
-    ("RC-51", "MAJOR",
-     re.compile(
-         r"\"(?:retry|retries|maxRetries|max_retries)\"\s*:\s*(?:-1|\"?(?:Infinity|inf|none|unlimited)\"?|[0-9]{4,})",
-         re.IGNORECASE,
-     ),
-     "RC-51: MCP unbounded retry (token-amplification vector)"),
-    ("RC-52", "MAJOR",
-     re.compile(
-         # Trailing \b removed — `agent.invoke(agent_self,...)` has `_` after
-         # `agent`, both word chars, so \b would fail. Allow word continuation.
-         r"\b(agent|skill|task)\s*\.\s*(?:invoke|spawn|launch|delegate)\s*\([^)]*\b\1\w*",
-         re.IGNORECASE,
-     ),
-     "RC-52: recursive self-invocation (token exhaustion)"),
-    ("RC-53", "CRITICAL",
-     re.compile(
-         r"\b(?:sampling|createMessage|sample)\s*\([^)]*?(?:credential|secret|token|key|password)",
-         re.IGNORECASE,
-     ),
-     "RC-53: MCP sampling/createMessage exfiltration (sensitive data in prompt)"),
-    ("RC-54", "MAJOR",
-     re.compile(r"\"(?:host|bind|listen)\"\s*:\s*\"(?:0\.0\.0\.0|::|::0)\""),
-     "RC-54: MCP server bound to 0.0.0.0 / :: (network exposure)"),
-    ("RC-56", "MAJOR",
-     re.compile(
-         r"\"inputSchema\"\s*:\s*\{[^}]*\"additionalProperties\"\s*:\s*true",
-         re.IGNORECASE,
-     ),
-     "RC-56: MCP inputSchema allows additionalProperties (manipulation surface)"),
-    ("RC-57", "MAJOR",
-     re.compile(r"\"(?:autoApprove|auto_approve|approve_all|alwaysApprove)\"\s*:\s*true", re.IGNORECASE),
-     "RC-57: MCP server auto-approves all calls (disables user safety gate)"),
-    ("RC-58", "CRITICAL",
-     re.compile(
-         r"\bagent\s*\.\s*(?:send|invoke|delegate)\s*\([^)]*\b(?:credential|api_?key|token|secret|password)",
-         re.IGNORECASE,
-     ),
-     "RC-58: agent passes credentials to a downstream agent (cross-agent relay)"),
-    ("RC-59", "CRITICAL",
-     re.compile(
-         r"\bname\s*[:=]\s*[\"'](?:claude|anthropic|admin|system|root)[\"']",
-         re.IGNORECASE,
-     ),
-     "RC-59: agent identity spoofing (Claude/Anthropic/admin/system in name field)"),
-    ("RC-60", "MAJOR",
-     re.compile(r"\b(?:shadow|alternate|hidden)\s*workspace\b|\bworkspace\s*[\"']hidden[\"']", re.IGNORECASE),
-     "RC-60: shadow / hidden / alternate workspace declaration"),
-    ("RC-63", "MAJOR",
-     re.compile(
-         r"\b(?:do\s+not|don'?t)\s+ask\s+(?:the\s+)?user\b|"
-         r"\bskip\s+(?:user\s+)?(?:confirmation|approval|prompt|verification)\b",
-         re.IGNORECASE,
-     ),
-     "RC-63: 'do not ask user' / skip-confirmation autonomy abuse"),
-
+    (
+        "RC-46",
+        "MAJOR",
+        re.compile(r"--(?:no-sandbox|allow-dangerous|disable-web-security|insecure)\b"),
+        "RC-46: MCP / browser security-disabling argument",
+    ),
+    (
+        "RC-48",
+        "CRITICAL",
+        re.compile(r"\"args\"\s*:\s*\[[^\]]*[\";]\s*(?:rm\s|curl\s|wget\s|sh\s)"),
+        "RC-48: MCP args contains shell metacharacters / command injection vector",
+    ),
+    (
+        "RC-48",
+        "CRITICAL",
+        re.compile(r"\"args\"\s*:\s*\[[^\]]*[\$`][\(<]"),
+        "RC-48: MCP args contains shell substitution `$( ` or `<( `",
+    ),
+    (
+        "RC-51",
+        "MAJOR",
+        re.compile(
+            r"\"(?:retry|retries|maxRetries|max_retries)\"\s*:\s*(?:-1|\"?(?:Infinity|inf|none|unlimited)\"?|[0-9]{4,})",
+            re.IGNORECASE,
+        ),
+        "RC-51: MCP unbounded retry (token-amplification vector)",
+    ),
+    (
+        "RC-52",
+        "MAJOR",
+        re.compile(
+            # Trailing \b removed — `agent.invoke(agent_self,...)` has `_` after
+            # `agent`, both word chars, so \b would fail. Allow word continuation.
+            r"\b(agent|skill|task)\s*\.\s*(?:invoke|spawn|launch|delegate)\s*\([^)]*\b\1\w*",
+            re.IGNORECASE,
+        ),
+        "RC-52: recursive self-invocation (token exhaustion)",
+    ),
+    (
+        "RC-53",
+        "CRITICAL",
+        re.compile(
+            r"\b(?:sampling|createMessage|sample)\s*\([^)]*?(?:credential|secret|token|key|password)",
+            re.IGNORECASE,
+        ),
+        "RC-53: MCP sampling/createMessage exfiltration (sensitive data in prompt)",
+    ),
+    (
+        "RC-54",
+        "MAJOR",
+        re.compile(r"\"(?:host|bind|listen)\"\s*:\s*\"(?:0\.0\.0\.0|::|::0)\""),
+        "RC-54: MCP server bound to 0.0.0.0 / :: (network exposure)",
+    ),
+    (
+        "RC-56",
+        "MAJOR",
+        re.compile(
+            r"\"inputSchema\"\s*:\s*\{[^}]*\"additionalProperties\"\s*:\s*true",
+            re.IGNORECASE,
+        ),
+        "RC-56: MCP inputSchema allows additionalProperties (manipulation surface)",
+    ),
+    (
+        "RC-57",
+        "MAJOR",
+        re.compile(r"\"(?:autoApprove|auto_approve|approve_all|alwaysApprove)\"\s*:\s*true", re.IGNORECASE),
+        "RC-57: MCP server auto-approves all calls (disables user safety gate)",
+    ),
+    (
+        "RC-58",
+        "CRITICAL",
+        re.compile(
+            r"\bagent\s*\.\s*(?:send|invoke|delegate)\s*\([^)]*\b(?:credential|api_?key|token|secret|password)",
+            re.IGNORECASE,
+        ),
+        "RC-58: agent passes credentials to a downstream agent (cross-agent relay)",
+    ),
+    (
+        "RC-59",
+        "CRITICAL",
+        re.compile(
+            r"\bname\s*[:=]\s*[\"'](?:claude|anthropic|admin|system|root)[\"']",
+            re.IGNORECASE,
+        ),
+        "RC-59: agent identity spoofing (Claude/Anthropic/admin/system in name field)",
+    ),
+    (
+        "RC-60",
+        "MAJOR",
+        re.compile(r"\b(?:shadow|alternate|hidden)\s*workspace\b|\bworkspace\s*[\"']hidden[\"']", re.IGNORECASE),
+        "RC-60: shadow / hidden / alternate workspace declaration",
+    ),
+    (
+        "RC-63",
+        "MAJOR",
+        re.compile(
+            r"\b(?:do\s+not|don'?t)\s+ask\s+(?:the\s+)?user\b|"
+            r"\bskip\s+(?:user\s+)?(?:confirmation|approval|prompt|verification)\b",
+            re.IGNORECASE,
+        ),
+        "RC-63: 'do not ask user' / skip-confirmation autonomy abuse",
+    ),
     # -------------------------------------------------------------------------
     # Phase 3c — Persistence / supply / exfil-extended
     # (RC-18/22/23/24/30/31/32/33/40/41/42/72/80/81/95/96/98)
     # -------------------------------------------------------------------------
-    ("RC-22", "CRITICAL",
-     re.compile(r"\bnavigator\.clipboard\.readText\s*\(\s*\)"),
-     "RC-22: clipboard-API exfil (browser navigator.clipboard.readText)"),
-    ("RC-22", "MINOR",
-     re.compile(r"\b(?:pbcopy|xclip\s+-(?:o|sel)|xsel\s+-(?:o|b)|Get-Clipboard)\b"),
-     "RC-22: clipboard read via pbcopy/xclip/xsel/Get-Clipboard"),
-    ("RC-23", "MAJOR",
-     re.compile(r"\bnavigator\.sendBeacon\s*\("),
-     "RC-23: navigator.sendBeacon (silent exfil — runs after page unload)"),
-    ("RC-24", "CRITICAL",
-     re.compile(
-         r"\b(?:WALLET|MNEMONIC|SEED|BIP39|BIP_39|PRIVATE_KEY)_(?:PHRASE|SEED|MNEMONIC|HEX|WIF)\b",
-         re.IGNORECASE,
-     ),
-     "RC-24: Web3 / crypto-wallet seed-related env var name"),
-    ("RC-24", "CRITICAL",
-     re.compile(r"\b(?:0x[0-9a-fA-F]{64})\b"),
-     "RC-24: Hex-encoded 256-bit value (Ethereum private-key shape)"),
-    ("RC-31", "MAJOR",
-     re.compile(r"\buses:\s*[A-Za-z0-9._/-]+@(?:main|master|develop|latest|HEAD)\s*$", re.MULTILINE),
-     "RC-31: GitHub Actions uses unpinned mutable ref (@main/master/latest)"),
-    ("RC-32", "MAJOR",
-     re.compile(r"\$\{\{\s*toJSON\s*\(\s*secrets\s*\)\s*\}\}", re.IGNORECASE),
-     "RC-32: GitHub Actions exfil — toJSON(secrets) dumps all repo secrets"),
-    ("RC-32", "MAJOR",
-     re.compile(r"echo\s+.*\$\{\{\s*secrets\.[A-Z_]+", re.IGNORECASE),
-     "RC-32: GitHub Actions secret value echoed (potential log leak)"),
-    ("RC-40", "CRITICAL",
-     re.compile(r">>?\s*~/\.ssh/authorized_keys\b"),
-     "RC-40: append to ~/.ssh/authorized_keys (permanent SSH backdoor)"),
-    ("RC-41", "MAJOR",
-     re.compile(r">>?\s*\.git/hooks/(?:pre|post|commit|push|update)-?[a-z]*\b"),
-     "RC-41: append to .git/hooks/* (git-hook persistence)"),
-    ("RC-42", "MAJOR",
-     re.compile(r"\b(?:echo|cat)\s+.*?>>?\s*(?:docker-entrypoint(?:\.sh)?|Dockerfile)\b"),
-     "RC-42: docker-entrypoint / Dockerfile modification at runtime"),
+    (
+        "RC-22",
+        "CRITICAL",
+        re.compile(r"\bnavigator\.clipboard\.readText\s*\(\s*\)"),
+        "RC-22: clipboard-API exfil (browser navigator.clipboard.readText)",
+    ),
+    (
+        "RC-22",
+        "MINOR",
+        re.compile(r"\b(?:pbcopy|xclip\s+-(?:o|sel)|xsel\s+-(?:o|b)|Get-Clipboard)\b"),
+        "RC-22: clipboard read via pbcopy/xclip/xsel/Get-Clipboard",
+    ),
+    (
+        "RC-23",
+        "MAJOR",
+        re.compile(r"\bnavigator\.sendBeacon\s*\("),
+        "RC-23: navigator.sendBeacon (silent exfil — runs after page unload)",
+    ),
+    (
+        "RC-24",
+        "CRITICAL",
+        re.compile(
+            r"\b(?:WALLET|MNEMONIC|SEED|BIP39|BIP_39|PRIVATE_KEY)_(?:PHRASE|SEED|MNEMONIC|HEX|WIF)\b",
+            re.IGNORECASE,
+        ),
+        "RC-24: Web3 / crypto-wallet seed-related env var name",
+    ),
+    (
+        "RC-24",
+        "CRITICAL",
+        re.compile(r"\b(?:0x[0-9a-fA-F]{64})\b"),
+        "RC-24: Hex-encoded 256-bit value (Ethereum private-key shape)",
+    ),
+    (
+        "RC-31",
+        "MAJOR",
+        re.compile(r"\buses:\s*[A-Za-z0-9._/-]+@(?:main|master|develop|latest|HEAD)\s*$", re.MULTILINE),
+        "RC-31: GitHub Actions uses unpinned mutable ref (@main/master/latest)",
+    ),
+    (
+        "RC-32",
+        "MAJOR",
+        re.compile(r"\$\{\{\s*toJSON\s*\(\s*secrets\s*\)\s*\}\}", re.IGNORECASE),
+        "RC-32: GitHub Actions exfil — toJSON(secrets) dumps all repo secrets",
+    ),
+    (
+        "RC-32",
+        "MAJOR",
+        re.compile(r"echo\s+.*\$\{\{\s*secrets\.[A-Z_]+", re.IGNORECASE),
+        "RC-32: GitHub Actions secret value echoed (potential log leak)",
+    ),
+    (
+        "RC-40",
+        "CRITICAL",
+        re.compile(r">>?\s*~/\.ssh/authorized_keys\b"),
+        "RC-40: append to ~/.ssh/authorized_keys (permanent SSH backdoor)",
+    ),
+    (
+        "RC-41",
+        "MAJOR",
+        re.compile(r">>?\s*\.git/hooks/(?:pre|post|commit|push|update)-?[a-z]*\b"),
+        "RC-41: append to .git/hooks/* (git-hook persistence)",
+    ),
+    (
+        "RC-42",
+        "MAJOR",
+        re.compile(r"\b(?:echo|cat)\s+.*?>>?\s*(?:docker-entrypoint(?:\.sh)?|Dockerfile)\b"),
+        "RC-42: docker-entrypoint / Dockerfile modification at runtime",
+    ),
     # v2.46 FP-X — require URL/socket context. The previous regex
     # matched any `0x[0-9a-fA-F]{8}` literal — every FNV/MurmurHash
     # constant, every JS color, every magic-number tripped this. The
@@ -2682,46 +2976,63 @@ PHASE3_PATTERNS: list[tuple[str, str, "re.Pattern[str]", str]] = [
     # (`http://0xc0a80101/`) or socket/inet calls
     # (`inet_aton(0xc0a80101)`). Only hits in those contexts are
     # interesting.
-    ("RC-72", "MAJOR",
-     re.compile(
-         r"(?:"
-         r"(?:https?://|//|\binet_(?:aton|pton)\s*\(|\bsocket\.\w+\s*\([^)]*|\bIPAddress\s*\(\s*)"
-         r")\s*"
-         r"(?:0x[0-9a-fA-F]{8}|3232235521|0177\.0\.0\.1)\b"
-     ),
-     "RC-72: hex / decimal / octal IPv4 (IP-allowlist bypass)"),
-    ("RC-80", "MAJOR",
-     re.compile(r"\\x7fELF|\\xcf\\xfa\\xed\\xfe|\\xfe\\xed\\xfa\\xcf|MZ\\x90\\x00"),
-     "RC-80: embedded binary magic bytes (ELF / Mach-O / PE) in plaintext file"),
-    ("RC-81", "MAJOR",
-     re.compile(r"(?:^|/)\.\w+\.(?:sh|bash|zsh|ps1|bat|cmd|exe|dll|so|dylib)\b"),
-     "RC-81: hidden dotfile with executable extension (.foo.sh, .x.exe)"),
-    ("RC-95", "MAJOR",
-     re.compile(
-         # Allow optional surrounding quote on the JSON key: "postuninstall":
-         r"\b(?:postuninstall|post_uninstall)[\"']?\s*[:=]\s*[\"'](?:[^\"']*?)"
-         r"(?:curl|wget|sh\s+|bash\s+|node|python)",
-         re.IGNORECASE,
-     ),
-     "RC-95: post-uninstall hook invokes downloader/interpreter (residue persistence)"),
-    ("RC-96", "MAJOR",
-     re.compile(
-         # Allow optional surrounding quote on the JSON key + non-greedy
-         # path consumption (greedy [^\]]* would swallow the .env extension)
-         r"\bfiles[\"']?\s*:\s*\[[^\]]*?\.(?:env|pem|key|p12|pfx|crt)\b",
-         re.IGNORECASE,
-     ),
-     "RC-96: package.json `files` array includes secret-shape file (publish hygiene)"),
-    ("RC-98", "CRITICAL",
-     re.compile(
-         r"\b(?:ufw\s+disable|systemctl\s+stop\s+(?:firewalld|ufw|iptables)|"
-         r"netsh\s+advfirewall\s+set\s+\S+\s+state\s+off|"
-         r"Set-MpPreference\s+-Disable\w+|"
-         r"insmod\s+\S+|modprobe\s+\S+)",
-         re.IGNORECASE,
-     ),
-     "RC-98: firewall / Defender disable OR kernel-module load (RC-98)"),
-
+    (
+        "RC-72",
+        "MAJOR",
+        re.compile(
+            r"(?:"
+            r"(?:https?://|//|\binet_(?:aton|pton)\s*\(|\bsocket\.\w+\s*\([^)]*|\bIPAddress\s*\(\s*)"
+            r")\s*"
+            r"(?:0x[0-9a-fA-F]{8}|3232235521|0177\.0\.0\.1)\b"
+        ),
+        "RC-72: hex / decimal / octal IPv4 (IP-allowlist bypass)",
+    ),
+    (
+        "RC-80",
+        "MAJOR",
+        re.compile(r"\\x7fELF|\\xcf\\xfa\\xed\\xfe|\\xfe\\xed\\xfa\\xcf|MZ\\x90\\x00"),
+        "RC-80: embedded binary magic bytes (ELF / Mach-O / PE) in plaintext file",
+    ),
+    (
+        "RC-81",
+        "MAJOR",
+        re.compile(r"(?:^|/)\.\w+\.(?:sh|bash|zsh|ps1|bat|cmd|exe|dll|so|dylib)\b"),
+        "RC-81: hidden dotfile with executable extension (.foo.sh, .x.exe)",
+    ),
+    (
+        "RC-95",
+        "MAJOR",
+        re.compile(
+            # Allow optional surrounding quote on the JSON key: "postuninstall":
+            r"\b(?:postuninstall|post_uninstall)[\"']?\s*[:=]\s*[\"'](?:[^\"']*?)"
+            r"(?:curl|wget|sh\s+|bash\s+|node|python)",
+            re.IGNORECASE,
+        ),
+        "RC-95: post-uninstall hook invokes downloader/interpreter (residue persistence)",
+    ),
+    (
+        "RC-96",
+        "MAJOR",
+        re.compile(
+            # Allow optional surrounding quote on the JSON key + non-greedy
+            # path consumption (greedy [^\]]* would swallow the .env extension)
+            r"\bfiles[\"']?\s*:\s*\[[^\]]*?\.(?:env|pem|key|p12|pfx|crt)\b",
+            re.IGNORECASE,
+        ),
+        "RC-96: package.json `files` array includes secret-shape file (publish hygiene)",
+    ),
+    (
+        "RC-98",
+        "CRITICAL",
+        re.compile(
+            r"\b(?:ufw\s+disable|systemctl\s+stop\s+(?:firewalld|ufw|iptables)|"
+            r"netsh\s+advfirewall\s+set\s+\S+\s+state\s+off|"
+            r"Set-MpPreference\s+-Disable\w+|"
+            r"insmod\s+\S+|modprobe\s+\S+)",
+            re.IGNORECASE,
+        ),
+        "RC-98: firewall / Defender disable OR kernel-module load (RC-98)",
+    ),
     # -------------------------------------------------------------------------
     # Phase 3d — Architecture (RC-69/79/82/89/94)
     # RC-73 cross-file taint, RC-74 multi-tool toxic-flow, RC-75 chain-detection
@@ -2729,40 +3040,57 @@ PHASE3_PATTERNS: list[tuple[str, str, "re.Pattern[str]", str]] = [
     # architecture (per-file tag dict + post-scan cross-reference) that
     # doesn't fit the single-pass PHASE3_PATTERNS model.
     # -------------------------------------------------------------------------
-    ("RC-69", "CRITICAL",
-     re.compile(r"\b(?:window|globalThis|self)\s*\[\s*[\"']eval[\"']\s*\]"),
-     "RC-69: AST-level eval obfuscation (window['eval'] bypass)"),
-    ("RC-69", "CRITICAL",
-     re.compile(r"\bnew\s+(?:window|globalThis)\s*\[\s*[\"']Function[\"']\s*\]"),
-     "RC-69: AST-level Function obfuscation (constructor via bracket access)"),
-    ("RC-79", "CRITICAL",
-     re.compile(
-         r"\b(?:fs|fs\.promises|node:fs)\.\w+\s*\(\s*[\"'][^\"']*?\.(?:claude|cursor|vscode|zed)/[^\"']*[\"']",
-         re.IGNORECASE,
-     ),
-     "RC-79: workbench tampering — write into protected ~/.claude/.cursor/.vscode/.zed surface"),
-    ("RC-89", "MAJOR",
-     re.compile(
-         r"\bplease\s+(?:provide|enter|share|give)\s+(?:your|the)\s+"
-         r"(?:password|api[\s_-]?key|token|secret|credentials?|2fa|otp)",
-         re.IGNORECASE,
-     ),
-     "RC-89: social-engineering credential prompt"),
-    ("RC-94", "CRITICAL",
-     re.compile(r"\bcursor://(?:settings|extensions|hook)\b", re.IGNORECASE),
-     "RC-94: cursor:// deeplink that opens settings/extensions/hooks (RCE vector)"),
+    (
+        "RC-69",
+        "CRITICAL",
+        re.compile(r"\b(?:window|globalThis|self)\s*\[\s*[\"']eval[\"']\s*\]"),
+        "RC-69: AST-level eval obfuscation (window['eval'] bypass)",
+    ),
+    (
+        "RC-69",
+        "CRITICAL",
+        re.compile(r"\bnew\s+(?:window|globalThis)\s*\[\s*[\"']Function[\"']\s*\]"),
+        "RC-69: AST-level Function obfuscation (constructor via bracket access)",
+    ),
+    (
+        "RC-79",
+        "CRITICAL",
+        re.compile(
+            r"\b(?:fs|fs\.promises|node:fs)\.\w+\s*\(\s*[\"'][^\"']*?\.(?:claude|cursor|vscode|zed)/[^\"']*[\"']",
+            re.IGNORECASE,
+        ),
+        "RC-79: workbench tampering — write into protected ~/.claude/.cursor/.vscode/.zed surface",
+    ),
+    (
+        "RC-89",
+        "MAJOR",
+        re.compile(
+            r"\bplease\s+(?:provide|enter|share|give)\s+(?:your|the)\s+"
+            r"(?:password|api[\s_-]?key|token|secret|credentials?|2fa|otp)",
+            re.IGNORECASE,
+        ),
+        "RC-89: social-engineering credential prompt",
+    ),
+    (
+        "RC-94",
+        "CRITICAL",
+        re.compile(r"\bcursor://(?:settings|extensions|hook)\b", re.IGNORECASE),
+        "RC-94: cursor:// deeplink that opens settings/extensions/hooks (RCE vector)",
+    ),
 ]
 
 # Register all Phase 3 rules in the registry (deduplicated by rule_id)
 for _rule_id, _severity, _pat, _msg in PHASE3_PATTERNS:
-    register_rule(RuleSchema(
-        rule_id=_rule_id,
-        name=_msg.split(":", 1)[1].strip() if ":" in _msg else _rule_id,
-        category="phase3",
-        severity=_severity,
-        description=_msg,
-        references=("Phase 3 catalog — see TRDD-0f1f7889 §3 sub-phases 3a/3b/3c/3d",),
-    ))
+    register_rule(
+        RuleSchema(
+            rule_id=_rule_id,
+            name=_msg.split(":", 1)[1].strip() if ":" in _msg else _rule_id,
+            category="phase3",
+            severity=_severity,
+            description=_msg,
+            references=("Phase 3 catalog — see TRDD-0f1f7889 §3 sub-phases 3a/3b/3c/3d",),
+        )
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -2770,21 +3098,80 @@ for _rule_id, _severity, _pat, _msg in PHASE3_PATTERNS:
 # -----------------------------------------------------------------------------
 # Carries its own helper because the check is a Levenshtein lookup, not a regex.
 # Source: aguara TYPO_001 + skillscan TYPO-002.
-TOP_PYPI_PACKAGES: frozenset[str] = frozenset({
-    "requests", "urllib3", "boto3", "botocore", "setuptools", "pip", "numpy",
-    "pandas", "matplotlib", "pyyaml", "click", "flask", "django", "fastapi",
-    "pytest", "tox", "black", "ruff", "mypy", "pyright", "selenium", "scrapy",
-    "scikit-learn", "tensorflow", "torch", "transformers", "langchain",
-    "openai", "anthropic", "huggingface_hub", "wandb", "mlflow", "ray",
-})
+TOP_PYPI_PACKAGES: frozenset[str] = frozenset(
+    {
+        "requests",
+        "urllib3",
+        "boto3",
+        "botocore",
+        "setuptools",
+        "pip",
+        "numpy",
+        "pandas",
+        "matplotlib",
+        "pyyaml",
+        "click",
+        "flask",
+        "django",
+        "fastapi",
+        "pytest",
+        "tox",
+        "black",
+        "ruff",
+        "mypy",
+        "pyright",
+        "selenium",
+        "scrapy",
+        "scikit-learn",
+        "tensorflow",
+        "torch",
+        "transformers",
+        "langchain",
+        "openai",
+        "anthropic",
+        "huggingface_hub",
+        "wandb",
+        "mlflow",
+        "ray",
+    }
+)
 
-TOP_NPM_PACKAGES: frozenset[str] = frozenset({
-    "react", "vue", "angular", "lodash", "express", "axios", "moment",
-    "webpack", "babel", "typescript", "next", "nuxt", "tailwindcss", "vite",
-    "esbuild", "rollup", "jest", "mocha", "chai", "cypress", "playwright",
-    "eslint", "prettier", "stylelint", "react-dom", "react-router",
-    "@types/node", "@types/react", "redux", "rxjs", "graphql", "apollo",
-})
+TOP_NPM_PACKAGES: frozenset[str] = frozenset(
+    {
+        "react",
+        "vue",
+        "angular",
+        "lodash",
+        "express",
+        "axios",
+        "moment",
+        "webpack",
+        "babel",
+        "typescript",
+        "next",
+        "nuxt",
+        "tailwindcss",
+        "vite",
+        "esbuild",
+        "rollup",
+        "jest",
+        "mocha",
+        "chai",
+        "cypress",
+        "playwright",
+        "eslint",
+        "prettier",
+        "stylelint",
+        "react-dom",
+        "react-router",
+        "@types/node",
+        "@types/react",
+        "redux",
+        "rxjs",
+        "graphql",
+        "apollo",
+    }
+)
 
 
 def is_typosquat(name: str, ecosystem: str = "pypi") -> tuple[bool, str | None]:
@@ -2805,16 +3192,18 @@ def is_typosquat(name: str, ecosystem: str = "pypi") -> tuple[bool, str | None]:
     return (False, None)
 
 
-register_rule(RuleSchema(
-    rule_id="RC-30",
-    name="Typosquatting — top-100 + Levenshtein ≤1",
-    category="supply-chain",
-    severity="MAJOR",
-    description="Package name within Levenshtein distance 1 of a top-100 PyPI/npm package.",
-    references=("aguara TYPO_001", "skillscan TYPO-002"),
-    cwe="CWE-829",
-    fp_guards=("Exact matches return False (those are the real package)",),
-))
+register_rule(
+    RuleSchema(
+        rule_id="RC-30",
+        name="Typosquatting — top-100 + Levenshtein ≤1",
+        category="supply-chain",
+        severity="MAJOR",
+        description="Package name within Levenshtein distance 1 of a top-100 PyPI/npm package.",
+        references=("aguara TYPO_001", "skillscan TYPO-002"),
+        cwe="CWE-829",
+        fp_guards=("Exact matches return False (those are the real package)",),
+    )
+)
 
 # -----------------------------------------------------------------------------
 # Phase 3 supplement — RC-33 compromised package DB
@@ -2823,15 +3212,29 @@ register_rule(RuleSchema(
 # colors, litellm). The list is curated from public CVE feeds; should be
 # refreshed from a CVE database in production but a small static seed is OK
 # for the initial implementation.
-COMPROMISED_PACKAGES: frozenset[str] = frozenset({
-    # npm — well-documented incidents
-    "event-stream", "colors", "faker", "ua-parser-js", "coa", "rc",
-    "node-ipc", "discord.js", "noblox.js-proxy", "circle-app",
-    # PyPI — high-profile cases
-    "ctx", "phpass", "litellm@1.82.7",  # version-tagged for clarity
-    # Compromised version markers
-    "ua-parser-js@0.7.29", "colors@1.4.44-liberty-2", "faker@6.6.6",
-})
+COMPROMISED_PACKAGES: frozenset[str] = frozenset(
+    {
+        # npm — well-documented incidents
+        "event-stream",
+        "colors",
+        "faker",
+        "ua-parser-js",
+        "coa",
+        "rc",
+        "node-ipc",
+        "discord.js",
+        "noblox.js-proxy",
+        "circle-app",
+        # PyPI — high-profile cases
+        "ctx",
+        "phpass",
+        "litellm@1.82.7",  # version-tagged for clarity
+        # Compromised version markers
+        "ua-parser-js@0.7.29",
+        "colors@1.4.44-liberty-2",
+        "faker@6.6.6",
+    }
+)
 
 
 def is_compromised_package(name: str, version: str | None = None) -> bool:
@@ -2844,16 +3247,18 @@ def is_compromised_package(name: str, version: str | None = None) -> bool:
     return False
 
 
-register_rule(RuleSchema(
-    rule_id="RC-33",
-    name="Compromised package (event-stream / colors / litellm pattern)",
-    category="supply-chain",
-    severity="CRITICAL",
-    description="Package name appears in the curated compromised-package list (CVE-derived).",
-    references=("aguara COMPROMISED_PKG_LIST", "event-stream incident", "colors incident", "litellm@1.82.7 CVE"),
-    cwe="CWE-829",
-    fp_guards=("Exact-match only — close-name typos handled by RC-30 instead",),
-))
+register_rule(
+    RuleSchema(
+        rule_id="RC-33",
+        name="Compromised package (event-stream / colors / litellm pattern)",
+        category="supply-chain",
+        severity="CRITICAL",
+        description="Package name appears in the curated compromised-package list (CVE-derived).",
+        references=("aguara COMPROMISED_PKG_LIST", "event-stream incident", "colors incident", "litellm@1.82.7 CVE"),
+        cwe="CWE-829",
+        fp_guards=("Exact-match only — close-name typos handled by RC-30 instead",),
+    )
+)
 
 
 # =============================================================================
@@ -2864,19 +3269,24 @@ register_rule(RuleSchema(
 PHASE4_PATTERNS: list[tuple[str, str, "re.Pattern[str]", str]] = [
     # RC-85 — License-compliance markers (proprietary-only or unlicensed code
     # shipped in plugins). The plugin should declare a license.
-    ("RC-85", "MINOR",
-     re.compile(
-         # `\b` only applies cleanly to ASCII word boundaries; © (U+00A9) is
-         # not a word char so skip the boundary requirement on that branch.
-         r"(?:\bCopyright|©)\s*(?:\(c\))?\s*\d{4}.*?"
-         r"(?:All\s+Rights\s+Reserved|Proprietary|Confidential)",
-         re.IGNORECASE,
-     ),
-     "RC-85: proprietary / All Rights Reserved notice without OSS license declared"),
-    ("RC-85", "MINOR",
-     re.compile(r"\bSPDX-License-Identifier:\s*(?:UNLICENSED|NONE)\b", re.IGNORECASE),
-     "RC-85: SPDX UNLICENSED / NONE — plugin should declare an OSS license"),
-
+    (
+        "RC-85",
+        "MINOR",
+        re.compile(
+            # `\b` only applies cleanly to ASCII word boundaries; © (U+00A9) is
+            # not a word char so skip the boundary requirement on that branch.
+            r"(?:\bCopyright|©)\s*(?:\(c\))?\s*\d{4}.*?"
+            r"(?:All\s+Rights\s+Reserved|Proprietary|Confidential)",
+            re.IGNORECASE,
+        ),
+        "RC-85: proprietary / All Rights Reserved notice without OSS license declared",
+    ),
+    (
+        "RC-85",
+        "MINOR",
+        re.compile(r"\bSPDX-License-Identifier:\s*(?:UNLICENSED|NONE)\b", re.IGNORECASE),
+        "RC-85: SPDX UNLICENSED / NONE — plugin should declare an OSS license",
+    ),
     # RC-87 — SSRF / external IP (suspicious-IP detection beyond the cloud-IMDS list)
     # The 0.0.0.0/0 + private-RFC-1918 + link-local ranges most often appear
     # in attack code that wants to bypass an "is this localhost?" check.
@@ -2886,9 +3296,12 @@ PHASE4_PATTERNS: list[tuple[str, str, "re.Pattern[str]", str]] = [
     # default-output count on plugins that legitimately bind to localhost
     # (CozoDB, MCP servers, dev databases). The signal is preserved for
     # `--strict` runs and `--verbose`.
-    ("RC-87", "NIT",
-     re.compile(r"\b127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\b"),
-     "RC-87: hardcoded loopback IP (127.x.x.x) — usually fine but worth flagging"),
+    (
+        "RC-87",
+        "NIT",
+        re.compile(r"\b127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\b"),
+        "RC-87: hardcoded loopback IP (127.x.x.x) — usually fine but worth flagging",
+    ),
     # v2.46 FP-A — IPv4 needs all 4 octets. The previous `[0-9.]+`
     # tail matched floats (`10.0`, `2.10.0`) and SemVer strings,
     # producing massive FPs in code that uses `10.0` as a numeric
@@ -2897,66 +3310,87 @@ PHASE4_PATTERNS: list[tuple[str, str, "re.Pattern[str]", str]] = [
     # the "10.0.0.255" prefix of "10.0.0.2550" (would-be IP-shaped
     # but invalid). The trailing-dot check `(?!\.)` prevents the
     # match from extending into a SemVer suffix (`10.0.0.0.5`).
-    ("RC-87", "MINOR",
-     re.compile(
-         r"\b(?:"
-         r"10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}"
-         r"|172\.(?:1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}"
-         r"|192\.168\.[0-9]{1,3}\.[0-9]{1,3}"
-         r")(?!\.?\d)"
-     ),
-     "RC-87: hardcoded RFC-1918 private IP — review for environment leakage"),
-    ("RC-87", "MAJOR",
-     re.compile(
-         r"\b169\.254\.(?!169\.254\b|170\.2\b)"
-         r"[0-9]{1,3}\.[0-9]{1,3}(?!\.?\d)"
-     ),
-     "RC-87: link-local IP outside known IMDS endpoints (RC-65)"),
-
+    (
+        "RC-87",
+        "MINOR",
+        re.compile(
+            r"\b(?:"
+            r"10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}"
+            r"|172\.(?:1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}"
+            r"|192\.168\.[0-9]{1,3}\.[0-9]{1,3}"
+            r")(?!\.?\d)"
+        ),
+        "RC-87: hardcoded RFC-1918 private IP — review for environment leakage",
+    ),
+    (
+        "RC-87",
+        "MAJOR",
+        re.compile(
+            r"\b169\.254\.(?!169\.254\b|170\.2\b)"
+            r"[0-9]{1,3}\.[0-9]{1,3}(?!\.?\d)"
+        ),
+        "RC-87: link-local IP outside known IMDS endpoints (RC-65)",
+    ),
     # RC-88 — Suspicious TLDs / URL shorteners / dev tunnels
     # Heuristic: certain TLDs (.tk, .ml, .ga, .cf, .gq) are free domains
     # historically associated with malware. Shorteners hide the destination.
     # Dev tunnels (ngrok / localtunnel / cloudflared / serveo) expose local
     # services to the internet — legitimate but worth flagging.
-    ("RC-88", "MINOR",
-     re.compile(r"https?://[a-z0-9.-]+\.(?:tk|ml|ga|cf|gq|top|xyz|click|loan|country)\b", re.IGNORECASE),
-     "RC-88: URL on free / abuse-associated TLD"),
-    ("RC-88", "MINOR",
-     re.compile(
-         r"\bhttps?://(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|ow\.ly|is\.gd|"
-         r"buff\.ly|adf\.ly|tiny\.cc|short\.io)/\S+",
-         re.IGNORECASE,
-     ),
-     "RC-88: URL shortener (hides destination)"),
-    ("RC-88", "MAJOR",
-     re.compile(
-         r"\bhttps?://(?:[a-z0-9-]+\.)?(?:ngrok\.io|loca\.lt|trycloudflare\.com|"
-         r"serveo\.net|pagekite\.me|telebit\.cloud|expose\.dev)\b",
-         re.IGNORECASE,
-     ),
-     "RC-88: dev-tunnel URL (exposes local service to internet)"),
-
+    (
+        "RC-88",
+        "MINOR",
+        re.compile(r"https?://[a-z0-9.-]+\.(?:tk|ml|ga|cf|gq|top|xyz|click|loan|country)\b", re.IGNORECASE),
+        "RC-88: URL on free / abuse-associated TLD",
+    ),
+    (
+        "RC-88",
+        "MINOR",
+        re.compile(
+            r"\bhttps?://(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|ow\.ly|is\.gd|"
+            r"buff\.ly|adf\.ly|tiny\.cc|short\.io)/\S+",
+            re.IGNORECASE,
+        ),
+        "RC-88: URL shortener (hides destination)",
+    ),
+    (
+        "RC-88",
+        "MAJOR",
+        re.compile(
+            r"\bhttps?://(?:[a-z0-9-]+\.)?(?:ngrok\.io|loca\.lt|trycloudflare\.com|"
+            r"serveo\.net|pagekite\.me|telebit\.cloud|expose\.dev)\b",
+            re.IGNORECASE,
+        ),
+        "RC-88: dev-tunnel URL (exposes local service to internet)",
+    ),
     # RC-86 — Token cost / resource abuse (informational)
     # Detects token-cost amplifiers: very long string literals in prompt files,
     # repeated tokens, and high-loop-count patterns.
-    ("RC-86", "INFO",
-     re.compile(r"['\"](?:[^'\"\n]){5000,}['\"]"),
-     "RC-86: very long string literal (≥5000 chars) — possible prompt-stuffing"),
-    ("RC-86", "INFO",
-     re.compile(r"\bfor\s*\([^)]*<\s*[0-9]{5,}\s*[;)]"),
-     "RC-86: high-loop-count iteration (≥10000) — resource abuse vector"),
+    (
+        "RC-86",
+        "INFO",
+        re.compile(r"['\"](?:[^'\"\n]){5000,}['\"]"),
+        "RC-86: very long string literal (≥5000 chars) — possible prompt-stuffing",
+    ),
+    (
+        "RC-86",
+        "INFO",
+        re.compile(r"\bfor\s*\([^)]*<\s*[0-9]{5,}\s*[;)]"),
+        "RC-86: high-loop-count iteration (≥10000) — resource abuse vector",
+    ),
 ]
 
 
 for _rule_id, _severity, _pat, _msg in PHASE4_PATTERNS:
-    register_rule(RuleSchema(
-        rule_id=_rule_id,
-        name=_msg.split(":", 1)[1].strip() if ":" in _msg else _rule_id,
-        category="phase4",
-        severity=_severity,
-        description=_msg,
-        references=("Phase 4 catalog — see TRDD-0f1f7889 §3 sub-phase 4",),
-    ))
+    register_rule(
+        RuleSchema(
+            rule_id=_rule_id,
+            name=_msg.split(":", 1)[1].strip() if ":" in _msg else _rule_id,
+            category="phase4",
+            severity=_severity,
+            description=_msg,
+            references=("Phase 4 catalog — see TRDD-0f1f7889 §3 sub-phase 4",),
+        )
+    )
 
 
 # =============================================================================
@@ -3003,6 +3437,7 @@ def disposition(findings_by_severity: dict[str, int]) -> str:
 # When findings are inconclusive (e.g. a single MAJOR with negation_guard
 # nearby), return "hold" instead of forcing a verdict. Honest output.
 
+
 def disposition_with_hold(findings_by_severity: dict[str, int], ambiguous_count: int = 0) -> str:
     """Like disposition() but returns 'hold' when ambiguous_count >= max(1, findings/3).
 
@@ -3018,25 +3453,29 @@ def disposition_with_hold(findings_by_severity: dict[str, int], ambiguous_count:
     return base
 
 
-register_rule(RuleSchema(
-    rule_id="RC-103",
-    name="Capability scoring disposition (verdict-tier classifier)",
-    category="verdict",
-    severity="INFO",
-    description="Deterministic 5-tier disposition (safe/risky/suspicious/unsafe/critical) from finding counts.",
-    references=("qualixar/skillfortify", "agentaudit VERDICT_DISPOSITION", "GoPlusSecurity/agentguard"),
-    fp_guards=("Disposition is deterministic — does not produce findings of its own",),
-))
+register_rule(
+    RuleSchema(
+        rule_id="RC-103",
+        name="Capability scoring disposition (verdict-tier classifier)",
+        category="verdict",
+        severity="INFO",
+        description="Deterministic 5-tier disposition (safe/risky/suspicious/unsafe/critical) from finding counts.",
+        references=("qualixar/skillfortify", "agentaudit VERDICT_DISPOSITION", "GoPlusSecurity/agentguard"),
+        fp_guards=("Disposition is deterministic — does not produce findings of its own",),
+    )
+)
 
-register_rule(RuleSchema(
-    rule_id="RC-104",
-    name="HOLD verdict tier (honest output for ambiguous results)",
-    category="verdict",
-    severity="INFO",
-    description="Returns 'hold' when ≥1/3 of findings were demoted as ambiguous, instead of forcing a verdict.",
-    references=("synthesis catalog",),
-    fp_guards=("Disposition is deterministic — does not produce findings of its own",),
-))
+register_rule(
+    RuleSchema(
+        rule_id="RC-104",
+        name="HOLD verdict tier (honest output for ambiguous results)",
+        category="verdict",
+        severity="INFO",
+        description="Returns 'hold' when ≥1/3 of findings were demoted as ambiguous, instead of forcing a verdict.",
+        references=("synthesis catalog",),
+        fp_guards=("Disposition is deterministic — does not produce findings of its own",),
+    )
+)
 
 
 # =============================================================================
@@ -3062,12 +3501,41 @@ register_rule(RuleSchema(
 # Order matters: longer suffixes first so the iterative loop strips the
 # largest known affix per pass before falling back to single-letter strips.
 _STEM_SUFFIXES = (
-    "ation", "ition", "ative", "ments",
-    "ising", "izing", "ised", "ized", "ings", "ness", "ment",
-    "able", "ible", "ence", "ance", "ical", "less", "ions",
-    "ful", "ing", "ies", "ied", "ers", "est", "ion",
-    "ed", "es", "er", "ly", "ty", "al", "ic",
-    "e", "y", "s",
+    "ation",
+    "ition",
+    "ative",
+    "ments",
+    "ising",
+    "izing",
+    "ised",
+    "ized",
+    "ings",
+    "ness",
+    "ment",
+    "able",
+    "ible",
+    "ence",
+    "ance",
+    "ical",
+    "less",
+    "ions",
+    "ful",
+    "ing",
+    "ies",
+    "ied",
+    "ers",
+    "est",
+    "ion",
+    "ed",
+    "es",
+    "er",
+    "ly",
+    "ty",
+    "al",
+    "ic",
+    "e",
+    "y",
+    "s",
 )
 
 
@@ -3101,22 +3569,48 @@ def stem_word(word: str) -> str:
 # stemmer's fixed point) so the matcher compares on the same axis.
 # Curated from the security survey of 36 community scanners; every entry
 # has been verified to satisfy `stem_word(s) == s`.
-INJECTION_TRIGGER_STEMS: frozenset[str] = frozenset({
-    # Imperatives meaning "stop following the rules"
-    "ignor", "disregard", "forget", "overrid", "bypa", "skip",
-    "abandon", "discard",
-    # Targets of those imperatives
-    "instruct", "rul", "guidelin", "directiv", "constrain",
-    "restrict", "system", "prompt",
-    # Temporal qualifiers that scope the imperative
-    "previou", "prior", "origin", "earli", "abov", "befor",
-    # Identity-elevation / persona-swap targets
-    "admin", "root", "develop", "engin",
-    # Action targets that follow the elevation
-    "execut", "leak", "output",
-    # Secret/credential exfil terms that often co-occur
-    "secret", "password", "token",
-})
+INJECTION_TRIGGER_STEMS: frozenset[str] = frozenset(
+    {
+        # Imperatives meaning "stop following the rules"
+        "ignor",
+        "disregard",
+        "forget",
+        "overrid",
+        "bypa",
+        "skip",
+        "abandon",
+        "discard",
+        # Targets of those imperatives
+        "instruct",
+        "rul",
+        "guidelin",
+        "directiv",
+        "constrain",
+        "restrict",
+        "system",
+        "prompt",
+        # Temporal qualifiers that scope the imperative
+        "previou",
+        "prior",
+        "origin",
+        "earli",
+        "abov",
+        "befor",
+        # Identity-elevation / persona-swap targets
+        "admin",
+        "root",
+        "develop",
+        "engin",
+        # Action targets that follow the elevation
+        "execut",
+        "leak",
+        "output",
+        # Secret/credential exfil terms that often co-occur
+        "secret",
+        "password",
+        "token",
+    }
+)
 
 
 def find_stemmed_injection_signal(
@@ -3169,23 +3663,25 @@ def find_stemmed_injection_signal(
 _WORD_TOKEN_RE = re.compile(r"\b[A-Za-z]{2,}\b")
 
 
-register_rule(RuleSchema(
-    rule_id="RC-76",
-    name="Stemmed semantic injection classifier",
-    category="prompt-injection",
-    severity="MAJOR",
-    description=(
-        "Lower-FP wording detector: catches paraphrased prompt-injection "
-        "attempts that vary word-form. Fires only when ≥3 trigger stems "
-        "co-occur within an 80-char window."
-    ),
-    references=("synthesis catalog", "rebuff", "lakera-promptscan"),
-    fp_guards=(
-        "3-stem co-occurrence threshold (single keywords don't fire)",
-        "80-char window limits cross-sentence false matches",
-        "Only fires on combinations not already caught by RC-01/02/04/06/07",
-    ),
-))
+register_rule(
+    RuleSchema(
+        rule_id="RC-76",
+        name="Stemmed semantic injection classifier",
+        category="prompt-injection",
+        severity="MAJOR",
+        description=(
+            "Lower-FP wording detector: catches paraphrased prompt-injection "
+            "attempts that vary word-form. Fires only when ≥3 trigger stems "
+            "co-occur within an 80-char window."
+        ),
+        references=("synthesis catalog", "rebuff", "lakera-promptscan"),
+        fp_guards=(
+            "3-stem co-occurrence threshold (single keywords don't fire)",
+            "80-char window limits cross-sentence false matches",
+            "Only fires on combinations not already caught by RC-01/02/04/06/07",
+        ),
+    )
+)
 
 
 # =============================================================================
@@ -3195,56 +3691,59 @@ register_rule(RuleSchema(
 # Implementation lives in scripts/cpv_taint_engine.py. The schemas below let
 # the rule-registry layer iterate / document them like every other RC-NN rule.
 
-register_rule(RuleSchema(
-    rule_id="RC-73",
-    name="Direct source-to-sink taint flow (1 hop)",
-    category="taint",
-    severity="MAJOR",
-    description=(
-        "External input (env vars, sys.argv, input(), etc.) reaches a "
-        "dangerous sink (exec/eval/os.system/subprocess shell=True/...) "
-        "without intermediate assignment."
-    ),
-    references=("synthesis catalog", "bandit", "semgrep"),
-    fp_guards=(
-        "Sanitizer recognition (shlex.quote, re.escape, int(), ...)",
-        "subprocess.run is only a sink with shell=True (otherwise array form is safe)",
-        "Function parameters treated as low-confidence sources only",
-    ),
-))
+register_rule(
+    RuleSchema(
+        rule_id="RC-73",
+        name="Direct source-to-sink taint flow (1 hop)",
+        category="taint",
+        severity="MAJOR",
+        description=(
+            "External input (env vars, sys.argv, input(), etc.) reaches a "
+            "dangerous sink (exec/eval/os.system/subprocess shell=True/...) "
+            "without intermediate assignment."
+        ),
+        references=("synthesis catalog", "bandit", "semgrep"),
+        fp_guards=(
+            "Sanitizer recognition (shlex.quote, re.escape, int(), ...)",
+            "subprocess.run is only a sink with shell=True (otherwise array form is safe)",
+            "Function parameters treated as low-confidence sources only",
+        ),
+    )
+)
 
-register_rule(RuleSchema(
-    rule_id="RC-74",
-    name="Transitive source-to-sink taint flow (2+ hops)",
-    category="taint",
-    severity="MINOR",
-    description=(
-        "Same as RC-73 but the tainted value passes through one or more "
-        "intermediate variable assignments before reaching the sink."
-    ),
-    references=("synthesis catalog", "bandit"),
-    fp_guards=(
-        "Re-assignment with non-source value clears taint",
-        "Sanitizer call in the chain breaks propagation",
-    ),
-))
+register_rule(
+    RuleSchema(
+        rule_id="RC-74",
+        name="Transitive source-to-sink taint flow (2+ hops)",
+        category="taint",
+        severity="MINOR",
+        description=(
+            "Same as RC-73 but the tainted value passes through one or more "
+            "intermediate variable assignments before reaching the sink."
+        ),
+        references=("synthesis catalog", "bandit"),
+        fp_guards=(
+            "Re-assignment with non-source value clears taint",
+            "Sanitizer call in the chain breaks propagation",
+        ),
+    )
+)
 
-register_rule(RuleSchema(
-    rule_id="RC-75",
-    name="Sanitizer recognition for taint chains",
-    category="taint",
-    severity="INFO",
-    description=(
-        "Recognized sanitizers (shlex.quote, re.escape, html.escape, "
-        "urllib.parse.quote, json.loads, ast.literal_eval, int/float/bool) "
-        "clear taint and break source-to-sink chains."
-    ),
-    references=("synthesis catalog",),
-    fp_guards=(
-        "Bypass detection: sanitizer must produce the assigned value, "
-        "not be called as a side-effect",
-    ),
-))
+register_rule(
+    RuleSchema(
+        rule_id="RC-75",
+        name="Sanitizer recognition for taint chains",
+        category="taint",
+        severity="INFO",
+        description=(
+            "Recognized sanitizers (shlex.quote, re.escape, html.escape, "
+            "urllib.parse.quote, json.loads, ast.literal_eval, int/float/bool) "
+            "clear taint and break source-to-sink chains."
+        ),
+        references=("synthesis catalog",),
+        fp_guards=("Bypass detection: sanitizer must produce the assigned value, not be called as a side-effect",),
+    )
+)
 
 
 # =============================================================================
@@ -3260,106 +3759,118 @@ register_rule(RuleSchema(
 # Reference: "Lessons from Building Claude Code: Prompt Caching Is
 # Everything" by Thariq Shihipar (Anthropic).
 
-register_rule(RuleSchema(
-    rule_id="CA-01",
-    name="Static prompt prefix — no dynamic data in system prompt",
-    category="cache",
-    severity="MAJOR",
-    description=(
-        "Dynamic placeholders ({{TIMESTAMP}}, $(date), $(git status)) in plugin "
-        "CLAUDE.md, agent system-prompt, or skill SKILL.md re-tokenise the "
-        "cached prefix every session."
-    ),
-    references=("ussumant/cache-audit Rule 1", "Anthropic engineering"),
-    fp_guards=(
-        "Dynamic markers inside fenced code blocks are documentation, not active",
-        "{{CLAUDE_PROJECT_DIR}} and {{CLAUDE_PLUGIN_ROOT}} are static path placeholders",
-    ),
-))
+register_rule(
+    RuleSchema(
+        rule_id="CA-01",
+        name="Static prompt prefix — no dynamic data in system prompt",
+        category="cache",
+        severity="MAJOR",
+        description=(
+            "Dynamic placeholders ({{TIMESTAMP}}, $(date), $(git status)) in plugin "
+            "CLAUDE.md, agent system-prompt, or skill SKILL.md re-tokenise the "
+            "cached prefix every session."
+        ),
+        references=("ussumant/cache-audit Rule 1", "Anthropic engineering"),
+        fp_guards=(
+            "Dynamic markers inside fenced code blocks are documentation, not active",
+            "{{CLAUDE_PROJECT_DIR}} and {{CLAUDE_PLUGIN_ROOT}} are static path placeholders",
+        ),
+    )
+)
 
-register_rule(RuleSchema(
-    rule_id="CA-02",
-    name="Hooks inject via additionalContext, not system-prompt edits",
-    category="cache",
-    severity="MAJOR",
-    description=(
-        "SessionStart / UserPromptSubmit / PreCompact hooks must emit JSON with "
-        "hookSpecificOutput.additionalContext, not write CLAUDE.md or settings.json "
-        "(those mutations bust the cached prefix)."
-    ),
-    references=("ussumant/cache-audit Rule 2", "Claude Code hooks reference"),
-    fp_guards=(
-        "Writes to user-data files under .claude/data/ are not cached prefix",
-        "Touching ~/.claude/CLAUDE.md from a non-cache hook (Stop, etc.) is benign",
-    ),
-))
+register_rule(
+    RuleSchema(
+        rule_id="CA-02",
+        name="Hooks inject via additionalContext, not system-prompt edits",
+        category="cache",
+        severity="MAJOR",
+        description=(
+            "SessionStart / UserPromptSubmit / PreCompact hooks must emit JSON with "
+            "hookSpecificOutput.additionalContext, not write CLAUDE.md or settings.json "
+            "(those mutations bust the cached prefix)."
+        ),
+        references=("ussumant/cache-audit Rule 2", "Claude Code hooks reference"),
+        fp_guards=(
+            "Writes to user-data files under .claude/data/ are not cached prefix",
+            "Touching ~/.claude/CLAUDE.md from a non-cache hook (Stop, etc.) is benign",
+        ),
+    )
+)
 
-register_rule(RuleSchema(
-    rule_id="CA-03",
-    name="Tool-set stability — no add/remove mid-session",
-    category="cache",
-    severity="MAJOR",
-    description=(
-        "Hook scripts that flip allow/deny lists in settings.json, or that toggle "
-        "MCP servers, force a tool-schema re-tokenise on every turn."
-    ),
-    references=("ussumant/cache-audit Rule 3", "Claude Code MCP guide"),
-    fp_guards=(
-        "Lazy MCP discovery via ToolSearch is the recommended pattern, not a violation",
-        "PreToolUse hooks that block specific calls don't change the schema",
-    ),
-))
+register_rule(
+    RuleSchema(
+        rule_id="CA-03",
+        name="Tool-set stability — no add/remove mid-session",
+        category="cache",
+        severity="MAJOR",
+        description=(
+            "Hook scripts that flip allow/deny lists in settings.json, or that toggle "
+            "MCP servers, force a tool-schema re-tokenise on every turn."
+        ),
+        references=("ussumant/cache-audit Rule 3", "Claude Code MCP guide"),
+        fp_guards=(
+            "Lazy MCP discovery via ToolSearch is the recommended pattern, not a violation",
+            "PreToolUse hooks that block specific calls don't change the schema",
+        ),
+    )
+)
 
-register_rule(RuleSchema(
-    rule_id="CA-04",
-    name="Single model per conversation — switches via subagents only",
-    category="cache",
-    severity="MINOR",
-    description=(
-        "Skills declaring a `model:` field force an in-line model switch and "
-        "invalidate the cached prefix. Use an agent (fresh sub-conversation) "
-        "instead."
-    ),
-    references=("ussumant/cache-audit Rule 4",),
-    fp_guards=(
-        "Agent frontmatter `model:` is fine — agents start a fresh conversation",
-        "Skill `model:` is the problematic case (in-line switch)",
-    ),
-))
+register_rule(
+    RuleSchema(
+        rule_id="CA-04",
+        name="Single model per conversation — switches via subagents only",
+        category="cache",
+        severity="MINOR",
+        description=(
+            "Skills declaring a `model:` field force an in-line model switch and "
+            "invalidate the cached prefix. Use an agent (fresh sub-conversation) "
+            "instead."
+        ),
+        references=("ussumant/cache-audit Rule 4",),
+        fp_guards=(
+            "Agent frontmatter `model:` is fine — agents start a fresh conversation",
+            "Skill `model:` is the problematic case (in-line switch)",
+        ),
+    )
+)
 
-register_rule(RuleSchema(
-    rule_id="CA-05",
-    name="Bounded dynamic-content size in hook output",
-    category="cache",
-    severity="MINOR",
-    description=(
-        "Hooks that dump unbounded `git status`, `find`, `ls -R`, or full-file "
-        "`cat` output can balloon to >40 KB per session — bound them with "
-        "--short, head -n N, or --maxdepth."
-    ),
-    references=("ussumant/cache-audit Rule 5",),
-    fp_guards=(
-        "Bounded commands (head -n N, grep -c, --short, --porcelain | head) are fine",
-        "WARNING-tier output: only emit when an unbounded pattern is the entire script body",
-    ),
-))
+register_rule(
+    RuleSchema(
+        rule_id="CA-05",
+        name="Bounded dynamic-content size in hook output",
+        category="cache",
+        severity="MINOR",
+        description=(
+            "Hooks that dump unbounded `git status`, `find`, `ls -R`, or full-file "
+            "`cat` output can balloon to >40 KB per session — bound them with "
+            "--short, head -n N, or --maxdepth."
+        ),
+        references=("ussumant/cache-audit Rule 5",),
+        fp_guards=(
+            "Bounded commands (head -n N, grep -c, --short, --porcelain | head) are fine",
+            "WARNING-tier output: only emit when an unbounded pattern is the entire script body",
+        ),
+    )
+)
 
-register_rule(RuleSchema(
-    rule_id="CA-06",
-    name="Fork safety — compaction & subagent calls preserve prefix",
-    category="cache",
-    severity="WARNING",
-    description=(
-        "PreCompact / PostCompact / SubagentStart hooks must preserve the parent's "
-        "system-prompt + tool-schema prefix when forking — otherwise compaction "
-        "loses the cached prefix entirely."
-    ),
-    references=("ussumant/cache-audit Rule 6",),
-    fp_guards=(
-        "Most plugins don't ship compaction hooks — silent PASS is the norm",
-        "Built-in Claude Code compaction is correct by default",
-    ),
-))
+register_rule(
+    RuleSchema(
+        rule_id="CA-06",
+        name="Fork safety — compaction & subagent calls preserve prefix",
+        category="cache",
+        severity="WARNING",
+        description=(
+            "PreCompact / PostCompact / SubagentStart hooks must preserve the parent's "
+            "system-prompt + tool-schema prefix when forking — otherwise compaction "
+            "loses the cached prefix entirely."
+        ),
+        references=("ussumant/cache-audit Rule 6",),
+        fp_guards=(
+            "Most plugins don't ship compaction hooks — silent PASS is the norm",
+            "Built-in Claude Code compaction is correct by default",
+        ),
+    )
+)
 
 
 # Private usernames to detect - automatically detected from system
@@ -4743,7 +5254,7 @@ def _aggregation_key(result: "ValidationResult") -> tuple[str, str]:
     for _kind, pattern in _RULE_ID_PATTERNS:
         m = pattern.match(stripped)
         if m is not None:
-            stripped = stripped[m.end():]
+            stripped = stripped[m.end() :]
             break
     stem = " ".join(stripped.split())[:120]
     return rule_id, stem
@@ -4774,9 +5285,7 @@ def print_results_aggregated(
     # First pass: bucket by (level, rule_id, stem). Preserve insertion
     # order within each level so the first-seen example wins as the
     # explanation anchor.
-    buckets: dict[str, dict[tuple[str, str], list["ValidationResult"]]] = {
-        lvl: {} for lvl in levels_visible
-    }
+    buckets: dict[str, dict[tuple[str, str], list["ValidationResult"]]] = {lvl: {} for lvl in levels_visible}
     for result in report.results:
         if result.level not in buckets:
             continue
@@ -4813,7 +5322,9 @@ def print_results_aggregated(
                 print(f"      - {loc}")
             remaining = count - len(shown)
             if remaining > 0:
-                print(f"      … +{remaining} more occurrence{'s' if remaining != 1 else ''} (same rule, omitted to save tokens)")
+                print(
+                    f"      … +{remaining} more occurrence{'s' if remaining != 1 else ''} (same rule, omitted to save tokens)"
+                )
 
 
 def _print_fixer_recommendation(report: ValidationReport, report_path: Path | None) -> None:
@@ -6099,6 +6610,27 @@ def validate_md_urls(
     except Exception:
         return
 
+    # Fresh-scaffold special case: when validating a brand-new plugin that
+    # has not yet been pushed to GitHub (no `.git/` dir AND no `origin`
+    # remote), the plugin's OWN homepage/repository URLs are guaranteed
+    # to 404 until the first push. Adding them to skip_domains here keeps
+    # the slurp/scaffold workflow noise-free without weakening dead-URL
+    # checks for shipped plugins.
+    own_urls_to_skip: set[str] = set()
+    git_dir = plugin_root / ".git"
+    if not git_dir.exists():
+        plugin_json = plugin_root / ".claude-plugin" / "plugin.json"
+        if plugin_json.is_file():
+            try:
+                manifest = json.loads(plugin_json.read_text(encoding="utf-8"))
+                for key in ("homepage", "repository"):
+                    val = manifest.get(key)
+                    if isinstance(val, str) and val.startswith(("http://", "https://")):
+                        # Strip trailing slash for matching
+                        own_urls_to_skip.add(val.rstrip("/"))
+            except (OSError, json.JSONDecodeError):
+                pass
+
     if skip_domains is None:
         # Domains to skip: localhost, example domains, local IPs, placeholders
         skip_domains = {
@@ -6170,6 +6702,13 @@ def validate_md_urls(
                 continue
         except Exception:
             continue
+
+        # Skip the plugin's own homepage/repository URLs when no .git/ exists
+        # yet (fresh scaffold — URLs would 404 until first push).
+        if own_urls_to_skip:
+            stripped = raw_url.rstrip("/")
+            if any(stripped == own or stripped.startswith(own + "/") for own in own_urls_to_skip):
+                continue
 
         # Sanitize URL before any network request
         safe_url = _sanitize_url(raw_url)

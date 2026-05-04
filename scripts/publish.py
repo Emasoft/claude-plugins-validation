@@ -119,8 +119,7 @@ def _ensure_gh_auth(owner: str, repo: str) -> None:
     gh_bin = shutil.which("gh")
     if gh_bin is None:
         print(
-            f"\n{RED}✗ gh CLI not installed.{NC}\n"
-            f"{YELLOW}  Install: brew install gh{NC}",
+            f"\n{RED}✗ gh CLI not installed.{NC}\n{YELLOW}  Install: brew install gh{NC}",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -179,35 +178,78 @@ def _ensure_gh_auth(owner: str, repo: str) -> None:
         sys.exit(1)
 
 
-def run(cmd: list[str], cwd: Path, *, check: bool = True) -> subprocess.CompletedProcess[str]:
-    """Run a command, print it, stream output, and fail fast on error."""
-    print(f"  $ {' '.join(cmd)}")
-    # Bypass the GitHub-anchored CPV self-integrity gate during publish:
-    # we are explicitly emitting a NEW version that, by definition, will
-    # differ from whatever was last published. The gate is a safety net
-    # for END USERS running the validator, not for the maintainer cutting
-    # a release. Without this bypass every Gate (4/5/6) would refuse to
-    # run with exit 2 because the in-tree validator hashes won't match
-    # the previous tag's manifest.
-    # Set BOTH env-var names (TRDD-bbff5bc5): new canonical
-    # PLUGIN_SKIP_GITHUB_INTEGRITY plus legacy CPV_SKIP_GITHUB_INTEGRITY for
-    # backward compat with v2.50.x verifier shims that may still be invoked
-    # transitively by spawned subprocesses. Legacy name removed in v2.53.0.
-    env = {
-        **os.environ,
-        "PLUGIN_SKIP_GITHUB_INTEGRITY": "1",
-        "CPV_SKIP_GITHUB_INTEGRITY": "1",
-    }
-    result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=600, env=env)
+def _print_result(result: subprocess.CompletedProcess[str], cmd: list[str], check: bool) -> None:
     if result.stdout.strip():
         print(result.stdout.strip())
     if result.stderr.strip():
-        # Print stderr but don't double-print if it's just warnings
         print(result.stderr.strip(), file=sys.stderr)
     if check and result.returncode != 0:
         print(f"\n{RED}✗ FAILED (exit {result.returncode}): {' '.join(cmd)}{NC}", file=sys.stderr)
         sys.exit(result.returncode)
+
+
+def run(
+    cmd: list[str],
+    cwd: Path,
+    *,
+    check: bool = True,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run a command, print it, stream output, and fail fast on error.
+
+    `env=None` means use `os.environ` unchanged — the safe default. Use
+    this for git/gh subprocesses, file operations, and anything that does
+    not load CPV's own self-integrity verifier. For validator subprocesses
+    (Gates 4, 5, 9) use `run_with_integrity_bypass` instead — that wrapper
+    threads the bypass env through this helper.
+    """
+    print(f"  $ {' '.join(cmd)}")
+    result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=600, env=env)
+    _print_result(result, cmd, check)
     return result
+
+
+def _bypass_env() -> dict[str, str]:
+    """Build the env dict that disables the GitHub-anchored integrity gate.
+
+    Both names are set: new canonical PLUGIN_SKIP_GITHUB_INTEGRITY plus the
+    legacy CPV_SKIP_GITHUB_INTEGRITY (TRDD-bbff5bc5) for one release of
+    backward compat with v2.50.x verifier shims that may still be invoked
+    transitively. Legacy name removed in v2.53.0.
+    """
+    return {
+        **os.environ,
+        "PLUGIN_SKIP_GITHUB_INTEGRITY": "1",
+        "CPV_SKIP_GITHUB_INTEGRITY": "1",
+    }
+
+
+def run_with_integrity_bypass(cmd: list[str], cwd: Path, *, check: bool = True) -> subprocess.CompletedProcess[str]:
+    """Run a validator subprocess WITH the GitHub-anchored integrity gate disabled.
+
+    Trust trade-off (Codex adversarial review 2026-05-04, finding #2):
+    publish.py emits a NEW version whose in-tree validator code, by
+    definition, differs from whatever the last GitHub tag carries. The
+    integrity gate refuses to run when local hashes diverge from the
+    canonical manifest, so it MUST be bypassed for the validator gates to
+    execute at all during release.
+
+    The bypass is now scoped to the SPECIFIC subprocess that needs it,
+    not blanket-injected by `run()` into every call. That makes the trust
+    window explicit at each call site so a reviewer can see exactly which
+    gates run with integrity disabled.
+
+    Implementation note: this is a thin wrapper around `run()` that adds
+    the bypass env. Doing it that way (instead of calling subprocess.run
+    directly) means tests that monkeypatch `publish.run` still intercept
+    bypass calls without having to know about both helpers.
+
+    A future TRDD will add a "compare against in-tree release-candidate
+    manifest" mode so the gate can stay enabled even during publish; until
+    then, the maintainer's defense against tampered validator code is
+    git history + code review + signed commits.
+    """
+    return run(cmd, cwd, check=check, env=_bypass_env())
 
 
 # ── Semver helpers (absorbed from bump_version.py) ───────────────────────────
@@ -761,7 +803,7 @@ def stage_validate_plugin(plugin_root: Path) -> int:
     Returns the validator's exit code directly (1-4 severity or 0 success).
     """
     print(f"\n{BLUE}═══ Gate 4: Validate plugin — ZERO errors required ═══{NC}")
-    vresult = run(
+    vresult = run_with_integrity_bypass(
         ["uv", "run", "python", "scripts/validate_plugin.py", ".", "--strict"],
         cwd=plugin_root,
         check=False,
@@ -792,7 +834,7 @@ def stage_validate_marketplace(plugin_root: Path, layout: str) -> int:
         print(f"  (skipped — not a marketplace repo, layout={layout})")
         print(f"{GREEN}✓ Marketplace validation not applicable{NC}")
         return 0
-    vresult = run(
+    vresult = run_with_integrity_bypass(
         ["uv", "run", "python", "scripts/validate_marketplace.py", ".", "--strict"],
         cwd=plugin_root,
         check=False,
@@ -1213,7 +1255,10 @@ def stage_refresh_self_hashes(plugin_root: Path) -> int:
             file=sys.stderr,
         )
         return 0
-    run(["uv", "run", "python", str(script), str(plugin_root)], cwd=plugin_root)
+    # Hash-refresh script may import _plugin_verify_hashes transitively;
+    # use the bypass helper so it doesn't error on the previous tag's
+    # manifest mismatch with the current working tree.
+    run_with_integrity_bypass(["uv", "run", "python", str(script), str(plugin_root)], cwd=plugin_root)
     print(f"{GREEN}✓ Integrity manifest refreshed (issue #18 fix){NC}")
     return 0
 
@@ -1328,20 +1373,21 @@ def stage_commit_tag_push(plugin_root: Path, tag_name: str) -> int:
     # Phase 1 (Sprint 3): both pushes wrapped in retry so a transient
     # github.com hiccup doesn't leave a half-published release (commit
     # local-only, tag local-only, or branch pushed without tag).
-    push_env = {
-        **os.environ,
-        "PLUGIN_SKIP_GITHUB_INTEGRITY": "1",
-        "CPV_SKIP_GITHUB_INTEGRITY": "1",
-    }
+    # `git push` doesn't load _plugin_verify_hashes, so no integrity
+    # bypass needed here.
     print("  $ git push origin HEAD")
     git_with_retry(
         ["git", "push", "origin", "HEAD"],
-        cwd=plugin_root, env=push_env, capture_output=False,
+        cwd=plugin_root,
+        env=os.environ.copy(),
+        capture_output=False,
     )
     print(f"  $ git push origin {tag_name}")
     git_with_retry(
         ["git", "push", "origin", tag_name],
-        cwd=plugin_root, env=push_env, capture_output=False,
+        cwd=plugin_root,
+        env=os.environ.copy(),
+        capture_output=False,
     )
     print(f"{GREEN}✓ Pushed branch and tag {tag_name}{NC}")
     return 0
@@ -1439,12 +1485,9 @@ Examples:
         """,
     )
     bump_group = parser.add_mutually_exclusive_group()
-    bump_group.add_argument("--major", action="store_true",
-                            help="Force a major bump (override auto-detection)")
-    bump_group.add_argument("--minor", action="store_true",
-                            help="Force a minor bump (override auto-detection)")
-    bump_group.add_argument("--patch", action="store_true",
-                            help="Force a patch bump (override auto-detection)")
+    bump_group.add_argument("--major", action="store_true", help="Force a major bump (override auto-detection)")
+    bump_group.add_argument("--minor", action="store_true", help="Force a minor bump (override auto-detection)")
+    bump_group.add_argument("--patch", action="store_true", help="Force a patch bump (override auto-detection)")
     parser.add_argument("--dry-run", action="store_true", help="Preview without making changes")
     parser.add_argument("--print-gates", action="store_true", help="Print gate list and exit")
     args = parser.parse_args()

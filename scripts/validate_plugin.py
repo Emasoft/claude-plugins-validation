@@ -221,8 +221,7 @@ def validate_dependencies(
         # name — required
         if "name" not in entry:
             report.major(
-                f"'dependencies[{i}]' object missing required 'name' field "
-                "(plugin-dependencies.md:46)",
+                f"'dependencies[{i}]' object missing required 'name' field (plugin-dependencies.md:46)",
                 ".claude-plugin/plugin.json",
             )
         else:
@@ -264,11 +263,7 @@ def validate_dependencies(
                     )
                 elif hosting_name is not None and market != hosting_name:
                     if hosting_allowlist is None or market not in hosting_allowlist:
-                        allow_desc = (
-                            sorted(hosting_allowlist)
-                            if hosting_allowlist is not None
-                            else "<none declared>"
-                        )
+                        allow_desc = sorted(hosting_allowlist) if hosting_allowlist is not None else "<none declared>"
                         report.major(
                             f"'dependencies[{i}].marketplace' = '{market}' is not in the hosting "
                             f"marketplace's allowedDependencyMarketplaces allowlist "
@@ -315,11 +310,19 @@ def validate_user_config_structure(manifest: dict[str, Any], report: ValidationR
         # non-dict userConfig — no need to duplicate it here.
         return
     # v2.1.121 spec — full sub-field set (9 fields total).
-    known_sub = frozenset({
-        "type", "title", "description",
-        "sensitive", "required", "default",
-        "multiple", "min", "max",
-    })
+    known_sub = frozenset(
+        {
+            "type",
+            "title",
+            "description",
+            "sensitive",
+            "required",
+            "default",
+            "multiple",
+            "min",
+            "max",
+        }
+    )
     required_sub = frozenset({"type", "title", "description"})
     for key, entry in uc.items():
         if not isinstance(key, str) or not _IDENTIFIER_RE.match(key):
@@ -337,8 +340,7 @@ def validate_user_config_structure(manifest: dict[str, Any], report: ValidationR
         for req in required_sub:
             if req not in entry:
                 report.major(
-                    f"'userConfig.{key}' missing required sub-field '{req}' "
-                    "(spec requires type, title, description)",
+                    f"'userConfig.{key}' missing required sub-field '{req}' (spec requires type, title, description)",
                     ".claude-plugin/plugin.json",
                 )
 
@@ -377,8 +379,7 @@ def validate_user_config_structure(manifest: dict[str, Any], report: ValidationR
         for bool_field in ("sensitive", "required", "multiple"):
             if bool_field in entry and not isinstance(entry[bool_field], bool):
                 report.major(
-                    f"'userConfig.{key}.{bool_field}' must be a boolean, got "
-                    f"{type(entry[bool_field]).__name__}",
+                    f"'userConfig.{key}.{bool_field}' must be a boolean, got {type(entry[bool_field]).__name__}",
                     ".claude-plugin/plugin.json",
                 )
 
@@ -388,8 +389,7 @@ def validate_user_config_structure(manifest: dict[str, Any], report: ValidationR
                 v = entry[num_field]
                 if not isinstance(v, (int, float)) or isinstance(v, bool):
                     report.major(
-                        f"'userConfig.{key}.{num_field}' must be a number, got "
-                        f"{type(v).__name__}",
+                        f"'userConfig.{key}.{num_field}' must be a number, got {type(v).__name__}",
                         ".claude-plugin/plugin.json",
                     )
                 elif entry.get("type") not in (None, "number"):
@@ -410,15 +410,12 @@ def validate_user_config_structure(manifest: dict[str, Any], report: ValidationR
         # Unknown sub-fields — MINOR so authors notice typos.
         for extra in set(entry.keys()) - known_sub:
             report.minor(
-                f"'userConfig.{key}.{extra}' is not a recognized sub-field "
-                f"(recognized: {sorted(known_sub)})",
+                f"'userConfig.{key}.{extra}' is not a recognized sub-field (recognized: {sorted(known_sub)})",
                 ".claude-plugin/plugin.json",
             )
 
 
-_PLUGIN_ROOT_DIR_PATTERN = re.compile(
-    r"\$\{?CLAUDE_PLUGIN_ROOT\}?[/\\]+([A-Za-z0-9_.\-]+)[/\\]"
-)
+_PLUGIN_ROOT_DIR_PATTERN = re.compile(r"\$\{?CLAUDE_PLUGIN_ROOT\}?[/\\]+([A-Za-z0-9_.\-]+)[/\\]")
 
 
 def _extract_referenced_dirs_from_text(text: str) -> set[str]:
@@ -550,9 +547,7 @@ def _mcp_server_keys(manifest: dict[str, Any], plugin_root: Path) -> set[str] | 
     return None
 
 
-def validate_channels_structure(
-    manifest: dict[str, Any], plugin_root: Path, report: ValidationReport
-) -> None:
+def validate_channels_structure(manifest: dict[str, Any], plugin_root: Path, report: ValidationReport) -> None:
     """Validate the ``channels`` array per plugins-reference.md:438-455.
 
     Each entry is a dict with required ``server`` (string). ``server`` MUST
@@ -585,8 +580,7 @@ def validate_channels_structure(
         # server — required + cross-reference
         if "server" not in entry:
             report.major(
-                f"'channels[{i}]' missing required 'server' field "
-                "(plugins-reference.md:438-455)",
+                f"'channels[{i}]' missing required 'server' field (plugins-reference.md:438-455)",
                 ".claude-plugin/plugin.json",
             )
         elif not isinstance(entry["server"], str):
@@ -706,11 +700,7 @@ def _validate_monitors_array(
                     "'on-skill-invoke:<skill-name>' (plugins-reference.md:302-318)",
                     source_label,
                 )
-            elif (
-                declared_skills is not None
-                and isinstance(when_val, str)
-                and when_val.startswith("on-skill-invoke:")
-            ):
+            elif declared_skills is not None and isinstance(when_val, str) and when_val.startswith("on-skill-invoke:"):
                 # GAP-10 (v2.22.3): cross-reference the skill name against
                 # declared skills. Empty declared_skills means the plugin
                 # has no skills/ directory at all — still report so authors
@@ -733,9 +723,7 @@ def _validate_monitors_array(
                 )
 
 
-def validate_monitors_entries(
-    manifest: dict[str, Any], plugin_root: Path, report: ValidationReport
-) -> None:
+def validate_monitors_entries(manifest: dict[str, Any], plugin_root: Path, report: ValidationReport) -> None:
     """Validate the ``monitors`` entries per plugins-reference.md:268-318.
 
     ``monitors`` may be inline in plugin.json OR a path string pointing at a
@@ -748,9 +736,7 @@ def validate_monitors_entries(
     monitors = manifest["monitors"]
     declared_skills = _discover_plugin_skills(plugin_root)
     if isinstance(monitors, list):
-        _validate_monitors_array(
-            monitors, ".claude-plugin/plugin.json", report, declared_skills
-        )
+        _validate_monitors_array(monitors, ".claude-plugin/plugin.json", report, declared_skills)
         return
     if isinstance(monitors, str):
         # Path string — resolve relative to plugin_root and load.
@@ -772,14 +758,12 @@ def validate_monitors_entries(
             _validate_monitors_array(data["monitors"], monitors, report, declared_skills)
         else:
             report.major(
-                f"monitors file must contain an array or {{'monitors': [...]}} wrapper, "
-                f"got {type(data).__name__}",
+                f"monitors file must contain an array or {{'monitors': [...]}} wrapper, got {type(data).__name__}",
                 monitors,
             )
         return
     report.major(
-        f"'monitors' must be an array or path string, got {type(monitors).__name__} "
-        "(plugins-reference.md:268-318)",
+        f"'monitors' must be an array or path string, got {type(monitors).__name__} (plugins-reference.md:268-318)",
         ".claude-plugin/plugin.json",
     )
 
@@ -843,11 +827,7 @@ def validate_layout_c_consistency(
 
     # Rule 2 — source must be "./" (relative)
     src = self_entry.get("source")
-    src_ok = (
-        src == "./"
-        or src == "."
-        or (isinstance(src, str) and src.strip() in ("./", "."))
-    )
+    src_ok = src == "./" or src == "." or (isinstance(src, str) and src.strip() in ("./", "."))
     if not src_ok:
         report.major(
             f"Layout C: marketplace.json's self-reference for plugin "
@@ -859,11 +839,7 @@ def validate_layout_c_consistency(
 
     # Rule 3 — version consistency
     self_version = self_entry.get("version")
-    if (
-        plugin_version
-        and self_version
-        and plugin_version != self_version
-    ):
+    if plugin_version and self_version and plugin_version != self_version:
         report.minor(
             f"Layout C: plugin.json version '{plugin_version}' differs from "
             f"marketplace.json plugins[{plugin_name}].version '{self_version}'. "
@@ -916,8 +892,7 @@ def validate_manifest(
             "output-styles",
         )
         has_components = any(
-            (plugin_root / d).is_dir() and any((plugin_root / d).iterdir())
-            for d in default_component_dirs
+            (plugin_root / d).is_dir() and any((plugin_root / d).iterdir()) for d in default_component_dirs
         )
         if has_components:
             report.minor(
@@ -1017,6 +992,12 @@ def validate_manifest(
         "userConfig",  # User-configurable values prompted at enable time (v2.1.80)
         "channels",  # Channel declarations for message injection (v2.1.85)
         "dependencies",  # v2.1.110+ — plugin dependency declarations with semver ranges (see plugin-dependencies.md)
+        # CPV-managed config block (TRDD-793ac32a strip-dev-parts). The
+        # generator emits a `cpv.strip` block on every fresh scaffold, and
+        # `cpv strip-dev-parts` reads it later. Allowlisted so CPV's own
+        # creator output validates clean. Custom keys under `cpv.*` stay
+        # under the same namespace per CPV ownership.
+        "cpv",
     }
     for key in manifest.keys():
         if key not in known_fields:
@@ -1159,7 +1140,7 @@ def validate_manifest(
         "number": (int, float),
         "boolean": (bool,),
         "directory": (str,),  # path string
-        "file": (str,),       # path string
+        "file": (str,),  # path string
     }
     if "userConfig" in manifest:
         uc = manifest["userConfig"]
@@ -1198,7 +1179,7 @@ def validate_manifest(
                     report.major(
                         f"'userConfig.{key}' missing required 'type' field — Claude Code runtime "
                         f"rejects this at install time with 'Invalid option: expected one of "
-                        f"\"string\"|\"number\"|\"boolean\"|\"directory\"|\"file\"'",
+                        f'"string"|"number"|"boolean"|"directory"|"file"\'',
                         ".claude-plugin/plugin.json",
                     )
                 elif not isinstance(entry["type"], str):
@@ -1296,8 +1277,7 @@ def validate_manifest(
                         for ai, arg in enumerate(args_val):
                             if not isinstance(arg, str):
                                 report.minor(
-                                    f"LSP server '{name}' args[{ai}] must be a string, "
-                                    f"got {type(arg).__name__}",
+                                    f"LSP server '{name}' args[{ai}] must be a string, got {type(arg).__name__}",
                                     ".claude-plugin/plugin.json",
                                 )
                 # GAP-68 (v2.22.3): `env` must be a dict with string values per
@@ -1454,9 +1434,13 @@ def validate_manifest(
             normalized_with_slash = normalized.rstrip("/") + "/"
             is_default = normalized_with_slash == "./agents/"
             extra_default_note = (
-                " (Note: the default ./agents/ folder is auto-discovered — just remove "
-                "the 'agents' field entirely from plugin.json.)"
-            ) if is_default else ""
+                (
+                    " (Note: the default ./agents/ folder is auto-discovered — just remove "
+                    "the 'agents' field entirely from plugin.json.)"
+                )
+                if is_default
+                else ""
+            )
             report.major(
                 f"Field 'agents' contains folder path '{path_str}' — Claude Code's manifest validator "
                 f"REJECTS folder paths in the 'agents' field with the cryptic error 'agents: Invalid input' "
@@ -2214,9 +2198,7 @@ RECOMMENDED_PLATFORMS = {
 # Shebang interpreters that mark a file as an interpreted script rather than a compiled binary.
 # Matches `#!/usr/bin/env python3`, `#!/bin/bash`, `#!/usr/bin/python3.12`, etc.
 # `\b(name)[\d.]*` allows versioned interpreters like python3 / python3.12 / node18.
-_SCRIPT_SHEBANG_RE = re.compile(
-    r"^#!.*\b(python|bash|sh|node|deno|ruby|perl|pwsh|fish|zsh|tclsh)[\d.]*\b"
-)
+_SCRIPT_SHEBANG_RE = re.compile(r"^#!.*\b(python|bash|sh|node|deno|ruby|perl|pwsh|fish|zsh|tclsh)[\d.]*\b")
 
 
 def _file_has_script_shebang(path: Path) -> bool:
@@ -2912,6 +2894,7 @@ def validate_strip_gitmodules(plugin_root: Path, report: ValidationReport) -> No
     try:
         import sys as _sys
         from pathlib import Path as _Path
+
         scripts_dir = str(_Path(__file__).resolve().parent)
         if scripts_dir not in _sys.path:
             _sys.path.insert(0, scripts_dir)
@@ -2935,9 +2918,7 @@ def validate_strip_gitmodules(plugin_root: Path, report: ValidationReport) -> No
         else:
             report.minor(msg)
     if not findings:
-        report.passed(
-            ".gitmodules URLs pass the strip-dev-parts allowlist (TRDD-793ac32a)"
-        )
+        report.passed(".gitmodules URLs pass the strip-dev-parts allowlist (TRDD-793ac32a)")
 
 
 def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
@@ -3545,8 +3526,19 @@ def _find_plugin_candidates(root: Path, max_depth: int = 3) -> list[Path]:
     with irrelevant hits.
     """
     skip_names = {
-        "node_modules", ".git", ".venv", "venv", "__pycache__", "dist", "build",
-        "target", ".idea", ".vscode", "tmp", "vendor", "cache",
+        "node_modules",
+        ".git",
+        ".venv",
+        "venv",
+        "__pycache__",
+        "dist",
+        "build",
+        "target",
+        ".idea",
+        ".vscode",
+        "tmp",
+        "vendor",
+        "cache",
     }
     candidates: list[Path] = []
 
@@ -3699,18 +3691,17 @@ def main() -> int:
     code 2 on mismatch — a tampered validator cannot be trusted.
     """
     from _plugin_verify_hashes import verify_self_integrity  # noqa: PLC0415
+
     verify_self_integrity(quiet=True)
 
     check_remote_execution_guard()
 
     from cpv_validation_common import launcher_epilog
+
     parser = argparse.ArgumentParser(
         description="Validate a Claude Code plugin against all validation rules.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=(
-            "This is the main entry point. It orchestrates all 17 sub-validators.\n\n"
-            + launcher_epilog("plugin")
-        ),
+        epilog=("This is the main entry point. It orchestrates all 17 sub-validators.\n\n" + launcher_epilog("plugin")),
     )
     parser.add_argument(
         "--verbose",
@@ -3797,10 +3788,9 @@ def main() -> int:
     # this is a marketplace folder, not a plugin. Bail with a targeted error so we
     # don't emit dozens of false positives ("Non-standard directory") for the
     # plugin subfolders that ARE the marketplace's content.
-    has_marketplace = (
-        (plugin_root / ".claude-plugin" / "marketplace.json").is_file()
-        or (plugin_root / "marketplace.json").is_file()
-    )
+    has_marketplace = (plugin_root / ".claude-plugin" / "marketplace.json").is_file() or (
+        plugin_root / "marketplace.json"
+    ).is_file()
     has_plugin_manifest = (plugin_root / ".claude-plugin" / "plugin.json").is_file()
     if has_marketplace and not has_plugin_manifest and not args.marketplace_only:
         print(
