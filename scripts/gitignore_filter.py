@@ -27,12 +27,47 @@ class GitignoreFilter:
     """Gitignore-aware file filter — loads patterns once, reuses for all scans.
 
     Uses pathlib exclusively for cross-platform compatibility.
+
+    Trust boundary: scanners run against attacker-controlled trees (cloned
+    plugins, archive extracts, …). To prevent a malicious plugin from
+    smuggling in a symlink that escapes the plugin root and tricks a
+    downstream scanner into reading host files, this filter REFUSES to
+    follow symlinks by default. Pass `follow_symlinks=True` only when the
+    target tree is fully trusted; even then, the filter still rejects any
+    symlink whose resolved target leaves `plugin_root`.
     """
 
-    def __init__(self, plugin_root: Path) -> None:
+    def __init__(self, plugin_root: Path, *, follow_symlinks: bool = False) -> None:
         self.root = plugin_root.resolve()
+        self.follow_symlinks = follow_symlinks
         gitignore_path = self.root / ".gitignore"
         self.patterns = parse_gitignore(gitignore_path) if gitignore_path.is_file() else []
+
+    def _is_unsafe_symlink(self, entry: Path) -> bool:
+        """Return True when `entry` is a symlink that must be skipped.
+
+        Default mode (follow_symlinks=False): every symlink is unsafe. The
+        walker rejects them so `entry.is_dir()` / `entry.is_file()`, which
+        follow symlinks, never get a chance to escape the plugin root.
+
+        Opt-in mode (follow_symlinks=True): allow symlinks only when the
+        canonical resolved target stays under `self.root`. Broken symlinks,
+        symlink loops, and permission errors during resolution are also
+        treated as unsafe — fail-closed.
+        """
+        if not entry.is_symlink():
+            return False
+        if not self.follow_symlinks:
+            return True
+        try:
+            resolved = entry.resolve(strict=True)
+        except (OSError, RuntimeError):
+            return True
+        try:
+            resolved.relative_to(self.root)
+        except ValueError:
+            return True
+        return False
 
     def is_ignored(self, path: Path) -> bool:
         """Check if a path should be skipped based on .gitignore patterns."""
@@ -76,6 +111,9 @@ class GitignoreFilter:
             return
 
         for entry in entries:
+            # Reject symlinks BEFORE is_dir/is_file (both follow links).
+            if self._is_unsafe_symlink(entry):
+                continue
             if entry.is_dir():
                 if skip_hidden and entry.name.startswith("."):
                     continue
@@ -110,16 +148,26 @@ class GitignoreFilter:
         yield from self._walk_pathlib(root, extra_skip, skip_hidden)
 
     def rglob(self, pattern: str, root: Path | None = None):
-        """Gitignore-aware rglob — yields Path objects that are not gitignored."""
+        """Gitignore-aware rglob — yields Path objects that are not gitignored.
+
+        Skips symlinks per the trust-boundary rule (see `_is_unsafe_symlink`).
+        """
         root = root or self.root
         for path in root.rglob(pattern):
+            if self._is_unsafe_symlink(path):
+                continue
             if not self.is_ignored(path):
                 yield path
 
     def iterdir(self, directory: Path | None = None, skip_hidden: bool = False):
-        """Gitignore-aware iterdir — yields Path objects that are not gitignored."""
+        """Gitignore-aware iterdir — yields Path objects that are not gitignored.
+
+        Skips symlinks per the trust-boundary rule (see `_is_unsafe_symlink`).
+        """
         directory = directory or self.root
         for item in directory.iterdir():
+            if self._is_unsafe_symlink(item):
+                continue
             if skip_hidden and item.name.startswith("."):
                 continue
             if not self.is_ignored(item):

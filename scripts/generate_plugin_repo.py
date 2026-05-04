@@ -17,6 +17,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import shutil
 import stat
 import sys
@@ -112,6 +113,49 @@ def _classify_md(path: Path) -> str:
     return "agent"
 
 
+_REQUIRED_SKILL_SECTIONS = (
+    "## Overview",
+    "## When to use",
+    "## Instructions",
+    "## Prerequisites",
+    "## Output",
+    "## Error Handling",
+    "## Resources",
+)
+
+
+def _audit_slurped_skill(dest_md: Path) -> None:
+    """Print actionable WARN lines if a slurped SKILL.md is missing the
+    sections CPV's strict validator requires.
+
+    The slurp does NOT modify user content — that would be surprising and
+    risky. Instead, it surfaces every missing section so the user can add
+    them before publishing. Each missing section becomes one WARN line
+    with the exact heading text to paste in.
+    """
+    try:
+        text = dest_md.read_text(encoding="utf-8")
+    except OSError:
+        return
+    missing = [h for h in _REQUIRED_SKILL_SECTIONS if h not in text]
+    if not missing:
+        return
+    print(
+        f"  [slurp] {YELLOW}WARN{NC} skill {dest_md.name} is missing "
+        f"{len(missing)} required section(s) for CPV strict-mode validation:"
+    )
+    for heading in missing:
+        print(f"           - add a `{heading}` section before publishing")
+    fm_match = re.search(r"^---\n(.*?)\n---", text, re.DOTALL | re.MULTILINE)
+    fm_block = fm_match.group(1) if fm_match else ""
+    if "Trigger with" not in fm_block:
+        print(
+            f"  [slurp] {YELLOW}WARN{NC} skill {dest_md.name} description "
+            f"is missing 'Trigger with ...' phrase (Nixtla strict mode "
+            f"requires both 'Use when ...' AND 'Trigger with ...')."
+        )
+
+
 def _slurp_one(target_root: Path, src: Path, kind: str) -> int:
     """Copy `src` into the right component folder of `target_root`.
 
@@ -133,15 +177,18 @@ def _slurp_one(target_root: Path, src: Path, kind: str) -> int:
                     shutil.copy2(f, dest_f)
                     n += 1
             print(f"  [slurp] skill {src} → {dest.relative_to(target_root)}/ ({n} files)")
+            _audit_slurped_skill(dest / "SKILL.md")
         elif src.is_file() and src.name == "SKILL.md":
             # Use parent dir name OR the skill's `name:` frontmatter.
             fm = _read_md_frontmatter(src)
             skill_name = fm.get("name") or src.parent.name or "imported-skill"
             dest_dir = target_root / "skills" / skill_name
             dest_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dest_dir / "SKILL.md")
+            dest_md = dest_dir / "SKILL.md"
+            shutil.copy2(src, dest_md)
             n = 1
             print(f"  [slurp] skill {src} → skills/{skill_name}/SKILL.md")
+            _audit_slurped_skill(dest_md)
         else:
             print(f"  [slurp] {YELLOW}WARN{NC} --skill {src}: not a SKILL.md or skill dir; skipped")
         return n
@@ -2746,8 +2793,7 @@ def generate_all_files(p: PluginParams) -> list[tuple[str, str, bool]]:
             [
                 ("scripts/__init__.py", gen_scripts_init(p), False),
                 ("scripts/publish.py", gen_publish_py(p), True),
-                ("scripts/cpv_network_resilience.py",
-                 gen_cpv_network_resilience_py(), True),
+                ("scripts/cpv_network_resilience.py", gen_cpv_network_resilience_py(), True),
                 ("scripts/setup-hooks.py", gen_setup_hooks_py(), True),
                 ("hooks/hooks.json", gen_hooks_json(p), False),
                 ("git-hooks/pre-push", gen_pre_push_hook(p), True),
@@ -2912,7 +2958,7 @@ Examples:
         "--self-marketplace",
         action="store_true",
         help="Layout C: also emit .claude-plugin/marketplace.json with a self-entry "
-        "(source: \"./\"). Use when the repo should be both plugin and marketplace.",
+        '(source: "./"). Use when the repo should be both plugin and marketplace.',
     )
     # TRDD-793ac32a: dev-stripping. Default ON — emits cpv.strip block in
     # plugin.json so the user can run `cpv strip-dev-parts` later. The actual
@@ -2942,28 +2988,57 @@ Examples:
     # allowed-tools → agent; .mcp.json → MCP server; directory of scripts
     # → scripts/. Multiple flags can be combined.
     slurp_grp = parser.add_argument_group("slurp inputs (Phase 6)")
-    slurp_grp.add_argument("--from", dest="from_path", type=Path, action="append",
-                           default=[], metavar="PATH",
-                           help="Auto-classify and copy a file or folder into the new plugin "
-                           "(may repeat). SKILL.md → skill; .md with allowed-tools → command; "
-                           ".md without → agent; .mcp.json → MCP config; directory → scripts/.")
-    slurp_grp.add_argument("--skill", type=Path, action="append", default=[],
-                           metavar="PATH",
-                           help="Copy SKILL.md (or folder containing SKILL.md) into "
-                           "skills/<name>/. May repeat.")
-    slurp_grp.add_argument("--agent", type=Path, action="append", default=[],
-                           metavar="PATH",
-                           help="Copy a .md agent file into agents/. May repeat.")
-    slurp_grp.add_argument("--command", type=Path, action="append", default=[],
-                           metavar="PATH",
-                           help="Copy a .md command file into commands/. May repeat.")
-    slurp_grp.add_argument("--mcp-server", type=Path, action="append", default=[],
-                           metavar="PATH",
-                           help="Copy .mcp.json (or a directory containing one) into "
-                           "the plugin root. May repeat.")
-    slurp_grp.add_argument("--scripts", type=Path, action="append", default=[],
-                           metavar="DIR",
-                           help="Copy all files from DIR into scripts/. May repeat.")
+    slurp_grp.add_argument(
+        "--from",
+        dest="from_path",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="Auto-classify and copy a file or folder into the new plugin "
+        "(may repeat). SKILL.md → skill; .md with allowed-tools → command; "
+        ".md without → agent; .mcp.json → MCP config; directory → scripts/.",
+    )
+    slurp_grp.add_argument(
+        "--skill",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="Copy SKILL.md (or folder containing SKILL.md) into skills/<name>/. May repeat.",
+    )
+    slurp_grp.add_argument(
+        "--agent",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="Copy a .md agent file into agents/. May repeat.",
+    )
+    slurp_grp.add_argument(
+        "--command",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="Copy a .md command file into commands/. May repeat.",
+    )
+    slurp_grp.add_argument(
+        "--mcp-server",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="Copy .mcp.json (or a directory containing one) into the plugin root. May repeat.",
+    )
+    slurp_grp.add_argument(
+        "--scripts",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="DIR",
+        help="Copy all files from DIR into scripts/. May repeat.",
+    )
 
     args = parser.parse_args()
 
@@ -3019,10 +3094,11 @@ Examples:
             mcp_paths=args.mcp_server,
             scripts_paths=args.scripts,
         )
-    elif any([args.from_path, args.skill, args.agent, args.command,
-              args.mcp_server, args.scripts]):
-        print(f"  {YELLOW}(dry-run: --from / --skill / --agent / --command / "
-              f"--mcp-server / --scripts inputs are NOT slurped){NC}")
+    elif any([args.from_path, args.skill, args.agent, args.command, args.mcp_server, args.scripts]):
+        print(
+            f"  {YELLOW}(dry-run: --from / --skill / --agent / --command / "
+            f"--mcp-server / --scripts inputs are NOT slurped){NC}"
+        )
 
     # Summary
     file_count = sum(1 for f in created if not f.endswith("/"))
