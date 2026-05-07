@@ -998,6 +998,10 @@ def validate_manifest(
         # creator output validates clean. Custom keys under `cpv.*` stay
         # under the same namespace per CPV ownership.
         "cpv",
+        # v2.1.129 — preferred wrapper for opt-in/experimental features.
+        # `themes` and `monitors` should now be declared under `experimental: { ... }`;
+        # top-level placement still works but `claude plugin validate` warns.
+        "experimental",
     }
     for key in manifest.keys():
         if key not in known_fields:
@@ -1005,6 +1009,43 @@ def validate_manifest(
                 f"Unknown manifest field '{key}' — not part of the Claude Code plugin spec. If used by plugin scripts, consider documenting it.",
                 ".claude-plugin/plugin.json",
             )
+
+    # v2.1.129 — Recommend the `experimental: { themes, monitors }` wrapper.
+    # Top-level `themes` and `monitors` are still honoured but `claude plugin
+    # validate` emits a warning, so CPV mirrors that as a NIT (non-blocking
+    # nudge) so authors discover the new shape without breaking existing files.
+    experimental = manifest.get("experimental")
+    for legacy_key in ("themes", "monitors"):
+        # If author already nested the key under `experimental`, don't double-warn
+        # on a top-level appearance — the CC loader prefers the nested copy.
+        nested = isinstance(experimental, dict) and legacy_key in experimental
+        if legacy_key in manifest and not nested:
+            report.nit(
+                f"'{legacy_key}' should be nested under 'experimental: {{ ... }}' "
+                f"per v2.1.129. Top-level still works (claude plugin validate warns).",
+                ".claude-plugin/plugin.json",
+            )
+
+    # When an `experimental` block is present, validate it's an object and only
+    # contains recognised opt-in keys. Unknown keys inside `experimental` are
+    # WARNINGs (the wrapper is a forward-compat surface, so we don't reject).
+    if "experimental" in manifest:
+        if not isinstance(experimental, dict):
+            report.major(
+                f"'experimental' must be an object, got {type(experimental).__name__} "
+                "(plugins-reference.md / changelog v2.1.129)",
+                ".claude-plugin/plugin.json",
+            )
+        else:
+            known_experimental_keys = {"themes", "monitors"}
+            for exp_key in experimental.keys():
+                if exp_key not in known_experimental_keys:
+                    report.warning(
+                        f"Unknown 'experimental.{exp_key}' field — not part of the "
+                        "Claude Code experimental opt-in surface (v2.1.129). "
+                        f"Known keys: {sorted(known_experimental_keys)}.",
+                        ".claude-plugin/plugin.json",
+                    )
 
     # Validate repository field type — Claude Code requires a string URL, not an object
     if "repository" in manifest:

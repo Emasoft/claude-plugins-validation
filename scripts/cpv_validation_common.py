@@ -801,6 +801,11 @@ VALID_PLUGIN_ENV_VARS = {
     "AI_AGENT",  # v2.1.120 — set by CC for subprocess attribution
     "CLAUDE_CODE_FORK_SUBAGENT",  # v2.1.117 — opt-in for forked subagents on external builds
     "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",  # v2.1.126 — host-managed deployment marker (Bedrock/Vertex/Foundry)
+    "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",  # v2.1.129 — opt-in for /v1/models gateway discovery
+    "CLAUDE_CODE_FORCE_SYNC_OUTPUT",  # v2.1.129 — force-enable synchronized output for terminals auto-detection misses
+    "CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE",  # v2.1.129 — opt-in homebrew/winget background auto-update
+    "CLAUDE_CODE_SESSION_ID",  # v2.1.132 — Bash subprocess session id (matches `session_id` passed to hooks)
+    "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN",  # v2.1.132 — opt out of fullscreen alternate-screen renderer
     # Anthropic *_SUPPORTED_CAPABILITIES — spec-correct suffix
     "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES",
     "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES",

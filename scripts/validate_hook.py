@@ -226,6 +226,33 @@ PRETOOLUSE_HOOK_SPECIFIC_OUTPUT_FIELDS = {
     "additionalContext",  # v2.1.110 — retained on tool failure (GAP-19)
 }
 
+# PostToolUse / PostToolUseFailure `hookSpecificOutput` known fields.
+# v2.1.121 — PostToolUse hooks can replace tool output via
+# `hookSpecificOutput.updatedToolOutput` for ALL tools (previously MCP-only).
+# v2.1.119 — PostToolUse and PostToolUseFailure hook *inputs* now carry
+# `duration_ms` (tool execution time, excluding permission prompts and
+# PreToolUse hooks). CPV does not validate runtime hook stdin shape, so the
+# constant lives in POSTTOOLUSE_HOOK_INPUT_FIELDS for future use.
+POSTTOOLUSE_HOOK_SPECIFIC_OUTPUT_FIELDS = {
+    "hookEventName",  # == "PostToolUse" or "PostToolUseFailure"
+    "updatedToolOutput",  # v2.1.121 — replaces tool output (string OR object)
+    "additionalContext",  # echoed from PreToolUse retention pattern
+}
+
+# PostToolUse / PostToolUseFailure hook *input* fields (stdin-side).
+# Authoritative for hook scripts that parse `JSON.parse(stdin)`.
+POSTTOOLUSE_HOOK_INPUT_FIELDS = {
+    "hook_event_name",  # canonical event-name field (lowercase per stdin spec)
+    "tool_name",
+    "tool_input",
+    "tool_response",  # PostToolUse only
+    "tool_error",  # PostToolUseFailure only
+    "duration_ms",  # v2.1.119 — tool execution time
+    "session_id",
+    "transcript_path",
+    "cwd",
+}
+
 # Permission-update-entry type enum (hooks.md L1115-1141, PermissionRequest
 # output schema). 6 types total. Exposed for downstream validators.
 # CPV-P2-m2 requested these constants exist even if unused by today's
@@ -337,32 +364,186 @@ _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 # Python 3.10+: sys.stdlib_module_names is the authoritative source.
 # For older Pythons we supply a conservative fallback. CPV itself requires
 # Python 3.11+ (see pyproject.toml) so this fallback is a safety net only.
-_STDLIB_FALLBACK = frozenset({
-    "abc", "argparse", "ast", "asyncio", "base64", "binascii", "bisect", "builtins",
-    "bz2", "calendar", "cgi", "cmath", "cmd", "codecs", "collections", "colorsys",
-    "compileall", "concurrent", "configparser", "contextlib", "contextvars", "copy",
-    "csv", "ctypes", "curses", "dataclasses", "datetime", "dbm", "decimal", "difflib",
-    "dis", "doctest", "email", "encodings", "enum", "errno", "fcntl", "filecmp",
-    "fileinput", "fnmatch", "fractions", "ftplib", "functools", "gc", "getopt",
-    "getpass", "gettext", "glob", "graphlib", "grp", "gzip", "hashlib", "heapq",
-    "hmac", "html", "http", "imaplib", "imp", "importlib", "inspect", "io",
-    "ipaddress", "itertools", "json", "keyword", "lib2to3", "linecache", "locale",
-    "logging", "lzma", "mailbox", "mailcap", "marshal", "math", "mimetypes",
-    "mmap", "modulefinder", "multiprocessing", "netrc", "numbers", "operator", "optparse",
-    "os", "pathlib", "pdb", "pickle", "pickletools", "pkgutil", "platform", "plistlib",
-    "poplib", "posix", "posixpath", "pprint", "profile", "pstats", "pty", "pwd",
-    "py_compile", "pyclbr", "pydoc", "queue", "quopri", "random", "re", "readline",
-    "reprlib", "resource", "rlcompleter", "runpy", "sched", "secrets", "select",
-    "selectors", "shelve", "shlex", "shutil", "signal", "site", "smtplib", "sndhdr",
-    "socket", "socketserver", "spwd", "sqlite3", "ssl", "stat", "statistics",
-    "string", "stringprep", "struct", "subprocess", "sys", "sysconfig", "syslog",
-    "tabnanny", "tarfile", "telnetlib", "tempfile", "termios", "textwrap", "threading",
-    "time", "timeit", "tkinter", "token", "tokenize", "tomllib", "trace", "traceback",
-    "tracemalloc", "tty", "turtle", "types", "typing", "unicodedata", "unittest",
-    "urllib", "uu", "uuid", "venv", "warnings", "wave", "weakref", "webbrowser",
-    "winreg", "winsound", "wsgiref", "xdrlib", "xml", "xmlrpc", "zipapp", "zipfile",
-    "zipimport", "zlib", "zoneinfo",
-})
+_STDLIB_FALLBACK = frozenset(
+    {
+        "abc",
+        "argparse",
+        "ast",
+        "asyncio",
+        "base64",
+        "binascii",
+        "bisect",
+        "builtins",
+        "bz2",
+        "calendar",
+        "cgi",
+        "cmath",
+        "cmd",
+        "codecs",
+        "collections",
+        "colorsys",
+        "compileall",
+        "concurrent",
+        "configparser",
+        "contextlib",
+        "contextvars",
+        "copy",
+        "csv",
+        "ctypes",
+        "curses",
+        "dataclasses",
+        "datetime",
+        "dbm",
+        "decimal",
+        "difflib",
+        "dis",
+        "doctest",
+        "email",
+        "encodings",
+        "enum",
+        "errno",
+        "fcntl",
+        "filecmp",
+        "fileinput",
+        "fnmatch",
+        "fractions",
+        "ftplib",
+        "functools",
+        "gc",
+        "getopt",
+        "getpass",
+        "gettext",
+        "glob",
+        "graphlib",
+        "grp",
+        "gzip",
+        "hashlib",
+        "heapq",
+        "hmac",
+        "html",
+        "http",
+        "imaplib",
+        "imp",
+        "importlib",
+        "inspect",
+        "io",
+        "ipaddress",
+        "itertools",
+        "json",
+        "keyword",
+        "lib2to3",
+        "linecache",
+        "locale",
+        "logging",
+        "lzma",
+        "mailbox",
+        "mailcap",
+        "marshal",
+        "math",
+        "mimetypes",
+        "mmap",
+        "modulefinder",
+        "multiprocessing",
+        "netrc",
+        "numbers",
+        "operator",
+        "optparse",
+        "os",
+        "pathlib",
+        "pdb",
+        "pickle",
+        "pickletools",
+        "pkgutil",
+        "platform",
+        "plistlib",
+        "poplib",
+        "posix",
+        "posixpath",
+        "pprint",
+        "profile",
+        "pstats",
+        "pty",
+        "pwd",
+        "py_compile",
+        "pyclbr",
+        "pydoc",
+        "queue",
+        "quopri",
+        "random",
+        "re",
+        "readline",
+        "reprlib",
+        "resource",
+        "rlcompleter",
+        "runpy",
+        "sched",
+        "secrets",
+        "select",
+        "selectors",
+        "shelve",
+        "shlex",
+        "shutil",
+        "signal",
+        "site",
+        "smtplib",
+        "sndhdr",
+        "socket",
+        "socketserver",
+        "spwd",
+        "sqlite3",
+        "ssl",
+        "stat",
+        "statistics",
+        "string",
+        "stringprep",
+        "struct",
+        "subprocess",
+        "sys",
+        "sysconfig",
+        "syslog",
+        "tabnanny",
+        "tarfile",
+        "telnetlib",
+        "tempfile",
+        "termios",
+        "textwrap",
+        "threading",
+        "time",
+        "timeit",
+        "tkinter",
+        "token",
+        "tokenize",
+        "tomllib",
+        "trace",
+        "traceback",
+        "tracemalloc",
+        "tty",
+        "turtle",
+        "types",
+        "typing",
+        "unicodedata",
+        "unittest",
+        "urllib",
+        "uu",
+        "uuid",
+        "venv",
+        "warnings",
+        "wave",
+        "weakref",
+        "webbrowser",
+        "winreg",
+        "winsound",
+        "wsgiref",
+        "xdrlib",
+        "xml",
+        "xmlrpc",
+        "zipapp",
+        "zipfile",
+        "zipimport",
+        "zlib",
+        "zoneinfo",
+    }
+)
 PYTHON_STDLIB_MODULES: frozenset[str] = (
     frozenset(sys.stdlib_module_names) if hasattr(sys, "stdlib_module_names") else _STDLIB_FALLBACK
 )
@@ -565,10 +746,7 @@ def validate_matcher(matcher: Any, event_name: str, report: ValidationReport) ->
         # Split on typical glob/regex separators and check whether every part
         # looks like a tool identifier (PascalCase, no dot, no slash, no wildcard).
         parts = [p.strip() for p in re.split(r"[|()]", matcher) if p.strip()]
-        tool_like = [
-            p for p in parts
-            if p in COMMON_TOOL_NAMES and "." not in p and "/" not in p and "*" not in p
-        ]
+        tool_like = [p for p in parts if p in COMMON_TOOL_NAMES and "." not in p and "/" not in p and "*" not in p]
         if tool_like and len(tool_like) == len(parts):
             report.info(
                 f"FileChanged matcher '{matcher}' looks like a tool name, but per "
@@ -1086,9 +1264,7 @@ def extract_script_path(command: str, plugin_root: Path | None) -> Path | None:
 # ---------------------------------------------------------------------------
 
 
-def detect_python_third_party_imports(
-    script_path: Path, plugin_script_dir: Path | None = None
-) -> set[str]:
+def detect_python_third_party_imports(script_path: Path, plugin_script_dir: Path | None = None) -> set[str]:
     """Parse a Python file with ast and return the set of third-party module
     root names it imports.
 
@@ -1473,8 +1649,7 @@ def reconcile_python_runtime_deps(
             )
         else:
             report.passed(
-                f"Runtime-dep reconciliation: {script_path.name} — "
-                f"`uv run --with` covers all third-party imports."
+                f"Runtime-dep reconciliation: {script_path.name} — `uv run --with` covers all third-party imports."
             )
         return
 
@@ -1942,9 +2117,7 @@ def validate_command_hook(
     # Warn only on case 1 — the combination of env-stripping with a plain
     # interpreter fallback is the actual foot-gun.
     has_plain_python = any(ref.invocation_mode == "interpreter-python" for ref in refs)
-    has_safer_python = any(
-        ref.invocation_mode in ("uv-run-script", "uv-run-with", "venv-python") for ref in refs
-    )
+    has_safer_python = any(ref.invocation_mode in ("uv-run-script", "uv-run-with", "venv-python") for ref in refs)
     if re.search(r"\bunset\s+VIRTUAL_ENV\b", command) and has_plain_python and not has_safer_python:
         report.warning(
             "Command runs `unset VIRTUAL_ENV` and then invokes a plain `python3` interpreter. "
@@ -1979,8 +2152,7 @@ def validate_command_hook(
                     # ${CLAUDE_PROJECT_DIR}/... or bare /usr/... are legitimate.
                     cmd_original = hook.get("command", "")
                     if (
-                        "${CLAUDE_PLUGIN_ROOT}" in cmd_original
-                        or "$CLAUDE_PLUGIN_ROOT" in cmd_original
+                        "${CLAUDE_PLUGIN_ROOT}" in cmd_original or "$CLAUDE_PLUGIN_ROOT" in cmd_original
                     ) and "CLAUDE_PROJECT_DIR" not in cmd_original:
                         report.warning(
                             f"Script path `{script_path}` resolves OUTSIDE the plugin root "
@@ -2010,15 +2182,12 @@ def validate_command_hook(
             #
             # For the `direct` mode we promote to `interpreter-python` semantics
             # for reconciliation purposes — the diagnosis and fix are identical.
-            is_python_reconcilable = (
-                script_path.suffix.lower() == ".py"
-                and ref.invocation_mode in (
-                    "interpreter-python",
-                    "uv-run-script",
-                    "uv-run-with",
-                    "venv-python",
-                    "direct",
-                )
+            is_python_reconcilable = script_path.suffix.lower() == ".py" and ref.invocation_mode in (
+                "interpreter-python",
+                "uv-run-script",
+                "uv-run-with",
+                "venv-python",
+                "direct",
             )
             if is_python_reconcilable:
                 if ref.invocation_mode == "direct":
@@ -2633,6 +2802,7 @@ def print_json(report: HookValidationReport) -> None:
 def main() -> int:
     """Main entry point."""
     from cpv_validation_common import launcher_epilog
+
     parser = argparse.ArgumentParser(
         description="Validate a Claude Code hooks.json file.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
