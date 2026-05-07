@@ -45,6 +45,14 @@ from cpv_validation_common import (
 # Valid transport types
 VALID_TRANSPORTS = {"stdio", "sse", "http"}
 
+# Reserved MCP server names — CC silently skips servers with these names and
+# logs a warning. Plugins shipping a server under a reserved name will look
+# loaded to the user but produce no tools.
+# v2.1.128: `workspace` was added as a reserved name (changelog 2026-05-04).
+RESERVED_MCP_SERVER_NAMES = {
+    "workspace",  # v2.1.128 — reserved by CC; existing servers with this name are skipped
+}
+
 # Known MCP server configuration fields
 KNOWN_SERVER_FIELDS = {
     "command",  # Required for stdio servers
@@ -149,9 +157,7 @@ def validate_path_value(value: str, report: ValidationReport, context: str, plug
             plugin_root_abs = plugin_root.resolve()
             resolved_abs.relative_to(plugin_root_abs)
         except (ValueError, OSError):
-            report.major(
-                f"Path traverses outside plugin root in {context}: {value} (resolves to {resolved_path})"
-            )
+            report.major(f"Path traverses outside plugin root in {context}: {value} (resolves to {resolved_path})")
             return
 
         # Only check if it looks like a file (has extension) not a dir
@@ -177,6 +183,17 @@ def validate_mcp_server(
         file_context: File context for error messages
     """
     ctx = f"{file_context}:{server_name}"
+
+    # v2.1.128 — server names in RESERVED_MCP_SERVER_NAMES are silently skipped
+    # by Claude Code at load time. The plugin still reports as installed but
+    # produces no tools. Surface this as MAJOR so authors rename before publish.
+    if server_name in RESERVED_MCP_SERVER_NAMES:
+        report.major(
+            f"MCP server name '{server_name}' is reserved by Claude Code (v2.1.128) — "
+            "this server will be silently skipped at load time. Rename it (for example "
+            f"'{server_name}-tools' or '{server_name}-bridge').",
+            ctx,
+        )
 
     # Check for unknown fields
     for key in config.keys():
@@ -632,9 +649,13 @@ def validate_plugin_mcp(plugin_root: Path, report: ValidationReport | None = Non
                 # sources, it WINS (verified via cpv-mcp-coexist-test). Surface that so
                 # the author knows which declaration is being silently dropped.
                 inline_wins_note = (
-                    " (when collisions occur, the inline plugin.json:mcpServers entry "
-                    "WINS per empirical test; the other source is silently dropped)"
-                ) if "plugin.json:mcpServers" in source_list else ""
+                    (
+                        " (when collisions occur, the inline plugin.json:mcpServers entry "
+                        "WINS per empirical test; the other source is silently dropped)"
+                    )
+                    if "plugin.json:mcpServers" in source_list
+                    else ""
+                )
                 report.major(
                     f"MCP server '{name}' is declared in {joined} — server names must be unique across all MCP sources{inline_wins_note}",
                     ".claude-plugin/plugin.json",
@@ -693,6 +714,7 @@ def print_results(report: ValidationReport, verbose: bool = False) -> None:
 def main() -> int:
     """Main entry point."""
     from cpv_validation_common import launcher_epilog
+
     parser = argparse.ArgumentParser(
         description="Validate MCP (Model Context Protocol) server configuration for Claude Code plugins.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
