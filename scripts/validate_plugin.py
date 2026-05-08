@@ -3,7 +3,10 @@
 Claude Code Plugin Validator
 
 Comprehensive validation suite for Claude Code plugins.
-Validates structure, manifest, hooks, skills, scripts, and MCP servers.
+Validates structure, manifest, hooks, skills, scripts, MCP servers, and
+since v2.65.0 the whole-repo lint pass via `cpv_lint_engine.lint_repo`
+(15 languages, gitignore-aware, uvx/bunx/docker fallback for tool
+resolution — strict-by-default missing-tool detection).
 
 Usage:
     uv run python scripts/validate_plugin.py /path/to/plugin
