@@ -110,7 +110,6 @@ _ALIASES: dict[str, str] = {
     "encoding": "validate_encoding",
     "rules": "validate_rules",
     "xref": "validate_xref",
-    "lint": "lint_files",
     "doctor": "manage_doctor",
     "registry": "manage_registry",
     "github": "manage_github_validate",
@@ -144,7 +143,6 @@ _ALIASES: dict[str, str] = {
     "validate_rules": "validate_rules",
     "validate_xref": "validate_xref",
     "validate_marketplace_pipeline": "validate_marketplace_pipeline",
-    "lint_files": "lint_files",
     "manage_doctor": "manage_doctor",
     "manage_registry": "manage_registry",
     "manage_github_validate": "manage_github_validate",
@@ -175,7 +173,6 @@ _COMMANDS: dict[str, str] = {
     "encoding": "File encoding validation (UTF-8, BOM, line endings)",
     "rules": "Rules directory validation",
     "xref": "Cross-reference validation",
-    "lint": "Lint all scripts (Python, Shell, JS, PowerShell, Go, Rust)",
     "doctor": "Health-check installed plugins and settings",
     "standardize": "Audit and fix plugin repo to match standards",
     "local-scope": "Local scope validation (non-git-tracked .claude/ elements)",
@@ -195,12 +192,11 @@ def main() -> int:
         "Examples:\n"
         "  cpv-remote-validate plugin /path/to/plugin\n"
         "  cpv-remote-validate skill /path/to/skill --strict\n"
-        "  cpv-remote-validate plugin /path/to/plugin -o report.md --verbose\n"
-        "  cpv-remote-validate lint /path/to/plugin\n",
+        "  cpv-remote-validate plugin /path/to/plugin -o report.md --verbose\n",
     )
     parser.add_argument(
         "script",
-        help="Validation command (e.g., plugin, skill, hook, security, lint)",
+        help="Validation command (e.g., plugin, skill, hook, security)",
     )
     parser.add_argument(
         "target",

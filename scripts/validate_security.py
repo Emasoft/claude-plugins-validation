@@ -97,11 +97,13 @@ from cpv_validation_common import (
 # Scanning them produces a flood of FPs against the SAME rules that
 # already fired against the actual source. Skip them at the file-walk
 # level so the per-line scanners never see them.
-ALWAYS_SKIP_BASENAMES: frozenset[str] = frozenset({
-    ".cpv-cisco-scan.json",     # Cisco skill-scanner output (CPV runs the scanner)
-    ".plugin-self-hashes.json", # plugin integrity manifest (TRDD-bbff5bc5 canonical)
-    ".cpv-self-hashes.json",    # legacy compat copy (removed in v2.53.0)
-})
+ALWAYS_SKIP_BASENAMES: frozenset[str] = frozenset(
+    {
+        ".cpv-cisco-scan.json",  # Cisco skill-scanner output (CPV runs the scanner)
+        ".plugin-self-hashes.json",  # plugin integrity manifest (TRDD-bbff5bc5 canonical)
+        ".cpv-self-hashes.json",  # legacy compat copy (removed in v2.53.0)
+    }
+)
 
 
 # Per-file size cap — files larger than this are skipped with a WARNING and
@@ -189,14 +191,16 @@ def _record_step(
         files: File coverage summary (e.g. "53 scanned, 2 skipped").
         details: Free-form note explaining a SKIPPED/FAILED status.
     """
-    _scan_step_log.append({
-        "num": num,
-        "name": name,
-        "status": status,
-        "findings": findings,
-        "files": files,
-        "details": details,
-    })
+    _scan_step_log.append(
+        {
+            "num": num,
+            "name": name,
+            "status": status,
+            "findings": findings,
+            "files": files,
+            "details": details,
+        }
+    )
 
 
 def get_scan_step_log() -> list[dict[str, Any]]:
@@ -216,9 +220,9 @@ def format_scan_step_table(steps: list[dict[str, Any]] | None = None) -> str:
         return ""
     glyph = {
         "COMPLETED": "[OK] COMPLETED",
-        "RAN":       "[OK] RAN",
-        "SKIPPED":   "[--] SKIPPED",
-        "FAILED":    "[!!] FAILED",
+        "RAN": "[OK] RAN",
+        "SKIPPED": "[--] SKIPPED",
+        "FAILED": "[!!] FAILED",
     }
     lines = [
         "| #  | Step                                  | Status         | Findings | Files / Details |",
@@ -227,10 +231,7 @@ def format_scan_step_table(steps: list[dict[str, Any]] | None = None) -> str:
     for s in steps:
         status = glyph.get(s["status"], s["status"])
         coverage = s.get("files") or s.get("details") or ""
-        lines.append(
-            f"| {s['num']:>2} | {s['name']:<37} | {status:<14} | "
-            f"{s['findings']:>8} | {coverage} |"
-        )
+        lines.append(f"| {s['num']:>2} | {s['name']:<37} | {status:<14} | {s['findings']:>8} | {coverage} |")
     return "\n".join(lines)
 
 
@@ -352,8 +353,7 @@ PIPE_TO_SHELL_PATTERNS = [
     ),
     (
         re.compile(r"(?<!\|)\|\s*\.\s"),
-        "[RC-119] Pipe-to-dot `| . ` (POSIX shorthand for `source`) — same "
-        "risk as RC-118. Fix: same as RC-118",
+        "[RC-119] Pipe-to-dot `| . ` (POSIX shorthand for `source`) — same risk as RC-118. Fix: same as RC-118",
     ),
 ]
 
@@ -411,8 +411,7 @@ EVAL_PATTERNS = [
     ),
     (
         re.compile(r"\bnew\s+Function\s*\("),
-        "[RC-126] JavaScript `new Function(…)` — eval-equivalent. Same fix "
-        "as RC-125",
+        "[RC-126] JavaScript `new Function(…)` — eval-equivalent. Same fix as RC-125",
     ),
 ]
 
@@ -429,7 +428,7 @@ PATH_TRAVERSAL_PATTERNS = [
         "the result can read or write outside the intended directory tree. "
         "Fix: anchor every relative path against a known root (Path.resolve() + "
         "is_relative_to() check) before opening. Common-OK: glob/regex patterns, "
-        "config keys like `extraPaths: [\"../scripts\"]`, doc snippets",
+        'config keys like `extraPaths: ["../scripts"]`, doc snippets',
     ),
     (
         re.compile(r"\.\.\\"),
@@ -483,7 +482,7 @@ PROMPT_INJECTION_PATTERNS = [
         "in plugin-shipped content; if loaded into a Claude turn this would "
         "attempt to override the system prompt. Fix: rephrase the documentation "
         "(e.g. \"DO NOT use the phrase 'ignore previous instructions' in "
-        "skill content\"); for educational content explaining the attack, "
+        'skill content"); for educational content explaining the attack, '
         "wrap the example in backticks or a fenced code block",
     ),
     (
@@ -514,7 +513,7 @@ PROMPT_INJECTION_PATTERNS = [
         "[RC-131] Prompt injection — fake system-prompt marker "
         "(`system: …`, `hidden prompt: …`); pretends to be the privileged "
         "system channel so the model treats following text as authoritative. "
-        "Fix: rephrase to plain words like \"system instructions\", or fence",
+        'Fix: rephrase to plain words like "system instructions", or fence',
     ),
     (
         re.compile(r"<\s*(?:system|instructions?|context)\s*>", re.IGNORECASE),
@@ -1108,6 +1107,7 @@ def _set_classifier_active(active: bool, plugin_root: Path | None = None) -> Non
         # (e.g. partial deploy) still runs in legacy v2.41-binary-guard mode.
         try:
             from cpv_fp_classifier_rules import load_plugin_meta  # noqa: PLC0415
+
             _CLASSIFIER_PLUGIN_META = load_plugin_meta(plugin_root)
         except ImportError:
             _CLASSIFIER_ACTIVE = False
@@ -1197,7 +1197,7 @@ def _set_cpv_self_scan(
 
     target_root = plugin_root.resolve()
     running_cpv_root = Path(__file__).resolve().parent.parent
-    is_running_cpv = (target_root == running_cpv_root)
+    is_running_cpv = target_root == running_cpv_root
 
     if is_running_cpv:
         # Trust the local manifest — running CPV's integrity was already
@@ -1212,6 +1212,7 @@ def _set_cpv_self_scan(
         target_version = _read_target_version(target_root)
         try:
             from _plugin_verify_hashes import fetch_canonical_manifest  # noqa: PLC0415
+
             manifest = fetch_canonical_manifest(target_version)
         except ImportError:
             manifest = None
@@ -1359,9 +1360,7 @@ def _is_dev_scratch_path(rel_or_abs: str) -> bool:
     return any(part in p for part in _DEV_SCRATCH_DIR_PARTS)
 
 
-_PYTEST_TEST_FILE_RE = re.compile(
-    r"(?:^|/)(?:test_[^/]+\.py|[^/]+_test\.py|conftest\.py)$"
-)
+_PYTEST_TEST_FILE_RE = re.compile(r"(?:^|/)(?:test_[^/]+\.py|[^/]+_test\.py|conftest\.py)$")
 
 
 # v2.48 P-3 — FP-corpus markdown predicate.
@@ -1415,7 +1414,8 @@ _FP_CORPUS_MARKER_PATTERNS: tuple[re.Pattern[str], ...] = (
 
 
 def is_fp_corpus_markdown(
-    file_path: str, content: str | list[str] | None = None,
+    file_path: str,
+    content: str | list[str] | None = None,
 ) -> bool:
     """v2.48 P-3 — True iff `file_path` is a rule-corpus markdown file.
 
@@ -1455,7 +1455,9 @@ def is_fp_corpus_markdown(
 
 
 def is_test_file_parametrize_body(
-    file_path: str, content: str | list[str] | None, line_no: int,
+    file_path: str,
+    content: str | list[str] | None,
+    line_no: int,
 ) -> bool:
     """v2.48 P-2 — True iff `file_path` is a Python test file AND
     `line_no` is inside a `@pytest.mark.parametrize(` decorator body.
@@ -1485,7 +1487,9 @@ def is_test_file_parametrize_body(
 
 
 def cpv_self_scan_skip_line(
-    file_path: str, content: str | list[str] | None, line_no: int,
+    file_path: str,
+    content: str | list[str] | None,
+    line_no: int,
 ) -> bool:
     """Return True if a specific (file, line_no) pair should be skipped
     during a CPV-self-scan OR universally for test fixture parametrize
@@ -1579,10 +1583,7 @@ def cpv_self_scan_skip(file_path: str) -> bool:
         # File matches the pattern but has no manifest entry — possibly
         # a new/renamed file the manifest wasn't regenerated for. Don't
         # skip; report once per file so reviewers refresh the manifest.
-        if (
-            _CPV_SELF_HASH_NOTICE_REPORT is not None
-            and file_normalized not in _CPV_SELF_HASH_REPORTED_MISSING
-        ):
+        if _CPV_SELF_HASH_NOTICE_REPORT is not None and file_normalized not in _CPV_SELF_HASH_REPORTED_MISSING:
             _CPV_SELF_HASH_REPORTED_MISSING.add(file_normalized)
             # Manifest-coverage gap is operational telemetry, not a security
             # finding — the file gets scanned normally regardless. Demoted
@@ -1607,10 +1608,7 @@ def cpv_self_scan_skip(file_path: str) -> bool:
         # Hash mismatch — file was modified. Could be a legitimate edit
         # in progress or a spoofed lookalike. Either way we DON'T skip;
         # scan it as if it were a normal plugin file. Report once.
-        if (
-            _CPV_SELF_HASH_NOTICE_REPORT is not None
-            and file_normalized not in _CPV_SELF_HASH_REPORTED_MODIFIED
-        ):
+        if _CPV_SELF_HASH_NOTICE_REPORT is not None and file_normalized not in _CPV_SELF_HASH_REPORTED_MODIFIED:
             _CPV_SELF_HASH_REPORTED_MODIFIED.add(file_normalized)
             _CPV_SELF_HASH_NOTICE_REPORT.warning(
                 f"[RC-162] CPV self-scan: file `{file_normalized}` matches "
@@ -1684,20 +1682,11 @@ def _is_self_scan_eligible(file_path: str) -> bool:
     # security patterns by example and the workflows that act on them.
     # Hash-verified so an unrelated plugin can't park a same-named file
     # in its own agents/ folder to evade scanning.
-    if (
-        ("/agents/" in file_normalized or file_normalized.startswith("agents/"))
-        and basename.endswith(".md")
-    ):
+    if ("/agents/" in file_normalized or file_normalized.startswith("agents/")) and basename.endswith(".md"):
         return True
-    if (
-        ("/commands/" in file_normalized or file_normalized.startswith("commands/"))
-        and basename.endswith(".md")
-    ):
+    if ("/commands/" in file_normalized or file_normalized.startswith("commands/")) and basename.endswith(".md"):
         return True
-    if (
-        ("/skills/" in file_normalized or file_normalized.startswith("skills/"))
-        and basename.endswith(".md")
-    ):
+    if ("/skills/" in file_normalized or file_normalized.startswith("skills/")) and basename.endswith(".md"):
         return True
     # Templates CPV ships for downstream plugins (workflow snippets,
     # config seeds). They contain placeholder strings like "<TOKEN>" and
@@ -1729,10 +1718,12 @@ def is_validator_script(file_path: str) -> bool:
     - Scaffolder scripts: `generate_*.py`, `manage_*.py`, `setup_*.py`,
       `standardize_*.py`. These emit publish.py templates and shell
       examples as Python triple-quoted strings.
-    - Pipeline scripts: `publish.py`, `smart_exec.py`, `lint_files.py`,
+    - Pipeline scripts: `publish.py`, `smart_exec.py`,
       `_plugin_compute_hashes.py` (canonical, TRDD-bbff5bc5),
       `compute_cpv_self_hashes.py` (legacy alias, removed in v2.53.0),
-      `cc_scope_rules.py`, `_minimal_yaml.py`.
+      `cc_scope_rules.py`, `_minimal_yaml.py`. The legacy
+      `lint_files.py` orchestrator was retired in v2.64.0 in favour of
+      `cpv_lint_engine.py` (matched by the `cpv_*` prefix above).
     """
     file_lower = file_path.lower().replace("\\", "/")
     basename = file_lower.rsplit("/", 1)[-1] if "/" in file_lower else file_lower
@@ -1752,11 +1743,10 @@ def is_validator_script(file_path: str) -> bool:
     if basename in {
         "publish.py",
         "smart_exec.py",
-        "lint_files.py",
         "_plugin_compute_hashes.py",  # TRDD-bbff5bc5 canonical
-        "_plugin_verify_hashes.py",   # TRDD-bbff5bc5 canonical
-        "compute_cpv_self_hashes.py", # legacy alias (removed in v2.53.0)
-        "cpv_integrity.py",           # legacy alias (removed in v2.53.0)
+        "_plugin_verify_hashes.py",  # TRDD-bbff5bc5 canonical
+        "compute_cpv_self_hashes.py",  # legacy alias (removed in v2.53.0)
+        "cpv_integrity.py",  # legacy alias (removed in v2.53.0)
         "cc_scope_rules.py",
         "_minimal_yaml.py",
         "detect_lockfiles.py",
@@ -1846,9 +1836,7 @@ def is_js_ts_file(file_path: str, content: str | None = None) -> bool:
        extension-only heuristic misses a lot of real-world JS files. Pass
        in the file's first line via the `content` arg to enable this.
     """
-    if file_path.lower().endswith(
-        (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts", ".cts")
-    ):
+    if file_path.lower().endswith((".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts", ".cts")):
         return True
     if content is not None:
         first_line = content.split("\n", 1)[0] if content else ""
@@ -1914,12 +1902,25 @@ def is_shell_like_file(file_path: str, content: str | None = None) -> bool:
     # doesn't matter. Hook names per githooks(5) — covers the standard set.
     basename = file_normalized.rsplit("/", 1)[-1] if "/" in file_normalized else file_normalized
     GIT_HOOK_BASENAMES = {
-        "pre-commit", "pre-push", "pre-rebase", "pre-receive",
-        "post-receive", "post-commit", "post-merge", "post-checkout",
-        "post-update", "commit-msg", "prepare-commit-msg",
-        "applypatch-msg", "pre-applypatch", "post-applypatch",
-        "update", "fsmonitor-watchman", "p4-pre-submit",
-        "post-rewrite", "sendemail-validate",
+        "pre-commit",
+        "pre-push",
+        "pre-rebase",
+        "pre-receive",
+        "post-receive",
+        "post-commit",
+        "post-merge",
+        "post-checkout",
+        "post-update",
+        "commit-msg",
+        "prepare-commit-msg",
+        "applypatch-msg",
+        "pre-applypatch",
+        "post-applypatch",
+        "update",
+        "fsmonitor-watchman",
+        "p4-pre-submit",
+        "post-rewrite",
+        "sendemail-validate",
     }
     if basename in GIT_HOOK_BASENAMES:
         return True
@@ -2034,10 +2035,13 @@ def _line_is_string_assignment(line: str) -> bool:
 
 
 _PATTERN_DEFINITION_HINTS = (
-    "re.compile(", "re.match(", "re.search(",
+    "re.compile(",
+    "re.match(",
+    "re.search(",
     "RegExp(",
     "regex.compile(",
-    'r"', "r'",            # Python raw-string literal at start of regex
+    'r"',
+    "r'",  # Python raw-string literal at start of regex
 )
 _PATTERN_DEFINITION_RE = re.compile(r"/[^/\n]+/[gimsuy]*")  # JS regex literal
 
@@ -2081,14 +2085,28 @@ def _line_is_pattern_definition(file_ref: str, line_number: int) -> bool:
 # such lines because the literal text matches their patterns; suppress
 # this whole class.
 _STATUS_REPORT_HINTS = (
-    "report.passed(", "report.warning(", "report.info(",
-    "report.minor(", "report.nit(", "report.major(",
-    "report.critical(", "report.add(",
-    "console.log(", "console.warn(", "console.error(",
-    "logger.info(", "logger.warning(", "logger.error(",
-    "log.info(", "log.warn(", "log.error(",
-    "echo \"", "echo '",
-    "print(", "println!(", "eprintln!(",
+    "report.passed(",
+    "report.warning(",
+    "report.info(",
+    "report.minor(",
+    "report.nit(",
+    "report.major(",
+    "report.critical(",
+    "report.add(",
+    "console.log(",
+    "console.warn(",
+    "console.error(",
+    "logger.info(",
+    "logger.warning(",
+    "logger.error(",
+    "log.info(",
+    "log.warn(",
+    "log.error(",
+    'echo "',
+    "echo '",
+    "print(",
+    "println!(",
+    "eprintln!(",
 )
 
 
@@ -2140,32 +2158,34 @@ _RC87_PURE_VERSION_LINE_RE = re.compile(
 # major→minor; this list demotes them one more tier (minor→nit), which
 # is appropriate because these specific files are by-convention
 # project narrative, not config.
-_RC87_HISTORY_DOC_BASENAMES = frozenset({
-    "changelog",
-    "changelog.md",
-    "changelog.rst",
-    "changelog.txt",
-    "changes",
-    "changes.md",
-    "changes.txt",
-    "history",
-    "history.md",
-    "history.rst",
-    "history.txt",
-    "news",
-    "news.md",
-    "news.rst",
-    "news.txt",
-    "readme",
-    "readme.md",
-    "readme.rst",
-    "readme.txt",
-    "release-notes",
-    "release-notes.md",
-    "release_notes.md",
-    "releases",
-    "releases.md",
-})
+_RC87_HISTORY_DOC_BASENAMES = frozenset(
+    {
+        "changelog",
+        "changelog.md",
+        "changelog.rst",
+        "changelog.txt",
+        "changes",
+        "changes.md",
+        "changes.txt",
+        "history",
+        "history.md",
+        "history.rst",
+        "history.txt",
+        "news",
+        "news.md",
+        "news.rst",
+        "news.txt",
+        "readme",
+        "readme.md",
+        "readme.rst",
+        "readme.txt",
+        "release-notes",
+        "release-notes.md",
+        "release_notes.md",
+        "releases",
+        "releases.md",
+    }
+)
 
 
 def _rc87_is_history_doc(file_path: str) -> bool:
@@ -2196,9 +2216,17 @@ def _rc87_is_semver_context(line: str, file_path: str) -> bool:
     file_lower = file_path.lower().replace("\\", "/")
     basename = file_lower.rsplit("/", 1)[-1]
     if basename in {
-        "package.json", "pyproject.toml", "cargo.toml",
-        "composer.json", "gemfile", "build.gradle", "build.gradle.kts",
-        "pubspec.yaml", "mix.exs", "deno.json", "bun.lock.json",
+        "package.json",
+        "pyproject.toml",
+        "cargo.toml",
+        "composer.json",
+        "gemfile",
+        "build.gradle",
+        "build.gradle.kts",
+        "pubspec.yaml",
+        "mix.exs",
+        "deno.json",
+        "bun.lock.json",
     }:
         return True
     if _RC87_PURE_VERSION_LINE_RE.match(line) or _RC87_DEPVERSION_RE.search(line):
@@ -2208,39 +2236,37 @@ def _rc87_is_semver_context(line: str, file_path: str) -> bool:
 
 _TEST_PATH_RE = re.compile(
     r"(?:"
-    r"(?:^|/)tests?/"          # /test/ or /tests/ segment
-    r"|(?:^|/)__tests?__/"     # /__tests__/ Jest convention
-    r"|(?:^|/)spec/"           # /spec/ RSpec / Jasmine
-    r"|(?:^|/)e2e/"            # end-to-end test directory
-    r"|(?:^|/)conftest\.py$"   # pytest conftest
-    r"|(?:^|/)test_[A-Za-z0-9_]+\.py$"        # pytest test_*.py
-    r"|(?:^|/)[A-Za-z0-9_]+_test\.py$"        # Go-style _test.py
-    r"|(?:^|/)[A-Za-z0-9_.\-]+\.test\."        # foo.test.ts/.test.js/.test.py
-    r"|(?:^|/)[A-Za-z0-9_.\-]+\.spec\."        # foo.spec.ts/.spec.js
-    r"|(?:^|/)test-[A-Za-z0-9_.\-]+\."          # test-foo.ts
-    r"|(?:^|/)fixture[s]?/"                    # /fixtures/ test data dir
+    r"(?:^|/)tests?/"  # /test/ or /tests/ segment
+    r"|(?:^|/)__tests?__/"  # /__tests__/ Jest convention
+    r"|(?:^|/)spec/"  # /spec/ RSpec / Jasmine
+    r"|(?:^|/)e2e/"  # end-to-end test directory
+    r"|(?:^|/)conftest\.py$"  # pytest conftest
+    r"|(?:^|/)test_[A-Za-z0-9_]+\.py$"  # pytest test_*.py
+    r"|(?:^|/)[A-Za-z0-9_]+_test\.py$"  # Go-style _test.py
+    r"|(?:^|/)[A-Za-z0-9_.\-]+\.test\."  # foo.test.ts/.test.js/.test.py
+    r"|(?:^|/)[A-Za-z0-9_.\-]+\.spec\."  # foo.spec.ts/.spec.js
+    r"|(?:^|/)test-[A-Za-z0-9_.\-]+\."  # test-foo.ts
+    r"|(?:^|/)fixture[s]?/"  # /fixtures/ test data dir
     r")"
 )
 
 
-_I18N_DIR_RE = re.compile(
-    r"(?:^|/)(?:locales?|i18n|lang|languages?|translations?|intl)/"
-)
+_I18N_DIR_RE = re.compile(r"(?:^|/)(?:locales?|i18n|lang|languages?|translations?|intl)/")
 # Language-code suffix: `<basename>.<lang>.<ext>` or
 # `<basename>.<lang>-<COUNTRY>.<ext>`. Common examples:
 #   README.ru.md       README.zh-CN.md
 #   guide.ja.md        messages.es-ES.json
 #   prompt-cache-guide-ru.md  (with hyphen — also catch this)
 _I18N_LANG_SUFFIX_RE = re.compile(
-    r"(?:[._-])"                                 # separator
+    r"(?:[._-])"  # separator
     r"(?:"
     # ISO 639-1 two-letter codes commonly used for translations.
     r"ar|az|bg|bn|ca|cs|da|de|el|en|es|et|fa|fi|fr|gu|he|hi|hr|hu|id|it|"
     r"ja|kk|kn|ko|lt|lv|ml|mr|ms|nb|nl|no|pl|pt|ro|ru|si|sk|sl|sq|sr|sv|"
     r"sw|ta|te|th|tr|uk|ur|vi|zh"
     r")"
-    r"(?:[-_][a-z]{2,3})?"                       # optional country code (lowercased path)
-    r"\.[a-z0-9]+$"                              # extension
+    r"(?:[-_][a-z]{2,3})?"  # optional country code (lowercased path)
+    r"\.[a-z0-9]+$"  # extension
 )
 
 
@@ -2299,9 +2325,9 @@ def _is_acronym_compound(token: str) -> bool:
     # Match: ASCII word (acronym or escape-prefix), optional separator,
     # non-Latin word.
     m = re.match(
-        r"^([A-Za-z][A-Za-z0-9]{0,9})"   # Latin acronym/prefix (1-10 chars)
-        r"([-_.]?)"                       # optional separator
-        r"([^\sA-Za-z]+)$",               # non-Latin descriptor
+        r"^([A-Za-z][A-Za-z0-9]{0,9})"  # Latin acronym/prefix (1-10 chars)
+        r"([-_.]?)"  # optional separator
+        r"([^\sA-Za-z]+)$",  # non-Latin descriptor
         token,
     )
     if m is None:
@@ -2331,7 +2357,7 @@ def _is_acronym_compound(token: str) -> bool:
     latin_is_short_prefix = len(latin_prefix) <= 2
     # Compound recognition:
     if has_separator and descriptor_is_word:
-        return True   # `API-вызов`, `JSON-файл`
+        return True  # `API-вызов`, `JSON-файл`
     if not has_separator:
         # No separator — be conservative. Only accept when:
         #   (a) Latin prefix is a single char or short escape (≤2),
@@ -2497,9 +2523,9 @@ def _is_bash_boolean_chain(line: str, match_start: int) -> bool:
         or rest.startswith(("&&", "||", ";", "&", "|"))
         or rest.startswith("then")
         or rest.startswith("done")
-        or rest.startswith("$")          # next chain link `$has_y`
+        or rest.startswith("$")  # next chain link `$has_y`
         or rest.startswith("checks_passed=")  # idiomatic counter-bump
-        or re.match(r"\w+=", rest)        # idiomatic var assignment after &&
+        or re.match(r"\w+=", rest)  # idiomatic var assignment after &&
         or rest.startswith("break")
         or rest.startswith("continue")
         or rest.startswith("return")
@@ -2741,7 +2767,7 @@ def _rc93_is_markdown_table_row(line: str) -> bool:
         inner = inner[:-2]
     for prefix in ('r"', "r'", 'f"', "f'", 'b"', "b'"):
         if inner.startswith(prefix):
-            inner = inner[len(prefix):]
+            inner = inner[len(prefix) :]
             break
     inner = inner.strip("\"'`").strip()
     if inner.startswith("|") and inner.endswith("|") and inner.count("|") >= 2:
@@ -2813,7 +2839,10 @@ def _md_lookback_heading(content_lines: list[str], line_idx: int, max_lookback: 
 
 
 def _md_block_negation_context(
-    content_lines: list[str], line_idx: int, window: int = 5, heading_lookback: int = 30,
+    content_lines: list[str],
+    line_idx: int,
+    window: int = 5,
+    heading_lookback: int = 30,
 ) -> bool:
     """True if the markdown context around line `line_idx` (0-based)
     contains an anti-pattern / DO-NOT framer.
@@ -2845,7 +2874,9 @@ def _md_block_negation_context(
 
 
 def _rc63_is_markdown_anti_pattern_bullet(
-    rel_path: str, content_lines: list[str], line_idx: int,
+    rel_path: str,
+    content_lines: list[str],
+    line_idx: int,
 ) -> bool:
     """RC-63 FP guard for markdown documentation that lists what an agent /
     persona DOES NOT do.
@@ -2973,7 +3004,9 @@ _RC02_DOC_ROLE_RE = re.compile(
 
 
 def _md_has_doc_role_heading(
-    content_lines: list[str], line_idx: int, max_lookback: int = 30,
+    content_lines: list[str],
+    line_idx: int,
+    max_lookback: int = 30,
 ) -> bool:
     """True if any preceding markdown heading within `max_lookback` lines
     contains a documentation-role stem.
@@ -3011,7 +3044,9 @@ def _md_has_doc_role_heading(
 
 
 def _rc02_is_md_doc_role_section(
-    rel_path: str, content_lines: list[str], line_idx: int,
+    rel_path: str,
+    content_lines: list[str],
+    line_idx: int,
 ) -> bool:
     """RC-02 FP guard for markdown documentation sections that describe
     orchestrator / procedure behaviour.
@@ -3075,9 +3110,18 @@ def _rc110_is_import_statement_line(line: str) -> bool:
 
 
 _RC21_SUBPROCESS_PREP_HINTS = (
-    "subprocess.", "Popen(", "run(", "check_output(", "check_call(",
-    "spawn(", "execve(", "execvp(", "execv(",
-    "child_process.", "execFile(", "exec(",
+    "subprocess.",
+    "Popen(",
+    "run(",
+    "check_output(",
+    "check_call(",
+    "spawn(",
+    "execve(",
+    "execvp(",
+    "execv(",
+    "child_process.",
+    "execFile(",
+    "exec(",
 )
 
 
@@ -3166,12 +3210,24 @@ def _is_variable_anchored_absolute_path(line: str, match_start: int) -> bool:
 # matches a structural shape, never a specific plugin's path.
 # =============================================================================
 
-_RESEARCH_DATA_SEGMENTS: frozenset[str] = frozenset({
-    "datasets", "dataset", "fixtures", "fixture",
-    "corpus", "corpora", "samples", "exemplars",
-    "benchmarks", "benchmark", "golden", "snapshots",
-    "research", "examples_data",
-})
+_RESEARCH_DATA_SEGMENTS: frozenset[str] = frozenset(
+    {
+        "datasets",
+        "dataset",
+        "fixtures",
+        "fixture",
+        "corpus",
+        "corpora",
+        "samples",
+        "exemplars",
+        "benchmarks",
+        "benchmark",
+        "golden",
+        "snapshots",
+        "research",
+        "examples_data",
+    }
+)
 
 
 def _is_research_data_path(rel_path: str) -> bool:
@@ -3221,10 +3277,7 @@ def _rc21_is_subprocess_prep(line: str, surrounding_lines: list[str]) -> bool:
     invocation within the next 5 lines (idiomatic env-prep, not exfil).
     """
     matched = line.strip()
-    if not (
-        "os.environ.copy()" in matched
-        or "dict(os.environ" in matched
-    ):
+    if not ("os.environ.copy()" in matched or "dict(os.environ" in matched):
         return False
     for nearby in surrounding_lines:
         if any(hint in nearby for hint in _RC21_SUBPROCESS_PREP_HINTS):
@@ -3235,20 +3288,50 @@ def _rc21_is_subprocess_prep(line: str, surrounding_lines: list[str]) -> bool:
 
 
 _RC65_PATTERN_SOURCE_HINTS = (
-    "_PATTERNS", "_PATTERN", "_RULES", "_HOSTS",
-    "denylist", "blocklist", "blacklist", "deny_list", "block_list",
-    "unsafe_hosts", "unsafe_urls", "blocked_hosts", "imds_hosts",
-    "PRIVATE_IP", "INTERNAL_IP", "LINK_LOCAL",
-    "DETECT_", "DETECTOR_",
+    "_PATTERNS",
+    "_PATTERN",
+    "_RULES",
+    "_HOSTS",
+    "denylist",
+    "blocklist",
+    "blacklist",
+    "deny_list",
+    "block_list",
+    "unsafe_hosts",
+    "unsafe_urls",
+    "blocked_hosts",
+    "imds_hosts",
+    "PRIVATE_IP",
+    "INTERNAL_IP",
+    "LINK_LOCAL",
+    "DETECT_",
+    "DETECTOR_",
 )
 
 
 _RC65_NETWORK_CALL_HINTS = (
-    "requests.", "urlopen(", "urllib.", "http.client", "httpx.", "aiohttp.",
-    "fetch(", "axios.", "got(", "needle.", "superagent.",
-    ".get(", ".post(", ".put(", ".delete(", ".patch(",
-    "curl ", "wget ", "Invoke-WebRequest", "Invoke-RestMethod",
-    "request(", "open(",
+    "requests.",
+    "urlopen(",
+    "urllib.",
+    "http.client",
+    "httpx.",
+    "aiohttp.",
+    "fetch(",
+    "axios.",
+    "got(",
+    "needle.",
+    "superagent.",
+    ".get(",
+    ".post(",
+    ".put(",
+    ".delete(",
+    ".patch(",
+    "curl ",
+    "wget ",
+    "Invoke-WebRequest",
+    "Invoke-RestMethod",
+    "request(",
+    "open(",
 )
 
 
@@ -3277,12 +3360,18 @@ def _surrounding_lines(content_lines: list[str], idx: int, window: int = 4) -> l
     """Return up to `window` lines on either side of `idx` (0-based)."""
     lo = max(0, idx - window)
     hi = min(len(content_lines), idx + window + 1)
-    return content_lines[lo:idx] + content_lines[idx + 1:hi]
+    return content_lines[lo:idx] + content_lines[idx + 1 : hi]
 
 
 _CLIPBOARD_DOMAIN_HINTS = (
-    "clipboard", "pasteboard", "copy-paste", "copy/paste",
-    "pbcopy", "pbpaste", "xclip", "xsel",
+    "clipboard",
+    "pasteboard",
+    "copy-paste",
+    "copy/paste",
+    "pbcopy",
+    "pbpaste",
+    "xclip",
+    "xsel",
 )
 
 
@@ -3424,14 +3513,23 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
                 if not is_shell_script:
                     shell_exec_indicators = (
                         # Python
-                        "os.system", "os.popen", "subprocess", "shell=",
-                        "Popen", "check_output", "check_call",
+                        "os.system",
+                        "os.popen",
+                        "subprocess",
+                        "shell=",
+                        "Popen",
+                        "check_output",
+                        "check_call",
                         # JS/Node
-                        "child_process", "execSync(", "spawn(",
+                        "child_process",
+                        "execSync(",
+                        "spawn(",
                         # Rust
-                        "Command::new", "std::process",
+                        "Command::new",
+                        "std::process",
                         # Go
-                        "exec.Command", "os/exec",
+                        "exec.Command",
+                        "os/exec",
                     )
                     if not any(indicator in line for indicator in shell_exec_indicators):
                         continue
@@ -3480,7 +3578,12 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
                 # a clear shell-execution call on the line.
                 if is_python_file:
                     py_shell_exec_indicators: tuple[str, ...] = (
-                        "os.system", "os.popen", "subprocess", "shell=", "Popen", "check_output",
+                        "os.system",
+                        "os.popen",
+                        "subprocess",
+                        "shell=",
+                        "Popen",
+                        "check_output",
                     )
                     if not any(indicator in line for indicator in py_shell_exec_indicators):
                         continue
@@ -3500,8 +3603,13 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
                 #   — no shell-exec call on line → skip.
                 if is_js_ts_file(file_path, content):
                     js_shell_exec_indicators: tuple[str, ...] = (
-                        "child_process", "execSync(", "exec(", "spawn(",
-                        "execFile(", "spawnSync(", "fork(",
+                        "child_process",
+                        "execSync(",
+                        "exec(",
+                        "spawn(",
+                        "execFile(",
+                        "spawnSync(",
+                        "fork(",
                     )
                     if not any(indicator in line for indicator in js_shell_exec_indicators):
                         continue
@@ -3513,9 +3621,15 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
                 # template, the harness substitutes placeholders and
                 # passes the result to its own controlled invocation.
                 _NON_EXECUTABLE_TEMPLATE_EXT = (
-                    ".txt", ".tmpl", ".template",
-                    ".tmpl.sh", ".sh.tmpl",
-                    ".j2", ".jinja", ".jinja2", ".mustache",
+                    ".txt",
+                    ".tmpl",
+                    ".template",
+                    ".tmpl.sh",
+                    ".sh.tmpl",
+                    ".j2",
+                    ".jinja",
+                    ".jinja2",
+                    ".mustache",
                 )
                 if file_lower.endswith(_NON_EXECUTABLE_TEMPLATE_EXT):
                     continue
@@ -3561,7 +3675,7 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
                     # The skip does NOT fire for `| bash <flag>` (e.g.
                     # `| bash -e`), so genuine `curl … | bash -e` keeps
                     # firing.
-                    after = line[pipe_match.end():]
+                    after = line[pipe_match.end() :]
                     after_stripped = after.lstrip()
                     if after_stripped[:1] in ('"', "'", "`", "$", "/", "~"):
                         continue
@@ -3593,9 +3707,7 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
                     # JS/TS comment lines mention `exec failure`, `eval`, etc.
                     # in prose. Comments are not code paths — suppress.
                     if is_js_ts_file(file_path, content) and (
-                        stripped.startswith("//")
-                        or stripped.startswith("/*")
-                        or stripped.startswith("*")
+                        stripped.startswith("//") or stripped.startswith("/*") or stripped.startswith("*")
                     ):
                         continue
                     # Shell-style `exec <cmd>` and `eval <code>` rules
@@ -3657,9 +3769,7 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
                         # fire on STRING comparisons `[[ $VAR == "x" ]]`
                         # where word-splitting matters, but the
                         # numeric ops are safe.
-                        if "comparison" in msg.lower() and re.search(
-                            r"-(?:gt|lt|eq|ne|le|ge)\b", line
-                        ):
+                        if "comparison" in msg.lower() and re.search(r"-(?:gt|lt|eq|ne|le|ge)\b", line):
                             continue
                         # GENERAL FP-B — PowerShell `$varname` is the
                         # canonical variable syntax (NOT word-split like
@@ -3681,10 +3791,7 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
                         # standard requires `<ApprovedVerb>-<Noun>`
                         # where the verb is from a closed list of ~100
                         # approved verbs.
-                        if (
-                            file_lower.endswith((".yml", ".yaml", ".ps1"))
-                            and _is_powershell_context(content, line)
-                        ):
+                        if file_lower.endswith((".yml", ".yaml", ".ps1")) and _is_powershell_context(content, line):
                             continue
                         # GENERAL: bash boolean-function call pattern.
                         # In bash, `$varname` standing alone as a
@@ -3811,7 +3918,11 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
     # `//!`) routinely contain path examples like
     # `exe_dir/../VERSION` describing the search algorithm.
     is_rust_src = file_lower.endswith(".rs")
-    is_c_family = is_js_ts or is_rust_src or file_lower.endswith((".c", ".cc", ".cpp", ".h", ".hpp", ".go", ".swift", ".kt", ".java", ".cs"))
+    is_c_family = (
+        is_js_ts
+        or is_rust_src
+        or file_lower.endswith((".c", ".cc", ".cpp", ".h", ".hpp", ".go", ".swift", ".kt", ".java", ".cs"))
+    )
     # GENERAL — shell-script context. Required for the per-line
     # `_is_shell_regex_source_line` predicate below: `grep -E '…'`,
     # `sed 's/…/…/'`, `awk '/…/{…}'` are bash builtins, not generic
@@ -3863,9 +3974,7 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
     # `` `path` ``. Path matches inside those spans are documentation
     # references, not instruction-shaped attack vectors. Other markdown
     # files are already excluded above.
-    is_ai_markdown = (
-        file_lower.endswith((".md", ".mdx", ".markdown")) and is_ai_facing_markdown(file_path)
-    )
+    is_ai_markdown = file_lower.endswith((".md", ".mdx", ".markdown")) and is_ai_facing_markdown(file_path)
     md_link_re = re.compile(r"\[[^\]]*\]\(([^)]+)\)") if is_ai_markdown else None
     md_inline_code_re = re.compile(r"`[^`\n]+`") if is_ai_markdown else None
     # Pre-compute fenced-code-block line set for AI-facing markdown so the
@@ -3876,6 +3985,7 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
     md_fence_lines: set[int] = set()
     if is_ai_markdown:
         from cpv_validation_common import build_fence_state, is_in_fenced_code_block  # noqa: PLC0415
+
         fence_state = build_fence_state(content)
         for i in range(len(lines)):
             if is_in_fenced_code_block(i, fence_state):
@@ -3937,11 +4047,7 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
         # comments are documentation (e.g. "// dist/cli.js → ../dist/index.js"
         # in JS, "/// Search order: exe_dir/../VERSION" in Rust), not
         # live file operations.
-        if is_c_family and (
-            stripped.startswith("//")
-            or stripped.startswith("/*")
-            or stripped.startswith("*")
-        ):
+        if is_c_family and (stripped.startswith("//") or stripped.startswith("/*") or stripped.startswith("*")):
             continue
 
         # JS/TS regex literals on the line — pre-compute their spans so the
@@ -4099,12 +4205,22 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
                     # validated by the same rule and would self-flag).
                     _slash = "/"
                     KNOWN_SAFE_PATHS: tuple[str, ...] = tuple(
-                        _slash + segs for segs in (
-                            "bin/sh", "bin/bash", "bin/zsh",
-                            "bin/dash", "bin/ksh",
-                            "bin/cat", "bin/cp", "bin/mv", "bin/rm",
-                            "bin/ls", "bin/echo", "bin/true",
-                            "bin/false", "bin/pwd",
+                        _slash + segs
+                        for segs in (
+                            "bin/sh",
+                            "bin/bash",
+                            "bin/zsh",
+                            "bin/dash",
+                            "bin/ksh",
+                            "bin/cat",
+                            "bin/cp",
+                            "bin/mv",
+                            "bin/rm",
+                            "bin/ls",
+                            "bin/echo",
+                            "bin/true",
+                            "bin/false",
+                            "bin/pwd",
                             "usr/bin/env",
                             "usr" + _slash + "local" + _slash + "bin",
                         )
@@ -4152,18 +4268,10 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
                 # the Windows-drive-letter regex on `r:\n` even though
                 # there is no `C:\…` path anywhere.
                 _is_cstyle_escape_lang = (
-                    is_c_family
-                    or file_lower.endswith(".json")
-                    or is_shell_like_file(file_path, content)
+                    is_c_family or file_lower.endswith(".json") or is_shell_like_file(file_path, content)
                 )
-                _line_has_quote = (
-                    "`" in stripped or "'" in stripped or '"' in stripped
-                )
-                if (
-                    "Windows" in msg
-                    and _is_cstyle_escape_lang
-                    and _line_has_quote
-                ):
+                _line_has_quote = "`" in stripped or "'" in stripped or '"' in stripped
+                if "Windows" in msg and _is_cstyle_escape_lang and _line_has_quote:
                     m = re.search(r"([A-Za-z]):\\(.)", line)
                     # `nrtbfv0` are escape-only — no Windows folder name
                     # starts with these letters at the segment boundary
@@ -4346,16 +4454,16 @@ _PLACEHOLDER_LINE_MARKERS = (
     "://admin:password@",
     "://admin:admin@",
     "://root:password@",
-    ":password@",         # any scheme, with literal "password"
-    ":secret@",           # any scheme, with literal "secret"
+    ":password@",  # any scheme, with literal "password"
+    ":secret@",  # any scheme, with literal "secret"
     # GENERAL — Bash / shell env-var passthrough in connection-string
     # body. The value `${TOKEN}` is bash variable expansion, never a
     # literal credential. Common shapes:
     #   https://oauth2:${GITHUB_TOKEN}@github.com/...
     #   https://${USER}:${PASSWORD}@host
     #   amqp://${RMQ_USER}:${RMQ_PASS}@broker
-    ":${",                # any `:${` — env var as password
-    ":$(",                # any `:$(...)` — command substitution as password
+    ":${",  # any `:${` — env var as password
+    ":$(",  # any `:$(...)` — command substitution as password
 )
 
 
@@ -4754,8 +4862,18 @@ _LEGIT_API_HOST_SUFFIXES = (
 # fixture word (bin/echo/req/res/get/post). Anyone naming a real
 # user-data API uses their company's name, not `bin`/`req`/`res`.
 _DOC_HOST_STEMS = (
-    "example", "fake", "mock", "dummy", "demo", "sandbox", "placeholder",
-    "fixture", "tutorial", "stub", "sample", "test",
+    "example",
+    "fake",
+    "mock",
+    "dummy",
+    "demo",
+    "sandbox",
+    "placeholder",
+    "fixture",
+    "tutorial",
+    "stub",
+    "sample",
+    "test",
 )
 
 # Tutorial-portmanteau patterns: a label that glues two HTTP-protocol /
@@ -4766,11 +4884,29 @@ _DOC_HOST_STEMS = (
 # user-data API uses their company's name; portmanteaus signal a public
 # fixture host.
 _TUTORIAL_PORTMANTEAU_PREFIXES = (
-    "http", "json", "xml", "rest", "api", "req", "reply", "res", "graphql",
+    "http",
+    "json",
+    "xml",
+    "rest",
+    "api",
+    "req",
+    "reply",
+    "res",
+    "graphql",
 )
 _TUTORIAL_PORTMANTEAU_SUFFIXES = (
-    "bin", "echo", "reply", "response", "placeholder", "fake", "stub",
-    "mock", "test", "res", "req", "api",
+    "bin",
+    "echo",
+    "reply",
+    "response",
+    "placeholder",
+    "fake",
+    "stub",
+    "mock",
+    "test",
+    "res",
+    "req",
+    "api",
 )
 
 
@@ -4785,15 +4921,19 @@ def _is_tutorial_portmanteau(label: str) -> bool:
     for pfx in _TUTORIAL_PORTMANTEAU_PREFIXES:
         if not lo.startswith(pfx) or len(lo) <= len(pfx):
             continue
-        rest = lo[len(pfx):]
+        rest = lo[len(pfx) :]
         if rest in _TUTORIAL_PORTMANTEAU_SUFFIXES and rest != pfx:
             return True
     return False
 
+
 # RFC-2606 / RFC-6761 reserved TLDs that never resolve. A host ending in any
 # of these is by definition documentation, not a live exfil target.
 _RESERVED_TLDS = (
-    ".test", ".example", ".invalid", ".localhost",
+    ".test",
+    ".example",
+    ".invalid",
+    ".localhost",
     # `.local` is mDNS but commonly used in dev examples; we treat it as
     # documentation when paired with a non-LAN-IP host.
 )
@@ -4802,8 +4942,8 @@ _RESERVED_TLDS = (
 # don't naturally tokenize on `.` boundaries. petstore + swagger have been
 # the canonical "REST tutorial" pair for 10+ years.
 _TUTORIAL_HOST_PARENTS = (
-    "typicode.com",   # jsonplaceholder.typicode.com and similar
-    "swagger.io",     # petstore3.swagger.io, petstore.swagger.io
+    "typicode.com",  # jsonplaceholder.typicode.com and similar
+    "swagger.io",  # petstore3.swagger.io, petstore.swagger.io
 )
 
 
@@ -4975,11 +5115,7 @@ def scan_for_credential_harvest(content: str, file_path: str, report: Validation
         if stripped.startswith("#"):
             continue
         # JS/TS comment lines — same intent as the # skip above.
-        if is_js_ts and (
-            stripped.startswith("//")
-            or stripped.startswith("/*")
-            or stripped.startswith("*")
-        ):
+        if is_js_ts and (stripped.startswith("//") or stripped.startswith("/*") or stripped.startswith("*")):
             continue
         # Skip Python string literals (templates, help text, CI workflows)
         if is_python and _is_python_string_context(stripped):
@@ -4998,12 +5134,20 @@ def scan_for_credential_harvest(content: str, file_path: str, report: Validation
         # and `os.getenv("GITHUB_TOKEN")` patterns: these are reads, not
         # writes/leaks. Skip the line if it pairs the literal token name
         # with one of those declarative APIs.
-        if any(api in line for api in (
-            "default=", "envvar=", "env=",
-            "os.environ.get", "os.getenv",
-            "process.env.", "process.env[",
-            "std::env::var", "env::var",
-        )):
+        if any(
+            api in line
+            for api in (
+                "default=",
+                "envvar=",
+                "env=",
+                "os.environ.get",
+                "os.getenv",
+                "process.env.",
+                "process.env[",
+                "std::env::var",
+                "env::var",
+            )
+        ):
             continue
         # Skip env-var-mapping configs: `OPENROUTER_API_KEY: "CLAUDE_PLUGIN_OPTION_..."`,
         # `"AWS_SECRET_ACCESS_KEY": process.env.AWS_SECRET_ACCESS_KEY`. Both
@@ -5044,15 +5188,19 @@ def scan_for_credential_harvest(content: str, file_path: str, report: Validation
                 # (open, read_text, fs.readFileSync, …) — those
                 # remain flagged.
                 io_apis = (
-                    "open(", "read_text(", "Path(", "with open",
-                    "fs.readFile", "fs.read", "readFileSync",
-                    "std::fs::read", "fs::File::open",
+                    "open(",
+                    "read_text(",
+                    "Path(",
+                    "with open",
+                    "fs.readFile",
+                    "fs.read",
+                    "readFileSync",
+                    "std::fs::read",
+                    "fs::File::open",
                 )
                 has_io = any(api in line for api in io_apis)
                 if not has_io and (
-                    ".contains(" in line
-                    or ".includes(" in line
-                    or re.search(r"['\"](?:[^'\"]+)['\"]\s+in\s+\w", line)
+                    ".contains(" in line or ".includes(" in line or re.search(r"['\"](?:[^'\"]+)['\"]\s+in\s+\w", line)
                 ):
                     continue
                 report.critical(f"{msg}: {stripped[:80]}", file_path, line_num)
@@ -5228,11 +5376,21 @@ def check_mcp_abuse(plugin_path: Path, report: ValidationReport) -> int:
 
         # Phase 2e RC-45 — interpreter / network-tool binaries that have no
         # legitimate place in an MCP `command` field.
-        DANGEROUS_MCP_COMMANDS = frozenset({
-            "socat", "ncat", "nc", "netcat",
-            "php", "ruby", "perl", "lua",
-            "telnet", "rsh", "ssh-keyscan",
-        })
+        DANGEROUS_MCP_COMMANDS = frozenset(
+            {
+                "socat",
+                "ncat",
+                "nc",
+                "netcat",
+                "php",
+                "ruby",
+                "perl",
+                "lua",
+                "telnet",
+                "rsh",
+                "ssh-keyscan",
+            }
+        )
 
         for name, config in servers.items():
             if not isinstance(config, dict):
@@ -5325,8 +5483,10 @@ def check_permission_escalation(plugin_path: Path, report: ValidationReport) -> 
                             )
                             issues_found += 1
                         # Phase 2e RC-61 — TLS-bypass env vars
-                        if "node_tls_reject_unauthorized" in fm_normalized.replace(":", "") or \
-                           "pythonhttpsverify=0" in fm_normalized:
+                        if (
+                            "node_tls_reject_unauthorized" in fm_normalized.replace(":", "")
+                            or "pythonhttpsverify=0" in fm_normalized
+                        ):
                             report.major(
                                 "RC-61: agent declares TLS-bypass env var (NODE_TLS_REJECT_UNAUTHORIZED / "
                                 "PYTHONHTTPSVERIFY) — disables certificate validation",
@@ -5596,9 +5756,7 @@ def scan_one_target(
         return scan_all_files(target, report)
 
     def _alarm_handler(_signum: int, _frame: object) -> None:
-        raise TimeoutError(
-            f"scan_one_target({target}) exceeded {timeout_seconds}s"
-        )
+        raise TimeoutError(f"scan_one_target({target}) exceeded {timeout_seconds}s")
 
     prev_handler = _signal.signal(_signal.SIGALRM, _alarm_handler)
     _signal.alarm(timeout_seconds)
@@ -5730,7 +5888,8 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
 
     try:
         result = subprocess.run(
-            launcher + [
+            launcher
+            + [
                 "check",
                 str(plugin_path),
                 "-t",
@@ -5865,11 +6024,7 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
                 # (file directly under /commands/). Only these are
                 # the model's instruction surface — everything
                 # else is doc.
-                is_executable_md = (
-                    f_basename == "skill.md"
-                    or _md_is_agent_body(f_norm)
-                    or _md_is_command_body(f_norm)
-                )
+                is_executable_md = f_basename == "skill.md" or _md_is_agent_body(f_norm) or _md_is_command_body(f_norm)
                 if not is_executable_md:
                     continue
 
@@ -5878,12 +6033,7 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
             # `RegExp(`), the literal-string match cc-audit fired on is
             # a detector body, not real-world payload. Same logic as our
             # internal gitleaks/trufflehog/credential-harvest skip.
-            if (
-                file_ref
-                and isinstance(line, int)
-                and line > 0
-                and _line_is_pattern_definition(file_ref, line)
-            ):
+            if file_ref and isinstance(line, int) and line > 0 and _line_is_pattern_definition(file_ref, line):
                 continue
 
             # v2.46 — also skip cc-audit findings on REPORT-STATUS lines
@@ -5893,12 +6043,7 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
             # the validator just checked — the literal string contains
             # the rule name as part of the description. The validator's
             # OWN status output is not a payload.
-            if (
-                file_ref
-                and isinstance(line, int)
-                and line > 0
-                and _line_is_status_report_message(file_ref, line)
-            ):
+            if file_ref and isinstance(line, int) and line > 0 and _line_is_status_report_message(file_ref, line):
                 continue
 
             cpv_level = severity_map.get(severity, "warning")
@@ -6037,10 +6182,13 @@ def check_tirith_scanner(plugin_path: Path, report: ValidationReport) -> int:
     if mode == "docker":
         # Insert the bind-mount BEFORE the image name (-v image is wrong).
         # prefix is ["docker", "run", "--rm", "-i", TIRITH_IMAGE]
-        cmd = (
-            ["docker", "run", "--rm", "-v", f"{plugin_path}:/scan:ro", TIRITH_IMAGE]
-            + ["scan", "/scan", "--format", "json", "--ci"]
-        )
+        cmd = ["docker", "run", "--rm", "-v", f"{plugin_path}:/scan:ro", TIRITH_IMAGE] + [
+            "scan",
+            "/scan",
+            "--format",
+            "json",
+            "--ci",
+        ]
     else:
         cmd = prefix + ["scan", str(plugin_path), "--format", "json", "--ci"]
 
@@ -6118,11 +6266,7 @@ def check_tirith_scanner(plugin_path: Path, report: ValidationReport) -> int:
         if not isinstance(finding, dict):
             continue
         sev_raw = (
-            finding.get("severity")
-            or finding.get("level")
-            or finding.get("verdict")
-            or finding.get("kind")
-            or "warn"
+            finding.get("severity") or finding.get("level") or finding.get("verdict") or finding.get("kind") or "warn"
         )
         sev = str(sev_raw).strip().lower()
         cpv_level = severity_map.get(sev, "warning")
@@ -6201,12 +6345,25 @@ def check_tirith_scanner(plugin_path: Path, report: ValidationReport) -> int:
 # only — patterns and helpers come from the common module.
 
 
-_LOCKFILE_BASENAMES = frozenset({
-    "uv.lock", "pipfile.lock", "poetry.lock", "pdm.lock",
-    "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
-    "cargo.lock", "gemfile.lock", "composer.lock", "mix.lock",
-    "go.sum", "deno.lock", "bun.lock", "bun.lockb",
-})
+_LOCKFILE_BASENAMES = frozenset(
+    {
+        "uv.lock",
+        "pipfile.lock",
+        "poetry.lock",
+        "pdm.lock",
+        "package-lock.json",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+        "cargo.lock",
+        "gemfile.lock",
+        "composer.lock",
+        "mix.lock",
+        "go.sum",
+        "deno.lock",
+        "bun.lock",
+        "bun.lockb",
+    }
+)
 
 
 def is_lockfile(file_path: str) -> bool:
@@ -6299,7 +6456,8 @@ def check_phase1_unicode_rules(plugin_path: Path, report: ValidationReport) -> i
             level = effective_severity("major", rel_path)
             getattr(report, level)(
                 f"RC-09: zero-width Unicode at line {line_no} ({desc})",
-                rel_path, line_no,
+                rel_path,
+                line_no,
             )
             issues += 1
 
@@ -6310,7 +6468,8 @@ def check_phase1_unicode_rules(plugin_path: Path, report: ValidationReport) -> i
             level = effective_severity("critical", rel_path)
             getattr(report, level)(
                 f"RC-10: TAG character {codepoint} at line {line_no} (AsciiSmuggler vector)",
-                rel_path, line_no,
+                rel_path,
+                line_no,
             )
             issues += 1
 
@@ -6352,7 +6511,8 @@ def check_phase1_unicode_rules(plugin_path: Path, report: ValidationReport) -> i
                     level = effective_severity("critical", rel_path, rule_id="RC-11")
                     getattr(report, level)(
                         f"RC-11: mixed-script identifier '{token}' at line {line_no} ({reason})",
-                        rel_path, line_no,
+                        rel_path,
+                        line_no,
                     )
                     issues += 1
                     break  # one finding per line is enough
@@ -6391,8 +6551,12 @@ def check_phase1_credential_rules(plugin_path: Path, report: ValidationReport) -
                     # demote (LIKELY_FP → MINOR) instead of suppressing.
                     if _CLASSIFIER_ACTIVE:
                         severity, _note = _classifier_decision(
-                            "RC-21", "major", line, surrounding_classifier,
-                            _file_role_from_path(rel_path), rel_path,
+                            "RC-21",
+                            "major",
+                            line,
+                            surrounding_classifier,
+                            _file_role_from_path(rel_path),
+                            rel_path,
                         )
                         if severity is None:
                             break
@@ -6404,7 +6568,8 @@ def check_phase1_credential_rules(plugin_path: Path, report: ValidationReport) -
                         level = effective_severity("major", rel_path, rule_id="RC-21")
                     getattr(report, level)(
                         f"RC-21: bulk env-var harvest at line {line_no}",
-                        rel_path, line_no,
+                        rel_path,
+                        line_no,
                     )
                     issues += 1
                     break
@@ -6429,7 +6594,8 @@ def check_phase1_supply_chain_rules(plugin_path: Path, report: ValidationReport)
             level = effective_severity("critical", rel_path)
             getattr(report, level)(
                 "RC-29: Python .pth file contains executable lines (import/exec) — runs at every interpreter startup",
-                rel_path, 1,
+                rel_path,
+                1,
             )
             issues += 1
 
@@ -6449,7 +6615,8 @@ def check_phase1_supply_chain_rules(plugin_path: Path, report: ValidationReport)
                     level = effective_severity("critical", rel_path, rule_id="RC-37")
                     getattr(report, level)(
                         f"RC-37: GTFOBin/LOLBin pattern at line {line_no}: {m.group(0)[:80]}",
-                        rel_path, line_no,
+                        rel_path,
+                        line_no,
                     )
                     issues += 1
                     break
@@ -6461,7 +6628,8 @@ def check_phase1_supply_chain_rules(plugin_path: Path, report: ValidationReport)
                     level = effective_severity("critical", rel_path)
                     getattr(report, level)(
                         f"RC-67: cryptomining indicator at line {line_no}: {m.group(0)[:80]}",
-                        rel_path, line_no,
+                        rel_path,
+                        line_no,
                     )
                     issues += 1
                     break
@@ -6485,7 +6653,8 @@ def check_phase1_evasion_rules(plugin_path: Path, report: ValidationReport) -> i
                     level = effective_severity("critical", rel_path)
                     getattr(report, level)(
                         f"RC-43: time-bomb / conditional-activation at line {line_no}",
-                        rel_path, line_no,
+                        rel_path,
+                        line_no,
                     )
                     issues += 1
                     break
@@ -6527,7 +6696,8 @@ def check_phase1_mcp_rules(plugin_path: Path, report: ValidationReport) -> int:
                         getattr(report, level)(
                             f"RC-47: MCP server '{server_name}' sets dangerous env var {key} — "
                             f"RCE on config load via dynamic-loader / runtime-hook hijack",
-                            rel_path, 0,
+                            rel_path,
+                            0,
                         )
                         issues += 1
 
@@ -6544,7 +6714,8 @@ def check_phase1_mcp_rules(plugin_path: Path, report: ValidationReport) -> int:
                             getattr(report, level)(
                                 f"RC-49: MCP tool '{tool.get('name', '?')}' description contains "
                                 f"prompt-injection signature — consider /cpv-semantic-validation for LLM judgment",
-                                rel_path, 0,
+                                rel_path,
+                                0,
                             )
                             issues += 1
                             break
@@ -6557,7 +6728,8 @@ def check_phase1_mcp_rules(plugin_path: Path, report: ValidationReport) -> int:
                         getattr(report, level)(
                             f"RC-50: MCP tool name '{tool_name}' shadows Claude Code built-in '{builtin}' "
                             f"— impersonation vector",
-                            rel_path, 0,
+                            rel_path,
+                            0,
                         )
                         issues += 1
     return issues
@@ -6591,6 +6763,7 @@ def check_phase10_taint(plugin_path: Path, report: ValidationReport) -> int:
              interrupt the chain
     """
     from cpv_taint_engine import analyze_plugin  # local — keeps cold path cheap
+
     issues = 0
     findings_by_file = analyze_plugin(plugin_path)
     for file_path, findings in findings_by_file.items():
@@ -6602,28 +6775,72 @@ def check_phase10_taint(plugin_path: Path, report: ValidationReport) -> int:
             severity = "major" if f.rule_id == "RC-73" else "minor"
             level = effective_severity(severity, rel_path, rule_id=f.rule_id)
             getattr(report, level)(
-                f"{f.rule_id}: tainted '{f.var_name}' from {f.source} reaches "
-                f"{f.sink} (hop_count={f.hop_count})",
-                rel_path, f.line,
+                f"{f.rule_id}: tainted '{f.var_name}' from {f.source} reaches {f.sink} (hop_count={f.hop_count})",
+                rel_path,
+                f.line,
             )
             issues += 1
     return issues
 
 
 _RC76_SOURCE_EXTENSIONS = (
-    ".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
-    ".go", ".rs", ".java", ".kt", ".swift", ".m", ".mm",
-    ".c", ".cc", ".cpp", ".cxx", ".h", ".hpp",
-    ".rb", ".php", ".cs", ".scala", ".clj", ".ex", ".exs",
-    ".sh", ".bash", ".zsh", ".fish", ".ps1",
+    ".py",
+    ".pyi",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".mjs",
+    ".cjs",
+    ".go",
+    ".rs",
+    ".java",
+    ".kt",
+    ".swift",
+    ".m",
+    ".mm",
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cxx",
+    ".h",
+    ".hpp",
+    ".rb",
+    ".php",
+    ".cs",
+    ".scala",
+    ".clj",
+    ".ex",
+    ".exs",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".fish",
+    ".ps1",
 )
-_RC76_CHANGELOG_BASENAMES = frozenset({
-    "changelog.md", "changelog.markdown", "changelog.txt", "changelog.rst",
-    "changes.md", "changes.markdown", "changes.txt", "changes.rst",
-    "history.md", "history.markdown", "history.txt", "history.rst",
-    "news.md", "news.markdown", "news.txt", "news.rst",
-    "releasenotes.md", "release_notes.md", "release-notes.md",
-})
+_RC76_CHANGELOG_BASENAMES = frozenset(
+    {
+        "changelog.md",
+        "changelog.markdown",
+        "changelog.txt",
+        "changelog.rst",
+        "changes.md",
+        "changes.markdown",
+        "changes.txt",
+        "changes.rst",
+        "history.md",
+        "history.markdown",
+        "history.txt",
+        "history.rst",
+        "news.md",
+        "news.markdown",
+        "news.txt",
+        "news.rst",
+        "releasenotes.md",
+        "release_notes.md",
+        "release-notes.md",
+    }
+)
 
 # v2.46 FP-L — Plain-config / ignore-pattern files. These are read
 # by the harness or build tools as config, never by the LLM as
@@ -6631,41 +6848,43 @@ _RC76_CHANGELOG_BASENAMES = frozenset({
 # here because words like `secret`, `leak`, `ignore`, `rules`,
 # `forget` appear legitimately in comments / patterns
 # (`# secrets that leaked into logs`, `*.rules`, `forget-me-not/`).
-_RC76_NON_AI_CONFIG_BASENAMES = frozenset({
-    ".gitignore",
-    ".dockerignore",
-    ".npmignore",
-    ".eslintignore",
-    ".prettierignore",
-    ".gcloudignore",
-    ".helmignore",
-    ".gitattributes",
-    ".editorconfig",
-    ".env.example",
-    ".env.sample",
-    ".env.template",
-    "license",
-    "license.md",
-    "license.txt",
-    "license.rst",
-    "licence",
-    "licence.md",
-    "licence.txt",
-    "copying",
-    "copying.txt",
-    "notice",
-    "notice.txt",
-    "authors",
-    "authors.md",
-    "authors.txt",
-    "contributors",
-    "contributors.md",
-    "contributors.txt",
-    "code_of_conduct.md",
-    "code-of-conduct.md",
-    "contributing.md",
-    "security.md",
-})
+_RC76_NON_AI_CONFIG_BASENAMES = frozenset(
+    {
+        ".gitignore",
+        ".dockerignore",
+        ".npmignore",
+        ".eslintignore",
+        ".prettierignore",
+        ".gcloudignore",
+        ".helmignore",
+        ".gitattributes",
+        ".editorconfig",
+        ".env.example",
+        ".env.sample",
+        ".env.template",
+        "license",
+        "license.md",
+        "license.txt",
+        "license.rst",
+        "licence",
+        "licence.md",
+        "licence.txt",
+        "copying",
+        "copying.txt",
+        "notice",
+        "notice.txt",
+        "authors",
+        "authors.md",
+        "authors.txt",
+        "contributors",
+        "contributors.md",
+        "contributors.txt",
+        "code_of_conduct.md",
+        "code-of-conduct.md",
+        "contributing.md",
+        "security.md",
+    }
+)
 
 # Vendored / cached / build-output directories that contain code the plugin
 # does NOT own. Every external scanner (trufflehog, gitleaks, semgrep,
@@ -6674,28 +6893,40 @@ _RC76_NON_AI_CONFIG_BASENAMES = frozenset({
 # time. CPV's own scan loops use `get_gitignore_filter` which already
 # drops these paths; the external scanners do not, so we post-filter
 # their output. v2.43.
-_VENDORED_DEP_DIR_PARTS = frozenset({
-    "node_modules",
-    ".venv", "venv", "env", ".env",
-    "site-packages",
-    "__pycache__",
-    ".pnpm-store", ".yarn",
-    "vendor",
-    "dist", "build",
-    ".tox", ".pytest_cache", ".mypy_cache", ".ruff_cache",
-    ".git",
-    "target",
-    # v2.46 — MCP server cache directories. These are local symbol/
-    # index caches written by Serena, Grepika, etc. Not part of the
-    # plugin's source tree. Pickled symbol tables routinely contain
-    # high-entropy strings that look like API keys to gitleaks.
-    ".serena", ".grepika",
-    # v2.46 — IDE caches (vscode-server only — `.vscode/` may carry
-    # plugin-author settings the user wants reviewed).
-    ".idea", ".vscode-server",
-    # v2.46 — Python uv-managed cache.
-    ".uv-cache",
-})
+_VENDORED_DEP_DIR_PARTS = frozenset(
+    {
+        "node_modules",
+        ".venv",
+        "venv",
+        "env",
+        ".env",
+        "site-packages",
+        "__pycache__",
+        ".pnpm-store",
+        ".yarn",
+        "vendor",
+        "dist",
+        "build",
+        ".tox",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".git",
+        "target",
+        # v2.46 — MCP server cache directories. These are local symbol/
+        # index caches written by Serena, Grepika, etc. Not part of the
+        # plugin's source tree. Pickled symbol tables routinely contain
+        # high-entropy strings that look like API keys to gitleaks.
+        ".serena",
+        ".grepika",
+        # v2.46 — IDE caches (vscode-server only — `.vscode/` may carry
+        # plugin-author settings the user wants reviewed).
+        ".idea",
+        ".vscode-server",
+        # v2.46 — Python uv-managed cache.
+        ".uv-cache",
+    }
+)
 
 
 def _is_vendored_dep_path(file_path: str) -> bool:
@@ -6710,8 +6941,7 @@ def _is_vendored_dep_path(file_path: str) -> bool:
     if not file_path:
         return False
     normalized = file_path.replace("\\", "/").lower()
-    return any(f"/{part}/" in normalized or normalized.startswith(f"{part}/")
-               for part in _VENDORED_DEP_DIR_PARTS)
+    return any(f"/{part}/" in normalized or normalized.startswith(f"{part}/") for part in _VENDORED_DEP_DIR_PARTS)
 
 
 def _rc76_is_source_code_file(rel_path: str) -> bool:
@@ -6764,7 +6994,18 @@ def _rc76_is_security_audit_role(rel_path: str) -> bool:
     """
     rel = rel_path.lower().replace("\\", "/")
     # Tokenize the path on `/` and `-`/`_` boundaries.
-    role_keywords = ("security", "audit", "review", "vulnerability", "vulnerabilities", "owasp", "threat", "pentest", "exploit", "harden")
+    role_keywords = (
+        "security",
+        "audit",
+        "review",
+        "vulnerability",
+        "vulnerabilities",
+        "owasp",
+        "threat",
+        "pentest",
+        "exploit",
+        "harden",
+    )
     parts = re.split(r"[/_-]", rel)
     return any(kw in part for kw in role_keywords for part in parts)
 
@@ -6907,13 +7148,15 @@ def check_phase9_stemmed_injection(plugin_path: Path, report: ValidationReport) 
                 # file role and the line, returning DEFINITE_FP for source
                 # extensions and REAL otherwise.
                 content_lines = _split_lines(content)
-                line_text = (
-                    content_lines[line_no - 1] if 0 <= line_no - 1 < len(content_lines) else ""
-                )
+                line_text = content_lines[line_no - 1] if 0 <= line_no - 1 < len(content_lines) else ""
                 surrounding = _surrounding_lines(content_lines, line_no - 1, window=2)
                 new_severity, _note = _classifier_decision(
-                    "RC-76", "major", line_text, surrounding,
-                    _file_role_from_path(rel_path), rel_path,
+                    "RC-76",
+                    "major",
+                    line_text,
+                    surrounding,
+                    _file_role_from_path(rel_path),
+                    rel_path,
                 )
                 if new_severity is None:
                     continue
@@ -6951,9 +7194,7 @@ def check_phase9_stemmed_injection(plugin_path: Path, report: ValidationReport) 
                 # signal that distinguishes real prompt-injection from
                 # mere vocabulary co-occurrence.
                 line_text = (
-                    content_lines_for_check[line_no - 1]
-                    if 0 <= line_no - 1 < len(content_lines_for_check)
-                    else ""
+                    content_lines_for_check[line_no - 1] if 0 <= line_no - 1 < len(content_lines_for_check) else ""
                 )
                 # Build a 200-char window centered on the match
                 window_start = max(0, char_offset - 100)
@@ -6965,7 +7206,8 @@ def check_phase9_stemmed_injection(plugin_path: Path, report: ValidationReport) 
             getattr(report, level)(
                 f"RC-76: stemmed prompt-injection signal — {len(stems)} trigger stems "
                 f"({', '.join(stems[:5])}) within 80-char window",
-                rel_path, line_no,
+                rel_path,
+                line_no,
             )
             issues += 1
     return issues
@@ -6999,8 +7241,12 @@ def check_phase4_all(plugin_path: Path, report: ValidationReport) -> int:
                 if _CLASSIFIER_ACTIVE and rule_id == "RC-87":
                     surrounding = _surrounding_lines(content_lines, line_no - 1, window=4)
                     new_severity, _note = _classifier_decision(
-                        rule_id, severity.lower(), line, surrounding,
-                        _file_role_from_path(rel_path), rel_path,
+                        rule_id,
+                        severity.lower(),
+                        line,
+                        surrounding,
+                        _file_role_from_path(rel_path),
+                        rel_path,
                     )
                     if new_severity is None:
                         continue
@@ -7034,7 +7280,8 @@ def check_phase4_all(plugin_path: Path, report: ValidationReport) -> int:
                     # quoting link-local IPs is still notable.
                 getattr(report, level)(
                     f"{rule_id}: {msg.split(': ', 1)[-1] if ': ' in msg else msg} (line {line_no})",
-                    rel_path, line_no,
+                    rel_path,
+                    line_no,
                 )
                 issues += 1
 
@@ -7116,8 +7363,12 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                 if _CLASSIFIER_ACTIVE and rule_id in ("RC-22", "RC-93"):
                     surrounding = _surrounding_lines(content_lines, line_no - 1, window=4)
                     new_severity, _note = _classifier_decision(
-                        rule_id, severity.lower(), line, surrounding,
-                        _file_role_from_path(rel_path), rel_path,
+                        rule_id,
+                        severity.lower(),
+                        line,
+                        surrounding,
+                        _file_role_from_path(rel_path),
+                        rel_path,
                     )
                     if new_severity is None:
                         continue
@@ -7198,10 +7449,7 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                     if (
                         rule_id in ("RC-02", "RC-03")
                         and rel_path.lower().endswith(".py")
-                        and (
-                            _is_python_string_context(line.strip())
-                            or line_no in py_docstring_lines
-                        )
+                        and (_is_python_string_context(line.strip()) or line_no in py_docstring_lines)
                     ):
                         continue
                     # v2.48 P2 — RC-02 prose-conditional inside a markdown
@@ -7213,7 +7461,9 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                     # etc.). Real prompt-injection lives in agent bodies
                     # without doc-role headings.
                     if rule_id == "RC-02" and _rc02_is_md_doc_role_section(
-                        rel_path, content_lines, line_no - 1,
+                        rel_path,
+                        content_lines,
+                        line_no - 1,
                     ):
                         continue
                     # v2.46 FP-D — RC-63 fires on the literal phrase
@@ -7237,15 +7487,28 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                     # We check the simpler conditions only, matching what the
                     # cluster of FPs in the wild looks like.
                     if rule_id == "RC-63":
-                        if any(api in line for api in (
-                            "add_argument(", "add_option(", "click.option(",
-                            "click.argument(", "typer.option(", "typer.argument(",
-                        )):
+                        if any(
+                            api in line
+                            for api in (
+                                "add_argument(",
+                                "add_option(",
+                                "click.option(",
+                                "click.argument(",
+                                "typer.option(",
+                                "typer.argument(",
+                            )
+                        ):
                             continue
-                        if any(kw in line for kw in (
-                            "help=", "description=", "usage=", "epilog=",
-                            "metavar=",
-                        )):
+                        if any(
+                            kw in line
+                            for kw in (
+                                "help=",
+                                "description=",
+                                "usage=",
+                                "epilog=",
+                                "metavar=",
+                            )
+                        ):
                             continue
                         if line.lstrip().startswith("#"):
                             continue
@@ -7271,9 +7534,7 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                         # document a `--force`/`--yes` flag (e.g.
                         # `| --force | No | Skip confirmation prompt |`).
                         # Reuse the existing markdown-table helper.
-                        if _rc93_is_markdown_table_row(line) and re.search(
-                            r"--[a-z][a-z0-9-]+", line, re.IGNORECASE
-                        ):
+                        if _rc93_is_markdown_table_row(line) and re.search(r"--[a-z][a-z0-9-]+", line, re.IGNORECASE):
                             continue
                         # v2.48 P1 — markdown bullet inside an anti-pattern
                         # / DO-NOT block describes a behaviour the persona
@@ -7283,7 +7544,9 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                         # negation-marker stem. See
                         # `_rc63_is_markdown_anti_pattern_bullet`.
                         if _rc63_is_markdown_anti_pattern_bullet(
-                            rel_path, content_lines, line_no - 1,
+                            rel_path,
+                            content_lines,
+                            line_no - 1,
                         ):
                             continue
                     level = effective_severity(severity.lower(), rel_path, rule_id=rule_id)
@@ -7299,7 +7562,8 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                         level = "minor"
                 getattr(report, level)(
                     f"{rule_id}: {msg.split(': ', 1)[-1] if ': ' in msg else msg} (line {line_no})",
-                    rel_path, line_no,
+                    rel_path,
+                    line_no,
                 )
                 issues += 1
                 # Keep going — multiple Phase 3 rules can match a single line
@@ -7314,13 +7578,21 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
     # manifests the plugin author actually maintains.
     _RC30_SKIP_DIR_PARTS = {
         "node_modules",
-        ".venv", "venv", "env", ".env",
+        ".venv",
+        "venv",
+        "env",
+        ".env",
         "site-packages",
         "__pycache__",
-        ".pnpm-store", ".yarn",
+        ".pnpm-store",
+        ".yarn",
         "vendor",
-        "dist", "build",
-        ".tox", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+        "dist",
+        "build",
+        ".tox",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
         ".git",
     }
     for manifest_path in list(plugin_path.rglob("package.json")) + list(plugin_path.rglob("requirements*.txt")):
@@ -7351,7 +7623,8 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                 if is_compromised_package(dep_name, dep_ver if isinstance(dep_ver, str) else None):
                     report.critical(
                         f"RC-33: dependency '{dep_name}' (version {dep_ver}) is in the compromised-package list",
-                        rel, 0,
+                        rel,
+                        0,
                     )
                     issues += 1
                 is_squat, target = is_typosquat(dep_name, ecosystem)
@@ -7359,7 +7632,8 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                     report.major(
                         f"RC-30: dependency '{dep_name}' is Levenshtein ≤1 from top-100 package '{target}' "
                         f"(possible typosquat)",
-                        rel, 0,
+                        rel,
+                        0,
                     )
                     issues += 1
         else:  # pypi requirements.txt
@@ -7373,7 +7647,9 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                     continue
                 if is_compromised_package(name):
                     report.critical(
-                        f"RC-33: dependency '{name}' is in the compromised-package list", rel, 0,
+                        f"RC-33: dependency '{name}' is in the compromised-package list",
+                        rel,
+                        0,
                     )
                     issues += 1
                 is_squat, target = is_typosquat(name, "pypi")
@@ -7381,7 +7657,8 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                     report.major(
                         f"RC-30: dependency '{name}' is Levenshtein ≤1 from top-100 package '{target}' "
                         f"(possible typosquat)",
-                        rel, 0,
+                        rel,
+                        0,
                     )
                     issues += 1
     return issues
@@ -7410,8 +7687,12 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
                     # the hood and adds the four-tier verdict ladder.
                     if _CLASSIFIER_ACTIVE:
                         new_severity, _note = _classifier_decision(
-                            "RC-65", "major", line, surrounding,
-                            _file_role_from_path(rel_path), rel_path,
+                            "RC-65",
+                            "major",
+                            line,
+                            surrounding,
+                            _file_role_from_path(rel_path),
+                            rel_path,
                         )
                         if new_severity is None:
                             break
@@ -7423,7 +7704,8 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
                         level = effective_severity("major", rel_path)
                     getattr(report, level)(
                         f"RC-65: cloud IMDS endpoint at line {line_no}: {m.group(0)}",
-                        rel_path, line_no,
+                        rel_path,
+                        line_no,
                     )
                     issues += 1
                     break
@@ -7442,7 +7724,8 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
                     level = effective_severity("major", rel_path)
                     getattr(report, level)(
                         f"RC-39: persistence pattern at line {line_no}: {m.group(0)[:80]}",
-                        rel_path, line_no,
+                        rel_path,
+                        line_no,
                     )
                     issues += 1
                     break
@@ -7487,8 +7770,12 @@ def check_trufflehog(plugin_path: Path, report: ValidationReport) -> int:
     try:
         result = subprocess.run(
             [
-                "trufflehog", "filesystem", str(plugin_path),
-                "--json", "--no-update", "--fail",
+                "trufflehog",
+                "filesystem",
+                str(plugin_path),
+                "--json",
+                "--no-update",
+                "--fail",
                 f"--concurrency={truffle_concurrency}",
             ],
             capture_output=True,
@@ -7569,7 +7856,8 @@ def check_trufflehog(plugin_path: Path, report: ValidationReport) -> int:
         level = effective_severity(base_level, rel)
         getattr(report, level)(
             f"trufflehog {'VERIFIED' if verified else 'UNVERIFIED'} secret: detector={detector}",
-            rel, line_no,
+            rel,
+            line_no,
         )
         issues += 1
 
@@ -7595,9 +7883,19 @@ def check_semgrep(plugin_path: Path, report: ValidationReport) -> int:
     issues = 0
     try:
         result = subprocess.run(
-            ["semgrep", "--config", "p/security-audit", "--config", "p/secrets",
-             "--json", "--quiet", "--no-rewrite-rule-ids",
-             "--metrics", "off", str(plugin_path)],
+            [
+                "semgrep",
+                "--config",
+                "p/security-audit",
+                "--config",
+                "p/secrets",
+                "--json",
+                "--quiet",
+                "--no-rewrite-rule-ids",
+                "--metrics",
+                "off",
+                str(plugin_path),
+            ],
             capture_output=True,
             text=True,
             timeout=300,
@@ -7742,11 +8040,10 @@ def validate_security(
     # that monkeypatch ``shutil.which`` / ``subprocess.run`` globally.
     # The test suite still exercises ensure_fclones() directly via
     # test_cpv_install_scanners.py.
-    if not os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get(
-        "CPV_NO_FCLONES_INSTALL"
-    ):
+    if not os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get("CPV_NO_FCLONES_INSTALL"):
         try:
             from cpv_install_scanners import ensure_fclones  # noqa: PLC0415
+
             ensure_fclones()
         except (ImportError, OSError, RuntimeError):
             # Defensive: never let the install module raise into the scan path.
@@ -7755,14 +8052,12 @@ def validate_security(
     # Verify plugin path exists
     if not plugin_path.exists():
         report.critical(f"Plugin path does not exist: {plugin_path}")
-        _record_step(0, "Validate target path", "FAILED",
-                     details=f"Path does not exist: {plugin_path}")
+        _record_step(0, "Validate target path", "FAILED", details=f"Path does not exist: {plugin_path}")
         return report
 
     if not plugin_path.is_dir():
         report.critical(f"Plugin path is not a directory: {plugin_path}")
-        _record_step(0, "Validate target path", "FAILED",
-                     details=f"Path is not a directory: {plugin_path}")
+        _record_step(0, "Validate target path", "FAILED", details=f"Path is not a directory: {plugin_path}")
         return report
 
     # Detect whether the target IS the CPV plugin itself (any deployment
@@ -7795,17 +8090,19 @@ def validate_security(
     dangerous_count = check_dangerous_files(plugin_path, report)
     if dangerous_count == 0:
         report.passed("No dangerous files detected")
-    _record_step(1, "Dangerous file detection", "COMPLETED",
-                 findings=dangerous_count,
-                 files=".env / credentials.json / .ssh/ etc.")
+    _record_step(
+        1,
+        "Dangerous file detection",
+        "COMPLETED",
+        findings=dangerous_count,
+        files=".env / credentials.json / .ssh/ etc.",
+    )
 
     # Check 2: Script permissions
     permission_issues = check_script_permissions(plugin_path, report)
     if permission_issues == 0:
         report.passed("All scripts have proper permissions")
-    _record_step(2, "Script permission check", "COMPLETED",
-                 findings=permission_issues,
-                 files="*.sh / *.py executables")
+    _record_step(2, "Script permission check", "COMPLETED", findings=permission_issues, files="*.sh / *.py executables")
 
     # Check 3-11: Full content scan (traditional + AI-specific)
     scan_stats = scan_all_files(plugin_path, report)
@@ -7823,10 +8120,9 @@ def validate_security(
     oversize_skipped = scan_stats.get("oversize_skipped", 0)
     files_summary = (
         f"{files_scanned} scanned, {files_skipped} skipped"
-        + (f" ({oversize_skipped} oversize > {MAX_SCAN_BYTES // (1024*1024)} MiB)"
-           if oversize_skipped else "")
+        + (f" ({oversize_skipped} oversize > {MAX_SCAN_BYTES // (1024 * 1024)} MiB)" if oversize_skipped else "")
         + f"; +{ide_stats['files_scanned']} IDE configs scanned"
-        + (f", {ide_stats['files_skipped']} skipped" if ide_stats['files_skipped'] else "")
+        + (f", {ide_stats['files_skipped']} skipped" if ide_stats["files_skipped"] else "")
     )
     report.info(f"Scanned {files_scanned} files, skipped {files_skipped} ({files_summary})")
 
@@ -7843,27 +8139,36 @@ def validate_security(
     # Record per-scanner step status. scan_all_files dispatches to 9
     # scanners on the same content; we report each as its own step so
     # the operator sees coverage per category.
-    _record_step(3,  "Injection scan",          "COMPLETED",
-                 findings=scan_stats["injection_issues"],         files=files_summary)
-    _record_step(4,  "Path-traversal scan",     "COMPLETED",
-                 findings=scan_stats["path_traversal_issues"],    files=files_summary)
-    _record_step(5,  "Secret scan",             "COMPLETED",
-                 findings=scan_stats["secret_issues"],            files=files_summary)
-    _record_step(6,  "User-path scan",          "COMPLETED",
-                 findings=scan_stats["user_path_issues"],         files=files_summary)
-    _record_step(7,  "Prompt-injection scan",   "COMPLETED",
-                 findings=scan_stats["prompt_injection_issues"],  files=files_summary)
-    _record_step(8,  "Data-exfiltration scan",  "COMPLETED",
-                 findings=scan_stats["exfiltration_issues"],      files=files_summary)
-    _record_step(9,  "Supply-chain scan",       "COMPLETED",
-                 findings=scan_stats["supply_chain_issues"],      files=files_summary)
-    _record_step(10, "Credential-harvest scan", "COMPLETED",
-                 findings=scan_stats["credential_harvest_issues"], files=files_summary)
-    _record_step(11, "Sandbox-escape scan",     "COMPLETED",
-                 findings=scan_stats["sandbox_escape_issues"],    files=files_summary)
-    _record_step(12, "IDE-config scan",         "COMPLETED",
-                 findings=ide_stats["secret_issues"],
-                 files=f"{ide_stats['files_scanned']} scanned, {ide_stats['files_skipped']} skipped")
+    _record_step(3, "Injection scan", "COMPLETED", findings=scan_stats["injection_issues"], files=files_summary)
+    _record_step(
+        4, "Path-traversal scan", "COMPLETED", findings=scan_stats["path_traversal_issues"], files=files_summary
+    )
+    _record_step(5, "Secret scan", "COMPLETED", findings=scan_stats["secret_issues"], files=files_summary)
+    _record_step(6, "User-path scan", "COMPLETED", findings=scan_stats["user_path_issues"], files=files_summary)
+    _record_step(
+        7, "Prompt-injection scan", "COMPLETED", findings=scan_stats["prompt_injection_issues"], files=files_summary
+    )
+    _record_step(
+        8, "Data-exfiltration scan", "COMPLETED", findings=scan_stats["exfiltration_issues"], files=files_summary
+    )
+    _record_step(9, "Supply-chain scan", "COMPLETED", findings=scan_stats["supply_chain_issues"], files=files_summary)
+    _record_step(
+        10,
+        "Credential-harvest scan",
+        "COMPLETED",
+        findings=scan_stats["credential_harvest_issues"],
+        files=files_summary,
+    )
+    _record_step(
+        11, "Sandbox-escape scan", "COMPLETED", findings=scan_stats["sandbox_escape_issues"], files=files_summary
+    )
+    _record_step(
+        12,
+        "IDE-config scan",
+        "COMPLETED",
+        findings=ide_stats["secret_issues"],
+        files=f"{ide_stats['files_scanned']} scanned, {ide_stats['files_skipped']} skipped",
+    )
 
     # --- AI-specific file-level checks ---
 
@@ -7871,22 +8176,27 @@ def validate_security(
     hook_issues = check_hook_abuse(plugin_path, report)
     if hook_issues == 0:
         report.passed("No hook abuse patterns detected")
-    _record_step(13, "Hook-abuse scan", "COMPLETED",
-                 findings=hook_issues, files="hooks/*.json + .json hook files")
+    _record_step(13, "Hook-abuse scan", "COMPLETED", findings=hook_issues, files="hooks/*.json + .json hook files")
 
     # Check 14: MCP server abuse (non-localhost connections)
     mcp_issues = check_mcp_abuse(plugin_path, report)
     if mcp_issues == 0:
         report.passed("No MCP server abuse detected")
-    _record_step(14, "MCP-server-abuse scan", "COMPLETED",
-                 findings=mcp_issues, files=".mcp.json + plugin.json mcpServers")
+    _record_step(
+        14, "MCP-server-abuse scan", "COMPLETED", findings=mcp_issues, files=".mcp.json + plugin.json mcpServers"
+    )
 
     # Check 15: Permission escalation (overly broad permissions)
     escalation_issues = check_permission_escalation(plugin_path, report)
     if escalation_issues == 0:
         report.passed("No permission escalation detected")
-    _record_step(15, "Permission-escalation scan", "COMPLETED",
-                 findings=escalation_issues, files="settings.json + plugin.json permissions")
+    _record_step(
+        15,
+        "Permission-escalation scan",
+        "COMPLETED",
+        findings=escalation_issues,
+        files="settings.json + plugin.json permissions",
+    )
 
     # Add passed messages for clean AI-specific categories
     if scan_stats["prompt_injection_issues"] == 0:
@@ -7904,45 +8214,53 @@ def validate_security(
     phase1_issues = check_phase1_all(plugin_path, report)
     if phase1_issues == 0:
         report.passed("No Phase 1 critical-rule findings (RC-09/10/11/21/29/37/43/47/49/50/67)")
-    _record_step(16, "Phase 1 — critical RC rules", "COMPLETED",
-                 findings=phase1_issues,
-                 files="RC-09/10/11/21/29/37/43/47/49/50/67")
+    _record_step(
+        16,
+        "Phase 1 — critical RC rules",
+        "COMPLETED",
+        findings=phase1_issues,
+        files="RC-09/10/11/21/29/37/43/47/49/50/67",
+    )
 
     # --- Phase 2e extras — Cloud IMDS, persistence, obfuscated decode-then-exec ---
     phase2e_issues = check_phase2e_extras(plugin_path, report)
     if phase2e_issues == 0:
         report.passed("No Phase 2e extras findings (RC-39 persistence, RC-65 cloud IMDS, RC-70 obfuscated exec)")
-    _record_step(17, "Phase 2e — extras", "COMPLETED",
-                 findings=phase2e_issues,
-                 files="RC-39 persistence, RC-65 IMDS, RC-70 obfuscated-exec")
+    _record_step(
+        17,
+        "Phase 2e — extras",
+        "COMPLETED",
+        findings=phase2e_issues,
+        files="RC-39 persistence, RC-65 IMDS, RC-70 obfuscated-exec",
+    )
 
     # --- Phase 3 — ~30 MAJOR net-new rules ---
     phase3_issues = check_phase3_all(plugin_path, report)
     if phase3_issues == 0:
         report.passed("No Phase 3 findings (~30 MAJOR net-new rules)")
-    _record_step(18, "Phase 3 — ~30 MAJOR RC rules", "COMPLETED",
-                 findings=phase3_issues, files="~30 MAJOR rules")
+    _record_step(18, "Phase 3 — ~30 MAJOR RC rules", "COMPLETED", findings=phase3_issues, files="~30 MAJOR rules")
 
     # --- Phase 4 — Minor / informational + verdict-tier (RC-85/86/87/88/103/104) ---
     phase4_issues = check_phase4_all(plugin_path, report)
     if phase4_issues == 0:
         report.passed("No Phase 4 findings (minor/info + observability)")
-    _record_step(19, "Phase 4 — minor + observability", "COMPLETED",
-                 findings=phase4_issues, files="RC-85/86/87/88/103/104")
+    _record_step(
+        19, "Phase 4 — minor + observability", "COMPLETED", findings=phase4_issues, files="RC-85/86/87/88/103/104"
+    )
 
     # --- Phase 9 — RC-76 stemmed semantic injection classifier ---
     phase9_issues = check_phase9_stemmed_injection(plugin_path, report)
     if phase9_issues == 0:
         report.passed("No Phase 9 findings (RC-76 stemmed semantic injection)")
-    _record_step(20, "Phase 9 — stemmed semantic injection", "COMPLETED",
-                 findings=phase9_issues, files="RC-76")
+    _record_step(20, "Phase 9 — stemmed semantic injection", "COMPLETED", findings=phase9_issues, files="RC-76")
 
     # --- Phase 10 — RC-73/74/75 AST-based Python taint engine ---
     phase10_issues = check_phase10_taint(plugin_path, report)
     if phase10_issues == 0:
         report.passed("No Phase 10 findings (RC-73/74/75 taint source→sink)")
-    _record_step(21, "Phase 10 — Python taint engine", "COMPLETED",
-                 findings=phase10_issues, files="RC-73/74/75 source-sink")
+    _record_step(
+        21, "Phase 10 — Python taint engine", "COMPLETED", findings=phase10_issues, files="RC-73/74/75 source-sink"
+    )
 
     # --- RC-103 disposition — emitted as a single INFO line ---
     counts = {
@@ -7971,13 +8289,18 @@ def validate_security(
     # self-skips when the npm package cannot be fetched).
     if shutil.which("npx"):
         cc_count = check_cc_audit(plugin_path, report)
-        _record_step(22, "External: cc-audit (100+ AI rules)", "RAN",
-                     findings=cc_count,
-                     files="npx @cc-audit/cc-audit (auto-fetched)")
+        _record_step(
+            22,
+            "External: cc-audit (100+ AI rules)",
+            "RAN",
+            findings=cc_count,
+            files="npx @cc-audit/cc-audit (auto-fetched)",
+        )
     else:
         check_cc_audit(plugin_path, report)  # still emits the WARNING for the user
-        _record_step(22, "External: cc-audit (100+ AI rules)", "SKIPPED",
-                     details="`npx` not on PATH — install Node.js to enable")
+        _record_step(
+            22, "External: cc-audit (100+ AI rules)", "SKIPPED", details="`npx` not on PATH — install Node.js to enable"
+        )
 
     # Check 23: tirith external scanner (terminal-security rules,
     # scan-only). Resolution order: PATH → docker → nix → auto-install
@@ -7989,24 +8312,24 @@ def validate_security(
         # Inspect newly-added results to determine RAN vs SKIPPED.
         new_results = report.results[report_len_before:]
         unavail = any(
-            "tirith" in (r.message or "").lower() and (
-                "not found" in r.message.lower()
-                or "unavailable" in r.message.lower()
-                or "skipped" in r.message.lower()
+            "tirith" in (r.message or "").lower()
+            and (
+                "not found" in r.message.lower() or "unavailable" in r.message.lower() or "skipped" in r.message.lower()
             )
             for r in new_results
         )
         _record_step(
-            23, "External: tirith (terminal-security)",
+            23,
+            "External: tirith (terminal-security)",
             "SKIPPED" if unavail else "RAN",
             findings=tirith_count,
             files="PATH → docker → nix → auto-install" if not unavail else "",
-            details=("tirith binary unavailable — see WARNING above"
-                     if unavail else ""),
+            details=("tirith binary unavailable — see WARNING above" if unavail else ""),
         )
     else:
-        _record_step(23, "External: tirith (terminal-security)", "SKIPPED",
-                     details="enable_tirith=False (test isolation knob)")
+        _record_step(
+            23, "External: tirith (terminal-security)", "SKIPPED", details="enable_tirith=False (test isolation knob)"
+        )
 
     # Checks 24-25 — Phase 5 specialist tools (RC-102). Each invocation
     # self-skips when the binary is missing AND no install path succeeds.
@@ -8016,22 +8339,18 @@ def validate_security(
     # the detectors gitleaks shipped, with verified-credential validation.
     for step_num, name, scanner_fn, enabled, binary_hint in (
         (24, "External: trufflehog (~700 secret rules)", check_trufflehog, enable_trufflehog, "trufflehog"),
-        (25, "External: semgrep (p/security-audit)",     check_semgrep,    enable_semgrep,    "semgrep"),
+        (25, "External: semgrep (p/security-audit)", check_semgrep, enable_semgrep, "semgrep"),
     ):
         if not enabled:
-            _record_step(step_num, name, "SKIPPED",
-                         details=f"enable_{binary_hint}=False (test isolation knob)")
+            _record_step(step_num, name, "SKIPPED", details=f"enable_{binary_hint}=False (test isolation knob)")
             continue
         if not shutil.which(binary_hint):
             scanner_fn(plugin_path, report)  # let it emit the WARNING
-            _record_step(step_num, name, "SKIPPED",
-                         details=f"`{binary_hint}` not on PATH (install via brew/pipx/etc.)")
+            _record_step(step_num, name, "SKIPPED", details=f"`{binary_hint}` not on PATH (install via brew/pipx/etc.)")
             continue
         report_len_before = len(report.results)
         count = scanner_fn(plugin_path, report)
-        _record_step(step_num, name, "RAN",
-                     findings=count,
-                     files=f"{binary_hint} (PATH binary)")
+        _record_step(step_num, name, "RAN", findings=count, files=f"{binary_hint} (PATH binary)")
 
     # Check 27 — Cisco AI Defense skill-scanner via uvx remote.
     # Programmatic-only mode (no API-key engines). Self-skips when uvx
@@ -8080,10 +8399,14 @@ def validate_security(
     # available before we can run the scan.
     if not (shutil.which("skill-scanner") or shutil.which("uvx")):
         # Neither launcher available — record SKIPPED and do not even spawn the run.
-        _record_step(26, "External: Cisco AI Defense (skill-scanner)", "SKIPPED",
-                     details="neither `skill-scanner` nor `uvx` on PATH — "
-                             "run `cpv-doctor --install-scanners` or "
-                             "`pip install uv && uv tool install cisco-ai-skill-scanner`")
+        _record_step(
+            26,
+            "External: Cisco AI Defense (skill-scanner)",
+            "SKIPPED",
+            details="neither `skill-scanner` nor `uvx` on PATH — "
+            "run `cpv-doctor --install-scanners` or "
+            "`pip install uv && uv tool install cisco-ai-skill-scanner`",
+        )
     else:
         report_len_before = len(report.results)
         cisco_result = run_cisco_scan(plugin_path)
@@ -8093,18 +8416,18 @@ def validate_security(
         # the WARNING messages run_cisco_scan / report_findings emit.
         unavail = any(
             ("cisco" in (r.message or "").lower() or "skill-scanner" in (r.message or "").lower())
-            and ("unavailable" in r.message.lower() or "not found" in r.message.lower()
-                 or "skipped" in r.message.lower() or "failed to resolve" in r.message.lower())
+            and (
+                "unavailable" in r.message.lower()
+                or "not found" in r.message.lower()
+                or "skipped" in r.message.lower()
+                or "failed to resolve" in r.message.lower()
+            )
             for r in new_results
         )
         timed_out = any(
-            "timeout" in (r.message or "").lower() and "cisco" in (r.message or "").lower()
-            for r in new_results
+            "timeout" in (r.message or "").lower() and "cisco" in (r.message or "").lower() for r in new_results
         )
-        cisco_findings = sum(
-            1 for r in new_results
-            if r.level in ("CRITICAL", "MAJOR", "MINOR", "NIT")
-        )
+        cisco_findings = sum(1 for r in new_results if r.level in ("CRITICAL", "MAJOR", "MINOR", "NIT"))
         if timed_out:
             status = "FAILED"
             details = "Cisco scanner timed out (override CPV_CISCO_SCAN_TIMEOUT_S)"
@@ -8114,10 +8437,14 @@ def validate_security(
         else:
             status = "RAN"
             details = ""
-        _record_step(26, "External: Cisco AI Defense (skill-scanner)", status,
-                     findings=cisco_findings,
-                     files="uvx --from cisco-ai-skill-scanner" if status == "RAN" else "",
-                     details=details)
+        _record_step(
+            26,
+            "External: Cisco AI Defense (skill-scanner)",
+            status,
+            findings=cisco_findings,
+            files="uvx --from cisco-ai-skill-scanner" if status == "RAN" else "",
+            details=details,
+        )
 
     return report
 
@@ -8232,9 +8559,9 @@ def _resolve_marketplace_plugins(spec: str) -> tuple[str, list[Path], list[str]]
     is_github = spec.startswith("github:") or spec.startswith("https://github.com/")
     if is_github:
         if spec.startswith("github:"):
-            slug = spec[len("github:"):].strip("/")
+            slug = spec[len("github:") :].strip("/")
         else:
-            slug = spec[len("https://github.com/"):].strip("/")
+            slug = spec[len("https://github.com/") :].strip("/")
         # Expect exactly owner/repo
         parts = slug.split("/")
         if len(parts) < 2:
@@ -8243,15 +8570,17 @@ def _resolve_marketplace_plugins(spec: str) -> tuple[str, list[Path], list[str]]
         # Fetch marketplace.json via gh api
         completed = subprocess.run(
             ["gh", "api", f"repos/{owner}/{repo}/contents/.claude-plugin/marketplace.json"],
-            capture_output=True, text=True, timeout=30, check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
         )
         if completed.returncode != 0:
-            raise RuntimeError(
-                f"gh api failed for {owner}/{repo}: {completed.stderr.strip()[:200]}"
-            )
+            raise RuntimeError(f"gh api failed for {owner}/{repo}: {completed.stderr.strip()[:200]}")
         # Response is a JSON object with base64-encoded content
         meta = json.loads(completed.stdout)
         import base64 as _b64  # noqa: PLC0415
+
         manifest_text = _b64.b64decode(meta["content"]).decode("utf-8")
         manifest = json.loads(manifest_text)
         cache_root = Path.home() / ".claude" / "plugins" / "cache" / repo
@@ -8448,10 +8777,7 @@ def _bucket_canonical_findings_into_plugins(
                         fixable=r.fixable,
                         fix_id=r.fix_id,
                         category=r.category,
-                        suggestion=(
-                            (r.suggestion or "")
-                            + (" [propagated from cross-plugin duplicate]")
-                        ).strip(),
+                        suggestion=((r.suggestion or "") + (" [propagated from cross-plugin duplicate]")).strip(),
                     )
                 )
                 propagated_count += 1
@@ -8478,7 +8804,7 @@ def _rewrite_finding_paths_to_original(
         if not r.file:
             continue
         if r.file.startswith(staged_str + os.sep):
-            r.file = original_str + r.file[len(staged_str):]
+            r.file = original_str + r.file[len(staged_str) :]
         elif r.file == staged_str:
             r.file = original_str
 
@@ -8531,10 +8857,7 @@ def _run_marketplace_scan(args: argparse.Namespace) -> int:
     # Build report path (timestamped, anchored to main checkout root).
     ts = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d_%H%M%S%z")
     safe_label = re.sub(r"[^A-Za-z0-9._-]+", "-", label)
-    report_path = (
-        _resolve_report_root() / "reports" / "security" /
-        f"marketplace_{ts}-{safe_label}.md"
-    )
+    report_path = _resolve_report_root() / "reports" / "security" / f"marketplace_{ts}-{safe_label}.md"
     report_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Build report body in-memory, also tee'd to stdout.
@@ -8547,8 +8870,7 @@ def _run_marketplace_scan(args: argparse.Namespace) -> int:
     emit(f"# Marketplace scan report — {label}")
     emit(f"Generated: {ts}")
     emit("")
-    emit(f"Plugins to scan: {len(plugin_dirs)}; "
-         f"skipped at resolution: {len(skipped)}")
+    emit(f"Plugins to scan: {len(plugin_dirs)}; skipped at resolution: {len(skipped)}")
     if skipped:
         emit("Resolution-skipped:")
         for line in skipped:
@@ -8595,19 +8917,13 @@ def _run_marketplace_scan(args: argparse.Namespace) -> int:
             dedup_groups = len(dedup_result.dedup_map)
             dedup_elapsed = dedup_result.fclones_elapsed_seconds
             if mp_result.supports_deletion:
-                dedup_files_removed, dedup_bytes_saved = apply_dedup(
-                    dedup_result.dedup_map
-                )
+                dedup_files_removed, dedup_bytes_saved = apply_dedup(dedup_result.dedup_map)
             else:
                 dedup_skipped_reason = (
-                    f"dedup-by-deletion skipped (mode={mp_result.mode}); "
-                    "cross-fs symlink staging is read-only safe"
+                    f"dedup-by-deletion skipped (mode={mp_result.mode}); cross-fs symlink staging is read-only safe"
                 )
         else:
-            dedup_skipped_reason = (
-                dedup_result.skipped_reason
-                or "fclones unavailable; scan proceeds without dedup"
-            )
+            dedup_skipped_reason = dedup_result.skipped_reason or "fclones unavailable; scan proceeds without dedup"
 
         emit("## Dedup summary (corpus-wide via fclones)")
         emit("")
@@ -8657,9 +8973,11 @@ def _run_marketplace_scan(args: argparse.Namespace) -> int:
             mp_result.original_paths,
         )
         if propagated:
-            emit(f"_Bucketing: {propagated} finding(s) propagated from "
-                 f"canonical files to peer plugins that originally contained "
-                 f"a copy of the same content._")
+            emit(
+                f"_Bucketing: {propagated} finding(s) propagated from "
+                f"canonical files to peer plugins that originally contained "
+                f"a copy of the same content._"
+            )
             emit("")
 
         # ── Phase 5: emit per-plugin sections + summary ───────────
@@ -8671,17 +8989,24 @@ def _run_marketplace_scan(args: argparse.Namespace) -> int:
                 emit("")
             counts = {
                 "CRITICAL": sum(1 for r in report.results if r.level == "CRITICAL"),
-                "MAJOR":    sum(1 for r in report.results if r.level == "MAJOR"),
-                "MINOR":    sum(1 for r in report.results if r.level == "MINOR"),
-                "NIT":      sum(1 for r in report.results if r.level == "NIT"),
-                "WARNING":  sum(1 for r in report.results if r.level == "WARNING"),
+                "MAJOR": sum(1 for r in report.results if r.level == "MAJOR"),
+                "MINOR": sum(1 for r in report.results if r.level == "MINOR"),
+                "NIT": sum(1 for r in report.results if r.level == "NIT"),
+                "WARNING": sum(1 for r in report.results if r.level == "WARNING"),
             }
             ec = report.exit_code_strict() if args.strict else report.exit_code
             worst_exit = max(worst_exit, ec)
-            summary_rows.append((
-                safe_name, counts["CRITICAL"], counts["MAJOR"],
-                counts["MINOR"], counts["NIT"], counts["WARNING"], ec,
-            ))
+            summary_rows.append(
+                (
+                    safe_name,
+                    counts["CRITICAL"],
+                    counts["MAJOR"],
+                    counts["MINOR"],
+                    counts["NIT"],
+                    counts["WARNING"],
+                    ec,
+                )
+            )
             emit(
                 f"**Plugin {safe_name}**: "
                 f"CRITICAL={counts['CRITICAL']} MAJOR={counts['MAJOR']} "
@@ -8695,8 +9020,7 @@ def _run_marketplace_scan(args: argparse.Namespace) -> int:
         emit("| Plugin                                            | CRITICAL | MAJOR | MINOR | NIT | WARNING | Exit |")
         emit("|---------------------------------------------------|---------:|------:|------:|----:|--------:|-----:|")
         for name, c, M, m, n, w, ec in summary_rows:
-            emit(f"| {name:<49} | {c:>8} | {M:>5} | {m:>5} | "
-                 f"{n:>3} | {w:>7} | {ec:>4} |")
+            emit(f"| {name:<49} | {c:>8} | {M:>5} | {m:>5} | {n:>3} | {w:>7} | {ec:>4} |")
         emit("")
         emit(f"**Worst exit code:** {worst_exit} (worst-of-all-plugins)")
         emit("")
@@ -8722,7 +9046,9 @@ def _extract_raw_positional_arg(argv: list[str]) -> str | None:
     """
     # Options that take a value (CPV's flags). Their values must be skipped.
     value_taking_options = {
-        "--marketplace", "--sarif-out", "--sbom-out",
+        "--marketplace",
+        "--sarif-out",
+        "--sbom-out",
     }
     skip_next = False
     for arg in argv[1:]:
@@ -8756,6 +9082,7 @@ def main() -> int:
     # FIRST: verify validator integrity against GitHub canonical hashes.
     # Done before argparse so even `--help` is gated by integrity.
     from _plugin_verify_hashes import verify_self_integrity  # noqa: PLC0415
+
     verify_self_integrity(quiet=True)
     from cpv_validation_common import launcher_epilog as _launcher_epilog  # noqa: PLC0415
 
@@ -8788,20 +9115,27 @@ Exit Codes:
   1 - CRITICAL issues found (must fix)
   2 - MAJOR issues found (should fix)
   3 - MINOR issues found (recommended to fix)
-        """ + "\n" + _launcher_epilog("security"),
+        """
+        + "\n"
+        + _launcher_epilog("security"),
     )
     # v2.48 — accepts a directory path (default) OR a GitHub URL OR a
     # local archive (.zip / .tar.gz / etc.). URL/archive detection runs
     # against the raw sys.argv spelling before argparse path-normalization
     # so `https://github.com/owner/repo` keeps its double slash. See
     # main() for the auto-ingest step.
-    parser.add_argument("plugin_path", type=Path, nargs="?", default=None,
-                        help="Path to the plugin directory, GitHub URL "
-                             "(`https://github.com/owner/repo` or `github:owner/repo`), "
-                             "or local archive (`*.zip`, `*.tar.gz`, `*.tgz`, `*.tar.bz2`, "
-                             "`*.tar.xz`, `*.tar`). URLs are cloned to a tmpdir, archives "
-                             "are extracted to a tmpdir, and both are scanned then cleaned "
-                             "up automatically. Mutually exclusive with --marketplace.")
+    parser.add_argument(
+        "plugin_path",
+        type=Path,
+        nargs="?",
+        default=None,
+        help="Path to the plugin directory, GitHub URL "
+        "(`https://github.com/owner/repo` or `github:owner/repo`), "
+        "or local archive (`*.zip`, `*.tar.gz`, `*.tgz`, `*.tar.bz2`, "
+        "`*.tar.xz`, `*.tar`). URLs are cloned to a tmpdir, archives "
+        "are extracted to a tmpdir, and both are scanned then cleaned "
+        "up automatically. Mutually exclusive with --marketplace.",
+    )
     parser.add_argument(
         "--marketplace",
         type=str,
@@ -8842,22 +9176,29 @@ Exit Codes:
     # its source URL (PATH lookup → package manager → release download).
     # The CPV_NO_TIRITH_INSTALL=1 env var still disables tirith's
     # auto-install fallback if the operator's CI cannot pull containers.
-    parser.add_argument("--sarif-out", type=Path, default=None,
-                        help="Also emit findings as SARIF 2.1.0 JSON to the given path "
-                             "(RC-105). Compatible with GitHub code scanning.")
-    parser.add_argument("--sbom-out", type=Path, default=None,
-                        help="Emit a CycloneDX 1.6 SBOM of declared dependencies to the "
-                             "given path (RC-106). Reads package.json, requirements*.txt, "
-                             "pyproject.toml, Cargo.toml, go.mod.")
+    parser.add_argument(
+        "--sarif-out",
+        type=Path,
+        default=None,
+        help="Also emit findings as SARIF 2.1.0 JSON to the given path (RC-105). Compatible with GitHub code scanning.",
+    )
+    parser.add_argument(
+        "--sbom-out",
+        type=Path,
+        default=None,
+        help="Emit a CycloneDX 1.6 SBOM of declared dependencies to the "
+        "given path (RC-106). Reads package.json, requirements*.txt, "
+        "pyproject.toml, Cargo.toml, go.mod.",
+    )
     parser.add_argument(
         "--with-classifier",
         action="store_true",
         help="Route findings for rules with a registered context-aware "
-             "classifier (RC-21/22/65/87/93 in v2.42) through the FP/TP "
-             "disambiguator. The classifier can demote a finding one "
-             "severity tier (LIKELY_FP) or suppress it entirely "
-             "(DEFINITE_FP). Off by default — preserves legacy v2.41 "
-             "binary-guard behaviour. See TRDD-fe006962.",
+        "classifier (RC-21/22/65/87/93 in v2.42) through the FP/TP "
+        "disambiguator. The classifier can demote a finding one "
+        "severity tier (LIKELY_FP) or suppress it entirely "
+        "(DEFINITE_FP). Off by default — preserves legacy v2.41 "
+        "binary-guard behaviour. See TRDD-fe006962.",
     )
 
     args = parser.parse_args()
@@ -8867,8 +9208,7 @@ Exit Codes:
     # render one step-status table per plugin plus a master summary.
     if args.marketplace is not None:
         if args.plugin_path is not None:
-            print("Error: --marketplace and plugin_path are mutually exclusive.",
-                  file=sys.stderr)
+            print("Error: --marketplace and plugin_path are mutually exclusive.", file=sys.stderr)
             return 1
         return _run_marketplace_scan(args)
 
@@ -8889,22 +9229,21 @@ Exit Codes:
         looks_like_archive,
         looks_like_github_url,
     )
+
     ingest_result = None  # set when we ingested from URL/archive
     try:
         if looks_like_github_url(raw_spec):
             try:
                 ingest_result = ingest_github_url(raw_spec)
             except (ValueError, RuntimeError) as exc:
-                print(f"Error ingesting GitHub URL {raw_spec!r}: {exc}",
-                      file=sys.stderr)
+                print(f"Error ingesting GitHub URL {raw_spec!r}: {exc}", file=sys.stderr)
                 return 1
             plugin_path = ingest_result.target.resolve()
         elif looks_like_archive(raw_spec):
             try:
                 ingest_result = ingest_archive(raw_spec)
             except (FileNotFoundError, ValueError, RuntimeError) as exc:
-                print(f"Error ingesting archive {raw_spec!r}: {exc}",
-                      file=sys.stderr)
+                print(f"Error ingesting archive {raw_spec!r}: {exc}", file=sys.stderr)
                 return 1
             plugin_path = ingest_result.target.resolve()
         else:
@@ -8928,12 +9267,15 @@ Exit Codes:
                             break
             except OSError:
                 pass
-            has_canonical_skill = any(
-                (plugin_path / "skills").is_dir()
-                and any(p.is_dir() and (p / "SKILL.md").is_file()
-                        for p in (plugin_path / "skills").iterdir())
-                for _ in [None]
-            ) if (plugin_path / "skills").is_dir() else False
+            has_canonical_skill = (
+                any(
+                    (plugin_path / "skills").is_dir()
+                    and any(p.is_dir() and (p / "SKILL.md").is_file() for p in (plugin_path / "skills").iterdir())
+                    for _ in [None]
+                )
+                if (plugin_path / "skills").is_dir()
+                else False
+            )
             looks_like_skill_pack = md_count >= 5 and not has_canonical_skill
             hint = ""
             if looks_like_skill_pack:
@@ -8969,6 +9311,7 @@ Exit Codes:
     # whether the user also asked for stdout JSON or a markdown report.
     if args.sarif_out is not None:
         from cpv_sarif_writer import write_sarif  # local import to keep cold-path cheap
+
         plugin_version = _read_plugin_version(plugin_path)
         sarif_path = write_sarif(
             report.results,
@@ -8981,6 +9324,7 @@ Exit Codes:
     # Optional CycloneDX SBOM (RC-106) — orthogonal to findings; reads manifests.
     if args.sbom_out is not None:
         from cpv_sbom_writer import write_sbom  # local import to keep cold-path cheap
+
         plugin_version = _read_plugin_version(plugin_path)
         sbom_path = write_sbom(
             plugin_path,

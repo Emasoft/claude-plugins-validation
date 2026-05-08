@@ -445,8 +445,8 @@ chmod +x scripts/*.sh
 
 ### Linting Pipeline
 
-- [ ] lint_files.py runs read-only (no --fix, no auto-commit)
-- [ ] Pre-push hook is a thin wrapper calling scripts/lint_files.py and scripts/validate_plugin.py
+- [ ] validate_plugin.py runs repo-wide lint via cpv_lint_engine (read-only, no --fix, no auto-commit)
+- [ ] Pre-push hook is a thin wrapper calling scripts/validate_plugin.py (which now owns linting since CPV v2.64.0)
 - [ ] Pre-commit hook only checks for sensitive data (no linting)
 
 ### General Script Requirements
@@ -480,7 +480,7 @@ chmod +x scripts/*.sh
 ### Validation Scripts
 
 - [ ] All validation scripts pass with exit code 0
-- [ ] Verify lint_files.py passes: `python scripts/lint_files.py .`
+- [ ] Verify validate_plugin.py passes (it owns repo-wide lint via cpv_lint_engine since v2.64.0)
 
 ```bash
 uv run python scripts/validate_plugin.py /path/to/plugin --verbose

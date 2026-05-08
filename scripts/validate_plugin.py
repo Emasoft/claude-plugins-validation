@@ -38,20 +38,18 @@ import json
 import os
 import platform
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any, cast
 
 import yaml
+from cpv_lint_engine import lint_repo as run_lint_engine
 from cpv_validation_common import (
     COLORS,
     ValidationReport,
     check_remote_execution_guard,
     is_vendored_path,
     load_cpv_config,
-    resolve_tool_command,
     save_report_and_print_summary,
     validate_component_name,
     validate_md_file_paths,
@@ -63,10 +61,6 @@ from cpv_validation_common import (
 from detect_language import detect_languages
 from detect_lockfiles import detect_lockfiles
 from gitignore_filter import GitignoreFilter
-from validate_hook import (
-    lint_bash_script,
-    lint_js_script,
-)
 from validate_hook import (
     validate_hooks as validate_hook_file,
 )
@@ -1978,84 +1972,32 @@ def _has_shebang(path: Path) -> bool:
 
 
 def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
-    """Validate all scripts in scripts/ — Python, Shell, JS/TS, PowerShell, Go, Rust."""
+    """Validate scripts/ structure — exec bits + shebangs ONLY.
+
+    v2.64.0: the lint pieces that lived here (ruff / mypy / shellcheck /
+    eslint / PSScriptAnalyzer / gofmt / cargo) moved to
+    `cpv_lint_engine.lint_repo`, which is invoked by the main `validate()`
+    flow as a separate REPO LINT phase. That gives us a single source of
+    truth for linting and lets every linter resolve via uvx / bunx / npx /
+    docker without polluting the host.
+
+    What stays here: scripts/-specific structural checks that don't make
+    sense at the whole-repo level — exec-bit verification on .sh/.bash
+    files and shebang enforcement on script extensions.
+    """
     scripts_dir = plugin_root / "scripts"
 
     if not scripts_dir.is_dir():
         report.info("No scripts/ directory found")
         return
 
-    # When running via remote_validation.py, don't use target's config files
-    # for linters — the remote launcher provides its own safe config via env vars
-    is_remote = os.environ.get("CPV_REMOTE_VALIDATION") == "1"
-
-    # --- Python scripts (.py) ---
-    py_files = list(scripts_dir.glob("*.py"))
-    if py_files:
-        ruff_cmd = resolve_tool_command("ruff")
-        if ruff_cmd:
-            ruff_args = ruff_cmd + ["check", "--select", "E,F,W", "--ignore", "E501", "--output-format=concise"]
-            if not is_remote:
-                pyproject = plugin_root / "pyproject.toml"
-                if pyproject.exists():
-                    ruff_args.extend(["--config", str(pyproject)])
-            ruff_args.extend([str(f) for f in py_files])
-            try:
-                result = subprocess.run(ruff_args, capture_output=True, text=True, timeout=60)
-            except subprocess.TimeoutExpired:
-                report.warning("Ruff timed out after 60s — skipping lint check")
-                result = None
-            if result is not None and result.returncode == 0:
-                report.passed(f"Ruff check passed for {len(py_files)} Python files")
-            elif result is not None:
-                errors_by_file: dict[str, int] = {}
-                for ruff_line in result.stdout.strip().split("\n"):
-                    if ruff_line and ":" in ruff_line:
-                        file_part = ruff_line.split(":")[0].strip()
-                        if file_part:
-                            errors_by_file[file_part] = errors_by_file.get(file_part, 0) + 1
-                for file_path_str, count in sorted(errors_by_file.items()):
-                    rel = file_path_str
-                    try:
-                        rel = str(Path(file_path_str).relative_to(plugin_root))
-                    except ValueError:
-                        pass
-                    report.major(f"Ruff: {count} error(s) in {rel}", rel)
-                if not errors_by_file and result.stdout.strip():
-                    report.major("Ruff: error(s) across script files")
-        else:
-            report.minor("ruff not available locally or via uvx, skipping Python lint check")
-
-        mypy_cmd = resolve_tool_command("mypy")
-        if mypy_cmd:
-            mypy_args = mypy_cmd + ["--ignore-missing-imports"]
-            if not is_remote:
-                pyproject = plugin_root / "pyproject.toml"
-                if pyproject.exists():
-                    mypy_args.extend(["--config-file", str(pyproject)])
-            mypy_args.extend([str(f) for f in py_files])
-            try:
-                result = subprocess.run(mypy_args, capture_output=True, text=True, timeout=60)
-            except subprocess.TimeoutExpired:
-                report.warning("Mypy timed out after 60s — skipping type check")
-                result = None
-            if result is not None and result.returncode == 0:
-                report.passed(f"Mypy check passed for {len(py_files)} Python files")
-            elif result is not None:
-                for line in result.stdout.strip().split("\n"):
-                    if not line or line.startswith("Success") or line.startswith("Found"):
-                        continue
-                    report.minor(f"Mypy: {line}")
-        else:
-            report.minor("mypy not available locally or via uvx, skipping type check")
-
-    # --- Shell scripts (.sh, .bash) ---
+    # --- Shell scripts (.sh, .bash) — exec-bit only; lint runs in REPO LINT ---
     sh_files = list(scripts_dir.glob("*.sh")) + list(scripts_dir.glob("*.bash"))
     for sh_file in sh_files:
-        # os.access(..., X_OK) is unreliable on Windows (NTFS ACLs don't map to
-        # POSIX exec bits), so skip the exec-bit check there. Users on Windows
-        # won't be executing .sh scripts directly from PowerShell/cmd anyway;
-        # the check is a Unix portability safeguard.
+        # os.access(..., X_OK) is unreliable on Windows (NTFS ACLs don't map
+        # to POSIX exec bits), so skip the exec-bit check there. Users on
+        # Windows won't be executing .sh scripts directly from PowerShell/cmd
+        # anyway; the check is a Unix portability safeguard.
         if IS_WINDOWS:
             report.passed(
                 f"Shell script present (exec bit not checked on Windows): {sh_file.name}",
@@ -2065,85 +2007,6 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
             report.major(f"Shell script not executable: {sh_file.name}", f"scripts/{sh_file.name}")
         else:
             report.passed(f"Shell script executable: {sh_file.name}", f"scripts/{sh_file.name}")
-        # Delegate to validate_hook.py's lint function (shellcheck with JSON parsing)
-        lint_bash_script(sh_file, report)
-
-    # --- JavaScript/TypeScript scripts (.js, .ts, .mjs, .cjs) ---
-    js_files = [f for f in scripts_dir.iterdir() if f.is_file() and f.suffix.lower() in {".js", ".ts", ".mjs", ".cjs"}]
-    for js_file in js_files:
-        lint_js_script(js_file, report)
-
-    # --- PowerShell scripts (.ps1, .psm1) ---
-    ps_files = [f for f in scripts_dir.iterdir() if f.is_file() and f.suffix.lower() in {".ps1", ".psm1"}]
-    if ps_files:
-        pssa_cmd = resolve_tool_command("PSScriptAnalyzer")
-        if pssa_cmd:
-            for ps_file in ps_files:
-                try:
-                    result = subprocess.run(
-                        pssa_cmd + ["-Path", str(ps_file), "-Severity", "Error,Warning"],
-                        capture_output=True,
-                        text=True,
-                        timeout=30,
-                    )
-                except subprocess.TimeoutExpired:
-                    report.warning(f"PSScriptAnalyzer timed out on {ps_file.name}")
-                    continue
-                if result.returncode == 0 and not result.stdout.strip():
-                    report.passed(f"PSScriptAnalyzer passed: {ps_file.name}")
-                elif result.stdout.strip():
-                    for line in result.stdout.strip().split("\n")[:5]:
-                        report.minor(f"PSScriptAnalyzer: {line.strip()}", f"scripts/{ps_file.name}")
-        else:
-            report.info("PSScriptAnalyzer not available, skipping PowerShell lint")
-
-    # --- Go scripts (.go) ---
-    go_files = list(scripts_dir.glob("*.go"))
-    if go_files:
-        go_bin = shutil.which("go")
-        if go_bin:
-            for go_file in go_files:
-                try:
-                    result = subprocess.run(
-                        [go_bin, "vet", str(go_file)],
-                        capture_output=True,
-                        text=True,
-                        timeout=30,
-                    )
-                except subprocess.TimeoutExpired:
-                    report.warning(f"go vet timed out on {go_file.name}")
-                    continue
-                if result.returncode == 0:
-                    report.passed(f"go vet passed: {go_file.name}")
-                else:
-                    for line in (result.stderr or result.stdout).strip().split("\n")[:5]:
-                        if line.strip():
-                            report.minor(f"go vet: {line.strip()}", f"scripts/{go_file.name}")
-        else:
-            report.info("go not available, skipping Go lint")
-
-    # --- Rust scripts (check for Cargo.toml in scripts/) ---
-    if (scripts_dir / "Cargo.toml").exists():
-        cargo_bin = shutil.which("cargo")
-        if cargo_bin:
-            try:
-                result = subprocess.run(
-                    [cargo_bin, "check", "--manifest-path", str(scripts_dir / "Cargo.toml")],
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                )
-            except subprocess.TimeoutExpired:
-                report.warning("cargo check timed out")
-                result = None
-            if result is not None and result.returncode == 0:
-                report.passed("cargo check passed for Rust scripts")
-            elif result is not None:
-                for line in result.stderr.strip().split("\n")[:5]:
-                    if "error" in line.lower():
-                        report.minor(f"cargo: {line.strip()}", "scripts/Cargo.toml")
-        else:
-            report.info("cargo not available, skipping Rust lint")
 
     # Check Python scripts with shebang are executable (Unix only)
     if not IS_WINDOWS:
@@ -3860,6 +3723,13 @@ def main() -> int:
     validate_hooks(plugin_root, report)
     validate_mcp(plugin_root, report)
     validate_scripts(plugin_root, report)
+    # v2.64.0 — single source of truth for repo-wide linting.
+    # Replaces the inline lint pieces of validate_scripts (Python ruff/mypy,
+    # shell shellcheck, JS eslint, PowerShell PSSA, Go vet, Rust cargo) AND
+    # the standalone scripts/lint_files.py orchestrator. Strict-by-default:
+    # any missing linter for a detected language fails the run with MAJOR.
+    print(f"\n{COLORS['BOLD']}═══ [REPO LINT] (15 languages, gitignore-filtered) ═══{COLORS['RESET']}")
+    run_lint_engine(plugin_root, report, strict_missing_tools=True)
     validate_bin_executables(plugin_root, report)
     validate_skills(plugin_root, report, skip_platform_checks)
     validate_rules(plugin_root, report)

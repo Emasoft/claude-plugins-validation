@@ -255,7 +255,7 @@ ruff check /path/to/script.py
 
 - [ ] 1. Verify .git/hooks directory exists
 - [ ] 2. Pre-commit hook only checks for sensitive data (no linting)
-- [ ] 3. Verify pre-push hook exists and delegates to scripts/lint_files.py (read-only, no --fix) and scripts/validate_plugin.py
+- [ ] 3. Verify pre-push hook exists and delegates to scripts/validate_plugin.py (which owns repo-wide lint via cpv_lint_engine since v2.64.0; no separate lint step needed)
 - [ ] 4. Make hooks executable (chmod +x)
 - [ ] 5. Test pre-push hook with a sample push
 - [ ] 6. Verify hook blocks invalid changes

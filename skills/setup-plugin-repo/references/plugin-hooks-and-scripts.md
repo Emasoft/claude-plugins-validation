@@ -352,8 +352,7 @@ All repo-specific values use `<placeholder-for-...>` tokens. Replace before use.
 |---|---|---|
 | `<placeholder-for-plugin-name>` | Plugin name (used in docstrings) | `my-awesome-plugin` |
 | `<placeholder-for-default-branch>` | Remote branch for version comparison | `origin/master` or `origin/main` |
-| `<placeholder-for-lint-script>` | Lint script filename in `scripts/` | `lint_files.py` |
-| `<placeholder-for-validate-script>` | Validation script filename in `scripts/` | `validate_plugin.py` |
+| `<placeholder-for-validate-script>` | Validation script filename in `scripts/` (owns repo lint since CPV v2.64.0) | `validate_plugin.py` |
 | `<placeholder-for-test-dir>` | Test suite directory | `tests` |
 
 ### Installation Quick-Start

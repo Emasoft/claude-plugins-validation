@@ -257,10 +257,12 @@ if __name__ == "__main__":
 '''
 
 PRE_PUSH_HOOK = '''#!/usr/bin/env python3
-"""pre-push hook: Lint and validate before pushing.
+"""pre-push hook: validate the plugin before pushing.
 
-Thin wrapper that delegates to scripts/lint_files.py and
-scripts/validate_plugin.py — the single source of truth.
+Thin wrapper around scripts/validate_plugin.py. As of CPV v2.64.0,
+the validator owns repo-wide linting via cpv_lint_engine, so a single
+invocation covers ruff + mypy + shellcheck + eslint + ... + structural
+checks in one pass — there is no separate lint step.
 """
 
 import os
@@ -307,7 +309,7 @@ def find_python() -> str:
 
 
 def main() -> int:
-    """Run linting and validation sequentially, fail-fast."""
+    """Run plugin validation (lint + structure) before push, fail-fast."""
     # Determine repo root
     try:
         repo_root = subprocess.check_output(
@@ -329,32 +331,21 @@ def main() -> int:
         return 0
 
     python = find_python()
-    overall = 0
 
-    # Step 1: Read-only linting
-    lint_script = os.path.join(scripts_dir, "lint_files.py")
-    if os.path.isfile(lint_script):
-        print(f"{BOLD}Running file linting (read-only)...{NC}")
-        result = subprocess.run([python, lint_script, repo_root])
-        if result.returncode != 0:
-            print(f"{RED}Linting failed — push blocked{NC}")
-            overall = 1
-
-    # Step 2: Plugin validation
+    # Plugin validation — owns repo-wide lint via cpv_lint_engine since v2.64.0
     validate_script = os.path.join(scripts_dir, "validate_plugin.py")
-    if os.path.isfile(validate_script):
-        print(f"{BOLD}Running plugin validation...{NC}")
-        result = subprocess.run([python, validate_script, repo_root, "--verbose"])
-        if result.returncode != 0:
-            print(f"{RED}Validation failed — push blocked{NC}")
-            overall = max(overall, result.returncode)
+    if not os.path.isfile(validate_script):
+        print(f"{YELLOW}WARNING: validate_plugin.py not found — skipping hook{NC}")
+        return 0
 
-    if overall == 0:
-        print(f"{GREEN}{BOLD}All checks passed — push allowed{NC}")
-    else:
-        print(f"{RED}{BOLD}Push blocked (exit code: {overall}){NC}")
+    print(f"{BOLD}Running plugin validation (lint + structure)...{NC}")
+    result = subprocess.run([python, validate_script, repo_root, "--verbose"])
+    if result.returncode != 0:
+        print(f"{RED}{BOLD}Validation failed — push blocked (exit code: {result.returncode}){NC}")
+        return result.returncode
 
-    return overall
+    print(f"{GREEN}{BOLD}All checks passed — push allowed{NC}")
+    return 0
 
 
 if __name__ == "__main__":
