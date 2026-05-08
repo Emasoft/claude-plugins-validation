@@ -125,12 +125,16 @@ class TestGhInvocationShape:
             assert "MARKETPLACE_PAT" in args
             assert "--repo" in args
             assert "owner/repo" in args
-            assert "--body" in args
-            # --body must be immediately followed by the value
-            body_idx = args.index("--body")
-            assert args[body_idx + 1] == "ghp_value"
-            # No stdin-piping: input= must NOT have been passed
-            assert "input" not in set_call.kwargs
+            # The secret is passed via stdin (--body-file -) NOT --body, so
+            # the value never appears in argv (which is visible to other users
+            # via /proc/<pid>/cmdline or `ps -ef`).
+            assert "--body-file" in args
+            body_file_idx = args.index("--body-file")
+            assert args[body_file_idx + 1] == "-"
+            assert "--body" not in args
+            # The value MUST be passed via input=, never as a positional arg.
+            assert set_call.kwargs.get("input") == "ghp_value"
+            assert "ghp_value" not in args
 
     def test_no_echo_pipe_in_executable_code(self):
         """AST check: no string literal in executable code runs echo | gh secret set.
@@ -174,12 +178,32 @@ class TestGhInvocationShape:
                         f"line {getattr(node, 'lineno', '?')}"
                     )
 
-    def test_script_uses_only_body_argv_form(self):
-        """The script's source must reference --body, not stdin."""
+    def test_script_uses_body_file_stdin_form(self):
+        """The script must use --body-file - + input= (stdin) so the secret
+        value is NEVER on argv (which is visible to other users via
+        /proc/<pid>/cmdline or `ps -ef`). The previous --body form was a
+        secret-leak vulnerability — fixed in v2.65.2."""
         source = SCRIPT_PATH.read_text(encoding="utf-8")
-        assert '"--body"' in source
-        # It must not spawn `gh secret set` with stdin/input=
-        assert "input=" not in source  # no stdin data passing
+        # Must use --body-file with the - sentinel (stdin)
+        assert '"--body-file"' in source
+        # AND pass the value via input= (stdin) so it never enters argv
+        assert "input=value" in source
+        # The plain --body argv form (which leaks via /proc) must not appear
+        # in executable code. (Docstrings may still mention it as historical
+        # context, so we check only that the literal "--body"-with-comma
+        # form (an argv element) is absent — note this also excludes the
+        # --body-file form via the trailing comma.)
+        # Find non-docstring uses of "--body" without "-file":
+        lines = source.splitlines()
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if stripped.startswith(('"', "'", "#")):
+                continue  # docstring or comment
+            if '"--body"' in line:
+                raise AssertionError(
+                    f'Line {i} uses "--body" argv form (secret leaks via /proc/<pid>/cmdline). '
+                    f'Use "--body-file", "-" + input=value instead.'
+                )
 
 
 class TestPatNeverLogged:

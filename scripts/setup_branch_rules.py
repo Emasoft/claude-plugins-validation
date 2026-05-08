@@ -117,13 +117,21 @@ class ShellError(RuntimeError):
 
 
 def run(cmd: list[str], *, check: bool = True,
-        input_data: str | None = None) -> subprocess.CompletedProcess[str]:
+        input_data: str | None = None,
+        timeout: int = 60) -> subprocess.CompletedProcess[str]:
+    """Run a subprocess with a default 60s timeout. Callers wanting longer
+    operations (clone, push, archive download) must pass an explicit
+    timeout. A hung gh-api call without a timeout used to block branch-rules
+    install indefinitely; the timeout makes the failure surface as
+    `subprocess.TimeoutExpired` instead of a silent stall.
+    """
     result = subprocess.run(
         cmd,
         capture_output=True,
         text=True,
         input=input_data,
         check=False,
+        timeout=timeout,
     )
     if check and result.returncode != 0:
         raise ShellError(

@@ -42,10 +42,8 @@ Audits existing plugin or marketplace repositories against CPV standards and aut
      - `plugin.json.name` ≠ marketplace self-entry name → align both
      - `plugin.json.version` ≠ marketplace self-entry version → align (publish.py should bump both atomically)
      - Self-entry source ≠ `"./"` → set to `"./"`
-   - **Current pipeline standards** — when the plugin has any of these:
-     - `[MAJOR] Dangling reference to scripts/<name>.py` from validate_pipeline_script_refs → load fix-validation skill's pipeline-migration reference §1 (replace removed lint script with cpv_lint_engine in CI; drop from pre-push hook)
-     - Legacy lint script still present → load pipeline-migration reference §2 (delete it; consolidate to cpv_lint_engine)
-     - publish.py lacks `_read_remote_version` / `_infer_bump_type` / `_git_porcelain_clean` helpers → load pipeline-migration reference §3 (regenerate via gen_publish_py, or surgically add the 5 helpers + idempotent guards)
+   - **Current pipeline standards** — load `fix-validation` skill's `pipeline-migration.md` for the full conversion recipes:
+     - §1 dangling script refs · §2 lint engine consolidation · §3 cross-platform Python (bash → Python, os.path → pathlib, hook commands) · §4 idempotent publish.py · §5 input sanitization (no shell=True; regex-validate every CLI flag / env-var / JSON field at the boundary)
 
 Copy this checklist and track your progress:
 - [ ] Audit report reviewed

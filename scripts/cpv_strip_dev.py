@@ -679,21 +679,24 @@ def _filter_and_push(target: ExtractTarget, plugin_root: Path,
     )
     print(f"  [filter] git filter-repo --subdirectory-filter {target.src}")
     # filter-repo is a single-shot operation, not network-dependent. No retry.
+    # 30-min timeout caps a corrupt-object-DB hang; capture_output drains
+    # stderr to avoid pipe-buffer deadlock on multi-GB repos that emit
+    # >64 KB of progress output.
     subprocess.run(
         ["git", "-C", str(clone), "filter-repo", "--force",
          "--subdirectory-filter", target.src.rstrip("/")],
-        check=True, capture_output=True,
+        check=True, capture_output=True, timeout=1800,
     )
     # filter-repo deletes 'origin' for safety. Re-add it pointing at the new repo.
     print(f"  [remote] origin → {target.url}")
     subprocess.run(
         ["git", "-C", str(clone), "remote", "add", "origin", target.url],
-        check=True, capture_output=True,
+        check=True, capture_output=True, timeout=30,
     )
     # Detect default branch name in the cloned repo (could be main or master).
     branch_res = subprocess.run(
         ["git", "-C", str(clone), "rev-parse", "--abbrev-ref", "HEAD"],
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, timeout=30,
     )
     branch = branch_res.stdout.strip() or "main"
     print(f"  [push] git push -u origin {branch} (force: first push to fresh repo)")
@@ -715,7 +718,7 @@ def _replace_with_submodule(target: ExtractTarget, plugin_root: Path) -> None:
     print(f"  [git rm] {target.src}")
     subprocess.run(
         ["git", "-C", str(plugin_root), "rm", "-rf", target.src],
-        check=True, capture_output=True,
+        check=True, capture_output=True, timeout=60,
     )
     # `git rm -rf` removes the directory entry but if untracked files
     # remained inside (gitignored), they may persist. The working-tree
@@ -727,7 +730,7 @@ def _replace_with_submodule(target: ExtractTarget, plugin_root: Path) -> None:
     subprocess.run(
         ["git", "-C", str(plugin_root), "submodule", "add", "--force",
          target.url, sub_path],
-        check=True, capture_output=True,
+        check=True, capture_output=True, timeout=300,
     )
 
 
@@ -790,14 +793,14 @@ def apply_plan(plan: StripPlan) -> None:
         print(f"\n[commit] git commit -m '{commit_msg}'")
         diff_check = subprocess.run(
             ["git", "-C", str(plan.plugin_root), "diff", "--cached", "--name-only"],
-            capture_output=True, text=True, check=False,
+            capture_output=True, text=True, check=False, timeout=30,
         )
         if not diff_check.stdout.strip():
             print("  (nothing staged — skipping commit)")
         else:
             subprocess.run(
                 ["git", "-C", str(plan.plugin_root), "commit", "-m", commit_msg],
-                check=True,
+                check=True, timeout=60,
             )
 
         save_state(plan.plugin_root, {

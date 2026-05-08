@@ -569,21 +569,18 @@ def _gh_secret_exists(
     """
     if gh_bin is None:
         gh_bin = shutil.which("gh") or "gh"
-    result = subprocess.run(
-        [gh_bin, "secret", "list"],
-        cwd=plugin_root,
+    # Use --json for stable parsing: gh's tab-separated default format is
+    # not formally specified and a future gh version may add color codes
+    # or extra columns. --json name --jq '.[].name' is forwards-compatible.
+    result = gh_with_retry(
+        [gh_bin, "secret", "list", "--json", "name", "--jq", ".[].name"],
+        cwd=str(plugin_root),
+        check=False,
         capture_output=True,
-        text=True,
-        timeout=60,
     )
     if result.returncode != 0:
         return False
-    for line in result.stdout.splitlines():
-        # `gh secret list` prints "SECRET_NAME\tUPDATED_AT" (tab-separated).
-        first = line.split("\t", 1)[0].strip()
-        if first == secret_name:
-            return True
-    return False
+    return secret_name in result.stdout.split()
 
 
 def _fetch_remote_marketplace_json(
@@ -595,7 +592,9 @@ def _fetch_remote_marketplace_json(
     """Fetch the remote marketplace.json using gh api. Returns parsed dict or None."""
     if gh_bin is None:
         gh_bin = shutil.which("gh") or "gh"
-    result = subprocess.run(
+    # Wrap with gh_with_retry — read-only api call, transient 502/503
+    # from github.com edge should not abort the publish pipeline.
+    result = gh_with_retry(
         [
             gh_bin,
             "api",
@@ -603,9 +602,8 @@ def _fetch_remote_marketplace_json(
             "-H",
             "Accept: application/vnd.github.raw+json",
         ],
+        check=False,
         capture_output=True,
-        text=True,
-        timeout=60,
     )
     if result.returncode != 0:
         return None
@@ -627,12 +625,11 @@ def _remote_has_receiver_workflow(
     """Check whether the remote marketplace repo has a workflow with repository_dispatch."""
     if gh_bin is None:
         gh_bin = shutil.which("gh") or "gh"
-    # List the workflow dir
-    result = subprocess.run(
+    # List the workflow dir — wrapped with retry for the same transient-error reason.
+    result = gh_with_retry(
         [gh_bin, "api", f"repos/{mkt_owner}/{mkt_repo}/contents/.github/workflows"],
+        check=False,
         capture_output=True,
-        text=True,
-        timeout=60,
     )
     if result.returncode != 0:
         return False
@@ -648,7 +645,7 @@ def _remote_has_receiver_workflow(
         name = entry.get("name", "")
         if not isinstance(name, str) or not name.endswith((".yml", ".yaml")):
             continue
-        file_result = subprocess.run(
+        file_result = gh_with_retry(
             [
                 gh_bin,
                 "api",
@@ -656,9 +653,8 @@ def _remote_has_receiver_workflow(
                 "-H",
                 "Accept: application/vnd.github.raw+json",
             ],
+            check=False,
             capture_output=True,
-            text=True,
-            timeout=60,
         )
         if file_result.returncode == 0 and "repository_dispatch" in file_result.stdout:
             return True

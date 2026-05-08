@@ -128,13 +128,31 @@ def _tool_missing(
     file_count: int,
     strict: bool,
 ) -> None:
-    """Emit a uniform missing-tool finding."""
+    """Emit a uniform missing-tool finding.
+
+    Cross-platform note: tools like ``shellcheck`` aren't natively
+    packaged on Windows (no homebrew/apt equivalent without scoop/WSL).
+    On Windows we always demote to WARNING regardless of strict mode so
+    Windows users aren't blocked from publishing — they get a
+    documentation pointer instead of a hard MAJOR finding.
+    """
+    import sys
     msg = (
         f"Missing linter for {lang}: {tool} (needed for {file_count} file(s)) — "
         "install it locally or rely on uvx / bunx / npx / docker fallback. "
         "Pass strict_missing_tools=False (or --soft-missing-linters in publish.py) "
         "to demote to WARNING."
     )
+    # Windows-specific: shellcheck has no native MSI installer. Don't
+    # block Windows users on a tool that POSIX systems package by default.
+    windows_only_unavailable = {"shellcheck"}
+    if sys.platform == "win32" and tool in windows_only_unavailable:
+        msg += (
+            " (On Windows: install via `scoop install shellcheck` or run "
+            "the plugin's CI under WSL/Linux — auto-demoted to WARNING here.)"
+        )
+        report.warning(msg)
+        return
     if strict:
         report.major(msg)
     else:

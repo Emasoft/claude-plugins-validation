@@ -70,13 +70,18 @@ def run(
     *,
     check: bool = True,
     input_data: str | None = None,
+    timeout: int = 60,
 ) -> subprocess.CompletedProcess[str]:
+    """Default 60s timeout — prevents hung gh-api calls from blocking the
+    rules-install pipeline indefinitely.
+    """
     result = subprocess.run(
         cmd,
         capture_output=True,
         text=True,
         input=input_data,
         check=False,
+        timeout=timeout,
     )
     if check and result.returncode != 0:
         raise ShellError(

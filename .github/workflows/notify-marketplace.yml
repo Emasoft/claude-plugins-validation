@@ -46,9 +46,14 @@ env:
 permissions:
   contents: read
 
+concurrency:
+  group: notify-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   notify:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Get plugin info
         id: plugin

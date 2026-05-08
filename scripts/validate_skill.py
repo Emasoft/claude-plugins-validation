@@ -422,7 +422,13 @@ def validate_arguments_field(frontmatter: dict[str, Any], report: ValidationRepo
 
 
 def validate_hooks_field(frontmatter: dict[str, Any], report: ValidationReport) -> None:
-    """Validate the 'hooks' frontmatter field."""
+    """Validate the 'hooks' frontmatter field.
+
+    Beyond the basic dict-shape check, this also runs the cross-platform +
+    persistent-data checks against every command-type hook so skill-level
+    hooks get the same scrutiny as hooks.json hooks (Windows portability,
+    bash-only constructs, writes to ${CLAUDE_PLUGIN_ROOT}, etc.).
+    """
     if "hooks" not in frontmatter:
         return
 
@@ -434,6 +440,34 @@ def validate_hooks_field(frontmatter: dict[str, Any], report: ValidationReport) 
             "SKILL.md",
         )
         return
+
+    # Recursively walk the hook tree and run cross-platform checks against
+    # every command-type hook. Mirrors the validate_agent.py pattern.
+    try:
+        from validate_hook import check_hook_command_cross_platform
+    except ImportError:
+        check_hook_command_cross_platform = None  # type: ignore[assignment]
+
+    if check_hook_command_cross_platform is not None:
+        for event_config in hooks.values():
+            if not isinstance(event_config, list):
+                continue
+            for matcher_block in event_config:
+                if not isinstance(matcher_block, dict):
+                    continue
+                inner = matcher_block.get("hooks")
+                if not isinstance(inner, list):
+                    continue
+                for h in inner:
+                    if not isinstance(h, dict):
+                        continue
+                    if h.get("type") != "command":
+                        continue
+                    cmd = h.get("command")
+                    if isinstance(cmd, str) and cmd.strip():
+                        check_hook_command_cross_platform(
+                            cmd, report, file_label="SKILL.md"
+                        )
 
     report.passed("'hooks' field present", "SKILL.md")
 

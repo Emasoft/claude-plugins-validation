@@ -2319,9 +2319,16 @@ def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
     owner, repo = _resolve_owner_repo(root)
     _ensure_gh_auth(owner, repo)
     changelog_file = root / "CHANGELOG.md"
-    args = ["gh", "release", "create", tag, "--title", tag, "--generate-notes"]
+    # Use --notes-file when CHANGELOG exists (the git-cliff structured
+    # release notes are the right thing to ship). Fall back to
+    # --generate-notes only when no CHANGELOG is present. Passing both
+    # flags simultaneously produces undefined behavior across gh versions
+    # (some concatenate, some override) — never both.
+    args = ["gh", "release", "create", tag, "--title", tag]
     if changelog_file.is_file():
         args.extend(["--notes-file", str(changelog_file)])
+    else:
+        args.append("--generate-notes")
     cprint(f"  {BLUE}$ {' '.join(args)}{NC}")
     result = gh_with_retry(args, cwd=str(root), check=False, capture_output=True)
     if result.stdout and result.stdout.strip():

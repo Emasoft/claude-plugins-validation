@@ -198,7 +198,11 @@ three independent migrations it documents:
 |---|---|---|
 | §1 — Stale script references | validate_pipeline_script_refs MAJOR with file:line | Replace removed lint script with cpv_lint_engine in CI; drop from pre-push hook (validator covers it) |
 | §2 — Whole-repo lint via cpv_lint_engine | Legacy lint script exists OR per-language lint steps in CI | Delete legacy script; replace per-language CI steps with one call to the unified engine |
+| §3a — Convert bash scripts to Python | `find . -name "*.sh"` returns shipped scripts (not in scripts_dev/) | Convert each .sh to a Python equivalent (preserve CLI flags). Move the .sh to scripts_dev/. Update every workflow/doc reference. |
+| §3b — Convert bash hook commands to Python | validate_hook MAJOR "bash-only constructs" or MINOR "POSIX-only tool" — in hooks.json AND in agent/skill frontmatter | Delegate the hook command to a Python script under `${CLAUDE_PLUGIN_ROOT}/scripts/`. Replace `jq` → `json`, `sed` → `re.sub`, `awk` → list comprehension, `[[ ]]` → `Path().is_file()`, `set -euo pipefail` → default Python exception flow. |
+| §3c — Convert os.path / hardcoded paths to pathlib | grep `os.path.`, `shell=True`, `"/tmp/`, or `os.system` in `scripts/*.py` returns hits | Every filesystem op MUST be abstracted via `pathlib.Path`. See pipeline-migration §3c for the full conversion table. |
 | §3 — Idempotent publish.py | `grep -E '^def _read_remote_version' scripts/publish.py` returns nothing | Regenerate via gen_publish_py, OR add the 5 helpers + idempotent guards surgically |
+| §5 — Sanitize every input parameter | grep `shell=True`, `os.system`, or unvalidated argparse-to-subprocess flows in `scripts/*.py` | Validate every CLI flag / env-var / JSON field / argv at the boundary using a canonical regex (REPO_PATTERN, SEMVER_PATTERN, NAME_PATTERN, etc.). Reject path traversal via `Path().resolve().relative_to(root)`. Reject unsafe URLs via host allowlist. NEVER `shell=True`. |
 
 Each migration is independently revertable. When all three are applied,
 the plugin is immune to the interrupted-publish double-bump class of bugs.

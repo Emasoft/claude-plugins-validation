@@ -1067,6 +1067,21 @@ def validate_hooks_field(frontmatter: dict[str, Any], filename: str, report: Age
                         "Valid types: command, http, prompt, agent",
                         filename,
                     )
+                    continue
+
+                # Cross-platform + persistent-data checks for command hooks
+                # defined in agent frontmatter. Reuses the same engine that
+                # validates hooks/hooks.json so the rules stay in lockstep.
+                if hook_type == "command":
+                    cmd = hook.get("command")
+                    if isinstance(cmd, str) and cmd.strip():
+                        try:
+                            from validate_hook import check_hook_command_cross_platform
+                            check_hook_command_cross_platform(
+                                cmd, report, file_label=filename
+                            )
+                        except ImportError:
+                            pass  # validate_hook unavailable in this scope
 
     report.passed("'hooks' field structure valid", filename)
 

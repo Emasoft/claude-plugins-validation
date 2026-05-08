@@ -1900,6 +1900,140 @@ def validate_script(script_path: Path, report: ValidationReport) -> None:
         lint_js_script(script_path, report)
 
 
+# ---------------------------------------------------------------------------
+# Cross-platform + persistent-data checks (reusable across hooks.json AND
+# agent/skill frontmatter hooks)
+# ---------------------------------------------------------------------------
+
+# Detect writes to ${CLAUDE_PLUGIN_ROOT} — that directory is REPLACED on
+# every plugin update (~7-day cleanup window). State written there is
+# silently destroyed. Plugins must persist data in ${CLAUDE_PLUGIN_DATA}.
+_PD_HOOK_WRITE_ROOT_RE = re.compile(
+    r"""
+    (?:
+        # Shell redirect: > "${CLAUDE_PLUGIN_ROOT}/..." or >>$CLAUDE_PLUGIN_ROOT/...
+        >>?\s*"?\$\{?CLAUDE_PLUGIN_ROOT\}?
+        |
+        # Pipe to a write command targeting CLAUDE_PLUGIN_ROOT
+        \|\s*(?:tee|sqlite3)\s+(?:-\w+\s+)*"?\$\{?CLAUDE_PLUGIN_ROOT\}?
+        |
+        # `tee "${CLAUDE_PLUGIN_ROOT}/..."` (no pipe — direct invocation)
+        (?:^|\s)(?:tee|sqlite3)\s+(?:-\w+\s+)*"?\$\{?CLAUDE_PLUGIN_ROOT\}?
+        |
+        # Install/store flags pointing at CLAUDE_PLUGIN_ROOT
+        --(?:prefix|target|cache-dir|store-dir|venv-dir|directory|out-dir|output|to|dir)
+        (?:\s+|=)"?\$\{?CLAUDE_PLUGIN_ROOT\}?
+    )
+    """,
+    re.VERBOSE,
+)
+
+# Bash-only constructs that break on Windows (where the hook runner uses
+# cmd.exe / PowerShell, not bash — even when WSL is installed). Plugin
+# authors must either write commands in POSIX-portable shell, OR delegate
+# to a Python script (recommended).
+_BASH_ONLY_RE = re.compile(
+    r"""
+    (?:
+        # `set -e`, `set -eu`, `set -euo`, `set -euo pipefail`. Option chunk
+        # is followed by ANY non-letter char (space, semicolon, &&, end-of-string)
+        # so all of these match: `set -e;`, `set -e\n`, `set -e &&`, `set -e$`.
+        (?:^|[\s;&|])set\s+-(?:eu?o?(?![A-Za-z])|euo\s+pipefail)
+        |
+        (?:^|[\s;&|])shopt\s+-                          # shopt
+        |
+        \[\[[^\]]+\]\]                                  # [[ ... ]]
+        |
+        \$\(<\s*[^)]+\)                                 # $(<file)
+        |
+        <\([^)]+\)                                      # <(cmd)
+        |
+        >\([^)]+\)                                      # >(cmd)
+        |
+        \{[a-zA-Z0-9_,-]+,[a-zA-Z0-9_,-]+\}             # {a,b}
+    )
+    """,
+    re.VERBOSE,
+)
+
+# POSIX-only tools that aren't natively packaged on Windows. Flagged unless
+# wrapped in an explicit `python3 -c "..."`, `bash -c "..."`, or
+# `wsl bash -c "..."` (in which case the user has owned the platform decision).
+_POSIX_ONLY_TOOLS = ("jq", "sed", "awk", "shellcheck")
+_POSIX_TOOL_RE = re.compile(
+    r"(?:^|[\s;&|])(" + "|".join(_POSIX_ONLY_TOOLS) + r")(?=\s|$)"
+)
+_SHELL_WRAPPER_RE = re.compile(r"(?:python3?|node|bash|sh|wsl)\s+-c\b")
+
+
+def check_hook_command_cross_platform(
+    command: str,
+    report: Any,
+    *,
+    file_label: str | None = None,
+) -> None:
+    """Run the persistent-data + cross-platform checks against a hook command.
+
+    Shared between:
+      - validate_command_hook (hooks defined in hooks/hooks.json or
+        plugin.json's `hooks` block)
+      - validate_agent.validate_hooks_field (hooks defined in agent
+        frontmatter — Claude Code v2.1.109+)
+      - validate_skill.validate_hooks_field (hooks defined in skill
+        frontmatter)
+
+    Emits:
+      - CRITICAL when the command writes runtime state under
+        ${CLAUDE_PLUGIN_ROOT} (state lost on every plugin update).
+      - MAJOR when the command uses bash-only constructs that break
+        on Windows.
+      - MINOR when the command invokes a POSIX-only tool directly
+        (without a `python3 -c` / `bash -c` shell-decision wrapper).
+
+    The ``report`` parameter is duck-typed: any object with
+    ``.critical(msg, file=...)``, ``.major(...)``, ``.minor(...)``
+    methods (matching CPV's standard ValidationReport / AgentValidationReport
+    / etc. shape) is accepted, so this single function works for every
+    validator without coupling to one report class.
+    """
+    extra = {"file": file_label} if file_label else {}
+
+    if _PD_HOOK_WRITE_ROOT_RE.search(command):
+        report.critical(
+            "Hook command writes runtime state under ${CLAUDE_PLUGIN_ROOT} — that "
+            "directory is REPLACED on every plugin update (~7-day cleanup window) "
+            "and the data will be lost. Use ${CLAUDE_PLUGIN_DATA} instead — it "
+            "persists across plugin versions. See "
+            "https://code.claude.com/docs/en/plugins-reference#persistent-data-directory",
+            **extra,
+        )
+
+    if _BASH_ONLY_RE.search(command):
+        report.major(
+            "Hook command uses bash-only constructs (set -euo, [[ ]], $(<...), "
+            "process substitution, brace expansion). These break on Windows "
+            "where the hook runner uses cmd.exe / PowerShell, not bash. Either "
+            "rewrite in POSIX shell, or (recommended) delegate to "
+            "${CLAUDE_PLUGIN_ROOT}/scripts/<name>.py — Python is cross-platform "
+            "by default.",
+            **extra,
+        )
+
+    posix_match = _POSIX_TOOL_RE.search(command)
+    if posix_match:
+        # Skip when the tool is wrapped in an explicit shell decision.
+        if not _SHELL_WRAPPER_RE.search(command):
+            tool_name = posix_match.group(1)
+            report.minor(
+                f"Hook command invokes POSIX-only tool '{tool_name}' directly. "
+                f"On Windows this requires WSL, scoop, or a manual install. "
+                f"For cross-platform plugins, replace with a Python equivalent: "
+                f"jq → `json` module, sed → `re.sub`, awk → list comprehension, "
+                f"shellcheck → run only in CI on linux runner.",
+                **extra,
+            )
+
+
 def validate_command_hook(
     hook: dict[str, Any],
     event_name: str,
@@ -2028,6 +2162,11 @@ def validate_command_hook(
             "a sibling directory in a monorepo), document it; otherwise rewrite the path "
             "to reference `${CLAUDE_PLUGIN_ROOT}/...` or `${CLAUDE_PROJECT_DIR}/...` directly."
         )
+
+    # 3f-3h: persistent-data + cross-platform checks (extracted into a
+    # reusable function so frontmatter hooks in agents/ + skills/ benefit
+    # from the same validations).
+    check_hook_command_cross_platform(command, report)
 
     # Relative path without $CLAUDE_PLUGIN_ROOT or $CLAUDE_PLUGIN_DATA — may not resolve at runtime
     if (
