@@ -464,6 +464,30 @@ def check_version_consistency(plugin_root: Path) -> tuple[bool, str]:
 # ── Bump all files ───────────────────────────────────────────────────────────
 
 
+def _sync_uv_lock(plugin_root: Path) -> None:
+    """Re-resolve `uv.lock` against the freshly-bumped `pyproject.toml`.
+
+    Without this, every release leaves `uv.lock` stale by one version
+    (`pyproject.toml` says e.g. `2.66.2` but `uv.lock` still pins
+    `2.66.1`). The next publish then refuses Stage 1 (clean-tree
+    check) and a separate `chore: update uv.lock` commit is needed
+    just to catch up. Idempotent and silently skipped when neither
+    `uv` nor `uv.lock` is present (e.g. plugins authored without uv
+    or run on a host where `uv` isn't installed).
+
+    Why call this from `do_bump` and not from a higher-level Gate:
+    `do_bump` is the only function that touches `pyproject.toml`. By
+    co-locating the sync we guarantee the lock can never be stale
+    after a successful bump — no other code path needs to remember.
+    """
+    uv_lock = plugin_root / "uv.lock"
+    if not uv_lock.exists():
+        return
+    if shutil.which("uv") is None:
+        return
+    run(["uv", "lock"], cwd=plugin_root, check=False)
+
+
 def do_bump(plugin_root: Path, new_version: str, dry_run: bool = False) -> bool:
     """Bump version across all files. Returns True on success."""
     if dry_run:
@@ -481,6 +505,11 @@ def do_bump(plugin_root: Path, new_version: str, dry_run: bool = False) -> bool:
         print(f"  {status} {msg}")
         if not ok:
             errors += 1
+
+    if errors == 0:
+        # Bump succeeded — re-resolve uv.lock so it doesn't lag the
+        # bumped pyproject.toml. See _sync_uv_lock docstring.
+        _sync_uv_lock(plugin_root)
 
     return errors == 0
 
