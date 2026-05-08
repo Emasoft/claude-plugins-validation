@@ -2772,18 +2772,46 @@ jobs:
           else
             CHANGELOG=$(git log --pretty=format:"- %s (%h)" $PREV_TAG..HEAD)
           fi
-          echo "$CHANGELOG" > changelog.txt
+          # Prefer the project's CHANGELOG.md (curated, conventional-commits
+          # body) over auto-generated git log if it exists. Issue: publish.py's
+          # Gate-13 (`gh release create`) is fired locally just before the tag
+          # is pushed; that race wins, this job sees the release already
+          # exists, and `softprops/action-gh-release@v3` 422s. Falling back to
+          # CHANGELOG.md content lets us either fill in the body when the
+          # release was just-created (still empty) or skip cleanly when the
+          # body is already populated.
+          if [ -f "CHANGELOG.md" ]; then
+            cp CHANGELOG.md changelog.txt
+          else
+            echo "$CHANGELOG" > changelog.txt
+          fi
           echo "changelog_file=changelog.txt" >> $GITHUB_OUTPUT
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          body_path: changelog.txt
-          files: |
-            validation-report.txt
-          generate_release_notes: true
+      - name: Create or update GitHub Release (idempotent)
+        # Idempotent shell flow — replaces the `softprops/action-gh-release`
+        # action which 422s when publish.py's Gate-13 already created the
+        # release locally. Pattern: `gh release view` to detect existence,
+        # then `gh release edit` (with --notes-file fallback to existing body)
+        # OR `gh release create` (when not pre-existing). Both branches
+        # upload the validation-report artifact.
         env:
-          GITHUB_TOKEN: ${{{{ secrets.GITHUB_TOKEN }}}}
+          GH_TOKEN: ${{{{ secrets.GITHUB_TOKEN }}}}
+          TAG: ${{{{ github.ref_name }}}}
+        run: |
+          set -e
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — editing in place"
+            gh release edit "$TAG" \
+              --notes-file changelog.txt \
+              --verify-tag
+            gh release upload "$TAG" validation-report.txt --clobber
+          else
+            echo "Release $TAG does not exist yet — creating"
+            gh release create "$TAG" validation-report.txt \
+              --title "$TAG" \
+              --notes-file changelog.txt \
+              --verify-tag
+          fi
 """
 
 

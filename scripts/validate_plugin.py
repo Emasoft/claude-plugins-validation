@@ -2926,6 +2926,137 @@ def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
                     "see https://code.claude.com/docs/en/plugins-reference#persistent-data-directory",
                 )
 
+    # Check that Node.js plugins wire a SessionStart installer hook.
+    # Plugins that ship `package.json`/`package-lock.json`/`pnpm-lock.yaml`/
+    # `yarn.lock`/`bun.lock` need their `node_modules/` installed at
+    # runtime — and the only durable place to install them is
+    # ${CLAUDE_PLUGIN_DATA}, because ${CLAUDE_PLUGIN_ROOT} is wiped on
+    # every plugin update.
+    #
+    # We narrow this advisory to Node.js because:
+    #   - Python plugins typically run via `uv run`, which auto-provisions
+    #     deps from pyproject.toml lazily (no SessionStart needed).
+    #   - Rust/Go plugins typically `cargo build`/`go install` lazily.
+    #   - Node.js is the only ecosystem where the dependency resolver
+    #     refuses to run lazily — `require()` looks up `node_modules/`
+    #     in the running process's directory tree, so the install MUST
+    #     happen ahead of the first import.
+    #
+    # This rule fires in BOTH dev mode and packaged mode — the
+    # missing-installer case is a design mistake, not a packaging
+    # mistake, and the dev tree is the right place to catch it before
+    # publish.
+    node_manifests: tuple[str, ...] = (
+        "package.json", "package-lock.json", "pnpm-lock.yaml",
+        "yarn.lock", "bun.lock",
+    )
+    matched_manifests: list[str] = [
+        m for m in node_manifests if (plugin_root / m).is_file()
+    ]
+    has_runtime_deps = bool(matched_manifests)
+
+    if has_runtime_deps:
+        # Look for a SessionStart hook in either of the two valid hook
+        # locations. The hook command must mention an installer command
+        # AND target ${CLAUDE_PLUGIN_DATA} for the install destination.
+        hook_files = [
+            plugin_root / "hooks" / "hooks.json",
+            plugin_root / ".claude-plugin" / "hooks" / "hooks.json",
+        ]
+        installer_keywords = re.compile(
+            r"(npm\s+(ci|install)|pnpm\s+install|yarn\s+install|bun\s+install|"
+            r"pip\s+install|uv\s+(pip\s+install|sync)|cargo\s+(build|install)|"
+            r"go\s+(install|build))",
+            re.IGNORECASE,
+        )
+        plugin_data_token = "CLAUDE_PLUGIN_DATA"
+        installer_found = False
+        for hook_file in hook_files:
+            if not hook_file.is_file():
+                continue
+            try:
+                hook_content = hook_file.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            # Cheap textual check — full JSON parsing happens in validate_hook.
+            # We just need to know whether the file mentions both an installer
+            # command AND ${CLAUDE_PLUGIN_DATA}, anywhere inside a SessionStart
+            # block.
+            if "SessionStart" in hook_content and plugin_data_token in hook_content and installer_keywords.search(hook_content):
+                installer_found = True
+                break
+
+        if not installer_found:
+            manifests_str = ", ".join(matched_manifests)
+            report.warning(
+                f"[RC-DATA-INSTALLER-001] Plugin declares runtime dependencies in "
+                f"{manifests_str} but has no SessionStart hook installing them into "
+                "${CLAUDE_PLUGIN_DATA}. Without one, the plugin either has to bundle "
+                "node_modules/site-packages (which inflates the install + gets wiped on every "
+                "plugin update because ${CLAUDE_PLUGIN_ROOT} is replaced wholesale), or it "
+                "depends on the user having the tooling globally installed (fragile). The "
+                "canonical pattern is a SessionStart hook that runs `npm ci --prefix "
+                "$CLAUDE_PLUGIN_DATA` (or `uv pip install --target $CLAUDE_PLUGIN_DATA/...` "
+                "for Python, etc.) on first session and is a no-op afterwards. See "
+                "https://code.claude.com/docs/en/plugins-reference#persistent-data-directory."
+            )
+
+    # Check that no script / hook / config file references
+    # ${CLAUDE_PLUGIN_ROOT}/<dep-dir>/ — that path is wiped on every update.
+    # Mutable state belongs in ${CLAUDE_PLUGIN_DATA}/.
+    #
+    # Markdown files are EXCLUDED from this scan: they are documentation
+    # that often quotes both correct and incorrect patterns side-by-side
+    # (e.g. plugin-diagnoser.md has rule descriptions that LITERALLY
+    # contain the bad pattern as the thing being detected). Quoting an
+    # anti-pattern is fine; we only flag actual code that ships the
+    # anti-pattern.
+    plugin_root_dep_re = re.compile(
+        r"\$\{?CLAUDE_PLUGIN_ROOT\}?/(node_modules|\.venv|venv|vendor|site-packages|target|__pypackages__)\b"
+    )
+    code_extensions = {".py", ".sh", ".js", ".ts", ".mjs", ".cjs", ".json", ".yml", ".yaml", ".toml"}
+    scan_dirs = [
+        plugin_root / "scripts",
+        plugin_root / "hooks",
+        plugin_root / "git-hooks",
+        plugin_root,  # for top-level config files like .mcp.json
+    ]
+    for scan_dir in scan_dirs:
+        if not scan_dir.is_dir():
+            continue
+        for f in scan_dir.rglob("*"):
+            if not f.is_file():
+                continue
+            if f.suffix.lower() not in code_extensions:
+                continue
+            # Skip files inside node_modules / .venv / vendor / etc. (we don't
+            # care about third-party code) and inside `_dev` working dirs.
+            try:
+                rel_parts = f.relative_to(plugin_root).parts
+            except ValueError:
+                continue
+            # Skip third-party / build dirs (we don't audit code we don't own)
+            # AND skip tests/ — test files often embed the very anti-patterns
+            # they exist to detect, as fixtures. Same idea as why
+            # validate_security skips test files for password / token regexes.
+            if any(p in {"node_modules", ".venv", "venv", "vendor", "__pypackages__", "target", "build", "dist", "_dev", "tests", "tests_dev"} or p.endswith("_dev") for p in rel_parts):
+                continue
+            try:
+                text = f.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for match in plugin_root_dep_re.finditer(text):
+                rel = str(f.relative_to(plugin_root))
+                line_no = text[: match.start()].count("\n") + 1
+                report.major(
+                    f"[RC-DATA-WRONG-ROOT-001] {rel}:{line_no} references "
+                    f"${{CLAUDE_PLUGIN_ROOT}}/{match.group(1)}/ — that path is wiped on "
+                    f"every plugin update. Use ${{CLAUDE_PLUGIN_DATA}}/{match.group(1)}/ "
+                    "instead, and install via a SessionStart hook.",
+                    file=rel,
+                    line=line_no,
+                )
+
     # Check that non-plugin artifacts that may exist are ignored
     # Look for actual artifacts in the tree that should be gitignored
     artifact_patterns = {

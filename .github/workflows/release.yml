@@ -59,15 +59,36 @@ jobs:
             CHANGELOG=$(git log --pretty=format:"- %s (%h)" ${PREV_TAG}..HEAD)
           fi
 
-          echo "$CHANGELOG" > changelog.txt
+          # Prefer the curated CHANGELOG.md when present — publish.py keeps
+          # it in lockstep with conventional commits via git-cliff, and the
+          # body is more useful than a flat git log.
+          if [ -f "CHANGELOG.md" ]; then
+            cp CHANGELOG.md changelog.txt
+          else
+            echo "$CHANGELOG" > changelog.txt
+          fi
           echo "changelog_file=changelog.txt" >> $GITHUB_OUTPUT
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
-        with:
-          body_path: changelog.txt
-          files: |
-            validation-report.txt
-          generate_release_notes: true
+      - name: Create or update GitHub Release (idempotent)
+        # Idempotent shell flow — replaces softprops/action-gh-release which
+        # 422s when publish.py's Gate-13 already created the release locally.
+        # Pattern: `gh release view` to detect existence, then either edit or
+        # create. Both branches upload the validation-report artifact.
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -e
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — editing in place"
+            gh release edit "$TAG" \
+              --notes-file changelog.txt \
+              --verify-tag
+            gh release upload "$TAG" validation-report.txt --clobber
+          else
+            echo "Release $TAG does not exist yet — creating"
+            gh release create "$TAG" validation-report.txt \
+              --title "$TAG" \
+              --notes-file changelog.txt \
+              --verify-tag
+          fi
