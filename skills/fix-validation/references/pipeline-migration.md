@@ -2,11 +2,67 @@
 
 ## Table of Contents
 
+- [§0 — Detect canonical pipeline drift via RC-PIPELINE-DRIFT-001](#0--detect-canonical-pipeline-drift-via-rc-pipeline-drift-001)
 - [§1 — Fix dangling script references](#1--fix-dangling-script-references)
 - [§2 — Migrate to whole-repo lint via cpv_lint_engine](#2--migrate-to-whole-repo-lint-via-cpv_lint_engine)
-- [§3 — Cross-platform Python (bash → Python, os.path → pathlib)](#3--cross-platform-python-bash--python-ospath--pathlib)
-- [§4 — Make publish.py idempotent](#4--make-publishpy-idempotent-interrupted-publish-recovery)
+- [§3 — Cross-platform Python — bash to Python, os.path to pathlib](#3--cross-platform-python-bash--python-ospath--pathlib)
+- [§4 — Make publish.py idempotent — interrupted-publish recovery](#4--make-publishpy-idempotent-interrupted-publish-recovery)
 - [§5 — Sanitize every script-input parameter against injection](#5--sanitize-every-script-input-parameter-against-injection)
+
+---
+
+## §0 — Detect canonical pipeline drift via `[RC-PIPELINE-DRIFT-001]`
+
+`validate_plugin.py::validate_canonical_pipeline_drift` (v2.66.0) emits a
+single consolidated **`[WARNING] [RC-PIPELINE-DRIFT-001] Plugin pipeline differs
+from the canonical CPV standard in: <file1>, <file2>, …`** when any of these
+files drifts from the canonical `gen_*` template:
+
+```
+scripts/publish.py
+scripts/cpv_network_resilience.py
+git-hooks/pre-push
+.github/workflows/ci.yml
+.github/workflows/release.yml
+.github/workflows/notify-marketplace.yml
+cliff.toml
+.mega-linter.yml
+```
+
+These files are pure infrastructure — plugin authors are NOT expected to
+customise them. Drift means the plugin's pipeline lacks something the
+current standard provides (idempotent publish.py recovery, sanitized
+inputs, cross-platform Python, the latest workflow `permissions: {}` block,
+GH Actions retry helpers, etc.).
+
+### Fix recipe (§0)
+
+```bash
+# One-shot migration that overwrites every drifted file with the canonical
+# template, backing up the previous copy as <file>.bak.
+uvx cpv-remote-validate standardize <plugin-path> --fix --force-templates
+
+# Equivalently from inside the plugin:
+uv run python scripts/standardize_plugin.py . --fix --force-templates
+```
+
+After migration, the WARNING disappears AND every §1–§5 follow-up section
+below becomes a no-op for the force-overwritten files (they already comply).
+Only files outside `_FORCE_TEMPLATE_FILES` (e.g. user-owned README, custom
+hook scripts, project-specific workflows) still need the per-section recipes.
+
+### Verify (§0)
+
+```bash
+uv run python scripts/validate_plugin.py . --strict
+# expect: no `[RC-PIPELINE-DRIFT-001]` finding
+```
+
+If a specific file SHOULD legitimately diverge from the standard (rare —
+usually for a plugin with bespoke release infrastructure), document the
+divergence in `CHANGELOG.md` and explicitly opt out by editing
+`scripts/standardize_plugin.py::_FORCE_TEMPLATE_FILES` in your fork. CPV
+itself is auto-skipped (the templates ARE its own files).
 
 How the plugin-fixer auto-migrates a legacy plugin's CI/CD + release
 pipeline to the canonical current standards. Three independent

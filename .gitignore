@@ -59,6 +59,11 @@ Thumbs.db
 reports/
 reports_dev/
 
+# Internal review reports (e.g. /review-loop-opus output). Same rationale as
+# reports/: they contain absolute paths, internal notes, and per-session
+# scratch — never publish them.
+reviews/
+
 # Cisco AI Defense skill-scanner runtime artifact (full plugin scan output;
 # token-heavy and project-private)
 .cpv-cisco-scan.json

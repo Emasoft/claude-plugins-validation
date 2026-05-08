@@ -678,6 +678,7 @@ _FILE_TO_GENERATOR: dict[str, str] = {
     "README.md": "gen_readme",
     "cliff.toml": "gen_cliff_toml",
     ".mega-linter.yml": "gen_mega_linter_yml",
+    ".markdownlint.json": "gen_markdownlint_json",
     "scripts/publish.py": "gen_publish_py",
     "scripts/cpv_network_resilience.py": "gen_cpv_network_resilience_py",
     "git-hooks/pre-push": "gen_pre_push_hook",
@@ -707,6 +708,7 @@ _FORCE_TEMPLATE_FILES: set[str] = {
     ".github/workflows/notify-marketplace.yml",
     "cliff.toml",
     ".mega-linter.yml",
+    ".markdownlint.json",
 }
 
 

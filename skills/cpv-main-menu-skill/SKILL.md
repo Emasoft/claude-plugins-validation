@@ -27,15 +27,7 @@ Full tree, table layouts, and per-leaf bash recipes: [menu-tree](references/menu
 > Shell prologue · Table-rendering rules · Menu definitions · Etiquette and error handling
 
 Top-level categories (canonical table in menu-tree.md §3.0):
-1. **Validate** — plugin / skill / cache / marketplace / scope / component
-2. **Validate from GitHub** — plugin or marketplace by owner/repo
-3. **Fix** — plugin / marketplace / cache optimize
-4. **Create** — scaffold plugin or marketplace
-5. **Manage** — list / install / doctor / scanners / bump / version
-6. **GitHub setup** — branch protection / link plugin to marketplace
-7. **Deep semantic analysis** — opus A-F grading
-8. **Help / About** — category overview / command list / version
-0. **Cancel / Exit** — terminate cleanly
+1 Validate · 2 Validate from GitHub · 3 Fix · 4 Create (plugin/marketplace/skill/agent/command/hook/MCP) · 5 Manage · 6 Diagnose & Upgrade (audit + pipeline-migration §1–§5 + branch rules + Claude action) · 7 GitHub setup · 8 Deep semantic · 9 Help · 0 Cancel
 
 ## Instructions
 

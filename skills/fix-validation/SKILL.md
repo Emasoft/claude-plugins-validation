@@ -50,15 +50,6 @@ Input:  [MAJOR] Missing plugin.json
 Output: plugin-structure-fixes §1
 ```
 
-| Error | Fix guide |
-|---|---|
-| `[MAJOR] Missing plugin.json` | plugin-structure-fixes §1 |
-| `[CA-01] Static prefix violation` | cache-fixes CA-01 |
-| `[MAJOR] userConfig.<key> missing 'type'` | plugin-structure-fixes |
-| `[CRITICAL] PLUGIN_SEED_DIR` | telemetry-hazard-fixes |
-| `[CRITICAL] Layout C self-entry` | plugin-structure-fixes §15 |
-| `[WARNING] recommend-restructure` | marketplace-fixes §9 |
-
 ## Schema-parity
 
 CPV mirrors CC's install-time schema. Contract: [schema-parity-contract.md](references/schema-parity-contract.md).
@@ -80,7 +71,7 @@ CPV mirrors CC's install-time schema. Contract: [schema-parity-contract.md](refe
 - [Telemetry Hazard Fixes](references/telemetry-hazard-fixes.md)
   > Overview · CRITICAL: Plugin ships CLAUDE_CODE_PLUGIN_SEED_DIR · CRITICAL: Plugin ships CLAUDE_CODE_SHELL_PREFIX · CRITICAL: Plugin ships CLAUDE_CONFIG_DIR · CRITICAL: Plugin ships BETA_TRACING_ENDPOINT pointing at external host · CRITICAL: Plugin ships OTEL_LOG_RAW_API_BODIES set to a file URL · MAJOR: Plugin ships third-party-provider bypass env var · Reference: env vars plugins MUST NEVER ship
 - [Pipeline Migration](references/pipeline-migration.md)
-  > §1 — Fix dangling script references · §2 — Migrate to whole-repo lint via cpv_lint_engine · §3 — Cross-platform Python (bash → Python, os.path → pathlib) · §4 — Make publish.py idempotent · §5 — Sanitize every script-input parameter against injection
+  > §0 — Detect canonical pipeline drift via RC-PIPELINE-DRIFT-001 · §1 — Fix dangling script references · §2 — Migrate to whole-repo lint via cpv_lint_engine · §3 — Cross-platform Python — bash to Python, os.path to pathlib · §4 — Make publish.py idempotent — interrupted-publish recovery · §5 — Sanitize every script-input parameter against injection
 
 ## MCP Server Bundling
 
