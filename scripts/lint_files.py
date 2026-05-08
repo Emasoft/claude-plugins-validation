@@ -482,7 +482,28 @@ def ensure_linter_installed(language: str, repo_root: Path) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def lint_python(repo_root: Path, files: list[Path] | None = None) -> bool:  # noqa: ARG001
+def _files_or_root(repo_root: Path, files: list[Path] | None) -> list[str]:
+    """Return the linter target list — gitignore-filtered files when available, repo_root otherwise.
+
+    Each language's `lint_*` function received `files` from `detect_languages()`,
+    which already pruned gitignored entries via `GitignoreFilter`. Passing those
+    files directly to the underlying tool (ruff / mypy / eslint / gofmt) is the
+    only reliable way to keep gitignored trees out of the scan, because each
+    tool has its own gitignore handling that breaks down when the project
+    contains nested `.git/` directories (e.g. cloned reference repos under
+    `INPUT_DEV/`). Without this, ruff treats every nested `.git/` as a
+    separate root and ignores the parent's `.gitignore` rules.
+
+    `files=None` falls back to scanning `repo_root` for backward compatibility
+    when callers haven't done discovery; in normal pipeline use the dispatcher
+    always supplies the filtered list.
+    """
+    if files:
+        return [str(f) for f in files]
+    return [str(repo_root)]
+
+
+def lint_python(repo_root: Path, files: list[Path] | None = None) -> bool:
     """Lint Python files with ruff check + mypy (read-only, no --fix).
 
     Steps: 1) ruff check (no --fix), 2) mypy type-check
@@ -491,12 +512,17 @@ def lint_python(repo_root: Path, files: list[Path] | None = None) -> bool:  # no
     """
     # ruff check (read-only, no --fix)
     print(f"{BLUE}    [1/2] ruff check...{NC}")
+    targets = _files_or_root(repo_root, files)
     try:
         result = subprocess.run(
             # Match pyproject's select — keep I (import sorting) in parity with CI, which runs
             # `uv run ruff check scripts/ tests/` with pyproject's full config. Skipping I here
             # caused a v2.22.7 CI failure after the local gate passed clean (2026-04-18).
-            ["ruff", "check", "--select=E,F,W,I", "--ignore=E501,E402", str(repo_root)],
+            # Passing the gitignore-filtered file list is critical when the project contains
+            # nested .git/ dirs (e.g. INPUT_DEV/<cloned-repo>/) — ruff's own gitignore handling
+            # treats each nested .git/ as a separate root, so the parent .gitignore rules don't
+            # apply. Pre-filtering via GitignoreFilter is the single source of truth.
+            ["ruff", "check", "--select=E,F,W,I", "--ignore=E501,E402", *targets],
             capture_output=True,
             text=True,
             timeout=120,
@@ -518,13 +544,17 @@ def lint_python(repo_root: Path, files: list[Path] | None = None) -> bool:  # no
     if shutil.which("mypy"):
         print(f"{BLUE}    [2/2] mypy...{NC}")
         try:
+            # Pass the gitignore-filtered file list so mypy doesn't recurse into ignored trees
+            # (mypy has no native .gitignore support — only `--exclude REGEX`). We keep the
+            # legacy `--exclude` regex as a belt-and-suspenders safety net for the
+            # well-known dev-scratch dirs in case files=None.
             result = subprocess.run(
                 [
                     "mypy",
                     "--ignore-missing-imports",
                     "--exclude",
                     "scripts_dev|docs_dev|builds_dev|tests_dev",
-                    str(repo_root),
+                    *_files_or_root(repo_root, files),
                 ],
                 capture_output=True,
                 text=True,
@@ -543,11 +573,12 @@ def lint_python(repo_root: Path, files: list[Path] | None = None) -> bool:  # no
     return True
 
 
-def lint_javascript(repo_root: Path, files: list[Path] | None = None) -> bool:  # noqa: ARG001
+def lint_javascript(repo_root: Path, files: list[Path] | None = None) -> bool:
     """Lint JavaScript/TypeScript files with eslint (read-only, no --fix).
 
-    Files are discovered internally via eslint; the files param is unused but
-    kept for uniform dispatch signature.
+    Receives the gitignore-filtered file list from `detect_languages()` and
+    passes it to eslint so foreign code under gitignored trees is not scanned.
+    Falls back to `.` (whole repo_root) when files is empty.
     """
     # Find eslint
     local_eslint = repo_root / "node_modules" / ".bin" / "eslint"
@@ -580,9 +611,12 @@ def lint_javascript(repo_root: Path, files: list[Path] | None = None) -> bool:  
         return True
 
     # Read-only check (no --fix)
+    # Pass the gitignore-filtered file list so eslint never traverses INPUT_DEV/
+    # or other gitignored trees containing foreign code.
     print(f"{BLUE}    eslint...{NC}")
+    targets = [str(f) for f in files] if files else ["."]
     try:
-        result = subprocess.run(eslint_cmd + ["."], cwd=repo_root, capture_output=True, text=True, timeout=120)
+        result = subprocess.run(eslint_cmd + targets, cwd=repo_root, capture_output=True, text=True, timeout=120)
         return result.returncode == 0
     except subprocess.TimeoutExpired:
         print(f"{YELLOW}    eslint timed out{NC}")
@@ -610,11 +644,23 @@ def lint_shell(repo_root: Path, files: list[Path]) -> bool:  # noqa: ARG001
 
 
 def lint_go(repo_root: Path, files: list[Path] | None = None) -> bool:  # noqa: ARG001
-    """Lint Go files with gofmt -l (list mode) + go vet (read-only)."""
+    """Lint Go files with gofmt -l (list mode) + go vet (read-only).
+
+    `gofmt` accepts file paths so we pass the gitignore-filtered list to keep
+    foreign Go code under gitignored trees out of the formatting check.
+
+    `go vet ./...` is module-aware and operates on package paths derived from
+    `go.mod`; it cannot accept a flat file list. To prevent it from descending
+    into nested cloned repos under gitignored trees, we only run vet when the
+    current `repo_root` itself is a Go module (has `go.mod`). External cloned
+    Go code under `INPUT_DEV/` typically has its own `go.mod`, so `./...` from
+    the parent module won't recurse into them by default.
+    """
     # gofmt -l: list files whose formatting differs (read-only, no -w)
     print(f"{BLUE}    gofmt -l (check formatting)...{NC}")
+    targets = [str(f) for f in files] if files else ["."]
     try:
-        result = subprocess.run(["gofmt", "-l", "."], cwd=repo_root, capture_output=True, text=True, timeout=120)
+        result = subprocess.run(["gofmt", "-l", *targets], cwd=repo_root, capture_output=True, text=True, timeout=120)
         if result.stdout.strip():
             # Files need formatting
             print(f"{RED}    Files need formatting:{NC}")
@@ -627,7 +673,12 @@ def lint_go(repo_root: Path, files: list[Path] | None = None) -> bool:  # noqa: 
         print(f"{RED}    gofmt not found{NC}")
         return False
 
-    # go vet (read-only)
+    # go vet (read-only) — only run when repo_root is itself a Go module.
+    # Without go.mod at repo_root, `./...` would walk into nested module
+    # directories (cloned repos under INPUT_DEV/) which is the wrong behaviour
+    # and matches the gofmt issue we just fixed.
+    if not (repo_root / "go.mod").exists():
+        return True
     print(f"{BLUE}    go vet...{NC}")
     try:
         result = subprocess.run(["go", "vet", "./..."], cwd=repo_root, capture_output=True, text=True, timeout=120)
@@ -1064,14 +1115,14 @@ def run_linting(repo_root: Path) -> bool:
 def main() -> int:
     """Lint all files in a repository (read-only). Returns 0 if pass, 1 if fail."""
     from cpv_validation_common import launcher_epilog
+
     parser = argparse.ArgumentParser(
         description="Read-only file linting for plugin repositories.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Supports 15 languages: Python, JavaScript, Shell, Go, Rust, "
             "Markdown, JSON, YAML, Dockerfile, XML, CSS, HTML, SQL, TOML, PowerShell. "
-            "All checks are read-only — no files are modified.\n\n"
-            + launcher_epilog("lint")
+            "All checks are read-only — no files are modified.\n\n" + launcher_epilog("lint")
         ),
     )
     parser.add_argument(
