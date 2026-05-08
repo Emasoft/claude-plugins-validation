@@ -451,32 +451,32 @@ def test_bypass_guard_passes_with_clean_env(monkeypatch):
     assert rc == 0
 
 
-def test_print_gates_lists_all_15_gates(capsys):
-    """print_gates prints all gates (0-14) with descriptions.
+def test_print_gates_lists_all_14_gates(capsys):
+    """print_gates prints all gates (0-13) with descriptions.
 
-    Issue #18 added Gate 9 ("Refresh .cpv-self-hashes.json"); existing
-    gates 9-13 renumbered to 10-14.
+    v2.64.0: Gate 2 (lint) was retired; lint moved into validate_plugin.py
+    via cpv_lint_engine. Gates 3-14 renumbered to 2-13. Total = 14.
+    Issue #18 added the integrity-manifest gate (now Gate 8).
     """
     publish.print_gates()
     out = capsys.readouterr().out
-    for i in range(15):
+    for i in range(14):
         assert f"Gate {i}:" in out
     assert "WARNING is the only severity" in out
 
 
-def test_gate_9_is_integrity_manifest_refresh():
-    """Gate 9 must regenerate .plugin-self-hashes.json (issue #18 regression).
+def test_gate_8_is_integrity_manifest_refresh():
+    """Gate 8 must regenerate .plugin-self-hashes.json (issue #18 regression).
 
     Before this gate existed, every release between manifest refreshes
     shipped a stale manifest and fresh marketplace installs hit
     `cpv_integrity` ABORT immediately. Pin the gate's existence and
     label so it can't silently regress.
 
-    TRDD-bbff5bc5 renamed `.cpv-self-hashes.json` → `.plugin-self-hashes.json`;
-    the description must mention either the new name or "self-hashes".
+    v2.64.0: lint gate retired, gates renumbered — was Gate 9, now Gate 8.
     """
-    label, desc = publish.GATES[9]
-    assert label == "Gate 9"
+    label, desc = publish.GATES[8]
+    assert label == "Gate 8"
     assert "self-hashes" in desc.lower() or "integrity" in desc.lower()
     assert "issue #18" in desc.lower()
 
@@ -534,64 +534,62 @@ def test_stage_refresh_self_hashes_falls_back_to_legacy_script(monkeypatch, tmp_
 
 
 # ── Pipeline order + git-cliff wiring ───────────────────────────────────────
-# Pin the cornerstone contract: lint must precede tests, tests must precede
-# validate, validate must precede bump, bump must precede changelog, and the
-# changelog must be generated via `git-cliff --bump --unreleased --tag`. The
-# template's pipeline is covered by TestPublishPyPipelineOrder in
-# test_generate_plugin_repo.py — these tests cover CPV's OWN publish.py.
+# Pin the cornerstone contract: tests must precede validate (which now owns
+# repo-wide lint via cpv_lint_engine since v2.64.0), validate must precede
+# bump, bump must precede changelog, and the changelog must be generated via
+# `git-cliff --bump --unreleased --tag`. The template's pipeline is covered
+# by TestPublishPyPipelineOrder in test_generate_plugin_repo.py — these
+# tests cover CPV's OWN publish.py.
 
 
 class TestCpvPublishPipelineOrder:
     """Pin the order of gates in CPV's own publish.py main() pipeline."""
 
-    def test_gate_2_is_lint(self):
-        """Gate 2 must be lint+typecheck (runs before tests on Gate 3)."""
+    def test_gate_2_is_tests(self):
+        """Gate 2 must be tests (was Gate 3 before v2.64.0).
+
+        v2.64.0 retired the standalone lint gate; lint moved into
+        validate_plugin.py via cpv_lint_engine, so tests slid up to Gate 2.
+        """
         label, desc = publish.GATES[2]
         assert label == "Gate 2"
-        assert "lint" in desc.lower()
-        assert "typecheck" in desc.lower() or "mypy" in desc.lower()
-
-    def test_gate_3_is_tests(self):
-        """Gate 3 must be tests (runs after lint on Gate 2)."""
-        label, desc = publish.GATES[3]
-        assert label == "Gate 3"
         assert "test" in desc.lower() or "pytest" in desc.lower()
 
-    def test_gate_4_is_plugin_validate(self):
-        """Gate 4 must be plugin validation (runs after tests on Gate 3)."""
-        label, desc = publish.GATES[4]
-        assert label == "Gate 4"
+    def test_gate_3_is_plugin_validate(self):
+        """Gate 3 must be plugin validation (owns repo-wide lint since v2.64.0)."""
+        label, desc = publish.GATES[3]
+        assert label == "Gate 3"
         assert "validat" in desc.lower()
 
-    def test_gate_8_is_bump(self):
-        """Gate 8 must be the bump stage."""
-        label, desc = publish.GATES[8]
-        assert label == "Gate 8"
+    def test_gate_7_is_bump(self):
+        """Gate 7 must be the bump stage (was Gate 8 before v2.64.0)."""
+        label, desc = publish.GATES[7]
+        assert label == "Gate 7"
         assert "bump" in desc.lower()
 
-    def test_gate_10_is_changelog_with_git_cliff_bump_unreleased(self):
-        """Gate 10 must be the changelog stage, explicitly using git-cliff --bump --unreleased.
+    def test_gate_9_is_changelog_with_git_cliff_bump_unreleased(self):
+        """Gate 9 must be the changelog stage, explicitly using git-cliff --bump --unreleased.
 
-        Issue #18 inserted the manifest-refresh gate at slot 9, pushing
-        the existing changelog gate to slot 10.
+        v2.64.0 retired the lint gate; the changelog gate moved from slot 10
+        to slot 9.
         """
-        label, desc = publish.GATES[10]
-        assert label == "Gate 10"
+        label, desc = publish.GATES[9]
+        assert label == "Gate 9"
         assert "git-cliff" in desc.lower()
         assert "--bump" in desc
         assert "--unreleased" in desc
         assert "--tag" in desc
 
-    def test_gates_11_to_14_run_commit_tag_push_release(self):
-        """Gates 11-14 must run commit → tag → push → github release in that order.
+    def test_gates_10_to_13_run_commit_tag_push_release(self):
+        """Gates 10-13 must run commit → tag → push → github release in that order.
 
-        Issue #18 inserted the manifest-refresh gate at slot 9, pushing the
-        existing commit/tag/push/release gates from 10-13 to 11-14.
+        v2.64.0 retired the lint gate; commit/tag/push/release shifted from
+        slots 11-14 down to 10-13.
         """
-        assert "commit" in publish.GATES[11][1].lower()
-        assert "tag" in publish.GATES[12][1].lower()
-        assert "push" in publish.GATES[13][1].lower()
-        assert "release" in publish.GATES[14][1].lower()
+        assert "commit" in publish.GATES[10][1].lower()
+        assert "tag" in publish.GATES[11][1].lower()
+        assert "push" in publish.GATES[12][1].lower()
+        assert "release" in publish.GATES[13][1].lower()
 
 
 class TestCpvStageChangelogUsesBumpUnreleased:

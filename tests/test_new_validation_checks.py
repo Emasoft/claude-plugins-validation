@@ -19,7 +19,6 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 # Add scripts directory to path for imports
 scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
@@ -163,8 +162,9 @@ def test_script_with_shebang_no_warning(tmp_path: Path):
     script = scripts_dir / "hello.py"
     script.write_text("#!/usr/bin/env python3\nprint('hello')\n")
     report = ValidationReport()
-    with patch("validate_plugin.resolve_tool_command", return_value=None):
-        validate_scripts(plugin_dir, report)
+    # v2.64.0: validate_scripts() no longer calls resolve_tool_command — lint
+    # moved to cpv_lint_engine. The function now does exec-bit + shebang only.
+    validate_scripts(plugin_dir, report)
     minor_msgs = [r.message for r in report.results if r.level == "MINOR"]
     assert not any("shebang" in m.lower() for m in minor_msgs)
 
@@ -180,8 +180,9 @@ def test_script_without_shebang_reports_minor(tmp_path: Path):
     script = scripts_dir / "hello.py"
     script.write_text("print('hello')\n")
     report = ValidationReport()
-    with patch("validate_plugin.resolve_tool_command", return_value=None):
-        validate_scripts(plugin_dir, report)
+    # v2.64.0: validate_scripts() no longer calls resolve_tool_command — lint
+    # moved to cpv_lint_engine. The function now does exec-bit + shebang only.
+    validate_scripts(plugin_dir, report)
     minor_msgs = [r.message for r in report.results if r.level == "MINOR"]
     assert any("shebang" in m.lower() for m in minor_msgs)
 

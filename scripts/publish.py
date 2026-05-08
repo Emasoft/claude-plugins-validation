@@ -200,7 +200,7 @@ def run(
     `env=None` means use `os.environ` unchanged — the safe default. Use
     this for git/gh subprocesses, file operations, and anything that does
     not load CPV's own self-integrity verifier. For validator subprocesses
-    (Gates 4, 5, 9) use `run_with_integrity_bypass` instead — that wrapper
+    (Gates 3, 4, 8) use `run_with_integrity_bypass` instead — that wrapper
     threads the bypass env through this helper.
     """
     print(f"  $ {' '.join(cmd)}")
@@ -450,27 +450,28 @@ def do_bump(plugin_root: Path, new_version: str, dry_run: bool = False) -> bool:
 GATES: list[tuple[str, str]] = [
     ("Gate 0", "Bypass-var rejection (CPV_SKIP_*, SKIP_*, NO_VERIFY)"),
     ("Gate 1", "Clean working tree (git status --porcelain)"),
-    ("Gate 2", "Lint + typecheck (ruff + mypy via scripts/lint_files.py)"),
-    ("Gate 3", "Tests (uv run pytest tests/ -x)"),
+    ("Gate 2", "Tests (uv run pytest tests/ -x)"),
     (
-        "Gate 4",
-        "Plugin validation (validate_plugin.py --strict) — blocks on CRITICAL/MAJOR/MINOR/NIT; WARNING advisory only",
+        "Gate 3",
+        "Plugin validation (validate_plugin.py --strict) — owns repo-wide "
+        "lint via cpv_lint_engine since v2.64.0; blocks on "
+        "CRITICAL/MAJOR/MINOR/NIT; WARNING advisory only",
     ),
-    ("Gate 5", "Marketplace validation (validate_marketplace.py --strict) — Layout B only"),
-    ("Gate 6", "Marketplace-registration check — verifies plugin is wired to its marketplace"),
-    ("Gate 7", "Version consistency (plugin.json / pyproject.toml / __version__)"),
-    ("Gate 8", "Bump version (auto from git-cliff, overridable via --major/--minor/--patch)"),
+    ("Gate 4", "Marketplace validation (validate_marketplace.py --strict) — Layout B only"),
+    ("Gate 5", "Marketplace-registration check — verifies plugin is wired to its marketplace"),
+    ("Gate 6", "Version consistency (plugin.json / pyproject.toml / __version__)"),
+    ("Gate 7", "Bump version (auto from git-cliff, overridable via --major/--minor/--patch)"),
     (
-        "Gate 9",
+        "Gate 8",
         "Refresh .plugin-self-hashes.json (_plugin_compute_hashes.py; legacy "
         ".cpv-self-hashes.json compat copy also written) — issue #18: stale manifest "
         "causes integrity-mismatch abort on fresh marketplace installs",
     ),
-    ("Gate 10", "Generate CHANGELOG.md + release notes (git-cliff --bump --unreleased --tag)"),
-    ("Gate 11", "Commit bump + manifest refresh + changelog"),
-    ("Gate 12", "Create annotated git tag vX.Y.Z"),
-    ("Gate 13", "Push branch + tag to origin"),
-    ("Gate 14", "Create GitHub release with notes (gh release create)"),
+    ("Gate 9", "Generate CHANGELOG.md + release notes (git-cliff --bump --unreleased --tag)"),
+    ("Gate 10", "Commit bump + manifest refresh + changelog"),
+    ("Gate 11", "Create annotated git tag vX.Y.Z"),
+    ("Gate 12", "Push branch + tag to origin"),
+    ("Gate 13", "Create GitHub release with notes (gh release create)"),
 ]
 
 
@@ -788,21 +789,21 @@ def stage_run_tests(plugin_root: Path) -> int:
     return 0
 
 
-def stage_run_lint(plugin_root: Path) -> int:
-    """Gate 3: run lint — mandatory, must pass with zero errors."""
-    print(f"\n{BLUE}═══ Gate 3: Lint files (mandatory) ═══{NC}")
-    run(["uv", "run", "python", "scripts/lint_files.py", "."], cwd=plugin_root)
-    print(f"{GREEN}✓ Linting passed{NC}")
-    return 0
+# v2.64.0: stage_run_lint() retired. Repo-wide lint moved into
+# scripts/cpv_lint_engine.py and is invoked by validate_plugin.py at
+# Gate 3, so there is exactly ONE source of truth for linting.
 
 
 def stage_validate_plugin(plugin_root: Path) -> int:
-    """Gate 4: validate plugin in strict mode — blocks on ANY CRITICAL/MAJOR/MINOR/NIT.
+    """Gate 3: validate plugin in strict mode — blocks on ANY CRITICAL/MAJOR/MINOR/NIT.
+
+    Since v2.64.0, validate_plugin.py owns repo-wide linting via
+    cpv_lint_engine, so the previous Gate 3 (`stage_run_lint`) was retired.
 
     WARNING (exit code 0 with warning output) is advisory and does not block.
     Returns the validator's exit code directly (1-4 severity or 0 success).
     """
-    print(f"\n{BLUE}═══ Gate 4: Validate plugin — ZERO errors required ═══{NC}")
+    print(f"\n{BLUE}═══ Gate 3: Validate plugin — ZERO errors required ═══{NC}")
     vresult = run_with_integrity_bypass(
         ["uv", "run", "python", "scripts/validate_plugin.py", ".", "--strict"],
         cwd=plugin_root,
@@ -823,13 +824,13 @@ def stage_validate_plugin(plugin_root: Path) -> int:
 
 
 def stage_validate_marketplace(plugin_root: Path, layout: str) -> int:
-    """Gate 5: validate marketplace in strict mode — only runs for Layout B.
+    """Gate 4: validate marketplace in strict mode — only runs for Layout B.
 
     For Layout B, publish.py runs at the marketplace repo root, and the parent
     marketplace.json must also validate cleanly. For Layout A (standalone plugin),
     there is no local marketplace to validate so this gate is a no-op.
     """
-    print(f"\n{BLUE}═══ Gate 5: Marketplace validation ═══{NC}")
+    print(f"\n{BLUE}═══ Gate 4: Marketplace validation ═══{NC}")
     if layout != "B":
         print(f"  (skipped — not a marketplace repo, layout={layout})")
         print(f"{GREEN}✓ Marketplace validation not applicable{NC}")
@@ -853,7 +854,7 @@ def stage_validate_marketplace(plugin_root: Path, layout: str) -> int:
 
 
 def stage_marketplace_registration_check(plugin_root: Path) -> int:
-    """Gate 6: verify the plugin is wired to its marketplace for auto-updates.
+    """Gate 5: verify the plugin is wired to its marketplace for auto-updates.
 
     Layout A (standalone plugin referencing a remote marketplace):
       - .github/workflows/notify-marketplace.yml exists and parses
@@ -871,7 +872,7 @@ def stage_marketplace_registration_check(plugin_root: Path) -> int:
 
     Returns 0 on success (including WARNING mode), 1 on any hard failure.
     """
-    print(f"\n{BLUE}═══ Gate 6: Marketplace-registration check ═══{NC}")
+    print(f"\n{BLUE}═══ Gate 5: Marketplace-registration check ═══{NC}")
     layout, details = detect_layout(plugin_root)
 
     if layout == "none":
@@ -1074,8 +1075,8 @@ def _read_plugin_name(plugin_root: Path) -> str:
 
 
 def stage_version_consistency(plugin_root: Path) -> int:
-    """Gate 7: version consistency across plugin.json, pyproject.toml, __version__."""
-    print(f"\n{BLUE}═══ Gate 7: Check version consistency ═══{NC}")
+    """Gate 6: version consistency across plugin.json, pyproject.toml, __version__."""
+    print(f"\n{BLUE}═══ Gate 6: Check version consistency ═══{NC}")
     ok, msg = check_version_consistency(plugin_root)
     print(f"  {msg}")
     if not ok:
@@ -1155,7 +1156,7 @@ def detect_bump_type(plugin_root: Path) -> str:
 
 
 def stage_bump(plugin_root: Path, bump_type: str, dry_run: bool) -> tuple[int, str | None]:
-    """Gate 8: bump version across all files. Returns (exit_code, new_version)."""
+    """Gate 7: bump version across all files. Returns (exit_code, new_version)."""
     current = get_current_version(plugin_root)
     if current is None:
         print(f"{RED}✗ Cannot read current version from plugin.json{NC}", file=sys.stderr)
@@ -1164,7 +1165,7 @@ def stage_bump(plugin_root: Path, bump_type: str, dry_run: bool) -> tuple[int, s
     if new_version is None:
         print(f"{RED}✗ Current version '{current}' is not valid semver{NC}", file=sys.stderr)
         return 1, None
-    print(f"\n{BLUE}═══ Gate 8: Bump version ({bump_type}: {current} → {new_version}) ═══{NC}")
+    print(f"\n{BLUE}═══ Gate 7: Bump version ({bump_type}: {current} → {new_version}) ═══{NC}")
     if not do_bump(plugin_root, new_version, dry_run=dry_run):
         print(f"{RED}✗ Version bump failed{NC}", file=sys.stderr)
         return 1, None
@@ -1175,7 +1176,7 @@ def stage_bump(plugin_root: Path, bump_type: str, dry_run: bool) -> tuple[int, s
 
 
 def stage_update_readme_badge(plugin_root: Path, old_version: str, new_version: str, dry_run: bool) -> None:
-    """Part of Gate 8: update the README.md version badge in-place.
+    """Part of Gate 7: update the README.md version badge in-place.
 
     Two-stage match strategy:
       1. Exact-string substitution `version-<old>-blue` → `version-<new>-blue`
@@ -1219,7 +1220,7 @@ def stage_update_readme_badge(plugin_root: Path, old_version: str, new_version: 
 
 
 def stage_refresh_self_hashes(plugin_root: Path) -> int:
-    """Gate 9: regenerate `.plugin-self-hashes.json` from the current source.
+    """Gate 8: regenerate `.plugin-self-hashes.json` from the current source.
 
     CPV's `_plugin_verify_hashes.py` (formerly `cpv_integrity.py`) fetches
     the GitHub-pinned manifest at runtime and aborts when the cache files
@@ -1238,7 +1239,7 @@ def stage_refresh_self_hashes(plugin_root: Path) -> int:
     don't ship a self-hashes manifest and therefore don't need this
     gate in their own publish.py.
     """
-    print(f"\n{BLUE}═══ Gate 9: Refresh .plugin-self-hashes.json ═══{NC}")
+    print(f"\n{BLUE}═══ Gate 8: Refresh .plugin-self-hashes.json ═══{NC}")
     # TRDD-bbff5bc5: prefer the new script name, fall back to legacy.
     script_new = plugin_root / "scripts" / "_plugin_compute_hashes.py"
     script_legacy = plugin_root / "scripts" / "compute_cpv_self_hashes.py"
@@ -1264,8 +1265,8 @@ def stage_refresh_self_hashes(plugin_root: Path) -> int:
 
 
 def stage_changelog(plugin_root: Path, tag_name: str, new_version: str) -> tuple[int, Path | None]:
-    """Gate 10: generate CHANGELOG.md and extract release notes via git-cliff."""
-    print(f"\n{BLUE}═══ Gate 10: Generate CHANGELOG + release notes (git-cliff) ═══{NC}")
+    """Gate 9: generate CHANGELOG.md and extract release notes via git-cliff."""
+    print(f"\n{BLUE}═══ Gate 9: Generate CHANGELOG + release notes (git-cliff) ═══{NC}")
     cliff_bin = shutil.which("git-cliff")
     if cliff_bin is None:
         print(
@@ -1322,7 +1323,7 @@ def stage_changelog(plugin_root: Path, tag_name: str, new_version: str) -> tuple
 def _resolve_owner_repo(plugin_root: Path) -> tuple[str, str]:
     """Read `git config remote.origin.url` and parse owner/repo. Exit 1 on failure.
 
-    Used by Gates 13 and 14 to scope the gh-auth precheck to the actual push
+    Used by Gates 12 and 13 to scope the gh-auth precheck to the actual push
     target. Per TRDD-bbff5bc5 §4.1, the precheck must verify push perms on
     THIS specific repo, not just "any gh auth status passes".
     """
@@ -1352,20 +1353,20 @@ def _resolve_owner_repo(plugin_root: Path) -> tuple[str, str]:
 
 
 def stage_commit_tag_push(plugin_root: Path, tag_name: str) -> int:
-    """Gates 11-13: commit, tag, push.
+    """Gates 10-12: commit, tag, push.
 
-    TRDD-bbff5bc5 §5: gh-auth precheck runs at the top of Gate 13 (before
+    TRDD-bbff5bc5 §5: gh-auth precheck runs at the top of Gate 12 (before
     the first `git push`) to give the maintainer an actionable error
     message BEFORE git tries the network round-trip and fails opaquely.
     """
-    print(f"\n{BLUE}═══ Gate 11: Commit version bump + manifest refresh + changelog ═══{NC}")
+    print(f"\n{BLUE}═══ Gate 10: Commit version bump + manifest refresh + changelog ═══{NC}")
     run(["git", "add", "-A"], cwd=plugin_root)
     run(["git", "commit", "-m", f"chore(release): {tag_name}"], cwd=plugin_root)
     print(f"{GREEN}✓ Committed {tag_name}{NC}")
-    print(f"\n{BLUE}═══ Gate 12: Create git tag {tag_name} ═══{NC}")
+    print(f"\n{BLUE}═══ Gate 11: Create git tag {tag_name} ═══{NC}")
     run(["git", "tag", "-a", tag_name, "-m", f"Release {tag_name}"], cwd=plugin_root)
     print(f"{GREEN}✓ Tag {tag_name} created{NC}")
-    print(f"\n{BLUE}═══ Gate 13: Push to origin (branch + tags) ═══{NC}")
+    print(f"\n{BLUE}═══ Gate 12: Push to origin (branch + tags) ═══{NC}")
     # TRDD-bbff5bc5: gh-auth precheck — fail fast with actionable error if
     # the maintainer's gh CLI is missing/unauthed/lacks push perm.
     owner, repo = _resolve_owner_repo(plugin_root)
@@ -1394,13 +1395,13 @@ def stage_commit_tag_push(plugin_root: Path, tag_name: str) -> int:
 
 
 def stage_github_release(plugin_root: Path, tag_name: str, release_notes_file: Path) -> int:
-    """Gate 14: create GitHub release with notes. Warns (not errors) if gh missing.
+    """Gate 13: create GitHub release with notes. Warns (not errors) if gh missing.
 
     TRDD-bbff5bc5 §5: gh-auth precheck runs before `gh release create` to
     surface auth issues with an actionable hint instead of a generic
     `gh release` failure.
     """
-    print(f"\n{BLUE}═══ Gate 14: Create GitHub release ═══{NC}")
+    print(f"\n{BLUE}═══ Gate 13: Create GitHub release ═══{NC}")
     gh_bin = shutil.which("gh")
     if gh_bin is None:
         print(
@@ -1409,7 +1410,7 @@ def stage_github_release(plugin_root: Path, tag_name: str, release_notes_file: P
             file=sys.stderr,
         )
         return 0
-    # TRDD-bbff5bc5: precheck before the release call. Even though Gate 13's
+    # TRDD-bbff5bc5: precheck before the release call. Even though Gate 12's
     # precheck already passed, the maintainer's auth state could change
     # mid-pipeline (token revoked, account switched). Fast re-check costs
     # one HTTP roundtrip and prevents a cryptic gh-release failure.
@@ -1417,7 +1418,7 @@ def stage_github_release(plugin_root: Path, tag_name: str, release_notes_file: P
     _ensure_gh_auth(owner, repo)
     # Phase 1 (Sprint 3): retry-wrap the release creation. Transient github.com
     # hiccups during the gh release POST are common and easy to recover from
-    # — if the tag is already on origin (Gate 13 passed), gh release create
+    # — if the tag is already on origin (Gate 12 passed), gh release create
     # is idempotent in the sense that a retry on the same tag either succeeds
     # (release didn't exist yet) OR returns a permanent "already exists"
     # error which our classifier treats as non-transient and surfaces.
@@ -1521,15 +1522,14 @@ Examples:
         bump_type = detect_bump_type(root)
         print(f"{BLUE}Bump type: {bump_type} (auto-detected from git-cliff){NC}")
 
-    # ── Gates 1-7: preflight ──
-    # Order: clean tree → lint(+typecheck) → tests → validate → marketplace →
-    # consistency. Lint comes BEFORE tests because type errors and syntax
-    # issues should fail fast (cheap), before paying the cost of running the
-    # test suite. Validate runs AFTER tests so the test suite catches any
-    # behavioral regression before the validator checks structural rules.
+    # ── Gates 1-6: preflight ──
+    # Order: clean tree → tests → validate (lint+structure+plugin checks) →
+    # marketplace → consistency. Since v2.64.0, validate_plugin.py owns
+    # repo-wide lint via cpv_lint_engine, so there is no separate lint
+    # stage — the validator catches lint errors AND structural issues in a
+    # single pass with one source of truth.
     for stage in (
         lambda: stage_check_working_tree(root),
-        lambda: stage_run_lint(root),
         lambda: stage_run_tests(root),
         lambda: stage_validate_plugin(root),
     ):
@@ -1550,7 +1550,7 @@ Examples:
     if rc != 0:
         return rc
 
-    # ── Gate 8: bump ──
+    # ── Gate 7: bump ──
     rc, new_version = stage_bump(root, bump_type, args.dry_run)
     if rc != 0 or new_version is None:
         # Narrowing for mypy: stage_bump returns (0, str) or (nonzero, None).
@@ -1563,12 +1563,12 @@ Examples:
 
     tag_name = f"v{new_version}"
 
-    # ── Gate 9: refresh integrity manifest (issue #18) ──
+    # ── Gate 8: refresh integrity manifest (issue #18) ──
     rc = stage_refresh_self_hashes(root)
     if rc != 0:
         return rc
 
-    # ── Gates 10-14: changelog, commit, tag, push, release ──
+    # ── Gates 9-13: changelog, commit, tag, push, release ──
     rc, release_notes_file = stage_changelog(root, tag_name, new_version)
     if rc != 0 or release_notes_file is None:
         return rc

@@ -65,7 +65,6 @@ Do NOT search for the launcher with `find`, do NOT browse
 | `telemetry` | validate_telemetry.py | OTEL telemetry supply-chain risk |
 | `local-scope` | validate_local_scope.py | non-git-tracked .claude/ |
 | `project-scope` | validate_project_scope.py | git-tracked .claude/ |
-| `lint` | lint_files.py | lint all scripts (15 languages, read-only) |
 | `doctor` | manage_doctor.py | health-check installed plugins |
 | `registry` | manage_registry.py | plugin registry operations |
 | `github` | manage_github_validate.py | validate plugin/marketplace from GitHub URL |

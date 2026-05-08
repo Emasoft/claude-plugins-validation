@@ -467,7 +467,7 @@ The semantic validator always warns about the cost and asks for confirmation bef
 | `generate_marketplace_repo.py` | Scaffold a marketplace hub |
 | `standardize_plugin.py` | Audit and fix plugin repo |
 | `standardize_marketplace.py` | Audit and fix marketplace repo |
-| `lint_files.py` | Read-only linting for 15 languages |
+| `cpv_lint_engine.py` | Repo-wide lint engine (15 languages, invoked by `validate_plugin.py`) |
 | `cpv_token_cost.py` | Token cost reporter |
 | `smart_exec.py` | Cross-platform script executor |
 | `cli.py` | CLI entry points for uvx/pip |
