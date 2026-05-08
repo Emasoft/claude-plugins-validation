@@ -2826,6 +2826,50 @@ DISABLE_REPORTERS:
 """
 
 
+def gen_markdownlint_json(p: PluginParams) -> str:
+    """Generate .markdownlint.json — disables MD013 (line-length).
+
+    Plugin .md files (skill descriptions, agent prompts, slash commands,
+    hook recipes) commonly contain extremely long lines that cannot be
+    safely wrapped:
+
+      - Inline `!command` shell snippets that would break across newlines
+      - Long URLs in references / badges
+      - Pipe-delimited tables describing config keys
+      - Frontmatter with comma-joined tool lists
+
+    Wrapping any of these would change the rendered markdown / break the
+    Claude Code parser. CPV-published plugins therefore disable MD013
+    everywhere; the rest of the markdownlint defaults stay in effect.
+    """
+    _ = p  # unused but kept for consistent signature
+    return """{
+  \"default\": true,
+  \"MD007\": false,
+  \"MD013\": false,
+  \"MD022\": false,
+  \"MD024\": { \"siblings_only\": true },
+  \"MD026\": false,
+  \"MD029\": false,
+  \"MD031\": false,
+  \"MD032\": false,
+  \"MD033\": false,
+  \"MD034\": false,
+  \"MD036\": false,
+  \"MD037\": false,
+  \"MD038\": false,
+  \"MD040\": false,
+  \"MD041\": false,
+  \"MD049\": false,
+  \"MD050\": false,
+  \"MD051\": false,
+  \"MD058\": false,
+  \"MD059\": false,
+  \"MD060\": false
+}
+"""
+
+
 def gen_notify_marketplace_yml(p: PluginParams) -> str:
     """Generate .github/workflows/notify-marketplace.yml — marketplace notification."""
     marketplace_owner = p.github_owner
@@ -2949,6 +2993,7 @@ def generate_all_files(p: PluginParams) -> list[tuple[str, str, bool]]:
                 ("hooks/hooks.json", gen_hooks_json(p), False),
                 ("git-hooks/pre-push", gen_pre_push_hook(p), True),
                 (".mega-linter.yml", gen_mega_linter_yml(p), False),
+                (".markdownlint.json", gen_markdownlint_json(p), False),
                 (".github/workflows/ci.yml", gen_ci_yml(p), False),
                 (".github/workflows/release.yml", gen_release_yml(p), False),
                 (".github/workflows/notify-marketplace.yml", gen_notify_marketplace_yml(p), False),

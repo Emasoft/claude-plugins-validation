@@ -280,23 +280,24 @@ what you'd like to do.
 
 ---
 
-### 3.0 Top-level menu (9 categories + Cancel)
+### 3.0 Top-level menu (10 categories + Cancel)
 
 ```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Category                ┃ What it does                                                          ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Validate                │ Check that a plugin or marketplace is well-formed                     │
-│ 2 │ Validate from GitHub    │ Check a plugin or marketplace hosted on GitHub (no local clone needed)│
-│ 3 │ Fix                     │ Auto-fix issues that a previous validation found                      │
-│ 4 │ Create                  │ Make a new plugin or marketplace from scratch                         │
-│ 5 │ Manage                  │ List installed plugins, install / update, health-check, bump version  │
-│ 6 │ GitHub setup            │ Branch-protection rules, link plugin to marketplace                   │
-│ 7 │ Deep semantic analysis  │ AI-graded quality review (slow + expensive — confirms cost first)     │
-│ 8 │ Help / About            │ Show the menu overview, list of commands, version                     │
-│ A │ Ask the agent           │ Let the agent suggest the best next action right now                  │
-│ 0 │ Cancel / Exit           │ Stop without doing anything                                           │
-└───┴─────────────────────────┴───────────────────────────────────────────────────────────────────────┘
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ # ┃ Category                 ┃ What it does                                                          ┃
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 1 │ Validate                 │ Check that a plugin or marketplace is well-formed                     │
+│ 2 │ Validate from GitHub     │ Check a plugin or marketplace hosted on GitHub (no local clone needed)│
+│ 3 │ Fix                      │ Auto-fix issues that a previous validation found                      │
+│ 4 │ Create                   │ Scaffold plugin, marketplace, skill, agent, command, hook, MCP server │
+│ 5 │ Manage                   │ List installed plugins, install / update, health-check, bump version  │
+│ 6 │ Diagnose & Upgrade       │ Deep audit + upgrade existing plugin to latest pipeline (recommended) │
+│ 7 │ GitHub setup             │ Branch-protection rules, link plugin to marketplace                   │
+│ 8 │ Deep semantic analysis   │ AI-graded quality review (slow + expensive — confirms cost first)     │
+│ 9 │ Help / About             │ Show the menu overview, list of commands, version                     │
+│ A │ Ask the agent            │ Let the agent suggest the best next action right now                  │
+│ 0 │ Cancel / Exit            │ Stop without doing anything                                           │
+└───┴──────────────────────────┴───────────────────────────────────────────────────────────────────────┘
 Type a number (or A to ask the agent) to choose:
 ```
 
@@ -306,7 +307,7 @@ Type a number (or A to ask the agent) to choose:
 
 After a leaf in §3.1 or §3.2 finishes and the report is on disk, the
 orchestrator MUST print the §3.10 post-validate fix menu (NEVER the
-generic §3.9 "do something else" table). This is non-negotiable: the user
+generic §3.99 "do something else" table). This is non-negotiable: the user
 always gets the explicit "fix N or end" choice after a validation, never
 just "what's next?".
 
@@ -684,15 +685,20 @@ Type a number to choose:
 ### 3.4 Create sub-menu
 
 ```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Scaffold                    ┃ What it does                                                     ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ New plugin                  │ Make a fresh plugin repo from scratch (uses the plugin-creator)  │
-│ 2 │ New marketplace             │ Make a fresh marketplace repo from scratch (uses plugin-creator) │
-│ 9 │ Back                        │ Go back to the top-level menu                                    │
-│ A │ Ask the agent               │ Let the agent suggest the best next action right now             │
-│ 0 │ Cancel / Exit               │ Stop without doing anything                                      │
-└───┴─────────────────────────────┴──────────────────────────────────────────────────────────────────┘
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ # ┃ Scaffold                                        ┃ What it does                                                                               ┃
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 1 │ New plugin (latest pipeline standard)           │ Fresh plugin repo with idempotent publish.py + cpv_lint_engine + pathlib + sanitized inputs│
+│ 2 │ New marketplace                                 │ Fresh marketplace repo from scratch (Layout A/B/C — interactive)                           │
+│ 3 │ New skill (in existing plugin)                  │ Add skills/<name>/SKILL.md — valid frontmatter + auto-refresh README                       │
+│ 4 │ New agent (in existing plugin)                  │ Add agents/<name>.md — valid frontmatter + tools whitelist + auto-refresh README           │
+│ 5 │ New slash command (in existing plugin)          │ Add commands/<name>.md — valid frontmatter + auto-refresh README                           │
+│ 6 │ New hook (in existing plugin)                   │ Append hook entry to hooks/hooks.json — cross-platform-aware (bash-isms rejected)          │
+│ 7 │ New MCP server (in existing plugin)             │ Register server in .mcp.json — stdio default, HTTP via flag, server-name uniqueness check  │
+│ 9 │ Back                                            │ Go back to the top-level menu                                                              │
+│ A │ Ask the agent                                   │ Let the agent suggest the best next action right now                                       │
+│ 0 │ Cancel / Exit                                   │ Stop without doing anything                                                                │
+└───┴─────────────────────────────────────────────────┴────────────────────────────────────────────────────────────────────────────────────────────┘
 Type a number to choose:
 ```
 
@@ -702,7 +708,8 @@ Type a number to choose:
   1. `Plugin name?`
   2. `Target directory?`
   3. `Layout (A=hub-and-spoke / B=nested monorepo / C=marketplace-in-plugin self-referential)?`
-- **execution**: dispatch the **plugin-creator agent** with the answers.
+- **execution**: dispatch the **plugin-creator agent** with the answers. Newly-scaffolded plugins ship with current pipeline standards baked in (idempotent publish.py, cpv_lint_engine, pathlib-only Python, sanitized inputs, validate_pipeline_script_refs rule, no `.sh` scripts).
+- **post-execution**: ALWAYS auto-dispatch the **plugin-diagnoser agent** on the just-scaffolded plugin path. If the diagnosis returns 0 CRITICAL/MAJOR/MINOR, print `✓ Scaffold passes diagnose-plugin clean.` and proceed to §3.99. Otherwise print the diagnoser's follow-up menu so the user can pick a fix path.
 
 #### 3.4.2 Scaffold a new marketplace
 
@@ -711,6 +718,84 @@ Type a number to choose:
   2. `Target directory?`
   3. `Owner GitHub username?`
 - **execution**: dispatch the **plugin-creator agent** in marketplace mode.
+
+#### 3.4.3 Add a skill to an existing plugin
+
+- **path-source**: per §3.0a (row 1 = current project folder)
+- **arg-prompts** (in order):
+  1. `Skill name (kebab-case)?`
+  2. `One-line description (what does the skill do)?`
+- **execution**:
+  ```bash
+  uv run "${CLAUDE_PLUGIN_ROOT}/scripts/add_component.py" "$PLUGIN_PATH" \
+    --type skill --name "$NAME" --description "$DESC"
+  uv run "${CLAUDE_PLUGIN_ROOT}/scripts/refresh_readme.py" "$PLUGIN_PATH"
+  ```
+- **post-execution**: auto-run `validate_plugin --strict` on the parent plugin so any drift is caught immediately. Print summary + report path.
+
+#### 3.4.4 Add an agent to an existing plugin
+
+- **path-source**: per §3.0a
+- **arg-prompts** (in order):
+  1. `Agent name (kebab-case)?`
+  2. `One-line description?`
+  3. `Tools whitelist (comma-separated, e.g. "Read, Bash, Grep" — leave blank for default sonnet+all)?`
+- **execution**:
+  ```bash
+  uv run "${CLAUDE_PLUGIN_ROOT}/scripts/add_component.py" "$PLUGIN_PATH" \
+    --type agent --name "$NAME" --description "$DESC" --tools "$TOOLS"
+  uv run "${CLAUDE_PLUGIN_ROOT}/scripts/refresh_readme.py" "$PLUGIN_PATH"
+  ```
+- **post-execution**: auto-run `validate_plugin --strict`.
+
+#### 3.4.5 Add a slash command to an existing plugin
+
+- **path-source**: per §3.0a
+- **arg-prompts** (in order):
+  1. `Command name (kebab-case)?`
+  2. `One-line description?`
+  3. `Allowed tools (e.g. "Bash(uv:*)" — leave blank to allow all)?`
+- **execution**:
+  ```bash
+  uv run "${CLAUDE_PLUGIN_ROOT}/scripts/add_component.py" "$PLUGIN_PATH" \
+    --type command --name "$NAME" --description "$DESC" --allowed-tools "$TOOLS"
+  uv run "${CLAUDE_PLUGIN_ROOT}/scripts/refresh_readme.py" "$PLUGIN_PATH"
+  ```
+- **post-execution**: auto-run `validate_plugin --strict`.
+
+#### 3.4.6 Add a hook to an existing plugin
+
+- **path-source**: per §3.0a
+- **arg-prompts** (in order):
+  1. `Hook event (PreToolUse, PostToolUse, SessionStart, Stop, …)?`
+  2. `Command (cross-platform — recommend `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/<your-hook>.py"`)?`
+- **pre-execution**: validate the command via `check_hook_command_cross_platform`. If it contains bash-only constructs (`set -euo pipefail`, `[[ ]]`, `$(<file)`, process substitution, brace expansion) OR POSIX-only tools (`jq`, `sed`, `awk`, `shellcheck`) — REJECT with the conversion-cheat-sheet from `pipeline-migration.md §3b` and re-prompt for the command.
+- **execution**:
+  ```bash
+  uv run "${CLAUDE_PLUGIN_ROOT}/scripts/add_component.py" "$PLUGIN_PATH" \
+    --type hook --event "$EVENT" --command "$COMMAND"
+  ```
+- **post-execution**: auto-run `validate_plugin --strict` (will re-validate the new hook command).
+
+#### 3.4.7 Add an MCP server to an existing plugin
+
+- **path-source**: per §3.0a
+- **arg-prompts** (in order):
+  1. `Server name (must be unique within plugin; cannot be "workspace")?`
+  2. `Command (must invoke a cross-platform runtime: `node`, `python3`, `uv run`, `npx` — bare `./script.sh` rejected)?`
+  3. `Transport (1=stdio default, 2=http)?`
+  4. (only if http) `HTTP URL?`
+- **pre-execution**: reject the reserved server name `workspace`. Reject command starting with bare `./` or `*.sh` (cross-platform requirement).
+- **execution**:
+  ```bash
+  # stdio
+  uv run "${CLAUDE_PLUGIN_ROOT}/scripts/add_component.py" "$PLUGIN_PATH" \
+    --type mcp --name "$NAME" --command "$COMMAND"
+  # http
+  uv run "${CLAUDE_PLUGIN_ROOT}/scripts/add_component.py" "$PLUGIN_PATH" \
+    --type mcp --name "$NAME" --http-url "$URL"
+  ```
+- **post-execution**: auto-run `validate_plugin --strict` AND `validate_mcp --strict` (catches cross-source server-name shadowing).
 
 ---
 
@@ -883,7 +968,98 @@ Type a number to choose:
 
 ---
 
-### 3.6 GitHub setup sub-menu
+### 3.6 Diagnose & Upgrade sub-menu
+
+The big-picture entry for any existing plugin. Goes beyond `/cpv-validate-plugin`
+(structure-only) by ALSO running all 5 external scanners + pipeline-staleness
+checks + cross-platform compliance + marketplace registration probe +
+cached-vs-GitHub sync probe + branch-rules + Claude action audit.
+
+```
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ # ┃ Operation                                         ┃ What it does                                                                                              ┃
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 1 │ Diagnose plugin (deep audit)                      │ Full audit + structured report + follow-up menu (offers upgrade / register / sync / fix)                  │
+│ 2 │ Upgrade plugin to current pipeline standard       │ Apply ALL pipeline-migration steps (§1–§5) — bash → Python, os.path → pathlib, idempotent publish.py, etc.│
+│ 3 │ Apply CRITICAL fixes only                         │ Fix only publish-blockers + security blockers — leaves MAJOR/MINOR/NIT findings for later                 │
+│ 4 │ Apply MAJOR + CRITICAL fixes                      │ Fix everything that blocks publishing or is non-cross-platform — leaves MINOR/NIT/WARNING for later       │
+│ 5 │ Sync cached install with GitHub                   │ Compare cache version to latest tag; offer to run `claude plugin update`                                  │
+│ 6 │ Check + fix marketplace registration              │ Verify plugin is listed in a marketplace; offer to register / create / re-register                        │
+│ 7 │ Audit branch rules + Claude action setup          │ Check ruleset, bypass actors, Claude action version pin, missing secrets — offer to fix                   │
+│ 8 │ Cross-platform audit                              │ Quick scan for `.sh` scripts, `os.path`, hardcoded `/tmp/`, `shell=True`, bash hook constructs, jq/sed/awk│
+│ 9 │ Back                                              │ Go back to the top-level menu                                                                             │
+│ A │ Ask the agent                                     │ Let the agent suggest the best next action right now                                                      │
+│ 0 │ Cancel / Exit                                     │ Stop without doing anything                                                                               │
+└───┴───────────────────────────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+Type a number to choose:
+```
+
+#### 3.6.1 Diagnose plugin
+
+- **path-source**: per §3.0a (its row 1 = "current project folder $PWD")
+- **execution**: dispatch the **plugin-diagnoser agent** with the path. The agent runs phases 1–7 (validate, security with all scanners, pipeline staleness, cross-platform, marketplace registration, branch+actions, sync), writes the structured report, then prints its own follow-up menu (rows 1–7 + 0).
+
+#### 3.6.2 Upgrade to current pipeline standard
+
+- **path-source**: per §3.0a
+- **execution**: dispatch the **plugin-fixer agent** with the path AND the prompt: `Apply pipeline-migration §1–§5 from skills/fix-validation/references/pipeline-migration.md. min_severity=WARNING (fix everything).`
+
+#### 3.6.3 Apply CRITICAL fixes only
+
+- **path-source**: per §3.0a
+- **execution**: dispatch the **plugin-fixer agent** with `min_severity=CRITICAL`.
+
+#### 3.6.4 Apply MAJOR + CRITICAL fixes
+
+- **path-source**: per §3.0a
+- **execution**: dispatch the **plugin-fixer agent** with `min_severity=MAJOR`.
+
+#### 3.6.5 Sync cached install with GitHub
+
+- **arg-prompts** (in order):
+  1. `Plugin name (or path under ~/.claude/plugins/cache/)?`
+  2. (after detection prints `cached: vX.Y.Z, latest: vA.B.C, N versions behind`) — `Run \`claude plugin update <name>@<marketplace>\` now? (yes/no)`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/manage_doctor.py" --check-cache-sync "<plugin-name>"
+  # if user says yes:
+  claude plugin update <name>@<marketplace>
+  ```
+
+#### 3.6.6 Check + fix marketplace registration
+
+- **path-source**: per §3.0a
+- **execution**: dispatch the **plugin-diagnoser agent** in marketplace-only mode → if not registered, dispatch the **plugin-creator agent** in orphan-plugin marketplace-onboarding mode (4-path menu: A=existing marketplace, B=new local marketplace, C=new GitHub marketplace, D=existing GitHub marketplace).
+
+#### 3.6.7 Audit branch rules + Claude action setup
+
+- **arg-prompt**: `Owner/repo slug to audit (or "auto" to detect from origin)?`
+- **execution**: dispatch the **plugin-diagnoser agent** in branch-rules-only mode (Phase 6.5). Findings include: ruleset state, bypass actors, Claude action version pin, missing secrets. After the audit prints, offer:
+  - 1: re-apply cpv-branch-rules ruleset → `/cpv-setup-branch-rules-generic <owner>/<repo>`
+  - 2: pin Claude action to latest SHA via pinact
+  - 3: surface secret-setup instructions for `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN`
+  - 0: end
+
+#### 3.6.8 Cross-platform audit
+
+- **path-source**: per §3.0a
+- **execution**:
+  ```bash
+  cd <plugin-path>
+  echo "=== Bash/shell scripts (should only be in scripts_dev/ — anything in scripts/ blocks Windows users) ==="
+  find . -name "*.sh" -not -path "./.git/*" -not -path "./scripts_dev/*"
+  echo
+  echo "=== os.path / hardcoded /tmp/ / shell=True / os.system in Python scripts ==="
+  grep -rnE "os\.path\.|shell=True|\"/tmp/|os\.system|os\.geteuid" scripts/ --include="*.py" 2>/dev/null
+  echo
+  echo "=== Bash-only hook commands ==="
+  uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" hook . --strict 2>&1 | grep -E "bash-only|POSIX-only" || echo "(none)"
+  ```
+- **post**: print the §3.99 "do something else?" 2-row table.
+
+---
+
+### 3.7 GitHub setup sub-menu
 
 ```
 ┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
@@ -899,16 +1075,16 @@ Type a number to choose:
 Type a number to choose:
 ```
 
-#### 3.6.1 Branch protection (current repo)
+#### 3.7.1 Branch protection (current repo)
 
 - **execution**: invokes `/cpv-setup-branch-rules` workflow inline (no extra prompts — uses the current `git remote get-url origin`).
 
-#### 3.6.2 Branch protection (generic owner/repo)
+#### 3.7.2 Branch protection (generic owner/repo)
 
 - **arg-prompt**: `Owner/repo slug?`
 - **execution**: invokes `/cpv-setup-branch-rules-generic` workflow inline with the slug.
 
-#### 3.6.3 Link plugin to a marketplace
+#### 3.7.3 Link plugin to a marketplace
 
 - **arg-prompts** (in order):
   1. `Plugin repo (owner/repo)?`
@@ -917,7 +1093,7 @@ Type a number to choose:
 
 ---
 
-### 3.7 Deep semantic analysis (opus, EXPENSIVE)
+### 3.8 Deep semantic analysis (opus, EXPENSIVE)
 
 ```
 ┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┓
@@ -931,7 +1107,7 @@ Type a number to choose:
 Type a number to choose:
 ```
 
-#### 3.7.1 Confirm + run
+#### 3.8.1 Confirm + run
 
 - **arg-prompts** (in order):
   1. `Semantic validation uses Opus with 1M context at max effort. Cost: ~10-50× normal. Proceed? (yes/no)`
@@ -940,7 +1116,7 @@ Type a number to choose:
 
 ---
 
-### 3.8 Help / About sub-menu
+### 3.9 Help / About sub-menu
 
 ```
 ┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
@@ -956,11 +1132,11 @@ Type a number to choose:
 Type a number to choose:
 ```
 
-#### 3.8.1 Category overview
+#### 3.9.1 Category overview
 
 - **execution**: re-print the 3.0 top-level menu table.
 
-#### 3.8.2 List every CPV command
+#### 3.9.2 List every CPV command
 
 - **execution**:
   ```bash
@@ -971,13 +1147,13 @@ Type a number to choose:
   done
   ```
 
-#### 3.8.3 Show CPV plugin version
+#### 3.9.3 Show CPV plugin version
 
 - **execution**: same as 3.5.7.
 
 ---
 
-### 3.9 End-of-leaf "do something else?" table (NON-validate flows)
+### 3.99 End-of-leaf "do something else?" table (NON-validate flows)
 
 After a Create / Manage / GitHub-setup / Help leaf finishes, print this 2-row
 table and wait for the user's number:

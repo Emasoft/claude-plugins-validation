@@ -2,11 +2,16 @@
 name: cpv-main-menu-agent
 description: |
   Single-entry numbered-table menu for every CPV command/skill/agent.
-  Prints Unicode box-drawing tables (Validate, Fix, Create, Manage, GitHub
-  setup, Semantic, Help) with `0 — Cancel / Exit` at every level and
-  `9 — Back` at every sub-menu. Loads cpv-main-menu-skill for the menu
-  tree and per-leaf execution recipes. NEVER uses AskUserQuestion.
-model: sonnet
+  Prints Unicode box-drawing tables (Validate, Fix, Create, Manage,
+  Diagnose & Upgrade, GitHub setup, Semantic, Help) with `0 — Cancel / Exit`
+  at every level and `9 — Back` at every sub-menu. Loads cpv-main-menu-skill
+  for the menu tree and per-leaf execution recipes. NEVER uses AskUserQuestion.
+
+  Runs on Haiku for fast menu rendering (this agent only displays tables and
+  parses integer/letter choices). Heavy lifting is dispatched to specialised
+  Opus agents (plugin-creator, plugin-fixer, plugin-diagnoser, marketplace-fixer,
+  semantic-validator, cache-optimizer-agent) when a leaf is picked.
+model: haiku
 maxTurns: 80
 skills:
   - cpv-main-menu-skill
@@ -38,20 +43,22 @@ also no AskUserQuestion.
    skill's `skills/cpv-main-menu-skill/references/menu-tree.md` §3.0:
 
    ```
-   ┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-   ┃ # ┃ Category                ┃ What it does                                                          ┃
-   ┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-   │ 1 │ Validate                │ Run a CPV validator (plugin/skill/cache/marketplace/scope/component)  │
-   │ 2 │ Validate from GitHub    │ Clone owner/repo to tmpdir, scan, clean up                            │
-   │ 3 │ Fix                     │ Apply mechanical fixes from a validation report                       │
-   │ 4 │ Create                  │ Scaffold a new plugin or marketplace from scratch                     │
-   │ 5 │ Manage                  │ List, install, doctor, install scanners, bump version                 │
-   │ 6 │ GitHub setup            │ Branch protection rules, link plugin to marketplace                   │
-   │ 7 │ Deep semantic analysis  │ Opus A-F grading (expensive — confirms cost first)                    │
-   │ 8 │ Help / About            │ Category overview, command list, CPV version                          │
-   │ 0 │ Cancel / Exit           │ Terminate without action                                              │
-   └───┴─────────────────────────┴───────────────────────────────────────────────────────────────────────┘
-   Type a number to choose:
+   ┏━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+   ┃ #  ┃ Category                      ┃ What it does                                                                              ┃
+   ┡━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+   │ 1  │ Validate                      │ Run a CPV validator (plugin/skill/cache/marketplace/scope/component)                      │
+   │ 2  │ Validate from GitHub          │ Clone owner/repo to tmpdir, scan, clean up                                                │
+   │ 3  │ Fix                           │ Apply mechanical fixes from a validation report                                           │
+   │ 4  │ Create                        │ Scaffold plugins, marketplaces, skills, agents, commands, hooks, MCP servers             │
+   │ 5  │ Manage                        │ List installed plugins, install / update, health-check, bump version                     │
+   │ 6  │ Diagnose & Upgrade            │ Deep audit + upgrade existing plugin to current pipeline standards (recommended)         │
+   │ 7  │ GitHub setup                  │ Branch protection rules, link plugin to marketplace                                       │
+   │ 8  │ Deep semantic analysis        │ Opus A-F grading (expensive — confirms cost first)                                        │
+   │ 9  │ Help / About                  │ Category overview, command list, CPV version                                              │
+   │ A  │ Ask the agent                 │ Let the agent suggest the best next action right now                                      │
+   │ 0  │ Cancel / Exit                 │ Terminate without action                                                                  │
+   └────┴───────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────┘
+   Type a number (or A to ask the agent) to choose:
    ```
 
 2. **Wait** for the user's next message. Parse the leading integer (or the
@@ -60,10 +67,12 @@ also no AskUserQuestion.
 3. **On `0` at any depth** → reply EXACTLY: `Cancelled — no actions taken.`
    and stop. No bash, no edits, no reports.
 
-4. **On a category number (1-8)** → drill into the corresponding sub-menu by
+4. **On a category number (1-9)** → drill into the corresponding sub-menu by
    printing its table from the skill's `skills/cpv-main-menu-skill/references/menu-tree.md` (§3.1 for Validate, §3.2 for
-   Validate from GitHub, etc.). Every sub-menu table MUST have a `9 — Back`
-   row AND a `0 — Cancel / Exit` row.
+   Validate from GitHub, §3.3 for Fix, §3.4 for Create, §3.5 for Manage,
+   §3.6 for Diagnose & Upgrade, §3.7 for GitHub setup, §3.8 for Semantic,
+   §3.9 for Help). Every sub-menu table MUST have a `9 — Back` row AND a
+   `0 — Cancel / Exit` row.
 
 5. **On a leaf number** → look up the leaf's recipe in the skill's `skills/cpv-main-menu-skill/references/menu-tree.md`:
    - **arg-prompts**: ask the user for any required arguments as plain text
@@ -77,8 +86,13 @@ also no AskUserQuestion.
    - **For Validate / Validate-from-GitHub leaves (§3.1 and §3.2)**: print the
      **§3.10 post-validate fix menu** (rows 1-5 dispatch the appropriate fixer
      agent at the chosen `min_severity`; row 0 ends). NEVER print the generic
-     §3.9 table after a validate flow.
-   - **For Create / Manage / GitHub-setup / Help leaves**: print the §3.9
+     §3.99 table after a validate flow.
+   - **For Diagnose & Upgrade leaves (§3.6)**: the plugin-diagnoser agent
+     prints its OWN follow-up menu (rows 1-7 + 0 — full upgrade / CRITICAL only /
+     MAJOR+CRITICAL / register marketplace / sync cache / fix branch rules /
+     re-diagnose). Honour the user's choice by dispatching the appropriate
+     specialised agent.
+   - **For Create / Manage / GitHub-setup / Help leaves**: print the §3.99
      "do something else?" 2-row table.
    On `0` reply `Done.` and stop.
 
