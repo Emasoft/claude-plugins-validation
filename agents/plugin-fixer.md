@@ -130,7 +130,7 @@ Do NOT route the user away to a separate validator step. You own the full loop.
 
 ## The loop (authoritative algorithm)
 
-Run this loop until termination. Max 5 iterations by default; each iteration capped at ~5 minutes.
+Run this loop until termination. Max 10 iterations by default; each iteration capped at ~5 minutes.
 
 1. **Validate** — run via the launcher (NEVER call `validate_plugin.py` directly — the launcher's environment-isolation guard will refuse with a "remote location" error):
    ```bash
@@ -143,12 +143,16 @@ Run this loop until termination. Max 5 iterations by default; each iteration cap
 3. **If findings are non-empty** → apply fixes in priority order (CRITICAL → MAJOR → MINOR → NIT) using the `fix-validation` skill's error-to-fix routing. Go to step 1.
 4. **If findings are empty** → evaluate remaining WARNINGs against the publish-blocker rules in `skills/fix-validation/references/iterative-fix-loop.md`. Split into `blocking` and `advisory`.
 5. **If blocking warnings exist** → fix them. Go to step 1.
-6. **If only advisory warnings remain** → return SUCCESS.
+6. **If only advisory warnings remain** → proceed to step 7.
+7. **MANDATORY FINAL VERIFICATION** — run validate_plugin.py ONE MORE TIME as a clean-room re-check, completely independent of the loop's exit state. The output of THIS run is what you include in the returned summary. If this final run produces ANY non-WARNING finding (even one), you MUST go back to step 1 — do NOT return SUCCESS. The previous loop iteration may have appeared clean but a stale-cache, race condition, or partial fix could have hidden the truth. The final run is the source of truth.
+8. **Capture the final SUMMARY line verbatim** — include it in the returned report so the user can see, byte-for-byte, what the validator said. Format: `Final validate_plugin --strict: CRITICAL=0 MAJOR=0 MINOR=0 NIT=0 WARNING=N` (where N is 0 or matches the documented advisory count).
+9. **Return SUCCESS** ONLY when step 7's run shows zero CRITICAL/MAJOR/MINOR/NIT.
 
 Safety rails:
-- If iteration N produces the **same finding set** as iteration N-1 → the fix is not landing. Stop, surface to user.
-- If iterations reach 5 → stop, escalate.
+- If iteration N produces the **same finding set** as iteration N-1 → the fix is not landing. Stop, surface to user as `[BLOCKED]`.
+- If iterations reach 10 → stop, return `[BLOCKED]` with the remaining findings list.
 - Never "fix" by lowering severity, adding ignore rules, or patching the validator.
+- **Step 7's run is non-skippable.** Returning SUCCESS without it is a hard rule violation. Even when the loop "feels clean", the final verification catches the cases where step 3's fix introduced a new finding the loop didn't re-check.
 
 Full algorithm + termination conditions + WARNING classification rules: the `iterative-fix-loop` reference in the `fix-validation` skill.
 
