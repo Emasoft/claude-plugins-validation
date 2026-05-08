@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-07T20:00:36+00:00",
+  "computed_at": "2026-05-08T11:11:48+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     "agents/cache-optimizer-agent.md": "sha256:b0f8e0619569cc2b04587e8b251f9ad2f9a8e8227da071953aa56f78c72c0553",
@@ -89,7 +89,7 @@
     "scripts/detect_lockfiles.py": "sha256:17c03bd5d381395f6348a7a2b8c2d4df99422cabdd600b98fe7be0b01ebb6971",
     "scripts/generate_marketplace_repo.py": "sha256:443e4080ac717814f97d7fa82b44c540eff5c5edca8def77a8b6cff90a534f9e",
     "scripts/generate_plugin_repo.py": "sha256:1c7f261bbb028f4d6ea368839601cbc3cb6824cfb238d38834eb3a4590a4e224",
-    "scripts/lint_files.py": "sha256:33f6a3be3216ded1e50b508ae85f9a9a77061ea6d2283cdd6310954644c004c1",
+    "scripts/lint_files.py": "sha256:ab540d8e1f5cd0dc2d422323c3a3d4bd03cef3ad86bdb1d3bd950a5827ee43b8",
     "scripts/manage_doctor.py": "sha256:aee097a13479bbfe898699ac8b52bddf02b2ac3393106a0de0354713b6eea127",
     "scripts/manage_github_validate.py": "sha256:3815122e0b6c491040ecb406f5b879f5a62f4b90c195d6f9f87c7ac9a19d7bbb",
     "scripts/manage_marketplace.py": "sha256:4ac998ff10df59c370107936845b5c71fa9b877293305fd10581aa9e2910e468",
@@ -289,6 +289,7 @@
     "tests/test_gitignore_filter.py": "sha256:6709548b5e52ca5e2a2882d4ce0a5bb245370de887a99bd11e1b8185d7d02801",
     "tests/test_issue_16_orchestrator_fps.py": "sha256:c493a3b644aa19933f934c676d6159c11b8ed5ebb7544a244e32e6a7b81df203",
     "tests/test_legacy_integrity_fallback.py": "sha256:9ce71d08a3e09eb36160e072b508492ac58820685229947e9a8201113dc0bc3e",
+    "tests/test_lint_files_gitignore.py": "sha256:29648773212337eff1cabd4c809aaaed1e7c2215c932cb67274f3b2fbc1ff82e",
     "tests/test_manage_doctor.py": "sha256:b5a8c933aa35a18d8e722e3e275f8ced05f4577fab8b7480f6dd923293e86ee4",
     "tests/test_manage_github_validate.py": "sha256:62bc9483e8fc624035bfa6e9b05108373885b05b6c2a85b70a1619a618817303",
     "tests/test_manage_marketplace.py": "sha256:5cffe81fb5240804729339557823ba94d7eeea24485f14fb26d283b80b87e5e0",
