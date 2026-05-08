@@ -92,3 +92,6 @@ rck-*-merge-pending.md
 /.trashcan/*
 !/.trashcan/.gitkeep
 !/.trashcan/README.txt
+
+# gh CLI per-host state directory created when running gh inside this repo.
+.local/
