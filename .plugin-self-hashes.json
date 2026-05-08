@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "computed_at": "2026-05-08T18:07:03+00:00",
+  "computed_at": "2026-05-08T18:17:04+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     "agents/cache-optimizer-agent.md": "sha256:b0f8e0619569cc2b04587e8b251f9ad2f9a8e8227da071953aa56f78c72c0553",
-    "agents/cpv-main-menu-agent.md": "sha256:040b9884320cb41dfbf87221f75cc08cc1b508261b300ed460232cc773ced445",
+    "agents/cpv-main-menu-agent.md": "sha256:f53c7d31d72204533699ef3e30fe0b688b601778440bc9410417fc7e8a2bf754",
     "agents/marketplace-fixer.md": "sha256:baa1eff71bc2112e764aba9d087db61d9163e899ec1e8120551544bd8bd147d3",
     "agents/plugin-creator.md": "sha256:23081ff58ea39c9f1a2abe1ac6546836c2afe0032a65eb8eaea189be856b4de0",
     "agents/plugin-diagnoser.md": "sha256:abc59b68d77778bfbf3588fb31afc519435ed8641701e0dd358018c161d7e9e9",
@@ -147,7 +147,7 @@
     "skills/canonical-pipeline/references/pipeline-standards.md": "sha256:dfe989554fb5602eaf6af6e93f3c152f2a3321d75de6ac9036931a4400329d07",
     "skills/canonical-pipeline/references/v2-1-80-features.md": "sha256:1ca8a9dd13d78e9f89c4c969b38f4a0a005c083e16789e6b4ee7f467e19d50e6",
     "skills/cpv-main-menu-skill/SKILL.md": "sha256:bbcc63dec410883eb884ab0cff26f4ebdb91694e04fa7a8bb115c9b38e3dbf4c",
-    "skills/cpv-main-menu-skill/references/menu-tree.md": "sha256:b758478053c0989b46a3991650ad7f2211586dc2f2dabafe5586bbe13589cc4b",
+    "skills/cpv-main-menu-skill/references/menu-tree.md": "sha256:a9933cb5191c6c74da59e8e7a8d1e6d91da1e18a0de890076b545e2f4f05870a",
     "skills/create-plugin/SKILL.md": "sha256:70a6cfeb5052b0561215567d4372cb9f905d3af411f792975a6434bf34eb7ef6",
     "skills/create-plugin/references/dev-stripping.md": "sha256:04616980266569ce59caf5397a9b2eee6d457c764eaaf4151172fbdb569dac0f",
     "skills/create-plugin/references/examples.md": "sha256:828381ff3159784df8bbf269b30630439b8a93966676b104ad6a6f7fc0647ed1",
