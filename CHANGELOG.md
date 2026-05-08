@@ -2,7 +2,7 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
-## [2.64.0] - 2026-05-08
+## [2.65.0] - 2026-05-08
 
 ### Refactor
 
