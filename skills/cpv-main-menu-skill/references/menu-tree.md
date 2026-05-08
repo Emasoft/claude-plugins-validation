@@ -240,43 +240,86 @@ MUST include a row labeled `A` immediately before the `0 — Cancel / Exit`
 row. The row reads:
 
 ```
-│ A │ Ask the agent for a recommendation              │ Let the agent suggest the best next action right now                  │
+│ A │ Ask the agent                                   │ Free-form chat with an Opus agent — paste logs, ask questions, get a plan │
 ```
 
 (Exact column widths vary per menu; the orchestrator pads with trailing
 spaces so the row matches the table's content-row width.)
 
-**Routing for `A`**:
+**Routing for `A` — free-form chat handoff (MUST NOT print a menu)**:
 
-The agent looks at:
-  1. What the user did most recently (last command, last validation
-     report, last error, etc.).
-  2. The current $PWD context (Layout C / marketplace / plugin /
-     multi-plugin / plain folder — see §3.0a detection).
-  3. Any unresolved findings on disk (recent validation reports under
-     `reports/`, open TRDDs under `design/tasks/`, etc.).
-  4. The menu the user is currently looking at (so the recommendation
-     stays contextually relevant — never suggests "fix" when the user
-     is in the "create" sub-menu, etc.).
+When the user picks `A`, the menu agent IMMEDIATELY hands control to a
+fresh Opus sub-agent (dispatched via the `Agent` tool with
+`subagent_type: general-purpose` and `model: opus`). The sub-agent
+receives a single prompt that bundles:
 
-The agent then prints ONE recommendation in plain language:
+1. The user's recent context (last command, last validation report
+   path, last visible error block, current $PWD, layout-detection
+   result, any unresolved findings under `reports/` or `design/tasks/`).
+2. The exact menu the user was looking at when they picked `A`.
+3. **An explicit instruction to enter free-form chat — NOT to print a
+   numbered menu, NOT to call `AskUserQuestion`, NOT to return to the
+   parent menu after one turn.**
 
-```
-Recommendation: <action> — because <one-line reason>.
-Type the menu number to accept, or pick a different option.
-```
-
-The recommendation is text-only; the user still types a number to
-proceed. The agent NEVER auto-runs the recommended action — that would
-violate Rule 1 (no proactive project work without explicit user
-permission).
-
-If the agent can't decide (insufficient signal), it prints:
+The Opus sub-agent's first message is open-ended, e.g.:
 
 ```
-Not enough signal to recommend — pick the option that best matches
-what you'd like to do.
+I'm here to help. What's going on? Paste any error logs, validation
+reports, gh run output, or describe the issue in your own words. I'll
+read it, propose a concrete plan, and wait for your approval before
+running anything.
 ```
+
+After that, the sub-agent stays in **multi-turn dialog mode**:
+
+- Reads pasted error blocks / log dumps verbatim.
+- Asks clarifying questions when the situation is ambiguous (in plain
+  text, NOT a menu).
+- Once it understands the problem, prints a concrete plan in this form:
+
+  ```
+  Plan:
+    1. <step 1 — concrete action, file, command>
+    2. <step 2 — …>
+    3. <step 3 — …>
+
+  Reply `ok` / `yes` / `go` to execute, or tell me what to change.
+  ```
+
+- **Waits for the user's free-form reply.** Only on explicit approval
+  (`yes` / `ok` / `go` / `approved` / similar) does it execute the plan
+  via the appropriate CPV launcher (`remote_validation.py <alias>`,
+  `add_component.py`, etc.).
+- After execution, prints a 3-line summary + report path, then asks
+  `Anything else?` and continues the dialog.
+- The user ends the chat by typing `done`, `exit`, `bye`, `0`, or
+  `back to menu` — only then does the Opus sub-agent return control
+  to the Haiku menu agent, which then prints the §3.99 "do something
+  else?" table.
+
+**Critical rules for the Ask-the-agent flow** (encode these in every
+menu agent's prompt):
+
+- NEVER print a numbered menu after picking `A`. The user is now in
+  free-form chat — menus would defeat the purpose.
+- NEVER call `AskUserQuestion`. Multi-choice prompts also defeat the
+  purpose; the user must be able to paste arbitrary text (error logs,
+  multi-line snippets, file contents).
+- NEVER auto-execute a plan. Wait for explicit text approval. This
+  preserves Rule 1 (no proactive project work).
+- DO accept multi-line user input. The user may paste a 50-line log
+  dump and that's a single conversational turn.
+- DO read the most recent ~20 messages from the parent conversation
+  for context (the menu agent passes them through in the dispatch
+  prompt) — this is where "the gh run failed" context lives.
+- DO route the eventual concrete action through CPV's standard
+  launchers (validators, fixers, scaffolders) — never improvise a
+  one-off bash command when a CPV recipe exists.
+
+If the user types nothing for several turns or types something the
+agent doesn't understand, the agent asks ONE clarifying question in
+plain text — never falls back to a menu. The orchestrator's menu only
+re-appears when the user explicitly says they're done.
 
 ---
 
