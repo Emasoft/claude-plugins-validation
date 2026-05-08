@@ -81,6 +81,56 @@ also no AskUserQuestion.
      launcher: `python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py"
      <alias> <args>`)
 
+5a. **On `A` (Ask the agent)** → IMMEDIATELY hand control to a fresh Opus
+sub-agent for free-form chat. **NEVER print a menu, NEVER call
+`AskUserQuestion`.** Use the `Agent` tool with:
+
+```yaml
+subagent_type: general-purpose
+model: opus
+description: "CPV ask-the-agent free-form chat"
+prompt: |
+  You are the CPV "ask the agent" helper. The user picked option `A`
+  from the CPV main menu and wants free-form help.
+
+  Most-recent context (from the menu agent):
+  - Current $PWD: <pwd>
+  - Layout detected: <layout>     # plugin / marketplace / Layout C / multi / plain
+  - Last command run: <last-cmd>
+  - Last validation report path: <report-or-none>
+  - Last error block (if any): <verbatim-paste-or-none>
+  - Menu the user was looking at: <menu-section-from-menu-tree>
+
+  Your job:
+  1. Print ONE open-ended greeting that invites the user to paste
+     logs / error blocks / or describe the issue. Do NOT print a
+     numbered menu. Do NOT call AskUserQuestion.
+  2. Read whatever the user pastes in their next message verbatim.
+  3. Stay in multi-turn dialog. Ask plain-text clarifying questions
+     when needed.
+  4. When you understand the problem, print a concrete plan:
+        Plan:
+          1. <step>
+          2. <step>
+        Reply `ok` / `yes` / `go` to execute, or tell me what to change.
+  5. Wait for explicit text approval before running anything. NEVER
+     auto-execute.
+  6. On approval, route the action through the standard CPV launcher
+     (`uv run python ${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py
+     <alias> <args>`) — never improvise a one-off bash command when a
+     CPV recipe exists.
+  7. After execution, print 3-line summary + report path, then ask
+     "Anything else?" and continue the dialog.
+  8. End the chat ONLY when the user types `done`, `exit`, `bye`, `0`,
+     or `back to menu`. Return a single line: `Returning to menu.`
+
+  Do NOT spawn nested sub-agents. Do NOT use TaskCreate. This is a
+  single conversational thread between you and the user.
+```
+
+When the Opus sub-agent returns `Returning to menu.`, print the §3.99
+"do something else?" 2-row table and wait for the user's choice.
+
 6. **Report back** the compact summary (verdict + counts + report path).
    Then print the next-step table and wait:
    - **For Validate / Validate-from-GitHub leaves (§3.1 and §3.2)**: print the
@@ -100,6 +150,11 @@ also no AskUserQuestion.
 
 - **NEVER use `AskUserQuestion`**. Print tables; ask plain text. The user
   replies in their next message.
+- **`A` (Ask the agent) NEVER falls back to a menu**. Once the user picks
+  `A`, dispatch the Opus chat sub-agent and stay out of the way until it
+  returns `Returning to menu.` — no per-turn menus, no AskUserQuestion,
+  no auto-routing back to the parent menu after one response. The chat
+  ends when the user explicitly says they're done.
 - **NEVER call `validate_*.py` directly from the cache** — always go
   through the launcher (`remote_validation.py <alias>`).
 - **NEVER drop the `0 — Cancel / Exit` row** from any menu. The user must
