@@ -50,7 +50,18 @@ import subprocess
 import sys
 
 SECRET_NAME_DEFAULT = "MARKETPLACE_PAT"
+# Default env-var lookup order. Tries PAT_MARKETPLACE first (the
+# convention recommended by the doctor agent's Phase 6.5 audit), then
+# MARKETPLACE_PAT (the original name kept for backward compat). The
+# CLI `--env-var <NAME>` flag overrides this entire list with a single
+# explicit name — used when the doctor agent has prompted the user
+# for a custom env-var name.
+DEFAULT_PAT_ENV_VARS: tuple[str, ...] = ("PAT_MARKETPLACE", "MARKETPLACE_PAT")
 REPO_PATTERN = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+# Validate env-var names so we never feed `os.environ.get(<user-input>)` an
+# arbitrary string. Standard POSIX shell convention: uppercase letters,
+# digits, and underscores; cannot start with a digit.
+ENV_VAR_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _die(code: int, msg: str) -> "int":
@@ -141,6 +152,16 @@ def main() -> int:
         help=f"Secret name to set (default: {SECRET_NAME_DEFAULT})",
     )
     parser.add_argument(
+        "--env-var",
+        default=None,
+        help=(
+            "Env-var name holding the PAT value. When omitted, tries "
+            f"{', '.join('$' + v for v in DEFAULT_PAT_ENV_VARS)} in order. "
+            "The doctor agent's Phase 6.5 audit passes this when the user "
+            "tells it which env var holds their PAT (e.g. --env-var GITHUB_PAT)."
+        ),
+    )
+    parser.add_argument(
         "--verify-only",
         action="store_true",
         help="Do not set anything — only check whether the secret exists on each repo",
@@ -157,23 +178,51 @@ def main() -> int:
     # the most specific error (exit 2) instead of the generic "gh not found"
     # (exit 3). Verify-only mode doesn't need the PAT at all.
     pat = ""
+    pat_source = ""  # which env var actually had the value, for the success print
     if not args.verify_only:
-        pat = os.environ.get("MARKETPLACE_PAT", "")
+        # Build the lookup list. `--env-var X` overrides the default chain;
+        # otherwise fall back to PAT_MARKETPLACE → MARKETPLACE_PAT in order.
+        if args.env_var:
+            if not ENV_VAR_NAME_PATTERN.match(args.env_var):
+                return _die(
+                    4,
+                    f"set_marketplace_pat: --env-var {args.env_var!r} is not a valid POSIX env-var name.\n"
+                    "  Names must match ^[A-Za-z_][A-Za-z0-9_]*$ (no spaces, dashes, or special chars).",
+                )
+            lookup_order: tuple[str, ...] = (args.env_var,)
+        else:
+            lookup_order = DEFAULT_PAT_ENV_VARS
+
+        for var_name in lookup_order:
+            value = os.environ.get(var_name, "")
+            if value:
+                pat = value
+                pat_source = var_name
+                break
+
         if not pat:
+            tried = ", ".join("$" + v for v in lookup_order)
             return _die(
                 2,
-                "set_marketplace_pat: $MARKETPLACE_PAT is not set in the environment.\n"
-                "  Export it first, e.g. in your shell rc file:\n"
-                "    export MARKETPLACE_PAT=ghp_xxxxxxxxxxxxxxxxxxxx\n"
+                f"set_marketplace_pat: PAT not found in environment (tried {tried}).\n"
+                "  Export the PAT first, e.g. in your shell rc file:\n"
+                "    export PAT_MARKETPLACE=ghp_xxxxxxxxxxxxxxxxxxxx\n"
+                "  Or pass --env-var <NAME> to read from a different env var.\n"
                 "  Then re-run this script. Never paste the token on the command line.",
             )
         # Reject obviously malformed PATs (whitespace, newlines from copy-paste)
         if pat.strip() != pat or "\n" in pat or "\r" in pat:
             return _die(
                 2,
-                "set_marketplace_pat: $MARKETPLACE_PAT contains whitespace or newlines.\n"
+                f"set_marketplace_pat: ${pat_source} contains whitespace or newlines.\n"
                 "  This is almost always a copy-paste error — rotate the token and re-export.",
             )
+
+        # Print the env-var source NOW (before any gh shell-out), so callers
+        # can verify which env var supplied the value even when downstream
+        # steps fail (e.g. gh-not-authed). Length is the only PAT detail
+        # ever printed — never the value itself, never a prefix.
+        print(f"  Read PAT from ${pat_source} (length {len(pat)} chars) — never logged")
 
     gh = _require_gh()
     _check_auth(gh)
@@ -187,7 +236,10 @@ def main() -> int:
             all_ok = all_ok and present
         return 0 if all_ok else 1
 
-    print(f"  Using $MARKETPLACE_PAT (length {len(pat)} chars) — never logged")
+    # The "Read PAT from $..." line was already printed above. No second
+    # print here — keeps the PAT-source signal visible to test harnesses
+    # whose gh-CLI environment lacks auth, while still emitting one tidy
+    # confirmation line in the normal flow.
 
     failures = 0
     for repo in args.repos:

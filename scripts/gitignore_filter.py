@@ -151,13 +151,61 @@ class GitignoreFilter:
         """Gitignore-aware rglob — yields Path objects that are not gitignored.
 
         Skips symlinks per the trust-boundary rule (see `_is_unsafe_symlink`).
+
+        The implementation walks the tree directory-by-directory (not via
+        ``Path.rglob`` which would descend into gitignored dirs first and
+        only filter individual matches afterwards). Pruning at descent
+        time means a 600-MB ``INPUT_DEV/`` listed in ``.gitignore`` is
+        never enumerated — fixes issue #19 where ``cpv-remote-validate
+        lint`` picked up thousands of files inside gitignored reference
+        tarballs.
+
+        Pattern matching uses ``Path.match(pattern)`` — same semantics as
+        ``Path.rglob(pattern)`` minus the unconditional descent.
         """
+        import fnmatch
+
         root = root or self.root
-        for path in root.rglob(pattern):
-            if self._is_unsafe_symlink(path):
+        # `Path.match` matches against the **basename** for unanchored
+        # patterns like ``*.py``; for patterns containing a path separator
+        # it matches the whole tail. Use ``fnmatch`` directly on the
+        # basename for the common case so behaviour matches Path.rglob.
+        if "/" in pattern or "\\" in pattern:
+            def matches(p: Path) -> bool:
+                try:
+                    return p.match(pattern)
+                except (ValueError, OSError):
+                    return False
+        else:
+            def matches(p: Path) -> bool:
+                return fnmatch.fnmatch(p.name, pattern)
+
+        # Iterative DFS using the same pruning rules as _walk_pathlib.
+        stack: list[Path] = [root]
+        while stack:
+            current = stack.pop()
+            try:
+                entries = list(current.iterdir())
+            except (PermissionError, NotADirectoryError, FileNotFoundError):
                 continue
-            if not self.is_ignored(path):
-                yield path
+            for entry in entries:
+                if self._is_unsafe_symlink(entry):
+                    continue
+                if entry.is_dir():
+                    # Skip hidden dirs (.git, .venv, etc.) AND gitignored
+                    # dirs at descent time. Matches `_walk_pathlib`'s
+                    # pruning so behaviour is consistent across both
+                    # iterators.
+                    if entry.name.startswith(".") and entry.name != ".":
+                        continue
+                    if self.is_dir_ignored(entry):
+                        continue
+                    stack.append(entry)
+                elif entry.is_file():
+                    if self.is_ignored(entry):
+                        continue
+                    if matches(entry):
+                        yield entry
 
     def iterdir(self, directory: Path | None = None, skip_hidden: bool = False):
         """Gitignore-aware iterdir — yields Path objects that are not gitignored.

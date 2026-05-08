@@ -246,80 +246,78 @@ row. The row reads:
 (Exact column widths vary per menu; the orchestrator pads with trailing
 spaces so the row matches the table's content-row width.)
 
-**Routing for `A` — free-form chat handoff (MUST NOT print a menu)**:
+**Routing for `A` — IMMEDIATE suggestion + free-form chat (NO greeting,
+NO menu, NO AskUserQuestion)**:
 
-When the user picks `A`, the menu agent IMMEDIATELY hands control to a
-fresh Opus sub-agent (dispatched via the `Agent` tool with
-`subagent_type: general-purpose` and `model: opus`). The sub-agent
-receives a single prompt that bundles:
+Picking `A` already IS the user's request to chat. Do NOT ask
+"what can I help you with?" — that wastes a turn. Instead the menu
+agent IMMEDIATELY hands control to a fresh Opus sub-agent (dispatched
+via the `Agent` tool with `subagent_type: general-purpose` and
+`model: opus`). The sub-agent's FIRST output is its analysis +
+suggestion — not a question, not a greeting, not a menu.
+
+The sub-agent receives a single prompt that bundles:
 
 1. The user's recent context (last command, last validation report
    path, last visible error block, current $PWD, layout-detection
    result, any unresolved findings under `reports/` or `design/tasks/`).
 2. The exact menu the user was looking at when they picked `A`.
-3. **An explicit instruction to enter free-form chat — NOT to print a
-   numbered menu, NOT to call `AskUserQuestion`, NOT to return to the
-   parent menu after one turn.**
+3. The most recent ~20 messages from the parent conversation (so the
+   sub-agent can see error blocks and `gh run` output the user pasted
+   into the orchestrator before picking `A`).
+4. An explicit instruction: **first message MUST be the analysis +
+   suggestion (or plan). NOT a greeting. NOT a question. NOT a menu.**
 
-The Opus sub-agent's first message is open-ended, e.g.:
+The sub-agent's first message looks like:
 
 ```
-I'm here to help. What's going on? Paste any error logs, validation
-reports, gh run output, or describe the issue in your own words. I'll
-read it, propose a concrete plan, and wait for your approval before
-running anything.
+Looking at your situation:
+  - <observation 1 from the recent context>
+  - <observation 2>
+  - <inferred problem in one line>
+
+Suggestion: <concrete recommendation>.
+Plan:
+  1. <step>
+  2. <step>
+  3. <step>
+
+Reply `ok` / `yes` / `go` to execute, or tell me what to change.
 ```
 
-After that, the sub-agent stays in **multi-turn dialog mode**:
+Then the sub-agent stays in **multi-turn dialog mode**:
 
-- Reads pasted error blocks / log dumps verbatim.
-- Asks clarifying questions when the situation is ambiguous (in plain
-  text, NOT a menu).
-- Once it understands the problem, prints a concrete plan in this form:
-
-  ```
-  Plan:
-    1. <step 1 — concrete action, file, command>
-    2. <step 2 — …>
-    3. <step 3 — …>
-
-  Reply `ok` / `yes` / `go` to execute, or tell me what to change.
-  ```
-
-- **Waits for the user's free-form reply.** Only on explicit approval
-  (`yes` / `ok` / `go` / `approved` / similar) does it execute the plan
-  via the appropriate CPV launcher (`remote_validation.py <alias>`,
-  `add_component.py`, etc.).
+- Reads the user's free-form reply (could be `yes`, `no, do X instead`,
+  a pasted log, a clarifying question, etc.).
+- Adjusts the plan based on the reply.
+- Asks plain-text follow-up questions ONLY when genuinely needed —
+  never as a substitute for the initial suggestion.
+- Waits for explicit approval (`yes` / `ok` / `go` / `approved` /
+  similar) before running anything.
+- Routes the approved action through the standard CPV launcher
+  (`remote_validation.py <alias>`, `add_component.py`, etc.).
 - After execution, prints a 3-line summary + report path, then asks
   `Anything else?` and continues the dialog.
-- The user ends the chat by typing `done`, `exit`, `bye`, `0`, or
-  `back to menu` — only then does the Opus sub-agent return control
-  to the Haiku menu agent, which then prints the §3.99 "do something
-  else?" table.
+- Ends the chat ONLY when the user types `done`, `exit`, `bye`, `0`,
+  or `back to menu` — at that point the sub-agent returns
+  `Returning to menu.` and the Haiku menu agent prints the §3.99
+  "do something else?" table.
 
-**Critical rules for the Ask-the-agent flow** (encode these in every
-menu agent's prompt):
+**Critical rules** (encode in every menu agent's prompt):
 
-- NEVER print a numbered menu after picking `A`. The user is now in
-  free-form chat — menus would defeat the purpose.
+- The sub-agent's FIRST message MUST contain a concrete suggestion
+  derived from the context — never an open-ended "what would you like
+  to do?" question.
+- NEVER print a numbered menu inside the chat. The user is in
+  free-form dialog; menus defeat the purpose.
 - NEVER call `AskUserQuestion`. Multi-choice prompts also defeat the
-  purpose; the user must be able to paste arbitrary text (error logs,
-  multi-line snippets, file contents).
-- NEVER auto-execute a plan. Wait for explicit text approval. This
-  preserves Rule 1 (no proactive project work).
-- DO accept multi-line user input. The user may paste a 50-line log
-  dump and that's a single conversational turn.
-- DO read the most recent ~20 messages from the parent conversation
-  for context (the menu agent passes them through in the dispatch
-  prompt) — this is where "the gh run failed" context lives.
-- DO route the eventual concrete action through CPV's standard
-  launchers (validators, fixers, scaffolders) — never improvise a
+  purpose; the user must be able to paste arbitrary text.
+- NEVER auto-execute. Wait for explicit text approval (preserves
+  Rule 1 — no proactive project work).
+- DO accept multi-line user input verbatim (50-line log dumps are one
+  conversational turn).
+- DO route concrete actions through CPV launchers — never improvise a
   one-off bash command when a CPV recipe exists.
-
-If the user types nothing for several turns or types something the
-agent doesn't understand, the agent asks ONE clarifying question in
-plain text — never falls back to a menu. The orchestrator's menu only
-re-appears when the user explicitly says they're done.
 
 ---
 

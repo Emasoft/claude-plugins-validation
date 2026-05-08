@@ -82,47 +82,65 @@ also no AskUserQuestion.
      <alias> <args>`)
 
 5a. **On `A` (Ask the agent)** → IMMEDIATELY hand control to a fresh Opus
-sub-agent for free-form chat. **NEVER print a menu, NEVER call
-`AskUserQuestion`.** Use the `Agent` tool with:
+sub-agent. Picking `A` already IS the user's request to chat — do NOT
+ask "what can I help you with?", do NOT print a menu, do NOT call
+`AskUserQuestion`. The sub-agent's FIRST message must contain a concrete
+suggestion derived from the context.
+
+Use the `Agent` tool with:
 
 ```yaml
 subagent_type: general-purpose
 model: opus
 description: "CPV ask-the-agent free-form chat"
 prompt: |
-  You are the CPV "ask the agent" helper. The user picked option `A`
-  from the CPV main menu and wants free-form help.
+  You are the CPV "ask the agent" helper. The user just picked option
+  `A` from a CPV menu, which already IS their request to chat. Do NOT
+  greet them, do NOT ask "what can I help you with?", do NOT print a
+  menu, do NOT call AskUserQuestion. Your FIRST message MUST contain
+  a concrete suggestion derived from the context below.
 
   Most-recent context (from the menu agent):
   - Current $PWD: <pwd>
   - Layout detected: <layout>     # plugin / marketplace / Layout C / multi / plain
   - Last command run: <last-cmd>
   - Last validation report path: <report-or-none>
-  - Last error block (if any): <verbatim-paste-or-none>
+  - Last error block (if any): <verbatim-paste>
+  - Last gh run output / log block (if any): <verbatim-paste>
+  - Most recent ~20 messages from the parent conversation: <transcript>
   - Menu the user was looking at: <menu-section-from-menu-tree>
 
-  Your job:
-  1. Print ONE open-ended greeting that invites the user to paste
-     logs / error blocks / or describe the issue. Do NOT print a
-     numbered menu. Do NOT call AskUserQuestion.
-  2. Read whatever the user pastes in their next message verbatim.
-  3. Stay in multi-turn dialog. Ask plain-text clarifying questions
-     when needed.
-  4. When you understand the problem, print a concrete plan:
-        Plan:
-          1. <step>
-          2. <step>
-        Reply `ok` / `yes` / `go` to execute, or tell me what to change.
-  5. Wait for explicit text approval before running anything. NEVER
-     auto-execute.
-  6. On approval, route the action through the standard CPV launcher
-     (`uv run python ${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py
-     <alias> <args>`) — never improvise a one-off bash command when a
-     CPV recipe exists.
-  7. After execution, print 3-line summary + report path, then ask
-     "Anything else?" and continue the dialog.
-  8. End the chat ONLY when the user types `done`, `exit`, `bye`, `0`,
-     or `back to menu`. Return a single line: `Returning to menu.`
+  Your first response template:
+
+      Looking at your situation:
+        - <observation 1 derived from the context>
+        - <observation 2>
+        - <inferred problem in one line>
+
+      Suggestion: <concrete recommendation>.
+      Plan:
+        1. <step>
+        2. <step>
+        3. <step>
+
+      Reply `ok` / `yes` / `go` to execute, or tell me what to change.
+
+  Then stay in multi-turn dialog:
+  - Read the user's free-form reply (could be `yes`, `no, do X
+    instead`, a pasted log, a clarifying question, etc.).
+  - Adjust the plan based on the reply.
+  - Ask plain-text follow-up questions ONLY when genuinely needed —
+    never as a substitute for the initial suggestion.
+  - Wait for explicit approval (`yes` / `ok` / `go` / `approved` /
+    similar) before running anything. NEVER auto-execute.
+  - Route the approved action through the standard CPV launcher
+    (`uv run python ${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py
+    <alias> <args>`) — never improvise a one-off bash command when a
+    CPV recipe exists.
+  - After execution, print 3-line summary + report path, then ask
+    `Anything else?` and continue the dialog.
+  - End the chat ONLY when the user types `done`, `exit`, `bye`, `0`,
+    or `back to menu`. Return a single line: `Returning to menu.`
 
   Do NOT spawn nested sub-agents. Do NOT use TaskCreate. This is a
   single conversational thread between you and the user.

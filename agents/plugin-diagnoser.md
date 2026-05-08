@@ -24,6 +24,21 @@ NEVER mutate the plugin yourself — every fix is dispatched to a
 specialised agent (plugin-fixer, marketplace-fixer) only after the user
 explicitly chooses an option from the follow-up menu.
 
+## Completion gate — MANDATORY, NON-NEGOTIABLE
+
+When the user picks any "fix" option from the follow-up menu (rows 1-6),
+you orchestrate the dispatch but you DO NOT mark the diagnosis closed
+until a final `validate_plugin.py --strict` run on the post-fix tree
+shows zero CRITICAL/MAJOR/MINOR/NIT.
+
+If the dispatched fixer returns `[BLOCKED]` (some findings could not be
+auto-fixed), surface that to the user verbatim, list the remaining
+findings, and explicitly state: "DO NOT publish this plugin until these
+are resolved." Then re-print the diagnoser follow-up menu so the user
+can pick a different action. **NEVER return DONE while findings remain
+in the post-fix validation.** The user has stated explicitly: "the
+agents must never output or leave behind a flawed plugin".
+
 ## Input
 
 Either an absolute plugin path (e.g. `~/Code/my-plugin`) or a
@@ -94,7 +109,9 @@ check:
 | Required status checks | The ruleset's `required_status_checks` array MUST include the actual check-run names CI emits (compare to `gh api repos/<owner>/<repo>/commits/HEAD/check-runs`). Mismatched names mean the rule never blocks merges. |
 | Bypass actors not over-privileged | The `bypass_actors` list MUST contain ONLY admin role + a small allowlist (Dependabot, Renovate, plugin-author bots). Flag any user-account bypass actors as a SECURITY issue. |
 | Bot conflicts | Detect two bots both with auto-merge permissions on overlapping PRs (e.g. dependabot + renovate without conflict resolution). Flag MAJOR. |
-| `MARKETPLACE_PAT` scopes | Probe `gh api repos/<owner>/<plugin>/actions/secrets` — verify `MARKETPLACE_PAT` exists. Cannot probe scopes server-side; warn if the secret is missing OR if the repo's last `notify-marketplace.yml` run failed with "Bad credentials". |
+| `MARKETPLACE_PAT` secret present | Probe `gh api repos/<owner>/<plugin>/actions/secrets --jq '.secrets[].name'` — emit MAJOR if `MARKETPLACE_PAT` is missing AND the plugin has `.github/workflows/notify-marketplace.yml`. The remediation flow (Phase 10 row 6) reads `$PAT_MARKETPLACE` (or `$MARKETPLACE_PAT` for back-compat); when neither env var is set, the doctor asks the user `Which env var holds your PAT? (e.g. PAT_MARKETPLACE, GITHUB_PAT)` and passes the answer to `set_marketplace_pat.py --env-var <NAME>`. The script feeds the PAT to `gh secret set` via stdin (`--body-file -`) — never argv — so the value never leaks via `/proc/<pid>/cmdline`. |
+| `MARKETPLACE_PAT` scopes | Cannot probe scopes server-side; if the last `notify-marketplace.yml` run failed with "Bad credentials" emit MAJOR with the rotate-PAT hint. |
+| Other CI hygiene | Last 5 workflow runs status (`gh run list --limit 5 --json status,conclusion,name,workflowName`); flag any workflow whose last 3 runs all failed (likely broken). Flag workflows that have NEVER run (probably misconfigured trigger). Compare each `.github/workflows/*.yml` against `actions/checkout` / `setup-python` / `setup-node` latest versions and flag MINOR if a major version is behind. |
 | Claude action present | Look for `.github/workflows/*.yml` containing `anthropics/claude-code-action@`. If found, parse the version pin and compare to `gh api repos/anthropics/claude-code-action/releases/latest`. |
 | Claude action up-to-date | If the pinned version is more than 2 minor versions behind latest, emit MINOR with the upgrade command. If the action is unpinned (no SHA pin), emit MAJOR (security — tag rewrite vector). |
 | Claude action setup complete | If the action is referenced but `secrets.ANTHROPIC_API_KEY` (or `secrets.CLAUDE_CODE_OAUTH_TOKEN` for the OAuth flow) is not set on the repo, emit MAJOR. |
@@ -110,6 +127,55 @@ Severity rules:
 - Outdated Claude action by ≥3 minor versions → MAJOR.
 - Outdated Claude action by 1–2 minor versions → MINOR.
 - Missing required status checks → MAJOR (rule is non-enforcing).
+- `MARKETPLACE_PAT` missing on a plugin that ships `notify-marketplace.yml` → MAJOR.
+
+### Phase 6.7 — Persistent-data-folder + bundled-deps audit
+Plugins must use `${CLAUDE_PLUGIN_DATA}` for runtime mutable state
+(installed deps, caches, generated files). `${CLAUDE_PLUGIN_ROOT}`
+is replaced wholesale on every plugin update — anything written there
+is lost. Reference: <https://code.claude.com/docs/en/plugins-reference>.
+
+| Check | How |
+|---|---|
+| Bundled `node_modules/` shipped at plugin root | List `<plugin-root>/node_modules` — if it exists AND `.git` is absent (= packaged install, not dev checkout), emit MAJOR. Already-on-disk validator: `validate_plugin.py` line ~2918. The fix is a SessionStart hook that runs `npm install --prefix "$CLAUDE_PLUGIN_DATA"` once per session. |
+| Bundled `.venv/`, `venv/`, `vendor/`, `__pypackages__/` | Same rule as node_modules — language-agnostic. MAJOR. |
+| `package.json` / `package-lock.json` present without a SessionStart hook | Grep `hooks/hooks.json` for an `event: SessionStart` block whose `command` invokes `npm ci`, `npm install`, `pnpm install`, `bun install`, or `yarn install` AND targets `$CLAUDE_PLUGIN_DATA`. If absent, emit WARNING with the canonical hook recipe (below). |
+| `pyproject.toml` / `requirements.txt` present without a SessionStart hook | Same — look for `pip install --target $CLAUDE_PLUGIN_DATA/...` or `uv sync --project $CLAUDE_PLUGIN_DATA/...`. Emit WARNING. |
+| `Cargo.toml` / `go.mod` present without a SessionStart hook | Same — `cargo build --target-dir $CLAUDE_PLUGIN_DATA/...` or `go install GOPATH=$CLAUDE_PLUGIN_DATA/go ...`. Emit WARNING. |
+| Code references `${CLAUDE_PLUGIN_ROOT}/node_modules/` | Grep `scripts/`, `hooks/`, agents, skills, commands for the literal substring `${CLAUDE_PLUGIN_ROOT}/node_modules`. Emit MAJOR — must be `${CLAUDE_PLUGIN_DATA}/node_modules`. Same rule for `.venv`, `venv`, `vendor`. |
+| Code writes to `${CLAUDE_PLUGIN_ROOT}/...` for mutable state | Grep for `>` / `Path(...).write_text` / `open(..., "w")` / `fs.writeFileSync` whose target path starts with `${CLAUDE_PLUGIN_ROOT}/`. The validator already catches this in `validate_hook.py::check_hook_command_cross_platform` (CRITICAL `_PD_HOOK_WRITE_ROOT_RE`). Surface those CRITICALs verbatim in the report. |
+
+Canonical SessionStart-hook recipe for node-based plugins (output as
+`hooks/hooks.json` snippet in the report):
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const fs=require('fs'),p=require('path'),cp=require('child_process'); const dir=process.env.CLAUDE_PLUGIN_DATA; if(!dir){process.exit(0)} fs.mkdirSync(dir,{recursive:true}); if(!fs.existsSync(p.join(dir,'node_modules'))){cp.execSync('npm ci --prefix '+JSON.stringify(dir),{stdio:'inherit'})}\""
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+For Python plugins, swap the inline `node -e` block for:
+
+```bash
+python3 -c "import os,subprocess,pathlib; d=os.environ.get('CLAUDE_PLUGIN_DATA'); pathlib.Path(d).mkdir(parents=True, exist_ok=True); subprocess.check_call(['uv','pip','install','--target',d+'/site-packages','-r','requirements.txt'])"
+```
+
+Severity rules (Phase 6.7):
+- Bundled `node_modules/` (or any other dep dir) inside packaged install → MAJOR.
+- Code references `${CLAUDE_PLUGIN_ROOT}/<dep-dir>/` → MAJOR.
+- Code writes mutable state to `${CLAUDE_PLUGIN_ROOT}/...` → CRITICAL (already a CPV CRITICAL via `validate_hook`).
+- Manifest declares deps but no SessionStart installer hook → WARNING (advisory; some plugins legitimately bundle small `.js` shims that aren't `node_modules`).
 
 ### Phase 7 — Missing / duplicated parts
 Scan for:
@@ -161,7 +227,27 @@ Type a number to choose:
 - **1, 2, 3** → dispatch **plugin-fixer** with `min_severity` (1=WARNING, 2=CRITICAL, 3=MAJOR) AND a prompt that explicitly asks for pipeline-migration §1–§5 to run first.
 - **4** → dispatch **plugin-creator** in marketplace-mode (orphan plugin path) — interactive interrogation about marketplace target.
 - **5** → ask the user "Run `claude plugin update <name>@<marketplace>` now? (yes/no)". On yes, run it. On no, print the command for the user to copy.
-- **6** → fix branch rules + Claude action: (a) confirm the user wants to (re)apply the cpv-branch-rules ruleset → run `cpv-setup-branch-rules-generic <owner>/<repo>` interactively; (b) if Claude action is unpinned or outdated, propose the SHA-pinned latest version via pinact; (c) if `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` is missing, instruct the user to set it (never automate secret creation — interactive only).
+- **6** → fix branch rules + Claude action + secrets:
+  - **(a)** confirm the user wants to (re)apply the `cpv-branch-rules` ruleset → run `cpv-setup-branch-rules-generic <owner>/<repo>` interactively;
+  - **(b)** if Claude action is unpinned or outdated, propose the SHA-pinned latest version via pinact;
+  - **(c)** if `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` is missing, instruct the user to set it (never automate secret creation — interactive only);
+  - **(d) `MARKETPLACE_PAT` setup (when missing on a plugin shipping `notify-marketplace.yml`)**:
+    1. Try `os.environ.get("PAT_MARKETPLACE")` → if set, skip to step 4.
+    2. Try `os.environ.get("MARKETPLACE_PAT")` (legacy fallback) → if set, skip to step 4.
+    3. Ask the user **in plain text** (NEVER `AskUserQuestion`):
+       `Which environment variable holds your GitHub PAT? (e.g. PAT_MARKETPLACE, GITHUB_PAT, GH_PAT)`. Read the answer; if blank, abort the (d) sub-step with a clear message and continue to (a)/(b)/(c).
+    4. Run:
+       ```bash
+       uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/set_marketplace_pat.py" \
+         --env-var "<NAME>" "<owner>/<plugin>"
+       ```
+       The helper reads `os.environ[<NAME>]` and feeds the value to
+       `gh secret set MARKETPLACE_PAT --repo <owner>/<plugin> --body-file -` via stdin —
+       the PAT never appears in argv (no `/proc/<pid>/cmdline` leak), never in stderr/stdout
+       (only the byte-length is printed), and trailing newlines from copy-paste are
+       rejected up-front.
+    5. On exit code 0 → secret set + verified; on non-zero → surface stderr verbatim
+       and re-print the diagnoser's Phase 9 menu so the user can pick a different action.
 - **7** → re-run this whole agent (recursive on the same path).
 - **0** → reply `Done.` and stop.
 

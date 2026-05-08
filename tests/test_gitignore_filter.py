@@ -244,6 +244,80 @@ def test_rglob_filters_gitignored(tmp_path: Path) -> None:
     assert "generated.py" not in result_names
 
 
+def test_rglob_does_not_descend_into_gitignored_subtree_issue19(tmp_path: Path) -> None:
+    """Regression test for issue #19 — rglob must NOT walk into gitignored
+    directories before filtering matches.
+
+    Before the fix, ``GitignoreFilter.rglob('*.js')`` called ``Path.rglob``
+    which descends unconditionally, then filtered individual files via
+    ``is_ignored``. That meant a 600-MB gitignored ``INPUT_DEV/`` (with
+    thousands of vendored ``.js`` files) was fully enumerated before
+    being thrown away — and any file whose pattern didn't match the
+    parent-directory rule slipped through.
+
+    The fix prunes at descent time. After the fix, the filter never
+    looks inside ``INPUT_DEV/`` at all.
+    """
+    gitignore = tmp_path / ".gitignore"
+    gitignore.write_text("INPUT_DEV/\nnode_modules/\n", encoding="utf-8")
+    gi = GitignoreFilter(tmp_path)
+
+    # Plugin's actual source: ZERO .js files
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "tool.py").touch()
+
+    # Gitignored INPUT_DEV/ with extracted reference repos containing .js
+    extracted = tmp_path / "INPUT_DEV" / "_extracted" / "ghist-main" / "src"
+    extracted.mkdir(parents=True)
+    (extracted / "index.js").touch()
+    (extracted / "util.js").touch()
+    (extracted / "deeply" / "nested" / "more.js").parent.mkdir(parents=True)
+    (extracted / "deeply" / "nested" / "more.js").touch()
+
+    # Gitignored node_modules/ — same pattern
+    nm = tmp_path / "node_modules" / "react" / "lib"
+    nm.mkdir(parents=True)
+    (nm / "react.js").touch()
+
+    # Plugin says it has 0 .js files. rglob must agree.
+    js_results = list(gi.rglob("*.js"))
+    assert js_results == [], (
+        f"rglob('*.js') leaked gitignored content: "
+        f"{[str(p.relative_to(tmp_path)) for p in js_results]}"
+    )
+
+    # Plugin's actual .py file is still found.
+    py_results = list(gi.rglob("*.py"))
+    assert any(p.name == "tool.py" for p in py_results)
+
+
+def test_rglob_does_not_walk_into_huge_gitignored_tree(tmp_path: Path) -> None:
+    """Performance: rglob must skip gitignored trees at descent time, not
+    after enumeration. This test creates a 1000-file gitignored subtree
+    and asserts the filter doesn't iterate any of those entries — a
+    sentinel pattern in the gitignored tree's filename that wouldn't
+    match the rglob pattern would still hit disk if the filter were
+    walking unconditionally.
+    """
+    gitignore = tmp_path / ".gitignore"
+    gitignore.write_text("vendor/\n", encoding="utf-8")
+    gi = GitignoreFilter(tmp_path)
+
+    # 1 normal source file + a gitignored vendor tree with many files
+    (tmp_path / "main.py").touch()
+    vendor = tmp_path / "vendor" / "pkg"
+    vendor.mkdir(parents=True)
+    for i in range(50):  # keep test fast — 50 is plenty to prove the point
+        (vendor / f"f{i}.go").touch()
+        (vendor / f"f{i}.py").touch()
+
+    # rglob('*.py') should yield ONLY main.py — the vendor/pkg/f*.py files
+    # are inside a gitignored directory and must never be enumerated.
+    results = list(gi.rglob("*.py"))
+    assert {p.name for p in results} == {"main.py"}, \
+        f"rglob leaked vendor files: {sorted(p.name for p in results)}"
+
+
 def test_iterdir_filters_gitignored(tmp_path: Path) -> None:
     """iterdir() does not yield items matching gitignore patterns."""
     gitignore = tmp_path / ".gitignore"
