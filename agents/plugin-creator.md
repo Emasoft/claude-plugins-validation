@@ -27,10 +27,18 @@ You MUST NOT return DONE / SUCCESS unless the FINAL `validate_plugin.py --strict
 - `CRITICAL=0 MAJOR=0 MINOR=0 NIT=0`
 - WARNING-only if any (every WARNING must be a documented advisory).
 
-If the post-scaffold validation has ANY non-WARNING finding, you MUST:
+Concrete verification recipe (run AFTER scaffolding finishes, BEFORE returning to the orchestrator):
+
+```bash
+CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
+  python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" \
+  plugin <scaffolded-path> --strict --report <tmp.md>
+```
+
+Read the report's `SUMMARY:` line and include it verbatim in your returned summary. If the line is anything other than `CRITICAL=0 MAJOR=0 MINOR=0 NIT=0 WARNING=<n>` you MUST:
 
 1. Apply automatic fixes via the plugin-fixer agent (dispatch with the report path).
-2. Re-run validation. If it's still dirty, repeat — up to a hard cap of 5 fixer iterations.
+2. Re-run the verification recipe above. If it's still dirty, repeat — up to a hard cap of 5 fixer iterations.
 3. If after 5 iterations the plugin is still dirty, return `[BLOCKED]` (NOT `[DONE]`) with the remaining findings and a clear recommendation (e.g. "manual review needed: `cpv.strip` block configuration for git-submodules conflict, see <report path>").
 
 The user has stated explicitly: "the agents must never output or leave behind a flawed plugin". A scaffolded plugin that fails validate_plugin.py is a flawed plugin. Returning DONE on a flawed scaffold is a hard rule violation.
