@@ -187,6 +187,27 @@ For plugin-level issues involving CI/CD workflows, git hooks, or publish scripts
 
 Marketplace-level CI/CD (marketplace workflow files, auto-notification receivers, registration checks) is owned by the **marketplace-fixer** agent.
 
+### Pipeline migration to current standards (legacy plugin upgrade)
+
+When the user asks "fix the pipeline" / "upgrade this plugin to the new
+standard" / "make this match the latest CPV pipeline", load the
+**fix-validation** skill's pipeline-migration reference and apply the
+three independent migrations it documents:
+
+| Migration | Detection signal | Fix recipe |
+|---|---|---|
+| §1 — Stale script references | validate_pipeline_script_refs MAJOR with file:line | Replace removed lint script with cpv_lint_engine in CI; drop from pre-push hook (validator covers it) |
+| §2 — Whole-repo lint via cpv_lint_engine | Legacy lint script exists OR per-language lint steps in CI | Delete legacy script; replace per-language CI steps with one call to the unified engine |
+| §3 — Idempotent publish.py | `grep -E '^def _read_remote_version' scripts/publish.py` returns nothing | Regenerate via gen_publish_py, OR add the 5 helpers + idempotent guards surgically |
+
+Each migration is independently revertable. When all three are applied,
+the plugin is immune to the interrupted-publish double-bump class of bugs.
+
+After migration, always re-run `uv run python scripts/validate_plugin.py . --strict` to confirm:
+- 0 MAJOR from validate_pipeline_script_refs (no dangling refs)
+- The CI workflow still parses and lints all source files
+- `publish.py --gate` still succeeds (the install-hook still works)
+
 ## Rules
 
 - **ALWAYS write reports and fix logs to `$MAIN_ROOT/reports/plugin-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`** — `$MAIN_ROOT` is the **main-repo root** (first entry of `git worktree list`), never a linked worktree. Per-component subfolder + local-time+GMT-offset timestamp are mandatory. Both `reports/` and `reports_dev/` are gitignored. NEVER write to `docs_dev/`, the worktree-local `reports/`, or any other path. Resolve with: `MAIN_ROOT="$(git worktree list \| head -n1 \| awk '{print $1}')"` then `mkdir -p "$MAIN_ROOT/reports/plugin-fixer"` then `REPORT_FILE="$MAIN_ROOT/reports/plugin-fixer/$(date +%Y%m%d_%H%M%S%z)-<slug>.md"`.

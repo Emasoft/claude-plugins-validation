@@ -2004,9 +2004,110 @@ def stage_consistency(root: Path) -> None:
         sys.exit(1)
     cprint(f"  {GREEN}Consistent.{NC}")
 
+def _read_remote_version(plugin_root: Path) -> str | None:
+    """Read .claude-plugin/plugin.json's `version` from origin/master (or main).
+
+    Idempotency baseline: the publish pipeline reads the REMOTE version, not
+    the local one, so an interrupted publish that already bumped + committed
+    locally cannot double-bump on re-run. Returns None when offline / no
+    remote ref / file missing — caller must fall back to local baseline.
+    """
+    for ref in ("origin/master", "origin/main", "origin/HEAD"):
+        try:
+            r = subprocess.run(
+                ["git", "show", f"{ref}:.claude-plugin/plugin.json"],
+                capture_output=True, text=True, cwd=str(plugin_root),
+                check=False, timeout=15,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if r.returncode != 0:
+            continue
+        try:
+            v = json.loads(r.stdout).get("version")
+        except json.JSONDecodeError:
+            continue
+        if isinstance(v, str):
+            return v
+    return None
+
+
+def _infer_bump_type(old: str, new: str) -> str | None:
+    """Classify a semver delta as 'major', 'minor', 'patch', or None."""
+    o = parse_semver(old)
+    n = parse_semver(new)
+    if o is None or n is None or n <= o:
+        return None
+    if n[0] != o[0]:
+        return "major"
+    if n[1] != o[1]:
+        return "minor"
+    return "patch"
+
+
+def _git_porcelain_clean(root: Path) -> bool:
+    """True iff `git status --porcelain` is empty (working tree clean)."""
+    try:
+        r = subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True, text=True, cwd=str(root),
+            check=False, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0 and not r.stdout.strip()
+
+
+def _head_commit_message(root: Path) -> str:
+    """Return the subject line of HEAD, or '' on failure."""
+    try:
+        r = subprocess.run(
+            ["git", "log", "-1", "--pretty=%s"],
+            capture_output=True, text=True, cwd=str(root),
+            check=False, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def _local_tag_exists(root: Path, tag: str) -> bool:
+    """True iff `tag` already exists in the local git repo."""
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--verify", f"refs/tags/{tag}"],
+            capture_output=True, text=True, cwd=str(root),
+            check=False, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0
+
+
 def stage_bump(root: Path, new_ver: str, dry_run: bool) -> None:
-    """Step 6: Bump version."""
+    """Step 7: Bump version. Idempotent — skips when local already matches target.
+
+    Recovery semantics: when a previous publish was interrupted between the
+    local commit+tag and the push (transient network failure during git push,
+    pre-push hook reject, etc.), the local repo is at the bumped version while
+    origin is one minor behind. Re-running publish.py would DOUBLE-BUMP
+    (read-local-then-add-1 → next minor on top of the already-bumped local).
+    The fix: read REMOTE plugin.json as baseline, infer bump type from
+    local-vs-remote delta, and skip the bump entirely when local already
+    matches the target.
+    """
     cprint(f"\n{BOLD}[7/11] Bumping version...{NC}")
+    current = get_current_version(root)
+    remote = _read_remote_version(root)
+    if remote and current and current == new_ver:
+        cprint(f"  {YELLOW}Local plugin.json is already at {new_ver} (remote at {remote}) — "
+               f"skipping bump (interrupted-publish recovery).{NC}")
+        return
+    if remote and current and current != remote and current != new_ver:
+        cprint(f"  {RED}REFUSED: local plugin.json is at {current} but remote is at "
+               f"{remote} and target is {new_ver}. Refuse to guess what state this is.{NC}")
+        cprint(f"  {RED}Manual intervention required: align local with remote, then re-run.{NC}")
+        sys.exit(1)
     if not do_bump(root, new_ver, dry_run=dry_run):
         cprint(f"  {RED}Version bump failed.{NC}")
         sys.exit(1)
@@ -2059,9 +2160,14 @@ def detect_bump_type(root: Path) -> str:
     """Auto-detect the next bump type from conventional commits via git-cliff.
 
     Runs `git-cliff --bumped-version` and compares the predicted version to
-    the current one to determine major/minor/patch. Falls back to 'patch' on
-    any failure (git-cliff missing, repo empty, parse error) so the cornerstone
-    rule — every push is a bump — is never violated.
+    the REMOTE one (origin/master) to determine major/minor/patch. Falls back
+    to 'patch' on any failure (git-cliff missing, repo empty, parse error) so
+    the cornerstone rule — every push is a bump — is never violated.
+
+    Idempotency: when the local repo already has a release commit (interrupted
+    publish), reading local plugin.json would over-shoot the bump (current is
+    already the bumped version, git-cliff would compute current+1). Reading
+    remote/origin gives the true baseline.
 
     Conventional commit mapping (git-cliff defaults):
       feat:                 -> minor
@@ -2072,7 +2178,7 @@ def detect_bump_type(root: Path) -> str:
     if cliff_bin is None:
         cprint(f"{YELLOW}git-cliff not installed — auto-bump falls back to 'patch'.{NC}")
         return "patch"
-    current = get_current_version(root)
+    current = _read_remote_version(root) or get_current_version(root)
     if not current:
         cprint(f"{YELLOW}Cannot read current version for auto-bump — falling back to 'patch'.{NC}")
         return "patch"
@@ -2139,7 +2245,12 @@ def stage_changelog(root: Path, new_ver: str, dry_run: bool) -> None:
     cprint(f"  {GREEN}CHANGELOG.md updated with {tag}.{NC}")
 
 def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
-    """Step 9: Commit, tag, push.
+    """Step 10: Commit, tag, push. Idempotent on commit + tag.
+
+    Idempotency: if HEAD's subject is already `chore: bump version to <new_ver>`
+    AND the working tree is clean, skip the commit step (interrupted-publish
+    recovery). If the tag already exists locally, skip the tag step. The push
+    always runs — that is what brings the remote into sync.
 
     TRDD-bbff5bc5 §5: gh-auth precheck runs BEFORE the first push so the
     user gets an actionable error if their gh CLI is unauthed/lacks push
@@ -2147,14 +2258,35 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
     """
     cprint(f"\n{BOLD}[10/11] Committing and pushing...{NC}")
     tag = f"v{new_ver}"
+    expected_subject = f"chore: bump version to {new_ver}"
+    head_subject = _head_commit_message(root)
+    tree_clean = _git_porcelain_clean(root)
+    tag_exists = _local_tag_exists(root, tag)
+
     if dry_run:
-        cprint(f"  Would commit: chore: bump version to {new_ver}")
-        cprint(f"  Would tag: {tag}")
+        if head_subject == expected_subject and tree_clean:
+            cprint(f"  Would skip commit (HEAD already '{expected_subject}', tree clean)")
+        else:
+            cprint(f"  Would commit: {expected_subject}")
+        if tag_exists:
+            cprint(f"  Would skip tag (already exists locally): {tag}")
+        else:
+            cprint(f"  Would tag: {tag}")
         cprint("  Would push: origin HEAD --tags")
         return
-    run(["git", "add", "-A"], cwd=root)
-    run(["git", "commit", "-m", f"chore: bump version to {new_ver}"], cwd=root)
-    run(["git", "tag", "-a", tag, "-m", f"Release {tag}"], cwd=root)
+
+    if head_subject == expected_subject and tree_clean:
+        cprint(f"  {YELLOW}HEAD is already '{expected_subject}' and tree is clean — "
+               f"skipping commit (interrupted-publish recovery).{NC}")
+    else:
+        run(["git", "add", "-A"], cwd=root)
+        run(["git", "commit", "-m", expected_subject], cwd=root)
+
+    if tag_exists:
+        cprint(f"  {YELLOW}Tag {tag} already exists locally — skipping tag step.{NC}")
+    else:
+        run(["git", "tag", "-a", tag, "-m", f"Release {tag}"], cwd=root)
+
     # gh-auth precheck — fail fast with actionable error if gh missing/unauthed.
     owner, repo = _resolve_owner_repo(root)
     _ensure_gh_auth(owner, repo)
@@ -2249,10 +2381,17 @@ def main() -> int:
         return run_gate(root)
 
     # Full publish pipeline — auto-detect bump type unless user forced one.
-    current = get_current_version(root)
-    if not current:
+    # Idempotency: read REMOTE plugin.json (origin/master) as the bump
+    # baseline. When local is ahead (interrupted publish: bumped + committed
+    # but not pushed), bumping from local would double-bump. From remote,
+    # bumping recomputes the SAME target as the original interrupted run,
+    # and stage_bump's "already-at-target" guard then skips the bump.
+    local = get_current_version(root)
+    if not local:
         cprint(f"{RED}Cannot read version from .claude-plugin/plugin.json{NC}")
         return 1
+    remote = _read_remote_version(root)
+    baseline = remote or local
 
     if args.bump is None:
         bump_type = detect_bump_type(root)
@@ -2261,10 +2400,15 @@ def main() -> int:
         bump_type = args.bump
         cprint(f"{BLUE}Bump type: {bump_type} (forced via --{bump_type}){NC}")
 
-    new_ver = bump_semver(current, bump_type)
+    new_ver = bump_semver(baseline, bump_type)
     if not new_ver:
-        cprint(f"{RED}Cannot parse current version: {current}{NC}")
+        cprint(f"{RED}Cannot parse baseline version: {baseline}{NC}")
         return 1
+
+    if remote and local != remote:
+        cprint(f"{YELLOW}Local plugin.json is at {local} but origin is at {remote} — "
+               f"using remote as bump baseline (interrupted-publish recovery).{NC}")
+    current = baseline
 
     cprint(f"\n{BOLD}Publish pipeline: {current} -> {new_ver}{NC}")
     if args.dry_run:
