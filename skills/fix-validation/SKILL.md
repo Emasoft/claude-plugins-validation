@@ -37,11 +37,11 @@ Copy this checklist and track your progress:
 
 ## Output
 
-Fix log → `$MAIN_ROOT/reports/plugin-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` (main-repo root via `git worktree list`, not a worktree).
+Fix log → `$MAIN_ROOT/reports/plugin-fixer/<ts±tz>-<slug>.md`.
 
 ## Error Handling
 
-If no matching section is found, search the reference by message keywords. If the reference file is missing, report the gap.
+If no match is found, search by keywords. Report missing reference files as gaps.
 
 ## Examples
 
@@ -50,18 +50,14 @@ Input:  [MAJOR] Missing plugin.json
 Output: open plugin-structure-fixes §1, follow the recipe
 ```
 
-```
-Input:  [CA-01] Static prefix violation in agents/foo.md line 12
-Output: open cache-fixes.md CA-01, replace {{TIMESTAMP}} with static literal
-```
-
 | Error | Fix guide |
 |---|---|
 | `[MAJOR] Missing plugin.json` | plugin-structure-fixes §1 |
-| `[CA-01] Static prefix violation` | cache-fixes.md CA-01 |
+| `[CA-01] Static prefix violation` | cache-fixes CA-01 |
 | `[MAJOR] userConfig.<key> missing 'type'` | plugin-structure-fixes |
 | `[CRITICAL] PLUGIN_SEED_DIR` | telemetry-hazard-fixes |
 | `[CRITICAL] Layout C self-entry` | plugin-structure-fixes §15 |
+| `[MAJOR] Dangling scripts/<name>.py ref` | pipeline-migration §1 |
 | `[WARNING] recommend-restructure` | marketplace-fixes §9 |
 
 ## Schema-parity
@@ -84,6 +80,8 @@ CPV mirrors CC's install-time schema. Contract: [schema-parity-contract.md](refe
   > Overview · CA-01 — Static prefix violation in cached content · CA-02 — Hook writes to cached files (CLAUDE.md / settings.json) · CA-03 — Hook flips MCP server enabled/disabled or permission allow/deny · CA-04 — SKILL.md `model:` frontmatter forces in-line model switch · CA-05 — Hook script runs unbounded output commands · CA-06 — Compaction/SubagentStart hook does not preserve cached prefix
 - [Telemetry Hazard Fixes](references/telemetry-hazard-fixes.md)
   > Overview · CRITICAL: Plugin ships CLAUDE_CODE_PLUGIN_SEED_DIR · CRITICAL: Plugin ships CLAUDE_CODE_SHELL_PREFIX · CRITICAL: Plugin ships CLAUDE_CONFIG_DIR · CRITICAL: Plugin ships BETA_TRACING_ENDPOINT pointing at external host · CRITICAL: Plugin ships OTEL_LOG_RAW_API_BODIES set to a file URL · MAJOR: Plugin ships third-party-provider bypass env var · Reference: env vars plugins MUST NEVER ship
+- [Pipeline Migration](references/pipeline-migration.md)
+  > §1 — Fix dangling script references · §2 — Migrate to whole-repo lint via cpv_lint_engine · §3 — Make publish.py idempotent · Combined verification
 
 ## MCP Server Bundling
 

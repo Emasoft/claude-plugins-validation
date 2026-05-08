@@ -3198,6 +3198,106 @@ def validate_pipeline_readiness(plugin_root: Path, report: ValidationReport) -> 
             report.warning("No notify-marketplace.yml workflow — plugin updates won't auto-notify marketplaces")
 
 
+# Regex matching `scripts/<name>.py` references in workflow / hook / template
+# files. Captures the script name only (no leading `scripts/` for cleaner
+# error messages).
+#   - The lookbehind `(?<![\w./])` blocks matches inside paths like
+#     `prefix/scripts/x.py` from being conflated with the project's scripts/.
+#   - The lookahead `(?![\w.])` blocks matches like `scripts/x.py.bak.gz` —
+#     a trailing `.` means the `.py` is part of a longer extension chain
+#     (backup, archive, .pyc-derivative), not an actual script reference.
+_SCRIPT_REF_RE = re.compile(r"(?<![\w./])scripts/([A-Za-z_][A-Za-z0-9_]*\.py)(?![\w.])")
+
+
+def _collect_script_refs(text: str, source_label: str) -> list[tuple[str, int, str]]:
+    """Yield (script_name, line_no, line_excerpt) for every scripts/*.py
+    reference found in ``text``. Used by ``validate_pipeline_script_refs``.
+    """
+    refs: list[tuple[str, int, str]] = []
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        for match in _SCRIPT_REF_RE.finditer(line):
+            script_name = match.group(1)
+            excerpt = line.strip()
+            if len(excerpt) > 120:
+                excerpt = excerpt[:117] + "..."
+            refs.append((script_name, line_no, excerpt))
+    _ = source_label  # kept for caller-side diagnostics
+    return refs
+
+
+def validate_pipeline_script_refs(plugin_root: Path, report: ValidationReport) -> None:
+    """Detect dangling `scripts/<name>.py` references in pipeline surface area.
+
+    Why this exists: every time a script in `scripts/` is renamed or removed,
+    multiple consumers silently break — `.github/workflows/*.yml`, the locally
+    installed `.git/hooks/pre-push`, the published `setup_plugin_pipeline.py`
+    template, and the `plugin-validation-skill` reference hooks all hardcode
+    `scripts/<name>.py` paths. The v2.65.0 lint consolidation triggered exactly
+    this regression — `lint_files.py` was removed but CI + the local hook still
+    invoked it, breaking every push until a follow-up patch.
+
+    This validator scans every place a stale reference could hide and emits
+    MAJOR for each missing target. Catching dangling references at PR / release
+    time is the only durable fix; the alternative is rediscovering the bug
+    every time a script gets renamed.
+    """
+    scripts_dir = plugin_root / "scripts"
+    if not scripts_dir.is_dir():
+        return  # plugin without a scripts/ folder — nothing to check
+
+    # Files that may legitimately hardcode `scripts/<name>.py` paths.
+    targets: list[tuple[Path, str]] = []
+
+    # GitHub workflows.
+    workflows_dir = plugin_root / ".github" / "workflows"
+    if workflows_dir.is_dir():
+        for wf in sorted(workflows_dir.glob("*.yml")):
+            targets.append((wf, f".github/workflows/{wf.name}"))
+        for wf in sorted(workflows_dir.glob("*.yaml")):
+            targets.append((wf, f".github/workflows/{wf.name}"))
+
+    # Locally-installed git hook (only present in dev checkouts; absent in
+    # cache installs because .git/ isn't shipped, so this is naturally a
+    # no-op for end users).
+    installed_hook = plugin_root / ".git" / "hooks" / "pre-push"
+    if installed_hook.is_file():
+        targets.append((installed_hook, ".git/hooks/pre-push"))
+
+    # Plugin-validation-skill reference hooks (template that gets copied into
+    # plugins by setup_plugin_pipeline).
+    pvs_hook = plugin_root / "skills" / "plugin-validation-skill" / "references" / "pre-push-hook.py"
+    if pvs_hook.is_file():
+        targets.append((pvs_hook, "skills/plugin-validation-skill/references/pre-push-hook.py"))
+
+    # The pipeline-template generator itself — its embedded PRE_PUSH_HOOK
+    # string is the source-of-truth for newly-scaffolded plugins.
+    pipeline_gen = plugin_root / "scripts" / "setup_plugin_pipeline.py"
+    if pipeline_gen.is_file():
+        targets.append((pipeline_gen, "scripts/setup_plugin_pipeline.py"))
+
+    if not targets:
+        return
+
+    # Build the set of scripts that actually exist on disk.
+    existing_scripts = {p.name for p in scripts_dir.glob("*.py")}
+
+    for path, label in targets:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for script_name, line_no, excerpt in _collect_script_refs(text, label):
+            if script_name in existing_scripts:
+                continue
+            report.major(
+                f"Dangling reference to scripts/{script_name} in {label}:{line_no} — "
+                f"the script does not exist. Update the reference or restore the file. "
+                f"Line: {excerpt}",
+                file=label,
+                line=line_no,
+            )
+
+
 def validate_workflow_best_practices(plugin_root: Path, report: ValidationReport) -> None:
     """Check GitHub workflow files for common anti-patterns."""
     workflows_dir = plugin_root / ".github" / "workflows"
@@ -3748,6 +3848,7 @@ def main() -> int:
     validate_md_content_references(plugin_root, report)
     validate_workflow_inline_python(plugin_root, report)
     validate_pipeline_readiness(plugin_root, report)
+    validate_pipeline_script_refs(plugin_root, report)
     validate_workflow_best_practices(plugin_root, report)
     # Submodule + language + lockfile detection (TRDD-79638eb6)
     validate_submodule_containment(plugin_root, report)

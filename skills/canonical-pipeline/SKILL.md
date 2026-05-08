@@ -83,5 +83,7 @@ A fully configured plugin repository with:
   > Standard Plugin Files · Standard CI/CD Workflows · Git Hooks · Release Pipeline (`scripts/publish.py`) · Marketplace Standard · Language-Specific Additions
 - [Pipeline Rules](references/pipeline-rules.md) — mandatory rules for all plugin operations
   > Pre-Push Hook: The Quality Gate · Fix-All Mandate · Running CPV Scripts · Processing Validation Output · GitHub Secrets · CI Workflow Dependencies · Marketplace Notification · All Scripts Are Python · Binary Plugins · README Requirements · Pre-Publish Local Dry-Run · Post-Push CI Verification · Mega-Linter Configuration · Common Fixes Reference
+- [Pipeline Standards (current)](references/pipeline-standards.md) — three guarantees every newly-scaffolded plugin ships with
+  > Overview · Whole-repo lint via cpv_lint_engine · Idempotent publish.py · validate_pipeline_script_refs rule · Migrating a legacy plugin
 - [v2.1.80+ Plugin Features](references/v2-1-80-features.md)
   > Monitor tool · userConfig (plugin.json) · channels (plugin.json) · CLAUDE_PLUGIN_OPTION_<KEY> env vars · Inline marketplace (settings.json) · managed-settings.d/ drop-in directory · Plugin skill `name` field (v2.1.98)

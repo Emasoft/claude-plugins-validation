@@ -1103,12 +1103,24 @@ def detect_bump_type(plugin_root: Path) -> str:
     guarantees we never publish without changing the version, even when
     git-cliff can't make a more confident recommendation.
     """
+    # Idempotency: if local plugin.json is ahead of remote (interrupted publish),
+    # infer the bump_type from the existing local-vs-remote diff so the SAME
+    # bump_type is reported across re-runs. git-cliff itself uses the last
+    # local tag as baseline, which can include orphan tags from a prior
+    # interrupted run — that produces a "patch" bump_type and would lead
+    # the downstream stage_bump into the refuse path.
+    remote = _read_remote_version(plugin_root)
+    current = get_current_version(plugin_root)
+    if remote and current and remote != current:
+        inferred = _infer_bump_type(remote, current)
+        if inferred is not None:
+            return inferred
+
     cliff_bin = shutil.which("git-cliff")
     if cliff_bin is None:
         print(f"{YELLOW}git-cliff not installed — auto-bump falls back to 'patch'.{NC}")
         return "patch"
 
-    current = get_current_version(plugin_root)
     if not current:
         print(f"{YELLOW}Cannot read current version for auto-bump — falling back to 'patch'.{NC}")
         return "patch"
@@ -1135,44 +1147,127 @@ def detect_bump_type(plugin_root: Path) -> str:
     # possibly along with warning lines on stderr. stdout should be one line.
     bumped_raw = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
     bumped = bumped_raw.lstrip("v").strip()
-    if not bumped or bumped == current:
+    baseline = remote or current
+    if not bumped or bumped == baseline:
         return "patch"
 
+    inferred = _infer_bump_type(baseline, bumped)
+    return inferred or "patch"
+
+
+def _infer_bump_type(old: str, new: str) -> str | None:
+    """Compare two semver strings and return the bump kind that maps old → new.
+
+    Returns one of "major" / "minor" / "patch" when the version components
+    differ as expected, or None when the strings can't be compared (non-numeric
+    components, downgrade, malformed).
+    """
     try:
-        cur_parts = [int(p) for p in current.split(".")[:3]]
-        new_parts = [int(p) for p in bumped.split(".")[:3]]
-        while len(cur_parts) < 3:
-            cur_parts.append(0)
-        while len(new_parts) < 3:
-            new_parts.append(0)
+        old_parts = [int(p) for p in old.split(".")[:3]]
+        new_parts = [int(p) for p in new.split(".")[:3]]
     except ValueError:
-        return "patch"
-
-    if new_parts[0] > cur_parts[0]:
+        return None
+    while len(old_parts) < 3:
+        old_parts.append(0)
+    while len(new_parts) < 3:
+        new_parts.append(0)
+    if new_parts[0] > old_parts[0]:
         return "major"
-    if new_parts[1] > cur_parts[1]:
+    if new_parts[0] == old_parts[0] and new_parts[1] > old_parts[1]:
         return "minor"
-    return "patch"
+    if new_parts[0] == old_parts[0] and new_parts[1] == old_parts[1] and new_parts[2] > old_parts[2]:
+        return "patch"
+    return None
+
+
+def _read_remote_version(plugin_root: Path) -> str | None:
+    """Read plugin.json `version` from the remote tracking branch (origin/master).
+
+    Returns None when the remote tracking branch isn't available (fresh clone
+    without origin, no internet, etc.) — caller falls back to bump-from-local
+    behaviour.
+    """
+    for ref in ("origin/master", "origin/main", "origin/HEAD"):
+        try:
+            result = subprocess.run(
+                ["git", "show", f"{ref}:.claude-plugin/plugin.json"],
+                capture_output=True,
+                text=True,
+                cwd=str(plugin_root),
+                check=False,
+                timeout=15,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if result.returncode != 0:
+            continue
+        try:
+            version = json.loads(result.stdout).get("version")
+        except json.JSONDecodeError:
+            continue
+        if isinstance(version, str):
+            return version
+    return None
 
 
 def stage_bump(plugin_root: Path, bump_type: str, dry_run: bool) -> tuple[int, str | None]:
-    """Gate 7: bump version across all files. Returns (exit_code, new_version)."""
+    """Gate 7: bump version across all files. Returns (exit_code, new_version).
+
+    Idempotency: when a previous publish was interrupted between the local
+    bump+commit and the push, plugin.json on disk is already at the target
+    version (e.g. 2.64.0) but the remote tracking branch is still on the
+    old version (2.63.2). Re-running publish.py would then DOUBLE-BUMP
+    (2.64.0 → 2.64.1 with --patch, or 2.64.0 → 2.65.0 with --minor),
+    producing a release that skips a number and leaves an orphan local
+    `chore(release): v2.64.0` commit with no published tag.
+
+    Fix: read the remote version from `origin/master:.claude-plugin/plugin.json`
+    and bump from THAT baseline, not the local plugin.json. If the local
+    plugin.json already matches the bumped target, the bump+commit have
+    already happened on a previous (interrupted) run — skip the bump and
+    let downstream stages (refresh hashes, changelog, commit, tag, push)
+    notice their own work-already-done state and pass through idempotently.
+    """
     current = get_current_version(plugin_root)
     if current is None:
         print(f"{RED}✗ Cannot read current version from plugin.json{NC}", file=sys.stderr)
         return 1, None
-    new_version = bump_semver(current, bump_type)
-    if new_version is None:
-        print(f"{RED}✗ Current version '{current}' is not valid semver{NC}", file=sys.stderr)
+    remote = _read_remote_version(plugin_root)
+    # Baseline for the bump = the version already published. Falling back to
+    # the local plugin.json keeps the old behaviour on first-time releases or
+    # when the remote ref isn't available (offline, fresh clone, etc.).
+    baseline = remote if remote else current
+    target = bump_semver(baseline, bump_type)
+    if target is None:
+        print(f"{RED}✗ Current version '{baseline}' is not valid semver{NC}", file=sys.stderr)
         return 1, None
-    print(f"\n{BLUE}═══ Gate 7: Bump version ({bump_type}: {current} → {new_version}) ═══{NC}")
-    if not do_bump(plugin_root, new_version, dry_run=dry_run):
+    if remote and current == target:
+        # Idempotent path: a previous publish run already bumped + committed
+        # the local files; only the push and release remain. Don't re-bump.
+        print(f"\n{BLUE}═══ Gate 7: Bump version ({bump_type}: {baseline} → {target}) ═══{NC}")
+        print(
+            f"{YELLOW}  Local plugin.json is already at {target} (remote at {remote}) — "
+            f"skipping bump (interrupted-publish recovery).{NC}"
+        )
+        print(f"{GREEN}✓ Version already bumped to {target}{NC}")
+        return 0, target
+    if remote and current != remote and current != target:
+        # Local is at some unexpected version (not remote, not the bump target).
+        # Refuse to proceed rather than guess.
+        print(
+            f"{RED}✗ Local plugin.json version is {current}, remote is {remote}, expected bump "
+            f"target is {target}. Refusing to bump — manual intervention required.{NC}",
+            file=sys.stderr,
+        )
+        return 1, None
+    print(f"\n{BLUE}═══ Gate 7: Bump version ({bump_type}: {baseline} → {target}) ═══{NC}")
+    if not do_bump(plugin_root, target, dry_run=dry_run):
         print(f"{RED}✗ Version bump failed{NC}", file=sys.stderr)
         return 1, None
-    print(f"{GREEN}✓ Version bumped to {new_version}{NC}")
+    print(f"{GREEN}✓ Version bumped to {target}{NC}")
     # Also update the README version badge in-place so it never drifts.
-    stage_update_readme_badge(plugin_root, current, new_version, dry_run)
-    return 0, new_version
+    stage_update_readme_badge(plugin_root, baseline, target, dry_run)
+    return 0, target
 
 
 def stage_update_readme_badge(plugin_root: Path, old_version: str, new_version: str, dry_run: bool) -> None:
@@ -1352,20 +1447,84 @@ def _resolve_owner_repo(plugin_root: Path) -> tuple[str, str]:
     return parsed
 
 
+def _git_porcelain_clean(plugin_root: Path) -> bool:
+    """True when `git status --porcelain` returns no lines (working tree clean)."""
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        cwd=str(plugin_root),
+        check=False,
+        timeout=15,
+    )
+    return result.returncode == 0 and not result.stdout.strip()
+
+
+def _head_commit_message(plugin_root: Path) -> str:
+    """Return the subject line of HEAD's commit message, or an empty string."""
+    result = subprocess.run(
+        ["git", "log", "-1", "--pretty=%s"],
+        capture_output=True,
+        text=True,
+        cwd=str(plugin_root),
+        check=False,
+        timeout=15,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _local_tag_exists(plugin_root: Path, tag_name: str) -> bool:
+    """True when `git tag` lists ``tag_name`` locally."""
+    result = subprocess.run(
+        ["git", "tag", "-l", tag_name],
+        capture_output=True,
+        text=True,
+        cwd=str(plugin_root),
+        check=False,
+        timeout=15,
+    )
+    return result.returncode == 0 and tag_name in result.stdout.split()
+
+
 def stage_commit_tag_push(plugin_root: Path, tag_name: str) -> int:
     """Gates 10-12: commit, tag, push.
+
+    Idempotency: when a previous publish run was interrupted between the
+    commit and the push, HEAD is already the release commit and the tag
+    already exists locally. Re-running publish.py must NOT create a second
+    release commit or fail trying to re-create an existing tag — that path
+    led to the v2.64.0/v2.65.0 jump described in the v2.66.0 commit body.
+
+    Gate 10: skip the commit when the working tree is clean AND HEAD's subject
+    is already `chore(release): <tag_name>`.
+    Gate 11: skip the tag when it already points at HEAD locally.
+    Gate 12: `git push` is idempotent on its own — pushing an already-pushed
+    ref is a no-op, so no extra check needed.
 
     TRDD-bbff5bc5 §5: gh-auth precheck runs at the top of Gate 12 (before
     the first `git push`) to give the maintainer an actionable error
     message BEFORE git tries the network round-trip and fails opaquely.
     """
     print(f"\n{BLUE}═══ Gate 10: Commit version bump + manifest refresh + changelog ═══{NC}")
-    run(["git", "add", "-A"], cwd=plugin_root)
-    run(["git", "commit", "-m", f"chore(release): {tag_name}"], cwd=plugin_root)
-    print(f"{GREEN}✓ Committed {tag_name}{NC}")
+    expected_subject = f"chore(release): {tag_name}"
+    head_subject = _head_commit_message(plugin_root)
+    if _git_porcelain_clean(plugin_root) and head_subject == expected_subject:
+        print(
+            f"{YELLOW}  Working tree clean and HEAD already has '{expected_subject}' — "
+            f"skipping commit (interrupted-publish recovery).{NC}"
+        )
+        print(f"{GREEN}✓ Already committed {tag_name}{NC}")
+    else:
+        run(["git", "add", "-A"], cwd=plugin_root)
+        run(["git", "commit", "-m", expected_subject], cwd=plugin_root)
+        print(f"{GREEN}✓ Committed {tag_name}{NC}")
     print(f"\n{BLUE}═══ Gate 11: Create git tag {tag_name} ═══{NC}")
-    run(["git", "tag", "-a", tag_name, "-m", f"Release {tag_name}"], cwd=plugin_root)
-    print(f"{GREEN}✓ Tag {tag_name} created{NC}")
+    if _local_tag_exists(plugin_root, tag_name):
+        print(f"{YELLOW}  Tag {tag_name} already exists locally — skipping (interrupted-publish recovery).{NC}")
+        print(f"{GREEN}✓ Tag {tag_name} already present{NC}")
+    else:
+        run(["git", "tag", "-a", tag_name, "-m", f"Release {tag_name}"], cwd=plugin_root)
+        print(f"{GREEN}✓ Tag {tag_name} created{NC}")
     print(f"\n{BLUE}═══ Gate 12: Push to origin (branch + tags) ═══{NC}")
     # TRDD-bbff5bc5: gh-auth precheck — fail fast with actionable error if
     # the maintainer's gh CLI is missing/unauthed/lacks push perm.
