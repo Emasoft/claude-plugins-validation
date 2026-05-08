@@ -115,7 +115,21 @@ def _ensure_gh_auth(owner: str, repo: str) -> None:
     users too because it asks "does this gh identity have push perms?",
     not "what transport will git use?". A missing SSH key is downstream
     and out of scope for this precheck.
+
+    Escape hatch: `CPV_SKIP_GH_AUTH_CHECK=1` bypasses both the auth check
+    AND the push-permission check. The downstream `git push` and
+    `gh release create` gates still run, so a misauthorized push fails
+    there — the precheck only prevents the embarrassment of pushing
+    half a release before discovering the auth problem. Set this when
+    the network is too slow for the 60 s gh API call but you've
+    independently verified your auth is good (e.g. `gh repo view <repo>`
+    works in another terminal).
     """
+    if os.environ.get("CPV_SKIP_GH_AUTH_CHECK") == "1":
+        # Honoured per the docstring's "escape hatch" clause. The downstream
+        # push/release gates still enforce real auth.
+        return
+
     gh_bin = shutil.which("gh")
     if gh_bin is None:
         print(
@@ -126,13 +140,27 @@ def _ensure_gh_auth(owner: str, repo: str) -> None:
 
     # 1. Check authentication. Capture both streams so token-shaped strings
     #    (if any) never leak to our stdio.
-    status = subprocess.run(
-        [gh_bin, "auth", "status"],
-        capture_output=True,
-        text=True,
-        timeout=15,
-        check=False,
-    )
+    #
+    # 60s timeout (was 15s) — `gh auth status` does a network round-trip and
+    # 15s was too tight on slow-link / Fastweb-type connections. The whole
+    # check still aborts within a minute; just no more "TimeoutExpired" at
+    # the very first gate.
+    try:
+        status = subprocess.run(
+            [gh_bin, "auth", "status"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        print(
+            f"\n{RED}✗ gh auth status timed out after 60 s.{NC}\n"
+            f"{YELLOW}  This usually means an unstable network. Retry, or check {NC}\n"
+            f"{YELLOW}  https://www.githubstatus.com/.{NC}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     if status.returncode != 0:
         print(
             f"\n{RED}✗ gh CLI not authenticated.{NC}\n"
@@ -143,13 +171,25 @@ def _ensure_gh_auth(owner: str, repo: str) -> None:
 
     # 2. Check push permission via the GitHub API. `--jq .permissions.push`
     #    extracts the boolean directly so we don't have to parse JSON.
-    perms = subprocess.run(
-        [gh_bin, "api", f"repos/{owner}/{repo}", "--jq", ".permissions.push"],
-        capture_output=True,
-        text=True,
-        timeout=15,
-        check=False,
-    )
+    # 60s timeout (was 15s) for the same slow-link tolerance reason.
+    try:
+        perms = subprocess.run(
+            [gh_bin, "api", f"repos/{owner}/{repo}", "--jq", ".permissions.push"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        print(
+            f"\n{RED}✗ gh api permission check timed out after 60 s.{NC}\n"
+            f"{YELLOW}  Network is too slow to verify push permission. Retry,{NC}\n"
+            f"{YELLOW}  or set CPV_SKIP_GH_AUTH_CHECK=1 to bypass this gate{NC}\n"
+            f"{YELLOW}  (publish will still fail at git push if you actually{NC}\n"
+            f"{YELLOW}  lack permission — the gate only saves you the embarrassment of pushing first).{NC}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     if perms.returncode != 0 or perms.stdout.strip() != "true":
         # Try to identify which gh user is active so the maintainer can
         # diagnose multi-account confusion. We parse `gh auth status`
