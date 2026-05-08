@@ -33,7 +33,9 @@ jobs:
         run: uv sync
 
       - name: Lint all source files (read-only)
-        run: uv run python scripts/lint_files.py .
+        # Standalone repo-wide lint via the v2.65.0 lint engine — same code path
+        # the validator uses, just exercised here as a fast pre-validation gate.
+        run: uv run python scripts/cpv_lint_engine.py .
 
       - name: Ruff check
         run: uv run ruff check scripts/ tests/
