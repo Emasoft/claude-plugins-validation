@@ -1047,11 +1047,22 @@ def get_repo_root() -> Path:
     return Path.cwd()
 
 
-def run_linting(repo_root: Path) -> bool:
+def run_linting(repo_root: Path, *, strict_missing_linters: bool = True) -> bool:
     """Detect languages and run appropriate linters (read-only).
 
+    Args:
+        repo_root: Project root to lint.
+        strict_missing_linters: When True (default — required for publish gates),
+            a missing linter for any language present in the project is treated
+            as a HARD FAILURE. Without this, missing eslint / cargo / shellcheck /
+            hadolint / etc. silently allow files to ship unlinted, which is what
+            #19's reporter and the creator-agent feedback both ran into. Local
+            dev workflows can flip this to False via `--soft-missing-linters`
+            on the CLI.
+
     Returns:
-        True if all linting passed, False if any linting issues found.
+        True if all linting passed AND every detected language had its linter
+        available, False otherwise.
     """
     all_passed = True
 
@@ -1082,27 +1093,47 @@ def run_linting(repo_root: Path) -> bool:
         "powershell": lint_powershell,
     }
 
+    missing_linters: list[str] = []
+    unsupported_langs: list[str] = []
+
     for lang, files in languages.items():
         print(f"{BLUE}  [{lang.upper()}] ({len(files)} files){NC}")
 
-        # Ensure linter is installed — emit WARNING if unavailable
+        # Ensure linter is installed — strict mode treats absence as a failure.
         if not ensure_linter_installed(lang, repo_root):
+            level = "✘ FAIL" if strict_missing_linters else "⚠ WARNING"
+            colour = RED if strict_missing_linters else YELLOW
             print(
-                f"{YELLOW}  ⚠ WARNING: {len(files)} {lang.upper()} file(s) cannot be validated — no linter available for this format{NC}"
+                f"{colour}  {level}: {len(files)} {lang.upper()} file(s) cannot be validated — no linter available for this format{NC}"
             )
+            missing_linters.append(lang)
+            if strict_missing_linters:
+                all_passed = False
             continue
 
-        # Dispatch to language-specific linter
+        # Dispatch to language-specific linter — a missing entry here is a
+        # programming bug (we detected files for a language we can't lint),
+        # never something to silently accept.
         lint_fn = _LINT_DISPATCH.get(lang)
         if lint_fn is None:
             print(
-                f"{YELLOW}  ⚠ WARNING: {len(files)} {lang.upper()} file(s) cannot be validated — no lint function registered{NC}"
+                f"{RED}  ✘ FAIL: {len(files)} {lang.upper()} file(s) cannot be validated — no lint function registered (CPV bug){NC}"
             )
+            unsupported_langs.append(lang)
+            all_passed = False
             continue
 
         passed = lint_fn(repo_root, files)
         if not passed:
             all_passed = False
+
+    if missing_linters and strict_missing_linters:
+        print(
+            f"\n{RED}  Missing linters for: {', '.join(missing_linters)}.{NC}\n"
+            f"{YELLOW}  Install them and re-run, or pass --soft-missing-linters for local dev.{NC}"
+        )
+    if unsupported_langs:
+        print(f"\n{RED}  Unsupported languages (CPV dispatch table out of sync): {', '.join(unsupported_langs)}{NC}")
 
     return all_passed
 
@@ -1145,6 +1176,17 @@ def main() -> int:
         metavar="PATH",
         help="Save full output to file, print only compact summary to stdout",
     )
+    parser.add_argument(
+        "--soft-missing-linters",
+        action="store_true",
+        help=(
+            "Treat missing linters as warnings instead of failures. "
+            "Default (publish-grade): a missing linter for any detected language "
+            "fails the run so plugins never ship with unlinted JS/TS/Rust/Bash code. "
+            "This flag is for local dev when you only want to lint the languages "
+            "you have tools installed for."
+        ),
+    )
     args = parser.parse_args()
 
     repo_root = args.path.resolve() if args.path else get_repo_root()
@@ -1166,7 +1208,7 @@ def main() -> int:
             print("File Linting (read-only, no auto-fix)")
             print(f"{'=' * 60}")
             print()
-            passed = run_linting(repo_root)
+            passed = run_linting(repo_root, strict_missing_linters=not args.soft_missing_linters)
             print()
             if passed:
                 print("All linting checks passed")
