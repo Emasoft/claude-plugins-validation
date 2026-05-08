@@ -93,11 +93,17 @@ def _secret_exists(gh: str, repo: str, secret_name: str) -> bool:
 
 
 def _set_secret(gh: str, repo: str, secret_name: str, value: str) -> int:
-    """Set the secret via --body. Never uses stdin/echo-pipe. Never logs value."""
+    """Set the secret via stdin (--body-file -). Never uses argv (which is
+    visible to other users via /proc/<pid>/cmdline or `ps -ef`). Never logs
+    value. The trailing newline strip on the gh side eliminates the
+    echo-pipe footgun (echo adds a newline → "Bad credentials" at push time).
+    """
     r = subprocess.run(
-        [gh, "secret", "set", secret_name, "--repo", repo, "--body", value],
+        [gh, "secret", "set", secret_name, "--repo", repo, "--body-file", "-"],
+        input=value,
         capture_output=True,
         text=True,
+        timeout=30,
     )
     if r.returncode != 0:
         print(

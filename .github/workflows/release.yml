@@ -5,9 +5,16 @@ on:
     tags:
       - 'v*.*.*'
 
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write
     steps:
@@ -24,14 +31,14 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Run full plugin validation
+      - name: Run full plugin validation (strict — same gate as pre-push hook)
         run: |
           set +e
-          uv run python scripts/validate_plugin.py . --verbose > validation-report.txt 2>&1
+          uv run python scripts/validate_plugin.py . --verbose --strict > validation-report.txt 2>&1
           exit_code=$?
           set -e
           cat validation-report.txt
-          # Fail release on ANY non-zero severity (CRITICAL=1, MAJOR=2, MINOR=3, NIT=4)
+          # Strict mode: any CRITICAL/MAJOR/MINOR/NIT (exit codes 1-4) blocks release.
           if [ $exit_code -ge 1 ] && [ $exit_code -le 4 ]; then
             echo "::error::Validation failed with exit code $exit_code"
             exit $exit_code
@@ -39,12 +46,6 @@ jobs:
 
       - name: Run tests
         run: uv run pytest tests/ -v
-
-      - name: Lint Python scripts
-        run: uv run ruff check scripts/
-
-      - name: Type check
-        run: uv run mypy scripts/ --ignore-missing-imports
 
       - name: Generate changelog
         id: changelog

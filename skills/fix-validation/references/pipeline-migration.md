@@ -2,10 +2,11 @@
 
 ## Table of Contents
 
-- [§1 — Fix dangling script references](#1--fix-dangling-scriptnamepy-references)
+- [§1 — Fix dangling script references](#1--fix-dangling-script-references)
 - [§2 — Migrate to whole-repo lint via cpv_lint_engine](#2--migrate-to-whole-repo-lint-via-cpv_lint_engine)
-- [§3 — Make publish.py idempotent](#3--make-publishpy-idempotent-interrupted-publish-recovery)
-- [Combined verification](#combined-verification)
+- [§3 — Cross-platform Python (bash → Python, os.path → pathlib)](#3--cross-platform-python-bash--python-ospath--pathlib)
+- [§4 — Make publish.py idempotent](#4--make-publishpy-idempotent-interrupted-publish-recovery)
+- [§5 — Sanitize every script-input parameter against injection](#5--sanitize-every-script-input-parameter-against-injection)
 
 How the plugin-fixer auto-migrates a legacy plugin's CI/CD + release
 pipeline to the canonical current standards. Three independent
@@ -25,7 +26,7 @@ with `file:line` for every stale reference in:
 - `scripts/setup_plugin_pipeline.py` — the PRE_PUSH_HOOK template literal
 - `skills/plugin-validation-skill/references/*` — reference hooks copied into new plugins
 
-### Fix recipe
+### Fix recipe (§1 )
 
 For each finding `[MAJOR] Dangling reference to scripts/<old>.py — found at <file>:<line>`:
 
@@ -35,7 +36,7 @@ For each finding `[MAJOR] Dangling reference to scripts/<old>.py — found at <f
 | `lint_validation.py` | Same as `lint_files.py` (older alias) |
 | Any other removed script | Read the script's last-known purpose from `git log --diff-filter=D --name-only`. If it had a replacement, swap the reference; if it was deleted with no replacement, remove the call site. |
 
-### Verify
+### Verify (§1 )
 
 ```bash
 uv run python scripts/validate_plugin.py . --strict
@@ -50,7 +51,7 @@ If the plugin still has a separate `scripts/lint_files.py`, or its CI
 workflow runs ruff/eslint/shellcheck/etc. as separate steps, consolidate
 to the unified engine.
 
-### Detection signals
+### Detection signals (§2 )
 
 | Signal | Severity | Source |
 |---|---|---|
@@ -58,7 +59,7 @@ to the unified engine.
 | `.github/workflows/ci.yml` has separate `Ruff check` / `ESLint` / `ShellCheck` steps for project source | INFO | workflow file |
 | Pre-push hook calls a per-language linter directly | INFO | `.git/hooks/pre-push` |
 
-### Fix recipe
+### Fix recipe (§2 )
 
 1. **Delete `scripts/lint_files.py`** (always — the engine owns this)
 2. **Replace per-language steps in `.github/workflows/ci.yml`**:
@@ -86,7 +87,7 @@ YAML, JSON, TOML, Dockerfile, HTML, CSS, SQL, Lua, R — and uses
 `uvx`/`bunx`/`docker` fallback so missing local binaries do NOT silently
 skip the language.
 
-### Verify
+### Verify (§2 )
 
 ```bash
 uv run python scripts/cpv_lint_engine.py . --strict
@@ -95,7 +96,198 @@ uv run python scripts/cpv_lint_engine.py . --strict
 
 ---
 
-## §3 — Make `publish.py` idempotent (interrupted-publish recovery)
+## §3 — Cross-platform Python (bash → Python, os.path → pathlib)
+
+This section consolidates three independent migrations: shipped `.sh`
+scripts (§3a below), bash-only hook commands (§3b below), and Python
+scripts that use `os.path` / `os.system` / hardcoded `/tmp/` /
+`shell=True` (§3c below). Apply them in order, then re-validate.
+
+### §3b — Convert bash hook commands to Python (cross-platform)
+
+Hook commands embedded in `hooks/hooks.json`, in plugin.json's inline
+`hooks` block, OR in agent / skill frontmatter `hooks:` field run on
+Linux, macOS, AND Windows. Bash-isms that work on POSIX (set -euo
+pipefail, `[[ ]]`, process substitution, brace expansion) break on
+Windows where the hook runner uses cmd.exe / PowerShell.
+
+### Detection signals (§3b)
+
+`validate_hook.py` (and the same checks invoked from `validate_agent`
+and `validate_skill`) emit:
+
+- **MAJOR — bash-only constructs:** `set -e`/`set -euo pipefail`,
+  `[[ ]]`, `$(<file)`, `<(...)`/`>(...)` process substitution,
+  `{a,b,c}` brace expansion.
+- **MINOR — POSIX-only tools used directly:** `jq`, `sed`, `awk`,
+  `shellcheck`. Skipped when wrapped in `python3 -c "..."`,
+  `bash -c "..."`, or `wsl bash -c "..."` (the user has owned the
+  platform decision).
+
+### Fix recipe — delegate to a Python script (§3b)
+
+The cleanest fix is to delegate every non-trivial hook command to a
+Python script bundled under `${CLAUDE_PLUGIN_ROOT}/scripts/`. Python
+is cross-platform by default and gives access to `subprocess`, `re`,
+`json`, `pathlib`, etc. — replacements for bash, jq, sed, awk.
+
+Example before:
+```json
+{
+  "hooks": {
+    "PostToolUse": [{
+      "hooks": [{
+        "type": "command",
+        "command": "set -euo pipefail; gh api repos/X | jq '.name' > \"${CLAUDE_PLUGIN_DATA}/last.txt\""
+      }]
+    }]
+  }
+}
+```
+
+Example after:
+```json
+{
+  "hooks": {
+    "PostToolUse": [{
+      "hooks": [{
+        "type": "command",
+        "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/post_tool_use_hook.py\""
+      }]
+    }]
+  }
+}
+```
+
+`scripts/post_tool_use_hook.py`:
+```python
+#!/usr/bin/env python3
+import json, os, subprocess
+from pathlib import Path
+
+data_dir = Path(os.environ["CLAUDE_PLUGIN_DATA"])
+data_dir.mkdir(parents=True, exist_ok=True)
+result = subprocess.run(
+    ["gh", "api", "repos/X"],
+    capture_output=True, text=True, check=True, timeout=30,
+)
+name = json.loads(result.stdout).get("name", "")
+(data_dir / "last.txt").write_text(name + "\n", encoding="utf-8")
+```
+
+### Translation cheat-sheet
+
+| Bash | Python equivalent |
+|---|---|
+| `jq '.name' file.json` | `json.loads(open("file.json").read())["name"]` |
+| `sed -i 's/foo/bar/g' f` | `Path(f).write_text(re.sub(r"foo", "bar", Path(f).read_text()))` |
+| `awk '{print $1}' f` | `[ln.split()[0] for ln in Path(f).read_text().splitlines()]` |
+| `[[ -f X ]]` | `Path("X").is_file()` |
+| `set -euo pipefail` | (default Python — uncaught exceptions exit nonzero) |
+| `cmd1 \| cmd2` | `subprocess.run(["cmd2"], input=subprocess.check_output(["cmd1"]))` |
+| `mktemp -d` | `tempfile.mkdtemp()` |
+| `find . -name "*.py"` | `Path(".").rglob("*.py")` |
+| `realpath X` | `Path(X).resolve()` |
+
+### Verify (§3b)
+
+```bash
+uv run python scripts/validate_plugin.py . --strict
+# expect: no MAJOR "bash-only constructs" findings,
+#         no MINOR "POSIX-only tool" findings.
+```
+
+### §3a — Convert shipped bash/shell scripts to Python (cross-platform)
+
+CPV's pipeline standard is **Python-only** since v2.65.2: every script
+shipped to user installs must run identically on Linux, macOS, AND
+Windows. Bash scripts violate that contract — `bash`, `jq`, `sed`,
+`awk` etc. are not natively packaged on Windows, so a plugin that
+ships a `.sh` script breaks for any Windows user.
+
+### Detection signals (§3a)
+
+`validate_plugin.py` emits a WARNING for each `.sh` script in the
+plugin tree ("Found N Bash/Shell script(s)"). Treat every such
+WARNING as a publish-blocker for cross-platform plugins.
+
+### Fix recipe (§3a)
+
+1. Identify the bash script's purpose — most fall in 4 categories:
+   - GitHub API calls via `gh + jq` → Python `subprocess.run` + `json` module (or `gh_with_retry` from `cpv_network_resilience`)
+   - File manipulation via `sed/awk/grep` → Python `re` + `pathlib`
+   - Process control via `set -euo pipefail` → `subprocess.run(check=True)` + try/except
+   - Conditional execution via `if [ -f X ]` → `Path(X).is_file()`
+
+2. Write the Python equivalent. Preserve the same CLI surface (argparse names matching the bash flags) so existing callers in workflows, hooks, and docs work unchanged.
+
+3. Move the bash script to `scripts_dev/` (gitignored, preserved for reference) — do not delete outright; the user may want to compare behaviour later.
+
+4. Update every reference — workflows, docs, README, hooks, skill references — to point at the new `.py`. The `validate_pipeline_script_refs` rule catches missed references.
+
+### Verify (§3a)
+
+```bash
+find . -name "*.sh" -not -path "./.git/*" -not -path "./scripts_dev/*"
+# expected: nothing in shipped tree
+
+uv run python scripts/validate_plugin.py . --strict
+# expected: no "Found N Bash/Shell script(s)" WARNING
+```
+
+### §3c — Convert os.path / os.system / hardcoded paths → pathlib (cross-platform Python)
+
+Even when a plugin's scripts are 100% Python, they can still fail on
+Windows if they use POSIX-only patterns:
+
+| POSIX-only pattern | Windows breakage | Cross-platform replacement |
+|---|---|---|
+| `os.path.join(a, b)` | works but inconsistent slashes mixed with `pathlib` | `Path(a) / b` |
+| `os.path.isfile(x)` | fragile vs symlinks | `Path(x).is_file()` |
+| `os.path.isdir(x)` | same | `Path(x).is_dir()` |
+| `os.path.exists(x)` | same | `Path(x).exists()` |
+| `os.path.dirname(__file__)` | returns string, mixed with Path | `Path(__file__).parent` |
+| `os.path.basename(p)` | string round-trip | `Path(p).name` |
+| `os.path.abspath(p)` | string | `Path(p).resolve()` |
+| `os.system("cmd")` | `shell=True` security risk + Windows quoting | `subprocess.run([...], check=True, timeout=N)` |
+| `"/tmp/foo"` | does not exist on Windows | `tempfile.gettempdir() / "foo"` or `tempfile.mkdtemp()` |
+| `"/usr/bin/env python"` shebang only | Windows ignores shebangs | declare `python` interpreter explicitly in CLI invocations |
+| `os.geteuid()` | `AttributeError` on Windows | `getattr(os, "geteuid", lambda: 1)()` |
+| `subprocess.run(... shell=True)` | quoting differs Windows vs POSIX | always pass `args` as list, never `shell=True` |
+| `f.read(n)` looping until 0 bytes | infinite loop on FUSE / sparse | bound the loop `for _ in range(N): ...` |
+
+### Detection signals (§3c)
+
+```bash
+# Per-file scan — quick heuristic for legacy patterns
+grep -rn "os\\.path\\.join\\|os\\.path\\.exists\\|os\\.path\\.isfile\\|os\\.path\\.isdir\\|os\\.geteuid\\|shell=True\\|\"/tmp/\\|os\\.system" scripts/ --include="*.py" | head
+```
+
+The CPV validator does NOT currently emit a finding for `os.path`
+usage (it's still legal Python). Treat ANY hit on the grep above as a
+fix candidate during a cross-platform audit.
+
+### Fix recipe (mechanical)
+
+1. `import os` + `os.path.X(...)` → `from pathlib import Path` + `Path(...).X()`
+2. `os.path.join(a, b, c)` → `Path(a) / b / c`
+3. `subprocess.run(... shell=True)` → split args list, drop `shell=True`
+4. `os.system("cmd")` → `subprocess.run([...], check=True, timeout=60)`
+5. `"/tmp/<name>"` → `Path(tempfile.gettempdir()) / "<name>"` OR `Path(tempfile.mkdtemp(prefix="<name>-"))`
+6. Add `timeout=` to every `subprocess.run` (60s default, longer for clones/builds)
+
+### Verify (§3c)
+
+```bash
+# After conversion, re-run grep — expect 0 hits in shipped scripts
+grep -rn "os\\.path\\.\\|shell=True\\|\"/tmp/\\|os\\.system" scripts/ --include="*.py"
+
+# Run lint + tests
+uv run ruff check scripts/
+uv run pytest tests/
+```
+
+## §4 — Make `publish.py` idempotent (interrupted-publish recovery)
 
 A non-idempotent `publish.py` reads LOCAL `plugin.json.version` as the
 bump baseline. When a publish is interrupted between commit+tag and
@@ -116,7 +308,7 @@ grep -E "^def _read_remote_version|^def _infer_bump_type|^def _git_porcelain_cle
 If the helpers are absent, `publish.py` is non-idempotent and must be
 upgraded.
 
-### Fix recipe
+### Fix recipe (§4 )
 
 The simplest path is to regenerate `publish.py` from
 `generate_plugin_repo.py`'s `gen_publish_py()` — every newly-scaffolded
@@ -145,7 +337,7 @@ clean. Skip the tag when it already exists locally. The push always runs.
 Reference implementation: `scripts/generate_plugin_repo.py:gen_publish_py`
 (canonical) and `scripts/publish.py` (CPV's own — same helpers).
 
-### Verify
+### Verify (§4 )
 
 ```bash
 # Simulate the interrupted-publish state and re-run:
@@ -158,6 +350,112 @@ uv run python scripts/publish.py --minor
 #         "HEAD is already 'chore: bump version to X.Y.Z' — skipping commit",
 #         "Tag vX.Y.Z already exists locally — skipping tag step",
 #         then push proceeds normally
+```
+
+---
+
+## §5 — Sanitize every script-input parameter against injection
+
+Every CLI flag, environment variable, argv element, JSON field, file
+content, gh-API response, and incoming HTTP body that a script consumes
+MUST be validated against a strict regex/allowlist BEFORE it is used in:
+
+- A subprocess call (shell injection)
+- A regex compile (regex injection / ReDoS)
+- A file-path operation (path traversal)
+- A URL passed to `gh api` / `urlopen` (SSRF)
+- An SQL query (SQL injection)
+- A shell argument inside `bash -c "..."` (shell injection)
+
+### Detection signals (§5)
+
+```bash
+# Per-script grep — quick heuristic for unsanitized-input patterns
+grep -rnE 'shell=True|os\.system|subprocess\.run\([^,]*\$\{|re\.compile\([^)]*input\(|urlopen\([^)]*\$\{|f\"[^\"]*\{[^}]*\}[^\"]*\"\s*,?\s*shell=True' \
+  scripts/ --include="*.py" | head
+```
+
+Also flag every place where an `argparse` argument or env-var read is
+passed directly to a subprocess / regex / URL without intermediate
+validation.
+
+### Fix recipe (§5)
+
+1. **Define a canonical regex / allowlist for each input type.** Examples
+   from CPV's existing scripts (use as-is or adapt):
+
+   ```python
+   # set_marketplace_pat.py — canonical repo-slug regex
+   REPO_PATTERN = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+
+   # Semantic version
+   SEMVER_PATTERN = re.compile(r"^\d+\.\d+\.\d+(?:[-+][\w.]+)?$")
+
+   # Plugin / marketplace name (kebab-case, must start with letter)
+   NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
+
+   # Tag name (vX.Y.Z form only — no arbitrary tag names accepted)
+   TAG_PATTERN = re.compile(r"^v\d+\.\d+\.\d+(?:[-+][\w.]+)?$")
+
+   # GitHub host allowlist
+   ALLOWED_HOSTS = frozenset({"github.com", "api.github.com", "raw.githubusercontent.com"})
+   ```
+
+2. **Validate at the boundary.** As soon as the script reads input
+   (argparse, env-var, JSON load), validate it against the regex/allowlist
+   AND raise / exit non-zero on mismatch. NEVER pass unvalidated input
+   forward.
+
+   ```python
+   # WRONG — value flows directly into a subprocess
+   def install(repo: str) -> None:
+       subprocess.run(["gh", "secret", "set", "X", "--repo", repo, ...])
+
+   # RIGHT — validated at the boundary
+   def install(repo: str) -> None:
+       if not REPO_PATTERN.match(repo):
+           raise ValueError(f"Invalid repo slug: {repo!r}")
+       subprocess.run(["gh", "secret", "set", "X", "--repo", repo, ...])
+   ```
+
+3. **For paths, resolve + relative_to.** This rejects path traversal
+   reliably — `Path("/safe/root").resolve() / "../../etc/passwd"` is
+   not enough; you must also verify the resolved result is under the
+   safe root.
+
+   ```python
+   from pathlib import Path
+   def safe_path(user_path: str, root: Path) -> Path:
+       resolved = (root / user_path).resolve()
+       try:
+           resolved.relative_to(root.resolve())
+       except ValueError as e:
+           raise ValueError(f"Path traversal detected: {user_path!r}") from e
+       return resolved
+   ```
+
+4. **For regex inputs, escape before compile.** If user input becomes
+   part of a regex pattern (e.g. searching for a user-supplied keyword),
+   escape it with `re.escape()` first.
+
+5. **For URLs, parse + allowlist host.** Use `urllib.parse.urlparse`
+   and check `.scheme in {"https"}` AND `.hostname in ALLOWED_HOSTS`.
+
+6. **NEVER `shell=True`. NEVER `os.system`.** Always pass argv as a
+   list to `subprocess.run`. The shell never gets a chance to interpret
+   metacharacters.
+
+### Verify (§5)
+
+```bash
+# After sanitization, re-run the grep — expect 0 hits in shipped scripts
+grep -rnE 'shell=True|os\.system' scripts/ --include="*.py"
+
+# Run the plugin's full security validator
+uv run python scripts/validate_plugin.py . --strict
+
+# (Future) CPV will gain a dedicated rule that flags unvalidated
+# argparse-to-subprocess flows.
 ```
 
 ---

@@ -404,26 +404,7 @@ def main() -> int:
 
     python_cmd = find_python_command()
 
-    # --- Lint ---
-    cprint(f"{BLUE}Running file linting...{NC}")
-    cprint("")
-
-    lint_script = repo_root / "scripts" / "lint_files.py"
-    lint_exit = run_script(python_cmd, lint_script, [str(repo_root)], cwd=repo_root)
-
-    if lint_exit != 0:
-        cprint("")
-        cprint(f"{RED}========================================{NC}")
-        cprint(f"{RED}  BLOCKED: Linting issues found{NC}")
-        cprint(f"{RED}  Fix lint issues before pushing.{NC}")
-        cprint(f"{RED}========================================{NC}")
-        return 1
-
-    cprint("")
-    cprint(f"{GREEN}Linting passed.{NC}")
-    cprint("")
-
-    # --- Validation ---
+    # --- Validation (lint is folded into validate_plugin.py via cpv_lint_engine, v2.64.0+) ---
     validate_script = repo_root / "scripts" / "validate_plugin.py"
     # --strict: NIT issues also block push (zero tolerance)
     validation_exit = run_script(python_cmd, validate_script, [".", "--verbose", "--strict"], cwd=repo_root)

@@ -3263,6 +3263,23 @@ def validate_pipeline_script_refs(plugin_root: Path, report: ValidationReport) -
     if installed_hook.is_file():
         targets.append((installed_hook, ".git/hooks/pre-push"))
 
+    # Git-tracked source-of-truth hook templates under git-hooks/. These
+    # are the canonical templates that setup_git_hooks.py copies into
+    # .git/hooks/, so a stale ref here propagates to every fresh install.
+    # The v2.65.0 lint_files.py-removal regression slipped through because
+    # this directory was NOT scanned by the validator — the installed
+    # copy under .git/hooks/ had been hand-patched, so .git/hooks/pre-push
+    # passed validation while git-hooks/pre-push (the source) still had
+    # the dangling reference.
+    git_hooks_dir = plugin_root / "git-hooks"
+    if git_hooks_dir.is_dir():
+        for hook_name in (
+            "pre-push", "pre-commit", "post-rewrite", "post-merge", "commit-msg",
+        ):
+            tracked_hook = git_hooks_dir / hook_name
+            if tracked_hook.is_file():
+                targets.append((tracked_hook, f"git-hooks/{hook_name}"))
+
     # Plugin-validation-skill reference hooks (template that gets copied into
     # plugins by setup_plugin_pipeline).
     pvs_hook = plugin_root / "skills" / "plugin-validation-skill" / "references" / "pre-push-hook.py"

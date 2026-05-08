@@ -53,10 +53,15 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   enable-auto-merge:
     name: Enable auto-merge for trusted bot PRs
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     # Allowlist of trusted bot logins. Add new bots here as needed —
     # never expand to a wildcard / "any bot" check, because forks can
     # impersonate arbitrary user-supplied actor names on workflow runs

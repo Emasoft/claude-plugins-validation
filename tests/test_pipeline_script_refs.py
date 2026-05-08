@@ -155,6 +155,43 @@ class TestHookReferences:
         assert _has_major(report, "scripts/lint_files.py")
         assert _has_major(report, ".git/hooks/pre-push")
 
+    def test_git_tracked_hook_template_scanned(self, tmp_path: Path) -> None:
+        """The git-tracked source-of-truth hooks under git-hooks/ are what
+        setup_git_hooks.py copies into .git/hooks/. A stale ref here propagates
+        to every fresh install. This is the gap that let the v2.65.0
+        lint_files.py-removal regression slip through — the locally-installed
+        .git/hooks/pre-push had been hand-patched, but git-hooks/pre-push
+        (the source) still referenced the removed script."""
+        plugin_root = _make_plugin(tmp_path, scripts=["validate_plugin.py"])
+        git_hooks_dir = plugin_root / "git-hooks"
+        git_hooks_dir.mkdir()
+        (git_hooks_dir / "pre-push").write_text(
+            "#!/usr/bin/env python3\n"
+            "import subprocess\n"
+            "subprocess.run(['python', 'scripts/lint_files.py', '.'])\n",
+            encoding="utf-8",
+        )
+
+        report = ValidationReport()
+        validate_pipeline_script_refs(plugin_root, report)
+        assert _has_major(report, "scripts/lint_files.py")
+        assert _has_major(report, "git-hooks/pre-push")
+
+    def test_git_tracked_pre_commit_scanned(self, tmp_path: Path) -> None:
+        """git-hooks/pre-commit is also scanned (multiple hook types covered)."""
+        plugin_root = _make_plugin(tmp_path, scripts=["validate_plugin.py"])
+        git_hooks_dir = plugin_root / "git-hooks"
+        git_hooks_dir.mkdir()
+        (git_hooks_dir / "pre-commit").write_text(
+            "#!/bin/bash\npython scripts/old_format.py .\n",
+            encoding="utf-8",
+        )
+
+        report = ValidationReport()
+        validate_pipeline_script_refs(plugin_root, report)
+        assert _has_major(report, "scripts/old_format.py")
+        assert _has_major(report, "git-hooks/pre-commit")
+
     def test_skill_reference_template_scanned(self, tmp_path: Path) -> None:
         """The template hook in plugin-validation-skill is the source for new
         plugin scaffolds; stale refs there propagate to every newly-created
