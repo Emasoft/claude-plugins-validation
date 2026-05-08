@@ -1082,22 +1082,34 @@ def _ensure_gh_auth(owner: str, repo: str) -> None:
     `gh auth token`; uses only `gh auth status` and `gh api` so PAT-shaped
     strings cannot leak to stdout/stderr.
     """
+    if os.environ.get("CPV_SKIP_GH_AUTH_CHECK") == "1":
+        return
     gh_bin = shutil.which("gh")
     if gh_bin is None:
         cprint(f"  {RED}gh CLI not installed. Install: brew install gh{NC}")
         sys.exit(1)
-    status = subprocess.run(
-        [gh_bin, "auth", "status"],
-        capture_output=True, text=True, timeout=15, check=False,
-    )
+    # 60s timeout (was 15s) — slow-link tolerance; downstream push gates
+    # still enforce real auth on failure.
+    try:
+        status = subprocess.run(
+            [gh_bin, "auth", "status"],
+            capture_output=True, text=True, timeout=60, check=False,
+        )
+    except subprocess.TimeoutExpired:
+        cprint(f"  {RED}gh auth status timed out after 60 s — flaky network. Retry, or set CPV_SKIP_GH_AUTH_CHECK=1.{NC}")
+        sys.exit(1)
     if status.returncode != 0:
         cprint(f"  {RED}gh CLI not authenticated.{NC}")
         cprint(f"  {YELLOW}Run: gh auth login --hostname github.com --git-protocol https{NC}")
         sys.exit(1)
-    perms = subprocess.run(
-        [gh_bin, "api", f"repos/{owner}/{repo}", "--jq", ".permissions.push"],
-        capture_output=True, text=True, timeout=15, check=False,
-    )
+    try:
+        perms = subprocess.run(
+            [gh_bin, "api", f"repos/{owner}/{repo}", "--jq", ".permissions.push"],
+            capture_output=True, text=True, timeout=60, check=False,
+        )
+    except subprocess.TimeoutExpired:
+        cprint(f"  {RED}gh permission check timed out after 60 s — set CPV_SKIP_GH_AUTH_CHECK=1 to bypass this gate.{NC}")
+        sys.exit(1)
     if perms.returncode != 0 or perms.stdout.strip() != "true":
         active_login = ""
         for line in (status.stdout + status.stderr).splitlines():
