@@ -4,7 +4,7 @@
 
 - Why this exists
 - When NOT to use
-- Testing approach (no checked-in fixture)
+- Testing approach
 
 After scaffolding a new plugin, optionally emit the `cpv.strip` block in
 plugin.json so it's ready for `cpv strip-dev-parts` later. Default ON;
