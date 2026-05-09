@@ -3,6 +3,7 @@
 ## Table of Contents
 
 - [§0 — Detect canonical pipeline drift via RC-PIPELINE-DRIFT-001](#0--detect-canonical-pipeline-drift-via-rc-pipeline-drift-001)
+- [§0b — Remove legacy pipeline scripts via RC-LEGACY-PIPELINE-001](#0b--remove-legacy-pipeline-scripts-via-rc-legacy-pipeline-001)
 - [§1 — Fix dangling script references](#1--fix-dangling-script-references)
 - [§2 — Migrate to whole-repo lint via cpv_lint_engine](#2--migrate-to-whole-repo-lint-via-cpv_lint_engine)
 - [§3 — Cross-platform Python — bash to Python, os.path to pathlib](#3--cross-platform-python-bash--python-ospath--pathlib)
@@ -68,6 +69,78 @@ How the plugin-fixer auto-migrates a legacy plugin's CI/CD + release
 pipeline to the canonical current standards. Three independent
 migrations: stale script refs, lint consolidation, and publish.py
 idempotency.
+
+---
+
+## §0b — Remove legacy pipeline scripts via `[RC-LEGACY-PIPELINE-001]`
+
+`validate_plugin.py::validate_legacy_pipeline_scripts` (v2.69.0) emits a
+**`[MINOR] [RC-LEGACY-PIPELINE-001]`** finding for every known-legacy
+pipeline script that survives in the plugin's `scripts/` folder. These
+files are obsoleted by `publish.py`'s 14-gate pipeline — keeping them
+around invites users to invoke them and skip the canonical gates
+(security scans, gh-auth precheck, integrity manifest, idempotent
+commit/tag/push, cross-platform Python, etc.).
+
+The legacy list (each entry includes its replacement):
+
+| Legacy file                       | Replaced by                                          |
+|-----------------------------------|------------------------------------------------------|
+| `scripts/bump_version.py`         | `publish.py --patch / --minor / --major` (Gate 7)    |
+| `scripts/release.sh`              | `publish.py` (.sh blocks Windows users)              |
+| `scripts/release.py`              | `publish.py`                                         |
+| `scripts/publish.sh`              | `publish.py`                                         |
+| `scripts/lint.sh`                 | `ci.yml` + `publish.py` Gate 4 (lint)                |
+| `scripts/setup-hooks.sh`          | `setup-hooks.py` (cross-platform)                    |
+| `scripts/compute_hashes.py`       | `publish.py` Gate 8 (integrity manifest)             |
+| `scripts/verify_hashes.py`        | `publish.py` Gate 8 verification                     |
+| `scripts/changelog.py`            | `publish.py` Gate 9 (git-cliff)                      |
+| `scripts/generate_changelog.py`   | `publish.py` Gate 9                                  |
+| `scripts/check_version.py`        | `publish.py` Gate 7                                  |
+| `scripts/install.sh`              | `claude plugin install` (no install script needed)   |
+
+### Fix recipe (§0b)
+
+```bash
+# Auto-applied alongside --force-templates (the upgrade flow's umbrella):
+uvx cpv-remote-validate standardize <plugin-path> --fix --force-templates
+
+# Or as a standalone cleanup (preserves --force-templates state):
+uvx cpv-remote-validate standardize <plugin-path> --fix --clean-legacy
+
+# Dry-run preview:
+uv run python scripts/standardize_plugin.py . --fix --clean-legacy --dry-run
+```
+
+**Preservation guardrail**: legacy scripts are **MOVED to `scripts_dev/`**,
+NOT deleted. `scripts_dev/` is gitignored per the user's `.gitignore`
+convention so the relocated files won't be committed accidentally. After
+verifying the upgrade works, the user can delete `scripts_dev/` contents
+in a follow-up commit, OR `git add scripts_dev/<file>` to keep something
+tracked.
+
+### Why MINOR (not MAJOR)?
+
+The finding does not block publishing — many plugins keep these around
+as hand-written helpers and the user must opt into removal. The fixer
+agent's `/cpv-upgrade-plugin` flow is the canonical path; manual users
+get the cheat-sheet table above.
+
+### Verify (§0b)
+
+```bash
+uv run python scripts/validate_plugin.py . --strict
+# expect: no `[RC-LEGACY-PIPELINE-001]` findings
+
+ls scripts_dev/  # the moved legacy files (review before deleting)
+```
+
+If a script in the legacy list is genuinely needed by your plugin (rare —
+ask "what does publish.py NOT do that this script does?"), document the
+need in `CHANGELOG.md` and rename it so it doesn't match the legacy
+allowlist (e.g. `scripts/lint.sh` → `scripts/_extra_lint_checks.sh`).
+Better still: replace the bash with a cross-platform Python module under
+`scripts/` and call it from a publish.py gate.
 
 ---
 

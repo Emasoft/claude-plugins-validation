@@ -711,6 +711,81 @@ _FORCE_TEMPLATE_FILES: set[str] = {
     ".markdownlint.json",
 }
 
+# Mirror of validate_plugin._LEGACY_PIPELINE_SCRIPTS — the names of older
+# helpers that publish.py now subsumes. Kept here so the upgrade flow can
+# move them without an extra import (avoids circular-import surprises during
+# remote_validation launcher dispatch).
+#
+# Source-of-truth for severity + user-facing wording stays in validate_plugin;
+# this list only needs the relative-path strings.
+_LEGACY_PIPELINE_SCRIPTS_RELPATHS: tuple[str, ...] = (
+    "scripts/bump_version.py",
+    "scripts/release.sh",
+    "scripts/release.py",
+    "scripts/publish.sh",
+    "scripts/lint.sh",
+    "scripts/setup-hooks.sh",
+    "scripts/compute_hashes.py",
+    "scripts/verify_hashes.py",
+    "scripts/changelog.py",
+    "scripts/generate_changelog.py",
+    "scripts/check_version.py",
+    "scripts/install.sh",
+)
+
+
+def move_legacy_pipeline_scripts(plugin_path: Path, dry_run: bool = False) -> list[str]:
+    """Move every legacy pipeline script (per ``_LEGACY_PIPELINE_SCRIPTS_RELPATHS``)
+    from `scripts/` into `scripts_dev/` so the canonical publish.py is the
+    only release entry point.
+
+    Preservation guardrail: scripts are MOVED, not deleted, so the user can
+    review the relocated files in `scripts_dev/` before final deletion. This
+    matches the user's explicit feedback: "be careful with purging dead
+    code or unreferenced scripts" — moving keeps the content git-recoverable
+    if the user wants to bring something back.
+
+    `scripts_dev/` is gitignored per the user's `.gitignore` convention so
+    moved files won't be committed accidentally; the user can either delete
+    them in a follow-up commit or run `git add scripts_dev/<file>` to keep
+    them tracked.
+
+    Returns the list of relative paths actually moved (or would-have-moved
+    in dry-run mode).
+    """
+    moved: list[str] = []
+    scripts_dev = plugin_path / "scripts_dev"
+
+    for rel_path in _LEGACY_PIPELINE_SCRIPTS_RELPATHS:
+        src = plugin_path / rel_path
+        if not src.is_file():
+            continue
+        dest = scripts_dev / Path(rel_path).name
+        if dry_run:
+            print(
+                f"  {BLUE}[dry-run] Would move{NC} {rel_path} → "
+                f"scripts_dev/{Path(rel_path).name}"
+            )
+            moved.append(rel_path)
+            continue
+        scripts_dev.mkdir(parents=True, exist_ok=True)
+        # If the destination already exists, append a `.<n>` suffix so we
+        # don't clobber an earlier move (idempotent re-runs).
+        if dest.exists():
+            n = 1
+            while True:
+                candidate = dest.with_name(f"{dest.name}.{n}")
+                if not candidate.exists():
+                    dest = candidate
+                    break
+                n += 1
+        src.rename(dest)
+        rel_dest = dest.relative_to(plugin_path)
+        print(f"  {GREEN}[moved]{NC} {rel_path} → {rel_dest}")
+        moved.append(rel_path)
+
+    return moved
+
 
 def fix_missing_files(
     plugin_path: Path,
@@ -916,7 +991,18 @@ Examples (always invoke via the launcher):
             "with the canonical CPV templates. Existing copies are backed up to "
             "<file>.bak before being replaced. README, pyproject.toml, .gitignore "
             "are NEVER force-written. Use this to propagate TRDD-bbff5bc5 changes "
-            "to existing plugins. Implies --fix."
+            "to existing plugins. Implies --fix and --clean-legacy."
+        ),
+    )
+    parser.add_argument(
+        "--clean-legacy",
+        action="store_true",
+        help=(
+            "Move known-legacy pipeline scripts (bump_version.py, release.sh, "
+            "lint.sh, compute_hashes.py, etc.) from scripts/ to scripts_dev/ — "
+            "they are obsoleted by publish.py's 14-gate pipeline. Files are "
+            "MOVED (not deleted) so the user can review before final removal. "
+            "Auto-enabled when --force-templates is passed."
         ),
     )
 
@@ -957,6 +1043,15 @@ Examples (always invoke via the launcher):
             marketplace=args.marketplace,
             force_templates=args.force_templates,
         )
+        # Move legacy pipeline scripts (RC-LEGACY-PIPELINE-001) — auto-enabled
+        # under --force-templates because the upgrade flow's whole point is
+        # making publish.py the only release entry point.
+        clean_legacy = args.clean_legacy or args.force_templates
+        if clean_legacy:
+            print(f"\n{BOLD}Legacy pipeline cleanup{NC}{mode_label}")
+            moved = move_legacy_pipeline_scripts(plugin_path, dry_run=args.dry_run)
+            if not moved:
+                print(f"  {GREEN}No legacy pipeline scripts found.{NC}")
         if created and not args.dry_run:
             # Re-run audit after fixes to show updated status
             print(f"\n{BOLD}Post-fix audit:{NC}")
