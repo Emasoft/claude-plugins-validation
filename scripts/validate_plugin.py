@@ -3830,6 +3830,166 @@ def validate_legacy_pipeline_scripts(
         )
 
 
+_PEP723_BLOCK_RE = re.compile(
+    r"^# /// script\s*\n(?P<body>(?:^#.*\n)*?)^# ///\s*$",
+    re.MULTILINE,
+)
+_PEP723_DEPS_RE = re.compile(
+    r"^#\s*dependencies\s*=\s*\[(?P<deps>.*?)\]",
+    re.MULTILINE | re.DOTALL,
+)
+_PYTHON_STDLIB_PREFIXES: tuple[str, ...] = (
+    # Conservative subset — anything else is treated as needing a venv.
+    "argparse", "ast", "asyncio", "base64", "bisect", "collections", "concurrent",
+    "contextlib", "copy", "csv", "dataclasses", "datetime", "difflib", "enum",
+    "errno", "fnmatch", "functools", "glob", "gzip", "hashlib", "heapq", "hmac",
+    "html", "http", "importlib", "inspect", "io", "ipaddress", "itertools", "json",
+    "logging", "math", "mimetypes", "multiprocessing", "operator", "os", "pathlib",
+    "pickle", "platform", "pprint", "queue", "random", "re", "secrets", "select",
+    "shlex", "shutil", "signal", "socket", "sqlite3", "ssl", "stat", "string",
+    "struct", "subprocess", "sys", "tempfile", "textwrap", "threading", "time",
+    "tomllib", "traceback", "types", "typing", "unicodedata", "unittest", "urllib",
+    "uuid", "venv", "warnings", "weakref", "xml", "zipfile", "zlib",
+)
+
+
+def _pep723_has_runtime_deps(body: str) -> bool:
+    """True when a PEP 723 metadata block declares ≥ 1 non-stdlib dependency.
+
+    Body is the inline-comment block between `# /// script` and `# ///`. We
+    parse the `dependencies = [ ... ]` list and check each entry's leading
+    package-name token against the conservative stdlib prefix list. An empty
+    list (`dependencies = []`) is fine — no `uv run` needed because the
+    script imports nothing extra.
+    """
+    deps_match = _PEP723_DEPS_RE.search(body)
+    if not deps_match:
+        return False
+    deps_str = deps_match.group("deps")
+    # Strip per-line comment leaders and quotes; collect package-name tokens.
+    cleaned = re.sub(r"^\s*#\s?", "", deps_str, flags=re.MULTILINE)
+    for raw in cleaned.split(","):
+        token = raw.strip().strip('"\'')
+        if not token:
+            continue
+        # Slice off version/extra markers (e.g. "ruamel.yaml>=0.18", "pkg[opt]>=1").
+        pkg = re.split(r"[<>=!~\[;]", token, maxsplit=1)[0].strip()
+        if not pkg:
+            continue
+        # Top-level module name (e.g. "ruamel.yaml" → "ruamel" — close enough).
+        head = pkg.split(".")[0].lower().replace("-", "_")
+        if head not in _PYTHON_STDLIB_PREFIXES:
+            return True
+    return False
+
+
+def validate_pep723_invocations(plugin_root: Path, report: ValidationReport) -> None:
+    """Emit MAJOR for `python <script.py>` invocations of PEP 723 scripts.
+
+    Background (reported 2026-05-09): plugin-creator scaffolded scripts that
+    declare runtime dependencies via a PEP 723 inline-script metadata block
+    (``# /// script ... # ///``), but the generated invocations in commands /
+    agents / skills / hooks / README used bare ``python <script>`` /
+    ``python3 <script>`` instead of ``uv run <script>``. Bare ``python`` ignores
+    the inline metadata block, so the script ImportErrors on the first
+    non-stdlib import the moment a user runs it. The plugin "looks valid" to
+    every static check yet is broken at runtime for anyone whose Python env
+    lacks the listed deps.
+
+    Detection:
+      1. Walk ``scripts/*.py`` for the regex
+         ``^# /// script\\s*\\n(?:^#.*\\n)*?^# ///\\s*$``.
+      2. For each script with a non-empty ``dependencies`` list (i.e. NOT
+         ``dependencies = []``) AND at least one non-stdlib package, record
+         the relative path + basename.
+      3. Walk every ``commands/*.md``, ``agents/*.md``, ``skills/**/SKILL.md``,
+         ``skills/**/references/*.md``, ``hooks/hooks.json``, ``.mcp.json``,
+         ``.lsp.json``, and the plugin's ``README.md`` for invocations
+         matching ``\\bpython3?\\s+[^\\n]*<script-basename>``.
+      4. Flag every bare-python invocation as MAJOR
+         ``[RC-PEP723-INVOCATION-001]``. Use the FIX hint to point at
+         ``uv run <script>`` (or ``uv run --with <deps> python <script>`` if
+         the plugin author insists on the explicit-deps form).
+
+    Severity is MAJOR — silent runtime breakage for end users is much worse
+    than the build-time noise of a wrong invocation pattern. The fixer's
+    cpv-codemod already supports a ``python-to-uv-run`` transform; the
+    upgrade flow chains it after the validator's report.
+    """
+    scripts_dir = plugin_root / "scripts"
+    if not scripts_dir.is_dir():
+        return
+
+    pep723_scripts: list[tuple[str, str]] = []  # [(rel_path, basename)]
+    for py_file in sorted(scripts_dir.glob("*.py")):
+        try:
+            text = py_file.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        match = _PEP723_BLOCK_RE.search(text)
+        if not match:
+            continue
+        if not _pep723_has_runtime_deps(match.group("body")):
+            continue
+        rel = str(py_file.relative_to(plugin_root))
+        pep723_scripts.append((rel, py_file.name))
+
+    if not pep723_scripts:
+        return
+
+    # Where to look for invocations. Skip ``scripts_dev/`` (gitignored dev
+    # scratch — not shipped) and the script files themselves.
+    candidate_files: list[Path] = []
+    for sub in ("commands", "agents", "skills", "hooks"):
+        d = plugin_root / sub
+        if d.is_dir():
+            candidate_files.extend(p for p in d.rglob("*.md") if p.is_file())
+            candidate_files.extend(p for p in d.rglob("*.json") if p.is_file())
+    for top_file in (".mcp.json", ".lsp.json", "README.md"):
+        f = plugin_root / top_file
+        if f.is_file():
+            candidate_files.append(f)
+
+    # Build one regex per script — match `python` or `python3` followed by
+    # optional flags + any path that ends with the script's basename.
+    bare_python_patterns = {
+        basename: re.compile(
+            rf"\bpython3?\b(?!\s+(?:-c|-m)\b)(?:\s+-[A-Za-z]+)*\s+\S*{re.escape(basename)}\b",
+        )
+        for _rel, basename in pep723_scripts
+    }
+    # `uv run python <script>` is acceptable — uv's environment satisfies
+    # PEP 723 deps. Detect the prefix to avoid false positives.
+    uv_prefix = re.compile(r"\b(?:uvx?|pipx)\s+(?:run\s+)?(?:--[a-z\-]+\s+\S+\s+)*", re.IGNORECASE)
+
+    for cand in sorted(set(candidate_files)):
+        try:
+            content = cand.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        rel_cand = str(cand.relative_to(plugin_root))
+        for line_no, line in enumerate(content.splitlines(), start=1):
+            for basename, pat in bare_python_patterns.items():
+                m = pat.search(line)
+                if not m:
+                    continue
+                # Skip if a uv/uvx/pipx prefix immediately precedes the python token.
+                pre = line[: m.start()]
+                if uv_prefix.search(pre[-100:]):  # 100-char lookback
+                    continue
+                report.major(
+                    f"[RC-PEP723-INVOCATION-001] Bare `python {basename}` "
+                    f"invocation in {rel_cand}:{line_no} — `scripts/{basename}` "
+                    f"declares PEP 723 inline runtime deps that bare python "
+                    f"ignores. Replace with `uv run scripts/{basename}` (or "
+                    f"`uv run --with <deps> python scripts/{basename}` if the "
+                    f"plugin author wants explicit deps). The cpv-codemod "
+                    f"`python-to-uv-run` transform applies the fix in bulk.",
+                    rel_cand,
+                    line_no,
+                )
+
+
 def validate_workflow_best_practices(plugin_root: Path, report: ValidationReport) -> None:
     """Check GitHub workflow files for common anti-patterns."""
     workflows_dir = plugin_root / ".github" / "workflows"
@@ -4445,6 +4605,7 @@ def main() -> int:
     validate_pipeline_script_refs(plugin_root, report)
     validate_canonical_pipeline_drift(plugin_root, report)
     validate_legacy_pipeline_scripts(plugin_root, report)
+    validate_pep723_invocations(plugin_root, report)
     validate_workflow_best_practices(plugin_root, report)
     # Submodule + language + lockfile detection (TRDD-79638eb6)
     validate_submodule_containment(plugin_root, report)
