@@ -14,11 +14,11 @@ Defines the standard files, workflows, hooks, and release pipeline that every Em
 
 ### Layout C specifics
 
-Layout C (marketplace-in-plugin) requires a slightly different release pipeline:
-- `publish.py` MUST bump THREE version slots in one atomic commit: `version` in `.claude-plugin/plugin.json`, `metadata.version` in `.claude-plugin/marketplace.json`, AND the self-entry's `version` in the same `marketplace.json`'s `plugins[]` array.
-- `notify-marketplace.yml` is NOT installed (no separate marketplace repo to notify).
+Layout C (marketplace-in-plugin) needs a different release pipeline:
+- `publish.py` bumps THREE version slots atomically: `plugin.json::version`, `marketplace.json::metadata.version`, AND the self-entry's `version` in `marketplace.json::plugins[]`.
+- `notify-marketplace.yml` is NOT installed (no separate marketplace repo).
 - A single tag `vX.Y.Z` covers both manifest changes.
-- `validate_marketplace.py --strict` runs alongside `validate_plugin.py --strict` in CI; both must pass before push.
+- `validate_marketplace.py --strict` runs alongside `validate_plugin.py --strict` in CI.
 
 ## Prerequisites
 
@@ -87,3 +87,4 @@ A fully configured plugin repository with:
   > Overview · Whole-repo lint via cpv_lint_engine · Idempotent publish.py · validate_pipeline_script_refs rule · Migrating a legacy plugin
 - [v2.1.80+ Plugin Features](references/v2-1-80-features.md)
   > Monitor tool · userConfig (plugin.json) · channels (plugin.json) · CLAUDE_PLUGIN_OPTION_<KEY> env vars · Inline marketplace (settings.json) · managed-settings.d/ drop-in directory · Plugin skill `name` field (v2.1.98)
+- Migration exit gate: `references/canonical-pipeline-migration-checklist.md`

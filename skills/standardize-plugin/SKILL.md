@@ -50,6 +50,7 @@ Copy this checklist and track your progress:
 - [ ] `--fix` applied
 - [ ] Remaining issues fixed manually
 - [ ] Re-validation passed
+- [ ] **For migration runs (`/cpv-upgrade-plugin`)**: the 82-check matrix in `references/canonical-pipeline-migration-checklist.md` returns exit 0 (every BLOCKER + MAJOR passes), AND a real `publish.py --patch` + `gh run watch --exit-status` returned green CI on the resulting tag. See `agents/plugin-fixer.md` "Pre-completion verification (REQUIRED)". Closes [issue #21 ask #1](https://github.com/Emasoft/claude-plugins-validation/issues/21).
 
 4. **Audit/Fix a Marketplace**:
    ```bash

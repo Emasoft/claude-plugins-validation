@@ -4,6 +4,7 @@
 
 - Why this exists
 - When NOT to use
+- Testing approach (no checked-in fixture)
 
 After scaffolding a new plugin, optionally emit the `cpv.strip` block in
 plugin.json so it's ready for `cpv strip-dev-parts` later. Default ON;
@@ -53,3 +54,35 @@ Skip dev-stripping (`--no-strip-dev`) when:
 - Tests are essential at runtime (very rare)
 - The plugin author prefers operational simplicity over install-size
   savings (one extra GitHub repo to manage per plugin)
+
+## Testing approach (no checked-in fixture)
+
+The TRDD-793ac32a plan referenced a `tests/fixtures/sample-plugin-with-tests/`
+fixture tree, but the implementation deliberately uses **`tmp_path` builders**
+instead — `_make_plugin()` helpers in
+`tests/test_cpv_strip_dev_unit.py`, `tests/test_cpv_validate_gitmodules.py`,
+and `_make_scaffold_with_strip()` in `tests/test_cpv_strip_dev_e2e.py`.
+There is no checked-in `sample-plugin-with-tests/` fixture and none is
+needed.
+
+Why builders, not a static fixture: the strip-dev surface tests 73
+distinct plugin shapes — clean tree, dirty tree, stashed tree, detached
+HEAD, non-git, symlinked dir, corrupt state JSON, missing plugin.json,
+hostile `.gitmodules` (file://, userinfo, http://, backslash, path
+traversal, alien owner), allowlist on/off, with/without `cpv.strip`
+block, with `--strip-dev`/`--no-strip-dev` flag, etc. Each test mutates
+the plugin shape per-case (drops in a stash, makes a symlink, writes a
+particular plugin.json variant). A single checked-in fixture would
+either need 73 sub-fixtures (high noise, easy to drift) or each test
+would still have to mutate the fixture in place — which is what
+`tmp_path` already does, but without the cross-test pollution risk of
+shared on-disk state. The builder approach also keeps the fixture
+intent inline with the test (you can read the test and see exactly what
+plugin shape it asserts against), and forces test isolation by
+construction (each `tmp_path` is unique to the test).
+
+If a future test case ever does need a real on-disk fixture (e.g. to
+exercise `cpv strip-dev-parts --auto` end-to-end against a snapshot of
+a real plugin), add it under `tests/fixtures/<specific-name>/` at that
+point — but the current 73 tests cover the engine, the validator, and
+the generator-to-builder round-trip without one.

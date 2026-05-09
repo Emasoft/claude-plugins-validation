@@ -22,6 +22,8 @@ Copy this checklist into your fix log and tick each item as you go:
 - [ ] Evaluate every remaining WARNING against the publish-blocker rules
 - [ ] Fix publish-blocker WARNINGs; leave truly-advisory WARNINGs with per-entry justification
 - [ ] Stop when findings empty AND no blocking warnings, OR escalate at iteration 5 / identical-finding-set
+- [ ] **For migration runs only (`/cpv-upgrade-plugin`)**: run `run_all_checks` from `references/canonical-pipeline-migration-checklist.md` — every BLOCKER + MAJOR must pass.
+- [ ] **For migration runs only**: run `uv run python scripts/publish.py --print-gates` then `--dry-run` then `--patch`, then `gh run watch <run-id> --exit-status` on the resulting tag (and on the marketplace tag if Layout C / Layout A).
 - [ ] Write the iteration-by-iteration fix log to `$MAIN_ROOT/reports/plugin-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` (at the **main-repo root** — first entry of `git worktree list`, never a linked worktree; both `reports/` and `reports_dev/` gitignored). NEVER write to `docs_dev/`, the worktree-local `reports/`, or any other path.
 - [ ] Return one-line summary to caller
 
@@ -43,6 +45,17 @@ while iterations < MAX_ITERATIONS (default 5):
         remaining_warnings = report.filter(severity == WARNING)
         blocking_warnings = evaluate_warnings(remaining_warnings)
         if blocking_warnings is empty:
+            # Step 7c — migration runs only — Pre-completion verification
+            if dispatched_for_migration:
+                run_all_rc = run_all_checks(<target>)
+                if run_all_rc != 0:
+                    return PARTIAL (BLOCKER/MAJOR check failed — see run-all log)
+                # Step 7d — migration runs only — Real publish + CI watch
+                if publish_dry_run() != 0: return PARTIAL
+                tag = publish_patch()                     # bumps + commits + pushes
+                if gh_run_watch(tag) != 0: return PARTIAL
+                if has_marketplace:
+                    if marketplace_publish_and_watch() != 0: return PARTIAL
             return SUCCESS (clean)
         else:
             fix_batch(blocking_warnings)    # blocking warnings must be fixed too
@@ -123,8 +136,38 @@ When in doubt, treat a WARNING as a blocker rather than advisory. The cost of a 
 
 The final report from the fixer must include:
 
-1. **Loop summary**: `iterations=<N>`, time elapsed, terminal state (`clean` / `blocked` / `escalated`).
+1. **Loop summary**: `iterations=<N>`, time elapsed, terminal state (`clean` / `blocked` / `escalated` / `partial`).
 2. **Findings healed**: list of CRITICAL/MAJOR/MINOR/NIT findings that were fixed, with the commits or Edit operations that fixed them.
 3. **Warnings fixed**: list of publish-blocking warnings that were addressed.
 4. **Advisory warnings remaining**: the list of truly-advisory warnings, with a one-line explanation per entry of why they are safe to leave. This lets the user audit the judgment.
 5. **Next steps**: if clean → "ready to publish, run `scripts/publish.py`"; if blocked → "these findings need human decisions: …"; if escalated → "loop stopped at iteration 5 with unchanged findings — need human review of …".
+6. **For canonical-pipeline migration runs only** (`/cpv-upgrade-plugin`): the Unicode-bordered table from `run_all_checks` (the 82-check matrix from `references/canonical-pipeline-migration-checklist.md`) AND the `gh run` URL of the green CI run on the resulting tag (and on the marketplace tag if Layout C / Layout A registered). Without both, the migration is `[PARTIAL]`, NOT `[DONE]`. See `agents/plugin-fixer.md` § "Pre-completion verification (REQUIRED)" for the exact bash commands. Closes [issue #21 ask #1](https://github.com/Emasoft/claude-plugins-validation/issues/21).
+
+## Migration runs — extra steps after step 7
+
+When the agent was dispatched for a canonical-pipeline migration, the
+basic loop above is **necessary but not sufficient**. After the regular
+loop returns clean (step 7's mandatory final re-validation passes), the
+agent MUST also run:
+
+- **Step 7c — Pre-completion verification matrix.** Source `run_all_checks`
+  from `references/canonical-pipeline-migration-checklist.md` and execute
+  it on the plugin root. Every BLOCKER and MAJOR check must pass. Output
+  is a Unicode-bordered Markdown table at
+  `$MAIN_ROOT/reports/canonical-pipeline-migration/<ts±tz>-run-all.md`. A
+  failed BLOCKER/MAJOR is equivalent to a CRITICAL/MAJOR in
+  `validate_plugin.py` — return `[PARTIAL]` (not `[DONE]`).
+- **Step 7d — Real publish + `gh run watch`.** Run
+  `uv run python scripts/publish.py --patch` then
+  `gh run watch <run-id> --exit-status` on the workflow run triggered by
+  the resulting tag push. Repeat for the marketplace tag if Layout A
+  (separate marketplace repo) or Layout C (single repo with both
+  manifests bumped atomically). If either run reports failure, return
+  `[PARTIAL]` with the failing job's `gh run view` URL.
+
+The migration agent never silently `--force-templates` when checks fail.
+Instead, surface the per-CHECK failure list to the user and ask them to
+choose: (a) fix manually, (b) re-run with `--force-templates` (with
+explicit warning that hand-tuned customisations to canonical files will be
+overwritten), or (c) abort. See `agents/plugin-fixer.md`'s "Pre-completion
+verification (REQUIRED)" section for the full decision matrix.

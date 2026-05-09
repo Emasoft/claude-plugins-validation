@@ -309,3 +309,88 @@ def test_owner_of_ssh_url_style():
 
 def test_owner_of_non_github():
     assert cvg._owner_of("https://gitlab.com/x/y.git") is None
+
+
+# ── validate_strip_gitmodules: fail-closed on import failure (TRDD-793ac32a) ──
+
+
+def test_validate_strip_gitmodules_fails_closed_when_helper_missing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """When ``cpv_validate_gitmodules`` cannot be imported (helper missing,
+    shadowed, or shipped from a stripped CPV release), the orchestrator
+    MUST emit a CRITICAL with code RC-STRIP-GITMODULES-IMPORT-FAILED —
+    NEVER degrade to a soft warning.
+
+    Rationale: the .gitmodules URL allowlist is a CRITICAL-tier security
+    check (TRDD-793ac32a §2.2). A missing security validator is itself a
+    security failure — silently passing the plugin would turn the
+    validator into a fail-open path that an attacker can exploit by
+    deleting / shadowing the helper module on disk before invoking CPV.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    from cpv_validation_common import ValidationReport
+    import validate_plugin
+
+    plugin = _make_plugin(
+        tmp_path,
+        gitmodules_text="""\
+[submodule "tests"]
+\tpath = dev/tests
+\turl = https://github.com/Emasoft/cpv-tests.git
+""",
+    )
+
+    # Force the import inside validate_strip_gitmodules to fail. The function
+    # does the import lazily inside its try/except, so we shadow the module
+    # in sys.modules with None to make the next ``from cpv_validate_gitmodules
+    # import validate_gitmodules`` raise ImportError. This is the canonical
+    # way to simulate "helper not installed" without removing files on disk.
+    monkeypatch.setitem(sys.modules, "cpv_validate_gitmodules", None)
+
+    report = ValidationReport()
+    validate_plugin.validate_strip_gitmodules(plugin, report)
+
+    criticals = [r for r in report.results if r.level == "CRITICAL"]
+    assert criticals, (
+        "Missing helper MUST emit CRITICAL — got "
+        f"{[r.level for r in report.results]}"
+    )
+    msg = criticals[0].message
+    assert "RC-STRIP-GITMODULES-IMPORT-FAILED" in msg, (
+        f"CRITICAL must carry the RC code so the fixer agent can route it; got: {msg}"
+    )
+    assert "refusing to validate" in msg, (
+        "Message MUST state explicitly that CPV is refusing to validate, "
+        "so the user understands this is fail-closed (not a transient warning)."
+    )
+    # And no soft WARNING should be present — a hidden warning would defeat
+    # the fail-closed guarantee even if the CRITICAL is also emitted.
+    soft_warnings = [
+        r for r in report.results
+        if r.level == "WARNING" and "STRIP-GITMODULES" in r.message
+    ]
+    assert not soft_warnings, (
+        "fail-CLOSED means CRITICAL only — any WARNING would silently pass "
+        "in non-strict mode and defeat the whole point. Got: "
+        f"{[w.message for w in soft_warnings]}"
+    )
+
+
+def test_validate_strip_gitmodules_noop_when_gitmodules_absent(tmp_path: Path) -> None:
+    """No ``.gitmodules`` file → no findings (the validator is a no-op,
+    not a fail-closed). Pin so a future import-tightening regression
+    can't accidentally make every plugin emit CRITICAL.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    from cpv_validation_common import ValidationReport
+    import validate_plugin
+
+    plugin = _make_plugin(tmp_path)  # no gitmodules_text → no .gitmodules
+    report = ValidationReport()
+    validate_plugin.validate_strip_gitmodules(plugin, report)
+
+    assert not report.results, (
+        "validate_strip_gitmodules must be silent when .gitmodules is absent. "
+        f"Got: {report.results}"
+    )

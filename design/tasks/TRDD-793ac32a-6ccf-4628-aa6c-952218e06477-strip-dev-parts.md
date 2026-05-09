@@ -3,7 +3,7 @@
 **TRDD ID:** `793ac32a-6ccf-4628-aa6c-952218e06477`
 **Filename:** `design/tasks/TRDD-793ac32a-6ccf-4628-aa6c-952218e06477-strip-dev-parts.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
-**Status:** Not started — design only, defer implementation
+**Status:** Sprint 1 + Sprint 2 publish-gate done — engine (cpv_strip_dev.py 914 LoC), validator (cpv_validate_gitmodules.py 425 LoC, indirectly enforced via validate_plugin.py + pre-push), generator --strip-dev flag, agent menu, skill pointer, 3 test files, AND `_ensure_submodules_pushed` at scripts/publish.py:1582 (wired into stage_commit_tag_push:1849, 11/11 tests passing). Only outstanding piece: CPV self-application (extract own tests/, design/, git-hooks/ to dedicated submodule repos). Cache install size already < 12 MB by other means (8.5–9.3 MB), so self-application is now dogfooding rather than size-savings — recommend deferring indefinitely.
 **Author:** Emasoft
 **Created:** 2026-05-02
 
@@ -329,3 +329,83 @@ functionality of any existing plugin.
   see filename `TRDD-bbff5bc5-...-publish-auth-standard.md`)
 - PSS source: `<dev-root>/PERFECT_SKILL_SUGGESTER/perfect-skill-suggester/`
 - PSS .gitmodules pattern: `[submodule "rust"] path = rust  url = https://github.com/Emasoft/pss-rust-engine.git`
+
+---
+
+## Verification (audited @ v2.73.0 on 2026-05-09)
+
+Status flipped from "Not started" to "Sprint 1 done; Sprint 2
+outstanding" based on the on-disk audit at
+`reports/trdd-status/20260509_180945+0200-trdd-793ac32a-status.md`.
+Citations:
+
+**Sprint 1 — DONE (engine, validator, generator, agent, indirect
+pre-push wiring):**
+
+- Engine + CLI: `scripts/cpv_strip_dev.py` (914 LoC — ~50% larger than
+  the planned ~600 LoC budget; engine and slash-command implementation
+  both present)
+- URL-allowlist validator: `scripts/cpv_validate_gitmodules.py`
+  (425 LoC — exports `validate_gitmodules()`; well above the 250 LoC
+  budget thanks to defence-in-depth checks)
+- Slash command: `commands/cpv-strip-dev-parts.md` (146 LoC)
+- Tests:
+  - `tests/test_cpv_strip_dev_unit.py` (428 LoC) — engine unit tests
+  - `tests/test_cpv_validate_gitmodules.py` (311 LoC) — URL allowlist
+  - `tests/test_cpv_strip_dev_e2e.py` (216 LoC) — opt-in via
+    `CPV_E2E_GH=1`
+- Reference doc (bonus, not in plan):
+  `skills/create-plugin/references/dev-stripping.md`
+- Cached strip-block reader: `cpv_validation_common.py:1132-1150`
+  (`_load_strip_block_cached()`, added after L1075 as planned)
+- Validator wiring in `scripts/validate_plugin.py`:
+  - `validate_strip_gitmodules()` defined at L2936 (imports
+    `validate_gitmodules` from `cpv_validate_gitmodules` at L2969)
+  - Called at L4643 from the main validation loop
+  - Companion `validate_submodule_containment()` at L4125, called L4656
+  - Both reference TRDD-793ac32a in comments
+- Generator wiring in `scripts/generate_plugin_repo.py`:
+  - `PluginParams.strip_dev: bool = True` at L315 (default-ON)
+  - `--strip-dev` / `--no-strip-dev` argparse flags at L3209/3218
+  - Writes `cpv.strip` block when on at L444-447
+  - Wired into entry-point at L3300
+- Agent menu: `agents/plugin-creator.md` §"Dev-stripping
+  (TRDD-793ac32a — Sprint 2)" at L447 with Unicode-table menu
+  (1=Standard / 2=Legacy / 0=Cancel)
+- Skill pointer: `skills/create-plugin/SKILL.md:107` — one-liner
+  pointer to `references/dev-stripping.md` (acceptable since the
+  agent already carries the inline menu)
+- Pre-push gate enforcement: indirect — `git-hooks/pre-push:408`
+  calls `validate_plugin.py`, which calls `validate_strip_gitmodules`
+  at L4643, which calls `cpv_validate_gitmodules.validate_gitmodules`.
+  URL allowlist therefore IS enforced on every push.
+
+**Sprint 2 — OUTSTANDING:**
+
+- `scripts/publish.py::_ensure_submodule_pushed` loop is **completely
+  missing** (no `_ensure_submodule_pushed`, no `_ensure_submodule`, no
+  `submodule` references at all in publish.py). Without it, a plugin
+  that ran `cpv strip-dev-parts` and then `publish.py` would push the
+  parent without verifying submodule SHAs reachable on origin —
+  exactly the failure mode the TRDD calls out.
+- CPV self-application: `.gitmodules` ABSENT at plugin root;
+  `tests/` (13 MB), `design/` (240 KB), and `git-hooks/` (28 KB)
+  are still committed as full directories; `plugin.json::cpv.strip`
+  block is ABSENT (only `cpv.allow_root_dirs` exists).
+- Missing fixture: `tests/fixtures/sample-plugin-with-tests/` is not
+  present — tests currently build fixtures inline via `tmp_path`.
+
+**Cache install size:**
+
+- Per-version installs are already 8.5–9.3 MB (under the 12 MB target)
+  via independent slim-down work (`.cpvignore` / release-archive
+  filtering), NOT via the strip-dev submodule mechanic. Self-application
+  is now a dogfooding signal rather than a size-savings driver.
+
+**Security observation worth following up:**
+
+- `validate_strip_gitmodules` degrades **silently** when
+  `cpv_validate_gitmodules.py` is not importable
+  (`validate_plugin.py:2973` raises a soft warning instead of erroring).
+  For a CRITICAL-tier security check this should fail-closed — see
+  task #161 in the task list.

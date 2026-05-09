@@ -3,7 +3,7 @@
 **TRDD ID:** `bbff5bc5-d52f-4318-85c1-d6d37f629d85`
 **Filename:** `design/tasks/TRDD-bbff5bc5-d52f-4318-85c1-d6d37f629d85-publish-auth-standard.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
-**Status:** Not started — design only, defer implementation
+**Status:** Done in v2.51.0 — Parts A (filename renames + dual-write + dual env-var) and B (_ensure_gh_auth helper) shipped; Part C (schema v1 → v2 migration) deliberately deferred to a future schema-v2 TRDD per §C of this spec
 **Author:** Emasoft
 **Created:** 2026-05-02
 
@@ -312,3 +312,67 @@ on stdin. Every secret is sourced from `gh auth` or `userConfig`.
   - `scripts/cpv_integrity.py`
   - `scripts/compute_cpv_self_hashes.py`
   - `.cpv-self-hashes.json`
+
+---
+
+## Verification (audited @ v2.73.0 on 2026-05-09)
+
+Status flipped from "Not started" to "Done (Parts A+B); Part C deferred"
+based on the on-disk audit at
+`reports/trdd-status/20260509_181028+0200-trdd-bbff5bc5-status.md`.
+Citations:
+
+**Part A — file renames (DONE):**
+- New canonical compute script: `scripts/_plugin_compute_hashes.py`
+  (9566 bytes, 248 LOC — real implementation; writes BOTH manifest
+  filenames atomically per §6.1 row A5 — see `write_manifest()` at
+  `_plugin_compute_hashes.py:210-224`)
+- New canonical verify script: `scripts/_plugin_verify_hashes.py`
+  (19482 bytes — real implementation; reads
+  `PLUGIN_SKIP_GITHUB_INTEGRITY` first, falls back to
+  `CPV_SKIP_GITHUB_INTEGRITY` with a stderr deprecation note at
+  `_plugin_verify_hashes.py:236-249`)
+- Legacy compute shim: `scripts/compute_cpv_self_hashes.py`
+  (1928 bytes — DeprecationWarning + re-exports, removed-in-v2.53.0)
+- Legacy verify shim: `scripts/cpv_integrity.py`
+  (1674 bytes — DeprecationWarning + re-exports, removed-in-v2.53.0)
+- Both manifests at root, identical content, identical mtime:
+  `.plugin-self-hashes.json` (canonical) and `.cpv-self-hashes.json`
+  (1-release legacy alias)
+- All validators import the new name: `validate_skill.py:758`,
+  `validate_plugin.py:4437`, `validate_marketplace.py:3063`,
+  `validate_security.py:1214,9084`. Zero remaining
+  `from cpv_integrity import …` references in production code.
+
+**Part B — `_ensure_gh_auth(owner, repo)` helper (DONE):**
+- Definition: `scripts/publish.py:91-218`
+- Failure modes 1–4 + network timeout + SSH-only diagnostic all covered
+- PAT non-leakage explicitly asserted (TRDD §2.8 R6): docstring at
+  `publish.py:103-108` documents that `gh auth token` is NEVER invoked
+- Wire-up Gate 12 (commit/tag push):
+  `scripts/publish.py:1685` (in `stage_commit_tag_push` defined at
+  `publish.py:1582`) — comment at lines 1682-1683 references
+  TRDD-bbff5bc5
+- Wire-up Gate 13 (GitHub release):
+  `scripts/publish.py:1730` (in `stage_github_release` defined at
+  `publish.py:1709`) — comment at lines 1725-1728 explains why both
+  gates need it
+- Escape hatch: `CPV_SKIP_GH_AUTH_CHECK=1` at `publish.py:128-131`
+
+**Tests (DONE):**
+- `tests/test_plugin_verify_hashes.py` — 258 LOC, 12 test functions;
+  covers env-var fallback, deprecation note, dual-name precedence
+- `tests/test_legacy_integrity_fallback.py` — 110 LOC, 5 test
+  functions; covers 1-release-only `.cpv-self-hashes.json` fallback
+- `tests/test_publish.py:805-899` — `_ensure_gh_auth` tests:
+  happy path + 4 failure modes + explicit PAT non-leakage assertion
+  at lines 894-899 ("gh auth token NEVER invoked")
+
+**Part C — schema v2 migration (DEFERRED, intentionally):**
+- `.plugin-self-hashes.json` is still **v1 schema**:
+  `{"version": 1, "computed_at": …, "purpose": …, "files": {…}}` —
+  no `format_version: 2`, no `plugin`/`git`/`submodules`/
+  `manifest_metadata` blocks, no `hashed_files` rename. This matches
+  the original §C plan ("Part C deferred to a future schema-v2 TRDD").
+  Future schema-v2 work should land as a NEW TRDD
+  (`plugin-self-hashes-v2-schema`), not by reopening this one.

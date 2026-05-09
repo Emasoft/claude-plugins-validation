@@ -1579,6 +1579,161 @@ def _remote_tag_exists(plugin_root: Path, tag_name: str) -> bool:
     return result.returncode == 0 and bool(result.stdout.strip())
 
 
+def _ensure_submodules_pushed(plugin_root: Path) -> None:
+    """Verify every submodule's currently-checked-out SHA is reachable on its
+    origin remote BEFORE the parent's `git push` happens.
+
+    TRDD-793ac32a Sprint 2 — closes the "most expensive way to break a
+    plugin install" gap: a parent push that points at a submodule SHA which
+    only exists locally produces a remote tree that anyone cloning will
+    fail at submodule init (the SHA in the parent's gitlink doesn't exist
+    on the submodule's origin, so `git submodule update --init` errors out
+    with "fatal: reference is not a tree").
+
+    Why this gate runs BEFORE the parent push:
+      - Once the parent push lands, the broken state is public — fixing it
+        requires either a force-push (rewrites history for everyone) or a
+        new commit pointing at a different submodule SHA. Neither is free.
+      - The check itself is cheap: one `git submodule status` to enumerate
+        + one `git -C <path> branch -r --contains <sha>` per submodule. No
+        network round-trip required because submodules already have their
+        remote refs locally (the `branch -r` query reads
+        `<submodule>/.git/refs/remotes/origin/`).
+
+    Behaviour:
+      - No `.gitmodules` at plugin root → no-op (return cleanly).
+      - `.gitmodules` exists but `git submodule status` returns no entries
+        (e.g. file is empty or all entries deinit'd) → no-op.
+      - Every submodule SHA is reachable on origin (`branch -r --contains`
+        returns at least one ref) → return cleanly.
+      - One or more submodule SHAs are NOT reachable on origin → exit 1
+        with an actionable message naming the offending path AND the
+        exact `git push origin HEAD` command to run inside it. The
+        message lists ALL unreachable submodules in one shot so a
+        maintainer with N broken submodules doesn't have to re-run the
+        publish gate N times.
+
+    Style: matches `_ensure_gh_auth` — capture_output=True, text=True,
+    timeout=60, fatal failures use `sys.exit(1)` with stderr message.
+    """
+    gitmodules = plugin_root / ".gitmodules"
+    if not gitmodules.is_file():
+        # No submodules registered. Nothing to verify.
+        return
+
+    # Enumerate submodule (path, currently-checked-out SHA) pairs from the
+    # parent's index. `git submodule status` output format is one line per
+    # submodule:
+    #   ` <sha> <path> (<describe>)`     — initialized, in sync
+    #   `+<sha> <path> (<describe>)`     — initialized, head differs from index
+    #   `-<sha> <path>`                  — not initialized
+    #   `U<sha> <path>`                  — merge conflict
+    # The first character is the status marker; columns 2..41 are the SHA.
+    # We accept ANY status (including '-' deinit) because the gitlink in
+    # the parent's index still points at <sha>, and that's what consumers
+    # will see post-push.
+    try:
+        status_result = subprocess.run(
+            ["git", "submodule", "status"],
+            cwd=str(plugin_root),
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        print(
+            f"\n{RED}✗ `git submodule status` timed out after 60 s.{NC}\n"
+            f"{YELLOW}  Cannot verify submodule SHAs are reachable on origin.{NC}\n"
+            f"{YELLOW}  Retry, or run manually: git -C <plugin_root> submodule status{NC}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if status_result.returncode != 0:
+        # Hard failure (corrupt .gitmodules, not-a-git-repo, etc.). Don't
+        # silently let publish proceed — the user has a broken setup that
+        # would also break submodule consumers.
+        print(
+            f"\n{RED}✗ `git submodule status` failed (exit {status_result.returncode}).{NC}\n"
+            f"{YELLOW}  stderr: {status_result.stderr.strip()}{NC}\n"
+            f"{YELLOW}  Fix the submodule configuration before publishing.{NC}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    submodule_entries: list[tuple[str, str]] = []  # (path, sha)
+    for raw_line in status_result.stdout.splitlines():
+        if not raw_line.strip():
+            continue
+        # Drop the leading status marker (1 char), then take the first two
+        # whitespace-separated tokens: <sha> <path>.
+        line_body = raw_line[1:].strip()
+        parts = line_body.split()
+        if len(parts) < 2:
+            continue
+        sha, path = parts[0], parts[1]
+        submodule_entries.append((path, sha))
+
+    if not submodule_entries:
+        # `.gitmodules` exists but no live submodule entries — nothing to
+        # verify.
+        return
+
+    unreachable: list[tuple[str, str]] = []  # (path, sha)
+    for sub_path, sub_sha in submodule_entries:
+        sub_root = plugin_root / sub_path
+        if not (sub_root / ".git").exists():
+            # Submodule has never been initialized in this checkout. We
+            # cannot probe its origin without `git submodule update --init`,
+            # and triggering that here would be a side effect publish.py
+            # has no business performing. Treat as unreachable so the
+            # maintainer initializes it themselves.
+            unreachable.append((sub_path, sub_sha))
+            continue
+        try:
+            contains = subprocess.run(
+                ["git", "-C", str(sub_root), "branch", "-r", "--contains", sub_sha],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            # Conservative: a timeout means we can't confirm reachability,
+            # so we treat as unreachable to avoid pushing a broken parent.
+            unreachable.append((sub_path, sub_sha))
+            continue
+        # `branch -r --contains <sha>` exits 0 with non-empty stdout when
+        # at least one remote ref contains the SHA. Empty stdout (even on
+        # exit 0) means no remote ref reaches it → unreachable.
+        if contains.returncode != 0 or not contains.stdout.strip():
+            unreachable.append((sub_path, sub_sha))
+
+    if unreachable:
+        # Build one consolidated error block listing every offending
+        # submodule with its individual fix command. This way a maintainer
+        # with N broken submodules sees them all at once instead of
+        # re-running publish N times.
+        lines = [
+            "",
+            f"{RED}✗ Cannot push parent: one or more submodule SHAs are NOT reachable on their origin remote.{NC}",
+            f"{RED}  Pushing now would create a broken install — anyone cloning will fail at submodule init.{NC}",
+            "",
+        ]
+        for sub_path, sub_sha in unreachable:
+            short_sha = sub_sha[:8] if len(sub_sha) >= 8 else sub_sha
+            lines.append(
+                f"{RED}  • submodule '{sub_path}' currently at SHA {short_sha} which is NOT reachable on origin remote.{NC}"
+            )
+            lines.append(
+                f"{YELLOW}    Run: cd {sub_path} && git push origin HEAD{NC}"
+            )
+        lines.append("")
+        lines.append(f"{YELLOW}  Then re-run publish.{NC}")
+        print("\n".join(lines), file=sys.stderr)
+        sys.exit(1)
+
+
 def stage_commit_tag_push(plugin_root: Path, tag_name: str) -> int:
     """Gates 10-12: commit, tag, push.
 
@@ -1683,6 +1838,15 @@ def stage_commit_tag_push(plugin_root: Path, tag_name: str) -> int:
     # the maintainer's gh CLI is missing/unauthed/lacks push perm.
     owner, repo = _resolve_owner_repo(plugin_root)
     _ensure_gh_auth(owner, repo)
+    # TRDD-793ac32a Sprint 2: submodule push gate — verify every submodule
+    # SHA referenced by the parent's index is reachable on its origin
+    # remote BEFORE we push the parent. Without this, a parent push that
+    # points at a local-only submodule SHA produces a broken install for
+    # everyone who clones with `--recurse-submodules`. Runs after the
+    # gh-auth precheck so we know auth is sane before doing any submodule
+    # probing; runs before the parent push so the broken state never
+    # becomes public.
+    _ensure_submodules_pushed(plugin_root)
     # Phase 1 (Sprint 3): both pushes wrapped in retry so a transient
     # github.com hiccup doesn't leave a half-published release (commit
     # local-only, tag local-only, or branch pushed without tag).
