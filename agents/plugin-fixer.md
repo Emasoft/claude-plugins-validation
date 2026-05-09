@@ -78,7 +78,7 @@ copy, a draft skill). Never delete without confirming.
 
 The cross-platform-Python migration in
 [pipeline-migration §3](../skills/fix-validation/references/pipeline-migration.md)
-> §0 — Detect canonical pipeline drift via RC-PIPELINE-DRIFT-001 · §1 — Fix dangling script references · §2 — Migrate to whole-repo lint via cpv_lint_engine · §3 — Cross-platform Python — bash to Python, os.path to pathlib · §4 — Make publish.py idempotent — interrupted-publish recovery · §5 — Sanitize every script-input parameter against injection
+> §0 — Detect canonical pipeline drift via RC-PIPELINE-DRIFT-001 · §0b — Remove legacy pipeline scripts via RC-LEGACY-PIPELINE-001 · §1 — Fix dangling script references · §2 — Migrate to whole-repo lint via cpv_lint_engine · §3 — Cross-platform Python — bash to Python, os.path to pathlib · §4 — Make publish.py idempotent — interrupted-publish recovery · §5 — Sanitize every script-input parameter against injection
 
 This migration converts bash hook commands and `.sh` scripts to Python. This is the
 DEFAULT for the canonical pipeline files (publish.py, pre-push hook,

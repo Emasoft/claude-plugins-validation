@@ -3590,6 +3590,143 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
         )
 
 
+# Legacy pipeline scripts that older `generate_plugin_repo` versions emitted
+# but that publish.py now subsumes. Plugins upgraded to the canonical pipeline
+# should NOT keep these around — invoking them bypasses the 14 publish gates
+# (security scans, gh-auth precheck, integrity manifest, idempotency, etc.).
+#
+# Each entry: (relative-path, replaced-by, why-it's-legacy).
+# Severity emitted by `validate_legacy_pipeline_scripts`: MINOR — informational,
+# does not block publish; the fixer agent moves these to scripts_dev/ on the
+# `/cpv-upgrade-plugin` path.
+_LEGACY_PIPELINE_SCRIPTS: tuple[tuple[str, str, str], ...] = (
+    (
+        "scripts/bump_version.py",
+        "scripts/publish.py --patch / --minor / --major",
+        "publish.py owns version bumping — Gate 7 reads the remote tag and "
+        "calls bump_semver() idempotently",
+    ),
+    (
+        "scripts/release.sh",
+        "scripts/publish.py",
+        "publish.py is the canonical 14-gate release pipeline; .sh blocks "
+        "Windows users",
+    ),
+    (
+        "scripts/release.py",
+        "scripts/publish.py",
+        "publish.py is the canonical 14-gate release pipeline",
+    ),
+    (
+        "scripts/publish.sh",
+        "scripts/publish.py",
+        "publish.py replaces publish.sh; .sh blocks Windows users",
+    ),
+    (
+        "scripts/lint.sh",
+        ".github/workflows/ci.yml + publish.py Gate 4 (lint)",
+        "linting runs in CI on every push and inside publish.py Gate 4 — "
+        "lint.sh is a pre-CPV-pipeline artefact",
+    ),
+    (
+        "scripts/setup-hooks.sh",
+        "scripts/setup-hooks.py",
+        "setup-hooks.py is cross-platform Python; .sh blocks Windows users",
+    ),
+    (
+        "scripts/compute_hashes.py",
+        "scripts/publish.py Gate 8 (integrity manifest)",
+        "publish.py Gate 8 generates and signs the integrity manifest; "
+        "third-party plugins should NOT ship a hash computer",
+    ),
+    (
+        "scripts/verify_hashes.py",
+        "scripts/publish.py Gate 8 verification",
+        "publish.py verifies hashes during the release; downstream verifiers "
+        "live in CPV's _plugin_verify_hashes.py",
+    ),
+    (
+        "scripts/changelog.py",
+        "scripts/publish.py Gate 9 (git-cliff)",
+        "publish.py Gate 9 invokes git-cliff with the cliff.toml emitted by "
+        "the canonical pipeline",
+    ),
+    (
+        "scripts/generate_changelog.py",
+        "scripts/publish.py Gate 9",
+        "publish.py Gate 9 generates CHANGELOG.md",
+    ),
+    (
+        "scripts/check_version.py",
+        "scripts/publish.py Gate 7",
+        "publish.py Gate 7 validates version consistency across plugin.json, "
+        "marketplace.json, pyproject.toml, etc.",
+    ),
+    (
+        "scripts/install.sh",
+        "Documentation in README + claude plugin install",
+        "users install via `claude plugin install` — install.sh is a "
+        "pre-pipeline artefact",
+    ),
+)
+
+
+def validate_legacy_pipeline_scripts(
+    plugin_root: Path, report: ValidationReport
+) -> None:
+    """Emit a MINOR finding for every known-legacy pipeline script that
+    survives in the plugin's `scripts/` folder.
+
+    Older versions of `generate_plugin_repo.py` shipped helpers
+    (bump_version.py, release.sh, lint.sh, etc.) that have since been
+    subsumed by publish.py's 14-gate pipeline. Plugins migrated via
+    `/cpv-upgrade-plugin` MUST have these removed — leaving them around
+    invites users to invoke the legacy entry-point and skip the canonical
+    gates (security scans, gh-auth precheck, integrity manifest,
+    idempotent commit/tag/push, etc.).
+
+    Severity is MINOR (not MAJOR) so the finding is informational and
+    does not block publishing — the fixer's `--upgrade` flow moves the
+    files to `scripts_dev/` (preservation guardrail) instead of deleting
+    them, then the user can decide whether to delete after verifying.
+
+    Skipped on CPV self-scan (CPV is the canonical source — the listed
+    files don't exist at CPV root anyway, but the early-return keeps the
+    rule cheap on every CPV-self lint pass).
+    """
+    # Skip CPV self-scan.
+    try:
+        from validate_security import is_cpv_self_scan
+
+        if is_cpv_self_scan(plugin_root):
+            return
+    except Exception:
+        plugin_json = plugin_root / ".claude-plugin" / "plugin.json"
+        if plugin_json.is_file():
+            try:
+                manifest_data = json.loads(plugin_json.read_text(encoding="utf-8"))
+                if (
+                    isinstance(manifest_data, dict)
+                    and manifest_data.get("name") == "claude-plugins-validation"
+                ):
+                    return
+            except Exception:
+                pass
+
+    for rel_path, replaced_by, reason in _LEGACY_PIPELINE_SCRIPTS:
+        target = plugin_root / rel_path
+        if not target.is_file():
+            continue
+        report.minor(
+            f"[RC-LEGACY-PIPELINE-001] Legacy pipeline script `{rel_path}` is "
+            f"obsoleted by `{replaced_by}` — {reason}. The fixer can move it "
+            f"to scripts_dev/ via `/cpv-upgrade-plugin` (preservation guardrail: "
+            f"the legacy file is moved, not deleted, so the user can review "
+            f"before final removal).",
+            rel_path,
+        )
+
+
 def validate_workflow_best_practices(plugin_root: Path, report: ValidationReport) -> None:
     """Check GitHub workflow files for common anti-patterns."""
     workflows_dir = plugin_root / ".github" / "workflows"
@@ -4204,6 +4341,7 @@ def main() -> int:
     validate_pipeline_readiness(plugin_root, report)
     validate_pipeline_script_refs(plugin_root, report)
     validate_canonical_pipeline_drift(plugin_root, report)
+    validate_legacy_pipeline_scripts(plugin_root, report)
     validate_workflow_best_practices(plugin_root, report)
     # Submodule + language + lockfile detection (TRDD-79638eb6)
     validate_submodule_containment(plugin_root, report)

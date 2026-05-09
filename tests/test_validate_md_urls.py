@@ -236,8 +236,13 @@ class TestValidateMdUrlsRetry:
         assert _warnings(report) == []
 
     def test_persistent_timeout_respects_max_retries(self, tmp_path: Path):
-        """max_retries=1 → exactly 2 attempts; WARNING surfaces exception type."""
-        md = _make_md(tmp_path)
+        """max_retries=1 → exactly 2 attempts on a non-bonus host.
+
+        Uses example.org (no per-host retry bonus) so the test exercises
+        the bare `max_retries` cap, not the github.com `_HOST_TRANSIENT_RETRY_BONUS`
+        path. WARNING surfaces the exception type.
+        """
+        md = _make_md(tmp_path, url="https://docs.astral.sh/uv/")
         counter = {"n": 0}
 
         def fake_urlopen(req, **kw):
@@ -250,6 +255,24 @@ class TestValidateMdUrlsRetry:
         assert counter["n"] == 2  # 1 initial + 1 retry
         warns = _warnings(report)
         assert any("timeout" in w.lower() for w in warns)
+
+    def test_github_com_gets_extra_retry_bonus(self, tmp_path: Path):
+        """github.com URLs receive +2 bonus retries vs the bare max_retries
+        param — mirrors the github-timeouts rule's "be patient with GitHub
+        transient failures" semantics. Default max_retries=2 + 2 bonus + 1
+        initial = 5 attempts before giving up."""
+        md = _make_md(tmp_path)  # default URL is on github.com
+        counter = {"n": 0}
+
+        def fake_urlopen(req, **kw):
+            counter["n"] += 1
+            raise socket.timeout("persistent")
+
+        report = ValidationReport()
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            validate_md_urls(md, tmp_path, report, timeout=1.0, url_cache={}, retry_backoff=0.01, max_retries=2)
+        # 1 initial + 2 bare retries + 2 github bonus retries = 5
+        assert counter["n"] == 5, f"expected 5 attempts on github.com, got {counter['n']}"
 
 
 class TestValidateMdUrlsPermanentFailures:
@@ -540,3 +563,51 @@ class TestValidateMdUrlsCacheAndSkips:
             validate_md_urls(md, tmp_path, report, timeout=1.0, url_cache={}, retry_backoff=0.01)
         assert all("in-code-block" not in u for u in seen_urls)
         assert any("real-link" in u for u in seen_urls)
+
+    def test_bare_host_url_is_skipped(self, tmp_path: Path):
+        """Bare-host URLs like https://github.com/ (path is "/") are
+        parser artefacts or homepage references — meaningless to probe.
+        Skipping prevents false-positive WARNINGs from rate-limited HEADs."""
+        md = tmp_path / "README.md"
+        md.write_text(
+            "Visit https://github.com/ to browse,\n"
+            "or check https://gitlab.com for the GitLab equivalent.\n"
+        )
+        counter = {"n": 0}
+
+        def fake_urlopen(req, **kw):
+            counter["n"] += 1
+            return _FakeResponse(200)
+
+        report = ValidationReport()
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            validate_md_urls(md, tmp_path, report, timeout=1.0, url_cache={}, retry_backoff=0.01)
+        # Both URLs have empty/`/` path → skipped → no network call.
+        assert counter["n"] == 0
+        assert _warnings(report) == []
+
+    def test_backtick_wrapped_url_extracts_cleanly(self, tmp_path: Path):
+        """An inline-code URL must capture WITHOUT trailing backtick + punctuation.
+
+        Before the backtick stop-char fix the extractor produced
+        "https://github.com/`," → stripped to bare "https://github.com/"
+        → false-positive WARNING. Now it stops at the backtick and the
+        full path-segment is preserved.
+
+        Uses /Emasoft/cpv-real to bypass the generic-placeholder skip
+        (which catches /owner/, /user/, etc.).
+        """
+        md = tmp_path / "README.md"
+        md.write_text("Do not include `https://github.com/Emasoft/cpv-real`, treat it as text.\n")
+        seen_urls: list[str] = []
+
+        def fake_urlopen(req, **kw):
+            seen_urls.append(req.full_url)
+            return _FakeResponse(200)
+
+        report = ValidationReport()
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            validate_md_urls(md, tmp_path, report, timeout=1.0, url_cache={}, retry_backoff=0.01)
+        assert seen_urls == ["https://github.com/Emasoft/cpv-real"], (
+            f"unexpected URL captures: {seen_urls}"
+        )

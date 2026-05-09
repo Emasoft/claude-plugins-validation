@@ -6508,6 +6508,38 @@ _STRICT_HOST_CONCURRENCY: dict[str, int] = {
 #  Still prevents a single upstream from seeing 16 parallel HEADs.
 _DEFAULT_PER_HOST_CONCURRENCY: int = 4
 
+#: Per-host transient-error retry budget. github.com sometimes returns
+#  socket timeouts under burst load even when the URL is healthy; bumping
+#  the retry budget for github-family hosts mirrors the spirit of the
+#  github-timeouts rule (be patient with transient failures) without
+#  bloating the runtime of `--strict` scans of arbitrary external URLs.
+#
+#  Counts are EXTRA attempts beyond the function's `max_retries` param —
+#  so an entry of 2 means github.com gets +2 attempts compared to the
+#  default. Total cap: max_retries + extra + 1 attempts.
+_HOST_TRANSIENT_RETRY_BONUS: dict[str, int] = {
+    "github.com": 2,
+    "www.github.com": 2,
+    "api.github.com": 2,
+    "raw.githubusercontent.com": 2,
+    "gist.github.com": 2,
+    "codeload.github.com": 2,
+    "objects.githubusercontent.com": 2,
+}
+
+#: Per-host linear-backoff multiplier (seconds added per retry attempt) —
+#  longer than the default 0.4 so github.com doesn't get hammered while
+#  it's actively rate-limiting us.
+_HOST_RETRY_BACKOFF: dict[str, float] = {
+    "github.com": 1.5,
+    "www.github.com": 1.5,
+    "api.github.com": 1.5,
+    "raw.githubusercontent.com": 1.5,
+    "gist.github.com": 1.5,
+    "codeload.github.com": 1.5,
+    "objects.githubusercontent.com": 1.5,
+}
+
 
 def _is_transient_url_error(exc: BaseException | None) -> bool:
     """True if `exc` is a network error that may clear up on retry.
@@ -6670,8 +6702,16 @@ def validate_md_urls(
     # Strip fenced code blocks — URLs in code examples shouldn't be validated
     content_no_codeblocks = re.sub(r"```[\s\S]*?```", "", content)
 
-    # Extract URLs from markdown links AND bare URLs
-    url_re = re.compile(r"https?://[^\s\)\]\"'<>]+")
+    # Extract URLs from markdown links AND bare URLs.
+    # NOTE: backtick (`) is in the stop-set so URLs wrapped in inline code
+    # like `` `https://example.com/path` `` capture cleanly without dragging
+    # the closing backtick + adjacent punctuation into the match. Without
+    # this, the input "Do not include `https://github.com/`," produced a
+    # URL of "https://github.com/`," which the trailing-punctuation strip
+    # reduced to bare "https://github.com/" — a meaningless homepage probe
+    # that occasionally rate-limits and surfaced as a false-positive
+    # "Dead URL" WARNING (issue: dead-URL false-positives, 2026-05-09).
+    url_re = re.compile(r"https?://[^\s\)\]\"'<>`]+")
 
     # Create SSL context once, outside the loop
     ctx = ssl.create_default_context()
@@ -6714,6 +6754,15 @@ def validate_md_urls(
             parsed = urlparse(raw_url)
             host = parsed.hostname or ""
             if any(skip in host for skip in skip_domains):
+                continue
+            # Skip bare-host URLs (path empty or "/" — i.e. just the
+            # homepage). These are usually parser artefacts ("see github.com")
+            # not real link checks, AND popular hosts (github.com, gitlab.com)
+            # rate-limit homepage HEADs aggressively, producing false-positive
+            # "Dead URL: https://github.com/" WARNINGs in CPV's own self-scan
+            # that confuse newcomers. A genuine link to a homepage will still
+            # resolve at scaffold time when a writer expands a placeholder.
+            if parsed.path in ("", "/"):
                 continue
         except Exception:
             continue
@@ -6795,10 +6844,15 @@ def validate_md_urls(
     def _check_one(pair: tuple[str, str]) -> tuple[str, str, bool, str | None]:
         """Returns (raw_url, safe_url, is_alive, warning_suffix_or_None).
 
-        Retry loop: up to `max_retries + 1` attempts total. First attempt uses
-        HEAD; subsequent attempts use GET (HEAD-drop-on-CDN fallback). Only
-        transient errors (_is_transient_url_error / _TRANSIENT_HTTP_CODES)
-        trigger retry — a confirmed 404 returns immediately.
+        Retry loop: up to `max_retries + bonus + 1` attempts total. First
+        attempt uses HEAD; subsequent attempts use GET (HEAD-drop-on-CDN
+        fallback). Only transient errors (_is_transient_url_error /
+        _TRANSIENT_HTTP_CODES) trigger retry — a confirmed 404 returns
+        immediately.
+
+        Per-host retry budget bumped via `_HOST_TRANSIENT_RETRY_BONUS` so
+        github.com (the host most likely to throttle anonymous HEADs)
+        gets extra patience without slowing scans of arbitrary URLs.
         """
         raw_url, safe_url = pair
         host = (urlparse(safe_url).hostname or "").lower()
@@ -6806,11 +6860,16 @@ def validate_md_urls(
 
         last_suffix = "unreachable"
 
-        for attempt in range(max_retries + 1):
+        # Per-host retry tuning (github-timeouts-rule semantics).
+        host_attempts = max_retries + _HOST_TRANSIENT_RETRY_BONUS.get(host, 0)
+        host_backoff = _HOST_RETRY_BACKOFF.get(host, retry_backoff)
+        backoff_cap = max(1.5, host_backoff * 4)
+
+        for attempt in range(host_attempts + 1):
             if attempt > 0:
-                # Linear backoff — conservative so we don't stretch `--strict`
-                # runtime on a site that stays dead.
-                time.sleep(min(1.5, retry_backoff * attempt))
+                # Linear backoff — capped so no single dead URL stretches
+                # `--strict` runtime past a sane upper bound.
+                time.sleep(min(backoff_cap, host_backoff * attempt))
 
             with sem:
                 # First attempt: HEAD (cheap). On retry, switch to GET
@@ -6831,7 +6890,7 @@ def validate_md_urls(
                     return (raw_url, safe_url, True, None)
                 # Error status. Retry if transient; otherwise it's dead.
                 last_suffix = f"HTTP {code}"
-                if code not in _TRANSIENT_HTTP_CODES or attempt >= max_retries:
+                if code not in _TRANSIENT_HTTP_CODES or attempt >= host_attempts:
                     return (raw_url, safe_url, False, last_suffix)
                 # Transient → fall through to retry.
                 continue
@@ -6839,7 +6898,7 @@ def validate_md_urls(
             # Network-level exception. Surface the type so users can tell
             # a DNS failure from a socket.timeout.
             last_suffix = f"unreachable: {_format_url_exception(exc)}"
-            if not _is_transient_url_error(exc) or attempt >= max_retries:
+            if not _is_transient_url_error(exc) or attempt >= host_attempts:
                 return (raw_url, safe_url, False, last_suffix)
             # Transient → fall through to retry.
 

@@ -82,6 +82,8 @@ Check the plugin against the current pipeline standards documented in
 
 | Check | How |
 |---|---|
+| §0 Canonical pipeline drift | run `validate_plugin.py --strict`; surface every `[RC-PIPELINE-DRIFT-001]` finding. Fix path: `/cpv-upgrade-plugin` (dispatches plugin-fixer with `--force-templates`). |
+| §0b Legacy pipeline scripts | run `validate_plugin.py --strict`; surface every `[RC-LEGACY-PIPELINE-001]` MINOR finding (bump_version.py, release.sh, lint.sh, compute_hashes.py, …). Fix path: same `/cpv-upgrade-plugin` flow auto-moves them to `scripts_dev/` (preservation guardrail — files MOVED, never deleted). |
 | §3a Bash scripts shipped | `find <root> -name "*.sh" -not -path "*/scripts_dev/*" -not -path "*/.git/*"` |
 | §3b Bash hook commands | parse `hooks/hooks.json` + agent/skill frontmatter `hooks:` and run `check_hook_command_cross_platform` (already part of validate_hook). |
 | §3c Non-pathlib Python | `grep -rnE "os\\.path\\.\|shell=True\|\"/tmp/\|os\\.system\|os\\.geteuid" <root>/scripts/ --include="*.py"` |
