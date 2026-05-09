@@ -5863,7 +5863,17 @@ def extract_toc_headings(md_content: str) -> list[str]:
 
 # Files exempt from the TOC requirement — these file types serve
 # structural roles and do not need a Table of Contents section.
-_TOC_EXEMPT_NAMES = {"SKILL.md", "CLAUDE.md"}
+_TOC_EXEMPT_NAMES = {
+    "SKILL.md",
+    "CLAUDE.md",
+    # Vendor-doc reference files fetched verbatim from code.claude.com.
+    # These are EMBEDDED canonical copies; we keep them byte-identical to
+    # the upstream so future doc updates produce clean diffs. CPV's TOC
+    # convention is not the upstream's — exempting these names lets us
+    # embed the official docs without reformatting them.
+    "plugins-reference.md",
+    "skills-reference.md",
+}
 _TOC_EXEMPT_DIRS = {"agents", "commands", "rules"}
 
 # Regex to detect list items (bulleted or numbered)

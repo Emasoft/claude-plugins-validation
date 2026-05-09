@@ -2357,8 +2357,17 @@ def validate_reference_files(skill_path: Path, report: ValidationReport) -> None
     # Short technique files (TECH-NN-*.md, 100-500 lines) work fine without
     # a TOC because every markdown viewer's outline panel already shows the
     # ## headings. Above 500 lines a TOC genuinely helps navigation.
+    #
+    # EXEMPT: vendor-doc reference files (e.g. plugins-reference.md,
+    # skills-reference.md fetched verbatim from code.claude.com). These are
+    # canonical embedded copies; we keep them byte-identical to the upstream
+    # so future doc updates produce clean diffs. Forcing CPV's TOC convention
+    # on them would mean editing them — exactly what we don't want.
+    VENDOR_DOC_NAMES = {"plugins-reference.md", "skills-reference.md"}
     TOC_MIN_LINES = 500
     for ref_file in refs_dir.glob("*.md"):
+        if ref_file.name in VENDOR_DOC_NAMES:
+            continue
         try:
             content = ref_file.read_text(encoding="utf-8")
             line_count = content.count("\n") + 1

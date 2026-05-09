@@ -29,5 +29,13 @@
     "scaffolding",
     "templates",
     "standardization"
-  ]
+  ],
+  "cpv": {
+    "allow_root_dirs": [
+      "reviews",
+      "design",
+      "templates",
+      "git-hooks"
+    ]
+  }
 }

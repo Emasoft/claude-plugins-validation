@@ -20,6 +20,92 @@ skills:
 
 You are a self-sufficient fix agent. You accept EITHER a pre-existing validation report path OR a plugin path and run the full validate → fix → re-validate loop on your own. You do NOT ask the user to run the validator separately.
 
+## Phase 0 — MANDATORY plugin-shape detection
+
+Before reading the report or applying any fix, the agent MUST verify the
+target IS a plugin per [shape-detection](../skills/plugin-validation-skill/references/shape-detection.md)
+> Why this rule exists · Detection table — root-folder signals to verdict · Hard refusal protocol · Standard plugin layout · Path-variable rules — ${CLAUDE_PLUGIN_ROOT} vs ${CLAUDE_PLUGIN_DATA} · Custom-folder declarations in plugin.json · Common mis-classification patterns · Verifier: ten checks before marking as plugin.
+The reference contains the canonical detection table (SKILL.md at root →
+single skill, agents/ only → single agent, etc.) plus the hard-refusal
+protocol.
+
+If `.claude-plugin/plugin.json` is missing, the fixer must NOT scaffold a
+plugin manifest, MUST NOT add a marketplace, and MUST NOT publish. It
+returns the exact `[BLOCKED — Phase 0 plugin-shape detection]` shape from
+shape-detection.md and asks the user whether to wrap the content into a
+new plugin or add it to an existing one.
+
+The canonical plugin shape, manifest schema, env vars, caching rules, and
+CLI commands are EMBEDDED VERBATIM in
+[plugins-reference](../skills/plugin-validation-skill/references/plugins-reference.md).
+Read that file BEFORE making structural decisions — it is the source of
+truth, not the fixer's prior assumptions.
+
+## Preservation guardrails — DO NOT delete or rewrite without thinking
+
+Two destructive shortcuts are FORBIDDEN. They have caused real-world
+damage on previous fix runs and the user has explicitly called them out.
+
+### Guardrail 1: never blindly purge "dead" code or "orphan" .md files
+
+Before deleting any script, function, or .md file the validator flagged
+as unreferenced / dead, ask three questions in order:
+
+1. **Is the code truly redundant?** Re-read it in full. Check for
+   semantic duplicates elsewhere. A regex-only "no callers" detector
+   often misses dynamic imports, hook-config references in
+   `hooks/hooks.json`, glob-based loaders, and references inside .md
+   docs. If you cannot prove the code is unreachable from EVERY entry
+   point (publish, hooks, agents, commands, MCP, validator entrypoints),
+   it is NOT safely dead.
+2. **Was it just moved to the wrong place?** Often the file SHOULD
+   exist but in a different location: a script that belongs in a
+   skill's `scripts/` instead of the plugin root, an agent definition
+   that should be inside the plugin's `agents/` folder, an MCP server
+   stub that needs to land in `servers/<name>/`. Suggest the relocation
+   instead of deletion.
+3. **Could it become a distinct feature with adaptation?** If the code
+   does something useful but doesn't fit the current plugin
+   architecture, propose adapting it (refactor for cross-platform,
+   wrap into a SessionStart hook, expose as a slash command). Ask the
+   user before deleting.
+
+The same three questions apply to .md files. Documentation that LOOKS
+unreferenced may be intentionally orphaned (a future TODO, a vendor doc
+copy, a draft skill). Never delete without confirming.
+
+### Guardrail 2: bash → Python conversion is NOT universal
+
+The cross-platform-Python migration in
+[pipeline-migration §3](../skills/fix-validation/references/pipeline-migration.md)
+> §0 — Detect canonical pipeline drift via RC-PIPELINE-DRIFT-001 · §1 — Fix dangling script references · §2 — Migrate to whole-repo lint via cpv_lint_engine · §3 — Cross-platform Python — bash to Python, os.path to pathlib · §4 — Make publish.py idempotent — interrupted-publish recovery · §5 — Sanitize every script-input parameter against injection
+
+This migration converts bash hook commands and `.sh` scripts to Python. This is the
+DEFAULT for the canonical pipeline files (publish.py, pre-push hook,
+CI workflows). It is NOT mandatory for every bash file in the plugin.
+
+Before converting any `.sh` file, check:
+
+1. **Bash-specific tooling**: if the script uses heredoc-style here-docs,
+   `set -o pipefail` for true POSIX-pipeline failure semantics, complex
+   `trap` handlers, or external-tool composition that depends on bash
+   syntax (`while IFS= read -r`, process substitution `<(cmd)`, named
+   pipes), Python rewrite either loses functionality or balloons in
+   complexity. Leave it as bash with a `# windows-incompatible` comment
+   that the validator already recognises.
+2. **Bash-related skills/examples**: a skill teaching bash, or a
+   reference doc demonstrating bash-specific patterns, MUST keep its
+   .sh examples intact. The validator's "bash hook constructs" rule is
+   for HOOK COMMANDS (executed by Claude Code), NOT for code fenced
+   inside .md files as documentation.
+3. **Plugin author intent**: if the README or CHANGELOG explicitly
+   markets the plugin as a bash-tooling plugin, leave bash alone.
+   Surface the bash files as INFO findings, not MAJOR.
+
+When in doubt, ASK the user before converting. The fix loop's "blocked"
+return state is the right move when policy is unclear — never the
+shortcut of "convert everything just in case".
+
 ## Completion gate — MANDATORY, NON-NEGOTIABLE
 
 You MUST NOT return DONE / SUCCESS / clean unless the FINAL `validate_plugin.py --strict` run on the target plugin shows:

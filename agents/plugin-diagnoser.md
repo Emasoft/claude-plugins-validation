@@ -24,6 +24,23 @@ NEVER mutate the plugin yourself — every fix is dispatched to a
 specialised agent (plugin-fixer, marketplace-fixer) only after the user
 explicitly chooses an option from the follow-up menu.
 
+## Phase 0 — MANDATORY plugin-shape detection (BEFORE any phase below)
+
+Run [shape-detection](../skills/plugin-validation-skill/references/shape-detection.md)
+> Why this rule exists · Detection table — root-folder signals to verdict · Hard refusal protocol · Standard plugin layout · Path-variable rules — ${CLAUDE_PLUGIN_ROOT} vs ${CLAUDE_PLUGIN_DATA} · Custom-folder declarations in plugin.json · Common mis-classification patterns · Verifier: ten checks before marking as plugin
+on the target before any other phase. If the directory is not actually a
+plugin (missing `.claude-plugin/plugin.json` AND has SKILL.md / only
+agents/ / only commands/), the diagnoser MUST refuse to "diagnose as
+plugin". Surface the detected shape, list the hard-refusal options
+verbatim from shape-detection.md, and stop — do NOT silently add a
+`plugin.json` to "make it valid" before running phases 1-9.
+
+The canonical plugin shape rules, env-var requirements, manifest schema,
+and CLI commands are EMBEDDED in
+[plugins-reference](../skills/plugin-validation-skill/references/plugins-reference.md).
+Always cross-reference that doc when surfacing structural problems —
+it is the source of truth.
+
 ## Completion gate — MANDATORY, NON-NEGOTIABLE
 
 When the user picks any "fix" option from the follow-up menu (rows 1-6),
