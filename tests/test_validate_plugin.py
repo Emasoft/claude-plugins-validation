@@ -2279,7 +2279,14 @@ class TestV223CrossMarketplaceDeps:
         )
 
     def test_cross_marketplace_dep_without_allowlist_major(self, tmp_path):
-        """Cross-marketplace dep with NO allowlist declared → MAJOR."""
+        """Cross-marketplace dep with NO allowlist declared → MAJOR.
+
+        The error message names the canonical spec field
+        `allowCrossMarketplaceDependenciesOn` (plugin-dependencies.md:54-79).
+        Earlier CPV builds used the wrong field name `allowedDependencyMarketplaces`;
+        the validator now reads from the spec name first and only falls back
+        to the legacy name (with a NIT) for backward compat.
+        """
         manifest = {
             "name": "consumer",
             "version": "1.0.0",
@@ -2289,12 +2296,12 @@ class TestV223CrossMarketplaceDeps:
             ],
         }
         plugin_dir = _write_plugin(tmp_path, "xm-none", manifest)
-        hosting = {"name": "host-market"}  # no allowedDependencyMarketplaces
+        hosting = {"name": "host-market"}  # no allowCrossMarketplaceDependenciesOn
         report = ValidationReport()
         validate_manifest(plugin_dir, report, hosting_marketplace=hosting)
         majors = [
             r.message for r in report.results
-            if r.level == "MAJOR" and "allowedDependencyMarketplaces" in r.message
+            if r.level == "MAJOR" and "allowCrossMarketplaceDependenciesOn" in r.message
         ]
         assert majors, (
             "Expected MAJOR without allowlist; got MAJORs: "

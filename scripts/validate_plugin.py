@@ -171,13 +171,19 @@ def validate_dependencies(
     ``hosting_marketplace`` (TRDD-20108ab7, v2.22.3) is the parsed
     ``marketplace.json`` of the marketplace hosting the plugin under
     validation. When supplied, cross-marketplace dependency references are
-    checked against the marketplace's ``allowedDependencyMarketplaces``
-    allowlist. The dict MUST contain a ``name`` key identifying the hosting
+    checked against the marketplace's ``allowCrossMarketplaceDependenciesOn``
+    allowlist (per plugin-dependencies.md:54-79 — the canonical spec field
+    name). The dict MUST contain a ``name`` key identifying the hosting
     marketplace; the allowlist is read from
-    ``hosting_marketplace["allowedDependencyMarketplaces"]`` (optional,
+    ``hosting_marketplace["allowCrossMarketplaceDependenciesOn"]`` (optional,
     defaults to empty allowlist). Pass ``None`` to skip cross-marketplace
     allowlist checks (e.g. when validating a plugin in isolation without
     marketplace context) — in that case an INFO is emitted per cross-dep.
+
+    Backward-compat: an earlier CPV release used the non-spec name
+    ``allowedDependencyMarketplaces``. Plugins that still ship that key
+    are honoured as a fallback (with a NIT nudge to rename to the spec
+    field).
     """
     if "dependencies" not in manifest:
         return
@@ -195,7 +201,21 @@ def validate_dependencies(
         raw_name = hosting_marketplace.get("name")
         if isinstance(raw_name, str) and raw_name:
             hosting_name = raw_name
-        raw_allow = hosting_marketplace.get("allowedDependencyMarketplaces")
+        # Spec name (plugin-dependencies.md): allowCrossMarketplaceDependenciesOn.
+        # Fall back to the legacy name allowedDependencyMarketplaces only when
+        # the spec name is absent — emit a NIT so authors rename to the spec.
+        raw_allow = hosting_marketplace.get("allowCrossMarketplaceDependenciesOn")
+        if raw_allow is None:
+            raw_allow_legacy = hosting_marketplace.get("allowedDependencyMarketplaces")
+            if raw_allow_legacy is not None:
+                report.nit(
+                    "marketplace.json uses legacy 'allowedDependencyMarketplaces' — "
+                    "rename to the spec field 'allowCrossMarketplaceDependenciesOn' "
+                    "(plugin-dependencies.md:54-79). Both names are honoured but the "
+                    "legacy alias is removed in a future release.",
+                    ".claude-plugin/marketplace.json",
+                )
+                raw_allow = raw_allow_legacy
         if isinstance(raw_allow, list):
             # Keep only string items — bad items are the marketplace validator's job.
             hosting_allowlist = [x for x in raw_allow if isinstance(x, str) and x]
@@ -207,6 +227,29 @@ def validate_dependencies(
                     f"'dependencies[{i}]' bare-string name '{entry}' is not a valid kebab-case plugin name",
                     ".claude-plugin/plugin.json",
                 )
+            else:
+                # plugin-dependencies.md:9-11: "By default, a dependency tracks
+                # the latest available version, so an upstream release can
+                # change the dependency under your plugin without warning."
+                # An unversioned bare-string dep is therefore a soft-WARNING
+                # signal — install can break on the next upstream tag. Authors
+                # who explicitly want auto-tracking can suppress with
+                # `cpv: { allow_unversioned_dependencies: true }` in plugin.json.
+                cpv_block = manifest.get("cpv") if isinstance(manifest, dict) else None
+                allow_unversioned = (
+                    isinstance(cpv_block, dict)
+                    and bool(cpv_block.get("allow_unversioned_dependencies"))
+                )
+                if not allow_unversioned:
+                    report.warning(
+                        f"'dependencies[{i}]' = '{entry}' has no version constraint "
+                        f"— it auto-tracks the latest tag and the next upstream release "
+                        f"can break this plugin without warning. Pin a semver range: "
+                        f"{{'name': '{entry}', 'version': '~1.2.0'}} (plugin-dependencies.md:9-11). "
+                        f"Suppress with `cpv.allow_unversioned_dependencies: true` if "
+                        f"intentional.",
+                        ".claude-plugin/plugin.json",
+                    )
             continue
         if not isinstance(entry, dict):
             report.major(
@@ -263,9 +306,11 @@ def validate_dependencies(
                         allow_desc = sorted(hosting_allowlist) if hosting_allowlist is not None else "<none declared>"
                         report.major(
                             f"'dependencies[{i}].marketplace' = '{market}' is not in the hosting "
-                            f"marketplace's allowedDependencyMarketplaces allowlist "
-                            f"({allow_desc}) — cross-marketplace dependency is blocked "
-                            "(TRDD-20108ab7, plugin-dependencies.md)",
+                            f"marketplace's allowCrossMarketplaceDependenciesOn allowlist "
+                            f"({allow_desc}) — cross-marketplace dependency is blocked at install time "
+                            "with a 'cross-marketplace' error (plugin-dependencies.md:54-79). Add "
+                            f"'{market}' to the root marketplace.json's "
+                            "allowCrossMarketplaceDependenciesOn array OR remove the marketplace field.",
                             ".claude-plugin/plugin.json",
                         )
                     else:
