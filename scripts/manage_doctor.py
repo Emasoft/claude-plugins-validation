@@ -210,8 +210,17 @@ def _check_orphaned_settings(settings: dict, fix: bool = False, settings_path: P
 # ── Doctor command ───────────────────────────────────────────────────
 
 
-def do_doctor(verbose: bool = False, fix: bool = False):
-    """Check overall health of local plugin installation."""
+def do_doctor(verbose: bool = False, fix: bool = False, quick: bool = False):
+    """Check overall health of local plugin installation.
+
+    `quick=True` (added 2026-05-09 to back the cpv-doctor menu's choice 20)
+    SKIPS the per-plugin `_run_cpv_validation` call inside the marketplace-
+    iteration loop. Everything else still runs: CLI auth, settings
+    integrity, marketplace-registration cross-checks, orphaned-entry
+    detection, stale `settings.local.json` detection. The result is a
+    sub-second health snapshot instead of the multi-minute full sweep —
+    appropriate for "do I need to investigate further?" triage.
+    """
     print(f"{BOLD}Plugin installation health check{NC}")
     print()
 
@@ -533,8 +542,17 @@ def do_doctor(verbose: bool = False, fix: bool = False):
             meta = read_plugin_meta(plug_dir)
             plugin_key = f"{meta['name']}@{mp_name}"
 
-            # Use CPV's modular validator via shared helper from manage_plugin
-            v_errors, v_warnings, _valid = _run_cpv_validation(plug_dir, quiet=True)
+            # Quick mode (cpv-doctor menu option 20) skips the per-plugin
+            # validator call. The wholesale scan dominates wall-clock time
+            # on installs with 20+ plugins (3-8 minutes); for a "do I need
+            # to investigate?" triage we only need the listing + enable
+            # state + marketplace-declaration cross-check.
+            if quick:
+                v_errors: list[str] = []
+                v_warnings: list[str] = []
+            else:
+                # Use CPV's modular validator via shared helper from manage_plugin
+                v_errors, v_warnings, _valid = _run_cpv_validation(plug_dir, quiet=True)
 
             status_parts = []
             if v_errors:
@@ -542,7 +560,9 @@ def do_doctor(verbose: bool = False, fix: bool = False):
                 issues += len(v_errors)
             if v_warnings:
                 status_parts.append(f"{YELLOW}{len(v_warnings)} warning(s){NC}")
-            if not v_errors and not v_warnings:
+            if quick:
+                status_parts.append(f"{CYAN}validation skipped (quick){NC}")
+            elif not v_errors and not v_warnings:
                 status_parts.append(f"{GREEN}clean{NC}")
 
             # Check enabled status
@@ -873,6 +893,17 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed validation")
     parser.add_argument("--fix", action="store_true", help="Auto-fix orphaned entries in settings files")
     parser.add_argument(
+        "--quick",
+        action="store_true",
+        help=(
+            "Sub-second triage mode (added 2026-05-09): skip the per-plugin "
+            "`validate_plugin.py` sweep inside the marketplace-iteration loop. "
+            "All other checks (CLI auth, settings integrity, marketplace "
+            "registrations, orphaned entries, stale settings.local.json) still "
+            "run. Used by /cpv-doctor menu option 20."
+        ),
+    )
+    parser.add_argument(
         "--install-scanners",
         action="store_true",
         help=(
@@ -915,7 +946,7 @@ def main():
             dry_run=args.prune_dry_run and not args.prune_old_versions,
             keep_n=args.prune_keep,
         ))
-    do_doctor(verbose=args.verbose, fix=args.fix)
+    do_doctor(verbose=args.verbose, fix=args.fix, quick=args.quick)
 
 
 if __name__ == "__main__":
