@@ -329,8 +329,8 @@ def test_validate_strip_gitmodules_fails_closed_when_helper_missing(
     deleting / shadowing the helper module on disk before invoking CPV.
     """
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-    from cpv_validation_common import ValidationReport
     import validate_plugin
+    from cpv_validation_common import ValidationReport
 
     plugin = _make_plugin(
         tmp_path,
@@ -383,8 +383,8 @@ def test_validate_strip_gitmodules_noop_when_gitmodules_absent(tmp_path: Path) -
     can't accidentally make every plugin emit CRITICAL.
     """
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-    from cpv_validation_common import ValidationReport
     import validate_plugin
+    from cpv_validation_common import ValidationReport
 
     plugin = _make_plugin(tmp_path)  # no gitmodules_text → no .gitmodules
     report = ValidationReport()
