@@ -118,3 +118,110 @@ Every dispatched validator/agent writes its report to
 agent-reports-location rule. Resolve `MAIN_ROOT` via
 `git worktree list | head -n1 | awk '{print $1}'` so the path is
 correct from worktrees and main checkouts.
+
+## Post-diagnosis follow-up — MANDATORY when findings exist
+
+Whenever a dispatched diagnostic produces ≥ 1 CRITICAL / MAJOR / MINOR /
+NIT / WARNING finding (i.e. anything other than `0/0/0/0/0`), the
+doctor agent MUST:
+
+1. **Print a brief summary** of the findings — one line per severity
+   bucket plus the top 5 most-impactful findings inline (file path +
+   line + rule code + one-line message). NOT the full report — keep
+   the orchestrator's context lean.
+2. **Suggest the best course of action** in one sentence (e.g.
+   *"Recommended: fix CRITICAL + MAJOR via plugin-fixer; the 12 NIT
+   findings can wait."*).
+3. **Print the complete report path** so the user can open the full
+   findings list:
+   ```
+   Full report: $MAIN_ROOT/reports/cpv-doctor/<TS±TZ>-<choice>.md
+   ```
+4. **Print the follow-up menu BELOW** and wait for the user's plain-text
+   reply. NEVER use AskUserQuestion. NEVER auto-pick a default.
+
+```
+┏━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  # ┃ Next action                                                                     ┃
+┡━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│  1 │ Fix ALL findings at-or-above CRITICAL                                           │
+│  2 │ Fix ALL findings at-or-above MAJOR                                              │
+│  3 │ Fix ALL findings at-or-above MINOR                                              │
+│  4 │ Fix ALL findings at-or-above NIT                                                │
+│  5 │ Fix ALL findings (incl. WARNING)                                                │
+│  6 │ Pick specific numbered findings from the report (interactive)                   │
+│  7 │ POST a new GitHub issue with the report as body — do NOT fix                    │
+│  8 │ POST GitHub issue + fix all + close-on-publish (auto-close once shipped)        │
+│  9 │ Skip — review the report myself, no further action                              │
+│  A │ Tell the doctor it's something else (free-form)                                 │
+│  0 │ Cancel / Exit                                                                   │
+└────┴─────────────────────────────────────────────────────────────────────────────────┘
+Type a number (or A for free-form) to choose:
+```
+
+### Per-choice routing (post-diagnosis)
+
+| # | Recipe |
+|---|--------|
+| 1 | Dispatch the **plugin-fixer agent** with `min_severity=CRITICAL` and the report path. Re-run the diagnostic afterwards; require post-fix `0/0/0/0/0` for that severity bucket before returning DONE. |
+| 2 | Same as #1 with `min_severity=MAJOR`. |
+| 3 | Same as #1 with `min_severity=MINOR`. |
+| 4 | Same as #1 with `min_severity=NIT`. |
+| 5 | Same as #1 with `min_severity=WARNING` (fix everything). |
+| 6 | Read the report's findings, number them 1..N (one per line, severity + file:line + rule code + message). Print to the user; ask `Which numbers (comma-separated, ranges OK like "1-3,7")?`. Parse the answer; dispatch plugin-fixer with the explicit subset of findings. |
+| 7 | Determine the target repo: `gh api repos/<owner>/<repo>` (owner/repo derived from the diagnosed item — for plugin: `git remote get-url origin` parsed; for marketplace/skill: from manifest's `repository` field, falling back to `homepage`). Then create the issue: `gh issue create --repo <owner>/<repo> --title "[CPV doctor] <severity-summary>" --body-file "$MAIN_ROOT/reports/cpv-doctor/<TS±TZ>-<choice>.md"`. Print the new issue URL. **NO fix is dispatched.** |
+| 8 | Same as #7 (capture issue number from `gh issue create --json url,number`), THEN dispatch plugin-fixer with `min_severity=WARNING` (fix everything). After the fixer completes successfully AND the publish pipeline ships the fixed version, the doctor agent runs `gh issue close <number> --repo <owner>/<repo> --comment "Fixed in v<X.Y.Z> — see <release-url>"`. The doctor passes the issue number to the fixer's prompt so the fixer's commit messages reference it (e.g. `fix(plugin): … (closes <owner>/<repo>#<n>)`). |
+| 9 | Print: `Report saved at <path>. Returning to the doctor menu.` and reprint the top-level menu (§ Mandatory first-message behaviour). |
+| A | Free-form sub-agent — pass the report excerpt + the user's typed description, let the sub-agent decide whether to dispatch plugin-fixer / open an issue / call a different agent. |
+| 0 | Print `Cancelled. Report kept at <path>.` and exit. |
+
+### Severity-threshold semantics
+
+The fix-set "at-or-above SEV" includes SEV and every more-severe level:
+
+- at-or-above CRITICAL → CRITICAL only
+- at-or-above MAJOR    → CRITICAL + MAJOR
+- at-or-above MINOR    → CRITICAL + MAJOR + MINOR
+- at-or-above NIT      → CRITICAL + MAJOR + MINOR + NIT
+- at-or-above WARNING  → everything (= choice 5)
+
+This matches `validate_plugin.py --strict`'s severity hierarchy.
+
+### Repo-resolution for the GitHub-issue paths (#7, #8)
+
+For each diagnosed item, the agent resolves the target repo in this
+order, stopping at the first that succeeds:
+
+1. **Plugin / marketplace at a path**: `cd <path> && git remote get-url origin` → parse `owner/repo`. If the repo is a worktree, fall back to `git worktree list | head -n1 | awk '{print $1}'` and resolve there.
+2. **GitHub plugin/marketplace by URL**: the URL itself encodes owner/repo.
+3. **Single skill/agent/hook/MCP/etc.**: walk up to find the parent plugin's `plugin.json` → `repository` field; if absent, walk further up to `git remote get-url origin`.
+4. **All-installed-plugins (choice 3 of the top menu)**: NOT eligible for #7/#8 — every plugin lives in a different repo. Print `Cannot create a single GitHub issue for a multi-plugin scan; please diagnose individually first.` and offer to chain into the per-plugin doctor flow.
+5. **Cache-cleanup / scanner-install / quick-health-check**: NOT eligible for #7/#8 — these don't produce per-repo findings. Hide rows 7+8 from the follow-up menu in those modes.
+
+If `gh` CLI is missing or unauthenticated, surface a single-line WARNING with the install/auth recipe and downgrade row 7 / row 8 to print the report path so the user can open the issue manually.
+
+### Close-on-publish wiring (#8)
+
+The doctor stores the issue number + repo slug in
+`$MAIN_ROOT/.cpv-doctor/pending-close-on-publish.json` (one entry per
+fix-and-close run). After the publish pipeline ships the new version
+(captured from `publish.py`'s `Gate 13` GitHub-release URL), the doctor
+agent walks the JSON and runs `gh issue close` for each pending entry.
+The state file is JSON-array of:
+
+```json
+[
+  {
+    "issue_number": 42,
+    "repo": "Emasoft/my-plugin",
+    "fixed_in_version": "1.2.0",
+    "release_url": "https://github.com/Emasoft/my-plugin/releases/tag/v1.2.0",
+    "report_path": "/path/to/reports/cpv-doctor/<TS>-<choice>.md",
+    "created_at": "2026-05-09T12:34:56+0200"
+  }
+]
+```
+
+Successful close removes the entry. Failed close (e.g. permissions,
+network) leaves the entry for the next run to retry. The state file is
+in `.cpv-doctor/` (gitignored — same convention as `.cpv-strip-state.json`).

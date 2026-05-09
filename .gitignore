@@ -95,3 +95,8 @@ rck-*-merge-pending.md
 
 # gh CLI per-host state directory created when running gh inside this repo.
 .local/
+
+# cpv-doctor state directory — close-on-publish queue, pending-fix tracking,
+# etc. Gitignored: contains issue-number + repo-slug pairs for the doctor's
+# fix-and-close-on-publish flow (#8 in the post-diagnosis follow-up menu).
+.cpv-doctor/
