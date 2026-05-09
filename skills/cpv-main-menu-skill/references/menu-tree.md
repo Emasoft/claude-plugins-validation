@@ -737,7 +737,8 @@ Type a number to choose:
 │ 6 │ New hook (in existing plugin)                   │ Append hook entry to hooks/hooks.json — cross-platform-aware (bash-isms rejected)          │
 │ 7 │ New MCP server (in existing plugin)             │ Register server in .mcp.json — stdio default, HTTP via flag, server-name uniqueness check  │
 │ 8 │ Pack components into a plugin (multi-select)    │ Pack a folder of components into a plugin (skill/agent/cmd/hook/mcp/lsp/monitor/style)     │
-│ 9 │ Back                                            │ Go back to the top-level menu                                                              │
+│ 9 │ Add dependencies (existing plugin)              │ --add NAME[@MKT[@VER]] explicit OR --from PATH-OR-URL copy from another plugin             │
+│ B │ Back                                            │ Go back to the top-level menu                                                              │
 │ A │ Ask the agent                                   │ Let the agent suggest the best next action right now                                       │
 │ 0 │ Cancel / Exit                                   │ Stop without doing anything                                                                │
 └───┴─────────────────────────────────────────────────┴────────────────────────────────────────────────────────────────────────────────────────────┘
@@ -893,6 +894,48 @@ The recovery path for "Phase 0 plugin-shape detection refused" — converts a fo
 - **JSON / remote-API mode**: append `--json` to make `cpv_pack_components.py` emit a single JSON object on stdout instead of human prose — used when the menu is driven by an external orchestrator.
 
 - **shape-detection escape hatch**: when Phase 0 detection has refused (per `skills/plugin-validation-skill/references/shape-detection.md`), this menu entry is the recommended remedy for option 1 ("Wrap into a NEW plugin") of the hard-refusal protocol.
+
+#### 3.4.9 Add dependencies (existing plugin)
+
+Adds plugin dependencies to a target plugin's `plugin.json::dependencies` array per [plugin-dependencies.md](https://code.claude.com/docs/en/plugin-dependencies.md). Two input modes that can be combined; the engine deduplicates by name with last-write-wins, sorts the result, and writes atomically.
+
+- **arg-prompts** (in order):
+  1. `Target plugin path?` (the plugin whose dependencies you're editing)
+  2. `Add specs (comma-separated, blank to skip)?` — each spec is one of:
+     - `name` (bare-string entry — auto-tracks latest, WARN on validate)
+     - `name@marketplace` (explicit marketplace, no version pin)
+     - `name@marketplace@version` (full pin — recommended)
+     - `name@@version` (version-pinned, no marketplace override)
+  3. `Copy-from sources (comma-separated paths/URLs, blank to skip)?` — each source is either a local plugin folder or a git URL (`https://`, `git+https://`, `ssh://`, `git@host:owner/repo`). Cloned shallowly to a tmp dir; deps merged in.
+
+- **execution**:
+  ```bash
+  uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/add_dependencies.py" "$TARGET" \
+      --add NAME[@MARKETPLACE[@VERSION]]   # repeat for each
+      --from PATH-OR-URL                   # repeat for each
+  ```
+
+- **dry-run**: append `--dry-run` to print the merged array on stdout WITHOUT writing. Always offer this BEFORE the real write so the user reviews. After confirmation, re-run without `--dry-run`.
+
+- **rollback safety**: the engine writes a `.bak` next to plugin.json BEFORE the atomic rename. If the post-write `validate_plugin --strict` produces ANY new CRITICAL/MAJOR finding, the `.bak` is restored and the user sees `ROLLBACK: merged dependencies introduced N new blocking findings`.
+
+- **typical recipes**:
+  ```bash
+  # Pin dev-browser to ~1.2.0 (recommended — auto-tracks 1.2.x patches)
+  add_dependencies.py /path/to/my-plugin --add dev-browser@@~1.2.0
+
+  # Cross-marketplace pin
+  add_dependencies.py /path/to/my-plugin --add audit-logger@acme-shared@^2.0
+
+  # "Add the same dependencies that other-plugin requires"
+  add_dependencies.py /path/to/my-plugin --from /path/to/other-plugin
+
+  # Copy from a remote plugin's git URL
+  add_dependencies.py /path/to/my-plugin \
+      --from https://github.com/Emasoft/dev-browser-plugin
+  ```
+
+- **post-execution**: auto-run `validate_plugin --strict` on the target. If unversioned bare-string deps emit `WARNING [RC-DEP-VERSION-001]`, surface them and offer to convert to pinned via a follow-up `--add` invocation.
 
 ---
 
