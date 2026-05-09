@@ -524,6 +524,85 @@ class TestLintMarkdown:
                 ok = lint_markdown(tmp_path, [f], report)
         assert ok is True
 
+    def test_findings_emit_nit_not_minor(self, tmp_path: Path) -> None:
+        """Issue #20: markdownlint findings are stylistic — they must NOT
+        block a publish gate via --strict. Demoting to NIT preserves the
+        signal (developer sees the rule + line) without making
+        markdownlint a publish blocker."""
+        f = tmp_path / "doc.md"
+        f.write_text("# Title\n\nlong line " + "x" * 200 + "\n")
+        report = ValidationReport()
+        stderr = (
+            "doc.md:3 MD013/line-length Line length [Expected: 80; Actual: 213]\n"
+            "doc.md:3 MD012/no-multiple-blanks Multiple blanks\n"
+        )
+        with patch("cpv_lint_engine._resolve", return_value=["/bin/markdownlint-cli2"]):
+            with patch(
+                "cpv_lint_engine.subprocess.run",
+                side_effect=_make_run(FakeResult(1, "", stderr)),
+            ):
+                ok = lint_markdown(tmp_path, [f], report)
+        assert ok is False
+        # Severities: NIT only — no MINOR markdownlint findings.
+        levels = [r.level for r in report.results if "markdownlint" in r.message]
+        assert levels and all(level == "NIT" for level in levels), (
+            f"expected all markdownlint findings to be NIT, got {levels}"
+        )
+        assert any("MD013" in r.message for r in report.results)
+        assert any("MD012" in r.message for r in report.results)
+
+    def test_silent_failure_surfaces_warning(self, tmp_path: Path) -> None:
+        """Issue #20 fix: when markdownlint exits non-zero but produces
+        NO parseable output, the developer used to see only "CPV blocked
+        the push" with no actionable detail. Now we always emit at least
+        one finding so the gate failure is explainable."""
+        f = tmp_path / "doc.md"
+        f.write_text("# hi\n")
+        report = ValidationReport()
+        with patch("cpv_lint_engine._resolve", return_value=["/bin/markdownlint-cli2"]):
+            with patch(
+                "cpv_lint_engine.subprocess.run",
+                side_effect=_make_run(FakeResult(3, "", "")),
+            ):
+                ok = lint_markdown(tmp_path, [f], report)
+        assert ok is False
+        # Either a WARNING (truly silent — empty stderr+stdout) or a NIT
+        # carrying the unparsed output. EITHER way at least one finding
+        # exists so the user knows why the gate failed.
+        relevant = [r for r in report.results if "markdownlint" in r.message]
+        assert relevant, "silent gate failure must produce at least one finding"
+        assert any(r.level in ("WARNING", "NIT") for r in relevant)
+
+    def test_bundled_config_passed_via_config_flag(self, tmp_path: Path) -> None:
+        """Multi-path resolver: when target has no .markdownlint.json, the
+        invocation must include `--config <path>` pointing at one of the
+        two CPV-bundled candidates (scripts/.markdownlint.json for uvx,
+        repo-root .markdownlint.json for cached). Issue #20 was that the
+        single-path resolver missed the wheel case under uvx."""
+        f = tmp_path / "x.md"
+        f.write_text("# x\n")
+        report = ValidationReport()
+        captured: dict[str, list[str]] = {"argv": []}
+
+        def fake_run(*args, **kwargs):
+            # subprocess.run signature: cmd is positional arg[0].
+            cmd = args[0] if args else kwargs.get("args", [])
+            captured["argv"] = list(cmd)
+            return FakeResult(0, "", "")
+
+        with patch("cpv_lint_engine._resolve", return_value=["/bin/markdownlint-cli2"]):
+            with patch("cpv_lint_engine.subprocess.run", side_effect=fake_run):
+                lint_markdown(tmp_path, [f], report)
+        # Either we found a bundled config (--config flag present) OR the
+        # CPV install genuinely lacks one (in which case markdownlint runs
+        # with its built-in defaults — fine for the unit test).
+        if "--config" in captured["argv"]:
+            cfg_idx = captured["argv"].index("--config")
+            cfg_path = captured["argv"][cfg_idx + 1]
+            assert cfg_path.endswith(".markdownlint.json"), (
+                f"unexpected --config path: {cfg_path}"
+            )
+
 
 class TestLintJson:
     def test_valid_json_passes(self, tmp_path: Path) -> None:

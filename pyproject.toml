@@ -5,6 +5,17 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["scripts"]
 
+# Force-include configuration files so `uvx --from git+...` ships them
+# alongside the wheel. Without this, the cached install (which ships the
+# whole repo to ~/.claude/plugins/cache/) and the uvx install (which only
+# bundles `packages`) disagree on which `.markdownlint.json` the linter
+# uses — see issue #20. The path resolver in cpv_lint_engine looks at
+# `Path(__file__).parent / ".markdownlint.json"` as the FIRST candidate so
+# the in-wheel copy wins under uvx.
+[tool.hatch.build.targets.wheel.force-include]
+".markdownlint.json" = "scripts/.markdownlint.json"
+".markdownlintignore" = "scripts/.markdownlintignore"
+
 [project]
 name = "claude-plugins-validation"
 version = "2.68.0"
