@@ -35,13 +35,18 @@ commands" / "unknown folder", refuse to wrap and use the hard-refusal
 protocol from shape-detection.md. The acceptable next-step options are
 ALWAYS:
 
-1. Wrap into a NEW plugin — but the content moves into the correct
-   plugin subfolder (`skills/<name>/SKILL.md`, `agents/<name>.md`,
-   `commands/<name>.md`). DO NOT just add a `plugin.json` next to the
-   misplaced content. Move the content first, THEN scaffold the
-   manifest at the new plugin root.
+1. Wrap into a NEW plugin — invoke `scripts/cpv_pack_components.py`
+   (the multi-select packer) so the discovered components land in the
+   correct plugin subfolders (`skills/<name>/SKILL.md`,
+   `agents/<name>.md`, `commands/<name>.md`, `hooks/<file>.json`,
+   `.mcp.json`, `.lsp.json`, `monitors/<file>.json`,
+   `output-styles/<name>.md`). NEVER just add a `plugin.json` next to
+   the misplaced content. The packer's `--list-only` flag enumerates
+   what's there so you can present a multi-select prompt to the user
+   before packing. Menu reference: §3.4.8 in
+   `skills/cpv-main-menu-skill/references/menu-tree.md`.
 2. ADD to an existing plugin — append the content to the existing
-   plugin's correct subfolder.
+   plugin's correct subfolder via `scripts/add_component.py`.
 3. Cancel.
 
 The canonical plugin layout, manifest schema, env vars, caching rules,

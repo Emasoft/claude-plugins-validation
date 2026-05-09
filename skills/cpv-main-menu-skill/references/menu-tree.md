@@ -736,6 +736,7 @@ Type a number to choose:
 │ 5 │ New slash command (in existing plugin)          │ Add commands/<name>.md — valid frontmatter + auto-refresh README                           │
 │ 6 │ New hook (in existing plugin)                   │ Append hook entry to hooks/hooks.json — cross-platform-aware (bash-isms rejected)          │
 │ 7 │ New MCP server (in existing plugin)             │ Register server in .mcp.json — stdio default, HTTP via flag, server-name uniqueness check  │
+│ 8 │ Pack components into a plugin (multi-select)    │ Pack a folder of components into a plugin (skill/agent/cmd/hook/mcp/lsp/monitor/style)     │
 │ 9 │ Back                                            │ Go back to the top-level menu                                                              │
 │ A │ Ask the agent                                   │ Let the agent suggest the best next action right now                                       │
 │ 0 │ Cancel / Exit                                   │ Stop without doing anything                                                                │
@@ -837,6 +838,61 @@ Type a number to choose:
     --type mcp --name "$NAME" --http-url "$URL"
   ```
 - **post-execution**: auto-run `validate_plugin --strict` AND `validate_mcp --strict` (catches cross-source server-name shadowing).
+
+#### 3.4.8 Pack components into a new plugin (multi-select)
+
+The recovery path for "Phase 0 plugin-shape detection refused" — converts a folder of standalone components (skill / agent / command / hook / mcp / lsp / monitor / output-style) into a real installable plugin. Also useful for rolling components from disparate projects into a single shared plugin.
+
+- **arg-prompts** (in order):
+  1. `Source folder containing components?`
+  2. `Target directory for the new plugin?`
+  3. `Plugin name (kebab-case, lowercase)?`
+  4. `One-line description?`
+  5. `Author name?`
+  6. `Author email?`
+  7. `GitHub owner (optional, leave blank if not publishing)?`
+
+- **discovery + selection** (BEFORE scaffolding):
+  ```bash
+  uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_pack_components.py" \
+      "$SOURCE" --list-only
+  ```
+  The script prints a table grouping discovered components by type. The menu agent then offers a multi-select prompt:
+  ```
+  Discovered N components in <SOURCE>:
+    skill:  my-skill, other-skill
+    agent:  my-agent
+    command: my-cmd
+    hook:    hooks
+    mcp:     mcp
+    lsp:     lsp
+    monitor: monitors
+    output-style: casual
+
+  Pick which to pack into the new plugin:
+    a) Pack ALL discovered components (recommended)
+    b) Pick by type (e.g. "skill,agent" includes everything in those types)
+    c) Pick by name (e.g. "my-skill,my-agent,my-cmd")
+    d) Cancel — leave the directory untouched
+  Type a / b / c / d:
+  ```
+  Translate the user's answer into `--all` or `--include type=name,name [...]` flags.
+
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_pack_components.py" \
+      "$SOURCE" "$TARGET" \
+      --name "$NAME" --description "$DESC" \
+      --author "$AUTHOR" --author-email "$AUTHOR_EMAIL" \
+      --github-owner "$GITHUB_OWNER" \
+      "${INCLUDE_FLAGS[@]}"
+  ```
+
+- **post-execution**: ALWAYS auto-dispatch the **plugin-diagnoser agent** on `$TARGET`. If the diagnose returns 0 CRITICAL/MAJOR, print `✓ Pack passes diagnose-plugin clean.` and proceed to §3.99. Otherwise print the diagnoser's follow-up menu so the user can pick a fix path.
+
+- **JSON / remote-API mode**: append `--json` to make `cpv_pack_components.py` emit a single JSON object on stdout instead of human prose — used when the menu is driven by an external orchestrator.
+
+- **shape-detection escape hatch**: when Phase 0 detection has refused (per `skills/plugin-validation-skill/references/shape-detection.md`), this menu entry is the recommended remedy for option 1 ("Wrap into a NEW plugin") of the hard-refusal protocol.
 
 ---
 
@@ -1039,11 +1095,13 @@ Type a number to choose:
 
 - **path-source**: per §3.0a (its row 1 = "current project folder $PWD")
 - **execution**: dispatch the **plugin-diagnoser agent** with the path. The agent runs phases 1–7 (validate, security with all scanners, pipeline staleness, cross-platform, marketplace registration, branch+actions, sync), writes the structured report, then prints its own follow-up menu (rows 1–7 + 0).
+- **Phase 0 escape hatch**: when the diagnoser's Phase 0 plugin-shape detection refuses (per `skills/plugin-validation-skill/references/shape-detection.md`), the diagnoser MUST redirect to §3.4.8 (Pack components into a new plugin) so the user can multi-select components and convert them into a real installable plugin. NEVER auto-scaffold around the wrong shape.
 
 #### 3.6.2 Upgrade to current pipeline standard
 
 - **path-source**: per §3.0a
 - **execution**: dispatch the **plugin-fixer agent** with the path AND the prompt: `Apply pipeline-migration §1–§5 from skills/fix-validation/references/pipeline-migration.md. min_severity=WARNING (fix everything).`
+- **Phase 0 escape hatch**: same rule as §3.6.1 — if shape detection refuses, redirect to §3.4.8 instead of upgrading the wrong shape.
 
 #### 3.6.3 Apply CRITICAL fixes only
 

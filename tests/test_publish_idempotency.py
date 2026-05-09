@@ -186,8 +186,14 @@ class TestCommitTagIdempotency:
         ):
             rc = publish.stage_commit_tag_push(plugin_root, "v2.64.0")
         assert rc == 0
-        # `publish.run` should NOT have been called (no `git add -A` / `git commit`)
-        assert all("commit" not in str(call) for call in fake_run.call_args_list)
+        # No `git add -A` / `git commit` call should have been issued — Gate 10
+        # took the "already committed" short-circuit. (Inspect args, not str(call):
+        # tmp_path contains the test name which itself contains "commit".)
+        cmd_lists = [list(call.args[0]) if call.args else [] for call in fake_run.call_args_list]
+        for cmd in cmd_lists:
+            assert not (len(cmd) >= 2 and cmd[0] == "git" and cmd[1] in ("add", "commit")), (
+                f"unexpected git add/commit call: {cmd}"
+            )
 
     def test_skips_tag_when_already_exists(self, tmp_path: Path) -> None:
         """Gate 11 must skip `git tag` when the tag already points locally."""
