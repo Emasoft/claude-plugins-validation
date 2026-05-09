@@ -87,7 +87,7 @@ Copy this checklist and track your progress:
 - [Marketplace Layouts](references/marketplace-layouts.md)
   > Overview · Layout A — Hub-and-Spoke (separate repos) · Layout B — Nested single-repo (monorepo) · Layout C — Marketplace-in-plugin (self-referential single repo) · How Claude Code updates plugins in each layout · When to choose which · Rich metadata fields (author, homepage, license, category) · Why CPV does not use git-subdir · Encountering a non-CPV marketplace · Refactoring between layouts · Agent behavior summary
 - [Dev-stripping](references/dev-stripping.md)
-  > Why this exists · When NOT to use · Testing approach (no checked-in fixture)
+  > Why this exists · When NOT to use · Testing approach
 
 ## MCP Server Bundling
 
@@ -105,4 +105,4 @@ See [examples.md](references/examples.md).
 ## Dev-stripping (TRDD-793ac32a)
 
 `generate_plugin_repo.py --strip-dev` (default) emits a `cpv.strip` block. See [dev-stripping.md](references/dev-stripping.md).
-> Why this exists · When NOT to use · Testing approach (no checked-in fixture)
+> Why this exists · When NOT to use · Testing approach

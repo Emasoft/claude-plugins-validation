@@ -55,7 +55,7 @@ Skip dev-stripping (`--no-strip-dev`) when:
 - The plugin author prefers operational simplicity over install-size
   savings (one extra GitHub repo to manage per plugin)
 
-## Testing approach (no checked-in fixture)
+## Testing approach
 
 The TRDD-793ac32a plan referenced a `tests/fixtures/sample-plugin-with-tests/`
 fixture tree, but the implementation deliberately uses **`tmp_path` builders**
