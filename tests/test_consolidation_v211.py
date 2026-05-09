@@ -69,8 +69,8 @@ AGENT_COMMANDS = {
 class TestCommandCount:
     """Verify total command count after consolidation."""
 
-    def test_total_command_count_is_35(self):
-        """commands/ directory should contain exactly 35 .md files.
+    def test_total_command_count_is_36(self):
+        """commands/ directory should contain exactly 36 .md files.
 
         Originally 13 after consolidation (8 direct + 5 agent).
         v2.12.13 added: cpv-link-plugin, cpv-validate-settings-marketplace.
@@ -97,9 +97,13 @@ class TestCommandCount:
           wrappers around cpv-add-component — exposed via new Create sub-menu),
           cpv-diagnose-plugin and cpv-upgrade-plugin (deep-audit + full-pipeline
           migration agents — exposed via new Diagnose & Upgrade sub-menu).
+        v2.69.0 added: cpv-pack-components (#157 — automated CLI packer that
+          discovers and converts standalone components into a real installable
+          plugin; surfaced via Create sub-menu §3.4.8 and shape-detection's
+          "Wrap into a NEW plugin" option).
         """
         md_files = list(COMMANDS_DIR.glob("*.md"))
-        assert len(md_files) == 35, f"Expected 35 commands, found {len(md_files)}: {sorted(f.name for f in md_files)}"
+        assert len(md_files) == 36, f"Expected 36 commands, found {len(md_files)}: {sorted(f.name for f in md_files)}"
 
 
 class TestDirectScriptCommands:

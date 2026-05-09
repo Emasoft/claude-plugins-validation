@@ -79,8 +79,10 @@ I refuse to scaffold plugin metadata around this — that would
 produce an empty install (no plugin components would actually load).
 
 Pick one:
-  1. Wrap this <skill / agent / commands> into a NEW plugin (I will
-     ask for plugin name + scaffolding details).
+  1. Wrap this <skill / agent / commands> into a NEW plugin — I will
+     run the multi-select packer (scripts/cpv_pack_components.py) so
+     you can choose which detected components to include and where to
+     write the new plugin (see menu §3.4.8).
   2. ADD this <skill / agent / commands> into an existing plugin's
      correct folder (I will ask for the existing plugin path).
   3. Cancel — I will leave the directory untouched.
@@ -90,6 +92,18 @@ Which option?
 
 The agent then waits for the user's plain-text reply. NEVER use
 AskUserQuestion. NEVER auto-pick option 1.
+
+When the user picks option 1, the agent invokes:
+```bash
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_pack_components.py" \
+    "<source>" --list-only
+```
+to enumerate detected components, presents the per-type list, asks the
+user which to include, then re-invokes the script with `--all` or
+`--include type=name,name [...]` flags to actually pack the selected
+subset into a new plugin shape. Exit codes 0/1/2/3/4/5 are the same as
+the menu §3.4.8 flow — the agent must report them to the user verbatim
+on failure.
 
 ## Standard plugin layout
 
