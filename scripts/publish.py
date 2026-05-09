@@ -1551,6 +1551,34 @@ def _local_tag_exists(plugin_root: Path, tag_name: str) -> bool:
     return result.returncode == 0 and tag_name in result.stdout.split()
 
 
+def _remote_tag_exists(plugin_root: Path, tag_name: str) -> bool:
+    """True when ``tag_name`` exists on origin (per ``git ls-remote``).
+
+    Used by Gate 10's recovery path to confirm a half-published release
+    can be safely consolidated into one commit. If the tag is already on
+    remote, the prior commit is the source-of-truth for that release and
+    we MUST NOT undo it.
+
+    Network failure → returns False conservatively. The caller's recovery
+    branch is only entered when HEAD already has the chore(release) commit
+    AND the tree is dirty; in the failure-to-check case, we'd just skip
+    the recovery and create a second chore commit (same as the pre-fix
+    behaviour, no regression).
+    """
+    try:
+        result = subprocess.run(
+            ["git", "ls-remote", "--tags", "origin", f"refs/tags/{tag_name}"],
+            capture_output=True,
+            text=True,
+            cwd=str(plugin_root),
+            check=False,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return False
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
 def stage_commit_tag_push(plugin_root: Path, tag_name: str) -> int:
     """Gates 10-12: commit, tag, push.
 
@@ -1573,20 +1601,80 @@ def stage_commit_tag_push(plugin_root: Path, tag_name: str) -> int:
     print(f"\n{BLUE}═══ Gate 10: Commit version bump + manifest refresh + changelog ═══{NC}")
     expected_subject = f"chore(release): {tag_name}"
     head_subject = _head_commit_message(plugin_root)
-    if _git_porcelain_clean(plugin_root) and head_subject == expected_subject:
+    porcelain_clean = _git_porcelain_clean(plugin_root)
+    if porcelain_clean and head_subject == expected_subject:
         print(
             f"{YELLOW}  Working tree clean and HEAD already has '{expected_subject}' — "
             f"skipping commit (interrupted-publish recovery).{NC}"
         )
         print(f"{GREEN}✓ Already committed {tag_name}{NC}")
+    elif (not porcelain_clean) and head_subject == expected_subject and not _remote_tag_exists(plugin_root, tag_name):
+        # Bug fix (task #151): the previous publish run got interrupted between
+        # Gate 10 (commit) and Gate 12 (push), so HEAD already has the
+        # `chore(release): v<tag>` commit but the tag was never pushed to
+        # remote. The current re-run reached this point with a DIRTY working
+        # tree because Gates 8 (refresh hashes) and 9 (regenerate CHANGELOG)
+        # touched files that the prior commit didn't include.
+        #
+        # Without this branch, Gate 10 would create a SECOND
+        # `chore(release): v<tag>` commit on top of the existing one — and
+        # Gate 11 would then keep the tag pointing at the OLDER commit
+        # (because `_local_tag_exists` short-circuits). Result: orphan commit
+        # on master, GitHub release built from stale tag, manifest refresh
+        # never makes it into the release.
+        #
+        # Fix: undo the unpushed release commit with `git reset --soft HEAD~1`
+        # (preserves all changes in the index + working tree), then make ONE
+        # consolidated commit that includes the prior bump AND the new
+        # manifest refresh. This is safe because:
+        # - The commit being undone is local-only (`_remote_tag_exists`
+        #   confirmed it).
+        # - `--soft` doesn't touch files; only the commit pointer moves back.
+        # - Git's reflog still has the old commit recoverable via
+        #   `git reset HEAD@{1}` for the next ~90 days.
+        print(
+            f"{YELLOW}  Recovery: HEAD already has '{expected_subject}' from a prior "
+            f"interrupted run, but the tree is dirty and the tag was never pushed.{NC}"
+        )
+        print(
+            f"{YELLOW}  Folding the manifest refresh into the existing release commit "
+            f"(git reset --soft HEAD~1, then re-commit).{NC}"
+        )
+        run(["git", "reset", "--soft", "HEAD~1"], cwd=plugin_root)
+        # If the existing local tag pointed at the just-undone commit, drop
+        # it so Gate 11 can re-create it pointing at the new consolidated
+        # commit. (No remote tag exists, per the elif guard above.)
+        if _local_tag_exists(plugin_root, tag_name):
+            run(["git", "tag", "-d", tag_name], cwd=plugin_root)
+            print(f"{YELLOW}  Removed local-only tag {tag_name} (will re-create on the consolidated commit).{NC}")
+        run(["git", "add", "-A"], cwd=plugin_root)
+        run(["git", "commit", "-m", expected_subject], cwd=plugin_root)
+        print(f"{GREEN}✓ Re-committed {tag_name} with manifest refresh folded in{NC}")
     else:
         run(["git", "add", "-A"], cwd=plugin_root)
         run(["git", "commit", "-m", expected_subject], cwd=plugin_root)
         print(f"{GREEN}✓ Committed {tag_name}{NC}")
     print(f"\n{BLUE}═══ Gate 11: Create git tag {tag_name} ═══{NC}")
     if _local_tag_exists(plugin_root, tag_name):
-        print(f"{YELLOW}  Tag {tag_name} already exists locally — skipping (interrupted-publish recovery).{NC}")
-        print(f"{GREEN}✓ Tag {tag_name} already present{NC}")
+        # Validate that the existing tag points at HEAD. If it points at an
+        # older commit AND the tag is unpushed, the prior run's recovery
+        # branch above should already have handled it; this check catches
+        # any remaining drift cases (manual tag created out-of-band, etc.).
+        tag_sha = run(
+            ["git", "rev-list", "-n", "1", tag_name], cwd=plugin_root, check=False
+        ).stdout.strip()
+        head_sha = run(["git", "rev-parse", "HEAD"], cwd=plugin_root, check=False).stdout.strip()
+        if tag_sha and head_sha and tag_sha != head_sha and not _remote_tag_exists(plugin_root, tag_name):
+            print(
+                f"{YELLOW}  Local tag {tag_name} points at {tag_sha[:8]}, HEAD is at "
+                f"{head_sha[:8]}. Tag is unpushed; moving it to HEAD.{NC}"
+            )
+            run(["git", "tag", "-d", tag_name], cwd=plugin_root)
+            run(["git", "tag", "-a", tag_name, "-m", f"Release {tag_name}"], cwd=plugin_root)
+            print(f"{GREEN}✓ Tag {tag_name} re-created at HEAD{NC}")
+        else:
+            print(f"{YELLOW}  Tag {tag_name} already exists locally — skipping (interrupted-publish recovery).{NC}")
+            print(f"{GREEN}✓ Tag {tag_name} already present{NC}")
     else:
         run(["git", "tag", "-a", tag_name, "-m", f"Release {tag_name}"], cwd=plugin_root)
         print(f"{GREEN}✓ Tag {tag_name} created{NC}")

@@ -915,3 +915,126 @@ class TestEnsureGhAuth:
             assert publish._parse_owner_repo_from_remote(url) == expected
         assert publish._parse_owner_repo_from_remote("not-a-url") is None
         assert publish._parse_owner_repo_from_remote("") is None
+
+
+class TestOrphanReleaseCommitRecovery:
+    """Regression tests for task #151 — orphan chore(release) commit when
+    a previous publish was interrupted between Gate 10 (commit) and Gate
+    12 (push), and the re-run finds HEAD already has the release commit
+    AND a dirty tree (from re-running Gate 8 / Gate 9).
+
+    Before the fix: Gate 10 created a SECOND `chore(release): v<tag>`
+    commit on top of the existing one, and Gate 11's "tag already exists"
+    short-circuit kept the tag pointing at the OLDER commit. Result: the
+    GitHub release was built from a stale tag.
+
+    After the fix: Gate 10 detects the bad state, undoes the local-only
+    chore commit (`git reset --soft HEAD~1`), drops the local-only tag,
+    and creates ONE consolidated commit + tag at the new HEAD.
+    """
+
+    def test_remote_tag_exists_helper_handles_present_tag(self, monkeypatch, tmp_path):
+        """`_remote_tag_exists` returns True when ls-remote shows the tag."""
+        def fake_run(cmd, **_):
+            assert cmd[:3] == ["git", "ls-remote", "--tags"]
+            return _completed(returncode=0, stdout="abcd1234\trefs/tags/v1.0.0\n")
+        monkeypatch.setattr(publish.subprocess, "run", fake_run)
+        assert publish._remote_tag_exists(tmp_path, "v1.0.0") is True
+
+    def test_remote_tag_exists_helper_returns_false_for_missing_tag(self, monkeypatch, tmp_path):
+        """`_remote_tag_exists` returns False when ls-remote returns empty."""
+        def fake_run(cmd, **_):
+            return _completed(returncode=0, stdout="")
+        monkeypatch.setattr(publish.subprocess, "run", fake_run)
+        assert publish._remote_tag_exists(tmp_path, "v9.9.9") is False
+
+    def test_remote_tag_exists_returns_false_on_timeout(self, monkeypatch, tmp_path):
+        """Conservative: timeout → False so the recovery branch is skipped
+        when we can't confirm the tag is local-only."""
+        def fake_run(cmd, **_):
+            raise publish.subprocess.TimeoutExpired(cmd, timeout=30)
+        monkeypatch.setattr(publish.subprocess, "run", fake_run)
+        assert publish._remote_tag_exists(tmp_path, "v1.0.0") is False
+
+    def test_remote_tag_exists_returns_false_on_nonzero_exit(self, monkeypatch, tmp_path):
+        """Non-zero exit (not-a-git-repo, network error) → False conservatively."""
+        def fake_run(cmd, **_):
+            return _completed(returncode=128, stdout="", stderr="not a git repo")
+        monkeypatch.setattr(publish.subprocess, "run", fake_run)
+        assert publish._remote_tag_exists(tmp_path, "v1.0.0") is False
+
+    def test_stage_commit_recovery_when_dirty_and_unpushed(self, monkeypatch, tmp_path):
+        """Recovery branch: HEAD has chore(release) commit, tree dirty,
+        tag local-only → reset --soft HEAD~1 + drop local tag + ONE
+        consolidated commit, then re-tag at HEAD in Gate 11.
+
+        Asserts on the exact git command sequence so a future refactor
+        cannot silently introduce the duplicate-commit bug again.
+        """
+        tag_name = "v1.0.0"
+        expected_subject = f"chore(release): {tag_name}"
+        commands: list[list[str]] = []
+        # Stateful: tag is local-only at start; recovery's `git tag -d`
+        # deletes it, so subsequent _local_tag_exists checks must return
+        # False so Gate 11 re-creates it on the consolidated HEAD.
+        local_tag_state = {"exists": True}
+
+        def fake_run(cmd, cwd=None, *, check=True, env=None):
+            commands.append(list(cmd))
+            if cmd[:3] == ["git", "tag", "-d"]:
+                local_tag_state["exists"] = False
+            return _completed(returncode=0)
+
+        def fake_git_with_retry(cmd, cwd=None, env=None, capture_output=False):
+            commands.append(list(cmd))
+            return _completed(returncode=0)
+
+        monkeypatch.setattr(publish, "run", fake_run)
+        monkeypatch.setattr(publish, "git_with_retry", fake_git_with_retry)
+        monkeypatch.setattr(publish, "_head_commit_message", lambda _root: expected_subject)
+        monkeypatch.setattr(publish, "_git_porcelain_clean", lambda _root: False)
+        monkeypatch.setattr(publish, "_remote_tag_exists", lambda _root, _tag: False)
+        monkeypatch.setattr(publish, "_local_tag_exists", lambda _root, _tag: local_tag_state["exists"])
+        monkeypatch.setattr(publish, "_resolve_owner_repo", lambda _root: ("Alice", "repo"))
+        monkeypatch.setattr(publish, "_ensure_gh_auth", lambda _o, _r: None)
+
+        rc = publish.stage_commit_tag_push(tmp_path, tag_name)
+        assert rc == 0
+
+        # Recovery sequence: reset → drop local tag → add → commit → tag → push branch → push tag
+        assert ["git", "reset", "--soft", "HEAD~1"] in commands
+        assert ["git", "tag", "-d", tag_name] in commands
+        # Exactly ONE commit with the release subject (not two).
+        commit_cmds = [c for c in commands if c[:2] == ["git", "commit"] and "-m" in c]
+        assert len(commit_cmds) == 1, f"expected 1 commit, got {len(commit_cmds)}: {commit_cmds}"
+        assert expected_subject in commit_cmds[0]
+        # New annotated tag created on the consolidated HEAD.
+        tag_cmds = [c for c in commands if c[:3] == ["git", "tag", "-a"]]
+        assert len(tag_cmds) == 1
+        assert tag_cmds[0][3] == tag_name
+
+    def test_stage_commit_normal_path_when_clean_and_no_chore_head(self, monkeypatch, tmp_path):
+        """Sanity: non-recovery path still works — clean tree, no prior
+        chore commit → standard add + commit + tag + push."""
+        tag_name = "v1.0.0"
+        commands: list[list[str]] = []
+
+        def fake_run(cmd, **_kw):
+            commands.append(list(cmd))
+            return _completed(returncode=0)
+
+        monkeypatch.setattr(publish, "run", fake_run)
+        monkeypatch.setattr(publish, "git_with_retry", lambda cmd, **_kw: commands.append(list(cmd)) or _completed(returncode=0))
+        monkeypatch.setattr(publish, "_head_commit_message", lambda _root: "feat: unrelated")
+        monkeypatch.setattr(publish, "_git_porcelain_clean", lambda _root: False)
+        monkeypatch.setattr(publish, "_local_tag_exists", lambda _root, _tag: False)
+        monkeypatch.setattr(publish, "_remote_tag_exists", lambda _root, _tag: False)
+        monkeypatch.setattr(publish, "_resolve_owner_repo", lambda _root: ("Alice", "repo"))
+        monkeypatch.setattr(publish, "_ensure_gh_auth", lambda _o, _r: None)
+
+        rc = publish.stage_commit_tag_push(tmp_path, tag_name)
+        assert rc == 0
+        # Normal path: NO reset; ONE commit; ONE tag.
+        assert ["git", "reset", "--soft", "HEAD~1"] not in commands
+        commit_cmds = [c for c in commands if c[:2] == ["git", "commit"] and "-m" in c]
+        assert len(commit_cmds) == 1
