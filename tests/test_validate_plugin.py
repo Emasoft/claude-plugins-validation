@@ -593,16 +593,24 @@ class TestValidateStructureExtended:
         assert any("commands/ directory exists" in m for m in passed_msgs)
         assert any("agents/ directory exists" in m for m in passed_msgs)
 
-    def test_non_standard_directory_reports_warning(self, tmp_path):
-        """validate_structure warns about non-standard directories (lines 359-360)."""
+    def test_non_standard_directory_reports_major(self, tmp_path):
+        """validate_structure now emits MAJOR (was WARNING) for undeclared non-standard root directories.
+
+        Bumped from WARNING → MAJOR in v2.68.0 after a real incident where a
+        directory holding a SKILL was wrapped into a "plugin" with bogus
+        non-standard root folders, published, and installed to nothing. The
+        user directive: "NO DEVIATION FROM THE STANDARD can be allowed unless
+        you declare the custom folder/path in plugin.json".
+        """
         plugin_dir = tmp_path / "odd-dirs"
         plugin_dir.mkdir()
         (plugin_dir / ".claude-plugin").mkdir()
         (plugin_dir / "foobar").mkdir()
         report = ValidationReport()
         validate_structure(plugin_dir, report)
-        warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
-        assert any("Non-standard directory 'foobar/'" in m for m in warning_msgs)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("Non-standard directory 'foobar/'" in m for m in major_msgs), \
+            f"Expected MAJOR for 'foobar/', got: {major_msgs}"
 
 
 class TestValidateCommands:
@@ -2640,8 +2648,12 @@ class TestManifestReferencedDirsSuppressNonStandardWarning:
         return plugin_dir
 
     def _has_warning_for_dir(self, report: ValidationReport, dirname: str) -> bool:
+        # As of v2.68.0 the severity for undeclared non-standard root dirs
+        # is MAJOR (was WARNING). Every test in this class predates the
+        # bump and originally checked for WARNING; helper now matches the
+        # MAJOR level so the existing assertions stay meaningful.
         return any(
-            r.level == "WARNING" and f"'{dirname}/'" in r.message and "Non-standard" in r.message
+            r.level == "MAJOR" and f"'{dirname}/'" in r.message and "Non-standard" in r.message
             for r in report.results
         )
 
@@ -2876,21 +2888,23 @@ class TestSubmodulePatternAllowance:
             f"{[r.message for r in report.results if r.level == 'WARNING']}"
         )
 
-    def test_subdir_not_matching_plugin_name_still_warns(self, tmp_path):
+    def test_subdir_not_matching_plugin_name_still_flags_as_major(self, tmp_path):
+        """Severity bumped to MAJOR in v2.68.0 (was WARNING). See class
+        TestSubmodulePatternAllowance._has_warning_for_dir docstring."""
         plugin_dir = tmp_path / "my-cool-plugin"
         (plugin_dir / ".claude-plugin").mkdir(parents=True)
         (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
             json.dumps({"name": "my-cool-plugin", "version": "1.0.0", "description": "x"})
         )
-        # Different name — must still warn
+        # Different name — must still flag (now as MAJOR, was WARNING)
         (plugin_dir / "unrelated-folder").mkdir()
         (plugin_dir / "unrelated-folder" / "x.js").write_text("// stub")
         report = ValidationReport()
         validate_structure(plugin_dir, report)
         assert any(
-            r.level == "WARNING" and "'unrelated-folder/'" in r.message and "Non-standard" in r.message
+            r.level == "MAJOR" and "'unrelated-folder/'" in r.message and "Non-standard" in r.message
             for r in report.results
-        ), "Unrelated non-standard folder should still trigger WARNING"
+        ), "Unrelated non-standard folder should trigger MAJOR (was WARNING pre-v2.68.0)"
 
     def test_submodule_check_safe_with_invalid_plugin_json(self, tmp_path):
         """If plugin.json is invalid JSON, the submodule check must not crash."""

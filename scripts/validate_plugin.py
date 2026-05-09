@@ -1720,8 +1720,21 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         allow_roots = cpv_cfg.get("allow_root_dirs", [])
         if isinstance(allow_roots, list) and dirname in allow_roots:
             continue
-        report.warning(
-            f"Non-standard directory '{dirname}/' — not part of the plugin spec. If needed by plugin scripts, consider documenting its purpose in README. (Add to cpv.allow_root_dirs in plugin.json to silence.)"
+        # Severity: MAJOR (was WARNING). The user's directive: "NO DEVIATION
+        # FROM THE STANDARD can be allowed unless you declare the custom
+        # folder in plugin.json". An undeclared non-standard root folder
+        # is the #1 source of "the plugin published but installs to
+        # nothing" because the install pipeline only knows about the
+        # standard component directories.
+        report.major(
+            f"[RC-NONSTD-DIR-001] Non-standard directory '{dirname}/' — not part "
+            "of the plugin spec, and not declared in plugin.json's "
+            "`cpv.allow_root_dirs`. Either move the contents under a standard "
+            "component dir (skills/agents/commands/hooks/scripts/...) OR add "
+            f"'{dirname}' to `cpv.allow_root_dirs` in .claude-plugin/plugin.json. "
+            "Undeclared non-standard root dirs are the #1 cause of empty plugin "
+            "installs because the install pipeline only loads from the standard "
+            "directories."
         )
 
     # Validate plugin-shipped settings.json if present
@@ -3240,7 +3253,12 @@ def validate_md_content_references(plugin_root: Path, report: ValidationReport) 
     if agents_dir.is_dir():
         md_files.extend(agents_dir.glob("*.md"))
 
-    # Skills (SKILL.md + references/*.md)
+    # Skills (SKILL.md + references/*.md). EXEMPT vendor-doc references
+    # — those are canonical embedded copies fetched from code.claude.com,
+    # and their cross-links use `/en/...` paths that target other Claude
+    # docs, not files inside the plugin. We keep them byte-identical to
+    # the upstream so doc updates produce clean diffs.
+    VENDOR_DOC_NAMES = {"plugins-reference.md", "skills-reference.md"}
     skills_dir = plugin_root / "skills"
     if skills_dir.is_dir():
         for skill_dir in skills_dir.iterdir():
@@ -3250,7 +3268,9 @@ def validate_md_content_references(plugin_root: Path, report: ValidationReport) 
                     md_files.append(skill_md)
                 refs_dir = skill_dir / "references"
                 if refs_dir.is_dir():
-                    md_files.extend(refs_dir.glob("*.md"))
+                    md_files.extend(
+                        f for f in refs_dir.glob("*.md") if f.name not in VENDOR_DOC_NAMES
+                    )
 
     if not md_files:
         return
@@ -4076,6 +4096,68 @@ def main() -> int:
             f"Error: {plugin_root} is a MARKETPLACE folder (has marketplace.json), not a plugin.\n"
             f"  Use validate_marketplace.py to validate marketplaces, or pass a plugin\n"
             f"  subfolder to validate_plugin.py.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Phase 0 plugin-shape detection — refuse to "validate as plugin" something
+    # that clearly isn't a plugin. Real incident: CPV agents wrapped a SKILL
+    # (which has SKILL.md at root + a `references/` folder + relative-path
+    # references) into a plugin manifest + marketplace + publish pipeline,
+    # and the published artifact installed to nothing because the underlying
+    # content was a skill, not a plugin. This guard fails fast with a clear
+    # message telling the user to call the right validator OR convert the
+    # content to a plugin first.
+    if not has_plugin_manifest and not has_marketplace and not args.marketplace_only:
+        skill_md_at_root = (plugin_root / "SKILL.md").is_file()
+        agents_only = (
+            (plugin_root / "agents").is_dir()
+            and not (plugin_root / "skills").is_dir()
+            and not (plugin_root / "commands").is_dir()
+            and not (plugin_root / "hooks").is_dir()
+        )
+        commands_only = (
+            (plugin_root / "commands").is_dir()
+            and not (plugin_root / "skills").is_dir()
+            and not (plugin_root / "agents").is_dir()
+            and not (plugin_root / "hooks").is_dir()
+        )
+        if skill_md_at_root:
+            print(
+                f"Error: {plugin_root} contains SKILL.md at root — it is a SKILL, not a plugin.\n"
+                f"  This is the most common mis-classification that produces empty plugin\n"
+                f"  installs. Either:\n"
+                f"  (a) wrap this skill INTO a new plugin: place its content under\n"
+                f"      <new-plugin>/skills/<skill-name>/SKILL.md, then add\n"
+                f"      <new-plugin>/.claude-plugin/plugin.json;\n"
+                f"  (b) ADD this skill to an existing plugin's skills/ folder;\n"
+                f"  (c) validate as a skill: `cpv-remote-validate skill {plugin_root}`.",
+                file=sys.stderr,
+            )
+            return 1
+        if agents_only:
+            print(
+                f"Error: {plugin_root} only has agents/ — it is a single agent, not a plugin.\n"
+                f"  Wrap into a plugin (add .claude-plugin/plugin.json + at least one\n"
+                f"  component) or add the agent to an existing plugin's agents/ folder.",
+                file=sys.stderr,
+            )
+            return 1
+        if commands_only:
+            print(
+                f"Error: {plugin_root} only has commands/ — it is a loose commands folder,\n"
+                f"  not a plugin. Wrap into a plugin or add to an existing plugin's commands/.",
+                file=sys.stderr,
+            )
+            return 1
+        # Generic missing-manifest case (no recognised standalone shape):
+        print(
+            f"Error: {plugin_root} has no .claude-plugin/plugin.json and no recognised\n"
+            f"  standalone Claude Code shape (no SKILL.md, no agents/, no commands/).\n"
+            f"  CPV refuses to validate this as a plugin — wrapping arbitrary directories\n"
+            f"  into plugin manifests has historically produced empty installs.\n"
+            f"  Add .claude-plugin/plugin.json (and at least one component dir) or pass\n"
+            f"  a different path.",
             file=sys.stderr,
         )
         return 1

@@ -159,6 +159,29 @@ scripts (§3a below), bash-only hook commands (§3b below), and Python
 scripts that use `os.path` / `os.system` / hardcoded `/tmp/` /
 `shell=True` (§3c below). Apply them in order, then re-validate.
 
+### IMPORTANT — bash → Python is NOT universal
+
+NEVER convert every `.sh` file in the plugin to Python without first
+checking each one against this exclusion list:
+
+1. **Bash-specific functionality**: heredocs, `set -o pipefail`, complex
+   `trap` handlers, process substitution `<(cmd)`, named pipes, or
+   external-tool composition that depends on bash syntax. Python
+   rewrite either loses functionality (no equivalent for `<(...)`) or
+   balloons in complexity. Leave the file as bash with a comment
+   marker the validator recognises.
+2. **Bash-teaching skills or examples**: a skill teaching bash, or a
+   reference file demonstrating bash patterns, MUST keep its `.sh`
+   examples intact. §3b's "bash hook constructs" rule applies to HOOK
+   COMMANDS only — NOT to code fenced inside `.md` documentation.
+3. **Plugin-author intent**: a plugin marketed as bash tooling
+   (README / CHANGELOG explicitly says so) keeps its bash. Surface
+   bash files as INFO, not MAJOR, in those plugins.
+
+When uncertain, ASK the user before converting. The fix loop's
+`[BLOCKED]` return is the right move when policy is unclear — NEVER
+the shortcut of "convert everything just in case".
+
 ### §3b — Convert bash hook commands to Python (cross-platform)
 
 Hook commands embedded in `hooks/hooks.json`, in plugin.json's inline

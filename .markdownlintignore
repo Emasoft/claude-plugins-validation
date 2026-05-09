@@ -1,0 +1,12 @@
+# Embedded vendor docs — fetched verbatim from code.claude.com.
+# Do NOT modify their formatting; we keep them byte-identical to the
+# upstream so that diffs against future doc updates are clean.
+skills/plugin-validation-skill/references/plugins-reference.md
+skills/plugin-validation-skill/references/skills-reference.md
+
+# Trash + report dirs are gitignored already, but list them here too
+# in case markdownlint is invoked at repo root before gitignore rules
+# kick in.
+.trashcan/
+reports/
+reports_dev/
