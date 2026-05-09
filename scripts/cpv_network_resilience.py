@@ -74,6 +74,15 @@ _TRANSIENT_SUBPROCESS_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"openssl ssl_read.* error", re.IGNORECASE),
     re.compile(r"network is unreachable", re.IGNORECASE),
     re.compile(r"transient .* failure", re.IGNORECASE),
+    # Go net package errors (gh CLI is Go-built; transient on flaky links).
+    # Examples seen in the wild:
+    #   `dial tcp 140.82.121.6:443: i/o timeout`
+    #   `read tcp 192.168.1.5:55432->140.82.121.6:443: i/o timeout`
+    #   `Get "https://api.github.com/...": context deadline exceeded`
+    re.compile(r"\bi/o timeout\b", re.IGNORECASE),
+    re.compile(r"\bcontext deadline exceeded\b", re.IGNORECASE),
+    re.compile(r"\bdial tcp\b.*\btimeout\b", re.IGNORECASE),
+    re.compile(r"\bno such host\b", re.IGNORECASE),  # transient DNS hiccup
 ]
 
 # These signatures indicate a permanent failure — NEVER retry. Permanent

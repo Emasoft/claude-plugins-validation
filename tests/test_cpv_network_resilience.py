@@ -41,6 +41,12 @@ import cpv_network_resilience as cnr  # noqa: E402
     "Too Many Requests",
     "the operation timed out",
     "gnutls_handshake() failed: A TLS packet with unexpected length was received.",
+    # Go net package errors — gh CLI is Go-built. Real cases observed when
+    # gh API hits flaky transit:
+    'Get "https://api.github.com/repos/Emasoft/foo/contents/.github/workflows/ci.yml": dial tcp 140.82.121.6:443: i/o timeout',
+    'read tcp 192.168.1.5:55432->140.82.121.6:443: i/o timeout',
+    'Get "https://api.github.com/...": context deadline exceeded',
+    'lookup api.github.com: no such host',
 ])
 def test_transient_subprocess_signatures(stderr: str):
     assert cnr.is_transient_subprocess_error(stderr, returncode=1) is True
