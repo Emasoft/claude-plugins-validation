@@ -1038,3 +1038,356 @@ class TestOrphanReleaseCommitRecovery:
         assert ["git", "reset", "--soft", "HEAD~1"] not in commands
         commit_cmds = [c for c in commands if c[:2] == ["git", "commit"] and "-m" in c]
         assert len(commit_cmds) == 1
+
+
+class TestSubmodulePushGate:
+    """TRDD-793ac32a Sprint 2 — submodule push gate.
+
+    Before the parent's `git push origin HEAD`, every submodule's
+    currently-checked-out SHA (as recorded in the parent's index) must be
+    reachable on the submodule's `origin` remote. If not, the parent
+    push would create a broken install: anyone cloning the parent with
+    `--recurse-submodules` would fail at submodule init because the
+    gitlinked SHA only exists in the maintainer's local clone.
+
+    These tests stub `subprocess.run` inside the publish module so we
+    never spawn real git processes or hit a network. Each test builds the
+    minimum on-disk state needed for the function under test:
+
+      - test_no_gitmodules_noop:                no .gitmodules → no-op
+      - test_submodule_reachable_passes:        one reachable submodule
+      - test_submodule_unreachable_fails:       one unreachable submodule
+      - test_multiple_submodules_one_unreachable: 3 submodules, one bad
+      - test_actionable_message_includes_push_command: error UX shape
+    """
+
+    @staticmethod
+    def _make_submodule_workdir(plugin_root: Path, sub_path: str) -> Path:
+        """Create the on-disk shape `_ensure_submodules_pushed` probes:
+        a `<plugin_root>/<sub_path>/.git` marker file. The function checks
+        `(sub_root / ".git").exists()` to decide whether the submodule is
+        initialized; we only need it to return True. Real git would have
+        `.git` as a gitdir-pointer file, but a plain file works for the
+        existence check."""
+        sub_root = plugin_root / sub_path
+        sub_root.mkdir(parents=True, exist_ok=True)
+        (sub_root / ".git").write_text(
+            "gitdir: ../.git/modules/" + sub_path, encoding="utf-8"
+        )
+        return sub_root
+
+    @staticmethod
+    def _stub_subprocess(monkeypatch, *, status_lines, branch_r_map):
+        """Stub publish.subprocess.run for the two commands the gate uses.
+
+        - `git submodule status` → returns one line per entry in
+          ``status_lines`` (already including the leading status marker).
+        - `git -C <sub> branch -r --contains <sha>` → consults
+          ``branch_r_map`` keyed by ``(sub_path, sha)``. Value is the
+          stdout the call should return; empty string ⇒ unreachable.
+
+        Any other subprocess call returns rc=0 / empty so we don't have
+        to enumerate every call site of subprocess.run inside publish.py.
+        """
+        def fake_run(cmd, **kwargs):
+            cmd_list = list(cmd)
+            if cmd_list[:2] == ["git", "submodule"] and "status" in cmd_list:
+                return _completed(
+                    returncode=0,
+                    stdout="\n".join(status_lines) + ("\n" if status_lines else ""),
+                )
+            # Match `git -C <sub_root> branch -r --contains <sha>`.
+            if (
+                len(cmd_list) >= 7
+                and cmd_list[0] == "git"
+                and cmd_list[1] == "-C"
+                and cmd_list[3:6] == ["branch", "-r", "--contains"]
+            ):
+                sub_root_str = cmd_list[2]
+                sha = cmd_list[6]
+                # Resolve sub_path from sub_root_str: it's the basename
+                # under plugin_root, but for portability the test keys
+                # branch_r_map by the trailing path component(s) the test
+                # used in ``status_lines``. Look up by sha first; fall
+                # back to the path tail.
+                # Try (path_tail, sha) for every key prefix-matching sub_root_str.
+                for (path_key, sha_key), stdout in branch_r_map.items():
+                    if sha_key == sha and sub_root_str.endswith(path_key):
+                        return _completed(returncode=0, stdout=stdout)
+                # Default: unreachable.
+                return _completed(returncode=0, stdout="")
+            return _completed(returncode=0)
+        monkeypatch.setattr(publish.subprocess, "run", fake_run)
+
+    def test_no_gitmodules_noop(self, monkeypatch, tmp_path):
+        """Plugin root has no .gitmodules → gate returns cleanly with no
+        subprocess calls beyond returning early. No SystemExit."""
+        # No .gitmodules file.
+        called: list[list[str]] = []
+
+        def fake_run(cmd, **_kw):
+            called.append(list(cmd))
+            return _completed(returncode=0)
+
+        monkeypatch.setattr(publish.subprocess, "run", fake_run)
+        publish._ensure_submodules_pushed(tmp_path)  # no exception
+        # Early return: subprocess.run must NOT have been invoked.
+        assert called == [], (
+            f"Expected zero subprocess calls when .gitmodules absent, got: {called}"
+        )
+
+    def test_submodule_reachable_passes(self, monkeypatch, tmp_path):
+        """One submodule, SHA reachable on origin → silent return."""
+        (tmp_path / ".gitmodules").write_text(
+            '[submodule "tests"]\n\tpath = tests\n\turl = https://github.com/x/cpv-tests.git\n',
+            encoding="utf-8",
+        )
+        self._make_submodule_workdir(tmp_path, "tests")
+        self._stub_subprocess(
+            monkeypatch,
+            status_lines=[" abcdef1234567890abcdef1234567890abcdef12 tests (heads/main)"],
+            branch_r_map={
+                ("tests", "abcdef1234567890abcdef1234567890abcdef12"):
+                    "  origin/main\n",
+            },
+        )
+        publish._ensure_submodules_pushed(tmp_path)  # no exception
+
+    def test_submodule_unreachable_fails(self, monkeypatch, tmp_path, capsys):
+        """One submodule, SHA NOT reachable on origin → exit 1 with an
+        actionable error message naming the submodule path AND the exact
+        push command."""
+        (tmp_path / ".gitmodules").write_text(
+            '[submodule "tests"]\n\tpath = tests\n\turl = https://github.com/x/cpv-tests.git\n',
+            encoding="utf-8",
+        )
+        self._make_submodule_workdir(tmp_path, "tests")
+        # `branch -r --contains <sha>` returns empty → unreachable.
+        self._stub_subprocess(
+            monkeypatch,
+            status_lines=[" deadbeefdeadbeefdeadbeefdeadbeefdeadbeef tests (heads/main)"],
+            branch_r_map={
+                ("tests", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"): "",
+            },
+        )
+        with pytest.raises(SystemExit) as exc:
+            publish._ensure_submodules_pushed(tmp_path)
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert "tests" in err
+        assert "deadbeef" in err  # short SHA in message
+        assert "git push origin HEAD" in err
+
+    def test_multiple_submodules_one_unreachable(self, monkeypatch, tmp_path, capsys):
+        """3 submodules, one is unreachable → fails with the offending
+        path named in the error, and the OTHER two submodules are NOT in
+        the error block (they're reachable)."""
+        gm = []
+        for sub in ("tests", "design", "git-hooks"):
+            gm.append(
+                f'[submodule "{sub}"]\n\tpath = {sub}\n\turl = https://github.com/x/{sub}.git\n'
+            )
+            self._make_submodule_workdir(tmp_path, sub)
+        (tmp_path / ".gitmodules").write_text("".join(gm), encoding="utf-8")
+
+        sha_tests = "1111111111111111111111111111111111111111"
+        sha_design = "2222222222222222222222222222222222222222"
+        sha_hooks = "3333333333333333333333333333333333333333"
+        self._stub_subprocess(
+            monkeypatch,
+            status_lines=[
+                f" {sha_tests} tests (heads/main)",
+                f" {sha_design} design (heads/main)",
+                f" {sha_hooks} git-hooks (heads/main)",
+            ],
+            branch_r_map={
+                ("tests", sha_tests): "  origin/main\n",
+                # design is the bad one — empty stdout → unreachable.
+                ("design", sha_design): "",
+                ("git-hooks", sha_hooks): "  origin/main\n",
+            },
+        )
+        with pytest.raises(SystemExit) as exc:
+            publish._ensure_submodules_pushed(tmp_path)
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        # The unreachable submodule must be named.
+        assert "design" in err
+        # And its short SHA must appear.
+        assert "22222222" in err
+        # The fix command for that path.
+        assert "cd design && git push origin HEAD" in err
+        # The two reachable submodules MUST NOT appear in any
+        # bullet/line of the error block (i.e. must not be flagged
+        # alongside the bad one).
+        # We check the bullet form to be precise — the word "tests" or
+        # "git-hooks" can appear as part of a heading or generic prose.
+        assert "submodule 'tests'" not in err
+        assert "submodule 'git-hooks'" not in err
+
+    def test_actionable_message_includes_push_command(self, monkeypatch, tmp_path, capsys):
+        """The failure message MUST contain `git push origin HEAD` for
+        the offending submodule path. This is the contract the TRDD
+        promises to maintainers."""
+        (tmp_path / ".gitmodules").write_text(
+            '[submodule "vendor/foo"]\n\tpath = vendor/foo\n\turl = https://example.com/foo.git\n',
+            encoding="utf-8",
+        )
+        self._make_submodule_workdir(tmp_path, "vendor/foo")
+        sha = "cafebabecafebabecafebabecafebabecafebabe"
+        self._stub_subprocess(
+            monkeypatch,
+            status_lines=[f" {sha} vendor/foo (heads/main)"],
+            branch_r_map={("vendor/foo", sha): ""},
+        )
+        with pytest.raises(SystemExit):
+            publish._ensure_submodules_pushed(tmp_path)
+        err = capsys.readouterr().err
+        # Exact contract: the message includes the path + the push
+        # command in a form a maintainer can paste into their shell.
+        assert "cd vendor/foo && git push origin HEAD" in err
+
+    def test_uninitialized_submodule_reported_as_unreachable(self, monkeypatch, tmp_path, capsys):
+        """A submodule whose `.git` marker is absent (never `submodule
+        update --init`'d) cannot be probed without side effects. The
+        gate treats it as unreachable so the maintainer initializes it
+        themselves before re-running publish."""
+        (tmp_path / ".gitmodules").write_text(
+            '[submodule "tests"]\n\tpath = tests\n\turl = https://github.com/x/cpv-tests.git\n',
+            encoding="utf-8",
+        )
+        # NOTE: deliberately NOT calling _make_submodule_workdir, so
+        # `<plugin_root>/tests/.git` does not exist.
+        self._stub_subprocess(
+            monkeypatch,
+            status_lines=[" 5555555555555555555555555555555555555555 tests (heads/main)"],
+            branch_r_map={},  # no entries — tests should be flagged unreachable
+        )
+        with pytest.raises(SystemExit) as exc:
+            publish._ensure_submodules_pushed(tmp_path)
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert "tests" in err
+        assert "git push origin HEAD" in err
+
+    def test_empty_gitmodules_file_noop(self, monkeypatch, tmp_path):
+        """`.gitmodules` exists but `git submodule status` returns no
+        lines → gate is a clean no-op (degenerate but legal state)."""
+        (tmp_path / ".gitmodules").write_text("", encoding="utf-8")
+        self._stub_subprocess(
+            monkeypatch,
+            status_lines=[],
+            branch_r_map={},
+        )
+        publish._ensure_submodules_pushed(tmp_path)  # no exception
+
+    def test_submodule_status_failure_aborts(self, monkeypatch, tmp_path, capsys):
+        """`git submodule status` exiting non-zero (corrupt config,
+        not-a-git-repo, etc.) aborts publish with stderr message — we
+        do NOT silently let publish proceed because that would also
+        break submodule consumers."""
+        (tmp_path / ".gitmodules").write_text(
+            '[submodule "tests"]\n\tpath = tests\n\turl = https://github.com/x/cpv-tests.git\n',
+            encoding="utf-8",
+        )
+
+        def fake_run(cmd, **_kw):
+            if list(cmd)[:2] == ["git", "submodule"]:
+                return _completed(returncode=128, stdout="", stderr="not a git repo")
+            return _completed(returncode=0)
+
+        monkeypatch.setattr(publish.subprocess, "run", fake_run)
+        with pytest.raises(SystemExit) as exc:
+            publish._ensure_submodules_pushed(tmp_path)
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert "git submodule status" in err
+
+    def test_submodule_status_timeout_aborts(self, monkeypatch, tmp_path, capsys):
+        """`git submodule status` timing out aborts publish — we cannot
+        verify reachability under a timeout, so we fail closed."""
+        (tmp_path / ".gitmodules").write_text(
+            '[submodule "tests"]\n\tpath = tests\n\turl = https://github.com/x/cpv-tests.git\n',
+            encoding="utf-8",
+        )
+
+        def fake_run(cmd, **_kw):
+            if list(cmd)[:2] == ["git", "submodule"]:
+                raise publish.subprocess.TimeoutExpired(cmd, timeout=60)
+            return _completed(returncode=0)
+
+        monkeypatch.setattr(publish.subprocess, "run", fake_run)
+        with pytest.raises(SystemExit) as exc:
+            publish._ensure_submodules_pushed(tmp_path)
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert "timed out" in err
+
+    def test_branch_r_timeout_treated_as_unreachable(self, monkeypatch, tmp_path, capsys):
+        """`git branch -r --contains` timing out per-submodule is treated
+        as unreachable (conservative). The submodule is named in the
+        error so the maintainer knows which one to inspect."""
+        (tmp_path / ".gitmodules").write_text(
+            '[submodule "tests"]\n\tpath = tests\n\turl = https://github.com/x/cpv-tests.git\n',
+            encoding="utf-8",
+        )
+        self._make_submodule_workdir(tmp_path, "tests")
+
+        def fake_run(cmd, **_kw):
+            cmd_list = list(cmd)
+            if cmd_list[:2] == ["git", "submodule"] and "status" in cmd_list:
+                return _completed(
+                    returncode=0,
+                    stdout=" abcdef1234567890abcdef1234567890abcdef12 tests (heads/main)\n",
+                )
+            if (
+                len(cmd_list) >= 7
+                and cmd_list[0] == "git"
+                and cmd_list[1] == "-C"
+                and cmd_list[3:6] == ["branch", "-r", "--contains"]
+            ):
+                raise publish.subprocess.TimeoutExpired(cmd, timeout=60)
+            return _completed(returncode=0)
+
+        monkeypatch.setattr(publish.subprocess, "run", fake_run)
+        with pytest.raises(SystemExit) as exc:
+            publish._ensure_submodules_pushed(tmp_path)
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert "tests" in err
+        assert "git push origin HEAD" in err
+
+    def test_gate_is_called_in_stage_commit_tag_push_after_gh_auth(self, monkeypatch, tmp_path):
+        """Wire-up test: the gate runs BEFORE the parent push and AFTER
+        gh-auth precheck. We capture the call order via a sentinel list
+        so a future refactor that reorders these gates breaks this test."""
+        tag_name = "v1.0.0"
+        call_order: list[str] = []
+
+        def fake_run(cmd, **_kw):
+            return _completed(returncode=0)
+
+        def fake_git_with_retry(cmd, **_kw):
+            call_order.append("git_push:" + " ".join(cmd[1:]))
+            return _completed(returncode=0)
+
+        monkeypatch.setattr(publish, "run", fake_run)
+        monkeypatch.setattr(publish, "git_with_retry", fake_git_with_retry)
+        monkeypatch.setattr(publish, "_head_commit_message", lambda _root: "feat: x")
+        monkeypatch.setattr(publish, "_git_porcelain_clean", lambda _root: False)
+        monkeypatch.setattr(publish, "_local_tag_exists", lambda _root, _tag: False)
+        monkeypatch.setattr(publish, "_remote_tag_exists", lambda _root, _tag: False)
+        monkeypatch.setattr(publish, "_resolve_owner_repo", lambda _root: ("Alice", "repo"))
+        monkeypatch.setattr(publish, "_ensure_gh_auth", lambda _o, _r: call_order.append("gh_auth"))
+        monkeypatch.setattr(publish, "_ensure_submodules_pushed", lambda _root: call_order.append("submodule_gate"))
+
+        rc = publish.stage_commit_tag_push(tmp_path, tag_name)
+        assert rc == 0
+
+        # Order MUST be: gh_auth → submodule_gate → first git push.
+        gh_idx = call_order.index("gh_auth")
+        sub_idx = call_order.index("submodule_gate")
+        first_push_idx = next(i for i, name in enumerate(call_order) if name.startswith("git_push:"))
+        assert gh_idx < sub_idx < first_push_idx, (
+            f"Expected gh_auth → submodule_gate → push, got: {call_order}"
+        )

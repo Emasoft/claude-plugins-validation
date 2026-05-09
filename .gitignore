@@ -100,3 +100,6 @@ rck-*-merge-pending.md
 # etc. Gitignored: contains issue-number + repo-slug pairs for the doctor's
 # fix-and-close-on-publish flow (#8 in the post-diagnosis follow-up menu).
 .cpv-doctor/
+
+# Serena MCP server — per-machine project config and cache. Never source.
+.serena/

@@ -8,8 +8,23 @@ description: |
   (parent folders, skill folders, .claude configs, etc.) to lock onto
   the right plugin root, then runs the loop. Loads fix-validation skill
   for error-to-fix mappings and plugin-validation-skill for structural reference.
+  When invoked for canonical-pipeline migration (via /cpv-upgrade-plugin) the
+  agent ALSO enforces the 82-check Pre-completion verification matrix from
+  references/canonical-pipeline-migration-checklist.md and runs a real
+  publish.py + gh run watch on the resulting tag — see "Pre-completion
+  verification (REQUIRED)" section below.
 model: opus
 maxTurns: 200
+tools:
+  - Read
+  - Edit
+  - Write
+  - Bash
+  - Grep
+  - Glob
+  - WebFetch
+  - Skill
+  - AskUserQuestion
 skills:
   - fix-validation
   - canonical-pipeline
@@ -123,6 +138,19 @@ Returning `[DONE]` while the plugin still has fixable findings is a HARD rule vi
 
 The fix loop's max iteration cap is 10. If you hit the cap with findings remaining, return `[BLOCKED]` (NOT `[DONE]`) with the iteration count, the remaining findings, and the suspected reason (e.g. circular dependency, finding requires a manual decision, fix recipe missing for that error code).
 
+### Migration exit contract (for /cpv-upgrade-plugin runs)
+
+**When this agent is dispatched as a canonical-pipeline migration** (entry point `/cpv-upgrade-plugin`, or any prompt that requests the §1–§5 pipeline migration recipes), the validator-only completion gate above is **necessary but NOT sufficient**.
+
+> **Migration is NOT complete until:**
+> **(a)** every BLOCKER and MAJOR check in [`references/canonical-pipeline-migration-checklist.md`](../references/canonical-pipeline-migration-checklist.md) passes (the 82-check matrix), **AND**
+> **(b)** a real `uv run python scripts/publish.py` run for the plugin completes with **green CI** on the resulting tag (verified via `gh run watch --exit-status`), **AND**
+> **(c)** if the plugin lives in a Layout-C marketplace OR is registered in any external marketplace, that marketplace's own `publish.py` also completes with green CI on its own tag.
+>
+> **Any failure** → report `[PARTIAL]`, list the specific `CHECK-NN` rows that failed with `file:line` citations from the run-all log, and **stop**. Do NOT auto-rerun publish.py. Do NOT silently `--force-templates`. Surface the failure to the user with explicit options (see "Pre-completion verification (REQUIRED)" below).
+
+The 82-check matrix is purpose-built to catch the silent-failure modes that `validate_plugin.py --strict` cannot see — broken-glob paths in workflow YAMLs, module-scope `sys.exit()` in hook scripts, missing `lib/__init__.py`, retired publish.py subcommands, untracked `*_dev/` content, etc. — i.e. the exact bug class that produced [issue #21](https://github.com/Emasoft/claude-plugins-validation/issues/21).
+
 ## Optional `min_severity` parameter (post-validate menu integration)
 
 When the orchestrator dispatches this agent from the cpv-main-menu §3.10
@@ -231,14 +259,20 @@ Run this loop until termination. Max 10 iterations by default; each iteration ca
 5. **If blocking warnings exist** → fix them. Go to step 1.
 6. **If only advisory warnings remain** → proceed to step 7.
 7. **MANDATORY FINAL VERIFICATION** — run validate_plugin.py ONE MORE TIME as a clean-room re-check, completely independent of the loop's exit state. The output of THIS run is what you include in the returned summary. If this final run produces ANY non-WARNING finding (even one), you MUST go back to step 1 — do NOT return SUCCESS. The previous loop iteration may have appeared clean but a stale-cache, race condition, or partial fix could have hidden the truth. The final run is the source of truth.
-8. **Capture the final SUMMARY line verbatim** — include it in the returned report so the user can see, byte-for-byte, what the validator said. Format: `Final validate_plugin --strict: CRITICAL=0 MAJOR=0 MINOR=0 NIT=0 WARNING=N` (where N is 0 or matches the documented advisory count).
-9. **Return SUCCESS** ONLY when step 7's run shows zero CRITICAL/MAJOR/MINOR/NIT.
+
+   **7c (migration runs ONLY) — Pre-completion verification matrix.** When this agent was dispatched for a canonical-pipeline migration (entry points `/cpv-upgrade-plugin`, the §1–§5 migration prompt, or any caller that explicitly requested pipeline-standard upgrade), you MUST also run the 82-check matrix from `references/canonical-pipeline-migration-checklist.md`. See the **"Pre-completion verification (REQUIRED)"** section below for the exact bash sequence. A BLOCKER or MAJOR fail in `run_all_checks` is equivalent to a CRITICAL/MAJOR finding in `validate_plugin.py` — return `[PARTIAL]` (NOT `[DONE]`) listing each failed `CHECK-NN`, do NOT proceed to step 8.
+
+   **7d (migration runs ONLY) — Real publish + CI watch.** Only after step 7 and step 7c both pass, run `uv run python scripts/publish.py --patch` AND `gh run watch --exit-status` on the resulting tag. If the plugin is part of a Layout-C marketplace (or registered in any external marketplace), repeat for the marketplace's own publish.py. If either CI run fails, return `[PARTIAL]` with the failing job's log location.
+
+8. **Capture the final SUMMARY line verbatim** — include it in the returned report so the user can see, byte-for-byte, what the validator said. Format: `Final validate_plugin --strict: CRITICAL=0 MAJOR=0 MINOR=0 NIT=0 WARNING=N` (where N is 0 or matches the documented advisory count). For migration runs, ALSO include the Unicode-bordered table from step 7c's `run_all_checks` output AND the green CI run URL(s) from step 7d.
+9. **Return SUCCESS** ONLY when step 7's run shows zero CRITICAL/MAJOR/MINOR/NIT, AND (for migration runs) step 7c returns exit 0 (no BLOCKER/MAJOR fails), AND step 7d's `gh run watch` reported `success` for both plugin and marketplace tags.
 
 Safety rails:
 - If iteration N produces the **same finding set** as iteration N-1 → the fix is not landing. Stop, surface to user as `[BLOCKED]`.
 - If iterations reach 10 → stop, return `[BLOCKED]` with the remaining findings list.
 - Never "fix" by lowering severity, adding ignore rules, or patching the validator.
 - **Step 7's run is non-skippable.** Returning SUCCESS without it is a hard rule violation. Even when the loop "feels clean", the final verification catches the cases where step 3's fix introduced a new finding the loop didn't re-check.
+- **Steps 7c and 7d are non-skippable for migration runs.** They close issue #21 ask #1 — *"the migration agent's exit contract should be CI passes on next push"*. Returning `[DONE]` from a migration without exercising both is a HARD rule violation.
 
 Full algorithm + termination conditions + WARNING classification rules: the `iterative-fix-loop` reference in the `fix-validation` skill.
 
@@ -318,6 +352,129 @@ After migration, always re-run `uv run python scripts/validate_plugin.py . --str
 - 0 MAJOR from validate_pipeline_script_refs (no dangling refs)
 - The CI workflow still parses and lints all source files
 - `publish.py --gate` still succeeds (the install-hook still works)
+
+This is the legacy validator-only check. The migration is **NOT complete**
+until the **Pre-completion verification (REQUIRED)** section below has also
+passed.
+
+## Pre-completion verification (REQUIRED)
+
+This section is **mandatory for every canonical-pipeline migration run**
+(`/cpv-upgrade-plugin`, the §1–§5 prompt, or any caller asking for pipeline
+upgrade). Skipping any step here violates the Migration exit contract and
+the user has explicitly asked that this be enforced. See [issue #21
+ask #1](https://github.com/Emasoft/claude-plugins-validation/issues/21) for
+the bug class that motivated it.
+
+The authoritative reference is
+[`references/canonical-pipeline-migration-checklist.md`](../references/canonical-pipeline-migration-checklist.md)
+— 82 checks across 16 categories (workflow YAML integrity, Python source
+quality, hook shape, publish.py, plugin.json, .gitignore, CPV self-validate,
+canonical-template parity, tests, git state, smoke-test publish,
+marketplace, notification chain, hooks.json, MCP servers, docs &
+changelog). Read the file in full before running step 7c the first time on
+any plugin so that you know which CHECK-NN IDs map to the bug class you
+already fixed.
+
+**Run, in order, the following bash blocks** with `cwd` set to the plugin
+root:
+
+```bash
+# Step 1 — extract and run the 82-check matrix from the canonical checklist.
+# This loads run_all_checks() from references/canonical-pipeline-migration-checklist.md
+# and writes a Unicode-bordered Markdown table to
+# $MAIN_ROOT/reports/canonical-pipeline-migration/<ts±tz>-run-all.md.
+CHECKLIST="${CLAUDE_PLUGIN_ROOT}/references/canonical-pipeline-migration-checklist.md"
+# Extract the run-all bash block between '### run_all_checks' and '### END_RUN_ALL'.
+awk '/^### run_all_checks$/,/^### END_RUN_ALL$/' "$CHECKLIST" \
+  | sed '1d;$d' \
+  > /tmp/run_all_checks.sh
+# Source the function definition.
+source /tmp/run_all_checks.sh
+# Define cpv_check_NN stubs by inlining each "Verify:" snippet from the checklist
+# (the orchestrator may instead source scripts/run_migration_checks.sh if it exists).
+if [ -f scripts/run_migration_checks.sh ]; then
+  source scripts/run_migration_checks.sh
+fi
+# Run the matrix. Exits 0 only if every BLOCKER + MAJOR passes.
+run_all_checks "$PWD"
+RUN_ALL_RC=$?
+if [ "$RUN_ALL_RC" -ne 0 ]; then
+  echo "[PARTIAL] run_all_checks exited $RUN_ALL_RC — see Unicode-bordered table above for which CHECK-NN failed."
+  echo "DO NOT proceed to step 2 (publish). DO NOT silently --force-templates. Surface the failure to the user."
+  exit "$RUN_ALL_RC"
+fi
+```
+
+After step 1 returns exit 0, AND only then:
+
+```bash
+# Step 2 — smoke-test publish (zero side-effects).
+# This catches argparse breakage, ImportError on retired subcommands,
+# and any other "publish.py exists but is broken" failure that
+# validate_plugin.py cannot detect.
+uv run python scripts/publish.py --print-gates    # exits 0 if argparse + imports OK
+uv run python scripts/publish.py --dry-run        # exits 0 if the full pipeline parses
+```
+
+After step 2 returns exit 0:
+
+```bash
+# Step 3 — real publish + gh run watch (the actual exit gate).
+# The user explicitly asked: "the migration agent's exit contract should be
+# CI passes on next push." This is that gate.
+uv run python scripts/publish.py --patch          # bumps + commits + pushes the tag
+# Capture the new tag for the gh run watch.
+TAG=$(git describe --tags --abbrev=0)
+# gh run watch on the workflow run triggered by the tag push.
+# --exit-status returns non-zero if the run fails.
+RUN_ID=$(gh run list --branch "$TAG" --limit 1 --json databaseId -q '.[0].databaseId')
+[ -z "$RUN_ID" ] && RUN_ID=$(gh run list --limit 1 --json databaseId -q '.[0].databaseId')
+gh run watch "$RUN_ID" --exit-status
+PUBLISH_RC=$?
+if [ "$PUBLISH_RC" -ne 0 ]; then
+  LOG_URL=$(gh run view "$RUN_ID" --json url -q '.url')
+  echo "[PARTIAL] gh run watch exited $PUBLISH_RC — failing job log: $LOG_URL"
+  exit "$PUBLISH_RC"
+fi
+```
+
+After step 3 returns exit 0, **if the plugin is in a Layout-C marketplace
+OR registered in any external marketplace**, repeat step 2 + step 3 from
+the marketplace's repo root:
+
+```bash
+# Step 4 (conditional) — marketplace publish + gh run watch.
+# Only needed when the plugin is part of a marketplace.
+# Detect: does the plugin's repo have .claude-plugin/marketplace.json (Layout C),
+# OR is the plugin's name listed in any registered upstream marketplace?
+if [ -f ".claude-plugin/marketplace.json" ]; then
+  # Layout C — marketplace.json is at the plugin root, single repo.
+  # publish.py at this same root already bumps both manifests in step 3,
+  # so the same CI run covers both — no extra step needed.
+  echo "Layout C detected — single tag covers both plugin + marketplace."
+else
+  # Layout A — separate plugin and marketplace repos.
+  # Locate the upstream marketplace via plugin.json:repository field
+  # or the registered marketplaces list, cd there, and run the same gates.
+  echo "Locate the upstream marketplace and repeat steps 2 + 3 from its repo root."
+fi
+```
+
+**Do NOT silently `--force-templates` when checks fail.** When step 1 fails,
+present the per-CHECK failure list to the user and ask them to choose:
+
+| Option | What happens |
+|--------|--------------|
+| **(a) Fix manually** | The agent surfaces the exact CHECK-NN failures with file:line citations and waits for the user to fix them. The user re-invokes the agent when ready. |
+| **(b) Re-run with `--force-templates`** | The agent reruns `uv run python scripts/standardize_plugin.py . --fix --force-templates` then re-enters the loop. **EXPLICIT WARNING required**: hand-tuned customisations to the canonical files (publish.py, ci.yml, pre-push, cliff.toml, etc.) will be **overwritten** by the canonical templates. Surface a `git diff` preview of every drifted file BEFORE running. |
+| **(c) Abort** | The agent returns `[PARTIAL]` with the run-all log path and stops. The plugin is left in its current state (no rollback). |
+
+Use AskUserQuestion to surface this choice — never auto-pick.
+
+**Show the Unicode-bordered table from `run_all_checks` to the user as part
+of the migration completion report.** The table is the source of truth for
+"what passed and what failed"; do not summarise it in prose.
 
 ## Rules
 

@@ -37,10 +37,13 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import difflib
+import glob as _glob
 import json
 import os
 import platform
 import re
+import shlex
 import sys
 from pathlib import Path
 from typing import Any, cast
@@ -2952,9 +2955,13 @@ def validate_strip_gitmodules(plugin_root: Path, report: ValidationReport) -> No
       * Recorded `submodule_commit_sha` cross-check vs git index
         → CRITICAL on mismatch (STRIP-G015)
 
-    No-op when `.gitmodules` is absent. Skips silently when CPV's own
-    `cpv_validate_gitmodules` module cannot be imported (degraded but
-    not blocking — the engine ALSO runs the same check at strip time).
+    No-op when `.gitmodules` is absent. **Fail-closed** when CPV's own
+    `cpv_validate_gitmodules` module cannot be imported: emit CRITICAL
+    with code RC-STRIP-GITMODULES-IMPORT-FAILED. A missing security
+    validator is itself a security failure — refusing to validate is
+    safer than silently passing the plugin (the engine ALSO runs the
+    same check at strip time, but that is a separate execution
+    path).
     """
     gm = plugin_root / ".gitmodules"
     if not gm.is_file():
@@ -2967,12 +2974,21 @@ def validate_strip_gitmodules(plugin_root: Path, report: ValidationReport) -> No
         if scripts_dir not in _sys.path:
             _sys.path.insert(0, scripts_dir)
         from cpv_validate_gitmodules import validate_gitmodules  # noqa: PLC0415
-    except ImportError:
-        # Engine helper missing — degraded mode (no allowlist enforcement).
-        report.minor(
-            ".gitmodules present but cpv_validate_gitmodules.py missing — "
-            "URL allowlist not enforced this run (TRDD-793ac32a). Update CPV "
-            "to a version that ships the engine."
+    except ImportError as e:
+        # Engine helper missing — security validator unavailable.
+        # FAIL-CLOSED: refuse to validate rather than silently pass.
+        # A missing CRITICAL-tier check on a security-sensitive surface
+        # (.gitmodules URL allowlist) must NEVER degrade to a soft warning
+        # — that turns a security validator into a fail-open path that
+        # an attacker can exploit by deleting / shadowing the helper.
+        report.critical(
+            "[RC-STRIP-GITMODULES-IMPORT-FAILED] .gitmodules present but "
+            "cpv_validate_gitmodules.py is not installed/importable — "
+            f"refusing to validate (import error: {e}). The .gitmodules URL "
+            "allowlist is a CRITICAL-tier security check (TRDD-793ac32a) "
+            "and CPV must not pass plugins through it silently. Reinstall "
+            "CPV from a release that ships scripts/cpv_validate_gitmodules.py, "
+            "or remove .gitmodules from the plugin if no submodule is needed."
         )
         return
 
@@ -3614,6 +3630,306 @@ def validate_pipeline_script_refs(plugin_root: Path, report: ValidationReport) -
             )
 
 
+# ── RC-WORKFLOW-PATH-BROKEN (issue #21 ask #2) ────────────────────────────────
+# Path-shape heuristic: a token is "path-like" if it starts with one of these
+# prefixes or carries a trailing ".sh"/".py" extension. We DELIBERATELY keep
+# this list narrow — broadening it (e.g. matching every `*` or every relative
+# segment) starts catching glob-formatted matrix variables, makefile vars,
+# bash arrays, etc. The narrow prefix list catches the documented symptom
+# (post-migration .sh references that no longer exist) without false-positives
+# on legitimate workflow constructs.
+_WORKFLOW_PATH_PREFIXES: tuple[str, ...] = (
+    "scripts/",
+    "tests/",
+    ".github/",
+    ".githooks/",
+    "git-hooks/",
+    "./",
+)
+
+# Glob meta-characters in the same shell sense Python's glob module uses.
+_WORKFLOW_GLOB_CHARS: frozenset[str] = frozenset({"*", "?", "[", "]"})
+
+
+def _looks_like_workflow_path(token: str) -> bool:
+    """True iff ``token`` is a candidate path argument extracted from a
+    workflow ``run:`` body.
+
+    Excludes flag tokens (``-x``), URLs (``http://...``, ``https://...``),
+    env-var refs (``${{ matrix.x }}``, ``$FOO``, ``${HOME}``), bare
+    binaries (``shellcheck``, ``bash``), and KEY=VALUE assignments.
+    """
+    if not token:
+        return False
+    # Flags: -x, --foo, ---bar (anything starting with `-`).
+    if token.startswith("-"):
+        return False
+    # URLs.
+    lowered = token.lower()
+    if (
+        lowered.startswith("http://")
+        or lowered.startswith("https://")
+        or lowered.startswith("git+ssh://")
+        or lowered.startswith("ssh://")
+    ):
+        return False
+    # GitHub Actions expressions and env-var refs. ${{ ... }} is the GHA
+    # expression form; $FOO and ${FOO} are POSIX shell. Either way, the token
+    # is not a literal path on disk and must NOT be flagged.
+    if "${{" in token or token.startswith("$") or token.startswith("${"):
+        return False
+    # Backticked command substitutions and $(...) substitutions are not paths.
+    if token.startswith("`") or token.startswith("$("):
+        return False
+    # KEY=VALUE shell assignments — the token isn't a path even when the value
+    # part *contains* one (the assignment as a whole is a single token).
+    if "=" in token and "/" not in token.split("=", 1)[0]:
+        return False
+    # Path-shape heuristic — must start with one of the known repo prefixes
+    # OR end in a recognised extension. Avoids flagging bare command names
+    # like ``shellcheck`` or ``bash``.
+    if any(token.startswith(p) for p in _WORKFLOW_PATH_PREFIXES):
+        return True
+    if token.endswith((".sh", ".py", ".yml", ".yaml", ".toml", ".json")):
+        # An unprefixed extension hit ('foo.sh') is too aggressive — only
+        # flag when the token also contains a path separator. ``echo done.sh``
+        # would otherwise emit a false positive.
+        if "/" in token:
+            return True
+    return False
+
+
+def _is_workflow_glob(token: str) -> bool:
+    """Treat ``token`` as a glob iff it contains shell wildcards. Anything
+    else is a literal path. Mirrors Python's ``glob`` module which treats
+    ``*``, ``?`` and ``[…]`` as wildcards."""
+    return any(ch in _WORKFLOW_GLOB_CHARS for ch in token)
+
+
+def _scan_workflow_run_body(body: str, body_start_line: int) -> list[tuple[str, int]]:
+    """Yield (token, absolute_line_no) tuples for every path-like token
+    found in a workflow ``run:`` body.
+
+    The body may be multi-line (``run: |`` literal block scalar). Each
+    line is shlex-tokenised independently with ``posix=True`` so quoted
+    strings collapse to single tokens. Tokeniser failures (unbalanced
+    quotes from ``run: |`` heredoc bodies, half-written EOF blocks, etc.)
+    fall back to whitespace-splitting that line — better than skipping
+    the entire file.
+    """
+    results: list[tuple[str, int]] = []
+    for offset, line in enumerate(body.splitlines()):
+        # Comments and empty lines: nothing to extract.
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        try:
+            tokens = shlex.split(line, comments=True, posix=True)
+        except ValueError:
+            tokens = line.split()
+        for token in tokens:
+            if _looks_like_workflow_path(token):
+                results.append((token, body_start_line + offset))
+    return results
+
+
+def _collect_run_blocks(content: str) -> list[tuple[str, int]]:
+    """Extract every ``run:`` body from a workflow YAML as a (body, line_no)
+    list. Falls back to a regex pass when ``yaml.safe_load`` fails — better
+    than giving up because of a single malformed step.
+
+    We use a hybrid approach: PyYAML for structural extraction, then
+    re-locate the body in the raw source so we can attach correct line
+    numbers (PyYAML strips them). The line number returned is the line
+    of the first content line of the body, NOT the line of the ``run:``
+    key — the user wants citations like ``ci.yml:42`` to point at the
+    offending command, not at the block-header line above it.
+    """
+    blocks: list[tuple[str, int]] = []
+
+    # ── Structural pass via yaml.safe_load ────────────────────────────
+    try:
+        doc = yaml.safe_load(content)
+    except Exception:
+        doc = None
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k == "run" and isinstance(v, str):
+                    body_start = _locate_run_body(content, v)
+                    blocks.append((v, body_start))
+                else:
+                    _walk(v)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    if doc is not None:
+        _walk(doc)
+        if blocks:
+            return blocks
+
+    # ── Regex fallback ─────────────────────────────────────────────────
+    # When PyYAML can't parse (e.g. tab indentation, unsupported tag), or
+    # the document parsed but contained zero ``run:`` keys (some workflows
+    # use only ``uses:`` actions), fall back to a regex that finds every
+    # ``run:`` line and grabs either the inline value or the literal-block
+    # body that follows.
+    pattern = re.compile(r"^([ \t]*)run:[ \t]*(\|[+-]?|>[+-]?)?[ \t]*(.*)$", re.MULTILINE)
+    for m in pattern.finditer(content):
+        indent = m.group(1)
+        block_marker = (m.group(2) or "").strip()
+        inline_value = m.group(3)
+        # Line number of the body's first physical line (NOT the run: line
+        # itself — the diagnostic message should point at the offending
+        # command). For inline ``run: foo`` that's the same line; for
+        # block ``run: |`` it's the next line.
+        line_at_run_key = content[: m.start()].count("\n") + 1
+        if block_marker.startswith("|") or block_marker.startswith(">"):
+            # Block scalar — collect indented continuation lines.
+            lines = content.splitlines()
+            start_idx = line_at_run_key  # 1-based: line AFTER the run: line
+            collected: list[str] = []
+            for idx in range(start_idx, len(lines)):
+                line = lines[idx]
+                if not line.strip():
+                    collected.append("")
+                    continue
+                # Block ends when indentation regresses to or below the
+                # ``run:`` line's indentation.
+                line_indent = line[: len(line) - len(line.lstrip())]
+                if len(line_indent) <= len(indent):
+                    break
+                collected.append(line)
+            body = "\n".join(collected).rstrip("\n")
+            blocks.append((body, start_idx + 1))  # 1-based body line
+        else:
+            blocks.append((inline_value or "", line_at_run_key))
+
+    return blocks
+
+
+def _locate_run_body(content: str, body: str) -> int:
+    """Best-effort 1-based line number of a ``run:`` body inside the raw
+    YAML source. Used when PyYAML stripped the line metadata.
+
+    Strategy: search for the first non-empty line of ``body`` as a
+    substring. Falls back to line 1 if not found.
+    """
+    first_line = next((line for line in body.splitlines() if line.strip()), body)
+    if not first_line:
+        return 1
+    idx = content.find(first_line.strip())
+    if idx < 0:
+        return 1
+    return content[:idx].count("\n") + 1
+
+
+def validate_workflow_path_broken(plugin_root: Path, report: ValidationReport) -> None:
+    """Detect broken literal paths and zero-match globs in workflow ``run:``
+    bodies — issue #21 ask #2 (RC-WORKFLOW-PATH-BROKEN, MAJOR).
+
+    Symptom this rule catches: a canonical-pipeline migration that
+    consolidates several scripts/*.sh helpers into publish.py but leaves
+    the workflow YAML still invoking the old shellcheck-on-globs lines:
+
+        run: shellcheck scripts/dispatch.sh scripts/detectors/*.sh \\
+                        scripts/hooks/*.sh scripts/lib/*.sh .githooks/pre-push
+
+    After consolidation, ``scripts/detectors/`` no longer exists, so
+    ``scripts/detectors/*.sh`` matches zero files and the workflow
+    silently passes (shellcheck reports zero issues on zero files). The
+    plugin then ships with NO shellcheck coverage, even though CI says
+    "green."
+
+    This validator detects the symptom by:
+      1. Walking every ``.github/workflows/*.yml``/``*.yaml`` file.
+      2. Extracting every ``run:`` body (multi-line block scalars too).
+      3. shlex-tokenising each line and selecting "path-like" tokens
+         via ``_looks_like_workflow_path``.
+      4. For literals: ``(plugin_root / token).exists()`` → MAJOR if
+         missing.
+      5. For globs (token contains ``*``/``?``/``[``): ``glob.glob`` from
+         the plugin root → MAJOR if zero matches.
+
+    Severity is MAJOR (not CRITICAL): the workflow still runs, but the
+    intended check is silently no-op'd. MAJOR means publish.py blocks the
+    release until the dangling reference is fixed. Severity NOT CRITICAL
+    because there is no security loss — only a lost lint/test signal.
+
+    Skipped when:
+      - The plugin has no ``.github/workflows/`` directory.
+      - The token is a flag (``-x``), URL, env-var ref, or KEY=VALUE
+        assignment (handled by ``_looks_like_workflow_path``).
+    """
+    workflows_dir = plugin_root / ".github" / "workflows"
+    if not workflows_dir.is_dir():
+        return
+
+    yaml_files: list[Path] = sorted(workflows_dir.glob("*.yml")) + sorted(
+        workflows_dir.glob("*.yaml")
+    )
+    if not yaml_files:
+        return
+
+    plugin_root_str = str(plugin_root)
+    found_any = False
+
+    for yaml_path in yaml_files:
+        try:
+            content = yaml_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        rel_path = str(yaml_path.relative_to(plugin_root))
+
+        run_blocks = _collect_run_blocks(content)
+        for body, body_start_line in run_blocks:
+            for token, line_no in _scan_workflow_run_body(body, body_start_line):
+                if _is_workflow_glob(token):
+                    # Resolve the glob from the plugin root. Use
+                    # ``recursive=False`` so ``*`` does NOT cross directory
+                    # boundaries (matches shell glob semantics, which is
+                    # what the workflow author wrote). ``**/*.sh`` would
+                    # need recursive=True, but the heuristic above only
+                    # accepts tokens with ``*`` not ``**``-style — and
+                    # even if it did, shell globs default non-recursive
+                    # unless the user enables ``shopt -s globstar``.
+                    abs_pattern = str(Path(plugin_root_str) / token)
+                    matches = _glob.glob(abs_pattern)
+                    if not matches:
+                        found_any = True
+                        report.major(
+                            f"[RC-WORKFLOW-PATH-BROKEN] {rel_path}:{line_no} — "
+                            f"glob '{token}' matches zero files in the plugin tree. "
+                            "If a canonical-pipeline migration consolidated the "
+                            "matched files into publish.py, remove the dangling "
+                            "glob from the workflow body; otherwise restore the "
+                            "missing files.",
+                            file=rel_path,
+                            line=line_no,
+                        )
+                else:
+                    target = plugin_root / token
+                    if not target.exists():
+                        found_any = True
+                        report.major(
+                            f"[RC-WORKFLOW-PATH-BROKEN] {rel_path}:{line_no} — "
+                            f"literal path '{token}' does not exist on disk. "
+                            "Update the workflow to point at the new canonical "
+                            "entry-point (e.g. publish.py / cpv_lint_engine), or "
+                            "restore the missing file.",
+                            file=rel_path,
+                            line=line_no,
+                        )
+
+    if not found_any and yaml_files:
+        report.passed(
+            f"All workflow run: paths/globs resolve in {len(yaml_files)} workflow file(s) "
+            "(RC-WORKFLOW-PATH-BROKEN)"
+        )
+
+
 # Files generated by `generate_plugin_repo.gen_*` that are pure
 # infrastructure (publish pipeline, retry helper, pre-push hook, CI / release
 # / notify workflows, changelog config, mega-linter config). Plugins are NOT
@@ -3704,7 +4020,15 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
     except Exception:
         return
 
-    drift_files: list[str] = []
+    # Per-file emission with embedded unified diff.
+    #
+    # Issue #21 ask #3: instead of one consolidated warning naming six files,
+    # emit one warning per drifted file containing the unified diff hunks
+    # (with @@ line markers) so the reader can immediately see WHICH lines
+    # drifted, not just WHICH files. Severity stays WARNING — escalation to
+    # MAJOR is the job of validate_workflow_path_refs (issue #21 ask #2),
+    # which targets a NARROWER subset (broken paths/globs in workflow run:
+    # bodies), not whole-file template drift.
     for rel_path, gen_func_name in _CANONICAL_PIPELINE_FILES:
         target = plugin_root / rel_path
         if not target.is_file():
@@ -3724,17 +4048,55 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
             expected_content = gen_func(params) if sig.parameters else gen_func()
         except Exception:
             continue
-        if actual_content != expected_content:
-            drift_files.append(rel_path)
+        if actual_content == expected_content:
+            continue
 
-    if drift_files:
-        files_str = ", ".join(drift_files)
+        # Build a unified diff. Cap at ±10 hunks per file or 200 diff lines
+        # total per emission so the message stays readable. The diff is
+        # produced with `lineterm=""` per Python docs — every yielded hunk
+        # line already contains its own newline, so no double-newlines and
+        # no trailing-LF noise.
+        diff_iter = difflib.unified_diff(
+            expected_content.splitlines(),
+            actual_content.splitlines(),
+            fromfile=f"canonical/{rel_path}",
+            tofile=f"plugin/{rel_path}",
+            lineterm="",
+            n=3,
+        )
+        diff_lines: list[str] = []
+        hunk_count = 0
+        max_hunks = 10
+        max_diff_lines = 200
+        truncated = False
+        for hunk_line in diff_iter:
+            if hunk_line.startswith("@@"):
+                hunk_count += 1
+                if hunk_count > max_hunks:
+                    truncated = True
+                    break
+            if len(diff_lines) >= max_diff_lines:
+                truncated = True
+                break
+            diff_lines.append(hunk_line)
+
+        diff_body = "\n".join(diff_lines)
+        if truncated:
+            diff_body += (
+                f"\n... (diff truncated at {max_hunks} hunks / "
+                f"{max_diff_lines} lines — full diff: "
+                f"`diff -u <canonical> {rel_path}`)"
+            )
+
         report.warning(
-            f"[RC-PIPELINE-DRIFT-001] Plugin pipeline differs from the canonical "
-            f"CPV standard in: {files_str}. Run `/cpv-upgrade-plugin` (or "
-            f"`uvx cpv-remote-validate standardize <plugin> --fix --force-templates`) "
-            f"to migrate to the latest standard (idempotent publish.py, sanitized "
-            f"inputs, pathlib-only Python, cross-platform hooks, etc.)."
+            f"[RC-PIPELINE-DRIFT-001] Plugin pipeline differs from the "
+            f"canonical CPV standard in {rel_path}. Run `/cpv-upgrade-plugin` "
+            f"(or `uvx cpv-remote-validate standardize <plugin> --fix "
+            f"--force-templates`) to migrate to the latest standard "
+            f"(idempotent publish.py, sanitized inputs, pathlib-only "
+            f"Python, cross-platform hooks, etc.).\n"
+            f"Unified diff (canonical → plugin):\n{diff_body}",
+            file=rel_path,
         )
 
 
@@ -4648,6 +5010,7 @@ def main() -> int:
     validate_workflow_inline_python(plugin_root, report)
     validate_pipeline_readiness(plugin_root, report)
     validate_pipeline_script_refs(plugin_root, report)
+    validate_workflow_path_broken(plugin_root, report)
     validate_canonical_pipeline_drift(plugin_root, report)
     validate_legacy_pipeline_scripts(plugin_root, report)
     validate_pep723_invocations(plugin_root, report)
