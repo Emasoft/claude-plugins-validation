@@ -645,11 +645,27 @@ def lint_markdown(
     invocation = list(cmd)
     # If the target doesn't have its own .markdownlint.json, use CPV's
     # relaxed config (disables MD013/MD033/MD040 — see issue #8).
+    #
+    # Multi-path resolver (issue #20 fix): the canonical rule set MUST be
+    # found whether CPV is invoked from the cached install (full repo at
+    # `~/.claude/plugins/cache/.../<ver>/`) OR from `uvx --from git+...`
+    # (only the wheel-bundled `scripts/` dir present). Try, in order:
+    #   1. `<scripts>/.markdownlint.json` — wheel package data (uvx case;
+    #      shipped via [tool.hatch.build.targets.wheel.force-include]).
+    #   2. `<scripts>/../.markdownlint.json` — repo-root copy (cached case
+    #      and dev-checkout case).
+    # Whichever exists first wins. Without (1), the uvx-from-HEAD path
+    # had `cpv_config.is_file()` return False, no `--config` was passed,
+    # and markdownlint-cli2 fell back to ITS defaults (MD013/MD012/MD032
+    # all enabled) — producing the cached-vs-remote disagreement in #20.
     target_config = repo_root / ".markdownlint.json"
     if not target_config.exists():
-        cpv_config = Path(__file__).resolve().parent.parent / ".markdownlint.json"
-        if cpv_config.is_file():
-            invocation.extend(["--config", str(cpv_config)])
+        scripts_dir = Path(__file__).resolve().parent
+        for candidate in (scripts_dir / ".markdownlint.json",
+                          scripts_dir.parent / ".markdownlint.json"):
+            if candidate.is_file():
+                invocation.extend(["--config", str(candidate)])
+                break
 
     file_paths = [str(f) for f in files]
 
@@ -669,18 +685,31 @@ def lint_markdown(
         report.passed(f"markdownlint passed for {len(files)} markdown file(s)")
         return True
 
-    # markdownlint-cli2 prints one issue per line — surface up to 20.
+    # markdownlint-cli2 prints one issue per line — surface up to 20 as
+    # NIT (issue #20: stylistic markdownlint findings should NOT block a
+    # publish via --strict; the canonical pipeline's correctness gates
+    # are the JSON/YAML/Python validators, not markdown prose style).
     output = (result.stderr or result.stdout or "").strip()
     surfaced = 0
     for line in output.splitlines():
         if not line.strip():
             continue
-        report.minor(f"markdownlint: {line.strip()}")
+        report.nit(f"markdownlint: {line.strip()}")
         surfaced += 1
         if surfaced >= 20:
             break
-    if not surfaced and output:
-        report.minor(f"markdownlint: {output[:200]}")
+    # Silent-failure surface (issue #20): if markdownlint exited non-zero
+    # but produced no parseable per-line output, the developer used to see
+    # only "CPV blocked the push (exit 3)" with no clue what failed. Now
+    # we always emit at least one finding carrying the raw stderr/stdout.
+    if not surfaced:
+        if output:
+            report.nit(f"markdownlint: {output[:200]}")
+        else:
+            report.warning(
+                f"markdownlint exited non-zero (rc={result.returncode}) but "
+                f"produced no output — possible binary or environment issue"
+            )
     return False
 
 
