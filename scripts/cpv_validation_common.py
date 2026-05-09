@@ -806,6 +806,8 @@ VALID_PLUGIN_ENV_VARS = {
     "CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE",  # v2.1.129 — opt-in homebrew/winget background auto-update
     "CLAUDE_CODE_SESSION_ID",  # v2.1.132 — Bash subprocess session id (matches `session_id` passed to hooks)
     "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN",  # v2.1.132 — opt out of fullscreen alternate-screen renderer
+    "CLAUDE_CODE_EFFORT_LEVEL",  # v2.1.132 — overrides the /effort picker default
+    "CLAUDE_CODE_ENABLE_FEEDBACK_SURVEY_FOR_OTEL",  # v2.1.136 — re-enable session-quality survey for enterprises capturing OTEL responses
     # Anthropic *_SUPPORTED_CAPABILITIES — spec-correct suffix
     "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES",
     "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES",

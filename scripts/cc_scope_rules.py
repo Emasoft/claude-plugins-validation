@@ -182,6 +182,7 @@ MANAGED_ONLY_KEYS: frozenset[str] = frozenset(
         "pluginTrustMessage",
         "strictKnownMarketplaces",
         "wslInheritsWindowsSettings",  # v2.1.118 — WSL inherits Windows-side managed settings
+        "parentSettingsBehavior",  # v2.1.133 — admin-tier 'first-wins' | 'merge' for SDK managedSettings
     }
 )
 
@@ -327,6 +328,9 @@ KNOWN_SETTINGS_KEYS: frozenset[str] = frozenset(
         # v2.33.x batch — keys added in CC v2.1.117–v2.1.121 spec sweep
         "prUrlTemplate",  # v2.1.119 — custom code-review URL for footer PR badge
         "wslInheritsWindowsSettings",  # v2.1.118 — WSL inherits Windows-side managed settings (managed-only)
+        # v2.70.x changelog catch-up (CC v2.1.122..v2.1.136)
+        "skillOverrides",  # v2.1.129 — values: off | user-invocable-only | name-only
+        "parentSettingsBehavior",  # v2.1.133 — admin-tier 'first-wins' | 'merge' for SDK managedSettings
     }
 )
 

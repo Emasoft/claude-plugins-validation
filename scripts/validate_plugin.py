@@ -2460,6 +2460,97 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
         )
 
 
+def validate_manifest_skill_paths(
+    plugin_root: Path, report: ValidationReport
+) -> bool:
+    """Validate the optional ``skills`` path-list in plugin.json (CC v2.1.136+).
+
+    Per CC v2.1.136 changelog: a ``skills`` entry in plugin.json HIDES the
+    plugin's default ``skills/`` directory (auto-discovery is suppressed)
+    and listing a file path that doesn't exist now shows an error in
+    ``claude plugin validate``. CPV mirrors that behaviour:
+
+    - When ``manifest["skills"]`` is absent or not a list, this function
+      is a no-op and ``validate_skills`` continues with the default
+      ``skills/`` directory walk.
+    - When ``manifest["skills"]`` is a list, every entry is validated
+      against the filesystem. Each entry may be either:
+        - a folder path containing ``SKILL.md`` (e.g. ``skills/my-skill/``)
+        - a direct ``SKILL.md`` file path (e.g. ``skills/my-skill/SKILL.md``)
+      Missing paths emit MAJOR (not WARNING) — they break the plugin's
+      skill discovery silently in CC < v2.1.136 and produce a hard error
+      in ≥ v2.1.136.
+
+    Returns ``True`` when the manifest declares a ``skills`` array (so
+    the caller can suppress the default ``skills/`` directory walk),
+    ``False`` otherwise. Mirrors the CC loader: a present ``skills`` field
+    is authoritative — it does not augment the default discovery.
+    """
+    plugin_json = plugin_root / ".claude-plugin" / "plugin.json"
+    if not plugin_json.is_file():
+        return False
+    try:
+        manifest = json.loads(plugin_json.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(manifest, dict):
+        return False
+    skills_field = manifest.get("skills")
+    if skills_field is None:
+        return False
+    if not isinstance(skills_field, list):
+        report.major(
+            f"plugin.json::skills must be a list of paths (got "
+            f"{type(skills_field).__name__}). CC v2.1.136+ rejects non-list "
+            f"values and the field overrides the default skills/ directory.",
+            ".claude-plugin/plugin.json",
+        )
+        return True  # field IS declared (just malformed) — suppress default walk
+    for i, entry in enumerate(skills_field):
+        if not isinstance(entry, str):
+            report.major(
+                f"plugin.json::skills[{i}] must be a string path (got "
+                f"{type(entry).__name__}). CC v2.1.136+ rejects non-string entries.",
+                ".claude-plugin/plugin.json",
+            )
+            continue
+        # Resolve relative to plugin root; reject path-traversal.
+        candidate = (plugin_root / entry).resolve()
+        try:
+            candidate.relative_to(plugin_root.resolve())
+        except ValueError:
+            report.major(
+                f"plugin.json::skills[{i}] = {entry!r} escapes the plugin root "
+                f"(resolved to {candidate}). Reject for security.",
+                ".claude-plugin/plugin.json",
+            )
+            continue
+        # Accept either a directory containing SKILL.md OR a direct SKILL.md.
+        if candidate.is_dir():
+            if not (candidate / "SKILL.md").is_file():
+                report.major(
+                    f"plugin.json::skills[{i}] = {entry!r} is a directory but "
+                    f"contains no SKILL.md. CC v2.1.136+ shows this as an error "
+                    f"in `claude plugin validate`.",
+                    ".claude-plugin/plugin.json",
+                )
+        elif candidate.is_file():
+            if candidate.name != "SKILL.md":
+                report.major(
+                    f"plugin.json::skills[{i}] = {entry!r} is a file but not a "
+                    f"SKILL.md (got {candidate.name!r}). CC v2.1.136+ requires "
+                    f"either a folder containing SKILL.md or a direct SKILL.md path.",
+                    ".claude-plugin/plugin.json",
+                )
+        else:
+            report.major(
+                f"plugin.json::skills[{i}] = {entry!r} does not exist on disk. "
+                f"CC v2.1.136+ shows this as an error instead of failing silently.",
+                ".claude-plugin/plugin.json",
+            )
+    return True
+
+
 def validate_skills(plugin_root: Path, report: ValidationReport, skip_platform_checks: list[str] | None = None) -> None:
     """Validate all skills in the plugin's skills/ directory.
 
@@ -2467,7 +2558,19 @@ def validate_skills(plugin_root: Path, report: ValidationReport, skip_platform_c
         plugin_root: Path to plugin root directory
         report: ValidationReport to add results to
         skip_platform_checks: List of platforms to skip checks for (e.g., ['windows'])
+
+    CC v2.1.136+ semantics: when plugin.json declares a ``skills`` array,
+    that list is AUTHORITATIVE and the default ``skills/`` directory walk
+    is suppressed. ``validate_manifest_skill_paths`` runs first and
+    returns True when it consumed the field — in that case this function
+    early-returns so we don't double-validate (or validate skills the
+    plugin author intentionally hid).
     """
+    if validate_manifest_skill_paths(plugin_root, report):
+        # plugin.json::skills is the authoritative source — every listed
+        # path is the responsibility of the manifest validator above.
+        return
+
     skills_dir = plugin_root / "skills"
 
     if not skills_dir.is_dir():
