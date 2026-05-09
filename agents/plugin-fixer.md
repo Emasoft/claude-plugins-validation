@@ -149,7 +149,7 @@ The fix loop's max iteration cap is 10. If you hit the cap with findings remaini
 >
 > **Any failure** → report `[PARTIAL]`, list the specific `CHECK-NN` rows that failed with `file:line` citations from the run-all log, and **stop**. Do NOT auto-rerun publish.py. Do NOT silently `--force-templates`. Surface the failure to the user with explicit options (see "Pre-completion verification (REQUIRED)" below).
 
-The 82-check matrix is purpose-built to catch the silent-failure modes that `validate_plugin.py --strict` cannot see — broken-glob paths in workflow YAMLs, module-scope `sys.exit()` in hook scripts, missing `lib/__init__.py`, retired publish.py subcommands, untracked `*_dev/` content, etc. — i.e. the exact bug class that produced [issue #21](https://github.com/Emasoft/claude-plugins-validation/issues/21).
+The 82-check matrix is purpose-built to catch the silent-failure modes that `validate_plugin.py --strict` cannot see — broken-glob paths in workflow YAMLs, module-scope `sys.exit()` in hook scripts, missing package-marker files (`__init__.py` in `lib/` etc.), retired publish.py subcommands, untracked `*_dev/` content, etc. — i.e. the exact bug class that produced [issue #21](https://github.com/Emasoft/claude-plugins-validation/issues/21).
 
 ## Optional `min_severity` parameter (post-validate menu integration)
 
