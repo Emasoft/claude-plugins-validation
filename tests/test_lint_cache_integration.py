@@ -145,17 +145,13 @@ def test_warm_cache_skips_scanner_subprocess(tmp_path: Path) -> None:
         lint_repo(repo, report2, cache=cache)
 
     # The warm run must NOT have invoked the patched linter.
-    assert warm_log == [], (
-        f"warm run still invoked the linter (cache miss?): {warm_log}"
-    )
+    assert warm_log == [], f"warm run still invoked the linter (cache miss?): {warm_log}"
     # The replayed report must contain the cached findings (the
     # "python: ok" PASSED line we wrote on the cold run).
     levels = [r.level for r in report2.results]
     messages = [r.message for r in report2.results]
     assert "PASSED" in levels, f"warm run report has no PASSED entry: {levels}"
-    assert any("python: ok" in m for m in messages), (
-        f"warm run did not replay the cached PASSED message: {messages}"
-    )
+    assert any("python: ok" in m for m in messages), f"warm run did not replay the cached PASSED message: {messages}"
 
 
 # ---------------------------------------------------------------------------
@@ -199,9 +195,7 @@ def test_targeted_file_change_invalidates_only_that_language(tmp_path: Path) -> 
 
     # python re-scanned (its content drifted); markdown stayed cached.
     assert "python" in warm_log, f"python lint did not re-run after edit: {warm_log}"
-    assert "markdown" not in warm_log, (
-        f"markdown lint re-ran despite no content change: {warm_log}"
-    )
+    assert "markdown" not in warm_log, f"markdown lint re-ran despite no content change: {warm_log}"
 
 
 # ---------------------------------------------------------------------------

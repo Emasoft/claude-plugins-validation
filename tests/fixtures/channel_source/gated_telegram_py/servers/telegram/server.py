@@ -5,9 +5,7 @@ import os
 from aiogram import Dispatcher, types
 from mcp_server import Server  # hypothetical MCP server library
 
-ALLOWED_USER_IDS = {
-    int(x) for x in os.environ.get("ALLOWED_USER_IDS", "").split(",") if x.strip()
-}
+ALLOWED_USER_IDS = {int(x) for x in os.environ.get("ALLOWED_USER_IDS", "").split(",") if x.strip()}
 CHANNEL_ID = os.environ.get("CHANNEL_ID", "default-channel")
 
 mcp = Server("telegram-channel", "1.0.0")

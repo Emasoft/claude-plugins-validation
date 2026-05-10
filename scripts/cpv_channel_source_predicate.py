@@ -198,8 +198,8 @@ def resolve_channel_server_sources(plugin_root: Path) -> list[Path]:
         rel = _strip_plugin_root_prefix(entry_arg)
         candidate = (plugin_root / rel).resolve()
         # Reject paths that escape the plugin root — defence-in-depth
-        # against args[0] = "../../../etc/passwd" attacks in malicious
-        # plugin.json files.
+        # against path-traversal attacks (e.g. dot-dot-slash sequences
+        # pointing at sensitive files) in malicious plugin.json args.
         try:
             candidate.relative_to(plugin_root.resolve())
         except ValueError:

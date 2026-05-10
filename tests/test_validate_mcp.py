@@ -576,10 +576,9 @@ class TestValidatePluginMcpAdvanced:
         (claude_dir / "plugin.json").write_text(json.dumps(manifest))
         report = validate_plugin_mcp(tmp_path)
         majors = [r for r in report.results if r.level == "MAJOR"]
-        assert any(
-            "must be a string (path), array (paths), or object (inline)" in m.message
-            for m in majors
-        ), f"Expected MAJOR about mcpServers type, got: {[m.message for m in majors]}"
+        assert any("must be a string (path), array (paths), or object (inline)" in m.message for m in majors), (
+            f"Expected MAJOR about mcpServers type, got: {[m.message for m in majors]}"
+        )
 
     def test_plugin_json_invalid_json_silently_skips(self, tmp_path):
         """plugin.json with invalid JSON should be silently handled (validated elsewhere)."""
@@ -778,9 +777,9 @@ class TestV2212AuditFixes:
         }
         validate_mcp_server("srv", config, report)
         majors = [r for r in report.results if r.level == "MAJOR"]
-        assert any(
-            "callbackPort" in m.message and "integer" in m.message.lower() for m in majors
-        ), f"Expected MAJOR about callbackPort integer, got: {[m.message for m in majors]}"
+        assert any("callbackPort" in m.message and "integer" in m.message.lower() for m in majors), (
+            f"Expected MAJOR about callbackPort integer, got: {[m.message for m in majors]}"
+        )
 
     def test_mcp_print_results_handles_unknown_severity(self, capsys):
         """G27: print_results must not KeyError when a result has an unknown severity label."""
@@ -807,10 +806,7 @@ class TestV2212AuditFixes:
         # returned True and later `config["mcpServers"]` would TypeError.
         report = validate_mcp_config(mcp_file)
         blockers = [r for r in report.results if r.level in ("CRITICAL", "MAJOR")]
-        assert any(
-            "must be a JSON object" in r.message or "object" in r.message.lower()
-            for r in blockers
-        ), (
+        assert any("must be a JSON object" in r.message or "object" in r.message.lower() for r in blockers), (
             f"Expected CRITICAL/MAJOR about root not being an object, "
             f"got: {[(r.level, r.message) for r in report.results]}"
         )
@@ -858,13 +854,8 @@ class TestCrossSourceDuplicateServerNames:
             mcp_json={"mcpServers": {"db": {"command": "node", "args": ["s.js"]}}},
         )
         report = validate_plugin_mcp(tmp_path)
-        dup_majors = [
-            r for r in report.results
-            if r.level == "MAJOR" and "declared in" in r.message
-        ]
-        assert dup_majors == [], (
-            f"Expected no cross-source duplicate MAJORs, got: {[m.message for m in dup_majors]}"
-        )
+        dup_majors = [r for r in report.results if r.level == "MAJOR" and "declared in" in r.message]
+        assert dup_majors == [], f"Expected no cross-source duplicate MAJORs, got: {[m.message for m in dup_majors]}"
 
     def test_only_inline_no_duplicate_emitted(self, tmp_path):
         """Single source (inline plugin.json mcpServers only) — no duplicate MAJOR."""
@@ -876,13 +867,8 @@ class TestCrossSourceDuplicateServerNames:
             },
         )
         report = validate_plugin_mcp(tmp_path)
-        dup_majors = [
-            r for r in report.results
-            if r.level == "MAJOR" and "declared in" in r.message
-        ]
-        assert dup_majors == [], (
-            f"Expected no cross-source duplicate MAJORs, got: {[m.message for m in dup_majors]}"
-        )
+        dup_majors = [r for r in report.results if r.level == "MAJOR" and "declared in" in r.message]
+        assert dup_majors == [], f"Expected no cross-source duplicate MAJORs, got: {[m.message for m in dup_majors]}"
 
     def test_distinct_names_in_two_sources_no_duplicate(self, tmp_path):
         """Two sources with disjoint server names — no duplicate MAJOR (sources can coexist)."""
@@ -895,10 +881,7 @@ class TestCrossSourceDuplicateServerNames:
             },
         )
         report = validate_plugin_mcp(tmp_path)
-        dup_majors = [
-            r for r in report.results
-            if r.level == "MAJOR" and "declared in" in r.message
-        ]
+        dup_majors = [r for r in report.results if r.level == "MAJOR" and "declared in" in r.message]
         assert dup_majors == [], (
             f"Two sources with distinct names is allowed; expected no duplicate MAJORs, "
             f"got: {[m.message for m in dup_majors]}"
@@ -916,7 +899,8 @@ class TestCrossSourceDuplicateServerNames:
         )
         report = validate_plugin_mcp(tmp_path)
         dup_majors = [
-            r for r in report.results
+            r
+            for r in report.results
             if r.level == "MAJOR" and "shared-server" in r.message and "declared in" in r.message
         ]
         assert len(dup_majors) == 1, (
@@ -950,11 +934,10 @@ class TestCrossSourceDuplicateServerNames:
             },
         )
         report = validate_plugin_mcp(tmp_path)
-        dup_majors = [
-            r for r in report.results
-            if r.level == "MAJOR" and "declared in" in r.message
-        ]
-        names_in_dup_majors = {n for n in ("alpha", "beta", "gamma", "delta") if any(n in m.message for m in dup_majors)}
+        dup_majors = [r for r in report.results if r.level == "MAJOR" and "declared in" in r.message]
+        names_in_dup_majors = {
+            n for n in ("alpha", "beta", "gamma", "delta") if any(n in m.message for m in dup_majors)
+        }
         assert names_in_dup_majors == {"alpha", "beta"}, (
             f"Expected MAJORs only for 'alpha' and 'beta' (the duplicated names), "
             f"got names: {names_in_dup_majors}, full messages: {[m.message for m in dup_majors]}"
@@ -967,9 +950,9 @@ class TestCrossSourceDuplicateServerNames:
     def test_mcpservers_pointing_at_default_mcp_json_emits_minor(self, tmp_path):
         """mcpServers: './.mcp.json' (override = default file) → MINOR defensive nudge."""
         # Create the .mcp.json at root with a real server
-        (tmp_path / ".mcp.json").write_text(json.dumps({
-            "mcpServers": {"db-server": {"command": "node", "args": ["s.js"]}}
-        }))
+        (tmp_path / ".mcp.json").write_text(
+            json.dumps({"mcpServers": {"db-server": {"command": "node", "args": ["s.js"]}}})
+        )
         # plugin.json with mcpServers pointing at the same default file (redundant)
         self._make_plugin(
             tmp_path,
@@ -977,7 +960,8 @@ class TestCrossSourceDuplicateServerNames:
         )
         report = validate_plugin_mcp(tmp_path)
         nudge_minors = [
-            r for r in report.results
+            r
+            for r in report.results
             if r.level == "MINOR" and ".mcp.json" in r.message and "auto-discover" in r.message
         ]
         assert len(nudge_minors) == 1, (
@@ -992,8 +976,7 @@ class TestCrossSourceDuplicateServerNames:
         # server in .mcp.json since it gets loaded twice (once by auto-discovery, once
         # by the override). Verify the duplicate-name detection still fires.
         dup_majors = [
-            r for r in report.results
-            if r.level == "MAJOR" and "db-server" in r.message and "declared in" in r.message
+            r for r in report.results if r.level == "MAJOR" and "db-server" in r.message and "declared in" in r.message
         ]
         assert len(dup_majors) == 1, (
             f"Expected MAJOR for db-server duplicated when override = default file, got: "
@@ -1008,12 +991,12 @@ class TestCrossSourceDuplicateServerNames:
         """
         # Create two referenced config files
         (tmp_path / "configs").mkdir()
-        (tmp_path / "configs" / "a.mcp.json").write_text(json.dumps({
-            "mcpServers": {"server-a": {"command": "node", "args": ["a.js"]}}
-        }))
-        (tmp_path / "configs" / "b.mcp.json").write_text(json.dumps({
-            "mcpServers": {"server-b": {"command": "node", "args": ["b.js"]}}
-        }))
+        (tmp_path / "configs" / "a.mcp.json").write_text(
+            json.dumps({"mcpServers": {"server-a": {"command": "node", "args": ["a.js"]}}})
+        )
+        (tmp_path / "configs" / "b.mcp.json").write_text(
+            json.dumps({"mcpServers": {"server-b": {"command": "node", "args": ["b.js"]}}})
+        )
         self._make_plugin(
             tmp_path,
             plugin_manifest={
@@ -1024,7 +1007,8 @@ class TestCrossSourceDuplicateServerNames:
         report = validate_plugin_mcp(tmp_path)
         # Should NOT emit "must be a string or object" MAJOR
         rejection_majors = [
-            r for r in report.results
+            r
+            for r in report.results
             if r.level == "MAJOR" and "must be a string" in r.message and "array" not in r.message
         ]
         assert rejection_majors == [], (
@@ -1039,49 +1023,37 @@ class TestCrossSourceDuplicateServerNames:
         (with the leading dot — the actual default) from mcp.json (a non-default file).
         """
         # Test with the ACTUAL default name
-        (tmp_path / ".mcp.json").write_text(json.dumps({
-            "mcpServers": {"db-server": {"command": "node", "args": ["s.js"]}}
-        }))
+        (tmp_path / ".mcp.json").write_text(
+            json.dumps({"mcpServers": {"db-server": {"command": "node", "args": ["s.js"]}}})
+        )
         self._make_plugin(
             tmp_path,
             plugin_manifest={"name": "p", "mcpServers": ".mcp.json"},  # NO leading "./"
         )
         report = validate_plugin_mcp(tmp_path)
-        nudges = [
-            r for r in report.results
-            if r.level == "MINOR" and "auto-discover" in r.message
-        ]
-        assert len(nudges) == 1, (
-            f"Expected MINOR nudge for '.mcp.json' (no './'), got: "
-            f"{[m.message for m in nudges]}"
-        )
+        nudges = [r for r in report.results if r.level == "MINOR" and "auto-discover" in r.message]
+        assert len(nudges) == 1, f"Expected MINOR nudge for '.mcp.json' (no './'), got: {[m.message for m in nudges]}"
 
     def test_mcpservers_pointing_at_non_default_no_minor_nudge(self, tmp_path):
         """mcpServers: './extras/mcp.json' (legitimate non-default path) → no MINOR nudge."""
         (tmp_path / "extras").mkdir()
-        (tmp_path / "extras" / "mcp.json").write_text(json.dumps({
-            "mcpServers": {"db-server": {"command": "node", "args": ["s.js"]}}
-        }))
+        (tmp_path / "extras" / "mcp.json").write_text(
+            json.dumps({"mcpServers": {"db-server": {"command": "node", "args": ["s.js"]}}})
+        )
         self._make_plugin(
             tmp_path,
             plugin_manifest={"name": "p", "mcpServers": "./extras/mcp.json"},
         )
         report = validate_plugin_mcp(tmp_path)
-        nudge_minors = [
-            r for r in report.results
-            if r.level == "MINOR" and "auto-discover" in r.message
-        ]
+        nudge_minors = [r for r in report.results if r.level == "MINOR" and "auto-discover" in r.message]
         assert nudge_minors == [], (
-            f"Non-default path should not trigger redundancy MINOR, got: "
-            f"{[m.message for m in nudge_minors]}"
+            f"Non-default path should not trigger redundancy MINOR, got: {[m.message for m in nudge_minors]}"
         )
 
     def test_same_name_in_mcp_json_and_path_string_external_emits_major(self, tmp_path):
         """Same server name in .mcp.json AND a path-string-referenced external file → MAJOR."""
         external = tmp_path / "extra-mcp.json"
-        external.write_text(json.dumps({
-            "mcpServers": {"db-server": {"command": "node", "args": ["x.js"]}}
-        }))
+        external.write_text(json.dumps({"mcpServers": {"db-server": {"command": "node", "args": ["x.js"]}}}))
         self._make_plugin(
             tmp_path,
             mcp_json={"mcpServers": {"db-server": {"command": "node", "args": ["y.js"]}}},
@@ -1089,8 +1061,7 @@ class TestCrossSourceDuplicateServerNames:
         )
         report = validate_plugin_mcp(tmp_path)
         dup_majors = [
-            r for r in report.results
-            if r.level == "MAJOR" and "db-server" in r.message and "declared in" in r.message
+            r for r in report.results if r.level == "MAJOR" and "db-server" in r.message and "declared in" in r.message
         ]
         assert len(dup_majors) == 1, (
             f"Expected MAJOR for 'db-server' duplicated across .mcp.json + external file, "
@@ -1114,6 +1085,7 @@ class TestV21SpecFieldAllowlist:
         """alwaysLoad: true must NOT be flagged as an unknown field (v2.1.121)."""
         from cpv_validation_common import ValidationReport  # noqa: PLC0415
         from validate_mcp import validate_mcp_server  # noqa: PLC0415
+
         report = ValidationReport()
         validate_mcp_server(
             "github",
@@ -1121,18 +1093,19 @@ class TestV21SpecFieldAllowlist:
             report,
         )
         unknown_warnings = [
-            r for r in report.results
+            r
+            for r in report.results
             if r.level == "WARNING" and "alwaysLoad" in r.message and "Unknown field" in r.message
         ]
         assert unknown_warnings == [], (
-            f"alwaysLoad must be a known field per v2.1.121, got warnings: "
-            f"{[w.message for w in unknown_warnings]}"
+            f"alwaysLoad must be a known field per v2.1.121, got warnings: {[w.message for w in unknown_warnings]}"
         )
 
     def test_headers_helper_field_accepted(self):
         """headersHelper must NOT be flagged as an unknown field (v2.1.85+)."""
         from cpv_validation_common import ValidationReport  # noqa: PLC0415
         from validate_mcp import validate_mcp_server  # noqa: PLC0415
+
         report = ValidationReport()
         validate_mcp_server(
             "remote",
@@ -1140,10 +1113,10 @@ class TestV21SpecFieldAllowlist:
             report,
         )
         unknown_warnings = [
-            r for r in report.results
+            r
+            for r in report.results
             if r.level == "WARNING" and "headersHelper" in r.message and "Unknown field" in r.message
         ]
         assert unknown_warnings == [], (
-            f"headersHelper must be a known field per v2.1.85+, got warnings: "
-            f"{[w.message for w in unknown_warnings]}"
+            f"headersHelper must be a known field per v2.1.85+, got warnings: {[w.message for w in unknown_warnings]}"
         )

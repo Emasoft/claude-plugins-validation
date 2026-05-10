@@ -919,6 +919,7 @@ def do_prune_old_versions(dry_run: bool = True, keep_n: int = 1) -> int:
 
 def main():
     from cpv_validation_common import launcher_epilog
+
     parser = argparse.ArgumentParser(
         description="Plugin health check",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -976,10 +977,12 @@ def main():
         sys.exit(do_install_scanners())
     if args.prune_old_versions or args.prune_dry_run:
         # --prune-dry-run implies dry-run; --prune-old-versions actually deletes
-        sys.exit(do_prune_old_versions(
-            dry_run=args.prune_dry_run and not args.prune_old_versions,
-            keep_n=args.prune_keep,
-        ))
+        sys.exit(
+            do_prune_old_versions(
+                dry_run=args.prune_dry_run and not args.prune_old_versions,
+                keep_n=args.prune_keep,
+            )
+        )
     do_doctor(verbose=args.verbose, fix=args.fix, quick=args.quick)
 
 

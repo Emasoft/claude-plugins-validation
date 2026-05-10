@@ -91,24 +91,26 @@ _PREFIX_FILE_PATTERNS = (
 _FILE_WRITE_OPS = re.compile(
     r"(?:"
     r"\btee(?:\s+-a|\s+--append)?\s+\S+"  # tee / tee -a FILE
-    r"|>>\s*\S+"                            # >> FILE
-    r"|>\s*\S+"                             # > FILE
-    r"|\bsed\s+-i\s+\S+\s+\S+"             # sed -i ... FILE
-    r"|\bcp\s+\S+\s+\S+"                   # cp src dst
-    r"|\bmv\s+\S+\s+\S+"                   # mv src dst
-    r"|\becho\s+\S+\s*>>?"                 # echo X >> / >
+    r"|>>\s*\S+"  # >> FILE
+    r"|>\s*\S+"  # > FILE
+    r"|\bsed\s+-i\s+\S+\s+\S+"  # sed -i ... FILE
+    r"|\bcp\s+\S+\s+\S+"  # cp src dst
+    r"|\bmv\s+\S+\s+\S+"  # mv src dst
+    r"|\becho\s+\S+\s*>>?"  # echo X >> / >
     r")"
 )
 
 # Hook events whose output IS part of the cached prefix. Stop / SubagentStop
 # / Notification / PostToolUse run AFTER the turn or as side-effects, so
 # touching CLAUDE.md from those is a CA-02 PASS (not a violation).
-_PREFIX_AFFECTING_EVENTS: frozenset[str] = frozenset({
-    "SessionStart",
-    "UserPromptSubmit",
-    "PreCompact",
-    "InstructionsLoaded",
-})
+_PREFIX_AFFECTING_EVENTS: frozenset[str] = frozenset(
+    {
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreCompact",
+        "InstructionsLoaded",
+    }
+)
 
 
 # =============================================================================
@@ -117,9 +119,7 @@ _PREFIX_AFFECTING_EVENTS: frozenset[str] = frozenset({
 
 # Hook scripts that mutate the allow/deny / tool list in settings.json
 # would cause the tool schema to differ between turns.
-_TOOL_LIST_MUTATION = re.compile(
-    r'\b(?:allow|deny|allowedTools|disallowedTools|enabled[Mm]cp[Ss]ervers)\b'
-)
+_TOOL_LIST_MUTATION = re.compile(r"\b(?:allow|deny|allowedTools|disallowedTools|enabled[Mm]cp[Ss]ervers)\b")
 
 
 # =============================================================================
@@ -434,11 +434,13 @@ def scan_hook_for_unbounded_output(
 # =============================================================================
 
 
-_FORK_AFFECTING_EVENTS: frozenset[str] = frozenset({
-    "PreCompact",
-    "PostCompact",
-    "SubagentStart",
-})
+_FORK_AFFECTING_EVENTS: frozenset[str] = frozenset(
+    {
+        "PreCompact",
+        "PostCompact",
+        "SubagentStart",
+    }
+)
 
 
 def scan_hook_for_fork_unsafe(
@@ -588,6 +590,7 @@ def main() -> int:
     check_remote_execution_guard()
 
     from cpv_validation_common import launcher_epilog
+
     parser = argparse.ArgumentParser(
         description="Validate prompt-cache discipline (CA-01..CA-06) for a Claude Code plugin",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -605,7 +608,8 @@ Exit codes:
   2 - MAJOR issues (CA-01 / CA-02 / CA-03)
   3 - MINOR issues (CA-04 / CA-05)
 
-""" + launcher_epilog("cache"),
+"""
+        + launcher_epilog("cache"),
     )
     parser.add_argument("target", help="Path to a plugin directory")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show PASSED/INFO results")

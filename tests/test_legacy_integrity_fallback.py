@@ -33,15 +33,9 @@ def test_cpv_integrity_shim_emits_deprecation_warning():
         warnings.simplefilter("always")
         _fresh_import("cpv_integrity")
     msgs = [str(w.message) for w in captured if issubclass(w.category, DeprecationWarning)]
-    assert any("TRDD-bbff5bc5" in m for m in msgs), (
-        f"DeprecationWarning missing TRDD reference; got: {msgs}"
-    )
-    assert any("_plugin_verify_hashes" in m for m in msgs), (
-        f"DeprecationWarning doesn't name new module; got: {msgs}"
-    )
-    assert any("v2.53.0" in m for m in msgs), (
-        f"DeprecationWarning doesn't mention removal release; got: {msgs}"
-    )
+    assert any("TRDD-bbff5bc5" in m for m in msgs), f"DeprecationWarning missing TRDD reference; got: {msgs}"
+    assert any("_plugin_verify_hashes" in m for m in msgs), f"DeprecationWarning doesn't name new module; got: {msgs}"
+    assert any("v2.53.0" in m for m in msgs), f"DeprecationWarning doesn't mention removal release; got: {msgs}"
 
 
 def test_compute_cpv_self_hashes_shim_emits_deprecation_warning():

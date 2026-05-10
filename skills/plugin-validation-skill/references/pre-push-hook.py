@@ -28,10 +28,7 @@ NC = "\033[0m"
 
 def is_rebase_in_progress(git_dir: str) -> bool:
     """Return True if a rebase is in progress — skip hook."""
-    return (
-        os.path.isdir(os.path.join(git_dir, "rebase-merge"))
-        or os.path.isdir(os.path.join(git_dir, "rebase-apply"))
-    )
+    return os.path.isdir(os.path.join(git_dir, "rebase-merge")) or os.path.isdir(os.path.join(git_dir, "rebase-apply"))
 
 
 def find_scripts_dir(repo_root: str) -> str | None:
@@ -49,6 +46,7 @@ def find_scripts_dir(repo_root: str) -> str | None:
 def find_python() -> str:
     """Return best available Python interpreter."""
     import shutil
+
     for name in ("python3", "python"):
         if shutil.which(name):
             return name

@@ -599,9 +599,7 @@ class TestLintMarkdown:
         if "--config" in captured["argv"]:
             cfg_idx = captured["argv"].index("--config")
             cfg_path = captured["argv"][cfg_idx + 1]
-            assert cfg_path.endswith(".markdownlint.json"), (
-                f"unexpected --config path: {cfg_path}"
-            )
+            assert cfg_path.endswith(".markdownlint.json"), f"unexpected --config path: {cfg_path}"
 
 
 class TestLintJson:

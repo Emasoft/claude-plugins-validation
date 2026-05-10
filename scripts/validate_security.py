@@ -8516,24 +8516,28 @@ def validate_security(
                 ["check", "-t", "plugin", "--format", "json", "--ci"],
                 local,
             )
-            steps.append({
-                "num": 22,
-                "name": "External: cc-audit (100+ AI rules)",
-                "status": "RAN",
-                "findings": cc_count,
-                "files": "npx @cc-audit/cc-audit (auto-fetched)",
-                "details": "",
-            })
+            steps.append(
+                {
+                    "num": 22,
+                    "name": "External: cc-audit (100+ AI rules)",
+                    "status": "RAN",
+                    "findings": cc_count,
+                    "files": "npx @cc-audit/cc-audit (auto-fetched)",
+                    "details": "",
+                }
+            )
         else:
             check_cc_audit(plugin_path, local)  # emits WARNING into local
-            steps.append({
-                "num": 22,
-                "name": "External: cc-audit (100+ AI rules)",
-                "status": "SKIPPED",
-                "findings": 0,
-                "files": "",
-                "details": "`npx` not on PATH — install Node.js to enable",
-            })
+            steps.append(
+                {
+                    "num": 22,
+                    "name": "External: cc-audit (100+ AI rules)",
+                    "status": "SKIPPED",
+                    "findings": 0,
+                    "files": "",
+                    "details": "`npx` not on PATH — install Node.js to enable",
+                }
+            )
         return local, steps
 
     def _task_tirith() -> tuple[ValidationReport, list[dict[str, Any]]]:
@@ -8563,23 +8567,27 @@ def validate_security(
                 )
                 for r in local.results
             )
-            steps.append({
-                "num": 23,
-                "name": "External: tirith (terminal-security)",
-                "status": "SKIPPED" if unavail else "RAN",
-                "findings": tirith_count,
-                "files": "PATH → docker → nix → auto-install" if not unavail else "",
-                "details": "tirith binary unavailable — see WARNING above" if unavail else "",
-            })
+            steps.append(
+                {
+                    "num": 23,
+                    "name": "External: tirith (terminal-security)",
+                    "status": "SKIPPED" if unavail else "RAN",
+                    "findings": tirith_count,
+                    "files": "PATH → docker → nix → auto-install" if not unavail else "",
+                    "details": "tirith binary unavailable — see WARNING above" if unavail else "",
+                }
+            )
         else:
-            steps.append({
-                "num": 23,
-                "name": "External: tirith (terminal-security)",
-                "status": "SKIPPED",
-                "findings": 0,
-                "files": "",
-                "details": "enable_tirith=False (test isolation knob)",
-            })
+            steps.append(
+                {
+                    "num": 23,
+                    "name": "External: tirith (terminal-security)",
+                    "status": "SKIPPED",
+                    "findings": 0,
+                    "files": "",
+                    "details": "enable_tirith=False (test isolation knob)",
+                }
+            )
         return local, steps
 
     def _task_specialist(
@@ -8599,24 +8607,28 @@ def validate_security(
         local = ValidationReport()
         steps: list[dict[str, Any]] = []
         if not enabled:
-            steps.append({
-                "num": step_num,
-                "name": name,
-                "status": "SKIPPED",
-                "findings": 0,
-                "files": "",
-                "details": f"enable_{binary_hint}=False (test isolation knob)",
-            })
+            steps.append(
+                {
+                    "num": step_num,
+                    "name": name,
+                    "status": "SKIPPED",
+                    "findings": 0,
+                    "files": "",
+                    "details": f"enable_{binary_hint}=False (test isolation knob)",
+                }
+            )
         elif not shutil.which(binary_hint):
             scanner_fn(plugin_path, local)  # emits WARNING into local
-            steps.append({
-                "num": step_num,
-                "name": name,
-                "status": "SKIPPED",
-                "findings": 0,
-                "files": "",
-                "details": f"`{binary_hint}` not on PATH (install via brew/pipx/etc.)",
-            })
+            steps.append(
+                {
+                    "num": step_num,
+                    "name": name,
+                    "status": "SKIPPED",
+                    "findings": 0,
+                    "files": "",
+                    "details": f"`{binary_hint}` not on PATH (install via brew/pipx/etc.)",
+                }
+            )
         else:
             # The scanner_argv stub captures the few flags each scanner
             # uses internally — kept short on purpose: a flag drift
@@ -8637,14 +8649,16 @@ def validate_security(
             else:
                 scanner_argv = []
             count = _run_scanner_with_cache(binary_hint, scanner_fn, scanner_argv, local)
-            steps.append({
-                "num": step_num,
-                "name": name,
-                "status": "RAN",
-                "findings": count,
-                "files": f"{binary_hint} (PATH binary)",
-                "details": "",
-            })
+            steps.append(
+                {
+                    "num": step_num,
+                    "name": name,
+                    "status": "RAN",
+                    "findings": count,
+                    "files": f"{binary_hint} (PATH binary)",
+                    "details": "",
+                }
+            )
         return local, steps
 
     # Declaration order is the canonical replay order — same order the

@@ -443,6 +443,7 @@ def print_json(report: ValidationReport) -> None:
 def main() -> int:
     """Main entry point."""
     from cpv_validation_common import launcher_epilog
+
     parser = argparse.ArgumentParser(
         description="Validate Claude Code rule files in a rules/ directory.",
         formatter_class=argparse.RawDescriptionHelpFormatter,

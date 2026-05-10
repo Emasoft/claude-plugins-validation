@@ -16,6 +16,7 @@ If markers are missing from README.md, the block is appended at the end.
 The user can then move the block wherever they want — subsequent runs
 preserve placement and only update the body between the markers.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -50,6 +51,7 @@ def refresh(plugin_root: Path, *, check_only: bool = False) -> int:
         # Dry-run: read the file and compare.
         text = readme.read_text(encoding="utf-8")
         from cpv_management_common import _re_marker  # type: ignore[attr-defined]
+
         marker_id = "COMPONENTS"
         begin = f"<!-- BEGIN AUTO-{marker_id} -->"
         end = f"<!-- END AUTO-{marker_id} -->"
@@ -68,7 +70,9 @@ def refresh(plugin_root: Path, *, check_only: bool = False) -> int:
         return 0
 
     changed, status = replace_marker_block(
-        readme, "COMPONENTS", table,
+        readme,
+        "COMPONENTS",
+        table,
         create_if_missing=True,
     )
     if changed:
@@ -80,10 +84,8 @@ def refresh(plugin_root: Path, *, check_only: bool = False) -> int:
 
 def main() -> int:
     p = argparse.ArgumentParser(description="Refresh AUTO-* marker blocks in README.md.")
-    p.add_argument("plugin_root", nargs="?", default=".", type=Path,
-                   help="Path to the plugin root (default: cwd).")
-    p.add_argument("--check", action="store_true",
-                   help="Exit 1 if README would change. Use as a CI gate.")
+    p.add_argument("plugin_root", nargs="?", default=".", type=Path, help="Path to the plugin root (default: cwd).")
+    p.add_argument("--check", action="store_true", help="Exit 1 if README would change. Use as a CI gate.")
     args = p.parse_args()
     return refresh(args.plugin_root.resolve(), check_only=args.check)
 

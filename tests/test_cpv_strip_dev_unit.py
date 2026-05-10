@@ -36,27 +36,25 @@ def _make_plugin(
     plugin = tmp_path / "demo"
     (plugin / ".claude-plugin").mkdir(parents=True)
     pj = plugin_json or {
-        "name": "demo", "version": "0.1.0", "description": "x",
+        "name": "demo",
+        "version": "0.1.0",
+        "description": "x",
         "repository": "https://github.com/Emasoft/demo",
     }
     (plugin / ".claude-plugin" / "plugin.json").write_text(
-        json.dumps(pj), encoding="utf-8",
+        json.dumps(pj),
+        encoding="utf-8",
     )
     for rel, content in (files or {}).items():
         target = plugin / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
     if init_git:
-        subprocess.run(["git", "-C", str(plugin), "init", "-b", "main"],
-                       capture_output=True, check=False)
-        subprocess.run(["git", "-C", str(plugin), "config", "user.email", "t@t.t"],
-                       capture_output=True, check=False)
-        subprocess.run(["git", "-C", str(plugin), "config", "user.name", "T"],
-                       capture_output=True, check=False)
-        subprocess.run(["git", "-C", str(plugin), "add", "."],
-                       capture_output=True, check=False)
-        subprocess.run(["git", "-C", str(plugin), "commit", "-m", "initial"],
-                       capture_output=True, check=False)
+        subprocess.run(["git", "-C", str(plugin), "init", "-b", "main"], capture_output=True, check=False)
+        subprocess.run(["git", "-C", str(plugin), "config", "user.email", "t@t.t"], capture_output=True, check=False)
+        subprocess.run(["git", "-C", str(plugin), "config", "user.name", "T"], capture_output=True, check=False)
+        subprocess.run(["git", "-C", str(plugin), "add", "."], capture_output=True, check=False)
+        subprocess.run(["git", "-C", str(plugin), "commit", "-m", "initial"], capture_output=True, check=False)
     return plugin
 
 
@@ -166,8 +164,7 @@ def test_check_working_tree_safe_rejects_stash(tmp_path):
     plugin = _make_plugin(tmp_path, files={"tests/x.py": "x"})
     # Modify a tracked file then stash.
     (plugin / "tests" / "x.py").write_text("modified", encoding="utf-8")
-    subprocess.run(["git", "-C", str(plugin), "stash", "push", "-m", "test"],
-                   capture_output=True, check=False)
+    subprocess.run(["git", "-C", str(plugin), "stash", "push", "-m", "test"], capture_output=True, check=False)
     targets = [csd.normalise_target("tests/", "Emasoft", "demo")]
     with pytest.raises(csd.StripError) as exc:
         csd.check_working_tree_safe(plugin, targets)
@@ -191,10 +188,11 @@ def test_check_working_tree_safe_rejects_detached_head(tmp_path):
     plugin = _make_plugin(tmp_path, files={"tests/x.py": "x"})
     head_sha = subprocess.run(
         ["git", "-C", str(plugin), "rev-parse", "HEAD"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
-    subprocess.run(["git", "-C", str(plugin), "checkout", head_sha],
-                   capture_output=True, check=False)
+    subprocess.run(["git", "-C", str(plugin), "checkout", head_sha], capture_output=True, check=False)
     targets = [csd.normalise_target("tests/", "Emasoft", "demo")]
     with pytest.raises(csd.StripError) as exc:
         csd.check_working_tree_safe(plugin, targets)
@@ -246,14 +244,15 @@ def test_state_progress_recognises_states(tmp_path):
 
 def test_build_plan_uses_defaults_when_no_config(tmp_path):
     """PSS-style default: ONE submodule per plugin (tests/ only)."""
-    plugin = _make_plugin(tmp_path, files={
-        "tests/x.py": "x",
-    })
+    plugin = _make_plugin(
+        tmp_path,
+        files={
+            "tests/x.py": "x",
+        },
+    )
     plan = csd.build_plan(plugin)
     srcs = {t.src for t in plan.targets}
-    assert srcs == {"tests/"}, (
-        f"Default extract should be tests/ only (PSS pattern), got {srcs}"
-    )
+    assert srcs == {"tests/"}, f"Default extract should be tests/ only (PSS pattern), got {srcs}"
 
 
 def test_build_plan_explicit_targets_override_config(tmp_path):
@@ -267,13 +266,14 @@ def test_build_plan_reads_cpv_strip_block(tmp_path):
     plugin = _make_plugin(
         tmp_path,
         plugin_json={
-            "name": "demo", "version": "0.1.0", "description": "x",
+            "name": "demo",
+            "version": "0.1.0",
+            "description": "x",
             "repository": "https://github.com/Emasoft/demo",
             "cpv": {
                 "strip": {
                     "extract": [
-                        {"src": "tests/", "submodule": "Emasoft/demo-tests",
-                         "submodule_path": "dev/tests/"},
+                        {"src": "tests/", "submodule": "Emasoft/demo-tests", "submodule_path": "dev/tests/"},
                     ],
                     "keep_in_main": ["tests/fixtures/small/"],
                     "keep_dev_configs": True,
@@ -302,7 +302,9 @@ def test_build_plan_rejects_invalid_src_in_config(tmp_path):
     plugin = _make_plugin(
         tmp_path,
         plugin_json={
-            "name": "demo", "version": "0.1.0", "description": "x",
+            "name": "demo",
+            "version": "0.1.0",
+            "description": "x",
             "cpv": {
                 "strip": {
                     "extract": [
@@ -388,11 +390,14 @@ def test_main_without_auto_falls_through_to_dry_run(tmp_path, capsys):
 
 def test_should_strip_target_skips_tiny_dir(tmp_path):
     """A 200-byte / 5-file tests/ is below both thresholds → don't strip."""
-    plugin = _make_plugin(tmp_path, files={
-        "tests/test_a.py": "a",
-        "tests/test_b.py": "b",
-        "tests/test_c.py": "c",
-    })
+    plugin = _make_plugin(
+        tmp_path,
+        files={
+            "tests/test_a.py": "a",
+            "tests/test_b.py": "b",
+            "tests/test_c.py": "c",
+        },
+    )
     target = csd.normalise_target("tests/", "Emasoft", "demo")
     worth, reason = csd.should_strip_target(target, plugin)
     assert worth is False
@@ -424,5 +429,6 @@ def test_state_progress_int_arithmetic():
     """state_progress returns higher numbers for later states."""
     assert csd.state_progress({"current_state": csd.StripState.INIT.value}) == 0
     assert csd.state_progress({"current_state": csd.StripState.REPO_VERIFIED.value}) > 0
-    assert (csd.state_progress({"current_state": csd.StripState.DONE.value})
-            > csd.state_progress({"current_state": csd.StripState.SUBMODULE_ADDED.value}))
+    assert csd.state_progress({"current_state": csd.StripState.DONE.value}) > csd.state_progress(
+        {"current_state": csd.StripState.SUBMODULE_ADDED.value}
+    )

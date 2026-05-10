@@ -25,6 +25,7 @@ Usage:
 Default plugin root is the parent of `scripts/`. Writes BOTH manifests
 to `<plugin_root>/`. Exit code 0 on success.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -70,26 +71,13 @@ def is_self_scan_eligible(rel_path: str) -> bool:
         return True
     if "/semantic-validation-skill/references/" in file_normalized:
         return True
-    if (
-        "/skills/" in file_normalized
-        and "/references/" in file_normalized
-        and basename.endswith(".md")
-    ):
+    if "/skills/" in file_normalized and "/references/" in file_normalized and basename.endswith(".md"):
         return True
-    if (
-        ("/agents/" in file_normalized or file_normalized.startswith("agents/"))
-        and basename.endswith(".md")
-    ):
+    if ("/agents/" in file_normalized or file_normalized.startswith("agents/")) and basename.endswith(".md"):
         return True
-    if (
-        ("/commands/" in file_normalized or file_normalized.startswith("commands/"))
-        and basename.endswith(".md")
-    ):
+    if ("/commands/" in file_normalized or file_normalized.startswith("commands/")) and basename.endswith(".md"):
         return True
-    if (
-        ("/skills/" in file_normalized or file_normalized.startswith("skills/"))
-        and basename.endswith(".md")
-    ):
+    if ("/skills/" in file_normalized or file_normalized.startswith("skills/")) and basename.endswith(".md"):
         return True
     if "/templates/" in file_normalized or file_normalized.startswith("templates/"):
         return True
@@ -123,6 +111,7 @@ def _git_tracked_files(plugin_root: Path) -> set[str] | None:
     fall back to the directory walk + skip_dirs heuristic.
     """
     import subprocess
+
     try:
         result = subprocess.run(
             ["git", "-C", str(plugin_root), "ls-files"],
@@ -153,10 +142,26 @@ def compute_manifest(plugin_root: Path) -> dict[str, object]:
     # Skip these dirs entirely — never useful to hash venvs, build artifacts,
     # cache, git internals.
     skip_dirs = {
-        ".git", ".venv", "venv", "__pycache__", "node_modules",
-        "dist", "build", ".pytest_cache", ".mypy_cache", ".ruff_cache",
-        "reports", "reports_dev", "downloads_dev", "libs_dev", "builds_dev",
-        "samples_dev", "scripts_dev", "tests_dev", "examples_dev", "docs_dev",
+        ".git",
+        ".venv",
+        "venv",
+        "__pycache__",
+        "node_modules",
+        "dist",
+        "build",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        "reports",
+        "reports_dev",
+        "downloads_dev",
+        "libs_dev",
+        "builds_dev",
+        "samples_dev",
+        "scripts_dev",
+        "tests_dev",
+        "examples_dev",
+        "docs_dev",
     }
 
     tracked = _git_tracked_files(plugin_root)

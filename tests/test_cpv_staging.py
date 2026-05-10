@@ -120,9 +120,7 @@ class TestStageTargetHardlink:
 
 
 class TestStageTargetCrossFsFallback:
-    def test_exdev_falls_back_to_copy_for_small_tree(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_exdev_falls_back_to_copy_for_small_tree(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         target = tmp_path / "p"
         target.mkdir()
         (target / "a").write_text("x" * 50)
@@ -145,9 +143,7 @@ class TestStageTargetCrossFsFallback:
         finally:
             staging.cleanup_staging(result.stage_root)
 
-    def test_exdev_falls_back_to_symlink_for_large_tree(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_exdev_falls_back_to_symlink_for_large_tree(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         target = tmp_path / "huge"
         target.mkdir()
         f = target / "big"
@@ -173,9 +169,7 @@ class TestStageTargetCrossFsFallback:
         finally:
             staging.cleanup_staging(result.stage_root)
 
-    def test_non_exdev_oserror_propagates(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_non_exdev_oserror_propagates(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         target = tmp_path / "p"
         target.mkdir()
         (target / "a").write_text("x")
@@ -211,6 +205,7 @@ class TestCleanupStaging:
         # Even if rmtree raises (despite ignore_errors), don't propagate.
         def boom(*a, **kw):
             raise RuntimeError("simulated")
+
         monkeypatch.setattr(staging.shutil, "rmtree", boom)
         # Should not raise.
         staging.cleanup_staging(Path("/tmp/anything"))

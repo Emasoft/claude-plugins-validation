@@ -48,11 +48,11 @@ _PURL_TYPE = {
 class Dependency:
     """One declared dependency lifted from a manifest file."""
 
-    ecosystem: str            # npm | pypi | cargo | golang
+    ecosystem: str  # npm | pypi | cargo | golang
     name: str
-    version: str | None       # raw version-spec string (may be None)
-    scope: str                # required | optional | dev
-    manifest: str             # relative manifest path (for evidence)
+    version: str | None  # raw version-spec string (may be None)
+    scope: str  # required | optional | dev
+    manifest: str  # relative manifest path (for evidence)
 
 
 # -----------------------------------------------------------------------------
@@ -135,9 +135,7 @@ def _parse_pyproject_toml(text: str, manifest_rel: str) -> Iterable[Dependency]:
             for name, spec in sec.items():
                 if not isinstance(name, str) or name == "python":
                     continue
-                ver = spec if isinstance(spec, str) else (
-                    spec.get("version") if isinstance(spec, dict) else None
-                )
+                ver = spec if isinstance(spec, str) else (spec.get("version") if isinstance(spec, dict) else None)
                 yield Dependency("pypi", name, ver, scope, manifest_rel)
 
 
@@ -173,9 +171,7 @@ def _parse_cargo_toml(text: str, manifest_rel: str) -> Iterable[Dependency]:
         for name, spec in deps.items():
             if not isinstance(name, str):
                 continue
-            ver = spec if isinstance(spec, str) else (
-                spec.get("version") if isinstance(spec, dict) else None
-            )
+            ver = spec if isinstance(spec, str) else (spec.get("version") if isinstance(spec, dict) else None)
             yield Dependency("cargo", name, ver, scope, manifest_rel)
 
 
@@ -192,7 +188,7 @@ def _parse_go_mod(text: str, manifest_rel: str) -> Iterable[Dependency]:
             in_block = False
             continue
         if line.startswith("require ") or in_block:
-            content = line[len("require "):] if line.startswith("require ") else line
+            content = line[len("require ") :] if line.startswith("require ") else line
             content = content.split("//", 1)[0].strip()
             parts = content.split()
             if len(parts) >= 2:
@@ -220,9 +216,18 @@ def iter_dependencies(plugin_path: Path) -> Iterable[Dependency]:
     """
     plugin_path = plugin_path.resolve()
     skip_dirs = {
-        "node_modules", ".venv", ".git", "dist", "build",
-        "__pycache__", ".tox", ".pytest_cache", ".mypy_cache", ".ruff_cache",
-        "vendor", "target",
+        "node_modules",
+        ".venv",
+        ".git",
+        "dist",
+        "build",
+        "__pycache__",
+        ".tox",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        "vendor",
+        "target",
     }
     skip_suffixes = ("_dev",)
 
@@ -282,9 +287,7 @@ def _component_for(dep: Dependency) -> dict[str, Any]:
         "name": dep.name,
         "purl": to_purl(dep),
         "scope": "optional" if dep.scope in ("dev", "optional") else "required",
-        "evidence": {
-            "occurrences": [{"location": dep.manifest}]
-        },
+        "evidence": {"occurrences": [{"location": dep.manifest}]},
         "properties": [
             {"name": "cpv:ecosystem", "value": dep.ecosystem},
             {"name": "cpv:scope", "value": dep.scope},

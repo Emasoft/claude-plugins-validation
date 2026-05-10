@@ -46,6 +46,7 @@ Bypass for development:
     The legacy `CPV_SKIP_GITHUB_INTEGRITY=1` is honoured for one
     release with a DeprecationWarning printed once per process.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -67,21 +68,15 @@ MANIFEST_FILE_LEGACY = ".cpv-self-hashes.json"  # removed in v2.53.0
 # plugin's version. Each release commits its own manifest before tagging
 # (see publish.py Gate 9), so v2.51.0's manifest at the v2.51.0 tag matches
 # the v2.51.0 source exactly.
-REPO_RAW_TAG_URL = (
-    f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/v{{version}}/{MANIFEST_FILE}"
-)
+REPO_RAW_TAG_URL = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/v{{version}}/{MANIFEST_FILE}"
 REPO_RAW_TAG_URL_LEGACY = (
     f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/v{{version}}/{MANIFEST_FILE_LEGACY}"
 )
 
 # Fallback for dev branches / pre-release versions: main HEAD manifest.
 # Used only when the per-version URL returns 404 (tag doesn't exist yet).
-REPO_RAW_MAIN_URL = (
-    f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/{MANIFEST_FILE}"
-)
-REPO_RAW_MAIN_URL_LEGACY = (
-    f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/{MANIFEST_FILE_LEGACY}"
-)
+REPO_RAW_MAIN_URL = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/{MANIFEST_FILE}"
+REPO_RAW_MAIN_URL_LEGACY = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/{MANIFEST_FILE_LEGACY}"
 
 CACHE_DIR = Path.home() / ".cache" / "cpv"
 CACHE_TTL = timedelta(hours=1)
@@ -309,9 +304,7 @@ def verify_self_integrity(
         # execution to continue. User may be offline; refusing to run
         # would be worse UX than running unverified with a warning.
         if not quiet:
-            tried_url = (
-                REPO_RAW_TAG_URL.format(version=version) if version else REPO_RAW_MAIN_URL
-            )
+            tried_url = REPO_RAW_TAG_URL.format(version=version) if version else REPO_RAW_MAIN_URL
             cache_path = _cache_path_for_version(version)
             print(
                 "[CPV integrity] WARNING: Could not fetch the canonical "
@@ -361,8 +354,7 @@ def verify_self_integrity(
     if mismatches:
         print(
             "\n" + "=" * 70 + "\n"
-            "[CPV integrity] CRITICAL: integrity manifest mismatch\n"
-            + "=" * 70 + "\n"
+            "[CPV integrity] CRITICAL: integrity manifest mismatch\n" + "=" * 70 + "\n"
             f"The following {len(mismatches)} CPV-internal file(s) differ from "
             "the canonical manifest published on GitHub:\n",
             file=sys.stderr,
@@ -395,8 +387,7 @@ def verify_self_integrity(
         try:
             cache_root = plugin_root.parent
             siblings = sorted(
-                (p for p in cache_root.iterdir()
-                 if p.is_dir() and p.name != plugin_root.name),
+                (p for p in cache_root.iterdir() if p.is_dir() and p.name != plugin_root.name),
                 reverse=True,
             )
             current_version = _read_local_plugin_version(plugin_root) or "?"
@@ -408,7 +399,7 @@ def verify_self_integrity(
                 for sib in siblings[:5]:
                     sib_launcher = sib / "scripts" / "remote_validation.py"
                     print(
-                        f"       python3 \"{sib_launcher}\" <subcommand> <args>",
+                        f'       python3 "{sib_launcher}" <subcommand> <args>',
                         file=sys.stderr,
                     )
             else:
@@ -432,8 +423,7 @@ def verify_self_integrity(
             "       rm -rf ~/.claude/plugins/cache/<marketplace>/claude-plugins-validation/\n"
             "       claude plugin update claude-plugins-validation@<marketplace>\n"
             "\n"
-            "Tracking: https://github.com/Emasoft/claude-plugins-validation/issues/18\n"
-            + "=" * 70 + "\n",
+            "Tracking: https://github.com/Emasoft/claude-plugins-validation/issues/18\n" + "=" * 70 + "\n",
             file=sys.stderr,
         )
 
@@ -443,8 +433,7 @@ def verify_self_integrity(
 
     if not quiet:
         print(
-            f"[CPV integrity] OK — {checked} CPV files verified against the "
-            "GitHub canonical manifest.",
+            f"[CPV integrity] OK — {checked} CPV files verified against the GitHub canonical manifest.",
             file=sys.stderr,
         )
     _VERIFIED_THIS_PROCESS = True

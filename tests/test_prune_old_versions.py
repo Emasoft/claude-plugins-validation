@@ -3,6 +3,7 @@
 Validates the cache pruning that frees disk space accumulated when
 ``claude plugin update`` doesn't remove old versions.
 """
+
 from __future__ import annotations
 
 import json
@@ -101,17 +102,13 @@ class TestFindActiveVersions:
         monkeypatch.setattr(manage_doctor, "SETTINGS_FILE", tmp_path / ".claude" / "settings.json")
         assert find_active_versions(tmp_path / "cache") == {}
 
-    def test_resolves_active_from_claude_json_projects(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ):
+    def test_resolves_active_from_claude_json_projects(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         cache = tmp_path / "cache"
         (cache / "mkt" / "plug" / "1.0.0").mkdir(parents=True)
         (cache / "mkt" / "plug" / "2.0.0").mkdir(parents=True)
-        (tmp_path / ".claude.json").write_text(json.dumps({
-            "projects": {
-                "/some/proj": {"enabledPlugins": {"plug@mkt": True}}
-            }
-        }))
+        (tmp_path / ".claude.json").write_text(
+            json.dumps({"projects": {"/some/proj": {"enabledPlugins": {"plug@mkt": True}}}})
+        )
         monkeypatch.setattr(manage_doctor, "CACHE_DIR", cache)
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         monkeypatch.setattr(manage_doctor, "SETTINGS_FILE", tmp_path / ".claude" / "settings.json")
@@ -123,18 +120,16 @@ class TestFindActiveVersions:
     def test_disabled_plugins_are_ignored(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         cache = tmp_path / "cache"
         (cache / "mkt" / "plug" / "1.0.0").mkdir(parents=True)
-        (tmp_path / ".claude.json").write_text(json.dumps({
-            "projects": {"/proj": {"enabledPlugins": {"plug@mkt": False}}}
-        }))
+        (tmp_path / ".claude.json").write_text(
+            json.dumps({"projects": {"/proj": {"enabledPlugins": {"plug@mkt": False}}}})
+        )
         monkeypatch.setattr(manage_doctor, "CACHE_DIR", cache)
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         monkeypatch.setattr(manage_doctor, "SETTINGS_FILE", tmp_path / ".claude" / "settings.json")
 
         assert find_active_versions(cache) == {}
 
-    def test_malformed_claude_json_does_not_crash(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ):
+    def test_malformed_claude_json_does_not_crash(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         (tmp_path / ".claude.json").write_text("this is not json")
         monkeypatch.setattr(manage_doctor, "CACHE_DIR", tmp_path / "cache")
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
@@ -184,9 +179,7 @@ class TestDoPruneOldVersions:
         for v in ("0.3.4", "0.3.7", "0.3.8"):
             assert not (cache / "ai-maestro-plugins" / "ai-maestro-janitor" / v).exists()
 
-    def test_single_version_plugin_left_alone(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ):
+    def test_single_version_plugin_left_alone(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         cache = self._setup_cache(tmp_path, monkeypatch)
         do_prune_old_versions(dry_run=False)
         assert (cache / "mkt" / "single" / "1.0.0").exists()
@@ -199,14 +192,12 @@ class TestDoPruneOldVersions:
         assert (cache / "ai-maestro-plugins" / "ai-maestro-janitor" / "0.3.8").exists()
         assert not (cache / "ai-maestro-plugins" / "ai-maestro-janitor" / "0.3.7").exists()
 
-    def test_active_version_always_kept_even_if_older(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ):
+    def test_active_version_always_kept_even_if_older(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         cache = self._setup_cache(tmp_path, monkeypatch)
         # Override active version to be 0.3.7 (older than 0.3.9)
-        (tmp_path / ".claude.json").write_text(json.dumps({
-            "projects": {"/p": {"enabledPlugins": {"ai-maestro-janitor@ai-maestro-plugins": True}}}
-        }))
+        (tmp_path / ".claude.json").write_text(
+            json.dumps({"projects": {"/p": {"enabledPlugins": {"ai-maestro-janitor@ai-maestro-plugins": True}}}})
+        )
         # The find_active_versions resolves to "0.3.9" (highest semver) when
         # enabledPlugins entry exists but doesn't pin a version. With keep_n=1
         # only 0.3.9 is kept. Verify the keep set always includes the version
@@ -214,9 +205,7 @@ class TestDoPruneOldVersions:
         do_prune_old_versions(dry_run=False, keep_n=1)
         assert (cache / "ai-maestro-plugins" / "ai-maestro-janitor" / "0.3.9").exists()
 
-    def test_no_old_versions_returns_zero(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
-    ):
+    def test_no_old_versions_returns_zero(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
         cache = tmp_path / "cache"
         (cache / "mkt" / "p" / "1.0.0").mkdir(parents=True)
         monkeypatch.setattr(manage_doctor, "CACHE_DIR", cache)
@@ -227,9 +216,7 @@ class TestDoPruneOldVersions:
         assert removed == 0
         assert "Cache is clean" in capsys.readouterr().out
 
-    def test_empty_cache_returns_zero(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
-    ):
+    def test_empty_cache_returns_zero(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
         monkeypatch.setattr(manage_doctor, "CACHE_DIR", tmp_path / "nonexistent")
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         monkeypatch.setattr(manage_doctor, "SETTINGS_FILE", tmp_path / ".claude" / "settings.json")
@@ -243,9 +230,7 @@ class TestDoPruneOldVersions:
 
 
 class TestArgparseWiring:
-    def test_prune_dry_run_invokes_with_dry_run_true(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ):
+    def test_prune_dry_run_invokes_with_dry_run_true(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         called: dict = {}
 
         def fake_prune(dry_run: bool, keep_n: int) -> int:
@@ -260,9 +245,7 @@ class TestArgparseWiring:
             manage_doctor.main()
         assert called == {"dry_run": True, "keep_n": 1}
 
-    def test_prune_old_versions_invokes_with_dry_run_false(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ):
+    def test_prune_old_versions_invokes_with_dry_run_false(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         called: dict = {}
 
         def fake_prune(dry_run: bool, keep_n: int) -> int:

@@ -89,11 +89,13 @@ class _FakeCompletedProcess:
 class TestTrufflehogParsing:
     def test_verified_secret_critical(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(validate_security.shutil, "which", lambda name: f"/usr/local/bin/{name}")
-        sample = json.dumps({
-            "DetectorName": "AWS",
-            "Verified": True,
-            "SourceMetadata": {"Data": {"Filesystem": {"file": "src/leak.py", "line": 10}}},
-        })
+        sample = json.dumps(
+            {
+                "DetectorName": "AWS",
+                "Verified": True,
+                "SourceMetadata": {"Data": {"Filesystem": {"file": "src/leak.py", "line": 10}}},
+            }
+        )
 
         def fake_run(*a: Any, **kw: Any) -> _FakeCompletedProcess:
             return _FakeCompletedProcess(stdout=sample, returncode=1)
@@ -106,11 +108,13 @@ class TestTrufflehogParsing:
 
     def test_unverified_secret_major(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(validate_security.shutil, "which", lambda name: f"/usr/local/bin/{name}")
-        sample = json.dumps({
-            "DetectorName": "GenericPassword",
-            "Verified": False,
-            "SourceMetadata": {"Data": {"Filesystem": {"file": "src/x.py", "line": 5}}},
-        })
+        sample = json.dumps(
+            {
+                "DetectorName": "GenericPassword",
+                "Verified": False,
+                "SourceMetadata": {"Data": {"Filesystem": {"file": "src/x.py", "line": 5}}},
+            }
+        )
 
         def fake_run(*a: Any, **kw: Any) -> _FakeCompletedProcess:
             return _FakeCompletedProcess(stdout=sample, returncode=1)
@@ -123,8 +127,9 @@ class TestTrufflehogParsing:
 
     def test_no_findings_passed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(validate_security.shutil, "which", lambda name: f"/usr/local/bin/{name}")
-        monkeypatch.setattr(validate_security.subprocess, "run",
-                             lambda *a, **kw: _FakeCompletedProcess(stdout="", returncode=0))
+        monkeypatch.setattr(
+            validate_security.subprocess, "run", lambda *a, **kw: _FakeCompletedProcess(stdout="", returncode=0)
+        )
         report = ValidationReport()
         check_trufflehog(_make_plugin(tmp_path), report)
         passed = [r for r in report.results if r.level == "PASSED" and "trufflehog" in r.message]
@@ -139,13 +144,16 @@ class TestTrufflehogParsing:
         name-only spoofing no longer evades scanning.
         """
         monkeypatch.setattr(validate_security.shutil, "which", lambda name: f"/usr/local/bin/{name}")
-        sample = json.dumps({
-            "DetectorName": "AWS",
-            "Verified": True,
-            "SourceMetadata": {"Data": {"Filesystem": {"file": "scripts/validate_security.py", "line": 100}}},
-        })
-        monkeypatch.setattr(validate_security.subprocess, "run",
-                             lambda *a, **kw: _FakeCompletedProcess(stdout=sample, returncode=1))
+        sample = json.dumps(
+            {
+                "DetectorName": "AWS",
+                "Verified": True,
+                "SourceMetadata": {"Data": {"Filesystem": {"file": "scripts/validate_security.py", "line": 100}}},
+            }
+        )
+        monkeypatch.setattr(
+            validate_security.subprocess, "run", lambda *a, **kw: _FakeCompletedProcess(stdout=sample, returncode=1)
+        )
         report = ValidationReport()
         plugin = _make_plugin(tmp_path)
         # Self-scan must NOT be active for this fake plugin.
@@ -169,14 +177,21 @@ class TestSemgrepParsing:
         monkeypatch.setattr(validate_security.shutil, "which", lambda name: f"/usr/local/bin/{name}")
         plugin = _make_plugin(tmp_path)
         # File path in finding must be relative to plugin_path
-        sample = json.dumps({"results": [{
-            "check_id": "python.security.audit.dangerous-system-call",
-            "extra": {"message": "eval() detected", "severity": "ERROR"},
-            "path": str(plugin / "src/x.py"),
-            "start": {"line": 1},
-        }]})
-        monkeypatch.setattr(validate_security.subprocess, "run",
-                             lambda *a, **kw: _FakeCompletedProcess(stdout=sample, returncode=0))
+        sample = json.dumps(
+            {
+                "results": [
+                    {
+                        "check_id": "python.security.audit.dangerous-system-call",
+                        "extra": {"message": "eval() detected", "severity": "ERROR"},
+                        "path": str(plugin / "src/x.py"),
+                        "start": {"line": 1},
+                    }
+                ]
+            }
+        )
+        monkeypatch.setattr(
+            validate_security.subprocess, "run", lambda *a, **kw: _FakeCompletedProcess(stdout=sample, returncode=0)
+        )
         report = ValidationReport()
         check_semgrep(plugin, report)
         msgs = [r for r in report.results if "semgrep" in r.message and r.level == "MAJOR"]

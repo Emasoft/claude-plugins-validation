@@ -491,10 +491,9 @@ class TestValidatePluginSource:
 
         plugin = {"name": "myplugin", "source": {"source": "file", "path": "/abs/path/marketplace.json"}}
         results = validate_plugin_source(plugin, "myplugin", tmp_path, "mp.json")
-        assert any(
-            r.level == "MAJOR" and "settings-level" in r.message and "file" in r.message
-            for r in results
-        ), "expected MAJOR identifying 'file' as settings-level-only"
+        assert any(r.level == "MAJOR" and "settings-level" in r.message and "file" in r.message for r in results), (
+            "expected MAJOR identifying 'file' as settings-level-only"
+        )
 
     def test_string_source_file_name_is_settings_level_only(self, tmp_path):
         """GAP-1 variant: bare 'file' string as source (not a relative path) hits the
@@ -506,8 +505,7 @@ class TestValidatePluginSource:
         # Either the MARKETPLACE_LEVEL_ONLY branch or the "invalid source type" branch is
         # acceptable — what must NOT happen is CPV accepting this silently.
         assert any(
-            r.level == "MAJOR"
-            and ("settings-level" in r.message or "invalid source type" in r.message)
+            r.level == "MAJOR" and ("settings-level" in r.message or "invalid source type" in r.message)
             for r in results
         )
 
@@ -1115,9 +1113,9 @@ class TestValidateMarketplaceIntegration:
         mp.write_text(json.dumps({"name": "test-mp", "owner": "just-a-string", "plugins": []}))
         report = validate_marketplace(tmp_path)
         # v2.22.3 — GAP-14: bare-string owner softened from MAJOR to MINOR
-        assert any(
-            r.level == "MINOR" and "bare string" in r.message.lower() for r in report.results
-        ), f"expected MINOR for bare-string owner, got: {[(r.level, r.message) for r in report.results]}"
+        assert any(r.level == "MINOR" and "bare string" in r.message.lower() for r in report.results), (
+            f"expected MINOR for bare-string owner, got: {[(r.level, r.message) for r in report.results]}"
+        )
 
     def test_marketplace_with_owner_non_string_non_object(self, tmp_path):
         """Owner that is neither a string nor an object still produces MAJOR."""
@@ -1209,9 +1207,9 @@ class TestV221MarketplaceVersionDuplication:
 
         plugin = {"name": "my-plugin", "source": "./my-plugin", "version": "1.2.3"}
         results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
-        assert any(
-            r.level == "NIT" and "only one place" in r.message.lower() for r in results
-        ), f"expected NIT with 'only one place' guidance, got: {[(r.level, r.message) for r in results]}"
+        assert any(r.level == "NIT" and "only one place" in r.message.lower() for r in results), (
+            f"expected NIT with 'only one place' guidance, got: {[(r.level, r.message) for r in results]}"
+        )
 
     def test_version_in_both_diverging_minor(self, tmp_path):
         """Relative-path source with diverging versions must produce MINOR drift warning."""
@@ -1223,9 +1221,9 @@ class TestV221MarketplaceVersionDuplication:
 
         plugin = {"name": "my-plugin", "source": "./my-plugin", "version": "1.0.0"}
         results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
-        assert any(
-            r.level == "MINOR" and "wins silently" in r.message.lower() for r in results
-        ), f"expected MINOR drift warning, got: {[(r.level, r.message) for r in results]}"
+        assert any(r.level == "MINOR" and "wins silently" in r.message.lower() for r in results), (
+            f"expected MINOR drift warning, got: {[(r.level, r.message) for r in results]}"
+        )
 
     def test_version_in_entry_only_ok(self, tmp_path):
         """Marketplace entry has version, plugin.json has no version → no version-consistency finding."""
@@ -1253,10 +1251,7 @@ class TestV221MarketplaceVersionDuplication:
 
         plugin = {"name": "my-plugin", "source": "./my-plugin"}  # no version field
         results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
-        assert not any(
-            "wins silently" in r.message.lower() or "only one place" in r.message.lower()
-            for r in results
-        )
+        assert not any("wins silently" in r.message.lower() or "only one place" in r.message.lower() for r in results)
 
     def test_remote_source_version_set_in_both_info_fallback(self, tmp_path):
         """GitHub source with version in entry → INFO fallback (cannot verify remote plugin.json)."""
@@ -1268,9 +1263,9 @@ class TestV221MarketplaceVersionDuplication:
             "version": "1.0.0",
         }
         results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
-        assert any(
-            r.level == "INFO" and "cannot verify version consistency" in r.message.lower() for r in results
-        ), f"expected INFO about unverifiable remote source, got: {[(r.level, r.message) for r in results]}"
+        assert any(r.level == "INFO" and "cannot verify version consistency" in r.message.lower() for r in results), (
+            f"expected INFO about unverifiable remote source, got: {[(r.level, r.message) for r in results]}"
+        )
 
 
 # =============================================================================
@@ -1297,16 +1292,13 @@ class TestV2223MarketplaceMinorFixes:
         }
         results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
         assert not any(
-            r.level == "INFO" and "unknown field" in r.message.lower() and "userConfig" in r.message
-            for r in results
+            r.level == "INFO" and "unknown field" in r.message.lower() and "userConfig" in r.message for r in results
         ), f"userConfig should no longer trigger unknown-field INFO: {[(r.level, r.message) for r in results]}"
         assert not any(
-            r.level == "INFO" and "unknown field" in r.message.lower() and "channels" in r.message
-            for r in results
+            r.level == "INFO" and "unknown field" in r.message.lower() and "channels" in r.message for r in results
         )
         assert not any(
-            r.level == "INFO" and "unknown field" in r.message.lower() and "monitors" in r.message
-            for r in results
+            r.level == "INFO" and "unknown field" in r.message.lower() and "monitors" in r.message for r in results
         )
 
     def test_gap7_sha_uppercase_hex_accepted(self, tmp_path):
@@ -1359,8 +1351,7 @@ class TestV2223MarketplaceMinorFixes:
         }
         results = validate_plugin_source(plugin, "my-plugin", tmp_path, "mp.json")
         assert any(
-            r.level == "NIT" and "CPV-only alias" in r.message and "url" in r.message.lower()
-            for r in results
+            r.level == "NIT" and "CPV-only alias" in r.message and "url" in r.message.lower() for r in results
         ), f"expected NIT advising canonical 'url' type: {[(r.level, r.message) for r in results]}"
 
     def test_gap3_directory_source_emits_nit(self, tmp_path):
@@ -1389,9 +1380,7 @@ class TestV2223MarketplaceMinorFixes:
             "author": {"name": "Alice", "url": 12345},
         }
         results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
-        assert any(
-            r.level == "MINOR" and "author.url" in r.message and "string" in r.message for r in results
-        )
+        assert any(r.level == "MINOR" and "author.url" in r.message and "string" in r.message for r in results)
 
     def test_gap13_author_url_bad_scheme_is_minor(self, tmp_path):
         """GAP-13: author.url not starting with http/https/git produces a MINOR."""
@@ -1403,9 +1392,7 @@ class TestV2223MarketplaceMinorFixes:
             "author": {"name": "Alice", "url": "ftp://bad-scheme.example.com"},
         }
         results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
-        assert any(
-            r.level == "MINOR" and "author.url" in r.message and "http" in r.message for r in results
-        )
+        assert any(r.level == "MINOR" and "author.url" in r.message and "http" in r.message for r in results)
 
     def test_gap13_author_url_http_ok(self, tmp_path):
         """GAP-13: author.url with http/https/git scheme is accepted silently."""
@@ -1422,9 +1409,9 @@ class TestV2223MarketplaceMinorFixes:
                 "author": {"name": "Alice", "url": url},
             }
             results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
-            assert not any(
-                r.level == "MINOR" and "author.url" in r.message for r in results
-            ), f"URL {url} should be accepted: {[(r.level, r.message) for r in results]}"
+            assert not any(r.level == "MINOR" and "author.url" in r.message for r in results), (
+                f"URL {url} should be accepted: {[(r.level, r.message) for r in results]}"
+            )
 
     def test_gap15_owner_url_emits_nit(self, tmp_path):
         """GAP-15: owner.url is not documented in the canonical owner schema — emit NIT."""
@@ -1467,9 +1454,9 @@ class TestV2223MarketplaceMinorFixes:
             "strict": False,
         }
         results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
-        assert any(
-            r.level == "MAJOR" and "conflicting manifests" in r.message for r in results
-        ), f"expected MAJOR for strict:false vs plugin.json components: {[(r.level, r.message) for r in results]}"
+        assert any(r.level == "MAJOR" and "conflicting manifests" in r.message for r in results), (
+            f"expected MAJOR for strict:false vs plugin.json components: {[(r.level, r.message) for r in results]}"
+        )
 
     def test_gap25_strict_false_with_metadata_only_plugin_json_is_silent(self, tmp_path):
         """GAP-25: strict:false with a plugin.json that has ONLY metadata (no components) is fine."""
@@ -1482,9 +1469,9 @@ class TestV2223MarketplaceMinorFixes:
         )
         plugin = {"name": "my-plugin", "source": "./my-plugin", "strict": False}
         results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
-        assert not any(
-            "conflicting manifests" in r.message for r in results
-        ), f"metadata-only plugin.json must not trigger conflicting-manifests MAJOR: {[(r.level, r.message) for r in results]}"
+        assert not any("conflicting manifests" in r.message for r in results), (
+            f"metadata-only plugin.json must not trigger conflicting-manifests MAJOR: {[(r.level, r.message) for r in results]}"
+        )
 
     def test_gap34_plugin_root_prefix_prepended_to_relative_path(self, tmp_path):
         """GAP-34: metadata.pluginRoot is prepended when resolving a relative source string."""
@@ -1508,9 +1495,10 @@ class TestV2223MarketplaceMinorFixes:
         report = validate_marketplace(tmp_path)
         # The relative path resolves as ./plugins/formatter thanks to GAP-34.
         assert not any(
-            r.level == "MAJOR" and "does not exist" in r.message and "formatter" in r.message
-            for r in report.results
-        ), f"pluginRoot should make ./formatter resolve to ./plugins/formatter: {[(r.level, r.message) for r in report.results]}"
+            r.level == "MAJOR" and "does not exist" in r.message and "formatter" in r.message for r in report.results
+        ), (
+            f"pluginRoot should make ./formatter resolve to ./plugins/formatter: {[(r.level, r.message) for r in report.results]}"
+        )
 
     def test_gap34_plugin_root_prefix_applied_to_bare_name_source(self, tmp_path):
         """GAP-34: bare-name source (`source: "formatter"`) resolves under pluginRoot."""
@@ -1534,10 +1522,9 @@ class TestV2223MarketplaceMinorFixes:
         report = validate_marketplace(tmp_path)
         # Previously: bare name "formatter" would trigger "invalid source type".
         # After GAP-34: bare name resolves via pluginRoot and passes.
-        assert not any(
-            r.level == "MAJOR" and "invalid source type: formatter" in r.message
-            for r in report.results
-        ), f"bare-name source must resolve via pluginRoot: {[(r.level, r.message) for r in report.results]}"
+        assert not any(r.level == "MAJOR" and "invalid source type: formatter" in r.message for r in report.results), (
+            f"bare-name source must resolve via pluginRoot: {[(r.level, r.message) for r in report.results]}"
+        )
 
     def test_gap32_top_level_description_emits_nit(self, tmp_path):
         """GAP-32: top-level `description` emits NIT favoring metadata.description."""
@@ -1555,10 +1542,9 @@ class TestV2223MarketplaceMinorFixes:
             )
         )
         report = validate_marketplace(tmp_path)
-        assert any(
-            r.level == "NIT" and "Top-level 'description'" in r.message
-            for r in report.results
-        ), f"expected NIT for top-level description: {[(r.level, r.message) for r in report.results]}"
+        assert any(r.level == "NIT" and "Top-level 'description'" in r.message for r in report.results), (
+            f"expected NIT for top-level description: {[(r.level, r.message) for r in report.results]}"
+        )
 
     def test_gap33_top_level_version_emits_nit(self, tmp_path):
         """GAP-33: top-level `version` emits NIT favoring metadata.version."""
@@ -1577,10 +1563,9 @@ class TestV2223MarketplaceMinorFixes:
             )
         )
         report = validate_marketplace(tmp_path)
-        assert any(
-            r.level == "NIT" and "Top-level 'version'" in r.message
-            for r in report.results
-        ), f"expected NIT for top-level version: {[(r.level, r.message) for r in report.results]}"
+        assert any(r.level == "NIT" and "Top-level 'version'" in r.message for r in report.results), (
+            f"expected NIT for top-level version: {[(r.level, r.message) for r in report.results]}"
+        )
 
     def test_gap28_channel_userconfig_unknown_type_is_minor(self, tmp_path):
         """GAP-28: channels[i].userConfig.type outside the allowed set produces MINOR."""
@@ -1599,9 +1584,7 @@ class TestV2223MarketplaceMinorFixes:
         }
         results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
         assert any(
-            r.level == "MINOR"
-            and "channels[0].userConfig.api_endpoint.type" in r.message
-            and "'quantum'" in r.message
+            r.level == "MINOR" and "channels[0].userConfig.api_endpoint.type" in r.message and "'quantum'" in r.message
             for r in results
         ), f"expected MINOR for unknown channel userConfig type: {[(r.level, r.message) for r in results]}"
 
@@ -1622,9 +1605,7 @@ class TestV2223MarketplaceMinorFixes:
         }
         results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
         assert any(
-            r.level == "MINOR"
-            and "channels[0].userConfig.api_endpoint" in r.message
-            and "'title'" in r.message
+            r.level == "MINOR" and "channels[0].userConfig.api_endpoint" in r.message and "'title'" in r.message
             for r in results
         ), f"expected MINOR for missing 'title': {[(r.level, r.message) for r in results]}"
 
@@ -1638,12 +1619,7 @@ class TestV2223MarketplaceMinorFixes:
             "userConfig": {"key1": {"type": "string", "description": "no title"}},
         }
         results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
-        assert any(
-            r.level == "MINOR"
-            and "userConfig.key1" in r.message
-            and "'title'" in r.message
-            for r in results
-        )
+        assert any(r.level == "MINOR" and "userConfig.key1" in r.message and "'title'" in r.message for r in results)
 
     def test_gap101_channel_userconfig_valid_entry_silent(self, tmp_path):
         """GAP-101: well-formed channels[i].userConfig entry produces no userConfig findings."""
@@ -1666,6 +1642,6 @@ class TestV2223MarketplaceMinorFixes:
             ],
         }
         results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
-        assert not any(
-            r.level in {"MINOR", "MAJOR", "CRITICAL"} and "userConfig" in r.message for r in results
-        ), f"valid userConfig must be silent: {[(r.level, r.message) for r in results]}"
+        assert not any(r.level in {"MINOR", "MAJOR", "CRITICAL"} and "userConfig" in r.message for r in results), (
+            f"valid userConfig must be silent: {[(r.level, r.message) for r in results]}"
+        )

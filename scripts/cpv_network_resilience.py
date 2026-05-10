@@ -24,6 +24,7 @@ spikes (DNS hiccup, AWS edge restart, rate-limit window). For git
 pushes the 60×4=240s budget plus the lowSpeedTime tolerance handles
 slow uploads on flaky transit (Fastweb, mobile tethering).
 """
+
 from __future__ import annotations
 
 import os
@@ -47,7 +48,7 @@ GH_HTTP_TIMEOUT_SEC: int = 300
 GIT_MAX_ATTEMPTS: int = 60
 GIT_BACKOFF_SEC: float = 4.0
 GIT_LOW_SPEED_LIMIT: int = 100  # bytes/sec floor below which transfer is "stalled"
-GIT_LOW_SPEED_TIME: int = 300   # seconds to tolerate stalled before aborting
+GIT_LOW_SPEED_TIME: int = 300  # seconds to tolerate stalled before aborting
 
 DEFAULT_TIMEOUT_SEC: float = 600.0  # per-attempt subprocess timeout
 
@@ -99,8 +100,7 @@ _PERMANENT_SUBPROCESS_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\b404\s+not\s+found\b", re.IGNORECASE),
     re.compile(r"name already exists on this account", re.IGNORECASE),
     re.compile(r"refusing to (?:overwrite|update)", re.IGNORECASE),
-    re.compile(r"unable to access .* the requested url returned error: 4\d\d",
-               re.IGNORECASE),
+    re.compile(r"unable to access .* the requested url returned error: 4\d\d", re.IGNORECASE),
 ]
 
 
@@ -291,8 +291,10 @@ def git_with_retry(
         raise ValueError("git_with_retry requires cmd[0] == 'git'")
     augmented = [
         cmd[0],
-        "-c", f"http.lowSpeedLimit={GIT_LOW_SPEED_LIMIT}",
-        "-c", f"http.lowSpeedTime={GIT_LOW_SPEED_TIME}",
+        "-c",
+        f"http.lowSpeedLimit={GIT_LOW_SPEED_LIMIT}",
+        "-c",
+        f"http.lowSpeedTime={GIT_LOW_SPEED_TIME}",
         *cmd[1:],
     ]
     return run_with_retry(

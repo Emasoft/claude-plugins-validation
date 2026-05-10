@@ -30,7 +30,8 @@ def _make_plugin(
     (plugin / ".claude-plugin").mkdir(parents=True)
     pj = plugin_json or {"name": "demo", "version": "0.1.0", "description": "x"}
     (plugin / ".claude-plugin" / "plugin.json").write_text(
-        json.dumps(pj), encoding="utf-8",
+        json.dumps(pj),
+        encoding="utf-8",
     )
     if gitmodules_text is not None:
         (plugin / ".gitmodules").write_text(gitmodules_text, encoding="utf-8")
@@ -46,14 +47,17 @@ def test_parse_gitmodules_urls_returns_empty_when_file_absent(tmp_path):
 
 
 def test_parse_gitmodules_urls_extracts_name_url_path(tmp_path):
-    plugin = _make_plugin(tmp_path, gitmodules_text="""\
+    plugin = _make_plugin(
+        tmp_path,
+        gitmodules_text="""\
 [submodule "tests"]
 \tpath = dev/tests
 \turl = https://github.com/Emasoft/demo-tests.git
 [submodule "design"]
 \tpath = dev/design
 \turl = https://github.com/Emasoft/demo-design.git
-""")
+""",
+    )
     entries = cvg.parse_gitmodules_urls(plugin)
     assert len(entries) == 2
     names = {e[0] for e in entries}
@@ -148,7 +152,9 @@ def test_validate_gitmodules_passes_with_explicit_allowlist(tmp_path):
     plugin = _make_plugin(
         tmp_path,
         plugin_json={
-            "name": "demo", "version": "0.1.0", "description": "x",
+            "name": "demo",
+            "version": "0.1.0",
+            "description": "x",
             "cpv": {
                 "strip": {
                     "allowed_submodule_urls": ["https://github.com/Emasoft/*.git"],
@@ -169,7 +175,9 @@ def test_validate_gitmodules_rejects_alien_owner_with_explicit_allowlist(tmp_pat
     plugin = _make_plugin(
         tmp_path,
         plugin_json={
-            "name": "demo", "version": "0.1.0", "description": "x",
+            "name": "demo",
+            "version": "0.1.0",
+            "description": "x",
             "cpv": {
                 "strip": {
                     "allowed_submodule_urls": ["https://github.com/Emasoft/*"],
@@ -248,7 +256,9 @@ def test_validate_gitmodules_opt_out_emits_warning(tmp_path):
     plugin = _make_plugin(
         tmp_path,
         plugin_json={
-            "name": "demo", "version": "0.1.0", "description": "x",
+            "name": "demo",
+            "version": "0.1.0",
+            "description": "x",
             "cpv": {
                 "strip": {
                     "require_url_allowlist": False,
@@ -314,9 +324,7 @@ def test_owner_of_non_github():
 # ── validate_strip_gitmodules: fail-closed on import failure (TRDD-793ac32a) ──
 
 
-def test_validate_strip_gitmodules_fails_closed_when_helper_missing(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_validate_strip_gitmodules_fails_closed_when_helper_missing(tmp_path: Path, monkeypatch) -> None:
     """When ``cpv_validate_gitmodules`` cannot be imported (helper missing,
     shadowed, or shipped from a stripped CPV release), the orchestrator
     MUST emit a CRITICAL with code RC-STRIP-GITMODULES-IMPORT-FAILED —
@@ -352,10 +360,7 @@ def test_validate_strip_gitmodules_fails_closed_when_helper_missing(
     validate_plugin.validate_strip_gitmodules(plugin, report)
 
     criticals = [r for r in report.results if r.level == "CRITICAL"]
-    assert criticals, (
-        "Missing helper MUST emit CRITICAL — got "
-        f"{[r.level for r in report.results]}"
-    )
+    assert criticals, f"Missing helper MUST emit CRITICAL — got {[r.level for r in report.results]}"
     msg = criticals[0].message
     assert "RC-STRIP-GITMODULES-IMPORT-FAILED" in msg, (
         f"CRITICAL must carry the RC code so the fixer agent can route it; got: {msg}"
@@ -366,10 +371,7 @@ def test_validate_strip_gitmodules_fails_closed_when_helper_missing(
     )
     # And no soft WARNING should be present — a hidden warning would defeat
     # the fail-closed guarantee even if the CRITICAL is also emitted.
-    soft_warnings = [
-        r for r in report.results
-        if r.level == "WARNING" and "STRIP-GITMODULES" in r.message
-    ]
+    soft_warnings = [r for r in report.results if r.level == "WARNING" and "STRIP-GITMODULES" in r.message]
     assert not soft_warnings, (
         "fail-CLOSED means CRITICAL only — any WARNING would silently pass "
         "in non-strict mode and defeat the whole point. Got: "
@@ -391,6 +393,5 @@ def test_validate_strip_gitmodules_noop_when_gitmodules_absent(tmp_path: Path) -
     validate_plugin.validate_strip_gitmodules(plugin, report)
 
     assert not report.results, (
-        "validate_strip_gitmodules must be silent when .gitmodules is absent. "
-        f"Got: {report.results}"
+        f"validate_strip_gitmodules must be silent when .gitmodules is absent. Got: {report.results}"
     )

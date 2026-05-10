@@ -146,6 +146,7 @@ def _tool_missing(
     documentation pointer instead of a hard MAJOR finding.
     """
     import sys
+
     msg = (
         f"Missing linter for {lang}: {tool} (needed for {file_count} file(s)) — "
         "install it locally or rely on uvx / bunx / npx / docker fallback. "
@@ -670,8 +671,7 @@ def lint_markdown(
     target_config = repo_root / ".markdownlint.json"
     if not target_config.exists():
         scripts_dir = Path(__file__).resolve().parent
-        for candidate in (scripts_dir / ".markdownlint.json",
-                          scripts_dir.parent / ".markdownlint.json"):
+        for candidate in (scripts_dir / ".markdownlint.json", scripts_dir.parent / ".markdownlint.json"):
             if candidate.is_file():
                 invocation.extend(["--config", str(candidate)])
                 break
@@ -1049,7 +1049,7 @@ def lint_toml(
         import tomllib as _toml
     except ModuleNotFoundError:
         try:
-            import tomli as _toml  # type: ignore[no-redef]
+            import tomli as _toml  # type: ignore[no-redef,import-not-found]
         except ModuleNotFoundError:
             report.warning("No TOML parser available (need Python 3.11+ or 'pip install tomli')")
             return True
@@ -1380,16 +1380,12 @@ def lint_repo(
             # Programming error — `detect_languages` returned a key
             # the dispatch table doesn't know about. Fail loud, into
             # this task's local report so the merge step sees it.
-            local_report.major(
-                f"No lint function registered for language '{lang}' — CPV dispatch table out of sync"
-            )
+            local_report.major(f"No lint function registered for language '{lang}' — CPV dispatch table out of sync")
             return lang, local_report, header_line, False
 
         # Phase D — cache lookup. Build the key off the file contents
         # and tool versions so the entry is invalidated by ANY drift.
-        cache_key = _build_cache_key(
-            lang, files, plugin_root, strict_missing_tools=strict_missing_tools
-        )
+        cache_key = _build_cache_key(lang, files, plugin_root, strict_missing_tools=strict_missing_tools)
         if cache_key is not None:
             cached = cache.get(cache_key)
             if cached is not None and isinstance(cached.get("findings"), list):

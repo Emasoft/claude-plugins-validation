@@ -68,9 +68,9 @@ class TestFenceTracker:
         content = "out\n```\nin\n```\nout"
         state = build_fence_state(content)
         assert is_in_fenced_code_block(0, state) is False
-        assert is_in_fenced_code_block(1, state) is True   # opening fence
-        assert is_in_fenced_code_block(2, state) is True   # body
-        assert is_in_fenced_code_block(3, state) is True   # closing fence
+        assert is_in_fenced_code_block(1, state) is True  # opening fence
+        assert is_in_fenced_code_block(2, state) is True  # body
+        assert is_in_fenced_code_block(3, state) is True  # closing fence
         assert is_in_fenced_code_block(4, state) is False
 
     def test_lookup_out_of_range_returns_false(self) -> None:
@@ -130,38 +130,44 @@ class TestNegationGuard:
 class TestPlaceholderSecret:
     """Verify is_placeholder_secret recognizes documentation-example secrets."""
 
-    @pytest.mark.parametrize("text", [
-        "your-api-key",
-        "your_api_key",
-        "YourApiKey",
-        "test-key",
-        "sample-token",
-        "demo-secret",
-        "example-api",
-        "placeholder-token",
-        "fake-credential",
-        "dummy-password",
-        "<your-api-key>",
-        "<your_token>",
-        "${OPENAI_API_KEY}",
-        "${MY_TOKEN}",
-        "sk-test",
-        "sk-proj-test",
-        "sk-demo",
-        "REDACTED",
-        "redacted",
-        "xxx",
-        "XXXXX",
-    ])
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "your-api-key",
+            "your_api_key",
+            "YourApiKey",
+            "test-key",
+            "sample-token",
+            "demo-secret",
+            "example-api",
+            "placeholder-token",
+            "fake-credential",
+            "dummy-password",
+            "<your-api-key>",
+            "<your_token>",
+            "${OPENAI_API_KEY}",
+            "${MY_TOKEN}",
+            "sk-test",
+            "sk-proj-test",
+            "sk-demo",
+            "REDACTED",
+            "redacted",
+            "xxx",
+            "XXXXX",
+        ],
+    )
     def test_recognized_placeholder(self, text: str) -> None:
         """Each documented placeholder pattern is detected as fake."""
         assert is_placeholder_secret(text) is True, f"failed to recognize {text!r}"
 
-    @pytest.mark.parametrize("text", [
-        "AKIAIOSFODNN7EXAMPLE",  # AWS-prefixed (real-shape, not a placeholder)
-        "real_credential_value_that_is_long",  # arbitrary string
-        "sk-1234567890abcdef",  # OpenAI-shape
-    ])
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "AKIAIOSFODNN7EXAMPLE",  # AWS-prefixed (real-shape, not a placeholder)
+            "real_credential_value_that_is_long",  # arbitrary string
+            "sk-1234567890abcdef",  # OpenAI-shape
+        ],
+    )
     def test_real_secrets_not_flagged_as_placeholder(self, text: str) -> None:
         """Real-shape secrets must NOT be mis-classified as placeholders."""
         assert is_placeholder_secret(text) is False, f"misclassified {text!r}"
@@ -175,16 +181,19 @@ class TestPlaceholderSecret:
 class TestProviderHosts:
     """Verify is_known_provider_host accepts AI providers, registries, code-hosts."""
 
-    @pytest.mark.parametrize("host", [
-        "api.openai.com",
-        "api.anthropic.com",
-        "claude.ai",
-        "huggingface.co",
-        "registry.npmjs.org",
-        "pypi.org",
-        "github.com",
-        "raw.githubusercontent.com",
-    ])
+    @pytest.mark.parametrize(
+        "host",
+        [
+            "api.openai.com",
+            "api.anthropic.com",
+            "claude.ai",
+            "huggingface.co",
+            "registry.npmjs.org",
+            "pypi.org",
+            "github.com",
+            "raw.githubusercontent.com",
+        ],
+    )
     def test_known_hosts_accepted(self, host: str) -> None:
         """All documented provider hosts return True."""
         assert is_known_provider_host(host) is True
@@ -194,12 +203,15 @@ class TestProviderHosts:
         assert is_known_provider_host("cdn.npmjs.org") is True
         assert is_known_provider_host("foo.api.openai.com") is True
 
-    @pytest.mark.parametrize("host", [
-        "evil.example.com",
-        "attacker.net",
-        "192.168.1.1",
-        "169.254.169.254",  # AWS IMDS — must NOT be in provider list
-    ])
+    @pytest.mark.parametrize(
+        "host",
+        [
+            "evil.example.com",
+            "attacker.net",
+            "192.168.1.1",
+            "169.254.169.254",  # AWS IMDS — must NOT be in provider list
+        ],
+    )
     def test_unknown_hosts_rejected(self, host: str) -> None:
         """Hosts not in whitelist (and not subdomains of any) return False."""
         assert is_known_provider_host(host) is False
@@ -218,57 +230,72 @@ class TestProviderHosts:
 class TestDefensiveContextPaths:
     """Verify is_test_path / is_doc_path / is_sample_file recognize defensive contexts."""
 
-    @pytest.mark.parametrize("path", [
-        "tests/test_foo.py",
-        "src/__tests__/foo.test.ts",
-        "spec/foo_spec.rb",
-        "e2e/checkout.spec.js",
-        "tests/fixtures/sample.json",
-        "src/foo.test.ts",
-        "src/foo.spec.ts",
-        "src/foo_test.go",
-        "src/foo_spec.rb",
-        "test_module.py",
-    ])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "tests/test_foo.py",
+            "src/__tests__/foo.test.ts",
+            "spec/foo_spec.rb",
+            "e2e/checkout.spec.js",
+            "tests/fixtures/sample.json",
+            "src/foo.test.ts",
+            "src/foo.spec.ts",
+            "src/foo_test.go",
+            "src/foo_spec.rb",
+            "test_module.py",
+        ],
+    )
     def test_test_paths_recognized(self, path: str) -> None:
         assert is_test_path(path) is True, f"failed for {path!r}"
 
-    @pytest.mark.parametrize("path", [
-        "src/main.py",  # source file, not a test
-        "lib/util.js",
-    ])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "src/main.py",  # source file, not a test
+            "lib/util.js",
+        ],
+    )
     def test_non_test_paths_not_recognized(self, path: str) -> None:
         assert is_test_path(path) is False, f"misclassified {path!r}"
 
-    @pytest.mark.parametrize("path", [
-        "README.md",
-        "CHANGELOG.md",
-        "CONTRIBUTING.md",
-        "LICENSE",
-        "docs/intro.md",
-        "documentation/guide.rst",
-        "skills/foo/SKILL.md",
-    ])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "README.md",
+            "CHANGELOG.md",
+            "CONTRIBUTING.md",
+            "LICENSE",
+            "docs/intro.md",
+            "documentation/guide.rst",
+            "skills/foo/SKILL.md",
+        ],
+    )
     def test_doc_paths_recognized(self, path: str) -> None:
         assert is_doc_path(path) is True, f"failed for {path!r}"
 
-    @pytest.mark.parametrize("path", [
-        ".env.example",
-        ".env.template",
-        "config.sample",
-        "settings.dist",
-        "nginx.tpl",
-        "config.example.yaml",
-        "secrets.sample.json",
-    ])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            ".env.example",
+            ".env.template",
+            "config.sample",
+            "settings.dist",
+            "nginx.tpl",
+            "config.example.yaml",
+            "secrets.sample.json",
+        ],
+    )
     def test_sample_files_recognized(self, path: str) -> None:
         assert is_sample_file(path) is True, f"failed for {path!r}"
 
-    @pytest.mark.parametrize("path", [
-        ".env",  # the real one — NOT a sample
-        "config.yaml",
-        "secrets.json",
-    ])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            ".env",  # the real one — NOT a sample
+            "config.yaml",
+            "secrets.json",
+        ],
+    )
     def test_real_files_not_recognized_as_sample(self, path: str) -> None:
         assert is_sample_file(path) is False, f"misclassified {path!r}"
 
@@ -281,14 +308,17 @@ class TestDefensiveContextPaths:
 class TestSeverityDemotion:
     """Verify demote_severity and effective_severity honor the demotion contract."""
 
-    @pytest.mark.parametrize("level,expected", [
-        ("critical", "major"),
-        ("major", "minor"),
-        ("minor", "warning"),
-        ("warning", "info"),
-        ("info", "passed"),
-        ("passed", "passed"),  # clamped at lowest
-    ])
+    @pytest.mark.parametrize(
+        "level,expected",
+        [
+            ("critical", "major"),
+            ("major", "minor"),
+            ("minor", "warning"),
+            ("warning", "info"),
+            ("info", "passed"),
+            ("passed", "passed"),  # clamped at lowest
+        ],
+    )
     def test_single_demotion(self, level: str, expected: str) -> None:
         assert demote_severity(level, by=1) == expected
 

@@ -37,13 +37,17 @@ def _make_minimal_plugin(tmp_path: Path, name: str = "test-plugin") -> Path:
     """Create a plugin folder with just the manifest. No pipeline files."""
     p = tmp_path / name
     (p / ".claude-plugin").mkdir(parents=True)
-    (p / ".claude-plugin" / "plugin.json").write_text(json.dumps({
-        "name": name,
-        "version": "0.1.0",
-        "description": "test",
-        "author": {"name": "Tester", "email": "t@example.com"},
-        "repository": f"https://github.com/Emasoft/{name}",
-    }))
+    (p / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps(
+            {
+                "name": name,
+                "version": "0.1.0",
+                "description": "test",
+                "author": {"name": "Tester", "email": "t@example.com"},
+                "repository": f"https://github.com/Emasoft/{name}",
+            }
+        )
+    )
     return p
 
 
@@ -125,8 +129,9 @@ def test_missing_pipeline_files_do_not_trigger_drift(tmp_path: Path) -> None:
     report = ValidationReport()
     validate_canonical_pipeline_drift(plugin_root, report)
 
-    assert not [r for r in report.results if r.level == "WARNING"], \
+    assert not [r for r in report.results if r.level == "WARNING"], (
         f"Missing files should produce 0 drift WARNINGs, got {report.results}"
+    )
 
 
 def test_multiple_drifts_emit_per_file_warnings(tmp_path: Path) -> None:
@@ -150,9 +155,7 @@ def test_multiple_drifts_emit_per_file_warnings(tmp_path: Path) -> None:
     validate_canonical_pipeline_drift(plugin_root, report)
 
     drift_warnings = [r for r in report.results if r.level == "WARNING" and "RC-PIPELINE-DRIFT-001" in r.message]
-    assert len(drift_warnings) == 2, (
-        f"Expected one WARNING per drifted file (2 total), got {len(drift_warnings)}"
-    )
+    assert len(drift_warnings) == 2, f"Expected one WARNING per drifted file (2 total), got {len(drift_warnings)}"
     files = {w.file for w in drift_warnings}
     assert "git-hooks/pre-push" in files
     assert "scripts/publish.py" in files
@@ -207,6 +210,4 @@ def test_drift_warning_caps_diff_at_max_hunks_or_lines(tmp_path: Path) -> None:
     assert len(drift_warnings) == 1
     msg = drift_warnings[0].message
     # The truncation footer is the marker that the cap fired.
-    assert "truncated" in msg, (
-        "Large drift must be truncated with a marker, not flooded into the report"
-    )
+    assert "truncated" in msg, "Large drift must be truncated with a marker, not flooded into the report"

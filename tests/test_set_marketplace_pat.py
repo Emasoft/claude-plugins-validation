@@ -115,13 +115,19 @@ class TestEnvVarFlexibility:
                 MagicMock(returncode=0, stdout="", stderr=""),  # gh secret set
                 MagicMock(returncode=0, stdout="MARKETPLACE_PAT\tabc\n"),  # verify
             ]
-            with patch.dict(os.environ, {
-                "PAT_MARKETPLACE": "ghp_from_PAT_MARKETPLACE",
-                "MARKETPLACE_PAT": "ghp_from_MARKETPLACE_PAT",
-            }, clear=True):
+            with patch.dict(
+                os.environ,
+                {
+                    "PAT_MARKETPLACE": "ghp_from_PAT_MARKETPLACE",
+                    "MARKETPLACE_PAT": "ghp_from_MARKETPLACE_PAT",
+                },
+                clear=True,
+            ):
                 # Patch _require_gh + _check_auth so they don't shell out
-                with patch.object(smp, "_require_gh", return_value="/usr/local/bin/gh"), \
-                     patch.object(smp, "_check_auth"):
+                with (
+                    patch.object(smp, "_require_gh", return_value="/usr/local/bin/gh"),
+                    patch.object(smp, "_check_auth"),
+                ):
                     rc = smp.main_with_args(["Emasoft/x"]) if hasattr(smp, "main_with_args") else None
                     if rc is None:
                         # main() reads sys.argv directly — invoke via subprocess for this test
@@ -315,9 +321,7 @@ class TestVerifyOnlyMode:
     def test_verify_only_does_not_call_secret_set(self, smp):
         """_secret_exists must call only `gh secret list`, never `gh secret set`."""
         with patch.object(smp.subprocess, "run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0, stdout="MARKETPLACE_PAT\t2026\n", stderr=""
-            )
+            mock_run.return_value = MagicMock(returncode=0, stdout="MARKETPLACE_PAT\t2026\n", stderr="")
             found = smp._secret_exists("/usr/bin/gh", "owner/repo", "MARKETPLACE_PAT")
         assert found is True
         args = mock_run.call_args.args[0]

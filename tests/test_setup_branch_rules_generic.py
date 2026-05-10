@@ -29,6 +29,7 @@ generic = importlib.import_module("scripts.setup_branch_rules_generic")
 
 # ── parse_repo_slug ─────────────────────────────────────────────────
 
+
 class TestParseRepoSlug:
     """Verifies the OWNER/REPO slug parser."""
 
@@ -53,6 +54,7 @@ class TestParseRepoSlug:
 
 
 # ── Default bypass actors ─────────────────────────────────────────
+
 
 class TestBuildDefaultBypassActors:
     """Verifies the admin-only default seed."""
@@ -83,6 +85,7 @@ class TestBuildDefaultBypassActors:
 
 # ── Merge bypass actors ─────────────────────────────────────────────
 
+
 class TestMergeBypassActors:
     """Verifies the preserve-existing semantics."""
 
@@ -106,6 +109,7 @@ class TestMergeBypassActors:
 
 
 # ── build_ruleset ───────────────────────────────────────────────────
+
 
 class TestBuildRuleset:
     """Verifies the ruleset payload shape."""
@@ -151,20 +155,14 @@ class TestBuildRuleset:
         """Every --check context appears in required_status_checks."""
         contexts = ["CI / build", "CI / test", "CI / lint"]
         ruleset = generic.build_ruleset("x", contexts, [])
-        status_rule = next(
-            r for r in ruleset["rules"] if r["type"] == "required_status_checks"
-        )
-        ruleset_contexts = [
-            c["context"] for c in status_rule["parameters"]["required_status_checks"]
-        ]
+        status_rule = next(r for r in ruleset["rules"] if r["type"] == "required_status_checks")
+        ruleset_contexts = [c["context"] for c in status_rule["parameters"]["required_status_checks"]]
         assert ruleset_contexts == contexts
 
     def test_required_status_checks_strict_false_for_automerge(self):
         """strict policy off so auto-merge doesn't force a rebase loop."""
         ruleset = generic.build_ruleset("x", ["CI / test"], [])
-        status = next(
-            r for r in ruleset["rules"] if r["type"] == "required_status_checks"
-        )
+        status = next(r for r in ruleset["rules"] if r["type"] == "required_status_checks")
         assert status["parameters"]["strict_required_status_checks_policy"] is False
 
     def test_required_status_checks_omits_do_not_enforce_on_create(self):
@@ -173,9 +171,7 @@ class TestBuildRuleset:
         That field is rejected as unexpected on user-owned repos.
         """
         ruleset = generic.build_ruleset("x", ["CI / test"], [])
-        status = next(
-            r for r in ruleset["rules"] if r["type"] == "required_status_checks"
-        )
+        status = next(r for r in ruleset["rules"] if r["type"] == "required_status_checks")
         assert "do_not_enforce_on_create" not in status["parameters"]
 
     def test_enforcement_is_active(self):
@@ -185,6 +181,7 @@ class TestBuildRuleset:
 
 
 # ── CLI ────────────────────────────────────────────────────────────
+
 
 class TestCli:
     """Verifies CLI parsing and required-arg enforcement."""
@@ -208,10 +205,9 @@ class TestCli:
     def test_check_is_repeatable(self):
         """--check can be passed multiple times."""
         with mock.patch.object(
-            sys, "argv",
-            ["branch-rules-install", "Emasoft/test",
-             "--check", "CI / build",
-             "--check", "CI / test"],
+            sys,
+            "argv",
+            ["branch-rules-install", "Emasoft/test", "--check", "CI / build", "--check", "CI / test"],
         ):
             args = generic.parse_args()
         assert args.check_contexts == ["CI / build", "CI / test"]
@@ -219,7 +215,8 @@ class TestCli:
     def test_ruleset_name_defaults_to_branch_rules(self):
         """Default --ruleset-name is 'branch-rules'."""
         with mock.patch.object(
-            sys, "argv",
+            sys,
+            "argv",
             ["branch-rules-install", "Emasoft/test", "--check", "CI / test"],
         ):
             args = generic.parse_args()
@@ -228,10 +225,9 @@ class TestCli:
     def test_ruleset_name_overridable(self):
         """--ruleset-name can be set to a custom value."""
         with mock.patch.object(
-            sys, "argv",
-            ["branch-rules-install", "Emasoft/test",
-             "--check", "CI / test",
-             "--ruleset-name", "my-custom-rules"],
+            sys,
+            "argv",
+            ["branch-rules-install", "Emasoft/test", "--check", "CI / test", "--ruleset-name", "my-custom-rules"],
         ):
             args = generic.parse_args()
         assert args.ruleset_name == "my-custom-rules"
@@ -239,10 +235,18 @@ class TestCli:
     def test_add_bypass_app_id_repeatable(self):
         """--add-bypass-app-id accepts multiple integer values."""
         with mock.patch.object(
-            sys, "argv",
-            ["branch-rules-install", "Emasoft/test", "--check", "CI / test",
-             "--add-bypass-app-id", "29110",
-             "--add-bypass-app-id", "852577"],
+            sys,
+            "argv",
+            [
+                "branch-rules-install",
+                "Emasoft/test",
+                "--check",
+                "CI / test",
+                "--add-bypass-app-id",
+                "29110",
+                "--add-bypass-app-id",
+                "852577",
+            ],
         ):
             args = generic.parse_args()
         assert args.add_bypass_app_id == [29110, 852577]
@@ -250,9 +254,9 @@ class TestCli:
     def test_dry_run_flag_parsed(self):
         """--dry-run sets args.dry_run=True."""
         with mock.patch.object(
-            sys, "argv",
-            ["branch-rules-install", "Emasoft/test",
-             "--check", "CI / test", "--dry-run"],
+            sys,
+            "argv",
+            ["branch-rules-install", "Emasoft/test", "--check", "CI / test", "--dry-run"],
         ):
             args = generic.parse_args()
         assert args.dry_run is True

@@ -152,7 +152,7 @@ When you finish, output ONLY the one-line summary above. The full audit + fix de
 user: Optimize cache for ~/Code/my-plugin/
 assistant: I'll audit, fix, and re-validate.
 [Phase 1: launcher → cache audit reports CA-01 (3 findings), CA-04 (1 finding)]
-[Phase 2: applies cache-fixes.md#ca-01 (removes {{TIMESTAMP}} from CLAUDE.md), commits]
+[Phase 2: applies cache-fixes.md#ca-01 (removes the dynamic-timestamp placeholder from CLAUDE.md), commits]
 [Phase 2: applies cache-fixes.md#ca-04 (removes model: from SKILL.md, suggests dedicated agent), commits]
 [Phase 3: re-validates → verdict VALID]
 [DONE] 4 of 4 findings fixed. Report: reports/validate_cache/20260421_184530+0200-my-plugin-final.md

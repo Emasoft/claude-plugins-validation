@@ -48,20 +48,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # ── Vendored-path skip list (matches issue #16 category F) ────────────────────
-VENDORED_DIR_NAMES = frozenset({
-    "external",
-    "vendor",
-    "vendored",
-    "third_party",
-    "third-party",
-    "node_modules",
-    ".venv",
-    "venv",
-    "dist",
-    "build",
-    ".git",
-    "__pycache__",
-})
+VENDORED_DIR_NAMES = frozenset(
+    {
+        "external",
+        "vendor",
+        "vendored",
+        "third_party",
+        "third-party",
+        "node_modules",
+        ".venv",
+        "venv",
+        "dist",
+        "build",
+        ".git",
+        "__pycache__",
+    }
+)
 
 
 def _read_gitmodules(plugin_root: Path) -> set[str]:
@@ -138,9 +140,7 @@ def _print_diff(file_path: Path, before: str, after: str) -> None:
 #   - npm package shapes: @scope/name, name@version, id/version (issue #16 C)
 #   - already-linked: [text](path) followed by no opening bracket
 #   - bare CLI/variable tokens (no slash AND no extension)
-_BACKTICK_PATH_RE = re.compile(
-    r"`([^`\n]+\.(?:md|py|js|ts|json|yaml|yml|toml|sh|html|css))`"
-)
+_BACKTICK_PATH_RE = re.compile(r"`([^`\n]+\.(?:md|py|js|ts|json|yaml|yml|toml|sh|html|css))`")
 _NPM_PACKAGE_RE = re.compile(
     r"^("
     r"@[a-z0-9][\w.-]*/[a-z0-9][\w.-]*(@[\w.-]+)?"
@@ -449,21 +449,28 @@ Safety contract:
   * Idempotent — running twice produces no further changes.
 """,
     )
-    parser.add_argument("subcommand", choices=[
-        "backtick-to-link",
-        "add-toc",
-        "wrap-placeholder-paths",
-        "add-standard-sections",
-        "dedup-trailing-blanks",
-        "external-skip-list",
-        "all",
-    ])
-    parser.add_argument("--plugin", required=True, type=Path,
-                        help="Path to the plugin root (must contain .claude-plugin/plugin.json or markdown files)")
-    parser.add_argument("--apply", action="store_true",
-                        help="Write changes (default is dry-run with diff preview)")
-    parser.add_argument("--min-lines", type=int, default=50,
-                        help="add-toc: minimum file line count to receive a TOC (default 50)")
+    parser.add_argument(
+        "subcommand",
+        choices=[
+            "backtick-to-link",
+            "add-toc",
+            "wrap-placeholder-paths",
+            "add-standard-sections",
+            "dedup-trailing-blanks",
+            "external-skip-list",
+            "all",
+        ],
+    )
+    parser.add_argument(
+        "--plugin",
+        required=True,
+        type=Path,
+        help="Path to the plugin root (must contain .claude-plugin/plugin.json or markdown files)",
+    )
+    parser.add_argument("--apply", action="store_true", help="Write changes (default is dry-run with diff preview)")
+    parser.add_argument(
+        "--min-lines", type=int, default=50, help="add-toc: minimum file line count to receive a TOC (default 50)"
+    )
     return parser
 
 

@@ -82,9 +82,7 @@ def _parse_add_spec(raw: str) -> dict[str, str] | str:
     version = parts[2] if len(parts) > 2 else ""
     if market:
         if not _SPEC_NAME_RE.match(market):
-            raise ValueError(
-                f"--add {raw!r}: marketplace {market!r} is not kebab-case"
-            )
+            raise ValueError(f"--add {raw!r}: marketplace {market!r} is not kebab-case")
         spec["marketplace"] = market
     if version:
         spec["version"] = version
@@ -95,9 +93,7 @@ def _read_plugin_json(path: Path) -> dict:
     """Read and parse plugin.json. Raises on missing or malformed."""
     pj = path / ".claude-plugin" / "plugin.json"
     if not pj.is_file():
-        raise FileNotFoundError(
-            f"no plugin.json at {pj} (target must be a Claude Code plugin)"
-        )
+        raise FileNotFoundError(f"no plugin.json at {pj} (target must be a Claude Code plugin)")
     try:
         data = json.loads(pj.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
@@ -139,12 +135,13 @@ def _read_deps_from_git_url(url: str) -> list:
         try:
             subprocess.run(
                 ["git", "clone", "--depth", "1", "--filter=blob:none", url, tmp],
-                capture_output=True, text=True, check=True, timeout=60,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=60,
             )
         except subprocess.CalledProcessError as exc:
-            raise RuntimeError(
-                f"--from {url}: git clone failed: {exc.stderr.strip() or exc}"
-            ) from exc
+            raise RuntimeError(f"--from {url}: git clone failed: {exc.stderr.strip() or exc}") from exc
         return _read_dependencies_from_source(tmp)
 
 
@@ -184,9 +181,7 @@ def merge_dependencies(existing: list, additions: list) -> list:
 
 def _atomic_write(path: Path, content: str) -> None:
     """Tmp-and-rename atomic write so a crash never leaves a partial file."""
-    fd, tmp_path = tempfile.mkstemp(
-        prefix=path.name + ".tmp.", dir=str(path.parent)
-    )
+    fd, tmp_path = tempfile.mkstemp(prefix=path.name + ".tmp.", dir=str(path.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)
@@ -218,7 +213,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("target", type=Path, help="Target plugin directory (contains .claude-plugin/plugin.json)")
     parser.add_argument(
-        "--add", action="append", default=[],
+        "--add",
+        action="append",
+        default=[],
         metavar="NAME[@MARKETPLACE[@VERSION]]",
         help=(
             "Add a dependency. Repeat for multiple. Forms: `name` (bare), "
@@ -227,7 +224,10 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
-        "--from", dest="from_source", action="append", default=[],
+        "--from",
+        dest="from_source",
+        action="append",
+        default=[],
         metavar="PATH-OR-URL",
         help=(
             "Copy ALL dependencies from another plugin. Repeat for multiple "
@@ -236,8 +236,9 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument("--dry-run", action="store_true", help="Print the merged dependencies array; do NOT write")
-    parser.add_argument("--no-validate", action="store_true",
-                        help="Skip the post-write validate_plugin.py check (NOT recommended)")
+    parser.add_argument(
+        "--no-validate", action="store_true", help="Skip the post-write validate_plugin.py check (NOT recommended)"
+    )
     args = parser.parse_args(argv)
 
     target = args.target.resolve()
@@ -298,7 +299,9 @@ def main(argv: list[str] | None = None) -> int:
         if validator.is_file():
             result = subprocess.run(
                 [sys.executable, str(validator), str(target), "--strict", "--json"],
-                capture_output=True, text=True, timeout=600,
+                capture_output=True,
+                text=True,
+                timeout=600,
             )
             try:
                 report = json.loads(result.stdout)

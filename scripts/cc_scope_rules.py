@@ -101,17 +101,17 @@ __all__ = [
 # Size caps for file reads, chosen to comfortably fit all real-world content
 # while rejecting adversarial inputs. These are applied BEFORE ``read_text``
 # or JSONC parsing so the validator can never be OOM'd by a hostile project.
-MAX_SETTINGS_JSON_BYTES: int = 1 * 1024 * 1024        # 1 MB — settings.json / settings.local.json
-MAX_MCP_JSON_BYTES: int = 1 * 1024 * 1024             # 1 MB — .mcp.json
-MAX_MARKDOWN_BYTES: int = 256 * 1024                  # 256 KB — individual agent/skill/command/rule .md
-MAX_CLAUDE_MD_BYTES: int = 2 * 1024 * 1024            # 2 MB — CLAUDE.md / CLAUDE.local.md
-MAX_HOME_CLAUDE_JSON_BYTES: int = 16 * 1024 * 1024    # 16 MB — ~/.claude.json (many projects)
-MAX_GITIGNORE_BYTES: int = 1 * 1024 * 1024            # 1 MB — .gitignore
+MAX_SETTINGS_JSON_BYTES: int = 1 * 1024 * 1024  # 1 MB — settings.json / settings.local.json
+MAX_MCP_JSON_BYTES: int = 1 * 1024 * 1024  # 1 MB — .mcp.json
+MAX_MARKDOWN_BYTES: int = 256 * 1024  # 256 KB — individual agent/skill/command/rule .md
+MAX_CLAUDE_MD_BYTES: int = 2 * 1024 * 1024  # 2 MB — CLAUDE.md / CLAUDE.local.md
+MAX_HOME_CLAUDE_JSON_BYTES: int = 16 * 1024 * 1024  # 16 MB — ~/.claude.json (many projects)
+MAX_GITIGNORE_BYTES: int = 1 * 1024 * 1024  # 1 MB — .gitignore
 
 # Frontmatter size cap + alias count limit close the YAML "billion laughs"
 # bomb surface on adversarial SKILL.md / agent .md files.
-MAX_FRONTMATTER_BYTES: int = 64 * 1024                # 64 KB
-MAX_YAML_ALIASES: int = 100                           # anchors + references combined
+MAX_FRONTMATTER_BYTES: int = 64 * 1024  # 64 KB
+MAX_YAML_ALIASES: int = 100  # anchors + references combined
 
 # Per-folder file count cap on rglob walks — prevents a hostile project from
 # forcing an unbounded tree walk via millions of .md files or directory symlinks.
@@ -371,16 +371,16 @@ SECRET_ENV_VAR_NAMES: frozenset[str] = frozenset(
 
 
 SECRET_VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"^sk-ant-[A-Za-z0-9_-]{20,}$"),               # Anthropic API key
-    re.compile(r"^sk-[A-Za-z0-9_-]{32,}$"),                   # OpenAI-style
-    re.compile(r"^ghp_[A-Za-z0-9]{30,}$"),                    # GitHub personal access token
-    re.compile(r"^gho_[A-Za-z0-9]{30,}$"),                    # GitHub OAuth token
-    re.compile(r"^ghs_[A-Za-z0-9]{30,}$"),                    # GitHub server-to-server
-    re.compile(r"^github_pat_[A-Za-z0-9_]{20,}$"),            # GitHub fine-grained PAT
-    re.compile(r"^AIza[A-Za-z0-9_-]{30,}$"),                  # Google API key
-    re.compile(r"^xox[baprs]-[A-Za-z0-9-]{20,}$"),            # Slack tokens
-    re.compile(r"^AKIA[A-Z0-9]{16}$"),                        # AWS access key ID
-    re.compile(                                                # JWT (header.payload.signature)
+    re.compile(r"^sk-ant-[A-Za-z0-9_-]{20,}$"),  # Anthropic API key
+    re.compile(r"^sk-[A-Za-z0-9_-]{32,}$"),  # OpenAI-style
+    re.compile(r"^ghp_[A-Za-z0-9]{30,}$"),  # GitHub personal access token
+    re.compile(r"^gho_[A-Za-z0-9]{30,}$"),  # GitHub OAuth token
+    re.compile(r"^ghs_[A-Za-z0-9]{30,}$"),  # GitHub server-to-server
+    re.compile(r"^github_pat_[A-Za-z0-9_]{20,}$"),  # GitHub fine-grained PAT
+    re.compile(r"^AIza[A-Za-z0-9_-]{30,}$"),  # Google API key
+    re.compile(r"^xox[baprs]-[A-Za-z0-9-]{20,}$"),  # Slack tokens
+    re.compile(r"^AKIA[A-Z0-9]{16}$"),  # AWS access key ID
+    re.compile(  # JWT (header.payload.signature)
         r"^eyJ[A-Za-z0-9_=-]+\.eyJ[A-Za-z0-9_=-]+\.[A-Za-z0-9_=.+/-]+$"
     ),
 )
@@ -505,9 +505,7 @@ def redact_home_path(text: str) -> str:
 Scope = Literal["project", "local", "missing", "no-git"]
 
 
-def _run_git(
-    args: list[str], cwd: Path, *, timeout: int = 10
-) -> subprocess.CompletedProcess[str] | None:
+def _run_git(args: list[str], cwd: Path, *, timeout: int = 10) -> subprocess.CompletedProcess[str] | None:
     """Run a pinned-binary git command. Returns None on any exec failure.
 
     This is the only place that calls ``subprocess.run`` for git — every
@@ -750,9 +748,7 @@ def list_tracked_files_under(folder: Path, repo_root: Path) -> set[Path] | None:
 # ``<plugin>@<marketplace>``. Both components use a strict name charset — no
 # slashes, no ``..``, no leading/trailing dots — so once the regex matches,
 # Path component injection into the cache-dir resolver is contained.
-ENABLED_PLUGIN_RE: re.Pattern[str] = re.compile(
-    r"^(?P<plugin>[A-Za-z0-9_.\-]+)@(?P<marketplace>[A-Za-z0-9_.\-]+)$"
-)
+ENABLED_PLUGIN_RE: re.Pattern[str] = re.compile(r"^(?P<plugin>[A-Za-z0-9_.\-]+)@(?P<marketplace>[A-Za-z0-9_.\-]+)$")
 
 
 def resolve_plugin_cache_dir(
@@ -782,6 +778,7 @@ def resolve_plugin_cache_dir(
     if not versions:
         picked = base
     else:
+
         def _version_key(p: Path) -> tuple:
             # ``str.lstrip`` treats its argument as a set of characters, so
             # ``vv1.0.0`` would become ``1.0.0`` (both leading v's stripped)
@@ -790,6 +787,7 @@ def resolve_plugin_cache_dir(
             # plugin-cache layout.
             parts = p.name.removeprefix("v").split(".")
             return tuple(int(x) if x.isdigit() else x for x in parts)
+
         try:
             versions.sort(key=_version_key, reverse=True)
         except TypeError:
@@ -838,9 +836,7 @@ def safe_read_text(path: Path, max_bytes: int) -> str:
     """
     st = path.stat()
     if st.st_size > max_bytes:
-        raise OversizedFileError(
-            f"file exceeds {max_bytes} byte cap ({st.st_size} bytes)"
-        )
+        raise OversizedFileError(f"file exceeds {max_bytes} byte cap ({st.st_size} bytes)")
     return path.read_text(encoding="utf-8-sig")
 
 
@@ -993,6 +989,7 @@ def _strip_code_spans(text: str) -> str:
     preserved. Callers that scan for ``@path`` import tokens use the stripped
     version to avoid false positives inside code examples.
     """
+
     def _blank(match: re.Match[str]) -> str:
         span = match.group(0)
         # Preserve newlines so line numbers remain stable for callers that
@@ -1154,7 +1151,6 @@ def validate_claude_md_imports(
 
     if import_count > 0:
         report.info(
-            f"{rel_label}: {import_count} import(s) resolved from {file_count} "
-            "file(s) (including the starting file).",
+            f"{rel_label}: {import_count} import(s) resolved from {file_count} file(s) (including the starting file).",
             rel_label,
         )

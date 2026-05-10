@@ -510,6 +510,7 @@ def validate_command(command_path: Path) -> CommandValidationReport:
     # Severity: WARNING — namespaced form still works; the collision only
     # affects autocomplete UX.
     from cpv_validation_common import BUILTIN_SLASH_COMMANDS
+
     stem = command_path.stem.lower()
     if stem in BUILTIN_SLASH_COMMANDS:
         report.warning(
@@ -635,6 +636,7 @@ def print_json(report: CommandValidationReport) -> None:
 def main() -> int:
     """Main entry point."""
     from cpv_validation_common import launcher_epilog
+
     parser = argparse.ArgumentParser(
         description="Validate a Claude Code command file or directory of commands.",
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -118,8 +118,7 @@ def _set_secret(gh: str, repo: str, secret_name: str, value: str) -> int:
     )
     if r.returncode != 0:
         print(
-            f"set_marketplace_pat: FAILED on {repo} (exit {r.returncode})\n"
-            f"{r.stderr}",
+            f"set_marketplace_pat: FAILED on {repo} (exit {r.returncode})\n{r.stderr}",
             file=sys.stderr,
         )
         return 1

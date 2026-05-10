@@ -762,10 +762,7 @@ def move_legacy_pipeline_scripts(plugin_path: Path, dry_run: bool = False) -> li
             continue
         dest = scripts_dev / Path(rel_path).name
         if dry_run:
-            print(
-                f"  {BLUE}[dry-run] Would move{NC} {rel_path} → "
-                f"scripts_dev/{Path(rel_path).name}"
-            )
+            print(f"  {BLUE}[dry-run] Would move{NC} {rel_path} → scripts_dev/{Path(rel_path).name}")
             moved.append(rel_path)
             continue
         scripts_dev.mkdir(parents=True, exist_ok=True)
@@ -849,10 +846,9 @@ def fix_missing_files(
 
     # Process missing-then-force so the [create] / [overwrite] markers in the
     # output reflect the actual operation.
-    process_set: list[tuple[str, str]] = (
-        [(p, "create") for p in sorted(missing_files)]
-        + [(p, "overwrite") for p in sorted(force_overwrite)]
-    )
+    process_set: list[tuple[str, str]] = [(p, "create") for p in sorted(missing_files)] + [
+        (p, "overwrite") for p in sorted(force_overwrite)
+    ]
 
     for rel_path, op_kind in process_set:
         gen_func_name = _FILE_TO_GENERATOR[rel_path]
@@ -872,10 +868,7 @@ def fix_missing_files(
 
         if dry_run:
             tag = f"[dry-run] Would {op_kind}"
-            print(
-                f"  {BLUE}{tag}{NC} {file_path} ({len(content)} bytes)"
-                f"{' [exec]' if is_executable else ''}"
-            )
+            print(f"  {BLUE}{tag}{NC} {file_path} ({len(content)} bytes){' [exec]' if is_executable else ''}")
             created.append(str(file_path))
             continue
 
@@ -907,10 +900,7 @@ def fix_missing_files(
             file_path.write_text(patched, encoding="utf-8")
 
         verb = "Overwrote" if op_kind == "overwrite" else "Created"
-        print(
-            f"  {GREEN}{verb}:{NC} {file_path}"
-            f"{' [exec]' if is_executable else ''}{backup_str}"
-        )
+        print(f"  {GREEN}{verb}:{NC} {file_path}{' [exec]' if is_executable else ''}{backup_str}")
         created.append(str(file_path))
 
     # Also create missing component directories
@@ -950,6 +940,7 @@ def fix_missing_files(
 def main() -> int:
     """Parse CLI arguments, run audit, optionally fix missing files."""
     from cpv_validation_common import launcher_epilog
+
     parser = argparse.ArgumentParser(
         description="Audit and standardize a Claude Code plugin repo against CPV standards.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -970,7 +961,8 @@ Examples (always invoke via the launcher):
   # Also run full CPV validation
   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" standardize /path/to/plugin --validate
 
-""" + launcher_epilog("standardize"),
+"""
+        + launcher_epilog("standardize"),
     )
     parser.add_argument("plugin_path", type=Path, help="Path to the plugin repository root")
     parser.add_argument("--fix", action="store_true", help="Generate missing standard files from templates")
@@ -1038,7 +1030,8 @@ Examples (always invoke via the launcher):
             mode_label += " [FORCE TEMPLATES]"
         print(f"{BOLD}Fix Mode{NC}{mode_label}")
         created = fix_missing_files(
-            plugin_path, results,
+            plugin_path,
+            results,
             dry_run=args.dry_run,
             marketplace=args.marketplace,
             force_templates=args.force_templates,

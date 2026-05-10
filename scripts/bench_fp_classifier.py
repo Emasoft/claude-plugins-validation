@@ -152,8 +152,7 @@ def parse_corpus(corpus_path: Path) -> list[Exemplar]:
         if fence is None:
             continue
         role_match = _FILE_ROLE_RE.search(block)
-        role = (role_match.group("role").strip().split("|")[0].strip().lower()
-                if role_match else "source")
+        role = role_match.group("role").strip().split("|")[0].strip().lower() if role_match else "source"
         role = role.split()[0] if role else "source"
         # An explicit `**File path:**` overrides the synthesized one
         # so corpus exemplars can target a specific basename (e.g.
@@ -181,21 +180,21 @@ def parse_corpus(corpus_path: Path) -> list[Exemplar]:
         extra_surrounding: tuple[str, ...] = ()
         surr_match = _SURROUNDING_RE.search(block)
         if surr_match:
-            extra_surrounding = tuple(
-                ln for ln in surr_match.group("body").splitlines() if ln.strip()
-            )
+            extra_surrounding = tuple(ln for ln in surr_match.group("body").splitlines() if ln.strip())
 
         counts[label] = counts.get(label, 0) + 1
-        exemplars.append(Exemplar(
-            rule_id=rule_id,
-            label=label,
-            title=f"{label}-{counts[label]}",
-            code=fence.group("body").strip(),
-            file_role=role,
-            file_path=file_path,
-            plugin_meta=plugin_meta,
-            extra_surrounding=extra_surrounding,
-        ))
+        exemplars.append(
+            Exemplar(
+                rule_id=rule_id,
+                label=label,
+                title=f"{label}-{counts[label]}",
+                code=fence.group("body").strip(),
+                file_role=role,
+                file_path=file_path,
+                plugin_meta=plugin_meta,
+                extra_surrounding=extra_surrounding,
+            )
+        )
     return exemplars
 
 
@@ -304,8 +303,10 @@ def print_table(results: list[BenchResult]) -> None:
         print("\nMisclassifications:")
         for r in results:
             for ex, verdict in r.misclassifications:
-                print(f"  [{r.rule_id}] {ex.title} ({ex.file_role}): expected"
-                      f" {'REAL' if ex.label == 'TP' else 'FP-tier'}, got {verdict.value}")
+                print(
+                    f"  [{r.rule_id}] {ex.title} ({ex.file_role}): expected"
+                    f" {'REAL' if ex.label == 'TP' else 'FP-tier'}, got {verdict.value}"
+                )
 
 
 def main(argv: list[str] | None = None) -> int:

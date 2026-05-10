@@ -24,9 +24,7 @@ from cpv_validation_common import ValidationReport  # noqa: E402
 from validate_security import _bucket_canonical_findings_into_plugins  # noqa: E402
 
 
-def _build_report_with_finding(
-    file_path: Path, level: str = "major", message: str = "test issue"
-) -> ValidationReport:
+def _build_report_with_finding(file_path: Path, level: str = "major", message: str = "test issue") -> ValidationReport:
     """Helper: build a ValidationReport containing one finding on file_path."""
     report = ValidationReport()
     getattr(report, level.lower())(message, str(file_path), 10)
@@ -34,9 +32,7 @@ def _build_report_with_finding(
 
 
 class TestBucketingPropagation:
-    def test_finding_on_canonical_propagates_to_all_peer_plugins(
-        self, tmp_path: Path
-    ) -> None:
+    def test_finding_on_canonical_propagates_to_all_peer_plugins(self, tmp_path: Path) -> None:
         """Setup: 3 plugins originally had identical SKILL.md. After dedup,
         only p1 still has it on disk (canonical). A finding emitted on
         p1's SKILL.md must propagate into p2 and p3's reports too."""
@@ -219,9 +215,7 @@ class TestPathRewriting:
         # Relative path unchanged
         assert report.results[0].file == "skills/SKILL.md"
 
-    def test_rewrite_leaves_unrelated_absolute_paths_alone(
-        self, tmp_path: Path
-    ) -> None:
+    def test_rewrite_leaves_unrelated_absolute_paths_alone(self, tmp_path: Path) -> None:
         from validate_security import _rewrite_finding_paths_to_original
 
         staged_root = tmp_path / "stage/p1"
@@ -237,8 +231,6 @@ class TestPathRewriting:
 
         report = ValidationReport()
         report.warning("general advisory")  # no file, no line
-        _rewrite_finding_paths_to_original(
-            report, Path("/stage/p1"), Path("/cache/p1")
-        )
+        _rewrite_finding_paths_to_original(report, Path("/stage/p1"), Path("/cache/p1"))
         # No file → no rewrite, no crash
         assert report.results[0].file is None

@@ -110,12 +110,7 @@ class TestRC74Transitive:
         assert any(f.rule_id == "RC-74" and f.hop_count == 3 for f in findings)
 
     def test_overwrite_clears_taint(self) -> None:
-        src = (
-            "import os\n"
-            "x = os.environ.get('A')\n"
-            "x = 'safe constant'\n"
-            "exec(x)\n"
-        )
+        src = "import os\nx = os.environ.get('A')\nx = 'safe constant'\nexec(x)\n"
         # Source is overwritten by a non-source non-Name expression → no taint
         findings = _analyze(src)
         assert findings == []
@@ -128,34 +123,19 @@ class TestRC74Transitive:
 
 class TestRC75Sanitizer:
     def test_shlex_quote_clears(self) -> None:
-        src = (
-            "import os, shlex\n"
-            "x = os.environ.get('A')\n"
-            "y = shlex.quote(x)\n"
-            "import os as os2\nos2.system(y)\n"
-        )
+        src = "import os, shlex\nx = os.environ.get('A')\ny = shlex.quote(x)\nimport os as os2\nos2.system(y)\n"
         # shlex.quote sanitizes; the os.system call gets a clean string
         findings = _analyze(src)
         assert findings == []
 
     def test_int_cast_clears(self) -> None:
-        src = (
-            "import os\n"
-            "raw = os.environ.get('PORT')\n"
-            "n = int(raw)\n"
-            "exec(n)\n"
-        )
+        src = "import os\nraw = os.environ.get('PORT')\nn = int(raw)\nexec(n)\n"
         # int() returns an int; exec(int) would crash anyway. No taint.
         findings = _analyze(src)
         assert findings == []
 
     def test_re_escape_clears(self) -> None:
-        src = (
-            "import os, re\n"
-            "x = os.environ.get('A')\n"
-            "y = re.escape(x)\n"
-            "exec(y)\n"
-        )
+        src = "import os, re\nx = os.environ.get('A')\ny = re.escape(x)\nexec(y)\n"
         findings = _analyze(src)
         assert findings == []
 
@@ -172,13 +152,7 @@ class TestFunctionParams:
         assert any(f.rule_id == "RC-73" and "parameter" in f.source for f in findings)
 
     def test_param_sanitized(self) -> None:
-        src = (
-            "import shlex\n"
-            "def run(cmd):\n"
-            "    safe = shlex.quote(cmd)\n"
-            "    import os\n"
-            "    os.system(safe)\n"
-        )
+        src = "import shlex\ndef run(cmd):\n    safe = shlex.quote(cmd)\n    import os\n    os.system(safe)\n"
         findings = _analyze(src)
         assert findings == []
 
@@ -202,12 +176,7 @@ class TestNegative:
         assert findings == []
 
     def test_unrelated_var_at_sink(self) -> None:
-        src = (
-            "import os\n"
-            "tainted = os.environ.get('A')\n"
-            "clean = 'safe'\n"
-            "exec(clean)\n"
-        )
+        src = "import os\ntainted = os.environ.get('A')\nclean = 'safe'\nexec(clean)\n"
         findings = _analyze(src)
         assert findings == []
 
@@ -219,34 +188,17 @@ class TestNegative:
 
 class TestControlFlow:
     def test_inside_if_branch(self) -> None:
-        src = (
-            "import os\n"
-            "if True:\n"
-            "    x = os.environ.get('A')\n"
-            "    exec(x)\n"
-        )
+        src = "import os\nif True:\n    x = os.environ.get('A')\n    exec(x)\n"
         findings = _analyze(src)
         assert any(f.rule_id == "RC-73" for f in findings)
 
     def test_inside_for_loop(self) -> None:
-        src = (
-            "import os\n"
-            "for i in range(3):\n"
-            "    cmd = os.environ.get('CMD')\n"
-            "    exec(cmd)\n"
-        )
+        src = "import os\nfor i in range(3):\n    cmd = os.environ.get('CMD')\n    exec(cmd)\n"
         findings = _analyze(src)
         assert any(f.rule_id == "RC-73" for f in findings)
 
     def test_inside_try_except(self) -> None:
-        src = (
-            "import os\n"
-            "try:\n"
-            "    x = os.environ.get('X')\n"
-            "    exec(x)\n"
-            "except Exception:\n"
-            "    pass\n"
-        )
+        src = "import os\ntry:\n    x = os.environ.get('X')\n    exec(x)\nexcept Exception:\n    pass\n"
         findings = _analyze(src)
         assert any(f.rule_id == "RC-73" for f in findings)
 
@@ -272,9 +224,7 @@ class TestFileLevel:
         assert analyze_file(tmp_path / "doesnt-exist.py") == []
 
     def test_analyze_plugin_collects(self, tmp_path: Path) -> None:
-        (tmp_path / "a.py").write_text(
-            "import os\nx = os.environ.get('A')\nexec(x)\n"
-        )
+        (tmp_path / "a.py").write_text("import os\nx = os.environ.get('A')\nexec(x)\n")
         (tmp_path / "b.py").write_text("def hello():\n    return 1\n")
         result = analyze_plugin(tmp_path)
         assert len(result) == 1
@@ -305,10 +255,10 @@ class TestFileLevel:
 class TestLineAttribution:
     def test_line_points_at_sink(self) -> None:
         src = (
-            "import os\n"   # 1
+            "import os\n"  # 1
             "x = os.environ.get('A')\n"  # 2 (source)
-            "y = x\n"        # 3 (hop)
-            "exec(y)\n"      # 4 (sink)
+            "y = x\n"  # 3 (hop)
+            "exec(y)\n"  # 4 (sink)
         )
         findings = _analyze(src)
         assert findings

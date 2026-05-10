@@ -45,10 +45,7 @@ _EMITTED_LEVELS = frozenset(_SARIF_LEVEL.keys())
 _RULE_ID_RE = re.compile(r"\b((?:RC|CPV|GAP)-[0-9A-Z]+(?:-[0-9A-Z]+)*)\b")
 
 SARIF_VERSION = "2.1.0"
-SARIF_SCHEMA_URI = (
-    "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/"
-    "master/Schemata/sarif-schema-2.1.0.json"
-)
+SARIF_SCHEMA_URI = "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json"
 
 
 def _extract_rule_id(message: str) -> str:
@@ -177,9 +174,7 @@ def results_to_sarif(
                         "rules": rules,
                     }
                 },
-                "originalUriBaseIds": {
-                    "%SRCROOT%": {"uri": plugin_root.resolve().as_uri() + "/"}
-                },
+                "originalUriBaseIds": {"%SRCROOT%": {"uri": plugin_root.resolve().as_uri() + "/"}},
                 "results": sarif_results,
             }
         ],

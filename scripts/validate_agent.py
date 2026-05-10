@@ -461,16 +461,18 @@ def validate_model_field(frontmatter: dict[str, Any], filename: str, report: Age
     report.passed(f"'model' field valid: {model}", filename)
 
 
-AGENT_NAMED_COLORS: frozenset[str] = frozenset({
-    "red",
-    "blue",
-    "green",
-    "yellow",
-    "purple",
-    "orange",
-    "pink",
-    "cyan",
-})
+AGENT_NAMED_COLORS: frozenset[str] = frozenset(
+    {
+        "red",
+        "blue",
+        "green",
+        "yellow",
+        "purple",
+        "orange",
+        "pink",
+        "cyan",
+    }
+)
 
 
 def validate_color_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
@@ -505,8 +507,7 @@ def validate_color_field(frontmatter: dict[str, Any], filename: str, report: Age
         return
 
     report.major(
-        f"'color' must be one of {sorted(AGENT_NAMED_COLORS)} "
-        f"or hex (#RRGGBB), got {color!r}",
+        f"'color' must be one of {sorted(AGENT_NAMED_COLORS)} or hex (#RRGGBB), got {color!r}",
         filename,
     )
 
@@ -786,8 +787,7 @@ def validate_isolation_field(frontmatter: dict[str, Any], filename: str, report:
         report.major(f"'isolation' must be a string, got {type(isolation_val).__name__}", rel_path)
     elif not isolation_val.strip():
         report.major(
-            "'isolation' field cannot be empty. "
-            "'worktree' is the only valid value per plugins-reference.md:70.",
+            "'isolation' field cannot be empty. 'worktree' is the only valid value per plugins-reference.md:70.",
             rel_path,
         )
     elif isolation_val not in VALID_ISOLATION_VALUES:
@@ -1003,8 +1003,7 @@ def validate_hooks_field(frontmatter: dict[str, Any], filename: str, report: Age
     for event_name, event_config in hooks.items():
         if event_name not in VALID_HOOK_EVENTS:
             report.major(
-                f"Invalid hook event for agent: '{event_name}'. "
-                f"Valid events: {sorted(VALID_HOOK_EVENTS)}",
+                f"Invalid hook event for agent: '{event_name}'. Valid events: {sorted(VALID_HOOK_EVENTS)}",
                 filename,
             )
             continue
@@ -1077,9 +1076,8 @@ def validate_hooks_field(frontmatter: dict[str, Any], filename: str, report: Age
                     if isinstance(cmd, str) and cmd.strip():
                         try:
                             from validate_hook import check_hook_command_cross_platform
-                            check_hook_command_cross_platform(
-                                cmd, report, file_label=filename
-                            )
+
+                            check_hook_command_cross_platform(cmd, report, file_label=filename)
                         except ImportError:
                             pass  # validate_hook unavailable in this scope
 
@@ -1513,6 +1511,7 @@ def print_json(report: AgentValidationReport) -> None:
 def main() -> int:
     """Main entry point."""
     from cpv_validation_common import launcher_epilog
+
     parser = argparse.ArgumentParser(
         description="Validate a Claude Code agent file or directory of agents.",
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -89,10 +89,12 @@ def test_gates_2_3_4_5_run_concurrently(tmp_path: Path):
     fake_mkpl_v = _make_sleeping_stage("mkpl_validate", 1.0)
     fake_mkpl_r = _make_sleeping_stage("mkpl_reg", 1.0)
 
-    with patch.object(publish, "stage_run_tests", fake_tests), \
-         patch.object(publish, "stage_validate_plugin", fake_validate), \
-         patch.object(publish, "stage_validate_marketplace", fake_mkpl_v), \
-         patch.object(publish, "stage_marketplace_registration_check", fake_mkpl_r):
+    with (
+        patch.object(publish, "stage_run_tests", fake_tests),
+        patch.object(publish, "stage_validate_plugin", fake_validate),
+        patch.object(publish, "stage_validate_marketplace", fake_mkpl_v),
+        patch.object(publish, "stage_marketplace_registration_check", fake_mkpl_r),
+    ):
         t0 = time.monotonic()
         rc = publish.run_preflight_parallel(plugin_root, layout)
         elapsed = time.monotonic() - t0
@@ -123,10 +125,12 @@ def test_failure_in_validate_gate_propagates_rc(tmp_path: Path):
     fake_mkpl_v = _make_sleeping_stage("mkpl_validate", 0.05, rc=0)
     fake_mkpl_r = _make_sleeping_stage("mkpl_reg", 0.05, rc=0)
 
-    with patch.object(publish, "stage_run_tests", fake_tests), \
-         patch.object(publish, "stage_validate_plugin", fake_validate), \
-         patch.object(publish, "stage_validate_marketplace", fake_mkpl_v), \
-         patch.object(publish, "stage_marketplace_registration_check", fake_mkpl_r):
+    with (
+        patch.object(publish, "stage_run_tests", fake_tests),
+        patch.object(publish, "stage_validate_plugin", fake_validate),
+        patch.object(publish, "stage_validate_marketplace", fake_mkpl_v),
+        patch.object(publish, "stage_marketplace_registration_check", fake_mkpl_r),
+    ):
         rc = publish.run_preflight_parallel(plugin_root, layout)
 
     assert rc == 2, f"Expected rc=2 from failed validate gate, got {rc}"
@@ -144,15 +148,17 @@ def test_first_failure_in_canonical_order_wins(tmp_path: Path):
     plugin_root = tmp_path
     layout = "A"
 
-    fake_tests = _make_sleeping_stage("tests", 0.30, rc=1)        # slow CRITICAL
+    fake_tests = _make_sleeping_stage("tests", 0.30, rc=1)  # slow CRITICAL
     fake_validate = _make_sleeping_stage("validate", 0.05, rc=2)  # fast MAJOR
     fake_mkpl_v = _make_sleeping_stage("mkpl_validate", 0.05, rc=0)
     fake_mkpl_r = _make_sleeping_stage("mkpl_reg", 0.05, rc=0)
 
-    with patch.object(publish, "stage_run_tests", fake_tests), \
-         patch.object(publish, "stage_validate_plugin", fake_validate), \
-         patch.object(publish, "stage_validate_marketplace", fake_mkpl_v), \
-         patch.object(publish, "stage_marketplace_registration_check", fake_mkpl_r):
+    with (
+        patch.object(publish, "stage_run_tests", fake_tests),
+        patch.object(publish, "stage_validate_plugin", fake_validate),
+        patch.object(publish, "stage_validate_marketplace", fake_mkpl_v),
+        patch.object(publish, "stage_marketplace_registration_check", fake_mkpl_r),
+    ):
         rc = publish.run_preflight_parallel(plugin_root, layout)
 
     assert rc == 1, (
@@ -183,10 +189,12 @@ def test_output_replayed_in_canonical_order(tmp_path: Path, capfd):
     fake_mkpl_v = _make_sleeping_stage("mkpl_validate", 0.20, rc=0)
     fake_mkpl_r = _make_sleeping_stage("mkpl_reg", 0.10, rc=0)
 
-    with patch.object(publish, "stage_run_tests", fake_tests), \
-         patch.object(publish, "stage_validate_plugin", fake_validate), \
-         patch.object(publish, "stage_validate_marketplace", fake_mkpl_v), \
-         patch.object(publish, "stage_marketplace_registration_check", fake_mkpl_r):
+    with (
+        patch.object(publish, "stage_run_tests", fake_tests),
+        patch.object(publish, "stage_validate_plugin", fake_validate),
+        patch.object(publish, "stage_validate_marketplace", fake_mkpl_v),
+        patch.object(publish, "stage_marketplace_registration_check", fake_mkpl_r),
+    ):
         rc = publish.run_preflight_parallel(plugin_root, layout)
 
     assert rc == 0
@@ -208,8 +216,7 @@ def test_output_replayed_in_canonical_order(tmp_path: Path, capfd):
         indices["mkpl_reg"],
     ]
     assert canonical_indices == sorted(canonical_indices), (
-        f"Replay out of canonical order. Indices: {indices}.\n"
-        f"Captured stdout:\n{out}"
+        f"Replay out of canonical order. Indices: {indices}.\nCaptured stdout:\n{out}"
     )
 
 
@@ -228,9 +235,7 @@ def test_gate1_failure_short_circuits_main(tmp_path: Path, monkeypatch):
     # Patch the things main() calls before the preflight block.
     monkeypatch.setattr(publish, "stage_bypass_guard", lambda: 0)
     monkeypatch.setattr(publish, "get_plugin_root", lambda: plugin_root)
-    monkeypatch.setattr(
-        publish, "detect_bump_type", lambda _root: "patch"
-    )
+    monkeypatch.setattr(publish, "detect_bump_type", lambda _root: "patch")
     monkeypatch.setattr(publish, "stage_check_working_tree", lambda _root: 1)
 
     # If main() incorrectly reaches the parallel block, this would be
@@ -249,8 +254,7 @@ def test_gate1_failure_short_circuits_main(tmp_path: Path, monkeypatch):
 
     assert rc == 1, f"Expected rc=1 from Gate 1 failure, got {rc}"
     assert not parallel_called, (
-        "run_preflight_parallel was invoked despite Gate 1 failing — "
-        "Gate 1 short-circuit broken."
+        "run_preflight_parallel was invoked despite Gate 1 failing — Gate 1 short-circuit broken."
     )
 
 
@@ -335,12 +339,8 @@ def test_thread_aware_stream_isolates_per_thread_writes():
     t2.join()
 
     # Every chunk in buffer A must be "AAA" — no "BBB" must leak in.
-    assert "BBB" not in results["a"], (
-        f"Thread A buffer contaminated by thread B writes. Got: {results['a'][:200]!r}"
-    )
-    assert "AAA" not in results["b"], (
-        f"Thread B buffer contaminated by thread A writes. Got: {results['b'][:200]!r}"
-    )
+    assert "BBB" not in results["a"], f"Thread A buffer contaminated by thread B writes. Got: {results['a'][:200]!r}"
+    assert "AAA" not in results["b"], f"Thread B buffer contaminated by thread A writes. Got: {results['b'][:200]!r}"
     # And nothing leaked to the real target either, since both threads
     # had buffers installed for the entire write window.
     assert real_target.getvalue() == "", (

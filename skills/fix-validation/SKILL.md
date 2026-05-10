@@ -57,7 +57,7 @@ CPV mirrors CC's install-time schema. Contract: [schema-parity-contract.md](refe
 ## Resources
 
 - [Plugin Error Index](references/plugin-error-index.md)
-  > 1. validate_plugin.py · 2. validate_skill.py · 3. validate_skill_comprehensive.py · 4. validate_hook.py · 5. validate_agent.py · 6. validate_command.py · 7. validate_mcp.py · 8. validate_lsp.py · 9. validate_security.py · 10. validate_rules.py · 11. validate_xref.py · 12. validate_settings_marketplace.py · 13. validate_documentation.py · 14. validate_encoding.py · 15. validate_enterprise.py · 16. validate_scoring.py · 17. validate_cache.py · 18. validate_telemetry.py — plugin-shipped env-var hazards
+  > 1. validate_plugin.py · 2. validate_skill.py · 3. validate_skill_comprehensive.py · 4. validate_hook.py · 5. validate_agent.py · 6. validate_command.py · 7. validate_mcp.py · 8. validate_lsp.py · 9. validate_security.py · 10. validate_rules.py · 11. validate_xref.py · 12. validate_settings_marketplace.py · 13. validate_documentation.py · 14. validate_encoding.py · 15. validate_enterprise.py · 16. validate_scoring.py · 17. validate_cache.py · 18. validate_telemetry.py — plugin-shipped env-var hazards · 19. Semantic pillar — Channel MCP Server Source-Code Security
 - [Marketplace Error Index](references/marketplace-error-index.md)
   > 1. validate_marketplace.py · 2. validate_marketplace_pipeline.py · 3. Architecture / Layout Migration Warnings (7 signals)
 - [Schema-Parity Contract](references/schema-parity-contract.md)

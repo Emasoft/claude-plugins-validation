@@ -134,8 +134,7 @@ def run_fclones(stage_root: Path) -> DedupResult:
         return DedupResult(
             attempted=False,
             succeeded=False,
-            skipped_reason="fclones not on PATH; install via "
-            "`cpv-doctor --install-scanners`",
+            skipped_reason="fclones not on PATH; install via `cpv-doctor --install-scanners`",
         )
 
     if not stage_root.is_dir():
@@ -146,14 +145,18 @@ def run_fclones(stage_root: Path) -> DedupResult:
         )
 
     import time
+
     start = time.perf_counter()
     try:
         result = subprocess.run(
             [
-                "fclones", "group", str(stage_root),
-                "--format", "json",
-                "--hidden",         # include dotfiles (scanners may flag .env etc.)
-                "--no-ignore",      # CPV must see EVERY file the scanners would see
+                "fclones",
+                "group",
+                str(stage_root),
+                "--format",
+                "json",
+                "--hidden",  # include dotfiles (scanners may flag .env etc.)
+                "--no-ignore",  # CPV must see EVERY file the scanners would see
             ],
             capture_output=True,
             text=True,
@@ -174,10 +177,7 @@ def run_fclones(stage_root: Path) -> DedupResult:
             attempted=True,
             succeeded=False,
             fclones_elapsed_seconds=elapsed,
-            skipped_reason=(
-                f"fclones exited {result.returncode}: "
-                f"{(result.stderr or '').strip()[:200]}"
-            ),
+            skipped_reason=(f"fclones exited {result.returncode}: {(result.stderr or '').strip()[:200]}"),
         )
 
     try:
@@ -378,13 +378,13 @@ def _cli_main(argv: list[str]) -> int:
     dedup into a real scan.
     """
     import argparse
+
     parser = argparse.ArgumentParser(
         prog="cpv-dedup",
         description="Run fclones on a staging tree and print the dedup map.",
     )
     parser.add_argument("stage_root", type=Path)
-    parser.add_argument("--apply", action="store_true",
-                        help="Actually delete duplicates (default: dry-run).")
+    parser.add_argument("--apply", action="store_true", help="Actually delete duplicates (default: dry-run).")
     args = parser.parse_args(argv)
 
     result = run_fclones(args.stage_root)
@@ -395,8 +395,7 @@ def _cli_main(argv: list[str]) -> int:
         print(f"[fail] {result.skipped_reason}")
         return 2
 
-    print(f"fclones found {len(result.dedup_map)} duplicate group(s) "
-          f"in {result.fclones_elapsed_seconds:.2f}s")
+    print(f"fclones found {len(result.dedup_map)} duplicate group(s) in {result.fclones_elapsed_seconds:.2f}s")
     for canonical, members in sorted(result.dedup_map.items()):
         print(f"  canonical={canonical}  dup_count={len(members) - 1}")
 
@@ -409,6 +408,7 @@ def _cli_main(argv: list[str]) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     import sys
+
     sys.exit(_cli_main(sys.argv[1:]))
 
 

@@ -237,6 +237,7 @@ class TestRemoteExecutionGuardPluginCache:
         # Trick the guard into thinking it's running from the fake script
         # path: monkey-patch __file__ on cpv_validation_common.
         import cpv_validation_common as cvc
+
         original_file = cvc.__file__
         try:
             cvc.__file__ = str(fake_script)
@@ -266,6 +267,7 @@ class TestRemoteExecutionGuardPluginCache:
         monkeypatch.chdir(tmp_path / "other_project" if (tmp_path / "other_project").exists() else tmp_path)
 
         import cpv_validation_common as cvc
+
         original_file = cvc.__file__
         try:
             cvc.__file__ = str(fake_script)
@@ -301,9 +303,7 @@ class TestRemoteExecutionGuardLookalike:
     env-var must still hit the cwd-based fallback check.
     """
 
-    def test_claude_plugin_root_set_but_script_outside_rejects(
-        self, tmp_path, monkeypatch, capsys
-    ):
+    def test_claude_plugin_root_set_but_script_outside_rejects(self, tmp_path, monkeypatch, capsys):
         """G21: regression guard. If an attacker sets `CLAUDE_PLUGIN_ROOT`
         to a legitimate plugin dir but tricks Python into running a copy
         of `validate_*.py` from a `/uv/tools/...` ephemeral env, the
@@ -338,6 +338,7 @@ class TestRemoteExecutionGuardLookalike:
         monkeypatch.chdir(plugin_root)
 
         import cpv_validation_common as cvc
+
         original_file = cvc.__file__
         try:
             cvc.__file__ = str(fake_script)
@@ -387,8 +388,7 @@ class TestSysPathRemoveDuplicates:
             # After cleanup there must be exactly ONE entry — the one
             # inserted at index 0 — and no stragglers further down.
             assert sys.path.count(scripts_dir) == 1, (
-                f"all duplicate entries of {scripts_dir!r} must be removed; "
-                f"got {sys.path.count(scripts_dir)} copies"
+                f"all duplicate entries of {scripts_dir!r} must be removed; got {sys.path.count(scripts_dir)} copies"
             )
             assert sys.path[0] == scripts_dir
         finally:

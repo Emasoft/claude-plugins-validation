@@ -69,9 +69,7 @@ def get_plugin_version(plugin_dir: Path) -> str | None:
     return data.get("version")
 
 
-def sync_versions(
-    marketplace_path: Path, dry_run: bool = False, verbose: bool = True
-) -> tuple[bool, list[str]]:
+def sync_versions(marketplace_path: Path, dry_run: bool = False, verbose: bool = True) -> tuple[bool, list[str]]:
     """
     Sync plugin versions from submodules to marketplace.json.
 
@@ -147,9 +145,7 @@ def sync_versions(
 
 def main() -> int:
     """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Sync plugin versions from submodules to marketplace.json"
-    )
+    parser = argparse.ArgumentParser(description="Sync plugin versions from submodules to marketplace.json")
     parser.add_argument(
         "--marketplace",
         type=Path,
@@ -162,7 +158,8 @@ def main() -> int:
         help="Show what would be changed without making changes",
     )
     parser.add_argument(
-        "-q", "--quiet",
+        "-q",
+        "--quiet",
         action="store_true",
         help="Suppress output except errors",
     )
@@ -185,9 +182,7 @@ def main() -> int:
         if args.dry_run:
             print("(dry run - no changes will be made)")
 
-    success, updated = sync_versions(
-        marketplace_path, dry_run=args.dry_run, verbose=not args.quiet
-    )
+    success, updated = sync_versions(marketplace_path, dry_run=args.dry_run, verbose=not args.quiet)
 
     if not success:
         return 1

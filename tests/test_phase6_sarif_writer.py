@@ -36,14 +36,17 @@ def _make_plugin(tmp_path: Path) -> Path:
 
 
 class TestRuleIdExtraction:
-    @pytest.mark.parametrize("msg,expected", [
-        ("RC-69 dangerous eval pattern", "RC-69"),
-        ("CPV-P2-C1 agent color must be named", "CPV-P2-C1"),
-        ("GAP-1 file source rejected", "GAP-1"),
-        ("Hardcoded user path /Users/foo detected", "CPV-GENERIC"),
-        ("", "CPV-GENERIC"),
-        ("RC-105 SARIF something", "RC-105"),
-    ])
+    @pytest.mark.parametrize(
+        "msg,expected",
+        [
+            ("RC-69 dangerous eval pattern", "RC-69"),
+            ("CPV-P2-C1 agent color must be named", "CPV-P2-C1"),
+            ("GAP-1 file source rejected", "GAP-1"),
+            ("Hardcoded user path /Users/foo detected", "CPV-GENERIC"),
+            ("", "CPV-GENERIC"),
+            ("RC-105 SARIF something", "RC-105"),
+        ],
+    )
     def test_extracts_or_falls_back(self, msg: str, expected: str) -> None:
         assert _extract_rule_id(msg) == expected
 
@@ -54,14 +57,17 @@ class TestRuleIdExtraction:
 
 
 class TestSeverityMapping:
-    @pytest.mark.parametrize("level,sarif_level", [
-        ("CRITICAL", "error"),
-        ("MAJOR", "error"),
-        ("MINOR", "warning"),
-        ("WARNING", "warning"),
-        ("NIT", "note"),
-        ("INFO", "note"),
-    ])
+    @pytest.mark.parametrize(
+        "level,sarif_level",
+        [
+            ("CRITICAL", "error"),
+            ("MAJOR", "error"),
+            ("MINOR", "warning"),
+            ("WARNING", "warning"),
+            ("NIT", "note"),
+            ("INFO", "note"),
+        ],
+    )
     def test_each_level_maps(self, tmp_path: Path, level: str, sarif_level: str) -> None:
         plugin = _make_plugin(tmp_path)
         report = ValidationReport()
@@ -222,10 +228,9 @@ class TestWriteSarif:
 class TestProperties:
     def test_category_propagates(self, tmp_path: Path) -> None:
         from cpv_validation_common import ValidationResult  # noqa: WPS433
+
         plugin = _make_plugin(tmp_path)
-        rs = [ValidationResult(
-            "CRITICAL", "RC-1 x", str(plugin / "a.py"), 1, "security", False, None, "secrets", None
-        )]
+        rs = [ValidationResult("CRITICAL", "RC-1 x", str(plugin / "a.py"), 1, "security", False, None, "secrets", None)]
         sarif = results_to_sarif(rs, plugin)
         props = sarif["runs"][0]["results"][0]["properties"]
         assert props["category"] == "secrets"
@@ -233,6 +238,7 @@ class TestProperties:
 
     def test_suggestion_becomes_fixes(self, tmp_path: Path) -> None:
         from cpv_validation_common import ValidationResult  # noqa: WPS433
+
         plugin = _make_plugin(tmp_path)
         rs = [ValidationResult("MAJOR", "RC-2 y", suggestion="Use os.environ.get instead")]
         sarif = results_to_sarif(rs, plugin)

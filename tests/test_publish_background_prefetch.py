@@ -82,9 +82,7 @@ def _layout_a_details() -> dict:
 # ---------------------------------------------------------------------------
 
 
-def test_prefetch_success_path_marketplace_skips_sync(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_prefetch_success_path_marketplace_skips_sync(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """When the marketplace.json prefetch resolved cleanly, _check_layout_a
     must reuse the cached dict and skip the synchronous fetch entirely.
 
@@ -134,9 +132,7 @@ def test_prefetch_success_path_marketplace_skips_sync(
     )
 
 
-def test_prefetch_success_path_gh_auth_skips_sync(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_prefetch_success_path_gh_auth_skips_sync(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """When the gh-auth prefetch resolved cleanly (no exception), Gate 12
     must reuse the cached result and skip the synchronous _ensure_gh_auth
     call.
@@ -157,9 +153,7 @@ def test_prefetch_success_path_gh_auth_skips_sync(
         sync_calls.append((owner, repo))
 
     monkeypatch.setattr(publish, "_ensure_gh_auth", fake_ensure_sync)
-    monkeypatch.setattr(
-        publish, "_resolve_owner_repo", lambda _root: ("Emasoft", "fake-plugin")
-    )
+    monkeypatch.setattr(publish, "_resolve_owner_repo", lambda _root: ("Emasoft", "fake-plugin"))
     # Stub everything else stage_commit_tag_push touches so we don't have
     # to set up a real git repo. We only care about whether the gh-auth
     # branch fired.
@@ -192,8 +186,7 @@ def test_prefetch_success_path_gh_auth_skips_sync(
 
     assert rc == 0, f"Expected Gate 12 to succeed, got rc={rc}"
     assert sync_calls == [], (
-        f"Expected 0 synchronous _ensure_gh_auth calls when prefetch is "
-        f"clean, got {len(sync_calls)}: {sync_calls}"
+        f"Expected 0 synchronous _ensure_gh_auth calls when prefetch is clean, got {len(sync_calls)}: {sync_calls}"
     )
 
 
@@ -202,9 +195,7 @@ def test_prefetch_success_path_gh_auth_skips_sync(
 # ---------------------------------------------------------------------------
 
 
-def test_prefetch_transient_failure_falls_back_to_sync_marketplace(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_prefetch_transient_failure_falls_back_to_sync_marketplace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """When the marketplace.json prefetch returned None (transient network
     failure: 503 from github.com edge, parse failure on a partial body,
     etc.), the gate MUST fall back to its synchronous fetch — not skip
@@ -252,14 +243,11 @@ def test_prefetch_transient_failure_falls_back_to_sync_marketplace(
 
     assert rc == 0, f"Expected layout-A check to pass after sync fallback, got rc={rc}"
     assert sync_calls == [("Emasoft", "test-marketplace")], (
-        f"Expected EXACTLY one sync fallback call to "
-        f"_fetch_remote_marketplace_json, got {sync_calls}"
+        f"Expected EXACTLY one sync fallback call to _fetch_remote_marketplace_json, got {sync_calls}"
     )
 
 
-def test_prefetch_transient_failure_falls_back_to_sync_gh_auth(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_prefetch_transient_failure_falls_back_to_sync_gh_auth(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """When the gh-auth prefetch raised an UNEXPECTED exception (not
     SystemExit — that's the permanent-failure path), Gate 12 must fall
     back to the synchronous call so a clean current error from
@@ -282,12 +270,8 @@ def test_prefetch_transient_failure_falls_back_to_sync_gh_auth(
         sync_calls.append((owner, repo))
 
     monkeypatch.setattr(publish, "_ensure_gh_auth", fake_ensure_sync)
-    monkeypatch.setattr(
-        publish, "_resolve_owner_repo", lambda _root: ("Emasoft", "fake-plugin")
-    )
-    monkeypatch.setattr(
-        publish, "_head_commit_message", lambda _root: "chore(release): v1.2.3"
-    )
+    monkeypatch.setattr(publish, "_resolve_owner_repo", lambda _root: ("Emasoft", "fake-plugin"))
+    monkeypatch.setattr(publish, "_head_commit_message", lambda _root: "chore(release): v1.2.3")
     monkeypatch.setattr(publish, "_git_porcelain_clean", lambda _root: True)
     monkeypatch.setattr(publish, "_local_tag_exists", lambda _root, _tag: True)
     monkeypatch.setattr(publish, "_remote_tag_exists", lambda _root, _tag: True)
@@ -313,8 +297,7 @@ def test_prefetch_transient_failure_falls_back_to_sync_gh_auth(
 
     assert rc == 0, f"Expected Gate 12 to succeed via sync fallback, got rc={rc}"
     assert sync_calls == [("Emasoft", "fake-plugin")], (
-        f"Expected EXACTLY one sync fallback call to _ensure_gh_auth, "
-        f"got {sync_calls}"
+        f"Expected EXACTLY one sync fallback call to _ensure_gh_auth, got {sync_calls}"
     )
 
 
@@ -323,9 +306,7 @@ def test_prefetch_transient_failure_falls_back_to_sync_gh_auth(
 # ---------------------------------------------------------------------------
 
 
-def test_prefetch_systemexit_re_raises_on_main_thread(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_prefetch_systemexit_re_raises_on_main_thread(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """When the gh-auth prefetch raised SystemExit (permanent auth
     failure: gh CLI not installed, no push perm, etc.), Gate 12 MUST
     re-raise it on the main thread.
@@ -348,12 +329,8 @@ def test_prefetch_systemexit_re_raises_on_main_thread(
         sync_calls.append((owner, repo))
 
     monkeypatch.setattr(publish, "_ensure_gh_auth", fake_ensure_sync)
-    monkeypatch.setattr(
-        publish, "_resolve_owner_repo", lambda _root: ("Emasoft", "fake-plugin")
-    )
-    monkeypatch.setattr(
-        publish, "_head_commit_message", lambda _root: "chore(release): v1.2.3"
-    )
+    monkeypatch.setattr(publish, "_resolve_owner_repo", lambda _root: ("Emasoft", "fake-plugin"))
+    monkeypatch.setattr(publish, "_head_commit_message", lambda _root: "chore(release): v1.2.3")
     monkeypatch.setattr(publish, "_git_porcelain_clean", lambda _root: True)
     monkeypatch.setattr(publish, "_local_tag_exists", lambda _root, _tag: True)
 
@@ -372,8 +349,7 @@ def test_prefetch_systemexit_re_raises_on_main_thread(
     # And the synchronous fallback must NOT have been called — re-raising
     # the prefetched SystemExit is the canonical fail-fast path.
     assert sync_calls == [], (
-        f"_ensure_gh_auth sync fallback was called despite prefetch raising "
-        f"SystemExit. Got {sync_calls}"
+        f"_ensure_gh_auth sync fallback was called despite prefetch raising SystemExit. Got {sync_calls}"
     )
 
 
@@ -382,9 +358,7 @@ def test_prefetch_systemexit_re_raises_on_main_thread(
 # ---------------------------------------------------------------------------
 
 
-def test_prefetch_mismatched_target_falls_back_to_sync(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_prefetch_mismatched_target_falls_back_to_sync(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """If the prefetch was scoped to a different (owner, repo) than the
     gate is now operating on (defensive: catches a future refactor that
     might add remote-rename handling between prefetch start and gate
@@ -435,9 +409,7 @@ def test_prefetch_mismatched_target_falls_back_to_sync(
 # ---------------------------------------------------------------------------
 
 
-def test_no_prefetch_falls_back_to_sync_calls(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_no_prefetch_falls_back_to_sync_calls(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Pre-Phase-E callers (e.g. plugin-fixer running just `gh release create`
     out-of-band) pass nothing for ``prefetch``. The consuming gates must
     behave identically to the pre-Phase-E pipeline — i.e. always do their
@@ -481,9 +453,7 @@ def test_no_prefetch_falls_back_to_sync_calls(
 # ---------------------------------------------------------------------------
 
 
-def test_layout_none_skips_prefetch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_layout_none_skips_prefetch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """When detect_layout returns "none" (no marketplace wired), neither
     prefetch fires. Both futures stay None and no executor is created.
 
@@ -515,15 +485,9 @@ def test_layout_none_skips_prefetch(
     prefetch = publish._start_prefetch(plugin_root, "none", {})
 
     assert prefetch.gh_auth is None, "gh_auth future must be None for layout='none'"
-    assert prefetch.marketplace_json is None, (
-        "marketplace_json future must be None for layout='none'"
-    )
-    assert prefetch.executor is None, (
-        "executor must be None for layout='none' (no threads spawned)"
-    )
-    assert submitted == [], (
-        f"ThreadPoolExecutor was instantiated/used despite layout='none': {submitted}"
-    )
+    assert prefetch.marketplace_json is None, "marketplace_json future must be None for layout='none'"
+    assert prefetch.executor is None, "executor must be None for layout='none' (no threads spawned)"
+    assert submitted == [], f"ThreadPoolExecutor was instantiated/used despite layout='none': {submitted}"
 
 
 # ---------------------------------------------------------------------------
@@ -531,9 +495,7 @@ def test_layout_none_skips_prefetch(
 # ---------------------------------------------------------------------------
 
 
-def test_layout_b_starts_only_gh_auth_prefetch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_layout_b_starts_only_gh_auth_prefetch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Layout B (nested plugin in marketplace repo) reads marketplace.json
     from disk in the parent repo — no remote fetch needed. Only the
     gh-auth prefetch runs.
@@ -548,9 +510,7 @@ def test_layout_b_starts_only_gh_auth_prefetch(
 
     try:
         assert prefetch.gh_auth is not None, "Layout B must still start gh-auth prefetch"
-        assert prefetch.marketplace_json is None, (
-            "Layout B must NOT start marketplace.json prefetch (parent on disk)"
-        )
+        assert prefetch.marketplace_json is None, "Layout B must NOT start marketplace.json prefetch (parent on disk)"
         assert prefetch.gh_auth_target == ("Emasoft", "fake-plugin")
         assert prefetch.marketplace_target is None
         # Wait for the (stubbed) prefetch to finish so the worker thread
@@ -565,9 +525,7 @@ def test_layout_b_starts_only_gh_auth_prefetch(
 # ---------------------------------------------------------------------------
 
 
-def test_prefetch_shutdown_releases_executor(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_prefetch_shutdown_releases_executor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """When a Gate 6+ failure short-circuits before the prefetch threads
     have been consumed, ``prefetch.shutdown()`` must be called on every
     exit path so the worker threads don't block process exit.
@@ -623,9 +581,7 @@ def test_prefetch_shutdown_releases_executor(
 # ---------------------------------------------------------------------------
 
 
-def test_no_double_call_marketplace(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_no_double_call_marketplace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """End-to-end: when the prefetch succeeded, the total number of
     _fetch_remote_marketplace_json invocations across BOTH the prefetch
     AND the gate is exactly 1 (the prefetch). The gate's sync call must
@@ -692,9 +648,7 @@ def test_no_double_call_marketplace(
 # ---------------------------------------------------------------------------
 
 
-def test_start_prefetch_layout_a_populates_both_futures(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_start_prefetch_layout_a_populates_both_futures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """For Layout A with valid mkt_owner/mkt_repo and a resolvable git
     origin, both futures are populated with the expected targets.
     """
@@ -706,9 +660,7 @@ def test_start_prefetch_layout_a_populates_both_futures(
     # Replace the worker functions with cheap synchronous shims so the
     # prefetch resolves quickly.
     monkeypatch.setattr(publish, "_ensure_gh_auth", lambda _o, _r: None)
-    monkeypatch.setattr(
-        publish, "_fetch_remote_marketplace_json", lambda _o, _r, *, gh_bin=None: {"plugins": []}
-    )
+    monkeypatch.setattr(publish, "_fetch_remote_marketplace_json", lambda _o, _r, *, gh_bin=None: {"plugins": []})
 
     prefetch = publish._start_prefetch(plugin_root, "A", details)
 
@@ -749,9 +701,7 @@ def test_default_prefetch_results_is_safe():
 # ---------------------------------------------------------------------------
 
 
-def test_layout_a_without_origin_only_starts_marketplace_prefetch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_layout_a_without_origin_only_starts_marketplace_prefetch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """If `git remote get-url origin` fails (no remote configured), we
     skip the gh-auth prefetch — Gate 12 will surface the failure via
     its existing _resolve_owner_repo path with the same error message.
@@ -765,16 +715,12 @@ def test_layout_a_without_origin_only_starts_marketplace_prefetch(
 
     # Simulate `git remote get-url origin` failing.
     monkeypatch.setattr(publish, "_current_repo_slug", lambda _root: None)
-    monkeypatch.setattr(
-        publish, "_fetch_remote_marketplace_json", lambda _o, _r, *, gh_bin=None: {"plugins": []}
-    )
+    monkeypatch.setattr(publish, "_fetch_remote_marketplace_json", lambda _o, _r, *, gh_bin=None: {"plugins": []})
 
     prefetch = publish._start_prefetch(plugin_root, "A", details)
 
     try:
-        assert prefetch.gh_auth is None, (
-            "gh_auth future must be None when origin is unresolvable"
-        )
+        assert prefetch.gh_auth is None, "gh_auth future must be None when origin is unresolvable"
         assert prefetch.marketplace_json is not None, (
             "marketplace_json future must still populate (independent of git origin)"
         )

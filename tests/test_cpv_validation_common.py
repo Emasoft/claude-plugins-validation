@@ -34,9 +34,11 @@ def _restore_color_enabled():
     test sees the documented default of True.
     """
     import cpv_validation_common as _cvc
+
     _cvc._COLOR_ENABLED = True
     yield
     _cvc._COLOR_ENABLED = True
+
 
 from cpv_validation_common import (  # noqa: E402
     EXIT_CRITICAL,
@@ -1302,8 +1304,7 @@ class TestV2212UserPathPatternsIgnoreCase:
         text = "c:\\users\\alice\\foo"
         matched = any(p.search(text) for p in USER_PATH_PATTERNS)
         assert matched, (
-            "Lowercase Windows drive path c:\\users\\alice\\... must match USER_PATH_PATTERNS "
-            "(re.IGNORECASE fix)"
+            "Lowercase Windows drive path c:\\users\\alice\\... must match USER_PATH_PATTERNS (re.IGNORECASE fix)"
         )
 
     def test_user_path_regex_matches_uppercase_windows_drive(self):
@@ -1338,12 +1339,8 @@ class TestPass2TaxonomyAdditions:
             "DISABLE_AUTOUPDATER",  # GAP-76
             "FORCE_AUTOUPDATE_PLUGINS",  # GAP-76
         ):
-            assert env_var in VALID_PLUGIN_ENV_VARS, (
-                f"{env_var} must be in VALID_PLUGIN_ENV_VARS (pass-2 GAP-59/60/76)"
-            )
-            assert is_valid_plugin_env_var(env_var), (
-                f"is_valid_plugin_env_var({env_var!r}) must return True"
-            )
+            assert env_var in VALID_PLUGIN_ENV_VARS, f"{env_var} must be in VALID_PLUGIN_ENV_VARS (pass-2 GAP-59/60/76)"
+            assert is_valid_plugin_env_var(env_var), f"is_valid_plugin_env_var({env_var!r}) must return True"
 
     def test_user_config_substitution_pattern_recognised(self):
         """GAP-57 / plugins-reference.md L433: `${user_config.<KEY>}` is a
@@ -1380,8 +1377,7 @@ class TestPass2TaxonomyAdditions:
         from cc_scope_rules import KNOWN_SETTINGS_KEYS
 
         assert "disableSkillShellExecution" in KNOWN_SETTINGS_KEYS, (
-            "KNOWN_SETTINGS_KEYS must recognise `disableSkillShellExecution` "
-            "(skills.md L414) per CPV-P2-m6."
+            "KNOWN_SETTINGS_KEYS must recognise `disableSkillShellExecution` (skills.md L414) per CPV-P2-m6."
         )
         # Regression guard: the two v2.22.2 additions must also still be present.
         assert "attribution" in KNOWN_SETTINGS_KEYS
@@ -1431,25 +1427,34 @@ class TestV2_1_120_to_126Additions:
 
         # CRITICAL → warning when the rule is in UNCERTAIN_IN_DOCS_RULES
         # AND the file is a doc.
-        for rid in ("RC-11", "RC-37", "RC-76", "RC-87", "RC-93", "RC-131",
-                    "RC-114", "RC-115", "RC-136", "RC-03", "RC-63"):
-            assert rid in UNCERTAIN_IN_DOCS_RULES, (
-                f"Expected {rid} in UNCERTAIN_IN_DOCS_RULES"
-            )
+        for rid in (
+            "RC-11",
+            "RC-37",
+            "RC-76",
+            "RC-87",
+            "RC-93",
+            "RC-131",
+            "RC-114",
+            "RC-115",
+            "RC-136",
+            "RC-03",
+            "RC-63",
+        ):
+            assert rid in UNCERTAIN_IN_DOCS_RULES, f"Expected {rid} in UNCERTAIN_IN_DOCS_RULES"
             assert effective_severity("critical", "README.md", rule_id=rid) == "warning"
             assert effective_severity("critical", "docs/install.md", rule_id=rid) == "warning"
-            assert effective_severity("major",    "agents/x.md",    rule_id=rid) == "warning"
+            assert effective_severity("major", "agents/x.md", rule_id=rid) == "warning"
 
         # Rules NOT in the set get the default ONE-tier demotion.
         # RC-21 is not in UNCERTAIN_IN_DOCS_RULES.
         assert effective_severity("critical", "README.md", rule_id="RC-21") == "major"
-        assert effective_severity("major",    "README.md", rule_id="RC-21") == "minor"
+        assert effective_severity("major", "README.md", rule_id="RC-21") == "minor"
 
         # Non-doc files: the UNCERTAIN_IN_DOCS rule_id has NO effect.
         # Real script source must keep its severity.
         for rid in ("RC-114", "RC-115", "RC-136"):
             assert effective_severity("critical", "scripts/install.sh", rule_id=rid) == "critical"
-            assert effective_severity("critical", "src/install.py",     rule_id=rid) == "critical"
+            assert effective_severity("critical", "src/install.py", rule_id=rid) == "critical"
 
     def test_allow_managed_read_paths_only_in_known_settings(self):
         """v2.1.126: ``allowManagedReadPathsOnly`` is the read-path sibling

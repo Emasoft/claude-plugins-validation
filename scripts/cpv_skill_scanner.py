@@ -48,9 +48,7 @@ _CISCO_TO_CPV_SEVERITY: dict[str, str] = {
 # Default 10 minutes covers most plugin sizes (cold-start uvx download
 # of the ~90 transitive deps eats the first 60-120s on a fresh machine).
 # Override via CPV_CISCO_SCAN_TIMEOUT_S=<seconds> for very large trees.
-DEFAULT_TIMEOUT_SECONDS = int(
-    os.environ.get("CPV_CISCO_SCAN_TIMEOUT_S", "600")
-)
+DEFAULT_TIMEOUT_SECONDS = int(os.environ.get("CPV_CISCO_SCAN_TIMEOUT_S", "600"))
 
 # Pinned to a major-version range. Bumping this is an explicit decision so
 # that a Cisco breaking change doesn't silently alter scan behaviour.
@@ -61,24 +59,24 @@ _CISCO_PACKAGE_SPEC = "cisco-ai-skill-scanner"
 class CiscoFinding:
     """One normalised finding from skill-scanner JSON output."""
 
-    severity: str          # CPV-canonical: critical/major/minor/nit/info
-    rule_id: str           # Cisco rule ID (e.g. "static.prompt_injection.v1")
-    message: str           # Human-readable finding text
-    file_path: str         # Relative path inside the scanned plugin
+    severity: str  # CPV-canonical: critical/major/minor/nit/info
+    rule_id: str  # Cisco rule ID (e.g. "static.prompt_injection.v1")
+    message: str  # Human-readable finding text
+    file_path: str  # Relative path inside the scanned plugin
     line_number: int | None  # 1-indexed line, None if not applicable
-    raw: dict[str, Any]    # Original Cisco finding object (for debugging)
+    raw: dict[str, Any]  # Original Cisco finding object (for debugging)
 
 
 @dataclass(frozen=True)
 class CiscoScanResult:
     """Aggregate result of one `skill-scanner scan-all` invocation."""
 
-    invoked: bool          # True iff uvx ran the scanner to completion
+    invoked: bool  # True iff uvx ran the scanner to completion
     findings: tuple[CiscoFinding, ...]
-    skipped_reason: str    # Empty when invoked; explains why otherwise
-    raw_stdout: str        # Captured stdout (JSON when invoked OK)
-    raw_stderr: str        # Captured stderr (diagnostics)
-    exit_code: int         # subprocess exit code; -1 if not invoked
+    skipped_reason: str  # Empty when invoked; explains why otherwise
+    raw_stdout: str  # Captured stdout (JSON when invoked OK)
+    raw_stderr: str  # Captured stderr (diagnostics)
+    exit_code: int  # subprocess exit code; -1 if not invoked
 
 
 def is_uvx_available() -> bool:
@@ -182,24 +180,14 @@ def _normalise_finding(raw: dict[str, Any]) -> CiscoFinding:
     severity_raw = (raw.get("severity") or raw.get("severity_level") or "info").lower()
     severity = _CISCO_TO_CPV_SEVERITY.get(severity_raw, "minor")
 
-    rule_id = (
-        raw.get("rule_id")
-        or raw.get("ruleId")
-        or raw.get("id")
-        or "cisco.unknown"
-    )
+    rule_id = raw.get("rule_id") or raw.get("ruleId") or raw.get("id") or "cisco.unknown"
 
     message = raw.get("message") or raw.get("description") or raw.get("title") or ""
     if not isinstance(message, str):
         message = str(message)
 
     location = raw.get("location") or {}
-    file_path = (
-        location.get("file")
-        or location.get("file_path")
-        or raw.get("file")
-        or ""
-    )
+    file_path = location.get("file") or location.get("file_path") or raw.get("file") or ""
     line_raw = location.get("line") or location.get("line_number") or raw.get("line")
     try:
         line_number: int | None = int(line_raw) if line_raw is not None else None

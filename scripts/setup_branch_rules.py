@@ -112,13 +112,14 @@ RULESET_NAME = "cpv-branch-rules"
 
 # ── Shell helpers ─────────────────────────────────────────────────────────
 
+
 class ShellError(RuntimeError):
     """Raised when a subprocess returns non-zero."""
 
 
-def run(cmd: list[str], *, check: bool = True,
-        input_data: str | None = None,
-        timeout: int = 60) -> subprocess.CompletedProcess[str]:
+def run(
+    cmd: list[str], *, check: bool = True, input_data: str | None = None, timeout: int = 60
+) -> subprocess.CompletedProcess[str]:
     """Run a subprocess with a default 60s timeout. Callers wanting longer
     operations (clone, push, archive download) must pass an explicit
     timeout. A hung gh-api call without a timeout used to block branch-rules
@@ -134,10 +135,7 @@ def run(cmd: list[str], *, check: bool = True,
         timeout=timeout,
     )
     if check and result.returncode != 0:
-        raise ShellError(
-            f"Command failed ({result.returncode}): {' '.join(cmd)}\n"
-            f"stderr: {result.stderr}"
-        )
+        raise ShellError(f"Command failed ({result.returncode}): {' '.join(cmd)}\nstderr: {result.stderr}")
     return result
 
 
@@ -145,23 +143,19 @@ def check_gh_available() -> None:
     try:
         run(["gh", "--version"])
     except (FileNotFoundError, ShellError) as exc:
-        sys.stderr.write(
-            "ERROR: `gh` CLI not available. Install from https://cli.github.com\n"
-            f"Details: {exc}\n"
-        )
+        sys.stderr.write(f"ERROR: `gh` CLI not available. Install from https://cli.github.com\nDetails: {exc}\n")
         sys.exit(2)
 
 
 def check_gh_auth() -> None:
     result = run(["gh", "auth", "status"], check=False)
     if result.returncode != 0:
-        sys.stderr.write(
-            "ERROR: `gh` CLI is not authenticated. Run `gh auth login` first.\n"
-        )
+        sys.stderr.write("ERROR: `gh` CLI is not authenticated. Run `gh auth login` first.\n")
         sys.exit(2)
 
 
 # ── Repo metadata ─────────────────────────────────────────────────────────
+
 
 def parse_repo_slug(slug: str) -> tuple[str, str]:
     if "/" not in slug:
@@ -247,6 +241,7 @@ def fetch_latest_check_contexts(owner: str, repo: str) -> list[str]:
 
 # ── Ruleset operations ────────────────────────────────────────────────────
 
+
 @dataclass
 class BypassActor:
     actor_id: int | None
@@ -301,7 +296,8 @@ def fetch_existing_ruleset(owner: str, repo: str) -> dict | None:
 
 
 def fetch_legacy_protection_rulesets(
-    owner: str, repo: str,
+    owner: str,
+    repo: str,
 ) -> list[dict]:
     """Return non-CPV rulesets that look like branch-protection rules.
 
@@ -449,9 +445,7 @@ def build_ruleset(
                 "type": "required_status_checks",
                 "parameters": {
                     "strict_required_status_checks_policy": False,
-                    "required_status_checks": [
-                        {"context": ctx} for ctx in check_contexts
-                    ],
+                    "required_status_checks": [{"context": ctx} for ctx in check_contexts],
                 },
             },
         ],
@@ -494,6 +488,7 @@ def apply_ruleset(
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
@@ -588,23 +583,15 @@ def main() -> int:
     # user can sanity-check that the hardcoded defaults match their actual CI.
     if args.check_context:
         check_contexts = args.check_context
-        sys.stderr.write(
-            f"Using user-specified check contexts: {', '.join(check_contexts)}\n"
-        )
+        sys.stderr.write(f"Using user-specified check contexts: {', '.join(check_contexts)}\n")
     else:
         repo_type = detect_repo_type(owner, repo)
         check_contexts = default_check_contexts_for(repo_type)
-        sys.stderr.write(
-            f"Detected repo type: {repo_type} "
-            f"(defaults: {', '.join(check_contexts)})\n"
-        )
+        sys.stderr.write(f"Detected repo type: {repo_type} (defaults: {', '.join(check_contexts)})\n")
         if args.dry_run:
             live = fetch_latest_check_contexts(owner, repo)
             if live:
-                sys.stderr.write(
-                    f"  For reference, check-runs currently reported on HEAD: "
-                    f"{', '.join(live)}\n"
-                )
+                sys.stderr.write(f"  For reference, check-runs currently reported on HEAD: {', '.join(live)}\n")
                 sys.stderr.write(
                     "  If these differ from the defaults above, pass "
                     "--check-context explicitly for each name you actually need.\n"
@@ -631,26 +618,12 @@ def main() -> int:
             if legacy:
                 # Adopt bypass actors from the first legacy ruleset found.
                 source = legacy[0]
-                legacy_names = ", ".join(
-                    str(rs.get("name", "?")) for rs in legacy
-                )
-                sys.stderr.write(
-                    f"⚠ Found {len(legacy)} pre-existing protection ruleset(s): "
-                    f"{legacy_names}\n"
-                )
-                sys.stderr.write(
-                    f"  Adopting bypass_actors from '{source.get('name')}' "
-                    f"(id={source.get('id')}).\n"
-                )
-                sys.stderr.write(
-                    "  After applying cpv-branch-rules, consider deleting the "
-                    "legacy ruleset(s) with:\n"
-                )
+                legacy_names = ", ".join(str(rs.get("name", "?")) for rs in legacy)
+                sys.stderr.write(f"⚠ Found {len(legacy)} pre-existing protection ruleset(s): {legacy_names}\n")
+                sys.stderr.write(f"  Adopting bypass_actors from '{source.get('name')}' (id={source.get('id')}).\n")
+                sys.stderr.write("  After applying cpv-branch-rules, consider deleting the legacy ruleset(s) with:\n")
                 for rs in legacy:
-                    sys.stderr.write(
-                        f"    gh api --method DELETE "
-                        f"repos/{owner}/{repo}/rulesets/{rs.get('id')}\n"
-                    )
+                    sys.stderr.write(f"    gh api --method DELETE repos/{owner}/{repo}/rulesets/{rs.get('id')}\n")
         if source is not None:
             existing_actors = [
                 BypassActor(
@@ -663,8 +636,7 @@ def main() -> int:
 
     # Merge: existing + defaults + CLI additions
     defaults = build_default_bypass_actors()
-    additions = [BypassActor(app_id, "Integration", "always")
-                 for app_id in args.add_bypass_app_id]
+    additions = [BypassActor(app_id, "Integration", "always") for app_id in args.add_bypass_app_id]
     bypass_actors = merge_bypass_actors(existing_actors, defaults + additions)
 
     ruleset = build_ruleset(check_contexts, bypass_actors)
@@ -678,8 +650,7 @@ def main() -> int:
         return 0
 
     response = apply_ruleset(owner, repo, ruleset, existing_id)
-    print(f"✓ Ruleset {'updated' if existing_id else 'created'}: "
-          f"{RULESET_NAME} (id={response.get('id')})")
+    print(f"✓ Ruleset {'updated' if existing_id else 'created'}: {RULESET_NAME} (id={response.get('id')})")
     print(f"  Check contexts required: {', '.join(check_contexts)}")
     print(f"  Bypass actors preserved/added: {len(bypass_actors)}")
     print(f"  View: https://github.com/{owner}/{repo}/rules/{response.get('id')}")

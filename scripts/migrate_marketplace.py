@@ -19,6 +19,7 @@ Usage:
 `--check` exits 1 if migrations would change the file (CI gate).
 `--no-probe` skips the live-ness probe (offline mode).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -49,7 +50,7 @@ def parse_github_url(url: str) -> tuple[str, str] | None:
         return None
     # git@github.com:<owner>/<repo>
     if url.startswith("git@github.com:"):
-        body = url[len("git@github.com:"):]
+        body = url[len("git@github.com:") :]
         parts = body.split("/", 1)
         if len(parts) == 2:
             return parts[0], parts[1]
@@ -68,9 +69,7 @@ def normalize_source(source: object) -> tuple[object, str | None]:
         parsed = parse_github_url(source)
         if parsed:
             owner, repo = parsed
-            return {"type": "github", "repo": f"{owner}/{repo}"}, (
-                f"string url → {{type:github, repo:{owner}/{repo}}}"
-            )
+            return {"type": "github", "repo": f"{owner}/{repo}"}, (f"string url → {{type:github, repo:{owner}/{repo}}}")
         return source, None
     if not isinstance(source, dict):
         return source, None
@@ -97,7 +96,10 @@ def probe_repo_alive(owner_repo: str) -> tuple[bool, str]:
     try:
         res = gh_with_retry(
             ["gh", "api", f"repos/{owner_repo}", "--jq", ".name"],
-            check=False, capture_output=True, max_attempts=3, backoff=4.0,
+            check=False,
+            capture_output=True,
+            max_attempts=3,
+            backoff=4.0,
         )
     except FileNotFoundError:
         return True, "gh CLI not installed — assumed alive (cannot probe)"
@@ -109,7 +111,8 @@ def probe_repo_alive(owner_repo: str) -> tuple[bool, str]:
 
 
 def migrate_marketplace(
-    root: Path, *,
+    root: Path,
+    *,
     check_only: bool = False,
     probe: bool = True,
 ) -> int:
@@ -180,8 +183,11 @@ def migrate_marketplace(
     for c in changes:
         print(c)
     if dead_repos:
-        print("\n  [migrate] DEAD repos detected — entries STILL IN marketplace.json. "
-              "Decide whether to remove or restore each:", file=sys.stderr)
+        print(
+            "\n  [migrate] DEAD repos detected — entries STILL IN marketplace.json. "
+            "Decide whether to remove or restore each:",
+            file=sys.stderr,
+        )
         for line in dead_repos:
             print(line, file=sys.stderr)
         return 1
@@ -189,14 +195,18 @@ def migrate_marketplace(
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("marketplace_root", nargs="?", default=".", type=Path,
-                   help="Path to marketplace root (containing .claude-plugin/marketplace.json)")
-    p.add_argument("--check", action="store_true",
-                   help="Exit 1 if migrations would change the file. CI gate mode.")
-    p.add_argument("--no-probe", action="store_true",
-                   help="Skip live-ness probe of each plugin's github repo (offline mode).")
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument(
+        "marketplace_root",
+        nargs="?",
+        default=".",
+        type=Path,
+        help="Path to marketplace root (containing .claude-plugin/marketplace.json)",
+    )
+    p.add_argument("--check", action="store_true", help="Exit 1 if migrations would change the file. CI gate mode.")
+    p.add_argument(
+        "--no-probe", action="store_true", help="Skip live-ness probe of each plugin's github repo (offline mode)."
+    )
     args = p.parse_args()
     return migrate_marketplace(
         args.marketplace_root.resolve(),

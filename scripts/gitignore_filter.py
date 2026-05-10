@@ -171,12 +171,14 @@ class GitignoreFilter:
         # it matches the whole tail. Use ``fnmatch`` directly on the
         # basename for the common case so behaviour matches Path.rglob.
         if "/" in pattern or "\\" in pattern:
+
             def matches(p: Path) -> bool:
                 try:
                     return p.match(pattern)
                 except (ValueError, OSError):
                     return False
         else:
+
             def matches(p: Path) -> bool:
                 return fnmatch.fnmatch(p.name, pattern)
 

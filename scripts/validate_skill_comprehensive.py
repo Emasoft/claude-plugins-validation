@@ -748,8 +748,7 @@ def validate_description_field(
             # else: long but acceptable because of trigger phrases.
         else:
             report.minor(
-                f"Description is long ({len(desc)} chars), consider shortening to "
-                f"< {MAX_DESCRIPTION_WARN}",
+                f"Description is long ({len(desc)} chars), consider shortening to < {MAX_DESCRIPTION_WARN}",
                 "SKILL.md",
                 category="Description Quality",
             )
@@ -2164,14 +2163,10 @@ def validate_resource_references(skill_path: Path, body: str, report: Validation
 
             target_subpath = f"skills/{target_skill_name}" if target_skill_name else ""
             in_allow_list = any(
-                target_subpath == p.strip().rstrip("/")
-                or target_subpath.startswith(p.strip().rstrip("/") + "/")
+                target_subpath == p.strip().rstrip("/") or target_subpath.startswith(p.strip().rstrip("/") + "/")
                 for p in allow_list
             )
-            is_orchestrator_target = bool(
-                target_skill_name
-                and is_orchestrator_skill(target_skill_name, skills_root)
-            )
+            is_orchestrator_target = bool(target_skill_name and is_orchestrator_skill(target_skill_name, skills_root))
 
             if in_allow_list:
                 report.passed(
@@ -2831,6 +2826,7 @@ def print_json(report: ValidationReport) -> None:
 def main() -> int:
     """Main entry point."""
     from cpv_validation_common import launcher_epilog
+
     parser = argparse.ArgumentParser(
         description="Comprehensive skill validator with 190+ validation rules",
         formatter_class=argparse.RawDescriptionHelpFormatter,

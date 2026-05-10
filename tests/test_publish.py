@@ -598,6 +598,7 @@ class TestCpvStageChangelogUsesBumpUnreleased:
     def test_stage_changelog_source_references_bump_unreleased_tag(self):
         """The stage_changelog function body must contain --bump, --unreleased, and --tag."""
         import inspect
+
         src = inspect.getsource(publish.stage_changelog)
         assert '"--bump"' in src or "'--bump'" in src
         assert '"--unreleased"' in src or "'--unreleased'" in src
@@ -635,8 +636,7 @@ class TestCpvDetectBumpType:
         monkeypatch.setattr(publish.shutil, "which", lambda _name: "/usr/bin/git-cliff")
         (tmp_path / ".claude-plugin").mkdir()
         (tmp_path / ".claude-plugin" / "plugin.json").write_text('{"version": "1.0.0"}')
-        monkeypatch.setattr(publish.subprocess, "run",
-                            lambda *a, **k: self._fake_run(returncode=1))
+        monkeypatch.setattr(publish.subprocess, "run", lambda *a, **k: self._fake_run(returncode=1))
         assert publish.detect_bump_type(tmp_path) == "patch"
 
     def test_detects_minor_bump(self, monkeypatch, tmp_path):
@@ -644,8 +644,7 @@ class TestCpvDetectBumpType:
         monkeypatch.setattr(publish.shutil, "which", lambda _name: "/usr/bin/git-cliff")
         (tmp_path / ".claude-plugin").mkdir()
         (tmp_path / ".claude-plugin" / "plugin.json").write_text('{"version": "1.2.3"}')
-        monkeypatch.setattr(publish.subprocess, "run",
-                            lambda *a, **k: self._fake_run(stdout="v1.3.0\n"))
+        monkeypatch.setattr(publish.subprocess, "run", lambda *a, **k: self._fake_run(stdout="v1.3.0\n"))
         assert publish.detect_bump_type(tmp_path) == "minor"
 
     def test_detects_major_bump(self, monkeypatch, tmp_path):
@@ -653,8 +652,7 @@ class TestCpvDetectBumpType:
         monkeypatch.setattr(publish.shutil, "which", lambda _name: "/usr/bin/git-cliff")
         (tmp_path / ".claude-plugin").mkdir()
         (tmp_path / ".claude-plugin" / "plugin.json").write_text('{"version": "1.2.3"}')
-        monkeypatch.setattr(publish.subprocess, "run",
-                            lambda *a, **k: self._fake_run(stdout="2.0.0"))
+        monkeypatch.setattr(publish.subprocess, "run", lambda *a, **k: self._fake_run(stdout="2.0.0"))
         assert publish.detect_bump_type(tmp_path) == "major"
 
     def test_detects_patch_bump(self, monkeypatch, tmp_path):
@@ -662,8 +660,7 @@ class TestCpvDetectBumpType:
         monkeypatch.setattr(publish.shutil, "which", lambda _name: "/usr/bin/git-cliff")
         (tmp_path / ".claude-plugin").mkdir()
         (tmp_path / ".claude-plugin" / "plugin.json").write_text('{"version": "1.2.3"}')
-        monkeypatch.setattr(publish.subprocess, "run",
-                            lambda *a, **k: self._fake_run(stdout="v1.2.4"))
+        monkeypatch.setattr(publish.subprocess, "run", lambda *a, **k: self._fake_run(stdout="v1.2.4"))
         assert publish.detect_bump_type(tmp_path) == "patch"
 
     def test_strips_v_prefix_and_whitespace(self, monkeypatch, tmp_path):
@@ -671,8 +668,7 @@ class TestCpvDetectBumpType:
         monkeypatch.setattr(publish.shutil, "which", lambda _name: "/usr/bin/git-cliff")
         (tmp_path / ".claude-plugin").mkdir()
         (tmp_path / ".claude-plugin" / "plugin.json").write_text('{"version": "1.0.0"}')
-        monkeypatch.setattr(publish.subprocess, "run",
-                            lambda *a, **k: self._fake_run(stdout="  v1.1.0  \n\n"))
+        monkeypatch.setattr(publish.subprocess, "run", lambda *a, **k: self._fake_run(stdout="  v1.1.0  \n\n"))
         assert publish.detect_bump_type(tmp_path) == "minor"
 
     def test_falls_back_to_patch_on_malformed_version(self, monkeypatch, tmp_path):
@@ -680,8 +676,7 @@ class TestCpvDetectBumpType:
         monkeypatch.setattr(publish.shutil, "which", lambda _name: "/usr/bin/git-cliff")
         (tmp_path / ".claude-plugin").mkdir()
         (tmp_path / ".claude-plugin" / "plugin.json").write_text('{"version": "1.0.0"}')
-        monkeypatch.setattr(publish.subprocess, "run",
-                            lambda *a, **k: self._fake_run(stdout="not-a-version"))
+        monkeypatch.setattr(publish.subprocess, "run", lambda *a, **k: self._fake_run(stdout="not-a-version"))
         assert publish.detect_bump_type(tmp_path) == "patch"
 
     def test_equal_versions_returns_patch(self, monkeypatch, tmp_path):
@@ -689,8 +684,7 @@ class TestCpvDetectBumpType:
         monkeypatch.setattr(publish.shutil, "which", lambda _name: "/usr/bin/git-cliff")
         (tmp_path / ".claude-plugin").mkdir()
         (tmp_path / ".claude-plugin" / "plugin.json").write_text('{"version": "1.2.3"}')
-        monkeypatch.setattr(publish.subprocess, "run",
-                            lambda *a, **k: self._fake_run(stdout="v1.2.3"))
+        monkeypatch.setattr(publish.subprocess, "run", lambda *a, **k: self._fake_run(stdout="v1.2.3"))
         assert publish.detect_bump_type(tmp_path) == "patch"
 
 
@@ -811,9 +805,9 @@ class TestEnsureGhAuth:
     """gh-auth precheck — TRDD-bbff5bc5 §4.1."""
 
     @staticmethod
-    def _stub_subprocess(monkeypatch, status_rc=0, status_out="",
-                         status_err="", perm_rc=0, perm_out="true"):
+    def _stub_subprocess(monkeypatch, status_rc=0, status_out="", status_err="", perm_rc=0, perm_out="true"):
         """Replace subprocess.run inside publish module to feed gh outputs."""
+
         def fake_run(cmd, **kwargs):
             if not cmd:
                 return _completed(returncode=0)
@@ -823,12 +817,12 @@ class TestEnsureGhAuth:
             if "api" in cmd and "permissions.push" in " ".join(str(c) for c in cmd):
                 return _completed(returncode=perm_rc, stdout=perm_out)
             return _completed(returncode=0)
+
         monkeypatch.setattr(publish.subprocess, "run", fake_run)
 
     def test_happy_path(self, monkeypatch):
         """gh installed, authed, has push perm → silent return (no exit)."""
-        monkeypatch.setattr(publish.shutil, "which",
-                            lambda name: "/usr/bin/gh" if name == "gh" else None)
+        monkeypatch.setattr(publish.shutil, "which", lambda name: "/usr/bin/gh" if name == "gh" else None)
         self._stub_subprocess(monkeypatch, status_rc=0, perm_rc=0, perm_out="true")
         publish._ensure_gh_auth("Emasoft", "claude-plugins-validation")  # no exception
 
@@ -845,8 +839,7 @@ class TestEnsureGhAuth:
     def test_fails_when_unauthed(self, monkeypatch, capsys):
         """gh installed but `gh auth status` exits non-zero → exit 1 with
         `gh auth login` hint."""
-        monkeypatch.setattr(publish.shutil, "which",
-                            lambda name: "/usr/bin/gh" if name == "gh" else None)
+        monkeypatch.setattr(publish.shutil, "which", lambda name: "/usr/bin/gh" if name == "gh" else None)
         self._stub_subprocess(monkeypatch, status_rc=1)
         with pytest.raises(SystemExit) as exc:
             publish._ensure_gh_auth("Emasoft", "claude-plugins-validation")
@@ -858,8 +851,7 @@ class TestEnsureGhAuth:
     def test_fails_when_no_push_perm(self, monkeypatch, capsys):
         """gh authed but no push perm on owner/repo → exit 1 with switch
         hint."""
-        monkeypatch.setattr(publish.shutil, "which",
-                            lambda name: "/usr/bin/gh" if name == "gh" else None)
+        monkeypatch.setattr(publish.shutil, "which", lambda name: "/usr/bin/gh" if name == "gh" else None)
         self._stub_subprocess(
             monkeypatch,
             status_rc=0,
@@ -878,8 +870,7 @@ class TestEnsureGhAuth:
         """TRDD-bbff5bc5 §2.8 R6: precheck MUST NEVER invoke `gh auth token`
         (PAT non-leakage). Capture every subprocess invocation and assert
         none contain the token subcommand."""
-        monkeypatch.setattr(publish.shutil, "which",
-                            lambda name: "/usr/bin/gh" if name == "gh" else None)
+        monkeypatch.setattr(publish.shutil, "which", lambda name: "/usr/bin/gh" if name == "gh" else None)
         seen_cmds: list[list[str]] = []
 
         def fake_run(cmd, **kwargs):
@@ -895,20 +886,15 @@ class TestEnsureGhAuth:
         # Assert: NO `gh auth token` invocation anywhere.
         for c in seen_cmds:
             joined = " ".join(c)
-            assert "auth token" not in joined, (
-                f"PAT leakage risk: precheck invoked `gh auth token`: {joined}"
-            )
+            assert "auth token" not in joined, f"PAT leakage risk: precheck invoked `gh auth token`: {joined}"
 
     def test_parse_owner_repo_from_remote_handles_all_url_shapes(self):
         """Pin _parse_owner_repo_from_remote against every git URL shape
         we expect (TRDD-bbff5bc5 — owner/repo derived once at gate top)."""
         cases = {
-            "git@github.com:Emasoft/claude-plugins-validation.git":
-                ("Emasoft", "claude-plugins-validation"),
-            "https://github.com/Emasoft/claude-plugins-validation.git":
-                ("Emasoft", "claude-plugins-validation"),
-            "https://github.com/Emasoft/claude-plugins-validation":
-                ("Emasoft", "claude-plugins-validation"),
+            "git@github.com:Emasoft/claude-plugins-validation.git": ("Emasoft", "claude-plugins-validation"),
+            "https://github.com/Emasoft/claude-plugins-validation.git": ("Emasoft", "claude-plugins-validation"),
+            "https://github.com/Emasoft/claude-plugins-validation": ("Emasoft", "claude-plugins-validation"),
             "git@gitlab.com:org/repo.git": ("org", "repo"),
         }
         for url, expected in cases.items():
@@ -935,31 +921,39 @@ class TestOrphanReleaseCommitRecovery:
 
     def test_remote_tag_exists_helper_handles_present_tag(self, monkeypatch, tmp_path):
         """`_remote_tag_exists` returns True when ls-remote shows the tag."""
+
         def fake_run(cmd, **_):
             assert cmd[:3] == ["git", "ls-remote", "--tags"]
             return _completed(returncode=0, stdout="abcd1234\trefs/tags/v1.0.0\n")
+
         monkeypatch.setattr(publish.subprocess, "run", fake_run)
         assert publish._remote_tag_exists(tmp_path, "v1.0.0") is True
 
     def test_remote_tag_exists_helper_returns_false_for_missing_tag(self, monkeypatch, tmp_path):
         """`_remote_tag_exists` returns False when ls-remote returns empty."""
+
         def fake_run(cmd, **_):
             return _completed(returncode=0, stdout="")
+
         monkeypatch.setattr(publish.subprocess, "run", fake_run)
         assert publish._remote_tag_exists(tmp_path, "v9.9.9") is False
 
     def test_remote_tag_exists_returns_false_on_timeout(self, monkeypatch, tmp_path):
         """Conservative: timeout → False so the recovery branch is skipped
         when we can't confirm the tag is local-only."""
+
         def fake_run(cmd, **_):
             raise publish.subprocess.TimeoutExpired(cmd, timeout=30)
+
         monkeypatch.setattr(publish.subprocess, "run", fake_run)
         assert publish._remote_tag_exists(tmp_path, "v1.0.0") is False
 
     def test_remote_tag_exists_returns_false_on_nonzero_exit(self, monkeypatch, tmp_path):
         """Non-zero exit (not-a-git-repo, network error) → False conservatively."""
+
         def fake_run(cmd, **_):
             return _completed(returncode=128, stdout="", stderr="not a git repo")
+
         monkeypatch.setattr(publish.subprocess, "run", fake_run)
         assert publish._remote_tag_exists(tmp_path, "v1.0.0") is False
 
@@ -1024,7 +1018,9 @@ class TestOrphanReleaseCommitRecovery:
             return _completed(returncode=0)
 
         monkeypatch.setattr(publish, "run", fake_run)
-        monkeypatch.setattr(publish, "git_with_retry", lambda cmd, **_kw: commands.append(list(cmd)) or _completed(returncode=0))
+        monkeypatch.setattr(
+            publish, "git_with_retry", lambda cmd, **_kw: commands.append(list(cmd)) or _completed(returncode=0)
+        )
         monkeypatch.setattr(publish, "_head_commit_message", lambda _root: "feat: unrelated")
         monkeypatch.setattr(publish, "_git_porcelain_clean", lambda _root: False)
         monkeypatch.setattr(publish, "_local_tag_exists", lambda _root, _tag: False)
@@ -1071,9 +1067,7 @@ class TestSubmodulePushGate:
         existence check."""
         sub_root = plugin_root / sub_path
         sub_root.mkdir(parents=True, exist_ok=True)
-        (sub_root / ".git").write_text(
-            "gitdir: ../.git/modules/" + sub_path, encoding="utf-8"
-        )
+        (sub_root / ".git").write_text("gitdir: ../.git/modules/" + sub_path, encoding="utf-8")
         return sub_root
 
     @staticmethod
@@ -1089,6 +1083,7 @@ class TestSubmodulePushGate:
         Any other subprocess call returns rc=0 / empty so we don't have
         to enumerate every call site of subprocess.run inside publish.py.
         """
+
         def fake_run(cmd, **kwargs):
             cmd_list = list(cmd)
             if cmd_list[:2] == ["git", "submodule"] and "status" in cmd_list:
@@ -1117,6 +1112,7 @@ class TestSubmodulePushGate:
                 # Default: unreachable.
                 return _completed(returncode=0, stdout="")
             return _completed(returncode=0)
+
         monkeypatch.setattr(publish.subprocess, "run", fake_run)
 
     def test_no_gitmodules_noop(self, monkeypatch, tmp_path):
@@ -1132,9 +1128,7 @@ class TestSubmodulePushGate:
         monkeypatch.setattr(publish.subprocess, "run", fake_run)
         publish._ensure_submodules_pushed(tmp_path)  # no exception
         # Early return: subprocess.run must NOT have been invoked.
-        assert called == [], (
-            f"Expected zero subprocess calls when .gitmodules absent, got: {called}"
-        )
+        assert called == [], f"Expected zero subprocess calls when .gitmodules absent, got: {called}"
 
     def test_submodule_reachable_passes(self, monkeypatch, tmp_path):
         """One submodule, SHA reachable on origin → silent return."""
@@ -1147,8 +1141,7 @@ class TestSubmodulePushGate:
             monkeypatch,
             status_lines=[" abcdef1234567890abcdef1234567890abcdef12 tests (heads/main)"],
             branch_r_map={
-                ("tests", "abcdef1234567890abcdef1234567890abcdef12"):
-                    "  origin/main\n",
+                ("tests", "abcdef1234567890abcdef1234567890abcdef12"): "  origin/main\n",
             },
         )
         publish._ensure_submodules_pushed(tmp_path)  # no exception
@@ -1184,9 +1177,7 @@ class TestSubmodulePushGate:
         the error block (they're reachable)."""
         gm = []
         for sub in ("tests", "design", "git-hooks"):
-            gm.append(
-                f'[submodule "{sub}"]\n\tpath = {sub}\n\turl = https://github.com/x/{sub}.git\n'
-            )
+            gm.append(f'[submodule "{sub}"]\n\tpath = {sub}\n\turl = https://github.com/x/{sub}.git\n')
             self._make_submodule_workdir(tmp_path, sub)
         (tmp_path / ".gitmodules").write_text("".join(gm), encoding="utf-8")
 
@@ -1388,6 +1379,4 @@ class TestSubmodulePushGate:
         gh_idx = call_order.index("gh_auth")
         sub_idx = call_order.index("submodule_gate")
         first_push_idx = next(i for i, name in enumerate(call_order) if name.startswith("git_push:"))
-        assert gh_idx < sub_idx < first_push_idx, (
-            f"Expected gh_auth → submodule_gate → push, got: {call_order}"
-        )
+        assert gh_idx < sub_idx < first_push_idx, f"Expected gh_auth → submodule_gate → push, got: {call_order}"

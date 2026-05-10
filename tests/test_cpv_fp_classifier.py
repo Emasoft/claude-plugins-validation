@@ -86,6 +86,7 @@ class TestRegistry:
             return FindingVerdict.REAL
 
         with pytest.raises(ValueError, match="Duplicate classifier registration for RC-22"):
+
             @register_classifier("RC-22")
             def _second(ctx: Context) -> FindingVerdict:
                 return FindingVerdict.REAL
@@ -169,16 +170,22 @@ class TestFileRoleOf:
 
 class TestHasSinkNearby:
     def test_match(self) -> None:
-        assert has_sink_nearby(
-            ("subprocess.Popen(cmd)",),
-            ("subprocess.", "child_process."),
-        ) is True
+        assert (
+            has_sink_nearby(
+                ("subprocess.Popen(cmd)",),
+                ("subprocess.", "child_process."),
+            )
+            is True
+        )
 
     def test_no_match(self) -> None:
-        assert has_sink_nearby(
-            ("print('hello')",),
-            ("subprocess.", "child_process."),
-        ) is False
+        assert (
+            has_sink_nearby(
+                ("print('hello')",),
+                ("subprocess.", "child_process."),
+            )
+            is False
+        )
 
     def test_empty_lines(self) -> None:
         assert has_sink_nearby((), ("subprocess.",)) is False

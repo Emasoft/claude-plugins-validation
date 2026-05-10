@@ -282,8 +282,7 @@ def test_rglob_does_not_descend_into_gitignored_subtree_issue19(tmp_path: Path) 
     # Plugin says it has 0 .js files. rglob must agree.
     js_results = list(gi.rglob("*.js"))
     assert js_results == [], (
-        f"rglob('*.js') leaked gitignored content: "
-        f"{[str(p.relative_to(tmp_path)) for p in js_results]}"
+        f"rglob('*.js') leaked gitignored content: {[str(p.relative_to(tmp_path)) for p in js_results]}"
     )
 
     # Plugin's actual .py file is still found.
@@ -314,8 +313,7 @@ def test_rglob_does_not_walk_into_huge_gitignored_tree(tmp_path: Path) -> None:
     # rglob('*.py') should yield ONLY main.py — the vendor/pkg/f*.py files
     # are inside a gitignored directory and must never be enumerated.
     results = list(gi.rglob("*.py"))
-    assert {p.name for p in results} == {"main.py"}, \
-        f"rglob leaked vendor files: {sorted(p.name for p in results)}"
+    assert {p.name for p in results} == {"main.py"}, f"rglob leaked vendor files: {sorted(p.name for p in results)}"
 
 
 def test_iterdir_filters_gitignored(tmp_path: Path) -> None:

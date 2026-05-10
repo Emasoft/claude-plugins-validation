@@ -86,9 +86,7 @@ def test_lint_repo_uses_threadpool_executor():
     # Every linter dispatch should now go through executor.map / submit.
     # Check for the literal old-style direct dispatch loop body.
     serial_marker = "for lang in sorted(selected.keys()):\n        files = selected[lang]"
-    assert serial_marker not in src, (
-        "lint_repo still has the pre-Phase-B serial dispatch loop body"
-    )
+    assert serial_marker not in src, "lint_repo still has the pre-Phase-B serial dispatch loop body"
 
 
 # ---------------------------------------------------------------------------
@@ -163,8 +161,8 @@ def test_lint_repo_output_order_is_alphabetical(tmp_path: Path, capfd):
 
     # Reverse the natural finish order so completion order != sort order.
     fake_dispatch = {
-        "python": _make_sleeping_lint("python", 0.30),     # finishes last
-        "shell": _make_sleeping_lint("shell", 0.05),       # finishes first
+        "python": _make_sleeping_lint("python", 0.30),  # finishes last
+        "shell": _make_sleeping_lint("shell", 0.05),  # finishes first
         "markdown": _make_sleeping_lint("markdown", 0.15),  # finishes middle
     }
 

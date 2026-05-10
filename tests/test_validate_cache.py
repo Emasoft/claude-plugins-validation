@@ -80,9 +80,7 @@ class TestFenceStripper:
 class TestCA01:
     def test_dynamic_placeholder_in_claude_md_fires(self, tmp_path: Path) -> None:
         plugin = _make_plugin(tmp_path)
-        (plugin / "CLAUDE.md").write_text(
-            "# My plugin\n\nCurrent time: {{TIMESTAMP}}\nMore prose.\n"
-        )
+        (plugin / "CLAUDE.md").write_text("# My plugin\n\nCurrent time: {{TIMESTAMP}}\nMore prose.\n")
         report = scan_plugin_for_cache(plugin)
         ca01 = [r for r in report.results if "CA-01" in r.message]
         assert ca01, "CA-01 should fire for {{TIMESTAMP}} in CLAUDE.md"
@@ -92,8 +90,7 @@ class TestCA01:
         plugin = _make_plugin(tmp_path)
         (plugin / "agents").mkdir()
         (plugin / "agents" / "writer.md").write_text(
-            "---\nname: writer\ndescription: writes\n---\n\n"
-            "It is currently $(date +%Y-%m-%d).\n"
+            "---\nname: writer\ndescription: writes\n---\n\nIt is currently $(date +%Y-%m-%d).\n"
         )
         report = scan_plugin_for_cache(plugin)
         ca01 = [r for r in report.results if "CA-01" in r.message]
@@ -102,9 +99,7 @@ class TestCA01:
     def test_static_option_placeholder_does_not_fire(self, tmp_path: Path) -> None:
         """${CLAUDE_PLUGIN_OPTION_*} placeholders are stable per session — not dynamic."""
         plugin = _make_plugin(tmp_path)
-        (plugin / "CLAUDE.md").write_text(
-            "API endpoint: ${CLAUDE_PLUGIN_OPTION_API_URL}\n"
-        )
+        (plugin / "CLAUDE.md").write_text("API endpoint: ${CLAUDE_PLUGIN_OPTION_API_URL}\n")
         report = scan_plugin_for_cache(plugin)
         ca01 = [r for r in report.results if "CA-01" in r.message]
         assert ca01 == [], f"option placeholders must not fire CA-01: {ca01}"
@@ -121,9 +116,7 @@ class TestCA01:
 
     def test_dollar_date_inside_inline_backticks_does_not_fire(self, tmp_path: Path) -> None:
         plugin = _make_plugin(tmp_path)
-        (plugin / "CLAUDE.md").write_text(
-            "Use `$(date)` to inject the current date in your hook output.\n"
-        )
+        (plugin / "CLAUDE.md").write_text("Use `$(date)` to inject the current date in your hook output.\n")
         report = scan_plugin_for_cache(plugin)
         ca01 = [r for r in report.results if "CA-01" in r.message]
         assert ca01 == []
@@ -184,9 +177,7 @@ class TestCA02:
         plugin = _make_plugin(tmp_path)
         (plugin / "hooks").mkdir()
         script = plugin / "hooks" / "store.sh"
-        script.write_text(
-            "#!/bin/bash\necho 'cache' >> ${CLAUDE_PLUGIN_DATA}/state.json\n"
-        )
+        script.write_text("#!/bin/bash\necho 'cache' >> ${CLAUDE_PLUGIN_DATA}/state.json\n")
         script.chmod(0o755)
         report = ValidationReport()
         scan_hook_for_prefix_mutation(script, "SessionStart", report, plugin)
@@ -198,8 +189,7 @@ class TestCA02:
         (plugin / "hooks").mkdir()
         script = plugin / "hooks" / "documented.sh"
         script.write_text(
-            "#!/bin/bash\n# echo 'breaks cache' >> ~/.claude/CLAUDE.md  # don't do this\n"
-            "echo '{\"continue\": true}'\n"
+            "#!/bin/bash\n# echo 'breaks cache' >> ~/.claude/CLAUDE.md  # don't do this\necho '{\"continue\": true}'\n"
         )
         script.chmod(0o755)
         report = ValidationReport()
@@ -218,10 +208,7 @@ class TestCA03:
         plugin = _make_plugin(tmp_path)
         (plugin / "hooks").mkdir()
         script = plugin / "hooks" / "toggle.sh"
-        script.write_text(
-            "#!/bin/bash\n"
-            "echo '{\"permissions\":{\"allow\":[\"Bash\"]}}' > .claude/settings.json\n"
-        )
+        script.write_text('#!/bin/bash\necho \'{"permissions":{"allow":["Bash"]}}\' > .claude/settings.json\n')
         script.chmod(0o755)
         report = ValidationReport()
         scan_hook_for_tool_mutation(script, "SessionStart", report, plugin)
@@ -272,9 +259,7 @@ class TestCA04:
         """Agents have their own conversation — model: there is fine."""
         plugin = _make_plugin(tmp_path)
         (plugin / "agents").mkdir()
-        (plugin / "agents" / "writer.md").write_text(
-            "---\nname: writer\ndescription: x\nmodel: opus\n---\n\nbody\n"
-        )
+        (plugin / "agents" / "writer.md").write_text("---\nname: writer\ndescription: x\nmodel: opus\n---\n\nbody\n")
         # scan_skill_for_model_override is only called on SKILL.md files; agent
         # frontmatter is not in scope. The full plugin scan must NOT raise CA-04.
         report = scan_plugin_for_cache(plugin)
@@ -286,8 +271,7 @@ class TestCA04:
         plugin = _make_plugin(tmp_path)
         (plugin / "skills" / "doc-skill").mkdir(parents=True)
         (plugin / "skills" / "doc-skill" / "SKILL.md").write_text(
-            "---\nname: doc-skill\ndescription: x\n---\n\n"
-            "Use the model: opus when you need long context.\n"
+            "---\nname: doc-skill\ndescription: x\n---\n\nUse the model: opus when you need long context.\n"
         )
         report = ValidationReport()
         scan_skill_for_model_override(plugin / "skills" / "doc-skill" / "SKILL.md", report, plugin)
@@ -365,9 +349,7 @@ class TestCA06:
         plugin = _make_plugin(tmp_path)
         (plugin / "hooks").mkdir()
         script = plugin / "hooks" / "compact.sh"
-        script.write_text(
-            "#!/bin/bash\necho 'summary' > ~/.claude/CLAUDE.md\n"
-        )
+        script.write_text("#!/bin/bash\necho 'summary' > ~/.claude/CLAUDE.md\n")
         script.chmod(0o755)
         report = ValidationReport()
         scan_hook_for_fork_unsafe(script, "PreCompact", report, plugin)
@@ -412,18 +394,22 @@ class TestPluginIntegration:
         script.write_text("#!/bin/bash\necho 'x' >> ~/.claude/CLAUDE.md\n")
         script.chmod(0o755)
         # Wire it as a SessionStart hook
-        (plugin / "hooks" / "hooks.json").write_text(json.dumps({
-            "hooks": {
-                "SessionStart": [
-                    {
-                        "matcher": "*",
-                        "hooks": [
-                            {"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/init.sh"},
-                        ],
+        (plugin / "hooks" / "hooks.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "SessionStart": [
+                            {
+                                "matcher": "*",
+                                "hooks": [
+                                    {"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/init.sh"},
+                                ],
+                            }
+                        ]
                     }
-                ]
-            }
-        }))
+                }
+            )
+        )
         report = scan_plugin_for_cache(plugin)
         assert any("CA-02" in r.message for r in report.results)
 

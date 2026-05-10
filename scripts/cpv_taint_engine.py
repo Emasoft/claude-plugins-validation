@@ -31,55 +31,69 @@ from typing import Iterable
 
 # Each source is a tuple of name parts: ('os', 'environ', 'get') matches
 # os.environ.get(...) and os.environ['X']. Bare-call sources are length-1.
-TAINT_SOURCES: frozenset[tuple[str, ...]] = frozenset({
-    ("os", "environ", "get"),
-    ("os", "getenv"),
-    ("os", "environ"),  # subscript access
-    ("sys", "argv"),
-    ("sys", "stdin", "read"),
-    ("sys", "stdin", "readline"),
-    ("input",),
-    ("subprocess", "check_output"),
-    ("socket", "recv"),
-    ("requests", "get"),  # response.text/.json() are downstream
-})
+TAINT_SOURCES: frozenset[tuple[str, ...]] = frozenset(
+    {
+        ("os", "environ", "get"),
+        ("os", "getenv"),
+        ("os", "environ"),  # subscript access
+        ("sys", "argv"),
+        ("sys", "stdin", "read"),
+        ("sys", "stdin", "readline"),
+        ("input",),
+        ("subprocess", "check_output"),
+        ("socket", "recv"),
+        ("requests", "get"),  # response.text/.json() are downstream
+    }
+)
 
 # Sinks consume taint dangerously. Some are conditional (subprocess.run
 # is only a sink with shell=True — handled in _is_sink_call).
-TAINT_SINKS_DIRECT: frozenset[str] = frozenset({
-    "exec", "eval", "compile",
-})
+TAINT_SINKS_DIRECT: frozenset[str] = frozenset(
+    {
+        "exec",
+        "eval",
+        "compile",
+    }
+)
 
-TAINT_SINKS_QUALIFIED: frozenset[tuple[str, ...]] = frozenset({
-    ("os", "system"),
-    ("os", "popen"),
-    ("subprocess", "run"),       # only when shell=True
-    ("subprocess", "call"),      # only when shell=True
-    ("subprocess", "Popen"),     # only when shell=True
-    ("subprocess", "check_call"),  # only when shell=True
-    ("subprocess", "getoutput"),
-    ("subprocess", "getstatusoutput"),
-    ("pickle", "loads"),
-    ("yaml", "load"),  # yaml.safe_load is the sanitizer
-    ("marshal", "loads"),
-})
+TAINT_SINKS_QUALIFIED: frozenset[tuple[str, ...]] = frozenset(
+    {
+        ("os", "system"),
+        ("os", "popen"),
+        ("subprocess", "run"),  # only when shell=True
+        ("subprocess", "call"),  # only when shell=True
+        ("subprocess", "Popen"),  # only when shell=True
+        ("subprocess", "check_call"),  # only when shell=True
+        ("subprocess", "getoutput"),
+        ("subprocess", "getstatusoutput"),
+        ("pickle", "loads"),
+        ("yaml", "load"),  # yaml.safe_load is the sanitizer
+        ("marshal", "loads"),
+    }
+)
 
 # Sanitizers clear taint when the tainted value passes through them.
-SANITIZERS_QUALIFIED: frozenset[tuple[str, ...]] = frozenset({
-    ("shlex", "quote"),
-    ("shlex", "split"),
-    ("re", "escape"),
-    ("html", "escape"),
-    ("urllib", "parse", "quote"),
-    ("urllib", "parse", "quote_plus"),
-    ("json", "loads"),
-    ("yaml", "safe_load"),
-    ("ast", "literal_eval"),
-})
+SANITIZERS_QUALIFIED: frozenset[tuple[str, ...]] = frozenset(
+    {
+        ("shlex", "quote"),
+        ("shlex", "split"),
+        ("re", "escape"),
+        ("html", "escape"),
+        ("urllib", "parse", "quote"),
+        ("urllib", "parse", "quote_plus"),
+        ("json", "loads"),
+        ("yaml", "safe_load"),
+        ("ast", "literal_eval"),
+    }
+)
 
-SANITIZERS_BARE: frozenset[str] = frozenset({
-    "int", "float", "bool",
-})
+SANITIZERS_BARE: frozenset[str] = frozenset(
+    {
+        "int",
+        "float",
+        "bool",
+    }
+)
 
 
 # -----------------------------------------------------------------------------
@@ -90,12 +104,13 @@ SANITIZERS_BARE: frozenset[str] = frozenset({
 @dataclass(frozen=True, slots=True)
 class TaintFinding:
     """One source-to-sink path discovered in a single file."""
-    rule_id: str           # "RC-73" (1-hop) or "RC-74" (transitive)
-    source: str            # human description of the source
-    sink: str              # human description of the sink
-    var_name: str          # the variable carrying the taint at the sink
-    hop_count: int         # 1 for direct, 2+ for transitive
-    line: int              # line of the SINK
+
+    rule_id: str  # "RC-73" (1-hop) or "RC-74" (transitive)
+    source: str  # human description of the source
+    sink: str  # human description of the sink
+    var_name: str  # the variable carrying the taint at the sink
+    hop_count: int  # 1 for direct, 2+ for transitive
+    line: int  # line of the SINK
 
 
 # -----------------------------------------------------------------------------
@@ -147,12 +162,9 @@ def _is_sink_call(call: ast.Call) -> str | None:
         return None
     if chain in TAINT_SINKS_QUALIFIED:
         # subprocess.* is only a sink when shell=True
-        if chain[:1] == ("subprocess",) and chain[1:] in (
-            ("run",), ("call",), ("Popen",), ("check_call",)
-        ):
+        if chain[:1] == ("subprocess",) and chain[1:] in (("run",), ("call",), ("Popen",), ("check_call",)):
             for kw in call.keywords:
-                if kw.arg == "shell" and isinstance(kw.value, ast.Constant) \
-                        and kw.value.value is True:
+                if kw.arg == "shell" and isinstance(kw.value, ast.Constant) and kw.value.value is True:
                     return ".".join(chain) + "(..., shell=True)"
             return None
         return ".".join(chain) + "(...)"
@@ -176,6 +188,7 @@ def _is_sanitizer_call(call: ast.Call) -> bool:
 @dataclass
 class _TaintState:
     """Per-scope mapping of variable name → (source_desc, hop_count)."""
+
     tainted: dict[str, tuple[str, int]] = field(default_factory=dict)
 
     def mark(self, name: str, source: str, hops: int) -> None:
@@ -217,13 +230,8 @@ def analyze_module(tree: ast.Module) -> list[TaintFinding]:
                 if hasattr(stmt, branch_attr):
                     branch = getattr(stmt, branch_attr)
                     if isinstance(branch, list):
-                        nested = [
-                            n for n in branch
-                            if isinstance(n, ast.stmt)
-                        ]
-                        if nested and not isinstance(stmt, (ast.FunctionDef,
-                                                            ast.AsyncFunctionDef,
-                                                            ast.ClassDef)):
+                        nested = [n for n in branch if isinstance(n, ast.stmt)]
+                        if nested and not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                             analyze_block(nested, scope_state)
                         # Handlers contain ExceptHandler with their own body
                         if branch_attr == "handlers" and isinstance(branch, list):
@@ -341,14 +349,16 @@ def _check_sink_args(
             if taint:
                 src, hops = taint
                 rule = "RC-73" if hops == 1 else "RC-74"
-                findings.append(TaintFinding(
-                    rule_id=rule,
-                    source=src,
-                    sink=sink_desc,
-                    var_name=arg.id,
-                    hop_count=hops,
-                    line=call.lineno,
-                ))
+                findings.append(
+                    TaintFinding(
+                        rule_id=rule,
+                        source=src,
+                        sink=sink_desc,
+                        var_name=arg.id,
+                        hop_count=hops,
+                        line=call.lineno,
+                    )
+                )
 
 
 # -----------------------------------------------------------------------------
@@ -372,9 +382,18 @@ def analyze_file(file_path: Path) -> list[TaintFinding]:
 def iter_python_files(root: Path) -> Iterable[Path]:
     """Yield every .py file under root, skipping standard ignore dirs."""
     skip_dirs = {
-        "node_modules", ".venv", ".git", "dist", "build",
-        "__pycache__", ".tox", ".pytest_cache", ".mypy_cache", ".ruff_cache",
-        "vendor", "target",
+        "node_modules",
+        ".venv",
+        ".git",
+        "dist",
+        "build",
+        "__pycache__",
+        ".tox",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        "vendor",
+        "target",
     }
     for p in root.rglob("*.py"):
         parts = p.relative_to(root).parts

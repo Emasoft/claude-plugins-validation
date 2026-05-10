@@ -705,6 +705,7 @@ def main() -> int:
         - 3: Minor issues only
     """
     from cpv_validation_common import launcher_epilog
+
     parser = argparse.ArgumentParser(
         description="Compute quality score for Claude Code plugin",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -721,7 +722,8 @@ Rating scale (0-10 per category):
     5-6:  Fair - Significant improvements needed
     0-4:  Poor - Major revision required
 
-""" + launcher_epilog("scoring"),
+"""
+        + launcher_epilog("scoring"),
     )
 
     parser.add_argument(

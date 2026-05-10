@@ -36,9 +36,7 @@ def _make_plugin(tmp_path: Path, *, skills_field: object = None) -> Path:
     }
     if skills_field is not None:
         manifest["skills"] = skills_field
-    (root / ".claude-plugin" / "plugin.json").write_text(
-        json.dumps(manifest), encoding="utf-8"
-    )
+    (root / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
     return root
 
 
@@ -88,9 +86,7 @@ class TestValidateManifestSkillPaths:
         root = _make_plugin(tmp_path, skills_field=["skills/good/"])
         skill_dir = root / "skills" / "good"
         skill_dir.mkdir(parents=True)
-        (skill_dir / "SKILL.md").write_text(
-            "---\nname: good\ndescription: x\n---\n## Overview\n"
-        )
+        (skill_dir / "SKILL.md").write_text("---\nname: good\ndescription: x\n---\n## Overview\n")
         report = ValidationReport()
         result = validate_plugin.validate_manifest_skill_paths(root, report)
         assert result is True
@@ -102,9 +98,7 @@ class TestValidateManifestSkillPaths:
         root = _make_plugin(tmp_path, skills_field=["skills/good/SKILL.md"])
         skill_dir = root / "skills" / "good"
         skill_dir.mkdir(parents=True)
-        (skill_dir / "SKILL.md").write_text(
-            "---\nname: good\ndescription: x\n---\n## Overview\n"
-        )
+        (skill_dir / "SKILL.md").write_text("---\nname: good\ndescription: x\n---\n## Overview\n")
         report = ValidationReport()
         result = validate_plugin.validate_manifest_skill_paths(root, report)
         assert result is True
@@ -141,9 +135,7 @@ class TestValidateManifestSkillPaths:
         majors = [r for r in report.results if r.level == "MAJOR"]
         assert any("must be a string" in r.message for r in majors)
 
-    def test_validate_skills_skips_default_walk_when_manifest_lists_present(
-        self, tmp_path: Path
-    ) -> None:
+    def test_validate_skills_skips_default_walk_when_manifest_lists_present(self, tmp_path: Path) -> None:
         """When manifest declares `skills`, the default skills/ walk MUST
         be suppressed even if other skill folders exist on disk. Mirrors
         the CC v2.1.136+ loader: the manifest list is authoritative."""

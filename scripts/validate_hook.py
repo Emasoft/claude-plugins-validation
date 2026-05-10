@@ -1960,9 +1960,7 @@ _BASH_ONLY_RE = re.compile(
 # wrapped in an explicit `python3 -c "..."`, `bash -c "..."`, or
 # `wsl bash -c "..."` (in which case the user has owned the platform decision).
 _POSIX_ONLY_TOOLS = ("jq", "sed", "awk", "shellcheck")
-_POSIX_TOOL_RE = re.compile(
-    r"(?:^|[\s;&|])(" + "|".join(_POSIX_ONLY_TOOLS) + r")(?=\s|$)"
-)
+_POSIX_TOOL_RE = re.compile(r"(?:^|[\s;&|])(" + "|".join(_POSIX_ONLY_TOOLS) + r")(?=\s|$)")
 _SHELL_WRAPPER_RE = re.compile(r"(?:python3?|node|bash|sh|wsl)\s+-c\b")
 
 

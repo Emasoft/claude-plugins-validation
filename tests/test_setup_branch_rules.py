@@ -22,6 +22,7 @@ setup_branch_rules = importlib.import_module("scripts.setup_branch_rules")
 
 # ── parse_repo_slug ─────────────────────────────────────────────────
 
+
 class TestParseRepoSlug:
     """Verifies the OWNER/REPO slug parser."""
 
@@ -46,6 +47,7 @@ class TestParseRepoSlug:
 
 
 # ── BypassActor dataclass ─────────────────────────────────────────
+
 
 class TestBypassActor:
     """Verifies the BypassActor dataclass serialization."""
@@ -75,6 +77,7 @@ class TestBypassActor:
 
 
 # ── build_default_bypass_actors ─────────────────────────────────────
+
 
 class TestBuildDefaultBypassActors:
     """Verifies default bypass_actors seed for new rulesets."""
@@ -106,6 +109,7 @@ class TestBuildDefaultBypassActors:
 
 
 # ── merge_bypass_actors ─────────────────────────────────────────────
+
 
 class TestMergeBypassActors:
     """Verifies preservation + deduplication behavior for bypass_actor merge."""
@@ -161,6 +165,7 @@ class TestMergeBypassActors:
 
 # ── build_ruleset ───────────────────────────────────────────────────
 
+
 class TestBuildRuleset:
     """Verifies the ruleset payload shape for GitHub Rulesets API."""
 
@@ -202,20 +207,14 @@ class TestBuildRuleset:
         """Each provided check context appears in required_status_checks."""
         contexts = ["Lint", "Validate", "Test"]
         ruleset = setup_branch_rules.build_ruleset(contexts, [])
-        status_rule = next(
-            r for r in ruleset["rules"] if r["type"] == "required_status_checks"
-        )
-        ruleset_contexts = [
-            c["context"] for c in status_rule["parameters"]["required_status_checks"]
-        ]
+        status_rule = next(r for r in ruleset["rules"] if r["type"] == "required_status_checks")
+        ruleset_contexts = [c["context"] for c in status_rule["parameters"]["required_status_checks"]]
         assert ruleset_contexts == contexts
 
     def test_strict_policy_disabled_for_automerge(self):
         """strict_required_status_checks_policy is false so auto-merge works without rebase loops."""
         ruleset = setup_branch_rules.build_ruleset([], [])
-        status_rule = next(
-            r for r in ruleset["rules"] if r["type"] == "required_status_checks"
-        )
+        status_rule = next(r for r in ruleset["rules"] if r["type"] == "required_status_checks")
         assert status_rule["parameters"]["strict_required_status_checks_policy"] is False
 
     def test_bypass_actors_are_serialized(self):
@@ -224,9 +223,7 @@ class TestBuildRuleset:
             setup_branch_rules.BypassActor(29110, "Integration", "always"),
         ]
         ruleset = setup_branch_rules.build_ruleset([], actors)
-        assert ruleset["bypass_actors"] == [
-            {"actor_id": 29110, "actor_type": "Integration", "bypass_mode": "always"}
-        ]
+        assert ruleset["bypass_actors"] == [{"actor_id": 29110, "actor_type": "Integration", "bypass_mode": "always"}]
 
     def test_enforcement_active(self):
         """Ruleset is created in 'active' enforcement mode (not 'evaluate')."""
@@ -235,6 +232,7 @@ class TestBuildRuleset:
 
 
 # ── CLI integration ────────────────────────────────────────────────
+
 
 class TestRepoTypeDetection:
     """Verifies plugin/marketplace auto-detection and default-selection logic."""
@@ -307,19 +305,16 @@ class TestCli:
 
     def test_dry_run_flag_parsed(self):
         """--dry-run flag is recognized and sets args.dry_run True."""
-        with mock.patch.object(
-            sys, "argv", ["setup_branch_rules.py", "Emasoft/test", "--dry-run"]
-        ):
+        with mock.patch.object(sys, "argv", ["setup_branch_rules.py", "Emasoft/test", "--dry-run"]):
             args = setup_branch_rules.parse_args()
         assert args.dry_run is True
 
     def test_add_bypass_app_id_accepts_multiple(self):
         """--add-bypass-app-id can be passed multiple times."""
         with mock.patch.object(
-            sys, "argv",
-            ["setup_branch_rules.py", "Emasoft/test",
-             "--add-bypass-app-id", "15368",
-             "--add-bypass-app-id", "29110"],
+            sys,
+            "argv",
+            ["setup_branch_rules.py", "Emasoft/test", "--add-bypass-app-id", "15368", "--add-bypass-app-id", "29110"],
         ):
             args = setup_branch_rules.parse_args()
         assert args.add_bypass_app_id == [15368, 29110]
@@ -327,18 +322,15 @@ class TestCli:
     def test_check_context_repeatable(self):
         """--check-context can be passed multiple times to override defaults."""
         with mock.patch.object(
-            sys, "argv",
-            ["setup_branch_rules.py", "Emasoft/test",
-             "--check-context", "X / A",
-             "--check-context", "X / B"],
+            sys,
+            "argv",
+            ["setup_branch_rules.py", "Emasoft/test", "--check-context", "X / A", "--check-context", "X / B"],
         ):
             args = setup_branch_rules.parse_args()
         assert args.check_context == ["X / A", "X / B"]
 
     def test_reset_bypass_flag(self):
         """--reset-bypass flag sets args.reset_bypass True."""
-        with mock.patch.object(
-            sys, "argv", ["setup_branch_rules.py", "Emasoft/test", "--reset-bypass"]
-        ):
+        with mock.patch.object(sys, "argv", ["setup_branch_rules.py", "Emasoft/test", "--reset-bypass"]):
             args = setup_branch_rules.parse_args()
         assert args.reset_bypass is True

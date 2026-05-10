@@ -13,7 +13,7 @@
 ## 1. User's request (verbatim)
 
 > are the commands using sonnet or haiku to display the menus? and only call the agent (with opus) when it is necessary to do the menu choice?
-
+>
 > - launching scripts (validate, security scan, etc) will only require haiku..
 > - basic commands that do not require analysis but only retrieving info, sonnett is enough..
 > - diagnosis or analysis of problems, planning upgrades/migrations, reading reports or applying fixes: opus is necessary

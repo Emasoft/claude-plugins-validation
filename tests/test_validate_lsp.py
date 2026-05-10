@@ -809,13 +809,8 @@ class TestLspCrossSourceDuplicateServerNames:
             lsp_json={"go": {"command": "gopls", "extensionToLanguage": {".go": "go"}}},
         )
         report = validate_plugin_lsp(tmp_path)
-        dup_majors = [
-            r for r in report.results
-            if r.level == "MAJOR" and "declared in" in r.message
-        ]
-        assert dup_majors == [], (
-            f"Expected no cross-source duplicate MAJORs, got: {[m.message for m in dup_majors]}"
-        )
+        dup_majors = [r for r in report.results if r.level == "MAJOR" and "declared in" in r.message]
+        assert dup_majors == [], f"Expected no cross-source duplicate MAJORs, got: {[m.message for m in dup_majors]}"
 
     def test_only_inline_no_duplicate(self, tmp_path):
         """Single source (inline plugin.json lspServers only) — no duplicate MAJOR."""
@@ -827,13 +822,8 @@ class TestLspCrossSourceDuplicateServerNames:
             },
         )
         report = validate_plugin_lsp(tmp_path)
-        dup_majors = [
-            r for r in report.results
-            if r.level == "MAJOR" and "declared in" in r.message
-        ]
-        assert dup_majors == [], (
-            f"Expected no cross-source duplicate MAJORs, got: {[m.message for m in dup_majors]}"
-        )
+        dup_majors = [r for r in report.results if r.level == "MAJOR" and "declared in" in r.message]
+        assert dup_majors == [], f"Expected no cross-source duplicate MAJORs, got: {[m.message for m in dup_majors]}"
 
     def test_distinct_names_in_two_sources_no_duplicate(self, tmp_path):
         """Two sources with disjoint server names — no MAJOR (sources can coexist)."""
@@ -846,13 +836,8 @@ class TestLspCrossSourceDuplicateServerNames:
             },
         )
         report = validate_plugin_lsp(tmp_path)
-        dup_majors = [
-            r for r in report.results
-            if r.level == "MAJOR" and "declared in" in r.message
-        ]
-        assert dup_majors == [], (
-            f"Two sources with distinct names is allowed; got: {[m.message for m in dup_majors]}"
-        )
+        dup_majors = [r for r in report.results if r.level == "MAJOR" and "declared in" in r.message]
+        assert dup_majors == [], f"Two sources with distinct names is allowed; got: {[m.message for m in dup_majors]}"
 
     def test_same_name_in_lsp_json_and_inline_emits_major(self, tmp_path):
         """Same server name in .lsp.json AND inline plugin.json:lspServers → MAJOR."""
@@ -861,17 +846,17 @@ class TestLspCrossSourceDuplicateServerNames:
             lsp_json={"shared-lsp": {"command": "echo", "args": ["lsp-json"], "extensionToLanguage": {".x": "x"}}},
             plugin_manifest={
                 "name": "p",
-                "lspServers": {"shared-lsp": {"command": "echo", "args": ["inline"], "extensionToLanguage": {".x": "x"}}},
+                "lspServers": {
+                    "shared-lsp": {"command": "echo", "args": ["inline"], "extensionToLanguage": {".x": "x"}}
+                },
             },
         )
         report = validate_plugin_lsp(tmp_path)
         dup_majors = [
-            r for r in report.results
-            if r.level == "MAJOR" and "shared-lsp" in r.message and "declared in" in r.message
+            r for r in report.results if r.level == "MAJOR" and "shared-lsp" in r.message and "declared in" in r.message
         ]
         assert len(dup_majors) == 1, (
-            f"Expected exactly 1 cross-source duplicate MAJOR for 'shared-lsp', "
-            f"got: {[m.message for m in dup_majors]}"
+            f"Expected exactly 1 cross-source duplicate MAJOR for 'shared-lsp', got: {[m.message for m in dup_majors]}"
         )
         msg = dup_majors[0].message
         assert ".lsp.json" in msg and "plugin.json:lspServers" in msg, (
@@ -889,9 +874,9 @@ class TestLspCrossSourceDuplicateServerNames:
         Added 2026-04-19 to ensure parity between MCP and LSP defensive nudges.
         """
         # Create the .lsp.json at root with a real server
-        (tmp_path / ".lsp.json").write_text(json.dumps({
-            "go-lsp": {"command": "gopls", "extensionToLanguage": {".go": "go"}}
-        }))
+        (tmp_path / ".lsp.json").write_text(
+            json.dumps({"go-lsp": {"command": "gopls", "extensionToLanguage": {".go": "go"}}})
+        )
         # plugin.json with lspServers pointing at the same default file (redundant)
         self._make_plugin(
             tmp_path,
@@ -899,44 +884,36 @@ class TestLspCrossSourceDuplicateServerNames:
         )
         report = validate_plugin_lsp(tmp_path)
         nudges = [
-            r for r in report.results
+            r
+            for r in report.results
             if r.level == "MINOR" and ".lsp.json" in r.message and "auto-discover" in r.message
         ]
         assert len(nudges) == 1, (
-            f"Expected exactly 1 MINOR nudge for redundant lspServers→.lsp.json, got: "
-            f"{[m.message for m in nudges]}"
+            f"Expected exactly 1 MINOR nudge for redundant lspServers→.lsp.json, got: {[m.message for m in nudges]}"
         )
         # And the cross-source duplicate detection should ALSO fire for every server
         # in .lsp.json (which gets loaded twice — once by auto-discovery, once by
         # the override), as it does for the MCP equivalent.
         dup_majors = [
-            r for r in report.results
-            if r.level == "MAJOR" and "go-lsp" in r.message and "declared in" in r.message
+            r for r in report.results if r.level == "MAJOR" and "go-lsp" in r.message and "declared in" in r.message
         ]
         assert len(dup_majors) == 1, (
-            f"Expected MAJOR for go-lsp duplicated when override = default file, got: "
-            f"{[m.message for m in dup_majors]}"
+            f"Expected MAJOR for go-lsp duplicated when override = default file, got: {[m.message for m in dup_majors]}"
         )
 
     def test_lspservers_pointing_at_non_default_no_minor(self, tmp_path):
         """lspServers: './extras/lsp.json' (legitimate non-default path) → no MINOR nudge."""
         (tmp_path / "extras").mkdir()
-        (tmp_path / "extras" / "lsp.json").write_text(json.dumps({
-            "go-lsp": {"command": "gopls", "extensionToLanguage": {".go": "go"}}
-        }))
+        (tmp_path / "extras" / "lsp.json").write_text(
+            json.dumps({"go-lsp": {"command": "gopls", "extensionToLanguage": {".go": "go"}}})
+        )
         self._make_plugin(
             tmp_path,
             plugin_manifest={"name": "p", "lspServers": "./extras/lsp.json"},
         )
         report = validate_plugin_lsp(tmp_path)
-        nudges = [
-            r for r in report.results
-            if r.level == "MINOR" and "auto-discover" in r.message
-        ]
-        assert nudges == [], (
-            f"Non-default path should not trigger redundancy MINOR, got: "
-            f"{[m.message for m in nudges]}"
-        )
+        nudges = [r for r in report.results if r.level == "MINOR" and "auto-discover" in r.message]
+        assert nudges == [], f"Non-default path should not trigger redundancy MINOR, got: {[m.message for m in nudges]}"
 
     def test_multiple_duplicates_emit_separate_majors(self, tmp_path):
         """Each duplicated name across sources gets its own MAJOR."""
@@ -957,11 +934,10 @@ class TestLspCrossSourceDuplicateServerNames:
             },
         )
         report = validate_plugin_lsp(tmp_path)
-        dup_majors = [
-            r for r in report.results
-            if r.level == "MAJOR" and "declared in" in r.message
-        ]
-        names_in_dup_majors = {n for n in ("alpha", "beta", "gamma", "delta") if any(n in m.message for m in dup_majors)}
+        dup_majors = [r for r in report.results if r.level == "MAJOR" and "declared in" in r.message]
+        names_in_dup_majors = {
+            n for n in ("alpha", "beta", "gamma", "delta") if any(n in m.message for m in dup_majors)
+        }
         assert names_in_dup_majors == {"alpha", "beta"}, (
             f"Expected MAJORs only for 'alpha' and 'beta' (duplicated names), got: {names_in_dup_majors}"
         )

@@ -5,6 +5,7 @@ the run_with_retry loop (success-on-first, success-on-Nth, terminal failure,
 permanent-no-retry), and gh_with_retry / git_with_retry environment +
 config injection.
 """
+
 from __future__ import annotations
 
 import socket
@@ -24,46 +25,52 @@ import cpv_network_resilience as cnr  # noqa: E402
 # ── is_transient_subprocess_error ────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("stderr", [
-    "fatal: unable to access 'https://github.com/...': Could not resolve host: github.com",
-    "fatal: unable to access 'https://github.com/...': Failed to connect to github.com port 443",
-    "Connection timed out after 60 seconds",
-    "Connection reset by peer",
-    "RPC failed; HTTP 500 curl 22",
-    "RPC failed; HTTP 502 curl 22",
-    "early EOF: unexpected end of stream",
-    "fatal: the remote end hung up unexpectedly",
-    "Service Unavailable",
-    "HTTP 503: Service Unavailable",
-    "Bad Gateway",
-    "Gateway Timeout",
-    "Rate limit exceeded",
-    "Too Many Requests",
-    "the operation timed out",
-    "gnutls_handshake() failed: A TLS packet with unexpected length was received.",
-    # Go net package errors — gh CLI is Go-built. Real cases observed when
-    # gh API hits flaky transit:
-    'Get "https://api.github.com/repos/Emasoft/foo/contents/.github/workflows/ci.yml": dial tcp 140.82.121.6:443: i/o timeout',
-    'read tcp 192.168.1.5:55432->140.82.121.6:443: i/o timeout',
-    'Get "https://api.github.com/...": context deadline exceeded',
-    'lookup api.github.com: no such host',
-])
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "fatal: unable to access 'https://github.com/...': Could not resolve host: github.com",
+        "fatal: unable to access 'https://github.com/...': Failed to connect to github.com port 443",
+        "Connection timed out after 60 seconds",
+        "Connection reset by peer",
+        "RPC failed; HTTP 500 curl 22",
+        "RPC failed; HTTP 502 curl 22",
+        "early EOF: unexpected end of stream",
+        "fatal: the remote end hung up unexpectedly",
+        "Service Unavailable",
+        "HTTP 503: Service Unavailable",
+        "Bad Gateway",
+        "Gateway Timeout",
+        "Rate limit exceeded",
+        "Too Many Requests",
+        "the operation timed out",
+        "gnutls_handshake() failed: A TLS packet with unexpected length was received.",
+        # Go net package errors — gh CLI is Go-built. Real cases observed when
+        # gh API hits flaky transit:
+        'Get "https://api.github.com/repos/Emasoft/foo/contents/.github/workflows/ci.yml": dial tcp 140.82.121.6:443: i/o timeout',
+        "read tcp 192.168.1.5:55432->140.82.121.6:443: i/o timeout",
+        'Get "https://api.github.com/...": context deadline exceeded',
+        "lookup api.github.com: no such host",
+    ],
+)
 def test_transient_subprocess_signatures(stderr: str):
     assert cnr.is_transient_subprocess_error(stderr, returncode=1) is True
 
 
-@pytest.mark.parametrize("stderr", [
-    "! [rejected] main -> main (non-fast-forward)",
-    "Permission denied (publickey)",
-    "HTTP 404: Not Found",
-    "HTTP 422: Validation Failed",
-    "Authentication failed for 'https://github.com/...'",
-    "401 Unauthorized",
-    "403 Forbidden",
-    "404 Not Found",
-    "name already exists on this account",
-    "refusing to overwrite",
-])
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "! [rejected] main -> main (non-fast-forward)",
+        "Permission denied (publickey)",
+        "HTTP 404: Not Found",
+        "HTTP 422: Validation Failed",
+        "Authentication failed for 'https://github.com/...'",
+        "401 Unauthorized",
+        "403 Forbidden",
+        "404 Not Found",
+        "name already exists on this account",
+        "refusing to overwrite",
+    ],
+)
 def test_permanent_subprocess_signatures(stderr: str):
     assert cnr.is_transient_subprocess_error(stderr, returncode=1) is False
 
@@ -111,7 +118,11 @@ def test_transient_http_remote_disconnected():
 def test_transient_http_5xx_codes():
     for code in (500, 502, 503, 504):
         exc = urllib.error.HTTPError(
-            url="x", code=code, msg="x", hdrs=None, fp=None,  # type: ignore[arg-type]
+            url="x",
+            code=code,
+            msg="x",
+            hdrs=None,
+            fp=None,  # type: ignore[arg-type]
         )
         assert cnr.is_transient_http_error(exc) is True, f"code {code} should be transient"
 
@@ -119,7 +130,11 @@ def test_transient_http_5xx_codes():
 def test_transient_http_408_429():
     for code in (408, 429):
         exc = urllib.error.HTTPError(
-            url="x", code=code, msg="x", hdrs=None, fp=None,  # type: ignore[arg-type]
+            url="x",
+            code=code,
+            msg="x",
+            hdrs=None,
+            fp=None,  # type: ignore[arg-type]
         )
         assert cnr.is_transient_http_error(exc) is True
 
@@ -127,7 +142,11 @@ def test_transient_http_408_429():
 def test_permanent_http_4xx_codes():
     for code in (400, 401, 403, 404, 422):
         exc = urllib.error.HTTPError(
-            url="x", code=code, msg="x", hdrs=None, fp=None,  # type: ignore[arg-type]
+            url="x",
+            code=code,
+            msg="x",
+            hdrs=None,
+            fp=None,  # type: ignore[arg-type]
         )
         assert cnr.is_transient_http_error(exc) is False, f"code {code} should be permanent"
 
@@ -152,7 +171,10 @@ def test_none_not_transient():
 def test_run_with_retry_success_on_first_attempt(tmp_path):
     """Successful command exits cleanly; no retries used."""
     result = cnr.run_with_retry(
-        ["true"], cwd=tmp_path, max_attempts=3, backoff=0.0,
+        ["true"],
+        cwd=tmp_path,
+        max_attempts=3,
+        backoff=0.0,
     )
     assert result.returncode == 0
 
@@ -169,7 +191,10 @@ def test_run_with_retry_permanent_failure_no_retry(tmp_path, capsys):
 
     with pytest.raises(subprocess.CalledProcessError):
         cnr.run_with_retry(
-            ["false"], cwd=tmp_path, max_attempts=10, backoff=0.0,
+            ["false"],
+            cwd=tmp_path,
+            max_attempts=10,
+            backoff=0.0,
             transient_check=fake_check,
         )
     # transient_check is called once; no retries.
@@ -191,20 +216,22 @@ def test_run_with_retry_transient_then_success(tmp_path):
         "#!/bin/bash\n"
         f'STATE="{state}"\n'
         'COUNT=$(cat "$STATE" 2>/dev/null || echo 0)\n'
-        'COUNT=$((COUNT + 1))\n'
+        "COUNT=$((COUNT + 1))\n"
         'echo "$COUNT" > "$STATE"\n'
         'if [ "$COUNT" -lt 3 ]; then\n'
         '  echo "Service Unavailable" >&2\n'
-        '  exit 1\n'
-        'fi\n'
+        "  exit 1\n"
+        "fi\n"
         'echo "ok"\n',
         encoding="utf-8",
     )
     helper.chmod(0o755)
 
     result = cnr.run_with_retry(
-        [str(helper)], cwd=tmp_path,
-        max_attempts=5, backoff=0.0,
+        [str(helper)],
+        cwd=tmp_path,
+        max_attempts=5,
+        backoff=0.0,
         transient_check=flaky_check,
     )
     assert result.returncode == 0
@@ -222,8 +249,10 @@ def test_run_with_retry_exhausts_attempts(tmp_path):
     helper.chmod(0o755)
     with pytest.raises(subprocess.CalledProcessError) as exc_info:
         cnr.run_with_retry(
-            [str(helper)], cwd=tmp_path,
-            max_attempts=3, backoff=0.0,
+            [str(helper)],
+            cwd=tmp_path,
+            max_attempts=3,
+            backoff=0.0,
         )
     assert exc_info.value.returncode == 1
 
@@ -237,8 +266,11 @@ def test_run_with_retry_check_false_returns_result(tmp_path):
     )
     helper.chmod(0o755)
     result = cnr.run_with_retry(
-        [str(helper)], cwd=tmp_path,
-        max_attempts=2, backoff=0.0, check=False,
+        [str(helper)],
+        cwd=tmp_path,
+        max_attempts=2,
+        backoff=0.0,
+        check=False,
     )
     assert result.returncode == 7
 
@@ -258,8 +290,11 @@ def test_run_with_retry_on_retry_callback(tmp_path):
 
     with pytest.raises(subprocess.CalledProcessError):
         cnr.run_with_retry(
-            [str(helper)], cwd=tmp_path,
-            max_attempts=4, backoff=0.0, check=True,
+            [str(helper)],
+            cwd=tmp_path,
+            max_attempts=4,
+            backoff=0.0,
+            check=True,
             on_retry=callback,
         )
     # 4 attempts total → callback fires after attempts 1, 2, 3 (not 4 — that's terminal)
@@ -293,7 +328,8 @@ def test_gh_with_retry_preserves_existing_http_timeout(tmp_path, monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     cnr.gh_with_retry(
-        ["gh", "auth", "status"], max_attempts=1,
+        ["gh", "auth", "status"],
+        max_attempts=1,
         env={"GH_HTTP_TIMEOUT": "999"},
     )
     assert captured_env.get("GH_HTTP_TIMEOUT") == "999"
