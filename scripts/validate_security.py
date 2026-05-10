@@ -71,6 +71,7 @@ from cpv_validation_common import (
     USER_PATH_PATTERNS,
     ValidationReport,
     build_fence_state,
+    detect_multilayer_encoded_payload,
     disposition,
     effective_severity,
     find_obfuscated_exec,
@@ -7779,6 +7780,24 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
         for line_no, msg in find_obfuscated_exec(content, proximity_lines=3):
             level = effective_severity("critical", rel_path)
             getattr(report, level)(f"RC-70: {msg}", rel_path, line_no)
+            issues += 1
+
+        # RC-68 — Multi-layer encoding decoder (TRDD-0f1f7889 gap-fill).
+        # Runs at WARNING per TRDD §7 and only fires when the recursively-
+        # decoded payload reveals an exec/eval/shell sink. The check is
+        # complementary to RC-70 (proximity-to-exec): RC-70 finds a single
+        # decoder near a sink; RC-68 finds a sink HIDDEN INSIDE the literal
+        # itself after recursive decoding. Both can co-fire on the same line.
+        for line_no, layers, sink_match in detect_multilayer_encoded_payload(content):
+            if cpv_self_scan_skip_line(rel_path, content_lines, line_no):
+                continue
+            level = effective_severity("warning", rel_path)
+            getattr(report, level)(
+                f"RC-68: multi-layer encoded payload at line {line_no}: "
+                f"sink revealed at decode-depth {layers} ({sink_match!r})",
+                rel_path,
+                line_no,
+            )
             issues += 1
     return issues
 
