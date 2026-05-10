@@ -3,7 +3,44 @@
 **TRDD ID:** `e3e74f69-e41c-4b0f-841c-69f066614b6f`
 **Filename:** `design/tasks/TRDD-e3e74f69-e41c-4b0f-841c-69f066614b6f-validate-telemetry.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
-**Status:** Not started
+**Status:** Done (v2.80.0 — TRDD-e3e74f69 wiring complete)
+
+## Completion notes (2026-05-10)
+
+The standalone validator `scripts/validate_telemetry.py` and the regression
+suite `tests/test_validate_telemetry.py` (27 base tests) had already shipped
+in earlier work. This TRDD closes the wiring gap so the validator is
+discoverable from every documented surface:
+
+- **CLI entry point**: `scripts/cli.py:validate_telemetry()` added.
+- **Console script**: `pyproject.toml` declares `cpv-validate-telemetry =
+  "scripts.cli:validate_telemetry"` — usable via `uvx --from
+  git+https://github.com/Emasoft/claude-plugins-validation
+  cpv-validate-telemetry <path>`.
+- **Slash command**: `commands/cpv-validate-telemetry.md` (direct-script
+  pattern, no `agent:` field). Documents TEL-01..TEL-06 rules,
+  `--settings`/`--managed`/`--verbose`/`--report` options, the canonical
+  `remote_validation.py telemetry` invocation, and exit codes.
+- **Umbrella runner**: `scripts/validate_plugin.py:validate_telemetry()`
+  added (delegates to `scan_plugin_for_telemetry`, merges non-PASSED
+  results), called from the main `validate()` flow right after
+  `validate_mcp` so every plugin scanned by the umbrella now gets the OTEL
+  audit for free.
+- **Aliases**: `remote_validation.py` already had `telemetry` and
+  `validate_telemetry` aliases (no edit needed).
+
+Wiring tests added to `tests/test_validate_telemetry.py`:
+`TestCliEntryPoint`, `TestSlashCommand`, `TestUmbrellaIntegration` (6 new
+tests, all passing). `tests/test_consolidation_v211.py` updated to expect
+38 commands (was 37) and to list `cpv-validate-telemetry` under
+`DIRECT_SCRIPT_COMMANDS`.
+
+**Note on local-scope/project-scope wiring:** the TRDD Wire-points section
+also asks for env-block invocation from `validate_local_scope.py` and
+`validate_project_scope.py`. These two files are owned by other concurrent
+agents (per worktree task constraints) and were intentionally NOT touched
+in this commit. A follow-up TRDD should pick up that step once the
+project-scope/local-scope owner has settled their changes.
 **Deferred from:** TRDD-479cde0c §v2.22.1 "NEXT-RELEASE"
 **Parent audit report:** `docs_dev/spec-audit-5-new-features-20260417-163011.md` §V2
 
