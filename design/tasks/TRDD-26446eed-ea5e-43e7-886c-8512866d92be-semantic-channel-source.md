@@ -3,7 +3,7 @@
 **TRDD ID:** `26446eed-ea5e-43e7-886c-8512866d92be`
 **Filename:** `design/tasks/TRDD-26446eed-ea5e-43e7-886c-8512866d92be-semantic-channel-source.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
-**Status:** Not started
+**Status:** Done 2026-05-10 — deterministic prefilter helper (`scripts/cpv_channel_source_predicate.py`) implemented with 29 fixture-based tests (`tests/test_channel_source_predicate.py`). Reference doc, SKILL.md, agent.md, README.md, and plugin-error-index.md cross-references in place. Reference file `channel-source-security.md` was already authored in v2.22.3; this TRDD added the prefilter helper, the wiring, the fixture corpus (7 plugin scaffolds covering ungated TS, gated TS, chat-id-only TS, permission-capability TS, no-channels, gated PY, ungated PY), and the test suite enumerating the 5 TRDD acceptance scenarios.
 **Deferred from:** TRDD-479cde0c §v2.22.1 "DEFERRED"
 **Parent audit report:** `docs_dev/spec-audit-5-new-features-20260417-163011.md` §V4
 

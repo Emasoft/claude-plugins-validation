@@ -4,6 +4,7 @@
 
 - [Why This Pillar Exists](#why-this-pillar-exists)
 - [Workflow](#workflow)
+- [Deterministic Prefilter Helper](#deterministic-prefilter-helper)
 - [Rule 1 — Sender-ID allowlist (CRITICAL)](#rule-1--sender-id-allowlist-critical)
 - [Rule 2 — Permission-relay gating (CRITICAL)](#rule-2--permission-relay-gating-critical)
 - [Rule 3 — Chat-ID-only gating (MAJOR)](#rule-3--chat-id-only-gating-major)
@@ -66,6 +67,61 @@ Start every evaluation by reading the `mcpServers` block in `plugin.json` and re
 ```
 
 The entry-point file is the one named in `args[0]`. If the build output is a bundled `dist/` artifact, look for the matching `src/index.ts` (or `src/server.py`) and read that — minified/bundled code is unreliable for manual gating analysis.
+
+## Deterministic Prefilter Helper
+
+Before invoking Opus, the agent SHOULD call the Python prefilter
+`scripts/cpv_channel_source_predicate.py` to bound the LLM's reading
+and short-circuit when the answer is unambiguous. The helper:
+
+- Detects pillar scope (`plugin_declares_channels()` — non-empty
+  `channels` array in plugin.json).
+- Resolves entry-point sources from `mcpServers.<server>.args[0]`,
+  preferring `src/` over `dist/` when only `src/` exists
+  (`resolve_channel_server_sources()`).
+- Identifies forward-call lines (`find_channel_forward_calls()`),
+  sender-gating lines (`find_sender_gating_patterns()`), chat-ID-only
+  gating (`find_chat_id_only_gating()`), and the
+  `claude/channel/permission` capability declaration
+  (`find_permission_capability_declaration()`).
+- Returns a `PrefilterVerdict` with `in_scope: bool` and a tuple of
+  `ChannelSourceFinding(severity, rule, file, line, message)` rows via
+  `classify_channel_source(plugin_root)`.
+
+### How to use the prefilter
+
+```bash
+uv run python -c "
+from pathlib import Path
+import sys
+sys.path.insert(0, 'scripts')
+from cpv_channel_source_predicate import classify_channel_source
+verdict = classify_channel_source(Path('<plugin_root>'))
+print('in_scope:', verdict.in_scope)
+for f in verdict.findings:
+    print(f.severity, f.rule, f'{f.file}:{f.line}', f.message)
+"
+```
+
+### When to skip the Opus call
+
+- `verdict.in_scope is False` → the pillar is not applicable. Skip.
+  Save the entire pillar's token budget.
+- All findings are PASSED with no INFO entries → high-confidence safe.
+  The agent MAY skip Opus and report the prefilter verdict directly.
+
+### When to invoke Opus
+
+- Any finding with severity CRITICAL, MAJOR, or INFO. The prefilter
+  surfaces a candidate; the LLM verifies the surrounding context
+  (allowlist origin, naïve-gating patterns, indirection through
+  helper functions, comments that fake gating).
+
+The prefilter is conservative: a PASSED finding only fires when the
+canonical `<sender_property> + allowlist_compare` pair is on the same
+line or within a 3-line window. Real-world code with multi-line
+abstractions still gets sent to Opus — the prefilter bounds tokens
+without compromising correctness.
 
 ## Rule 1 — Inbound Sender Gating (CRITICAL)
 
