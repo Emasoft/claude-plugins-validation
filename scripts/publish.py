@@ -119,7 +119,8 @@ class _ThreadAwareStream:
         return bool(getattr(self._real, "isatty", lambda: False)())
 
     def fileno(self) -> int:
-        return self._real.fileno()
+        # Cast Any → int (mypy can't tell from getattr path).
+        return int(self._real.fileno())
 
     @property
     def encoding(self) -> str:
