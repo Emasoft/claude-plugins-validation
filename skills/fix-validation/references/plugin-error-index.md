@@ -20,6 +20,7 @@
 - [16. validate_scoring.py](#16-validate_scoringpy)
 - [17. validate_cache.py](#17-validate_cachepy)
 - [18. validate_telemetry.py — plugin-shipped env-var hazards](#18-validate_telemetrypy--plugin-shipped-env-var-hazards)
+- [19. Semantic pillar — Channel MCP Server Source-Code Security](#19-semantic-pillar--channel-mcp-server-source-code-security)
 
 ## Checklist
 
@@ -424,3 +425,22 @@ Primary fix guide: [telemetry-hazard-fixes.md](telemetry-hazard-fixes.md)
 | `MAJOR: Plugin ships OTEL_LOG_USER_PROMPTS=1 / OTEL_LOG_TOOL_DETAILS=1 / OTEL_LOG_TOOL_CONTENT=1` (privacy exfiltration) | telemetry-hazard-fixes (Reference table) |
 
 Every fix is the same shape: REMOVE the env var from the plugin's `env` blocks (plugin.json, hooks, MCP servers, settings.json) and document it in README so the user can opt in themselves.
+
+---
+
+## 19. Semantic pillar — Channel MCP Server Source-Code Security
+
+Added in v2.36+ (TRDD-26446eed). Runs ONLY under `/cpv-semantic-validation` (Opus, opt-in) AND only when `plugin.json` declares a non-empty `channels` array. Reads each MCP server entry-point source (TypeScript / JavaScript / Python) and verifies the spec-mandated sender-ID gating from `channels-reference.md`.
+
+Primary reference: [`skills/semantic-validation-skill/references/channel-source-security.md`](../../semantic-validation-skill/references/channel-source-security.md)
+
+Deterministic prefilter: `scripts/cpv_channel_source_predicate.py` (`classify_channel_source(plugin_root)`) — the agent runs it first to bound LLM reading. When the prefilter returns `in_scope=False` the pillar is skipped entirely.
+
+| Error topic | Severity | Fix guide |
+|---|---|---|
+| `RULE-1-no-sender-gating` — Channel MCP server forwards `notifications/claude/channel` without a sender-ID allowlist | CRITICAL | channel-source-security.md "Rule 1 — Inbound Sender Gating (CRITICAL)" |
+| `RULE-2-permission-capability-ungated` — Server declares `capabilities.experimental['claude/channel/permission']` without sender-gating in the permission handler | CRITICAL | channel-source-security.md "Rule 2 — Permission-Relay Capability Gate (CRITICAL)" |
+| `RULE-3-chat-id-only-gating` — Forwarding gated only on chat/room ID, not sender ID | MAJOR | channel-source-security.md "Rule 3 — Room/Chat-ID-Only Gating (MAJOR)" |
+| `RULE-0-no-forward-call-detected` — Channel server resolves but the prefilter found no forward call | INFO | The Opus pillar must read the file to verify the indirection is safe. |
+
+Fix shape (all rules): add an early-return that compares the transport-specific sender-ID property (`message.from.id` for Telegram, `message.author.id` for Discord, `message.sender_id` for iMessage/SMS gateways, etc.) against an allowlist sourced from a constant or env var. NEVER use truthy-only checks (`if (msg.from)`), empty allowlists, or always-true guards. Chat-ID gating is allowed as a SECONDARY scope check but never as the sole gate.

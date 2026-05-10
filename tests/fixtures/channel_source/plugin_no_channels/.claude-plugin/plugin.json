@@ -1,0 +1,11 @@
+{
+  "name": "plugin-no-channels",
+  "version": "1.0.0",
+  "description": "Plain plugin with no channels declared — pillar must be skipped",
+  "mcpServers": {
+    "fetch": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/servers/fetch/dist/server.js"]
+    }
+  }
+}

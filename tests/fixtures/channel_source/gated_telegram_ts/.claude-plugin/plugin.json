@@ -1,0 +1,14 @@
+{
+  "name": "gated-telegram",
+  "version": "1.0.0",
+  "description": "Safe Telegram channel — sender-ID allowlist enforced",
+  "mcpServers": {
+    "telegram": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/servers/telegram/src/server.ts"]
+    }
+  },
+  "channels": [
+    {"server": "telegram"}
+  ]
+}
