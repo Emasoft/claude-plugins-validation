@@ -1153,3 +1153,326 @@ class TestVerifyPluginInstalled:
         monkeypatch.setattr(mp, "MARKETPLACES_DIR", mp_dir)
         monkeypatch.chdir(tmp_path)
         assert mp._verify_plugin_installed("ghost@nowhere") is False
+
+
+# ── Tests: --dev-link install ────────────────────────────────
+
+
+class TestDevLinkInstall:
+    """Tests for --dev-link install — symlink instead of copy + sentinel handling."""
+
+    def _setup_env(self, tmp_path, monkeypatch):
+        """Identical isolated env to TestDoInstall, used for dev-link tests."""
+        mp_dir = tmp_path / "marketplaces"
+        mp_dir.mkdir()
+        settings_file = tmp_path / "settings.local.json"
+        installed_file = tmp_path / "installed_plugins.json"
+        cache_dir = tmp_path / "cache"
+        monkeypatch.setattr(mp, "MARKETPLACES_DIR", mp_dir)
+        monkeypatch.setattr(mp, "SETTINGS_TARGET", settings_file)
+        monkeypatch.setattr(mp, "INSTALLED_FILE", installed_file)
+        monkeypatch.setattr(mp, "CACHE_DIR", cache_dir)
+        return mp_dir, settings_file, installed_file
+
+    @pytest.mark.skipif(platform.system() == "Windows", reason="symlinks need Developer Mode on Windows")
+    @patch.object(mp, "_run_cpv_validation", return_value=([], [], True))
+    def test_dev_link_creates_symlink_to_source(self, mock_val, tmp_path, monkeypatch):
+        """--dev-link installs the plugin as a symlink pointing at the live source dir."""
+        mp_dir, _, _ = self._setup_env(tmp_path, monkeypatch)
+        source = _make_plugin_dir(tmp_path / "source", "live-plugin", "1.0.0", "live")
+        mp.do_install(str(source), "dev-market", force=True, quiet=True, dev_link=True)
+        dest = mp_dir / "dev-market" / "plugins" / "live-plugin"
+        assert dest.is_symlink(), "dev-link install must create a symlink, not a copy"
+        # The symlink target must resolve to the original source dir
+        assert dest.resolve() == source.resolve()
+
+    @pytest.mark.skipif(platform.system() == "Windows", reason="symlinks need Developer Mode on Windows")
+    @patch.object(mp, "_run_cpv_validation", return_value=([], [], True))
+    def test_dev_link_writes_sentinel(self, mock_val, tmp_path, monkeypatch):
+        """--dev-link writes a .cpv-devlink-<plugin>.json sentinel with source path metadata."""
+        mp_dir, _, _ = self._setup_env(tmp_path, monkeypatch)
+        source = _make_plugin_dir(tmp_path / "source", "sent-plugin", "1.0.0", "s")
+        mp.do_install(str(source), "dev-market", force=True, quiet=True, dev_link=True)
+        sentinel = mp_dir / "dev-market" / "plugins" / ".cpv-devlink-sent-plugin.json"
+        assert sentinel.exists(), "dev-link must write a sentinel file"
+        sj = json.loads(sentinel.read_text(encoding="utf-8"))
+        # Sentinel must record the resolved source path, the timestamp, and the installer version
+        assert sj["source_path"] == str(source.resolve())
+        assert "timestamp" in sj
+        assert "installer_version" in sj
+
+    @pytest.mark.skipif(platform.system() == "Windows", reason="symlinks need Developer Mode on Windows")
+    @patch.object(mp, "_run_cpv_validation", return_value=([], [], True))
+    def test_dev_link_reflects_live_edits(self, mock_val, tmp_path, monkeypatch):
+        """Editing the source after --dev-link install is visible at the marketplace path (live edits)."""
+        mp_dir, _, _ = self._setup_env(tmp_path, monkeypatch)
+        source = _make_plugin_dir(tmp_path / "source", "edit-plugin", "1.0.0", "e")
+        mp.do_install(str(source), "dev-market", force=True, quiet=True, dev_link=True)
+        # Mutate the source directly — the symlinked dest must see the change
+        new_file = source / "new_after_install.txt"
+        new_file.write_text("LIVE EDIT", encoding="utf-8")
+        dest = mp_dir / "dev-market" / "plugins" / "edit-plugin"
+        seen = dest / "new_after_install.txt"
+        assert seen.exists(), "edits in source must be visible via the symlinked install"
+        assert seen.read_text(encoding="utf-8") == "LIVE EDIT"
+
+    @patch.object(mp, "_run_cpv_validation", return_value=([], [], True))
+    def test_dev_link_rejects_archive_source(self, mock_val, tmp_path, monkeypatch):
+        """--dev-link with an archive source exits with an error (only directories are valid)."""
+        self._setup_env(tmp_path, monkeypatch)
+        source = _make_plugin_dir(tmp_path / "source", "p", "1.0.0", "x")
+        # Make a tarball of the plugin so the source is now an archive, not a dir
+        import tarfile
+
+        archive = tmp_path / "p.tar.gz"
+        with tarfile.open(archive, "w:gz") as tf:
+            tf.add(source, arcname="p")
+        with pytest.raises(SystemExit):
+            mp.do_install(str(archive), "dev-market", force=True, quiet=True, dev_link=True)
+
+
+# ── Tests: do_uninstall on a dev-linked plugin ───────────────
+
+
+class TestUninstallDevLink:
+    """Tests for do_uninstall — must NOT delete the live source tree of dev-linked plugins."""
+
+    def _install_devlink(self, tmp_path, monkeypatch, plugin_name="live-plugin", marketplace="dev-market"):
+        """Spin up a real --dev-link install and return paths for assertions."""
+        mp_dir = tmp_path / "marketplaces"
+        mp_dir.mkdir()
+        settings_file = tmp_path / "settings.local.json"
+        installed_file = tmp_path / "installed_plugins.json"
+        cache_dir = tmp_path / "cache"
+        monkeypatch.setattr(mp, "MARKETPLACES_DIR", mp_dir)
+        monkeypatch.setattr(mp, "SETTINGS_TARGET", settings_file)
+        monkeypatch.setattr(mp, "INSTALLED_FILE", installed_file)
+        monkeypatch.setattr(mp, "CACHE_DIR", cache_dir)
+        source = _make_plugin_dir(tmp_path / "source", plugin_name, "1.0.0", "live")
+        with patch.object(mp, "_run_cpv_validation", return_value=([], [], True)):
+            mp.do_install(str(source), marketplace, force=True, quiet=True, dev_link=True)
+        dest = mp_dir / marketplace / "plugins" / plugin_name
+        sentinel = mp_dir / marketplace / "plugins" / f".cpv-devlink-{plugin_name}.json"
+        return mp_dir, source, dest, sentinel
+
+    @pytest.mark.skipif(platform.system() == "Windows", reason="symlinks need Developer Mode on Windows")
+    def test_uninstall_dev_link_preserves_source(self, tmp_path, monkeypatch):
+        """Uninstalling a --dev-link install removes the symlink but PRESERVES the live source dir."""
+        mp_dir, source, dest, sentinel = self._install_devlink(tmp_path, monkeypatch)
+        assert source.exists()
+        assert dest.is_symlink()
+        mp.do_uninstall("live-plugin@dev-market", quiet=True)
+        # Source must still exist — this is the whole point of dev-link
+        assert source.exists()
+        assert (source / ".claude-plugin" / "plugin.json").exists()
+        # The symlink at the marketplace path must be gone
+        assert not dest.exists()
+        # The sentinel must also be cleaned up
+        assert not sentinel.exists()
+
+    @pytest.mark.skipif(platform.system() == "Windows", reason="symlinks need Developer Mode on Windows")
+    def test_uninstall_normal_plugin_still_deletes_dir(self, tmp_path, monkeypatch):
+        """A non-dev-linked install (no sentinel, regular dir) is recursively removed as before."""
+        mp_dir = tmp_path / "marketplaces"
+        plug_dir = mp_dir / "market" / "plugins" / "regular"
+        plug_dir.mkdir(parents=True)
+        (plug_dir / "data.txt").write_text("X", encoding="utf-8")
+        _make_marketplace(mp_dir / "market", "market", [{"name": "regular", "version": "1.0.0"}])
+        settings_file = tmp_path / "settings.local.json"
+        settings_file.write_text(json.dumps({"enabledPlugins": {"regular@market": True}}), encoding="utf-8")
+        installed_file = tmp_path / "installed_plugins.json"
+        installed_file.write_text(
+            json.dumps({"version": 2, "plugins": {"regular@market": [{"scope": "user", "version": "1.0.0"}]}}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(mp, "MARKETPLACES_DIR", mp_dir)
+        monkeypatch.setattr(mp, "SETTINGS_TARGET", settings_file)
+        monkeypatch.setattr(mp, "INSTALLED_FILE", installed_file)
+        monkeypatch.setattr(mp, "CACHE_DIR", tmp_path / "cache")
+        mp.do_uninstall("regular@market", quiet=True)
+        # Without a sentinel, the dir is wiped — this preserves the pre-dev-link behavior
+        assert not plug_dir.exists()
+
+
+# ── Tests: do_link_plugin ────────────────────────────────────
+
+
+class TestDoLinkPlugin:
+    """Tests for do_link_plugin — appending a plugin entry to an existing marketplace.json."""
+
+    def _make_marketplace_root(self, tmp_path, name="my-mkt"):
+        """Build a marketplace dir with a minimal valid marketplace.json."""
+        root = tmp_path / name
+        cp = root / ".claude-plugin"
+        cp.mkdir(parents=True)
+        mj = {
+            "name": name,
+            "owner": {"name": "Test"},
+            "plugins": [],
+        }
+        (cp / "marketplace.json").write_text(json.dumps(mj, indent=2), encoding="utf-8")
+        return root
+
+    def test_link_plugin_local_path_appends_entry(self, tmp_path):
+        """Linking a local path appends a plugin entry with relative-to-marketplace source."""
+        mkt = self._make_marketplace_root(tmp_path)
+        # Place the plugin INSIDE the marketplace tree so the relative-path branch fires
+        plug = _make_plugin_dir(mkt / "plugins-src", "local-plug", "0.1.0", "loc")
+        mp.do_link_plugin(str(mkt), str(plug), quiet=True)
+        mj = json.loads((mkt / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+        names = [p["name"] for p in mj["plugins"]]
+        assert "local-plug" in names
+        entry = next(p for p in mj["plugins"] if p["name"] == "local-plug")
+        # Source MUST be a relative ./path (stays portable across machines)
+        assert entry["source"].startswith("./")
+        assert entry["version"] == "0.1.0"
+        assert entry["description"] == "loc"
+
+    def test_link_plugin_github_spec_uses_source_object(self, tmp_path):
+        """owner/repo spec emits a source object with source.source = github + repo string."""
+        mkt = self._make_marketplace_root(tmp_path)
+        mp.do_link_plugin(str(mkt), "Emasoft/some-plugin", quiet=True)
+        mj = json.loads((mkt / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+        entry = next(p for p in mj["plugins"] if p["name"] == "some-plugin")
+        # CRITICAL: must use the CORRECT schema key 'source.source' (NOT legacy 'source.type')
+        assert isinstance(entry["source"], dict)
+        assert entry["source"]["source"] == "github"
+        assert entry["source"]["repo"] == "Emasoft/some-plugin"
+
+    def test_link_plugin_replaces_existing_entry(self, tmp_path):
+        """Linking a plugin name that already exists replaces the entry, does not duplicate."""
+        mkt = self._make_marketplace_root(tmp_path)
+        mp.do_link_plugin(str(mkt), "Emasoft/dup", quiet=True)
+        mp.do_link_plugin(str(mkt), "Emasoft/dup", quiet=True)
+        mj = json.loads((mkt / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+        # Exactly one entry — replacement, not duplicate append
+        matches = [p for p in mj["plugins"] if p["name"] == "dup"]
+        assert len(matches) == 1
+
+    def test_link_plugin_dry_run_does_not_write(self, tmp_path):
+        """--dry-run does not modify the marketplace.json on disk."""
+        mkt = self._make_marketplace_root(tmp_path)
+        mp.do_link_plugin(str(mkt), "Emasoft/ghost", dry_run=True, quiet=True)
+        mj = json.loads((mkt / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+        names = [p["name"] for p in mj["plugins"]]
+        assert "ghost" not in names
+
+    def test_link_plugin_missing_marketplace_exits(self, tmp_path):
+        """Pointing at a directory without marketplace.json exits with an error."""
+        empty_dir = tmp_path / "no-mkt"
+        empty_dir.mkdir()
+        with pytest.raises(SystemExit):
+            mp.do_link_plugin(str(empty_dir), "Emasoft/foo", quiet=True)
+
+    def test_link_plugin_invalid_github_spec_exits(self, tmp_path):
+        """A multi-slash github spec (more than one '/') is rejected."""
+        mkt = self._make_marketplace_root(tmp_path)
+        with pytest.raises(SystemExit):
+            mp.do_link_plugin(str(mkt), "owner/repo/extra", quiet=True)
+
+    def test_link_plugin_missing_local_path_exits(self, tmp_path):
+        """A local path that doesn't exist exits cleanly with an error."""
+        mkt = self._make_marketplace_root(tmp_path)
+        with pytest.raises(SystemExit):
+            mp.do_link_plugin(str(mkt), "./does-not-exist", quiet=True)
+
+    def test_link_plugin_local_path_without_plugin_json_exits(self, tmp_path):
+        """A local path that exists but has no plugin.json exits with an error."""
+        mkt = self._make_marketplace_root(tmp_path)
+        empty = tmp_path / "bare"
+        empty.mkdir()
+        with pytest.raises(SystemExit):
+            mp.do_link_plugin(str(mkt), str(empty), quiet=True)
+
+    def test_link_plugin_marketplace_at_root_supported(self, tmp_path):
+        """A marketplace.json at the root (no .claude-plugin/) is accepted as a fallback location."""
+        root = tmp_path / "flat-mkt"
+        root.mkdir()
+        (root / "marketplace.json").write_text(
+            json.dumps({"name": "flat", "owner": {"name": "T"}, "plugins": []}),
+            encoding="utf-8",
+        )
+        mp.do_link_plugin(str(root), "Emasoft/foo", quiet=True)
+        mj = json.loads((root / "marketplace.json").read_text(encoding="utf-8"))
+        assert any(p["name"] == "foo" for p in mj["plugins"])
+
+
+# ── Tests: do_update on a dev-linked plugin ──────────────────
+
+
+class TestUpdateDevLink:
+    """do_update on a dev-linked plugin must keep the dev-link state — never copy over the live source."""
+
+    @pytest.mark.skipif(platform.system() == "Windows", reason="symlinks need Developer Mode on Windows")
+    @patch.object(mp, "_run_cpv_validation", return_value=([], [], True))
+    def test_update_preserves_dev_link(self, mock_val, tmp_path, monkeypatch):
+        """Calling --update on a dev-linked plugin must keep it as a symlink (not turn it into a copy).
+
+        REGRESSION GUARD: pre-fix, do_update would call do_uninstall (which correctly preserves the
+        source via the sentinel) and then do_install WITHOUT dev_link=True, silently downgrading the
+        dev-link into a regular copy. The dev-link state must survive an update.
+        """
+        mp_dir = tmp_path / "marketplaces"
+        mp_dir.mkdir()
+        settings_file = tmp_path / "settings.local.json"
+        installed_file = tmp_path / "installed_plugins.json"
+        cache_dir = tmp_path / "cache"
+        monkeypatch.setattr(mp, "MARKETPLACES_DIR", mp_dir)
+        monkeypatch.setattr(mp, "SETTINGS_TARGET", settings_file)
+        monkeypatch.setattr(mp, "INSTALLED_FILE", installed_file)
+        monkeypatch.setattr(mp, "CACHE_DIR", cache_dir)
+
+        source = _make_plugin_dir(tmp_path / "source", "ulive", "1.0.0", "u")
+        # 1. Dev-link install
+        mp.do_install(str(source), "umkt", force=True, quiet=True, dev_link=True)
+        dest = mp_dir / "umkt" / "plugins" / "ulive"
+        assert dest.is_symlink()
+
+        # 2. Bump version in the live source (simulating real dev workflow)
+        plug_json = source / ".claude-plugin" / "plugin.json"
+        meta = json.loads(plug_json.read_text(encoding="utf-8"))
+        meta["version"] = "1.1.0"
+        plug_json.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+        # 3. Update — pre-fix this would silently reinstall as a regular copy
+        mp.do_update(str(source), "umkt", force=True, quiet=True)
+
+        # POST-condition: dest is STILL a symlink, NOT a regular dir
+        assert dest.is_symlink(), "do_update on a dev-linked plugin must keep it dev-linked"
+        assert dest.resolve() == source.resolve()
+        sentinel = mp_dir / "umkt" / "plugins" / ".cpv-devlink-ulive.json"
+        assert sentinel.exists(), "the dev-link sentinel must be re-created after update"
+        # The version visible at the symlink target reflects the live edit
+        meta2 = json.loads((dest / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        assert meta2["version"] == "1.1.0"
+
+    @patch.object(mp, "_run_cpv_validation", return_value=([], [], True))
+    def test_update_normal_plugin_still_copies(self, mock_val, tmp_path, monkeypatch):
+        """A non-dev-linked plugin updated normally is still a regular copied dir (regression check)."""
+        mp_dir = tmp_path / "marketplaces"
+        mp_dir.mkdir()
+        settings_file = tmp_path / "settings.local.json"
+        installed_file = tmp_path / "installed_plugins.json"
+        cache_dir = tmp_path / "cache"
+        monkeypatch.setattr(mp, "MARKETPLACES_DIR", mp_dir)
+        monkeypatch.setattr(mp, "SETTINGS_TARGET", settings_file)
+        monkeypatch.setattr(mp, "INSTALLED_FILE", installed_file)
+        monkeypatch.setattr(mp, "CACHE_DIR", cache_dir)
+
+        source = _make_plugin_dir(tmp_path / "source", "ncopy", "1.0.0", "n")
+        # Plain install (NO dev-link)
+        mp.do_install(str(source), "nmkt", force=True, quiet=True)
+        dest = mp_dir / "nmkt" / "plugins" / "ncopy"
+        assert dest.exists() and not dest.is_symlink()
+
+        # Bump source version
+        plug_json = source / ".claude-plugin" / "plugin.json"
+        meta = json.loads(plug_json.read_text(encoding="utf-8"))
+        meta["version"] = "2.0.0"
+        plug_json.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+        mp.do_update(str(source), "nmkt", force=True, quiet=True)
+        # Still a regular dir — never auto-promoted to dev-link
+        assert dest.exists() and not dest.is_symlink()
+        meta2 = json.loads((dest / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        assert meta2["version"] == "2.0.0"
