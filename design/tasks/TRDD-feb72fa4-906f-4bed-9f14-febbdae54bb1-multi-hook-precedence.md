@@ -4,7 +4,14 @@
 **Filename:** `design/tasks/TRDD-feb72fa4-906f-4bed-9f14-febbdae54bb1-multi-hook-precedence.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
 
-**Status:** Not started (deferred from v2.22.2 pass-2 audit CPV-P2-M2)
+**Status:** Done — 2026-05-10 (initial implementation shipped in v2.22.3 commit
+54ff533, 442 LOC + 19 tests; v2.65.x follow-up commit on branch
+`wt/trdd-feb72fa4` adds the PreToolUse event-scoping fix
+(`EVENTS_WITH_PERMISSION_DECISION_PRECEDENCE`) so the precedence pass no
+longer competes with the hook-output MAJOR finding for the same
+authorship bug, plus 14 additional tests covering event-scoping, CLI
+exit-code flow, JSON output, and regression coverage of the canonical
+in-scope path.)
 **Priority:** MAJOR (scope)
 **Spec ref:** hooks.md L989 — decision precedence `deny > defer > ask > allow`
 
@@ -68,3 +75,33 @@ Cross-hook aggregation is a new static-analysis pass whose value depends on
 hook-output validation (TRDD-cf57bf86). No existing plugin is mis-validated
 by the absence of this check — CPV still catches each hook configuration
 error individually. Safe to ship v2.22.2 without it.
+
+## Implementation notes (resolved)
+
+### v2.22.3 (commit 54ff533)
+Initial precedence validator: `scripts/validate_hook_precedence.py` (442 LOC)
+with `tests/test_validate_hook_precedence.py` (19 tests). Implements the
+spec scenarios verbatim and exposes `validate_hook_precedence(path)` for
+embedding into a future master pipeline pass.
+
+### v2.65.x follow-up — event scoping
+Initial implementation grouped hooks by `(event, matcher)` event-agnostically.
+That meant a buggy `PostToolUse` hook with an inline `permissionDecision`
+would surface BOTH the `validate_hook_output.py` MAJOR finding AND a MINOR
+precedence finding for the same authorship bug, drowning the higher-severity
+signal. The follow-up adds:
+
+- `EVENTS_WITH_PERMISSION_DECISION_PRECEDENCE: frozenset[str] = frozenset({"PreToolUse"})`
+  — spec-traceable, extensible.
+- Event filter inside `detect_precedence_conflicts()` — out-of-scope events
+  are skipped entirely.
+- 14 new tests covering the event-scoping fix, CLI smoke (4 cases incl.
+  exit codes 0/1/3 and `--json` payload), and the regression guard that
+  PreToolUse remains in-scope after the filter.
+
+Future enhancement (not in this TRDD): if the spec ever extends precedence
+semantics to other events (e.g. PermissionRequest's `behavior` field), add
+those events to `EVENTS_WITH_PERMISSION_DECISION_PRECEDENCE` and broaden
+`extract_inline_permission_decision()` to recognize the alternate decision
+key. The current implementation is event-keyed so this is a single-line
+change plus a per-decision-surface adapter.
