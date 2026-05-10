@@ -3839,14 +3839,37 @@ _WORKFLOW_PATH_PREFIXES: tuple[str, ...] = (
 # Glob meta-characters in the same shell sense Python's glob module uses.
 _WORKFLOW_GLOB_CHARS: frozenset[str] = frozenset({"*", "?", "[", "]"})
 
+# Trailing shell control operators that frequently glue onto path-like
+# tokens because shlex.split does NOT consume them as token separators —
+# they are shell metacharacters, not whitespace. Without stripping them,
+# `for h in scripts/hooks/*.py; do` produces the token
+# `scripts/hooks/*.py;` (with the semicolon attached), which globs to
+# zero matches and triggers a spurious MAJOR. Symmetric set for leading
+# operators (case branches, leading pipes); the sets must remain narrow
+# so we don't accidentally strip a leading dot or path separator.
+_TRAILING_SHELL_OPS: str = ";)&|<>"
+_LEADING_SHELL_OPS: str = "(&|"
+
+
+def _strip_shell_ops(token: str) -> str:
+    """Remove trailing/leading shell control operators (``;``, ``)``,
+    ``&``, ``|``, ``<``, ``>``, ``(``) that shlex.split leaves glued onto
+    path-like tokens. ``str.rstrip`` / ``lstrip`` take a *set* of
+    characters, so this collapses runs of mixed operators in one pass
+    (e.g. ``scripts/foo.sh;)`` → ``scripts/foo.sh``).
+    """
+    return token.lstrip(_LEADING_SHELL_OPS).rstrip(_TRAILING_SHELL_OPS)
+
 
 def _looks_like_workflow_path(token: str) -> bool:
     """True iff ``token`` is a candidate path argument extracted from a
     workflow ``run:`` body.
 
     Excludes flag tokens (``-x``), URLs (``http://...``, ``https://...``),
-    env-var refs (``${{ matrix.x }}``, ``$FOO``, ``${HOME}``), bare
-    binaries (``shellcheck``, ``bash``), and KEY=VALUE assignments.
+    env-var refs (``${{ matrix.x }}``, ``$FOO``, ``${HOME}``), tokens
+    that *contain* a shell variable reference anywhere (``./$h``,
+    ``path/${VAR}/x.sh``), bare binaries (``shellcheck``, ``bash``), and
+    KEY=VALUE assignments.
     """
     if not token:
         return False
@@ -3862,13 +3885,21 @@ def _looks_like_workflow_path(token: str) -> bool:
         or lowered.startswith("ssh://")
     ):
         return False
-    # GitHub Actions expressions and env-var refs. ${{ ... }} is the GHA
-    # expression form; $FOO and ${FOO} are POSIX shell. Either way, the token
-    # is not a literal path on disk and must NOT be flagged.
-    if "${{" in token or token.startswith("$") or token.startswith("${"):
+    # Shell variable references and GitHub Actions expressions. ${{ ... }}
+    # is the GHA expression form; $FOO and ${FOO} are POSIX shell. We
+    # exclude the token when ``$`` appears ANYWHERE in it — not just at
+    # the start. shlex.split with posix=True strips the surrounding
+    # quotes from `./"$h"`, leaving the bare string `./$h` which would
+    # otherwise pass the path-prefix check below and be reported as a
+    # missing literal. Any token containing ``$`` is dynamic at runtime
+    # and cannot be statically validated against the filesystem, so the
+    # honest answer is "not a literal path".
+    if "$" in token:
         return False
-    # Backticked command substitutions and $(...) substitutions are not paths.
-    if token.startswith("`") or token.startswith("$("):
+    # Backticked command substitutions are not paths. ($-anchored
+    # substitutions like $(...) are already excluded by the $-anywhere
+    # rule above.)
+    if token.startswith("`"):
         return False
     # KEY=VALUE shell assignments — the token isn't a path even when the value
     # part *contains* one (the assignment as a whole is a single token).
@@ -3916,7 +3947,17 @@ def _scan_workflow_run_body(body: str, body_start_line: int) -> list[tuple[str, 
             tokens = shlex.split(line, comments=True, posix=True)
         except ValueError:
             tokens = line.split()
-        for token in tokens:
+        for raw_token in tokens:
+            # Strip shell control operators that shlex.split does not treat
+            # as token separators (`;`, `)`, `&`, `|`, `<`, `>` trailing;
+            # `(`, `&`, `|` leading). Without this step the for-loop
+            # syntax `for h in scripts/hooks/*.py; do` produces the token
+            # `scripts/hooks/*.py;` — a glob that matches zero files and
+            # triggers a spurious MAJOR. The strip is safe: pathnames
+            # ending in those characters are not legal in POSIX command
+            # arguments without explicit quoting (which shlex would have
+            # consumed before we see the token here).
+            token = _strip_shell_ops(raw_token)
             if _looks_like_workflow_path(token):
                 results.append((token, body_start_line + offset))
     return results

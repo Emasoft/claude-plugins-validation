@@ -293,6 +293,127 @@ jobs:
         )
 
 
+def test_for_loop_glob_does_not_attach_semicolon(tmp_path: Path) -> None:
+    """A `for x in scripts/hooks/*.py; do` loop must NOT trigger
+    RC-WORKFLOW-PATH-BROKEN. shlex.split does not consume ``;`` as a token
+    separator (it is a shell metacharacter, not whitespace), so the loop
+    header produces the token ``scripts/hooks/*.py;`` — semicolon glued
+    on. Without trailing-operator stripping the validator treats that as
+    a glob, expands it via Python's ``glob`` module, gets zero matches
+    (because no real file ends in ``.py;``), and emits a spurious MAJOR.
+
+    This regression test reproduces the ai-maestro-janitor v0.4.2 publish
+    failure where the hook smoke loop and the weekly-audit detector loop
+    both tripped this bug despite the underlying glob being valid.
+    """
+    plugin = _make_minimal_plugin(tmp_path)
+    (plugin / "scripts" / "hooks").mkdir(parents=True)
+    (plugin / "scripts" / "hooks" / "on-session-start.py").write_text("# ok\n")
+    (plugin / "scripts" / "hooks" / "on-stop-failure.py").write_text("# ok\n")
+    _write_workflow(
+        plugin,
+        "ci.yml",
+        """\
+name: ci
+on: [push]
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          rc=0
+          for h in scripts/hooks/*.py; do
+            timeout 30 ./"$h" || rc=$?
+          done
+          exit $rc
+""",
+    )
+    report = _run_validator(plugin)
+    findings = _findings(report)
+    assert not findings, (
+        "for-loop with attached `;` and `./\"$h\"` body must produce zero "
+        f"findings, got: {[f.message for f in findings]}"
+    )
+
+
+def test_shell_variable_inside_token_not_flagged(tmp_path: Path) -> None:
+    """Tokens containing a shell variable reference anywhere — not just
+    at the start — must NOT be classified as a literal path.
+
+    ``shlex.split('./"$h"', posix=True)`` returns ``['./$h']``: the
+    surrounding quotes are stripped and the variable reference survives
+    in the middle of the token. The pre-fix version of
+    ``_looks_like_workflow_path`` only excluded tokens that *started*
+    with ``$``, so ``./$h`` slipped past and was reported as a missing
+    literal path. The fix rejects any token containing ``$`` anywhere.
+
+    Also covers ``${VAR}`` mid-token (``path/to/${VAR}/file.sh``) which
+    the pre-fix code would have flagged for the same reason.
+    """
+    plugin = _make_minimal_plugin(tmp_path)
+    (plugin / "scripts").mkdir()
+    (plugin / "scripts" / "publish.py").write_text("# ok\n")
+    _write_workflow(
+        plugin,
+        "ci.yml",
+        """\
+name: ci
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          h=scripts/publish.py
+          ./"$h"
+          ./${h}
+          bash path/to/${VAR}/file.sh
+""",
+    )
+    report = _run_validator(plugin)
+    findings = _findings(report)
+    assert not findings, (
+        "Tokens containing $VAR anywhere must not be statically validated. "
+        f"Got: {[f.message for f in findings]}"
+    )
+
+
+def test_strip_shell_ops_preserves_real_zero_match_globs(tmp_path: Path) -> None:
+    """Stripping trailing ``;`` must not mask the ORIGINAL bug the
+    validator was built to catch: a glob with NO trailing operator that
+    legitimately matches zero files (the canonical migration symptom
+    where ``scripts/detectors/*.sh`` survives in the workflow but
+    ``scripts/detectors/`` no longer exists).
+
+    Concretely: a clean ``scripts/missing/*.sh`` (no semicolon, no shell
+    operator, no variable ref) must still emit a MAJOR. Otherwise the
+    bug-fix would be a regression on the validator's whole purpose.
+    """
+    plugin = _make_minimal_plugin(tmp_path)
+    (plugin / "scripts").mkdir()
+    (plugin / "scripts" / "publish.py").write_text("# ok\n")
+    _write_workflow(
+        plugin,
+        "ci.yml",
+        """\
+name: ci
+on: [push]
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - run: shellcheck scripts/missing/*.sh
+""",
+    )
+    report = _run_validator(plugin)
+    findings = _findings(report)
+    assert len(findings) == 1, (
+        f"Expected exactly 1 MAJOR for a real zero-match glob, got "
+        f"{len(findings)}: {[f.message for f in findings]}"
+    )
+    assert "scripts/missing/*.sh" in findings[0].message
+
+
 def test_block_scalar_run_body_line_numbers(tmp_path: Path) -> None:
     """A multi-line ``run: |`` body must be scanned line-by-line and the
     citation must point at the offending body line, NOT the ``run:`` line
