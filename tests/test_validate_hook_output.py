@@ -81,9 +81,7 @@ class TestConstants:
 
     def test_pretooluse_decisions_exhaustive(self):
         """PRETOOLUSE_DECISIONS contains exactly {allow, deny, ask, defer}."""
-        assert PRETOOLUSE_DECISIONS == frozenset(
-            {"allow", "deny", "ask", "defer"}
-        )
+        assert PRETOOLUSE_DECISIONS == frozenset({"allow", "deny", "ask", "defer"})
 
     def test_permission_update_types_exhaustive(self):
         """PERMISSION_UPDATE_TYPES has the 6 hooks.md L1119-1126 types."""
@@ -104,15 +102,11 @@ class TestConstants:
 
     def test_permission_destinations_exhaustive(self):
         """PERMISSION_DESTINATIONS matches hooks.md L1134-1139."""
-        assert PERMISSION_DESTINATIONS == frozenset(
-            {"session", "localSettings", "projectSettings", "userSettings"}
-        )
+        assert PERMISSION_DESTINATIONS == frozenset({"session", "localSettings", "projectSettings", "userSettings"})
 
     def test_permission_modes_exhaustive(self):
         """PERMISSION_MODES has the 5 values from hooks.md L1124."""
-        assert PERMISSION_MODES == frozenset(
-            {"default", "acceptEdits", "dontAsk", "bypassPermissions", "plan"}
-        )
+        assert PERMISSION_MODES == frozenset({"default", "acceptEdits", "dontAsk", "bypassPermissions", "plan"})
 
     def test_universal_output_fields_exhaustive(self):
         """UNIVERSAL_OUTPUT_FIELDS covers hooks.md L601-606 plus decision/reason."""
@@ -136,9 +130,7 @@ class TestConstants:
         from cpv_validation_common import VALID_HOOK_EVENTS
 
         for event in VALID_HOOK_EVENTS:
-            assert event in HOOK_OUTPUT_EVENT_FIELDS, (
-                f"Missing output schema for event {event!r}"
-            )
+            assert event in HOOK_OUTPUT_EVENT_FIELDS, f"Missing output schema for event {event!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -151,41 +143,31 @@ class TestPreToolUseDecisions:
 
     def test_decision_allow_passes(self):
         """PreToolUse permissionDecision='allow' is accepted."""
-        report = validate_output_payload(
-            "PreToolUse", _pretooluse_payload("allow")
-        )
+        report = validate_output_payload("PreToolUse", _pretooluse_payload("allow"))
         assert not report.has_major
         assert not report.has_critical
 
     def test_decision_deny_passes(self):
         """PreToolUse permissionDecision='deny' is accepted."""
-        report = validate_output_payload(
-            "PreToolUse", _pretooluse_payload("deny")
-        )
+        report = validate_output_payload("PreToolUse", _pretooluse_payload("deny"))
         assert not report.has_major
         assert not report.has_critical
 
     def test_decision_ask_passes(self):
         """PreToolUse permissionDecision='ask' is accepted."""
-        report = validate_output_payload(
-            "PreToolUse", _pretooluse_payload("ask")
-        )
+        report = validate_output_payload("PreToolUse", _pretooluse_payload("ask"))
         assert not report.has_major
         assert not report.has_critical
 
     def test_decision_defer_passes(self):
         """PreToolUse permissionDecision='defer' is accepted (hooks.md L984)."""
-        report = validate_output_payload(
-            "PreToolUse", _pretooluse_payload("defer")
-        )
+        report = validate_output_payload("PreToolUse", _pretooluse_payload("defer"))
         assert not report.has_major
         assert not report.has_critical
 
     def test_unknown_decision_yolo_is_major(self):
         """PreToolUse permissionDecision='yolo' produces MAJOR."""
-        report = validate_output_payload(
-            "PreToolUse", _pretooluse_payload("yolo")
-        )
+        report = validate_output_payload("PreToolUse", _pretooluse_payload("yolo"))
         assert report.has_major
         majors = report.get_errors_by_level("MAJOR")
         assert any("yolo" in m.message for m in majors)
@@ -215,9 +197,7 @@ class TestHookEventName:
         payload = {"hookSpecificOutput": {"permissionDecision": "allow"}}
         report = validate_output_payload("PreToolUse", payload)
         assert report.has_major
-        assert any(
-            "hookEventName" in r.message for r in report.get_all_errors()
-        )
+        assert any("hookEventName" in r.message for r in report.get_all_errors())
 
     def test_mismatched_hook_event_name_is_major(self):
         """Mismatched hookEventName vs --event is MAJOR."""
@@ -241,38 +221,28 @@ class TestPermissionUpdateTypes:
 
     def test_add_rules_accepted(self):
         """addRules permission update type is accepted."""
-        report = validate_output_payload(
-            "PermissionRequest", _permission_request_payload("addRules")
-        )
+        report = validate_output_payload("PermissionRequest", _permission_request_payload("addRules"))
         assert not report.has_major
         assert not report.has_critical
 
     def test_replace_rules_accepted(self):
         """replaceRules permission update type is accepted."""
-        report = validate_output_payload(
-            "PermissionRequest", _permission_request_payload("replaceRules")
-        )
+        report = validate_output_payload("PermissionRequest", _permission_request_payload("replaceRules"))
         assert not report.has_major
 
     def test_remove_rules_accepted(self):
         """removeRules permission update type is accepted."""
-        report = validate_output_payload(
-            "PermissionRequest", _permission_request_payload("removeRules")
-        )
+        report = validate_output_payload("PermissionRequest", _permission_request_payload("removeRules"))
         assert not report.has_major
 
     def test_set_mode_accepted(self):
         """setMode permission update type is accepted."""
-        report = validate_output_payload(
-            "PermissionRequest", _permission_request_payload("setMode")
-        )
+        report = validate_output_payload("PermissionRequest", _permission_request_payload("setMode"))
         assert not report.has_major
 
     def test_add_directories_accepted(self):
         """addDirectories permission update type is accepted."""
-        report = validate_output_payload(
-            "PermissionRequest", _permission_request_payload("addDirectories")
-        )
+        report = validate_output_payload("PermissionRequest", _permission_request_payload("addDirectories"))
         assert not report.has_major
 
     def test_remove_directories_accepted(self):
@@ -290,17 +260,13 @@ class TestPermissionUpdateTypes:
                 "hookEventName": "PermissionRequest",
                 "decision": {
                     "behavior": "allow",
-                    "updatedPermissions": [
-                        {"type": "nukeEverything", "destination": "session"}
-                    ],
+                    "updatedPermissions": [{"type": "nukeEverything", "destination": "session"}],
                 },
             }
         }
         report = validate_output_payload("PermissionRequest", payload)
         assert report.has_major
-        assert any(
-            "nukeEverything" in r.message for r in report.get_all_errors()
-        )
+        assert any("nukeEverything" in r.message for r in report.get_all_errors())
 
 
 # ---------------------------------------------------------------------------
@@ -329,10 +295,7 @@ class TestUniversalFields:
         payload = {"mysteryField": "xxx"}
         report = validate_output_payload("Notification", payload)
         assert report.has_minor
-        assert any(
-            "mysteryField" in r.message
-            for r in report.get_errors_by_level("MINOR")
-        )
+        assert any("mysteryField" in r.message for r in report.get_errors_by_level("MINOR"))
 
     def test_stop_reason_accepted(self):
         """stopReason string is accepted."""
@@ -600,6 +563,143 @@ class TestPostToolUseUpdatedToolOutput:
         }
         report = validate_output_payload("PostToolUse", payload)
         # Either major or critical depending on validator severity policy.
-        assert report.has_major or report.has_critical or any(
-            "totallyMadeUpKey" in r.message for r in report.results
-        )
+        assert report.has_major or report.has_critical or any("totallyMadeUpKey" in r.message for r in report.results)
+
+
+# ---------------------------------------------------------------------------
+# Top-level reason / decision type-checks (CPV-P2-M1 follow-ups)
+# ---------------------------------------------------------------------------
+
+
+class TestTopLevelReasonTypeCheck:
+    """Top-level 'reason' must be a string when present (hooks.md L601-606)."""
+
+    def test_top_level_reason_string_accepted(self):
+        """Top-level 'reason' as string is accepted on Stop event."""
+        payload = {"decision": "block", "reason": "policy violation"}
+        report = validate_output_payload("Stop", payload)
+        assert not report.has_major
+        assert not report.has_critical
+
+    def test_top_level_reason_int_is_major(self):
+        """Top-level 'reason' as int produces MAJOR (must be string)."""
+        payload = {"decision": "block", "reason": 42}
+        report = validate_output_payload("Stop", payload)
+        assert report.has_major
+        assert any("reason" in r.message.lower() for r in report.get_errors_by_level("MAJOR"))
+
+    def test_top_level_reason_list_is_major(self):
+        """Top-level 'reason' as list produces MAJOR."""
+        payload = {"decision": "block", "reason": ["a", "b"]}
+        report = validate_output_payload("Stop", payload)
+        assert report.has_major
+
+    def test_top_level_reason_null_accepted(self):
+        """Top-level 'reason' as null is treated as absent (no error)."""
+        payload = {"decision": "block", "reason": None}
+        report = validate_output_payload("Stop", payload)
+        # null is conventionally "no reason" — should not be flagged as MAJOR
+        # because spec L601-606 docs the field as optional.
+        assert not report.has_major
+
+
+class TestTopLevelDecisionScope:
+    """Events that DO NOT support top-level 'decision: block' must reject it.
+
+    hooks.md per-event decision-control table (L583-628) enumerates which
+    events can emit a top-level decision. Events outside that list (e.g.
+    TaskCreated L1440-1443, SessionStart, Notification) only honor
+    `continue:false` plus exit-code 2; emitting `decision: block` from
+    them is silently ignored at runtime — CPV must surface this as MAJOR
+    so hook authors don't ship broken decision logic.
+    """
+
+    def test_task_created_decision_block_is_major(self):
+        """TaskCreated does not honor top-level 'decision' — MAJOR."""
+        payload = {"decision": "block", "reason": "stop"}
+        report = validate_output_payload("TaskCreated", payload)
+        assert report.has_major
+        assert any("decision" in r.message.lower() for r in report.get_errors_by_level("MAJOR"))
+
+    def test_task_completed_decision_block_is_major(self):
+        """TaskCompleted does not honor top-level 'decision' — MAJOR."""
+        payload = {"decision": "block"}
+        report = validate_output_payload("TaskCompleted", payload)
+        assert report.has_major
+
+    def test_session_start_decision_block_is_major(self):
+        """SessionStart does not honor top-level 'decision' — MAJOR."""
+        payload = {"decision": "block"}
+        report = validate_output_payload("SessionStart", payload)
+        assert report.has_major
+
+    def test_session_end_decision_block_is_major(self):
+        """SessionEnd does not honor top-level 'decision' — MAJOR."""
+        payload = {"decision": "block"}
+        report = validate_output_payload("SessionEnd", payload)
+        assert report.has_major
+
+    def test_notification_decision_block_is_major(self):
+        """Notification does not honor top-level 'decision' — MAJOR."""
+        payload = {"decision": "block"}
+        report = validate_output_payload("Notification", payload)
+        assert report.has_major
+
+    def test_post_tool_use_decision_allow_is_major(self):
+        """PostToolUse top-level 'decision' must be 'block' — 'allow' is MAJOR."""
+        payload = {"decision": "allow"}
+        report = validate_output_payload("PostToolUse", payload)
+        assert report.has_major
+        assert any("block" in r.message for r in report.get_errors_by_level("MAJOR"))
+
+    def test_user_prompt_submit_decision_block_accepted(self):
+        """UserPromptSubmit top-level 'decision: block' is accepted."""
+        payload = {"decision": "block", "reason": "blocked"}
+        report = validate_output_payload("UserPromptSubmit", payload)
+        assert not report.has_major
+        assert not report.has_critical
+
+
+class TestPreToolUseLegacyDecision:
+    """PreToolUse top-level 'decision' is deprecated — hooks.md L1010.
+
+    Legacy values "approve" and "block" (mapped to "allow" / "deny") still
+    work at runtime but emit a WARNING. Other values (e.g. "yolo") on
+    top-level decision should be MAJOR even with the deprecation warning.
+    """
+
+    def test_pretooluse_top_level_approve_warns(self):
+        """PreToolUse top-level decision='approve' emits WARNING (deprecated)."""
+        payload = {"decision": "approve"}
+        report = validate_output_payload("PreToolUse", payload)
+        assert any("deprecated" in r.message.lower() for r in report.results)
+
+    def test_pretooluse_top_level_block_warns(self):
+        """PreToolUse top-level decision='block' emits WARNING (deprecated)."""
+        payload = {"decision": "block"}
+        report = validate_output_payload("PreToolUse", payload)
+        assert any("deprecated" in r.message.lower() for r in report.results)
+
+    def test_pretooluse_top_level_yolo_is_major(self):
+        """PreToolUse top-level decision='yolo' is MAJOR (unknown legacy value)."""
+        payload = {"decision": "yolo"}
+        report = validate_output_payload("PreToolUse", payload)
+        assert report.has_major
+
+
+class TestStopReasonScopeWithPassed:
+    """Verify the report is marked PASSED when only WARNING is present.
+
+    A WARNING about deprecated PreToolUse top-level decision should not
+    block the report — `report.passed(...)` should still be recorded if
+    no critical/major/minor flags were set.
+    """
+
+    def test_pretooluse_top_level_approve_still_passes(self):
+        """PreToolUse top-level decision='approve' — only WARNING, marked passed."""
+        payload = {"decision": "approve"}
+        report = validate_output_payload("PreToolUse", payload)
+        # Has the deprecation warning but no major/critical/minor.
+        assert not report.has_major
+        assert not report.has_critical
+        assert not report.has_minor
