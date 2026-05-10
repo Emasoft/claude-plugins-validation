@@ -74,6 +74,7 @@ Primary fix guide: [plugin-structure-fixes.md](plugin-structure-fixes.md)
 | `Layout C: self-entry name does not match plugin.json.name` (v2.32.0+, Phase 16, marketplace-in-plugin) **[NEW]** | plugin-structure-fixes §15 (Layout C) |
 | `Layout C: self-entry source is not "./"` (v2.32.0+) **[NEW]** | plugin-structure-fixes §15 (Layout C) |
 | `Layout C: version mismatch between plugin.json and marketplace.json` (v2.32.0+) **[NEW]** | plugin-structure-fixes §15 (Layout C) |
+| `'dependencies[i].marketplace' = '<x>' is not in the hosting marketplace's allowCrossMarketplaceDependenciesOn allowlist` (TRDD-20108ab7, 2026-05-10, plugin-dependencies.md:54-79) **[NEW]** | plugin-structure-fixes "Cross-marketplace dependency blocked" — Add `<x>` to root marketplace.json's `allowCrossMarketplaceDependenciesOn` array, OR remove `marketplace` sub-field on the dep, OR pass `--marketplace-context PATH` if hosting context was wrong. |
 
 Common crash-category CRITICALs (from `validate_scoring.py`) land here too when the plugin validator raises an exception.
 

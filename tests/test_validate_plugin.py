@@ -455,10 +455,9 @@ class TestManifestPathFields:
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
         critical_msgs = [r.message for r in report.results if r.level == "CRITICAL" and "hooks" in r.message]
-        assert any(
-            "Invalid input" in m or "will not load" in m
-            for m in critical_msgs
-        ), f"Expected CRITICAL for hooks default-dir, got: {critical_msgs}"
+        assert any("Invalid input" in m or "will not load" in m for m in critical_msgs), (
+            f"Expected CRITICAL for hooks default-dir, got: {critical_msgs}"
+        )
 
     def test_commands_default_path_reports_minor(self, tmp_path):
         """validate_manifest reports MINOR (was CRITICAL until 2026-04-18) when commands points to default.
@@ -609,8 +608,9 @@ class TestValidateStructureExtended:
         report = ValidationReport()
         validate_structure(plugin_dir, report)
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("Non-standard directory 'foobar/'" in m for m in major_msgs), \
+        assert any("Non-standard directory 'foobar/'" in m for m in major_msgs), (
             f"Expected MAJOR for 'foobar/', got: {major_msgs}"
+        )
 
 
 class TestValidateCommands:
@@ -904,12 +904,9 @@ class TestValidateReadmeAndLicense:
         (plugin_dir / "README.md").write_text("# My Plugin\n\nA minimal README.\n")
         report = ValidationReport()
         validate_readme(plugin_dir, report)
-        badge_warnings = [
-            r for r in report.results if r.level == "WARNING" and "badge" in r.message.lower()
-        ]
+        badge_warnings = [r for r in report.results if r.level == "WARNING" and "badge" in r.message.lower()]
         assert not badge_warnings, (
-            f"false-positive badge-markers WARNING on badge-less README: "
-            f"{[r.message for r in badge_warnings]}"
+            f"false-positive badge-markers WARNING on badge-less README: {[r.message for r in badge_warnings]}"
         )
 
     def test_badge_markers_literal_badge_no_markers_warns(self, tmp_path):
@@ -924,9 +921,7 @@ class TestValidateReadmeAndLicense:
         )
         report = ValidationReport()
         validate_readme(plugin_dir, report)
-        badge_warnings = [
-            r for r in report.results if r.level == "WARNING" and "badge" in r.message.lower()
-        ]
+        badge_warnings = [r for r in report.results if r.level == "WARNING" and "badge" in r.message.lower()]
         assert badge_warnings, "literal badge without markers was NOT flagged (regression)"
 
     def test_badge_markers_shields_url_no_markers_warns(self, tmp_path):
@@ -934,14 +929,10 @@ class TestValidateReadmeAndLicense:
         badges — the warning should still fire."""
         plugin_dir = tmp_path / "shields-url"
         plugin_dir.mkdir()
-        (plugin_dir / "README.md").write_text(
-            "# My Plugin\n\n![](https://img.shields.io/badge/v-1.0-blue)\n"
-        )
+        (plugin_dir / "README.md").write_text("# My Plugin\n\n![](https://img.shields.io/badge/v-1.0-blue)\n")
         report = ValidationReport()
         validate_readme(plugin_dir, report)
-        badge_warnings = [
-            r for r in report.results if r.level == "WARNING" and "badge" in r.message.lower()
-        ]
+        badge_warnings = [r for r in report.results if r.level == "WARNING" and "badge" in r.message.lower()]
         assert badge_warnings, "shields.io badge without markers was NOT flagged (regression)"
 
     def test_badge_markers_empty_ci_placeholder_passes(self, tmp_path):
@@ -953,16 +944,11 @@ class TestValidateReadmeAndLicense:
         plugin_dir = tmp_path / "empty-markers"
         plugin_dir.mkdir()
         (plugin_dir / "README.md").write_text(
-            "# My Plugin\n\n"
-            "<!--BADGES-START-->\n"
-            "<!--BADGES-END-->\n\n"
-            "A minimal README.\n"
+            "# My Plugin\n\n<!--BADGES-START-->\n<!--BADGES-END-->\n\nA minimal README.\n"
         )
         report = ValidationReport()
         validate_readme(plugin_dir, report)
-        badge_warnings = [
-            r for r in report.results if r.level == "WARNING" and "badge" in r.message.lower()
-        ]
+        badge_warnings = [r for r in report.results if r.level == "WARNING" and "badge" in r.message.lower()]
         assert not badge_warnings, (
             f"empty CI-placeholder markers triggered a warning — "
             f"must be silent per v2.26.0 guidance: "
@@ -970,8 +956,7 @@ class TestValidateReadmeAndLicense:
         )
         passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
         assert any("badge markers" in m for m in passed_msgs), (
-            "empty-marker CI-placeholder pattern did not produce the "
-            "PASSED result — markers present should always pass"
+            "empty-marker CI-placeholder pattern did not produce the PASSED result — markers present should always pass"
         )
 
     def test_license_missing_reports_minor(self, tmp_path):
@@ -1180,6 +1165,7 @@ class TestValidateUserConfig:
         import inspect
 
         from validate_plugin import validate_manifest  # noqa: F401 — exercise import path
+
         src = inspect.getsource(validate_manifest)
         # The whitelist literal must appear in the validator source
         assert 'USERCONFIG_VALID_TYPES = {"string", "number", "boolean", "directory", "file"}' in src, (
@@ -1202,19 +1188,34 @@ class TestValidateUserConfig:
                 "github_repo": {"title": "GitHub Repository", "description": "x", "sensitive": False},
                 "trdd_path": {"title": "TRDD Directory Path", "description": "x", "sensitive": False},
                 "pr_reconciler_interval": {"title": "PR Reconciler Interval", "description": "x", "sensitive": False},
-                "worktree_janitor_interval": {"title": "Worktree Janitor Interval", "description": "x", "sensitive": False},
+                "worktree_janitor_interval": {
+                    "title": "Worktree Janitor Interval",
+                    "description": "x",
+                    "sensitive": False,
+                },
                 "trdd_drift_interval": {"title": "TRDD Drift Interval", "description": "x", "sensitive": False},
                 "trdd_reminder_interval": {"title": "TRDD Reminder Interval", "description": "x", "sensitive": False},
-                "task_pr_mismatch_interval": {"title": "Task/PR Mismatch Interval", "description": "x", "sensitive": False},
-                "rate_limit_retry_interval": {"title": "Rate-Limit Retry Interval", "description": "x", "sensitive": False},
-                "cache_keepalive_threshold": {"title": "Cache Keep-Alive Threshold", "description": "x", "sensitive": False},
+                "task_pr_mismatch_interval": {
+                    "title": "Task/PR Mismatch Interval",
+                    "description": "x",
+                    "sensitive": False,
+                },
+                "rate_limit_retry_interval": {
+                    "title": "Rate-Limit Retry Interval",
+                    "description": "x",
+                    "sensitive": False,
+                },
+                "cache_keepalive_threshold": {
+                    "title": "Cache Keep-Alive Threshold",
+                    "description": "x",
+                    "sensitive": False,
+                },
                 "trdd_staleness_days": {"title": "TRDD Staleness Threshold", "description": "x", "sensitive": False},
                 "stale_pr_days": {"title": "Stale PR Threshold", "description": "x", "sensitive": False},
             },
         )
         missing_type_majors = [
-            r.message for r in report.results
-            if r.level == "MAJOR" and "missing required 'type' field" in r.message
+            r.message for r in report.results if r.level == "MAJOR" and "missing required 'type' field" in r.message
         ]
         assert len(missing_type_majors) == 11, (
             f"Expected 11 missing-type MAJORs (one per userConfig entry), got {len(missing_type_majors)}. "
@@ -1234,12 +1235,15 @@ class TestPathResolutionHints:
     def _write_plugin_fixture(parent: Path, name: str) -> Path:
         plugin_dir = parent / name
         (plugin_dir / ".claude-plugin").mkdir(parents=True)
-        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(f'{{"name":"{name}","version":"0.1.0","description":"x"}}')
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            f'{{"name":"{name}","version":"0.1.0","description":"x"}}'
+        )
         return plugin_dir
 
     def test_find_plugin_candidates_detects_child_plugin(self, tmp_path):
         """Given a parent dev folder, _find_plugin_candidates must surface the inner plugin."""
         from validate_plugin import _find_plugin_candidates
+
         self._write_plugin_fixture(tmp_path, "my-plugin")
         candidates = _find_plugin_candidates(tmp_path)
         assert len(candidates) == 1
@@ -1248,6 +1252,7 @@ class TestPathResolutionHints:
     def test_find_plugin_candidates_detects_multiple_siblings(self, tmp_path):
         """Two sibling plugins under the same parent are both reported."""
         from validate_plugin import _find_plugin_candidates
+
         self._write_plugin_fixture(tmp_path, "plugin-a")
         self._write_plugin_fixture(tmp_path, "plugin-b")
         candidates = _find_plugin_candidates(tmp_path)
@@ -1257,6 +1262,7 @@ class TestPathResolutionHints:
     def test_find_plugin_candidates_skips_noise_directories(self, tmp_path):
         """node_modules, .git, _dev folders must not pollute candidate lists."""
         from validate_plugin import _find_plugin_candidates
+
         # Write a real plugin and a noise folder with something that LOOKS like a plugin inside
         self._write_plugin_fixture(tmp_path, "real-plugin")
         noise = tmp_path / "node_modules" / "fake-plugin"
@@ -1268,6 +1274,7 @@ class TestPathResolutionHints:
     def test_classify_marketplace_path(self, tmp_path):
         """A folder with marketplace.json must classify as 'marketplace'."""
         from validate_plugin import _classify_path
+
         (tmp_path / ".claude-plugin").mkdir()
         (tmp_path / ".claude-plugin" / "marketplace.json").write_text('{"plugins":[]}')
         assert _classify_path(tmp_path) == "marketplace"
@@ -1275,6 +1282,7 @@ class TestPathResolutionHints:
     def test_classify_claude_project_config(self, tmp_path):
         """A folder named .claude (or with settings.json + plugins/) is a project config, not a source."""
         from validate_plugin import _classify_path
+
         claude_dir = tmp_path / ".claude"
         claude_dir.mkdir()
         assert _classify_path(claude_dir) == "claude_project_config"
@@ -1282,6 +1290,7 @@ class TestPathResolutionHints:
     def test_no_plugin_found_hint_includes_candidates(self, tmp_path):
         """The error hint must surface the discovered candidate path."""
         from validate_plugin import _format_no_plugin_found_hint
+
         self._write_plugin_fixture(tmp_path, "my-plugin")
         hint = _format_no_plugin_found_hint(tmp_path)
         assert "my-plugin" in hint
@@ -1290,6 +1299,7 @@ class TestPathResolutionHints:
     def test_no_plugin_found_hint_classifies_marketplace(self, tmp_path):
         """When the path is a marketplace, the hint must say so and route to marketplace validator."""
         from validate_plugin import _format_no_plugin_found_hint
+
         (tmp_path / ".claude-plugin").mkdir()
         (tmp_path / ".claude-plugin" / "marketplace.json").write_text('{"plugins":[]}')
         hint = _format_no_plugin_found_hint(tmp_path)
@@ -1299,6 +1309,7 @@ class TestPathResolutionHints:
     def test_classify_standalone_skill(self, tmp_path):
         """A folder with SKILL.md but no plugin.json (and no plugin ancestor) is a standalone skill."""
         from validate_plugin import _classify_path
+
         skill_dir = tmp_path / "my-skill"
         skill_dir.mkdir()
         (skill_dir / "SKILL.md").write_text("---\nname: my-skill\n---\n# Skill")
@@ -1307,6 +1318,7 @@ class TestPathResolutionHints:
     def test_classify_skill_inside_plugin(self, tmp_path):
         """A SKILL.md nested inside a plugin (ancestor has plugin.json) classifies differently."""
         from validate_plugin import _classify_path
+
         plugin_dir = tmp_path / "my-plugin"
         (plugin_dir / ".claude-plugin").mkdir(parents=True)
         (plugin_dir / ".claude-plugin" / "plugin.json").write_text('{"name":"my-plugin"}')
@@ -1318,6 +1330,7 @@ class TestPathResolutionHints:
     def test_hint_for_standalone_skill_explains_difference(self, tmp_path):
         """The error hint must clearly distinguish skill from plugin and mention scope options."""
         from validate_plugin import _format_no_plugin_found_hint
+
         skill_dir = tmp_path / "my-skill"
         skill_dir.mkdir()
         (skill_dir / "SKILL.md").write_text("---\nname: my-skill\n---\n# Skill")
@@ -1330,6 +1343,7 @@ class TestPathResolutionHints:
     def test_hint_for_skill_inside_plugin_points_to_plugin_root(self, tmp_path):
         """When the user points at a skill inside a plugin, the hint must redirect to the plugin root."""
         from validate_plugin import _format_no_plugin_found_hint
+
         plugin_dir = tmp_path / "my-plugin"
         (plugin_dir / ".claude-plugin").mkdir(parents=True)
         (plugin_dir / ".claude-plugin" / "plugin.json").write_text('{"name":"my-plugin"}')
@@ -1473,7 +1487,8 @@ class TestV2212AuditFixes:
         report_a = ValidationReport()
         validate_gitignore(plugin_a, report_a)
         venv_majors_a = [
-            r.message for r in report_a.results
+            r.message
+            for r in report_a.results
             if r.level == "MAJOR" and "Virtual environment '.venv/' detected" in r.message
         ]
         assert not venv_majors_a, (
@@ -1498,7 +1513,8 @@ class TestV2212AuditFixes:
         report_b = ValidationReport()
         validate_gitignore(plugin_b, report_b)
         venv_majors_b = [
-            r.message for r in report_b.results
+            r.message
+            for r in report_b.results
             if r.level == "MAJOR" and "Virtual environment 'venv/' detected" in r.message
         ]
         assert venv_majors_b, (
@@ -1525,7 +1541,8 @@ class TestV2212AuditFixes:
         report_win = ValidationReport()
         vp_mod.validate_bin_executables(plugin_dir, report_win)
         win_not_exec = [
-            r.message for r in report_win.results
+            r.message
+            for r in report_win.results
             if r.level == "MINOR" and "bin/cli" in r.message and "not executable" in r.message
         ]
         assert not win_not_exec, (
@@ -1534,19 +1551,19 @@ class TestV2212AuditFixes:
         )
         # And a PASSED note mentioning Windows skip should be present
         win_passed = [
-            r.message for r in report_win.results
+            r.message
+            for r in report_win.results
             if r.level == "PASSED" and "bin/cli" in r.message and "Windows" in r.message
         ]
-        assert win_passed, (
-            "Expected PASSED message noting exec bit not checked on Windows for bin/cli"
-        )
+        assert win_passed, "Expected PASSED message noting exec bit not checked on Windows for bin/cli"
 
         # --- Non-Windows: the same file WITH missing +x MUST produce the MINOR finding ---
         monkeypatch.setattr(vp_mod, "IS_WINDOWS", False)
         report_unix = ValidationReport()
         vp_mod.validate_bin_executables(plugin_dir, report_unix)
         unix_not_exec = [
-            r.message for r in report_unix.results
+            r.message
+            for r in report_unix.results
             if r.level == "MINOR" and "bin/cli" in r.message and "not executable" in r.message
         ]
         assert unix_not_exec, (
@@ -1600,10 +1617,7 @@ class TestV222PluginSchema:
         plugin_dir = _write_plugin(tmp_path, "deps-bare", manifest)
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
-        dep_majors = [
-            r.message for r in report.results
-            if r.level == "MAJOR" and "dependencies" in r.message
-        ]
+        dep_majors = [r.message for r in report.results if r.level == "MAJOR" and "dependencies" in r.message]
         assert not dep_majors, f"Unexpected MAJORs for bare-string dep: {dep_majors}"
 
     def test_dependencies_object_with_version_accepted(self, tmp_path):
@@ -1624,10 +1638,7 @@ class TestV222PluginSchema:
         plugin_dir = _write_plugin(tmp_path, "deps-obj", manifest)
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
-        dep_majors = [
-            r.message for r in report.results
-            if r.level == "MAJOR" and "dependencies" in r.message
-        ]
+        dep_majors = [r.message for r in report.results if r.level == "MAJOR" and "dependencies" in r.message]
         assert not dep_majors, f"Unexpected MAJORs for object deps: {dep_majors}"
 
     def test_dependencies_malformed_semver_rejected(self, tmp_path):
@@ -1643,10 +1654,7 @@ class TestV222PluginSchema:
         plugin_dir = _write_plugin(tmp_path, "deps-bad-semver", manifest)
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
-        dep_majors = [
-            r.message for r in report.results
-            if r.level == "MAJOR" and "semver" in r.message.lower()
-        ]
+        dep_majors = [r.message for r in report.results if r.level == "MAJOR" and "semver" in r.message.lower()]
         assert dep_majors, (
             "Expected MAJOR for malformed semver range; got: "
             f"{[r.message for r in report.results if r.level == 'MAJOR']}"
@@ -1663,10 +1671,7 @@ class TestV222PluginSchema:
         plugin_dir = _write_plugin(tmp_path, "deps-wrong-type", manifest)
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
-        wrong_type = [
-            r.message for r in report.results
-            if r.level == "MAJOR" and "string or object" in r.message
-        ]
+        wrong_type = [r.message for r in report.results if r.level == "MAJOR" and "string or object" in r.message]
         assert len(wrong_type) >= 2, (
             "Expected 2+ MAJORs for non-string/non-dict entries; got: "
             f"{[r.message for r in report.results if r.level == 'MAJOR']}"
@@ -1686,7 +1691,8 @@ class TestV222PluginSchema:
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
         minors = [
-            r.message for r in report.results
+            r.message
+            for r in report.results
             if r.level == "MINOR" and "dependencies" in r.message and "wat" in r.message
         ]
         assert minors, (
@@ -1719,10 +1725,7 @@ class TestV222PluginSchema:
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
         # No structural MAJOR about userConfig keys or types
-        uc_majors = [
-            r.message for r in report.results
-            if r.level == "MAJOR" and "userConfig" in r.message
-        ]
+        uc_majors = [r.message for r in report.results if r.level == "MAJOR" and "userConfig" in r.message]
         assert not uc_majors, f"Unexpected userConfig MAJORs: {uc_majors}"
 
     def test_userconfig_non_identifier_key_rejected(self, tmp_path):
@@ -1742,7 +1745,8 @@ class TestV222PluginSchema:
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
         ident_majors = [
-            r.message for r in report.results
+            r.message
+            for r in report.results
             if r.level == "MAJOR" and "userConfig" in r.message and "identifier" in r.message
         ]
         assert ident_majors, (
@@ -1768,7 +1772,8 @@ class TestV222PluginSchema:
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
         sens_majors = [
-            r.message for r in report.results
+            r.message
+            for r in report.results
             if r.level == "MAJOR" and "sensitive" in r.message and "boolean" in r.message
         ]
         assert sens_majors, (
@@ -1797,10 +1802,7 @@ class TestV222PluginSchema:
         plugin_dir = _write_plugin(tmp_path, "chan-ok", manifest)
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
-        chan_majors = [
-            r.message for r in report.results
-            if r.level == "MAJOR" and "channels" in r.message
-        ]
+        chan_majors = [r.message for r in report.results if r.level == "MAJOR" and "channels" in r.message]
         assert not chan_majors, f"Unexpected channel MAJORs: {chan_majors}"
 
     def test_channels_server_missing_mcpserver_major(self, tmp_path):
@@ -1820,10 +1822,9 @@ class TestV222PluginSchema:
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
         miss = [
-            r.message for r in report.results
-            if r.level == "MAJOR"
-            and "channels[0].server" in r.message
-            and "slack" in r.message
+            r.message
+            for r in report.results
+            if r.level == "MAJOR" and "channels[0].server" in r.message and "slack" in r.message
         ]
         assert miss, (
             "Expected MAJOR for missing mcpServers cross-ref; got MAJORs: "
@@ -1843,10 +1844,7 @@ class TestV222PluginSchema:
         plugin_dir = _write_plugin(tmp_path, "mon-missing-fields", manifest)
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
-        majors = [
-            r.message for r in report.results
-            if r.level == "MAJOR" and "monitors[0]" in r.message
-        ]
+        majors = [r.message for r in report.results if r.level == "MAJOR" and "monitors[0]" in r.message]
         # Expect at least two MAJORs: command + description
         assert any("command" in m for m in majors), f"Missing 'command' MAJOR; got: {majors}"
         assert any("description" in m for m in majors), f"Missing 'description' MAJOR; got: {majors}"
@@ -1870,8 +1868,7 @@ class TestV222PluginSchema:
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
         when_majors = [
-            r.message for r in report.results
-            if r.level == "MAJOR" and "when" in r.message and "always" in r.message
+            r.message for r in report.results if r.level == "MAJOR" and "when" in r.message and "always" in r.message
         ]
         assert when_majors, (
             "Expected MAJOR for invalid 'when' format; got MAJORs: "
@@ -1890,10 +1887,7 @@ class TestV222PluginSchema:
         plugin_dir = _write_plugin(tmp_path, "path-traversal", manifest)
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
-        trav = [
-            r.message for r in report.results
-            if r.level == "MAJOR" and "path-traversal" in r.message
-        ]
+        trav = [r.message for r in report.results if r.level == "MAJOR" and "path-traversal" in r.message]
         # One for 'skills' string, one for 'commands[1]' entry
         assert len(trav) >= 2, (
             "Expected 2+ MAJORs for path-traversal; got MAJORs: "
@@ -1909,13 +1903,12 @@ class TestV222PluginSchema:
         }
         plugin_dir = _write_plugin(tmp_path, "sas-plugin", manifest)
         # Add plugin-root settings.json
-        (plugin_dir / "settings.json").write_text(
-            json.dumps({"subagentStatusLine": {"command": "echo status"}})
-        )
+        (plugin_dir / "settings.json").write_text(json.dumps({"subagentStatusLine": {"command": "echo status"}}))
         report = ValidationReport()
         validate_structure(plugin_dir, report)
         unrec = [
-            r.message for r in report.results
+            r.message
+            for r in report.results
             if r.level == "MINOR" and "subagentStatusLine" in r.message and "unrecognized" in r.message
         ]
         assert not unrec, (
@@ -1938,10 +1931,7 @@ class TestV222PluginSchema:
         plugin_dir = _write_plugin(tmp_path, "author-url", manifest)
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
-        url_majors = [
-            r.message for r in report.results
-            if r.level == "MAJOR" and "author.url" in r.message
-        ]
+        url_majors = [r.message for r in report.results if r.level == "MAJOR" and "author.url" in r.message]
         assert not url_majors, f"Unexpected author.url MAJORs: {url_majors}"
 
         # Negative: non-string author.url IS a MAJOR
@@ -1951,7 +1941,8 @@ class TestV222PluginSchema:
         bad_report = ValidationReport()
         validate_manifest(bad_dir, bad_report)
         bad_url_majors = [
-            r.message for r in bad_report.results
+            r.message
+            for r in bad_report.results
             if r.level == "MAJOR" and "author.url" in r.message and "string" in r.message
         ]
         assert bad_url_majors, (
@@ -2062,8 +2053,7 @@ class TestV223Gap10MonitorSkillCrossRef:
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
         cross_minors = [
-            r.message for r in report.results
-            if r.level == "MINOR" and "references unknown skill" in r.message
+            r.message for r in report.results if r.level == "MINOR" and "references unknown skill" in r.message
         ]
         assert not cross_minors, f"Unexpected dangling-ref MINORs: {cross_minors}"
 
@@ -2087,7 +2077,8 @@ class TestV223Gap10MonitorSkillCrossRef:
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
         cross_minors = [
-            r.message for r in report.results
+            r.message
+            for r in report.results
             if r.level == "MINOR" and "ghost" in r.message and "unknown skill" in r.message
         ]
         assert cross_minors, (
@@ -2113,10 +2104,7 @@ class TestV223Gap10MonitorSkillCrossRef:
         plugin_dir = _write_plugin(tmp_path, "mon-always", manifest)
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
-        cross_minors = [
-            r.message for r in report.results
-            if r.level == "MINOR" and "unknown skill" in r.message
-        ]
+        cross_minors = [r.message for r in report.results if r.level == "MINOR" and "unknown skill" in r.message]
         assert not cross_minors
 
 
@@ -2228,10 +2216,19 @@ class TestV223LspInlineTypeChecks:
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
         unexpected = [
-            r.message for r in report.results
-            if r.level == "MINOR" and any(
-                kw in r.message for kw in ("'args'", "'env'", "'settings'", "'initializationOptions'",
-                                           "'workspaceFolder'", "'restartOnCrash'")
+            r.message
+            for r in report.results
+            if r.level == "MINOR"
+            and any(
+                kw in r.message
+                for kw in (
+                    "'args'",
+                    "'env'",
+                    "'settings'",
+                    "'initializationOptions'",
+                    "'workspaceFolder'",
+                    "'restartOnCrash'",
+                )
             )
         ]
         assert not unexpected, f"Unexpected MINORs on valid LSP config: {unexpected}"
@@ -2253,9 +2250,7 @@ class TestV223CrossMarketplaceDeps:
             "name": "consumer",
             "version": "1.0.0",
             "description": "x",
-            "dependencies": [
-                {"name": "shared-lib", "marketplace": "other-market"}
-            ],
+            "dependencies": [{"name": "shared-lib", "marketplace": "other-market"}],
         }
         plugin_dir = _write_plugin(tmp_path, "xm-ok", manifest)
         hosting = {
@@ -2265,13 +2260,9 @@ class TestV223CrossMarketplaceDeps:
         report = ValidationReport()
         validate_manifest(plugin_dir, report, hosting_marketplace=hosting)
         majors = [
-            r.message for r in report.results
-            if r.level == "MAJOR" and "allowedDependencyMarketplaces" in r.message
+            r.message for r in report.results if r.level == "MAJOR" and "allowedDependencyMarketplaces" in r.message
         ]
-        passed = [
-            r.message for r in report.results
-            if r.level == "PASSED" and "allowlisted" in r.message
-        ]
+        passed = [r.message for r in report.results if r.level == "PASSED" and "allowlisted" in r.message]
         assert not majors, f"Unexpected MAJOR for allowlisted dep: {majors}"
         assert passed, (
             "Expected PASSED for allowlisted cross-market dep; got PASSED: "
@@ -2291,21 +2282,19 @@ class TestV223CrossMarketplaceDeps:
             "name": "consumer",
             "version": "1.0.0",
             "description": "x",
-            "dependencies": [
-                {"name": "shared-lib", "marketplace": "other-market"}
-            ],
+            "dependencies": [{"name": "shared-lib", "marketplace": "other-market"}],
         }
         plugin_dir = _write_plugin(tmp_path, "xm-none", manifest)
         hosting = {"name": "host-market"}  # no allowCrossMarketplaceDependenciesOn
         report = ValidationReport()
         validate_manifest(plugin_dir, report, hosting_marketplace=hosting)
         majors = [
-            r.message for r in report.results
+            r.message
+            for r in report.results
             if r.level == "MAJOR" and "allowCrossMarketplaceDependenciesOn" in r.message
         ]
         assert majors, (
-            "Expected MAJOR without allowlist; got MAJORs: "
-            f"{[r.message for r in report.results if r.level == 'MAJOR']}"
+            f"Expected MAJOR without allowlist; got MAJORs: {[r.message for r in report.results if r.level == 'MAJOR']}"
         )
 
     def test_cross_marketplace_dep_not_in_allowlist_major(self, tmp_path):
@@ -2314,9 +2303,7 @@ class TestV223CrossMarketplaceDeps:
             "name": "consumer",
             "version": "1.0.0",
             "description": "x",
-            "dependencies": [
-                {"name": "shared-lib", "marketplace": "other-market"}
-            ],
+            "dependencies": [{"name": "shared-lib", "marketplace": "other-market"}],
         }
         plugin_dir = _write_plugin(tmp_path, "xm-notin", manifest)
         hosting = {
@@ -2326,9 +2313,9 @@ class TestV223CrossMarketplaceDeps:
         report = ValidationReport()
         validate_manifest(plugin_dir, report, hosting_marketplace=hosting)
         majors = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any(
-            "other-market" in m and "trusted-a" in m for m in majors
-        ), f"Expected MAJOR listing allowlist; got MAJORs: {majors}"
+        assert any("other-market" in m and "trusted-a" in m for m in majors), (
+            f"Expected MAJOR listing allowlist; got MAJORs: {majors}"
+        )
 
     def test_same_marketplace_dep_no_cross_check(self, tmp_path):
         """Dep pointing at the SAME hosting marketplace → no cross-check fire."""
@@ -2336,17 +2323,14 @@ class TestV223CrossMarketplaceDeps:
             "name": "consumer",
             "version": "1.0.0",
             "description": "x",
-            "dependencies": [
-                {"name": "sibling", "marketplace": "host-market"}
-            ],
+            "dependencies": [{"name": "sibling", "marketplace": "host-market"}],
         }
         plugin_dir = _write_plugin(tmp_path, "xm-same", manifest)
         hosting = {"name": "host-market"}  # no allowlist — same marketplace OK
         report = ValidationReport()
         validate_manifest(plugin_dir, report, hosting_marketplace=hosting)
         blocked = [
-            r.message for r in report.results
-            if r.level == "MAJOR" and "allowedDependencyMarketplaces" in r.message
+            r.message for r in report.results if r.level == "MAJOR" and "allowedDependencyMarketplaces" in r.message
         ]
         assert not blocked, f"Same-market dep must not be blocked; got MAJORs: {blocked}"
 
@@ -2356,26 +2340,365 @@ class TestV223CrossMarketplaceDeps:
             "name": "consumer",
             "version": "1.0.0",
             "description": "x",
-            "dependencies": [
-                {"name": "shared-lib", "marketplace": "other-market"}
-            ],
+            "dependencies": [{"name": "shared-lib", "marketplace": "other-market"}],
         }
         plugin_dir = _write_plugin(tmp_path, "xm-noctx", manifest)
         report = ValidationReport()
         validate_manifest(plugin_dir, report)  # no hosting_marketplace
-        infos = [
-            r.message for r in report.results
-            if r.level == "INFO" and "cross-marketplace" in r.message
-        ]
+        infos = [r.message for r in report.results if r.level == "INFO" and "cross-marketplace" in r.message]
         blocked = [
-            r.message for r in report.results
-            if r.level == "MAJOR" and "allowedDependencyMarketplaces" in r.message
+            r.message for r in report.results if r.level == "MAJOR" and "allowedDependencyMarketplaces" in r.message
         ]
         assert infos, (
             "Expected INFO for missing hosting context; got INFO: "
             f"{[r.message for r in report.results if r.level == 'INFO']}"
         )
         assert not blocked
+
+
+class TestCrossMarketplaceHostingDiscovery:
+    """TRDD-20108ab7 (2026-05-10): hosting-marketplace auto-discovery.
+
+    The library functions ``validate_dependencies`` and ``validate_manifest``
+    accept ``hosting_marketplace=`` but the CLI orchestrator never threads
+    it through, so end-users never benefit from cross-marketplace allowlist
+    enforcement when running ``validate_plugin <path>``. This class adds
+    deterministic auto-discovery of the hosting marketplace context from
+    well-known on-disk patterns:
+
+      1. **Layout C**: the plugin's own ``.claude-plugin/marketplace.json``
+         (marketplace-in-plugin — covered by Layout C cross-validation).
+      2. **Layout B**: parent directory contains
+         ``.claude-plugin/marketplace.json`` (nested monorepo).
+      3. **Cache layout**: the plugin lives under
+         ``~/.claude/plugins/cache/<marketplace-name>/<plugin>/`` — the cache
+         parent's ``marketplace.json`` is the hosting marketplace.
+
+    When NONE of those patterns match, no auto-discovery happens and the
+    INFO-when-no-context behaviour from the v2.22.3 baseline kicks in.
+    """
+
+    def test_layout_c_self_marketplace_discovered(self, tmp_path):
+        """Layout C plugin: ``.claude-plugin/marketplace.json`` at plugin root."""
+        from validate_plugin import discover_hosting_marketplace
+
+        plugin_dir = tmp_path / "self-mkt-plugin"
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "self-mkt-plugin", "version": "1.0.0"})
+        )
+        (plugin_dir / ".claude-plugin" / "marketplace.json").write_text(
+            json.dumps(
+                {
+                    "name": "self-mkt",
+                    "owner": {"name": "x"},
+                    "plugins": [{"name": "self-mkt-plugin", "source": "./"}],
+                    "allowCrossMarketplaceDependenciesOn": ["other-mkt"],
+                }
+            )
+        )
+        hosting = discover_hosting_marketplace(plugin_dir)
+        assert hosting is not None, "Layout C marketplace must be discovered"
+        assert hosting.get("name") == "self-mkt"
+        assert hosting.get("allowCrossMarketplaceDependenciesOn") == ["other-mkt"]
+
+    def test_layout_b_parent_marketplace_discovered(self, tmp_path):
+        """Layout B plugin: parent ``./.claude-plugin/marketplace.json`` exists."""
+        from validate_plugin import discover_hosting_marketplace
+
+        marketplace_root = tmp_path / "monorepo"
+        (marketplace_root / ".claude-plugin").mkdir(parents=True)
+        (marketplace_root / ".claude-plugin" / "marketplace.json").write_text(
+            json.dumps(
+                {
+                    "name": "monorepo-mkt",
+                    "owner": {"name": "x"},
+                    "plugins": [{"name": "nested-plugin", "source": "./plugins/nested-plugin"}],
+                    "allowCrossMarketplaceDependenciesOn": ["external-mkt"],
+                }
+            )
+        )
+        plugin_dir = marketplace_root / "plugins" / "nested-plugin"
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "nested-plugin", "version": "1.0.0"})
+        )
+        hosting = discover_hosting_marketplace(plugin_dir)
+        assert hosting is not None, "Layout B parent marketplace must be discovered"
+        assert hosting.get("name") == "monorepo-mkt"
+        assert hosting.get("allowCrossMarketplaceDependenciesOn") == ["external-mkt"]
+
+    def test_cache_layout_marketplace_discovered(self, tmp_path):
+        """Cache layout: ``~/.claude/plugins/cache/<mkt>/<plugin>/`` shape."""
+        from validate_plugin import discover_hosting_marketplace
+
+        cache_mkt = tmp_path / "cache" / "host-cache-mkt"
+        (cache_mkt / ".claude-plugin").mkdir(parents=True)
+        (cache_mkt / ".claude-plugin" / "marketplace.json").write_text(
+            json.dumps(
+                {
+                    "name": "host-cache-mkt",
+                    "owner": {"name": "x"},
+                    "plugins": [{"name": "cached-plugin", "source": "./cached-plugin"}],
+                }
+            )
+        )
+        plugin_dir = cache_mkt / "cached-plugin"
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "cached-plugin", "version": "1.0.0"})
+        )
+        hosting = discover_hosting_marketplace(plugin_dir)
+        assert hosting is not None, "Cache-layout marketplace must be discovered"
+        assert hosting.get("name") == "host-cache-mkt"
+
+    def test_standalone_plugin_no_discovery(self, tmp_path):
+        """Standalone plugin (no marketplace.json anywhere) → returns None."""
+        from validate_plugin import discover_hosting_marketplace
+
+        plugin_dir = tmp_path / "standalone-plugin"
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "standalone-plugin", "version": "1.0.0"})
+        )
+        hosting = discover_hosting_marketplace(plugin_dir)
+        assert hosting is None, "Standalone plugin must yield None (no auto-discovery)"
+
+    def test_layout_c_takes_priority_over_parent(self, tmp_path):
+        """Layout C (self-marketplace) wins over a parent marketplace."""
+        from validate_plugin import discover_hosting_marketplace
+
+        # Outer marketplace at parent
+        outer = tmp_path / "outer"
+        (outer / ".claude-plugin").mkdir(parents=True)
+        (outer / ".claude-plugin" / "marketplace.json").write_text(
+            json.dumps(
+                {
+                    "name": "outer-mkt",
+                    "owner": {"name": "x"},
+                    "plugins": [],
+                }
+            )
+        )
+        # Layout C plugin nested INSIDE outer (own marketplace.json)
+        plugin_dir = outer / "self-mkt-plugin"
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "self-mkt-plugin", "version": "1.0.0"})
+        )
+        (plugin_dir / ".claude-plugin" / "marketplace.json").write_text(
+            json.dumps(
+                {
+                    "name": "self-mkt",
+                    "owner": {"name": "x"},
+                    "plugins": [{"name": "self-mkt-plugin", "source": "./"}],
+                }
+            )
+        )
+        hosting = discover_hosting_marketplace(plugin_dir)
+        assert hosting is not None
+        assert hosting.get("name") == "self-mkt", "Layout C self-marketplace must take priority over parent marketplace"
+
+    def test_malformed_marketplace_json_yields_none(self, tmp_path):
+        """Malformed marketplace.json must NOT raise — returns None gracefully."""
+        from validate_plugin import discover_hosting_marketplace
+
+        marketplace_root = tmp_path / "broken-mkt"
+        (marketplace_root / ".claude-plugin").mkdir(parents=True)
+        (marketplace_root / ".claude-plugin" / "marketplace.json").write_text("{not valid json")
+        plugin_dir = marketplace_root / "child-plugin"
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "child-plugin", "version": "1.0.0"})
+        )
+        # Must not raise — returns None and lets the standard INFO message fire
+        hosting = discover_hosting_marketplace(plugin_dir)
+        assert hosting is None
+
+    def test_validate_manifest_auto_discovers_layout_b_and_blocks_cross_market(self, tmp_path):
+        """End-to-end: Layout B plugin with cross-mkt dep + no allowlist → MAJOR.
+
+        This proves the auto-discovery is properly threaded so end-users
+        running ``validate_manifest(plugin_dir, report)`` (no explicit
+        ``hosting_marketplace=``) get the cross-marketplace allowlist
+        enforcement that was previously gated on explicit context.
+        """
+        from validate_plugin import validate_manifest
+
+        marketplace_root = tmp_path / "host-mkt"
+        (marketplace_root / ".claude-plugin").mkdir(parents=True)
+        (marketplace_root / ".claude-plugin" / "marketplace.json").write_text(
+            json.dumps(
+                {
+                    "name": "host-mkt",
+                    "owner": {"name": "x"},
+                    "plugins": [{"name": "consumer", "source": "./plugins/consumer"}],
+                    # NO allowCrossMarketplaceDependenciesOn — triggers MAJOR
+                }
+            )
+        )
+        plugin_dir = marketplace_root / "plugins" / "consumer"
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "name": "consumer",
+                    "version": "1.0.0",
+                    "description": "x",
+                    "dependencies": [{"name": "shared-lib", "marketplace": "other-mkt"}],
+                }
+            )
+        )
+        report = ValidationReport()
+        # NO hosting_marketplace= passed — must auto-discover.
+        validate_manifest(plugin_dir, report)
+        majors = [
+            r.message
+            for r in report.results
+            if r.level == "MAJOR" and "allowCrossMarketplaceDependenciesOn" in r.message
+        ]
+        assert majors, (
+            "Expected MAJOR via auto-discovered Layout B context; got MAJORs: "
+            f"{[r.message for r in report.results if r.level == 'MAJOR']}"
+        )
+
+    def test_cli_marketplace_context_flag_threads_to_validator(self, tmp_path, monkeypatch):
+        """CLI ``--marketplace-context PATH`` resolves and is threaded into validation.
+
+        Black-box test of the CLI orchestration: a plugin with a
+        cross-marketplace dep that points OUTSIDE the allowlist must exit
+        non-zero when the user passes ``--marketplace-context`` pointing at
+        a marketplace.json that does NOT allowlist the target.
+        """
+        import subprocess
+
+        # Plugin with cross-mkt dep
+        plugin_dir = tmp_path / "consumer"
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "name": "consumer",
+                    "version": "1.0.0",
+                    "description": "x",
+                    "dependencies": [{"name": "shared-lib", "marketplace": "other-mkt"}],
+                }
+            )
+        )
+        # Marketplace context with NO allowlist
+        ctx_dir = tmp_path / "host-mkt"
+        (ctx_dir / ".claude-plugin").mkdir(parents=True)
+        (ctx_dir / ".claude-plugin" / "marketplace.json").write_text(
+            json.dumps(
+                {
+                    "name": "host-mkt",
+                    "owner": {"name": "x"},
+                    "plugins": [{"name": "consumer", "source": "./../consumer"}],
+                }
+            )
+        )
+        validate_script = scripts_dir / "validate_plugin.py"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(validate_script),
+                "--marketplace-context",
+                str(ctx_dir),
+                "--no-color",
+                str(plugin_dir),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            cwd=str(scripts_dir),
+        )
+        # The script exits non-zero when MAJORs were emitted (exit 2 = MAJOR).
+        # The combined stdout+stderr must mention the cross-marketplace error.
+        combined = result.stdout + result.stderr
+        assert "allowCrossMarketplaceDependenciesOn" in combined or "cross-marketplace" in combined, (
+            f"CLI must surface the cross-marketplace block message. stdout/stderr was:\n{combined}"
+        )
+
+    def test_cli_marketplace_context_invalid_path_warns(self, tmp_path):
+        """Invalid ``--marketplace-context`` path yields a warning, NOT a crash."""
+        import subprocess
+
+        plugin_dir = tmp_path / "p"
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "p", "version": "1.0.0", "description": "x"})
+        )
+        validate_script = scripts_dir / "validate_plugin.py"
+        nonexistent = tmp_path / "does-not-exist"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(validate_script),
+                "--marketplace-context",
+                str(nonexistent),
+                "--no-color",
+                str(plugin_dir),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            cwd=str(scripts_dir),
+        )
+        # Process must NOT crash with a stack trace
+        assert "Traceback" not in result.stderr, (
+            f"CLI must not crash on invalid --marketplace-context. stderr:\n{result.stderr}"
+        )
+        assert "did not resolve" in result.stderr, (
+            f"Expected warning about unresolved context. stderr:\n{result.stderr}"
+        )
+
+    def test_validate_manifest_explicit_context_overrides_auto_discovery(self, tmp_path):
+        """Explicit ``hosting_marketplace=`` always wins over auto-discovery."""
+        from validate_plugin import validate_manifest
+
+        # Set up Layout B with allowlist that WOULD pass
+        marketplace_root = tmp_path / "host-mkt"
+        (marketplace_root / ".claude-plugin").mkdir(parents=True)
+        (marketplace_root / ".claude-plugin" / "marketplace.json").write_text(
+            json.dumps(
+                {
+                    "name": "host-mkt",
+                    "owner": {"name": "x"},
+                    "plugins": [],
+                    "allowCrossMarketplaceDependenciesOn": ["other-mkt"],  # would allow
+                }
+            )
+        )
+        plugin_dir = marketplace_root / "plugins" / "consumer"
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "name": "consumer",
+                    "version": "1.0.0",
+                    "description": "x",
+                    "dependencies": [{"name": "shared-lib", "marketplace": "other-mkt"}],
+                }
+            )
+        )
+        report = ValidationReport()
+        # Explicit context with EMPTY allowlist must override the auto-discovered
+        # one and produce a MAJOR even though auto-discovery would have passed.
+        validate_manifest(
+            plugin_dir,
+            report,
+            hosting_marketplace={"name": "override-mkt"},  # no allowlist
+        )
+        majors = [
+            r.message
+            for r in report.results
+            if r.level == "MAJOR" and "allowCrossMarketplaceDependenciesOn" in r.message
+        ]
+        assert majors, (
+            "Explicit hosting_marketplace= must override the auto-discovered "
+            "marketplace. Expected MAJOR; got MAJORs: "
+            f"{[r.message for r in report.results if r.level == 'MAJOR']}"
+        )
 
 
 class TestEmpiricalDocsBugsAdded20260418:
@@ -2421,7 +2744,9 @@ class TestEmpiricalDocsBugsAdded20260418:
     def test_hooks_pointing_at_default_file_no_leading_dotslash(self, tmp_path):
         """Also catches 'hooks/hooks.json' without './' prefix."""
         manifest = {
-            "name": "p", "version": "1.0.0", "description": "x",
+            "name": "p",
+            "version": "1.0.0",
+            "description": "x",
             "hooks": "hooks/hooks.json",
         }
         plugin_dir = self._make_plugin_dir(tmp_path, manifest)
@@ -2436,19 +2761,17 @@ class TestEmpiricalDocsBugsAdded20260418:
     def test_hooks_pointing_at_non_default_file_no_major(self, tmp_path):
         """hooks: './hooks/extra.json' → no cascade-MAJOR (it's a legitimate non-default path)."""
         manifest = {
-            "name": "p", "version": "1.0.0", "description": "x",
+            "name": "p",
+            "version": "1.0.0",
+            "description": "x",
             "hooks": "./hooks/extra.json",
         }
         plugin_dir = self._make_plugin_dir(tmp_path, manifest)
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
-        cascade_majors = [
-            r for r in report.results
-            if r.level == "MAJOR" and "hook-load-failed" in r.message
-        ]
+        cascade_majors = [r for r in report.results if r.level == "MAJOR" and "hook-load-failed" in r.message]
         assert cascade_majors == [], (
-            f"Non-default hooks path should not trigger cascade MAJOR, got: "
-            f"{[m.message for m in cascade_majors]}"
+            f"Non-default hooks path should not trigger cascade MAJOR, got: {[m.message for m in cascade_majors]}"
         )
 
     # --- Tier 1.2: agents folder paths → MAJOR with helpful pre-empt ---
@@ -2456,14 +2779,17 @@ class TestEmpiricalDocsBugsAdded20260418:
     def test_agents_string_folder_path_emits_major(self, tmp_path):
         """agents: './custom-agents/' (string folder) → MAJOR."""
         manifest = {
-            "name": "p", "version": "1.0.0", "description": "x",
+            "name": "p",
+            "version": "1.0.0",
+            "description": "x",
             "agents": "./custom-agents/",
         }
         plugin_dir = self._make_plugin_dir(tmp_path, manifest)
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
         majors = [
-            r for r in report.results
+            r
+            for r in report.results
             if r.level == "MAJOR" and "agents" in r.message and "folder path" in r.message.lower()
         ]
         assert len(majors) >= 1, (
@@ -2477,14 +2803,17 @@ class TestEmpiricalDocsBugsAdded20260418:
     def test_agents_array_of_folder_paths_emits_major(self, tmp_path):
         """agents: ['./custom-agents/'] (array of folders) → MAJOR."""
         manifest = {
-            "name": "p", "version": "1.0.0", "description": "x",
+            "name": "p",
+            "version": "1.0.0",
+            "description": "x",
             "agents": ["./custom-agents/", "./more-agents/"],
         }
         plugin_dir = self._make_plugin_dir(tmp_path, manifest)
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
         majors = [
-            r for r in report.results
+            r
+            for r in report.results
             if r.level == "MAJOR" and "agents" in r.message and "folder path" in r.message.lower()
         ]
         # Should emit one MAJOR per folder path
@@ -2496,14 +2825,17 @@ class TestEmpiricalDocsBugsAdded20260418:
     def test_agents_array_of_file_paths_no_major(self, tmp_path):
         """agents: ['./custom-agents/foo.md'] (array of .md files) → no folder-path MAJOR."""
         manifest = {
-            "name": "p", "version": "1.0.0", "description": "x",
+            "name": "p",
+            "version": "1.0.0",
+            "description": "x",
             "agents": ["./custom-agents/foo.md", "./agents/bar.md"],
         }
         plugin_dir = self._make_plugin_dir(tmp_path, manifest)
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
         folder_majors = [
-            r for r in report.results
+            r
+            for r in report.results
             if r.level == "MAJOR" and "agents" in r.message and "folder path" in r.message.lower()
         ]
         assert folder_majors == [], (
@@ -2514,19 +2846,21 @@ class TestEmpiricalDocsBugsAdded20260418:
     def test_agents_string_file_path_no_major(self, tmp_path):
         """agents: './custom-agents/foo.md' (string .md file) → no folder-path MAJOR."""
         manifest = {
-            "name": "p", "version": "1.0.0", "description": "x",
+            "name": "p",
+            "version": "1.0.0",
+            "description": "x",
             "agents": "./custom-agents/foo.md",
         }
         plugin_dir = self._make_plugin_dir(tmp_path, manifest)
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
         folder_majors = [
-            r for r in report.results
+            r
+            for r in report.results
             if r.level == "MAJOR" and "agents" in r.message and "folder path" in r.message.lower()
         ]
         assert folder_majors == [], (
-            f"String .md file path should not trigger folder-path MAJOR, got: "
-            f"{[m.message for m in folder_majors]}"
+            f"String .md file path should not trigger folder-path MAJOR, got: {[m.message for m in folder_majors]}"
         )
 
     # --- Audit fixes: edge cases for path normalization, array forms, no-double-fire ---
@@ -2543,14 +2877,17 @@ class TestEmpiricalDocsBugsAdded20260418:
         Net effect: exactly ONE MAJOR finding (no CRITICAL, no double-fire).
         """
         manifest = {
-            "name": "p", "version": "1.0.0", "description": "x",
+            "name": "p",
+            "version": "1.0.0",
+            "description": "x",
             "agents": "./agents/",
         }
         plugin_dir = self._make_plugin_dir(tmp_path, manifest)
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
         agents_majors = [
-            r for r in report.results
+            r
+            for r in report.results
             if r.level == "MAJOR" and "agents" in r.message and "folder path" in r.message.lower()
         ]
         assert len(agents_majors) == 1, (
@@ -2562,10 +2899,7 @@ class TestEmpiricalDocsBugsAdded20260418:
             f"Expected default-folder hint in message, got: {agents_majors[0].message}"
         )
         # No CRITICAL for agents (auto_discovered_defaults check skips agents)
-        agents_criticals = [
-            r for r in report.results
-            if r.level == "CRITICAL" and "agents" in r.message
-        ]
+        agents_criticals = [r for r in report.results if r.level == "CRITICAL" and "agents" in r.message]
         assert agents_criticals == [], (
             f"agents: './agents/' should not emit CRITICAL (only the dedicated MAJOR), got: "
             f"{[r.message for r in agents_criticals]}"
@@ -2574,16 +2908,15 @@ class TestEmpiricalDocsBugsAdded20260418:
     def test_hooks_array_form_pointing_at_default_emits_major(self, tmp_path):
         """hooks: ['./hooks/hooks.json'] (array form pointing at default) → MAJOR."""
         manifest = {
-            "name": "p", "version": "1.0.0", "description": "x",
+            "name": "p",
+            "version": "1.0.0",
+            "description": "x",
             "hooks": ["./hooks/hooks.json"],
         }
         plugin_dir = self._make_plugin_dir(tmp_path, manifest)
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
-        majors = [
-            r for r in report.results
-            if r.level == "MAJOR" and "hook-load-failed" in r.message
-        ]
+        majors = [r for r in report.results if r.level == "MAJOR" and "hook-load-failed" in r.message]
         assert len(majors) >= 1, (
             f"Expected MAJOR for hooks array containing default file, got: "
             f"{[r.message for r in report.results if r.level == 'MAJOR']}"
@@ -2595,16 +2928,15 @@ class TestEmpiricalDocsBugsAdded20260418:
         Audit fix: the new _is_default_hooks_path collapses './' segments.
         """
         manifest = {
-            "name": "p", "version": "1.0.0", "description": "x",
+            "name": "p",
+            "version": "1.0.0",
+            "description": "x",
             "hooks": "./hooks/./hooks.json",
         }
         plugin_dir = self._make_plugin_dir(tmp_path, manifest)
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
-        majors = [
-            r for r in report.results
-            if r.level == "MAJOR" and "hook-load-failed" in r.message
-        ]
+        majors = [r for r in report.results if r.level == "MAJOR" and "hook-load-failed" in r.message]
         assert len(majors) >= 1, (
             f"Expected MAJOR for hooks path with normalization quirks, got: "
             f"{[r.message for r in report.results if r.level == 'MAJOR']}"
@@ -2660,8 +2992,7 @@ class TestManifestReferencedDirsSuppressNonStandardWarning:
         # bump and originally checked for WARNING; helper now matches the
         # MAJOR level so the existing assertions stay meaningful.
         return any(
-            r.level == "MAJOR" and f"'{dirname}/'" in r.message and "Non-standard" in r.message
-            for r in report.results
+            r.level == "MAJOR" and f"'{dirname}/'" in r.message and "Non-standard" in r.message for r in report.results
         )
 
     def test_mcp_json_command_arg_reference_suppresses_warning(self, tmp_path):
@@ -2848,13 +3179,36 @@ class TestKnownDirsExpandedV2_23_2:
         "dirname",
         [
             # Common cross-cutting dirs surfaced empirically:
-            "prompts", "demo", "demos", "eval", "evals",
-            "node_modules", "output", "outputs",
-            "server", "public", "static", "web",
-            "shared", "settings", "guidances", "plugins",
+            "prompts",
+            "demo",
+            "demos",
+            "eval",
+            "evals",
+            "node_modules",
+            "output",
+            "outputs",
+            "server",
+            "public",
+            "static",
+            "web",
+            "shared",
+            "settings",
+            "guidances",
+            "plugins",
             # Language source dirs (plugins shipping native binaries):
-            "rust", "go", "python", "node", "ts", "js",
-            "java", "kotlin", "swift", "ruby", "csharp", "cpp", "c",
+            "rust",
+            "go",
+            "python",
+            "node",
+            "ts",
+            "js",
+            "java",
+            "kotlin",
+            "swift",
+            "ruby",
+            "csharp",
+            "cpp",
+            "c",
         ],
     )
     def test_common_dir_no_longer_warns(self, tmp_path, dirname):
@@ -2942,10 +3296,16 @@ class TestMarketplaceShortCircuit:
         # The marketplace short-circuit lives in main(), so we shell out
         # rather than calling validate_structure directly.
         import subprocess
+
         result = subprocess.run(
             [
-                "uv", "run", "--with", "pyyaml", "python",
-                "scripts/validate_plugin.py", str(plugin_path),
+                "uv",
+                "run",
+                "--with",
+                "pyyaml",
+                "python",
+                "scripts/validate_plugin.py",
+                str(plugin_path),
             ],
             capture_output=True,
             text=True,
@@ -2958,14 +3318,18 @@ class TestMarketplaceShortCircuit:
         marketplace_dir = tmp_path / "my-mkt"
         (marketplace_dir / ".claude-plugin").mkdir(parents=True)
         (marketplace_dir / ".claude-plugin" / "marketplace.json").write_text(
-            json.dumps({
-                "name": "my-mkt",
-                "owner": {"name": "x"},
-                "plugins": [{"name": "p1", "source": "./p1"}],
-            })
+            json.dumps(
+                {
+                    "name": "my-mkt",
+                    "owner": {"name": "x"},
+                    "plugins": [{"name": "p1", "source": "./p1"}],
+                }
+            )
         )
         result = self._run_validate_plugin_main(marketplace_dir)
-        assert result.returncode == 1, f"Expected exit code 1, got {result.returncode}\nstderr: {result.stderr}\nstdout: {result.stdout}"
+        assert result.returncode == 1, (
+            f"Expected exit code 1, got {result.returncode}\nstderr: {result.stderr}\nstdout: {result.stdout}"
+        )
         assert "MARKETPLACE folder" in result.stderr, f"Expected marketplace bail-out hint. Got stderr: {result.stderr}"
 
     def test_plugin_with_both_manifests_proceeds_normally(self, tmp_path):
@@ -2996,6 +3360,7 @@ class TestPhase14UserConfigSchema:
     def _validate_uc(self, uc):  # type: ignore[no-untyped-def]
         from cpv_validation_common import ValidationReport
         from validate_plugin import validate_user_config_structure
+
         report = ValidationReport()
         validate_user_config_structure({"userConfig": uc}, report)
         return list(report.results)
@@ -3022,24 +3387,16 @@ class TestPhase14UserConfigSchema:
 
     def test_type_enum_unknown_value_major(self) -> None:
         results = self._validate_uc({"k": {"type": "uuid", "title": "T", "description": "D"}})
-        assert any(
-            "is not a valid type" in r.message and "uuid" in r.message
-            for r in results
-            if r.level == "MAJOR"
-        )
+        assert any("is not a valid type" in r.message and "uuid" in r.message for r in results if r.level == "MAJOR")
 
     def test_min_max_on_non_number_minor(self) -> None:
-        results = self._validate_uc({
-            "k": {"type": "string", "title": "T", "description": "D", "min": 0, "max": 100}
-        })
+        results = self._validate_uc({"k": {"type": "string", "title": "T", "description": "D", "min": 0, "max": 100}})
         minor_msgs = [r.message for r in results if r.level == "MINOR"]
         assert any("min" in m and "only meaningful for type: number" in m for m in minor_msgs)
         assert any("max" in m and "only meaningful for type: number" in m for m in minor_msgs)
 
     def test_multiple_on_non_string_minor(self) -> None:
-        results = self._validate_uc({
-            "k": {"type": "number", "title": "T", "description": "D", "multiple": True}
-        })
+        results = self._validate_uc({"k": {"type": "number", "title": "T", "description": "D", "multiple": True}})
         assert any(
             "multiple" in r.message and "only meaningful for type: string" in r.message
             for r in results
@@ -3047,50 +3404,42 @@ class TestPhase14UserConfigSchema:
         )
 
     def test_invalid_identifier_key_major(self) -> None:
-        results = self._validate_uc({
-            "1invalid_start_digit": {"type": "string", "title": "T", "description": "D"}
-        })
-        assert any(
-            "must be a valid identifier" in r.message
-            for r in results
-            if r.level == "MAJOR"
-        )
+        results = self._validate_uc({"1invalid_start_digit": {"type": "string", "title": "T", "description": "D"}})
+        assert any("must be a valid identifier" in r.message for r in results if r.level == "MAJOR")
 
     def test_unknown_subfield_minor(self) -> None:
-        results = self._validate_uc({
-            "k": {"type": "string", "title": "T", "description": "D", "regex": "^[A-Z]+$"}
-        })
+        results = self._validate_uc({"k": {"type": "string", "title": "T", "description": "D", "regex": "^[A-Z]+$"}})
         assert any(
-            "regex" in r.message and "not a recognized sub-field" in r.message
-            for r in results
-            if r.level == "MINOR"
+            "regex" in r.message and "not a recognized sub-field" in r.message for r in results if r.level == "MINOR"
         )
 
     def test_complete_valid_config_no_findings(self) -> None:
-        results = self._validate_uc({
-            "api_url": {
-                "type": "string",
-                "title": "API URL",
-                "description": "Base URL for the API",
-                "default": "https://api.example.com",
-                "required": True,
-            },
-            "api_key": {
-                "type": "string",
-                "title": "API Key",
-                "description": "Auth token",
-                "sensitive": True,
-                "required": True,
-            },
-            "max_retries": {
-                "type": "number",
-                "title": "Max retries",
-                "description": "Maximum retry attempts",
-                "default": 3,
-                "min": 0,
-                "max": 10,
-            },
-        })
+        results = self._validate_uc(
+            {
+                "api_url": {
+                    "type": "string",
+                    "title": "API URL",
+                    "description": "Base URL for the API",
+                    "default": "https://api.example.com",
+                    "required": True,
+                },
+                "api_key": {
+                    "type": "string",
+                    "title": "API Key",
+                    "description": "Auth token",
+                    "sensitive": True,
+                    "required": True,
+                },
+                "max_retries": {
+                    "type": "number",
+                    "title": "Max retries",
+                    "description": "Maximum retry attempts",
+                    "default": 3,
+                    "min": 0,
+                    "max": 10,
+                },
+            }
+        )
         critical = [r for r in results if r.level == "CRITICAL"]
         major = [r for r in results if r.level == "MAJOR"]
         minor = [r for r in results if r.level == "MINOR"]
@@ -3109,31 +3458,27 @@ class TestPhase15BundledSlashCollision:
 
     def test_builtin_set_includes_recent_additions(self) -> None:
         from cpv_validation_common import BUILTIN_SLASH_COMMANDS
+
         # v2.1.110-121 era additions
-        for name in ("usage", "tui", "focus", "ultrareview", "loop", "proactive",
-                     "recap", "less-permission-prompts"):
+        for name in ("usage", "tui", "focus", "ultrareview", "loop", "proactive", "recap", "less-permission-prompts"):
             assert name in BUILTIN_SLASH_COMMANDS, f"{name} missing from bundled list"
 
     def test_command_named_loop_emits_warning(self, tmp_path: Path) -> None:
         from validate_command import validate_command
+
         cmd = tmp_path / "loop.md"
-        cmd.write_text(
-            "---\nname: loop\ndescription: my custom loop\n---\n\n"
-            "Body of the command.\n"
-        )
+        cmd.write_text("---\nname: loop\ndescription: my custom loop\n---\n\nBody of the command.\n")
         report = validate_command(cmd)
         msgs = [r.message for r in report.results if r.level == "WARNING"]
         assert any("collides with a built-in" in m and "/loop" in m for m in msgs)
 
     def test_command_with_unique_name_no_warning(self, tmp_path: Path) -> None:
         from validate_command import validate_command
+
         cmd = tmp_path / "my-very-unique-name.md"
-        cmd.write_text(
-            "---\nname: my-very-unique-name\ndescription: x\n---\n\nbody\n"
-        )
+        cmd.write_text("---\nname: my-very-unique-name\ndescription: x\n---\n\nbody\n")
         report = validate_command(cmd)
-        msgs = [r.message for r in report.results if r.level == "WARNING"
-                and "collides with a built-in" in r.message]
+        msgs = [r.message for r in report.results if r.level == "WARNING" and "collides with a built-in" in r.message]
         assert msgs == []
 
 
@@ -3145,12 +3490,17 @@ class TestPhase15BundledSlashCollision:
 class TestPhase16LayoutC:
     """A repo that is BOTH a plugin AND a marketplace must self-reference."""
 
-    def _run_layout_c(self, tmp_path: Path, plugin_name: str = "demo",
-                      plugin_version: str = "1.0.0",
-                      market_self_version: str | None = None,
-                      market_self_source: str = "./",
-                      include_self: bool = True):  # type: ignore[no-untyped-def]
+    def _run_layout_c(
+        self,
+        tmp_path: Path,
+        plugin_name: str = "demo",
+        plugin_version: str = "1.0.0",
+        market_self_version: str | None = None,
+        market_self_source: str = "./",
+        include_self: bool = True,
+    ):  # type: ignore[no-untyped-def]
         from cpv_validation_common import ValidationReport
+
         plugin_dir = tmp_path / "demo-repo"
         plugin_dir.mkdir()
         (plugin_dir / ".claude-plugin").mkdir()
@@ -3164,13 +3514,16 @@ class TestPhase16LayoutC:
                 entry["version"] = market_self_version
             plugins_arr.append(entry)
         (plugin_dir / ".claude-plugin" / "marketplace.json").write_text(
-            json.dumps({
-                "name": plugin_name,
-                "owner": {"name": "x", "email": "x@example.com"},
-                "plugins": plugins_arr,
-            })
+            json.dumps(
+                {
+                    "name": plugin_name,
+                    "owner": {"name": "x", "email": "x@example.com"},
+                    "plugins": plugins_arr,
+                }
+            )
         )
         from validate_plugin import validate_layout_c_consistency
+
         report = ValidationReport()
         validate_layout_c_consistency(plugin_dir, report)
         return report
@@ -3184,36 +3537,21 @@ class TestPhase16LayoutC:
 
     def test_layout_c_missing_self_reference_major(self, tmp_path: Path) -> None:
         report = self._run_layout_c(tmp_path, include_self=False)
-        assert any(
-            "does not list a self-reference" in r.message
-            for r in report.results
-            if r.level == "MAJOR"
-        )
+        assert any("does not list a self-reference" in r.message for r in report.results if r.level == "MAJOR")
 
     def test_layout_c_wrong_source_major(self, tmp_path: Path) -> None:
-        report = self._run_layout_c(
-            tmp_path, market_self_source="github://my-org/demo-repo"
-        )
-        assert any(
-            "must be './'" in r.message
-            for r in report.results
-            if r.level == "MAJOR"
-        )
+        report = self._run_layout_c(tmp_path, market_self_source="github://my-org/demo-repo")
+        assert any("must be './'" in r.message for r in report.results if r.level == "MAJOR")
 
     def test_layout_c_version_drift_minor(self, tmp_path: Path) -> None:
-        report = self._run_layout_c(
-            tmp_path, plugin_version="1.0.0", market_self_version="1.1.0"
-        )
-        assert any(
-            "version" in r.message and "differs from" in r.message
-            for r in report.results
-            if r.level == "MINOR"
-        )
+        report = self._run_layout_c(tmp_path, plugin_version="1.0.0", market_self_version="1.1.0")
+        assert any("version" in r.message and "differs from" in r.message for r in report.results if r.level == "MINOR")
 
     def test_layout_c_validator_skipped_for_plain_plugin(self, tmp_path: Path) -> None:
         """Plain plugin (no marketplace.json) must not trigger Layout C checks."""
         from cpv_validation_common import ValidationReport
         from validate_plugin import validate_layout_c_consistency
+
         plugin_dir = tmp_path / "plain"
         plugin_dir.mkdir()
         (plugin_dir / ".claude-plugin").mkdir()

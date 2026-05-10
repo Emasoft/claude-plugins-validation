@@ -155,6 +155,83 @@ def _path_has_traversal(path: str) -> bool:
     return any(p == ".." for p in parts)
 
 
+def _safe_load_marketplace_json(path: Path) -> dict[str, Any] | None:
+    """Read+parse a ``marketplace.json`` file. Returns None on any error.
+
+    Used by ``discover_hosting_marketplace`` so a malformed marketplace.json
+    on the filesystem never crashes the plugin validator — it just falls
+    back to the no-context INFO behaviour. Validation of the marketplace
+    file itself is the marketplace-validator's job, not the plugin
+    validator's.
+    """
+    try:
+        if not path.is_file():
+            return None
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def discover_hosting_marketplace(plugin_root: Path) -> dict[str, Any] | None:
+    """Auto-discover the hosting marketplace.json for a plugin on disk.
+
+    Returns the parsed marketplace.json dict (or ``None`` when no hosting
+    marketplace is on the filesystem). The result is suitable to pass as the
+    ``hosting_marketplace=`` kwarg on ``validate_manifest`` /
+    ``validate_dependencies``.
+
+    Discovery order (first match wins — Layout C beats Layout B beats cache):
+
+      1. **Layout C — marketplace-in-plugin.** Plugin's own
+         ``.claude-plugin/marketplace.json`` exists at ``plugin_root``.
+      2. **Layout B — nested monorepo.** Walk up at most 3 parents looking
+         for ``<parent>/.claude-plugin/marketplace.json``. (3 is enough to
+         cover ``<mkt>/plugins/<name>/`` and one extra for safety while
+         keeping the walk bounded.)
+      3. **Cache layout.** ``~/.claude/plugins/cache/<mkt>/<plugin>/`` —
+         the immediate parent's ``.claude-plugin/marketplace.json``. This
+         is the dominant deployment shape after ``claude plugin install``.
+
+    On a malformed marketplace.json the function returns None rather than
+    raising — that surface is owned by ``validate_marketplace.py`` and the
+    plugin validator must not crash on a sibling's bad JSON.
+    """
+    plugin_root = Path(plugin_root)
+
+    # 1. Layout C — self-marketplace
+    self_mkt = plugin_root / ".claude-plugin" / "marketplace.json"
+    layout_c = _safe_load_marketplace_json(self_mkt)
+    if layout_c is not None:
+        return layout_c
+
+    # 2. Layout B — walk up looking for a parent .claude-plugin/marketplace.json.
+    #    Bound the walk to 3 levels so we don't scan the entire filesystem
+    #    for an arbitrarily-deep nesting.
+    seen: set[Path] = set()
+    parent = plugin_root.parent
+    for _ in range(3):
+        if parent in seen or parent == parent.parent:
+            break
+        seen.add(parent)
+        parent_mkt = parent / ".claude-plugin" / "marketplace.json"
+        layout_b = _safe_load_marketplace_json(parent_mkt)
+        if layout_b is not None:
+            return layout_b
+        parent = parent.parent
+
+    # 3. Cache layout — ~/.claude/plugins/cache/<mkt>/<plugin>/.
+    #    Already covered by step 2 when the parent has .claude-plugin/marketplace.json.
+    #    Some cache layouts put marketplace.json directly at the cache-mkt root
+    #    (no .claude-plugin/ wrapper). Try that fallback too.
+    direct_parent_mkt = plugin_root.parent / "marketplace.json"
+    return _safe_load_marketplace_json(direct_parent_mkt)
+
+
 def validate_dependencies(
     manifest: dict[str, Any],
     report: ValidationReport,
@@ -239,9 +316,8 @@ def validate_dependencies(
                 # who explicitly want auto-tracking can suppress with
                 # `cpv: { allow_unversioned_dependencies: true }` in plugin.json.
                 cpv_block = manifest.get("cpv") if isinstance(manifest, dict) else None
-                allow_unversioned = (
-                    isinstance(cpv_block, dict)
-                    and bool(cpv_block.get("allow_unversioned_dependencies"))
+                allow_unversioned = isinstance(cpv_block, dict) and bool(
+                    cpv_block.get("allow_unversioned_dependencies")
                 )
                 if not allow_unversioned:
                     report.warning(
@@ -1581,7 +1657,19 @@ def validate_manifest(
     # field is absent so unused manifests pay zero extra cost.
     # v2.22.3 (TRDD-20108ab7): dependencies receives hosting_marketplace context
     # so cross-marketplace refs can be checked against the allowlist.
-    validate_dependencies(manifest, report, hosting_marketplace=hosting_marketplace)
+    # v2.79+ (TRDD-20108ab7, 2026-05-10): when caller did NOT supply explicit
+    # hosting_marketplace, attempt on-disk auto-discovery so end-users running
+    # ``validate_plugin <path>`` with NO marketplace flag also get the
+    # cross-marketplace enforcement (Layout C / Layout B / cache layout).
+    # Explicit context always wins over auto-discovery (test:
+    # test_validate_manifest_explicit_context_overrides_auto_discovery).
+    effective_hosting = hosting_marketplace
+    if effective_hosting is None and "dependencies" in manifest:
+        # Only pay the discovery cost when the manifest actually has deps.
+        # Manifests with no dependencies field never trigger the cross-mkt
+        # path, so the parent-walk filesystem cost would be wasted.
+        effective_hosting = discover_hosting_marketplace(plugin_root)
+    validate_dependencies(manifest, report, hosting_marketplace=effective_hosting)
     validate_user_config_structure(manifest, report)
     validate_channels_structure(manifest, plugin_root, report)
     validate_monitors_entries(manifest, plugin_root, report)
@@ -2508,9 +2596,7 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
         )
 
 
-def validate_manifest_skill_paths(
-    plugin_root: Path, report: ValidationReport
-) -> bool:
+def validate_manifest_skill_paths(plugin_root: Path, report: ValidationReport) -> bool:
     """Validate the optional ``skills`` path-list in plugin.json (CC v2.1.136+).
 
     Per CC v2.1.136 changelog: a ``skills`` entry in plugin.json HIDES the
@@ -3124,12 +3210,13 @@ def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
     # mistake, and the dev tree is the right place to catch it before
     # publish.
     node_manifests: tuple[str, ...] = (
-        "package.json", "package-lock.json", "pnpm-lock.yaml",
-        "yarn.lock", "bun.lock",
+        "package.json",
+        "package-lock.json",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+        "bun.lock",
     )
-    matched_manifests: list[str] = [
-        m for m in node_manifests if (plugin_root / m).is_file()
-    ]
+    matched_manifests: list[str] = [m for m in node_manifests if (plugin_root / m).is_file()]
     has_runtime_deps = bool(matched_manifests)
 
     if has_runtime_deps:
@@ -3159,7 +3246,11 @@ def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
             # We just need to know whether the file mentions both an installer
             # command AND ${CLAUDE_PLUGIN_DATA}, anywhere inside a SessionStart
             # block.
-            if "SessionStart" in hook_content and plugin_data_token in hook_content and installer_keywords.search(hook_content):
+            if (
+                "SessionStart" in hook_content
+                and plugin_data_token in hook_content
+                and installer_keywords.search(hook_content)
+            ):
                 installer_found = True
                 break
 
@@ -3216,7 +3307,24 @@ def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
             # AND skip tests/ — test files often embed the very anti-patterns
             # they exist to detect, as fixtures. Same idea as why
             # validate_security skips test files for password / token regexes.
-            if any(p in {"node_modules", ".venv", "venv", "vendor", "__pypackages__", "target", "build", "dist", "_dev", "tests", "tests_dev"} or p.endswith("_dev") for p in rel_parts):
+            if any(
+                p
+                in {
+                    "node_modules",
+                    ".venv",
+                    "venv",
+                    "vendor",
+                    "__pypackages__",
+                    "target",
+                    "build",
+                    "dist",
+                    "_dev",
+                    "tests",
+                    "tests_dev",
+                }
+                or p.endswith("_dev")
+                for p in rel_parts
+            ):
                 continue
             try:
                 text = f.read_text(encoding="utf-8", errors="replace")
@@ -3432,9 +3540,7 @@ def validate_md_content_references(plugin_root: Path, report: ValidationReport) 
                     md_files.append(skill_md)
                 refs_dir = skill_dir / "references"
                 if refs_dir.is_dir():
-                    md_files.extend(
-                        f for f in refs_dir.glob("*.md") if f.name not in VENDOR_DOC_NAMES
-                    )
+                    md_files.extend(f for f in refs_dir.glob("*.md") if f.name not in VENDOR_DOC_NAMES)
 
     if not md_files:
         return
@@ -3589,7 +3695,11 @@ def validate_pipeline_script_refs(plugin_root: Path, report: ValidationReport) -
     git_hooks_dir = plugin_root / "git-hooks"
     if git_hooks_dir.is_dir():
         for hook_name in (
-            "pre-push", "pre-commit", "post-rewrite", "post-merge", "commit-msg",
+            "pre-push",
+            "pre-commit",
+            "post-rewrite",
+            "post-merge",
+            "commit-msg",
         ):
             tracked_hook = git_hooks_dir / hook_name
             if tracked_hook.is_file():
@@ -3867,9 +3977,7 @@ def validate_workflow_path_broken(plugin_root: Path, report: ValidationReport) -
     if not workflows_dir.is_dir():
         return
 
-    yaml_files: list[Path] = sorted(workflows_dir.glob("*.yml")) + sorted(
-        workflows_dir.glob("*.yaml")
-    )
+    yaml_files: list[Path] = sorted(workflows_dir.glob("*.yml")) + sorted(workflows_dir.glob("*.yaml"))
     if not yaml_files:
         return
 
@@ -3925,8 +4033,7 @@ def validate_workflow_path_broken(plugin_root: Path, report: ValidationReport) -
 
     if not found_any and yaml_files:
         report.passed(
-            f"All workflow run: paths/globs resolve in {len(yaml_files)} workflow file(s) "
-            "(RC-WORKFLOW-PATH-BROKEN)"
+            f"All workflow run: paths/globs resolve in {len(yaml_files)} workflow file(s) (RC-WORKFLOW-PATH-BROKEN)"
         )
 
 
@@ -3982,6 +4089,7 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
     # CPV self-scan: skip — the templates ARE CPV's own files.
     try:
         from validate_security import is_cpv_self_scan
+
         if is_cpv_self_scan(plugin_root):
             return
     except Exception:
@@ -4044,6 +4152,7 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
             # Some gen_* are unparameterized; introspect the signature instead
             # of guessing.
             import inspect
+
             sig = inspect.signature(gen_func)
             expected_content = gen_func(params) if sig.parameters else gen_func()
         except Exception:
@@ -4113,14 +4222,12 @@ _LEGACY_PIPELINE_SCRIPTS: tuple[tuple[str, str, str], ...] = (
     (
         "scripts/bump_version.py",
         "scripts/publish.py --patch / --minor / --major",
-        "publish.py owns version bumping — Gate 7 reads the remote tag and "
-        "calls bump_semver() idempotently",
+        "publish.py owns version bumping — Gate 7 reads the remote tag and calls bump_semver() idempotently",
     ),
     (
         "scripts/release.sh",
         "scripts/publish.py",
-        "publish.py is the canonical 14-gate release pipeline; .sh blocks "
-        "Windows users",
+        "publish.py is the canonical 14-gate release pipeline; .sh blocks Windows users",
     ),
     (
         "scripts/release.py",
@@ -4135,8 +4242,7 @@ _LEGACY_PIPELINE_SCRIPTS: tuple[tuple[str, str, str], ...] = (
     (
         "scripts/lint.sh",
         ".github/workflows/ci.yml + publish.py Gate 4 (lint)",
-        "linting runs in CI on every push and inside publish.py Gate 4 — "
-        "lint.sh is a pre-CPV-pipeline artefact",
+        "linting runs in CI on every push and inside publish.py Gate 4 — lint.sh is a pre-CPV-pipeline artefact",
     ),
     (
         "scripts/setup-hooks.sh",
@@ -4152,14 +4258,12 @@ _LEGACY_PIPELINE_SCRIPTS: tuple[tuple[str, str, str], ...] = (
     (
         "scripts/verify_hashes.py",
         "scripts/publish.py Gate 8 verification",
-        "publish.py verifies hashes during the release; downstream verifiers "
-        "live in CPV's _plugin_verify_hashes.py",
+        "publish.py verifies hashes during the release; downstream verifiers live in CPV's _plugin_verify_hashes.py",
     ),
     (
         "scripts/changelog.py",
         "scripts/publish.py Gate 9 (git-cliff)",
-        "publish.py Gate 9 invokes git-cliff with the cliff.toml emitted by "
-        "the canonical pipeline",
+        "publish.py Gate 9 invokes git-cliff with the cliff.toml emitted by the canonical pipeline",
     ),
     (
         "scripts/generate_changelog.py",
@@ -4169,21 +4273,17 @@ _LEGACY_PIPELINE_SCRIPTS: tuple[tuple[str, str, str], ...] = (
     (
         "scripts/check_version.py",
         "scripts/publish.py Gate 7",
-        "publish.py Gate 7 validates version consistency across plugin.json, "
-        "marketplace.json, pyproject.toml, etc.",
+        "publish.py Gate 7 validates version consistency across plugin.json, marketplace.json, pyproject.toml, etc.",
     ),
     (
         "scripts/install.sh",
         "Documentation in README + claude plugin install",
-        "users install via `claude plugin install` — install.sh is a "
-        "pre-pipeline artefact",
+        "users install via `claude plugin install` — install.sh is a pre-pipeline artefact",
     ),
 )
 
 
-def validate_legacy_pipeline_scripts(
-    plugin_root: Path, report: ValidationReport
-) -> None:
+def validate_legacy_pipeline_scripts(plugin_root: Path, report: ValidationReport) -> None:
     """Emit a MINOR finding for every known-legacy pipeline script that
     survives in the plugin's `scripts/` folder.
 
@@ -4215,10 +4315,7 @@ def validate_legacy_pipeline_scripts(
         if plugin_json.is_file():
             try:
                 manifest_data = json.loads(plugin_json.read_text(encoding="utf-8"))
-                if (
-                    isinstance(manifest_data, dict)
-                    and manifest_data.get("name") == "claude-plugins-validation"
-                ):
+                if isinstance(manifest_data, dict) and manifest_data.get("name") == "claude-plugins-validation":
                     return
             except Exception:
                 pass
@@ -4247,16 +4344,80 @@ _PEP723_DEPS_RE = re.compile(
 )
 _PYTHON_STDLIB_PREFIXES: tuple[str, ...] = (
     # Conservative subset — anything else is treated as needing a venv.
-    "argparse", "ast", "asyncio", "base64", "bisect", "collections", "concurrent",
-    "contextlib", "copy", "csv", "dataclasses", "datetime", "difflib", "enum",
-    "errno", "fnmatch", "functools", "glob", "gzip", "hashlib", "heapq", "hmac",
-    "html", "http", "importlib", "inspect", "io", "ipaddress", "itertools", "json",
-    "logging", "math", "mimetypes", "multiprocessing", "operator", "os", "pathlib",
-    "pickle", "platform", "pprint", "queue", "random", "re", "secrets", "select",
-    "shlex", "shutil", "signal", "socket", "sqlite3", "ssl", "stat", "string",
-    "struct", "subprocess", "sys", "tempfile", "textwrap", "threading", "time",
-    "tomllib", "traceback", "types", "typing", "unicodedata", "unittest", "urllib",
-    "uuid", "venv", "warnings", "weakref", "xml", "zipfile", "zlib",
+    "argparse",
+    "ast",
+    "asyncio",
+    "base64",
+    "bisect",
+    "collections",
+    "concurrent",
+    "contextlib",
+    "copy",
+    "csv",
+    "dataclasses",
+    "datetime",
+    "difflib",
+    "enum",
+    "errno",
+    "fnmatch",
+    "functools",
+    "glob",
+    "gzip",
+    "hashlib",
+    "heapq",
+    "hmac",
+    "html",
+    "http",
+    "importlib",
+    "inspect",
+    "io",
+    "ipaddress",
+    "itertools",
+    "json",
+    "logging",
+    "math",
+    "mimetypes",
+    "multiprocessing",
+    "operator",
+    "os",
+    "pathlib",
+    "pickle",
+    "platform",
+    "pprint",
+    "queue",
+    "random",
+    "re",
+    "secrets",
+    "select",
+    "shlex",
+    "shutil",
+    "signal",
+    "socket",
+    "sqlite3",
+    "ssl",
+    "stat",
+    "string",
+    "struct",
+    "subprocess",
+    "sys",
+    "tempfile",
+    "textwrap",
+    "threading",
+    "time",
+    "tomllib",
+    "traceback",
+    "types",
+    "typing",
+    "unicodedata",
+    "unittest",
+    "urllib",
+    "uuid",
+    "venv",
+    "warnings",
+    "weakref",
+    "xml",
+    "zipfile",
+    "zlib",
 )
 
 
@@ -4276,7 +4437,7 @@ def _pep723_has_runtime_deps(body: str) -> bool:
     # Strip per-line comment leaders and quotes; collect package-name tokens.
     cleaned = re.sub(r"^\s*#\s?", "", deps_str, flags=re.MULTILINE)
     for raw in cleaned.split(","):
-        token = raw.strip().strip('"\'')
+        token = raw.strip().strip("\"'")
         if not token:
             continue
         # Slice off version/extra markers (e.g. "ruamel.yaml>=0.18", "pkg[opt]>=1").
@@ -4832,6 +4993,23 @@ def main() -> int:
     parser.add_argument(
         "--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout"
     )
+    # TRDD-20108ab7 (2026-05-10): explicit hosting-marketplace override.
+    # When passed, the plugin's cross-marketplace dep allowlist is checked
+    # against THIS marketplace.json instead of the auto-discovered one.
+    # Useful for CI where the plugin lives outside its production marketplace
+    # tree (e.g. a worktree, a packed tarball, or a freshly cloned PR).
+    parser.add_argument(
+        "--marketplace-context",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help=(
+            "Path to a marketplace.json (or its containing directory) that "
+            "should be treated as the plugin's hosting marketplace for "
+            "cross-marketplace dependency-allowlist enforcement. Overrides "
+            "auto-discovery. See plugin-dependencies.md:54-79."
+        ),
+    )
     parser.add_argument("path", nargs="?", help="Plugin root path (default: parent of scripts/)")
     args = parser.parse_args()
 
@@ -4981,7 +5159,33 @@ def main() -> int:
     marketplace_only = args.marketplace_only
     skip_platform_checks = args.skip_platform_checks
 
-    validate_manifest(plugin_root, report, marketplace_only)
+    # TRDD-20108ab7 (2026-05-10): resolve --marketplace-context (if any) so
+    # validate_manifest sees the explicit hosting marketplace and skips
+    # auto-discovery. Malformed/missing marketplace.json at the override path
+    # falls through to auto-discovery rather than crashing.
+    explicit_hosting: dict[str, Any] | None = None
+    if args.marketplace_context:
+        ctx_path = Path(args.marketplace_context).resolve()
+        if ctx_path.is_dir():
+            # Try Layout C location first, then bare marketplace.json at root.
+            for cand in (
+                ctx_path / ".claude-plugin" / "marketplace.json",
+                ctx_path / "marketplace.json",
+            ):
+                explicit_hosting = _safe_load_marketplace_json(cand)
+                if explicit_hosting is not None:
+                    break
+        else:
+            explicit_hosting = _safe_load_marketplace_json(ctx_path)
+        if explicit_hosting is None:
+            print(
+                f"Warning: --marketplace-context {args.marketplace_context!r} "
+                "did not resolve to a readable marketplace.json — auto-discovery "
+                "will be used instead.",
+                file=sys.stderr,
+            )
+
+    validate_manifest(plugin_root, report, marketplace_only, hosting_marketplace=explicit_hosting)
     validate_structure(plugin_root, report, marketplace_only)
     # v2.32.0 — Layout C cross-validation (marketplace-in-plugin)
     validate_layout_c_consistency(plugin_root, report)
