@@ -4,10 +4,51 @@
 **Filename:** `design/tasks/TRDD-8ccb9337-e6e5-4371-8c4c-5cf64f4d5eb9-ide-config-secret-scan.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
 
-**Status:** Not started
+**Status:** Done
 **Priority:** LOW
 **Effort:** SMALL
 **Source:** `docs_dev/cpv_workflow_audit_20260412.md` section B6 / C11
+
+## Resolution (TRDD-8ccb9337 implementation, 2026-05-10)
+
+The CRITICAL-severity portion of this TRDD was already shipped in
+`scripts/validate_security.py::scan_ide_config_files` (and
+`IDE_CONFIG_PATHS` constant, plus the `TestScanIdeConfigFiles` test class
+in `tests/test_validate_security.py`). The implementation already covers:
+
+  - All 9 IDE config paths from the spec (.vscode/.idea/.cursor/.zed)
+  - Uses `get_gitignore_filter` to skip gitignored files
+  - Uses the existing `SECRET_PATTERNS` regex suite via `scan_for_secrets`
+  - Flags REAL secret values at CRITICAL severity
+  - Dedupe between literal entries and globs (e.g. `.idea/workspace.xml`
+    vs `.idea/*.xml`)
+
+The remaining "Additional: warn on .env in IDE configs" feature — NIT
+warnings on env-var REFERENCES with secret-like names (`API_KEY`,
+`TOKEN`, etc.) — is shipped as a sibling validator in
+`scripts/validate_ide_config.py`. The two scanners are intentionally
+separate so the high-cost regex suite in `scan_for_secrets` stays put
+and the low-cost env-name predicate runs in its own module.
+
+Sibling validator emits NIT findings on:
+
+  1. Env-var references (`${VAR}`, `${env:VAR}`, `$VAR`, `%VAR%`,
+     `$VAR$`) where the variable name matches `SECRET_LIKE_ENV_NAME`
+     (API_KEY, TOKEN, SECRET, PASSWORD, CREDENTIALS, BEARER, etc.).
+  2. References to a `.env` file (any form: `.env`, `.env.local`,
+     `path/to/.env`, …).
+
+Both scanners use the same `IDE_CONFIG_PATHS` constant and the same
+gitignore filter, so coverage is symmetric.
+
+CLI entry point: `cpv-validate-ide-config <plugin-path> [--strict] [--report PATH]`.
+NITs do NOT block by default; pass `--strict` to make them block.
+
+Test coverage: `tests/test_validate_ide_config.py` (37 tests across 5
+classes — TestSpec, TestIsSecretLikeEnvName, TestScanSingleFile,
+TestPluginOrchestration, TestCLI). Existing
+`TestScanIdeConfigFiles` in test_validate_security.py keeps the
+CRITICAL-severity coverage.
 
 ## Problem
 
