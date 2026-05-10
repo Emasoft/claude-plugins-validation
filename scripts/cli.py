@@ -183,3 +183,16 @@ def standardize() -> None:
     from standardize_plugin import main
 
     sys.exit(main())
+
+
+def setup_auth() -> None:
+    """Read-only orchestrator for the eight CPV auth surfaces (TRDD-b5e44619).
+
+    Reports SET / NOT SET / PARTIAL / N/A for each of: git identity, gh CLI
+    auth, ssh-agent, MARKETPLACE_PAT env var, branch-rules helper presence,
+    pre-push hook, commit signing, and external scanners. Use --strict to
+    exit non-zero when any required surface (1, 2, 6) is unset.
+    """
+    from cpv_setup_auth import main
+
+    sys.exit(main())

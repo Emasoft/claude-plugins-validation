@@ -68,6 +68,8 @@ cpv-remote-validate = "scripts.remote_validation:main"
 cpv-setup-branch-rules = "scripts.setup_branch_rules:main"
 # Generic variant — works on ANY GitHub repository (no CPV/plugin/marketplace assumptions)
 branch-rules-install = "scripts.setup_branch_rules_generic:main"
+# Auth-surface status report (TRDD-b5e44619 Phase C — read-only)
+cpv-setup-auth = "scripts.cli:setup_auth"
 
 [tool.ruff]
 line-length = 120
