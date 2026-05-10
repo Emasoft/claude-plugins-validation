@@ -148,6 +148,19 @@ def validate_local_scope() -> None:
     sys.exit(main())
 
 
+def validate_ide_config() -> None:
+    """IDE-config hygiene validator (NIT-level env-var-reference checks).
+
+    Companion to validate_security.scan_ide_config_files — that pass catches
+    REAL secret VALUES at CRITICAL severity. This validator adds the
+    NIT-level "env-var name looks credential-like" warnings called out under
+    TRDD-8ccb9337 §"Additional: warn on .env in IDE configs".
+    """
+    from validate_ide_config import main
+
+    sys.exit(main())
+
+
 # ── Management entry points ──────────────────────────────────────────
 
 
