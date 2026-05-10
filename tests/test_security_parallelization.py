@@ -32,6 +32,7 @@ if str(scripts_dir) not in sys.path:
     sys.path.insert(0, str(scripts_dir))
 
 import validate_security  # noqa: E402
+from cpv_scanner_cache import ScannerCache  # noqa: E402
 from validate_security import (  # noqa: E402
     get_scan_step_log,
 )
@@ -113,16 +114,22 @@ def test_scanner_block_uses_threadpool_executor():
 
 
 def test_scanner_block_wall_time_is_slowest_not_sum(tmp_path: Path):
-    """With four sleeping scanners (each 0.4s), serial execution would
-    take ~1.6s; parallel must finish in ~0.4s.
+    """With four sleeping scanners (each 1.0s), serial execution would
+    take ~4.0s; parallel must finish in ~1.0s.
 
-    Lower-bound for serial: 4 * 0.4 = 1.6s. Upper bound for parallel:
+    Lower-bound for serial: 4 * 1.0 = 4.0s. Upper bound for parallel:
     same number, since hitting it means parallelism is broken. Use the
     serial lower-bound as the hard ceiling on the parallel run.
+
+    Sleep bumped to 1.0s in v2.78.0 (Phase D) so the assertion has
+    enough slack to absorb cache-merkle compute + cache disk IO +
+    other xdist workers contending for CPU. The point of the test —
+    "parallelism is engaged" — survives unchanged: serial would still
+    take 4× as long.
     """
     plugin_path = _make_minimal_plugin(tmp_path)
 
-    sleep_s = 0.4
+    sleep_s = 1.0
     fake_cc = _make_sleeping_scanner("cc-audit", sleep_s)
     fake_tirith = _make_sleeping_scanner("tirith", sleep_s)
     fake_truffle = _make_sleeping_scanner("trufflehog", sleep_s)
@@ -186,8 +193,12 @@ def test_scanner_block_wall_time_is_slowest_not_sum(tmp_path: Path):
             # (handled inside validate_security via its own shutil.which
             # call routed through our fake).
         ):
+            # Phase D — isolate the scanner-result cache so concurrent
+            # xdist workers don't contend on ~/.cache/cpv/scanner-results/
+            # (which would defeat parallelism in this exact test).
+            iso_cache = ScannerCache(cache_dir=tmp_path / "scanner-cache")
             t0 = time.perf_counter()
-            run_validate_security(plugin_path)
+            run_validate_security(plugin_path, cache=iso_cache)
             elapsed = time.perf_counter() - t0
 
     serial_lower_bound = sleep_s * 4
@@ -257,7 +268,9 @@ def test_scanner_step_log_order_is_declaration_order(tmp_path: Path):
         patch.object(validate_security, "check_phase10_taint", return_value=0),
     ):
         shutil_mock.which = fake_which
-        run_validate_security(plugin_path)
+        # Phase D — isolated cache; see test_scanner_block_wall_time_*.
+        iso_cache = ScannerCache(cache_dir=tmp_path / "scanner-cache")
+        run_validate_security(plugin_path, cache=iso_cache)
 
     # Pull the per-scanner step records out of the global step log.
     # Steps 22..25 must appear in that exact numerical order — the
@@ -357,7 +370,9 @@ def test_scanner_failure_does_not_block_others(tmp_path: Path):
         patch.object(validate_security, "check_phase10_taint", return_value=0),
     ):
         shutil_mock.which = fake_which
-        report = run_validate_security(plugin_path)
+        # Phase D — isolated cache to avoid xdist worker contention.
+        iso_cache = ScannerCache(cache_dir=tmp_path / "scanner-cache")
+        report = run_validate_security(plugin_path, cache=iso_cache)
 
     # All four scanners ran (completion_log is populated by side effect
     # inside each fake — order is non-deterministic under the pool, but
