@@ -104,14 +104,10 @@ PERMISSION_UPDATE_TYPES: frozenset[str] = frozenset(
 PERMISSION_BEHAVIORS: frozenset[str] = frozenset({"allow", "deny", "ask"})
 
 # ``mode`` enum on setMode (hooks.md L1124).
-PERMISSION_MODES: frozenset[str] = frozenset(
-    {"default", "acceptEdits", "dontAsk", "bypassPermissions", "plan"}
-)
+PERMISSION_MODES: frozenset[str] = frozenset({"default", "acceptEdits", "dontAsk", "bypassPermissions", "plan"})
 
 # ``destination`` enum on every permission update type (hooks.md L1134-1139).
-PERMISSION_DESTINATIONS: frozenset[str] = frozenset(
-    {"session", "localSettings", "projectSettings", "userSettings"}
-)
+PERMISSION_DESTINATIONS: frozenset[str] = frozenset({"session", "localSettings", "projectSettings", "userSettings"})
 
 # =============================================================================
 # PermissionRequest — hooks.md L1089-1113
@@ -138,9 +134,7 @@ HOOK_OUTPUT_EVENT_FIELDS: dict[str, frozenset[str]] = {
     # hooks.md L717
     "SessionStart": frozenset({"additionalContext"}),
     # hooks.md L842-847
-    "UserPromptSubmit": frozenset(
-        {"decision", "reason", "additionalContext", "sessionTitle"}
-    ),
+    "UserPromptSubmit": frozenset({"decision", "reason", "additionalContext", "sessionTitle"}),
     # hooks.md L982-987
     "PreToolUse": frozenset(
         {
@@ -165,9 +159,7 @@ HOOK_OUTPUT_EVENT_FIELDS: dict[str, frozenset[str]] = {
     # hooks.md L1177-1182
     # v2.1.121 generalized hookSpecificOutput.updatedToolOutput from MCP-only
     # to all tools — both names accepted (legacy + new).
-    "PostToolUse": frozenset(
-        {"decision", "reason", "additionalContext", "updatedMCPToolOutput", "updatedToolOutput"}
-    ),
+    "PostToolUse": frozenset({"decision", "reason", "additionalContext", "updatedMCPToolOutput", "updatedToolOutput"}),
     # hooks.md L1234
     "PostToolUseFailure": frozenset({"additionalContext"}),
     # hooks.md L1278
@@ -214,15 +206,11 @@ HOOK_OUTPUT_EVENT_FIELDS: dict[str, frozenset[str]] = {
     "InstructionsLoaded": frozenset(),
     # v2.1.121 — UserPromptExpansion fires when a slash-command/MCP-prompt
     # expands. Same decision-control shape as UserPromptSubmit.
-    "UserPromptExpansion": frozenset(
-        {"decision", "reason", "additionalContext"}
-    ),
+    "UserPromptExpansion": frozenset({"decision", "reason", "additionalContext"}),
     # v2.1.121 — PostToolBatch fires AFTER all parallel tools resolve, BEFORE
     # the next model call. Per hooks.md, supports decision/reason/additionalContext
     # plus per-tool `updatedToolOutput`.
-    "PostToolBatch": frozenset(
-        {"decision", "reason", "additionalContext", "updatedToolOutput"}
-    ),
+    "PostToolBatch": frozenset({"decision", "reason", "additionalContext", "updatedToolOutput"}),
 }
 
 
@@ -240,25 +228,18 @@ def validate_output_payload(event_name: str, payload: Any) -> ValidationReport:
 
     # Event-name sanity.
     if event_name not in VALID_HOOK_EVENTS:
-        report.major(
-            f"Unknown hook event: {event_name!r}. "
-            f"Expected one of: {sorted(VALID_HOOK_EVENTS)}"
-        )
+        report.major(f"Unknown hook event: {event_name!r}. Expected one of: {sorted(VALID_HOOK_EVENTS)}")
         return report
 
     # Legacy Setup → WARNING (matches validate_hook.py handling).
     if event_name == "Setup":
         report.warning(
-            "Setup is a legacy event not listed in hooks.md as of v2.1.109; "
-            "output payload validation is best-effort."
+            "Setup is a legacy event not listed in hooks.md as of v2.1.109; output payload validation is best-effort."
         )
 
     # Top-level type check.
     if not isinstance(payload, dict):
-        report.critical(
-            f"Hook output payload must be a JSON object, got "
-            f"{type(payload).__name__}"
-        )
+        report.critical(f"Hook output payload must be a JSON object, got {type(payload).__name__}")
         return report
 
     # Universal fields — only warn on unknown top-level keys.
@@ -272,29 +253,19 @@ def validate_output_payload(event_name: str, payload: Any) -> ValidationReport:
 
     # Universal field type checks (hooks.md L601-606).
     if "continue" in payload and not isinstance(payload["continue"], bool):
-        report.major(
-            f"'continue' must be a boolean, got "
-            f"{type(payload['continue']).__name__}"
-        )
-    if "suppressOutput" in payload and not isinstance(
-        payload["suppressOutput"], bool
-    ):
-        report.major(
-            f"'suppressOutput' must be a boolean, got "
-            f"{type(payload['suppressOutput']).__name__}"
-        )
+        report.major(f"'continue' must be a boolean, got {type(payload['continue']).__name__}")
+    if "suppressOutput" in payload and not isinstance(payload["suppressOutput"], bool):
+        report.major(f"'suppressOutput' must be a boolean, got {type(payload['suppressOutput']).__name__}")
     if "stopReason" in payload and not isinstance(payload["stopReason"], str):
-        report.major(
-            f"'stopReason' must be a string, got "
-            f"{type(payload['stopReason']).__name__}"
-        )
-    if "systemMessage" in payload and not isinstance(
-        payload["systemMessage"], str
-    ):
-        report.major(
-            f"'systemMessage' must be a string, got "
-            f"{type(payload['systemMessage']).__name__}"
-        )
+        report.major(f"'stopReason' must be a string, got {type(payload['stopReason']).__name__}")
+    if "systemMessage" in payload and not isinstance(payload["systemMessage"], str):
+        report.major(f"'systemMessage' must be a string, got {type(payload['systemMessage']).__name__}")
+    # 'reason' is the human-readable explanation paired with 'decision'.
+    # hooks.md L601-606 documents it as a string. ``null`` is treated as
+    # absent (consistent with how authors write `reason: payload.get("...")`
+    # in hook scripts) and skipped without flagging.
+    if "reason" in payload and payload["reason"] is not None and not isinstance(payload["reason"], str):
+        report.major(f"'reason' must be a string, got {type(payload['reason']).__name__}")
 
     # hookSpecificOutput — event-specific validation.
     hso = payload.get("hookSpecificOutput")
@@ -312,29 +283,19 @@ def validate_output_payload(event_name: str, payload: Any) -> ValidationReport:
     return report
 
 
-def _validate_hook_specific_output(
-    event_name: str, hso: Any, report: ValidationReport
-) -> None:
+def _validate_hook_specific_output(event_name: str, hso: Any, report: ValidationReport) -> None:
     """Validate the ``hookSpecificOutput`` dict for the given event."""
     if not isinstance(hso, dict):
-        report.critical(
-            f"hookSpecificOutput must be a JSON object, got "
-            f"{type(hso).__name__}"
-        )
+        report.critical(f"hookSpecificOutput must be a JSON object, got {type(hso).__name__}")
         return
 
     # ``hookEventName`` is required on hookSpecificOutput per the per-event
     # examples in hooks.md (every event that uses hookSpecificOutput shows it).
     reported_event = hso.get("hookEventName")
     if reported_event is None:
-        report.major(
-            "hookSpecificOutput is missing required field 'hookEventName'"
-        )
+        report.major("hookSpecificOutput is missing required field 'hookEventName'")
     elif reported_event != event_name:
-        report.major(
-            f"hookSpecificOutput.hookEventName={reported_event!r} does not "
-            f"match --event {event_name!r}"
-        )
+        report.major(f"hookSpecificOutput.hookEventName={reported_event!r} does not match --event {event_name!r}")
 
     # Per-event specific fields.
     allowed = HOOK_OUTPUT_EVENT_FIELDS.get(event_name, frozenset())
@@ -369,10 +330,7 @@ def _validate_pretooluse_hso(hso: dict[str, Any], report: ValidationReport) -> N
     decision = hso.get("permissionDecision")
     if decision is not None:
         if not isinstance(decision, str):
-            report.major(
-                f"PreToolUse permissionDecision must be a string, got "
-                f"{type(decision).__name__}"
-            )
+            report.major(f"PreToolUse permissionDecision must be a string, got {type(decision).__name__}")
         elif decision not in PRETOOLUSE_DECISIONS:
             report.major(
                 f"Unknown PreToolUse permissionDecision: {decision!r}. "
@@ -382,29 +340,18 @@ def _validate_pretooluse_hso(hso: dict[str, Any], report: ValidationReport) -> N
 
     reason = hso.get("permissionDecisionReason")
     if reason is not None and not isinstance(reason, str):
-        report.major(
-            f"PreToolUse permissionDecisionReason must be a string, got "
-            f"{type(reason).__name__}"
-        )
+        report.major(f"PreToolUse permissionDecisionReason must be a string, got {type(reason).__name__}")
 
     updated_input = hso.get("updatedInput")
     if updated_input is not None and not isinstance(updated_input, dict):
-        report.major(
-            f"PreToolUse updatedInput must be an object, got "
-            f"{type(updated_input).__name__}"
-        )
+        report.major(f"PreToolUse updatedInput must be an object, got {type(updated_input).__name__}")
 
     additional_ctx = hso.get("additionalContext")
     if additional_ctx is not None and not isinstance(additional_ctx, str):
-        report.major(
-            f"PreToolUse additionalContext must be a string, got "
-            f"{type(additional_ctx).__name__}"
-        )
+        report.major(f"PreToolUse additionalContext must be a string, got {type(additional_ctx).__name__}")
 
 
-def _validate_permission_request_hso(
-    hso: dict[str, Any], report: ValidationReport
-) -> None:
+def _validate_permission_request_hso(hso: dict[str, Any], report: ValidationReport) -> None:
     """Validate PermissionRequest hookSpecificOutput (hooks.md L1089-1113)."""
     # PermissionRequest nests the decision under ``decision`` in hso.
     decision = hso.get("decision")
@@ -413,22 +360,14 @@ def _validate_permission_request_hso(
         return
 
     if not isinstance(decision, dict):
-        report.major(
-            f"PermissionRequest hookSpecificOutput.decision must be an "
-            f"object, got {type(decision).__name__}"
-        )
+        report.major(f"PermissionRequest hookSpecificOutput.decision must be an object, got {type(decision).__name__}")
         return
 
     behavior = decision.get("behavior")
     if behavior is None:
-        report.major(
-            "PermissionRequest decision.behavior is required (hooks.md L1093)"
-        )
+        report.major("PermissionRequest decision.behavior is required (hooks.md L1093)")
     elif not isinstance(behavior, str):
-        report.major(
-            f"PermissionRequest decision.behavior must be a string, got "
-            f"{type(behavior).__name__}"
-        )
+        report.major(f"PermissionRequest decision.behavior must be a string, got {type(behavior).__name__}")
     elif behavior not in PERMISSION_REQUEST_BEHAVIORS:
         report.major(
             f"Unknown PermissionRequest behavior: {behavior!r}. "
@@ -441,22 +380,15 @@ def _validate_permission_request_hso(
         _validate_permission_updates(updated_perms, report)
 
 
-def _validate_permission_updates(
-    updates: Any, report: ValidationReport
-) -> None:
+def _validate_permission_updates(updates: Any, report: ValidationReport) -> None:
     """Validate an updatedPermissions list (hooks.md L1115-1141)."""
     if not isinstance(updates, list):
-        report.major(
-            f"updatedPermissions must be a list, got {type(updates).__name__}"
-        )
+        report.major(f"updatedPermissions must be a list, got {type(updates).__name__}")
         return
 
     for i, entry in enumerate(updates):
         if not isinstance(entry, dict):
-            report.major(
-                f"updatedPermissions[{i}] must be an object, got "
-                f"{type(entry).__name__}"
-            )
+            report.major(f"updatedPermissions[{i}] must be an object, got {type(entry).__name__}")
             continue
 
         type_ = entry.get("type")
@@ -499,116 +431,131 @@ def _validate_permission_updates(
             )
 
 
-def _validate_permission_denied_hso(
-    hso: dict[str, Any], report: ValidationReport
-) -> None:
+def _validate_permission_denied_hso(hso: dict[str, Any], report: ValidationReport) -> None:
     """Validate PermissionDenied hookSpecificOutput (hooks.md L1278)."""
     retry = hso.get("retry")
     if retry is not None and not isinstance(retry, bool):
-        report.major(
-            f"PermissionDenied retry must be a boolean, got "
-            f"{type(retry).__name__}"
-        )
+        report.major(f"PermissionDenied retry must be a boolean, got {type(retry).__name__}")
 
 
-def _validate_elicitation_hso(
-    event_name: str, hso: dict[str, Any], report: ValidationReport
-) -> None:
+def _validate_elicitation_hso(event_name: str, hso: dict[str, Any], report: ValidationReport) -> None:
     """Validate Elicitation/ElicitationResult HSO (hooks.md L2021-2024, L2067-2070)."""
     action = hso.get("action")
     if action is not None:
         if not isinstance(action, str):
-            report.major(
-                f"{event_name} action must be a string, got "
-                f"{type(action).__name__}"
-            )
+            report.major(f"{event_name} action must be a string, got {type(action).__name__}")
         elif action not in ELICITATION_ACTIONS:
-            report.major(
-                f"Unknown {event_name} action: {action!r}. "
-                f"Expected one of: {sorted(ELICITATION_ACTIONS)}"
-            )
+            report.major(f"Unknown {event_name} action: {action!r}. Expected one of: {sorted(ELICITATION_ACTIONS)}")
 
 
-def _validate_session_start_hso(
-    hso: dict[str, Any], report: ValidationReport
-) -> None:
+def _validate_session_start_hso(hso: dict[str, Any], report: ValidationReport) -> None:
     """Validate SessionStart hookSpecificOutput (hooks.md L717)."""
     ctx = hso.get("additionalContext")
     if ctx is not None and not isinstance(ctx, str):
-        report.major(
-            f"SessionStart additionalContext must be a string, got "
-            f"{type(ctx).__name__}"
-        )
+        report.major(f"SessionStart additionalContext must be a string, got {type(ctx).__name__}")
 
 
-def _validate_watch_paths_hso(
-    event_name: str, hso: dict[str, Any], report: ValidationReport
-) -> None:
+def _validate_watch_paths_hso(event_name: str, hso: dict[str, Any], report: ValidationReport) -> None:
     """Validate CwdChanged/FileChanged watchPaths (hooks.md L1722, L1765)."""
     watch_paths = hso.get("watchPaths")
     if watch_paths is None:
         return
     if not isinstance(watch_paths, list):
-        report.major(
-            f"{event_name} watchPaths must be a list, got "
-            f"{type(watch_paths).__name__}"
-        )
+        report.major(f"{event_name} watchPaths must be a list, got {type(watch_paths).__name__}")
         return
     for i, p in enumerate(watch_paths):
         if not isinstance(p, str):
-            report.major(
-                f"{event_name} watchPaths[{i}] must be a string, got "
-                f"{type(p).__name__}"
-            )
+            report.major(f"{event_name} watchPaths[{i}] must be a string, got {type(p).__name__}")
 
 
-def _validate_worktree_create_hso(
-    hso: dict[str, Any], report: ValidationReport
-) -> None:
+def _validate_worktree_create_hso(hso: dict[str, Any], report: ValidationReport) -> None:
     """Validate WorktreeCreate hookSpecificOutput (hooks.md L1819)."""
     path = hso.get("worktreePath")
     if path is not None and not isinstance(path, str):
-        report.major(
-            f"WorktreeCreate worktreePath must be a string, got "
-            f"{type(path).__name__}"
-        )
+        report.major(f"WorktreeCreate worktreePath must be a string, got {type(path).__name__}")
 
 
-def _validate_top_level_decision(
-    event_name: str, payload: dict[str, Any], report: ValidationReport
-) -> None:
-    """Validate legacy top-level ``decision``/``reason`` (hooks.md L601, L1010)."""
-    decision = payload.get("decision")
-
-    # PreToolUse deprecation (hooks.md L1010): top-level decision is
-    # deprecated; "approve" → "allow", "block" → "deny".
-    if event_name == "PreToolUse":
-        report.warning(
-            "PreToolUse top-level 'decision' is deprecated; use "
-            "hookSpecificOutput.permissionDecision instead (hooks.md L1010)"
-        )
-
-    # Events that legitimately use top-level "decision: block".
-    block_only_events = {
+# Events that legitimately use top-level "decision: block".
+# hooks.md per-event tables (L583-628 + per-event sections) — these events
+# honor top-level ``decision: block`` to interrupt the run; all other events
+# either use hookSpecificOutput.* or do not support decision-style control
+# at all (e.g. TaskCreated L1440-1443 only supports continue:false / exit 2).
+TOP_LEVEL_BLOCK_EVENTS: frozenset[str] = frozenset(
+    {
         "PostToolUse",
         "Stop",
         "SubagentStop",
         "ConfigChange",
         "PreCompact",
         "UserPromptSubmit",
+        "UserPromptExpansion",  # v2.1.121 — same decision semantics as UserPromptSubmit
+        "PostToolBatch",  # v2.1.121 — supports decision/block per hooks.md
     }
+)
 
-    if decision is not None and not isinstance(decision, str):
-        report.major(
-            f"Top-level 'decision' must be a string, got "
-            f"{type(decision).__name__}"
-        )
-    elif decision is not None and event_name in block_only_events:
+# PreToolUse legacy top-level decision values (hooks.md L1010): "approve"
+# was renamed to "allow", "block" to "deny" — both still accepted at runtime
+# but emit a WARNING. Anything outside this legacy enum is MAJOR.
+PRETOOLUSE_LEGACY_DECISIONS: frozenset[str] = frozenset({"approve", "block"})
+
+
+def _validate_top_level_decision(event_name: str, payload: dict[str, Any], report: ValidationReport) -> None:
+    """Validate legacy top-level ``decision``/``reason`` (hooks.md L601, L1010).
+
+    Three branches:
+      1. Type check — decision must be a string.
+      2. PreToolUse — deprecated top-level decision; only legacy values
+         {"approve", "block"} get a WARNING; anything else is MAJOR.
+      3. Other events — decision is honored only for TOP_LEVEL_BLOCK_EVENTS
+         and only with value ``"block"``; for events outside that set,
+         the runtime silently ignores the field — CPV must surface MAJOR
+         so authors don't ship dead decision logic.
+    """
+    decision = payload.get("decision")
+    if decision is None:
+        return
+
+    # Branch 1: type check (covers every event uniformly).
+    if not isinstance(decision, str):
+        report.major(f"Top-level 'decision' must be a string, got {type(decision).__name__}")
+        return
+
+    # Branch 2: PreToolUse deprecation (hooks.md L1010).
+    # Only legacy values get the soft WARNING; anything outside is MAJOR.
+    if event_name == "PreToolUse":
+        if decision in PRETOOLUSE_LEGACY_DECISIONS:
+            report.warning(
+                f"PreToolUse top-level 'decision' = {decision!r} is "
+                "deprecated; use hookSpecificOutput.permissionDecision "
+                "instead (hooks.md L1010)"
+            )
+        else:
+            report.major(
+                f"Unknown PreToolUse top-level 'decision': {decision!r}. "
+                f"Legacy values: {sorted(PRETOOLUSE_LEGACY_DECISIONS)} "
+                f"(deprecated); preferred surface is "
+                "hookSpecificOutput.permissionDecision (hooks.md L1010)"
+            )
+        return
+
+    # Branch 3: events that DO support top-level decision="block".
+    if event_name in TOP_LEVEL_BLOCK_EVENTS:
         if decision != "block":
             report.major(
-                f"{event_name} top-level 'decision' must be 'block' "
-                f"(or omitted), got {decision!r} (hooks.md L601)"
+                f"{event_name} top-level 'decision' must be 'block' (or omitted), got {decision!r} (hooks.md L601)"
             )
+        return
+
+    # Branch 4: events that do NOT honor top-level decision at all
+    # (TaskCreated, TaskCompleted, SessionStart, SessionEnd, Notification,
+    # CwdChanged, FileChanged, etc.). Runtime ignores it silently — surface
+    # MAJOR so the author knows their decision logic is dead code.
+    report.major(
+        f"{event_name} does not honor top-level 'decision' "
+        f"(hooks.md per-event table L583-628). The runtime ignores it "
+        f"silently — use 'continue: false' or exit code 2 to interrupt "
+        f"this event."
+    )
 
 
 # =============================================================================
@@ -654,10 +601,7 @@ def _load_payload(args: argparse.Namespace) -> Any:
 def main() -> int:
     """CLI entry point for hook output payload validation."""
     parser = argparse.ArgumentParser(
-        description=(
-            "Validate a hook output JSON payload against the per-event "
-            "decision-control table in hooks.md."
-        ),
+        description=("Validate a hook output JSON payload against the per-event decision-control table in hooks.md."),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
