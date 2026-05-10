@@ -151,9 +151,7 @@ def test_no_extra_known_marketplaces_key_passes(tmp_path: Path):
     assert not report.has_major
     assert not report.has_minor
     assert any(
-        r.level == "PASSED"
-        and "no 'extraKnownMarketplaces'" in r.message
-        and "strictKnownMarketplaces" in r.message
+        r.level == "PASSED" and "no 'extraKnownMarketplaces'" in r.message and "strictKnownMarketplaces" in r.message
         for r in report.results
     ), "expected a PASSED result stating both marketplace blocks are absent"
 
@@ -296,8 +294,7 @@ def test_host_pattern_source_type_missing_field_is_major(tmp_path: Path):
     report = validate_settings_marketplace_file(settings_path)
     assert report.has_major
     assert any(
-        "bad-host-mp" in m and "hostPattern" in m
-        for m in (r.message for r in report.results if r.level == "MAJOR")
+        "bad-host-mp" in m and "hostPattern" in m for m in (r.message for r in report.results if r.level == "MAJOR")
     )
 
 
@@ -306,6 +303,7 @@ def test_host_pattern_source_type_missing_field_is_major(tmp_path: Path):
 # Per plugin-marketplaces.md:625-669 only {github, url, hostPattern, pathPattern}
 # are valid inside strictKnownMarketplaces — extraKnownMarketplaces accepts more.
 # =============================================================================
+
 
 def test_strict_known_marketplaces_github_source_passes(tmp_path: Path):
     """strictKnownMarketplaces with a github source is accepted."""
@@ -327,9 +325,7 @@ def test_strict_known_marketplaces_npm_source_is_major(tmp_path: Path):
     report = validate_settings_marketplace_file(settings_path)
     assert report.has_major
     assert any(
-        "npm" in r.message and "strictKnownMarketplaces" in r.message
-        for r in report.results
-        if r.level == "MAJOR"
+        "npm" in r.message and "strictKnownMarketplaces" in r.message for r in report.results if r.level == "MAJOR"
     ), "expected MAJOR explaining npm is not allowed in strictKnownMarketplaces"
 
 
@@ -342,9 +338,7 @@ def test_strict_known_marketplaces_file_source_is_major(tmp_path: Path):
     report = validate_settings_marketplace_file(settings_path)
     assert report.has_major
     assert any(
-        "file" in r.message and "strictKnownMarketplaces" in r.message
-        for r in report.results
-        if r.level == "MAJOR"
+        "file" in r.message and "strictKnownMarketplaces" in r.message for r in report.results if r.level == "MAJOR"
     )
 
 
@@ -378,12 +372,9 @@ def test_gap5_host_pattern_invalid_regex_is_minor(tmp_path: Path):
         {EXTRA_KNOWN_MARKETPLACES_KEY: {"bad-host": {"source": {"source": "hostPattern", "hostPattern": "["}}}},
     )
     report = validate_settings_marketplace_file(settings_path)
-    assert report.has_minor, (
-        f"expected MINOR for invalid regex, got: {[(r.level, r.message) for r in report.results]}"
-    )
+    assert report.has_minor, f"expected MINOR for invalid regex, got: {[(r.level, r.message) for r in report.results]}"
     assert any(
-        r.level == "MINOR" and "invalid regex" in r.message and "hostPattern" in r.message
-        for r in report.results
+        r.level == "MINOR" and "invalid regex" in r.message and "hostPattern" in r.message for r in report.results
     )
 
 
@@ -395,8 +386,7 @@ def test_gap5_path_pattern_invalid_regex_is_minor(tmp_path: Path):
     )
     report = validate_settings_marketplace_file(settings_path)
     assert any(
-        r.level == "MINOR" and "invalid regex" in r.message and "pathPattern" in r.message
-        for r in report.results
+        r.level == "MINOR" and "invalid regex" in r.message and "pathPattern" in r.message for r in report.results
     )
 
 
@@ -416,9 +406,7 @@ def test_gap5_host_pattern_valid_regex_silent(tmp_path: Path):
         },
     )
     report = validate_settings_marketplace_file(settings_path)
-    assert not any(
-        r.level == "MINOR" and "invalid regex" in r.message for r in report.results
-    )
+    assert not any(r.level == "MINOR" and "invalid regex" in r.message for r in report.results)
 
 
 def test_gap5_host_pattern_non_string_value_is_major(tmp_path: Path):
@@ -429,6 +417,241 @@ def test_gap5_host_pattern_non_string_value_is_major(tmp_path: Path):
     )
     report = validate_settings_marketplace_file(settings_path)
     assert any(
-        r.level == "MAJOR" and "hostPattern" in r.message and "must be a string" in r.message
-        for r in report.results
+        r.level == "MAJOR" and "hostPattern" in r.message and "must be a string" in r.message for r in report.results
     )
+
+
+# =============================================================================
+# TRDD-e2b17a61 — wiring + scope tests
+#
+# Open question 1 (TRDD §"Open questions"): the validator must run from
+# validate_plugin.py whenever EITHER extraKnownMarketplaces OR
+# strictKnownMarketplaces is present in a plugin-shipped settings.json. The
+# pre-existing wiring only fired on extraKnownMarketplaces, leaving
+# strictKnownMarketplaces unvalidated and falsely flagged as an
+# "unrecognized key" MINOR.
+#
+# Open question 3: a plugin-shipped settings.json should not contain either
+# of these keys — they belong in user/project/managed-settings scopes.
+# extraKnownMarketplaces emits a WARNING (informational, scope-mismatch),
+# strictKnownMarketplaces emits a MAJOR because it is admin-managed-only
+# (cc_scope_rules.MANAGED_ONLY_KEYS).
+# =============================================================================
+
+
+def test_strict_known_marketplaces_recognized_in_plugin_settings(tmp_path: Path):
+    """A plugin-shipped settings.json with only strictKnownMarketplaces must NOT
+    emit the validator-level "unrecognized key" MINOR — the key is a recognized
+    settings-marketplace block.
+    """
+    import json as _json
+
+    # Add scripts to path
+    import sys as _sys
+
+    scripts_dir = Path(__file__).parent.parent / "scripts"
+    if str(scripts_dir) not in _sys.path:
+        _sys.path.insert(0, str(scripts_dir))
+
+    from validate_plugin import validate_structure  # noqa: E402
+
+    plugin_dir = tmp_path / "p1"
+    plugin_dir.mkdir()
+    cp = plugin_dir / ".claude-plugin"
+    cp.mkdir()
+    (cp / "plugin.json").write_text(_json.dumps({"name": "p1", "version": "1.0.0", "description": "x"}))
+    # Add an agents/ dir so plugin has content (not strictly required for this test)
+    (plugin_dir / "agents").mkdir()
+    (plugin_dir / "agents" / "x.md").write_text("---\nname: x\ndescription: y\n---\n")
+    # Plugin-shipped settings.json with ONLY strictKnownMarketplaces
+    (plugin_dir / "settings.json").write_text(
+        _json.dumps({"strictKnownMarketplaces": [{"source": "github", "repo": "owner/repo"}]})
+    )
+    report = ValidationReport()
+    validate_structure(plugin_dir, report)
+
+    unrec_minors = [
+        r.message
+        for r in report.results
+        if r.level == "MINOR" and "unrecognized key 'strictKnownMarketplaces'" in r.message
+    ]
+    assert not unrec_minors, (
+        "strictKnownMarketplaces must be recognized in plugin settings.json "
+        f"(no 'unrecognized key' MINOR allowed). Got: {unrec_minors}"
+    )
+
+
+def test_strict_known_marketplaces_validation_runs_in_plugin_pipeline(tmp_path: Path):
+    """validate_plugin.validate_structure must invoke the settings-marketplace
+    validator when only strictKnownMarketplaces is present (not just when
+    extraKnownMarketplaces is present).
+    """
+    import json as _json
+    import sys as _sys
+
+    scripts_dir = Path(__file__).parent.parent / "scripts"
+    if str(scripts_dir) not in _sys.path:
+        _sys.path.insert(0, str(scripts_dir))
+
+    from validate_plugin import validate_structure  # noqa: E402
+
+    plugin_dir = tmp_path / "p2"
+    plugin_dir.mkdir()
+    cp = plugin_dir / ".claude-plugin"
+    cp.mkdir()
+    (cp / "plugin.json").write_text(_json.dumps({"name": "p2", "version": "1.0.0", "description": "x"}))
+    (plugin_dir / "agents").mkdir()
+    (plugin_dir / "agents" / "x.md").write_text("---\nname: x\ndescription: y\n---\n")
+    # Add an INVALID strictKnownMarketplaces entry — npm is not allowed in strict mode
+    # (per plugin-marketplaces.md:625-669, only github/url/hostPattern/pathPattern accepted)
+    (plugin_dir / "settings.json").write_text(
+        _json.dumps({"strictKnownMarketplaces": [{"source": "npm", "package": "@scope/pkg"}]})
+    )
+    report = ValidationReport()
+    validate_structure(plugin_dir, report)
+
+    # The MAJOR from validate_settings_marketplace must propagate into the
+    # plugin report. Without wiring, this assertion fails.
+    npm_strict_majors = [
+        r.message
+        for r in report.results
+        if r.level == "MAJOR" and "strictKnownMarketplaces" in r.message and "npm" in r.message
+    ]
+    assert npm_strict_majors, (
+        "Expected the settings-marketplace validator to fire when "
+        "strictKnownMarketplaces is present in plugin settings.json. "
+        "Got MAJOR messages: "
+        f"{[r.message for r in report.results if r.level == 'MAJOR']}"
+    )
+
+
+def test_extra_known_marketplaces_in_plugin_settings_emits_warning(tmp_path: Path):
+    """Open question 3: extraKnownMarketplaces is a USER/PROJECT-scope key.
+    A plugin shipping it in plugin-root settings.json should produce a
+    WARNING explaining the scope mismatch (Claude Code silently ignores
+    such declarations from plugins).
+    """
+    import json as _json
+    import sys as _sys
+
+    scripts_dir = Path(__file__).parent.parent / "scripts"
+    if str(scripts_dir) not in _sys.path:
+        _sys.path.insert(0, str(scripts_dir))
+
+    from validate_plugin import validate_structure  # noqa: E402
+
+    plugin_dir = tmp_path / "p3"
+    plugin_dir.mkdir()
+    cp = plugin_dir / ".claude-plugin"
+    cp.mkdir()
+    (cp / "plugin.json").write_text(_json.dumps({"name": "p3", "version": "1.0.0", "description": "x"}))
+    (plugin_dir / "agents").mkdir()
+    (plugin_dir / "agents" / "x.md").write_text("---\nname: x\ndescription: y\n---\n")
+    # Plugin-shipped settings.json with extraKnownMarketplaces — wrong scope
+    (plugin_dir / "settings.json").write_text(
+        _json.dumps(
+            {
+                "extraKnownMarketplaces": {
+                    "vendor-mp": {
+                        "source": {"source": "github", "repo": "vendor/mp"},
+                    }
+                }
+            }
+        )
+    )
+    report = ValidationReport()
+    validate_structure(plugin_dir, report)
+
+    scope_warnings = [
+        r.message
+        for r in report.results
+        if r.level == "WARNING"
+        and "extraKnownMarketplaces" in r.message
+        and ("plugin-shipped" in r.message or "user-scope" in r.message or "user/project" in r.message)
+    ]
+    assert scope_warnings, (
+        "Expected a WARNING about extraKnownMarketplaces being in a "
+        "plugin-shipped settings.json (wrong scope). Got: "
+        f"{[(r.level, r.message) for r in report.results if r.level == 'WARNING']}"
+    )
+
+
+def test_strict_known_marketplaces_in_plugin_settings_emits_major(tmp_path: Path):
+    """Open question 3 + scope: strictKnownMarketplaces is admin-managed only
+    (cc_scope_rules.MANAGED_ONLY_KEYS). A plugin shipping it must emit a
+    MAJOR — Claude Code silently ignores it from plugins, leaving the author
+    with a false sense of lockdown enforcement.
+    """
+    import json as _json
+    import sys as _sys
+
+    scripts_dir = Path(__file__).parent.parent / "scripts"
+    if str(scripts_dir) not in _sys.path:
+        _sys.path.insert(0, str(scripts_dir))
+
+    from validate_plugin import validate_structure  # noqa: E402
+
+    plugin_dir = tmp_path / "p4"
+    plugin_dir.mkdir()
+    cp = plugin_dir / ".claude-plugin"
+    cp.mkdir()
+    (cp / "plugin.json").write_text(_json.dumps({"name": "p4", "version": "1.0.0", "description": "x"}))
+    (plugin_dir / "agents").mkdir()
+    (plugin_dir / "agents" / "x.md").write_text("---\nname: x\ndescription: y\n---\n")
+    # Plugin-shipped settings.json with strictKnownMarketplaces — managed-only key
+    (plugin_dir / "settings.json").write_text(
+        _json.dumps({"strictKnownMarketplaces": [{"source": "github", "repo": "trusted/mp"}]})
+    )
+    report = ValidationReport()
+    validate_structure(plugin_dir, report)
+
+    scope_majors = [
+        r.message
+        for r in report.results
+        if r.level == "MAJOR"
+        and "strictKnownMarketplaces" in r.message
+        and ("admin-managed" in r.message or "managed-settings" in r.message or "plugin-shipped" in r.message)
+    ]
+    assert scope_majors, (
+        "Expected a MAJOR about strictKnownMarketplaces being managed-only "
+        "(silently ignored from plugin-shipped settings.json). Got: "
+        f"{[(r.level, r.message) for r in report.results if r.level == 'MAJOR']}"
+    )
+
+
+def test_settings_marketplace_validator_skipped_when_neither_block_present(tmp_path: Path):
+    """Regression guard: when neither extraKnownMarketplaces nor
+    strictKnownMarketplaces is in the plugin's settings.json, the
+    settings-marketplace validator does NOT add spurious "no marketplace
+    blocks" PASSED messages or otherwise interfere with validate_plugin's
+    own settings.json check.
+    """
+    import json as _json
+    import sys as _sys
+
+    scripts_dir = Path(__file__).parent.parent / "scripts"
+    if str(scripts_dir) not in _sys.path:
+        _sys.path.insert(0, str(scripts_dir))
+
+    from validate_plugin import validate_structure  # noqa: E402
+
+    plugin_dir = tmp_path / "p5"
+    plugin_dir.mkdir()
+    cp = plugin_dir / ".claude-plugin"
+    cp.mkdir()
+    (cp / "plugin.json").write_text(_json.dumps({"name": "p5", "version": "1.0.0", "description": "x"}))
+    (plugin_dir / "agents").mkdir()
+    (plugin_dir / "agents" / "x.md").write_text("---\nname: x\ndescription: y\n---\n")
+    # settings.json with only "agent" key — no marketplace blocks
+    (plugin_dir / "settings.json").write_text(_json.dumps({"agent": "x"}))
+    report = ValidationReport()
+    validate_structure(plugin_dir, report)
+
+    # No CRITICAL/MAJOR/WARNING about marketplaces should appear
+    bad = [
+        r.message
+        for r in report.results
+        if r.level in {"CRITICAL", "MAJOR", "WARNING"}
+        and ("extraKnownMarketplaces" in r.message or "strictKnownMarketplaces" in r.message)
+    ]
+    assert not bad, f"Expected zero marketplace-related findings when neither block is present. Got: {bad}"

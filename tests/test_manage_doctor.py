@@ -743,3 +743,118 @@ class TestDoDoctor:
 
         out = capsys.readouterr().out
         assert "not authenticated" in out.lower()
+
+
+# ═══════════════════════════════════════════════════════════════════
+# TRDD-e2b17a61 — settings.json marketplace schema validation in doctor
+#
+# The doctor reads ~/.claude/settings.json and reports the count of
+# marketplaces under extraKnownMarketplaces. The TRDD's third deliverable
+# wires schema validation into the doctor pipeline — when an
+# extraKnownMarketplaces / strictKnownMarketplaces block is present, the
+# doctor delegates to validate_settings_marketplace_file() so schema
+# violations surface during the health check (instead of silently waiting
+# for an explicit `/cpv-validate-settings-marketplace` invocation).
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestDoctorSettingsMarketplaceWiring:
+    """Doctor pipeline wires validate_settings_marketplace into health check."""
+
+    def test_doctor_flags_invalid_extra_known_marketplaces_schema(self, tmp_path, monkeypatch, capsys):
+        """Invalid extraKnownMarketplaces schema (unknown source type) surfaces during doctor sweep."""
+        claude_dir = _make_claude_dir(tmp_path)
+        _patch_paths(monkeypatch, claude_dir)
+
+        # Settings with an unknown source type — should be a MAJOR finding
+        _make_settings(
+            claude_dir,
+            {
+                "extraKnownMarketplaces": {
+                    "broken-mp": {
+                        "source": {"source": "quantum", "data": "irrelevant"},
+                    }
+                },
+            },
+        )
+
+        with patch("manage_doctor.shutil.which", return_value=None):
+            do_doctor()
+
+        out = capsys.readouterr().out
+        # Doctor should mention the schema problem somewhere in its output.
+        # Either the marketplace name or the term "marketplace schema" must appear.
+        assert "broken-mp" in out or "unknown source type" in out, (
+            f"Expected doctor to surface the invalid extraKnownMarketplaces schema. Got output:\n{out}"
+        )
+
+    def test_doctor_flags_strict_known_marketplaces_with_disallowed_npm(self, tmp_path, monkeypatch, capsys):
+        """strictKnownMarketplaces npm source (not in allowlist) surfaces during doctor sweep."""
+        claude_dir = _make_claude_dir(tmp_path)
+        _patch_paths(monkeypatch, claude_dir)
+
+        # strictKnownMarketplaces only accepts {github, url, hostPattern, pathPattern}
+        _make_settings(
+            claude_dir,
+            {
+                "strictKnownMarketplaces": [
+                    {"source": "npm", "package": "@scope/pkg"},
+                ],
+            },
+        )
+
+        with patch("manage_doctor.shutil.which", return_value=None):
+            do_doctor()
+
+        out = capsys.readouterr().out
+        # Output should mention strictKnownMarketplaces or 'npm' violation
+        assert "strictKnownMarketplaces" in out or "npm" in out.lower() or "not allowed" in out.lower(), (
+            f"Expected doctor to surface the strictKnownMarketplaces npm violation. Got output:\n{out}"
+        )
+
+    def test_doctor_silent_when_marketplace_blocks_valid(self, tmp_path, monkeypatch, capsys):
+        """When extraKnownMarketplaces is well-formed, doctor reports no schema issue."""
+        claude_dir = _make_claude_dir(tmp_path)
+        _patch_paths(monkeypatch, claude_dir)
+
+        _make_settings(
+            claude_dir,
+            {
+                "extraKnownMarketplaces": {
+                    "good-mp": {
+                        "source": {"source": "github", "repo": "owner/repo"},
+                    },
+                },
+            },
+        )
+
+        # Create the marketplaces dir + plugin so doctor doesn't complain about
+        # missing infrastructure
+        mp_dir = claude_dir / "plugins" / "marketplaces"
+        mp_dir.mkdir(parents=True)
+
+        with patch("manage_doctor.shutil.which", return_value=None):
+            do_doctor()
+
+        out = capsys.readouterr().out
+        # No 'unknown source type' / 'invalid' marketplace findings should appear
+        bad_markers = ["unknown source type", "marketplace schema invalid", "MAJOR"]
+        for marker in bad_markers:
+            assert marker not in out, (
+                f"Expected NO '{marker}' in doctor output for a well-formed extraKnownMarketplaces. Got: {out}"
+            )
+
+    def test_doctor_skips_marketplace_validation_when_no_block_present(self, tmp_path, monkeypatch, capsys):
+        """Doctor doesn't blow up when settings.json has no extraKnownMarketplaces key at all."""
+        claude_dir = _make_claude_dir(tmp_path)
+        _patch_paths(monkeypatch, claude_dir)
+
+        # Plain settings — no marketplace blocks
+        _make_settings(claude_dir, {"model": "sonnet"})
+
+        with patch("manage_doctor.shutil.which", return_value=None):
+            do_doctor()
+
+        out = capsys.readouterr().out
+        # No exceptions — doctor must complete normally
+        assert "settings.json: valid" in out

@@ -4,7 +4,17 @@
 **Filename:** `design/tasks/TRDD-e2b17a61-e6f0-4bff-ac9e-feb3a7cd046b-settings-json-marketplace-validator.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
 
-**Status:** In progress
+**Status:** Done — 2026-05-10. validate_settings_marketplace.py + constants in
+cpv_validation_common.py + 24 schema tests already shipped. This pass added
+strictKnownMarketplaces wiring into validate_plugin.py (was triggered only by
+extraKnownMarketplaces), recognized strictKnownMarketplaces in plugin
+settings.json (no false "unrecognized key" MINOR), implemented Open Question 3
+(plugin-shipped scope-mismatch warnings: WARNING for extraKnownMarketplaces +
+MAJOR for strictKnownMarketplaces, the latter being managed-only per
+cc_scope_rules.MANAGED_ONLY_KEYS), and wired schema validation into
+manage_doctor.do_doctor() so user-settings violations surface during health
+checks. 9 new tests (5 settings-marketplace pipeline, 4 doctor wiring) all
+passing alongside 4489 existing tests.
 
 ## Context
 
