@@ -1,0 +1,14 @@
+{
+  "name": "chat-id-only-gated",
+  "version": "1.0.0",
+  "description": "Naive Telegram channel — gates on chat-ID only",
+  "mcpServers": {
+    "telegram": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/servers/telegram/src/server.ts"]
+    }
+  },
+  "channels": [
+    {"server": "telegram"}
+  ]
+}

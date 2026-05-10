@@ -60,6 +60,7 @@ Runs only when `plugin.json.channels` is non-empty AND plugin ships MCP server s
 Load [channel-source-security](references/channel-source-security.md):
 - Why This Pillar Exists
 - Workflow
+- Deterministic Prefilter Helper
 - Rule 1 — Sender-ID allowlist (CRITICAL)
 - Rule 2 — Permission-relay gating (CRITICAL)
 - Rule 3 — Chat-ID-only gating (MAJOR)
