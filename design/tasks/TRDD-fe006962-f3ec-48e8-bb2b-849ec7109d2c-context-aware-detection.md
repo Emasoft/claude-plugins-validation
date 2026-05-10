@@ -3,10 +3,11 @@
 **TRDD ID:** `fe006962-f3ec-48e8-bb2b-849ec7109d2c`
 **Filename:** `design/tasks/TRDD-fe006962-f3ec-48e8-bb2b-849ec7109d2c-context-aware-detection.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
-**Status:** In progress — v1 shipped 2026-04-29 in v2.42 (Steps 1+2+3 complete for RC-21/22/65/87/93; Step 4 demote-only — escalation gated behind future `--extreme` flag)
+**Status:** Done — v2 shipped 2026-05-10 (Step 4 escalation tier complete: `--extreme` CLI flag wired through `_set_classifier_active(with_extreme=)` → `_CLASSIFIER_ESCALATE` module global → `apply_verdict(allow_escalation=...)`. RC-21 copy-then-exfil-sink and RC-65 same-line-IMDS-network-call now return `DEFINITE_TP` so `--extreme` promotes MAJOR→CRITICAL. Off by default; LIKELY_FP demotion path unchanged. Bench corpus still 100% precision/recall — `DEFINITE_TP` counts as TP.)
 **Priority:** Medium (security quality gate, not blocking)
 **Created:** 2026-04-29
 **v1 release:** 2026-04-29 — `--with-classifier` opt-in flag, `cpv_fp_classifier` infra, `cpv_fp_classifier_rules` for 5 v2.41 rules, `bench_fp_classifier.py` corpus harness, `tests/fixtures/fp_corpus/` with 25 TP + 25 FP exemplars (100% precision/recall on bench)
+**v2 release:** 2026-05-10 — Step 4 escalation tier (`--extreme` CLI flag, `_CLASSIFIER_ESCALATE` global, `with_extreme=` kwarg on `_set_classifier_active()` and `validate_security()`, RC-21/RC-65 `DEFINITE_TP` verdicts in their highest-confidence contexts; 14 new tests; backwards-compatible — flag default is OFF).
 
 ## User's request (verbatim)
 

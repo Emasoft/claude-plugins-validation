@@ -1086,6 +1086,14 @@ CPV_SELF_HASH_MANIFEST_NAME = PLUGIN_SELF_HASH_MANIFEST_NAME_LEGACY  # deprecate
 # call so the per-finding overhead stays in O(1) substring matching.
 _CLASSIFIER_ACTIVE: bool = False
 _CLASSIFIER_PLUGIN_META: dict = {}
+# Step 4 (TRDD-fe006962) — escalation tier flag. When True, classifier
+# verdicts of `DEFINITE_TP` are translated to a one-tier severity bump
+# via `apply_verdict(allow_escalation=True)`. Default is False so the
+# rollout never inflates findings without an explicit `--extreme` opt-in.
+# This flag is meaningful ONLY when `_CLASSIFIER_ACTIVE is True`; the
+# legacy v2.41 binary-guard path never escalates because it never asks
+# the classifier in the first place.
+_CLASSIFIER_ESCALATE: bool = False
 
 
 def _file_role_from_path(rel_path: str) -> str:
@@ -1107,9 +1115,24 @@ def _file_role_from_path(rel_path: str) -> str:
     return "source"
 
 
-def _set_classifier_active(active: bool, plugin_root: Path | None = None) -> None:
-    """Toggle the classifier and pre-load `plugin.json` for `Context.plugin_meta`."""
-    global _CLASSIFIER_ACTIVE, _CLASSIFIER_PLUGIN_META
+def _set_classifier_active(
+    active: bool,
+    plugin_root: Path | None = None,
+    *,
+    with_extreme: bool = False,
+) -> None:
+    """Toggle the classifier and pre-load `plugin.json` for `Context.plugin_meta`.
+
+    `with_extreme` (Step 4 of TRDD-fe006962) toggles the escalation tier:
+    when True AND the classifier is active, `DEFINITE_TP` verdicts are
+    promoted one severity tier (e.g. MAJOR → CRITICAL). The flag is
+    silently forced to False when `active=False` because escalation lives
+    on the classifier path — the legacy v2.41 binary guards never ask
+    the classifier. Forcing the flag off in that case keeps an
+    accidental `with_extreme=True` from creating a "phantom" escalation
+    that the rest of the code path never reads.
+    """
+    global _CLASSIFIER_ACTIVE, _CLASSIFIER_PLUGIN_META, _CLASSIFIER_ESCALATE
     _CLASSIFIER_ACTIVE = active
     if active and plugin_root is not None:
         # Imported lazily so a CPV install without `cpv_fp_classifier_rules`
@@ -1123,6 +1146,13 @@ def _set_classifier_active(active: bool, plugin_root: Path | None = None) -> Non
             _CLASSIFIER_PLUGIN_META = {}
     else:
         _CLASSIFIER_PLUGIN_META = {}
+    # Escalation only matters when the classifier is actually on. Use the
+    # MODULE GLOBAL (`_CLASSIFIER_ACTIVE`), not the local `active`
+    # parameter — the lazy import above can downgrade `active=True` to
+    # `_CLASSIFIER_ACTIVE=False` on a partial install. Pinning escalate
+    # to the post-import classifier state makes
+    # `_CLASSIFIER_ESCALATE → _CLASSIFIER_ACTIVE` a hard invariant.
+    _CLASSIFIER_ESCALATE = bool(_CLASSIFIER_ACTIVE and with_extreme)
 
 
 def _classifier_decision(
@@ -1166,7 +1196,13 @@ def _classifier_decision(
         plugin_meta=_CLASSIFIER_PLUGIN_META,
     )
     verdict = classify_rule(rule_id, ctx)
-    action = apply_verdict(verdict, declared_severity)
+    # Step 4 — escalation tier. The `allow_escalation` flag is opt-in
+    # via `--extreme`; default behaviour is unchanged (DEFINITE_TP =
+    # REAL severity). `_CLASSIFIER_ESCALATE` is gated on
+    # `_CLASSIFIER_ACTIVE` inside `_set_classifier_active`, so reading
+    # it here is safe even if the classifier became inactive between
+    # the activation call and this line.
+    action = apply_verdict(verdict, declared_severity, allow_escalation=_CLASSIFIER_ESCALATE)
     return action.report_severity, action.note
 
 
@@ -7994,6 +8030,7 @@ def validate_security(
     enable_trufflehog: bool = True,
     enable_semgrep: bool = True,
     with_classifier: bool = False,
+    with_extreme: bool = False,
     cache: ScannerCache | None = None,
 ) -> ValidationReport:
     """Run all security validations on a plugin directory.
@@ -8022,6 +8059,17 @@ def validate_security(
             can demote (LIKELY_FP → one severity tier down) or suppress
             (DEFINITE_FP → not reported). Off by default — gives the legacy
             v2.41 binary-guard behaviour. See TRDD-fe006962.
+        with_extreme: When True, classifier verdicts of `DEFINITE_TP`
+            promote the declared severity one tier (e.g. MAJOR → CRITICAL).
+            Currently used by RC-21 (copy-then-exfil-sink pattern) and
+            RC-65 (IMDS literal in same-line network call) — both
+            high-confidence credential / instance-metadata exfiltration
+            signals with no observed benign reading. Off by default
+            because escalation can only inflate findings; explicit
+            opt-in keeps the rollout safe. Implies `with_classifier=True`
+            (silently — escalation lives on the classifier path; an
+            extreme-only call without the classifier is a no-op).
+            See TRDD-fe006962 §Step 4.
         cache: Phase D scanner-result cache. When ``None`` (default), a
             ``ScannerCache`` against the user's home cache directory is
             constructed. The cache only wraps the four EXTERNAL tree-
@@ -8045,7 +8093,7 @@ def validate_security(
     # phase-specific scan helpers via module-level globals — same pattern
     # the self-scan flag uses, so the overhead per finding stays in the
     # check rather than crossing every function boundary.
-    _set_classifier_active(with_classifier, plugin_path)
+    _set_classifier_active(with_classifier, plugin_path, with_extreme=with_extreme)
 
     # v2.48 — silent autoinstall of fclones (the dedup helper used by Phase
     # 4's marketplace bulk scanner). Idempotent: if fclones is already on
@@ -9254,6 +9302,7 @@ def _run_marketplace_scan(args: argparse.Namespace) -> int:
                 enable_trufflehog=True,
                 enable_semgrep=True,
                 with_classifier=args.with_classifier,
+                with_extreme=args.extreme,
             )
             # Snapshot the per-plugin step table BEFORE the next plugin's
             # `validate_security` call resets the module-global step log.
@@ -9498,6 +9547,19 @@ Exit Codes:
         "(DEFINITE_FP). Off by default — preserves legacy v2.41 "
         "binary-guard behaviour. See TRDD-fe006962.",
     )
+    parser.add_argument(
+        "--extreme",
+        action="store_true",
+        help="Step 4 of TRDD-fe006962 — classifier escalation tier. When "
+        "set, the highest-confidence TP verdicts (RC-21 copy-then-"
+        "exfil-sink, RC-65 IMDS literal in same-line network call) "
+        "promote the declared severity one tier (MAJOR → CRITICAL). "
+        "Off by default because escalation can only inflate findings — "
+        "use only when you want maximally-paranoid scanning of code "
+        "that handles credentials. Implies --with-classifier; passing "
+        "--extreme without --with-classifier is a no-op (escalation "
+        "lives on the classifier path).",
+    )
 
     args = parser.parse_args()
 
@@ -9600,6 +9662,7 @@ Exit Codes:
             enable_trufflehog=True,
             enable_semgrep=True,
             with_classifier=args.with_classifier,
+            with_extreme=args.extreme,
         )
     finally:
         if ingest_result is not None:
