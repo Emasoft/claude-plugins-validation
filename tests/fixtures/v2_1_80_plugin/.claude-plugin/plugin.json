@@ -1,0 +1,66 @@
+{
+  "name": "v2-1-80-demo-plugin",
+  "version": "1.0.0",
+  "description": "Demo plugin exercising every Claude Code v2.1.80+ feature: Monitor tool, userConfig (5-type whitelist), channels, CLAUDE_PLUGIN_OPTION_<KEY> env vars, and the v2.1.98 plugin-skill name field.",
+  "author": {
+    "name": "CPV Test Suite",
+    "email": "cpv-tests@example.com"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/Emasoft/claude-plugins-validation",
+  "repository": "https://github.com/Emasoft/claude-plugins-validation",
+  "keywords": [
+    "demo",
+    "v2.1.80",
+    "fixture",
+    "validation"
+  ],
+  "agents": [
+    "./agents/log-watcher.md"
+  ],
+  "userConfig": {
+    "WORKSPACE_DIR": {
+      "title": "Workspace directory",
+      "description": "Absolute path to the user's workspace directory.",
+      "type": "directory"
+    },
+    "API_TOKEN": {
+      "title": "API authentication token",
+      "description": "Bearer token routed to the system keychain (sensitive=true).",
+      "type": "string",
+      "sensitive": true
+    },
+    "POLL_INTERVAL": {
+      "title": "Poll interval (seconds)",
+      "description": "How often to poll upstream events.",
+      "type": "number",
+      "default": 900
+    },
+    "ENABLE_CACHE": {
+      "title": "Enable cache",
+      "description": "Whether to cache results between runs.",
+      "type": "boolean",
+      "default": true
+    },
+    "CONFIG_FILE": {
+      "title": "Config file path",
+      "description": "Absolute path to the plugin's configuration file.",
+      "type": "file"
+    }
+  },
+  "mcpServers": {
+    "notifications": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/mcp/notifications.js",
+        "--workspace=${CLAUDE_PLUGIN_OPTION_WORKSPACE_DIR}"
+      ]
+    }
+  },
+  "channels": [
+    {
+      "server": "notifications",
+      "name": "alerts"
+    }
+  ]
+}
