@@ -1796,7 +1796,15 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
                 # "agent" is the primary plugin-level setting; "extraKnownMarketplaces"
                 # is the v2.1.80 inline-marketplace declaration validated separately below.
                 # "subagentStatusLine" is the v2.1.x plugin-scoped override (plugins.md:278-288).
-                recognized_keys = {"agent", "extraKnownMarketplaces", "subagentStatusLine"}
+                # TRDD-e2b17a61: "strictKnownMarketplaces" added so it does not emit a
+                # spurious "unrecognized key" MINOR — its actual scope violation
+                # (admin-managed only) is reported as a MAJOR below.
+                recognized_keys = {
+                    "agent",
+                    "extraKnownMarketplaces",
+                    "strictKnownMarketplaces",
+                    "subagentStatusLine",
+                }
                 has_unrecognized = False
                 for key in settings_data:
                     if key not in recognized_keys:
@@ -1820,14 +1828,52 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
                         report.major(
                             f"settings.json 'agent' must be a string, got {type(agent_val).__name__}", "settings.json"
                         )
-                # v2.1.80+: validate extraKnownMarketplaces block by delegating to the
-                # dedicated settings-marketplace validator. Results are merged into this
-                # plugin report so all findings land in a single report.
-                if "extraKnownMarketplaces" in settings_data:
+                # TRDD-e2b17a61 — v2.1.80+: validate extraKnownMarketplaces /
+                # strictKnownMarketplaces by delegating to the dedicated
+                # settings-marketplace validator. Wiring fires for EITHER block so
+                # authors get schema validation for whichever they ship. Results
+                # merge into this plugin report so all findings land in a single
+                # report.
+                #
+                # Open question 3 (TRDD-e2b17a61): both keys are scope-mismatched
+                # when they live in a plugin-shipped settings.json:
+                #   - extraKnownMarketplaces: USER/PROJECT-scope (silently ignored
+                #     from plugins) → emit WARNING so the author knows the
+                #     declaration is a no-op for end users.
+                #   - strictKnownMarketplaces: ADMIN-MANAGED-only allowlist → emit
+                #     MAJOR because the author may be relying on lockdown that
+                #     will never fire.
+                has_extra_kn_mp = "extraKnownMarketplaces" in settings_data
+                has_strict_kn_mp = "strictKnownMarketplaces" in settings_data
+                if has_extra_kn_mp or has_strict_kn_mp:
                     from validate_settings_marketplace import validate_settings_marketplace_file
 
                     sm_report = validate_settings_marketplace_file(settings_path)
                     report.merge(sm_report)
+
+                    if has_extra_kn_mp:
+                        report.warning(
+                            "settings.json: 'extraKnownMarketplaces' is a USER/PROJECT-scope "
+                            "key (settings.md). When shipped inside a plugin-shipped "
+                            "settings.json it is silently ignored at runtime — Claude Code "
+                            "only honours this block from user (~/.claude/settings.json) "
+                            "or project (.claude/settings.json) scopes. Move the "
+                            "declaration to your project README as installation guidance "
+                            "instead of bundling it in the plugin.",
+                            "settings.json",
+                        )
+                    if has_strict_kn_mp:
+                        report.major(
+                            "settings.json: 'strictKnownMarketplaces' is an "
+                            "ADMIN-MANAGED-only key (cc_scope_rules.MANAGED_ONLY_KEYS, "
+                            "managed-settings.md). Claude Code silently ignores this "
+                            "block from any plugin-shipped settings.json — the author "
+                            "is relying on lockdown enforcement that will NEVER fire. "
+                            "Strict allowlists belong in /etc/claude-code/managed-settings.json "
+                            "(Linux), /Library/Application Support/ClaudeCode/managed-settings.json "
+                            "(macOS), or C:\\ProgramData\\ClaudeCode\\managed-settings.json (Windows).",
+                            "settings.json",
+                        )
                 if not has_unrecognized:
                     report.passed("settings.json is valid", "settings.json")
                 else:
