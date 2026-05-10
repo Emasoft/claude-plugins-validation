@@ -3,7 +3,51 @@
 **TRDD ID:** `b5e44619-1a90-4caa-84da-f5717d7cc27e`
 **Filename:** `design/tasks/TRDD-b5e44619-1a90-4caa-84da-f5717d7cc27e-universal-publish-and-auth.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
-**Status:** Draft — awaiting user approval before implementation.
+**Status:** Partial — Phase A/B/D deferred to TRDD-9065109a (which explicitly supersedes this TRDD's Phase A); Phase C (auth-surface contract) read-only slice landed in v2.81.0 as `scripts/cpv_setup_auth.py` + `skills/cpv-setup-auth-skill/` + 33 tests; the slash-command + agent triple is still pending (commands/agents are owned by other TRDDs in the wave-4 contract).
+
+**Verification (2026-05-10):**
+
+Phase-by-phase status:
+
+| Phase | Status | Reference |
+|-------|--------|-----------|
+| A.1 — `scripts/publish.py` → `cpv/publish.py` | DEFERRED | Active in TRDD-9065109a worktree (Phases A/C/D/E/F/H still deferred there too) |
+| A.2 — 3-line wrapper for new plugins | DEFERRED | Depends on A.1; same worktree |
+| B — Layout detection | DONE elsewhere | Already shipped in TRDD-9065109a Phase B (`scripts/cpv_repo_shape.py`, 7-shape classifier with 33 tests) |
+| C — 8-surface auth contract (orchestrator + skill) | DONE | This worktree — see "C deliverables" below |
+| C — `/cpv-setup-auth` slash command + agent | DEFERRED | `commands/*.md` and `agents/*.md` owned by other TRDDs in wave-4 contract |
+| D — Legacy migration helper | DEFERRED | Depends on Phase A landing first |
+| E — Tests + docs | PARTIAL | Tests for the C deliverables landed (33); docs for A/B/D pending |
+
+**Phase C deliverables (this worktree):**
+
+- `scripts/cpv_setup_auth.py` (557 LOC) — read-only orchestrator covering all 8 surfaces from §C:
+  1. Git identity (`git config user.name/email` local OR global)
+  2. GitHub HTTPS auth (`gh auth status`; never invokes `gh auth token`)
+  3. GitHub SSH auth (`ssh-add -L`, N/A when ssh-add absent)
+  4. MARKETPLACE_PAT env var (`PAT_MARKETPLACE` then `MARKETPLACE_PAT`, matching `set_marketplace_pat.DEFAULT_PAT_ENV_VARS` order)
+  5. Branch-rules helper (script-on-disk presence)
+  6. Pre-push hook (`core.hooksPath` + hook file existence; PARTIAL when hook is in default `.git/hooks/`)
+  7. Commit signing (`commit.gpgsign` + `user.signingkey`)
+  8. External scanners (PATH check for the 6 scanners `cpv_install_scanners` installs)
+- `tests/test_cpv_setup_auth.py` — 33 tests (one happy-path + at least one failure-path per surface, plus renderer + CLI)
+- `docs_dev/cpv-setup-auth-skill-staging/cpv-setup-auth-skill/` — user-facing skill (parked in `docs_dev/` because the orphan-skill check at `tests/test_consolidation_v211.py::test_every_skill_is_loaded_by_at_least_one_agent` requires every skill in `skills/` to be referenced by at least one agent; promoting this skill to `skills/` requires a follow-up that updates `agents/cpv-doctor-agent.md` or `agents/plugin-creator.md` — owned by other TRDDs in the wave-4 contract). Includes a README explaining the promotion procedure.
+- `pyproject.toml` — `cpv-setup-auth` console script
+- `scripts/cli.py` — `setup_auth()` entry point
+
+**Read-only contract enforced (per TRDD-bbff5bc5 §4.1):**
+
+- NEVER invokes `gh auth token` (PAT non-leakage).
+- NEVER reads or prints secret values from disk or env.
+- NEVER writes to disk.
+- NEVER modifies any git config.
+- Default mode (`check`) always exits 0; `--strict` mode exits 1 only when one of the 3 load-bearing surfaces (1, 2, 6) is unset.
+
+**Cross-references:**
+
+- TRDD-9065109a — supersedes this TRDD's Phase A (publish.py promotion); has shipped Phases B + G as of 2026-05-10.
+- TRDD-bbff5bc5 — Done in v2.51.0; `_ensure_gh_auth(owner, repo)` in publish.py is the load-bearing companion to this TRDD's surface 2 check.
+- TRDD-b934f65c — Done in v2.80.0; local-marketplace dev-link layer that makes the publish-side flow testable without GitHub.
 
 ## User request (verbatim, 2026-05-02)
 
