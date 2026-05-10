@@ -3,7 +3,7 @@
 **TRDD ID:** `82e836dc-5880-42e6-a533-2e92747eeb77`
 **Filename:** `design/tasks/TRDD-82e836dc-5880-42e6-a533-2e92747eeb77-agent-model-tier-policy.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
-**Status:** Not started — awaiting implementation
+**Status:** Done (2026-05-10) — Phases A+B shipped
 **Author:** Emanuele (orchestrator captured 2026-05-10)
 **Created:** 2026-05-10
 **Priority:** Medium (token-efficiency optimisation; user-visible cost reduction; no functional regression risk if done correctly)
