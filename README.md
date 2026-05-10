@@ -53,6 +53,7 @@ CPV runs **20 specialized validators** covering **190+ rules** across every part
 | **Security** | Hardcoded secrets, path traversal, command injection, prompt injection |
 | **Compatibility** | Windows/macOS/Linux path issues, encoding problems, broken references |
 | **Quality** | Missing documentation, no license, inconsistent versions, dead links |
+| **v2.1.80+ Plugin Features** | `Monitor` tool, `userConfig` (5-type whitelist + required `title`/`type`), `channels` (server cross-ref), `CLAUDE_PLUGIN_OPTION_<KEY>` env vars, inline marketplace in `settings.json`, `managed-settings.d/` drop-ins, plugin skill `name` field (v2.1.98) — full reference: [`skills/create-plugin/references/v2-1-80-features.md`](skills/create-plugin/references/v2-1-80-features.md) |
 | **Empirical Loading Bugs** *(v2.23.0+)* | Silent-failure modes in CC's plugin loader that `claude plugin validate` doesn't catch — see below |
 
 ### Empirical Plugin-Loading Bugs CPV Catches
