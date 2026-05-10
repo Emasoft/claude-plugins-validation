@@ -38,6 +38,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -8285,72 +8286,184 @@ def validate_security(
     # The `enable_*` keyword arguments survive only as test-isolation
     # knobs for hermetic unit tests — production callers pass True.
 
-    # Check 22: cc-audit external scanner (100+ rules; runs via npx,
-    # self-skips when the npm package cannot be fetched).
-    if shutil.which("npx"):
-        cc_count = check_cc_audit(plugin_path, report)
-        _record_step(
-            22,
-            "External: cc-audit (100+ AI rules)",
-            "RAN",
-            findings=cc_count,
-            files="npx @cc-audit/cc-audit (auto-fetched)",
-        )
-    else:
-        check_cc_audit(plugin_path, report)  # still emits the WARNING for the user
-        _record_step(
-            22, "External: cc-audit (100+ AI rules)", "SKIPPED", details="`npx` not on PATH — install Node.js to enable"
-        )
+    # Phase B (v2.76.0) — run cc-audit, tirith, trufflehog, semgrep in
+    # parallel. Each scanner is a long subprocess (npx download +
+    # network-bound npm pull, docker pull, full-tree filesystem scan,
+    # registry config download); even on a 4-core machine running them
+    # concurrently shaves ~50–70% off the wall clock when more than
+    # one scanner is installed. Each scanner self-times-out (180s for
+    # trufflehog, 300s for semgrep, internal timeouts for the rest),
+    # so concurrent execution does not change the worst-case latency.
+    #
+    # Output ordering rule: declaration order (cc-audit → tirith →
+    # trufflehog → semgrep) is preserved when merging per-task results
+    # and per-task `_record_step` records back into the global report
+    # and step log. Completion order is irrelevant to the user-facing
+    # output.
+    #
+    # IMPORTANT — no `contextlib.redirect_stdout` inside the thread
+    # tasks. ``redirect_stdout`` mutates the process-global
+    # ``sys.stdout`` reference: with N concurrent threads the last one
+    # to exit may restore a stale per-thread buffer instead of the
+    # real stdout, swallowing every subsequent write made by the main
+    # thread. All four scanners route their output through
+    # ``report.X(...)`` and ``capture_output=True`` subprocess calls,
+    # so there is no inner ``print()`` to capture.
 
-    # Check 23: tirith external scanner (terminal-security rules,
-    # scan-only). Resolution order: PATH → docker → nix → auto-install
-    # (brew/npm/cargo). Set CPV_NO_TIRITH_INSTALL=1 to disable the
-    # install fallback in CI sandboxes that block container pulls.
-    if enable_tirith:
-        report_len_before = len(report.results)
-        tirith_count = check_tirith_scanner(plugin_path, report)
-        # Inspect newly-added results to determine RAN vs SKIPPED.
-        new_results = report.results[report_len_before:]
-        unavail = any(
-            "tirith" in (r.message or "").lower()
-            and (
-                "not found" in r.message.lower() or "unavailable" in r.message.lower() or "skipped" in r.message.lower()
+    def _task_cc_audit() -> tuple[ValidationReport, list[dict[str, Any]]]:
+        """Run cc-audit into a private report; record one step entry."""
+        local = ValidationReport()
+        steps: list[dict[str, Any]] = []
+        if shutil.which("npx"):
+            cc_count = check_cc_audit(plugin_path, local)
+            steps.append({
+                "num": 22,
+                "name": "External: cc-audit (100+ AI rules)",
+                "status": "RAN",
+                "findings": cc_count,
+                "files": "npx @cc-audit/cc-audit (auto-fetched)",
+                "details": "",
+            })
+        else:
+            check_cc_audit(plugin_path, local)  # emits WARNING into local
+            steps.append({
+                "num": 22,
+                "name": "External: cc-audit (100+ AI rules)",
+                "status": "SKIPPED",
+                "findings": 0,
+                "files": "",
+                "details": "`npx` not on PATH — install Node.js to enable",
+            })
+        return local, steps
+
+    def _task_tirith() -> tuple[ValidationReport, list[dict[str, Any]]]:
+        """Run tirith into a private report; record one step entry."""
+        local = ValidationReport()
+        steps: list[dict[str, Any]] = []
+        if enable_tirith:
+            tirith_count = check_tirith_scanner(plugin_path, local)
+            # Inspect this task's local results (not the global) to
+            # derive RAN vs SKIPPED — same predicate the serial
+            # version used, just on the per-task report.
+            unavail = any(
+                "tirith" in (r.message or "").lower()
+                and (
+                    "not found" in r.message.lower()
+                    or "unavailable" in r.message.lower()
+                    or "skipped" in r.message.lower()
+                )
+                for r in local.results
             )
-            for r in new_results
-        )
-        _record_step(
-            23,
-            "External: tirith (terminal-security)",
-            "SKIPPED" if unavail else "RAN",
-            findings=tirith_count,
-            files="PATH → docker → nix → auto-install" if not unavail else "",
-            details=("tirith binary unavailable — see WARNING above" if unavail else ""),
-        )
-    else:
-        _record_step(
-            23, "External: tirith (terminal-security)", "SKIPPED", details="enable_tirith=False (test isolation knob)"
-        )
+            steps.append({
+                "num": 23,
+                "name": "External: tirith (terminal-security)",
+                "status": "SKIPPED" if unavail else "RAN",
+                "findings": tirith_count,
+                "files": "PATH → docker → nix → auto-install" if not unavail else "",
+                "details": "tirith binary unavailable — see WARNING above" if unavail else "",
+            })
+        else:
+            steps.append({
+                "num": 23,
+                "name": "External: tirith (terminal-security)",
+                "status": "SKIPPED",
+                "findings": 0,
+                "files": "",
+                "details": "enable_tirith=False (test isolation knob)",
+            })
+        return local, steps
 
-    # Checks 24-25 — Phase 5 specialist tools (RC-102). Each invocation
-    # self-skips when the binary is missing AND no install path succeeds.
-    # v2.48 — gitleaks removed: trufflehog (~700 detectors, --concurrency
-    # parallelism) supersedes it. gitleaks did not support reliable parallel
-    # scans and crashed under load; trufflehog covers a strict superset of
-    # the detectors gitleaks shipped, with verified-credential validation.
-    for step_num, name, scanner_fn, enabled, binary_hint in (
-        (24, "External: trufflehog (~700 secret rules)", check_trufflehog, enable_trufflehog, "trufflehog"),
-        (25, "External: semgrep (p/security-audit)", check_semgrep, enable_semgrep, "semgrep"),
-    ):
+    def _task_specialist(
+        step_num: int,
+        name: str,
+        scanner_fn: Any,
+        enabled: bool,
+        binary_hint: str,
+    ) -> tuple[ValidationReport, list[dict[str, Any]]]:
+        """Run a Phase 5 specialist tool (trufflehog / semgrep) into a private report."""
+        local = ValidationReport()
+        steps: list[dict[str, Any]] = []
         if not enabled:
-            _record_step(step_num, name, "SKIPPED", details=f"enable_{binary_hint}=False (test isolation knob)")
-            continue
-        if not shutil.which(binary_hint):
-            scanner_fn(plugin_path, report)  # let it emit the WARNING
-            _record_step(step_num, name, "SKIPPED", details=f"`{binary_hint}` not on PATH (install via brew/pipx/etc.)")
-            continue
-        report_len_before = len(report.results)
-        count = scanner_fn(plugin_path, report)
-        _record_step(step_num, name, "RAN", findings=count, files=f"{binary_hint} (PATH binary)")
+            steps.append({
+                "num": step_num,
+                "name": name,
+                "status": "SKIPPED",
+                "findings": 0,
+                "files": "",
+                "details": f"enable_{binary_hint}=False (test isolation knob)",
+            })
+        elif not shutil.which(binary_hint):
+            scanner_fn(plugin_path, local)  # emits WARNING into local
+            steps.append({
+                "num": step_num,
+                "name": name,
+                "status": "SKIPPED",
+                "findings": 0,
+                "files": "",
+                "details": f"`{binary_hint}` not on PATH (install via brew/pipx/etc.)",
+            })
+        else:
+            count = scanner_fn(plugin_path, local)
+            steps.append({
+                "num": step_num,
+                "name": name,
+                "status": "RAN",
+                "findings": count,
+                "files": f"{binary_hint} (PATH binary)",
+                "details": "",
+            })
+        return local, steps
+
+    # Declaration order is the canonical replay order — same order the
+    # serial version produced before Phase B.
+    _scanner_tasks = [
+        ("cc-audit", _task_cc_audit),
+        ("tirith", _task_tirith),
+        (
+            "trufflehog",
+            lambda: _task_specialist(
+                24,
+                "External: trufflehog (~700 secret rules)",
+                check_trufflehog,
+                enable_trufflehog,
+                "trufflehog",
+            ),
+        ),
+        (
+            "semgrep",
+            lambda: _task_specialist(
+                25,
+                "External: semgrep (p/security-audit)",
+                check_semgrep,
+                enable_semgrep,
+                "semgrep",
+            ),
+        ),
+    ]
+
+    _scanner_results: list[tuple[ValidationReport, list[dict[str, Any]]]] = []
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        # Submit in declaration order; collect futures in the same
+        # order so the result list is also in declaration order.
+        futures = [ex.submit(fn) for _name, fn in _scanner_tasks]
+        for fut in futures:
+            _scanner_results.append(fut.result())
+
+    # Merge in declaration order so report.results and the step log
+    # look byte-identical to the serial version (subprocesses already
+    # captured their own output via capture_output=True; no terminal
+    # writes need replaying).
+    for local_report, step_records in _scanner_results:
+        report.merge(local_report)
+        for rec in step_records:
+            _record_step(
+                rec["num"],
+                rec["name"],
+                rec["status"],
+                findings=rec.get("findings", 0),
+                files=rec.get("files", ""),
+                details=rec.get("details", ""),
+            )
 
     # Check 27 — Cisco AI Defense skill-scanner via uvx remote.
     # Programmatic-only mode (no API-key engines). Self-skips when uvx
