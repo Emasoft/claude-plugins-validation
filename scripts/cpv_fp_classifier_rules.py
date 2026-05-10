@@ -27,10 +27,14 @@ Each classifier returns:
 * `REAL` (the default) when nothing in the surrounding context
   contradicts the rule's signal.
 
-`DEFINITE_TP` (escalation) is intentionally not used by these v1
-classifiers — promotion requires more confidence than heuristics
-provide. The four-tier API is preserved for future rules that use
-the cpv_taint_engine to confirm a match feeds an exfil sink.
+`DEFINITE_TP` (escalation) is reserved for the highest-confidence TP
+contexts — currently `RC-21` copy-then-exfil-sink and `RC-65` IMDS
+literal in a same-line network call. Both are unambiguous credential
+or instance-metadata exfiltration; neither has a benign reading we
+have observed in production. The verdict is honoured only when the
+caller passes `--extreme` to `validate_security.py` (Step 4 of
+TRDD-fe006962). With the flag off, `DEFINITE_TP` is treated as `REAL`
+— same severity as the legacy path.
 """
 
 from __future__ import annotations
@@ -86,6 +90,12 @@ def classify_rc21(ctx: Context) -> FindingVerdict:
     Test-fixture and doc-path findings are demoted to DEFINITE_FP
     because those files exist *to* contain the pattern (the test_
     files in CPV's own suite are an example).
+
+    Step 4 (`--extreme`): when a copy pattern is followed by an exfil
+    sink in the surrounding window, the verdict is `DEFINITE_TP` so the
+    `--extreme` flag can promote the declared severity (MAJOR → CRITICAL).
+    Without the flag the verdict is treated as `REAL` (same severity as
+    the legacy path), so this change is backwards-compatible.
     """
 
     if ctx.file_role in ("fixture", "test"):
@@ -101,7 +111,10 @@ def classify_rc21(ctx: Context) -> FindingVerdict:
         return FindingVerdict.REAL
 
     if has_sink_nearby(ctx.surrounding_lines, _RC21_EXFIL_SINK_HINTS):
-        return FindingVerdict.REAL
+        # Strongest TP signal: copy + nearby exfil sink. No benign reading
+        # has been observed in the v2.40.x sweep corpus or the seven
+        # emasoft-plugins. Mark as DEFINITE_TP so --extreme can escalate.
+        return FindingVerdict.DEFINITE_TP
     # Subprocess hints are checked ONLY in the surrounding lines so a
     # bare `env = os.environ.copy()` without nearby Popen/run stays
     # LIKELY_FP (insufficient context to call DEFINITE_FP).
@@ -187,10 +200,20 @@ def classify_rc65(ctx: Context) -> FindingVerdict:
     surrounding identifiers). Otherwise, surrounding identifiers like
     `unsafe_hosts`, `_PATTERNS`, etc. mark the line as a detector's
     pattern source and the verdict drops to DEFINITE_FP.
+
+    Step 4 (`--extreme`): a same-line network call against the IMDS
+    literal in a SOURCE-role file is unambiguous instance-metadata
+    exfiltration — the canonical SSRF target. Returns `DEFINITE_TP` in
+    that exact context so `--extreme` can escalate (MAJOR → CRITICAL).
+    Test/fixture/doc roles still get `REAL` (no escalation) because
+    detector test suites and prose docs legitimately reference IMDS
+    addresses inside `requests.`-shaped exemplars.
     """
 
+    role_allows_escalation = ctx.file_role == "source"
+
     if any(hint in ctx.line for hint in _RC65_NETWORK_CALL_HINTS):
-        return FindingVerdict.REAL
+        return FindingVerdict.DEFINITE_TP if role_allows_escalation else FindingVerdict.REAL
     if any(hint in ctx.line for hint in _RC65_PATTERN_SOURCE_HINTS):
         return FindingVerdict.DEFINITE_FP
     if any(hint in line for line in ctx.surrounding_lines for hint in _RC65_PATTERN_SOURCE_HINTS):

