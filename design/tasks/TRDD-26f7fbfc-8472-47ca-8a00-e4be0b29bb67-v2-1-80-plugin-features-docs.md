@@ -4,10 +4,40 @@
 **Filename:** `design/tasks/TRDD-26f7fbfc-8472-47ca-8a00-e4be0b29bb67-v2-1-80-plugin-features-docs.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
 
-**Status:** Not started
+**Status:** Done (2026-05-10)
 **Priority:** HIGH
 **Effort:** MEDIUM
 **Source:** `docs_dev/cpv_workflow_audit_20260412.md` section A7 / C2
+
+## Resolution
+
+- Reference files shipped in commit `298c6f7` (phase-1 TRDD batch, April 2026)
+  for all three target skills:
+  - `skills/create-plugin/references/v2-1-80-features.md`
+  - `skills/canonical-pipeline/references/v2-1-80-features.md`
+  - `skills/setup-plugin-repo/references/v2-1-80-features.md`
+- All three SKILL.md files cross-link the new reference (verified via grep).
+- Per-section Checklist added in commit `4034cb4` so reviewers can audit
+  feature-by-feature coverage.
+- Closing PR (this commit, 2026-05-10):
+  - Adds the v2.1.80+ row to README.md's "What Does CPV Check?" table.
+  - Adds `tests/fixtures/v2_1_80_plugin/` — a complete demo plugin that
+    exercises every v2.1.80+ feature (Monitor tool, userConfig with all
+    5 type values + sensitive flag, channels cross-referencing
+    mcpServers, CLAUDE_PLUGIN_OPTION_<KEY> in MCP args + SKILL.md body,
+    plugin skill `name` field matching directory).
+  - Adds `tests/test_v2_1_80_demo_plugin.py` (13 tests) as a CI guardrail:
+    any regression that breaks userConfig / channels / Monitor / skill-name
+    handling will surface here as a CRITICAL or MAJOR finding.
+  - Demo plugin passes `validate_plugin.py` and `--strict` with
+    CRITICAL=0 MAJOR=0; only the standard publish-pipeline advisories
+    (no LICENSE / pre-push / publish.py / cliff.toml / CI workflow)
+    remain — every minimal fixture has the same baseline.
+
+The inline-marketplace (`source: "settings"`) and `managed-settings.d/`
+features are intentionally NOT in the demo plugin — they live in
+`settings.json` rather than a plugin tree, and are tested separately by
+`tests/test_validate_settings_marketplace.py`.
 
 ## Context
 
