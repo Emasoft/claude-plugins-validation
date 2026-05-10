@@ -1,0 +1,16 @@
+# Test fixture for v2.1.80+ feature validation.
+# This .gitignore exists only to silence CPV's "no .gitignore" MAJOR.
+
+# Ignore standard build/cache outputs that any real plugin would also ignore.
+__pycache__/
+*.pyc
+*.pyo
+.coverage
+.cache/
+.pytest_cache/
+.ruff_cache/
+node_modules/
+
+# Reports written by CPV agents (per agent-reports-location.md).
+/reports/
+/reports_dev/
