@@ -3,10 +3,57 @@
 **TRDD ID:** `479cde0c-c781-4bfb-b62a-fbf40e91523f`
 **Filename:** `design/tasks/TRDD-479cde0c-c781-4bfb-b62a-fbf40e91523f-v2.22-claude-code-compliance.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
-**Status:** In progress (2026-04-17)
+**Status:** Done (2026-05-10) — fully shipped across v2.22.0 → v2.22.3.
 **Baseline:** CPV v2.21.3 (aligned with Claude Code v2.1.109)
 **Target:** CPV v2.22.0 aligned with Claude Code v2.1.112 (current) + spec-complete against the
 26 reference docs audited on 2026-04-17.
+
+## Closing summary (2026-05-10)
+
+All NOW + NEXT-RELEASE items in this TRDD landed in the v2.22.x release train —
+**no items remain outstanding**. Items in the DEFERRED section were intentionally
+moved to dedicated follow-up TRDDs (channel source-code audit shipped as the
+new `channel-source-security` reference under the semantic-validation skill in
+v2.22.3; hook output JSON schema split into TRDD-cf57bf86; cross-hook
+precedence into TRDD-feb72fa4 — both implemented as standalone validators in
+v2.22.3).
+
+Closing commits:
+
+| Item-block | Version | Commit |
+|------------|---------|--------|
+| NOW (1–24) — main spec-alignment sweep | v2.22.0 | `605b45f` (feat) + `8a4e78a` (release) |
+| NEXT-RELEASE — `@path` imports, rules `paths:`, `Agent()` grammar, `defaultMode`, marketplace fuzzy-impersonation, `bin/`+`monitors/` recognition, version-in-both-places | v2.22.1 | `6d49c52` (feat) + `4fcc2e3` (release) |
+| NEXT-RELEASE — pass-2 audit: agent color enum, SessionStart hook-type lockdown, per-plugin source-type cleanup, strictKnownMarketplaces narrow, agent-frontmatter hook event/type expansion, `asyncRewake`/`async` contradiction | v2.22.2 | `88c0e8c` (feat) + `6a62236` (release) |
+| NEXT-RELEASE — exhaustive pass-2 follow-up: 5 new validators (`validate_hook_output.py`, `validate_hook_precedence.py`, `validate_telemetry.py`), 13 marketplace fixes, 6 plugin/agent fixes, channel-source-security pillar in semantic-validation skill | v2.22.3 | `54ff533` (feat) + `26e482a` (release) |
+
+Test-count progression for the TRDD: 2088 → 2129 (+41 in v2.22.0) → 2171
+(+42 in v2.22.1) → 2180 (+9 in v2.22.2) → 2336 (+156 in v2.22.3). Current
+test count on master: 4459 passing, 5 skipped. All v2.22-era tests still
+green.
+
+Success-criteria audit (TRDD §"Success criteria", lines 109–120):
+
+- [x] +40 new tests passing — actually +248 across v2.22.0–v2.22.3.
+- [x] `uv run ruff check scripts/ tests/` clean (verified 2026-05-10).
+- [x] `uv run mypy scripts/` clean for v2.22-era code; the lone outstanding
+      `tomli` `import-not-found` in `scripts/cpv_lint_engine.py:1052` was
+      introduced by the unrelated `feat(security+xplat)` work in commit
+      `85fdc0ff` (2026-05-08), well after this TRDD shipped.
+- [x] Skill 1,200-char description + 400-char `when_to_use` (combined 1,600)
+      fires MAJOR; 1,400-char description alone does NOT — verified by
+      `tests/test_validate_skill_comprehensive.py::TestPass2SkillFixes`.
+- [x] `dependencies: ["helper-lib", {"name": "vault", "version": "~2.1.0"}]`
+      validates clean — `TestV222PluginSchema::test_dependencies_*`.
+- [x] `pathPattern` settings source type validates clean — present in
+      `cpv_validation_common.VALID_SETTINGS_SOURCE_TYPES` at line 506.
+- [x] `xhigh` effort validates clean on skills + agents — present in
+      `cpv_validation_common.VALID_EFFORT_VALUES` at line 603.
+- [x] `${CLAUDE_PLUGIN_DATA}/foo.py` does NOT emit unknown-substitution-token
+      finding — handled in `validate_hook.py` substitution recognition.
+
+This TRDD is closed. Future Claude Code spec-alignment work should branch a
+fresh TRDD against the current Claude Code release pointer (v2.1.121 today).
 
 ## Source audit reports
 
