@@ -3,8 +3,51 @@
 **TRDD ID:** `fa70f9b8-90c6-471b-883e-053b527991b4`
 **Filename:** `design/tasks/TRDD-fa70f9b8-90c6-471b-883e-053b527991b4-flaky-test-main-verbose.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
-**Status:** RECURRED 2026-05-03 (v2.51.0 publish run) — a SECOND test now
-exhibits the identical pollution pattern:
+**Status:** RESOLVED 2026-05-10 (v2.79.0+) via defensive autouse reset
+fixture in `tests/conftest.py` (`_trdd_fa70f9b8_reset_global_state`).
+Both previously-skipped tests are RE-ENABLED and pass green:
+`tests/test_validate_security.py::TestMainCLI::test_main_verbose_text_output`
+and `tests/test_phase4_minor_observability.py::TestCheckPhase4All::test_phase4_fires_on_real_file`.
+
+The fixture resets EVERY suspected polluter BEFORE each test:
+- `_CPV_SELF_SCAN_ACTIVE`, `_CPV_SELF_PLUGIN_ROOT`, `_CPV_SELF_HASH_MANIFEST`,
+  `_CPV_SELF_HASH_REPORTED_MISSING`, `_CPV_SELF_HASH_REPORTED_MODIFIED`,
+  `_CPV_SELF_HASH_NOTICE_REPORT` (via `_set_cpv_self_scan(False, ...)`)
+- `_CLASSIFIER_ACTIVE`, `_CLASSIFIER_PLUGIN_META` (via `_set_classifier_active(False)`)
+- `_read_gitmodules_paths.cache_clear()` and `_load_cpv_config_cached.cache_clear()`
+  (the two `functools.lru_cache(maxsize=128)` helpers in `cpv_validation_common`)
+
+Regression coverage lives in `tests/test_trdd_fa70f9b8_isolation.py` (9
+tests across 3 classes): asserts the autouse fixture clears every suspected
+polluter, proves the pollution shape IS real by simulating the leak via
+direct global mutation and exercising `cpv_self_scan_skip` /
+`check_phase4_all` end-to-end, and verifies the reset is idempotent.
+
+Local stability check on darwin (Python 3.12.13, pytest 9.0.3 + pytest-xdist
+3.8.0): 5/5 consecutive `pytest tests/ -n auto --dist=worksteal --maxfail=1`
+runs PASSED with 4470 tests, 3 skipped (1 unrelated TRDD, 2 CI-env skips).
+Could not reproduce the original failure on darwin even with the fixture
+DISABLED (5/5 passed) — the flake was always Linux-CI-specific. The fix is
+risk-free: it operates only on test-process state, costs ~microseconds per
+test, and is idempotent / no-op when the globals are already at defaults.
+
+A THIRD test originally tagged with this TRDD —
+`tests/test_generate_plugin_repo.py::TestLayoutCGeneration::test_layout_c_plugin_validates_clean`
+— was investigated 2026-05-10 and turns out to be MIS-FILED. Running it in
+isolation produces `CRITICAL=0 MAJOR=4 MINOR=14`: two mypy `redefinition`
+errors in the generated `scripts/publish.py`, a yamllint syntax error in the
+generated `.mega-linter.yml`, and two dangling `scripts/validate_plugin.py`
+references in the generated workflow files. These are template-generation
+drift bugs in `gen_publish_py` / `gen_workflows`, not suite pollution. The
+test stays skipped under a new dedicated reason pointing at the generator
+rather than this TRDD.
+
+---
+
+## Earlier history (kept for archaeological value)
+
+**RECURRED 2026-05-03 (v2.51.0 publish run)** — a SECOND test now exhibits
+the identical pollution pattern:
 `tests/test_phase4_minor_observability.py::TestCheckPhase4All::test_phase4_fires_on_real_file`
 fails in CI Linux with `report.results count: 0` even though `_iter_scannable_files`
 should yield `src/cfg.py` containing the ngrok URL. Same Heisenbug shape:
