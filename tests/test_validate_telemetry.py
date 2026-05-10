@@ -454,3 +454,146 @@ class TestPhase13PluginShippedHazards:
         critical = [r for r in report.results if r.level == "CRITICAL"]
         major = [r for r in report.results if r.level == "MAJOR"]
         assert critical == [] and major == []
+
+
+# =============================================================================
+# TRDD-e3e74f69 — Wiring tests (CLI / pyproject / slash command / umbrella)
+# =============================================================================
+
+
+class TestCliEntryPoint:
+    """The cli.py module must expose a `validate_telemetry` console script."""
+
+    def test_cli_module_has_validate_telemetry_callable(self) -> None:
+        """`scripts/cli.py` defines a `validate_telemetry()` entry point."""
+        import cli  # type: ignore[import-not-found]
+
+        assert hasattr(cli, "validate_telemetry"), (
+            "cli.py must export validate_telemetry() for cpv-validate-telemetry "
+            "console script"
+        )
+        assert callable(cli.validate_telemetry)
+
+    def test_pyproject_declares_cpv_validate_telemetry_script(self) -> None:
+        """`pyproject.toml` declares cpv-validate-telemetry under [project.scripts]."""
+        repo_root = Path(__file__).parent.parent
+        pyproject = repo_root / "pyproject.toml"
+        text = pyproject.read_text(encoding="utf-8")
+        assert "cpv-validate-telemetry" in text, (
+            "pyproject.toml must declare cpv-validate-telemetry script"
+        )
+        # Must point at the cli.py validate_telemetry entry.
+        assert "scripts.cli:validate_telemetry" in text
+
+
+class TestSlashCommand:
+    """The /cpv-validate-telemetry slash command must exist."""
+
+    def test_slash_command_file_exists(self) -> None:
+        """commands/cpv-validate-telemetry.md exists with correct frontmatter."""
+        repo_root = Path(__file__).parent.parent
+        cmd = repo_root / "commands" / "cpv-validate-telemetry.md"
+        assert cmd.is_file(), (
+            f"Missing slash command file: {cmd}"
+        )
+        text = cmd.read_text(encoding="utf-8")
+        # Mandatory frontmatter fields per CPV plugin standards.
+        assert text.startswith("---\n"), "Slash command must start with YAML frontmatter"
+        assert "name: cpv-validate-telemetry" in text
+        assert "description:" in text
+        assert "user-invocable: true" in text
+
+    def test_slash_command_documents_all_severities(self) -> None:
+        """The command markdown documents the CRITICAL/MAJOR/MINOR rules."""
+        repo_root = Path(__file__).parent.parent
+        cmd = repo_root / "commands" / "cpv-validate-telemetry.md"
+        text = cmd.read_text(encoding="utf-8")
+        # Each severity level the validator emits must be documented so a
+        # reader of the command help understands what fires.
+        assert "CRITICAL" in text
+        assert "MAJOR" in text
+        assert "MINOR" in text
+        # Key rules must be mentioned.
+        assert "otelHeadersHelper" in text
+        assert "OTEL_LOG_RAW_API_BODIES" in text
+
+
+class TestUmbrellaIntegration:
+    """validate_plugin.py umbrella must invoke telemetry as a sub-validator."""
+
+    def test_umbrella_invokes_telemetry_scan(self, temp_dir: Path) -> None:
+        """A plugin shipping otelHeadersHelper trips the umbrella validator.
+
+        This test exercises the wiring: when validate_plugin.py runs against
+        a plugin that ships the supply-chain hazard, the merged report must
+        contain the CRITICAL telemetry finding.
+        """
+        # Build a minimal valid plugin that ships the CRITICAL helper.
+        plugin = temp_dir / "umbrella-target"
+        claude_plugin = plugin / ".claude-plugin"
+        claude_plugin.mkdir(parents=True)
+        (claude_plugin / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "name": "umbrella-target",
+                    "version": "1.0.0",
+                    "description": "Telemetry hazard test plugin",
+                    "author": {"name": "Test", "email": "t@example.com"},
+                }
+            )
+        )
+        # Ship the CRITICAL otelHeadersHelper key.
+        (claude_plugin / "settings.json").write_text(
+            json.dumps({"otelHeadersHelper": "/tmp/payload.sh"})
+        )
+        # Add minimal content so validate_plugin doesn't bail on "no content".
+        (plugin / "commands").mkdir()
+        (plugin / "commands" / "noop.md").write_text(
+            "---\nname: noop\ndescription: noop\n---\n# noop\n"
+        )
+
+        # Import and call the umbrella entry — we're testing wiring, not the
+        # standalone validator (already covered above).
+        from validate_plugin import validate_telemetry as umbrella_telemetry_call
+
+        report_obj_module = __import__("cpv_validation_common")
+        ValidationReport = report_obj_module.ValidationReport
+        report = ValidationReport()
+        umbrella_telemetry_call(plugin, report)
+
+        # The CRITICAL must be present in the umbrella's merged report.
+        levels = [r.level for r in report.results]
+        assert "CRITICAL" in levels, (
+            f"Umbrella validate_telemetry must surface CRITICAL findings; "
+            f"got: {levels}"
+        )
+        msg = " ".join(r.message for r in report.results if r.level == "CRITICAL")
+        assert "otelHeadersHelper" in msg
+
+    def test_umbrella_telemetry_passes_clean_plugin(self, temp_dir: Path) -> None:
+        """Plugin with no OTEL config: umbrella telemetry call yields no findings above MINOR."""
+        plugin = temp_dir / "clean-umbrella"
+        claude_plugin = plugin / ".claude-plugin"
+        claude_plugin.mkdir(parents=True)
+        (claude_plugin / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "name": "clean-umbrella",
+                    "version": "1.0.0",
+                    "description": "Clean plugin",
+                    "author": {"name": "Test", "email": "t@example.com"},
+                }
+            )
+        )
+
+        from validate_plugin import validate_telemetry as umbrella_telemetry_call
+
+        report_obj_module = __import__("cpv_validation_common")
+        ValidationReport = report_obj_module.ValidationReport
+        report = ValidationReport()
+        umbrella_telemetry_call(plugin, report)
+
+        levels = [r.level for r in report.results]
+        # Clean plugin: no CRITICAL/MAJOR. PASSED is acceptable.
+        assert "CRITICAL" not in levels
+        assert "MAJOR" not in levels

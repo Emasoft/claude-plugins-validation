@@ -50,6 +50,8 @@ cpv-validate-mcp = "scripts.cli:validate_mcp"
 cpv-validate-lsp = "scripts.cli:validate_lsp"
 cpv-validate-rules = "scripts.cli:validate_rules"
 cpv-validate-xref = "scripts.cli:validate_xref"
+# OTEL telemetry supply-chain validator (TRDD-e3e74f69)
+cpv-validate-telemetry = "scripts.cli:validate_telemetry"
 # Scope validators — validate Claude Code configuration under a project path,
 # distinguishing git-tracked (project) from non-git-tracked (local) elements.
 cpv-validate-project-scope = "scripts.cli:validate_project_scope"
