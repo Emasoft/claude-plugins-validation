@@ -4,10 +4,57 @@
 **Filename:** `design/tasks/TRDD-b934f65c-8978-41e5-a08f-82ce19d073b1-local-marketplace-devlink.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
 
-**Status:** Not started
+**Status:** Done (2026-05-10)
 **Priority:** MEDIUM
 **Effort:** MEDIUM
 **Source:** `docs_dev/cpv_workflow_audit_20260412.md` sections A2/A4/A5/A6/C6/C12
+
+## Completion notes (2026-05-10)
+
+All four parts implemented across multiple commits:
+
+- **Part 1 — local marketplace generator** (commit `f747af2`, 2026-05-03): empty
+  `--github-owner` triggers LOCAL-ONLY mode in `generate_marketplace_repo.py` —
+  no `.github/workflows/`, no badges, README routes through `_readme_local()`.
+  This branch was previously unreachable dead code.
+- **Part 2 — dev-link install / uninstall / update** (commit `5dd4c5f`,
+  2026-04-12 + the present worktree): `--dev-link` flag on install creates a
+  symlink from `MARKETPLACES_DIR` to the live source plus a
+  `.cpv-devlink-<plugin>.json` sentinel. `do_uninstall` detects the sentinel
+  and unlinks only (preserving the source tree). `do_update` now ALSO detects
+  the dev-link state before tearing down and re-applies `--dev-link` on the
+  reinstall — without this guard, an update silently downgraded a dev-link
+  into a regular copy.
+- **Part 3 — `do_link_plugin`** (commit `5dd4c5f`): appends a plugin entry to
+  an existing marketplace.json using the correct `source.source` schema key,
+  resolves local paths to `./relative` and `owner/repo` to GitHub source
+  objects, replaces existing entries by name (no duplicates).
+- **Part 4 — `/cpv-link-plugin` slash command** (commit `5dd4c5f`):
+  `commands/cpv-link-plugin.md` wires the slash command directly to
+  `manage_plugin.py --link-plugin`.
+
+Tests added in this worktree (18 total):
+
+- `tests/test_manage_plugin.py::TestDevLinkInstall` (4 tests) — symlink
+  creation, sentinel content, live-edit visibility, archive-source rejection
+- `tests/test_manage_plugin.py::TestUninstallDevLink` (2 tests) — source
+  preservation on dev-link uninstall, regression check that normal uninstall
+  still rms the dir
+- `tests/test_manage_plugin.py::TestDoLinkPlugin` (9 tests) — local + github
+  spec resolution, replace-not-duplicate, dry-run, error paths, root-level
+  marketplace.json fallback
+- `tests/test_manage_plugin.py::TestUpdateDevLink` (2 tests) — preserves
+  dev-link across update (this caught the bug fixed in this worktree),
+  regression check that normal updates still copy
+- `tests/test_generate_marketplace_repo.py::TestLocalOnlyGeneration` (4
+  tests) — workflows skipped, local-only README template (no badges, has
+  `marketplace add` instructions), marketplace.json valid, essential files
+  still emitted
+
+The fix to `do_update` in this worktree closes the last gap in the success
+criteria ("All existing install/uninstall/update workflows still pass tests")
+— previously, updating a dev-linked plugin would silently lose the dev-link.
+Full test suite: 4534 passed, 3 skipped (Windows-only paths).
 
 ## Problem
 
