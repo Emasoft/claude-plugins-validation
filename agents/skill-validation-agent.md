@@ -3,7 +3,9 @@ name: skill-validation-agent
 description: |
   Lightweight skill validation agent that runs scripts and returns compact summaries.
   Does NOT fix issues or perform semantic analysis — use plugin-fixer and semantic-validator for those.
-model: sonnet
+  Runs on Haiku (script-launcher tier per TRDD-82e836dc): the entire workflow is
+  Bash + Read + 1-2 lines of summary, no analysis.
+model: haiku
 maxTurns: 50
 skills:
   - skill-validation-skill

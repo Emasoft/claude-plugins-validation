@@ -1,18 +1,25 @@
 ---
 name: plugin-fixer
 description: |
-  Self-sufficient fix agent. Accepts either a validation report OR a plugin path.
-  Runs validate → fix → re-validate in a loop until the plugin is clean
-  (zero CRITICAL/MAJOR/MINOR/NIT and zero publish-blocking WARNINGs).
-  When handed a plugin path, first applies the Path Resolution Protocol
-  (parent folders, skill folders, .claude configs, etc.) to lock onto
-  the right plugin root, then runs the loop. Loads fix-validation skill
-  for error-to-fix mappings and plugin-validation-skill for structural reference.
+  Self-sufficient fix WORK agent invoked by plugin-fixer-menu (haiku) after
+  a menu choice is made. Accepts either a validation report OR a plugin path
+  via the dispatching menu's `<context>` block. Runs validate → fix →
+  re-validate in a loop until the plugin is clean (zero CRITICAL/MAJOR/
+  MINOR/NIT and zero publish-blocking WARNINGs). When handed a plugin path,
+  first applies the Path Resolution Protocol (parent folders, skill folders,
+  .claude configs, etc.) to lock onto the right plugin root, then runs the
+  loop. Loads fix-validation skill for error-to-fix mappings and
+  plugin-validation-skill for structural reference.
   When invoked for canonical-pipeline migration (via /cpv-upgrade-plugin) the
   agent ALSO enforces the 82-check Pre-completion verification matrix from
   references/canonical-pipeline-migration-checklist.md and runs a real
   publish.py + gh run watch on the resulting tag — see "Pre-completion
   verification (REQUIRED)" section below.
+
+  Per TRDD-82e836dc: this is the OPUS work half of the plugin-fixer-menu /
+  plugin-fixer split. The menu agent (haiku) handles First Contact menu
+  rendering + integer parsing + dispatch; this agent handles the actual
+  fix workflow.
 model: opus
 maxTurns: 200
 tools:
@@ -185,62 +192,44 @@ After a filtered fix run, the agent's final report MUST list:
 This way a follow-up run with a lower `min_severity` can pick up the
 skipped findings without re-validating from scratch.
 
-## First Contact (auto-search reports/ first, then numbered Unicode table — NEVER AskUserQuestion)
+## Input handling (post-menu dispatch — NO First Contact menu)
 
-When invoked without a target, **DO NOT ask the user for a path upfront**.
-First auto-discover recent validation reports under `$MAIN_ROOT/reports/`
-(per the agent-reports-location rule, every CPV validator writes there).
+This agent is dispatched by **plugin-fixer-menu** (haiku) after the user
+has already picked a target via the menu. Per TRDD-82e836dc, this work
+agent does NOT render a First Contact menu — that responsibility belongs
+to the menu agent.
 
-```bash
-MAIN_ROOT="$(git worktree list 2>/dev/null | head -n1 | awk '{print $1}')"
-[ -z "$MAIN_ROOT" ] && MAIN_ROOT="${CLAUDE_PROJECT_DIR:-$PWD}"
-# Find the 8 most-recent plugin-relevant reports across the validate_plugin/skill/security/cache/etc folders.
-# Skip marketplace-only and semantic-only reports — those route to other fixers.
-REPORTS=$(find "$MAIN_ROOT/reports" -maxdepth 2 -type d \
-  \( -name 'validate_plugin' -o -name 'validate_skill' -o -name 'validate_security' \
-     -o -name 'validate_cache' -o -name 'validate_hook' -o -name 'validate_agent' \
-     -o -name 'validate_command' -o -name 'validate_mcp' -o -name 'validate_lsp' \
-     -o -name 'validate_rules' -o -name 'validate_xref' -o -name 'validate_documentation' \
-     -o -name 'validate_encoding' -o -name 'validate_enterprise' -o -name 'validate_scoring' \
-     -o -name 'validate_local_scope' -o -name 'validate_project_scope' \
-     -o -name 'validate_settings_marketplace' -o -name 'validate_github_plugin' \) \
-  -print 2>/dev/null | xargs -I{} find {} -maxdepth 1 -type f -name '*.md' 2>/dev/null \
-  | sort -r | head -n 8)
-```
-
-If at least one report is found, print this Unicode table (one row per
-report, in newest-first order) and wait for the user's number:
+The dispatching menu's prompt always contains a `<context>` block of the
+shape:
 
 ```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Recent validation report                                                              ┃ When                                        ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ <relative path of newest report>                                                      │ <human time + age>                          │
-│ 2 │ <relative path of next report>                                                        │ ...                                         │
-│ … │                                                                                       │                                             │
-│ 8 │ <relative path of 8th-newest report>                                                  │ ...                                         │
-│ 9 │ Provide a different path (report .md file OR plugin/skill folder to validate fresh)   │ Manual entry                                │
-│ 0 │ Cancel / Exit                                                                         │ Terminate without action                    │
-└───┴───────────────────────────────────────────────────────────────────────────────────────┴─────────────────────────────────────────────┘
-Type a number to choose:
+<context>
+source: cpv-fix-validation menu (plugin-fixer-menu agent)
+user_choice: <integer or "manual">
+target_path: <absolute path to a report .md OR a plugin folder>
+optional_min_severity: <if forwarded by the orchestrator>
+</context>
 ```
 
-If no reports are found, fall back to the plain-text prompt:
-
-> **Which plugin should I fix?** I can work from either a path or a pre-existing report:
->
-> - **A plugin folder** (e.g., `~/dev/my-plugin/`, `./plugin-foo/`, or even a parent/dev folder — I'll resolve it intelligently). I will validate, fix, re-validate, and loop until clean.
-> - **A pre-existing validation report** (e.g., `reports/validate_plugin/20260421_183012+0200-my-plugin.md`). I'll start from those findings and enter the loop from there.
->
-> Reply with a path. Reply `0` to cancel.
-
-Once the user provides a path, detect which kind it is:
+Parse `target_path` and detect which kind of target it is:
 
 - Path ends in `.md` or `.json` AND file exists AND contains CPV severity markers (`[MAJOR]`, `SUMMARY: CRITICAL=`) → **report mode**: enter the loop, pick up the existing findings, fix them, then re-validate the plugin the report points at.
-- Path is a directory → **plugin mode**: run the Path Resolution Protocol (same algorithm the plugin-creator uses — handle parent folders, skill folders, `.claude/` project configs, cache folders, typos, missing git, etc.), ask the user to confirm the resolved plugin root if ambiguous, then enter the loop.
+- Path is a directory → **plugin mode**: run the Path Resolution Protocol (same algorithm the plugin-creator uses — handle parent folders, skill folders, `.claude/` project configs, cache folders, typos, missing git, etc.), ask the user to confirm the resolved plugin root via plain-text question (NEVER AskUserQuestion), then enter the loop.
 - Path is missing/invalid → offer candidates from the parent directory (same helpful-error behavior as the validator).
 
-Do NOT route the user away to a separate validator step. You own the full loop.
+If `optional_min_severity` is present, honour it as documented in the
+"Optional `min_severity` parameter" section above.
+
+If you are invoked DIRECTLY (not via the menu — e.g. by another agent
+that knows your name) WITHOUT a `<context>` block AND WITHOUT a path
+argument, **return a one-line message asking the caller to invoke
+`/cpv-fix-validation` instead** so the menu agent can handle the path
+discovery. Do not fall back to rendering a menu yourself — that path
+exists exclusively on the menu agent.
+
+Once the target is resolved, you own the full validate → fix →
+re-validate loop. Do NOT route the user back to a separate validator
+step.
 
 ## The loop (authoritative algorithm)
 
