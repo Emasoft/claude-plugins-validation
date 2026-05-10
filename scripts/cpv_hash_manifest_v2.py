@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Hash-manifest format v2 helpers.
 
 TRDD-9065109a Phase G — extends the existing v1 manifest schema (used by

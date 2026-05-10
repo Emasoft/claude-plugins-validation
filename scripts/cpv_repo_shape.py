@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Auto-detect repo shape and configuration for the universal publish pipeline.
 
 TRDD-9065109a Phase B (zero-config publish pipeline). The classifier in this
@@ -140,9 +141,10 @@ def _read_plugin_json(root: Path) -> dict | None:
     if not pj.is_file():
         return None
     try:
-        return json.loads(pj.read_text(encoding="utf-8"))
+        data = json.loads(pj.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+    return data if isinstance(data, dict) else None
 
 
 def _read_marketplace_json(root: Path) -> dict | None:
@@ -151,9 +153,10 @@ def _read_marketplace_json(root: Path) -> dict | None:
     if not mp.is_file():
         return None
     try:
-        return json.loads(mp.read_text(encoding="utf-8"))
+        data = json.loads(mp.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+    return data if isinstance(data, dict) else None
 
 
 def _list_workspace_plugin_dirs(root: Path) -> list[Path]:
@@ -294,7 +297,7 @@ def detect_repo_shape(root: Path) -> RepoShape:
     # presence does NOT override layout — it's exposed via submodule_paths
     # on the returned shape so callers can layer the extra verify gates
     # on top.
-    if has_pj and has_mp and _is_self_marketplace_in_plugin(root, mp_data, pj_data):
+    if pj_data is not None and mp_data is not None and _is_self_marketplace_in_plugin(root, mp_data, pj_data):
         return RepoShape(
             kind="marketplace-in-plugin",
             root=root,
