@@ -2,6 +2,7 @@
 name: cpv-doctor
 description: Menu-driven plugin doctor — diagnose a single plugin, current folder, GitHub repo, scope, individual component, or run cache-cleanup / scanner-install / quick-health-check (NEVER auto-scans every cached plugin)
 allowed-tools: Bash(uv:*)
+agent: cpv-doctor-menu
 user-invocable: true
 ---
 
@@ -11,7 +12,16 @@ user-invocable: true
 
 ## How
 
-The slash command dispatches the **cpv-doctor-agent** (Opus, menu-driven). The agent prints the menu verbatim, reads the user's plain-text reply, and routes to the right specialised agent or validator. Power-user CLI examples (the same flags the agent uses internally):
+The slash command dispatches the **cpv-doctor-menu** agent (haiku —
+TRDD-82e836dc), which prints the 22-row first-contact menu verbatim,
+reads the user's plain-text reply, and dispatches the **cpv-doctor-agent**
+(opus) work agent via the Agent tool with the chosen mode + target_path
+inside a structured `<context>` block. The work agent runs the matching
+diagnostic recipe, then renders the post-scan follow-up menu (rows 1-9
+with severity-threshold actions) when findings exist — that follow-up
+menu stays on opus because it requires scanner-output context.
+
+Power-user CLI examples (the same flags the work agent uses internally):
 
 ```bash
 # Choice 1: dispatch plugin-diagnoser on a path
@@ -34,7 +44,9 @@ uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py"
     doctor --verbose
 ```
 
-The full per-choice routing table lives in `agents/cpv-doctor-agent.md`.
+The 22-row first-contact menu and the per-choice → mode mapping live in
+`agents/cpv-doctor-menu.md`. The per-mode recipes (the actual diagnostic
+work) and the post-scan follow-up menu live in `agents/cpv-doctor-agent.md`.
 
 ## Why menu-driven
 
