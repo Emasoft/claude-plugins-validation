@@ -107,9 +107,17 @@ class TestParseDedupGroups:
     def test_canonical_is_lexicographic_first(self) -> None:
         """Determinism: re-running fclones on the same tree must produce
         identical bucketing. The canonical choice is sorted-by-path."""
-        payload = {"groups": [{"files": [
-            {"path": "/z/file"}, {"path": "/a/file"}, {"path": "/m/file"},
-        ]}]}
+        payload = {
+            "groups": [
+                {
+                    "files": [
+                        {"path": "/z/file"},
+                        {"path": "/a/file"},
+                        {"path": "/m/file"},
+                    ]
+                }
+            ]
+        }
         result = dedup.parse_dedup_groups(payload)
         assert list(result.keys()) == [Path("/a/file")]
         assert result[Path("/a/file")][0] == Path("/a/file")
@@ -139,9 +147,7 @@ class TestApplyDedup:
         canonical.write_text("x")
         dup.write_text("x")
 
-        files_removed, bytes_saved = dedup.apply_dedup(
-            {canonical: [canonical, dup]}, dry_run=True
-        )
+        files_removed, bytes_saved = dedup.apply_dedup({canonical: [canonical, dup]}, dry_run=True)
         assert files_removed == 1
         assert bytes_saved == 1  # "x" is 1 byte
         # Both files still on disk
@@ -196,9 +202,7 @@ class TestBucketCanonicalToMembers:
         unrelated = Path("/u")
         dedup_map = {canonical: [canonical, dup]}
 
-        result = dedup.bucket_canonical_to_members(
-            [canonical, unrelated], dedup_map
-        )
+        result = dedup.bucket_canonical_to_members([canonical, unrelated], dedup_map)
         assert result[canonical] == [canonical, dup]
         assert result[unrelated] == [unrelated]
 
@@ -268,18 +272,14 @@ class TestRunFclonesIntegration:
 
 
 class TestRunFclonesMissing:
-    def test_skipped_reason_when_fclones_unavailable(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_skipped_reason_when_fclones_unavailable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(dedup, "is_fclones_available", lambda: False)
         result = dedup.run_fclones(Path("/tmp"))
         assert result.attempted is False
         assert result.succeeded is False
         assert "fclones" in result.skipped_reason.lower()
 
-    def test_invocation_failure_recorded(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_invocation_failure_recorded(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setattr(dedup, "is_fclones_available", lambda: True)
 
         def fake_run(*a, **kw) -> object:
@@ -287,6 +287,7 @@ class TestRunFclonesMissing:
                 returncode = 7
                 stdout = ""
                 stderr = "fclones boom"
+
             return M()
 
         monkeypatch.setattr(dedup.subprocess, "run", fake_run)
@@ -296,9 +297,7 @@ class TestRunFclonesMissing:
         assert "exited 7" in result.skipped_reason
         assert "boom" in result.skipped_reason
 
-    def test_invalid_json_recorded(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_invalid_json_recorded(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setattr(dedup, "is_fclones_available", lambda: True)
 
         class M:
@@ -312,9 +311,7 @@ class TestRunFclonesMissing:
         assert result.succeeded is False
         assert "JSON parse failed" in result.skipped_reason
 
-    def test_timeout_recorded(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_timeout_recorded(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setattr(dedup, "is_fclones_available", lambda: True)
 
         def fake_run(*a, **kw):
@@ -343,9 +340,11 @@ class TestDedupResultShape:
 
     def test_explicit_fields(self) -> None:
         r = dedup.DedupResult(
-            attempted=True, succeeded=True,
+            attempted=True,
+            succeeded=True,
             dedup_map={Path("/x"): [Path("/x"), Path("/y")]},
-            files_removed=1, bytes_saved=10,
+            files_removed=1,
+            bytes_saved=10,
             fclones_elapsed_seconds=0.5,
         )
         assert r.attempted is True
@@ -360,23 +359,25 @@ class TestParseRealisticFclonesOutput:
 
     def test_realistic_output(self) -> None:
         # This is the actual shape fclones 0.34+ emits for `--format json`.
-        blob = json.dumps({
-            "header": {
-                "command": "fclones group /tmp/test --format json",
-                "version": "0.34.0",
-                "timestamp": "2026-05-01T12:34:56+0000",
-            },
-            "groups": [
-                {
-                    "file_len": 12,
-                    "file_hash": "abcd1234",
-                    "files": [
-                        {"path": "/tmp/test/a.md", "len": 12},
-                        {"path": "/tmp/test/b.md", "len": 12},
-                    ],
+        blob = json.dumps(
+            {
+                "header": {
+                    "command": "fclones group /tmp/test --format json",
+                    "version": "0.34.0",
+                    "timestamp": "2026-05-01T12:34:56+0000",
                 },
-            ],
-        })
+                "groups": [
+                    {
+                        "file_len": 12,
+                        "file_hash": "abcd1234",
+                        "files": [
+                            {"path": "/tmp/test/a.md", "len": 12},
+                            {"path": "/tmp/test/b.md", "len": 12},
+                        ],
+                    },
+                ],
+            }
+        )
         result = dedup.parse_dedup_groups(json.loads(blob))
         assert len(result) == 1
         members = list(result.values())[0]

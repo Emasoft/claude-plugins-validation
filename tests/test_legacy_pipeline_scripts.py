@@ -28,9 +28,7 @@ def _make_plugin(tmp_path: Path, name: str = "demo-plugin") -> Path:
     root = tmp_path / name
     (root / ".claude-plugin").mkdir(parents=True)
     (root / ".claude-plugin" / "plugin.json").write_text(
-        json.dumps(
-            {"name": name, "version": "1.0.0", "description": "x", "author": {"name": "t", "email": "t@e.com"}}
-        ),
+        json.dumps({"name": name, "version": "1.0.0", "description": "x", "author": {"name": "t", "email": "t@e.com"}}),
         encoding="utf-8",
     )
     (root / "scripts").mkdir()

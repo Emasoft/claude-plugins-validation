@@ -814,10 +814,7 @@ class TestNamedArgSubstitutionShellVarHeuristic:
 
     def test_uppercase_shell_var_is_skipped(self):
         """ALL_UPPERCASE $MAIN_ROOT outside backticks must NOT be flagged."""
-        content = (
-            "---\nname: my-skill\n---\n"
-            "Anchor reports to $MAIN_ROOT, which is the main checkout root.\n"
-        )
+        content = "---\nname: my-skill\n---\nAnchor reports to $MAIN_ROOT, which is the main checkout root.\n"
         report = _make_report()
         validate_skill_content(content, report, declared_args=[])
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
@@ -825,10 +822,7 @@ class TestNamedArgSubstitutionShellVarHeuristic:
 
     def test_common_uppercase_shell_vars_skipped(self):
         """$REPORT, $TIMESTAMP, $TS, $PWD, $HOME must NOT be flagged."""
-        content = (
-            "---\nname: my-skill\n---\n"
-            "Set $REPORT, $TIMESTAMP, $TS, $PWD, $HOME — all shell vars.\n"
-        )
+        content = "---\nname: my-skill\n---\nSet $REPORT, $TIMESTAMP, $TS, $PWD, $HOME — all shell vars.\n"
         report = _make_report()
         validate_skill_content(content, report, declared_args=[])
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
@@ -837,10 +831,7 @@ class TestNamedArgSubstitutionShellVarHeuristic:
 
     def test_inline_backtick_span_is_stripped(self):
         """`$myarg` inside inline backticks must NOT be flagged."""
-        content = (
-            "---\nname: my-skill\n---\n"
-            "The substitution `$myarg` is documented as an example.\n"
-        )
+        content = "---\nname: my-skill\n---\nThe substitution `$myarg` is documented as an example.\n"
         report = _make_report()
         validate_skill_content(content, report, declared_args=[])
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
@@ -848,10 +839,7 @@ class TestNamedArgSubstitutionShellVarHeuristic:
 
     def test_fenced_code_block_is_stripped(self):
         """$myarg inside ```bash fenced block must NOT be flagged."""
-        content = (
-            "---\nname: my-skill\n---\n"
-            "```bash\nrun --flag $myarg\n```\n"
-        )
+        content = "---\nname: my-skill\n---\n```bash\nrun --flag $myarg\n```\n"
         report = _make_report()
         validate_skill_content(content, report, declared_args=[])
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
@@ -860,8 +848,7 @@ class TestNamedArgSubstitutionShellVarHeuristic:
     def test_known_env_vars_skipped(self):
         """$CLAUDE_PROJECT_DIR, $CLAUDE_PLUGIN_ROOT, etc. must NOT be flagged."""
         content = (
-            "---\nname: my-skill\n---\n"
-            "Use $CLAUDE_PROJECT_DIR for project root and $CLAUDE_PLUGIN_ROOT for plugin.\n"
+            "---\nname: my-skill\n---\nUse $CLAUDE_PROJECT_DIR for project root and $CLAUDE_PLUGIN_ROOT for plugin.\n"
         )
         report = _make_report()
         validate_skill_content(content, report, declared_args=[])
@@ -879,10 +866,7 @@ class TestNamedArgSubstitutionShellVarHeuristic:
 
     def test_brace_form_already_safe(self):
         """${MAIN_ROOT} brace form was always safe (regex doesn't match {)."""
-        content = (
-            "---\nname: my-skill\n---\n"
-            "Anchor to ${MAIN_ROOT}/reports — brace form.\n"
-        )
+        content = "---\nname: my-skill\n---\nAnchor to ${MAIN_ROOT}/reports — brace form.\n"
         report = _make_report()
         validate_skill_content(content, report, declared_args=[])
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]

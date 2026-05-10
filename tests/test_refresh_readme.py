@@ -1,4 +1,5 @@
 """Tests for scripts/refresh_readme.py + cpv_management_common marker helpers."""
+
 from __future__ import annotations
 
 import json
@@ -204,7 +205,10 @@ def test_refresh_readme_cli(tmp_path):
     (plugin / "agents" / "a1.md").write_text("---\nname: a1\n---\n")
     res = subprocess.run(
         [sys.executable, str(REPO_ROOT / "scripts" / "refresh_readme.py"), str(plugin)],
-        capture_output=True, text=True, timeout=30, check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
     )
     assert res.returncode == 0
     text = (plugin / "README.md").read_text(encoding="utf-8")

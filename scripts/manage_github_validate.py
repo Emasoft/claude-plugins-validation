@@ -140,6 +140,7 @@ def audit_github_marketplace(repo: str) -> int:
 
 def main():
     from cpv_validation_common import launcher_epilog
+
     parser = argparse.ArgumentParser(
         description="GitHub plugin/marketplace validation",
         formatter_class=argparse.RawDescriptionHelpFormatter,

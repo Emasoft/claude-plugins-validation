@@ -32,7 +32,10 @@ from generate_plugin_repo import PluginParams, gen_plugin_json  # noqa: E402
 def test_gen_plugin_json_includes_cpv_strip_block_by_default():
     """Default --strip-dev=True → plugin.json carries a cpv.strip block."""
     p = PluginParams(
-        name="my-plugin", description="x", author="A", author_email="a@a.a",
+        name="my-plugin",
+        description="x",
+        author="A",
+        author_email="a@a.a",
         github_owner="Emasoft",
     )
     pj = json.loads(gen_plugin_json(p))
@@ -49,8 +52,12 @@ def test_gen_plugin_json_includes_cpv_strip_block_by_default():
 def test_gen_plugin_json_omits_cpv_strip_block_when_disabled():
     """--no-strip-dev → no cpv.strip block in plugin.json."""
     p = PluginParams(
-        name="my-plugin", description="x", author="A", author_email="a@a.a",
-        github_owner="Emasoft", strip_dev=False,
+        name="my-plugin",
+        description="x",
+        author="A",
+        author_email="a@a.a",
+        github_owner="Emasoft",
+        strip_dev=False,
     )
     pj = json.loads(gen_plugin_json(p))
     assert "cpv" not in pj or "strip" not in pj.get("cpv", {})
@@ -59,7 +66,10 @@ def test_gen_plugin_json_omits_cpv_strip_block_when_disabled():
 def test_gen_plugin_json_uses_owner_in_submodule_names():
     """When github_owner is set, scaffolded submodule names use it directly."""
     p = PluginParams(
-        name="lint-checker", description="x", author="A", author_email="a@a.a",
+        name="lint-checker",
+        description="x",
+        author="A",
+        author_email="a@a.a",
         github_owner="Acme",
     )
     pj = json.loads(gen_plugin_json(p))
@@ -70,7 +80,10 @@ def test_gen_plugin_json_uses_owner_in_submodule_names():
 def test_gen_plugin_json_uses_placeholder_when_no_owner():
     """Without github_owner, submodule names get a `<owner>` placeholder."""
     p = PluginParams(
-        name="lint-checker", description="x", author="A", author_email="a@a.a",
+        name="lint-checker",
+        description="x",
+        author="A",
+        author_email="a@a.a",
     )
     pj = json.loads(gen_plugin_json(p))
     submodules = {e["submodule"] for e in pj["cpv"]["strip"]["extract"]}
@@ -87,20 +100,29 @@ def _make_scaffold_with_strip(tmp_path: Path, *, strip: bool = True) -> Path:
     """
     target = tmp_path / "demo"
     cmd = [
-        sys.executable, str(REPO_ROOT / "scripts" / "generate_plugin_repo.py"),
+        sys.executable,
+        str(REPO_ROOT / "scripts" / "generate_plugin_repo.py"),
         str(target),
-        "--name", "demo",
-        "--description", "test plugin",
-        "--author", "Tester",
-        "--author-email", "t@t.t",
-        "--github-owner", "Emasoft",
+        "--name",
+        "demo",
+        "--description",
+        "test plugin",
+        "--author",
+        "Tester",
+        "--author-email",
+        "t@t.t",
+        "--github-owner",
+        "Emasoft",
     ]
     if not strip:
         cmd.append("--no-strip-dev")
     res = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=60, check=False,
-        env={"PLUGIN_SKIP_GITHUB_INTEGRITY": "1", "PATH": "/usr/bin:/bin",
-             "HOME": str(tmp_path)},
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        env={"PLUGIN_SKIP_GITHUB_INTEGRITY": "1", "PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
     )
     if res.returncode != 0:
         pytest.fail(f"generate_plugin_repo failed: {res.stderr}\n{res.stdout}")
@@ -154,9 +176,11 @@ def test_dry_run_summary_lists_steps(tmp_path):
     (target / "tests" / "x.py").write_text("# placeholder\n", encoding="utf-8")
 
     res = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "scripts" / "cpv_strip_dev.py"),
-         str(target), "--dry-run"],
-        capture_output=True, text=True, timeout=30, check=False,
+        [sys.executable, str(REPO_ROOT / "scripts" / "cpv_strip_dev.py"), str(target), "--dry-run"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
     )
     assert res.returncode == 0
     out = res.stdout
@@ -175,18 +199,17 @@ def test_dry_run_warns_when_working_tree_dirty(tmp_path):
     (target / "tests" / "x.py").write_text("x", encoding="utf-8")
 
     # Initialize git but DON'T commit — tree is "dirty" by definition.
-    subprocess.run(["git", "-C", str(target), "init", "-b", "main"],
-                   capture_output=True, check=False)
-    subprocess.run(["git", "-C", str(target), "config", "user.email", "t@t.t"],
-                   capture_output=True, check=False)
-    subprocess.run(["git", "-C", str(target), "config", "user.name", "T"],
-                   capture_output=True, check=False)
+    subprocess.run(["git", "-C", str(target), "init", "-b", "main"], capture_output=True, check=False)
+    subprocess.run(["git", "-C", str(target), "config", "user.email", "t@t.t"], capture_output=True, check=False)
+    subprocess.run(["git", "-C", str(target), "config", "user.name", "T"], capture_output=True, check=False)
     # No git add / commit — tree is dirty (untracked files everywhere).
 
     res = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "scripts" / "cpv_strip_dev.py"),
-         str(target), "--dry-run"],
-        capture_output=True, text=True, timeout=30, check=False,
+        [sys.executable, str(REPO_ROOT / "scripts" / "cpv_strip_dev.py"), str(target), "--dry-run"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
     )
     assert res.returncode == 0
     # The plan summary still prints. But the working-tree warning should
@@ -206,9 +229,11 @@ def test_live_execution_blocked_with_clear_message(tmp_path):
     (target / "tests" / "x.py").write_text("x", encoding="utf-8")
 
     res = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "scripts" / "cpv_strip_dev.py"),
-         str(target), "--extract", "tests/"],
-        capture_output=True, text=True, timeout=30, check=False,
+        [sys.executable, str(REPO_ROOT / "scripts" / "cpv_strip_dev.py"), str(target), "--extract", "tests/"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
     )
     # Live execution requires --auto. Without --auto, this falls through
     # to dry-run and exits 0. Other failure modes (working tree dirty,

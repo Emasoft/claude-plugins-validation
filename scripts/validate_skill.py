@@ -465,9 +465,7 @@ def validate_hooks_field(frontmatter: dict[str, Any], report: ValidationReport) 
                         continue
                     cmd = h.get("command")
                     if isinstance(cmd, str) and cmd.strip():
-                        check_hook_command_cross_platform(
-                            cmd, report, file_label="SKILL.md"
-                        )
+                        check_hook_command_cross_platform(cmd, report, file_label="SKILL.md")
 
     report.passed("'hooks' field present", "SKILL.md")
 
@@ -535,8 +533,14 @@ def validate_skill_content(
             if name in declared_args:
                 continue  # explicitly declared
             # Skip names that match known env vars used in skill substitution.
-            if name in {"CLAUDE_SESSION_ID", "CLAUDE_EFFORT", "CLAUDE_SKILL_DIR",
-                        "CLAUDE_PLUGIN_ROOT", "CLAUDE_PLUGIN_DATA", "CLAUDE_PROJECT_DIR"}:
+            if name in {
+                "CLAUDE_SESSION_ID",
+                "CLAUDE_EFFORT",
+                "CLAUDE_SKILL_DIR",
+                "CLAUDE_PLUGIN_ROOT",
+                "CLAUDE_PLUGIN_DATA",
+                "CLAUDE_PROJECT_DIR",
+            }:
                 continue
             # ALL_UPPERCASE names are shell-variable convention, NOT skill-arg
             # convention. Skill args are lowercase snake_case. So `$MAIN_ROOT`,
@@ -756,6 +760,7 @@ def main() -> int:
     canonical manifest. Exits with code 2 on mismatch.
     """
     from _plugin_verify_hashes import verify_self_integrity  # noqa: PLC0415
+
     verify_self_integrity(quiet=True)
 
     if _USING_FALLBACK_YAML:

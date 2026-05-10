@@ -35,7 +35,9 @@ from cpv_validation_common import ValidationReport  # noqa: E402
 
 def test_resolver_prefers_path_when_tirith_present(monkeypatch: pytest.MonkeyPatch) -> None:
     """If tirith is already on PATH, no docker/nix probe is needed."""
-    monkeypatch.setattr(validate_security.shutil, "which", lambda name: "/usr/local/bin/tirith" if name == "tirith" else None)
+    monkeypatch.setattr(
+        validate_security.shutil, "which", lambda name: "/usr/local/bin/tirith" if name == "tirith" else None
+    )
     runner = validate_security._resolve_tirith_runner()
     assert runner == (["tirith"], "local")
 
@@ -93,16 +95,14 @@ def _write_shim(tmp_path: Path, name: str, json_payload: str, exit_code: int = 0
     shim = tmp_path / name
     # printf %s preserves the literal JSON without injecting trailing newlines
     # that would change downstream parsing semantics.
-    shim.write_text(
-        "#!/bin/sh\n"
-        f"printf '%s' {json_payload!r}\n"
-        f"exit {exit_code}\n"
-    )
+    shim.write_text(f"#!/bin/sh\nprintf '%s' {json_payload!r}\nexit {exit_code}\n")
     shim.chmod(shim.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return shim
 
 
-def _run_with_shim(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, payload: str, exit_code: int = 0) -> ValidationReport:
+def _run_with_shim(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, payload: str, exit_code: int = 0
+) -> ValidationReport:
     """Place a fake ``tirith`` on PATH, run the check, return the populated report."""
     bin_dir = tmp_path / "fake-bin"
     bin_dir.mkdir()
@@ -135,7 +135,9 @@ def test_check_tirith_findings_object(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
 def test_check_tirith_sarif_shape(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Tirith JSON shape #3: SARIF runs/results structure."""
-    payload = '{"runs": [{"results": [{"level": "low", "rule_id": "ansi_escape", "title": "ANSI escape sequence found"}]}]}'
+    payload = (
+        '{"runs": [{"results": [{"level": "low", "rule_id": "ansi_escape", "title": "ANSI escape sequence found"}]}]}'
+    )
     report = _run_with_shim(monkeypatch, tmp_path, payload)
     msgs = [r.message for r in report.results]
     assert any("tirith ansi_escape" in m for m in msgs)
@@ -203,14 +205,13 @@ def test_tirith_always_runs_via_cli(tmp_path: Path) -> None:
         check=False,
     )
 
-    assert result.returncode in (0, 1, 2, 3), (
-        f"unexpected exit {result.returncode}\nstderr: {result.stderr}"
-    )
+    assert result.returncode in (0, 1, 2, 3), f"unexpected exit {result.returncode}\nstderr: {result.stderr}"
     # tirith runs unconditionally now. When the scanner binary is absent and
     # auto-install is disabled, the check_tirith_scanner step self-skips and
     # emits an advisory message starting with "tirith". That advisory IS the
     # signal we use to confirm the check ran end-to-end.
     import json as _json
+
     payload = _json.loads(result.stdout)
     messages = [r.get("message", "") for r in payload.get("results", [])]
     tirith_msgs = [m for m in messages if m.lower().startswith("tirith")]
@@ -236,9 +237,7 @@ def test_legacy_no_tirith_flag_is_rejected(tmp_path: Path) -> None:
     """
     plugin = tmp_path / "demo-plugin"
     (plugin / ".claude-plugin").mkdir(parents=True)
-    (plugin / ".claude-plugin" / "plugin.json").write_text(
-        '{"name": "demo", "version": "0.0.1"}\n'
-    )
+    (plugin / ".claude-plugin" / "plugin.json").write_text('{"name": "demo", "version": "0.0.1"}\n')
 
     result = subprocess.run(
         [

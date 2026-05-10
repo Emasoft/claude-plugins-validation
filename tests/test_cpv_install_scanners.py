@@ -39,16 +39,12 @@ class TestOptOut:
         assert cis._opt_out("CPV_NO_FCLONES_INSTALL") is False
 
     @pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "Yes", "on", "ON"])
-    def test_truthy_values_return_true(
-        self, monkeypatch: pytest.MonkeyPatch, value: str
-    ) -> None:
+    def test_truthy_values_return_true(self, monkeypatch: pytest.MonkeyPatch, value: str) -> None:
         monkeypatch.setenv("CPV_NO_FCLONES_INSTALL", value)
         assert cis._opt_out("CPV_NO_FCLONES_INSTALL") is True
 
     @pytest.mark.parametrize("value", ["0", "false", "no", "off", "", "  "])
-    def test_falsy_values_return_false(
-        self, monkeypatch: pytest.MonkeyPatch, value: str
-    ) -> None:
+    def test_falsy_values_return_false(self, monkeypatch: pytest.MonkeyPatch, value: str) -> None:
         monkeypatch.setenv("CPV_NO_FCLONES_INSTALL", value)
         assert cis._opt_out("CPV_NO_FCLONES_INSTALL") is False
 
@@ -112,9 +108,7 @@ class TestEnsureLocalBinOnPath:
         cis._ensure_local_bin_on_path()
         assert str(cis._local_bin_dir()) in cis.os.environ["PATH"].split(cis.os.pathsep)
 
-    def test_idempotent_when_already_present(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_idempotent_when_already_present(self, monkeypatch: pytest.MonkeyPatch) -> None:
         bin_dir = str(cis._local_bin_dir())
         monkeypatch.setenv("PATH", f"{bin_dir}:/usr/bin")
         original = cis.os.environ["PATH"]
@@ -127,9 +121,7 @@ class TestEnsureLocalBinOnPath:
 
 
 class TestEnsureFclones:
-    def test_returns_true_when_already_on_path(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_returns_true_when_already_on_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(cis.shutil, "which", lambda name: "/usr/bin/fclones")
         # No subprocess should be invoked.
         called = []
@@ -206,9 +198,7 @@ class TestEnsureFclones:
         assert cis.ensure_fclones() is True
         assert run_calls[0] == ["snap", "install", "fclones"]
 
-    def test_windows_attempts_release_download(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_windows_attempts_release_download(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("CPV_NO_FCLONES_INSTALL", raising=False)
         monkeypatch.setattr(cis.platform, "system", lambda: "Windows")
         monkeypatch.setattr(cis.shutil, "which", lambda name: None)
@@ -301,9 +291,7 @@ class TestEnsureCiscoSkillScanner:
 
 
 class TestInstallAllScanners:
-    def test_returns_dict_with_all_six_keys(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_returns_dict_with_all_six_keys(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Mark every scanner as already installed; no cascades to run.
         monkeypatch.setattr(cis.shutil, "which", lambda name: f"/usr/bin/{name}")
         statuses = cis.install_all_scanners()
@@ -317,9 +305,7 @@ class TestInstallAllScanners:
         }
         assert all(statuses.values()), f"all should be available; got {statuses}"
 
-    def test_returns_false_when_unavailable(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_returns_false_when_unavailable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # No scanner on PATH; every opt-out set so no cascades fire.
         monkeypatch.setattr(cis.shutil, "which", lambda name: None)
         for var in (

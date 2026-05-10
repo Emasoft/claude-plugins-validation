@@ -70,13 +70,7 @@ class TestBacktickToLink:
         assert out == text
 
     def test_fenced_code_block_is_left_alone(self):
-        text = (
-            "Some text.\n\n"
-            "```\n"
-            "See `references/foo.md` here.\n"
-            "```\n\n"
-            "Outside: `references/bar.md` here.\n"
-        )
+        text = "Some text.\n\n```\nSee `references/foo.md` here.\n```\n\nOutside: `references/bar.md` here.\n"
         out = cpv_codemod._apply_backtick_to_link(text)
         # Inside the fence: untouched
         assert "`references/foo.md`" in out
@@ -84,13 +78,7 @@ class TestBacktickToLink:
         assert "[bar](references/bar.md)" in out
 
     def test_indented_code_block_is_left_alone(self):
-        text = (
-            "Prose: `references/x.md`\n"
-            "\n"
-            "    See `references/y.md` here\n"
-            "\n"
-            "More prose: `references/z.md`\n"
-        )
+        text = "Prose: `references/x.md`\n\n    See `references/y.md` here\n\nMore prose: `references/z.md`\n"
         out = cpv_codemod._apply_backtick_to_link(text)
         assert "[x](references/x.md)" in out
         assert "`references/y.md`" in out  # indented, untouched
@@ -149,9 +137,7 @@ class TestAddToc:
             "# Title\n\n"
             "## Table of Contents\n\n"
             "- [A](#a)\n\n"
-            "## A\n\n"
-            + "\n".join(f"line {i}" for i in range(60))
-            + "\n"
+            "## A\n\n" + "\n".join(f"line {i}" for i in range(60)) + "\n"
         )
         out = cpv_codemod._apply_add_toc(text, min_lines=10)
         # Already has TOC: text unchanged (length and content)
@@ -214,9 +200,7 @@ class TestWrapPlaceholderPaths:
         plugin_root = _make_plugin(tmp_path)
         file_path = plugin_root / "doc.md"
         file_path.write_text("See `${VAR}/file.md` for details.\n", encoding="utf-8")
-        out = cpv_codemod._apply_wrap_placeholder_paths(
-            file_path.read_text(encoding="utf-8"), plugin_root, file_path
-        )
+        out = cpv_codemod._apply_wrap_placeholder_paths(file_path.read_text(encoding="utf-8"), plugin_root, file_path)
         assert "`<${VAR}/file.md>`" in out
 
     def test_existing_path_not_wrapped(self, tmp_path):
@@ -224,9 +208,7 @@ class TestWrapPlaceholderPaths:
         (plugin_root / "real.md").write_text("real", encoding="utf-8")
         file_path = plugin_root / "doc.md"
         file_path.write_text("See `real.md` for details.\n", encoding="utf-8")
-        out = cpv_codemod._apply_wrap_placeholder_paths(
-            file_path.read_text(encoding="utf-8"), plugin_root, file_path
-        )
+        out = cpv_codemod._apply_wrap_placeholder_paths(file_path.read_text(encoding="utf-8"), plugin_root, file_path)
         assert "<real.md>" not in out
 
     def test_already_wrapped_skipped(self, tmp_path):
@@ -275,9 +257,7 @@ class TestExternalSkipList:
         (plugin_root / "node_modules").mkdir()
         changed, _summary = cpv_codemod._apply_external_skip_list(plugin_root)
         assert changed
-        manifest = json.loads(
-            (plugin_root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
-        )
+        manifest = json.loads((plugin_root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
         assert "external" in manifest["cpv"]["exclude_paths"]
         assert "node_modules" in manifest["cpv"]["exclude_paths"]
 
@@ -300,16 +280,12 @@ class TestExternalSkipList:
     def test_gitmodules_paths_included(self, tmp_path):
         plugin_root = _make_plugin(tmp_path)
         (plugin_root / ".gitmodules").write_text(
-            '[submodule "vendored/lib"]\n'
-            "  path = vendored/lib\n"
-            "  url = https://example.com/lib.git\n",
+            '[submodule "vendored/lib"]\n  path = vendored/lib\n  url = https://example.com/lib.git\n',
             encoding="utf-8",
         )
         changed, _summary = cpv_codemod._apply_external_skip_list(plugin_root)
         assert changed
-        manifest = json.loads(
-            (plugin_root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
-        )
+        manifest = json.loads((plugin_root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
         assert "vendored/lib" in manifest["cpv"]["exclude_paths"]
 
 
@@ -339,14 +315,11 @@ class TestVendoredSkip:
 class TestCliEndToEnd:
     def test_dry_run_does_not_write(self, tmp_path):
         plugin_root = _make_plugin(tmp_path)
-        (plugin_root / "doc.md").write_text(
-            "See `references/foo.md` for details.\n", encoding="utf-8"
-        )
+        (plugin_root / "doc.md").write_text("See `references/foo.md` for details.\n", encoding="utf-8")
         rc = cpv_codemod.main(["backtick-to-link", "--plugin", str(plugin_root)])
         assert rc == 0
         # File MUST NOT have been written
-        assert (plugin_root / "doc.md").read_text(encoding="utf-8") == \
-            "See `references/foo.md` for details.\n"
+        assert (plugin_root / "doc.md").read_text(encoding="utf-8") == "See `references/foo.md` for details.\n"
         # No backup directory created
         assert not (plugin_root / ".cpv-codemod-backup").exists()
 
@@ -372,19 +345,23 @@ class TestCliEndToEnd:
             cpv_codemod.main(["nonsense", "--plugin", str(plugin_root)])
 
     def test_invalid_plugin_path_rejected(self, tmp_path):
-        rc = cpv_codemod.main([
-            "backtick-to-link", "--plugin", str(tmp_path / "missing")
-        ])
+        rc = cpv_codemod.main(["backtick-to-link", "--plugin", str(tmp_path / "missing")])
         assert rc == 2
 
     def test_min_lines_threshold_respected(self, tmp_path):
         plugin_root = _make_plugin(tmp_path)
         short = "# Title\n\n## A\n\n## B\n\n## C\n\nshort doc.\n"
         (plugin_root / "short.md").write_text(short, encoding="utf-8")
-        rc = cpv_codemod.main([
-            "add-toc", "--plugin", str(plugin_root), "--apply",
-            "--min-lines", "200",
-        ])
+        rc = cpv_codemod.main(
+            [
+                "add-toc",
+                "--plugin",
+                str(plugin_root),
+                "--apply",
+                "--min-lines",
+                "200",
+            ]
+        )
         assert rc == 0
         # File too short for the 200-line threshold; unchanged
         assert (plugin_root / "short.md").read_text(encoding="utf-8") == short
@@ -392,13 +369,8 @@ class TestCliEndToEnd:
     def test_vendored_files_skipped(self, tmp_path):
         plugin_root = _make_plugin(tmp_path)
         (plugin_root / "external").mkdir()
-        (plugin_root / "external" / "lib.md").write_text(
-            "See `lib/foo.md` here.\n", encoding="utf-8"
-        )
-        rc = cpv_codemod.main([
-            "backtick-to-link", "--plugin", str(plugin_root), "--apply"
-        ])
+        (plugin_root / "external" / "lib.md").write_text("See `lib/foo.md` here.\n", encoding="utf-8")
+        rc = cpv_codemod.main(["backtick-to-link", "--plugin", str(plugin_root), "--apply"])
         assert rc == 0
         # external/ is in the vendored skip list — file untouched
-        assert (plugin_root / "external" / "lib.md").read_text(encoding="utf-8") == \
-            "See `lib/foo.md` here.\n"
+        assert (plugin_root / "external" / "lib.md").read_text(encoding="utf-8") == "See `lib/foo.md` here.\n"

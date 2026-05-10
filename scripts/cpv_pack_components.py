@@ -268,9 +268,7 @@ def validate_selection(selected: list[Component]) -> list[str]:
     # Singleton root configs — at most one allowed.
     for singleton in ("hook", "mcp", "lsp", "monitor"):
         if len(by_type.get(singleton, [])) > 1:
-            problems.append(
-                f"more than one {singleton} config selected; only one per plugin is allowed at root"
-            )
+            problems.append(f"more than one {singleton} config selected; only one per plugin is allowed at root")
     return problems
 
 
@@ -362,9 +360,7 @@ def create_marketplace(target: Path, plugin_params: gpr.PluginParams) -> None:
         "owner": {"name": plugin_params.author, "email": plugin_params.author_email},
         "plugins": [],
     }
-    (target / ".claude-plugin" / "marketplace.json").write_text(
-        json.dumps(mkt_json, indent=2) + "\n", encoding="utf-8"
-    )
+    (target / ".claude-plugin" / "marketplace.json").write_text(json.dumps(mkt_json, indent=2) + "\n", encoding="utf-8")
     add_to_marketplace(target, plugin_params)
 
 
@@ -411,33 +407,60 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default="python",
         help="Plugin language (default: python)",
     )
-    parser.add_argument("--strip-dev", dest="strip_dev", action="store_true", default=True,
-                        help="(default) Emit cpv.strip block in plugin.json")
-    parser.add_argument("--no-strip-dev", dest="strip_dev", action="store_false",
-                        help="Disable dev-stripping config (legacy mode)")
     parser.add_argument(
-        "--all", dest="include_all", action="store_true",
+        "--strip-dev",
+        dest="strip_dev",
+        action="store_true",
+        default=True,
+        help="(default) Emit cpv.strip block in plugin.json",
+    )
+    parser.add_argument(
+        "--no-strip-dev", dest="strip_dev", action="store_false", help="Disable dev-stripping config (legacy mode)"
+    )
+    parser.add_argument(
+        "--all",
+        dest="include_all",
+        action="store_true",
         help="Include every detected component (mutually exclusive with --include)",
     )
     parser.add_argument(
-        "--include", action="append", default=[],
+        "--include",
+        action="append",
+        default=[],
         metavar="TYPE=N1,N2",
-        help=("Include named components of TYPE. May repeat. Empty name list = all of TYPE. "
-              f"Valid TYPEs: {', '.join(VALID_TYPES)}."),
+        help=(
+            "Include named components of TYPE. May repeat. Empty name list = all of TYPE. "
+            f"Valid TYPEs: {', '.join(VALID_TYPES)}."
+        ),
     )
     parser.add_argument(
-        "--exclude", action="append", default=[],
+        "--exclude",
+        action="append",
+        default=[],
         metavar="TYPE=N1,N2",
         help="Exclude named components from selection (after --include / --all).",
     )
-    parser.add_argument("--list-only", action="store_true",
-                        help="Print discovered components and exit (no scaffolding)")
-    parser.add_argument("--add-to-marketplace", type=Path, default=None,
-                        help="After packing, register the plugin in this existing marketplace")
-    parser.add_argument("--create-marketplace", type=Path, default=None,
-                        help="After packing, create a new marketplace at this path with the plugin")
-    parser.add_argument("--json", dest="json_mode", action="store_true",
-                        help="Emit a single JSON object on stdout (machine-readable mode)")
+    parser.add_argument(
+        "--list-only", action="store_true", help="Print discovered components and exit (no scaffolding)"
+    )
+    parser.add_argument(
+        "--add-to-marketplace",
+        type=Path,
+        default=None,
+        help="After packing, register the plugin in this existing marketplace",
+    )
+    parser.add_argument(
+        "--create-marketplace",
+        type=Path,
+        default=None,
+        help="After packing, create a new marketplace at this path with the plugin",
+    )
+    parser.add_argument(
+        "--json",
+        dest="json_mode",
+        action="store_true",
+        help="Emit a single JSON object on stdout (machine-readable mode)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Preview only, no writes")
     return parser
 

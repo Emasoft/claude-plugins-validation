@@ -46,8 +46,7 @@ def test_gate2_does_not_use_legacy_x_flag():
     src = inspect.getsource(publish.stage_run_tests)
     # Match the literal `"-x"` argument (not just the letter x in any context).
     assert '"-x"' not in src, (
-        "Gate 2 reintroduced `-x` after Phase A. "
-        "Use `--maxfail=1` instead — it is xdist-compatible."
+        "Gate 2 reintroduced `-x` after Phase A. Use `--maxfail=1` instead — it is xdist-compatible."
     )
 
 
@@ -58,16 +57,18 @@ def test_xdist_collection_smoke(tmp_path):
     """
     # Build a 3-test fixture suite.
     test_file = tmp_path / "test_dummy.py"
-    test_file.write_text(textwrap.dedent('''
+    test_file.write_text(
+        textwrap.dedent("""
         def test_a(): assert 1 + 1 == 2
         def test_b(): assert "a" + "b" == "ab"
         def test_c(): assert [1, 2, 3][0] == 1
-    '''))
+    """)
+    )
 
     import subprocess
+
     result = subprocess.run(
-        ["uv", "run", "pytest", str(test_file), "--collect-only", "-q",
-         "-n", "auto", "--dist=worksteal"],
+        ["uv", "run", "pytest", str(test_file), "--collect-only", "-q", "-n", "auto", "--dist=worksteal"],
         capture_output=True,
         text=True,
         timeout=60,

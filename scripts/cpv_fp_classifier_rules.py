@@ -55,9 +55,17 @@ from cpv_fp_classifier import (
 # -----------------------------------------------------------------------------
 
 _RC21_SUBPROCESS_HINTS = (
-    "subprocess.", "Popen(", "subprocess.run(", "check_output(", "check_call(",
-    "spawn(", "execve(", "execvp(", "execv(",
-    "child_process.", "execFile(",
+    "subprocess.",
+    "Popen(",
+    "subprocess.run(",
+    "check_output(",
+    "check_call(",
+    "spawn(",
+    "execve(",
+    "execvp(",
+    "execv(",
+    "child_process.",
+    "execFile(",
 )
 
 # Sink hints used to recognize EXFIL contexts. Kept narrow on purpose —
@@ -66,13 +74,26 @@ _RC21_SUBPROCESS_HINTS = (
 # `open(` for file-write exfil, the corpus will catch the regression
 # and we'll add a more specific token (e.g. `open(filename, "w"`).
 _RC21_EXFIL_SINK_HINTS = (
-    "requests.post", "requests.put", "requests.patch", "requests.delete",
-    "urlopen(", "http.client", "httpx.", "aiohttp.",
-    "fetch(", "axios.post", "axios.put",
-    "sendBeacon(", "send_beacon(",
-    "writeFile(", "write_text(", "json.dump(",
-    "ftplib.", "smtplib.",
-    'boto3.client("s3")', 'boto3.resource("s3")',
+    "requests.post",
+    "requests.put",
+    "requests.patch",
+    "requests.delete",
+    "urlopen(",
+    "http.client",
+    "httpx.",
+    "aiohttp.",
+    "fetch(",
+    "axios.post",
+    "axios.put",
+    "sendBeacon(",
+    "send_beacon(",
+    "writeFile(",
+    "write_text(",
+    "json.dump(",
+    "ftplib.",
+    "smtplib.",
+    'boto3.client("s3")',
+    'boto3.resource("s3")',
 )
 
 
@@ -103,10 +124,7 @@ def classify_rc21(ctx: Context) -> FindingVerdict:
     if ctx.file_role == "doc":
         return FindingVerdict.LIKELY_FP
 
-    is_copy_pattern = (
-        "os.environ.copy()" in ctx.line
-        or "dict(os.environ" in ctx.line
-    )
+    is_copy_pattern = "os.environ.copy()" in ctx.line or "dict(os.environ" in ctx.line
     if not is_copy_pattern:
         return FindingVerdict.REAL
 
@@ -128,8 +146,14 @@ def classify_rc21(ctx: Context) -> FindingVerdict:
 # -----------------------------------------------------------------------------
 
 _CLIPBOARD_DOMAIN_HINTS = (
-    "clipboard", "pasteboard", "copy-paste", "copy/paste",
-    "pbcopy", "pbpaste", "xclip", "xsel",
+    "clipboard",
+    "pasteboard",
+    "copy-paste",
+    "copy/paste",
+    "pbcopy",
+    "pbpaste",
+    "xclip",
+    "xsel",
 )
 
 
@@ -176,18 +200,47 @@ def _plugin_is_clipboard_domain(plugin_meta: dict) -> bool:
 # -----------------------------------------------------------------------------
 
 _RC65_NETWORK_CALL_HINTS = (
-    "requests.", "urlopen(", "urllib.", "http.client", "httpx.", "aiohttp.",
-    "fetch(", "axios.", "got(", "needle.", "superagent.",
-    ".get(", ".post(", ".put(", ".delete(", ".patch(",
-    "curl ", "wget ", "Invoke-WebRequest", "Invoke-RestMethod",
+    "requests.",
+    "urlopen(",
+    "urllib.",
+    "http.client",
+    "httpx.",
+    "aiohttp.",
+    "fetch(",
+    "axios.",
+    "got(",
+    "needle.",
+    "superagent.",
+    ".get(",
+    ".post(",
+    ".put(",
+    ".delete(",
+    ".patch(",
+    "curl ",
+    "wget ",
+    "Invoke-WebRequest",
+    "Invoke-RestMethod",
 )
 
 _RC65_PATTERN_SOURCE_HINTS = (
-    "_PATTERNS", "_PATTERN", "_RULES", "_HOSTS",
-    "denylist", "blocklist", "blacklist", "deny_list", "block_list",
-    "unsafe_hosts", "unsafe_urls", "blocked_hosts", "imds_hosts",
-    "PRIVATE_IP", "INTERNAL_IP", "LINK_LOCAL",
-    "DETECT_", "DETECTOR_",
+    "_PATTERNS",
+    "_PATTERN",
+    "_RULES",
+    "_HOSTS",
+    "denylist",
+    "blocklist",
+    "blacklist",
+    "deny_list",
+    "block_list",
+    "unsafe_hosts",
+    "unsafe_urls",
+    "blocked_hosts",
+    "imds_hosts",
+    "PRIVATE_IP",
+    "INTERNAL_IP",
+    "LINK_LOCAL",
+    "DETECT_",
+    "DETECTOR_",
 )
 
 
@@ -245,11 +298,21 @@ _RC87_PURE_VERSION_LINE_RE = re.compile(
 _RC87_SEMVER_VALUE_RE = re.compile(
     r"\"[^\"]+\"\s*:\s*\"[\^~]\s*\d+\.\d+\.\d+",
 )
-_RC87_MANIFEST_BASENAMES = frozenset({
-    "package.json", "pyproject.toml", "cargo.toml",
-    "composer.json", "gemfile", "build.gradle", "build.gradle.kts",
-    "pubspec.yaml", "mix.exs", "deno.json", "bun.lock.json",
-})
+_RC87_MANIFEST_BASENAMES = frozenset(
+    {
+        "package.json",
+        "pyproject.toml",
+        "cargo.toml",
+        "composer.json",
+        "gemfile",
+        "build.gradle",
+        "build.gradle.kts",
+        "pubspec.yaml",
+        "mix.exs",
+        "deno.json",
+        "bun.lock.json",
+    }
+)
 
 
 @register_classifier("RC-87")
@@ -293,11 +356,39 @@ _RC93_TABLE_SEPARATOR_RE = re.compile(r"^\s*\|\s*[-:]+\s*(?:\|\s*[-:]+\s*)+\|?\s
 # -----------------------------------------------------------------------------
 
 _RC76_SOURCE_EXTENSIONS = (
-    ".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
-    ".go", ".rs", ".java", ".kt", ".swift", ".m", ".mm",
-    ".c", ".cc", ".cpp", ".cxx", ".h", ".hpp",
-    ".rb", ".php", ".cs", ".scala", ".clj", ".ex", ".exs",
-    ".sh", ".bash", ".zsh", ".fish", ".ps1",
+    ".py",
+    ".pyi",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".mjs",
+    ".cjs",
+    ".go",
+    ".rs",
+    ".java",
+    ".kt",
+    ".swift",
+    ".m",
+    ".mm",
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cxx",
+    ".h",
+    ".hpp",
+    ".rb",
+    ".php",
+    ".cs",
+    ".scala",
+    ".clj",
+    ".ex",
+    ".exs",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".fish",
+    ".ps1",
 )
 
 
@@ -327,11 +418,25 @@ def classify_rc76(ctx: Context) -> FindingVerdict:
         return FindingVerdict.DEFINITE_FP
     basename = file_path_lower.rsplit("/", 1)[-1]
     if basename in {
-        "changelog.md", "changelog.markdown", "changelog.txt", "changelog.rst",
-        "changes.md", "changes.markdown", "changes.txt", "changes.rst",
-        "history.md", "history.markdown", "history.txt", "history.rst",
-        "news.md", "news.markdown", "news.txt", "news.rst",
-        "releasenotes.md", "release_notes.md", "release-notes.md",
+        "changelog.md",
+        "changelog.markdown",
+        "changelog.txt",
+        "changelog.rst",
+        "changes.md",
+        "changes.markdown",
+        "changes.txt",
+        "changes.rst",
+        "history.md",
+        "history.markdown",
+        "history.txt",
+        "history.rst",
+        "news.md",
+        "news.markdown",
+        "news.txt",
+        "news.rst",
+        "releasenotes.md",
+        "release_notes.md",
+        "release-notes.md",
     }:
         return FindingVerdict.DEFINITE_FP
     if ctx.file_role in ("fixture", "test"):
@@ -365,6 +470,7 @@ def classify_rc93(ctx: Context) -> FindingVerdict:
 # -----------------------------------------------------------------------------
 # Plugin-meta loader — used by the scan loop to populate Context.plugin_meta.
 # -----------------------------------------------------------------------------
+
 
 def load_plugin_meta(plugin_root: Path) -> dict:
     """Read plugin.json (if present) and return its top-level dict.

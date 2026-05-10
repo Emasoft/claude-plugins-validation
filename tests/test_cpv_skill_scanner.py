@@ -51,9 +51,7 @@ def test_severity_mapping(cisco_level: str, expected_cpv: str) -> None:
 
 
 def test_severity_unknown_falls_back_to_minor() -> None:
-    finding = css._normalise_finding(
-        {"severity": "weird-level", "rule_id": "x", "message": "m"}
-    )
+    finding = css._normalise_finding({"severity": "weird-level", "rule_id": "x", "message": "m"})
     assert finding.severity == "minor"
 
 
@@ -64,9 +62,7 @@ def test_severity_missing_defaults_to_info() -> None:
 
 def test_severity_legacy_field_name() -> None:
     """Older builds use 'severity_level' instead of 'severity'."""
-    finding = css._normalise_finding(
-        {"severity_level": "high", "rule_id": "x", "message": "m"}
-    )
+    finding = css._normalise_finding({"severity_level": "high", "rule_id": "x", "message": "m"})
     assert finding.severity == "major"
 
 
@@ -89,9 +85,7 @@ class TestBuildScanCommand:
         }
         assert forbidden.isdisjoint(cmd), f"forbidden API-key flag in argv: {cmd}"
 
-    def test_required_invocation_shape_uvx_fallback(
-        self, tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
-    ) -> None:
+    def test_required_invocation_shape_uvx_fallback(self, tmp_path: Path, monkeypatch: "pytest.MonkeyPatch") -> None:
         """v2.48 — when no persistent ``skill-scanner`` binary is on PATH,
         the launcher falls back to ``uvx --from cisco-ai-skill-scanner``."""
         # Force the uvx fallback path (no persistent install).
@@ -121,7 +115,8 @@ class TestBuildScanCommand:
         uses it directly and skips the ``uvx --from`` resolve cost (~5-10s
         per invocation)."""
         monkeypatch.setattr(
-            css.shutil, "which",
+            css.shutil,
+            "which",
             lambda name: "/Users/test/.local/bin/skill-scanner" if name == "skill-scanner" else None,
         )
         out = tmp_path / "out.json"
@@ -139,27 +134,19 @@ class TestBuildScanCommand:
         assert "--use-trigger" in cmd
 
     def test_behavioral_flag_can_be_disabled(self, tmp_path: Path) -> None:
-        cmd = css.build_scan_command(
-            tmp_path, json_output_path=tmp_path / "o.json", use_behavioral=False
-        )
+        cmd = css.build_scan_command(tmp_path, json_output_path=tmp_path / "o.json", use_behavioral=False)
         assert "--use-behavioral" not in cmd
 
     def test_trigger_flag_can_be_disabled(self, tmp_path: Path) -> None:
-        cmd = css.build_scan_command(
-            tmp_path, json_output_path=tmp_path / "o.json", use_trigger=False
-        )
+        cmd = css.build_scan_command(tmp_path, json_output_path=tmp_path / "o.json", use_trigger=False)
         assert "--use-trigger" not in cmd
 
     def test_policy_override(self, tmp_path: Path) -> None:
-        cmd = css.build_scan_command(
-            tmp_path, json_output_path=tmp_path / "o.json", policy="strict"
-        )
+        cmd = css.build_scan_command(tmp_path, json_output_path=tmp_path / "o.json", policy="strict")
         idx = cmd.index("--policy")
         assert cmd[idx + 1] == "strict"
 
-    def test_package_spec_override(
-        self, tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
-    ) -> None:
+    def test_package_spec_override(self, tmp_path: Path, monkeypatch: "pytest.MonkeyPatch") -> None:
         """``package_spec`` only takes effect when the launcher falls back to
         ``uvx --from <spec>``. The persistent ``skill-scanner`` binary uses
         whichever version was previously installed via ``uv tool install`` and
@@ -215,16 +202,12 @@ class TestParseFindings:
         assert [f.severity for f in findings] == ["major", "nit"]
 
     def test_string_input(self) -> None:
-        blob = json.dumps(
-            {"results": [{"findings": [{"severity": "info", "rule_id": "r"}]}]}
-        )
+        blob = json.dumps({"results": [{"findings": [{"severity": "info", "rule_id": "r"}]}]})
         findings = css.parse_findings(blob)
         assert len(findings) == 1
 
     def test_bytes_input(self) -> None:
-        blob = json.dumps(
-            {"results": [{"findings": [{"severity": "info", "rule_id": "r"}]}]}
-        ).encode("utf-8")
+        blob = json.dumps({"results": [{"findings": [{"severity": "info", "rule_id": "r"}]}]}).encode("utf-8")
         findings = css.parse_findings(blob)
         assert len(findings) == 1
 
@@ -238,19 +221,11 @@ class TestParseFindings:
         assert css.parse_findings([]) == ()  # type: ignore[arg-type]
 
     def test_line_number_coerces_string(self) -> None:
-        blob = {
-            "findings": [
-                {"severity": "high", "rule_id": "r", "location": {"line": "17"}}
-            ]
-        }
+        blob = {"findings": [{"severity": "high", "rule_id": "r", "location": {"line": "17"}}]}
         assert css.parse_findings(blob)[0].line_number == 17
 
     def test_line_number_invalid_becomes_none(self) -> None:
-        blob = {
-            "findings": [
-                {"severity": "high", "rule_id": "r", "location": {"line": "n/a"}}
-            ]
-        }
+        blob = {"findings": [{"severity": "high", "rule_id": "r", "location": {"line": "n/a"}}]}
         assert css.parse_findings(blob)[0].line_number is None
 
     def test_alternate_id_field_names(self) -> None:
@@ -298,9 +273,7 @@ class _FakeCompleted:
 
 
 class TestRunCiscoScan:
-    def test_skipped_when_uvx_missing(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_skipped_when_uvx_missing(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setattr(css, "is_uvx_available", lambda: False)
         result = css.run_cisco_scan(tmp_path)
         assert result.invoked is False
@@ -308,9 +281,7 @@ class TestRunCiscoScan:
         assert result.findings == ()
         assert result.exit_code == -1
 
-    def test_invocation_writes_json_then_parses(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_invocation_writes_json_then_parses(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setattr(css, "is_uvx_available", lambda: True)
         json_path = tmp_path / ".cpv-cisco-scan.json"
         sample = {
@@ -343,14 +314,10 @@ class TestRunCiscoScan:
         # Sentinel JSON file must be cleaned up afterwards.
         assert not json_path.exists()
 
-    def test_invocation_falls_back_to_stdout_json(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_invocation_falls_back_to_stdout_json(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """When the JSON file isn't written, parse stdout if it looks JSON."""
         monkeypatch.setattr(css, "is_uvx_available", lambda: True)
-        sample = json.dumps(
-            {"results": [{"findings": [{"severity": "info", "rule_id": "r"}]}]}
-        )
+        sample = json.dumps({"results": [{"findings": [{"severity": "info", "rule_id": "r"}]}]})
         monkeypatch.setattr(
             subprocess,
             "run",
@@ -360,9 +327,7 @@ class TestRunCiscoScan:
         assert result.invoked is True
         assert len(result.findings) == 1
 
-    def test_timeout_is_handled(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_timeout_is_handled(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setattr(css, "is_uvx_available", lambda: True)
 
         def fake_run(*_a: Any, **_kw: Any) -> None:
@@ -374,9 +339,7 @@ class TestRunCiscoScan:
         assert "timed out" in result.skipped_reason
         assert result.exit_code == -2
 
-    def test_filenotfound_returns_skipped(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_filenotfound_returns_skipped(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setattr(css, "is_uvx_available", lambda: True)
 
         def fake_run(*_a: Any, **_kw: Any) -> None:

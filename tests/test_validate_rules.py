@@ -511,10 +511,7 @@ class TestV221RulesPathsFrontmatter:
         )
         report = ValidationReport()
         validate_rule_file(rule_file, report, "rules/scoped.md")
-        blocking = [
-            r for r in report.results
-            if r.level in ("CRITICAL", "MAJOR", "MINOR")
-        ]
+        blocking = [r for r in report.results if r.level in ("CRITICAL", "MAJOR", "MINOR")]
         assert blocking == [], (
             f"Valid `paths:` frontmatter must not produce blocking findings; "
             f"got: {[(r.level, r.message) for r in blocking]}"
@@ -526,9 +523,9 @@ class TestV221RulesPathsFrontmatter:
         report = ValidationReport()
         _validate_frontmatter(frontmatter, report, "rules/bad-paths.md")
         majors = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any(
-            "must be an array" in m for m in majors
-        ), f"Expected MAJOR about non-array paths; got MAJORs: {majors}"
+        assert any("must be an array" in m for m in majors), (
+            f"Expected MAJOR about non-array paths; got MAJORs: {majors}"
+        )
 
     def test_rule_paths_absolute_glob_major(self, tmp_path):
         """`paths: ['/etc/**']` is MAJOR — absolute globs never match relative
@@ -537,10 +534,9 @@ class TestV221RulesPathsFrontmatter:
         report = ValidationReport()
         _validate_frontmatter(frontmatter, report, "rules/abs-glob.md")
         majors = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any(
-            "absolute" in m.lower() or "relative" in m.lower()
-            for m in majors
-        ), f"Expected MAJOR about absolute glob; got MAJORs: {majors}"
+        assert any("absolute" in m.lower() or "relative" in m.lower() for m in majors), (
+            f"Expected MAJOR about absolute glob; got MAJORs: {majors}"
+        )
 
     def test_rule_paths_traversal_glob_major(self, tmp_path):
         """`paths: ['../**']` escapes the project root → MAJOR."""
@@ -548,10 +544,9 @@ class TestV221RulesPathsFrontmatter:
         report = ValidationReport()
         _validate_frontmatter(frontmatter, report, "rules/escape-glob.md")
         majors = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any(
-            "escape" in m.lower() or ".." in m
-            for m in majors
-        ), f"Expected MAJOR about .. escape; got MAJORs: {majors}"
+        assert any("escape" in m.lower() or ".." in m for m in majors), (
+            f"Expected MAJOR about .. escape; got MAJORs: {majors}"
+        )
 
     def test_rule_paths_unknown_key_minor(self, tmp_path):
         """An unknown top-level key in frontmatter is MINOR (not WARNING),
@@ -560,7 +555,6 @@ class TestV221RulesPathsFrontmatter:
         report = ValidationReport()
         _validate_frontmatter(frontmatter, report, "rules/unknown-key.md")
         minors = [r.message for r in report.results if r.level == "MINOR"]
-        assert any(
-            "Unknown frontmatter field" in m and "author" in m
-            for m in minors
-        ), f"Expected MINOR about unknown key 'author'; got MINORs: {minors}"
+        assert any("Unknown frontmatter field" in m and "author" in m for m in minors), (
+            f"Expected MINOR about unknown key 'author'; got MINORs: {minors}"
+        )

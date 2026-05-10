@@ -111,8 +111,7 @@ class TestIngestArchive:
         archive = tmp_path / "pack.zip"
         with zipfile.ZipFile(archive, "w") as zf:
             zf.writestr("plugin/skills/SKILL.md", "skill body")
-            zf.writestr("plugin/.claude-plugin/plugin.json",
-                        '{"name": "p", "version": "1.0.0"}')
+            zf.writestr("plugin/.claude-plugin/plugin.json", '{"name": "p", "version": "1.0.0"}')
 
         result = staging.ingest_archive(archive)
         try:
@@ -153,9 +152,7 @@ class TestIngestArchive:
             staging.ingest_archive(f)
         assert "unsupported archive format" in str(exc_info.value).lower()
 
-    def test_extract_failure_cleans_up_tmpdir(
-        self, tmp_path: Path
-    ) -> None:
+    def test_extract_failure_cleans_up_tmpdir(self, tmp_path: Path) -> None:
         """Verify tmpdir cleanup on extract failure WITHOUT monkey-patching
         the global extract_archive (which can leak across tests in some
         pytest scheduling orders). We create a malformed archive that
@@ -169,6 +166,7 @@ class TestIngestArchive:
 
         # Capture what tmpdir gets created so we can verify cleanup.
         from cpv_staging import _ARCHIVE_SUFFIXES  # noqa: F401 — sanity import
+
         with pytest.raises(RuntimeError) as exc_info:
             staging.ingest_archive(archive)
         assert "extract failed" in str(exc_info.value).lower()
@@ -182,18 +180,14 @@ class TestIngestGithubUrl:
         with pytest.raises(ValueError):
             staging.ingest_github_url("/local/path")
 
-    def test_missing_gh_cli_raises_runtime_error(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_missing_gh_cli_raises_runtime_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Force shutil.which("gh") to return None
         monkeypatch.setattr(staging.shutil, "which", lambda name: None)
         with pytest.raises(RuntimeError) as exc_info:
             staging.ingest_github_url("https://github.com/owner/repo")
         assert "'gh' CLI" in str(exc_info.value) or "gh" in str(exc_info.value)
 
-    def test_clone_failure_cleans_up_and_raises(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_clone_failure_cleans_up_and_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Force gh to be present but clone to fail.
         monkeypatch.setattr(staging.shutil, "which", lambda name: "/usr/local/bin/gh")
         captured_tmpdirs: list[Path] = []
@@ -222,9 +216,7 @@ class TestIngestGithubUrl:
         for d in captured_tmpdirs:
             assert not d.exists()
 
-    def test_normalizes_shorthand_to_owner_repo(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_normalizes_shorthand_to_owner_repo(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(staging.shutil, "which", lambda name: "/usr/local/bin/gh")
         captured_argv: list[list[str]] = []
 
@@ -246,9 +238,7 @@ class TestIngestGithubUrl:
         finally:
             staging.cleanup_staging(result.tmpdir)
 
-    def test_strips_trailing_path_components(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_strips_trailing_path_components(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """`https://github.com/owner/repo/tree/main/sub` → `owner/repo`."""
         monkeypatch.setattr(staging.shutil, "which", lambda name: "/usr/local/bin/gh")
         captured_argv: list[list[str]] = []
@@ -261,9 +251,7 @@ class TestIngestGithubUrl:
             return m
 
         monkeypatch.setattr(staging.subprocess, "run", fake_run)
-        result = staging.ingest_github_url(
-            "https://github.com/owner/repo/tree/main/path/inside"
-        )
+        result = staging.ingest_github_url("https://github.com/owner/repo/tree/main/path/inside")
         try:
             argv = captured_argv[0]
             assert "owner/repo" in argv

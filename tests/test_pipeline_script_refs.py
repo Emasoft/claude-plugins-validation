@@ -166,9 +166,7 @@ class TestHookReferences:
         git_hooks_dir = plugin_root / "git-hooks"
         git_hooks_dir.mkdir()
         (git_hooks_dir / "pre-push").write_text(
-            "#!/usr/bin/env python3\n"
-            "import subprocess\n"
-            "subprocess.run(['python', 'scripts/lint_files.py', '.'])\n",
+            "#!/usr/bin/env python3\nimport subprocess\nsubprocess.run(['python', 'scripts/lint_files.py', '.'])\n",
             encoding="utf-8",
         )
 

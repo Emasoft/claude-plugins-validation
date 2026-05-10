@@ -142,7 +142,7 @@ Runs ONLY when the target plugin's `plugin.json` contains a non-empty `channels`
 - **Chat-ID-only gating** — detect and flag as MAJOR.
 - Quote `<file>:<line>` for every finding.
 
-**Deterministic prefilter helper.** Before invoking Opus, run `scripts/cpv_channel_source_predicate.py` (`classify_channel_source(plugin_root)`) — it returns `PrefilterVerdict.in_scope` plus a tuple of `ChannelSourceFinding(severity, rule, file, line, message)`. When `in_scope=False`, skip the pillar entirely (zero opus tokens). When all findings are `PASSED`, the agent MAY report the prefilter verdict directly. Otherwise, send each candidate to Opus for context-aware verification using the prompt template in `references/channel-source-security.md` § "Opus prompt template".
+**Deterministic prefilter helper.** Before invoking Opus, run `scripts/cpv_channel_source_predicate.py` (`classify_channel_source(plugin_root)`) — it returns `PrefilterVerdict.in_scope` plus a tuple of `ChannelSourceFinding(severity, rule, file, line, message)`. When `in_scope=False`, skip the pillar entirely (zero opus tokens). When all findings are `PASSED`, the agent MAY report the prefilter verdict directly. Otherwise, send each candidate to Opus for context-aware verification using the prompt template in `skills/semantic-validation-skill/references/channel-source-security.md` § "Opus prompt template".
 
 See the pillar definition in `skills/semantic-validation-skill/SKILL.md` ("Pillar: Channel MCP Server Source-Code Security") and the full rules + example code + opus prompt template in `skills/semantic-validation-skill/references/channel-source-security.md`.
 

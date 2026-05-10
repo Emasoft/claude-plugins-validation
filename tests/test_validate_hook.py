@@ -114,28 +114,20 @@ def test_validate_single_hook_type_errors(tmp_path: Path):
     # SessionStart is command+mcp_tool only (hooks.md v2.1.121) — prompt is rejected.
     r3 = HookValidationReport()
     validate_single_hook({"type": "prompt", "prompt": "Do something"}, "SessionStart", tmp_path, r3)
-    assert any(
-        "only supports 'command' and 'mcp_tool' hooks" in r.message
-        for r in r3.results
-        if r.level == "CRITICAL"
-    )
+    assert any("only supports 'command' and 'mcp_tool' hooks" in r.message for r in r3.results if r.level == "CRITICAL")
     # Prompt on a command-or-http event (Notification) — still CRITICAL with
     # the updated message wording (now also mentions mcp_tool).
     r4 = HookValidationReport()
     validate_single_hook({"type": "prompt", "prompt": "Do something"}, "Notification", tmp_path, r4)
     assert any(
-        "only supports 'command', 'http', and 'mcp_tool'" in r.message
-        for r in r4.results
-        if r.level == "CRITICAL"
+        "only supports 'command', 'http', and 'mcp_tool'" in r.message for r in r4.results if r.level == "CRITICAL"
     )
     # v2.22.2 GAP-P2-C2 (refined for v2.1.121): SessionStart now accepts both
     # command AND mcp_tool. http remains rejected.
     r5 = HookValidationReport()
     validate_single_hook({"type": "http", "url": "https://x"}, "SessionStart", tmp_path, r5)
     assert any(
-        "only supports 'command' and 'mcp_tool' hooks" in r.message
-        for r in r5.results
-        if r.level == "CRITICAL"
+        "only supports 'command' and 'mcp_tool' hooks" in r.message for r in r5.results if r.level == "CRITICAL"
     ), "expected CRITICAL: SessionStart rejects http hooks"
 
 
@@ -696,12 +688,9 @@ def test_async_rewake_is_recognised(tmp_path: Path):
     r = HookValidationReport()
     validate_single_hook(hook, "PreToolUse", tmp_path, r)
     unknown_warnings = [
-        res for res in r.results
-        if res.level == "WARNING" and "asyncRewake" in res.message and "Unknown" in res.message
+        res for res in r.results if res.level == "WARNING" and "asyncRewake" in res.message and "Unknown" in res.message
     ]
-    assert unknown_warnings == [], (
-        f"asyncRewake should NOT be flagged as unknown: {unknown_warnings}"
-    )
+    assert unknown_warnings == [], f"asyncRewake should NOT be flagged as unknown: {unknown_warnings}"
 
 
 def test_elicitation_no_matchers(tmp_path: Path):
@@ -1071,7 +1060,7 @@ def test_detect_pep723_malformed_block_returns_empty(tmp_path: Path):
     script = _make_py_script(
         tmp_path,
         "malformed.py",
-        '# /// script\n# dependencies = this is not TOML\n# ///\nimport pycozo\n',
+        "# /// script\n# dependencies = this is not TOML\n# ///\nimport pycozo\n",
     )
     deps = detect_pep723_deps(script)
     assert deps == []
@@ -1086,9 +1075,7 @@ def test_detect_module_scope_sys_exit_direct(tmp_path: Path):
     """Top-level `sys.exit(...)` is detected."""
     from validate_hook import detect_module_scope_sys_exit
 
-    script = _make_py_script(
-        tmp_path, "direct_exit.py", "import sys\nsys.exit('boom')\n"
-    )
+    script = _make_py_script(tmp_path, "direct_exit.py", "import sys\nsys.exit('boom')\n")
     hits = detect_module_scope_sys_exit(script)
     assert hits == [2]
 
@@ -1111,8 +1098,7 @@ def test_detect_module_scope_sys_exit_inside_try_except(tmp_path: Path):
     )
     hits = detect_module_scope_sys_exit(script)
     assert hits == [6], (
-        f"sys.exit inside top-level try/except MUST be detected "
-        f"(this is the PSS v3.1.0 pattern); got: {hits}"
+        f"sys.exit inside top-level try/except MUST be detected (this is the PSS v3.1.0 pattern); got: {hits}"
     )
 
 
@@ -1152,9 +1138,7 @@ def test_detect_module_scope_raise_system_exit(tmp_path: Path):
     """Top-level `raise SystemExit(...)` is detected."""
     from validate_hook import detect_module_scope_sys_exit
 
-    script = _make_py_script(
-        tmp_path, "raise_se.py", "raise SystemExit('boom')\n"
-    )
+    script = _make_py_script(tmp_path, "raise_se.py", "raise SystemExit('boom')\n")
     hits = detect_module_scope_sys_exit(script)
     assert hits == [1]
 
@@ -1201,6 +1185,7 @@ def test_pss_v310_hooks_json_produces_major_regression(tmp_path: Path):
         "    print('ok')\n"
     )
     import os
+
     os.chmod(pss_hook, 0o755)
 
     hooks_dir = tmp_path / "hooks"
@@ -1230,18 +1215,18 @@ def test_pss_v310_hooks_json_produces_major_regression(tmp_path: Path):
 
     # Runtime-dep reconciliation MAJOR
     major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-    assert any(
-        "plain interpreter" in m and "pycozo" in m for m in major_msgs
-    ), f"Expected runtime-dep MAJOR mentioning 'plain interpreter' and 'pycozo'; got MAJORs: {major_msgs}"
+    assert any("plain interpreter" in m and "pycozo" in m for m in major_msgs), (
+        f"Expected runtime-dep MAJOR mentioning 'plain interpreter' and 'pycozo'; got MAJORs: {major_msgs}"
+    )
 
     # unset VIRTUAL_ENV antipattern warning — fires ONLY because `unset VIRTUAL_ENV`
     # is combined with plain `python3` (the PSS failure mode). If the hook used
     # `uv run --script` or venv-python, unsetting VIRTUAL_ENV is a legitimate
     # defensive pattern and the warning does NOT fire (see separate test below).
     warnings = [r.message for r in report.results if r.level == "WARNING"]
-    assert any(
-        "unset VIRTUAL_ENV" in m and "plain `python3`" in m for m in warnings
-    ), f"Expected conditional WARNING on `unset VIRTUAL_ENV + plain python3`; got: {warnings}"
+    assert any("unset VIRTUAL_ENV" in m and "plain `python3`" in m for m in warnings), (
+        f"Expected conditional WARNING on `unset VIRTUAL_ENV + plain python3`; got: {warnings}"
+    )
 
 
 def test_unset_virtual_env_with_uv_run_script_no_warning(tmp_path: Path):
@@ -1251,29 +1236,31 @@ def test_unset_virtual_env_with_uv_run_script_no_warning(tmp_path: Path):
     scripts_dir = tmp_path / "scripts"
     scripts_dir.mkdir()
     script = scripts_dir / "safe.py"
-    script.write_text(
-        '# /// script\n'
-        '# dependencies = ["pycozo"]\n'
-        '# ///\n'
-        "import pycozo\n"
-    )
+    script.write_text('# /// script\n# dependencies = ["pycozo"]\n# ///\nimport pycozo\n')
     import os
+
     os.chmod(script, 0o755)
 
     hooks_dir = tmp_path / "hooks"
     hooks_dir.mkdir()
     hooks_file = hooks_dir / "hooks.json"
     hooks_file.write_text(
-        json.dumps({
-            "hooks": {
-                "UserPromptSubmit": [{
-                    "hooks": [{
-                        "type": "command",
-                        "command": 'unset VIRTUAL_ENV; uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/safe.py"',
-                    }]
-                }]
+        json.dumps(
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": 'unset VIRTUAL_ENV; uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/safe.py"',
+                                }
+                            ]
+                        }
+                    ]
+                }
             }
-        })
+        )
     )
     report = validate_hooks(hooks_file, plugin_root=tmp_path)
     warnings = [r.message for r in report.results if r.level == "WARNING"]
@@ -1293,34 +1280,44 @@ def test_unset_virtual_env_with_venv_python_no_warning(tmp_path: Path):
     script = scripts_dir / "safe.py"
     script.write_text("import pycozo\n")
     import os
+
     os.chmod(script, 0o755)
 
     hooks_dir = tmp_path / "hooks"
     hooks_dir.mkdir()
     hooks_file = hooks_dir / "hooks.json"
     hooks_file.write_text(
-        json.dumps({
-            "hooks": {
-                "SessionStart": [{
-                    "hooks": [{
-                        "type": "command",
-                        "command": 'uv venv "${CLAUDE_PLUGIN_DATA}/.venv" && uv pip install pycozo',
-                    }]
-                }],
-                "UserPromptSubmit": [{
-                    "hooks": [{
-                        "type": "command",
-                        "command": 'unset VIRTUAL_ENV; "${CLAUDE_PLUGIN_DATA}/.venv/bin/python" "${CLAUDE_PLUGIN_ROOT}/scripts/safe.py"',
-                    }]
-                }]
+        json.dumps(
+            {
+                "hooks": {
+                    "SessionStart": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": 'uv venv "${CLAUDE_PLUGIN_DATA}/.venv" && uv pip install pycozo',
+                                }
+                            ]
+                        }
+                    ],
+                    "UserPromptSubmit": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": 'unset VIRTUAL_ENV; "${CLAUDE_PLUGIN_DATA}/.venv/bin/python" "${CLAUDE_PLUGIN_ROOT}/scripts/safe.py"',
+                                }
+                            ]
+                        }
+                    ],
+                }
             }
-        })
+        )
     )
     report = validate_hooks(hooks_file, plugin_root=tmp_path)
     warnings = [r.message for r in report.results if r.level == "WARNING"]
     assert not any("unset VIRTUAL_ENV" in m for m in warnings), (
-        f"Should NOT warn on `unset VIRTUAL_ENV` when combined with venv-python; "
-        f"got: {warnings}"
+        f"Should NOT warn on `unset VIRTUAL_ENV` when combined with venv-python; got: {warnings}"
     )
 
 
@@ -1330,15 +1327,16 @@ def test_uv_run_script_with_complete_pep723_passes(tmp_path: Path):
     scripts_dir.mkdir()
     script = scripts_dir / "good.py"
     script.write_text(
-        '# /// script\n'
+        "# /// script\n"
         '# requires-python = ">=3.10"\n'
-        '# dependencies = [\n'
+        "# dependencies = [\n"
         '#     "pycozo[embedded]>=0.7.6",\n'
-        '# ]\n'
-        '# ///\n'
+        "# ]\n"
+        "# ///\n"
         "import pycozo\n"
     )
     import os
+
     os.chmod(script, 0o755)
 
     hooks_dir = tmp_path / "hooks"
@@ -1366,10 +1364,9 @@ def test_uv_run_script_with_complete_pep723_passes(tmp_path: Path):
     report = validate_hooks(hooks_file, plugin_root=tmp_path)
     major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
     # The runtime-dep reconciliation should NOT flag this.
-    assert not any(
-        "plain interpreter" in m or "missing declarations" in m or "no PEP 723" in m
-        for m in major_msgs
-    ), f"Unexpected MAJORs for a correctly-configured uv-run-script hook: {major_msgs}"
+    assert not any("plain interpreter" in m or "missing declarations" in m or "no PEP 723" in m for m in major_msgs), (
+        f"Unexpected MAJORs for a correctly-configured uv-run-script hook: {major_msgs}"
+    )
 
 
 def test_uv_run_script_missing_pep723_flagged(tmp_path: Path):
@@ -1379,6 +1376,7 @@ def test_uv_run_script_missing_pep723_flagged(tmp_path: Path):
     script = scripts_dir / "nobod.py"
     script.write_text("import pycozo\n")
     import os
+
     os.chmod(script, 0o755)
 
     hooks_dir = tmp_path / "hooks"
@@ -1405,9 +1403,7 @@ def test_uv_run_script_missing_pep723_flagged(tmp_path: Path):
 
     report = validate_hooks(hooks_file, plugin_root=tmp_path)
     major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-    assert any("no PEP 723" in m for m in major_msgs), (
-        f"Expected MAJOR on missing PEP 723 block; got: {major_msgs}"
-    )
+    assert any("no PEP 723" in m for m in major_msgs), f"Expected MAJOR on missing PEP 723 block; got: {major_msgs}"
 
 
 def test_uv_run_script_pep723_partial_covers_other_only_flagged(tmp_path: Path):
@@ -1425,13 +1421,9 @@ def test_uv_run_script_pep723_partial_covers_other_only_flagged(tmp_path: Path):
     script = scripts_dir / "partial.py"
     # Block declares `requests` but the script imports `pycozo` — the block
     # exists and parses, but does NOT cover the actual import.
-    script.write_text(
-        '# /// script\n'
-        '# dependencies = ["requests"]\n'
-        '# ///\n'
-        "import pycozo\n"
-    )
+    script.write_text('# /// script\n# dependencies = ["requests"]\n# ///\nimport pycozo\n')
     import os
+
     os.chmod(script, 0o755)
 
     hooks_dir = tmp_path / "hooks"
@@ -1458,14 +1450,14 @@ def test_uv_run_script_pep723_partial_covers_other_only_flagged(tmp_path: Path):
 
     report = validate_hooks(hooks_file, plugin_root=tmp_path)
     major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-    assert any(
-        "missing declarations" in m and "pycozo" in m for m in major_msgs
-    ), f"Expected MAJOR pinpointing missing pycozo declaration; got MAJORs: {major_msgs}"
+    assert any("missing declarations" in m and "pycozo" in m for m in major_msgs), (
+        f"Expected MAJOR pinpointing missing pycozo declaration; got MAJORs: {major_msgs}"
+    )
     # And — crucially — the message must not also fire the "no PEP 723 block"
     # MAJOR (that's a different failure mode and would confuse the fix).
-    assert not any(
-        "no PEP 723 inline metadata block" in m for m in major_msgs
-    ), f"Unexpected 'no PEP 723 block' MAJOR — block exists but is incomplete: {major_msgs}"
+    assert not any("no PEP 723 inline metadata block" in m for m in major_msgs), (
+        f"Unexpected 'no PEP 723 block' MAJOR — block exists but is incomplete: {major_msgs}"
+    )
 
 
 def test_uv_run_with_covers_imports_passes(tmp_path: Path):
@@ -1475,6 +1467,7 @@ def test_uv_run_with_covers_imports_passes(tmp_path: Path):
     script = scripts_dir / "covered.py"
     script.write_text("import pycozo\n")
     import os
+
     os.chmod(script, 0o755)
 
     hooks_dir = tmp_path / "hooks"
@@ -1513,6 +1506,7 @@ def test_venv_python_with_session_start_setup_passes(tmp_path: Path):
     script = scripts_dir / "venv_user.py"
     script.write_text("import pycozo\n")
     import os
+
     os.chmod(script, 0o755)
 
     hooks_dir = tmp_path / "hooks"
@@ -1562,6 +1556,7 @@ def test_venv_python_without_session_start_setup_minor(tmp_path: Path):
     script = scripts_dir / "venv_user.py"
     script.write_text("import pycozo\n")
     import os
+
     os.chmod(script, 0o755)
 
     hooks_dir = tmp_path / "hooks"
@@ -1610,22 +1605,29 @@ def test_stdlib_only_script_with_plain_python3_produces_no_major(tmp_path: Path)
         "if __name__ == '__main__':\n    main()\n"
     )
     import os
+
     os.chmod(script, 0o755)
 
     hooks_dir = tmp_path / "hooks"
     hooks_dir.mkdir()
     hooks_file = hooks_dir / "hooks.json"
     hooks_file.write_text(
-        json.dumps({
-            "hooks": {
-                "UserPromptSubmit": [{
-                    "hooks": [{
-                        "type": "command",
-                        "command": 'python3 "${CLAUDE_PLUGIN_ROOT}/scripts/stdlib_only.py"',
-                    }]
-                }]
+        json.dumps(
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": 'python3 "${CLAUDE_PLUGIN_ROOT}/scripts/stdlib_only.py"',
+                                }
+                            ]
+                        }
+                    ]
+                }
             }
-        })
+        )
     )
     report = validate_hooks(hooks_file, plugin_root=tmp_path)
     major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
@@ -1645,22 +1647,29 @@ def test_python_versioned_interpreter_is_classified_correctly(tmp_path: Path):
     script = scripts_dir / "v.py"
     script.write_text("import httpx\n")
     import os
+
     os.chmod(script, 0o755)
 
     hooks_dir = tmp_path / "hooks"
     hooks_dir.mkdir()
     hooks_file = hooks_dir / "hooks.json"
     hooks_file.write_text(
-        json.dumps({
-            "hooks": {
-                "UserPromptSubmit": [{
-                    "hooks": [{
-                        "type": "command",
-                        "command": 'python3.12 "${CLAUDE_PLUGIN_ROOT}/scripts/v.py"',
-                    }]
-                }]
+        json.dumps(
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": 'python3.12 "${CLAUDE_PLUGIN_ROOT}/scripts/v.py"',
+                                }
+                            ]
+                        }
+                    ]
+                }
             }
-        })
+        )
     )
     report = validate_hooks(hooks_file, plugin_root=tmp_path)
     major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
@@ -1695,11 +1704,10 @@ def test_scripts_in_nested_subdirectories(tmp_path: Path):
     script = nested / "deep.py"
     script.write_text("import pycozo\n")
     import os
+
     os.chmod(script, 0o755)
 
-    refs = extract_script_paths(
-        'python3 "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/deep.py"', tmp_path
-    )
+    refs = extract_script_paths('python3 "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/deep.py"', tmp_path)
     assert len(refs) == 1
     assert refs[0].path == tmp_path / "scripts" / "hooks" / "deep.py"
 
@@ -1759,9 +1767,7 @@ def test_type_checking_guard_imports_are_detected_as_third_party(tmp_path: Path)
     script = _make_py_script(
         tmp_path,
         "type_check.py",
-        "from typing import TYPE_CHECKING\n"
-        "if TYPE_CHECKING:\n"
-        "    import httpx\n",
+        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import httpx\n",
     )
     imports = detect_python_third_party_imports(script)
     # httpx IS detected — hook-fixes §13.3 documents how to handle this
@@ -1777,9 +1783,7 @@ def test_extract_script_paths_from_env_dash_s_shebang_style(tmp_path: Path):
     """`env -S python3 -u foo.py` (portable shebang style) parses correctly."""
     from validate_hook import extract_script_paths
 
-    refs = extract_script_paths(
-        'env -S python3 -u "${CLAUDE_PLUGIN_ROOT}/scripts/foo.py"', tmp_path
-    )
+    refs = extract_script_paths('env -S python3 -u "${CLAUDE_PLUGIN_ROOT}/scripts/foo.py"', tmp_path)
     assert len(refs) == 1
     assert refs[0].invocation_mode == "interpreter-python"
 
@@ -1826,35 +1830,37 @@ def test_pypi_to_import_alias_covers_pillow_pil(tmp_path: Path):
     scripts_dir = tmp_path / "scripts"
     scripts_dir.mkdir()
     script = scripts_dir / "with_pil.py"
-    script.write_text(
-        '# /// script\n'
-        '# dependencies = ["pillow>=10"]\n'
-        '# ///\n'
-        "from PIL import Image\n"
-    )
+    script.write_text('# /// script\n# dependencies = ["pillow>=10"]\n# ///\nfrom PIL import Image\n')
     import os
+
     os.chmod(script, 0o755)
 
     hooks_dir = tmp_path / "hooks"
     hooks_dir.mkdir()
     hooks_file = hooks_dir / "hooks.json"
     hooks_file.write_text(
-        json.dumps({
-            "hooks": {
-                "UserPromptSubmit": [{
-                    "hooks": [{
-                        "type": "command",
-                        "command": 'uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/with_pil.py"',
-                    }]
-                }]
+        json.dumps(
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": 'uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/with_pil.py"',
+                                }
+                            ]
+                        }
+                    ]
+                }
             }
-        })
+        )
     )
     report = validate_hooks(hooks_file, plugin_root=tmp_path)
     major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-    assert not any(
-        "missing declarations" in m and "PIL" in m.upper() for m in major_msgs
-    ), f"pillow in deps must cover `import PIL`; got MAJORs: {major_msgs}"
+    assert not any("missing declarations" in m and "PIL" in m.upper() for m in major_msgs), (
+        f"pillow in deps must cover `import PIL`; got MAJORs: {major_msgs}"
+    )
 
 
 def test_pypi_to_import_alias_covers_beautifulsoup4_bs4(tmp_path: Path):
@@ -1862,35 +1868,37 @@ def test_pypi_to_import_alias_covers_beautifulsoup4_bs4(tmp_path: Path):
     scripts_dir = tmp_path / "scripts"
     scripts_dir.mkdir()
     script = scripts_dir / "soup.py"
-    script.write_text(
-        '# /// script\n'
-        '# dependencies = ["beautifulsoup4>=4"]\n'
-        '# ///\n'
-        "import bs4\n"
-    )
+    script.write_text('# /// script\n# dependencies = ["beautifulsoup4>=4"]\n# ///\nimport bs4\n')
     import os
+
     os.chmod(script, 0o755)
 
     hooks_dir = tmp_path / "hooks"
     hooks_dir.mkdir()
     hooks_file = hooks_dir / "hooks.json"
     hooks_file.write_text(
-        json.dumps({
-            "hooks": {
-                "UserPromptSubmit": [{
-                    "hooks": [{
-                        "type": "command",
-                        "command": 'uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/soup.py"',
-                    }]
-                }]
+        json.dumps(
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": 'uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/soup.py"',
+                                }
+                            ]
+                        }
+                    ]
+                }
             }
-        })
+        )
     )
     report = validate_hooks(hooks_file, plugin_root=tmp_path)
     major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-    assert not any(
-        "missing declarations" in m and "bs4" in m for m in major_msgs
-    ), f"beautifulsoup4 in deps must cover `import bs4`; got MAJORs: {major_msgs}"
+    assert not any("missing declarations" in m and "bs4" in m for m in major_msgs), (
+        f"beautifulsoup4 in deps must cover `import bs4`; got MAJORs: {major_msgs}"
+    )
 
 
 def test_pep503_normalization_covers_dashes_and_case(tmp_path: Path):
@@ -1900,35 +1908,37 @@ def test_pep503_normalization_covers_dashes_and_case(tmp_path: Path):
     scripts_dir = tmp_path / "scripts"
     scripts_dir.mkdir()
     script = scripts_dir / "sk.py"
-    script.write_text(
-        '# /// script\n'
-        '# dependencies = ["Scikit-Learn==1.5"]\n'
-        '# ///\n'
-        "import sklearn\n"
-    )
+    script.write_text('# /// script\n# dependencies = ["Scikit-Learn==1.5"]\n# ///\nimport sklearn\n')
     import os
+
     os.chmod(script, 0o755)
 
     hooks_dir = tmp_path / "hooks"
     hooks_dir.mkdir()
     hooks_file = hooks_dir / "hooks.json"
     hooks_file.write_text(
-        json.dumps({
-            "hooks": {
-                "UserPromptSubmit": [{
-                    "hooks": [{
-                        "type": "command",
-                        "command": 'uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/sk.py"',
-                    }]
-                }]
+        json.dumps(
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": 'uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/sk.py"',
+                                }
+                            ]
+                        }
+                    ]
+                }
             }
-        })
+        )
     )
     report = validate_hooks(hooks_file, plugin_root=tmp_path)
     major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-    assert not any(
-        "missing declarations" in m and "sklearn" in m for m in major_msgs
-    ), f"Scikit-Learn must cover sklearn after PEP 503 normalization; got: {major_msgs}"
+    assert not any("missing declarations" in m and "sklearn" in m for m in major_msgs), (
+        f"Scikit-Learn must cover sklearn after PEP 503 normalization; got: {major_msgs}"
+    )
 
 
 def test_uv_run_isolated_is_boolean_flag_not_value_consumer(tmp_path: Path):
@@ -1940,9 +1950,7 @@ def test_uv_run_isolated_is_boolean_flag_not_value_consumer(tmp_path: Path):
     """
     from validate_hook import extract_script_paths
 
-    refs = extract_script_paths(
-        'uv run --isolated --script "${CLAUDE_PLUGIN_ROOT}/scripts/foo.py"', tmp_path
-    )
+    refs = extract_script_paths('uv run --isolated --script "${CLAUDE_PLUGIN_ROOT}/scripts/foo.py"', tmp_path)
     assert len(refs) == 1
     assert refs[0].invocation_mode == "uv-run-script"
 
@@ -1959,9 +1967,7 @@ def test_uv_run_gui_script_mode(tmp_path: Path):
     """`uv run --gui-script foo.py` maps to uv-run-script mode (same PEP 723 semantics)."""
     from validate_hook import extract_script_paths
 
-    refs = extract_script_paths(
-        'uv run --gui-script "${CLAUDE_PLUGIN_ROOT}/scripts/foo.py"', tmp_path
-    )
+    refs = extract_script_paths('uv run --gui-script "${CLAUDE_PLUGIN_ROOT}/scripts/foo.py"', tmp_path)
     assert len(refs) == 1
     assert refs[0].invocation_mode == "uv-run-script"
 
@@ -1994,18 +2000,14 @@ def test_uv_run_end_of_options_marker(tmp_path: Path):
     # After `--`, the next positional is `--script` which looks like a flag but
     # should be treated as a script arg. Since `--script` isn't a lintable
     # path, the function should return None (no valid script after `--`).
-    assert result is None, (
-        f"After `--`, flags should not be re-interpreted; got: {result}"
-    )
+    assert result is None, f"After `--`, flags should not be re-interpreted; got: {result}"
 
 
 def test_uv_run_end_of_options_with_real_script(tmp_path: Path):
     """`uv run -- foo.py arg1` — after `--`, foo.py is the script (plain mode)."""
     from validate_hook import extract_script_paths
 
-    refs = extract_script_paths(
-        'uv run -- "${CLAUDE_PLUGIN_ROOT}/scripts/foo.py" --some-arg', tmp_path
-    )
+    refs = extract_script_paths('uv run -- "${CLAUDE_PLUGIN_ROOT}/scripts/foo.py" --some-arg', tmp_path)
     assert len(refs) == 1
     assert refs[0].invocation_mode == "interpreter-python"
 
@@ -2021,9 +2023,7 @@ def test_windows_py_launcher_recognized(tmp_path: Path):
     assert refs[0].invocation_mode == "interpreter-python"
 
     # With version selector flag (-3.12 is py-launcher specific)
-    refs2 = extract_script_paths(
-        'py.exe -3.12 "${CLAUDE_PLUGIN_ROOT}/scripts/foo.py"', tmp_path
-    )
+    refs2 = extract_script_paths('py.exe -3.12 "${CLAUDE_PLUGIN_ROOT}/scripts/foo.py"', tmp_path)
     assert len(refs2) == 1
     assert refs2[0].invocation_mode == "interpreter-python"
 
@@ -2048,22 +2048,29 @@ def test_path_traversal_in_hook_command_warns(tmp_path: Path):
     script = scripts_dir / "ok.py"
     script.write_text("print('ok')\n")
     import os
+
     os.chmod(script, 0o755)
 
     hooks_dir = tmp_path / "hooks"
     hooks_dir.mkdir()
     hooks_file = hooks_dir / "hooks.json"
     hooks_file.write_text(
-        json.dumps({
-            "hooks": {
-                "UserPromptSubmit": [{
-                    "hooks": [{
-                        "type": "command",
-                        "command": 'python3 "${CLAUDE_PLUGIN_ROOT}/../other_plugin/foo.py"',
-                    }]
-                }]
+        json.dumps(
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": 'python3 "${CLAUDE_PLUGIN_ROOT}/../other_plugin/foo.py"',
+                                }
+                            ]
+                        }
+                    ]
+                }
             }
-        })
+        )
     )
     report = validate_hooks(hooks_file, plugin_root=tmp_path)
     warnings = [r.message for r in report.results if r.level == "WARNING"]
@@ -2078,16 +2085,22 @@ def test_path_traversal_for_env_var_prefix(tmp_path: Path):
     hooks_dir.mkdir()
     hooks_file = hooks_dir / "hooks.json"
     hooks_file.write_text(
-        json.dumps({
-            "hooks": {
-                "UserPromptSubmit": [{
-                    "hooks": [{
-                        "type": "command",
-                        "command": 'bash "${CLAUDE_PROJECT_DIR}/../evil.sh"',
-                    }]
-                }]
+        json.dumps(
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": 'bash "${CLAUDE_PROJECT_DIR}/../evil.sh"',
+                                }
+                            ]
+                        }
+                    ]
+                }
             }
-        })
+        )
     )
     report = validate_hooks(hooks_file, plugin_root=tmp_path)
     warnings = [r.message for r in report.results if r.level == "WARNING"]
@@ -2103,22 +2116,29 @@ def test_no_false_positive_on_clean_paths(tmp_path: Path):
     script = scripts_dir / "clean.py"
     script.write_text("print('ok')\n")
     import os
+
     os.chmod(script, 0o755)
 
     hooks_dir = tmp_path / "hooks"
     hooks_dir.mkdir()
     hooks_file = hooks_dir / "hooks.json"
     hooks_file.write_text(
-        json.dumps({
-            "hooks": {
-                "UserPromptSubmit": [{
-                    "hooks": [{
-                        "type": "command",
-                        "command": 'python3 "${CLAUDE_PLUGIN_ROOT}/scripts/clean.py"',
-                    }]
-                }]
+        json.dumps(
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": 'python3 "${CLAUDE_PLUGIN_ROOT}/scripts/clean.py"',
+                                }
+                            ]
+                        }
+                    ]
+                }
             }
-        })
+        )
     )
     report = validate_hooks(hooks_file, plugin_root=tmp_path)
     warnings = [r.message for r in report.results if r.level == "WARNING"]
@@ -2141,6 +2161,7 @@ def test_resolved_script_path_escaping_plugin_root_warns(tmp_path: Path):
     external_script = external_dir / "foo.py"
     external_script.write_text("print('ok')\n")
     import os
+
     os.chmod(external_script, 0o755)
 
     hooks_dir = plugin_dir / "hooks"
@@ -2148,23 +2169,29 @@ def test_resolved_script_path_escaping_plugin_root_warns(tmp_path: Path):
     hooks_file = hooks_dir / "hooks.json"
     # The command uses CLAUDE_PLUGIN_ROOT/.. which escapes plugin_dir
     hooks_file.write_text(
-        json.dumps({
-            "hooks": {
-                "UserPromptSubmit": [{
-                    "hooks": [{
-                        "type": "command",
-                        "command": 'python3 "${CLAUDE_PLUGIN_ROOT}/../external/foo.py"',
-                    }]
-                }]
+        json.dumps(
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": 'python3 "${CLAUDE_PLUGIN_ROOT}/../external/foo.py"',
+                                }
+                            ]
+                        }
+                    ]
+                }
             }
-        })
+        )
     )
     report = validate_hooks(hooks_file, plugin_root=plugin_dir)
     warnings = [r.message for r in report.results if r.level == "WARNING"]
     # Either the command-regex traversal check OR the resolved-path check should fire.
-    assert any(
-        "OUTSIDE the plugin root" in m or "..` path segment" in m for m in warnings
-    ), f"Expected escape-plugin-root WARNING; got: {warnings}"
+    assert any("OUTSIDE the plugin root" in m or "..` path segment" in m for m in warnings), (
+        f"Expected escape-plugin-root WARNING; got: {warnings}"
+    )
 
 
 def test_direct_python_shebang_reconciles_like_interpreter(tmp_path: Path):
@@ -2180,28 +2207,35 @@ def test_direct_python_shebang_reconciles_like_interpreter(tmp_path: Path):
     script = scripts_dir / "direct.py"
     script.write_text("#!/usr/bin/env python3\nimport pycozo\n")
     import os
+
     os.chmod(script, 0o755)
 
     hooks_dir = tmp_path / "hooks"
     hooks_dir.mkdir()
     hooks_file = hooks_dir / "hooks.json"
     hooks_file.write_text(
-        json.dumps({
-            "hooks": {
-                "UserPromptSubmit": [{
-                    "hooks": [{
-                        "type": "command",
-                        "command": '"${CLAUDE_PLUGIN_ROOT}/scripts/direct.py"',
-                    }]
-                }]
+        json.dumps(
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": '"${CLAUDE_PLUGIN_ROOT}/scripts/direct.py"',
+                                }
+                            ]
+                        }
+                    ]
+                }
             }
-        })
+        )
     )
     report = validate_hooks(hooks_file, plugin_root=tmp_path)
     major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-    assert any(
-        "plain interpreter" in m and "pycozo" in m for m in major_msgs
-    ), f"Direct-mode .py with third-party imports must trigger runtime-dep MAJOR; got: {major_msgs}"
+    assert any("plain interpreter" in m and "pycozo" in m for m in major_msgs), (
+        f"Direct-mode .py with third-party imports must trigger runtime-dep MAJOR; got: {major_msgs}"
+    )
 
 
 def test_env_var_assignment_prefix_python3(tmp_path: Path):
@@ -2210,9 +2244,7 @@ def test_env_var_assignment_prefix_python3(tmp_path: Path):
     """
     from validate_hook import extract_script_paths
 
-    refs = extract_script_paths(
-        'PYTHONPATH=./lib python3 "${CLAUDE_PLUGIN_ROOT}/scripts/foo.py"', tmp_path
-    )
+    refs = extract_script_paths('PYTHONPATH=./lib python3 "${CLAUDE_PLUGIN_ROOT}/scripts/foo.py"', tmp_path)
     assert len(refs) == 1
     assert refs[0].invocation_mode == "interpreter-python"
     assert refs[0].path == tmp_path / "scripts" / "foo.py"
@@ -2222,9 +2254,7 @@ def test_env_var_assignment_multiple(tmp_path: Path):
     """Multiple env-var assignments in a row: `A=1 B=2 python3 foo.py`."""
     from validate_hook import extract_script_paths
 
-    refs = extract_script_paths(
-        'NODE_ENV=production DEBUG=1 node "${CLAUDE_PLUGIN_ROOT}/hook.js"', tmp_path
-    )
+    refs = extract_script_paths('NODE_ENV=production DEBUG=1 node "${CLAUDE_PLUGIN_ROOT}/hook.js"', tmp_path)
     assert len(refs) == 1
     assert refs[0].invocation_mode == "node"
 
@@ -2238,7 +2268,7 @@ def test_env_var_assignment_only_legal_names(tmp_path: Path):
     # `1=2` is not a valid POSIX env-var name → should NOT be skipped. The
     # tokenizer's first real token is "1=2" which falls through to direct
     # invocation (no interpreter matched, no lintable extension → empty refs).
-    refs = extract_script_paths('1=2 foo.py', tmp_path)
+    refs = extract_script_paths("1=2 foo.py", tmp_path)
     # Conservative: either no refs OR the `1=2` becomes first token and does
     # nothing. Either way the downstream should not crash.
     assert isinstance(refs, list)
@@ -2248,9 +2278,7 @@ def test_extract_script_paths_preserves_direct_sh_invocation(tmp_path: Path):
     """`./scripts/foo.sh` as first token — direct invocation mode."""
     from validate_hook import extract_script_paths
 
-    refs = extract_script_paths(
-        '"${CLAUDE_PLUGIN_ROOT}/scripts/foo.sh" --verbose', tmp_path
-    )
+    refs = extract_script_paths('"${CLAUDE_PLUGIN_ROOT}/scripts/foo.sh" --verbose', tmp_path)
     assert len(refs) == 1
     assert refs[0].invocation_mode == "direct"
     assert refs[0].path.suffix == ".sh"
@@ -2266,31 +2294,37 @@ def test_interpreter_python_major_warns_against_uvx_substitution(tmp_path: Path)
     script = scripts_dir / "plain.py"
     script.write_text("import pycozo\n")
     import os
+
     os.chmod(script, 0o755)
 
     hooks_dir = tmp_path / "hooks"
     hooks_dir.mkdir()
     hooks_file = hooks_dir / "hooks.json"
     hooks_file.write_text(
-        json.dumps({
-            "hooks": {
-                "UserPromptSubmit": [{
-                    "hooks": [{
-                        "type": "command",
-                        "command": 'python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plain.py"',
-                    }]
-                }]
+        json.dumps(
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": 'python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plain.py"',
+                                }
+                            ]
+                        }
+                    ]
+                }
             }
-        })
+        )
     )
     report = validate_hooks(hooks_file, plugin_root=tmp_path)
     major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
     # The message must call out `uvx` specifically so plugin authors don't
     # mistake it for a valid alternative to `uv run --script`.
-    assert any(
-        "plain interpreter" in m and "uvx" in m and "uv run --script" in m
-        for m in major_msgs
-    ), f"MAJOR message must mention both uvx (as non-substitute) and uv run --script (as correct tool); got: {major_msgs}"
+    assert any("plain interpreter" in m and "uvx" in m and "uv run --script" in m for m in major_msgs), (
+        f"MAJOR message must mention both uvx (as non-substitute) and uv run --script (as correct tool); got: {major_msgs}"
+    )
 
 
 def test_http_hook_latency_sensitive_event_warning():
@@ -2326,9 +2360,7 @@ def test_interpreter_W_flag_arg_consumption_preserves_script(tmp_path: Path):
     from validate_hook import extract_script_paths
 
     refs = extract_script_paths("python3 -W ignore foo.py", None)
-    assert len(refs) == 1, (
-        f"Expected exactly 1 script ref with `-W ignore` consumed, got: {refs}"
-    )
+    assert len(refs) == 1, f"Expected exactly 1 script ref with `-W ignore` consumed, got: {refs}"
     assert refs[0].path == Path("foo.py")
     assert refs[0].invocation_mode == "interpreter-python"
 
@@ -2349,9 +2381,7 @@ def test_schema_top_level_field_is_known(tmp_path: Path):
     )
     report = validate_hooks(hooks_file, plugin_root=tmp_path)
     warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
-    assert not any(
-        "unknown top-level field" in m.lower() and "$schema" in m for m in warning_msgs
-    ), (
+    assert not any("unknown top-level field" in m.lower() and "$schema" in m for m in warning_msgs), (
         f"`$schema` must not produce an 'unknown top-level field' warning; got: {warning_msgs}"
     )
 
@@ -2406,7 +2436,7 @@ def test_os_exit_at_module_scope_is_flagged(tmp_path: Path):
     script = scripts_dir / "os_exit_script.py"
     script.write_text(
         "# /// script\n"
-        "# requires-python = \">=3.10\"\n"
+        '# requires-python = ">=3.10"\n'
         "# dependencies = []\n"
         "# ///\n"
         "import os\n"
@@ -2549,9 +2579,7 @@ def test_clean_quoted_command_produces_no_malformed_finding(tmp_path: Path):
 
     malformed: list[str] = []
     refs = extract_script_paths('python3 "foo bar.py"', None, malformed_out=malformed)
-    assert malformed == [], (
-        f"Balanced quotes must not trip malformed_out; got malformed={malformed!r}"
-    )
+    assert malformed == [], f"Balanced quotes must not trip malformed_out; got malformed={malformed!r}"
     assert len(refs) == 1 and refs[0].path == Path("foo bar.py"), (
         f"Expected single script ref for `foo bar.py`; got refs={refs!r}"
     )
@@ -2599,13 +2627,9 @@ class TestV22HookMatcherValues:
         report = ValidationReport()
         ok = validate_matcher("bypass_permissions_disabled", "SessionEnd", report)
         assert ok is True
-        unknown_infos = [
-            r.message for r in report.results
-            if r.level == "INFO" and "not a known reason" in r.message
-        ]
+        unknown_infos = [r.message for r in report.results if r.level == "INFO" and "not a known reason" in r.message]
         assert unknown_infos == [], (
-            f"'bypass_permissions_disabled' must be a recognised SessionEnd "
-            f"reason; got INFOs: {unknown_infos}"
+            f"'bypass_permissions_disabled' must be a recognised SessionEnd reason; got INFOs: {unknown_infos}"
         )
 
     def test_instructions_loaded_reason_compact_accepted(self) -> None:
@@ -2617,12 +2641,10 @@ class TestV22HookMatcherValues:
         ok = validate_matcher("compact", "InstructionsLoaded", report)
         assert ok is True
         unknown_infos = [
-            r.message for r in report.results
-            if r.level == "INFO" and "not a known load_reason" in r.message
+            r.message for r in report.results if r.level == "INFO" and "not a known load_reason" in r.message
         ]
         assert unknown_infos == [], (
-            f"'compact' must be a recognised InstructionsLoaded load_reason; "
-            f"got INFOs: {unknown_infos}"
+            f"'compact' must be a recognised InstructionsLoaded load_reason; got INFOs: {unknown_infos}"
         )
 
     def test_stopfailure_error_max_output_tokens_accepted(self) -> None:
@@ -2632,13 +2654,9 @@ class TestV22HookMatcherValues:
         report = ValidationReport()
         ok = validate_matcher("max_output_tokens", "StopFailure", report)
         assert ok is True
-        unknown_infos = [
-            r.message for r in report.results
-            if r.level == "INFO" and "not a known error" in r.message
-        ]
+        unknown_infos = [r.message for r in report.results if r.level == "INFO" and "not a known error" in r.message]
         assert unknown_infos == [], (
-            f"'max_output_tokens' must be a recognised StopFailure error; "
-            f"got INFOs: {unknown_infos}"
+            f"'max_output_tokens' must be a recognised StopFailure error; got INFOs: {unknown_infos}"
         )
 
     def test_claude_plugin_data_substitution_not_flagged(self, tmp_path: Path) -> None:
@@ -2660,11 +2678,8 @@ class TestV22HookMatcherValues:
             f"{[r.message for r in report.results if r.level == 'MAJOR']}"
         )
         # Belt-and-suspenders: no "unknown substitution" messaging at any level.
-        assert not any(
-            "unknown substitution" in r.message.lower() for r in report.results
-        ), (
-            "${CLAUDE_PLUGIN_DATA} must be recognised as a known substitution "
-            "token per plugins-reference.md L484-550."
+        assert not any("unknown substitution" in r.message.lower() for r in report.results), (
+            "${CLAUDE_PLUGIN_DATA} must be recognised as a known substitution token per plugins-reference.md L484-550."
         )
 
     def test_user_config_substitution_not_flagged(self, tmp_path: Path) -> None:
@@ -2685,11 +2700,8 @@ class TestV22HookMatcherValues:
             f"${{user_config.KEY}} must not produce MAJOR; got "
             f"{[r.message for r in report.results if r.level == 'MAJOR']}"
         )
-        assert not any(
-            "unknown substitution" in r.message.lower() for r in report.results
-        ), (
-            "${user_config.<KEY>} must be recognised as a known substitution "
-            "token per plugins-reference.md L423-432."
+        assert not any("unknown substitution" in r.message.lower() for r in report.results), (
+            "${user_config.<KEY>} must be recognised as a known substitution token per plugins-reference.md L423-432."
         )
 
 
@@ -2712,8 +2724,7 @@ class TestPass2HookFixes:
         validate_prompt_hook(hook, "Stop", report)
         minors = [r for r in report.results if r.level == "MINOR"]
         assert any("more than 10" in r.message for r in minors), (
-            f"timeout=350s must emit a MINOR per CPV-P2-m1; got: "
-            f"{[r.message for r in report.results]}"
+            f"timeout=350s must emit a MINOR per CPV-P2-m1; got: {[r.message for r in report.results]}"
         )
 
     def test_prompt_hook_timeout_exactly_300s_does_not_emit_minor(self) -> None:
@@ -2725,12 +2736,8 @@ class TestPass2HookFixes:
         hook = {"type": "prompt", "prompt": "Summarize.", "timeout": 300}
         validate_prompt_hook(hook, "Stop", report)
         # Neither MINOR nor the "exceeds 600s" warning should fire at 300s.
-        assert not any(
-            "more than 10" in r.message for r in report.results if r.level == "MINOR"
-        )
-        assert not any(
-            "exceeds 600s" in r.message for r in report.results if r.level == "WARNING"
-        )
+        assert not any("more than 10" in r.message for r in report.results if r.level == "MINOR")
+        assert not any("exceeds 600s" in r.message for r in report.results if r.level == "WARNING")
 
     def test_prompt_hook_timeout_millisecond_branch_reachable(self) -> None:
         """CPV-P2-m1 regression: the pre-fix code ordered '>600' before '>10000',
@@ -2741,13 +2748,9 @@ class TestPass2HookFixes:
         report = ValidationReport()
         hook = {"type": "prompt", "prompt": "Summarize.", "timeout": 15000}
         validate_prompt_hook(hook, "Stop", report)
-        ms_warnings = [
-            r for r in report.results
-            if r.level == "WARNING" and "milliseconds" in r.message
-        ]
+        ms_warnings = [r for r in report.results if r.level == "WARNING" and "milliseconds" in r.message]
         assert ms_warnings, (
-            f"timeout=15000s must hit the milliseconds branch; got: "
-            f"{[r.message for r in report.results]}"
+            f"timeout=15000s must hit the milliseconds branch; got: {[r.message for r in report.results]}"
         )
 
     # --- GAP-17: PermissionDenied {retry: true} output shape ---
@@ -2762,9 +2765,7 @@ class TestPass2HookFixes:
         assert validate_permission_denied_output({"retry": True}) == []
         assert validate_permission_denied_output({"retry": False}) == []
         # Wrapped in hookSpecificOutput — both forms are seen in the spec.
-        assert validate_permission_denied_output(
-            {"hookSpecificOutput": {"retry": True}}
-        ) == []
+        assert validate_permission_denied_output({"hookSpecificOutput": {"retry": True}}) == []
 
     def test_permission_denied_retry_non_boolean_emits_minor_issue(self) -> None:
         """GAP-17: ``retry`` must be a boolean; any non-bool produces an issue."""
@@ -2795,13 +2796,9 @@ class TestPass2HookFixes:
         report = ValidationReport()
         ok = validate_matcher("Bash", "FileChanged", report)
         assert ok is True
-        infos = [
-            r for r in report.results
-            if r.level == "INFO" and "FileChanged matcher" in r.message
-        ]
+        infos = [r for r in report.results if r.level == "INFO" and "FileChanged matcher" in r.message]
         assert infos, (
-            f"FileChanged matcher='Bash' must emit the GAP-18 INFO; got: "
-            f"{[r.message for r in report.results]}"
+            f"FileChanged matcher='Bash' must emit the GAP-18 INFO; got: {[r.message for r in report.results]}"
         )
         assert "FILENAME glob" in infos[0].message
 
@@ -2815,13 +2812,9 @@ class TestPass2HookFixes:
         ok = validate_matcher(r"src/foo\.py$", "FileChanged", report)
         assert ok is True
         # Must NOT emit the GAP-18 INFO for a legitimate glob/regex.
-        tool_infos = [
-            r for r in report.results
-            if r.level == "INFO" and "FileChanged matcher" in r.message
-        ]
+        tool_infos = [r for r in report.results if r.level == "INFO" and "FileChanged matcher" in r.message]
         assert not tool_infos, (
-            f"filename regex 'src/foo\\.py$' must NOT trigger the GAP-18 INFO; "
-            f"got: {[r.message for r in tool_infos]}"
+            f"filename regex 'src/foo\\.py$' must NOT trigger the GAP-18 INFO; got: {[r.message for r in tool_infos]}"
         )
 
     # --- GAP-19: PreToolUse additionalContext in hookSpecificOutput ---
@@ -2874,17 +2867,13 @@ class TestPass2HookFixes:
         ``Setup`` matcher entry must cite the CURRENT Claude Code release. After
         the fix it is v2.1.109 (was v2.1.86).
         """
-        hook_src = Path(
-            __file__
-        ).parent.parent / "scripts" / "validate_hook.py"
+        hook_src = Path(__file__).parent.parent / "scripts" / "validate_hook.py"
         src_text = hook_src.read_text(encoding="utf-8")
         # The comment must cite v2.1.109 now and MUST NOT still cite v2.1.86.
-        assert "v2.1.109" in src_text, (
-            "Setup matcher comment must reference v2.1.109 (CPV-P2-n6)."
+        assert "v2.1.109" in src_text, "Setup matcher comment must reference v2.1.109 (CPV-P2-n6)."
+        assert "as of v2.1.86" not in src_text, (
+            "stale v2.1.86 citation left in validate_hook.py — CPV-P2-n6 not applied"
         )
-        assert (
-            "as of v2.1.86" not in src_text
-        ), "stale v2.1.86 citation left in validate_hook.py — CPV-P2-n6 not applied"
 
 
 # =============================================================================
@@ -2898,16 +2887,19 @@ class TestPhase12NewHookEvents:
     def test_user_prompt_expansion_recognised(self) -> None:
         """UserPromptExpansion is a valid event — must NOT be flagged as unknown."""
         from cpv_validation_common import VALID_HOOK_EVENTS
+
         assert "UserPromptExpansion" in VALID_HOOK_EVENTS
 
     def test_post_tool_batch_recognised(self) -> None:
         """PostToolBatch is a valid event — must NOT be flagged as unknown."""
         from cpv_validation_common import VALID_HOOK_EVENTS
+
         assert "PostToolBatch" in VALID_HOOK_EVENTS
 
     def test_event_count_at_least_28(self) -> None:
         """27 documented events + Setup legacy = 28 entries minimum."""
         from cpv_validation_common import VALID_HOOK_EVENTS
+
         assert len(VALID_HOOK_EVENTS) >= 28
 
 
@@ -2916,28 +2908,36 @@ class TestPhase12NewHookType:
 
     def test_mcp_tool_in_valid_types(self) -> None:
         from cpv_validation_common import VALID_HOOK_TYPES as common_types
+
         assert "mcp_tool" in common_types
 
     def test_validate_hook_accepts_mcp_tool(self) -> None:
         from validate_hook import VALID_HOOK_TYPES
+
         assert "mcp_tool" in VALID_HOOK_TYPES
 
     def test_mcp_tool_hook_requires_server_and_tool(self, tmp_path: Path) -> None:
         from validate_hook import validate_single_hook
+
         # Missing server
         r1 = HookValidationReport()
         validate_single_hook({"type": "mcp_tool", "tool": "bash"}, "PreToolUse", tmp_path, r1)
-        assert any("missing required" in res.message and "server" in res.message
-                   for res in r1.results if res.level == "CRITICAL")
+        assert any(
+            "missing required" in res.message and "server" in res.message
+            for res in r1.results
+            if res.level == "CRITICAL"
+        )
         # Missing tool
         r2 = HookValidationReport()
         validate_single_hook({"type": "mcp_tool", "server": "playwright"}, "PreToolUse", tmp_path, r2)
-        assert any("missing required" in res.message and "tool" in res.message
-                   for res in r2.results if res.level == "CRITICAL")
+        assert any(
+            "missing required" in res.message and "tool" in res.message for res in r2.results if res.level == "CRITICAL"
+        )
 
     def test_mcp_tool_hook_minimal_valid(self, tmp_path: Path) -> None:
         """A well-formed mcp_tool hook on PreToolUse must pass."""
         from validate_hook import validate_single_hook
+
         r = HookValidationReport()
         validate_single_hook(
             {"type": "mcp_tool", "server": "playwright", "tool": "screenshot"},
@@ -2949,6 +2949,7 @@ class TestPhase12NewHookType:
 
     def test_mcp_tool_hook_input_must_be_object(self, tmp_path: Path) -> None:
         from validate_hook import validate_single_hook
+
         r = HookValidationReport()
         validate_single_hook(
             {"type": "mcp_tool", "server": "x", "tool": "y", "input": "not an object"},
@@ -2961,6 +2962,7 @@ class TestPhase12NewHookType:
     def test_mcp_tool_accepted_on_session_start(self, tmp_path: Path) -> None:
         """Per hooks.md, SessionStart accepts both command AND mcp_tool."""
         from validate_hook import validate_single_hook
+
         r = HookValidationReport()
         validate_single_hook(
             {"type": "mcp_tool", "server": "x", "tool": "y"},
@@ -2969,11 +2971,7 @@ class TestPhase12NewHookType:
             r,
         )
         # Must NOT emit a "only supports" CRITICAL — mcp_tool is allowed here.
-        assert not any(
-            "only supports" in res.message
-            for res in r.results
-            if res.level == "CRITICAL"
-        )
+        assert not any("only supports" in res.message for res in r.results if res.level == "CRITICAL")
 
 
 class TestPhase12HookTypeMatrix:
@@ -2981,16 +2979,19 @@ class TestPhase12HookTypeMatrix:
 
     def test_session_start_only_accepts_command_and_mcp_tool(self) -> None:
         from cpv_validation_common import hook_types_allowed_for_event
+
         allowed = hook_types_allowed_for_event("SessionStart")
         assert allowed == frozenset({"command", "mcp_tool"})
 
     def test_post_tool_use_accepts_full_5_set(self) -> None:
         from cpv_validation_common import hook_types_allowed_for_event
+
         allowed = hook_types_allowed_for_event("PostToolUse")
         assert allowed == frozenset({"command", "http", "mcp_tool", "prompt", "agent"})
 
     def test_notification_excludes_prompt_and_agent(self) -> None:
         from cpv_validation_common import hook_types_allowed_for_event
+
         allowed = hook_types_allowed_for_event("Notification")
         assert "prompt" not in allowed
         assert "agent" not in allowed
@@ -2999,5 +3000,6 @@ class TestPhase12HookTypeMatrix:
     def test_user_prompt_expansion_full_5_set(self) -> None:
         """UserPromptExpansion belongs to the prompt-flow group with full 5-type support."""
         from cpv_validation_common import hook_types_allowed_for_event
+
         allowed = hook_types_allowed_for_event("UserPromptExpansion")
         assert allowed == frozenset({"command", "http", "mcp_tool", "prompt", "agent"})

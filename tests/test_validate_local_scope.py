@@ -39,9 +39,7 @@ from validate_local_scope import (  # noqa: E402
 
 
 def _git(repo: Path, *args: str) -> None:
-    result = subprocess.run(
-        ["git", *args], cwd=str(repo), capture_output=True, text=True, check=False
-    )
+    result = subprocess.run(["git", *args], cwd=str(repo), capture_output=True, text=True, check=False)
     if result.returncode != 0:
         raise AssertionError(f"git {' '.join(args)} failed: {result.stderr}")
 
@@ -117,9 +115,7 @@ class TestSettingsLocalMajorRules:
         _commit(project, ".claude/settings.local.json", "{}\n")
         report = ValidationReport()
         validate_local_scope(project, report)
-        assert any(
-            "git-tracked" in m for m in _messages(report, "MAJOR")
-        )
+        assert any("git-tracked" in m for m in _messages(report, "MAJOR"))
 
     def test_managed_only_key_is_major(self, project: Path) -> None:
         """allowedMcpServers in settings.local.json is MAJOR."""
@@ -136,9 +132,7 @@ class TestSettingsLocalMajorRules:
     def test_global_config_key_is_major(self, project: Path) -> None:
         """editorMode in settings.local.json is MAJOR."""
         _commit(project, ".gitignore", ".claude/settings.local.json\n")
-        _write_untracked(
-            project, ".claude/settings.local.json", '{"editorMode": "vim"}\n'
-        )
+        _write_untracked(project, ".claude/settings.local.json", '{"editorMode": "vim"}\n')
         report = ValidationReport()
         validate_local_scope(project, report)
         assert any("editorMode" in m for m in _messages(report, "MAJOR"))
@@ -162,9 +156,7 @@ class TestSettingsLocalMinorSuggestions:
         )
         report = ValidationReport()
         validate_local_scope(project, report)
-        assert any(
-            "extraKnownMarketplaces" in m for m in _messages(report, "MINOR")
-        )
+        assert any("extraKnownMarketplaces" in m for m in _messages(report, "MINOR"))
 
     def test_enable_all_project_mcp_servers_suggestion(self, project: Path) -> None:
         """enableAllProjectMcpServers is typically shared — suggest moving it."""
@@ -176,9 +168,7 @@ class TestSettingsLocalMinorSuggestions:
         )
         report = ValidationReport()
         validate_local_scope(project, report)
-        assert any(
-            "enableAllProjectMcpServers" in m for m in _messages(report, "MINOR")
-        )
+        assert any("enableAllProjectMcpServers" in m for m in _messages(report, "MINOR"))
 
 
 # =============================================================================
@@ -199,16 +189,12 @@ class TestSettingsLocalNits:
         )
         report = ValidationReport()
         validate_local_scope(project, report)
-        assert any(
-            "deprecated" in m for m in _messages(report, "NIT")
-        )
+        assert any("deprecated" in m for m in _messages(report, "NIT"))
 
     def test_missing_schema_is_nit(self, project: Path) -> None:
         """settings.local.json without $schema is a NIT."""
         _commit(project, ".gitignore", ".claude/settings.local.json\n")
-        _write_untracked(
-            project, ".claude/settings.local.json", '{"model": "x"}\n'
-        )
+        _write_untracked(project, ".claude/settings.local.json", '{"model": "x"}\n')
         report = ValidationReport()
         validate_local_scope(project, report)
         assert any("$schema" in m for m in _messages(report, "NIT"))
@@ -226,15 +212,11 @@ class TestLocalScopeIsRelaxed:
         """/Users/alice/... in settings.local.json is fine — personal config."""
         _commit(project, ".gitignore", ".claude/settings.local.json\n")
         payload = {"statusLine": {"command": "/Users/alice/bin/status"}}
-        _write_untracked(
-            project, ".claude/settings.local.json", json.dumps(payload) + "\n"
-        )
+        _write_untracked(project, ".claude/settings.local.json", json.dumps(payload) + "\n")
         report = ValidationReport()
         validate_local_scope(project, report)
         # Accept: no MINOR about the status line path
-        assert not any(
-            "statusLine" in m for m in _messages(report, "MINOR")
-        )
+        assert not any("statusLine" in m for m in _messages(report, "MINOR"))
 
 
 # =============================================================================
@@ -250,10 +232,7 @@ class TestClaudeLocalMd:
         _commit(project, "CLAUDE.local.md", "Personal notes.\n")
         report = ValidationReport()
         validate_local_scope(project, report)
-        assert any(
-            "CLAUDE.local.md" in m and "git-tracked" in m
-            for m in _messages(report, "MAJOR")
-        )
+        assert any("CLAUDE.local.md" in m and "git-tracked" in m for m in _messages(report, "MAJOR"))
 
     def test_untracked_claude_local_md_is_ok(self, project: Path) -> None:
         """CLAUDE.local.md that is not tracked is accepted."""
@@ -261,10 +240,7 @@ class TestClaudeLocalMd:
         _write_untracked(project, "CLAUDE.local.md", "Notes.\n")
         report = ValidationReport()
         validate_local_scope(project, report)
-        assert not any(
-            "CLAUDE.local.md" in m and "git-tracked" in m
-            for m in _messages(report, "MAJOR")
-        )
+        assert not any("CLAUDE.local.md" in m and "git-tracked" in m for m in _messages(report, "MAJOR"))
 
 
 # =============================================================================
@@ -305,9 +281,7 @@ class TestFolderScopeFilter:
         validate_local_scope(project, report)
         # Deep validation replaces shallow frontmatter-only check; assert no
         # CRITICAL findings about this agent (valid frontmatter → no blocking).
-        assert not any(
-            "personal.md" in m for m in _messages(report, "CRITICAL")
-        )
+        assert not any("personal.md" in m for m in _messages(report, "CRITICAL"))
 
     def test_local_agent_with_no_frontmatter_is_flagged(self, project: Path) -> None:
         """Untracked agent without frontmatter is flagged by the deep
@@ -318,9 +292,7 @@ class TestFolderScopeFilter:
         frontmatter-less agent definition is genuinely broken, not advisory.
         """
         _commit(project, ".gitignore", ".claude/agents/\n")
-        _write_untracked(
-            project, ".claude/agents/nofm.md", "Just body no frontmatter\n"
-        )
+        _write_untracked(project, ".claude/agents/nofm.md", "Just body no frontmatter\n")
         report = ValidationReport()
         validate_local_scope(project, report)
         # After deep-validation: no-frontmatter is CRITICAL (blocking).
@@ -344,11 +316,9 @@ class TestFolderScopeFilter:
         report = ValidationReport()
         validate_local_scope(project, report)
         # Deep validation elevates no-frontmatter to CRITICAL/MAJOR.
-        assert any(
-            "quick.md" in m
-            for level in ("CRITICAL", "MAJOR", "MINOR")
-            for m in _messages(report, level)
-        ), f"Expected a finding about quick.md; got: {report.results}"
+        assert any("quick.md" in m for level in ("CRITICAL", "MAJOR", "MINOR") for m in _messages(report, level)), (
+            f"Expected a finding about quick.md; got: {report.results}"
+        )
 
     def test_local_skill_with_valid_frontmatter_clean(self, project: Path) -> None:
         """Untracked SKILL.md with valid frontmatter → no findings."""
@@ -360,9 +330,7 @@ class TestFolderScopeFilter:
         )
         report = ValidationReport()
         validate_local_scope(project, report)
-        assert not any(
-            "mine/SKILL.md" in m for m in _messages(report, "MINOR")
-        )
+        assert not any("mine/SKILL.md" in m for m in _messages(report, "MINOR"))
 
 
 # =============================================================================
@@ -384,9 +352,7 @@ class TestNoGitRepo:
         (plain / ".claude" / "settings.local.json").write_text("{}\n", encoding="utf-8")
         report = ValidationReport()
         validate_local_scope(plain, report)
-        assert any(
-            "Not a git repository" in r.message for r in report.results if r.level == "INFO"
-        )
+        assert any("Not a git repository" in r.message for r in report.results if r.level == "INFO")
 
 
 # =============================================================================
@@ -509,10 +475,9 @@ class TestDeepElementValidation:
         validate_local_scope(project, report)
         # The deep validate_agent emits a specific finding about missing name.
         all_msgs = [r.message for r in report.results]
-        assert any(
-            "name" in m.lower() and "noname.md" in m
-            for m in all_msgs
-        ), f"Deep validator must flag missing `name` field; got: {all_msgs}"
+        assert any("name" in m.lower() and "noname.md" in m for m in all_msgs), (
+            f"Deep validator must flag missing `name` field; got: {all_msgs}"
+        )
 
     def test_command_with_invalid_tools_caught(self, project: Path) -> None:
         """A command with an unknown tool in allowed-tools fires a
@@ -522,23 +487,15 @@ class TestDeepElementValidation:
         _write_untracked(
             project,
             ".claude/commands/cmd.md",
-            (
-                "---\n"
-                "name: cmd\n"
-                "description: test command\n"
-                "allowed-tools: [NotARealTool, Read]\n"
-                "---\n"
-                "Body.\n"
-            ),
+            ("---\nname: cmd\ndescription: test command\nallowed-tools: [NotARealTool, Read]\n---\nBody.\n"),
         )
         report = ValidationReport()
         validate_local_scope(project, report)
         # The deep command validator knows the valid tools list.
         all_msgs = [r.message for r in report.results]
-        assert any(
-            "cmd.md" in m and ("NotARealTool" in m or "tool" in m.lower())
-            for m in all_msgs
-        ), f"Deep validator must flag unknown tool; got: {all_msgs}"
+        assert any("cmd.md" in m and ("NotARealTool" in m or "tool" in m.lower()) for m in all_msgs), (
+            f"Deep validator must flag unknown tool; got: {all_msgs}"
+        )
 
 
 class TestSettingsSubtreeValidation:
@@ -550,40 +507,28 @@ class TestSettingsSubtreeValidation:
         """An invalid event name in settings.local.json.hooks is caught by
         validate_hooks — not by any shallow settings check.
         """
-        settings = {
-            "hooks": {
-                "NotARealEvent": [
-                    {"hooks": [{"type": "command", "command": "echo x"}]}
-                ]
-            }
-        }
+        settings = {"hooks": {"NotARealEvent": [{"hooks": [{"type": "command", "command": "echo x"}]}]}}
         _write_untracked(project, ".claude/settings.local.json", json.dumps(settings))
         report = ValidationReport()
         validate_local_scope(project, report)
         all_msgs = [r.message for r in report.results]
-        assert any(
-            "NotARealEvent" in m or "Unknown hook event" in m
-            for m in all_msgs
-        ), f"Hook subtree validator must catch bad event; got: {all_msgs}"
+        assert any("NotARealEvent" in m or "Unknown hook event" in m for m in all_msgs), (
+            f"Hook subtree validator must catch bad event; got: {all_msgs}"
+        )
 
     def test_mcp_subtree_invalid_shape_caught(self, project: Path) -> None:
         """Malformed mcpServers block — missing required command — is
         caught by the MCP validator.
         """
-        settings = {
-            "mcpServers": {
-                "bad-server": {"no-required-fields": True}
-            }
-        }
+        settings = {"mcpServers": {"bad-server": {"no-required-fields": True}}}
         _write_untracked(project, ".claude/settings.local.json", json.dumps(settings))
         report = ValidationReport()
         validate_local_scope(project, report)
         all_msgs = [r.message for r in report.results]
         # validate_mcp_config surfaces issues about missing 'command' etc.
-        assert any(
-            "bad-server" in m or "mcpServers" in m.lower()
-            for m in all_msgs
-        ), f"MCP subtree validator must run; got: {all_msgs}"
+        assert any("bad-server" in m or "mcpServers" in m.lower() for m in all_msgs), (
+            f"MCP subtree validator must run; got: {all_msgs}"
+        )
 
 
 class TestLocallyEnabledPluginEnumeration:
@@ -603,10 +548,9 @@ class TestLocallyEnabledPluginEnumeration:
         report = ValidationReport()
         validate_local_scope(project, report)
         all_msgs = [r.message for r in report.results]
-        assert any(
-            "nonexistent-plugin" in m and ("not installed" in m or "enabledPlugins" in m)
-            for m in all_msgs
-        ), f"Missing-plugin enablement must trigger MAJOR; got: {all_msgs}"
+        assert any("nonexistent-plugin" in m and ("not installed" in m or "enabledPlugins" in m) for m in all_msgs), (
+            f"Missing-plugin enablement must trigger MAJOR; got: {all_msgs}"
+        )
 
     def test_disabled_plugin_not_enumerated(self, project: Path) -> None:
         """A plugin explicitly set to false must NOT be validated (user
@@ -622,9 +566,9 @@ class TestLocallyEnabledPluginEnumeration:
         validate_local_scope(project, report)
         all_msgs = [r.message for r in report.results]
         # No findings should reference a disabled plugin.
-        assert not any(
-            "some-plugin" in m for m in all_msgs
-        ), f"Disabled plugin MUST NOT be enumerated; got findings referencing it: {all_msgs}"
+        assert not any("some-plugin" in m for m in all_msgs), (
+            f"Disabled plugin MUST NOT be enumerated; got findings referencing it: {all_msgs}"
+        )
 
     def test_malformed_plugin_key_is_minor(self, project: Path) -> None:
         """A plugin key not matching `<name>@<marketplace>` form is MINOR
@@ -639,10 +583,9 @@ class TestLocallyEnabledPluginEnumeration:
         report = ValidationReport()
         validate_local_scope(project, report)
         all_msgs = [r.message for r in report.results]
-        assert any(
-            "malformed-no-at-sign" in m and ("match" in m or "plugin" in m.lower())
-            for m in all_msgs
-        ), f"Malformed plugin key must trigger MINOR; got: {all_msgs}"
+        assert any("malformed-no-at-sign" in m and ("match" in m or "plugin" in m.lower()) for m in all_msgs), (
+            f"Malformed plugin key must trigger MINOR; got: {all_msgs}"
+        )
 
 
 # =============================================================================
@@ -663,9 +606,7 @@ class TestTrackedRulesDoNotDuplicate:
     for it — those belong to `validate_project_scope`.
     """
 
-    def test_tracked_rule_does_not_duplicate_into_local_findings(
-        self, project: Path
-    ) -> None:
+    def test_tracked_rule_does_not_duplicate_into_local_findings(self, project: Path) -> None:
         """G15: commit a rules file (making the folder project-scope), then
         run the local validator. Assert no `[rules]` entry references
         that file.
@@ -693,15 +634,8 @@ class TestTrackedRulesDoNotDuplicate:
         validate_local_scope(project, report)
         # No `[rules]`-prefixed finding may reference the tracked file —
         # that's project-scope's responsibility, not local-scope.
-        leaked = [
-            r.message
-            for r in report.results
-            if r.message.startswith("[rules]") and "foo.md" in r.message
-        ]
-        assert leaked == [], (
-            f"Tracked rule foo.md must NOT appear in [rules] local findings; "
-            f"got leaks: {leaked}"
-        )
+        leaked = [r.message for r in report.results if r.message.startswith("[rules]") and "foo.md" in r.message]
+        assert leaked == [], f"Tracked rule foo.md must NOT appear in [rules] local findings; got leaks: {leaked}"
 
 
 # =============================================================================
@@ -725,15 +659,11 @@ class TestLoopMdLocalScope:
         emit at least one finding (INFO by default) that names the file, so
         users can confirm the content is intentional.
         """
-        _write_untracked(
-            project, ".claude/loop.md", "# Loop prompt\n\nRun /review-pr 1234\n"
-        )
+        _write_untracked(project, ".claude/loop.md", "# Loop prompt\n\nRun /review-pr 1234\n")
         report = ValidationReport()
         validate_local_scope(project, report)
         all_msgs = [r.message for r in report.results]
-        assert any(
-            "loop.md" in m for m in all_msgs
-        ), f"Expected a finding mentioning loop.md; got: {all_msgs}"
+        assert any("loop.md" in m for m in all_msgs), f"Expected a finding mentioning loop.md; got: {all_msgs}"
 
     def test_loop_md_size_cap_major(self, project: Path) -> None:
         """A `.claude/loop.md` larger than 25,000 bytes fires a MAJOR."""
@@ -743,10 +673,9 @@ class TestLoopMdLocalScope:
         report = ValidationReport()
         validate_local_scope(project, report)
         majors = _messages(report, "MAJOR")
-        assert any(
-            "loop.md" in m and ("25000" in m or "25,000" in m or "cap" in m)
-            for m in majors
-        ), f"Expected MAJOR about loop.md size cap; got MAJORs: {majors}"
+        assert any("loop.md" in m and ("25000" in m or "25,000" in m or "cap" in m) for m in majors), (
+            f"Expected MAJOR about loop.md size cap; got MAJORs: {majors}"
+        )
 
     def test_loop_md_non_utf8_critical(self, project: Path) -> None:
         """A `.claude/loop.md` with non-UTF-8 bytes fires a CRITICAL."""
@@ -758,10 +687,9 @@ class TestLoopMdLocalScope:
         report = ValidationReport()
         validate_local_scope(project, report)
         criticals = _messages(report, "CRITICAL")
-        assert any(
-            "loop.md" in m and ("read failed" in m or "UnicodeDecodeError" in m)
-            for m in criticals
-        ), f"Expected CRITICAL about loop.md UTF-8 decode; got CRITICALs: {criticals}"
+        assert any("loop.md" in m and ("read failed" in m or "UnicodeDecodeError" in m) for m in criticals), (
+            f"Expected CRITICAL about loop.md UTF-8 decode; got CRITICALs: {criticals}"
+        )
 
     def test_loop_md_tracked_skipped_by_local_validator(self, project: Path) -> None:
         """A TRACKED `.claude/loop.md` must not produce a local-scope finding —
@@ -773,10 +701,7 @@ class TestLoopMdLocalScope:
         # No local-scope finding should mention loop.md — the tracked file
         # is project-scope's concern.
         loop_findings = [r.message for r in report.results if "loop.md" in r.message]
-        assert loop_findings == [], (
-            f"Tracked loop.md must NOT produce local-scope findings; got: "
-            f"{loop_findings}"
-        )
+        assert loop_findings == [], f"Tracked loop.md must NOT produce local-scope findings; got: {loop_findings}"
 
 
 # =============================================================================
@@ -805,13 +730,11 @@ class TestV221ClaudeMdImports:
         report = ValidationReport()
         validate_local_scope(project, report)
         import_findings = [
-            r for r in report.results
-            if r.level in ("CRITICAL", "MAJOR")
-            and ("import" in r.message.lower() or "@notes.md" in r.message)
+            r
+            for r in report.results
+            if r.level in ("CRITICAL", "MAJOR") and ("import" in r.message.lower() or "@notes.md" in r.message)
         ]
-        assert import_findings == [], (
-            f"Valid in-repo import must not trigger findings; got: {import_findings}"
-        )
+        assert import_findings == [], f"Valid in-repo import must not trigger findings; got: {import_findings}"
 
     def test_at_path_absolute_outside_repo_critical(self, project: Path) -> None:
         """`@/etc/passwd` in CLAUDE.local.md is a CRITICAL exfiltration leak."""
@@ -824,10 +747,9 @@ class TestV221ClaudeMdImports:
         report = ValidationReport()
         validate_local_scope(project, report)
         criticals = _messages(report, "CRITICAL")
-        assert any(
-            "/etc/passwd" in m and ("import" in m.lower() or "outside" in m.lower())
-            for m in criticals
-        ), f"Expected CRITICAL about @/etc/passwd; got CRITICALs: {criticals}"
+        assert any("/etc/passwd" in m and ("import" in m.lower() or "outside" in m.lower()) for m in criticals), (
+            f"Expected CRITICAL about @/etc/passwd; got CRITICALs: {criticals}"
+        )
 
     def test_at_path_traversal_escaping_repo_major(self, project: Path) -> None:
         """`@../../outside.md` that escapes the repo root is MAJOR."""
@@ -840,10 +762,9 @@ class TestV221ClaudeMdImports:
         report = ValidationReport()
         validate_local_scope(project, report)
         majors = _messages(report, "MAJOR")
-        assert any(
-            "outside.md" in m and ("escape" in m.lower() or ".." in m)
-            for m in majors
-        ), f"Expected MAJOR about .. escape; got MAJORs: {majors}"
+        assert any("outside.md" in m and ("escape" in m.lower() or ".." in m) for m in majors), (
+            f"Expected MAJOR about .. escape; got MAJORs: {majors}"
+        )
 
     def test_at_path_missing_file_major(self, project: Path) -> None:
         """`@does-not-exist.md` in CLAUDE.local.md is MAJOR (dead import)."""
@@ -856,10 +777,9 @@ class TestV221ClaudeMdImports:
         report = ValidationReport()
         validate_local_scope(project, report)
         majors = _messages(report, "MAJOR")
-        assert any(
-            "does-not-exist.md" in m and ("not exist" in m.lower() or "dead" in m.lower())
-            for m in majors
-        ), f"Expected MAJOR about missing imported file; got MAJORs: {majors}"
+        assert any("does-not-exist.md" in m and ("not exist" in m.lower() or "dead" in m.lower()) for m in majors), (
+            f"Expected MAJOR about missing imported file; got MAJORs: {majors}"
+        )
 
     def test_at_path_recursion_depth_5_max(self, project: Path) -> None:
         """A chain rooted in CLAUDE.local.md exceeding depth 5 must fire MAJOR."""
@@ -874,47 +794,32 @@ class TestV221ClaudeMdImports:
         report = ValidationReport()
         validate_local_scope(project, report)
         majors = _messages(report, "MAJOR")
-        assert any(
-            "depth" in m.lower() and ("5" in m or "maximum" in m.lower())
-            for m in majors
-        ), f"Expected MAJOR about depth-5 limit; got MAJORs: {majors}"
+        assert any("depth" in m.lower() and ("5" in m or "maximum" in m.lower()) for m in majors), (
+            f"Expected MAJOR about depth-5 limit; got MAJORs: {majors}"
+        )
 
     def test_at_path_circular_import_detected_major(self, project: Path) -> None:
         """CLAUDE.local.md → other.md → CLAUDE.local.md must fire circular MAJOR."""
         _commit(project, ".gitignore", "CLAUDE.local.md\n")
         _commit(project, "other.md", "# Other\n\nLoops back: @CLAUDE.local.md\n")
-        _write_untracked(
-            project, "CLAUDE.local.md", "# Main\n\nSee @other.md\n"
-        )
+        _write_untracked(project, "CLAUDE.local.md", "# Main\n\nSee @other.md\n")
         report = ValidationReport()
         validate_local_scope(project, report)
         majors = _messages(report, "MAJOR")
-        assert any(
-            "circular" in m.lower()
-            for m in majors
-        ), f"Expected MAJOR about circular import; got MAJORs: {majors}"
+        assert any("circular" in m.lower() for m in majors), (
+            f"Expected MAJOR about circular import; got MAJORs: {majors}"
+        )
 
     def test_at_path_inside_fenced_block_is_not_an_import(self, project: Path) -> None:
         """An `@path` token inside a fenced code block in CLAUDE.local.md
         must NOT be treated as an import."""
-        body = (
-            "# Main\n\n"
-            "Example usage:\n\n"
-            "```markdown\n"
-            "See @/etc/passwd for example only.\n"
-            "```\n\n"
-            "End of doc.\n"
-        )
+        body = "# Main\n\nExample usage:\n\n```markdown\nSee @/etc/passwd for example only.\n```\n\nEnd of doc.\n"
         _commit(project, ".gitignore", "CLAUDE.local.md\n")
         _write_untracked(project, "CLAUDE.local.md", body)
         report = ValidationReport()
         validate_local_scope(project, report)
-        assert not any(
-            "/etc/passwd" in r.message and r.level == "CRITICAL"
-            for r in report.results
-        ), (
-            f"Fenced `@/etc/passwd` must not trigger an import finding; "
-            f"got CRITICALs: {_messages(report, 'CRITICAL')}"
+        assert not any("/etc/passwd" in r.message and r.level == "CRITICAL" for r in report.results), (
+            f"Fenced `@/etc/passwd` must not trigger an import finding; got CRITICALs: {_messages(report, 'CRITICAL')}"
         )
 
     def test_email_addresses_are_not_imports(self, project: Path) -> None:
@@ -928,10 +833,8 @@ class TestV221ClaudeMdImports:
         report = ValidationReport()
         validate_local_scope(project, report)
         import_findings = [
-            r for r in report.results
-            if "example.com" in r.message
-            and ("import" in r.message.lower() or "@" in r.message)
+            r
+            for r in report.results
+            if "example.com" in r.message and ("import" in r.message.lower() or "@" in r.message)
         ]
-        assert import_findings == [], (
-            f"Email address must not be treated as import; got: {import_findings}"
-        )
+        assert import_findings == [], f"Email address must not be treated as import; got: {import_findings}"

@@ -131,13 +131,11 @@ def test_agent_warns_about_force_templates_data_loss() -> None:
     body = AGENT_FILE.read_text()
     # The warning must be present, not just the flag.
     assert "--force-templates" in body, (
-        "agents/plugin-fixer.md must mention the --force-templates option "
-        "in the post-failure decision matrix."
+        "agents/plugin-fixer.md must mention the --force-templates option in the post-failure decision matrix."
     )
     # And it must be paired with a warning about overwriting customisations.
     has_warning = any(
-        kw in body.lower()
-        for kw in ("overwrit", "lost", "lose", "hand-tuned", "customisation", "customization")
+        kw in body.lower() for kw in ("overwrit", "lost", "lose", "hand-tuned", "customisation", "customization")
     )
     assert has_warning, (
         "agents/plugin-fixer.md must explicitly warn that --force-templates "
@@ -312,9 +310,7 @@ def test_standardize_plugin_skill_mentions_82_check_matrix() -> None:
     """standardize-plugin SKILL.md MUST mention the 82-check matrix in its checklist."""
     body = STANDARDIZE_PLUGIN_SKILL.read_text()
     has_checklist_ref = (
-        "canonical-pipeline-migration-checklist" in body
-        or "82-check matrix" in body
-        or "82 check" in body
+        "canonical-pipeline-migration-checklist" in body or "82-check matrix" in body or "82 check" in body
     )
     assert has_checklist_ref, (
         "skills/standardize-plugin/SKILL.md must mention the 82-check "
@@ -345,9 +341,7 @@ def test_agent_completion_gate_blocks_on_run_all_non_zero() -> None:
         r"step 7c.{0,200}returns? exit 0",
         r"run_all_checks.{0,200}returns? exit 0",
     ]
-    matched = any(
-        re.search(p, body, re.IGNORECASE | re.DOTALL) for p in success_tied_to_runall_patterns
-    )
+    matched = any(re.search(p, body, re.IGNORECASE | re.DOTALL) for p in success_tied_to_runall_patterns)
     assert matched, (
         "agents/plugin-fixer.md must tie the SUCCESS / [DONE] return "
         "condition to run_all_checks returning exit 0. Without this "

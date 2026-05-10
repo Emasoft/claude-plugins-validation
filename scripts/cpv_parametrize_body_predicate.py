@@ -114,7 +114,7 @@ def _strip_string_and_comment(line: str) -> str:
         if c in ("'", '"'):
             # Triple-quote? Don't strip here — caller handles it.
             if i + 2 < n and line[i + 1] == c and line[i + 2] == c:
-                out.append(line[i:i + 3])
+                out.append(line[i : i + 3])
                 i += 3
                 continue
             in_str = c
@@ -189,7 +189,7 @@ def compute_parametrize_body_lines(
                     close_count = cleaned.count(")")
                     paren_depth = open_count - close_count
                 else:
-                    after = cleaned[m.end():]
+                    after = cleaned[m.end() :]
                     # We've already passed ONE `(` (the parametrize-open).
                     paren_depth = 1
                     paren_depth += after.count("(") - after.count(")")
@@ -223,7 +223,8 @@ def compute_parametrize_body_lines(
 
 
 def _scan_line_for_triple(
-    line: str, current: str | None,
+    line: str,
+    current: str | None,
 ) -> tuple[str, str | None]:
     """Scan `line` for triple-quoted string toggles.
 
@@ -268,7 +269,8 @@ def _scan_line_for_triple(
 
 
 def is_parametrize_body_line(
-    content: str | list[str], line_no: int,
+    content: str | list[str],
+    line_no: int,
 ) -> bool:
     """Return True iff `line_no` (1-based) lies inside the body of a
     `@pytest.mark.parametrize(` decorator.

@@ -119,9 +119,7 @@ def test_validate_skill_runs_without_pyyaml(tmp_path: Path) -> None:
 
     # The run must complete (exit 0/1/2/3 — not a crash). The fallback note
     # appears on stderr when pyyaml is absent; stdout carries the JSON report.
-    assert result.returncode in (0, 1, 2, 3), (
-        f"unexpected exit {result.returncode}\nstderr: {result.stderr}"
-    )
+    assert result.returncode in (0, 1, 2, 3), f"unexpected exit {result.returncode}\nstderr: {result.stderr}"
     assert result.stdout.lstrip().startswith("{"), f"expected JSON on stdout, got: {result.stdout[:200]}"
 
 
@@ -145,9 +143,7 @@ def test_validate_security_bare_folder_flag(tmp_path: Path) -> None:
     )
 
     # No crash, exit code in normal range, JSON on stdout.
-    assert result.returncode in (0, 1, 2, 3), (
-        f"unexpected exit {result.returncode}\nstderr: {result.stderr}"
-    )
+    assert result.returncode in (0, 1, 2, 3), f"unexpected exit {result.returncode}\nstderr: {result.stderr}"
     assert result.stdout.lstrip().startswith("{"), f"expected JSON on stdout, got: {result.stdout[:200]}"
 
 

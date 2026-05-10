@@ -3,6 +3,7 @@
 Covers --from / --skill / --agent / --command / --mcp-server / --scripts
 classification + copy behavior.
 """
+
 from __future__ import annotations
 
 import json
@@ -190,9 +191,9 @@ def test_do_slurp_combines_all_kinds(empty_plugin, tmp_path):
 def test_do_slurp_from_autoclassifies_skill_md(empty_plugin, tmp_path):
     f = tmp_path / "SKILL.md"
     f.write_text("---\nname: auto-classified\n---\n", encoding="utf-8")
-    n = g._do_slurp(empty_plugin, from_paths=[f], skill_paths=[],
-                    agent_paths=[], command_paths=[],
-                    mcp_paths=[], scripts_paths=[])
+    n = g._do_slurp(
+        empty_plugin, from_paths=[f], skill_paths=[], agent_paths=[], command_paths=[], mcp_paths=[], scripts_paths=[]
+    )
     assert n == 1
     assert (empty_plugin / "skills" / "auto-classified" / "SKILL.md").is_file()
 
@@ -200,9 +201,9 @@ def test_do_slurp_from_autoclassifies_skill_md(empty_plugin, tmp_path):
 def test_do_slurp_from_autoclassifies_command(empty_plugin, tmp_path):
     f = tmp_path / "do.md"
     f.write_text("---\nname: do\nallowed-tools: Bash\n---\n", encoding="utf-8")
-    n = g._do_slurp(empty_plugin, from_paths=[f], skill_paths=[],
-                    agent_paths=[], command_paths=[],
-                    mcp_paths=[], scripts_paths=[])
+    n = g._do_slurp(
+        empty_plugin, from_paths=[f], skill_paths=[], agent_paths=[], command_paths=[], mcp_paths=[], scripts_paths=[]
+    )
     assert n == 1
     assert (empty_plugin / "commands" / "do.md").is_file()
 
@@ -210,9 +211,9 @@ def test_do_slurp_from_autoclassifies_command(empty_plugin, tmp_path):
 def test_do_slurp_from_autoclassifies_agent(empty_plugin, tmp_path):
     f = tmp_path / "ag.md"
     f.write_text("---\nname: ag\ndescription: x\n---\n", encoding="utf-8")
-    n = g._do_slurp(empty_plugin, from_paths=[f], skill_paths=[],
-                    agent_paths=[], command_paths=[],
-                    mcp_paths=[], scripts_paths=[])
+    n = g._do_slurp(
+        empty_plugin, from_paths=[f], skill_paths=[], agent_paths=[], command_paths=[], mcp_paths=[], scripts_paths=[]
+    )
     assert n == 1
     assert (empty_plugin / "agents" / "ag.md").is_file()
 
@@ -220,17 +221,23 @@ def test_do_slurp_from_autoclassifies_agent(empty_plugin, tmp_path):
 def test_do_slurp_from_autoclassifies_mcp(empty_plugin, tmp_path):
     f = tmp_path / ".mcp.json"
     f.write_text('{"mcpServers":{}}', encoding="utf-8")
-    n = g._do_slurp(empty_plugin, from_paths=[f], skill_paths=[],
-                    agent_paths=[], command_paths=[],
-                    mcp_paths=[], scripts_paths=[])
+    n = g._do_slurp(
+        empty_plugin, from_paths=[f], skill_paths=[], agent_paths=[], command_paths=[], mcp_paths=[], scripts_paths=[]
+    )
     assert n == 1
     assert (empty_plugin / ".mcp.json").is_file()
 
 
 def test_do_slurp_from_skips_nonexistent(empty_plugin, tmp_path):
-    n = g._do_slurp(empty_plugin, from_paths=[tmp_path / "nope"],
-                    skill_paths=[], agent_paths=[], command_paths=[],
-                    mcp_paths=[], scripts_paths=[])
+    n = g._do_slurp(
+        empty_plugin,
+        from_paths=[tmp_path / "nope"],
+        skill_paths=[],
+        agent_paths=[],
+        command_paths=[],
+        mcp_paths=[],
+        scripts_paths=[],
+    )
     assert n == 0
 
 
@@ -248,14 +255,26 @@ def test_generator_with_from_flag_e2e(tmp_path):
         sys.executable,
         str(REPO_ROOT / "scripts" / "generate_plugin_repo.py"),
         str(target),
-        "--name", "demo", "--description", "x",
-        "--author", "A", "--author-email", "a@a.a",
-        "--github-owner", "Emasoft",
-        "--from", str(src_skill),
+        "--name",
+        "demo",
+        "--description",
+        "x",
+        "--author",
+        "A",
+        "--author-email",
+        "a@a.a",
+        "--github-owner",
+        "Emasoft",
+        "--from",
+        str(src_skill),
     ]
-    res = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False,
-                         env={"PLUGIN_SKIP_GITHUB_INTEGRITY": "1",
-                              "PATH": "/usr/bin:/bin", "HOME": str(tmp_path)})
+    res = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        env={"PLUGIN_SKIP_GITHUB_INTEGRITY": "1", "PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+    )
     assert res.returncode == 0, f"generator failed: {res.stderr}\n{res.stdout}"
-    assert (target / "skills" / "my-skill" / "SKILL.md").is_file(), \
-        f"Slurped skill missing. stdout: {res.stdout}"
+    assert (target / "skills" / "my-skill" / "SKILL.md").is_file(), f"Slurped skill missing. stdout: {res.stdout}"

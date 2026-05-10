@@ -212,8 +212,10 @@ def _download_fclones_github_release() -> bool:
     """
     arch = platform.machine().lower()
     arch_token = (
-        "x86_64-pc-windows-msvc" if arch in {"amd64", "x86_64"}
-        else "aarch64-pc-windows-msvc" if arch in {"arm64", "aarch64"}
+        "x86_64-pc-windows-msvc"
+        if arch in {"amd64", "x86_64"}
+        else "aarch64-pc-windows-msvc"
+        if arch in {"arm64", "aarch64"}
         else None
     )
     if arch_token is None:
@@ -227,6 +229,7 @@ def _download_fclones_github_release() -> bool:
         )
         with urllib.request.urlopen(req, timeout=_DOWNLOAD_TIMEOUT_SECONDS) as resp:
             import json
+
             payload = json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, OSError, ValueError):
         return False
@@ -334,10 +337,13 @@ def ensure_trufflehog() -> bool:
     if shutil.which("trufflehog"):
         return True
     if shutil.which("go"):
-        _silent_run([
-            "go", "install",
-            "github.com/trufflesecurity/trufflehog/v3@latest",
-        ])
+        _silent_run(
+            [
+                "go",
+                "install",
+                "github.com/trufflesecurity/trufflehog/v3@latest",
+            ]
+        )
     _ensure_local_bin_on_path()
     # `go install` writes to $GOPATH/bin or $GOBIN — surface that on PATH too
     gopath_bin = Path(os.environ.get("GOPATH", str(Path.home() / "go"))) / "bin"

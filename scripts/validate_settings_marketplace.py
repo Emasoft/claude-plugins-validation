@@ -510,6 +510,7 @@ def print_results(report: ValidationReport, verbose: bool = False) -> None:
 def main() -> int:
     """Main entry point."""
     from cpv_validation_common import launcher_epilog
+
     parser = argparse.ArgumentParser(
         description="Validate the extraKnownMarketplaces block of a Claude Code settings.json file.",
         formatter_class=argparse.RawDescriptionHelpFormatter,

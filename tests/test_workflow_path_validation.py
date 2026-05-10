@@ -41,13 +41,17 @@ def _make_minimal_plugin(tmp_path: Path, name: str = "test-plugin") -> Path:
     """Create a plugin folder with just the manifest. No workflows, no scripts."""
     p = tmp_path / name
     (p / ".claude-plugin").mkdir(parents=True)
-    (p / ".claude-plugin" / "plugin.json").write_text(json.dumps({
-        "name": name,
-        "version": "0.1.0",
-        "description": "test",
-        "author": {"name": "Tester", "email": "t@example.com"},
-        "repository": f"https://github.com/Emasoft/{name}",
-    }))
+    (p / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps(
+            {
+                "name": name,
+                "version": "0.1.0",
+                "description": "test",
+                "author": {"name": "Tester", "email": "t@example.com"},
+                "repository": f"https://github.com/Emasoft/{name}",
+            }
+        )
+    )
     return p
 
 
@@ -79,9 +83,7 @@ def test_no_workflows_dir_is_silent_noop(tmp_path: Path) -> None:
     """Plugin without .github/workflows/ → no findings, no exception."""
     plugin = _make_minimal_plugin(tmp_path)
     report = _run_validator(plugin)
-    assert not _findings(report), (
-        f"Expected silent no-op when workflows dir absent, got: {report.results}"
-    )
+    assert not _findings(report), f"Expected silent no-op when workflows dir absent, got: {report.results}"
 
 
 def test_all_paths_valid_emits_zero_findings(tmp_path: Path) -> None:
@@ -108,9 +110,7 @@ jobs:
 """,
     )
     report = _run_validator(plugin)
-    assert not _findings(report), (
-        f"All-valid workflow must emit 0 MAJOR, got: {[r.message for r in _findings(report)]}"
-    )
+    assert not _findings(report), f"All-valid workflow must emit 0 MAJOR, got: {[r.message for r in _findings(report)]}"
 
 
 def test_one_missing_literal_emits_one_major(tmp_path: Path) -> None:
@@ -134,9 +134,7 @@ jobs:
     )
     report = _run_validator(plugin)
     findings = _findings(report)
-    assert len(findings) == 1, (
-        f"Expected exactly 1 MAJOR, got {len(findings)}: {[f.message for f in findings]}"
-    )
+    assert len(findings) == 1, f"Expected exactly 1 MAJOR, got {len(findings)}: {[f.message for f in findings]}"
     f = findings[0]
     assert f.file == ".github/workflows/ci.yml"
     assert f.line is not None and f.line > 0
@@ -166,8 +164,7 @@ jobs:
     report = _run_validator(plugin)
     findings = _findings(report)
     assert len(findings) == 1, (
-        f"Expected exactly 1 MAJOR for zero-match glob, got {len(findings)}: "
-        f"{[f.message for f in findings]}"
+        f"Expected exactly 1 MAJOR for zero-match glob, got {len(findings)}: {[f.message for f in findings]}"
     )
     f = findings[0]
     assert "scripts/detectors/*.sh" in f.message
@@ -199,9 +196,7 @@ jobs:
     )
     report = _run_validator(plugin)
     findings = _findings(report)
-    assert len(findings) == 2, (
-        f"Expected exactly 2 MAJOR, got {len(findings)}: {[f.message for f in findings]}"
-    )
+    assert len(findings) == 2, f"Expected exactly 2 MAJOR, got {len(findings)}: {[f.message for f in findings]}"
     msgs = " ".join(f.message for f in findings)
     assert "scripts/missing.sh" in msgs
     assert "scripts/zero/*.sh" in msgs
@@ -237,8 +232,7 @@ jobs:
     report = _run_validator(plugin)
     findings = _findings(report)
     assert not findings, (
-        "Flags, URLs, env-vars, command substitutions must not be flagged. "
-        f"Got: {[f.message for f in findings]}"
+        f"Flags, URLs, env-vars, command substitutions must not be flagged. Got: {[f.message for f in findings]}"
     )
 
 
@@ -283,8 +277,7 @@ jobs:
     report = _run_validator(plugin)
     findings = _findings(report)
     assert len(findings) == 3, (
-        f"Expected exactly 3 MAJOR (one per zero-match glob), "
-        f"got {len(findings)}: {[f.message for f in findings]}"
+        f"Expected exactly 3 MAJOR (one per zero-match glob), got {len(findings)}: {[f.message for f in findings]}"
     )
     msgs = " | ".join(f.message for f in findings)
     assert "scripts/detectors/*.sh" in msgs
@@ -323,12 +316,9 @@ jobs:
     report = _run_validator(plugin)
     findings = _findings(report)
     assert len(findings) == 1, (
-        f"Expected exactly 1 MAJOR for the only broken literal, "
-        f"got {len(findings)}: {[f.message for f in findings]}"
+        f"Expected exactly 1 MAJOR for the only broken literal, got {len(findings)}: {[f.message for f in findings]}"
     )
     f = findings[0]
     # The offending line is line 10 of the YAML (1-indexed).
-    assert f.line == 10, (
-        f"Expected citation at line 10 (the bash line), got line {f.line}"
-    )
+    assert f.line == 10, f"Expected citation at line 10 (the bash line), got line {f.line}"
     assert "scripts/missing-on-line-10.sh" in f.message

@@ -60,9 +60,7 @@ _PATTERN_COLLECTION_NAME_RE: Final[re.Pattern[str]] = re.compile(
 
 # Rule-id markers that may appear in docstrings or comments. Their
 # presence anchors the whole region as part of a rule declaration.
-_RULE_ID_MARKER_RE: Final[re.Pattern[str]] = re.compile(
-    r"\b(?:RC-\d+|CWE-\d+|OWASP-LLM\d+|OWASP-LLM-\d+)\b"
-)
+_RULE_ID_MARKER_RE: Final[re.Pattern[str]] = re.compile(r"\b(?:RC-\d+|CWE-\d+|OWASP-LLM\d+|OWASP-LLM-\d+)\b")
 
 # Docstring metadata labels that, when followed by a colon-content line,
 # anchor the region as a rule declaration's documentation block.
@@ -119,7 +117,8 @@ def _compute_docstring_lines(content_lines: list[str]) -> set[int]:
 
 
 def _compute_collection_literal_lines(
-    content_lines: list[str], doc_line_set: set[int],
+    content_lines: list[str],
+    doc_line_set: set[int],
 ) -> set[int]:
     """Return the set of 1-based line numbers that lie INSIDE an open
     pattern-collection literal (tuple/list/set/dict/frozenset whose head
@@ -153,7 +152,7 @@ def _compute_collection_literal_lines(
                 # The opener is in this line. Count brackets from the
                 # `=` onwards.
                 eq_idx = code.find("=")
-                rest = code[eq_idx + 1:] if eq_idx >= 0 else code
+                rest = code[eq_idx + 1 :] if eq_idx >= 0 else code
                 opens, closes = _count_brackets(rest)
                 depth += opens - closes
                 if depth > 0:
@@ -240,7 +239,8 @@ def _find_unquoted_hash(line: str) -> int | None:
 
 
 def _enclosing_docstring_block(
-    doc_line_set: set[int], line_idx_1based: int,
+    doc_line_set: set[int],
+    line_idx_1based: int,
 ) -> tuple[int, int] | None:
     """Return `(start, end)` 1-based line range of the docstring block
     enclosing `line_idx_1based`, or None if the line is not inside one.
@@ -319,9 +319,7 @@ class _FileContext:
                 seen.add(k)
             body_lines = lines[start_b - 1 : end_b]
             body = "\n".join(body_lines)
-            anchored = bool(_RULE_ID_MARKER_RE.search(body)) or bool(
-                _DOCSTRING_LABEL_RE.search(body)
-            )
+            anchored = bool(_RULE_ID_MARKER_RE.search(body)) or bool(_DOCSTRING_LABEL_RE.search(body))
             if not anchored:
                 # Also peek at the 5 lines above the docstring for
                 # rule-id markers that anchor the docstring.
@@ -416,7 +414,9 @@ def _get_or_build_context(lines: list[str], cache_key: int) -> _FileContext:
 
 
 def is_pattern_source_line(
-    content: str | list[str], line_no: int, file_path: str,
+    content: str | list[str],
+    line_no: int,
+    file_path: str,
 ) -> bool:
     """Return True if line `line_no` (1-based) is structurally a
     pattern-source line in a CPV-style rule declaration.

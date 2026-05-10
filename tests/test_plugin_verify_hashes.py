@@ -113,9 +113,7 @@ def test_dual_name_reader_prefers_new(monkeypatch):
         return None
 
     monkeypatch.setattr(_plugin_verify_hashes, "_fetch_one", fake_fetch_one)
-    result = _plugin_verify_hashes._fetch_github_manifest(
-        "1.2.3", prefer_cache=False
-    )
+    result = _plugin_verify_hashes._fetch_github_manifest("1.2.3", prefer_cache=False)
     assert result == new_payload
     # Must have tried the NEW filename first.
     assert any("plugin-self-hashes.json" in u for u in seen_urls)
@@ -136,9 +134,7 @@ def test_dual_name_reader_falls_back_to_legacy(monkeypatch, capsys):
         return None  # NEW name 404s
 
     monkeypatch.setattr(_plugin_verify_hashes, "_fetch_one", fake_fetch_one)
-    result = _plugin_verify_hashes._fetch_github_manifest(
-        "1.2.3", prefer_cache=False
-    )
+    result = _plugin_verify_hashes._fetch_github_manifest("1.2.3", prefer_cache=False)
     assert result == legacy_payload
     # Tried both names.
     assert any("plugin-self-hashes.json" in u for u in seen_urls)
@@ -176,12 +172,11 @@ def test_schema_v1_files_key_read(monkeypatch, tmp_path):
 
     manifest = {"version": 1, "files": {"scripts/validate_x.py": f"sha256:{digest}"}}
     monkeypatch.setattr(
-        _plugin_verify_hashes, "_fetch_github_manifest",
+        _plugin_verify_hashes,
+        "_fetch_github_manifest",
         lambda v, prefer_cache=True: manifest,
     )
-    ok = _plugin_verify_hashes.verify_self_integrity(
-        plugin_root=plugin_root, fail_on_mismatch=False, quiet=True
-    )
+    ok = _plugin_verify_hashes.verify_self_integrity(plugin_root=plugin_root, fail_on_mismatch=False, quiet=True)
     assert ok is True
 
 
@@ -199,12 +194,11 @@ def test_schema_v2_hashed_files_key_read(monkeypatch, tmp_path):
         "hashed_files": {"scripts/validate_x.py": f"sha256:{digest}"},
     }
     monkeypatch.setattr(
-        _plugin_verify_hashes, "_fetch_github_manifest",
+        _plugin_verify_hashes,
+        "_fetch_github_manifest",
         lambda v, prefer_cache=True: manifest,
     )
-    ok = _plugin_verify_hashes.verify_self_integrity(
-        plugin_root=plugin_root, fail_on_mismatch=False, quiet=True
-    )
+    ok = _plugin_verify_hashes.verify_self_integrity(plugin_root=plugin_root, fail_on_mismatch=False, quiet=True)
     assert ok is True
 
 
@@ -213,12 +207,11 @@ def test_schema_with_neither_key_warns_and_passes(monkeypatch, tmp_path, capsys)
     (graceful degradation, not a hard fail)."""
     plugin_root = _build_plugin_root(tmp_path)
     monkeypatch.setattr(
-        _plugin_verify_hashes, "_fetch_github_manifest",
+        _plugin_verify_hashes,
+        "_fetch_github_manifest",
         lambda v, prefer_cache=True: {"format_version": 99},
     )
-    ok = _plugin_verify_hashes.verify_self_integrity(
-        plugin_root=plugin_root, fail_on_mismatch=False, quiet=False
-    )
+    ok = _plugin_verify_hashes.verify_self_integrity(plugin_root=plugin_root, fail_on_mismatch=False, quiet=False)
     # Neither key matched → files = {} → no mismatches → True.
     assert ok is True
 

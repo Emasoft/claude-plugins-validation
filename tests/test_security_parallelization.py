@@ -73,9 +73,7 @@ def _make_minimal_plugin(tmp_path: Path) -> Path:
     so the early-exit guards don't fire.
     """
     (tmp_path / ".claude-plugin").mkdir(parents=True)
-    (tmp_path / ".claude-plugin" / "plugin.json").write_text(
-        '{"name": "test-plugin", "version": "0.0.1"}\n'
-    )
+    (tmp_path / ".claude-plugin" / "plugin.json").write_text('{"name": "test-plugin", "version": "0.0.1"}\n')
     return tmp_path
 
 
@@ -103,9 +101,7 @@ def test_scanner_block_uses_threadpool_executor():
     #     ):
     # If that exact pattern reappears, parallelism is gone.
     serial_marker = "for step_num, name, scanner_fn, enabled, binary_hint in ("
-    assert serial_marker not in src, (
-        "validate_security() still has the pre-Phase-B serial trufflehog/semgrep loop"
-    )
+    assert serial_marker not in src, "validate_security() still has the pre-Phase-B serial trufflehog/semgrep loop"
 
 
 # ---------------------------------------------------------------------------
@@ -223,10 +219,10 @@ def test_scanner_step_log_order_is_declaration_order(tmp_path: Path):
     plugin_path = _make_minimal_plugin(tmp_path)
 
     # Reverse-order sleep so completion order != declaration order.
-    fake_cc = _make_sleeping_scanner("cc-audit", 0.40, count=1)         # finishes last
-    fake_tirith = _make_sleeping_scanner("tirith", 0.30, count=2)       # finishes 3rd
+    fake_cc = _make_sleeping_scanner("cc-audit", 0.40, count=1)  # finishes last
+    fake_tirith = _make_sleeping_scanner("tirith", 0.30, count=2)  # finishes 3rd
     fake_truffle = _make_sleeping_scanner("trufflehog", 0.20, count=3)  # finishes 2nd
-    fake_semgrep = _make_sleeping_scanner("semgrep", 0.05, count=4)     # finishes 1st
+    fake_semgrep = _make_sleeping_scanner("semgrep", 0.05, count=4)  # finishes 1st
 
     def fake_which(name: str) -> str | None:
         if name in ("npx", "trufflehog", "semgrep"):
@@ -245,11 +241,18 @@ def test_scanner_step_log_order_is_declaration_order(tmp_path: Path):
             validate_security,
             "scan_all_files",
             return_value={
-                "files_scanned": 0, "files_skipped": 0, "oversize_skipped": 0,
-                "injection_issues": 0, "path_traversal_issues": 0, "secret_issues": 0,
-                "user_path_issues": 0, "prompt_injection_issues": 0,
-                "exfiltration_issues": 0, "supply_chain_issues": 0,
-                "credential_harvest_issues": 0, "sandbox_escape_issues": 0,
+                "files_scanned": 0,
+                "files_skipped": 0,
+                "oversize_skipped": 0,
+                "injection_issues": 0,
+                "path_traversal_issues": 0,
+                "secret_issues": 0,
+                "user_path_issues": 0,
+                "prompt_injection_issues": 0,
+                "exfiltration_issues": 0,
+                "supply_chain_issues": 0,
+                "credential_harvest_issues": 0,
+                "sandbox_escape_issues": 0,
             },
         ),
         patch.object(
@@ -347,11 +350,18 @@ def test_scanner_failure_does_not_block_others(tmp_path: Path):
             validate_security,
             "scan_all_files",
             return_value={
-                "files_scanned": 0, "files_skipped": 0, "oversize_skipped": 0,
-                "injection_issues": 0, "path_traversal_issues": 0, "secret_issues": 0,
-                "user_path_issues": 0, "prompt_injection_issues": 0,
-                "exfiltration_issues": 0, "supply_chain_issues": 0,
-                "credential_harvest_issues": 0, "sandbox_escape_issues": 0,
+                "files_scanned": 0,
+                "files_skipped": 0,
+                "oversize_skipped": 0,
+                "injection_issues": 0,
+                "path_traversal_issues": 0,
+                "secret_issues": 0,
+                "user_path_issues": 0,
+                "prompt_injection_issues": 0,
+                "exfiltration_issues": 0,
+                "supply_chain_issues": 0,
+                "credential_harvest_issues": 0,
+                "sandbox_escape_issues": 0,
             },
         ),
         patch.object(

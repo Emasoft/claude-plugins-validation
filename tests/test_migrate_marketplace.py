@@ -1,4 +1,5 @@
 """Tests for scripts/migrate_marketplace.py."""
+
 from __future__ import annotations
 
 import json
@@ -88,17 +89,23 @@ def _make_marketplace(tmp_path: Path, plugins: list[dict]) -> Path:
 
 
 def test_migrate_no_changes(tmp_path):
-    root = _make_marketplace(tmp_path, [
-        {"name": "p1", "source": {"type": "github", "repo": "Emasoft/p1"}},
-    ])
+    root = _make_marketplace(
+        tmp_path,
+        [
+            {"name": "p1", "source": {"type": "github", "repo": "Emasoft/p1"}},
+        ],
+    )
     rc = m.migrate_marketplace(root, check_only=False, probe=False)
     assert rc == 0
 
 
 def test_migrate_applies_url_to_repo(tmp_path):
-    root = _make_marketplace(tmp_path, [
-        {"name": "p1", "source": {"url": "https://github.com/Emasoft/p1"}},
-    ])
+    root = _make_marketplace(
+        tmp_path,
+        [
+            {"name": "p1", "source": {"url": "https://github.com/Emasoft/p1"}},
+        ],
+    )
     rc = m.migrate_marketplace(root, check_only=False, probe=False)
     assert rc == 0
     data = json.loads((root / ".claude-plugin" / "marketplace.json").read_text())
@@ -106,9 +113,12 @@ def test_migrate_applies_url_to_repo(tmp_path):
 
 
 def test_migrate_check_mode_returns_1_on_drift(tmp_path):
-    root = _make_marketplace(tmp_path, [
-        {"name": "p1", "source": {"url": "https://github.com/Emasoft/p1"}},
-    ])
+    root = _make_marketplace(
+        tmp_path,
+        [
+            {"name": "p1", "source": {"url": "https://github.com/Emasoft/p1"}},
+        ],
+    )
     rc = m.migrate_marketplace(root, check_only=True, probe=False)
     assert rc == 1
     # File should NOT have been modified in check mode.
@@ -117,9 +127,12 @@ def test_migrate_check_mode_returns_1_on_drift(tmp_path):
 
 
 def test_migrate_check_mode_returns_0_when_clean(tmp_path):
-    root = _make_marketplace(tmp_path, [
-        {"name": "p1", "source": {"type": "github", "repo": "Emasoft/p1"}},
-    ])
+    root = _make_marketplace(
+        tmp_path,
+        [
+            {"name": "p1", "source": {"type": "github", "repo": "Emasoft/p1"}},
+        ],
+    )
     rc = m.migrate_marketplace(root, check_only=True, probe=False)
     assert rc == 0
 
@@ -135,7 +148,8 @@ def test_migrate_handles_invalid_json(tmp_path):
     root = tmp_path / "broken"
     (root / ".claude-plugin").mkdir(parents=True)
     (root / ".claude-plugin" / "marketplace.json").write_text(
-        "{ not json",  encoding="utf-8",
+        "{ not json",
+        encoding="utf-8",
     )
     rc = m.migrate_marketplace(root, check_only=False, probe=False)
     assert rc == 1
@@ -143,9 +157,12 @@ def test_migrate_handles_invalid_json(tmp_path):
 
 def test_migrate_atomic_write(tmp_path):
     """The .tmp intermediate file should not exist after a successful write."""
-    root = _make_marketplace(tmp_path, [
-        {"name": "p1", "source": {"url": "https://github.com/Emasoft/p1"}},
-    ])
+    root = _make_marketplace(
+        tmp_path,
+        [
+            {"name": "p1", "source": {"url": "https://github.com/Emasoft/p1"}},
+        ],
+    )
     rc = m.migrate_marketplace(root, check_only=False, probe=False)
     assert rc == 0
     assert not (root / ".claude-plugin" / "marketplace.json.tmp").exists()

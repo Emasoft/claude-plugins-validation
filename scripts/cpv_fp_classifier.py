@@ -115,10 +115,7 @@ def register_classifier(rule_id: str) -> Callable[[Classifier], Classifier]:
         if rule_id in RULE_CLASSIFIERS:
             existing = RULE_CLASSIFIERS[rule_id]
             existing_name = getattr(existing, "__name__", repr(existing))
-            raise ValueError(
-                f"Duplicate classifier registration for {rule_id}: "
-                f"already bound to {existing_name}"
-            )
+            raise ValueError(f"Duplicate classifier registration for {rule_id}: already bound to {existing_name}")
         RULE_CLASSIFIERS[rule_id] = fn
         return fn
 
@@ -214,6 +211,7 @@ def apply_verdict(
 # focused on its own decision tree.
 # -----------------------------------------------------------------------------
 
+
 def file_role_of(rel_path: str) -> str:
     """Classify the file's role from its path.
 
@@ -243,9 +241,7 @@ def file_role_of(rel_path: str) -> str:
         or basename.endswith(".spec.js")
     ):
         return "test"
-    if "/docs/" in rel or rel.startswith("docs/") or rel.endswith(
-        (".md", ".mdx", ".rst", ".txt", ".markdown")
-    ):
+    if "/docs/" in rel or rel.startswith("docs/") or rel.endswith((".md", ".mdx", ".rst", ".txt", ".markdown")):
         return "doc"
     if (
         rel.endswith((".example", ".sample", ".template"))

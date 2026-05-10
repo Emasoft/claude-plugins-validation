@@ -486,6 +486,7 @@ def validate_encoding(plugin_path: Path) -> EncodingValidationReport:
 def main() -> int:
     """CLI entry point for standalone encoding validation."""
     from cpv_validation_common import launcher_epilog
+
     parser = argparse.ArgumentParser(
         description="Encoding validation for Claude Code plugins",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -505,7 +506,8 @@ Exit Codes:
   2 - MAJOR issues found (should fix)
   3 - MINOR issues found (recommended to fix)
 
-""" + launcher_epilog("encoding"),
+"""
+        + launcher_epilog("encoding"),
     )
     parser.add_argument("plugin_path", type=Path, help="Path to the plugin directory to validate")
     parser.add_argument("-v", "--verbose", action="store_true", help="Show all results including INFO and PASSED")

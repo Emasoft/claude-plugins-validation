@@ -77,9 +77,10 @@ class StageMode:
     deletions are safe (``HARDLINK``, ``COPY``) or must be skipped
     (``SYMLINK``).
     """
-    HARDLINK = "hardlink"   # same-fs hardlinks; deletion-safe
-    COPY = "copy"           # cross-fs file copies; deletion-safe
-    SYMLINK = "symlink"     # cross-fs symlinks; dedup-by-deletion DISABLED
+
+    HARDLINK = "hardlink"  # same-fs hardlinks; deletion-safe
+    COPY = "copy"  # cross-fs file copies; deletion-safe
+    SYMLINK = "symlink"  # cross-fs symlinks; dedup-by-deletion DISABLED
 
 
 class StageResult:
@@ -239,7 +240,8 @@ def hardlink_tree(src: Path, dst: Path) -> tuple[int, int, list[str]]:
             ``skipped_reasons`` (NOT raised) — partial hardlinks remain.
     """
     return _walk_and_apply(
-        src, dst,
+        src,
+        dst,
         on_file=lambda s, d: _hardlink_file(s, d, raise_first_exdev=True),
     )
 
@@ -632,10 +634,10 @@ def _normalize_github_spec(spec: str) -> str:
     """Convert any accepted GitHub spec form to ``owner/repo`` for ``gh repo clone``."""
     s = spec.strip()
     if s.startswith(_GITHUB_SHORTHAND_PREFIX):
-        s = s[len(_GITHUB_SHORTHAND_PREFIX):]
+        s = s[len(_GITHUB_SHORTHAND_PREFIX) :]
     for prefix in _GITHUB_URL_RE:
         if s.startswith(prefix):
-            s = s[len(prefix):]
+            s = s[len(prefix) :]
             break
     s = s.rstrip("/")
     # Strip any trailing path components (e.g. /tree/main/sub/dir) — gh
@@ -670,17 +672,13 @@ def ingest_github_url(spec: str, *, depth: int = 1, timeout_seconds: int = 120) 
         raise ValueError(f"ingest_github_url: not a GitHub URL: {spec!r}")
     gh_bin = shutil.which("gh")
     if not gh_bin:
-        raise RuntimeError(
-            "ingest_github_url: 'gh' CLI not on PATH. "
-            "Install: https://cli.github.com/"
-        )
+        raise RuntimeError("ingest_github_url: 'gh' CLI not on PATH. Install: https://cli.github.com/")
     repo_name = _normalize_github_spec(spec)
     tmpdir = Path(tempfile.mkdtemp(prefix="cpv-ingest-gh-"))
     target = tmpdir / "repo"
     try:
         result = subprocess.run(
-            [gh_bin, "repo", "clone", repo_name, str(target),
-             "--", "--depth", str(depth), "--quiet"],
+            [gh_bin, "repo", "clone", repo_name, str(target), "--", "--depth", str(depth), "--quiet"],
             capture_output=True,
             text=True,
             timeout=timeout_seconds,
@@ -694,9 +692,7 @@ def ingest_github_url(spec: str, *, depth: int = 1, timeout_seconds: int = 120) 
             )
     except (subprocess.TimeoutExpired, OSError) as exc:
         cleanup_staging(tmpdir)
-        raise RuntimeError(
-            f"ingest_github_url: clone of {repo_name!r} failed: {exc!r}"
-        ) from exc
+        raise RuntimeError(f"ingest_github_url: clone of {repo_name!r} failed: {exc!r}") from exc
     except RuntimeError:
         cleanup_staging(tmpdir)
         raise
@@ -747,12 +743,12 @@ def ingest_archive(archive_path: Path | str) -> IngestResult:
         # Local import keeps cpv_management_common's heavy dependency graph
         # out of the cold path (no ingestion → no import cost).
         from cpv_management_common import extract_archive  # noqa: PLC0415
+
         try:
             extract_archive(str(archive), target)
         except SystemExit as exc:
             raise RuntimeError(
-                f"ingest_archive: extract failed for {archive!r} "
-                f"(exit {exc.code}). See stderr for details."
+                f"ingest_archive: extract failed for {archive!r} (exit {exc.code}). See stderr for details."
             ) from exc
     except Exception:
         cleanup_staging(tmpdir)

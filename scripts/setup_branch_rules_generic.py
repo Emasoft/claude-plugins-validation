@@ -61,6 +61,7 @@ DEFAULT_ADMIN_ROLE_IDS: list[int] = [5]
 
 # ── Shell helpers ─────────────────────────────────────────────────────────
 
+
 class ShellError(RuntimeError):
     """Raised when a subprocess returns non-zero."""
 
@@ -84,10 +85,7 @@ def run(
         timeout=timeout,
     )
     if check and result.returncode != 0:
-        raise ShellError(
-            f"Command failed ({result.returncode}): {' '.join(cmd)}\n"
-            f"stderr: {result.stderr}"
-        )
+        raise ShellError(f"Command failed ({result.returncode}): {' '.join(cmd)}\nstderr: {result.stderr}")
     return result
 
 
@@ -95,19 +93,14 @@ def check_gh_available() -> None:
     try:
         run(["gh", "--version"])
     except (FileNotFoundError, ShellError) as exc:
-        sys.stderr.write(
-            "ERROR: `gh` CLI not available. Install from https://cli.github.com\n"
-            f"Details: {exc}\n"
-        )
+        sys.stderr.write(f"ERROR: `gh` CLI not available. Install from https://cli.github.com\nDetails: {exc}\n")
         sys.exit(2)
 
 
 def check_gh_auth() -> None:
     result = run(["gh", "auth", "status"], check=False)
     if result.returncode != 0:
-        sys.stderr.write(
-            "ERROR: `gh` CLI is not authenticated. Run `gh auth login` first.\n"
-        )
+        sys.stderr.write("ERROR: `gh` CLI is not authenticated. Run `gh auth login` first.\n")
         sys.exit(2)
 
 
@@ -121,6 +114,7 @@ def parse_repo_slug(slug: str) -> tuple[str, str]:
 
 
 # ── Ruleset payload ───────────────────────────────────────────────────────
+
 
 @dataclass
 class BypassActor:
@@ -198,9 +192,7 @@ def build_ruleset(
                 "type": "required_status_checks",
                 "parameters": {
                     "strict_required_status_checks_policy": False,
-                    "required_status_checks": [
-                        {"context": ctx} for ctx in check_contexts
-                    ],
+                    "required_status_checks": [{"context": ctx} for ctx in check_contexts],
                 },
             },
         ],
@@ -209,6 +201,7 @@ def build_ruleset(
 
 
 # ── Ruleset CRUD operations ──────────────────────────────────────────────
+
 
 def _fetch_all_rulesets(owner: str, repo: str) -> list[dict]:
     """Return every ruleset on the repo (list view — no rules/bypass arrays)."""
@@ -250,7 +243,9 @@ def fetch_managed_ruleset(owner: str, repo: str, name: str) -> dict | None:
 
 
 def fetch_legacy_protection_rulesets(
-    owner: str, repo: str, managed_name: str,
+    owner: str,
+    repo: str,
+    managed_name: str,
 ) -> list[dict]:
     """Return non-managed rulesets that look like branch-protection rules.
 
@@ -330,9 +325,11 @@ def fetch_latest_check_contexts(owner: str, repo: str) -> list[str]:
     """
     result = run(
         [
-            "gh", "api",
+            "gh",
+            "api",
             f"repos/{owner}/{repo}/commits/HEAD/check-runs",
-            "--jq", ".check_runs[].name",
+            "--jq",
+            ".check_runs[].name",
         ],
         check=False,
     )
@@ -379,6 +376,7 @@ def apply_ruleset(
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
@@ -439,8 +437,7 @@ Examples:
         "--reset-bypass",
         action="store_true",
         help=(
-            "Reset bypass_actors to defaults only (admin role). "
-            "WARNING: this removes any manually configured trust."
+            "Reset bypass_actors to defaults only (admin role). WARNING: this removes any manually configured trust."
         ),
     )
     p.add_argument(
@@ -496,9 +493,7 @@ def main() -> int:
     check_contexts: list[str] = args.check_contexts
     ruleset_name: str = args.ruleset_name
     sys.stderr.write(
-        f"Target: {owner}/{repo}\n"
-        f"Ruleset name: {ruleset_name}\n"
-        f"Required check contexts: {', '.join(check_contexts)}\n"
+        f"Target: {owner}/{repo}\nRuleset name: {ruleset_name}\nRequired check contexts: {', '.join(check_contexts)}\n"
     )
 
     # Fetch managed ruleset (update in place if found)
@@ -514,23 +509,11 @@ def main() -> int:
             if legacy:
                 source = legacy[0]
                 legacy_names = ", ".join(str(rs.get("name", "?")) for rs in legacy)
-                sys.stderr.write(
-                    f"⚠ Found {len(legacy)} pre-existing protection ruleset(s): "
-                    f"{legacy_names}\n"
-                )
-                sys.stderr.write(
-                    f"  Adopting bypass_actors from '{source.get('name')}' "
-                    f"(id={source.get('id')}).\n"
-                )
-                sys.stderr.write(
-                    "  After applying this ruleset, consider deleting the "
-                    "legacy ruleset(s) with:\n"
-                )
+                sys.stderr.write(f"⚠ Found {len(legacy)} pre-existing protection ruleset(s): {legacy_names}\n")
+                sys.stderr.write(f"  Adopting bypass_actors from '{source.get('name')}' (id={source.get('id')}).\n")
+                sys.stderr.write("  After applying this ruleset, consider deleting the legacy ruleset(s) with:\n")
                 for rs in legacy:
-                    sys.stderr.write(
-                        f"    gh api --method DELETE "
-                        f"repos/{owner}/{repo}/rulesets/{rs.get('id')}\n"
-                    )
+                    sys.stderr.write(f"    gh api --method DELETE repos/{owner}/{repo}/rulesets/{rs.get('id')}\n")
         if source is not None:
             existing_actors = [
                 BypassActor(
@@ -542,8 +525,7 @@ def main() -> int:
             ]
 
     defaults = build_default_bypass_actors()
-    additions = [BypassActor(app_id, "Integration", "always")
-                 for app_id in args.add_bypass_app_id]
+    additions = [BypassActor(app_id, "Integration", "always") for app_id in args.add_bypass_app_id]
     bypass_actors = merge_bypass_actors(existing_actors, defaults + additions)
 
     ruleset = build_ruleset(ruleset_name, check_contexts, bypass_actors)
@@ -556,14 +538,8 @@ def main() -> int:
         print(json.dumps(ruleset, indent=2))
         live = fetch_latest_check_contexts(owner, repo)
         if live:
-            sys.stderr.write(
-                f"\n# Diagnostic — check-runs currently reported on HEAD: "
-                f"{', '.join(live)}\n"
-            )
-            sys.stderr.write(
-                "# If your --check values don't match any of these, the "
-                "ruleset will never pass.\n"
-            )
+            sys.stderr.write(f"\n# Diagnostic — check-runs currently reported on HEAD: {', '.join(live)}\n")
+            sys.stderr.write("# If your --check values don't match any of these, the ruleset will never pass.\n")
         else:
             sys.stderr.write(
                 "\n# Diagnostic — no check-runs reported on HEAD yet. "
@@ -572,8 +548,7 @@ def main() -> int:
         return 0
 
     response = apply_ruleset(owner, repo, ruleset, existing_id)
-    print(f"✓ Ruleset {'updated' if existing_id else 'created'}: "
-          f"{ruleset_name} (id={response.get('id')})")
+    print(f"✓ Ruleset {'updated' if existing_id else 'created'}: {ruleset_name} (id={response.get('id')})")
     print(f"  Check contexts required: {', '.join(check_contexts)}")
     print(f"  Bypass actors preserved/added: {len(bypass_actors)}")
     print(f"  View: https://github.com/{owner}/{repo}/rules/{response.get('id')}")

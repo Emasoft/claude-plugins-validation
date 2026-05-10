@@ -185,6 +185,7 @@ def _run_stage_captured(
         stderr_router._set_buffer(None)
     return rc, out_buf.getvalue(), err_buf.getvalue()
 
+
 # Lazy-initialized gitignore filter for file scanning
 _gi_cache: dict = {}
 
@@ -1002,8 +1003,7 @@ def stage_run_tests(plugin_root: Path) -> int:
     """
     print(f"\n{BLUE}═══ Gate 2: Run tests (mandatory) ═══{NC}")
     result = run(
-        ["uv", "run", "pytest", "tests/", "-n", "auto", "--dist=worksteal",
-         "--maxfail=1", "-q", "--tb=short"],
+        ["uv", "run", "pytest", "tests/", "-n", "auto", "--dist=worksteal", "--maxfail=1", "-q", "--tb=short"],
         cwd=plugin_root,
         check=False,
     )
@@ -1948,9 +1948,7 @@ def _ensure_submodules_pushed(plugin_root: Path) -> None:
             lines.append(
                 f"{RED}  • submodule '{sub_path}' currently at SHA {short_sha} which is NOT reachable on origin remote.{NC}"
             )
-            lines.append(
-                f"{YELLOW}    Run: cd {sub_path} && git push origin HEAD{NC}"
-            )
+            lines.append(f"{YELLOW}    Run: cd {sub_path} && git push origin HEAD{NC}")
         lines.append("")
         lines.append(f"{YELLOW}  Then re-run publish.{NC}")
         print("\n".join(lines), file=sys.stderr)
@@ -2050,9 +2048,7 @@ def stage_commit_tag_push(
         # older commit AND the tag is unpushed, the prior run's recovery
         # branch above should already have handled it; this check catches
         # any remaining drift cases (manual tag created out-of-band, etc.).
-        tag_sha = run(
-            ["git", "rev-list", "-n", "1", tag_name], cwd=plugin_root, check=False
-        ).stdout.strip()
+        tag_sha = run(["git", "rev-list", "-n", "1", tag_name], cwd=plugin_root, check=False).stdout.strip()
         head_sha = run(["git", "rev-parse", "HEAD"], cwd=plugin_root, check=False).stdout.strip()
         if tag_sha and head_sha and tag_sha != head_sha and not _remote_tag_exists(plugin_root, tag_name):
             print(
@@ -2095,11 +2091,7 @@ def stage_commit_tag_push(
     #     synchronous (defensive: never trade fail-fast for a Phase E
     #     speedup on something we don't recognise).
     used_prefetch = False
-    if (
-        prefetch is not None
-        and prefetch.gh_auth is not None
-        and prefetch.gh_auth_target == (owner, repo)
-    ):
+    if prefetch is not None and prefetch.gh_auth is not None and prefetch.gh_auth_target == (owner, repo):
         try:
             exc = prefetch.gh_auth.exception()
         except Exception:
@@ -2407,9 +2399,7 @@ def _start_prefetch(plugin_root: Path, layout: str, layout_details: dict) -> _Pr
 
     if mkt_target is not None:
         mkt_owner, mkt_repo = mkt_target
-        results.marketplace_json = executor.submit(
-            _prefetch_marketplace_json_safe, mkt_owner, mkt_repo
-        )
+        results.marketplace_json = executor.submit(_prefetch_marketplace_json_safe, mkt_owner, mkt_repo)
         results.marketplace_target = mkt_target
 
     return results
@@ -2475,10 +2465,7 @@ def run_preflight_parallel(
     # number of tasks — no point sizing the pool larger.
     captured: dict[str, tuple[int, str, str]] = {}
     with ThreadPoolExecutor(max_workers=4) as ex:
-        futures = {
-            name: ex.submit(_run_stage_captured, fn)
-            for name, fn in stage_callables.items()
-        }
+        futures = {name: ex.submit(_run_stage_captured, fn) for name, fn in stage_callables.items()}
         # Wait for all to finish — DON'T short-circuit on first failure.
         # We want a clean per-gate replay even when multiple gates fail,
         # otherwise the user sees an arbitrary subset based on completion

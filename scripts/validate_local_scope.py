@@ -139,9 +139,7 @@ MAX_LOOP_MD_BYTES: int = 25_000
 # =============================================================================
 
 
-def _report_parse_error(
-    report: ValidationReport, file_label: str, exc: BaseException
-) -> None:
+def _report_parse_error(report: ValidationReport, file_label: str, exc: BaseException) -> None:
     """Record a CRITICAL parse-error finding without leaking file contents.
 
     Uses ``type(exc).__name__`` only — never ``str(exc)`` — per aegis
@@ -175,9 +173,7 @@ def _load_json_or_report(
 # =============================================================================
 
 
-def _flag_managed_only_keys_local(
-    data: dict[str, Any], report: ValidationReport, file_label: str
-) -> None:
+def _flag_managed_only_keys_local(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
     """Managed-only keys are wrong in local scope too (never read outside managed)."""
     for key in sorted(MANAGED_ONLY_KEYS):
         if key in data:
@@ -191,9 +187,7 @@ def _flag_managed_only_keys_local(
             )
 
 
-def _flag_global_config_keys_local(
-    data: dict[str, Any], report: ValidationReport, file_label: str
-) -> None:
+def _flag_global_config_keys_local(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
     """Global-config keys belong in ~/.claude.json, not in any settings.json."""
     for key in sorted(GLOBAL_CONFIG_KEYS):
         if key in data:
@@ -206,9 +200,7 @@ def _flag_global_config_keys_local(
             )
 
 
-def _flag_permissions_default_mode_local(
-    data: dict[str, Any], report: ValidationReport, file_label: str
-) -> None:
+def _flag_permissions_default_mode_local(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
     """Validate ``permissions.defaultMode`` against the 6 permission-modes.md
     values. Same enforcement as project scope — an out-of-enum value is
     silently dropped so the author's intent never takes effect.
@@ -232,9 +224,7 @@ def _flag_permissions_default_mode_local(
         )
 
 
-def _flag_managed_only_nested_keys_local(
-    data: dict[str, Any], report: ValidationReport, file_label: str
-) -> None:
+def _flag_managed_only_nested_keys_local(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
     """Nested admin kill-switches (``permissions.disableAutoMode`` etc.) are
     silently ignored outside managed settings. MAJOR so the user moves them to
     the correct scope.
@@ -259,9 +249,7 @@ def _flag_managed_only_nested_keys_local(
             )
 
 
-def _flag_plugin_only_keys_local(
-    data: dict[str, Any], report: ValidationReport, file_label: str
-) -> None:
+def _flag_plugin_only_keys_local(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
     """Plugin-only keys (``lspServers``, ``monitors``) never work in a settings
     file — Claude Code reads them only from a plugin package's ``plugin.json``.
     CRITICAL because the author's intent is silently dropped.
@@ -280,9 +268,7 @@ def _flag_plugin_only_keys_local(
             )
 
 
-def _suggest_typically_shared_keys(
-    data: dict[str, Any], report: ValidationReport, file_label: str
-) -> None:
+def _suggest_typically_shared_keys(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
     """Hint that some keys should probably live in shared project settings."""
     for key in sorted(_TYPICALLY_SHARED_KEYS):
         if key in data:
@@ -296,9 +282,7 @@ def _suggest_typically_shared_keys(
             )
 
 
-def _flag_deprecated_keys(
-    data: dict[str, Any], report: ValidationReport, file_label: str
-) -> None:
+def _flag_deprecated_keys(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
     """Flag deprecated keys as NIT."""
     if "includeCoAuthoredBy" in data:
         report.nit(
@@ -310,9 +294,7 @@ def _flag_deprecated_keys(
         )
 
 
-def _flag_missing_schema_local(
-    data: dict[str, Any], report: ValidationReport, file_label: str
-) -> None:
+def _flag_missing_schema_local(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
     """NIT: settings.local.json should declare $schema too."""
     if "$schema" not in data:
         report.nit(
@@ -325,9 +307,7 @@ def _flag_missing_schema_local(
         )
 
 
-def validate_settings_local_json(
-    settings_path: Path, report: ValidationReport
-) -> dict[str, Any] | None:
+def validate_settings_local_json(settings_path: Path, report: ValidationReport) -> dict[str, Any] | None:
     """Apply local-scope rules to ``.claude/settings.local.json`` contents.
 
     Returns the parsed top-level dict (or ``None`` when parsing failed or the
@@ -362,9 +342,7 @@ def validate_settings_local_json(
 # =============================================================================
 
 
-def _validate_markdown_frontmatter_only(
-    path: Path, report: ValidationReport, rel_label: str
-) -> None:
+def _validate_markdown_frontmatter_only(path: Path, report: ValidationReport, rel_label: str) -> None:
     """Light-touch validation: YAML frontmatter parseable, name present.
 
     Intentionally does NOT check for absolute home paths — local scope is
@@ -428,8 +406,7 @@ def _walk_local_markdown_folder(
         real = resolve_within(md, project_root)
         if real is None:
             report.major(
-                f"{md.relative_to(project_root)}: path resolves outside the "
-                "project root (symlink escape) — skipping",
+                f"{md.relative_to(project_root)}: path resolves outside the project root (symlink escape) — skipping",
                 str(md.relative_to(project_root)),
             )
             continue
@@ -439,23 +416,17 @@ def _walk_local_markdown_folder(
         _validate_markdown_frontmatter_only(md, report, str(rel))
 
 
-def validate_local_agents(
-    agents_dir: Path, repo_root: Path, project_root: Path, report: ValidationReport
-) -> None:
+def validate_local_agents(agents_dir: Path, repo_root: Path, project_root: Path, report: ValidationReport) -> None:
     """Validate untracked agent .md files."""
     _walk_local_markdown_folder(agents_dir, repo_root, project_root, report, "*.md")
 
 
-def validate_local_skills(
-    skills_dir: Path, repo_root: Path, project_root: Path, report: ValidationReport
-) -> None:
+def validate_local_skills(skills_dir: Path, repo_root: Path, project_root: Path, report: ValidationReport) -> None:
     """Validate untracked SKILL.md files."""
     _walk_local_markdown_folder(skills_dir, repo_root, project_root, report, "SKILL.md")
 
 
-def validate_local_commands(
-    commands_dir: Path, repo_root: Path, project_root: Path, report: ValidationReport
-) -> None:
+def validate_local_commands(commands_dir: Path, repo_root: Path, project_root: Path, report: ValidationReport) -> None:
     """Validate untracked command .md files."""
     _walk_local_markdown_folder(commands_dir, repo_root, project_root, report, "*.md")
 
@@ -467,9 +438,7 @@ def validate_local_output_styles(
     _walk_local_markdown_folder(styles_dir, repo_root, project_root, report, "*.md")
 
 
-def validate_local_rules(
-    rules_dir: Path, repo_root: Path, project_root: Path, report: ValidationReport
-) -> None:
+def validate_local_rules(rules_dir: Path, repo_root: Path, project_root: Path, report: ValidationReport) -> None:
     """Surface untracked rule .md files as INFO (relaxed rules)."""
     tracked = list_tracked_files_under(rules_dir, repo_root) or set()
     count = 0
@@ -510,9 +479,7 @@ def validate_local_rules(
 # =============================================================================
 
 
-def validate_claude_local_md(
-    md_path: Path, repo_root: Path, report: ValidationReport
-) -> None:
+def validate_claude_local_md(md_path: Path, repo_root: Path, report: ValidationReport) -> None:
     """Validate ``CLAUDE.local.md`` — must be gitignored, structurally valid.
 
     Besides the gitignored + size-cap checks, the body is scanned for
@@ -548,9 +515,7 @@ def validate_claude_local_md(
         )
         return
     # @path import recursion check (memory.md L95-107).
-    validate_claude_md_imports(
-        md_path, repo_root, report, str(rel), max_bytes=MAX_CLAUDE_MD_BYTES
-    )
+    validate_claude_md_imports(md_path, repo_root, report, str(rel), max_bytes=MAX_CLAUDE_MD_BYTES)
     report.passed(f"{rel}: CLAUDE.local.md present and not tracked", str(rel))
 
 
@@ -559,9 +524,7 @@ def validate_claude_local_md(
 # =============================================================================
 
 
-def validate_home_claude_json_for_project(
-    project_root: Path, report: ValidationReport
-) -> None:
+def validate_home_claude_json_for_project(project_root: Path, report: ValidationReport) -> None:
     """Look up per-project state in ~/.claude.json.
 
     Reports any ``projects[<abs_path>].mcpServers`` entries as INFO. This
@@ -583,15 +546,13 @@ def validate_home_claude_json_for_project(
         data = safe_load_jsonc(home_claude_json, MAX_HOME_CLAUDE_JSON_BYTES)
     except OversizedFileError:
         report.warning(
-            f"~/.claude.json exceeds {MAX_HOME_CLAUDE_JSON_BYTES} byte cap — "
-            "skipping per-project MCP check.",
+            f"~/.claude.json exceeds {MAX_HOME_CLAUDE_JSON_BYTES} byte cap — skipping per-project MCP check.",
             "~/.claude.json",
         )
         return
     except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
         report.warning(
-            f"~/.claude.json: cannot parse ({type(exc).__name__}) — "
-            "skipping per-project MCP check.",
+            f"~/.claude.json: cannot parse ({type(exc).__name__}) — skipping per-project MCP check.",
             "~/.claude.json",
         )
         return
@@ -613,8 +574,7 @@ def validate_home_claude_json_for_project(
     if isinstance(mcp_servers, dict) and mcp_servers:
         names = ", ".join(sorted(mcp_servers.keys()))
         report.info(
-            f"~/.claude.json has {len(mcp_servers)} local MCP server(s) for this "
-            f"project: {names}",
+            f"~/.claude.json has {len(mcp_servers)} local MCP server(s) for this project: {names}",
             "~/.claude.json",
         )
     else:
@@ -629,9 +589,7 @@ def validate_home_claude_json_for_project(
 # =============================================================================
 
 
-def validate_gitignore_for_local_files(
-    repo_root: Path, report: ValidationReport
-) -> None:
+def validate_gitignore_for_local_files(repo_root: Path, report: ValidationReport) -> None:
     """Check that common local-scope files are gitignored.
 
     Uses ``git check-ignore`` (via ``gitignore_covers_path``) which
@@ -674,9 +632,7 @@ def validate_gitignore_for_local_files(
 # =============================================================================
 
 
-def validate_loop_md_local(
-    loop_path: Path, repo_root: Path, project_root: Path, report: ValidationReport
-) -> None:
+def validate_loop_md_local(loop_path: Path, repo_root: Path, project_root: Path, report: ValidationReport) -> None:
     """Validate an UNTRACKED ``.claude/loop.md`` file (local scope).
 
     Rules (TRDD-479cde0c §NOW #19, scheduled-tasks.md):
@@ -720,9 +676,7 @@ def validate_loop_md_local(
 # =============================================================================
 
 
-def _validate_wip_shared_settings(
-    settings_path: Path, report: ValidationReport
-) -> None:
+def _validate_wip_shared_settings(settings_path: Path, report: ValidationReport) -> None:
     """Apply strict project-scope rules to an UNTRACKED settings.json.
 
     TRDD-f4e2d385 §3.1 invariant: a finding that fires for a tracked
@@ -779,8 +733,7 @@ def validate_local_scope(project_root: Path, report: ValidationReport) -> None:
     no_git = not (repo_root / ".git").exists()
     if no_git:
         report.info(
-            "Not a git repository — every file under .claude/ is treated as "
-            "local scope.",
+            "Not a git repository — every file under .claude/ is treated as local scope.",
             str(project_root),
         )
 
@@ -809,12 +762,8 @@ def validate_local_scope(project_root: Path, report: ValidationReport) -> None:
             # semantically valid in settings.
             settings_local_data = validate_settings_local_json(settings_local, report)
             if isinstance(settings_local_data, dict):
-                _validate_settings_hooks_subtree(
-                    settings_local_data, ".claude/settings.local.json", report
-                )
-                _validate_settings_mcp_subtree(
-                    settings_local_data, ".claude/settings.local.json", report
-                )
+                _validate_settings_hooks_subtree(settings_local_data, ".claude/settings.local.json", report)
+                _validate_settings_mcp_subtree(settings_local_data, ".claude/settings.local.json", report)
 
     # 2. Untracked settings.json (WIP shared config) — use STRICT project rules.
     # Per user spec for local scope: settings.json is IGNORED (only
@@ -895,8 +844,7 @@ def validate_local_scope(project_root: Path, report: ValidationReport) -> None:
     if not report.results:
         if claude_dir.exists() and not any(claude_dir.iterdir()):
             report.info(
-                ".claude/ directory exists but is empty — no local configuration "
-                "to validate.",
+                ".claude/ directory exists but is empty — no local configuration to validate.",
                 str(project_root),
             )
         else:
@@ -972,9 +920,7 @@ def _validate_untracked_file_deep(
     _merge_subreport(subreport, parent_report, f"[{label_kind} {rel}]")
 
 
-def validate_local_agents_deep(
-    agents_dir: Path, repo_root: Path, project_root: Path, report: ValidationReport
-) -> None:
+def validate_local_agents_deep(agents_dir: Path, repo_root: Path, project_root: Path, report: ValidationReport) -> None:
     """Deep-validate every UNTRACKED .md file under `.claude/agents/` with
     the full `validate_agent` pipeline (required fields, tools allowlist,
     model, TaskOutput deprecation, plugin-shipped restrictions, etc.).
@@ -1009,9 +955,7 @@ def validate_local_commands_deep(
         _validate_untracked_file_deep(md, project_root, tracked, _deep_validate_command, report, "command")
 
 
-def validate_local_skills_deep(
-    skills_dir: Path, repo_root: Path, project_root: Path, report: ValidationReport
-) -> None:
+def validate_local_skills_deep(skills_dir: Path, repo_root: Path, project_root: Path, report: ValidationReport) -> None:
     """Deep-validate every UNTRACKED skill directory under `.claude/skills/`.
 
     A skill directory is `.claude/skills/<skill-name>/SKILL.md` plus optional
@@ -1055,17 +999,14 @@ def validate_local_skills_deep(
             subreport = _deep_validate_skill(skill_dir)
         except Exception as exc:  # pragma: no cover — defensive
             report.critical(
-                f"[skill .claude/skills/{skill_dir.name}]: validator raised "
-                f"{type(exc).__name__}",
+                f"[skill .claude/skills/{skill_dir.name}]: validator raised {type(exc).__name__}",
                 f".claude/skills/{skill_dir.name}",
             )
             continue
         _merge_subreport(subreport, report, f"[skill .claude/skills/{skill_dir.name}]")
 
 
-def validate_local_rules_deep(
-    rules_dir: Path, repo_root: Path, project_root: Path, report: ValidationReport
-) -> None:
+def validate_local_rules_deep(rules_dir: Path, repo_root: Path, project_root: Path, report: ValidationReport) -> None:
     """Validate UNTRACKED rule files using `validate_rules_directory`.
 
     `validate_rules_directory` walks the full folder — we can't pre-filter
@@ -1153,8 +1094,7 @@ def _run_settings_subtree_validator(
             subreport = validator(tmp_path, plugin_root=None)
         except Exception as exc:  # pragma: no cover — defensive
             report.critical(
-                f"[{subtree_key} in {settings_file_label}] validator raised "
-                f"{type(exc).__name__}",
+                f"[{subtree_key} in {settings_file_label}] validator raised {type(exc).__name__}",
                 settings_file_label,
             )
             return
@@ -1165,9 +1105,7 @@ def _validate_settings_hooks_subtree(
     settings: dict[str, Any], settings_file_label: str, report: ValidationReport
 ) -> None:
     """Extract `hooks` from a settings dict and run the hook validator."""
-    _run_settings_subtree_validator(
-        "hooks", settings.get("hooks"), settings_file_label, _deep_validate_hooks, report
-    )
+    _run_settings_subtree_validator("hooks", settings.get("hooks"), settings_file_label, _deep_validate_hooks, report)
 
 
 def _validate_settings_mcp_subtree(
@@ -1298,9 +1236,7 @@ def _validate_plugin_all_checks(plugin_root: Path, report: ValidationReport) -> 
     _vp_cross(plugin_root, report)
 
 
-def validate_locally_enabled_plugins(
-    enabled_plugins: object, report: ValidationReport
-) -> None:
+def validate_locally_enabled_plugins(enabled_plugins: object, report: ValidationReport) -> None:
     """For each `plugin@marketplace: true` in enabledPlugins, locate the
     installed plugin and run the core plugin checks on it.
 
@@ -1317,16 +1253,13 @@ def validate_locally_enabled_plugins(
         m = ENABLED_PLUGIN_RE.match(str(key))
         if not m:
             report.minor(
-                f"[enabledPlugins] '{key}' does not match "
-                "'<plugin>@<marketplace>' form — skipping",
+                f"[enabledPlugins] '{key}' does not match '<plugin>@<marketplace>' form — skipping",
                 "enabledPlugins",
             )
             continue
         plugin = m.group("plugin")
         marketplace = m.group("marketplace")
-        cache_dir = resolve_plugin_cache_dir(
-            plugin, marketplace, report=report, scope_label="enabledPlugins"
-        )
+        cache_dir = resolve_plugin_cache_dir(plugin, marketplace, report=report, scope_label="enabledPlugins")
         if cache_dir is None:
             report.major(
                 f"[enabledPlugins {key}] plugin is enabled but NOT installed "
@@ -1342,8 +1275,7 @@ def validate_locally_enabled_plugins(
             _validate_plugin_all_checks(cache_dir, subreport)
         except Exception as exc:  # pragma: no cover — defensive
             report.critical(
-                f"[enabledPlugins {key}] plugin validator raised "
-                f"{type(exc).__name__}",
+                f"[enabledPlugins {key}] plugin validator raised {type(exc).__name__}",
                 "enabledPlugins",
             )
             continue
@@ -1360,11 +1292,9 @@ def main() -> int:
     check_remote_execution_guard()
 
     from cpv_validation_common import launcher_epilog
+
     parser = argparse.ArgumentParser(
-        description=(
-            "Validate non-git-tracked (local-scope) Claude Code configuration "
-            "under <project_path>."
-        ),
+        description=("Validate non-git-tracked (local-scope) Claude Code configuration under <project_path>."),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=launcher_epilog("local-scope"),
     )

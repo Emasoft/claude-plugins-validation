@@ -27,7 +27,9 @@ def _make_plugin(tmp_path: Path) -> Path:
     root = tmp_path / "demo-plugin"
     (root / ".claude-plugin").mkdir(parents=True)
     (root / ".claude-plugin" / "plugin.json").write_text(
-        json.dumps({"name": "demo-plugin", "version": "1.0.0", "description": "x", "author": {"name": "t", "email": "t@e.com"}})
+        json.dumps(
+            {"name": "demo-plugin", "version": "1.0.0", "description": "x", "author": {"name": "t", "email": "t@e.com"}}
+        )
     )
     (root / "scripts").mkdir()
     return root
@@ -62,7 +64,9 @@ class TestValidatePep723Invocations:
         root = tmp_path / "p"
         (root / ".claude-plugin").mkdir(parents=True)
         (root / ".claude-plugin" / "plugin.json").write_text(
-            json.dumps({"name": "p", "version": "1.0.0", "description": "x", "author": {"name": "t", "email": "t@e.com"}})
+            json.dumps(
+                {"name": "p", "version": "1.0.0", "description": "x", "author": {"name": "t", "email": "t@e.com"}}
+            )
         )
         report = ValidationReport()
         validate_plugin.validate_pep723_invocations(root, report)
@@ -107,9 +111,7 @@ class TestValidatePep723Invocations:
         root = _make_plugin(tmp_path)
         _write_pep723_script(root / "scripts", "yaml_tool.py")
         (root / "commands").mkdir(parents=True, exist_ok=True)
-        (root / "commands" / "yaml.md").write_text(
-            "## Usage\n\n```bash\npython scripts/yaml_tool.py --check\n```\n"
-        )
+        (root / "commands" / "yaml.md").write_text("## Usage\n\n```bash\npython scripts/yaml_tool.py --check\n```\n")
         report = ValidationReport()
         validate_plugin.validate_pep723_invocations(root, report)
         msgs = _findings(report)
@@ -134,9 +136,7 @@ class TestValidatePep723Invocations:
         root = _make_plugin(tmp_path)
         _write_pep723_script(root / "scripts", "yaml_tool.py")
         (root / "commands").mkdir(parents=True, exist_ok=True)
-        (root / "commands" / "x.md").write_text(
-            "## Usage\n\nRun: `uv run scripts/yaml_tool.py --check`\n"
-        )
+        (root / "commands" / "x.md").write_text("## Usage\n\nRun: `uv run scripts/yaml_tool.py --check`\n")
         report = ValidationReport()
         validate_plugin.validate_pep723_invocations(root, report)
         assert _findings(report) == []
@@ -147,9 +147,7 @@ class TestValidatePep723Invocations:
         root = _make_plugin(tmp_path)
         _write_pep723_script(root / "scripts", "yaml_tool.py")
         (root / "commands").mkdir(parents=True, exist_ok=True)
-        (root / "commands" / "x.md").write_text(
-            "Run: `uv run python scripts/yaml_tool.py`\n"
-        )
+        (root / "commands" / "x.md").write_text("Run: `uv run python scripts/yaml_tool.py`\n")
         report = ValidationReport()
         validate_plugin.validate_pep723_invocations(root, report)
         assert _findings(report) == []
@@ -160,9 +158,7 @@ class TestValidatePep723Invocations:
         root = _make_plugin(tmp_path)
         _write_pep723_script(root / "scripts", "yaml_tool.py")
         (root / "commands").mkdir(parents=True, exist_ok=True)
-        (root / "commands" / "x.md").write_text(
-            "Run: `uv run --with ruamel.yaml python scripts/yaml_tool.py`\n"
-        )
+        (root / "commands" / "x.md").write_text("Run: `uv run --with ruamel.yaml python scripts/yaml_tool.py`\n")
         report = ValidationReport()
         validate_plugin.validate_pep723_invocations(root, report)
         assert _findings(report) == []
@@ -185,9 +181,7 @@ class TestValidatePep723Invocations:
         """Bug surface includes README.md too."""
         root = _make_plugin(tmp_path)
         _write_pep723_script(root / "scripts", "yaml_tool.py")
-        (root / "README.md").write_text(
-            "## Quickstart\n\n`python scripts/yaml_tool.py`\n"
-        )
+        (root / "README.md").write_text("## Quickstart\n\n`python scripts/yaml_tool.py`\n")
         report = ValidationReport()
         validate_plugin.validate_pep723_invocations(root, report)
         msgs = _findings(report)

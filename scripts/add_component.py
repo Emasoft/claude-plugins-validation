@@ -14,6 +14,7 @@ Each subcommand writes minimal but valid stubs with frontmatter that
 passes validate_plugin / validate_skill out of the box. Existing files
 are NEVER overwritten unless `--force` is passed.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -105,8 +106,7 @@ def add_skill(plugin: Path, name: str, description: str, *, force: bool) -> int:
     skill_dir = plugin / "skills" / name
     skill_md = skill_dir / "SKILL.md"
     if skill_md.is_file() and not force:
-        print(f"  [add-skill] {skill_md} already exists. Pass --force to overwrite.",
-              file=sys.stderr)
+        print(f"  [add-skill] {skill_md} already exists. Pass --force to overwrite.", file=sys.stderr)
         return 1
     skill_dir.mkdir(parents=True, exist_ok=True)
     skill_md.write_text(_skill_template(name, description), encoding="utf-8")
@@ -114,13 +114,11 @@ def add_skill(plugin: Path, name: str, description: str, *, force: bool) -> int:
     return 0
 
 
-def add_agent(plugin: Path, name: str, description: str, tools: str,
-              *, force: bool) -> int:
+def add_agent(plugin: Path, name: str, description: str, tools: str, *, force: bool) -> int:
     agents_dir = plugin / "agents"
     agent_md = agents_dir / f"{name}.md"
     if agent_md.is_file() and not force:
-        print(f"  [add-agent] {agent_md} already exists. Pass --force to overwrite.",
-              file=sys.stderr)
+        print(f"  [add-agent] {agent_md} already exists. Pass --force to overwrite.", file=sys.stderr)
         return 1
     agents_dir.mkdir(parents=True, exist_ok=True)
     agent_md.write_text(_agent_template(name, description, tools), encoding="utf-8")
@@ -128,17 +126,14 @@ def add_agent(plugin: Path, name: str, description: str, tools: str,
     return 0
 
 
-def add_command(plugin: Path, name: str, description: str, allowed_tools: str,
-                *, force: bool) -> int:
+def add_command(plugin: Path, name: str, description: str, allowed_tools: str, *, force: bool) -> int:
     cmd_dir = plugin / "commands"
     cmd_md = cmd_dir / f"{name}.md"
     if cmd_md.is_file() and not force:
-        print(f"  [add-command] {cmd_md} already exists. Pass --force to overwrite.",
-              file=sys.stderr)
+        print(f"  [add-command] {cmd_md} already exists. Pass --force to overwrite.", file=sys.stderr)
         return 1
     cmd_dir.mkdir(parents=True, exist_ok=True)
-    cmd_md.write_text(_command_template(name, description, allowed_tools),
-                      encoding="utf-8")
+    cmd_md.write_text(_command_template(name, description, allowed_tools), encoding="utf-8")
     print(f"  [add-command] created {cmd_md.relative_to(plugin)}")
     return 0
 
@@ -199,34 +194,26 @@ def add_mcp(plugin: Path, name: str, command: str, http_url: str) -> int:
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("plugin_path", type=Path,
-                   help="Plugin root (containing .claude-plugin/plugin.json)")
-    p.add_argument("--type", required=True, choices=sorted(VALID_TYPES),
-                   help="Component type to add")
-    p.add_argument("--name", default="",
-                   help="Component name (skills/agents/commands/mcp). Required for those types.")
-    p.add_argument("--description", default="(describe me)",
-                   help="One-line description for the new component (optional).")
-    p.add_argument("--tools", default="",
-                   help="Agent only: comma-separated `tools:` list.")
-    p.add_argument("--allowed-tools", default="",
-                   help="Command only: `allowed-tools:` value (e.g. 'Bash(uv:*)').")
-    p.add_argument("--event", default="",
-                   help="Hook only: event name (PreToolUse, Stop, SessionStart, ...).")
-    p.add_argument("--command", default="",
-                   help="Hook/MCP only: shell command to run.")
-    p.add_argument("--http-url", default="",
-                   help="MCP only: HTTP endpoint URL (creates an http-transport server).")
-    p.add_argument("--force", action="store_true",
-                   help="Overwrite an existing file of the same name (default: refuse).")
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("plugin_path", type=Path, help="Plugin root (containing .claude-plugin/plugin.json)")
+    p.add_argument("--type", required=True, choices=sorted(VALID_TYPES), help="Component type to add")
+    p.add_argument("--name", default="", help="Component name (skills/agents/commands/mcp). Required for those types.")
+    p.add_argument(
+        "--description", default="(describe me)", help="One-line description for the new component (optional)."
+    )
+    p.add_argument("--tools", default="", help="Agent only: comma-separated `tools:` list.")
+    p.add_argument("--allowed-tools", default="", help="Command only: `allowed-tools:` value (e.g. 'Bash(uv:*)').")
+    p.add_argument("--event", default="", help="Hook only: event name (PreToolUse, Stop, SessionStart, ...).")
+    p.add_argument("--command", default="", help="Hook/MCP only: shell command to run.")
+    p.add_argument("--http-url", default="", help="MCP only: HTTP endpoint URL (creates an http-transport server).")
+    p.add_argument(
+        "--force", action="store_true", help="Overwrite an existing file of the same name (default: refuse)."
+    )
     args = p.parse_args()
 
     plugin = args.plugin_path.resolve()
     if not (plugin / ".claude-plugin" / "plugin.json").is_file():
-        print(f"  [add] {plugin}: not a plugin root (missing .claude-plugin/plugin.json)",
-              file=sys.stderr)
+        print(f"  [add] {plugin}: not a plugin root (missing .claude-plugin/plugin.json)", file=sys.stderr)
         return 1
 
     if args.type == "skill":
@@ -238,14 +225,12 @@ def main() -> int:
         if not args.name:
             print("  [add-agent] --name is required", file=sys.stderr)
             return 1
-        return add_agent(plugin, args.name, args.description, args.tools,
-                         force=args.force)
+        return add_agent(plugin, args.name, args.description, args.tools, force=args.force)
     if args.type == "command":
         if not args.name:
             print("  [add-command] --name is required", file=sys.stderr)
             return 1
-        return add_command(plugin, args.name, args.description, args.allowed_tools,
-                           force=args.force)
+        return add_command(plugin, args.name, args.description, args.allowed_tools, force=args.force)
     if args.type == "hook":
         if not args.event or not args.command:
             print("  [add-hook] --event AND --command are required", file=sys.stderr)

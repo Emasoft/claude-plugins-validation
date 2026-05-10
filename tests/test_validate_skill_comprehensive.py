@@ -746,12 +746,7 @@ class TestStringSubstitutionValidation:
         from validate_skill_comprehensive import validate_string_substitutions
 
         report = ValidationReport(skill_path="test")
-        body = (
-            "```bash\n"
-            "export REPORT_DIR=\"$MAIN_ROOT/reports/foo\"\n"
-            "```\n\n"
-            "Write reports into ${REPORT_DIR}.\n"
-        )
+        body = '```bash\nexport REPORT_DIR="$MAIN_ROOT/reports/foo"\n```\n\nWrite reports into ${REPORT_DIR}.\n'
         validate_string_substitutions(body, report)
         unknown = [r for r in report.results if "Unknown variable reference" in r.message]
         assert not unknown, f"false-positive unknown-var for REPORT_DIR: {[r.message for r in unknown]}"
@@ -761,14 +756,7 @@ class TestStringSubstitutionValidation:
         from validate_skill_comprehensive import validate_string_substitutions
 
         report = ValidationReport(skill_path="test")
-        body = (
-            "```bash\n"
-            "my_fn() {\n"
-            "  local TS=\"$(date +%s)\"\n"
-            "}\n"
-            "```\n\n"
-            "The timestamp is captured in ${TS}.\n"
-        )
+        body = '```bash\nmy_fn() {\n  local TS="$(date +%s)"\n}\n```\n\nThe timestamp is captured in ${TS}.\n'
         validate_string_substitutions(body, report)
         unknown = [r for r in report.results if "Unknown variable reference" in r.message]
         assert not unknown, f"false-positive unknown-var for TS: {[r.message for r in unknown]}"
@@ -803,7 +791,9 @@ class TestStringSubstitutionValidation:
         report = ValidationReport(skill_path="test")
         body = "Set ${MYSTERY_VAR}. Then use ${MYSTERY_VAR} twice. And again: ${MYSTERY_VAR}."
         validate_string_substitutions(body, report)
-        unknown = [r for r in report.results if "Unknown variable reference" in r.message and "MYSTERY_VAR" in r.message]
+        unknown = [
+            r for r in report.results if "Unknown variable reference" in r.message and "MYSTERY_VAR" in r.message
+        ]
         assert len(unknown) == 1, f"expected 1 warning for de-dup, got {len(unknown)}"
 
 
@@ -1350,10 +1340,7 @@ class TestFieldWhitelistDeprecated:
         frontmatter = {"name": "test", "when_to_use": "always"}
         validate_field_whitelist(frontmatter, report)
         # No finding should mention deprecation for when_to_use.
-        assert not any(
-            "Deprecated field" in r.message and "when_to_use" in r.message
-            for r in report.results
-        )
+        assert not any("Deprecated field" in r.message and "when_to_use" in r.message for r in report.results)
         # And the DEPRECATED_FIELDS set must not contain it.
         assert "when_to_use" not in DEPRECATED_FIELDS
 
@@ -1575,15 +1562,9 @@ class TestReferenceFilesValidation:
         report = ValidationReport(skill_path=str(skill_dir))
         validate_reference_files(skill_dir, report)
         # NO MINOR for the missing TOC — it's an INFO instead
-        minor_results = [
-            r for r in report.results
-            if r.level == "MINOR" and "no table of contents" in r.message
-        ]
+        minor_results = [r for r in report.results if r.level == "MINOR" and "no table of contents" in r.message]
         assert not minor_results, "Short ref files (<500 lines) must NOT emit MINOR for missing TOC"
-        info_results = [
-            r for r in report.results
-            if "without TOC" in r.message and "OK for short files" in r.message
-        ]
+        info_results = [r for r in report.results if "without TOC" in r.message and "OK for short files" in r.message]
         assert info_results, "Expected INFO advisory for the short-file TOC exemption"
 
     def test_long_reference_file_with_toc_passes(self, tmp_path):
@@ -1895,8 +1876,7 @@ class TestV170ToolCountSeverity:
         validate_allowed_tools_field(frontmatter, report)
         many_tools_results = [r for r in report.results if "Many tools permitted" in r.message]
         assert not many_tools_results, (
-            f"user-invocable: false should suppress the warning but it "
-            f"fired: {[r.message for r in many_tools_results]}"
+            f"user-invocable: false should suppress the warning but it fired: {[r.message for r in many_tools_results]}"
         )
 
     def test_user_invocable_true_does_not_suppress_warning(self):
@@ -2035,10 +2015,9 @@ class TestPass2SkillFixes:
         text = src.read_text(encoding="utf-8")
         # The wrong comment claimed "Official Claude Code spec: descriptions
         # truncated at 250 chars in skill listing" — verify it's gone.
-        assert (
-            "descriptions truncated at 250 chars in skill listing"
-            not in text
-        ), "stale false-citation comment still present on MAX_DESCRIPTION_WARN"
+        assert "descriptions truncated at 250 chars in skill listing" not in text, (
+            "stale false-citation comment still present on MAX_DESCRIPTION_WARN"
+        )
         # And the corrected comment (CPV-internal heuristic) is present.
         assert "CPV-internal readability heuristic" in text, (
             "CPV-P2-n1 fix not applied: MAX_DESCRIPTION_WARN comment should "
@@ -2063,18 +2042,11 @@ class TestPass2SkillFixes:
         )
         report = validate_skill(skill_dir)
         minor_msgs = [r.message for r in report.results if r.level == "MINOR"]
-        assert any(
-            "disableSkillShellExecution" in m
-            and "settings.json key" in m
-            for m in minor_msgs
-        ), (
-            f"CPV-P2-m6 MINOR not emitted for frontmatter misuse; got MINORs: "
-            f"{minor_msgs}"
+        assert any("disableSkillShellExecution" in m and "settings.json key" in m for m in minor_msgs), (
+            f"CPV-P2-m6 MINOR not emitted for frontmatter misuse; got MINORs: {minor_msgs}"
         )
 
-    def test_disable_skill_shell_execution_still_type_checked_as_boolean(
-        self, tmp_path
-    ):
+    def test_disable_skill_shell_execution_still_type_checked_as_boolean(self, tmp_path):
         """CPV-P2-m6: even when misplaced in frontmatter, CPV still type-checks
         `disableSkillShellExecution` as a boolean — a string value must
         produce a CRITICAL from validate_boolean_field on top of the MINOR.
@@ -2091,12 +2063,8 @@ class TestPass2SkillFixes:
         )
         report = validate_skill(skill_dir)
         criticals = [r.message for r in report.results if r.level == "CRITICAL"]
-        assert any(
-            "disableSkillShellExecution" in m and "must be a boolean" in m
-            for m in criticals
-        ), (
-            f"Type check of disableSkillShellExecution missed non-bool value; "
-            f"got CRITICALs: {criticals}"
+        assert any("disableSkillShellExecution" in m and "must be a boolean" in m for m in criticals), (
+            f"Type check of disableSkillShellExecution missed non-bool value; got CRITICALs: {criticals}"
         )
 
     def test_is_self_pointing_skill_path_positives(self):

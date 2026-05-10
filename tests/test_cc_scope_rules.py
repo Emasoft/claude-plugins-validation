@@ -155,11 +155,13 @@ class TestTaxonomyConstants:
     def test_v2_1_119_pr_url_template_in_known_settings(self) -> None:
         """prUrlTemplate (v2.1.119) is a recognized top-level settings key."""
         from cc_scope_rules import KNOWN_SETTINGS_KEYS  # noqa: PLC0415
+
         assert "prUrlTemplate" in KNOWN_SETTINGS_KEYS
 
     def test_v2_1_118_wsl_inherits_in_managed_only(self) -> None:
         """wslInheritsWindowsSettings (v2.1.118) is a managed-only policy key."""
         from cc_scope_rules import KNOWN_SETTINGS_KEYS  # noqa: PLC0415
+
         assert "wslInheritsWindowsSettings" in MANAGED_ONLY_KEYS
         assert "wslInheritsWindowsSettings" in KNOWN_SETTINGS_KEYS
 
@@ -746,9 +748,7 @@ class TestBomHandling:
         result = safe_load_jsonc(f, 1024)
         assert result == {"model": "opus"}
 
-    def test_safe_load_jsonc_parses_jsonc_with_bom_and_comments(
-        self, tmp_path: Path
-    ) -> None:
+    def test_safe_load_jsonc_parses_jsonc_with_bom_and_comments(self, tmp_path: Path) -> None:
         """BOM + JSONC comments + trailing commas all parse cleanly."""
         payload = b'\xef\xbb\xbf{\n  // a comment\n  "k": "v",\n}\n'
         f = tmp_path / "settings.json"
@@ -765,9 +765,7 @@ class TestBomHandling:
 class TestSymlinkEscapeClassification:
     """classify_folder_scope / classify_file_scope reject symlink escapes."""
 
-    def test_folder_symlink_outside_repo_classifies_missing(
-        self, git_repo: Path, tmp_path: Path
-    ) -> None:
+    def test_folder_symlink_outside_repo_classifies_missing(self, git_repo: Path, tmp_path: Path) -> None:
         """A folder symlink to outside the repo classifies as 'missing'."""
         outside = tmp_path / "outside-dir"
         outside.mkdir()
@@ -778,9 +776,7 @@ class TestSymlinkEscapeClassification:
         scope = classify_folder_scope(link, git_repo)
         assert scope == "missing"
 
-    def test_file_symlink_outside_repo_classifies_missing(
-        self, git_repo: Path, tmp_path: Path
-    ) -> None:
+    def test_file_symlink_outside_repo_classifies_missing(self, git_repo: Path, tmp_path: Path) -> None:
         """A file symlink to outside the repo classifies as 'missing'."""
         outside = tmp_path / "outside.txt"
         outside.write_text("secret\n", encoding="utf-8")
@@ -790,14 +786,10 @@ class TestSymlinkEscapeClassification:
         scope = classify_file_scope(link, git_repo)
         assert scope == "missing"
 
-    def test_normal_folder_inside_repo_still_classified_correctly(
-        self, git_repo: Path
-    ) -> None:
+    def test_normal_folder_inside_repo_still_classified_correctly(self, git_repo: Path) -> None:
         """Regression guard — plain folders (no symlinks) still work."""
         (git_repo / ".claude" / "agents").mkdir(parents=True)
-        (git_repo / ".claude" / "agents" / "x.md").write_text(
-            "---\nname: x\n---\n", encoding="utf-8"
-        )
+        (git_repo / ".claude" / "agents" / "x.md").write_text("---\nname: x\n---\n", encoding="utf-8")
         _git(git_repo, "add", ".claude/agents/x.md")
         _git(git_repo, "commit", "-m", "add agent", "--quiet")
         scope = classify_folder_scope(git_repo / ".claude" / "agents", git_repo)

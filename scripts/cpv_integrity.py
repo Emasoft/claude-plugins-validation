@@ -12,6 +12,7 @@ using `subprocess.run([..., "scripts/cpv_integrity.py"])` or imports
 written before the rename landed) keeps working for one release,
 giving downstream code time to migrate.
 """
+
 from __future__ import annotations
 
 import warnings as _w
@@ -59,4 +60,5 @@ __all__ = [
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(main())

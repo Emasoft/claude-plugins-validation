@@ -32,6 +32,7 @@ Idempotent state machine (per TRDD-793ac32a §2.5):
 State checkpointed at `<plugin_root>/.cpv-strip-state.json` so a
 crashed run can resume from the last successful step.
 """
+
 from __future__ import annotations
 
 import json
@@ -58,10 +59,19 @@ from cpv_network_resilience import gh_with_retry, git_with_retry  # noqa: E402
 _SAFE_SRC_RE = re.compile(r"^[a-z][a-z0-9_-]*(/[a-z][a-z0-9_-]*)*/?$")
 
 # Reserved paths that may NEVER be extracted (would brick the plugin).
-_RESERVED_SRCS: frozenset[str] = frozenset({
-    ".git", ".gitmodules", ".claude-plugin", "scripts",
-    "agents", "commands", "skills", "hooks", "templates",
-})
+_RESERVED_SRCS: frozenset[str] = frozenset(
+    {
+        ".git",
+        ".gitmodules",
+        ".claude-plugin",
+        "scripts",
+        "agents",
+        "commands",
+        "skills",
+        "hooks",
+        "templates",
+    }
+)
 
 # Default extraction targets (per TRDD-793ac32a §4.2).
 # PSS-style default: ONE submodule per plugin. tests/ is typically the
@@ -75,6 +85,7 @@ STATE_FILENAME: str = ".cpv-strip-state.json"
 
 class StripState(str, Enum):
     """Idempotent state-machine states (per TRDD-793ac32a §2.5)."""
+
     INIT = "INIT"
     REPO_VERIFIED = "REPO_VERIFIED"
     REPO_CREATED = "REPO_CREATED"
@@ -106,6 +117,7 @@ class StripError(RuntimeError):
     STRIP-Exxx for path errors, STRIP-Gxxx for gh-repo errors,
     STRIP-Hxxx for history errors).
     """
+
     def __init__(self, code: str, message: str) -> None:
         super().__init__(f"[{code}] {message}")
         self.code = code
@@ -118,9 +130,10 @@ class StripError(RuntimeError):
 @dataclass
 class ExtractTarget:
     """A single `cpv.strip.extract[]` entry, normalised."""
-    src: str                     # "tests/" — relative to plugin_root
-    submodule: str               # "Emasoft/cpv-tests" — owner/repo
-    submodule_path: str          # "dev/tests/" — where it lands in plugin_root
+
+    src: str  # "tests/" — relative to plugin_root
+    submodule: str  # "Emasoft/cpv-tests" — owner/repo
+    submodule_path: str  # "dev/tests/" — where it lands in plugin_root
     submodule_commit_sha: str = ""  # empty if not yet pinned
 
     @property
@@ -131,6 +144,7 @@ class ExtractTarget:
 @dataclass
 class StripPlan:
     """Plan for a strip operation. Built by `build_plan`, consumed by `apply_plan`."""
+
     plugin_root: Path
     targets: list[ExtractTarget]
     keep_in_main: list[str] = field(default_factory=list)
@@ -151,28 +165,33 @@ def validate_src_path(src: str, plugin_root: Path) -> Path:
     if not src:
         raise StripError("STRIP-E003", "src path is empty")
     if not _SAFE_SRC_RE.match(src):
-        raise StripError("STRIP-E003", (
-            f"src '{src}' does not match safe-name pattern "
-            f"(lowercase + alnum + hyphen + underscore + slash; no `..` or `/` prefix)"
-        ))
+        raise StripError(
+            "STRIP-E003",
+            (
+                f"src '{src}' does not match safe-name pattern "
+                f"(lowercase + alnum + hyphen + underscore + slash; no `..` or `/` prefix)"
+            ),
+        )
     if src.rstrip("/") in _RESERVED_SRCS:
-        raise StripError("STRIP-E006", (
-            f"src '{src}' is a reserved path (would brick the runtime plugin); "
-            f"reserved set = {sorted(_RESERVED_SRCS)}"
-        ))
+        raise StripError(
+            "STRIP-E006",
+            (
+                f"src '{src}' is a reserved path (would brick the runtime plugin); "
+                f"reserved set = {sorted(_RESERVED_SRCS)}"
+            ),
+        )
 
     repo_resolved = plugin_root.resolve()
-    raw_candidate = plugin_root / src   # NOT resolved — keeps symlinks intact
+    raw_candidate = plugin_root / src  # NOT resolved — keeps symlinks intact
     candidate = raw_candidate.resolve()
 
     # Strict subpath check (resolved form must stay inside resolved root).
     try:
         candidate.relative_to(repo_resolved)
     except ValueError as e:
-        raise StripError("STRIP-E001", (
-            f"src '{src}' resolves to '{candidate}' which is OUTSIDE the "
-            f"plugin root '{repo_resolved}'"
-        )) from e
+        raise StripError(
+            "STRIP-E001", (f"src '{src}' resolves to '{candidate}' which is OUTSIDE the plugin root '{repo_resolved}'")
+        ) from e
 
     # Symlink check — walk the UNRESOLVED path's ancestors AND the leaf.
     # We catch:
@@ -183,11 +202,14 @@ def validate_src_path(src: str, plugin_root: Path) -> Path:
     cursor = raw_candidate
     while True:
         if cursor.is_symlink():
-            raise StripError("STRIP-E002", (
-                f"src '{src}' traverses a symlink at '{cursor}'. "
-                f"Symlinks are rejected for safety (the symlink target is not "
-                f"part of the plugin's working tree)."
-            ))
+            raise StripError(
+                "STRIP-E002",
+                (
+                    f"src '{src}' traverses a symlink at '{cursor}'. "
+                    f"Symlinks are rejected for safety (the symlink target is not "
+                    f"part of the plugin's working tree)."
+                ),
+            )
         if cursor == plugin_root or cursor.parent == cursor:
             break
         cursor = cursor.parent
@@ -217,95 +239,136 @@ def check_working_tree_safe(
     # 1. Is this a git working tree at all?
     res = subprocess.run(
         ["git", "-C", str(plugin_root), "rev-parse", "--is-inside-work-tree"],
-        capture_output=True, text=True, timeout=10, check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
     )
     if res.returncode != 0 or res.stdout.strip() != "true":
-        raise StripError("STRIP-W001", (
-            f"plugin_root '{plugin_root}' is not a git working tree. "
-            f"`cpv strip-dev-parts` requires a git repo (it commits the "
-            f".gitmodules + content removal atomically)."
-        ))
+        raise StripError(
+            "STRIP-W001",
+            (
+                f"plugin_root '{plugin_root}' is not a git working tree. "
+                f"`cpv strip-dev-parts` requires a git repo (it commits the "
+                f".gitmodules + content removal atomically)."
+            ),
+        )
 
     # 2. Working tree must be clean.
     res = subprocess.run(
         ["git", "-C", str(plugin_root), "status", "--porcelain"],
-        capture_output=True, text=True, timeout=15, check=False,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
     )
     porcelain = (res.stdout or "").strip()
     if porcelain:
-        raise StripError("STRIP-W002", (
-            f"plugin_root '{plugin_root}' has uncommitted changes:\n{porcelain[:600]}\n"
-            f"Commit or stash them before running cpv strip-dev-parts."
-        ))
+        raise StripError(
+            "STRIP-W002",
+            (
+                f"plugin_root '{plugin_root}' has uncommitted changes:\n{porcelain[:600]}\n"
+                f"Commit or stash them before running cpv strip-dev-parts."
+            ),
+        )
 
     # 3. Refuse to operate inside a linked git worktree.
     cd_res = subprocess.run(
         ["git", "-C", str(plugin_root), "rev-parse", "--git-dir"],
-        capture_output=True, text=True, timeout=5, check=False,
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
     )
     cmn_res = subprocess.run(
         ["git", "-C", str(plugin_root), "rev-parse", "--git-common-dir"],
-        capture_output=True, text=True, timeout=5, check=False,
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
     )
     if cd_res.returncode == 0 and cmn_res.returncode == 0:
         gd = cd_res.stdout.strip()
         gcd = cmn_res.stdout.strip()
         if gd != gcd:
-            raise StripError("STRIP-W003", (
-                f"plugin_root '{plugin_root}' is a linked git worktree "
-                f"(git-dir={gd!r}, git-common-dir={gcd!r}). cpv strip-dev-parts "
-                f"must run from the main checkout."
-            ))
+            raise StripError(
+                "STRIP-W003",
+                (
+                    f"plugin_root '{plugin_root}' is a linked git worktree "
+                    f"(git-dir={gd!r}, git-common-dir={gcd!r}). cpv strip-dev-parts "
+                    f"must run from the main checkout."
+                ),
+            )
 
     # 4. Stashes present → could lose work.
     res = subprocess.run(
         ["git", "-C", str(plugin_root), "stash", "list"],
-        capture_output=True, text=True, timeout=5, check=False,
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
     )
     if res.returncode == 0 and res.stdout.strip():
-        raise StripError("STRIP-W004", (
-            f"plugin_root has {len(res.stdout.splitlines())} stash entries. "
-            f"Pop or drop them before running cpv strip-dev-parts — the "
-            f"strip rewrites paths and could lose stashed work."
-        ))
+        raise StripError(
+            "STRIP-W004",
+            (
+                f"plugin_root has {len(res.stdout.splitlines())} stash entries. "
+                f"Pop or drop them before running cpv strip-dev-parts — the "
+                f"strip rewrites paths and could lose stashed work."
+            ),
+        )
 
     # 5. Untracked files inside extraction targets.
     if not test_mode:
         for t in targets:
             res = subprocess.run(
-                ["git", "-C", str(plugin_root), "ls-files",
-                 "--others", "--exclude-standard", "--", t.src],
-                capture_output=True, text=True, timeout=15, check=False,
+                ["git", "-C", str(plugin_root), "ls-files", "--others", "--exclude-standard", "--", t.src],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
             )
             if res.returncode == 0 and res.stdout.strip():
-                raise StripError("STRIP-W005", (
-                    f"untracked files inside extraction target '{t.src}':\n"
-                    f"{res.stdout.strip()[:400]}\n"
-                    f"Add+commit OR delete them before running cpv strip-dev-parts."
-                ))
+                raise StripError(
+                    "STRIP-W005",
+                    (
+                        f"untracked files inside extraction target '{t.src}':\n"
+                        f"{res.stdout.strip()[:400]}\n"
+                        f"Add+commit OR delete them before running cpv strip-dev-parts."
+                    ),
+                )
 
     # 6. Unmerged paths (in-progress merge).
     res = subprocess.run(
         ["git", "-C", str(plugin_root), "ls-files", "-u"],
-        capture_output=True, text=True, timeout=5, check=False,
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
     )
     if res.returncode == 0 and res.stdout.strip():
-        raise StripError("STRIP-W006", (
-            "plugin_root has unmerged paths (in-progress merge). "
-            "Resolve before running cpv strip-dev-parts."
-        ))
+        raise StripError(
+            "STRIP-W006",
+            ("plugin_root has unmerged paths (in-progress merge). Resolve before running cpv strip-dev-parts."),
+        )
 
     # 7. HEAD detached.
     res = subprocess.run(
         ["git", "-C", str(plugin_root), "symbolic-ref", "HEAD"],
-        capture_output=True, text=True, timeout=5, check=False,
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
     )
     if res.returncode != 0:
-        raise StripError("STRIP-W007", (
-            "plugin_root has detached HEAD. cpv strip-dev-parts must "
-            "run from a branch (the strip commits + needs to push to "
-            "the branch's remote tracking ref)."
-        ))
+        raise StripError(
+            "STRIP-W007",
+            (
+                "plugin_root has detached HEAD. cpv strip-dev-parts must "
+                "run from a branch (the strip commits + needs to push to "
+                "the branch's remote tracking ref)."
+            ),
+        )
 
 
 # ── State checkpointing ───────────────────────────────────────────────────────
@@ -392,10 +455,9 @@ def build_plan(
     """
     pj_path = plugin_root / ".claude-plugin" / "plugin.json"
     if not pj_path.is_file():
-        raise StripError("STRIP-E007", (
-            f"plugin.json not found at {pj_path}. "
-            f"cpv strip-dev-parts requires a Claude Code plugin."
-        ))
+        raise StripError(
+            "STRIP-E007", (f"plugin.json not found at {pj_path}. cpv strip-dev-parts requires a Claude Code plugin.")
+        )
     pj = json.loads(pj_path.read_text(encoding="utf-8"))
     plugin_name = str(pj.get("name", "")) or "plugin"
     repo_field = pj.get("repository") or pj.get("homepage") or ""
@@ -407,10 +469,7 @@ def build_plan(
 
     # Targets — explicit list from CLI overrides the plugin.json list.
     if explicit_targets:
-        targets = [
-            normalise_target(s, plugin_owner, plugin_name)
-            for s in explicit_targets
-        ]
+        targets = [normalise_target(s, plugin_owner, plugin_name) for s in explicit_targets]
     else:
         raw_targets = strip.get("extract", [])
         if not isinstance(raw_targets, list):
@@ -426,21 +485,20 @@ def build_plan(
                     targets.append(normalise_target(src, plugin_owner, plugin_name))
                 else:
                     bare = src.rstrip("/").split("/")[-1]
-                    targets.append(ExtractTarget(
-                        src=src.rstrip("/") + "/",
-                        submodule=submodule,
-                        submodule_path=str(entry.get("submodule_path") or f"dev/{bare}/"),
-                        submodule_commit_sha=str(entry.get("submodule_commit_sha", "")),
-                    ))
+                    targets.append(
+                        ExtractTarget(
+                            src=src.rstrip("/") + "/",
+                            submodule=submodule,
+                            submodule_path=str(entry.get("submodule_path") or f"dev/{bare}/"),
+                            submodule_commit_sha=str(entry.get("submodule_commit_sha", "")),
+                        )
+                    )
             elif isinstance(entry, str):
                 targets.append(normalise_target(entry, plugin_owner, plugin_name))
 
     if not targets:
         # Apply defaults if nothing configured AND no explicit list.
-        targets = [
-            normalise_target(s, plugin_owner, plugin_name)
-            for s in DEFAULT_EXTRACT_TARGETS
-        ]
+        targets = [normalise_target(s, plugin_owner, plugin_name) for s in DEFAULT_EXTRACT_TARGETS]
 
     # Validate every src path before returning.
     for t in targets:
@@ -474,13 +532,15 @@ def gh_repo_exists_and_populated(submodule: str) -> tuple[bool, bool]:
     """
     gh_bin = shutil.which("gh")
     if gh_bin is None:
-        raise StripError("STRIP-G003", (
-            "gh CLI not installed; required for repo creation. "
-            "Install via `brew install gh`."
-        ))
+        raise StripError(
+            "STRIP-G003", ("gh CLI not installed; required for repo creation. Install via `brew install gh`.")
+        )
     res = subprocess.run(
         [gh_bin, "repo", "view", submodule, "--json", "name,defaultBranchRef,isEmpty"],
-        capture_output=True, text=True, timeout=20, check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
     )
     if res.returncode != 0:
         # 404 or other non-zero → repo doesn't exist or no perm.
@@ -514,10 +574,7 @@ def summarise_plan(plan: StripPlan) -> str:
         lines.append(f"    - {kp}")
     lines.append(f"  extract targets ({len(plan.targets)}):")
     for t in plan.targets:
-        lines.append(
-            f"    - src={t.src!r:20s} → submodule={t.submodule!r} "
-            f"path={t.submodule_path!r}"
-        )
+        lines.append(f"    - src={t.src!r:20s} → submodule={t.submodule!r} path={t.submodule_path!r}")
         # Heuristic recommendation — surface but never auto-skip targets.
         # The user's explicit cpv.strip.extract[] config wins; this is just
         # advice when the dry-run plan looks like a waste of effort.
@@ -526,16 +583,9 @@ def summarise_plan(plan: StripPlan) -> str:
         lines.append(f"      {marker} {reason}")
     lines.append("Steps that would execute (in order):")
     for i, t in enumerate(plan.targets, start=1):
-        lines.append(
-            f"  [{i}] gh repo create {t.submodule} --private  "
-            f"(if it doesn't already exist + is empty)"
-        )
-        lines.append(
-            f"      git clone --no-local <plugin> /tmp/cpv-strip-{uuid.uuid4().hex[:8]}/extract"
-        )
-        lines.append(
-            f"      git filter-repo --force --subdirectory-filter {t.src} --refs main"
-        )
+        lines.append(f"  [{i}] gh repo create {t.submodule} --private  (if it doesn't already exist + is empty)")
+        lines.append(f"      git clone --no-local <plugin> /tmp/cpv-strip-{uuid.uuid4().hex[:8]}/extract")
+        lines.append(f"      git filter-repo --force --subdirectory-filter {t.src} --refs main")
         lines.append(f"      git push -u origin main  # to {t.url}")
         lines.append(f"      git submodule add {t.url} {t.submodule_path}")
     lines.append("  [N+1] git commit -m 'chore: extract dev parts to submodules (cpv strip-dev-parts)'")
@@ -555,8 +605,10 @@ NEEDS_STRIP_BYTES_MIN: int = 256 * 1024
 NEEDS_STRIP_FILES_MIN: int = 20
 
 
-def should_strip_target(target: ExtractTarget, plugin_root: Path,
-                        ) -> tuple[bool, str]:
+def should_strip_target(
+    target: ExtractTarget,
+    plugin_root: Path,
+) -> tuple[bool, str]:
     """Return (worth-stripping, reason).
 
     Heuristic: a target is worth stripping ONLY if BOTH thresholds are
@@ -640,8 +692,15 @@ def _ensure_repo_exists(target: ExtractTarget, plugin_name: str) -> None:
         raise StripError("STRIP-G003", "gh CLI not installed")
     print(f"  [create] gh repo create {target.submodule} --private")
     gh_with_retry(
-        [gh_bin, "repo", "create", target.submodule, "--private",
-         "--description", f"Dev artefacts extracted from {plugin_name} (TRDD-793ac32a)"],
+        [
+            gh_bin,
+            "repo",
+            "create",
+            target.submodule,
+            "--private",
+            "--description",
+            f"Dev artefacts extracted from {plugin_name} (TRDD-793ac32a)",
+        ],
         check=True,
     )
 
@@ -657,7 +716,10 @@ def _gh_remote_head_sha(submodule: str) -> str | None:
         return None
     res = subprocess.run(
         [gh_bin, "api", f"repos/{submodule}/commits", "--jq", ".[0].sha"],
-        capture_output=True, text=True, timeout=20, check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
     )
     if res.returncode != 0:
         return None
@@ -665,8 +727,7 @@ def _gh_remote_head_sha(submodule: str) -> str | None:
     return sha if sha else None
 
 
-def _filter_and_push(target: ExtractTarget, plugin_root: Path,
-                     tmp_root: Path) -> None:
+def _filter_and_push(target: ExtractTarget, plugin_root: Path, tmp_root: Path) -> None:
     """Clone main repo to tmpdir, filter-repo to keep only target.src,
     push to target.url. Uses --no-local so filter-repo refuses to operate
     on the original repo. Push is retry-wrapped against transient hiccups.
@@ -675,7 +736,8 @@ def _filter_and_push(target: ExtractTarget, plugin_root: Path,
     print(f"  [clone] git clone --no-local {plugin_root} {clone}")
     git_with_retry(
         ["git", "clone", "--no-local", str(plugin_root), str(clone)],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
     print(f"  [filter] git filter-repo --subdirectory-filter {target.src}")
     # filter-repo is a single-shot operation, not network-dependent. No retry.
@@ -683,26 +745,33 @@ def _filter_and_push(target: ExtractTarget, plugin_root: Path,
     # stderr to avoid pipe-buffer deadlock on multi-GB repos that emit
     # >64 KB of progress output.
     subprocess.run(
-        ["git", "-C", str(clone), "filter-repo", "--force",
-         "--subdirectory-filter", target.src.rstrip("/")],
-        check=True, capture_output=True, timeout=1800,
+        ["git", "-C", str(clone), "filter-repo", "--force", "--subdirectory-filter", target.src.rstrip("/")],
+        check=True,
+        capture_output=True,
+        timeout=1800,
     )
     # filter-repo deletes 'origin' for safety. Re-add it pointing at the new repo.
     print(f"  [remote] origin → {target.url}")
     subprocess.run(
         ["git", "-C", str(clone), "remote", "add", "origin", target.url],
-        check=True, capture_output=True, timeout=30,
+        check=True,
+        capture_output=True,
+        timeout=30,
     )
     # Detect default branch name in the cloned repo (could be main or master).
     branch_res = subprocess.run(
         ["git", "-C", str(clone), "rev-parse", "--abbrev-ref", "HEAD"],
-        check=True, capture_output=True, text=True, timeout=30,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     branch = branch_res.stdout.strip() or "main"
     print(f"  [push] git push -u origin {branch} (force: first push to fresh repo)")
     git_with_retry(
         ["git", "-C", str(clone), "push", "-u", "origin", branch, "--force"],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
 
 
@@ -718,7 +787,9 @@ def _replace_with_submodule(target: ExtractTarget, plugin_root: Path) -> None:
     print(f"  [git rm] {target.src}")
     subprocess.run(
         ["git", "-C", str(plugin_root), "rm", "-rf", target.src],
-        check=True, capture_output=True, timeout=60,
+        check=True,
+        capture_output=True,
+        timeout=60,
     )
     # `git rm -rf` removes the directory entry but if untracked files
     # remained inside (gitignored), they may persist. The working-tree
@@ -728,9 +799,10 @@ def _replace_with_submodule(target: ExtractTarget, plugin_root: Path) -> None:
         shutil.rmtree(src_dir)
     print(f"  [submodule add] {target.url} {sub_path}")
     subprocess.run(
-        ["git", "-C", str(plugin_root), "submodule", "add", "--force",
-         target.url, sub_path],
-        check=True, capture_output=True, timeout=300,
+        ["git", "-C", str(plugin_root), "submodule", "add", "--force", target.url, sub_path],
+        check=True,
+        capture_output=True,
+        timeout=300,
     )
 
 
@@ -766,47 +838,66 @@ def apply_plan(plan: StripPlan) -> None:
             # Reset state markers when moving past saved target.
             cur_state = saved_state if idx == saved_idx else StripState.INIT.value
             saved_state = StripState.INIT.value  # only the resumed target uses the saved value
-            saved_idx = idx                       # keep idx aligned for next iter
+            saved_idx = idx  # keep idx aligned for next iter
 
             # Step A: ensure repo exists (idempotent).
-            if state_progress({"current_state": cur_state}) < state_progress({"current_state": StripState.REPO_VERIFIED.value}):
+            if state_progress({"current_state": cur_state}) < state_progress(
+                {"current_state": StripState.REPO_VERIFIED.value}
+            ):
                 save_state(plan.plugin_root, {"current_target_index": idx, "current_state": StripState.INIT.value})
                 _ensure_repo_exists(target, plugin_name)
-                save_state(plan.plugin_root, {"current_target_index": idx, "current_state": StripState.REPO_VERIFIED.value})
+                save_state(
+                    plan.plugin_root, {"current_target_index": idx, "current_state": StripState.REPO_VERIFIED.value}
+                )
                 cur_state = StripState.REPO_VERIFIED.value
 
             # Step B: clone + filter-repo + push.
-            if state_progress({"current_state": cur_state}) < state_progress({"current_state": StripState.CONTENT_PUSHED.value}):
+            if state_progress({"current_state": cur_state}) < state_progress(
+                {"current_state": StripState.CONTENT_PUSHED.value}
+            ):
                 tmp = Path(tempfile.mkdtemp(prefix=f"cpv-strip-{uuid.uuid4().hex[:8]}-"))
                 tmp_dirs.append(tmp)
                 _filter_and_push(target, plan.plugin_root, tmp)
-                save_state(plan.plugin_root, {"current_target_index": idx, "current_state": StripState.CONTENT_PUSHED.value})
+                save_state(
+                    plan.plugin_root, {"current_target_index": idx, "current_state": StripState.CONTENT_PUSHED.value}
+                )
                 cur_state = StripState.CONTENT_PUSHED.value
 
             # Step C: git rm + submodule add.
-            if state_progress({"current_state": cur_state}) < state_progress({"current_state": StripState.SUBMODULE_ADDED.value}):
+            if state_progress({"current_state": cur_state}) < state_progress(
+                {"current_state": StripState.SUBMODULE_ADDED.value}
+            ):
                 _replace_with_submodule(target, plan.plugin_root)
-                save_state(plan.plugin_root, {"current_target_index": idx, "current_state": StripState.SUBMODULE_ADDED.value})
+                save_state(
+                    plan.plugin_root, {"current_target_index": idx, "current_state": StripState.SUBMODULE_ADDED.value}
+                )
 
         # Step D: final commit (only if there are submodule changes staged).
         commit_msg = "chore: extract dev parts to submodules (cpv strip-dev-parts)"
         print(f"\n[commit] git commit -m '{commit_msg}'")
         diff_check = subprocess.run(
             ["git", "-C", str(plan.plugin_root), "diff", "--cached", "--name-only"],
-            capture_output=True, text=True, check=False, timeout=30,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
         )
         if not diff_check.stdout.strip():
             print("  (nothing staged — skipping commit)")
         else:
             subprocess.run(
                 ["git", "-C", str(plan.plugin_root), "commit", "-m", commit_msg],
-                check=True, timeout=60,
+                check=True,
+                timeout=60,
             )
 
-        save_state(plan.plugin_root, {
-            "current_target_index": len(plan.targets),
-            "current_state": StripState.DONE.value,
-        })
+        save_state(
+            plan.plugin_root,
+            {
+                "current_target_index": len(plan.targets),
+                "current_state": StripState.DONE.value,
+            },
+        )
         print("\n✓ Strip complete. Push the parent commit to make it visible.")
         # Clear state on full success so the next run starts fresh.
         clear_state(plan.plugin_root)
@@ -829,11 +920,9 @@ def main(argv: list[str] | None = None) -> int:
     if not args or args[0] in ("-h", "--help"):
         print(__doc__)
         print("\nUsage:")
-        print("  cpv_strip_dev.py <plugin-path> --dry-run "
-              "[--extract <src>...]")
+        print("  cpv_strip_dev.py <plugin-path> --dry-run [--extract <src>...]")
         print("  cpv_strip_dev.py <plugin-path> --check")
-        print("  cpv_strip_dev.py <plugin-path> --auto "
-              "[--extract <src>...]")
+        print("  cpv_strip_dev.py <plugin-path> --auto [--extract <src>...]")
         return 0
 
     plugin_root = Path(args[0]).resolve()
@@ -864,8 +953,7 @@ def main(argv: list[str] | None = None) -> int:
         offending = [t for t in plan.targets if (plugin_root / t.src).is_dir()]
         if offending:
             print(
-                f"FAIL: dev parts still in MAIN repo: "
-                f"{[t.src for t in offending]}",
+                f"FAIL: dev parts still in MAIN repo: {[t.src for t in offending]}",
                 file=sys.stderr,
             )
             return 1
@@ -877,8 +965,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             check_working_tree_safe(plugin_root, plan.targets)
         except StripError as e:
-            print(f"\nNOTE: working tree is NOT in a state where the plan "
-                  f"could execute: {e}", file=sys.stderr)
+            print(f"\nNOTE: working tree is NOT in a state where the plan could execute: {e}", file=sys.stderr)
         return 0
 
     # Live execution path. Requires --auto (no interactive mode in this RC).
@@ -895,8 +982,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         check_working_tree_safe(plugin_root, plan.targets)
     except StripError as e:
-        print(f"ABORT: working tree not safe for live execution: {e}",
-              file=sys.stderr)
+        print(f"ABORT: working tree not safe for live execution: {e}", file=sys.stderr)
         return 1
 
     try:

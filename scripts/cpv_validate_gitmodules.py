@@ -36,6 +36,7 @@ Per TRDD-793ac32a §9 risk #1: submodule URL injection is the #1
 CRITICAL risk for the strip-dev-parts feature. Skipping this validator
 is FORBIDDEN — `cpv strip-dev-parts` refuses to operate without it.
 """
+
 from __future__ import annotations
 
 import fnmatch
@@ -84,6 +85,7 @@ class GitmodulesFinding:
     Severity is one of `WARNING` (recoverable / advisory) or `CRITICAL`
     (publish-blocking).
     """
+
     severity: str
     code: str
     submodule_name: str
@@ -104,7 +106,10 @@ def _read_remote_owner(plugin_root: Path) -> str | None:
     try:
         result = subprocess.run(
             ["git", "-C", str(plugin_root), "config", "--get", "remote.origin.url"],
-            capture_output=True, text=True, timeout=10, check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -190,10 +195,7 @@ def _validate_url_shape(url: str) -> tuple[bool, str]:
     if scheme is None:
         return False, "URL has no recognised scheme"
     if scheme not in _ALLOWED_SCHEMES:
-        return False, (
-            f"URL scheme `{scheme}` is not allowed (only "
-            f"{sorted(_ALLOWED_SCHEMES)} permitted)"
-        )
+        return False, (f"URL scheme `{scheme}` is not allowed (only {sorted(_ALLOWED_SCHEMES)} permitted)")
     return True, ""
 
 
@@ -216,17 +218,31 @@ def parse_gitmodules_urls(
     try:
         urls_result = subprocess.run(
             [
-                "git", "config", "--file", str(gm),
-                "--get-regexp", r"^submodule\..*\.url$",
+                "git",
+                "config",
+                "--file",
+                str(gm),
+                "--get-regexp",
+                r"^submodule\..*\.url$",
             ],
-            capture_output=True, text=True, timeout=10, check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
         )
         paths_result = subprocess.run(
             [
-                "git", "config", "--file", str(gm),
-                "--get-regexp", r"^submodule\..*\.path$",
+                "git",
+                "config",
+                "--file",
+                str(gm),
+                "--get-regexp",
+                r"^submodule\..*\.path$",
             ],
-            capture_output=True, text=True, timeout=10, check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return []
@@ -244,10 +260,7 @@ def parse_gitmodules_urls(
         m = re.match(r"^submodule\.(.+)\.path\s+(.+)$", line)
         if m:
             name_to_path[m.group(1)] = m.group(2)
-    return [
-        (name, url, name_to_path.get(name, ""))
-        for name, url in sorted(name_to_url.items())
-    ]
+    return [(name, url, name_to_path.get(name, "")) for name, url in sorted(name_to_url.items())]
 
 
 def validate_gitmodules(plugin_root: Path) -> list[GitmodulesFinding]:
@@ -295,27 +308,33 @@ def validate_gitmodules(plugin_root: Path) -> list[GitmodulesFinding]:
         # 1. URL-shape check.
         ok, reason = _validate_url_shape(url)
         if not ok:
-            findings.append(GitmodulesFinding(
-                severity="CRITICAL",
-                code="STRIP-G010",
-                submodule_name=name, url=url, path=path,
-                message=f"Submodule URL '{url}' rejected: {reason}",
-            ))
+            findings.append(
+                GitmodulesFinding(
+                    severity="CRITICAL",
+                    code="STRIP-G010",
+                    submodule_name=name,
+                    url=url,
+                    path=path,
+                    message=f"Submodule URL '{url}' rejected: {reason}",
+                )
+            )
             continue
 
         # 2. Allowlist match.
         if explicit_allowlist is not None:
             if not _matches_allowlist(url, explicit_allowlist):
-                findings.append(GitmodulesFinding(
-                    severity="CRITICAL",
-                    code="STRIP-G011",
-                    submodule_name=name, url=url, path=path,
-                    message=(
-                        f"Submodule URL '{url}' is not in "
-                        f"`cpv.strip.allowed_submodule_urls` "
-                        f"({explicit_allowlist})"
-                    ),
-                ))
+                findings.append(
+                    GitmodulesFinding(
+                        severity="CRITICAL",
+                        code="STRIP-G011",
+                        submodule_name=name,
+                        url=url,
+                        path=path,
+                        message=(
+                            f"Submodule URL '{url}' is not in `cpv.strip.allowed_submodule_urls` ({explicit_allowlist})"
+                        ),
+                    )
+                )
                 continue
         elif require_allowlist:
             # Default rule: parent owner or Emasoft.
@@ -324,45 +343,57 @@ def validate_gitmodules(plugin_root: Path) -> list[GitmodulesFinding]:
                 parent_owner_loaded = True
             url_owner = _owner_of(url)
             if url_owner is None:
-                findings.append(GitmodulesFinding(
-                    severity="CRITICAL",
-                    code="STRIP-G012",
-                    submodule_name=name, url=url, path=path,
-                    message=(
-                        f"Submodule URL '{url}' is not GitHub-shaped; the "
-                        "default allowlist rule (same-owner OR Emasoft) "
-                        "cannot evaluate it. Add an explicit "
-                        "`cpv.strip.allowed_submodule_urls` entry, OR set "
-                        "`require_url_allowlist=false` to opt out."
-                    ),
-                ))
+                findings.append(
+                    GitmodulesFinding(
+                        severity="CRITICAL",
+                        code="STRIP-G012",
+                        submodule_name=name,
+                        url=url,
+                        path=path,
+                        message=(
+                            f"Submodule URL '{url}' is not GitHub-shaped; the "
+                            "default allowlist rule (same-owner OR Emasoft) "
+                            "cannot evaluate it. Add an explicit "
+                            "`cpv.strip.allowed_submodule_urls` entry, OR set "
+                            "`require_url_allowlist=false` to opt out."
+                        ),
+                    )
+                )
                 continue
             if url_owner != parent_owner and url_owner != _DEFAULT_TRANSITIONAL_OWNER:
-                findings.append(GitmodulesFinding(
-                    severity="CRITICAL",
-                    code="STRIP-G013",
-                    submodule_name=name, url=url, path=path,
-                    message=(
-                        f"Submodule URL '{url}' owner '{url_owner}' is not "
-                        f"the parent owner ('{parent_owner}') and not the "
-                        f"transitional default ('{_DEFAULT_TRANSITIONAL_OWNER}'). "
-                        f"Add it to `cpv.strip.allowed_submodule_urls`."
-                    ),
-                ))
+                findings.append(
+                    GitmodulesFinding(
+                        severity="CRITICAL",
+                        code="STRIP-G013",
+                        submodule_name=name,
+                        url=url,
+                        path=path,
+                        message=(
+                            f"Submodule URL '{url}' owner '{url_owner}' is not "
+                            f"the parent owner ('{parent_owner}') and not the "
+                            f"transitional default ('{_DEFAULT_TRANSITIONAL_OWNER}'). "
+                            f"Add it to `cpv.strip.allowed_submodule_urls`."
+                        ),
+                    )
+                )
                 continue
         else:
             # No explicit allowlist AND require_url_allowlist=False —
             # opt-out. Emit advisory WARNING for traceability.
-            findings.append(GitmodulesFinding(
-                severity="WARNING",
-                code="STRIP-G014",
-                submodule_name=name, url=url, path=path,
-                message=(
-                    f"Submodule URL '{url}' accepted without allowlist "
-                    f"(require_url_allowlist=false). Reviewers must "
-                    f"manually verify this URL on every change."
-                ),
-            ))
+            findings.append(
+                GitmodulesFinding(
+                    severity="WARNING",
+                    code="STRIP-G014",
+                    submodule_name=name,
+                    url=url,
+                    path=path,
+                    message=(
+                        f"Submodule URL '{url}' accepted without allowlist "
+                        f"(require_url_allowlist=false). Reviewers must "
+                        f"manually verify this URL on every change."
+                    ),
+                )
+            )
 
         # 3. SHA-pin verification (best-effort; needs git in working repo).
         pinned_sha = sha_pins.get(path.rstrip("/"))
@@ -370,7 +401,10 @@ def validate_gitmodules(plugin_root: Path) -> list[GitmodulesFinding]:
             try:
                 tree_result = subprocess.run(
                     ["git", "-C", str(plugin_root), "ls-tree", "HEAD", path],
-                    capture_output=True, text=True, timeout=10, check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
                 )
             except (OSError, subprocess.SubprocessError):
                 tree_result = None
@@ -381,19 +415,23 @@ def validate_gitmodules(plugin_root: Path) -> list[GitmodulesFinding]:
                 if m:
                     actual_sha = m.group(1)
             if actual_sha and not actual_sha.startswith(pinned_sha[: len(actual_sha)]):
-                findings.append(GitmodulesFinding(
-                    severity="CRITICAL",
-                    code="STRIP-G015",
-                    submodule_name=name, url=url, path=path,
-                    message=(
-                        f"Submodule '{path}' index SHA ({actual_sha[:12]}…) "
-                        f"does not match recorded "
-                        f"`cpv.strip.extract[].submodule_commit_sha` "
-                        f"({pinned_sha[:12]}…). Either revert the submodule "
-                        f"pointer change, or update the recorded SHA in "
-                        f"plugin.json — and have a reviewer approve both."
-                    ),
-                ))
+                findings.append(
+                    GitmodulesFinding(
+                        severity="CRITICAL",
+                        code="STRIP-G015",
+                        submodule_name=name,
+                        url=url,
+                        path=path,
+                        message=(
+                            f"Submodule '{path}' index SHA ({actual_sha[:12]}…) "
+                            f"does not match recorded "
+                            f"`cpv.strip.extract[].submodule_commit_sha` "
+                            f"({pinned_sha[:12]}…). Either revert the submodule "
+                            f"pointer change, or update the recorded SHA in "
+                            f"plugin.json — and have a reviewer approve both."
+                        ),
+                    )
+                )
     return findings
 
 
@@ -411,8 +449,7 @@ def main(argv: list[str] | None = None) -> int:
     rc = 0
     for f in findings:
         print(
-            f"[{f.severity}] [{f.code}] submodule={f.submodule_name!r} "
-            f"path={f.path!r} url={f.url!r}",
+            f"[{f.severity}] [{f.code}] submodule={f.submodule_name!r} path={f.path!r} url={f.url!r}",
             file=sys.stderr,
         )
         print(f"  {f.message}", file=sys.stderr)

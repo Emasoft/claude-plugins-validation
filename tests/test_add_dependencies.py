@@ -33,9 +33,7 @@ def _make_plugin(tmp_path: Path, name: str = "demo", deps: list | None = None) -
     }
     if deps is not None:
         manifest["dependencies"] = deps
-    (root / ".claude-plugin" / "plugin.json").write_text(
-        json.dumps(manifest, indent=2), encoding="utf-8"
-    )
+    (root / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return root
 
 
@@ -54,18 +52,22 @@ class TestParseAddSpec:
 
     def test_name_and_marketplace(self):
         assert add_deps._parse_add_spec("dev-browser@my-mkt") == {
-            "name": "dev-browser", "marketplace": "my-mkt",
+            "name": "dev-browser",
+            "marketplace": "my-mkt",
         }
 
     def test_name_marketplace_version(self):
         assert add_deps._parse_add_spec("dev-browser@my-mkt@~1.2.0") == {
-            "name": "dev-browser", "marketplace": "my-mkt", "version": "~1.2.0",
+            "name": "dev-browser",
+            "marketplace": "my-mkt",
+            "version": "~1.2.0",
         }
 
     def test_name_double_at_version(self):
         """`name@@version` form (version without marketplace)."""
         assert add_deps._parse_add_spec("dev-browser@@~1.2.0") == {
-            "name": "dev-browser", "version": "~1.2.0",
+            "name": "dev-browser",
+            "version": "~1.2.0",
         }
 
     def test_invalid_kebab_rejected(self):
@@ -127,9 +129,14 @@ class TestMainEndToEnd:
     def test_add_writes_atomically_and_validates(self, tmp_path: Path) -> None:
         """`--add foo@@^1.0` writes the spec; .bak removed on success."""
         plugin = _make_plugin(tmp_path, deps=["existing"])
-        rc = add_deps.main([
-            str(plugin), "--add", "new-dep@@^1.0", "--no-validate",
-        ])
+        rc = add_deps.main(
+            [
+                str(plugin),
+                "--add",
+                "new-dep@@^1.0",
+                "--no-validate",
+            ]
+        )
         assert rc == 0
         deps = _read_deps(plugin)
         # Sorted: existing < new-dep
@@ -161,7 +168,8 @@ class TestMainEndToEnd:
         """`--from <local-plugin>` copies that plugin's full deps array."""
         # Source plugin with two deps.
         source = _make_plugin(
-            tmp_path, name="src",
+            tmp_path,
+            name="src",
             deps=["alpha", {"name": "beta", "version": "^2.0"}],
         )
         target = _make_plugin(tmp_path, name="tgt", deps=[])
@@ -180,17 +188,23 @@ class TestMainEndToEnd:
     def test_combined_add_and_from(self, tmp_path: Path) -> None:
         """--from + --add together — merged with last-write-wins."""
         source = _make_plugin(
-            tmp_path, name="src",
+            tmp_path,
+            name="src",
             deps=["alpha", {"name": "beta", "version": "^1.0"}],
         )
         target = _make_plugin(tmp_path, name="tgt", deps=[])
-        rc = add_deps.main([
-            str(target),
-            "--from", str(source),
-            "--add", "beta@@^2.0",  # overrides source's beta@^1.0
-            "--add", "gamma",
-            "--no-validate",
-        ])
+        rc = add_deps.main(
+            [
+                str(target),
+                "--from",
+                str(source),
+                "--add",
+                "beta@@^2.0",  # overrides source's beta@^1.0
+                "--add",
+                "gamma",
+                "--no-validate",
+            ]
+        )
         assert rc == 0
         deps = _read_deps(target)
         # Sorted by name: alpha < beta < gamma

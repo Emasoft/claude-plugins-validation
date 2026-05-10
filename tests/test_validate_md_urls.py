@@ -569,10 +569,7 @@ class TestValidateMdUrlsCacheAndSkips:
         parser artefacts or homepage references — meaningless to probe.
         Skipping prevents false-positive WARNINGs from rate-limited HEADs."""
         md = tmp_path / "README.md"
-        md.write_text(
-            "Visit https://github.com/ to browse,\n"
-            "or check https://gitlab.com for the GitLab equivalent.\n"
-        )
+        md.write_text("Visit https://github.com/ to browse,\nor check https://gitlab.com for the GitLab equivalent.\n")
         counter = {"n": 0}
 
         def fake_urlopen(req, **kw):
@@ -608,6 +605,4 @@ class TestValidateMdUrlsCacheAndSkips:
         report = ValidationReport()
         with patch("urllib.request.urlopen", side_effect=fake_urlopen):
             validate_md_urls(md, tmp_path, report, timeout=1.0, url_cache={}, retry_backoff=0.01)
-        assert seen_urls == ["https://github.com/Emasoft/cpv-real"], (
-            f"unexpected URL captures: {seen_urls}"
-        )
+        assert seen_urls == ["https://github.com/Emasoft/cpv-real"], f"unexpected URL captures: {seen_urls}"

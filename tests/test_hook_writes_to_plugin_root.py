@@ -40,8 +40,7 @@ from validate_hook import validate_command_hook  # noqa: E402
 
 def _has_critical_pd_root(report: ValidationReport) -> bool:
     return any(
-        r.level == "CRITICAL" and "CLAUDE_PLUGIN_ROOT" in r.message and "REPLACED" in r.message
-        for r in report.results
+        r.level == "CRITICAL" and "CLAUDE_PLUGIN_ROOT" in r.message and "REPLACED" in r.message for r in report.results
     )
 
 
@@ -89,7 +88,7 @@ class TestHookWritesToPluginRoot:
     def test_npm_install_prefix_plugin_root_critical(self) -> None:
         report = ValidationReport()
         validate_command_hook(
-            {"command": 'npm install --prefix ${CLAUDE_PLUGIN_ROOT} express'},
+            {"command": "npm install --prefix ${CLAUDE_PLUGIN_ROOT} express"},
             "SessionStart",
             None,
             report,
@@ -99,7 +98,7 @@ class TestHookWritesToPluginRoot:
     def test_pip_install_target_plugin_root_critical(self) -> None:
         report = ValidationReport()
         validate_command_hook(
-            {"command": 'pip install --target=${CLAUDE_PLUGIN_ROOT}/.venv requests'},
+            {"command": "pip install --target=${CLAUDE_PLUGIN_ROOT}/.venv requests"},
             "SessionStart",
             None,
             report,

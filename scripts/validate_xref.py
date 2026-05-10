@@ -708,6 +708,7 @@ def main() -> int:
         Exit code (0=OK, 1=CRITICAL, 2=MAJOR, 3=MINOR)
     """
     from cpv_validation_common import launcher_epilog
+
     parser = argparse.ArgumentParser(
         description="Validate cross-references between Claude Code plugin components",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -720,7 +721,8 @@ Exit codes:
     2 - MAJOR issues found
     3 - MINOR issues found
 
-""" + launcher_epilog("xref"),
+"""
+        + launcher_epilog("xref"),
     )
     parser.add_argument(
         "plugin_path",

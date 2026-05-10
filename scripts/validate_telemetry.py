@@ -347,8 +347,12 @@ def _validate_env_block(
                     source,
                 )
                 continue
-            if name in {"CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
-                        "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_USE_MANTLE"}:
+            if name in {
+                "CLAUDE_CODE_USE_BEDROCK",
+                "CLAUDE_CODE_USE_VERTEX",
+                "CLAUDE_CODE_USE_FOUNDRY",
+                "CLAUDE_CODE_USE_MANTLE",
+            }:
                 report.major(
                     f"Plugin env sets {name}={value!r}. Per server-managed-settings.md, "
                     "this third-party-provider opt-in BYPASSES managed-settings — the "
@@ -403,11 +407,7 @@ def _validate_env_block(
             # v2.1.111+ — `OTEL_LOG_RAW_API_BODIES=file:<dir>` is a SEPARATE
             # exfil mode: untruncated bodies written to disk (rather than
             # inline 60 KB cap). Severity is at least as bad as `=1`.
-            if (
-                name == "OTEL_LOG_RAW_API_BODIES"
-                and isinstance(value, str)
-                and value.strip().startswith("file:")
-            ):
+            if name == "OTEL_LOG_RAW_API_BODIES" and isinstance(value, str) and value.strip().startswith("file:"):
                 report.critical(
                     f"Plugin env sets {name}={value!r}. The `file:<dir>` mode "
                     "writes UNTRUNCATED API bodies to disk — at least as bad "
@@ -522,8 +522,7 @@ def scan_settings_for_telemetry(
             )
         else:
             report.passed(
-                "otelHeadersHelper is present in a managed-settings file — "
-                "admin-managed configuration, allowed.",
+                "otelHeadersHelper is present in a managed-settings file — admin-managed configuration, allowed.",
                 source,
             )
 
@@ -599,9 +598,7 @@ def scan_plugin_for_telemetry(plugin_root: Path) -> ValidationReport:
 
     # If scans touched files but found nothing, add an explicit PASSED
     # so consumers can see the validator ran.
-    if not any(
-        r.level in ("CRITICAL", "MAJOR", "MINOR") for r in report.results
-    ):
+    if not any(r.level in ("CRITICAL", "MAJOR", "MINOR") for r in report.results):
         report.passed(
             "No telemetry supply-chain risks detected in plugin.",
             source_root,
@@ -630,9 +627,9 @@ def main() -> int:
     check_remote_execution_guard()
 
     from cpv_validation_common import launcher_epilog
+
     parser = argparse.ArgumentParser(
-        description="Validate OTEL telemetry supply-chain risks in a plugin "
-        "or settings.json file",
+        description="Validate OTEL telemetry supply-chain risks in a plugin or settings.json file",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Checks performed:
@@ -648,7 +645,8 @@ Exit codes:
   2 - MAJOR issues
   3 - MINOR issues
 
-""" + launcher_epilog("telemetry"),
+"""
+        + launcher_epilog("telemetry"),
     )
     parser.add_argument(
         "target",
@@ -662,8 +660,7 @@ Exit codes:
     parser.add_argument(
         "--managed",
         action="store_true",
-        help="Explicitly mark the settings file as admin-managed "
-        "(skips the otelHeadersHelper CRITICAL)",
+        help="Explicitly mark the settings file as admin-managed (skips the otelHeadersHelper CRITICAL)",
     )
     parser.add_argument(
         "--verbose",
@@ -692,9 +689,7 @@ Exit codes:
 
     if args.settings or target.is_file():
         plugin_shipped = None if not args.managed else False
-        report = scan_settings_for_telemetry(
-            target, plugin_shipped=plugin_shipped
-        )
+        report = scan_settings_for_telemetry(target, plugin_shipped=plugin_shipped)
     else:
         report = scan_plugin_for_telemetry(target)
 

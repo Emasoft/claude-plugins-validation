@@ -269,10 +269,18 @@ class TestMainEndToEnd:
     def test_include_and_all_mutex(self, tmp_path, capsys):
         """--include + --all together → exit 3 (selection conflict)."""
         src = _make_full_source(tmp_path / "src")
-        rc = pkg.main([
-            str(src), str(tmp_path / "tgt"), "--name", "p1",
-            "--all", "--include", "agent=my-agent", "--json",
-        ])
+        rc = pkg.main(
+            [
+                str(src),
+                str(tmp_path / "tgt"),
+                "--name",
+                "p1",
+                "--all",
+                "--include",
+                "agent=my-agent",
+                "--json",
+            ]
+        )
         assert rc == 3
         payload = json.loads(capsys.readouterr().out.strip())
         assert "mutually exclusive" in payload["error"]
@@ -288,12 +296,21 @@ class TestMainEndToEnd:
         and slurps the components into the right folders."""
         src = _make_full_source(tmp_path / "src")
         target = tmp_path / "plugin"
-        rc = pkg.main([
-            str(src), str(target),
-            "--name", "p1", "--description", "test",
-            "--author", "Alice", "--author-email", "a@e.com",
-            "--all",
-        ])
+        rc = pkg.main(
+            [
+                str(src),
+                str(target),
+                "--name",
+                "p1",
+                "--description",
+                "test",
+                "--author",
+                "Alice",
+                "--author-email",
+                "a@e.com",
+                "--all",
+            ]
+        )
         assert rc == 0
         # Plugin manifest exists.
         assert (target / ".claude-plugin" / "plugin.json").is_file()
@@ -311,12 +328,20 @@ class TestMainEndToEnd:
         """`--include agent=my-agent` packs only that one component."""
         src = _make_full_source(tmp_path / "src")
         target = tmp_path / "plugin"
-        rc = pkg.main([
-            str(src), str(target),
-            "--name", "p1",
-            "--author", "Alice", "--author-email", "a@e.com",
-            "--include", "agent=my-agent",
-        ])
+        rc = pkg.main(
+            [
+                str(src),
+                str(target),
+                "--name",
+                "p1",
+                "--author",
+                "Alice",
+                "--author-email",
+                "a@e.com",
+                "--include",
+                "agent=my-agent",
+            ]
+        )
         assert rc == 0
         assert (target / "agents" / "my-agent.md").is_file()
         # Skill not packed because not included.
@@ -326,12 +351,20 @@ class TestMainEndToEnd:
         """`--dry-run` exits 0 but does NOT create the target dir's plugin shape."""
         src = _make_full_source(tmp_path / "src")
         target = tmp_path / "plugin"
-        rc = pkg.main([
-            str(src), str(target),
-            "--name", "p1",
-            "--author", "Alice", "--author-email", "a@e.com",
-            "--all", "--dry-run",
-        ])
+        rc = pkg.main(
+            [
+                str(src),
+                str(target),
+                "--name",
+                "p1",
+                "--author",
+                "Alice",
+                "--author-email",
+                "a@e.com",
+                "--all",
+                "--dry-run",
+            ]
+        )
         assert rc == 0
         assert not target.exists() or not (target / ".claude-plugin").exists()
 
@@ -339,12 +372,20 @@ class TestMainEndToEnd:
         """--json: stdout has exactly one JSON line; stderr has the human prose."""
         src = _make_full_source(tmp_path / "src")
         target = tmp_path / "plugin"
-        rc = pkg.main([
-            str(src), str(target),
-            "--name", "p1",
-            "--author", "Alice", "--author-email", "a@e.com",
-            "--all", "--json",
-        ])
+        rc = pkg.main(
+            [
+                str(src),
+                str(target),
+                "--name",
+                "p1",
+                "--author",
+                "Alice",
+                "--author-email",
+                "a@e.com",
+                "--all",
+                "--json",
+            ]
+        )
         assert rc == 0
         captured = capsys.readouterr()
         # Last line of stdout is a JSON object.

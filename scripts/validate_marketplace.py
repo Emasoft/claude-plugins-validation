@@ -533,9 +533,7 @@ def validate_plugin_entry(
     # the plugin manifest always wins silently when both marketplace.json and
     # plugin.json declare a version, so drift is a real risk.
     if isinstance(version, str):
-        results.extend(
-            _validate_version_consistency(plugin, plugin_id, version, marketplace_dir, json_path)
-        )
+        results.extend(_validate_version_consistency(plugin, plugin_id, version, marketplace_dir, json_path))
 
     # Validate local path if present
     local_path = plugin.get("path")
@@ -811,8 +809,7 @@ def validate_plugin_entry(
                             level="MINOR",
                             category="plugin",
                             message=(
-                                f"Plugin '{plugin_id}' channels[{idx}] must be an object, "
-                                f"got {type(channel).__name__}"
+                                f"Plugin '{plugin_id}' channels[{idx}] must be an object, got {type(channel).__name__}"
                             ),
                             file=json_path,
                         )
@@ -834,9 +831,7 @@ def validate_plugin_entry(
 
 # Valid `type` values for userConfig entries per plugins-reference.md runtime schema
 # (empirically verified via CPV Issue #9 — the spec text itself is under-documented).
-_MARKETPLACE_USERCONFIG_VALID_TYPES = frozenset(
-    {"string", "boolean", "select", "number", "integer"}
-)
+_MARKETPLACE_USERCONFIG_VALID_TYPES = frozenset({"string", "boolean", "select", "number", "integer"})
 
 
 def _validate_marketplace_userconfig(
@@ -874,9 +869,7 @@ def _validate_marketplace_userconfig(
                 ValidationResult(
                     level="MINOR",
                     category="plugin",
-                    message=(
-                        f"Plugin '{plugin_id}' {entry_ctx} must be an object, got {type(entry).__name__}"
-                    ),
+                    message=(f"Plugin '{plugin_id}' {entry_ctx} must be an object, got {type(entry).__name__}"),
                     file=json_path,
                 )
             )
@@ -901,8 +894,7 @@ def _validate_marketplace_userconfig(
                     level="MINOR",
                     category="plugin",
                     message=(
-                        f"Plugin '{plugin_id}' {entry_ctx}.title must be a string, "
-                        f"got {type(entry['title']).__name__}"
+                        f"Plugin '{plugin_id}' {entry_ctx}.title must be a string, got {type(entry['title']).__name__}"
                     ),
                     file=json_path,
                 )
@@ -916,8 +908,7 @@ def _validate_marketplace_userconfig(
                         level="MINOR",
                         category="plugin",
                         message=(
-                            f"Plugin '{plugin_id}' {entry_ctx}.type must be a string, "
-                            f"got {type(entry_type).__name__}"
+                            f"Plugin '{plugin_id}' {entry_ctx}.type must be a string, got {type(entry_type).__name__}"
                         ),
                         file=json_path,
                     )
@@ -1284,9 +1275,7 @@ def validate_plugin_source(
                 # Only fall back to "invalid source type" when NO pluginRoot
                 # prefix is configured or the prefixed path does not exist.
                 plugin_root_prefix = _read_marketplace_plugin_root(marketplace_dir).strip()
-                prefixed_root: Path | None = (
-                    _apply_plugin_root(marketplace_dir, source) if plugin_root_prefix else None
-                )
+                prefixed_root: Path | None = _apply_plugin_root(marketplace_dir, source) if plugin_root_prefix else None
                 if prefixed_root is not None and prefixed_root.exists() and prefixed_root.is_dir():
                     # Treat as Layout B nested plugin via pluginRoot prefix
                     results.extend(_validate_nested_plugin(prefixed_root, plugin_id, json_path))
@@ -1382,7 +1371,7 @@ def validate_plugin_source(
                         "Per plugin-marketplaces.md:223-229 the canonical form is the bare relative-path string."
                     ),
                     file=json_path,
-                    suggestion=f"Rewrite as `source: \"{path_hint}\"` (plain string shorthand)",
+                    suggestion=f'Rewrite as `source: "{path_hint}"` (plain string shorthand)',
                 )
             )
 
@@ -2662,8 +2651,7 @@ def validate_marketplace(marketplace_path: Path) -> ValidationReport:
                 level="NIT",
                 category="manifest",
                 message=(
-                    "Top-level 'version' is not documented at plugin-marketplaces.md:172-176; "
-                    "prefer 'metadata.version'"
+                    "Top-level 'version' is not documented at plugin-marketplaces.md:172-176; prefer 'metadata.version'"
                 ),
                 file=json_path,
             )
@@ -3061,9 +3049,11 @@ def main() -> int:
     canonical manifest. Exits with code 2 on mismatch.
     """
     from _plugin_verify_hashes import verify_self_integrity  # noqa: PLC0415
+
     verify_self_integrity(quiet=True)
 
     from cpv_validation_common import launcher_epilog
+
     parser = argparse.ArgumentParser(
         description="Validate Claude Code plugin marketplace configuration",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -3079,7 +3069,8 @@ Examples:
   %(prog)s ./my-marketplace/marketplace.json --verbose
   %(prog)s ./my-marketplace --json
 
-""" + launcher_epilog("marketplace"),
+"""
+        + launcher_epilog("marketplace"),
     )
     parser.add_argument(
         "marketplace_path",

@@ -12,6 +12,7 @@ The new `_plugin_compute_hashes.py` writes BOTH `.plugin-self-hashes.json`
 invocation, so existing publish pipelines that invoke this script via
 its old path continue to produce both files.
 """
+
 from __future__ import annotations
 
 import sys as _sys

@@ -63,7 +63,7 @@ class TestBashOnlyConstructs:
 
     def test_dollar_lt_file_major(self) -> None:
         report = ValidationReport()
-        check_hook_command_cross_platform('VERSION=$(<VERSION.txt)', report)
+        check_hook_command_cross_platform("VERSION=$(<VERSION.txt)", report)
         assert _has_major(report, "bash-only constructs")
 
     def test_process_substitution_major(self) -> None:
@@ -79,15 +79,13 @@ class TestBashOnlyConstructs:
     def test_posix_command_no_finding(self) -> None:
         """POSIX-portable commands must not trigger the bash-only rule."""
         report = ValidationReport()
-        check_hook_command_cross_platform(
-            'python3 "${CLAUDE_PLUGIN_ROOT}/scripts/hook.py"', report
-        )
+        check_hook_command_cross_platform('python3 "${CLAUDE_PLUGIN_ROOT}/scripts/hook.py"', report)
         assert not _has_major(report, "bash-only constructs")
 
     def test_arithmetic_no_finding(self) -> None:
         """``$((...))`` IS POSIX-portable and must not be flagged."""
         report = ValidationReport()
-        check_hook_command_cross_platform('count=$((count + 1)); echo $count', report)
+        check_hook_command_cross_platform("count=$((count + 1)); echo $count", report)
         assert not _has_major(report, "bash-only constructs")
 
 
@@ -129,17 +127,13 @@ class TestPosixOnlyTools:
     def test_bash_c_wrapper_no_finding(self) -> None:
         """``bash -c "..."`` opt-out — explicit shell decision."""
         report = ValidationReport()
-        check_hook_command_cross_platform(
-            'bash -c "jq .name file.json"', report
-        )
+        check_hook_command_cross_platform('bash -c "jq .name file.json"', report)
         assert not _has_minor(report, "POSIX-only tool")
 
     def test_wsl_wrapper_no_finding(self) -> None:
         """``wsl bash -c "..."`` opt-out — Windows-aware shell decision."""
         report = ValidationReport()
-        check_hook_command_cross_platform(
-            'wsl bash -c "sed -i s/x/y/ file"', report
-        )
+        check_hook_command_cross_platform('wsl bash -c "sed -i s/x/y/ file"', report)
         assert not _has_minor(report, "POSIX-only tool")
 
 
@@ -201,10 +195,7 @@ class TestAgentFrontmatterHookIntegration:
         }
         report = AgentValidationReport()
         validate_hooks_field(frontmatter, "agents/foo.md", report)
-        assert any(
-            r.level == "MAJOR" and "bash-only constructs" in r.message
-            for r in report.results
-        )
+        assert any(r.level == "MAJOR" and "bash-only constructs" in r.message for r in report.results)
 
     def test_agent_frontmatter_hook_writes_plugin_root_critical(self) -> None:
         """Agent frontmatter command writing to PLUGIN_ROOT → CRITICAL."""
