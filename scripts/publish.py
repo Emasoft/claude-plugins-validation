@@ -1233,7 +1233,7 @@ def _check_layout_a(
     elif used_prefetch:
         # Tiny breadcrumb so a maintainer reading the publish log can see
         # the Phase E speedup actually fired this run.
-        print(f"  (Phase E: reused prefetched marketplace.json)")
+        print("  (Phase E: reused prefetched marketplace.json)")
 
     if mkt_json is None:
         print(
@@ -2123,7 +2123,7 @@ def stage_commit_tag_push(
                 used_prefetch = False
 
     if used_prefetch:
-        print(f"  (Phase E: reused prefetched gh-auth check)")
+        print("  (Phase E: reused prefetched gh-auth check)")
     else:
         _ensure_gh_auth(owner, repo)
     # TRDD-793ac32a Sprint 2: submodule push gate — verify every submodule

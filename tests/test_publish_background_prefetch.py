@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import sys
 import threading
-import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -45,7 +44,6 @@ if str(scripts_dir) not in sys.path:
     sys.path.insert(0, str(scripts_dir))
 
 import publish  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Helpers — synthesise prefetch futures without spinning up real threads.
