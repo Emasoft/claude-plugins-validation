@@ -278,6 +278,40 @@ def do_doctor(verbose: bool = False, fix: bool = False, quick: bool = False):
                     enabled = sum(1 for v in ep.values() if v)
                     disabled = sum(1 for v in ep.values() if not v)
                     info(f"  {enabled} plugin(s) enabled, {disabled} disabled")
+
+                # TRDD-e2b17a61: when extraKnownMarketplaces or
+                # strictKnownMarketplaces is present, run the dedicated
+                # settings-marketplace schema validator so doctor surfaces
+                # spec violations (unknown source type, missing required
+                # fields, strict-allowlist breaches) without forcing the
+                # user to invoke /cpv-validate-settings-marketplace
+                # manually. We render only CRITICAL/MAJOR/MINOR/WARNING
+                # findings — PASSED/INFO are silent in the doctor sweep so
+                # we don't drown the health check in low-signal noise.
+                if "extraKnownMarketplaces" in data or "strictKnownMarketplaces" in data:
+                    try:
+                        from validate_settings_marketplace import (
+                            validate_settings_marketplace_file,
+                        )
+
+                        sm_report = validate_settings_marketplace_file(path)
+                        for r in sm_report.results:
+                            if r.level == "CRITICAL":
+                                err(f"  marketplace schema CRITICAL — {r.message}")
+                                issues += 1
+                            elif r.level == "MAJOR":
+                                warn(f"  marketplace schema MAJOR — {r.message}")
+                                issues += 1
+                            elif r.level == "MINOR":
+                                warn(f"  marketplace schema MINOR — {r.message}")
+                            elif r.level == "WARNING":
+                                warn(f"  marketplace schema warning — {r.message}")
+                    except ImportError:
+                        # If the validator module isn't importable for any
+                        # reason (e.g. running from an incomplete checkout),
+                        # the doctor must continue without crashing — schema
+                        # validation is a value-add, not a hard dependency.
+                        info("  (marketplace schema validator not available — skipped)")
             except Exception as e:
                 err(f"{label}: CORRUPT — {e}")
                 issues += 1
