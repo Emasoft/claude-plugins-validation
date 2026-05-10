@@ -4,8 +4,17 @@
 **Filename:** `design/tasks/TRDD-f4e2d385-b37d-4f9e-b2c8-4940958b474a-scope-deep-validation.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
 
-**Status:** In progress (2026-04-17)
+**Status:** Done (2026-05-10)
 **Supersedes:** clarifies TRDD-2be75e88 (initial scope validators)
+
+**Completion notes (2026-05-10):**
+- Phases A, B, C, D, E shipped in commit `37ed357` (2026-04-17 — `feat(scope-validators): deep element validation + settings subtrees + plugin enum (TRDD-f4e2d385)`).
+- Follow-up audit (2026-05-10) closed two §3.1/§3.3 gaps in `validate_project_scope.py`:
+  1. `validate_project_rules_deep` — symmetric to `validate_local_rules_deep`, runs `validate_rules_directory` on the rules folder and filters out untracked findings via the same `rules_dir.parent` path-resolution fix that the local-scope side already uses.
+  2. `_validate_mcp_json_file_deep_project` — runs the full `validate_mcp_config` pipeline on tracked `.mcp.json` files (transport schema, reserved-name detection, package-executor warnings) on top of the existing project-scope-specific shallow check (literal secrets in `env`, absolute home paths in `command`/`args`).
+- 8 new tests added under `tests/test_validate_project_scope.py::TestProjectRulesDeepValidation` and `tests/test_validate_project_scope.py::TestProjectMcpJsonDeepValidation`. All 117 scope tests pass.
+- Test count: scope test suite went from 109 to 117. Full test suite: 4490 passed (excluding 2 known-flaky perf/main-cli tests under TRDD-fa70f9b8 jurisdiction).
+- `lspServers` deep validation NOT implemented (per v2.21.3 follow-up: `lspServers` is plugin-only — settings files reject it via the plugin-only-key CRITICAL, deep-validating an inline block would imply it is semantically valid).
 
 ## 1. User intent (verbatim)
 

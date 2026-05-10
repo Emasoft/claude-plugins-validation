@@ -136,9 +136,7 @@ MAX_LOOP_MD_BYTES: int = 25_000
 # =============================================================================
 
 
-def _report_parse_error(
-    report: ValidationReport, file_label: str, exc: BaseException
-) -> None:
+def _report_parse_error(report: ValidationReport, file_label: str, exc: BaseException) -> None:
     """Record a CRITICAL parse-error finding without leaking file contents.
 
     Uses ``type(exc).__name__`` only — never ``str(exc)`` — because
@@ -236,9 +234,7 @@ def _flag_rejected_nested_keys(data: dict[str, Any], report: ValidationReport, f
             )
 
 
-def _flag_permissions_default_mode(
-    data: dict[str, Any], report: ValidationReport, file_label: str
-) -> None:
+def _flag_permissions_default_mode(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
     """Validate ``permissions.defaultMode`` against the 6 permission-modes.md
     values. An out-of-enum value is silently dropped by Claude Code, so the
     author's intended default never takes effect — MAJOR, not CRITICAL
@@ -265,9 +261,7 @@ def _flag_permissions_default_mode(
         )
 
 
-def _flag_managed_only_nested_keys(
-    data: dict[str, Any], report: ValidationReport, file_label: str
-) -> None:
+def _flag_managed_only_nested_keys(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
     """Flag nested paths that only work in a managed settings file.
 
     ``permissions.disableAutoMode`` and ``permissions.disableBypassPermissionsMode``
@@ -406,9 +400,7 @@ def _flag_secrets_in_env(data: dict[str, Any], report: ValidationReport, file_la
             )
 
 
-def _flag_absolute_home_paths_in_scalar(
-    label: str, value: Any, report: ValidationReport, file_label: str
-) -> None:
+def _flag_absolute_home_paths_in_scalar(label: str, value: Any, report: ValidationReport, file_label: str) -> None:
     """Emit a MINOR if ``value`` is a string containing an absolute home path.
 
     The value is redacted (username replaced with ``<REDACTED>``) before
@@ -432,9 +424,7 @@ def _flag_machine_specific_command_paths(data: dict[str, Any], report: Validatio
     for parent_key in ("statusLine", "fileSuggestion"):
         parent = data.get(parent_key)
         if isinstance(parent, dict):
-            _flag_absolute_home_paths_in_scalar(
-                f"{parent_key}.command", parent.get("command"), report, file_label
-            )
+            _flag_absolute_home_paths_in_scalar(f"{parent_key}.command", parent.get("command"), report, file_label)
 
 
 def _flag_hook_command_paths(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
@@ -491,9 +481,7 @@ def _flag_claude_md_excludes(data: dict[str, Any], report: ValidationReport, fil
     excludes = data.get("claudeMdExcludes")
     if isinstance(excludes, list):
         for idx, entry in enumerate(excludes):
-            _flag_absolute_home_paths_in_scalar(
-                f"claudeMdExcludes[{idx}]", entry, report, file_label
-            )
+            _flag_absolute_home_paths_in_scalar(f"claudeMdExcludes[{idx}]", entry, report, file_label)
 
 
 def _flag_missing_schema(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
@@ -509,9 +497,7 @@ def _flag_missing_schema(data: dict[str, Any], report: ValidationReport, file_la
         )
 
 
-def validate_settings_json_project_scope(
-    settings_path: Path, report: ValidationReport
-) -> dict[str, Any] | None:
+def validate_settings_json_project_scope(settings_path: Path, report: ValidationReport) -> dict[str, Any] | None:
     """Apply project-scope rules to ``.claude/settings.json`` contents.
 
     Returns the parsed JSON dict on success so the orchestrator can reuse
@@ -580,15 +566,11 @@ def validate_mcp_json_project_scope(mcp_path: Path, report: ValidationReport) ->
                         ),
                         file_label,
                     )
-        _flag_absolute_home_paths_in_scalar(
-            f"mcpServers.{name}.command", server.get("command"), report, file_label
-        )
+        _flag_absolute_home_paths_in_scalar(f"mcpServers.{name}.command", server.get("command"), report, file_label)
         args = server.get("args")
         if isinstance(args, list):
             for idx, arg in enumerate(args):
-                _flag_absolute_home_paths_in_scalar(
-                    f"mcpServers.{name}.args[{idx}]", arg, report, file_label
-                )
+                _flag_absolute_home_paths_in_scalar(f"mcpServers.{name}.args[{idx}]", arg, report, file_label)
         url = server.get("url")
         if isinstance(url, str) and looks_like_secret_key_name(url):
             report.minor(
@@ -674,17 +656,14 @@ def _walk_tracked_markdown(
         real = resolve_within(md, project_root)
         if real is None:
             report.major(
-                f"{md.relative_to(project_root)}: path resolves outside the "
-                "project root (symlink escape) — skipping",
+                f"{md.relative_to(project_root)}: path resolves outside the project root (symlink escape) — skipping",
                 str(md.relative_to(project_root)),
             )
             continue
         if real not in tracked:
             continue
         rel = md.relative_to(project_root)
-        _validate_markdown_file_shared(
-            md, report, str(rel), forbid_home_paths=forbid_home_paths
-        )
+        _validate_markdown_file_shared(md, report, str(rel), forbid_home_paths=forbid_home_paths)
 
 
 def validate_agents_folder(
@@ -694,9 +673,7 @@ def validate_agents_folder(
     report: ValidationReport,
 ) -> None:
     """Validate every tracked ``*.md`` file in ``.claude/agents/``."""
-    _walk_tracked_markdown(
-        agents_dir, repo_root, project_root, report, "*.md", forbid_home_paths=True
-    )
+    _walk_tracked_markdown(agents_dir, repo_root, project_root, report, "*.md", forbid_home_paths=True)
 
 
 def validate_skills_folder(
@@ -706,9 +683,7 @@ def validate_skills_folder(
     report: ValidationReport,
 ) -> None:
     """Validate every tracked ``SKILL.md`` in ``.claude/skills/``."""
-    _walk_tracked_markdown(
-        skills_dir, repo_root, project_root, report, "SKILL.md", forbid_home_paths=True
-    )
+    _walk_tracked_markdown(skills_dir, repo_root, project_root, report, "SKILL.md", forbid_home_paths=True)
 
 
 def validate_commands_folder(
@@ -718,9 +693,7 @@ def validate_commands_folder(
     report: ValidationReport,
 ) -> None:
     """Validate every tracked ``*.md`` file in ``.claude/commands/``."""
-    _walk_tracked_markdown(
-        commands_dir, repo_root, project_root, report, "*.md", forbid_home_paths=True
-    )
+    _walk_tracked_markdown(commands_dir, repo_root, project_root, report, "*.md", forbid_home_paths=True)
 
 
 def validate_output_styles_folder(
@@ -735,9 +708,7 @@ def validate_output_styles_folder(
     The structure is simpler than agents/skills but the same markdown
     hygiene rules apply — no absolute home paths in body, no secrets.
     """
-    _walk_tracked_markdown(
-        styles_dir, repo_root, project_root, report, "*.md", forbid_home_paths=True
-    )
+    _walk_tracked_markdown(styles_dir, repo_root, project_root, report, "*.md", forbid_home_paths=True)
 
 
 def validate_rules_folder(
@@ -824,15 +795,12 @@ def validate_hooks_folder(
             continue
         if contains_absolute_home_path(content):
             report.minor(
-                f"{rel}: hook script contains an absolute home path — "
-                "use $CLAUDE_PROJECT_DIR instead",
+                f"{rel}: hook script contains an absolute home path — use $CLAUDE_PROJECT_DIR instead",
                 str(rel),
             )
 
 
-def validate_claude_md_file(
-    md_path: Path, repo_root: Path, report: ValidationReport
-) -> None:
+def validate_claude_md_file(md_path: Path, repo_root: Path, report: ValidationReport) -> None:
     """Validate a CLAUDE.md file (project root or .claude/).
 
     ``repo_root`` is used to build relative labels. A ``resolve_within``
@@ -880,14 +848,10 @@ def validate_claude_md_file(
                 )
                 break
     # @path import recursion check (memory.md L95-107).
-    validate_claude_md_imports(
-        md_path, repo_root, report, str(rel), max_bytes=MAX_CLAUDE_MD_BYTES
-    )
+    validate_claude_md_imports(md_path, repo_root, report, str(rel), max_bytes=MAX_CLAUDE_MD_BYTES)
 
 
-def validate_gitignore_for_scope_hygiene(
-    repo_root: Path, report: ValidationReport
-) -> None:
+def validate_gitignore_for_scope_hygiene(repo_root: Path, report: ValidationReport) -> None:
     """Informational: recommend gitignore entries for local-scope files.
 
     Uses ``git check-ignore`` (via ``gitignore_covers_path``) rather than
@@ -928,9 +892,7 @@ def validate_gitignore_for_scope_hygiene(
 # =============================================================================
 
 
-def validate_loop_md_project(
-    loop_path: Path, repo_root: Path, report: ValidationReport
-) -> None:
+def validate_loop_md_project(loop_path: Path, repo_root: Path, report: ValidationReport) -> None:
     """Validate a TRACKED ``.claude/loop.md`` file (project scope).
 
     Rules (TRDD-479cde0c §NOW #19, scheduled-tasks.md):
@@ -1111,12 +1073,92 @@ def validate_project_skills_deep(
             # Module invariant: never leak str(exc) — validator exception
             # messages may embed excerpts of user files (see module docstring).
             report.critical(
-                f"[skill .claude/skills/{skill_dir.name}]: validator raised "
-                f"{type(exc).__name__}",
+                f"[skill .claude/skills/{skill_dir.name}]: validator raised {type(exc).__name__}",
                 f".claude/skills/{skill_dir.name}",
             )
             continue
         _merge_subreport_project(subreport, report, f"[skill .claude/skills/{skill_dir.name}]")
+
+
+def validate_project_rules_deep(rules_dir: Path, repo_root: Path, project_root: Path, report: ValidationReport) -> None:
+    """Deep-validate every TRACKED ``.md`` file under ``.claude/rules/`` with
+    the full ``validate_rules_directory`` pipeline.
+
+    Symmetric to ``validate_local_rules_deep``: ``validate_rules_directory``
+    walks the entire folder unconditionally, so we run it on the whole tree
+    and then filter out findings whose ``file`` path resolves to an
+    UNTRACKED rule (those belong to ``validate_local_scope``).
+
+    Path-resolution caveat (mirror of the bug fix in
+    ``validate_local_rules_deep``): ``validate_rules.validate_rule_file``
+    emits ``r.file`` as a path RELATIVE TO ``rules_dir.parent``
+    (i.e. ``.claude/``). Joining with ``project_root`` would produce
+    ``<project_root>/rules/<file>.md`` which never matches entries in
+    ``tracked`` (resolved as ``<project_root>/.claude/rules/<file>.md``).
+    We resolve against ``rules_dir.parent`` to reconstruct the same
+    absolute path that ``tracked`` holds — same fix, applied to the
+    INVERTED filter (keep tracked, drop untracked).
+    """
+    from validate_rules import validate_rules_directory as _deep_validate_rules  # noqa: E402
+
+    tracked = list_tracked_files_under(rules_dir, repo_root) or set()
+    rules_report = ValidationReport()
+    try:
+        _deep_validate_rules(rules_dir, rules_report, plugin_root=None)
+    except Exception as exc:  # pragma: no cover — defensive
+        # Module invariant: never leak str(exc).
+        report.critical(
+            f"[rules .claude/rules]: validator raised {type(exc).__name__}",
+            ".claude/rules",
+        )
+        return
+
+    rel_base = rules_dir.parent
+    for r in rules_report.results:
+        if r.file:
+            try:
+                rfile = Path(r.file)
+                resolved = rfile.resolve() if rfile.is_absolute() else (rel_base / rfile).resolve()
+            except (OSError, ValueError):
+                resolved = None
+            # PROJECT scope: keep findings about TRACKED files; drop the rest.
+            # Findings without a `file` (e.g. token-budget WARNING about the
+            # combined corpus) are always kept — they describe the corpus
+            # as a whole, which is exactly project-scope's concern when at
+            # least one tracked rule file exists.
+            if resolved is not None and resolved not in tracked:
+                continue
+        report.add(r.level, f"[rules] {r.message}", r.file, r.line)
+
+
+def _validate_mcp_json_file_deep_project(mcp_path: Path, report: ValidationReport) -> None:
+    """Run the full ``validate_mcp_config`` pipeline on a tracked
+    ``.mcp.json`` at the project root.
+
+    This is the project-scope counterpart to
+    ``_validate_mcp_json_file_deep`` in ``validate_local_scope``.
+    Findings are merged with a `[.mcp.json]` prefix so users can tell
+    which validator surfaced them.
+
+    The shallow ``validate_mcp_json_project_scope`` runs first to apply
+    project-scope-specific rules (literal-secret detection, absolute
+    home paths). This function runs ON TOP to add the deep schema /
+    transport / reserved-name checks that the shallow validator does
+    not perform.
+    """
+    from validate_mcp import validate_mcp_config as _deep_validate_mcp  # noqa: E402
+
+    try:
+        subreport = _deep_validate_mcp(mcp_path, plugin_root=None)
+    except Exception as exc:  # pragma: no cover — defensive
+        # Module invariant: never leak str(exc) — validator exception
+        # messages may embed excerpts of user files.
+        report.critical(
+            f"[.mcp.json] validator raised {type(exc).__name__}",
+            ".mcp.json",
+        )
+        return
+    _merge_subreport_project(subreport, report, "[.mcp.json]")
 
 
 def _run_project_subtree_validator(
@@ -1147,8 +1189,7 @@ def _run_project_subtree_validator(
             subreport = validator(tmp_path, plugin_root=None)
         except Exception as exc:  # pragma: no cover — defensive
             report.critical(
-                f"[{subtree_key} in {settings_file_label}] validator raised "
-                f"{type(exc).__name__}",
+                f"[{subtree_key} in {settings_file_label}] validator raised {type(exc).__name__}",
                 settings_file_label,
             )
             return
@@ -1161,9 +1202,7 @@ def _validate_project_settings_hooks(
     """Deep-validate `hooks` subtree in settings.json."""
     from validate_hook import validate_hooks as _deep_validate_hooks  # noqa: E402
 
-    _run_project_subtree_validator(
-        "hooks", settings.get("hooks"), settings_file_label, _deep_validate_hooks, report
-    )
+    _run_project_subtree_validator("hooks", settings.get("hooks"), settings_file_label, _deep_validate_hooks, report)
 
 
 def _validate_project_settings_mcp(
@@ -1191,9 +1230,7 @@ def _validate_project_settings_mcp(
 # cc_scope_rules.py — see ``ENABLED_PLUGIN_RE`` and ``resolve_plugin_cache_dir``.
 
 
-def validate_project_enabled_plugins(
-    enabled_plugins: object, report: ValidationReport
-) -> None:
+def validate_project_enabled_plugins(enabled_plugins: object, report: ValidationReport) -> None:
     """For each `plugin@marketplace: true` in settings.json.enabledPlugins,
     validate the installed plugin with the core plugin pipeline.
     """
@@ -1226,6 +1263,7 @@ def validate_project_enabled_plugins(
     from validate_plugin import (
         validate_structure as _vp_structure,
     )
+
     for key, value in enabled_plugins.items():
         if value is not True:
             continue
@@ -1238,9 +1276,7 @@ def validate_project_enabled_plugins(
             continue
         plugin = m.group("plugin")
         marketplace = m.group("marketplace")
-        cache_dir = resolve_plugin_cache_dir(
-            plugin, marketplace, report=report, scope_label="enabledPlugins"
-        )
+        cache_dir = resolve_plugin_cache_dir(plugin, marketplace, report=report, scope_label="enabledPlugins")
         if cache_dir is None:
             report.major(
                 f"[enabledPlugins {key}] plugin is enabled in settings.json but "
@@ -1323,8 +1359,7 @@ def validate_project_scope(project_root: Path, report: ValidationReport) -> None
             _validate_project_settings_mcp(settings_data, ".claude/settings.json", report)
     elif settings_path.exists():
         report.info(
-            ".claude/settings.json exists but is not git-tracked — validated by "
-            "cpv-validate-local-scope instead.",
+            ".claude/settings.json exists but is not git-tracked — validated by cpv-validate-local-scope instead.",
             ".claude/settings.json",
         )
 
@@ -1332,6 +1367,12 @@ def validate_project_scope(project_root: Path, report: ValidationReport) -> None
     mcp_path = project_root / ".mcp.json"
     if classify_file_scope(mcp_path, repo_root) == "project":
         validate_mcp_json_project_scope(mcp_path, report)
+        # TRDD-f4e2d385 §3.3: ALSO run the deep MCP validator. The shallow
+        # project-scope check above only enforces project-specific rules
+        # (literal secrets in env, absolute home paths). The deep validator
+        # adds transport-schema rules, reserved-name detection (v2.1.128),
+        # unknown-field warnings, and package-executor security warnings.
+        _validate_mcp_json_file_deep_project(mcp_path, report)
     elif mcp_path.exists():
         report.warning(
             ".mcp.json exists but is not git-tracked — per Claude Code docs, "
@@ -1362,6 +1403,14 @@ def validate_project_scope(project_root: Path, report: ValidationReport) -> None
     rules_dir = claude_dir / "rules"
     if classify_folder_scope(rules_dir, repo_root) == "project":
         validate_rules_folder(rules_dir, repo_root, project_root, report)
+        # TRDD-f4e2d385 §3.1: ALSO run the deep rules validator. The shallow
+        # `validate_rules_folder` above only enforces project-specific rules
+        # (no absolute home paths in the body). The deep validator adds the
+        # rules-spec frontmatter checks (`paths` array shape, absolute glob
+        # rejection, `..` segment escape), secret/private-path scans, the
+        # token-budget warning over the combined corpus, and unknown-field
+        # MINOR for `path:` typos.
+        validate_project_rules_deep(rules_dir, repo_root, project_root, report)
 
     # 7. .claude/output-styles/ (TRDD 4.7)
     styles_dir = claude_dir / "output-styles"
@@ -1422,11 +1471,9 @@ def main() -> int:
     check_remote_execution_guard()
 
     from cpv_validation_common import launcher_epilog
+
     parser = argparse.ArgumentParser(
-        description=(
-            "Validate git-tracked (project-scope) Claude Code configuration "
-            "under <project_path>."
-        ),
+        description=("Validate git-tracked (project-scope) Claude Code configuration under <project_path>."),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=launcher_epilog("project-scope"),
     )
