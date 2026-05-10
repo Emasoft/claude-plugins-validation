@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-10T06:59:45+00:00",
+  "computed_at": "2026-05-10T07:25:37+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     "agents/cache-optimizer-agent.md": "sha256:b0f8e0619569cc2b04587e8b251f9ad2f9a8e8227da071953aa56f78c72c0553",
@@ -109,7 +109,7 @@
     "scripts/manage_plugin.py": "sha256:a9f6551d2bff96f9fc2f78b136a15835953ebfd731510e79939439aecf3a16c4",
     "scripts/manage_registry.py": "sha256:61a915f598faa5ae774c66ee9b8ed75345a9dc0a317d75b5ec3902249e036a03",
     "scripts/manage_remote.py": "sha256:a4142540c469a978fdb80a91f863a28078db41db0f50ee5d71738f2777da44c5",
-    "scripts/publish.py": "sha256:e07c937d8bffea9f82085235eb663027d5f1b1ac31e737497e81ca2df7c376f6",
+    "scripts/publish.py": "sha256:07104e18fd4b80aeded5d0c5bfb98a201ad42b7903af696200131c85c0886835",
     "scripts/set_marketplace_pat.py": "sha256:4edd250150691c84e2ddfaae506c99b89e23e6f9cf256b9db323e04df99cef1d",
     "scripts/setup_branch_rules.py": "sha256:752d23cc4abe242ce56df5d909fcd563aa681ade9824a9f80553cf4cd60cbfac",
     "scripts/setup_branch_rules_generic.py": "sha256:36bc1862e5959f378cd2cd729c1dccb1e30a03afc74560f74672ab9bbf6bade0",
@@ -343,8 +343,9 @@
     "tests/test_plugin_verify_hashes.py": "sha256:e7deffe7543ea6d8f3d7463541c148bc536ea59b79a4483ed0de9c07748d054c",
     "tests/test_prune_old_versions.py": "sha256:a45dda546e8ad193ee5af914ba4918bdc5d3358fb8865264f0ff44fb88ffece8",
     "tests/test_publish.py": "sha256:6710e4487bb7d9eb7341abd0d049b3223a176460bc91fba08a8253ef96ce368a",
+    "tests/test_publish_background_prefetch.py": "sha256:f9df5b2a16b4e0a3ded53a63c923d0f68862cc6428acda7b05b077da738dee49",
     "tests/test_publish_idempotency.py": "sha256:4e01bdda7638cfbe9f014ed34164a9b07f39b000fc369d2b718d917cc615af4b",
-    "tests/test_publish_parallel_preflight.py": "sha256:81a6bba0e2e57bf6505b7c116784b5531b838ed60cceeb748f9ae0abd0f7d681",
+    "tests/test_publish_parallel_preflight.py": "sha256:b7b89178934a0b0ec55f206e64d467d79042b80303b2887b43cf69f9d3ba71e7",
     "tests/test_publish_parallelization.py": "sha256:9c15f93a31fae8ea1600f6c650bb14e8956757b22de401d5fefed50418981326",
     "tests/test_refresh_readme.py": "sha256:42a089cd1ed00d00e26bcf115edd0d96715ce85c1f45ce8b546cac9a2b97f891",
     "tests/test_remote_validation.py": "sha256:92770c033bb8f88df1e16927ef9ab63cc00467258ac6f1d3c637118fcbe92121",
