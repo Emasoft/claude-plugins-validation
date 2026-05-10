@@ -3,7 +3,7 @@
 **TRDD ID:** `9065109a-fd99-48b9-b895-8f91be725d2d`
 **Filename:** `design/tasks/TRDD-9065109a-fd99-48b9-b895-8f91be725d2d-zero-config-publish-pipeline.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
-**Status:** Draft — awaiting user approval before implementation.
+**Status:** Partial — Phase B (repo-shape detection + auto-config extraction) and Phase G (hash-manifest format v2 schema helpers) shipped 2026-05-10 via `scripts/cpv_repo_shape.py` and `scripts/cpv_hash_manifest_v2.py` (46 new tests). Phase A/C/D/E/F/H deferred — too large for a single commit and overlap heavily with already-shipped TRDDs (auth/integrity = TRDD-bbff5bc5 Done in v2.51.0; submodule reachability gates = TRDD-793ac32a; multi-language scaffolding = TRDD-83ab59e7). See "Status — what shipped vs deferred" section at bottom of this file for detail.
 **Supersedes:** TRDD-b5e44619 (universal-publish-and-auth) — extended scope.
 
 ## User request (verbatim, 2026-05-02)
@@ -365,3 +365,106 @@ Once these decisions are made, implementation begins with Phase A.
 
 No environment variables. No "set this constant before publishing." No
 "copy this template and fill in your values." Zero-config.
+
+## Status — what shipped vs deferred (2026-05-10)
+
+### Shipped this session (kraken on `wt/trdd-9065109a`)
+
+**Phase B — repo-shape detection + auto-config extraction.** New module
+`scripts/cpv_repo_shape.py` implements:
+  - `detect_repo_shape(root) -> RepoShape` covering all seven kinds in
+    the §B detection table (single-plugin, marketplace-hub,
+    nested-monorepo, marketplace-in-plugin, workspace-multi-git,
+    submodule-bundle, unknown). Layout takes precedence over submodule
+    presence — a Layout C plugin with `.gitmodules` is reported as
+    `marketplace-in-plugin` with `submodule_paths` populated, NOT as
+    `submodule-bundle` (so the layout-aware publish dispatch is
+    preserved).
+  - `extract_config_from_tree(root, shape) -> RepoConfig` pulls plugin
+    name+version (from `plugin.json`), GitHub remote owner+repo (from
+    `git remote get-url origin`), marketplace owner+repo (from
+    `notify-marketplace.yml`), submodule paths (from `.gitmodules`),
+    and per-child shapes (workspace-multi-git only). All values are
+    `None` when the signal is absent — never a fallback default.
+  - `pick_workspace_child(shape, input_fn=...)` interactive picker for
+    `workspace-multi-git`. The `input_fn` callable injection makes the
+    picker test-driveable without mocking stdin.
+  - `parse_owner_repo_from_remote(url)` URL parser (mirrored from
+    `publish._parse_owner_repo_from_remote`) so callers don't have to
+    reach into `publish.py` just for URL parsing.
+  - CLI entry: `python scripts/cpv_repo_shape.py [<path>]` prints the
+    detected shape + auto-extracted config in a stable plain-text
+    format. Useful for users debugging "why does publish.py think my
+    repo is X?" without dropping into a Python REPL.
+
+**Phase G — hash-manifest format v2 schema helpers.** New module
+`scripts/cpv_hash_manifest_v2.py` ships:
+  - `build_v2_manifest(v1, *, git=None, submodules=None)` promotes a
+    v1 manifest dict to v2: adds `version: 2`, `format:
+    "cpv-hash-manifest-v2"`, optional `git` block (`tag`+`sha`+`remote`
+    of the source commit), optional `submodules` block (per-path
+    `url`+`sha`+`purpose`).
+  - `normalize_to_files_dict(manifest)` reads either v1 OR v2 and
+    returns the inner files map. Raises `KeyError` for missing
+    `version`, `ValueError` for unsupported version. Backward-compat
+    contract: existing v1 manifests stay valid.
+  - `detect_format_version(manifest)` returns the manifest version
+    (1, 2, or None for malformed input) without raising.
+  - `SUPPORTED_VERSIONS = {1, 2}` and `V2_FORMAT_TAG =
+    "cpv-hash-manifest-v2"` constants for downstream callers.
+
+**Tests.** 46 new tests across `tests/test_cpv_repo_shape.py` (33) and
+`tests/test_hash_manifest_v2.py` (13). Full suite: 4881 passing + 3
+skipped (no regressions).
+
+### Deferred — rationale
+
+- **Phase A** (promote `scripts/publish.py` → `cpv/publish.py` +
+  3-line wrapper). Touches 30+ generated plugins. Needs a coordinated
+  release: bump CPV minor, refresh every plugin via `cpv-doctor
+  --standardize`, then drop the legacy in-tree `publish.py`. Out of
+  scope for a single worktree commit. The new `cpv_repo_shape.py` and
+  `cpv_hash_manifest_v2.py` are written so they can be lifted into
+  `cpv/` verbatim when Phase A lands.
+
+- **Phase C** (universal auth contract). **Already done as
+  TRDD-bbff5bc5** ("Done in v2.51.0"): `.plugin-self-hashes.json`
+  canonical filename, `_plugin_compute_hashes.py` /
+  `_plugin_verify_hashes.py` canonical scripts, GH PAT delegated to
+  `gh auth`, plugin secrets via `userConfig.sensitive: true`. Re-doing
+  this work would be churn.
+
+- **Phase D** (submodule-bundle support — rebuild logic, manifest
+  extension). Submodule reachability gates **already done as
+  TRDD-793ac32a** (`_ensure_submodules_pushed` in `publish.py:1805`).
+  The remaining piece — auto-rebuild bundled binaries when the
+  submodule HEAD has advanced — depends on the user's outstanding
+  decision in §"Decision needed" item 2 (auto-rebuild vs
+  `--rebuild-bundles` flag). Cannot ship without that decision.
+
+- **Phase E** (workspace-multi-git picker wired into `publish.py`).
+  The picker logic itself shipped this session
+  (`pick_workspace_child`). Wiring it into `publish.main()` requires
+  touching `scripts/publish.py`, which is owned by other agents per
+  the worktree's ownership constraints. Picker is ready to wire in a
+  follow-up commit.
+
+- **Phase F** (3-line `publish.py` wrapper). Same blocker as Phase A —
+  cannot land without the Phase A package promotion + the migration
+  of every generated plugin. Out of scope.
+
+- **Phase H** (canonical pipeline files re-sync via `cpv-doctor
+  --standardize`). The doctor agent (`scripts/manage_doctor.py`,
+  `agents/cpv-doctor-*.md`) is owned by other agents per the
+  worktree's ownership constraints. Cannot ship from this worktree.
+
+### Open questions still pending user decision (from §"Decision needed")
+
+1. Workspace-multi-git ambiguity: prompt vs `cd` requirement?
+2. Submodule rebuild trigger: auto vs `--rebuild-bundles`?
+3. Wrapper customization: zero customization vs `pre_publish`/`post_publish` hooks?
+4. Migration policy: opt-in `cpv-doctor --standardize` vs forced minor bump?
+5. Manifest v1 → v2 transition: parallel support for N releases vs force-flip?
+
+Once those are settled, Phases A/D/E/F/H can land in a coordinated
+release wave.
