@@ -64,7 +64,67 @@ NC = "\033[0m" if _USE_COLOR else ""
 # =============================================================================
 
 
-VALID_LANGUAGES = {"python", "js", "ts", "rust", "go", "deno"}
+VALID_LANGUAGES = {"python", "js", "ts", "rust", "go", "deno", "elixir", "ruby", "java", "kotlin"}
+
+
+# TRDD-83ab59e7: per-language manifest files used by `--language auto`
+# resolution and per-language scaffolding. Each language MUST appear in
+# VALID_LANGUAGES and (for non-python) MUST have a manifest generator
+# wired up in `generate_all_files()`. Order matches the TRDD spec table.
+LANGUAGE_MANIFESTS: dict[str, str] = {
+    "python": "pyproject.toml",
+    "js": "package.json",
+    "ts": "package.json",
+    "rust": "Cargo.toml",
+    "go": "go.mod",
+    "deno": "deno.json",
+    "elixir": "mix.exs",
+    "ruby": "Gemfile",
+    "java": "pom.xml",
+    "kotlin": "build.gradle.kts",
+}
+
+
+def resolve_language(arg: str, target: Path) -> str:
+    """Resolve the --language CLI argument to a concrete language string.
+
+    For `--language auto`, calls `detect_languages(target)` and picks the
+    first language found in the canonical priority order. If detection
+    finds nothing (or `target` doesn't exist), falls back to `python` so
+    the original behaviour is preserved.
+
+    Args:
+        arg: The raw value of --language (one of VALID_LANGUAGES, or "auto").
+        target: The target directory the plugin will be generated into.
+
+    Returns:
+        A concrete language string from VALID_LANGUAGES.
+
+    Why a thin wrapper instead of doing this inline in main(): so tests
+    can exercise the auto-detection path without mocking argparse, and so
+    `standardize_plugin.py` (which audits an EXISTING plugin) can call
+    the same resolver to pick the correct language.
+    """
+    if arg != "auto":
+        return arg
+    if not target.exists() or not target.is_dir():
+        return "python"
+    # Local import to avoid a hard cycle: detect_language imports nothing
+    # from this module, but keeping the import local also means tools that
+    # `import generate_plugin_repo` for a single helper do not pay the
+    # detection-module import cost.
+    from detect_language import detect_languages  # noqa: PLC0415
+
+    detected = detect_languages(target)
+    if not detected:
+        return "python"
+    # TRDD priority: prefer ts > js when both are present, then walk the
+    # rest of LANGUAGE_MANIFESTS in declaration order. This matches the
+    # detect_language module's own discriminator (tsconfig.json wins).
+    for lang in LANGUAGE_MANIFESTS:
+        if lang in detected:
+            return lang
+    return "python"
 
 
 # ── Phase 6: single-input slurp helpers ───────────────────────────────────
@@ -417,6 +477,191 @@ def gen_deno_json(p: PluginParams) -> str:
         )
         + "\n"
     )
+
+
+def _module_name_from_plugin(name: str) -> str:
+    """Convert a kebab-case plugin name to a CamelCase Elixir/Java module.
+
+    `my-test-plugin` -> `MyTestPlugin`. Used as the namespace for Elixir
+    `defmodule` and Java/Kotlin package fragments. Idempotent on names
+    that are already CamelCase.
+    """
+    parts = [p for p in name.replace("_", "-").split("-") if p]
+    return "".join(p[:1].upper() + p[1:] for p in parts) or "Plugin"
+
+
+def _atom_name_from_plugin(name: str) -> str:
+    """Convert a kebab-case plugin name to an Elixir atom (snake_case).
+
+    `my-test-plugin` -> `my_test_plugin`. Elixir atoms use snake_case for
+    project app names. Idempotent on already-snake names.
+    """
+    return name.replace("-", "_").lower() or "plugin"
+
+
+def gen_mix_exs(p: PluginParams) -> str:
+    """Generate mix.exs for Elixir plugins.
+
+    Produces a minimal valid Mix project with :credo (lint) and :ex_unit
+    (built-in test framework, no extra dep) wired up. The defmodule name
+    is CamelCase from the plugin name; the :app atom is snake_case.
+
+    Why not embed test_paths or coverage config: keep the scaffold under
+    50 lines so plugin authors can read it top-to-bottom and customise
+    without un-learning Elixir defaults.
+    """
+    module = _module_name_from_plugin(p.name)
+    atom = _atom_name_from_plugin(p.name)
+    return f"""defmodule {module}.MixProject do
+  use Mix.Project
+
+  def project do
+    [
+      app: :{atom},
+      version: "{p.version}",
+      elixir: "~> 1.16",
+      description: "{p.description}",
+      deps: deps(),
+      package: package(),
+      preferred_cli_env: [credo: :dev, test: :test]
+    ]
+  end
+
+  def application do
+    [extra_applications: [:logger]]
+  end
+
+  defp deps do
+    [
+      {{:credo, "~> 1.7", only: [:dev, :test], runtime: false}}
+    ]
+  end
+
+  defp package do
+    [
+      maintainers: ["{p.author}"],
+      licenses: ["{p.license}"],
+      links: %{{}}
+    ]
+  end
+end
+"""
+
+
+def gen_gemfile(p: PluginParams) -> str:
+    """Generate Gemfile for Ruby plugins.
+
+    Pins `rubocop` (lint) and `rspec` (test) under the right Bundler
+    groups so `bundle install --without development` works in CI without
+    pulling in dev tools by accident.
+    """
+    return f"""# frozen_string_literal: true
+# Gemfile for {p.name} ({p.version}) — {p.description}
+source 'https://rubygems.org'
+
+group :development do
+  gem 'rubocop', '~> 1.60'
+end
+
+group :test do
+  gem 'rspec', '~> 3.13'
+end
+"""
+
+
+def gen_pom_xml(p: PluginParams) -> str:
+    """Generate pom.xml for Java plugins (Maven layout).
+
+    Targets Java 17 (Temurin LTS, GitHub Actions default) and wires
+    junit-jupiter as the test framework. checkstyle is the lint pick
+    declared in the TRDD; we expose it as a Maven plugin entry rather
+    than a dep so `mvn checkstyle:check` works without extra config.
+    """
+    group_id = f"io.github.{p.github_owner}".replace("-", "_") if p.github_owner else "com.example"
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>{group_id}</groupId>
+  <artifactId>{p.name}</artifactId>
+  <version>{p.version}</version>
+  <packaging>jar</packaging>
+
+  <name>{p.name}</name>
+  <description>{p.description}</description>
+
+  <properties>
+    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>17</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>5.10.2</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-checkstyle-plugin</artifactId>
+        <version>3.3.1</version>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.2.5</version>
+      </plugin>
+    </plugins>
+  </build>
+</project>
+"""
+
+
+def gen_build_gradle_kts(p: PluginParams) -> str:
+    """Generate build.gradle.kts for Kotlin plugins (Gradle Kotlin DSL).
+
+    Pulls in the JVM Kotlin plugin and wires detekt for lint + JUnit5
+    for tests. The Kotlin version is pinned to a recent stable so the
+    initial scaffold builds on a fresh JDK 17 without surprise breakage.
+    """
+    group = f"io.github.{p.github_owner}".replace("-", "_") if p.github_owner else "com.example"
+    return f"""// build.gradle.kts for {p.name} ({p.version})
+// {p.description}
+
+plugins {{
+    kotlin("jvm") version "1.9.23"
+    id("io.gitlab.arturbosch.detekt") version "1.23.6"
+}}
+
+group = "{group}"
+version = "{p.version}"
+
+repositories {{
+    mavenCentral()
+}}
+
+dependencies {{
+    testImplementation(kotlin("test"))
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
+}}
+
+tasks.test {{
+    useJUnitPlatform()
+}}
+
+detekt {{
+    buildUponDefaultConfig = true
+}}
+"""
 
 
 # =============================================================================
@@ -3018,6 +3263,14 @@ def generate_all_files(p: PluginParams) -> list[tuple[str, str, bool]]:
         files.append(("go.mod", gen_go_mod(p), False))
     elif p.language == "deno":
         files.append(("deno.json", gen_deno_json(p), False))
+    elif p.language == "elixir":
+        files.append(("mix.exs", gen_mix_exs(p), False))
+    elif p.language == "ruby":
+        files.append(("Gemfile", gen_gemfile(p), False))
+    elif p.language == "java":
+        files.append(("pom.xml", gen_pom_xml(p), False))
+    elif p.language == "kotlin":
+        files.append(("build.gradle.kts", gen_build_gradle_kts(p), False))
     files.extend(
         [
             # Documentation
@@ -3192,9 +3445,11 @@ Examples:
     parser.add_argument("--version", default="0.1.0", help="Initial version (default: 0.1.0)")
     parser.add_argument(
         "--language",
-        choices=sorted(VALID_LANGUAGES),
+        choices=sorted(VALID_LANGUAGES) + ["auto"],
         default="python",
-        help="Plugin language (default: python). Non-python emits a minimal scaffold.",
+        help="Plugin language (default: python). Use 'auto' to detect from "
+        "an existing manifest in target_dir (uses detect_language). "
+        "Non-python emits a minimal scaffold.",
     )
     parser.add_argument(
         "--self-marketplace",
@@ -3284,6 +3539,16 @@ Examples:
 
     args = parser.parse_args()
 
+    target = args.target_dir.resolve()
+
+    # TRDD-83ab59e7: --language auto resolves against any pre-existing
+    # manifest in target_dir. We resolve BEFORE constructing PluginParams
+    # so the rest of the pipeline sees a concrete language and never has
+    # to special-case "auto" again.
+    resolved_language = resolve_language(args.language, target)
+    if args.language == "auto":
+        print(f"{BLUE}--language auto detected:{NC} {resolved_language}")
+
     # Build params
     params = PluginParams(
         name=args.name,
@@ -3295,12 +3560,10 @@ Examples:
         github_owner=args.github_owner,
         marketplace=args.marketplace,
         version=args.version,
-        language=args.language,
+        language=resolved_language,
         self_marketplace=args.self_marketplace,
         strip_dev=args.strip_dev,
     )
-
-    target = args.target_dir.resolve()
 
     # Check target directory
     if target.exists() and any(target.iterdir()):
