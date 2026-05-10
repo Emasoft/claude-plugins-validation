@@ -38,6 +38,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -45,6 +46,13 @@ from typing import Any
 
 from cpv_parametrize_body_predicate import is_parametrize_body_line
 from cpv_pattern_source_predicate import is_pattern_source_line
+from cpv_scanner_cache import (
+    CacheKey,
+    ScannerCache,
+    get_scanner_version,
+    sha256_of_args,
+    tree_merkle,
+)
 from cpv_validation_common import (
     CLOUD_IMDS_PATTERNS,
     CRYPTOMINING_PATTERNS,
@@ -7986,6 +7994,7 @@ def validate_security(
     enable_trufflehog: bool = True,
     enable_semgrep: bool = True,
     with_classifier: bool = False,
+    cache: ScannerCache | None = None,
 ) -> ValidationReport:
     """Run all security validations on a plugin directory.
 
@@ -8013,12 +8022,25 @@ def validate_security(
             can demote (LIKELY_FP → one severity tier down) or suppress
             (DEFINITE_FP → not reported). Off by default — gives the legacy
             v2.41 binary-guard behaviour. See TRDD-fe006962.
+        cache: Phase D scanner-result cache. When ``None`` (default), a
+            ``ScannerCache`` against the user's home cache directory is
+            constructed. The cache only wraps the four EXTERNAL tree-
+            level scanners (cc-audit, tirith, trufflehog, semgrep) —
+            the in-process pattern checks rebuild every run because
+            their cost is dominated by file IO, which the cache cannot
+            elide without bypassing the freshness check itself. Tests
+            can pass an isolated cache via
+            ``ScannerCache(cache_dir=tmp_path / "cache")``.
 
     Returns:
         ValidationReport with all security findings
     """
     report = ValidationReport()
     _reset_scan_step_log()
+    # Phase D — default to a real on-disk scanner-result cache. Tests
+    # that want isolation pass their own ``ScannerCache(cache_dir=...)``.
+    if cache is None:
+        cache = ScannerCache()
     # Make the classifier flag and the plugin-meta dict visible to the
     # phase-specific scan helpers via module-level globals — same pattern
     # the self-scan flag uses, so the overhead per finding stays in the
@@ -8309,13 +8331,143 @@ def validate_security(
     # thread. All four scanners route their output through
     # ``report.X(...)`` and ``capture_output=True`` subprocess calls,
     # so there is no inner ``print()`` to capture.
+    #
+    # Phase D (v2.78.0) — wrap each scanner with a content-hash cache
+    # lookup. The cache key is built from a tree merkle of every file
+    # the scanner would read (the gitignore-filtered tree under
+    # plugin_path). On a hit we replay the cached findings into the
+    # local report and skip the subprocess entirely. On a miss the
+    # scanner runs normally and its findings are serialised into the
+    # cache for the next warm run. The merkle is computed ONCE per
+    # validate_security() call and shared across all four scanners,
+    # so the per-scanner cache lookup is O(1).
+    _tree_merkle_cache: dict[str, str] = {}
+
+    def _compute_tree_merkle() -> str:
+        """Return the gitignore-filtered tree merkle for plugin_path.
+
+        Memoised across the four scanner cache lookups inside this
+        single ``validate_security`` invocation. The merkle stays
+        valid for the duration of the call because the scanners are
+        read-only.
+        """
+        if "merkle" in _tree_merkle_cache:
+            return _tree_merkle_cache["merkle"]
+        gi = get_gitignore_filter(plugin_path)
+        files: list[Path] = []
+        for dirpath_s, _dirs, filenames in gi.walk():
+            dp = Path(dirpath_s) if isinstance(dirpath_s, str) else dirpath_s
+            for fn in filenames:
+                fp = dp / fn
+                # Skip cache files themselves (.cc-audit.yaml is
+                # auto-generated per scan; including it in the
+                # merkle would break the cache on every run).
+                if fp.name.startswith(".cc-audit") or fp.name == ".cpv-self-hashes.json":
+                    continue
+                files.append(fp)
+        merkle = tree_merkle(files, base=plugin_path)
+        _tree_merkle_cache["merkle"] = merkle
+        return merkle
+
+    def _run_scanner_with_cache(
+        scanner_name: str,
+        scanner_fn: Any,
+        scanner_argv: list[str],
+        local_report: ValidationReport,
+    ) -> int:
+        """Cache-wrap a tree-level security scanner call.
+
+        Looks up a (tree-merkle, scanner-name, scanner-version, args)
+        cache entry. On hit, replays the cached findings into
+        ``local_report`` and returns the cached findings count. On
+        miss, invokes ``scanner_fn(plugin_path, local_report)`` and
+        writes the result back to the cache.
+
+        ``scanner_argv`` is the stable identifier of the CLI flags
+        this scanner uses — bumping a flag invalidates only this
+        scanner's entries. We don't model the actual CLI here
+        (each ``check_*`` function builds its own argv inline), so
+        ``scanner_argv`` is a curated whitelist that captures the
+        flags a developer would change when tuning the scanner.
+        """
+        merkle = _compute_tree_merkle()
+        version = get_scanner_version(scanner_name)
+        # Bake plugin_path into the args hash so two plugins with
+        # IDENTICAL trees but different on-disk paths still get
+        # distinct entries. trufflehog's `--no-update` and similar
+        # flags are also baked here — change any flag in
+        # scanner_argv and the cache invalidates.
+        full_args = [*scanner_argv, str(plugin_path)]
+        args_hash = sha256_of_args(full_args)
+        key = CacheKey(
+            target_id=f"{plugin_path}::sec:{scanner_name}",
+            content_sha256=merkle,
+            scanner_name=f"cpv-sec:{scanner_name}",
+            scanner_version=version,
+            args_hash=args_hash,
+        )
+        cached = cache.get(key)
+        if cached is not None and isinstance(cached.get("findings"), list):
+            # Cache hit — replay each finding into the local report.
+            # The cache also stores the scanner's integer return
+            # (the count of findings for the step log).
+            for entry in cached["findings"]:
+                if not isinstance(entry, dict):
+                    continue
+                level = entry.get("level")
+                msg = entry.get("message")
+                if not isinstance(level, str) or not isinstance(msg, str):
+                    continue
+                # Re-emit through ValidationReport.add() so all the
+                # invariants (counts, exit_code) are preserved.
+                local_report.add(
+                    level=level,  # type: ignore[arg-type]
+                    message=msg,
+                    file=entry.get("file"),
+                    line=entry.get("line"),
+                    phase=entry.get("phase"),
+                    fixable=bool(entry.get("fixable", False)),
+                    fix_id=entry.get("fix_id"),
+                )
+            return int(cached.get("findings_count", len(cached["findings"])))
+
+        # Cache miss — run the actual scanner and remember the
+        # delta between local_report.results before/after so we
+        # only cache findings produced by THIS scanner (not any
+        # findings the caller may have already pushed in).
+        before = len(local_report.results)
+        count = scanner_fn(plugin_path, local_report)
+        after_results = local_report.results[before:]
+        try:
+            cache.put(
+                key,
+                {
+                    "findings": [r.to_dict() for r in after_results],
+                    "findings_count": int(count),
+                    "ts": time.time(),
+                },
+            )
+        except Exception:
+            # Cache writes must NEVER affect scanner correctness.
+            pass
+        return int(count)
 
     def _task_cc_audit() -> tuple[ValidationReport, list[dict[str, Any]]]:
-        """Run cc-audit into a private report; record one step entry."""
+        """Run cc-audit into a private report; record one step entry.
+
+        Phase D — wraps the actual scanner call with a content-hash
+        cache lookup so a warm run skips the ~5-15s `npx` resolve +
+        ~30s scan against an unchanged tree.
+        """
         local = ValidationReport()
         steps: list[dict[str, Any]] = []
         if shutil.which("npx"):
-            cc_count = check_cc_audit(plugin_path, local)
+            cc_count = _run_scanner_with_cache(
+                "cc-audit",
+                check_cc_audit,
+                ["check", "-t", "plugin", "--format", "json", "--ci"],
+                local,
+            )
             steps.append({
                 "num": 22,
                 "name": "External: cc-audit (100+ AI rules)",
@@ -8337,11 +8489,20 @@ def validate_security(
         return local, steps
 
     def _task_tirith() -> tuple[ValidationReport, list[dict[str, Any]]]:
-        """Run tirith into a private report; record one step entry."""
+        """Run tirith into a private report; record one step entry.
+
+        Phase D — wraps the actual scanner call with a content-hash
+        cache lookup; a warm run elides the docker pull + scan.
+        """
         local = ValidationReport()
         steps: list[dict[str, Any]] = []
         if enable_tirith:
-            tirith_count = check_tirith_scanner(plugin_path, local)
+            tirith_count = _run_scanner_with_cache(
+                "tirith",
+                check_tirith_scanner,
+                ["scan", "--format", "json"],
+                local,
+            )
             # Inspect this task's local results (not the global) to
             # derive RAN vs SKIPPED — same predicate the serial
             # version used, just on the per-task report.
@@ -8380,7 +8541,13 @@ def validate_security(
         enabled: bool,
         binary_hint: str,
     ) -> tuple[ValidationReport, list[dict[str, Any]]]:
-        """Run a Phase 5 specialist tool (trufflehog / semgrep) into a private report."""
+        """Run a Phase 5 specialist tool (trufflehog / semgrep) into a private report.
+
+        Phase D — wraps the actual scanner call with a content-hash
+        cache lookup. Cache key uses ``binary_hint`` as the scanner
+        name so the trufflehog and semgrep entries are partitioned
+        cleanly.
+        """
         local = ValidationReport()
         steps: list[dict[str, Any]] = []
         if not enabled:
@@ -8403,7 +8570,25 @@ def validate_security(
                 "details": f"`{binary_hint}` not on PATH (install via brew/pipx/etc.)",
             })
         else:
-            count = scanner_fn(plugin_path, local)
+            # The scanner_argv stub captures the few flags each scanner
+            # uses internally — kept short on purpose: a flag drift
+            # inside check_trufflehog or check_semgrep should manually
+            # update this list to invalidate the cache. Bumping the
+            # scanner binary itself is auto-detected via scanner_version.
+            if binary_hint == "trufflehog":
+                scanner_argv = ["filesystem", "--json", "--no-update", "--fail"]
+            elif binary_hint == "semgrep":
+                scanner_argv = [
+                    "--config",
+                    "p/security-audit",
+                    "--config",
+                    "p/secrets",
+                    "--json",
+                    "--quiet",
+                ]
+            else:
+                scanner_argv = []
+            count = _run_scanner_with_cache(binary_hint, scanner_fn, scanner_argv, local)
             steps.append({
                 "num": step_num,
                 "name": name,
