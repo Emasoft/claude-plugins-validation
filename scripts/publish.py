@@ -33,7 +33,8 @@ import shutil
 import subprocess
 import sys
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
@@ -1080,7 +1081,11 @@ def stage_validate_marketplace(plugin_root: Path, layout: str) -> int:
     return 0
 
 
-def stage_marketplace_registration_check(plugin_root: Path) -> int:
+def stage_marketplace_registration_check(
+    plugin_root: Path,
+    *,
+    prefetch: "_PrefetchResults | None" = None,
+) -> int:
     """Gate 5: verify the plugin is wired to its marketplace for auto-updates.
 
     Layout A (standalone plugin referencing a remote marketplace):
@@ -1097,6 +1102,13 @@ def stage_marketplace_registration_check(plugin_root: Path) -> int:
     No-marketplace mode: emits a WARNING (not an error) and proceeds — this is
     valid for first releases or experimental standalone plugins.
 
+    Phase E (v2.79.0): the optional ``prefetch`` argument carries the
+    background-fetched marketplace.json future. When set and resolved
+    cleanly, ``_check_layout_a`` reuses the prefetched dict and skips its
+    own synchronous fetch. Pre-Phase-E callers (everything except the
+    parallel preflight orchestrator) pass nothing and the original
+    synchronous path runs unchanged.
+
     Returns 0 on success (including WARNING mode), 1 on any hard failure.
     """
     print(f"\n{BLUE}═══ Gate 5: Marketplace-registration check ═══{NC}")
@@ -1112,7 +1124,7 @@ def stage_marketplace_registration_check(plugin_root: Path) -> int:
         return 0
 
     if layout == "A":
-        return _check_layout_a(plugin_root, details)
+        return _check_layout_a(plugin_root, details, prefetch=prefetch)
 
     if layout == "B":
         return _check_layout_b(plugin_root, details)
@@ -1121,7 +1133,12 @@ def stage_marketplace_registration_check(plugin_root: Path) -> int:
     return 1
 
 
-def _check_layout_a(plugin_root: Path, details: dict) -> int:
+def _check_layout_a(
+    plugin_root: Path,
+    details: dict,
+    *,
+    prefetch: "_PrefetchResults | None" = None,
+) -> int:
     """Layout A verification: standalone plugin + remote marketplace."""
     print("  Layout A detected (standalone plugin repo)")
     notify_wf_raw = details.get("notify_workflow")
@@ -1173,7 +1190,51 @@ def _check_layout_a(plugin_root: Path, details: dict) -> int:
     print(f"  {GREEN}✓ MARKETPLACE_PAT secret configured{NC}")
 
     # 4. Plugin must be registered in the remote marketplace.json
-    mkt_json = _fetch_remote_marketplace_json(mkt_owner, mkt_repo, gh_bin=gh_bin)
+    #
+    # Phase E (v2.79.0): try the prefetched marketplace.json first. The
+    # prefetch was started ~Phase-C-time (before pytest), so by the time
+    # Gate 5 runs the network round-trip should already be done. We only
+    # accept the prefetch result if:
+    #   - The future was actually populated (Layout A with resolved owner/repo).
+    #   - It was scoped to the SAME (mkt_owner, mkt_repo) we're checking now
+    #     (defensive — guards against a future refactor adding remote-rename).
+    #   - It resolved without exception AND returned a usable dict (not None
+    #     transient failure).
+    # In every other case we fall through to the synchronous fetch — pre-
+    # Phase-E behaviour preserved.
+    mkt_json: dict | None = None
+    used_prefetch = False
+    if (
+        prefetch is not None
+        and prefetch.marketplace_json is not None
+        and prefetch.marketplace_target == (mkt_owner, mkt_repo)
+    ):
+        try:
+            # The prefetch thread was kicked off at the start of preflight,
+            # so by Gate 5 it has typically completed. .result() blocks
+            # only if the prefetch is still in flight (rare on a real
+            # publish but happens in fast-stage unit tests).
+            prefetched = prefetch.marketplace_json.result()
+        except Exception:
+            # Any exception (timeout, cancelled, bug in prefetch wrapper)
+            # → fall back to the synchronous path. We don't propagate
+            # these because the synchronous fetch will give us a clean,
+            # current attempt with a fresh error message if the network
+            # is genuinely down.
+            prefetched = None
+        if isinstance(prefetched, dict):
+            mkt_json = prefetched
+            used_prefetch = True
+
+    if mkt_json is None:
+        # Either no prefetch was available (no-prefetch path), or it
+        # failed transiently. Run the synchronous call exactly as before.
+        mkt_json = _fetch_remote_marketplace_json(mkt_owner, mkt_repo, gh_bin=gh_bin)
+    elif used_prefetch:
+        # Tiny breadcrumb so a maintainer reading the publish log can see
+        # the Phase E speedup actually fired this run.
+        print(f"  (Phase E: reused prefetched marketplace.json)")
+
     if mkt_json is None:
         print(
             f"{RED}✗ Could not fetch marketplace.json from {mkt_owner}/{mkt_repo}.{NC}\n"
@@ -1896,7 +1957,12 @@ def _ensure_submodules_pushed(plugin_root: Path) -> None:
         sys.exit(1)
 
 
-def stage_commit_tag_push(plugin_root: Path, tag_name: str) -> int:
+def stage_commit_tag_push(
+    plugin_root: Path,
+    tag_name: str,
+    *,
+    prefetch: "_PrefetchResults | None" = None,
+) -> int:
     """Gates 10-12: commit, tag, push.
 
     Idempotency: when a previous publish run was interrupted between the
@@ -1914,6 +1980,13 @@ def stage_commit_tag_push(plugin_root: Path, tag_name: str) -> int:
     TRDD-bbff5bc5 §5: gh-auth precheck runs at the top of Gate 12 (before
     the first `git push`) to give the maintainer an actionable error
     message BEFORE git tries the network round-trip and fails opaquely.
+
+    Phase E (v2.79.0): the optional ``prefetch`` argument carries the
+    background-fetched gh-auth future. When set and resolved cleanly, the
+    Gate 12 precheck reuses the prefetch result and skips the synchronous
+    ``_ensure_gh_auth`` call. If the prefetch raised SystemExit (permanent
+    auth failure), it's re-raised here on the main thread so the existing
+    fail-fast behaviour is preserved exactly.
     """
     print(f"\n{BLUE}═══ Gate 10: Commit version bump + manifest refresh + changelog ═══{NC}")
     expected_subject = f"chore(release): {tag_name}"
@@ -1999,7 +2072,60 @@ def stage_commit_tag_push(plugin_root: Path, tag_name: str) -> int:
     # TRDD-bbff5bc5: gh-auth precheck — fail fast with actionable error if
     # the maintainer's gh CLI is missing/unauthed/lacks push perm.
     owner, repo = _resolve_owner_repo(plugin_root)
-    _ensure_gh_auth(owner, repo)
+    # Phase E (v2.79.0): try the prefetched gh-auth result first. The
+    # prefetch was started ~Phase-C-time (before pytest), so by the time
+    # Gate 12 runs the network round-trip should already be done.
+    #
+    # We accept the prefetched result iff:
+    #   - The future was actually populated.
+    #   - It was scoped to the SAME (owner, repo) we're about to push to.
+    #
+    # The prefetch wrapper catches no exceptions itself, so the future
+    # carries either:
+    #   - exception() == None and result() == None → auth check passed
+    #     cleanly. Skip the synchronous call.
+    #   - exception() is SystemExit(1) → permanent auth failure. Re-raise
+    #     on the main thread so the existing fail-fast path runs (sys.exit
+    #     prints the same actionable error message _ensure_gh_auth would
+    #     have printed if invoked synchronously, because the SystemExit
+    #     was already raised AFTER its print — captured stderr was
+    #     emitted into the worker thread's stderr proxy, so it already
+    #     reached the user terminal).
+    #   - exception() is some OTHER unexpected exception → fall back to
+    #     synchronous (defensive: never trade fail-fast for a Phase E
+    #     speedup on something we don't recognise).
+    used_prefetch = False
+    if (
+        prefetch is not None
+        and prefetch.gh_auth is not None
+        and prefetch.gh_auth_target == (owner, repo)
+    ):
+        try:
+            exc = prefetch.gh_auth.exception()
+        except Exception:
+            # .exception() itself raising means the future is in a bad
+            # state (cancelled, etc.) — fall through to synchronous.
+            exc = None
+            used_prefetch = False
+        else:
+            if exc is None:
+                # Prefetch completed without raising → auth is good.
+                used_prefetch = True
+            elif isinstance(exc, SystemExit):
+                # Re-raise on the main thread to preserve fail-fast.
+                # SystemExit is the only auth-failure signal _ensure_gh_auth
+                # uses, so this is the canonical "permanent auth failure"
+                # path.
+                raise exc
+            else:
+                # Unknown exception → fall back to synchronous so the user
+                # gets a real, current error message from _ensure_gh_auth.
+                used_prefetch = False
+
+    if used_prefetch:
+        print(f"  (Phase E: reused prefetched gh-auth check)")
+    else:
+        _ensure_gh_auth(owner, repo)
     # TRDD-793ac32a Sprint 2: submodule push gate — verify every submodule
     # SHA referenced by the parent's index is reachable on its origin
     # remote BEFORE we push the parent. Without this, a parent push that
@@ -2100,7 +2226,201 @@ def stage_github_release(plugin_root: Path, tag_name: str, release_notes_file: P
 _PARALLEL_GATE_ORDER: tuple[str, ...] = ("tests", "validate", "mkpl_validate", "mkpl_reg")
 
 
-def run_preflight_parallel(plugin_root: Path, layout: str) -> int:
+# ── Phase E (v2.79.0): background prefetch during preflight ──────────────────
+#
+# Two network-bound calls block downstream gates and are independent of any
+# preflight state — they can be prefetched in parallel with Gate 2 (pytest):
+#
+#   1. `_ensure_gh_auth(owner, repo)` — Gate 12 dependency. Verifies the
+#      maintainer's gh CLI auth + push permission. ~60s of network round-trips.
+#   2. `_fetch_remote_marketplace_json(mkt_owner, mkt_repo)` — Gate 5
+#      dependency (Layout A only). Fetches the remote marketplace.json so we
+#      can verify the plugin is registered. ~5–10s.
+#
+# Strategy: kick both off at the same moment as the parallel preflight block
+# starts (~Phase C) and consume the cached results when each gate runs. If a
+# prefetch failed transiently (network hiccup, API timeout), the consuming
+# gate falls back to its existing synchronous call so behaviour is identical
+# in the worst case.
+#
+# `_ensure_gh_auth` raises SystemExit on permanent auth failure. We CANNOT
+# re-raise from inside a worker thread (only the worker dies) — instead, the
+# prefetch wrapper catches SystemExit and stores it on the future via the
+# exception channel. Gate 12 then re-raises it on the main thread for the
+# usual fail-fast behaviour.
+#
+# Layout="none" runs neither prefetch — there is no marketplace to fetch and
+# Gate 12 is the only consumer of gh-auth, but skipping the auth prefetch in
+# that mode keeps the no-marketplace fast-path cheap and matches the "no
+# behavioural change" promise (Gate 12's synchronous _ensure_gh_auth still
+# runs).
+
+
+@dataclass
+class _PrefetchResults:
+    """Carries background-prefetch futures across the preflight block.
+
+    Both fields are Optional so this same dataclass works in three modes:
+
+    * Layout A with prefetch: both futures are populated.
+    * Layout B / no marketplace: ``marketplace_json`` is None (Gate 5 in
+      Layout B reads the parent marketplace.json from disk; no remote fetch
+      happens, so prefetch is a no-op for that branch). ``gh_auth`` is still
+      populated since Gate 12 always pushes to origin regardless of layout.
+    * No layout: both fields are None — prefetch is fully skipped, the
+      consuming gates fall through to their synchronous calls.
+
+    Note: ``executor`` is owned by the caller of ``start_prefetch()``. Use
+    ``shutdown()`` (or wrap construction in a ``with`` block via the helper)
+    to guarantee thread cleanup even if the pipeline aborts before the
+    consuming gates run.
+    """
+
+    gh_auth: Future[None] | None = None
+    marketplace_json: Future[dict | None] | None = None
+    executor: ThreadPoolExecutor | None = field(default=None, repr=False)
+    # Owner/repo captured at prefetch time so the consuming gate can do a
+    # cheap sanity check that the prefetch was scoped to the same target
+    # the gate is now about to operate on. (Defensive — the preflight block
+    # never mutates origin between prefetch and consumption, but a future
+    # refactor that adds remote-rename handling shouldn't silently use a
+    # stale prefetch result.)
+    gh_auth_target: tuple[str, str] | None = None
+    marketplace_target: tuple[str, str] | None = None
+
+    def shutdown(self) -> None:
+        """Release the executor's worker threads.
+
+        ``ThreadPoolExecutor.shutdown(wait=False)`` returns immediately and
+        the worker threads continue running in the background until their
+        tasks complete. Daemon=False threads would block process exit; we
+        use ``wait=False`` to keep main()'s control flow snappy on early
+        failure paths, then rely on the workers being daemon=True (set
+        below in ``start_prefetch()``) so they die with the process.
+        """
+        if self.executor is not None:
+            self.executor.shutdown(wait=False)
+            self.executor = None
+
+
+def _prefetch_gh_auth_safe(owner: str, repo: str) -> None:
+    """Worker for the gh-auth prefetch thread.
+
+    The wrapped ``_ensure_gh_auth`` raises SystemExit on permanent auth
+    failure. SystemExit raised in a thread only kills THAT thread — the
+    main thread keeps running and would silently skip Gate 12's auth
+    check, defeating the precheck. We can't re-raise from here; instead,
+    the future stores the exception so Gate 12 can re-raise it on the
+    main thread when it consumes the prefetch result.
+
+    This helper just runs the call; the exception capture happens
+    automatically inside ``Future`` (raised exceptions become
+    ``future.exception()``).
+    """
+    _ensure_gh_auth(owner, repo)
+
+
+def _prefetch_marketplace_json_safe(mkt_owner: str, mkt_repo: str) -> dict | None:
+    """Worker for the marketplace.json prefetch thread.
+
+    ``_fetch_remote_marketplace_json`` already returns None on failure
+    (transient network error, parse failure, missing repo). We don't
+    transform that — Gate 5 is designed to fall back to a synchronous
+    fetch when this prefetch returns None. Any unexpected exception is
+    captured by the future and Gate 5 will see it via
+    ``future.exception()`` and fall back to the synchronous path.
+    """
+    return _fetch_remote_marketplace_json(mkt_owner, mkt_repo)
+
+
+def _start_prefetch(plugin_root: Path, layout: str, layout_details: dict) -> _PrefetchResults:
+    """Spawn the background gh-auth + marketplace-json prefetch threads.
+
+    Called from main() right before ``run_preflight_parallel``. The two
+    prefetch tasks run on a ThreadPoolExecutor with daemon worker threads
+    so they don't block process exit on early failures. Total preflight
+    workers ≈ 6 (4 from Phase C parallel preflight + 2 from this prefetch).
+
+    Layout-aware behaviour:
+
+    * Layout="none" → both futures stay None (skip prefetch entirely).
+    * Layout="A" with valid mkt_owner/mkt_repo → both futures populated.
+    * Layout="A" without resolved owner/repo → only gh_auth future
+      populated (marketplace_json prefetch needs both names).
+    * Layout="B" → only gh_auth future populated (no remote marketplace
+      fetch happens in Layout B; Gate 5 reads from disk).
+
+    Owner/repo for gh-auth comes from ``_current_repo_slug``. If that
+    fails (no origin remote, parse failure), gh_auth prefetch is skipped
+    too — Gate 12 will surface the failure via its existing synchronous
+    ``_resolve_owner_repo`` + ``_ensure_gh_auth`` calls.
+
+    Defensive: we never let exceptions in the prefetch path abort the
+    pipeline. If something goes wrong here, the consuming gates still do
+    their own synchronous calls and the publish completes; we lose the
+    Phase E speedup but not correctness.
+    """
+    # Never prefetch when there's no marketplace involved — the no-layout
+    # fast-path stays exactly as it was before Phase E.
+    if layout == "none":
+        return _PrefetchResults()
+
+    # Resolve the gh-auth target. Use _current_repo_slug (same parser that
+    # _resolve_owner_repo uses, but returns "owner/repo" string we then
+    # split). If we can't resolve it, skip the gh-auth prefetch — Gate 12
+    # will fail loudly via _resolve_owner_repo with the same error message
+    # we'd produce here, just slightly later.
+    gh_target: tuple[str, str] | None = None
+    slug = _current_repo_slug(plugin_root)
+    if slug and "/" in slug:
+        owner, repo = slug.split("/", 1)
+        if owner and repo:
+            gh_target = (owner, repo)
+
+    # Resolve the marketplace.json target. Only Layout A has a remote
+    # marketplace to fetch; Layout B reads marketplace.json from the
+    # parent repo on disk.
+    mkt_target: tuple[str, str] | None = None
+    if layout == "A":
+        mkt_owner_raw = layout_details.get("mkt_owner")
+        mkt_repo_raw = layout_details.get("mkt_repo")
+        if isinstance(mkt_owner_raw, str) and isinstance(mkt_repo_raw, str):
+            mkt_target = (mkt_owner_raw, mkt_repo_raw)
+
+    # If neither prefetch is applicable, skip the executor entirely.
+    if gh_target is None and mkt_target is None:
+        return _PrefetchResults()
+
+    # max_workers = number of prefetch tasks (1 or 2). thread_name_prefix
+    # makes the prefetch threads identifiable in any debug/strace output.
+    max_workers = sum(t is not None for t in (gh_target, mkt_target))
+    executor = ThreadPoolExecutor(
+        max_workers=max_workers,
+        thread_name_prefix="cpv-prefetch",
+    )
+    results = _PrefetchResults(executor=executor)
+
+    if gh_target is not None:
+        owner, repo = gh_target
+        results.gh_auth = executor.submit(_prefetch_gh_auth_safe, owner, repo)
+        results.gh_auth_target = gh_target
+
+    if mkt_target is not None:
+        mkt_owner, mkt_repo = mkt_target
+        results.marketplace_json = executor.submit(
+            _prefetch_marketplace_json_safe, mkt_owner, mkt_repo
+        )
+        results.marketplace_target = mkt_target
+
+    return results
+
+
+def run_preflight_parallel(
+    plugin_root: Path,
+    layout: str,
+    *,
+    prefetch: _PrefetchResults | None = None,
+) -> int:
     """Run Gates 2/3/4/5 concurrently with per-thread output capture.
 
     Phase C (v2.77.0): replaces the previous sequential Gate-2 → Gate-3 →
@@ -2136,13 +2456,19 @@ def run_preflight_parallel(plugin_root: Path, layout: str) -> int:
     """
     print(f"\n{BLUE}═══ Running Gates 2-5 concurrently (Phase C parallel preflight) ═══{NC}")
 
+    # Phase E (v2.79.0): Gate 5 may consume the prefetched marketplace.json
+    # instead of doing its own synchronous fetch. Pass prefetch results
+    # through via the keyword argument; if None, Gate 5 falls back to the
+    # synchronous path (identical to pre-Phase-E behaviour).
+    pf = prefetch  # local alias for closure capture readability
+
     # Stage callable lookup — wrapped in lambdas because some stages take
     # extra arguments beyond plugin_root (Gate 4 wants the layout string).
     stage_callables: dict[str, Callable[[], int]] = {
         "tests": lambda: stage_run_tests(plugin_root),
         "validate": lambda: stage_validate_plugin(plugin_root),
         "mkpl_validate": lambda: stage_validate_marketplace(plugin_root, layout),
-        "mkpl_reg": lambda: stage_marketplace_registration_check(plugin_root),
+        "mkpl_reg": lambda: stage_marketplace_registration_check(plugin_root, prefetch=pf),
     }
 
     # Submit all four gates simultaneously. max_workers=4 is the exact
@@ -2275,48 +2601,77 @@ Examples:
     if rc != 0:
         return rc
 
-    layout, _ = detect_layout(root)
-    rc = run_preflight_parallel(root, layout)
-    if rc != 0:
-        return rc
+    layout, layout_details = detect_layout(root)
 
-    rc = stage_version_consistency(root)
-    if rc != 0:
-        return rc
+    # Phase E (v2.79.0): kick off background prefetch threads for the two
+    # network-bound calls that block downstream gates:
+    #   - _ensure_gh_auth (Gate 12 dependency)
+    #   - _fetch_remote_marketplace_json (Gate 5 dependency, Layout A only)
+    # Both run in parallel with the 4-worker preflight pool, so total
+    # preflight workers ≈ 6. The futures are stored on `prefetch` and
+    # consumed by the relevant gates. If prefetch failed transiently, the
+    # consuming gate falls back to its synchronous call (no behavioural
+    # change). If gh-auth raised SystemExit (permanent auth failure), it's
+    # re-raised on the main thread when Gate 12 consumes the result.
+    #
+    # Daemon-thread cleanup: ThreadPoolExecutor uses non-daemon threads by
+    # default, so we MUST call shutdown() on every exit path — otherwise
+    # an early-failure path (e.g. Gate 6 returns non-zero) would leak the
+    # workers and stall process exit. The wide try/finally below covers
+    # all return paths through main() that happen AFTER prefetch starts.
+    prefetch = _start_prefetch(root, layout, layout_details)
+    try:
+        rc = run_preflight_parallel(root, layout, prefetch=prefetch)
+        if rc != 0:
+            return rc
 
-    # ── Gate 7: bump ──
-    rc, new_version = stage_bump(root, bump_type, args.dry_run)
-    if rc != 0 or new_version is None:
-        # Narrowing for mypy: stage_bump returns (0, str) or (nonzero, None).
-        # The second branch catches the defensive case where rc is 0 but
-        # new_version is None — should never happen, but fail-fast if it does.
-        return rc if rc != 0 else 1
-    if args.dry_run:
-        print(f"\n{GREEN}✓ Dry run complete — no changes made.{NC}")
+        rc = stage_version_consistency(root)
+        if rc != 0:
+            return rc
+
+        # ── Gate 7: bump ──
+        rc, new_version = stage_bump(root, bump_type, args.dry_run)
+        if rc != 0 or new_version is None:
+            # Narrowing for mypy: stage_bump returns (0, str) or (nonzero, None).
+            # The second branch catches the defensive case where rc is 0 but
+            # new_version is None — should never happen, but fail-fast if it does.
+            return rc if rc != 0 else 1
+        if args.dry_run:
+            print(f"\n{GREEN}✓ Dry run complete — no changes made.{NC}")
+            return 0
+
+        tag_name = f"v{new_version}"
+
+        # ── Gate 8: refresh integrity manifest (issue #18) ──
+        rc = stage_refresh_self_hashes(root)
+        if rc != 0:
+            return rc
+
+        # ── Gates 9-13: changelog, commit, tag, push, release ──
+        rc, release_notes_file = stage_changelog(root, tag_name, new_version)
+        if rc != 0 or release_notes_file is None:
+            return rc
+
+        # Phase E (v2.79.0): pass the prefetch results into Gate 12 so the
+        # synchronous _ensure_gh_auth call can be skipped when the
+        # background prefetch already completed cleanly.
+        rc = stage_commit_tag_push(root, tag_name, prefetch=prefetch)
+        if rc != 0:
+            return rc
+
+        rc = stage_github_release(root, tag_name, release_notes_file)
+        if rc != 0:
+            return rc
+
+        print(f"\n{GREEN}✓ Published v{new_version}{NC}")
         return 0
-
-    tag_name = f"v{new_version}"
-
-    # ── Gate 8: refresh integrity manifest (issue #18) ──
-    rc = stage_refresh_self_hashes(root)
-    if rc != 0:
-        return rc
-
-    # ── Gates 9-13: changelog, commit, tag, push, release ──
-    rc, release_notes_file = stage_changelog(root, tag_name, new_version)
-    if rc != 0 or release_notes_file is None:
-        return rc
-
-    rc = stage_commit_tag_push(root, tag_name)
-    if rc != 0:
-        return rc
-
-    rc = stage_github_release(root, tag_name, release_notes_file)
-    if rc != 0:
-        return rc
-
-    print(f"\n{GREEN}✓ Published v{new_version}{NC}")
-    return 0
+    finally:
+        # Phase E: release the prefetch executor's worker threads on every
+        # exit path (success, early failure, exception). The workers are
+        # stdlib non-daemon threads, so without shutdown() the process
+        # would stall on exit waiting for them — even on a Gate 6 failure
+        # that aborted long before Gate 12 consumed the prefetch.
+        prefetch.shutdown()
 
 
 if __name__ == "__main__":
