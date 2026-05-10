@@ -60,10 +60,19 @@ with a WARNING.
 - **NIT**: missing `$schema` declaration.
 
 ### 2. `.mcp.json` at the project root
+Shallow (project-scope rules):
 - **CRITICAL**: JSON parse failure.
 - **MAJOR**: root not an object, missing `mcpServers`.
 - **MINOR**: literal secrets in `mcpServers.*.env` values (use `${VAR}`
   expansion per mcp.md), absolute home paths in `command` / `args`.
+
+Deep (v2.21.0+, TRDD-f4e2d385 §3.3): invoked via
+`validate_mcp.validate_mcp_config` on top of the shallow check — adds
+transport-schema rules (`stdio` requires `command`, `http`/`sse` require
+`url`), reserved-name detection (v2.1.128 — names that Claude Code
+silently skips at load time), unknown-field WARNING for typos like
+`commandz`, and package-executor security warnings (`npx`/`bunx`/`uvx`
+running unpinned remote packages).
 
 > **v2.21.0 behavior change (TRDD-f4e2d385 §3.1):** every tracked element
 > under `.claude/` is now passed to the FULL per-element validator
