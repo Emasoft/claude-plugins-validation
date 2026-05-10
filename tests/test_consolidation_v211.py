@@ -38,13 +38,17 @@ def _parse_frontmatter(path: Path) -> dict | None:
 
 
 # --- Direct-script commands (no agent field) ---
+#
+# v2.79.x note: cpv-doctor was previously direct-script; per TRDD-82e836dc
+# Phase B it now dispatches the cpv-doctor-menu agent (haiku menu) which
+# in turn dispatches cpv-doctor-agent (opus work). It therefore moves to
+# AGENT_COMMANDS below.
 
 DIRECT_SCRIPT_COMMANDS = [
     "cpv-validate-plugin",
     "cpv-validate-skill",
     "cpv-validate-github-plugin",
     "cpv-validate-github-marketplace",
-    "cpv-doctor",
     "cpv-list-plugins",
     "cpv-bump-version",
     "cpv-version",
@@ -55,13 +59,22 @@ DIRECT_SCRIPT_COMMANDS = [
 ]
 
 # --- Agent commands (with agent field) ---
+#
+# v2.79.x note: per TRDD-82e836dc Phase B, four commands now route to a
+# `*-menu` haiku dispatcher rather than directly to the opus work agent:
+#   cpv-fix-validation             → plugin-fixer-menu       (was plugin-fixer)
+#   cpv-fix-marketplace-validation → marketplace-fixer-menu  (was marketplace-fixer)
+#   cpv-cache-optimize             → cache-optimizer-menu    (was cache-optimizer-agent)
+#   cpv-doctor                     → cpv-doctor-menu         (was implicit cpv-doctor-agent)
 
 AGENT_COMMANDS = {
     "cpv-validate": "plugin-validator",
     "cpv-manage": "plugin-manager",
     "cpv-create": "plugin-creator",
-    "cpv-fix-validation": "plugin-fixer",
-    "cpv-fix-marketplace-validation": "marketplace-fixer",
+    "cpv-fix-validation": "plugin-fixer-menu",
+    "cpv-fix-marketplace-validation": "marketplace-fixer-menu",
+    "cpv-cache-optimize": "cache-optimizer-menu",
+    "cpv-doctor": "cpv-doctor-menu",
     "cpv-semantic-validation": "semantic-validator",
 }
 
@@ -250,11 +263,34 @@ class TestSkillAgentArchitecture:
             )
 
     def test_all_agents_declare_skills_list(self):
-        """Every agent must have a skills: list in its frontmatter."""
+        """Every agent must have a skills: list in its frontmatter.
+
+        Exception (TRDD-82e836dc §4 cross-cutting #3): the four `*-menu`
+        haiku dispatcher agents have NO skills — they pass everything to
+        the opus work agent via Agent dispatch. Loading skills on the
+        menu agent would double-load them (menu + work) and waste cache.
+        """
+        # Menu agents are pure dispatchers — they hold no skills by design.
+        menu_agents_no_skills = {
+            "plugin-fixer-menu.md",
+            "marketplace-fixer-menu.md",
+            "cache-optimizer-menu.md",
+            "cpv-doctor-menu.md",
+        }
         for agent_md in AGENTS_DIR.glob("*.md"):
             fm = _parse_frontmatter(agent_md)
             assert fm is not None, f"{agent_md} has no frontmatter"
             skills = fm.get("skills")
+            if agent_md.name in menu_agents_no_skills:
+                # Per TRDD-82e836dc §4 #3: the menu agents must have no
+                # skills (None or [] both acceptable). If they DID have
+                # skills, the loader would import the same skill files
+                # twice (menu + dispatched work agent).
+                assert not skills, (
+                    f"{agent_md.name}: menu agents must have NO skills "
+                    f"(per TRDD-82e836dc §4 cross-cutting #3), got {skills!r}"
+                )
+                continue
             assert isinstance(skills, list) and skills, (
                 f"{agent_md.name}: skills must be a non-empty list, got {skills!r}"
             )
@@ -271,9 +307,7 @@ class TestSkillAgentArchitecture:
         for skill_dir in SKILLS_DIR.iterdir():
             if not skill_dir.is_dir() or not (skill_dir / "SKILL.md").exists():
                 continue
-            assert skill_dir.name in loaded, (
-                f"Skill {skill_dir.name} is not loaded by any agent — orphaned skill"
-            )
+            assert skill_dir.name in loaded, f"Skill {skill_dir.name} is not loaded by any agent — orphaned skill"
 
     def test_loaded_by_claims_match_actual_agents(self):
         """Each 'Loaded by X agent' claim in a skill must map to an agent that loads it."""

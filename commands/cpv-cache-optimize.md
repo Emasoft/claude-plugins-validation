@@ -11,12 +11,12 @@ user-invocable: true
 
 Dispatches the **cache-optimizer-menu** agent (haiku — TRDD-82e836dc), which
 either runs immediately (when a path argument is provided) or renders the
-First Contact menu (auto-discovered recent cache-audit reports + audit-then-fix
-+ broader rows) and parses the user's integer reply. On a leaf pick the menu
-agent dispatches the **cache-optimizer-agent** work agent (opus) to run the
-actual audit + fix + re-validate loop. With `--broader`, the work agent also
-performs Phase 4 cache-aware refactoring of the plugin's
-skills/agents/commands/CLAUDE.md/rules.
+First Contact menu (auto-discovered recent cache-audit reports plus
+audit-then-fix and broader rows) and parses the user's integer reply. On
+a leaf pick the menu agent dispatches the **cache-optimizer-agent** work
+agent (opus) to run the actual audit + fix + re-validate loop. With
+`--broader`, the work agent also performs Phase 4 cache-aware
+refactoring of the plugin's skills/agents/commands/CLAUDE.md/rules.
 
 Unlike `/cpv-validate-cache` (which only audits), this command runs the full
 **validate → fix → re-validate loop**.
