@@ -3,7 +3,7 @@ name: cpv-fix-marketplace-validation
 description: Fix issues from a marketplace validation report file (or migrate marketplace layout)
 allowed-tools: Read, Bash, Glob, Grep, Write, Edit, AskUserQuestion
 argument-hint: "<report_file_path>"
-agent: marketplace-fixer
+agent: marketplace-fixer-menu
 user-invocable: true
 ---
 
@@ -17,7 +17,11 @@ Reads a marketplace validation report file and fixes the issues it contains, one
 /cpv-fix-marketplace-validation <report_file_path>
 ```
 
-The argument is optional — if omitted, the marketplace-fixer agent asks what the user would like to do (mechanical fix, architectural migration, or pipeline standardization) via a First Contact menu.
+The argument is optional — if omitted, the **marketplace-fixer-menu** agent
+(haiku — TRDD-82e836dc) renders the First Contact menu and dispatches the
+**marketplace-fixer** work agent (opus) once a leaf is picked. The work
+agent then handles the actual fixing (mechanical, architectural, or
+pipeline standardization).
 
 ## Arguments
 
@@ -27,13 +31,25 @@ The argument is optional — if omitted, the marketplace-fixer agent asks what t
 
 ## Workflow
 
-1. The marketplace-fixer agent reads the report file (or asks the user for one).
-2. Screens all findings for `category: architecture`. If any are present, hands off to `migrate-marketplace-architecture` BEFORE any mechanical fix. Architectural migrations require extensive `AskUserQuestion` interaction (layout choice, owner, licenses, per-plugin metadata).
-3. For remaining mechanical findings, fixes in strict priority order: CRITICAL → MAJOR → MINOR → NIT.
-4. Consults `fix-marketplace-validation` to map each error to the correct fix guide section, then applies the Edit.
-5. Skips WARNING items (advisory only).
-6. Writes a fix log to `$MAIN_ROOT/reports/marketplace-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`.
-7. Returns a one-line summary: `fixed N of M issues. Report: <filepath>`.
+1. The **marketplace-fixer-menu** agent (haiku — TRDD-82e836dc) renders the
+   First Contact menu (auto-discovered recent reports + architecture /
+   pipeline / manual rows) and parses the user's integer reply.
+2. On a leaf pick, the menu agent dispatches the **marketplace-fixer** work
+   agent (opus) with the chosen path/mode inside a `<context>` block.
+3. The work agent reads the report file (or runs validation when handed a
+   marketplace folder) and screens all findings for `category: architecture`.
+   If any are present, it hands off to `migrate-marketplace-architecture`
+   BEFORE any mechanical fix.
+4. For remaining mechanical findings, fixes in strict priority order:
+   CRITICAL → MAJOR → MINOR → NIT.
+5. Consults `fix-marketplace-validation` to map each error to the correct
+   fix guide section, then applies the Edit.
+6. Skips WARNING items (advisory only) unless they are publish-blockers.
+7. Writes a fix log to `$MAIN_ROOT/reports/marketplace-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`.
+8. Returns a one-line summary: `fixed N of M issues. Report: <filepath>`.
+
+When invoked with a path argument the menu skips the table and dispatches
+immediately, so no extra latency is added by the haiku-then-opus chain.
 
 ## Examples
 
