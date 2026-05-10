@@ -5048,7 +5048,11 @@ def is_valid_kebab_case(name: str) -> bool:
 # Color Formatting (for terminal output)
 # =============================================================================
 
-# ANSI color codes
+# ANSI color codes — IMMUTABLE. Never mutate this dict at runtime; use
+# `set_color_enabled(False)` instead. Mutating the dict is shared-state
+# pollution that flares under pytest-xdist parallel workers (one worker's
+# `--no-color` validate run clobbers COLORS for every other worker's
+# subsequent `colorize()` call in the same process).
 COLORS = {
     "CRITICAL": "\033[91m",  # Red
     "MAJOR": "\033[93m",  # Yellow
@@ -5063,17 +5067,38 @@ COLORS = {
     "DIM": "\033[2m",  # Dim
 }
 
+# Color-enabled flag. False → colorize/format_result emit no ANSI codes.
+# Set via set_color_enabled() — never mutate COLORS itself.
+_COLOR_ENABLED: bool = True
+
+
+def set_color_enabled(enabled: bool) -> None:
+    """Toggle ANSI color output globally for this process.
+
+    Call this from a CLI's main() when --no-color is passed or stdout
+    isn't a TTY. Replaces the older "for k in COLORS: COLORS[k] = ''"
+    pattern which was shared-state pollution that broke under
+    pytest-xdist parallel workers.
+    """
+    global _COLOR_ENABLED
+    _COLOR_ENABLED = bool(enabled)
+
 
 def colorize(text: str, level: str) -> str:
-    """Apply color to text based on level."""
+    """Apply color to text based on level (no-op when colors disabled)."""
+    if not _COLOR_ENABLED:
+        return text
     color = COLORS.get(level, "")
     return f"{color}{text}{COLORS['RESET']}"
 
 
 def format_result(result: ValidationResult, show_file: bool = True) -> str:
     """Format a single validation result for terminal output."""
-    color = COLORS.get(result.level, "")
-    reset = COLORS["RESET"]
+    if _COLOR_ENABLED:
+        color = COLORS.get(result.level, "")
+        reset = COLORS["RESET"]
+    else:
+        color = reset = ""
 
     parts = [f"{color}[{result.level}]{reset} {result.message}"]
 

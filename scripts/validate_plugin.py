@@ -4835,12 +4835,15 @@ def main() -> int:
     parser.add_argument("path", nargs="?", help="Plugin root path (default: parent of scripts/)")
     args = parser.parse_args()
 
-    # Disable ANSI colors when --no-color is passed or stdout is not a TTY
+    # Disable ANSI colors when --no-color is passed or stdout is not a TTY.
+    # Use the set_color_enabled() helper instead of mutating COLORS — direct
+    # mutation is shared-state pollution that flares under pytest-xdist
+    # parallel workers (one worker's --no-color clobbers COLORS for every
+    # subsequent colorize() call by any other test in the same process).
     if args.no_color or not (hasattr(sys.stdout, "isatty") and sys.stdout.isatty()):
         import cpv_validation_common
 
-        for key in list(cpv_validation_common.COLORS.keys()):
-            cpv_validation_common.COLORS[key] = ""
+        cpv_validation_common.set_color_enabled(False)
 
     # Determine plugin root — always resolve to absolute path so relative_to() works
     if args.path:
