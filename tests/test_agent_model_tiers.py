@@ -273,6 +273,14 @@ def test_opus_work_agent_has_no_first_contact_menu(agent_name: str) -> None:
     They are dispatched by the haiku menu agent which already made the
     choice. A leftover menu in the work agent risks the user being
     re-prompted after dispatch.
+
+    We detect the menu via TWO concrete signals — the heavy table-drawing
+    `┏━` row that every legacy menu uses, AND a markdown section header
+    that begins with `## First Contact`. Bare prose mentions of "First
+    Contact" inside the description / explanatory paragraphs are allowed
+    because they document what was MOVED (e.g. "the menu agent handles
+    First Contact menu rendering"). The fail is on the SECTION, not the
+    phrase.
     """
     menu_name = agent_name.replace(".md", "-menu.md")
     if not (AGENTS_DIR / menu_name).exists():
@@ -281,16 +289,20 @@ def test_opus_work_agent_has_no_first_contact_menu(agent_name: str) -> None:
             f"({menu_name} missing) — menu-removal guard skipped until split lands."
         )
     body = (AGENTS_DIR / agent_name).read_text(encoding="utf-8")
-    # Heuristic 1: the heavy table-drawing characters that the legacy
-    # First Contact menus use should not appear in a work-only agent.
+    # Signal 1: heavy table-drawing characters the legacy menus use.
     assert "┏━" not in body, (
         f"{agent_name} still contains a Unicode-bordered menu table "
         f"(`┏━` found). First Contact menus belong on the haiku menu agent."
     )
-    # Heuristic 2: the explicit "First Contact" header.
-    assert "First Contact" not in body, (
-        f"{agent_name} still contains a `First Contact` section. The menu "
-        f"belongs on the haiku menu agent ({menu_name})."
+    # Signal 2: an actual `## First Contact` section header (case-sensitive,
+    # markdown-level-2 only). Inline prose mentions of the term are fine.
+    has_first_contact_section = any(
+        line.startswith("## First Contact") for line in body.splitlines()
+    )
+    assert not has_first_contact_section, (
+        f"{agent_name} still contains a `## First Contact` section. The "
+        f"menu belongs on the haiku menu agent ({menu_name}). Bare prose "
+        f"mentions of the term are allowed; only the section header is forbidden."
     )
 
 
