@@ -39,6 +39,7 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # Local helpers — the scripts/ dir is on sys.path when validate_plugin.py
@@ -1174,24 +1175,95 @@ def lint_repo(
 
     print(f"  Detected languages: {', '.join(sorted(selected.keys()))}")
 
-    all_passed = True
-    for lang in sorted(selected.keys()):
+    # Phase B (v2.76.0) — run every applicable linter in parallel.
+    # Each lint function is essentially a series of subprocess calls
+    # (ruff, eslint, shellcheck, gofmt, …); subprocesses release the
+    # GIL while they wait, so a ThreadPoolExecutor gives near-linear
+    # speedup without adding any new dependency.
+    #
+    # Output ordering must remain deterministic (alphabetical by
+    # language) regardless of which linter finishes first, so each
+    # task writes both its findings and its captured stdout into a
+    # per-language buffer, and the main thread replays them in
+    # sorted order after the pool drains.
+    #
+    # IMPORTANT — no `contextlib.redirect_stdout` inside the thread
+    # tasks. ``redirect_stdout`` mutates the process-global
+    # ``sys.stdout`` reference: with N concurrent threads the last one
+    # to exit may restore a stale per-thread buffer instead of the
+    # real stdout, swallowing every subsequent write made by the main
+    # thread (this exact bug surfaced in early Phase B drafts). All
+    # CPV lint helpers route their output through ``report.X(...)``
+    # and ``capture_output=True`` subprocesses, so there is no inner
+    # ``print()`` to capture. The per-language `[LABEL] N file(s)`
+    # header line is the only direct stdout write — we synthesise it
+    # explicitly into the per-task buffer here, and replay everything
+    # in canonical order after the pool drains.
+    sorted_langs = sorted(selected.keys())
+
+    def _run_one(lang: str) -> tuple[str, ValidationReport, str, bool]:
+        """Lint one language in isolation.
+
+        Returns ``(lang, per_task_report, header_line, passed)``. The
+        per-task report is merged into the caller's ``report`` in
+        canonical order; the header line is replayed verbatim so the
+        terminal sees exactly the same lines the serial version
+        printed (just possibly re-ordered by language).
+        """
+        local_report = ValidationReport()
         files = selected[lang]
         label = _LANG_LABEL.get(lang, lang.upper())
-        print(f"  [{label}] {len(files)} file(s)")
+        # The only stdout write the serial version produced per
+        # language — synthesise it here so the main-thread replay
+        # below can emit it in alphabetical order.
+        header_line = f"  [{label}] {len(files)} file(s)\n"
         lint_fn = _DISPATCH.get(lang)
         if lint_fn is None:
-            # Programming error — `detect_languages` returned a key the
-            # dispatch table doesn't know about. Fail loud.
-            report.major(f"No lint function registered for language '{lang}' — CPV dispatch table out of sync")
-            all_passed = False
-            continue
+            # Programming error — `detect_languages` returned a key
+            # the dispatch table doesn't know about. Fail loud, into
+            # this task's local report so the merge step sees it.
+            local_report.major(
+                f"No lint function registered for language '{lang}' — CPV dispatch table out of sync"
+            )
+            return lang, local_report, header_line, False
         passed = lint_fn(
             plugin_root,
             files,
-            report,
+            local_report,
             strict_missing_tools=strict_missing_tools,
         )
+        return lang, local_report, header_line, passed
+
+    if not sorted_langs:
+        # Defensive — `selected` is non-empty by the early return above,
+        # but guard against future refactors that could reach here with
+        # an empty dict and accidentally pass `max_workers=0` to the
+        # executor (which raises ValueError).
+        return True
+
+    # max_workers caps at 8 to keep the system responsive on machines
+    # with many subprocess-heavy linters configured. Linters never
+    # share state, so the pool's only contention is the subprocess
+    # spawn syscall and disk IO — both of which scale well beyond 8
+    # in practice but plateau in benefit past that point.
+    max_workers = min(8, len(sorted_langs))
+    results: list[tuple[str, ValidationReport, str, bool]] = []
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        # `executor.map` preserves input order and is the simplest
+        # way to fan out + collect; we re-sort below anyway in case
+        # the dispatch order changes in a future refactor.
+        for outcome in ex.map(_run_one, sorted_langs):
+            results.append(outcome)
+
+    # Replay in canonical (alphabetical) order so logs are stable
+    # across runs even if linters finish in different orders.
+    results.sort(key=lambda t: t[0])
+
+    all_passed = True
+    for _lang, local_report, header_line, passed in results:
+        if header_line:
+            sys.stdout.write(header_line)
+        report.merge(local_report)
         if not passed:
             all_passed = False
 
