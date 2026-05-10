@@ -259,15 +259,21 @@ def test_menu_agent_tool_surface_is_minimal(
 # requires scanner-output context, so we exclude its full body from the
 # "no menu table" check, but we DO require its First Contact (top-level)
 # menu to be gone — that's covered by a separate test below.
+#
+# Each entry is (work-agent, menu-agent) — these names DO NOT follow the
+# naive `name + "-menu"` rule because cache-optimizer-agent splits into
+# cache-optimizer-menu (NOT cache-optimizer-agent-menu).
 _OPUS_AGENTS_NO_FIRST_CONTACT = [
-    "plugin-fixer.md",
-    "marketplace-fixer.md",
-    "cache-optimizer-agent.md",
+    ("plugin-fixer.md", "plugin-fixer-menu.md"),
+    ("marketplace-fixer.md", "marketplace-fixer-menu.md"),
+    ("cache-optimizer-agent.md", "cache-optimizer-menu.md"),
 ]
 
 
-@pytest.mark.parametrize("agent_name", _OPUS_AGENTS_NO_FIRST_CONTACT)
-def test_opus_work_agent_has_no_first_contact_menu(agent_name: str) -> None:
+@pytest.mark.parametrize("agent_name,menu_name", _OPUS_AGENTS_NO_FIRST_CONTACT)
+def test_opus_work_agent_has_no_first_contact_menu(
+    agent_name: str, menu_name: str
+) -> None:
     """Opus work agents must not contain First Contact / numbered-menu blocks.
 
     They are dispatched by the haiku menu agent which already made the
@@ -282,7 +288,6 @@ def test_opus_work_agent_has_no_first_contact_menu(agent_name: str) -> None:
     First Contact menu rendering"). The fail is on the SECTION, not the
     phrase.
     """
-    menu_name = agent_name.replace(".md", "-menu.md")
     if not (AGENTS_DIR / menu_name).exists():
         pytest.skip(
             f"Phase B split not yet shipped for {agent_name} "
