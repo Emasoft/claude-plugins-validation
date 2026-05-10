@@ -1231,13 +1231,31 @@ def do_update(
     old_meta = read_plugin_meta(plug_dir)
     old_version = old_meta.get("version", "unknown")
 
+    # Preserve dev-link state across update.
+    #
+    # Why this matters: a dev-link is a symlink from the marketplace plugins/
+    # dir to the live source tree, marked by .cpv-devlink-<plugin>.json sentinel.
+    # If we naively call do_uninstall + do_install (with no dev_link flag), the
+    # uninstall correctly preserves the source tree (sentinel branch), but the
+    # subsequent install would silently *copy* the source — downgrading the
+    # dev-link to a regular install and breaking the live-edit workflow that
+    # was the whole point of `--dev-link`. Detect the sentinel/symlink BEFORE
+    # uninstall so we can re-apply --dev-link on the reinstall.
+    sentinel = MARKETPLACES_DIR / marketplace_name / "plugins" / f".cpv-devlink-{plugin_name}.json"
+    was_devlink = sentinel.exists() or plug_dir.is_symlink()
+
     if not quiet:
         info(f"Updating {BOLD}{plugin_name}{NC} in marketplace '{marketplace_name}'")
         info(f"  Old version: {old_version}  ->  New version: {meta['version']}")
+        if was_devlink:
+            info("  (dev-link detected — re-linking instead of copying)")
 
     if dry_run:
         if not quiet:
-            ok("Would uninstall old version and reinstall from new source.")
+            if was_devlink:
+                ok("Would unlink dev-link symlink and re-link to new source path.")
+            else:
+                ok("Would uninstall old version and reinstall from new source.")
             print(f"\n  {CYAN}Run without --dry-run to update.{NC}")
         return
 
@@ -1250,6 +1268,7 @@ def do_update(
         quiet=quiet,
         plugin_dir=plugin_dir,
         follow_symlinks=follow_symlinks,
+        dev_link=was_devlink,
     )
 
     if not quiet:

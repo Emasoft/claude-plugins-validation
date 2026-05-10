@@ -395,3 +395,96 @@ class TestMarketplaceHelpers:
         write_file(target_file, "hello world", dry_run=False)
         assert target_file.exists()
         assert target_file.read_text() == "hello world"
+
+
+# =============================================================================
+# Group 7: Local-only marketplace generation (TRDD-b934f65c Part 1)
+# =============================================================================
+
+
+class TestLocalOnlyGeneration:
+    """Tests for LOCAL-ONLY marketplace generation — github_owner='' triggers local mode.
+
+    TRDD-b934f65c Part 1 — when scaffolding a marketplace that won't be published
+    to GitHub, the generator must skip GitHub-specific scaffolding (workflows,
+    badges, install-from-GitHub README sections) and route through the local
+    README template instead.
+    """
+
+    def test_local_mode_skips_github_workflows(self, tmp_path):
+        """github_owner='' (local mode) must NOT emit .github/workflows/."""
+        target = tmp_path / "local-mkt"
+        target.mkdir()
+        result = generate_marketplace_repo(
+            target,
+            "local-mkt",
+            "Local Dev",
+            "A project-internal marketplace",
+            github_owner="",  # LOCAL MODE
+            add_plugins=[],
+            dry_run=False,
+        )
+        assert result == 0
+        # Workflows directory and individual files must not exist
+        assert not (target / ".github" / "workflows").exists()
+        assert not (target / ".github" / "workflows" / "validate.yml").exists()
+        assert not (target / ".github" / "workflows" / "update-catalog.yml").exists()
+        # Marketplace JSON still exists — only the GitHub CI surface is skipped
+        assert (target / ".claude-plugin" / "marketplace.json").exists()
+
+    def test_local_mode_uses_local_readme_template(self, tmp_path):
+        """Local-mode README must NOT include GitHub badges or 'install from owner/name' commands."""
+        target = tmp_path / "local-mkt"
+        target.mkdir()
+        generate_marketplace_repo(
+            target,
+            "internal-plugins",
+            "Acme Internal",
+            "Acme's internal plugin set",
+            github_owner="",
+            add_plugins=[],
+            dry_run=False,
+        )
+        readme = (target / "README.md").read_text(encoding="utf-8")
+        # Badges link to github.com/<owner>/<name> — must NOT appear in local mode
+        assert "shields.io" not in readme
+        assert "github.com/test-org" not in readme
+        # The local README must explain how to add the marketplace by absolute path
+        assert "marketplace add" in readme
+        assert "/path/to/" in readme or "absolute path" in readme.lower()
+
+    def test_local_mode_marketplace_json_still_valid(self, tmp_path):
+        """marketplace.json must still parse and have the expected fields in local mode."""
+        target = tmp_path / "local-mkt"
+        target.mkdir()
+        generate_marketplace_repo(
+            target,
+            "local-mkt",
+            "Local Dev",
+            "A project-internal marketplace",
+            github_owner="",
+            add_plugins=[],
+            dry_run=False,
+        )
+        mj = json.loads((target / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+        assert mj["name"] == "local-mkt"
+        assert mj["owner"]["name"] == "Local Dev"
+        assert mj["plugins"] == []  # No add_plugins passed
+
+    def test_local_mode_still_emits_essential_files(self, tmp_path):
+        """Even in local mode, .gitignore, cliff.toml, and the marketplace.json must be present."""
+        target = tmp_path / "local-mkt"
+        target.mkdir()
+        generate_marketplace_repo(
+            target,
+            "local-mkt",
+            "Local Dev",
+            "Local",
+            github_owner="",
+            add_plugins=[],
+            dry_run=False,
+        )
+        assert (target / ".gitignore").exists()
+        assert (target / "cliff.toml").exists()
+        assert (target / ".claude-plugin" / "marketplace.json").exists()
+        assert (target / "README.md").exists()
