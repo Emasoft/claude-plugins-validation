@@ -847,9 +847,22 @@ def stage_check_working_tree(plugin_root: Path) -> int:
 
 
 def stage_run_tests(plugin_root: Path) -> int:
-    """Gate 2: run tests — mandatory, cannot be skipped."""
+    """Gate 2: run tests — mandatory, cannot be skipped.
+
+    Phase A speedup (TRDD-publish-speed Phase A): use pytest-xdist to run
+    tests in parallel across all available cores. `-x` is dropped because
+    xdist workers can't coordinate stop-on-first-fail; `--maxfail=1` is the
+    semantic equivalent under parallel execution. `--dist=worksteal` is
+    better than the default for our test mix (some files have 100+ short
+    tests, some have 5 long ones). CI can override worker count via the
+    PYTEST_XDIST_NUM_WORKERS env var (xdist honors it natively).
+    """
     print(f"\n{BLUE}═══ Gate 2: Run tests (mandatory) ═══{NC}")
-    run(["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"], cwd=plugin_root)
+    run(
+        ["uv", "run", "pytest", "tests/", "-n", "auto", "--dist=worksteal",
+         "--maxfail=1", "-q", "--tb=short"],
+        cwd=plugin_root,
+    )
     print(f"{GREEN}✓ All tests passed{NC}")
     return 0
 
