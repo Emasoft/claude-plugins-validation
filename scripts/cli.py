@@ -134,6 +134,13 @@ def validate_xref() -> None:
     sys.exit(main())
 
 
+def validate_telemetry() -> None:
+    """OTEL telemetry supply-chain risk validator (TRDD-e3e74f69)."""
+    from validate_telemetry import main
+
+    sys.exit(main())
+
+
 def validate_project_scope() -> None:
     """Validate git-tracked (project-scope) Claude Code configuration."""
     from validate_project_scope import main

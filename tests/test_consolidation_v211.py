@@ -56,6 +56,9 @@ DIRECT_SCRIPT_COMMANDS = [
     "cpv-setup-branch-rules-generic",
     "cpv-validate-project-scope",
     "cpv-validate-local-scope",
+    # TRDD-e3e74f69 — OTEL telemetry supply-chain validator (direct-script,
+    # invoked via remote_validation.py "telemetry" alias, no agent field).
+    "cpv-validate-telemetry",
 ]
 
 # --- Agent commands (with agent field) ---
@@ -82,8 +85,8 @@ AGENT_COMMANDS = {
 class TestCommandCount:
     """Verify total command count after consolidation."""
 
-    def test_total_command_count_is_37(self):
-        """commands/ directory should contain exactly 37 .md files.
+    def test_total_command_count_is_38(self):
+        """commands/ directory should contain exactly 38 .md files.
 
         Originally 13 after consolidation (8 direct + 5 agent).
         v2.12.13 added: cpv-link-plugin, cpv-validate-settings-marketplace.
@@ -118,9 +121,12 @@ class TestCommandCount:
           explicit --add specs or --from copy from another plugin's
           plugin.json (per plugin-dependencies.md). Surfaced in Main menu
           § 3.4 row 9 and Doctor menu option 22.
+        v2.80.0 added: cpv-validate-telemetry (TRDD-e3e74f69 — OTEL
+          supply-chain audit: otelHeadersHelper / OTEL_LOG_RAW_API_BODIES /
+          endpoint hijack rules from monitoring-usage.md).
         """
         md_files = list(COMMANDS_DIR.glob("*.md"))
-        assert len(md_files) == 37, f"Expected 37 commands, found {len(md_files)}: {sorted(f.name for f in md_files)}"
+        assert len(md_files) == 38, f"Expected 38 commands, found {len(md_files)}: {sorted(f.name for f in md_files)}"
 
 
 class TestDirectScriptCommands:
