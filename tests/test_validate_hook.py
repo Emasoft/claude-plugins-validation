@@ -1410,6 +1410,64 @@ def test_uv_run_script_missing_pep723_flagged(tmp_path: Path):
     )
 
 
+def test_uv_run_script_pep723_partial_covers_other_only_flagged(tmp_path: Path):
+    """TRDD §6.5 matrix entry: `uv run --script foo.py` whose script imports
+    `pycozo` but whose PEP 723 block only declares `requests` must produce a
+    MAJOR finding pinpointing the missing dependency.
+
+    This is also the indirect coverage for §6.4 "malformed block returns
+    empty" — an empty/incomplete dep list flows through the same MAJOR path
+    so the user sees the actionable "missing declarations for X" message
+    rather than a duplicated "block is malformed" finding.
+    """
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    script = scripts_dir / "partial.py"
+    # Block declares `requests` but the script imports `pycozo` — the block
+    # exists and parses, but does NOT cover the actual import.
+    script.write_text(
+        '# /// script\n'
+        '# dependencies = ["requests"]\n'
+        '# ///\n'
+        "import pycozo\n"
+    )
+    import os
+    os.chmod(script, 0o755)
+
+    hooks_dir = tmp_path / "hooks"
+    hooks_dir.mkdir()
+    hooks_file = hooks_dir / "hooks.json"
+    hooks_file.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": 'uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/partial.py"',
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        )
+    )
+
+    report = validate_hooks(hooks_file, plugin_root=tmp_path)
+    major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+    assert any(
+        "missing declarations" in m and "pycozo" in m for m in major_msgs
+    ), f"Expected MAJOR pinpointing missing pycozo declaration; got MAJORs: {major_msgs}"
+    # And — crucially — the message must not also fire the "no PEP 723 block"
+    # MAJOR (that's a different failure mode and would confuse the fix).
+    assert not any(
+        "no PEP 723 inline metadata block" in m for m in major_msgs
+    ), f"Unexpected 'no PEP 723 block' MAJOR — block exists but is incomplete: {major_msgs}"
+
+
 def test_uv_run_with_covers_imports_passes(tmp_path: Path):
     """`uv run --with pycozo foo.py` passes runtime-dep check when --with covers the import."""
     scripts_dir = tmp_path / "scripts"
