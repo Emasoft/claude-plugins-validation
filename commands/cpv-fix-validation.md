@@ -3,7 +3,7 @@ name: cpv-fix-validation
 description: Fix issues from a PLUGIN validation report file (marketplace reports use /cpv-fix-marketplace-validation)
 allowed-tools: Read, Bash, Glob, Grep, Write, Edit, AskUserQuestion
 argument-hint: "<report_file_path>"
-agent: plugin-fixer
+agent: plugin-fixer-menu
 user-invocable: true
 ---
 
@@ -25,11 +25,21 @@ Reads a **plugin** validation report file and fixes the issues it contains, one 
 
 ## Workflow
 
-1. The fixer agent reads the report file
-2. Fixes issues in priority order: CRITICAL → MAJOR → MINOR → NIT
-3. Consults fix guides in `skills/fix-validation/references/` for each issue type
-4. Skips WARNING items (advisory only)
-5. Returns summary: `fixed N of M issues`
+1. The **plugin-fixer-menu** agent (haiku — TRDD-82e836dc) renders the
+   First Contact menu (auto-discovered recent reports, or a free-text
+   prompt when none exist) and parses the user's integer reply.
+2. On a leaf pick, the menu agent dispatches the **plugin-fixer** work
+   agent (opus) with the chosen path inside a `<context>` block.
+3. The work agent reads the report file (or runs validation when handed a
+   plugin folder) and fixes issues in priority order:
+   CRITICAL → MAJOR → MINOR → NIT.
+4. Consults fix guides in `skills/fix-validation/references/` for each issue type.
+5. Skips WARNING items (advisory only) unless they are publish-blockers.
+6. Returns summary: `fixed N of M issues`. The menu agent has no further
+   role after dispatch.
+
+When invoked with a path argument the menu skips the table and dispatches
+immediately, so no extra latency is added by the haiku-then-opus chain.
 
 ## Examples
 
