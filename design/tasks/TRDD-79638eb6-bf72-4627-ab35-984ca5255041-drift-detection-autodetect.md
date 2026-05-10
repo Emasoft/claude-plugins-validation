@@ -4,7 +4,12 @@
 **Filename:** `design/tasks/TRDD-79638eb6-bf72-4627-ab35-984ca5255041-drift-detection-autodetect.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
 
-**Status:** Not started
+**Status:** Done (2026-05-10) — implementation already shipped in v2.38.x.
+This commit adds the missing test coverage (92 tests) for all four parts:
+detect_languages (34 tests), detect_lockfiles (26 tests), and the wired-in
+validate_submodule_containment / validate_project_languages /
+validate_lockfiles / standardize_plugin.audit_drift functions (32 tests).
+All 4605 suite-wide tests pass.
 **Priority:** LOW
 **Effort:** MEDIUM
 **Source:** `docs_dev/cpv_workflow_audit_20260412.md` sections B2/B4/B5/B7 / C7/C8/C9/C10
