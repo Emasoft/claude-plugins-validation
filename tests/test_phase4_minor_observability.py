@@ -20,18 +20,12 @@ from validate_security import check_phase4_all  # noqa: E402
 
 
 def _assert_pattern_matches(rule_id: str, text: str) -> None:
-    matched = any(
-        rid == rule_id and pat.search(text)
-        for rid, _sev, pat, _msg in PHASE4_PATTERNS
-    )
+    matched = any(rid == rule_id and pat.search(text) for rid, _sev, pat, _msg in PHASE4_PATTERNS)
     assert matched, f"expected {rule_id} match on {text!r}"
 
 
 def _assert_pattern_does_not_match(rule_id: str, text: str) -> None:
-    matched = any(
-        rid == rule_id and pat.search(text)
-        for rid, _sev, pat, _msg in PHASE4_PATTERNS
-    )
+    matched = any(rid == rule_id and pat.search(text) for rid, _sev, pat, _msg in PHASE4_PATTERNS)
     assert not matched, f"expected NO {rule_id} match on {text!r}"
 
 
@@ -54,13 +48,16 @@ def _make_plugin(tmp_path: Path, files: dict[str, str]) -> Path:
 
 
 class TestRC85License:
-    @pytest.mark.parametrize("text", [
-        "Copyright 2024 ACME Corp. All Rights Reserved.",
-        "Copyright (c) 2025 X. Proprietary.",
-        "© 2024 Y. Confidential.",
-        "SPDX-License-Identifier: UNLICENSED",
-        "SPDX-License-Identifier: NONE",
-    ])
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Copyright 2024 ACME Corp. All Rights Reserved.",
+            "Copyright (c) 2025 X. Proprietary.",
+            "© 2024 Y. Confidential.",
+            "SPDX-License-Identifier: UNLICENSED",
+            "SPDX-License-Identifier: NONE",
+        ],
+    )
     def test_proprietary_or_unlicensed(self, text: str) -> None:
         _assert_pattern_matches("RC-85", text)
 
@@ -71,37 +68,43 @@ class TestRC85License:
 
 
 class TestRC87SsrfIp:
-    @pytest.mark.parametrize("ip", [
-        "127.0.0.1",
-        "127.5.5.5",
-        "10.0.0.1",
-        "172.16.0.1",
-        "192.168.1.1",
-    ])
+    @pytest.mark.parametrize(
+        "ip",
+        [
+            "127.0.0.1",
+            "127.5.5.5",
+            "10.0.0.1",
+            "172.16.0.1",
+            "192.168.1.1",
+        ],
+    )
     def test_loopback_and_private(self, ip: str) -> None:
         _assert_pattern_matches("RC-87", f"requests.get('http://{ip}/api')")
 
     def test_link_local_outside_imds(self) -> None:
         _assert_pattern_matches("RC-87", "169.254.5.5")
 
-    @pytest.mark.parametrize("text", [
-        # v2.46 FP-A — Python float literals must NOT match the IPv4 regex.
-        # The previous regex `\b10\.[0-9.]+\b` matched `10.0` because the
-        # tail `[0-9.]+` allowed any digit-or-dot run. Real IPv4 needs all
-        # four octets. These cases were FPs in 5 of the 7 emasoft plugins.
-        "QUICK_CHECK: float = 10.0",
-        "max_score: float = 10.0,",
-        "weighted_sum += (cat_score.score / 10.0) * weight * 100",
-        "weighted_sum += (cat_score.score / 10.0)",
-        "(the user's v2.10.0 feature request)",
-        "as of v2.10.0):",
-        # SemVer-shaped strings that are definitely not IPs
-        "version = '10.0'",
-        "engines: '>=10.0'",
-        # Two-octet strings that look like IPs but aren't
-        "192.168 prefix",
-        "172.16.x.y prefix",
-    ])
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # v2.46 FP-A — Python float literals must NOT match the IPv4 regex.
+            # The previous regex `\b10\.[0-9.]+\b` matched `10.0` because the
+            # tail `[0-9.]+` allowed any digit-or-dot run. Real IPv4 needs all
+            # four octets. These cases were FPs in 5 of the 7 emasoft plugins.
+            "QUICK_CHECK: float = 10.0",
+            "max_score: float = 10.0,",
+            "weighted_sum += (cat_score.score / 10.0) * weight * 100",
+            "weighted_sum += (cat_score.score / 10.0)",
+            "(the user's v2.10.0 feature request)",
+            "as of v2.10.0):",
+            # SemVer-shaped strings that are definitely not IPs
+            "version = '10.0'",
+            "engines: '>=10.0'",
+            # Two-octet strings that look like IPs but aren't
+            "192.168 prefix",
+            "172.16.x.y prefix",
+        ],
+    )
     def test_no_fp_on_floats_and_partial_ip_strings(self, text: str) -> None:
         """RC-87 must NOT fire on Python float literals like `10.0`,
         SemVer strings like `v2.10.0`, or partial IP-shaped text.
@@ -115,27 +118,36 @@ class TestRC87SsrfIp:
 
 
 class TestRC88SuspiciousTlds:
-    @pytest.mark.parametrize("url", [
-        "https://malware.tk/x",
-        "https://evil.ml/y",
-        "https://example.xyz",
-    ])
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://malware.tk/x",
+            "https://evil.ml/y",
+            "https://example.xyz",
+        ],
+    )
     def test_free_tld(self, url: str) -> None:
         _assert_pattern_matches("RC-88", url)
 
-    @pytest.mark.parametrize("url", [
-        "https://bit.ly/abc",
-        "https://tinyurl.com/xyz",
-        "https://goo.gl/123",
-    ])
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://bit.ly/abc",
+            "https://tinyurl.com/xyz",
+            "https://goo.gl/123",
+        ],
+    )
     def test_shortener(self, url: str) -> None:
         _assert_pattern_matches("RC-88", url)
 
-    @pytest.mark.parametrize("url", [
-        "https://abc123.ngrok.io",
-        "https://demo.trycloudflare.com",
-        "https://x.serveo.net",
-    ])
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://abc123.ngrok.io",
+            "https://demo.trycloudflare.com",
+            "https://x.serveo.net",
+        ],
+    )
     def test_dev_tunnel(self, url: str) -> None:
         _assert_pattern_matches("RC-88", url)
 
@@ -155,10 +167,7 @@ class TestRC86TokenCost:
 
     def test_short_string_not_flagged(self) -> None:
         text = '"hello world"'
-        matched = any(
-            rid == "RC-86" and pat.search(text)
-            for rid, _sev, pat, _msg in PHASE4_PATTERNS
-        )
+        matched = any(rid == "RC-86" and pat.search(text) for rid, _sev, pat, _msg in PHASE4_PATTERNS)
         assert not matched
 
 
@@ -168,21 +177,24 @@ class TestRC86TokenCost:
 
 
 class TestRC103Disposition:
-    @pytest.mark.parametrize("counts,expected", [
-        ({"CRITICAL": 2}, "critical"),
-        ({"CRITICAL": 5, "MAJOR": 1}, "critical"),
-        ({"CRITICAL": 1}, "unsafe"),
-        ({"MAJOR": 3}, "unsafe"),
-        ({"MAJOR": 5}, "unsafe"),
-        ({"MAJOR": 1}, "suspicious"),
-        ({"MAJOR": 2}, "suspicious"),
-        ({"MINOR": 5}, "risky"),
-        ({"MINOR": 10}, "risky"),
-        ({"MINOR": 1}, "risky"),
-        ({"WARNING": 1}, "risky"),
-        ({}, "safe"),
-        ({"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "WARNING": 0}, "safe"),
-    ])
+    @pytest.mark.parametrize(
+        "counts,expected",
+        [
+            ({"CRITICAL": 2}, "critical"),
+            ({"CRITICAL": 5, "MAJOR": 1}, "critical"),
+            ({"CRITICAL": 1}, "unsafe"),
+            ({"MAJOR": 3}, "unsafe"),
+            ({"MAJOR": 5}, "unsafe"),
+            ({"MAJOR": 1}, "suspicious"),
+            ({"MAJOR": 2}, "suspicious"),
+            ({"MINOR": 5}, "risky"),
+            ({"MINOR": 10}, "risky"),
+            ({"MINOR": 1}, "risky"),
+            ({"WARNING": 1}, "risky"),
+            ({}, "safe"),
+            ({"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "WARNING": 0}, "safe"),
+        ],
+    )
     def test_disposition_rules(self, counts: dict[str, int], expected: str) -> None:
         assert disposition(counts) == expected
 
@@ -218,30 +230,32 @@ class TestRC104Hold:
 
 
 class TestCheckPhase4All:
-    @pytest.mark.skip(
-        reason=(
-            "Suite-pollution Heisenbug — see TRDD-fa70f9b8. test PASSES locally "
-            "and in isolated CI runs; FAILS deterministically when the full "
-            "tests/ directory runs in CI Linux. Same pattern as "
-            "test_main_verbose_text_output: report.results comes back empty even "
-            "though _iter_scannable_files should yield src/cfg.py. The polluter "
-            "is suspected to be in the _gi_cache / lru_cache / "
-            "_CPV_SELF_SCAN_* module globals but has not been isolated. "
-            "DO NOT REMOVE this skip until TRDD-fa70f9b8 status is RESOLVED."
-        ),
-    )
+    # TRDD-fa70f9b8 — re-enabled 2026-05-10. The conftest autouse fixture
+    # `_trdd_fa70f9b8_reset_global_state` now resets the suspected polluters
+    # (`_CPV_SELF_SCAN_*`, `_CLASSIFIER_*` module globals + the two
+    # `lru_cache`d helpers in cpv_validation_common) BEFORE every test, so
+    # this test no longer sees the empty `report.results` symptom caused by
+    # leaked self-scan state from a previous test. See
+    # tests/test_trdd_fa70f9b8_isolation.py for the regression suite that
+    # proves the fix.
     def test_phase4_fires_on_real_file(self, tmp_path: Path) -> None:
-        plugin = _make_plugin(tmp_path, {
-            "src/cfg.py": "BASE_URL = 'https://abc.ngrok.io/api'",
-        })
+        plugin = _make_plugin(
+            tmp_path,
+            {
+                "src/cfg.py": "BASE_URL = 'https://abc.ngrok.io/api'",
+            },
+        )
         report = ValidationReport()
         check_phase4_all(plugin, report)
         assert any("RC-88" in r.message for r in report.results)
 
     def test_clean_plugin_no_phase4_findings(self, tmp_path: Path) -> None:
-        plugin = _make_plugin(tmp_path, {
-            "src/main.py": "def hello(): return 42\n",
-        })
+        plugin = _make_plugin(
+            tmp_path,
+            {
+                "src/main.py": "def hello(): return 42\n",
+            },
+        )
         report = ValidationReport()
         check_phase4_all(plugin, report)
         assert not any(r.message.startswith("RC-") for r in report.results)

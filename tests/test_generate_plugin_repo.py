@@ -451,8 +451,14 @@ class TestPublishPyCornerstoneRule:
         src = self._src()
         assert "def stage_bypass_guard" in src
         assert "stage_bypass_guard()" in src  # called from main()
-        for var in ["CPV_SKIP_TESTS", "CPV_SKIP_LINT", "CPV_SKIP_VALIDATE",
-                    "CPV_FORCE_PUBLISH", "CPV_BYPASS_CHECKS", "NO_VERIFY"]:
+        for var in [
+            "CPV_SKIP_TESTS",
+            "CPV_SKIP_LINT",
+            "CPV_SKIP_VALIDATE",
+            "CPV_FORCE_PUBLISH",
+            "CPV_BYPASS_CHECKS",
+            "NO_VERIFY",
+        ]:
             assert var in src, f"bypass_guard must list {var}"
 
     def test_no_skip_tests_flag(self):
@@ -512,6 +518,7 @@ class TestTemplateGetOriginSlug:
         from pathlib import Path as _Path
 
         from generate_plugin_repo import gen_publish_py  # noqa: PLC0415
+
         src = gen_publish_py(_default_params())
         tree = _ast.parse(src)
         fn_node = None
@@ -600,12 +607,14 @@ class TestPublishPyPipelineOrder:
     def _src() -> str:
         p = _default_params()
         from generate_plugin_repo import gen_publish_py  # noqa: PLC0415
+
         return gen_publish_py(p)
 
     def _stage_call_order(self, src: str) -> list[str]:
         """Return the ordered list of stage_* calls appearing in the full pipeline."""
         # Find the main() block where all the stage_* calls live together
         import re
+
         pattern = re.compile(r"^\s*(stage_[a-z_]+)\s*\(", re.MULTILINE)
         # Find the final publish pipeline region — the one that ends with stage_gh_release
         all_calls = pattern.findall(src)
@@ -686,6 +695,7 @@ class TestPublishPyAutoBump:
     def _src() -> str:
         p = _default_params()
         from generate_plugin_repo import gen_publish_py  # noqa: PLC0415
+
         return gen_publish_py(p)
 
     def test_detect_bump_type_function_present(self):
@@ -797,9 +807,7 @@ class TestPublishPyMarketplaceRegistration:
         tests_idx = src.find("stage_tests(root)")
         mkt_idx = src.find("stage_marketplace_registration(root)")
         bump_idx = src.find("stage_bump(root,")
-        assert tests_idx < mkt_idx < bump_idx, (
-            f"Wrong order: tests={tests_idx}, mkt={mkt_idx}, bump={bump_idx}"
-        )
+        assert tests_idx < mkt_idx < bump_idx, f"Wrong order: tests={tests_idx}, mkt={mkt_idx}, bump={bump_idx}"
 
     def test_layout_a_logic_present(self):
         """Layout A check must verify notify workflow + secret + remote registration."""
@@ -840,8 +848,18 @@ class TestPublishPyMarketplaceRegistration:
         assert "/11]" in src
         # The old 10-step labels must all be gone from the code (docstring is fine)
         # Look for cprint calls with the old format only
-        for stale in ("[1/10]", "[2/10]", "[3/10]", "[4/10]", "[5/10]", "[6/10]",
-                      "[7/10]", "[8/10]", "[9/10]", "[10/10]"):
+        for stale in (
+            "[1/10]",
+            "[2/10]",
+            "[3/10]",
+            "[4/10]",
+            "[5/10]",
+            "[6/10]",
+            "[7/10]",
+            "[8/10]",
+            "[9/10]",
+            "[10/10]",
+        ):
             assert stale not in src, f"Stale stage label {stale} still in template"
 
 
@@ -861,6 +879,7 @@ class TestLayoutCGeneration:
     def test_self_marketplace_true_emits_marketplace_json(self, tmp_path):
         """With self_marketplace=True, .claude-plugin/marketplace.json is generated."""
         from generate_plugin_repo import gen_self_marketplace_json  # noqa: PLC0415
+
         target = tmp_path / "layout-c-plugin"
         target.mkdir()
         p = _default_params(self_marketplace=True)
@@ -883,6 +902,7 @@ class TestLayoutCGeneration:
     def test_self_marketplace_self_entry_uses_relative_self(self):
         """The self-entry's source must be exactly './' (Layout C marker)."""
         from generate_plugin_repo import gen_self_marketplace_json  # noqa: PLC0415
+
         p = _default_params(self_marketplace=True)
         manifest = json.loads(gen_self_marketplace_json(p))
         assert len(manifest["plugins"]) == 1
@@ -892,6 +912,7 @@ class TestLayoutCGeneration:
     def test_self_marketplace_name_matches_plugin_name(self):
         """marketplace.json self-entry name MUST equal plugin.json name."""
         from generate_plugin_repo import gen_plugin_json, gen_self_marketplace_json  # noqa: PLC0415
+
         p = _default_params(name="my-layout-c-plugin", self_marketplace=True)
         plugin = json.loads(gen_plugin_json(p))
         market = json.loads(gen_self_marketplace_json(p))
@@ -901,6 +922,7 @@ class TestLayoutCGeneration:
     def test_self_marketplace_versions_match(self):
         """plugin.json version, metadata.version, and self-entry version MUST all match."""
         from generate_plugin_repo import gen_plugin_json, gen_self_marketplace_json  # noqa: PLC0415
+
         p = _default_params(version="2.5.7", self_marketplace=True)
         plugin = json.loads(gen_plugin_json(p))
         market = json.loads(gen_self_marketplace_json(p))
@@ -912,6 +934,7 @@ class TestLayoutCGeneration:
         """When github_owner is set, the self-entry must include a repository field
         so validate_marketplace.py's github-source check passes."""
         from generate_plugin_repo import gen_self_marketplace_json  # noqa: PLC0415
+
         p = _default_params(github_owner="my-org", self_marketplace=True)
         market = json.loads(gen_self_marketplace_json(p))
         entry = market["plugins"][0]
@@ -920,17 +943,26 @@ class TestLayoutCGeneration:
 
     @pytest.mark.skip(
         reason=(
-            "TRDD-fa70f9b8 Heisenbug: passes in isolation, fails in full suite "
-            "due to suite-pollution affecting validate_plugin's _iter_scannable_files. "
-            "Verified manually 2026-05-03: a freshly-generated Layout-C plugin "
-            "validates with CRITICAL=0 MAJOR=0 MINOR=0 NIT=0 WARNING=5 (all WARNING-only "
-            "findings are ineliminable: cpv block, .venv, broken README badges)."
+            "TRDD-fa70f9b8 investigation 2026-05-10: this test was originally "
+            "filed as a suite-pollution Heisenbug, but running it in isolation "
+            "(after the autouse global-state reset fixture was added) reveals "
+            "it fails with CRITICAL=0 MAJOR=4 MINOR=14 — the failures are "
+            "REAL, not pollution artefacts. They are: (1) two mypy "
+            "`redefinition` errors in scripts/publish.py for the conditional "
+            "gh_with_retry/git_with_retry stubs, (2) a yamllint syntax error "
+            "in .mega-linter.yml line 25 escape character `.`, and "
+            "(3) two dangling-reference MAJORs for scripts/validate_plugin.py "
+            "in the generated workflow files. These are template-generation "
+            "drift bugs in `gen_publish_py` / `gen_workflows`, not a "
+            "suite-pollution flake. Filed as a separate TRDD; this skip "
+            "stays until the generator is fixed."
         )
     )
     def test_layout_c_plugin_validates_clean(self, tmp_path):
         """End-to-end: a Layout C plugin generated by --self-marketplace must
         pass validate_plugin.py --strict with zero non-WARNING findings."""
         import subprocess  # noqa: PLC0415
+
         target = tmp_path / "layout-c-e2e"
         target.mkdir()
         p = _default_params(self_marketplace=True)
@@ -942,21 +974,25 @@ class TestLayoutCGeneration:
         # plumbing needed here.
         result = subprocess.run(
             ["python3", str(validator), str(target), "--strict", "--no-color"],
-            capture_output=True, text=True, check=False,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         # The summary line shows CRITICAL=N MAJOR=N MINOR=N NIT=N WARNING=N
         # We only care that all severities above WARNING are zero.
         for severity in ("CRITICAL=0", "MAJOR=0", "MINOR=0", "NIT=0"):
-            assert severity in result.stdout, (
-                f"Layout C plugin failed to clear {severity} - output:\n{result.stdout}"
-            )
+            assert severity in result.stdout, f"Layout C plugin failed to clear {severity} - output:\n{result.stdout}"
 
     def test_publish_py_template_handles_layout_c_in_do_bump(self):
         """The publish.py template MUST detect Layout C and call update_self_marketplace_json."""
         from generate_plugin_repo import gen_publish_py  # noqa: PLC0415
+
         src = gen_publish_py(_default_params())
         # The do_bump function should reference the Layout C marketplace.json check
         assert "is_layout_c" in src
         assert "update_self_marketplace_json" in src
         # check_version_consistency should also include marketplace.json sources
-        assert "marketplace.json:metadata" in src or "marketplace.json" in src.split("def check_version_consistency")[1].split("def do_bump")[0]
+        assert (
+            "marketplace.json:metadata" in src
+            or "marketplace.json" in src.split("def check_version_consistency")[1].split("def do_bump")[0]
+        )

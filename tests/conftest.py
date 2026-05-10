@@ -16,6 +16,92 @@ if str(scripts_dir) not in sys.path:
     sys.path.insert(0, str(scripts_dir))
 
 
+# ----------------------------------------------------------------------------
+# TRDD-fa70f9b8 — suite-pollution defence.
+#
+# Two tests historically failed only when run via the full `pytest tests/`
+# directory glob (NOT in isolation, NOT with explicit-file lists):
+#   - tests/test_validate_security.py::TestMainCLI::test_main_verbose_text_output
+#   - tests/test_phase4_minor_observability.py::TestCheckPhase4All::test_phase4_fires_on_real_file
+#
+# The TRDD identified the suspected polluters as module-level globals on
+# `validate_security` (`_CPV_SELF_SCAN_*`, `_CLASSIFIER_*`) plus the two
+# `functools.lru_cache`-wrapped helpers in `cpv_validation_common`
+# (`_read_gitmodules_paths`, `_load_cpv_config_cached`). Any earlier test
+# that called `validate_security()` against the real CPV plugin (or directly
+# poked `_set_cpv_self_scan(True, ...)` / `_set_classifier_active(True, ...)`)
+# could leak that state into later tests that bypass the orchestrator and
+# call the lower-level phase checkers directly.
+#
+# This autouse fixture defensively resets every suspected polluter BEFORE
+# each test. The cost is microseconds; the upside is deterministic per-test
+# isolation that closes the Heisenbug regardless of pytest collection order
+# or worker-id assignment under `-n auto --dist=worksteal`.
+#
+# DO NOT remove without a corresponding rewrite of the production globals
+# into context-managed state (see TRDD-fa70f9b8 §"Why we can't easily fix it").
+# ----------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _trdd_fa70f9b8_reset_global_state():
+    """Reset suspected suite-pollution globals BEFORE every test.
+
+    Hardens the suite against TRDD-fa70f9b8: previous tests that activate
+    self-scan / classifier or fill the cpv-config / gitmodules lru_caches
+    used to leak state into the next test, producing a Heisenbug whose
+    symptom (test passes alone, fails in directory mode) defied bisection.
+
+    The reset is idempotent and side-effect-free when the globals are
+    already at their default values.
+    """
+    # Only attempt the reset when the validator modules are importable in
+    # this test process. They WILL be importable in every test under
+    # tests/ because conftest.py adds scripts/ to sys.path above, but the
+    # try/except keeps the fixture safe if the test layout ever changes.
+    try:
+        import validate_security as _vs
+
+        _vs._set_cpv_self_scan(False, plugin_root=None, notice_report=None)
+        _vs._set_classifier_active(False)
+    except ImportError:
+        pass
+
+    try:
+        from cpv_validation_common import (
+            _load_cpv_config_cached,
+            _read_gitmodules_paths,
+        )
+
+        _read_gitmodules_paths.cache_clear()
+        _load_cpv_config_cached.cache_clear()
+    except ImportError:
+        pass
+
+    yield
+
+    # Post-test reset — guards against tests that activate state and rely
+    # on a "clean exit" but forget to reset (or raise mid-test).
+    try:
+        import validate_security as _vs
+
+        _vs._set_cpv_self_scan(False, plugin_root=None, notice_report=None)
+        _vs._set_classifier_active(False)
+    except ImportError:
+        pass
+
+    try:
+        from cpv_validation_common import (
+            _load_cpv_config_cached,
+            _read_gitmodules_paths,
+        )
+
+        _read_gitmodules_paths.cache_clear()
+        _load_cpv_config_cached.cache_clear()
+    except ImportError:
+        pass
+
+
 @pytest.fixture
 def temp_dir():
     """Create a temporary directory for test files.
