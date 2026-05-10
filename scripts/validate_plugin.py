@@ -2026,6 +2026,39 @@ def validate_mcp(plugin_root: Path, report: ValidationReport) -> None:
         report.add(result.level, result.message, result.file, result.line)
 
 
+# TRDD-e3e74f69 telemetry hookup
+def validate_telemetry(plugin_root: Path, report: ValidationReport) -> None:
+    """Run the OTEL telemetry supply-chain sub-validator.
+
+    Delegates to ``validate_telemetry.scan_plugin_for_telemetry`` and merges
+    findings into the umbrella report. Catches the OTEL hazards introduced
+    by ``monitoring-usage.md``: ``otelHeadersHelper`` in plugin settings
+    (CRITICAL — periodic arbitrary code execution),
+    ``OTEL_LOG_RAW_API_BODIES=1`` in plugin env (CRITICAL — full
+    request/response exfil), prompt-exfil flags (MAJOR), endpoint hijack
+    (MAJOR), and any plugin-shipped OTEL var (MINOR — telemetry config
+    belongs in ``managed-settings.json``).
+
+    The check stays silent when the plugin has no OTEL configuration at
+    all — PASSED-only results from the standalone validator are dropped to
+    avoid noise in the umbrella output for the 99% of plugins that don't
+    ship telemetry config.
+    """
+    # PLC0415: import inside the function to avoid pulling validate_telemetry
+    # at module import time. Multiple agents may add umbrella entries; this
+    # keeps the import surface stable across merges.
+    from validate_telemetry import scan_plugin_for_telemetry  # noqa: PLC0415
+
+    tel_report = scan_plugin_for_telemetry(plugin_root)
+
+    # Merge findings, filtering PASSED noise — the umbrella does not need
+    # a separate "telemetry passed" line for every clean plugin.
+    for result in tel_report.results:
+        if result.level == "PASSED":
+            continue
+        report.add(result.level, result.message, result.file, result.line)
+
+
 def _has_shebang(path: Path) -> bool:
     """Check if a file starts with a shebang (#!) line."""
     try:
@@ -4989,6 +5022,8 @@ def main() -> int:
     validate_agents(plugin_root, report)
     validate_hooks(plugin_root, report)
     validate_mcp(plugin_root, report)
+    # TRDD-e3e74f69 telemetry hookup — OTEL supply-chain audit on every plugin
+    validate_telemetry(plugin_root, report)
     validate_scripts(plugin_root, report)
     # v2.64.0 — single source of truth for repo-wide linting.
     # Replaces the inline lint pieces of validate_scripts (Python ruff/mypy,
