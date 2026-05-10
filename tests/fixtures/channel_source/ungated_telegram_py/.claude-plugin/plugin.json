@@ -1,0 +1,14 @@
+{
+  "name": "ungated-telegram-py",
+  "version": "1.0.0",
+  "description": "Vulnerable Telegram channel (Python) — no sender gating",
+  "mcpServers": {
+    "telegram": {
+      "command": "python",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/servers/telegram/server.py"]
+    }
+  },
+  "channels": [
+    {"server": "telegram"}
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "gated-telegram-py",
+  "version": "1.0.0",
+  "description": "Safe Telegram channel (Python) — sender-ID allowlist enforced",
+  "mcpServers": {
+    "telegram": {
+      "command": "python",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/servers/telegram/server.py"]
+    }
+  },
+  "channels": [
+    {"server": "telegram"}
+  ]
+}

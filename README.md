@@ -342,6 +342,12 @@ CPV has two validation layers:
 
 The semantic validator always warns about the cost and asks for confirmation before running. In most cases, script validation is all you need.
 
+##### Conditional Pillar — Channel MCP Server Source-Code Security
+
+`/cpv-semantic-validation` automatically activates the **Channel Source Security** pillar when the target plugin's `plugin.json` declares a non-empty `channels` array (Claude Code v2.1.80+ research-preview channels). The pillar reads the MCP server entry-point source (TypeScript / JavaScript / Python) and verifies the spec-mandated sender-ID gating per `channels-reference.md` — a check no syntactic validator can perform.
+
+A deterministic prefilter (`scripts/cpv_channel_source_predicate.py`) bounds the LLM's reading and short-circuits the pillar entirely for plugins that do not ship channels — zero opus tokens spent. See [`skills/semantic-validation-skill/references/channel-source-security.md`](skills/semantic-validation-skill/references/channel-source-security.md) for the four rules (CRITICAL: no sender gating, CRITICAL: permission-relay capability without gating, MAJOR: chat-ID-only gating, PASSED: fully gated).
+
 ### Slash Commands
 
 22 commands — 13 run scripts directly (zero AI tokens), 7 spawn an agent, 2 are specialized utility scripts.

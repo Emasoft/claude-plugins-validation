@@ -1,0 +1,14 @@
+{
+  "name": "permission-capability-ungated",
+  "version": "1.0.0",
+  "description": "Vulnerable Telegram channel — declares permission capability without sender gating",
+  "mcpServers": {
+    "telegram": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/servers/telegram/src/server.ts"]
+    }
+  },
+  "channels": [
+    {"server": "telegram"}
+  ]
+}
