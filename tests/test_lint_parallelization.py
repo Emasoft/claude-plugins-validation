@@ -36,7 +36,6 @@ import cpv_lint_engine  # noqa: E402
 from cpv_lint_engine import lint_repo  # noqa: E402
 from cpv_validation_common import ValidationReport  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
