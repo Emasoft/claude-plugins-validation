@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-10T15:26:44+00:00",
+  "computed_at": "2026-05-10T17:05:02+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     "agents/cache-optimizer-agent.md": "sha256:3148226fba744236f82a62080a2295d3473d76a76d6660b8d2ade7a6c12af084",
@@ -144,7 +144,7 @@
     "scripts/validate_marketplace.py": "sha256:e15746b20120110493bd4d8e593cc1ae690e4e59c777c09e984f1bae190cc354",
     "scripts/validate_marketplace_pipeline.py": "sha256:cdab129d86bf9b43dc18c500bfc7bddb49ac091cb65facfd3a4e057ae98bde2a",
     "scripts/validate_mcp.py": "sha256:66ccd86294ae31859b26725785c8ecdbbc48fafef8de676d653078853330cc9c",
-    "scripts/validate_plugin.py": "sha256:4b1d66f5a0b6f0cfd4c6a0a547807a68f93fef3cfc102ab25e9696ddf568cc80",
+    "scripts/validate_plugin.py": "sha256:843bdcdee12b699d26c19ce0e673cd477a32bc3f44dbc3ff84917293b8481af7",
     "scripts/validate_project_scope.py": "sha256:4526810e55e736561da00ce2ab2d61a07522ddeb84918f67978ade900cfbdd6c",
     "scripts/validate_rules.py": "sha256:2315f53e8b7145b2c2d7a61af2c2ee09d24d27a99d8be031b5b0927762b2ba4c",
     "scripts/validate_scoring.py": "sha256:cceab6a14fc4e52136ce81fd7a7911f65694ec69ad6e86839b4d9013a99b5759",
@@ -426,6 +426,6 @@
     "tests/test_validate_xref.py": "sha256:8931fbce94c922757bc53db9d3e93d05df063180d063ed1b2af6d54daea3de48",
     "tests/test_validator_early_exit.py": "sha256:f7f63b4ea47741fe4ed05fcab7c94549ec4d173481b1435badc211df6243db1b",
     "tests/test_with_classifier_flag.py": "sha256:a38df69e16396efab5edce75eb45826fc24001463dfe1aaba4ef7db406429a24",
-    "tests/test_workflow_path_validation.py": "sha256:8b4ff395b7bf235edab94ca3a740dcd8e4fe6822dde2019ff58bb92fe8d104b3"
+    "tests/test_workflow_path_validation.py": "sha256:0871d34a4a5f3a7e807b0d59bc66f92cfb1312efef4b9e47f1828188bbbd5ecd"
   }
 }
