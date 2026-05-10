@@ -54,6 +54,9 @@ cpv-validate-xref = "scripts.cli:validate_xref"
 # distinguishing git-tracked (project) from non-git-tracked (local) elements.
 cpv-validate-project-scope = "scripts.cli:validate_project_scope"
 cpv-validate-local-scope = "scripts.cli:validate_local_scope"
+# TRDD-8ccb9337 IDE-config hygiene — NIT-level env-var-reference checks
+# Sibling of validate_security.scan_ide_config_files (which handles CRITICAL).
+cpv-validate-ide-config = "scripts.cli:validate_ide_config"
 # Management tools
 cpv-doctor = "scripts.cli:doctor"
 cpv-standardize = "scripts.cli:standardize"
