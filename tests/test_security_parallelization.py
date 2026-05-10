@@ -32,12 +32,12 @@ if str(scripts_dir) not in sys.path:
     sys.path.insert(0, str(scripts_dir))
 
 import validate_security  # noqa: E402
-from cpv_validation_common import ValidationReport  # noqa: E402
 from validate_security import (  # noqa: E402
     get_scan_step_log,
+)
+from validate_security import (
     validate_security as run_validate_security,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
