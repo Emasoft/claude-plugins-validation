@@ -4,7 +4,7 @@
 **Filename:** `design/tasks/TRDD-0028dd34-bb15-4443-afe2-fe026d22acaa-hook-validator-runtime-deps.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
 
-**Status:** In progress (2026-04-17)
+**Status:** Done (2026-05-10) — tokenizer, extractor, PEP 723 detection, sys.exit module-scope detector, runtime-dep reconciliation matrix, antipattern checks (unset VIRTUAL_ENV combo + module-scope sys.exit), uvx-non-substitute callout, and umbrella-validator wiring all shipped across commits 1ea1e40 → 56d2da4. Final TDD coverage gap closed 2026-05-10: added `test_uv_run_script_pep723_partial_covers_other_only_flagged` for the §6.5 matrix entry "uv run --script + imports pycozo + PEP 723 declares `requests` only → MAJOR pinpointing the missing dep" (also covers §6.4 malformed-block indirect path). Hook test suite: 234 passed.
 **Owner:** Emasoft
 **Area:** `scripts/validate_hook.py`
 **Trigger incident:** Perfect Skill Suggester (PSS) shipped v3.1.0 with a broken hook that `sys.exit`-ed at every `UserPromptSubmit` because `python3 pss_hook.py` could not resolve the `pycozo` import. CPV's `cpv-validate-plugin` passed the plugin cleanly. The user flagged this as an unacceptable false-negative.
