@@ -3,13 +3,23 @@ name: cpv-cache-optimize
 description: Audit AND fix prompt-cache invalidation patterns (CA-01..CA-06) — interactive cache-optimizer agent
 allowed-tools: Read, Bash, Glob, Grep, Write, Edit, AskUserQuestion
 argument-hint: "<plugin_or_project_path_or_report> [--broader]"
-agent: cache-optimizer-agent
+agent: cache-optimizer-menu
 user-invocable: true
 ---
 
 # /cpv-cache-optimize Command
 
-Dispatches the **cache-optimizer agent** to audit and fix prompt-cache invalidation patterns in a Claude Code plugin or project. Unlike `/cpv-validate-cache` (which only audits), this command runs the full **validate → fix → re-validate loop** on its own and, with `--broader`, performs cache-aware refactoring of the plugin's skills/agents/commands/CLAUDE.md/rules.
+Dispatches the **cache-optimizer-menu** agent (haiku — TRDD-82e836dc), which
+either runs immediately (when a path argument is provided) or renders the
+First Contact menu (auto-discovered recent cache-audit reports + audit-then-fix
++ broader rows) and parses the user's integer reply. On a leaf pick the menu
+agent dispatches the **cache-optimizer-agent** work agent (opus) to run the
+actual audit + fix + re-validate loop. With `--broader`, the work agent also
+performs Phase 4 cache-aware refactoring of the plugin's
+skills/agents/commands/CLAUDE.md/rules.
+
+Unlike `/cpv-validate-cache` (which only audits), this command runs the full
+**validate → fix → re-validate loop**.
 
 ## Usage
 
