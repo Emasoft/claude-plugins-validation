@@ -3,7 +3,7 @@
 **TRDD ID:** `793ac32a-6ccf-4628-aa6c-952218e06477`
 **Filename:** `design/tasks/TRDD-793ac32a-6ccf-4628-aa6c-952218e06477-strip-dev-parts.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
-**Status:** Sprint 1 + Sprint 2 publish-gate done — engine (cpv_strip_dev.py 914 LoC), validator (cpv_validate_gitmodules.py 425 LoC, indirectly enforced via validate_plugin.py + pre-push), generator --strip-dev flag, agent menu, skill pointer, 3 test files, AND `_ensure_submodules_pushed` at scripts/publish.py:1582 (wired into stage_commit_tag_push:1849, 11/11 tests passing). Only outstanding piece: CPV self-application (extract own tests/, design/, git-hooks/ to dedicated submodule repos). Cache install size already < 12 MB by other means (8.5–9.3 MB), so self-application is now dogfooding rather than size-savings — recommend deferring indefinitely.
+**Status:** Done (2026-05-10) — Sprint 1+2 shipped; CPV self-application formally deferred (see Decision section).
 **Author:** Emasoft
 **Created:** 2026-05-02
 
@@ -409,3 +409,79 @@ pre-push wiring):**
   (`validate_plugin.py:2973` raises a soft warning instead of erroring).
   For a CRITICAL-tier security check this should fail-closed — see
   task #161 in the task list.
+
+---
+
+## Decision (2026-05-10): Self-application deferred indefinitely
+
+**Decision:** CPV will NOT apply `cpv strip-dev-parts` to itself
+(originally Phase 4, §9). The deferral is open-ended — no version is
+gated on it, no follow-up TRDD is required, and the standing
+recommendation is to revisit only if the cache install size budget
+becomes a real user-facing problem again.
+
+### Rationale
+
+The original size-savings driver behind §6 (CPV self-application) was
+the audited 25 MB per-version cache install — chiefly the 12 MB
+`tests/` payload. Independent slim-down work (`.cpvignore` + release-
+archive filtering) since v2.50.x has compacted per-version cache
+installs to **8.5–9.3 MB**, comfortably under the 12 MB target the
+TRDD set as the size win. The size lever the strip-dev mechanic was
+designed to pull no longer has a problem to solve on this codebase.
+
+Re-stated: with the cache already at 8.5–9.3 MB by other means, the
+remaining benefit of self-extracting `tests/` (~12 MB), `design/`
+(~240 KB), and `git-hooks/` (~28 KB) to dedicated submodule repos
+collapses to **dogfooding** — proving the mechanic works on its own
+author. There is no user-facing improvement (the install is already
+small enough), no developer-facing improvement (devs still get the
+files via `git clone` of the main repo, no extra `--recurse-
+submodules` flag needed), and no test-quality improvement.
+
+### Cost vs. value
+
+The self-application cost is non-trivial and recurring:
+
+| Cost item | Magnitude |
+|---|---|
+| Create + populate `Emasoft/cpv-tests`, `Emasoft/cpv-design`, `Emasoft/cpv-git-hooks` (or fold into one `cpv-dev`) | one-time, ~half a day |
+| Migrate ~80 test files + 23 TRDDs + git-hooks via `git filter-repo` (preserve history) | one-time, ~half a day |
+| Update CI workflows to clone with `--recurse-submodules` | one-time, ~1 hour |
+| Cross-repo sync maintenance (every TRDD update, every new test, every git-hooks tweak now requires touching two repos and bumping submodule SHA) | recurring, **forever** |
+| Pre-push gate must verify the submodule pushes (already implemented via `_ensure_submodules_pushed` Sprint 2 — would now be exercised on CPV's own pushes) | recurring runtime cost on every CPV release |
+| Onboarding friction for new contributors who must learn the `--recurse-submodules` clone idiom | recurring, low but non-zero |
+
+The recurring cross-repo sync is the killer: every routine PR that
+touches a test or a TRDD (most CPV PRs) would now need a coordinated
+multi-repo commit + submodule SHA bump on the parent. That cost
+significantly exceeds the value (zero user-facing benefit + symbolic
+dogfooding signal).
+
+### What stays unchanged
+
+The `cpv strip-dev-parts` command, the `cpv.strip` config block, the
+generator `--strip-dev` flag (default ON for new plugins), the
+`_ensure_submodules_pushed` publish-time gate, and the URL-allowlist
+validator REMAIN fully shipped and enforced. The strip-dev mechanic
+is available to every other plugin author who wants to opt in. CPV
+itself simply chooses not to be one of those plugins.
+
+### Cache size measurement (referenced)
+
+Verified via the cache-install-size audit at v2.73.0 (cited in the
+"Verification" block above): per-version installs measured 8.5–9.3 MB
+across recent releases, achieved through `.cpvignore` and release-
+archive filtering — NOT through the strip-dev submodule mechanic.
+
+### Reopening conditions
+
+Revisit this decision only if:
+1. CPV's cache install size grows back above ~15 MB by accretion AND
+   `.cpvignore` / archive filtering have been exhausted.
+2. A user-facing problem materialises that the strip-dev mechanic
+   would specifically fix (none currently exists or is anticipated).
+3. The cross-repo sync overhead is mitigated by tooling not yet
+   available in 2026.
+
+None of these are anticipated. This TRDD is closed.
