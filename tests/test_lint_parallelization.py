@@ -34,6 +34,7 @@ if str(scripts_dir) not in sys.path:
 
 import cpv_lint_engine  # noqa: E402
 from cpv_lint_engine import lint_repo  # noqa: E402
+from cpv_scanner_cache import ScannerCache  # noqa: E402
 from cpv_validation_common import ValidationReport  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -117,9 +118,13 @@ def test_lint_repo_wall_time_is_slowest_linter_not_sum(tmp_path: Path):
     }
 
     report = ValidationReport()
+    # Phase D — isolated cache so concurrent xdist workers don't
+    # contend on ~/.cache/cpv/scanner-results/ and defeat the
+    # parallelism this test is pinning.
+    iso_cache = ScannerCache(cache_dir=tmp_path / "lint-cache")
     with patch.object(cpv_lint_engine, "_DISPATCH", fake_dispatch):
         t0 = time.perf_counter()
-        passed = lint_repo(tmp_path, report, strict_missing_tools=False)
+        passed = lint_repo(tmp_path, report, strict_missing_tools=False, cache=iso_cache)
         elapsed = time.perf_counter() - t0
 
     assert passed is True
@@ -164,8 +169,9 @@ def test_lint_repo_output_order_is_alphabetical(tmp_path: Path, capfd):
     }
 
     report = ValidationReport()
+    iso_cache = ScannerCache(cache_dir=tmp_path / "lint-cache")
     with patch.object(cpv_lint_engine, "_DISPATCH", fake_dispatch):
-        lint_repo(tmp_path, report, strict_missing_tools=False)
+        lint_repo(tmp_path, report, strict_missing_tools=False, cache=iso_cache)
 
     out = capfd.readouterr().out
     # Find positions of each per-language header. Alphabetical order
@@ -207,8 +213,9 @@ def test_lint_repo_one_failure_does_not_block_others(tmp_path: Path):
     }
 
     report = ValidationReport()
+    iso_cache = ScannerCache(cache_dir=tmp_path / "lint-cache")
     with patch.object(cpv_lint_engine, "_DISPATCH", fake_dispatch):
-        passed = lint_repo(tmp_path, report, strict_missing_tools=False)
+        passed = lint_repo(tmp_path, report, strict_missing_tools=False, cache=iso_cache)
 
     assert passed is False, "lint_repo must return False when any linter fails"
     # All three linters ran (even though one failed).
@@ -242,7 +249,8 @@ def test_lint_repo_empty_languages_filter_no_executor(tmp_path: Path):
     """
     # No source files at all — detect_languages returns {}.
     report = ValidationReport()
-    passed = lint_repo(tmp_path, report, strict_missing_tools=False)
+    iso_cache = ScannerCache(cache_dir=tmp_path / "lint-cache")
+    passed = lint_repo(tmp_path, report, strict_missing_tools=False, cache=iso_cache)
     assert passed is True
     # Pre-Phase-B emitted "No source files found to lint" — same INFO.
     info_msgs = [r.message for r in report.results if r.level == "INFO"]
@@ -252,7 +260,7 @@ def test_lint_repo_empty_languages_filter_no_executor(tmp_path: Path):
     # `selected`, again must early-return without creating a pool.
     (tmp_path / "main.py").write_text("x = 1\n")
     report2 = ValidationReport()
-    passed2 = lint_repo(tmp_path, report2, languages=["go"], strict_missing_tools=False)
+    passed2 = lint_repo(tmp_path, report2, languages=["go"], strict_missing_tools=False, cache=iso_cache)
     assert passed2 is True
     info2 = [r.message for r in report2.results if r.level == "INFO"]
     assert any("language subset" in m for m in info2), info2

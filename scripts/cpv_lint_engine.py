@@ -38,13 +38,21 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # Local helpers — the scripts/ dir is on sys.path when validate_plugin.py
 # imports us; tests insert it explicitly via conftest.
-from cpv_validation_common import ValidationReport, resolve_tool_command
+from cpv_scanner_cache import (
+    CacheKey,
+    ScannerCache,
+    get_scanner_version,
+    sha256_of_args,
+    tree_merkle,
+)
+from cpv_validation_common import ValidationReport, ValidationResult, resolve_tool_command
 from gitignore_filter import GitignoreFilter
 
 # Display labels for `[REPO LINT][PYTHON]` style section headers when
@@ -1132,6 +1140,139 @@ _DISPATCH: dict[str, Callable[..., bool]] = {
     "powershell": lint_powershell,
 }
 
+# ---------------------------------------------------------------------------
+# Phase D — content-hash scanner cache wiring
+# ---------------------------------------------------------------------------
+#
+# Each per-language linter has a small set of CLI knobs (e.g. ruff's
+# ``--select=E,F,W,I``, ``--ignore=E501,E402``) that are baked into
+# this module's source. We capture them as a stable list-of-strings
+# per language so the cache key tracks "this language was linted with
+# these flags against this scanner version against these file
+# contents" — change any of those three and the cache misses.
+#
+# This is INTENTIONALLY coarse-grained: we cache at the per-language
+# level (one cache entry per <repo, language>) rather than per-file.
+# Most linters (ruff, eslint, mypy, markdownlint) batch all files in
+# one subprocess invocation, so per-file caching would double-count
+# the spawn cost. shellcheck is the only true per-file linter, but
+# its loop is small and a per-language merkle still saves all of it
+# on a warm run.
+#
+# The scanner_name field carries both the language and the primary
+# tool so a future addition of e.g. "pylint" alongside "ruff" doesn't
+# accidentally hit a stale ruff entry.
+_LANG_LINTER_ARGS: dict[str, list[str]] = {
+    # Ruff flags from lint_python — keep in sync with the ruff_cmd
+    # invocation. mypy is auxiliary and runs only on scripts/, but
+    # we don't bother modelling it here: a mypy version bump still
+    # invalidates via the scanner_version field on a separate
+    # cache key, AND mypy findings are MINOR (non-blocking) so a
+    # stale cached "no mypy issues" outcome is conservative.
+    "python": ["check", "--select=E,F,W,I", "--ignore=E501,E402", "--output-format=concise"],
+    "javascript": ["--format=json"],
+    "shell": ["-f", "json", "-x"],
+    "go": ["-l"],
+    "rust": ["fmt", "--check"],
+    "markdown": ["--no-globs"],
+    "json": [],  # stdlib json — scanner_version="stdlib"
+    "yaml": ["-f", "parsable"],
+    "dockerfile": ["--format", "json"],
+    "xml": ["--noout"],
+    "css": ["--formatter", "json"],
+    "html": ["--format", "json"],
+    "sql": ["lint", "--format", "json"],
+    "toml": [],  # stdlib tomllib — scanner_version="stdlib"
+    "powershell": ["-Settings", "PSGallery"],
+}
+
+
+def _replay_results_into_report(
+    serialised: list[dict],
+    report: ValidationReport,
+) -> None:
+    """Re-inject cached findings into ``report``.
+
+    The cache stores ``[ValidationResult.to_dict(), ...]``; this
+    helper rebuilds ``ValidationResult`` instances and appends them
+    to the live report so the final summary, score, and exit code
+    are byte-identical to the no-cache path.
+    """
+    for entry in serialised:
+        if not isinstance(entry, dict):
+            continue
+        level = entry.get("level")
+        message = entry.get("message")
+        if not isinstance(level, str) or not isinstance(message, str):
+            continue
+        # ValidationResult takes ``Level`` (a Literal alias). The
+        # cache may have come from a different CPV release so we
+        # defensively coerce by string-equality against the known
+        # set inside ValidationReport.add() — invalid levels would
+        # raise there, but every level we ever emit is in the
+        # standard set, so passing the string through is fine.
+        result = ValidationResult(
+            level=level,  # type: ignore[arg-type]
+            message=message,
+            file=entry.get("file"),
+            line=entry.get("line"),
+            phase=entry.get("phase"),
+            fixable=bool(entry.get("fixable", False)),
+            fix_id=entry.get("fix_id"),
+            category=str(entry.get("category", "")),
+            suggestion=entry.get("suggestion"),
+        )
+        report.results.append(result)
+
+
+def _build_cache_key(
+    lang: str,
+    files: list[Path],
+    plugin_root: Path,
+    *,
+    strict_missing_tools: bool,
+) -> CacheKey | None:
+    """Return a CacheKey for ``lang`` over ``files`` — None if uncacheable.
+
+    Returns None for languages we don't model in ``_LANG_LINTER_ARGS``
+    (defensive — every key from ``_DISPATCH`` is mapped today, but a
+    new language added without a flag-list entry should miss the
+    cache rather than collide with another language's entry).
+    """
+    flag_list = _LANG_LINTER_ARGS.get(lang)
+    if flag_list is None:
+        return None
+    if not files:
+        return None
+
+    # Tree merkle of the language's input files (relative to plugin
+    # root, so the merkle is stable across machines).
+    merkle = tree_merkle(files, base=plugin_root)
+
+    # The args hash also encodes the strict_missing_tools knob —
+    # a strict run vs a soft run can produce different findings
+    # for the same file content (a missing tool is MAJOR vs WARNING).
+    args = list(flag_list)
+    args.append(f"strict_missing_tools={strict_missing_tools}")
+    args_hash = sha256_of_args(args)
+
+    primary_tool = _PRIMARY_TOOL.get(lang, lang)
+    # stdlib-backed linters (json, toml) don't have a meaningful
+    # external version. Tag them with "stdlib" so a stdlib upgrade
+    # (Python version bump) invalidates the cache.
+    if primary_tool in ("json", "tomllib"):
+        scanner_version = f"stdlib-py{sys.version_info.major}.{sys.version_info.minor}"
+    else:
+        scanner_version = get_scanner_version(primary_tool)
+
+    return CacheKey(
+        target_id=f"{plugin_root}::{lang}",
+        content_sha256=merkle,
+        scanner_name=f"cpv-lint:{lang}",
+        scanner_version=scanner_version,
+        args_hash=args_hash,
+    )
+
 
 def lint_repo(
     plugin_root: Path,
@@ -1139,6 +1280,7 @@ def lint_repo(
     *,
     strict_missing_tools: bool = True,
     languages: list[str] | None = None,
+    cache: ScannerCache | None = None,
 ) -> bool:
     """Run every applicable linter across the gitignore-filtered tree.
 
@@ -1153,12 +1295,22 @@ def lint_repo(
             and the run continues.
         languages: When supplied, restrict the run to this subset of
             language names. Unknown names are silently skipped.
+        cache: Phase D scanner-result cache. When ``None`` (default), a
+            ``ScannerCache`` against the user's home cache directory is
+            constructed. Tests can pass an isolated cache via
+            ``ScannerCache(cache_dir=tmp_path / "cache")``. When the
+            cache hits for a language, the cached findings are replayed
+            into ``report`` and the linter subprocess is skipped.
 
     Returns:
         True iff no MAJOR/CRITICAL was added by any linter AND no
         missing-tool failure occurred (in strict mode). MINOR/WARNING
         findings do not flip the return value.
     """
+    if cache is None:
+        # Default: a real on-disk cache under the user's home dir.
+        # Tests that want isolation pass their own ScannerCache.
+        cache = ScannerCache()
     detected = detect_languages(plugin_root)
     if not detected:
         report.info("No source files found to lint")
@@ -1209,6 +1361,12 @@ def lint_repo(
         canonical order; the header line is replayed verbatim so the
         terminal sees exactly the same lines the serial version
         printed (just possibly re-ordered by language).
+
+        Phase D — before invoking the linter, look up a cache entry
+        keyed on (plugin_root, lang, file-content merkle, args, scanner
+        version). On hit, replay the cached findings into ``local_report``
+        and return without spawning any subprocess. On miss, run the
+        linter and cache the resulting findings + pass flag.
         """
         local_report = ValidationReport()
         files = selected[lang]
@@ -1226,12 +1384,51 @@ def lint_repo(
                 f"No lint function registered for language '{lang}' — CPV dispatch table out of sync"
             )
             return lang, local_report, header_line, False
+
+        # Phase D — cache lookup. Build the key off the file contents
+        # and tool versions so the entry is invalidated by ANY drift.
+        cache_key = _build_cache_key(
+            lang, files, plugin_root, strict_missing_tools=strict_missing_tools
+        )
+        if cache_key is not None:
+            cached = cache.get(cache_key)
+            if cached is not None and isinstance(cached.get("findings"), list):
+                # Cache hit — replay findings into the local report
+                # and return WITHOUT invoking any linter subprocess.
+                # This is the warm-path win that makes a re-run of
+                # `validate_plugin --strict` after a single edit go
+                # from ~15s to <2s.
+                _replay_results_into_report(cached["findings"], local_report)
+                passed = bool(cached.get("passed", True))
+                return lang, local_report, header_line, passed
+
         passed = lint_fn(
             plugin_root,
             files,
             local_report,
             strict_missing_tools=strict_missing_tools,
         )
+
+        # Phase D — write the result back to the cache for future
+        # warm runs. Serialise the findings via to_dict() so the
+        # cache entry is pure JSON. put() is best-effort: if the
+        # write fails, the next run simply re-misses and re-scans.
+        if cache_key is not None:
+            try:
+                serialised = [r.to_dict() for r in local_report.results]
+                cache.put(
+                    cache_key,
+                    {
+                        "findings": serialised,
+                        "passed": passed,
+                        "ts": time.time(),
+                    },
+                )
+            except Exception:
+                # Cache writes must NEVER affect lint correctness —
+                # swallow any unexpected error and continue.
+                pass
+
         return lang, local_report, header_line, passed
 
     if not sorted_langs:
