@@ -1836,3 +1836,82 @@ For the canonical fix recipe and migration paths, see [layout-c-migration.md](..
 If the plugin is named `myplugin`, prefix collision-prone names with `myplugin-`. If renaming breaks downstream users, consider if the command really needs to exist as a slash command at all — sometimes the work belongs in an agent or skill instead.
 
 The full list of built-in names CPV checks against is `cpv_validation_common::BUILTIN_SLASH_COMMANDS`.
+
+---
+
+## 17. Cross-marketplace dependency blocked (TRDD-20108ab7, 2026-05-10)
+
+### MAJOR: Cross-marketplace dependency not in hosting marketplace's allowlist
+
+| Field | Value |
+|-------|-------|
+| **Script** | `validate_plugin.py::validate_dependencies` |
+| **Severity** | MAJOR |
+| **Message** | `'dependencies[i].marketplace' = '<target>' is not in the hosting marketplace's allowCrossMarketplaceDependenciesOn allowlist (<list>) — cross-marketplace dependency is blocked at install time with a 'cross-marketplace' error (plugin-dependencies.md:54-79)` |
+| **Spec** | [plugin-dependencies.md:54-79](https://code.claude.com/docs/en/plugin-dependencies.md) |
+
+**Why it matters:** Cross-marketplace dependencies cross trust boundaries. When `plugin-foo@market-A` declares `dependencies: [{name: "shared-lib", marketplace: "market-B"}]`, Claude Code refuses the install at runtime with a `cross-marketplace` error UNLESS `market-A`'s `marketplace.json::allowCrossMarketplaceDependenciesOn` lists `"market-B"`. The allowlist is the marketplace owner's explicit consent that pulling from `market-B` is OK.
+
+**Three legitimate fixes (pick one):**
+
+1. **Add to the allowlist** (preferred when the dep IS legitimate):
+
+   ```json
+   // <hosting-marketplace>/.claude-plugin/marketplace.json
+   {
+     "name": "host-mkt",
+     "owner": {"name": "..."},
+     "plugins": [...],
+     "allowCrossMarketplaceDependenciesOn": ["other-mkt"]
+   }
+   ```
+
+   The marketplace owner must explicitly opt-in to each foreign marketplace. Don't add `"*"` — there is no wildcard in the spec.
+
+2. **Remove the `marketplace` sub-field** if the dep actually lives in the SAME marketplace:
+
+   ```json
+   // BEFORE — pointless cross-mkt declaration
+   "dependencies": [{"name": "sibling-plugin", "marketplace": "host-mkt"}]
+
+   // AFTER — same-mkt dep, no marketplace field needed
+   "dependencies": ["sibling-plugin"]
+   // OR with version pin:
+   "dependencies": [{"name": "sibling-plugin", "version": "~1.2.0"}]
+   ```
+
+3. **Pass `--marketplace-context PATH`** when validating in CI / outside the production marketplace tree:
+
+   ```bash
+   uv run python scripts/validate_plugin.py \
+     --marketplace-context /path/to/host-marketplace/ \
+     /path/to/plugin/
+   ```
+
+   This is the right answer when the plugin lives in a worktree, an extracted tarball, or a freshly cloned PR branch where the on-disk auto-discovery (Layout C / Layout B / cache layout) cannot find the production marketplace.
+
+**Auto-discovery layouts CPV walks** (no `--marketplace-context` needed):
+
+- **Layout C** — plugin's own `.claude-plugin/marketplace.json` (marketplace-in-plugin).
+- **Layout B** — parent `.claude-plugin/marketplace.json` (nested monorepo, walked up to 3 levels).
+- **Cache layout** — `~/.claude/plugins/cache/<mkt>/<plugin>/` (immediate parent's `marketplace.json`).
+
+When auto-discovery finds nothing, CPV emits INFO and skips the allowlist check (rather than MAJOR-blocking a standalone clone). This is by design.
+
+### NIT: Marketplace.json uses legacy 'allowedDependencyMarketplaces'
+
+| Field | Value |
+|-------|-------|
+| **Script** | `validate_plugin.py::validate_dependencies` |
+| **Severity** | NIT |
+| **Message** | `marketplace.json uses legacy 'allowedDependencyMarketplaces' — rename to the spec field 'allowCrossMarketplaceDependenciesOn' (plugin-dependencies.md:54-79)` |
+
+**Fix:** A pre-spec CPV release used `allowedDependencyMarketplaces`. The canonical spec name is `allowCrossMarketplaceDependenciesOn`. Both are honoured for backward compatibility, but the legacy alias is removed in a future release.
+
+```json
+// BEFORE
+{ "allowedDependencyMarketplaces": ["other-mkt"] }
+
+// AFTER
+{ "allowCrossMarketplaceDependenciesOn": ["other-mkt"] }
+```
