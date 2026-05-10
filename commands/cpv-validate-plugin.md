@@ -69,6 +69,7 @@ If no exact match is found, fuzzy matching is used (e.g., `cpt-validate` → `cp
 | `--json` | Output results as JSON (skips the auto-saved report file) |
 | `--report PATH` | Write the aggregated report to PATH explicitly |
 | `--marketplace-only` | Skip plugin.json requirement for marketplace-only repos |
+| `--marketplace-context PATH` | Treat the marketplace.json at PATH as the plugin's hosting marketplace for cross-marketplace dependency-allowlist enforcement (TRDD-20108ab7). Overrides on-disk auto-discovery. |
 | `--skip-platform-checks [PLATFORM...]` | Skip platform-specific checks (e.g., `--skip-platform-checks windows`) |
 
 > **Default output is path-only.** Without `--json` or `--report`, `validate_security.py` auto-saves the aggregated report to `$CLAUDE_PROJECT_DIR/reports/security/<TS>-<plugin>.md` and prints **only** the compact summary (counts table + verdict + plugin path + report path). Findings are bucketed by `(level, rule_id)` so each vulnerability TYPE shows its full explanation exactly once with a count and capped file:line list — token-bounded reports, no findings ever silently dropped.
@@ -83,6 +84,7 @@ If no exact match is found, fuzzy matching is used (e.g., `cpt-validate` → `cp
 - Name format validation (kebab-case, lowercase)
 - Version format (semver)
 - agents array validation (must be array of .md file paths)
+- **Cross-marketplace dependencies (TRDD-20108ab7).** When `dependencies[i].marketplace` points at a marketplace OTHER than the hosting one, the hosting `marketplace.json::allowCrossMarketplaceDependenciesOn` array MUST list that target. The validator auto-discovers the hosting marketplace.json from the on-disk layout (Layout C self-marketplace, Layout B parent-marketplace, or `~/.claude/plugins/cache/<mkt>/<plugin>/`). When auto-discovery cannot find a marketplace.json, the validator emits INFO and skips the allowlist check; pass `--marketplace-context PATH` to force a specific marketplace.json. Spec: [plugin-dependencies.md:54-79](https://code.claude.com/docs/en/plugin-dependencies.md). Severity: MAJOR when blocked.
 
 ### 2. Hooks Configuration (`hooks/hooks.json`)
 - JSON structure validation

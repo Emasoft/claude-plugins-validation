@@ -3,7 +3,7 @@
 **TRDD ID:** `20108ab7-3fb1-4d20-8959-700992e9ee7c`
 **Filename:** `design/tasks/TRDD-20108ab7-3fb1-4d20-8959-700992e9ee7c-cross-marketplace-deps.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
-**Status:** Not started
+**Status:** Done — 2026-05-10. Spec field name confirmed (`allowCrossMarketplaceDependenciesOn`, plugin-dependencies.md:54-79); validator wired in v2.22.3 with library-level enforcement; on-disk auto-discovery (Layout C / Layout B / cache layout) added 2026-05-10 so `validate_plugin <path>` enforces the allowlist without explicit context; CLI `--marketplace-context PATH` flag added for CI / out-of-tree validation; documentation updated in README.md, commands/cpv-validate-plugin.md, skills/fix-validation/references/{plugin-error-index.md, plugin-structure-fixes.md §17}; 15/15 regression tests pass (5 from v2.22.3 + 10 added 2026-05-10).
 **Deferred from:** TRDD-479cde0c §v2.22.1 "NEXT-RELEASE"
 **Parent audit report:** `docs_dev/spec-audit-2-plugins-20260417-163141.md` §5 item 4
 
@@ -69,16 +69,22 @@ The research agent flagged this in the audit:
 - `test_marketplace_json_malformed_allowlist_rejected`
 - `test_same_marketplace_dep_no_cross_check_needed`
 
-## Blocking questions
+## Blocking questions — RESOLVED 2026-04-XX (v2.22.3 era)
 
-1. What is the exact name of the allowlist key in `marketplace.json`?
-2. Is it TOP-LEVEL or nested under `metadata`?
-3. Can plugins themselves declare the allowlist, or is it marketplace-only?
-4. Does the allowlist use bare marketplace names or `owner/repo` form?
-
-Until these are answered by a concrete spec reference, CPV should continue
-to WARN on any cross-marketplace dependency resolution attempt rather than
-enforce an allowlist it cannot locate.
+1. **What is the exact name of the allowlist key in `marketplace.json`?**
+   `allowCrossMarketplaceDependenciesOn` (plugin-dependencies.md:54-79).
+   The earlier conjectural name `allowedDependencyMarketplaces` was wrong;
+   CPV honours it as a legacy alias with a NIT nudge.
+2. **Is it TOP-LEVEL or nested under `metadata`?** Top-level. Added to
+   `OPTIONAL_MARKETPLACE_TOP_LEVEL_FIELDS` in `validate_marketplace.py:180`.
+3. **Can plugins themselves declare the allowlist, or is it marketplace-only?**
+   Marketplace-only. The allowlist is the marketplace owner's explicit
+   consent for foreign-marketplace deps; a plugin cannot grant itself
+   foreign-marketplace permission.
+4. **Does the allowlist use bare marketplace names or `owner/repo` form?**
+   Bare marketplace names (the `name` field of the foreign marketplace's
+   `marketplace.json`). Same identifier shape used by
+   `claude plugin install <plugin>@<marketplace>`.
 
 ## Interim behavior (already in v2.22.0)
 
@@ -87,10 +93,40 @@ and flags it as "cross-marketplace dependency — resolution subject to root
 marketplace allowlist (not yet enforced by CPV)". This is fine as a
 placeholder until the spec is confirmed.
 
-## Success criteria
+## Success criteria — STATUS
 
-- `validate_marketplace.py` recognizes the new allowlist field.
+- `validate_marketplace.py` recognizes the new allowlist field — DONE
+  (v2.22.3, `validate_marketplace.py:180`).
 - `validate_plugin.py` emits MAJOR on cross-marketplace deps that violate the
-  root marketplace's allowlist.
-- Five regression tests covering the behavior matrix above all pass.
-- Documentation (command docs + README) mention the new validation.
+  root marketplace's allowlist — DONE (v2.22.3, `validate_plugin.py:295-322`).
+- Five regression tests covering the behavior matrix above all pass — DONE
+  (v2.22.3, `TestV223CrossMarketplaceDeps`, 5 tests).
+- Documentation (command docs + README) mention the new validation — DONE
+  (v2.22.3 partial in `cpv-add-dependency.md`; completed 2026-05-10 in
+  README.md "Cross-marketplace dependency allowlist" + commands/cpv-validate-plugin.md
+  Options table + "What Gets Validated" §1 + skills/fix-validation/references/
+  {plugin-error-index.md, plugin-structure-fixes.md §17}).
+
+## 2026-05-10 follow-up — auto-discovery + CLI override
+
+The library-level enforcement landed in v2.22.3 was correct but the
+ORCHESTRATION layer never threaded the hosting marketplace into
+`validate_manifest`, so end-users running `validate_plugin <path>` got
+INFO instead of MAJOR. 2026-05-10 closes that gap:
+
+1. `discover_hosting_marketplace(plugin_root: Path) -> dict | None` — new
+   helper in `validate_plugin.py:180-232`. Walks three on-disk shapes in
+   priority order: Layout C (own `.claude-plugin/marketplace.json`),
+   Layout B (parent `.claude-plugin/marketplace.json`, walked up to 3
+   levels), cache layout (parent `marketplace.json` without the wrapper).
+   Returns None on standalone plugins. Malformed marketplace.json yields
+   None gracefully (validation owned by `validate_marketplace.py`, not us).
+2. `validate_manifest()` auto-calls `discover_hosting_marketplace()` when
+   `hosting_marketplace=` is None AND the manifest has a `dependencies`
+   field. Explicit context always wins.
+3. CLI `--marketplace-context PATH` flag for CI / out-of-tree validation
+   (worktrees, extracted tarballs, fresh PR clones).
+4. Tests: 10 new tests under `TestCrossMarketplaceHostingDiscovery` —
+   layout discovery (4), priority order (1), graceful malformed handling
+   (1), library auto-discovery integration (1), CLI flag round-trip (2),
+   explicit override precedence (1).
