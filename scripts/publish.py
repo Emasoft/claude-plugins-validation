@@ -25,13 +25,17 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any, Callable
 
 # Ensure the scripts/ directory is on sys.path so we can import cpv_validation_common
 # when publish.py is invoked directly (e.g. `uv run python scripts/publish.py`).
@@ -48,6 +52,136 @@ GREEN = "\033[0;32m" if _USE_COLOR else ""
 YELLOW = "\033[1;33m" if _USE_COLOR else ""
 BLUE = "\033[0;34m" if _USE_COLOR else ""
 NC = "\033[0m" if _USE_COLOR else ""
+
+
+# ── Phase C (v2.77.0): per-thread stdout/stderr capture ──────────────────────
+#
+# Phase C runs Gates 2/3/4/5 concurrently. Each gate prints "═══ Gate N ═══"
+# headers and ✓/✗ summary lines via plain `print()` calls, so the only way to
+# keep terminal output readable is to capture each gate's writes into its own
+# buffer and replay them in fixed order after every gate finishes.
+#
+# We do NOT use `contextlib.redirect_stdout`. That helper mutates the
+# process-global `sys.stdout` reference: with N concurrent threads the last
+# one to exit may restore a stale buffer instead of the real stdout,
+# swallowing every subsequent write made by the main thread (this exact
+# bug surfaced during early Phase B drafts in cpv_lint_engine — see the
+# comment at scripts/cpv_lint_engine.py:1190).
+#
+# Instead we install thread-aware proxies for sys.stdout / sys.stderr that
+# fall through to the real streams when no buffer is set on the calling
+# thread, and write to the per-thread buffer otherwise. The main thread
+# never sets a buffer, so its prints (the parent reporting layer) keep
+# going to the real terminal — no race window.
+
+
+class _ThreadAwareStream:
+    """sys.stdout / sys.stderr proxy that routes to a per-thread buffer.
+
+    When ``threading.local()._buffer`` is set on the calling thread, every
+    write goes to that buffer. When unset, the write passes through to
+    the real underlying stream. Other stream attributes (``isatty``,
+    ``flush``, ``fileno``, ``encoding``, …) are forwarded to the real
+    stream so existing checks like ``sys.stdout.isatty()`` keep working.
+    """
+
+    def __init__(self, real_stream: Any) -> None:
+        self._real = real_stream
+        self._tls = threading.local()
+
+    def _active_buffer(self) -> io.StringIO | None:
+        """Return the per-thread buffer if set, else None."""
+        return getattr(self._tls, "_buffer", None)
+
+    def _set_buffer(self, buf: io.StringIO | None) -> None:
+        """Install (or clear) the per-thread buffer on the calling thread."""
+        if buf is None:
+            try:
+                del self._tls._buffer
+            except AttributeError:
+                pass
+        else:
+            self._tls._buffer = buf
+
+    def write(self, data: str) -> int:
+        buf = self._active_buffer()
+        target = buf if buf is not None else self._real
+        return target.write(data)
+
+    def flush(self) -> None:
+        buf = self._active_buffer()
+        if buf is not None:
+            buf.flush()
+        else:
+            self._real.flush()
+
+    def isatty(self) -> bool:
+        return bool(getattr(self._real, "isatty", lambda: False)())
+
+    def fileno(self) -> int:
+        return self._real.fileno()
+
+    @property
+    def encoding(self) -> str:
+        return getattr(self._real, "encoding", "utf-8")
+
+    def __getattr__(self, name: str) -> Any:
+        # Fall through to the real stream for anything else (e.g. .buffer,
+        # .errors, .reconfigure on Python 3.7+). Called only if normal
+        # lookup misses, so the explicitly defined attrs above win.
+        return getattr(self._real, name)
+
+
+def _install_stream_routers() -> tuple[_ThreadAwareStream, _ThreadAwareStream]:
+    """Replace sys.stdout/sys.stderr with thread-aware proxies (idempotent).
+
+    Returns the (stdout_router, stderr_router) pair so callers can attach
+    per-thread buffers via ``router._set_buffer(io.StringIO())``.
+    """
+    if not isinstance(sys.stdout, _ThreadAwareStream):
+        sys.stdout = _ThreadAwareStream(sys.stdout)  # type: ignore[assignment]
+    if not isinstance(sys.stderr, _ThreadAwareStream):
+        sys.stderr = _ThreadAwareStream(sys.stderr)  # type: ignore[assignment]
+    return sys.stdout, sys.stderr  # type: ignore[return-value]
+
+
+def _run_stage_captured(
+    fn: Callable[..., int],
+    *args: Any,
+    **kwargs: Any,
+) -> tuple[int, str, str]:
+    """Run a stage_*() function with stdout+stderr captured per-thread.
+
+    Installs a per-thread StringIO on both routers for the duration of the
+    call, then drains them and returns ``(rc, stdout_text, stderr_text)``.
+    SystemExit raised by `_print_result` (when a stage's `run()` call uses
+    check=True and the subprocess fails) is caught and converted to a
+    plain return code so the orchestrator can report all gates uniformly.
+    """
+    stdout_router, stderr_router = _install_stream_routers()
+    out_buf = io.StringIO()
+    err_buf = io.StringIO()
+    stdout_router._set_buffer(out_buf)
+    stderr_router._set_buffer(err_buf)
+    try:
+        try:
+            rc = fn(*args, **kwargs)
+        except SystemExit as e:
+            # `_print_result` calls sys.exit(returncode) on subprocess
+            # failure when check=True. That raises SystemExit, which only
+            # kills the worker thread. Convert to a plain return code so
+            # the orchestrator sees the failure and can act on it.
+            code = e.code
+            if code is None:
+                rc = 0
+            elif isinstance(code, int):
+                rc = code
+            else:
+                rc = 1
+    finally:
+        stdout_router._set_buffer(None)
+        stderr_router._set_buffer(None)
+    return rc, out_buf.getvalue(), err_buf.getvalue()
 
 # Lazy-initialized gitignore filter for file scanning
 _gi_cache: dict = {}
@@ -856,13 +990,27 @@ def stage_run_tests(plugin_root: Path) -> int:
     better than the default for our test mix (some files have 100+ short
     tests, some have 5 long ones). CI can override worker count via the
     PYTEST_XDIST_NUM_WORKERS env var (xdist honors it natively).
+
+    Phase C (v2.77.0): use ``check=False`` so a test failure returns the
+    pytest exit code through the normal control flow instead of calling
+    ``sys.exit()`` from inside ``_print_result``. When this stage runs in
+    a worker thread (parallel preflight), ``sys.exit`` would only kill the
+    thread — the orchestrator needs the explicit return code to halt the
+    publish atomically.
     """
     print(f"\n{BLUE}═══ Gate 2: Run tests (mandatory) ═══{NC}")
-    run(
+    result = run(
         ["uv", "run", "pytest", "tests/", "-n", "auto", "--dist=worksteal",
          "--maxfail=1", "-q", "--tb=short"],
         cwd=plugin_root,
+        check=False,
     )
+    if result.returncode != 0:
+        print(
+            f"\n{RED}✗ Tests failed (pytest exit {result.returncode}) — PUBLISH BLOCKED{NC}",
+            file=sys.stderr,
+        )
+        return result.returncode
     print(f"{GREEN}✓ All tests passed{NC}")
     return 0
 
@@ -1942,6 +2090,100 @@ def stage_github_release(plugin_root: Path, tag_name: str, release_notes_file: P
     return 0
 
 
+# ── Phase C (v2.77.0) parallel preflight orchestrator ───────────────────────
+
+
+# Canonical replay order for the parallel preflight block. The terminal sees
+# Gate 2 → 3 → 4 → 5 in this exact order regardless of which thread finishes
+# first, so logs stay diff-friendly across runs and are easy to skim.
+_PARALLEL_GATE_ORDER: tuple[str, ...] = ("tests", "validate", "mkpl_validate", "mkpl_reg")
+
+
+def run_preflight_parallel(plugin_root: Path, layout: str) -> int:
+    """Run Gates 2/3/4/5 concurrently with per-thread output capture.
+
+    Phase C (v2.77.0): replaces the previous sequential Gate-2 → Gate-3 →
+    Gate-4 → Gate-5 dispatch. The four gates are independent (none mutates
+    on-disk state that another reads), so running them on a 4-worker thread
+    pool drops preflight wall time from ``sum(gates)`` to ``max(gates)``
+    — typically a 25–60s reduction depending on test-suite size.
+
+    Output handling:
+
+    * Each gate's stdout AND stderr are captured per-thread via the
+      ``_ThreadAwareStream`` proxies installed on ``sys.stdout``/
+      ``sys.stderr``. The proxies fall through to the real terminal for
+      the orchestrator (main thread), so this function's own prints land
+      on the user's screen as expected.
+    * After all four gates finish, captured buffers are replayed in the
+      fixed canonical order: tests → validate → mkpl_validate → mkpl_reg.
+      The original "═══ Gate N ═══" headers and ✓/✗ summary lines are
+      preserved verbatim.
+
+    Failure semantics:
+
+    * The pool waits for ALL four gates to finish (so we don't leave
+      validators running after we already have a hard failure to report).
+    * Captured output is replayed in canonical order REGARDLESS of which
+      gates failed.
+    * After the replay, the FIRST non-zero return code (in canonical
+      order) is returned to the caller, which surfaces it as the publish
+      exit code. Returning the first failure (not the last) keeps the
+      reported severity stable — if Gate 3 fails CRITICAL and Gate 4
+      fails MAJOR, the user sees CRITICAL.
+    * If every gate passes, returns 0.
+    """
+    print(f"\n{BLUE}═══ Running Gates 2-5 concurrently (Phase C parallel preflight) ═══{NC}")
+
+    # Stage callable lookup — wrapped in lambdas because some stages take
+    # extra arguments beyond plugin_root (Gate 4 wants the layout string).
+    stage_callables: dict[str, Callable[[], int]] = {
+        "tests": lambda: stage_run_tests(plugin_root),
+        "validate": lambda: stage_validate_plugin(plugin_root),
+        "mkpl_validate": lambda: stage_validate_marketplace(plugin_root, layout),
+        "mkpl_reg": lambda: stage_marketplace_registration_check(plugin_root),
+    }
+
+    # Submit all four gates simultaneously. max_workers=4 is the exact
+    # number of tasks — no point sizing the pool larger.
+    captured: dict[str, tuple[int, str, str]] = {}
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        futures = {
+            name: ex.submit(_run_stage_captured, fn)
+            for name, fn in stage_callables.items()
+        }
+        # Wait for all to finish — DON'T short-circuit on first failure.
+        # We want a clean per-gate replay even when multiple gates fail,
+        # otherwise the user sees an arbitrary subset based on completion
+        # order.
+        for name, fut in futures.items():
+            captured[name] = fut.result()
+
+    # Replay in canonical order so log diffs stay stable across runs.
+    for name in _PARALLEL_GATE_ORDER:
+        _, out_text, err_text = captured[name]
+        if out_text:
+            sys.stdout.write(out_text)
+            if not out_text.endswith("\n"):
+                sys.stdout.write("\n")
+        if err_text:
+            sys.stderr.write(err_text)
+            if not err_text.endswith("\n"):
+                sys.stderr.write("\n")
+    sys.stdout.flush()
+    sys.stderr.flush()
+
+    # Surface the FIRST non-zero return code in canonical order. This
+    # keeps the reported severity deterministic — a stable Gate 3
+    # CRITICAL is more useful than an arbitrary Gate-3-or-4 result that
+    # depends on thread scheduling.
+    for name in _PARALLEL_GATE_ORDER:
+        rc = captured[name][0]
+        if rc != 0:
+            return rc
+    return 0
+
+
 # ── Main pipeline orchestrator ────────────────────────────────────────────────
 
 
@@ -2017,21 +2259,23 @@ Examples:
     # repo-wide lint via cpv_lint_engine, so there is no separate lint
     # stage — the validator catches lint errors AND structural issues in a
     # single pass with one source of truth.
-    for stage in (
-        lambda: stage_check_working_tree(root),
-        lambda: stage_run_tests(root),
-        lambda: stage_validate_plugin(root),
-    ):
-        rc = stage()
-        if rc != 0:
-            return rc
-
-    layout, _ = detect_layout(root)
-    rc = stage_validate_marketplace(root, layout)
+    #
+    # Phase C (v2.77.0): Gate 1 still runs first sequentially — the clean
+    # working tree must be verified before tests run, otherwise pytest
+    # could pick up uncommitted state (or auto-commit the lockfile via
+    # the in-place `git add uv.lock`/`git commit` branch). After Gate 1
+    # passes, Gates 2/3/4/5 run concurrently in a thread pool; their
+    # output is captured per-thread and replayed in canonical order so
+    # the terminal stays readable. Gate 6 runs sequentially after the
+    # parallel block to keep version-consistency strictly downstream of
+    # the validators (avoids racing against any in-flight validator
+    # subprocess that may touch on-disk state).
+    rc = stage_check_working_tree(root)
     if rc != 0:
         return rc
 
-    rc = stage_marketplace_registration_check(root)
+    layout, _ = detect_layout(root)
+    rc = run_preflight_parallel(root, layout)
     if rc != 0:
         return rc
 
