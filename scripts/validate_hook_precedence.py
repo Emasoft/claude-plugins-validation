@@ -3,20 +3,32 @@
 Claude Plugins Validation - Hook Precedence Validator
 
 Validates cross-hook precedence in a hooks.json file. Per hooks.md L989,
-when multiple hooks match the same (event, matcher) pair their decisions
-aggregate by precedence:
+when multiple PreToolUse hooks match the same (event, matcher) pair their
+``permissionDecision`` outputs aggregate by precedence:
 
     deny > defer > ask > allow
 
-CPV's per-hook validators do not aggregate across hooks. This module
-walks a hooks.json file, groups hooks by (event, matcher), and emits:
+The precedence rule is **PreToolUse-specific** because it governs the
+``permissionDecision`` surface, which only PreToolUse honors at runtime
+(hooks.md per-event table L583-L628). For other events, declaring an inline
+``permissionDecision`` is dead code at runtime and is already surfaced by
+``validate_hook_output.py`` at MAJOR severity — adding a duplicate MINOR
+here would bury that higher-severity finding under noise.
 
-  * MINOR when >=2 hooks on the same (event, matcher) declare conflicting
+CPV's per-hook validators do not aggregate across hooks. This module walks
+a hooks.json file, groups its PreToolUse hooks by ``(event, matcher)``,
+and emits:
+
+  * MINOR when >=2 PreToolUse hooks on the same matcher declare conflicting
     inline permissionDecision values (silent override by precedence).
-  * INFO when >=2 hooks are on the same (event, matcher) but one or more
+  * INFO when >=2 PreToolUse hooks are on the same matcher but one or more
     are exec scripts whose decision cannot be statically determined.
   * PASSED when every group has <=1 hook OR all hooks share the same
-    inline decision.
+    inline decision OR the group is on a non-PreToolUse event.
+
+Out-of-scope events are silently skipped. The set of in-scope events is
+exposed as ``EVENTS_WITH_PERMISSION_DECISION_PRECEDENCE`` for spec-traceable
+extensibility.
 
 Spec reference:
   - https://code.claude.com/docs/en/hooks.md#L989
@@ -59,6 +71,17 @@ PRECEDENCE_DESCRIPTION = "deny>defer>ask>allow"
 # Matcher used for events that do not support matchers (hooks.md). We collapse
 # hooks without a matcher onto a single group key so they still aggregate.
 NO_MATCHER_SENTINEL = ""
+
+# Hooks events whose runtime semantics include the permissionDecision surface
+# governed by the deny>defer>ask>allow precedence (hooks.md L984-L989). Only
+# PreToolUse honors permissionDecision at runtime — the field appears nowhere
+# else in the per-event spec table. If an author declares permissionDecision
+# inside a non-PreToolUse hook, that's dead code at runtime — already flagged
+# by validate_hook_output.py at MAJOR severity. The precedence validator MUST
+# NOT also report MINOR on top of that, or the user sees two findings for the
+# same authorship bug. Keeping the in-scope set here makes the constraint
+# spec-traceable and trivial to extend if the spec ever broadens it.
+EVENTS_WITH_PERMISSION_DECISION_PRECEDENCE: frozenset[str] = frozenset({"PreToolUse"})
 
 
 @dataclass(frozen=True)
@@ -218,6 +241,15 @@ def detect_precedence_conflicts(
     findings: list[PrecedenceFinding] = []
 
     for (event, matcher), hook_list in sorted(groups.items()):
+        # Event scoping (hooks.md L989): the precedence rule applies only to
+        # events whose runtime semantics use the permissionDecision surface.
+        # Per the spec table that's PreToolUse only. Skipping out-of-scope
+        # events here prevents duplicate findings against authorship bugs that
+        # validate_hook_output.py already surfaces at MAJOR severity (e.g. a
+        # PostToolUse hook that declares permissionDecision is dead code).
+        if event not in EVENTS_WITH_PERMISSION_DECISION_PRECEDENCE:
+            continue
+
         if len(hook_list) < 2:
             continue
 
@@ -415,8 +447,7 @@ def main() -> int:
             "exit_code": report.exit_code,
             "counts": report.count_by_level(),
             "results": [
-                {"level": r.level, "message": r.message, "file": r.file, "line": r.line}
-                for r in report.results
+                {"level": r.level, "message": r.message, "file": r.file, "line": r.line} for r in report.results
             ],
         }
         print(json.dumps(payload, indent=2))
