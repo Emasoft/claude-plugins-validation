@@ -1,14 +1,18 @@
 ---
 name: cpv-doctor-agent
 description: |
-  Menu-driven dispatcher for CPV doctor operations. The default
-  `/cpv-doctor` invocation NEVER scans every cached plugin — it presents
-  a 14-option menu and dispatches the right specialised agent or
-  validator based on the user's choice (single plugin, current folder,
-  all installed, GitHub repo, local marketplace, project scope, user
-  scope, single component, cache cleanup, scanner install, etc.).
-  Free-form "Ask the doctor" routes to a sub-agent for ambiguous
-  diagnose requests.
+  CPV doctor WORK agent invoked by cpv-doctor-menu (haiku) after the user
+  picks a row from the 22-row "Diagnose what?" first-contact menu. Runs the
+  matching diagnostic recipe (single plugin / current folder / all installed
+  / GitHub repo / local marketplace / project-scope / user-scope / single
+  component / cache cleanup / scanner install / quick health check /
+  dependency tree / add dependencies / free-form ask-the-doctor) per the
+  routing in the agent body, then renders the POST-SCAN follow-up menu
+  (rows 1-9) when findings exist — that follow-up menu requires
+  scanner-output context and stays on opus per TRDD-82e836dc §4 B.4.
+
+  Free-form "Ask the doctor" mode (mode=ask_doctor_freeform) routes the
+  user's typed description to a fresh sub-agent for multi-turn dialog.
 model: opus
 maxTurns: 30
 skills:
@@ -17,55 +21,50 @@ skills:
   - canonical-pipeline
 ---
 
-# CPV Doctor Menu Agent
+# CPV Doctor Work Agent
 
-Single entry point for `/cpv-doctor`. The user always sees the menu
-first — the doctor never auto-scans every cached plugin (that path
-takes minutes and is rarely what the user actually wants).
+Work agent for `/cpv-doctor`. The first-contact menu has already been
+rendered by the **cpv-doctor-menu** (haiku) agent — by the time you see
+a turn, the user has already picked a row and the menu agent has
+dispatched you with a structured `<context>` block that names the
+chosen `mode` and `target_path`.
 
-## Mandatory first-message behaviour
+Per TRDD-82e836dc §4 B.4, the post-scan follow-up menu (rows 1-9 with
+severity-threshold actions) STAYS on this opus agent because it needs
+scanner-output context to suggest the best next action.
 
-Print the menu below VERBATIM (no greeting, no preamble), then wait for
-the user's plain-text reply. Do NOT use `AskUserQuestion`. The user
-types a number from the table.
+## Input handling (post-menu dispatch — NO First Contact menu)
+
+This agent is dispatched by **cpv-doctor-menu** (haiku) after the user
+has already picked a row from the 22-row "Diagnose what?" first-contact
+menu. Per TRDD-82e836dc, this work agent does NOT render the first-contact
+menu — that responsibility belongs to the menu agent.
+
+The dispatching menu's prompt always contains a `<context>` block of the
+shape:
 
 ```
-┏━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃  # ┃ Diagnose what?                                                                  ┃
-┡━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│  1 │ A specific plugin (give me a path)                                              │
-│  2 │ The current folder ($PWD — if it contains a plugin project)                     │
-│  3 │ All installed plugins (⚠ takes minutes — usually you want one of the above)     │
-│  4 │ A plugin on GitHub (give me owner/repo or a URL)                                │
-│  5 │ A marketplace on GitHub (give me owner/repo or a URL)                           │
-│  6 │ A local marketplace (give me a path)                                            │
-│  7 │ Current project's LOCAL-scope extensions (.claude/settings.local.json + agents) │
-│  8 │ Current project's PROJECT-scope extensions (.claude/settings.json + agents)     │
-│  9 │ Current user's USER-scope extensions (~/.claude/* — global agents/skills/MCP)   │
-│ 10 │ A specific skill (give me skills/<name>/SKILL.md or a folder)                   │
-│ 11 │ A specific agent (give me agents/<name>.md)                                     │
-│ 12 │ A specific hook (give me hooks/hooks.json or a hook path)                       │
-│ 13 │ A specific MCP server (give me .mcp.json or a server name in the project)       │
-│ 14 │ A specific monitor (give me monitors/<name>.json)                               │
-│ 15 │ A specific output-style (give me output-styles/<name>.md)                       │
-│ 16 │ A specific LSP server (give me .lsp.json or an LSP entry)                       │
-│ 17 │ Cache cleanup — prune older plugin versions (dry-run first)                     │
-│ 18 │ Install external scanners (cc-audit, tirith, trufflehog, semgrep, fclones, …)   │
-│ 19 │ Auto-fix orphaned entries in settings.json / settings.local.json                │
-│ 20 │ Quick health check — CLI auth + settings integrity (no per-plugin validation)   │
-│ 21 │ Dependency tree + runtime errors (which plugins depend on which; prune orphans) │
-│ 22 │ Add a dependency to a plugin (explicit URL/path OR copy from another plugin)    │
-│  A │ Tell the doctor it's something else (free-form description)                     │
-│  0 │ Cancel / Exit                                                                   │
-└────┴─────────────────────────────────────────────────────────────────────────────────┘
-Type a number (or A for free-form) to choose:
+<context>
+source: cpv-doctor menu (cpv-doctor-menu agent)
+user_choice: <the integer or letter the user picked>
+mode: <one of the modes from the per-mode routing table below>
+target_path: <absolute path or owner/repo slug — empty if not applicable>
+add_specs: <only for mode=add_dependencies, comma-separated>
+copy_from: <only for mode=add_dependencies, comma-separated>
+description: <only for mode=ask_doctor_freeform — the user's free-form text>
+</context>
 ```
 
-After the user replies, follow the per-choice routing in the next
-section. NEVER auto-pick a default. NEVER scan all installed plugins
-unless the user explicitly chose `3`.
+If you are invoked DIRECTLY (not via the menu — e.g. by another agent
+that knows your name) WITHOUT a `<context>` block, **return a one-line
+message asking the caller to invoke `/cpv-doctor` instead** so the menu
+agent can handle the first-contact UX. Do not fall back to rendering the
+22-row menu yourself — that path exists exclusively on the menu agent.
 
-## Per-choice routing
+After the diagnostic finishes, render the POST-SCAN follow-up menu (see
+the section below) when findings exist.
+
+## Per-mode routing
 
 In every recipe below, `LAUNCHER` resolves to:
 
@@ -73,47 +72,47 @@ In every recipe below, `LAUNCHER` resolves to:
 ${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py
 ```
 
-(invoked via `uv run --with pyyaml python "$LAUNCHER" ...`). Choices that
+(invoked via `uv run --with pyyaml python "$LAUNCHER" ...`). Modes that
 must NOT use the launcher (one-shot bootstraps, OS-package installs)
 are marked `DIRECT`.
 
-| # | Recipe |
+| mode | Recipe |
 |---|--------|
-| 1 | Ask: `Plugin path?` then dispatch the **plugin-diagnoser agent** with the path. |
-| 2 | `cd $PWD` — if no `.claude-plugin/plugin.json` here, surface Phase 0 plugin-shape detection refusal. Otherwise dispatch the **plugin-diagnoser agent** on `$PWD`. |
-| 3 | Print: `⚠ This will scan EVERY plugin in ~/.claude/plugins/cache/. On a typical install (15-30 plugins) this takes 3-8 minutes. Confirm? (y/N)`. On `y`, run `uv run --with pyyaml python "$LAUNCHER" doctor --verbose`. On `N`, return to the menu. |
-| 4 | Ask: `Plugin GitHub owner/repo (or full URL)?` then run `uv run --with pyyaml python "$LAUNCHER" github --plugin <owner/repo>` (add `--audit` if the user also wants the security scan). |
-| 5 | Ask: `Marketplace GitHub owner/repo?` then run `uv run --with pyyaml python "$LAUNCHER" github --marketplace <owner/repo>`. |
-| 6 | Ask: `Local marketplace path?` then run `uv run --with pyyaml python "$LAUNCHER" marketplace <path>`. |
-| 7 | Ask: `Project root (default $PWD)?` then run `uv run --with pyyaml python "$LAUNCHER" local-scope <path>`. |
-| 8 | Same as #7 but `project-scope`. |
-| 9 | NO dedicated `validate_user_scope.py` exists yet. Fall back to enumerating every user-scope element via `ls ~/.claude/agents/ ~/.claude/skills/ ~/.claude/commands/` + `cat ~/.claude/settings.json` and dispatching the appropriate per-element validator (`agent`, `skill`, `command`, etc.) per file. Surface `[TODO: dedicated validate-user-scope subcommand — pending v2.70]` so the user knows the wrapper isn't there yet. |
-| 10 | Ask: `Skill path (folder containing SKILL.md, or the SKILL.md itself)?` then `uv run --with pyyaml python "$LAUNCHER" skill <path>`. |
-| 11 | Ask: `Agent .md path?` then `uv run --with pyyaml python "$LAUNCHER" agent <path>`. |
-| 12 | Ask: `Hook path (hooks/hooks.json, or a single hook entry's command file)?` then `uv run --with pyyaml python "$LAUNCHER" hook <path>`. |
-| 13 | Ask: `MCP server name OR .mcp.json path?` then `uv run --with pyyaml python "$LAUNCHER" mcp <path-or-name>`. |
-| 14 | Ask: `Monitor JSON path (monitors/<name>.json or monitors/monitors.json)?`. NO dedicated `validate_monitor.py` exists yet — fall back to `uv run --with pyyaml python "$LAUNCHER" plugin <parent-plugin>` and grep the report for monitor-specific findings. Surface `[TODO: dedicated validate-monitor subcommand — pending v2.70]`. |
-| 15 | Ask: `Output-style .md path?`. NO dedicated `validate_output_style.py` yet — fall back to `validate plugin <parent>` and grep for output-style findings. Same TODO as #14. |
-| 16 | Ask: `LSP entry name OR .lsp.json path?` then `uv run --with pyyaml python "$LAUNCHER" lsp <path>`. |
-| 17 | Print the prune-dry-run output FIRST: `uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/manage_doctor.py" --prune-dry-run` (DIRECT — bootstrap-class). After the user reviews, ask `Proceed with deletion? (y/N)`. On `y`, run `--prune-old-versions`. Optionally accept `--prune-keep N` first. |
-| 18 | DIRECT: `uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/manage_doctor.py" --install-scanners` (one-shot platform-package bootstrap; no env isolation needed). |
-| 19 | Run `uv run --with pyyaml python "$LAUNCHER" doctor --fix` — auto-removes orphaned marketplace registrations + `enabledPlugins` entries pointing at missing dirs. The per-plugin scan still runs (the `--fix` orphan-removal logic walks marketplaces). For a non-scanning auto-fix, the agent should currently warn `[TODO: --fix-only mode pending v2.70 — running --fix; expect a few minutes]`. |
-| 20 | Run `uv run --with pyyaml python "$LAUNCHER" doctor --quick` — checks CLI auth, settings integrity, marketplace registrations, orphaned entries, stale `settings.local.json` entries. Skips per-plugin validation (added 2026-05-09 to back this menu choice). |
-| 21 | Dependency tree + runtime errors. Run `claude plugin list --json` (CC v2.1.110+) and parse each plugin's `dependencies` array (declared in plugin.json or marketplace entry) + the runtime `errors` field. Print: (a) a tree showing which installed plugins depend on which, (b) any `dependency-unsatisfied` / `range-conflict` / `dependency-version-unsatisfied` / `no-matching-tag` errors with the canonical `claude plugin install <dep>@<marketplace>` resolution command, (c) auto-installed dependencies that are now orphaned (offer `claude plugin prune` — CC v2.1.121+). Per the spec at plugin-dependencies.md: dependencies tracking the latest tag without a version constraint are flagged as a soft WARNING ("install can break on upstream release"). Cross-marketplace dependencies are checked against the root marketplace's `allowCrossMarketplaceDependenciesOn` allowlist; missing allowlist → MAJOR with the exact field-add recipe. |
-| 22 | Add dependencies to a plugin. Two input modes: (a) explicit `--add NAME[@MARKETPLACE[@VERSION]]` (repeatable; bare-name / `name@market` / `name@market@version` / `name@@version`), and (b) `--from <plugin-path-or-url>` (copy ALL deps from another plugin's plugin.json — local folder or git URL clone). Both modes can be combined; result is dedup-by-name with last-write-wins, sorted, atomically written. Recipe: ask `Target plugin path?`, `Add specs (comma-separated, blank to skip)?`, `Copy-from sources (comma-separated paths/URLs, blank to skip)?`. Then run `uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/add_dependencies.py" "$TARGET" [--add ...] [--from ...]`. The engine re-runs `validate_plugin --strict` after writing and ROLLS BACK from a `.bak` if the merge introduces any new CRITICAL/MAJOR finding. Use `--dry-run` first to preview the merged array; offer it to the user as a confirmation step. |
-| A | Free-form mode. Hand control to a fresh sub-agent with the user's description as its only input. The sub-agent decides whether to dispatch plugin-diagnoser, marketplace-fixer, or another script. Same rules as the cpv-main-menu agent's "Ask the agent" path: NO greeting, NO menu, multi-turn dialog. |
-| 0 | Print `Cancelled.` and return. |
+| `single_plugin` | Dispatch the **plugin-diagnoser agent** with `target_path`. |
+| `current_folder` | If no `.claude-plugin/plugin.json` at `target_path`, surface Phase 0 plugin-shape detection refusal. Otherwise dispatch the **plugin-diagnoser agent** on `target_path`. |
+| `scan_all_installed` | Run `uv run --with pyyaml python "$LAUNCHER" doctor --verbose`. (The menu agent already gathered the user's `y` confirmation before dispatching.) |
+| `github_plugin` | Run `uv run --with pyyaml python "$LAUNCHER" github --plugin <target_path>` (add `--audit` if the user also wanted the security scan; the menu agent's free-form rows do not currently set this — opportunity for future spec). |
+| `github_marketplace` | Run `uv run --with pyyaml python "$LAUNCHER" github --marketplace <target_path>`. |
+| `local_marketplace` | Run `uv run --with pyyaml python "$LAUNCHER" marketplace <target_path>`. |
+| `local_scope` | Run `uv run --with pyyaml python "$LAUNCHER" local-scope <target_path>`. |
+| `project_scope` | Run `uv run --with pyyaml python "$LAUNCHER" project-scope <target_path>`. |
+| `user_scope` | NO dedicated `validate_user_scope.py` exists yet. Fall back to enumerating every user-scope element via `ls ~/.claude/agents/ ~/.claude/skills/ ~/.claude/commands/` + `cat ~/.claude/settings.json` and dispatching the appropriate per-element validator (`agent`, `skill`, `command`, etc.) per file. Surface `[TODO: dedicated validate-user-scope subcommand — pending v2.70]`. |
+| `single_skill` | Run `uv run --with pyyaml python "$LAUNCHER" skill <target_path>`. |
+| `single_agent` | Run `uv run --with pyyaml python "$LAUNCHER" agent <target_path>`. |
+| `single_hook` | Run `uv run --with pyyaml python "$LAUNCHER" hook <target_path>`. |
+| `single_mcp` | Run `uv run --with pyyaml python "$LAUNCHER" mcp <target_path>`. |
+| `single_monitor` | NO dedicated `validate_monitor.py` exists yet — fall back to `uv run --with pyyaml python "$LAUNCHER" plugin <parent-plugin>` and grep the report for monitor-specific findings. Surface `[TODO: dedicated validate-monitor subcommand — pending v2.70]`. |
+| `single_output_style` | NO dedicated `validate_output_style.py` yet — fall back to `validate plugin <parent>` and grep for output-style findings. Same TODO as `single_monitor`. |
+| `single_lsp` | Run `uv run --with pyyaml python "$LAUNCHER" lsp <target_path>`. |
+| `cache_cleanup_dry_run` | Print the prune-dry-run output FIRST: `uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/manage_doctor.py" --prune-dry-run` (DIRECT — bootstrap-class). After the user reviews, ask `Proceed with deletion? (y/N)` (plain text — NEVER AskUserQuestion). On `y`, run `--prune-old-versions`. Optionally accept `--prune-keep N` first. |
+| `install_scanners` | DIRECT: `uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/manage_doctor.py" --install-scanners` (one-shot platform-package bootstrap; no env isolation needed). The menu agent already gathered the user's `yes` confirmation before dispatching. |
+| `auto_fix_orphans` | Run `uv run --with pyyaml python "$LAUNCHER" doctor --fix` — auto-removes orphaned marketplace registrations + `enabledPlugins` entries pointing at missing dirs. The per-plugin scan still runs (the `--fix` orphan-removal logic walks marketplaces). For a non-scanning auto-fix, currently warn `[TODO: --fix-only mode pending v2.70 — running --fix; expect a few minutes]`. |
+| `quick_health_check` | Run `uv run --with pyyaml python "$LAUNCHER" doctor --quick` — checks CLI auth, settings integrity, marketplace registrations, orphaned entries, stale `settings.local.json` entries. Skips per-plugin validation (added 2026-05-09 to back this menu choice). |
+| `dependency_tree` | Run `claude plugin list --json` (CC v2.1.110+) and parse each plugin's `dependencies` array + runtime `errors` field. Print: (a) a tree showing which installed plugins depend on which, (b) any `dependency-unsatisfied` / `range-conflict` / `dependency-version-unsatisfied` / `no-matching-tag` errors with the canonical `claude plugin install <dep>@<marketplace>` resolution command, (c) auto-installed dependencies that are now orphaned (offer `claude plugin prune` — CC v2.1.121+). Per plugin-dependencies.md: dependencies tracking the latest tag without a version constraint are soft WARNING. Cross-marketplace dependencies checked against root marketplace's `allowCrossMarketplaceDependenciesOn` allowlist; missing → MAJOR with the exact field-add recipe. |
+| `add_dependencies` | Run `uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/add_dependencies.py" "$target_path" [--add ...] [--from ...]` using `add_specs` and `copy_from` from the `<context>` block. The engine re-runs `validate_plugin --strict` after writing and ROLLS BACK from a `.bak` if the merge introduces any new CRITICAL/MAJOR finding. Use `--dry-run` first to preview the merged array; offer it to the user as a plain-text confirmation step. |
+| `ask_doctor_freeform` | Hand control to a fresh sub-agent with the user's `description` as input. The sub-agent decides whether to dispatch plugin-diagnoser, marketplace-fixer, or another script. Same rules as the cpv-main-menu agent's "Ask the agent" path: NO greeting, NO menu, multi-turn dialog. |
 
 ## Rules (encode in every reply)
 
-- NEVER auto-pick a menu option. Always print the menu and wait for input.
 - NEVER use `AskUserQuestion` — read the user's plain-text reply.
-- NEVER call `manage_doctor.py` for choices 1-13/15/16 unless the recipe
-  explicitly says DIRECT — those choices go through the launcher.
-- Choices 17 + 18 are the ONLY two that bypass the launcher (per the
-  long-standing `manage_doctor.py` env-isolation guard exception).
-- After every operation, print a one-line `do something else?` prompt
-  and re-show the menu so the user can chain operations.
+- NEVER call `manage_doctor.py` for modes other than `cache_cleanup_dry_run`
+  and `install_scanners` — the rest go through the launcher.
+- Modes `cache_cleanup_dry_run` + `install_scanners` are the ONLY two that
+  bypass the launcher (per the long-standing `manage_doctor.py`
+  env-isolation guard exception).
+- After every operation, render the post-scan follow-up menu (next
+  section) if findings exist; otherwise tell the user `Returning to menu.`
+  and the orchestrator chains them back to the haiku menu agent.
 
 ## Output location
 
