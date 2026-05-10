@@ -68,6 +68,16 @@ Through extensive empirical testing of Claude Code's plugin loader (April 2026),
 
 All five rules are documented with empirical evidence in [`skills/fix-validation/references/empirical-loading-bugs.md`](skills/fix-validation/references/empirical-loading-bugs.md) (13 test plugin scenarios, debug-log excerpts, runtime probes).
 
+### Cross-marketplace dependency allowlist (TRDD-20108ab7)
+
+When `plugin.json` declares a dependency with `dependencies[i].marketplace` pointing at a marketplace OTHER than the one hosting the declaring plugin, Claude Code blocks the install at runtime with a `cross-marketplace` error UNLESS the hosting `marketplace.json::allowCrossMarketplaceDependenciesOn` array lists that target marketplace by name. CPV catches this MAJOR ahead of install time, with on-disk auto-discovery of the hosting marketplace.json from three deployment shapes:
+
+- **Layout C (marketplace-in-plugin)** — plugin's own `.claude-plugin/marketplace.json`
+- **Layout B (nested monorepo)** — parent `.claude-plugin/marketplace.json` (walked up to 3 levels)
+- **Cache layout** — `~/.claude/plugins/cache/<marketplace>/<plugin>/` (immediate parent's `marketplace.json`)
+
+When auto-discovery cannot find a hosting marketplace.json (standalone plugin clones, fresh PRs in CI), CPV emits INFO instead of MAJOR. Pass `validate_plugin --marketplace-context PATH` to force a specific marketplace.json. Spec: [plugin-dependencies.md:54-79](https://code.claude.com/docs/en/plugin-dependencies.md).
+
 All in-process checks run as pure Python — no API calls, no tokens consumed, no data sent anywhere.
 
 ### External Security Scanners (always-run, programmatic-only)
