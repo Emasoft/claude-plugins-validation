@@ -234,12 +234,13 @@ def test_gate1_failure_short_circuits_main(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(publish, "stage_check_working_tree", lambda _root: 1)
 
     # If main() incorrectly reaches the parallel block, this would be
-    # called — assert it isn't.
+    # called — assert it isn't. Phase E (v2.79.0): the lambda must accept
+    # **kwargs because main() now passes prefetch=... to the call site.
     parallel_called = []
     monkeypatch.setattr(
         publish,
         "run_preflight_parallel",
-        lambda _root, _layout: parallel_called.append(True) or 0,
+        lambda _root, _layout, **_kwargs: parallel_called.append(True) or 0,
     )
 
     # Drive main() with a synthetic argv that bypasses argparse failures.
@@ -271,10 +272,12 @@ def test_gate6_runs_after_parallel_block(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(publish, "detect_bump_type", lambda _root: "patch")
     monkeypatch.setattr(publish, "stage_check_working_tree", lambda _root: 0)
     monkeypatch.setattr(publish, "detect_layout", lambda _root: ("A", {}))
+    # Phase E (v2.79.0): main() now passes prefetch=... so the lambda
+    # must accept the keyword argument (it ignores it for this test).
     monkeypatch.setattr(
         publish,
         "run_preflight_parallel",
-        lambda _root, _layout: 0,
+        lambda _root, _layout, **_kwargs: 0,
     )
 
     gate6_calls = []
