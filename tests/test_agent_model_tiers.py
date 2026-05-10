@@ -131,8 +131,7 @@ def test_plugin_diagnoser_stays_opus() -> None:
     """Regression guard — plugin-diagnoser stays on opus (analysis tier)."""
     fm = _load_frontmatter(AGENTS_DIR / "plugin-diagnoser.md")
     assert fm["model"] == "opus", (
-        "plugin-diagnoser must declare `model: opus` per TRDD-82e836dc §3 — "
-        "deep diagnosis requires opus."
+        "plugin-diagnoser must declare `model: opus` per TRDD-82e836dc §3 — deep diagnosis requires opus."
     )
 
 
@@ -212,8 +211,7 @@ def test_work_agent_is_opus(work: str, menu: str, cmd: str, _cmd_name: str) -> N
     """Each work-agent counterpart stays on opus."""
     if not _phase_b_ready(work, menu):
         pytest.skip(
-            f"Phase B not yet shipped — {menu} doesn't exist yet. "
-            f"This test gates the {work} side of the split."
+            f"Phase B not yet shipped — {menu} doesn't exist yet. This test gates the {work} side of the split."
         )
     fm = _load_frontmatter(AGENTS_DIR / work)
     assert fm["model"] == "opus", (
@@ -223,14 +221,10 @@ def test_work_agent_is_opus(work: str, menu: str, cmd: str, _cmd_name: str) -> N
 
 
 @pytest.mark.parametrize("work,menu,cmd,_cmd_name", _SPLIT_MAP)
-def test_menu_agent_tool_surface_is_minimal(
-    work: str, menu: str, cmd: str, _cmd_name: str
-) -> None:
+def test_menu_agent_tool_surface_is_minimal(work: str, menu: str, cmd: str, _cmd_name: str) -> None:
     """Each *-menu agent declares tools: [Bash, Read, Agent] only."""
     if not _phase_b_ready(work, menu):
-        pytest.skip(
-            f"Phase B not yet shipped for {menu} — tool-surface guard skipped."
-        )
+        pytest.skip(f"Phase B not yet shipped for {menu} — tool-surface guard skipped.")
     fm = _load_frontmatter(AGENTS_DIR / menu)
     declared_tools = fm.get("tools", [])
     # Tools may be a list of strings or a list of {name: ...} dicts.
@@ -241,9 +235,7 @@ def test_menu_agent_tool_surface_is_minimal(
         elif isinstance(tool, dict) and "name" in tool:
             normalised.add(tool["name"])
         else:
-            raise AssertionError(
-                f"{menu} declares unparseable tool entry: {tool!r}"
-            )
+            raise AssertionError(f"{menu} declares unparseable tool entry: {tool!r}")
     allowed = {"Bash", "Read", "Agent"}
     extras = normalised - allowed
     assert not extras, (
@@ -271,9 +263,7 @@ _OPUS_AGENTS_NO_FIRST_CONTACT = [
 
 
 @pytest.mark.parametrize("agent_name,menu_name", _OPUS_AGENTS_NO_FIRST_CONTACT)
-def test_opus_work_agent_has_no_first_contact_menu(
-    agent_name: str, menu_name: str
-) -> None:
+def test_opus_work_agent_has_no_first_contact_menu(agent_name: str, menu_name: str) -> None:
     """Opus work agents must not contain First Contact / numbered-menu blocks.
 
     They are dispatched by the haiku menu agent which already made the
@@ -301,9 +291,7 @@ def test_opus_work_agent_has_no_first_contact_menu(
     )
     # Signal 2: an actual `## First Contact` section header (case-sensitive,
     # markdown-level-2 only). Inline prose mentions of the term are fine.
-    has_first_contact_section = any(
-        line.startswith("## First Contact") for line in body.splitlines()
-    )
+    has_first_contact_section = any(line.startswith("## First Contact") for line in body.splitlines())
     assert not has_first_contact_section, (
         f"{agent_name} still contains a `## First Contact` section. The "
         f"menu belongs on the haiku menu agent ({menu_name}). Bare prose "
@@ -342,14 +330,10 @@ def test_cpv_doctor_agent_first_contact_menu_removed() -> None:
 
 
 @pytest.mark.parametrize("work,menu,cmd,cmd_name", _SPLIT_MAP)
-def test_command_routes_to_menu_agent(
-    work: str, menu: str, cmd: str, cmd_name: str
-) -> None:
+def test_command_routes_to_menu_agent(work: str, menu: str, cmd: str, cmd_name: str) -> None:
     """Each command's `agent:` field points at the menu (not the work) agent."""
     if not _phase_b_ready(work, menu):
-        pytest.skip(
-            f"Phase B not yet shipped — {menu} missing. Command-routing guard skipped."
-        )
+        pytest.skip(f"Phase B not yet shipped — {menu} missing. Command-routing guard skipped.")
     cmd_path = COMMANDS_DIR / cmd
     fm = _load_frontmatter(cmd_path)
     actual = fm.get("agent")
@@ -361,9 +345,7 @@ def test_command_routes_to_menu_agent(
 
 
 @pytest.mark.parametrize("work,menu,cmd,_cmd_name", _SPLIT_MAP)
-def test_work_agent_skills_preserved(
-    work: str, menu: str, cmd: str, _cmd_name: str
-) -> None:
+def test_work_agent_skills_preserved(work: str, menu: str, cmd: str, _cmd_name: str) -> None:
     """The work agent retains the original skill-set (skills do the actual work).
 
     Per TRDD §4 cross-cutting requirement #3: skills go on WORK agent only.
