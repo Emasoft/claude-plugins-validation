@@ -38,9 +38,7 @@ from validate_project_scope import (  # noqa: E402
 
 
 def _git(repo: Path, *args: str) -> None:
-    result = subprocess.run(
-        ["git", *args], cwd=str(repo), capture_output=True, text=True, check=False
-    )
+    result = subprocess.run(["git", *args], cwd=str(repo), capture_output=True, text=True, check=False)
     if result.returncode != 0:
         raise AssertionError(f"git {' '.join(args)} failed: {result.stderr}")
 
@@ -119,9 +117,7 @@ class TestSettingsRejectedKeys:
         )
         report = ValidationReport()
         validate_project_scope(project, report)
-        assert any(
-            "skipDangerousModePermissionPrompt" in m for m in _messages(report, "CRITICAL")
-        )
+        assert any("skipDangerousModePermissionPrompt" in m for m in _messages(report, "CRITICAL"))
 
 
 # =============================================================================
@@ -243,9 +239,7 @@ class TestSettingsAbsolutePaths:
                 "PostToolUse": [
                     {
                         "matcher": "Write",
-                        "hooks": [
-                            {"type": "command", "command": "/Users/alice/scripts/check.sh"}
-                        ],
+                        "hooks": [{"type": "command", "command": "/Users/alice/scripts/check.sh"}],
                     }
                 ]
             }
@@ -400,21 +394,20 @@ class TestMarkdownElements:
                 "Body of the agent.\n\n"
                 "<example>\n"
                 "Context: User asks Alice to validate a file.\n"
-                "user: \"Validate foo.md\"\n"
-                "assistant: \"I'll validate foo.md now.\"\n"
+                'user: "Validate foo.md"\n'
+                'assistant: "I\'ll validate foo.md now."\n'
                 "</example>\n\n"
                 "<example>\n"
                 "Context: User asks Alice to audit a directory.\n"
-                "user: \"Audit the agents folder\"\n"
-                "assistant: \"Running the audit on the agents folder.\"\n"
+                'user: "Audit the agents folder"\n'
+                'assistant: "Running the audit on the agents folder."\n'
                 "</example>\n"
             ),
         )
         report = ValidationReport()
         validate_project_scope(project, report)
         blocking = [
-            m for m in _messages(report, "CRITICAL") + _messages(report, "MAJOR")
-            if ".claude/agents/alice.md" in m
+            m for m in _messages(report, "CRITICAL") + _messages(report, "MAJOR") if ".claude/agents/alice.md" in m
         ]
         assert blocking == [], f"Fully-specified agent should have no CRITICAL/MAJOR; got: {blocking}"
 
@@ -423,10 +416,7 @@ class TestMarkdownElements:
         _commit(project, ".claude/agents/nameless.md", "---\ndescription: x\n---\n")
         report = ValidationReport()
         validate_project_scope(project, report)
-        assert any(
-            ".claude/agents/nameless.md" in m and "'name'" in m
-            for m in _messages(report, "MINOR")
-        )
+        assert any(".claude/agents/nameless.md" in m and "'name'" in m for m in _messages(report, "MINOR"))
 
     def test_agent_with_home_path_in_body_is_minor(self, project: Path) -> None:
         """Agent body containing /Users/alice/ is MINOR."""
@@ -437,28 +427,21 @@ class TestMarkdownElements:
         )
         report = ValidationReport()
         validate_project_scope(project, report)
-        assert any(
-            ".claude/agents/homepath.md" in m for m in _messages(report, "MINOR")
-        )
+        assert any(".claude/agents/homepath.md" in m for m in _messages(report, "MINOR"))
 
     def test_skill_with_no_frontmatter_is_minor(self, project: Path) -> None:
         """Skill SKILL.md without frontmatter → MINOR."""
         _commit(project, ".claude/skills/foo/SKILL.md", "# Just a body\n")
         report = ValidationReport()
         validate_project_scope(project, report)
-        assert any(
-            "SKILL.md" in m and "frontmatter" in m
-            for m in _messages(report, "MINOR")
-        )
+        assert any("SKILL.md" in m and "frontmatter" in m for m in _messages(report, "MINOR"))
 
     def test_rule_with_home_path_is_minor(self, project: Path) -> None:
         """Rule body with /home/bob/ is MINOR."""
         _commit(project, ".claude/rules/r1.md", "Run /home/bob/tool\n")
         report = ValidationReport()
         validate_project_scope(project, report)
-        assert any(
-            ".claude/rules/r1.md" in m for m in _messages(report, "MINOR")
-        )
+        assert any(".claude/rules/r1.md" in m for m in _messages(report, "MINOR"))
 
     def test_claude_md_with_home_path_is_minor(self, project: Path) -> None:
         """CLAUDE.md body with /Users/... is MINOR."""
@@ -469,9 +452,7 @@ class TestMarkdownElements:
 
     def test_claude_md_with_literal_secret_is_major(self, project: Path) -> None:
         """CLAUDE.md containing a ghp_... token is MAJOR."""
-        _commit(
-            project, "CLAUDE.md", f"Token: ghp_{'a' * 40}\n"
-        )
+        _commit(project, "CLAUDE.md", f"Token: ghp_{'a' * 40}\n")
         report = ValidationReport()
         validate_project_scope(project, report)
         assert any("CLAUDE.md" in m for m in _messages(report, "MAJOR"))
@@ -493,9 +474,7 @@ class TestGitTrackingFilter:
         # No CRITICAL because the file is not tracked
         assert not report.has_critical
         # INFO should note that it's skipped
-        assert any(
-            "not git-tracked" in r.message for r in report.results if r.level == "INFO"
-        )
+        assert any("not git-tracked" in r.message for r in report.results if r.level == "INFO")
 
     def test_ignored_agents_folder_is_not_validated(self, project: Path) -> None:
         """A gitignored .claude/agents/ folder is skipped by the project validator."""
@@ -504,9 +483,7 @@ class TestGitTrackingFilter:
         report = ValidationReport()
         validate_project_scope(project, report)
         # No MINOR about broken.md because the folder is local-scope
-        assert not any(
-            "broken.md" in r.message for r in report.results
-        )
+        assert not any("broken.md" in r.message for r in report.results)
 
     def test_non_git_repo_emits_warning(self, tmp_path: Path) -> None:
         """A directory with no .git anywhere up the tree → WARNING + skip."""
@@ -647,13 +624,13 @@ class TestProjectDeepElementValidation:
                 "Body of the agent.\n\n"
                 "<example>\n"
                 "Context: User asks badtool to do something.\n"
-                "user: \"Run the tool\"\n"
-                "assistant: \"Running now.\"\n"
+                'user: "Run the tool"\n'
+                'assistant: "Running now."\n'
                 "</example>\n\n"
                 "<example>\n"
                 "Context: User asks badtool to audit files.\n"
-                "user: \"Audit the folder\"\n"
-                "assistant: \"Auditing now.\"\n"
+                'user: "Audit the folder"\n'
+                'assistant: "Auditing now."\n'
                 "</example>\n"
             ),
         )
@@ -662,10 +639,9 @@ class TestProjectDeepElementValidation:
         all_msgs = [r.message for r in report.results]
         # The deep validate_agent surfaces an "Unknown tools" finding that
         # includes the offending tool name. The shallow scan would not.
-        assert any(
-            "badtool.md" in m and "NonExistentTool" in m
-            for m in all_msgs
-        ), f"Deep agent validator must flag unknown tool; got: {all_msgs}"
+        assert any("badtool.md" in m and "NonExistentTool" in m for m in all_msgs), (
+            f"Deep agent validator must flag unknown tool; got: {all_msgs}"
+        )
 
 
 class TestProjectSettingsSubtreeValidation:
@@ -678,21 +654,14 @@ class TestProjectSettingsSubtreeValidation:
         the deep `validate_hook` pipeline. A shallow schema check would not
         know which event names are valid.
         """
-        settings = {
-            "hooks": {
-                "NotARealEvent": [
-                    {"hooks": [{"type": "command", "command": "echo x"}]}
-                ]
-            }
-        }
+        settings = {"hooks": {"NotARealEvent": [{"hooks": [{"type": "command", "command": "echo x"}]}]}}
         _commit(project, ".claude/settings.json", json.dumps(settings) + "\n")
         report = ValidationReport()
         validate_project_scope(project, report)
         all_msgs = [r.message for r in report.results]
-        assert any(
-            "NotARealEvent" in m or "Unknown hook event" in m
-            for m in all_msgs
-        ), f"Hook subtree validator must catch bad event; got: {all_msgs}"
+        assert any("NotARealEvent" in m or "Unknown hook event" in m for m in all_msgs), (
+            f"Hook subtree validator must catch bad event; got: {all_msgs}"
+        )
 
     def test_tracked_settings_with_non_dict_hooks_is_major(self, project: Path) -> None:
         """G5: `hooks` set to a non-object must trigger MAJOR without crashing
@@ -705,10 +674,9 @@ class TestProjectSettingsSubtreeValidation:
         # Must not raise.
         validate_project_scope(project, report)
         majors = _messages(report, "MAJOR")
-        assert any(
-            "hooks" in m and ("object" in m or "dict" in m.lower())
-            for m in majors
-        ), f"Non-object hooks value must be MAJOR; got MAJORs: {majors}"
+        assert any("hooks" in m and ("object" in m or "dict" in m.lower()) for m in majors), (
+            f"Non-object hooks value must be MAJOR; got MAJORs: {majors}"
+        )
 
 
 class TestProjectEnabledPluginEnumeration:
@@ -732,9 +700,7 @@ class TestProjectEnabledPluginEnumeration:
         validate_project_scope(project, report)
         all_msgs = [r.message for r in report.results]
         assert any(
-            "nonexistent-plugin-xyz" in m
-            and ("not installed" in m.lower() or "enabledPlugins" in m)
-            for m in all_msgs
+            "nonexistent-plugin-xyz" in m and ("not installed" in m.lower() or "enabledPlugins" in m) for m in all_msgs
         ), f"Missing-plugin enablement must trigger MAJOR; got: {all_msgs}"
 
 
@@ -763,13 +729,9 @@ class TestProjectPluginCacheHighestSemver:
             )
         picked = resolve_plugin_cache_dir("plg", "mkt")
         assert picked is not None, "resolver must locate the cache dir"
-        assert picked.name == "v2.0.0", (
-            f"Resolver must pick highest semver v2.0.0, got: {picked.name}"
-        )
+        assert picked.name == "v2.0.0", f"Resolver must pick highest semver v2.0.0, got: {picked.name}"
 
-    def test_vv_prefix_is_not_doubly_stripped(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_vv_prefix_is_not_doubly_stripped(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """G7: a directory literally named `vv1.0.0` must not be collapsed to
         `1.0.0` by over-eager prefix stripping. `str.removeprefix` strips
         exactly ONE leading "v"; `str.lstrip("v")` would strip both and
@@ -812,9 +774,7 @@ class TestProjectPluginCacheHighestSemver:
 class TestLoopMdProjectScope:
     """`.claude/loop.md` recognition under project scope (TRDD-479cde0c §NOW #19)."""
 
-    def test_loop_md_tracked_validated_under_project_scope(
-        self, project: Path
-    ) -> None:
+    def test_loop_md_tracked_validated_under_project_scope(self, project: Path) -> None:
         """A git-tracked `.claude/loop.md` produces at least one finding that
         names the file — confirms the project-scope validator is actually
         walking it (not silently skipping)."""
@@ -822,9 +782,7 @@ class TestLoopMdProjectScope:
         report = ValidationReport()
         validate_project_scope(project, report)
         all_msgs = [r.message for r in report.results]
-        assert any(
-            "loop.md" in m for m in all_msgs
-        ), f"Expected a finding mentioning tracked loop.md; got: {all_msgs}"
+        assert any("loop.md" in m for m in all_msgs), f"Expected a finding mentioning tracked loop.md; got: {all_msgs}"
 
     def test_loop_md_missing_is_silent(self, project: Path) -> None:
         """If `.claude/loop.md` does not exist, the validator must not emit
@@ -837,9 +795,7 @@ class TestLoopMdProjectScope:
         report = ValidationReport()
         validate_project_scope(project, report)
         loop_findings = [r.message for r in report.results if "loop.md" in r.message]
-        assert loop_findings == [], (
-            f"Missing loop.md must produce NO findings; got: {loop_findings}"
-        )
+        assert loop_findings == [], f"Missing loop.md must produce NO findings; got: {loop_findings}"
 
     def test_loop_md_tracked_size_cap_major(self, project: Path) -> None:
         """A tracked `.claude/loop.md` larger than 25,000 bytes fires MAJOR."""
@@ -848,10 +804,9 @@ class TestLoopMdProjectScope:
         report = ValidationReport()
         validate_project_scope(project, report)
         majors = _messages(report, "MAJOR")
-        assert any(
-            "loop.md" in m and ("25000" in m or "25,000" in m or "cap" in m)
-            for m in majors
-        ), f"Expected MAJOR about tracked loop.md size cap; got MAJORs: {majors}"
+        assert any("loop.md" in m and ("25000" in m or "25,000" in m or "cap" in m) for m in majors), (
+            f"Expected MAJOR about tracked loop.md size cap; got MAJORs: {majors}"
+        )
 
 
 # =============================================================================
@@ -876,13 +831,11 @@ class TestV221ClaudeMdImports:
         report = ValidationReport()
         validate_project_scope(project, report)
         import_findings = [
-            r for r in report.results
-            if r.level in ("CRITICAL", "MAJOR")
-            and ("import" in r.message.lower() or "@notes.md" in r.message)
+            r
+            for r in report.results
+            if r.level in ("CRITICAL", "MAJOR") and ("import" in r.message.lower() or "@notes.md" in r.message)
         ]
-        assert import_findings == [], (
-            f"Valid in-repo import must not trigger findings; got: {import_findings}"
-        )
+        assert import_findings == [], f"Valid in-repo import must not trigger findings; got: {import_findings}"
 
     def test_at_path_absolute_outside_repo_critical(self, project: Path) -> None:
         """`@/etc/passwd` in CLAUDE.md is a security leak → CRITICAL."""
@@ -890,10 +843,9 @@ class TestV221ClaudeMdImports:
         report = ValidationReport()
         validate_project_scope(project, report)
         criticals = _messages(report, "CRITICAL")
-        assert any(
-            "/etc/passwd" in m and ("import" in m.lower() or "outside" in m.lower())
-            for m in criticals
-        ), f"Expected CRITICAL about @/etc/passwd; got CRITICALs: {criticals}"
+        assert any("/etc/passwd" in m and ("import" in m.lower() or "outside" in m.lower()) for m in criticals), (
+            f"Expected CRITICAL about @/etc/passwd; got CRITICALs: {criticals}"
+        )
 
     def test_at_path_traversal_escaping_repo_major(self, project: Path) -> None:
         """`@../../outside.md` that escapes the repo root is MAJOR."""
@@ -901,10 +853,9 @@ class TestV221ClaudeMdImports:
         report = ValidationReport()
         validate_project_scope(project, report)
         majors = _messages(report, "MAJOR")
-        assert any(
-            "outside.md" in m and ("escape" in m.lower() or ".." in m)
-            for m in majors
-        ), f"Expected MAJOR about .. escape; got MAJORs: {majors}"
+        assert any("outside.md" in m and ("escape" in m.lower() or ".." in m) for m in majors), (
+            f"Expected MAJOR about .. escape; got MAJORs: {majors}"
+        )
 
     def test_at_path_missing_file_major(self, project: Path) -> None:
         """`@does-not-exist.md` import to a missing file is MAJOR (dead import)."""
@@ -912,10 +863,9 @@ class TestV221ClaudeMdImports:
         report = ValidationReport()
         validate_project_scope(project, report)
         majors = _messages(report, "MAJOR")
-        assert any(
-            "does-not-exist.md" in m and ("not exist" in m.lower() or "dead" in m.lower())
-            for m in majors
-        ), f"Expected MAJOR about missing imported file; got MAJORs: {majors}"
+        assert any("does-not-exist.md" in m and ("not exist" in m.lower() or "dead" in m.lower()) for m in majors), (
+            f"Expected MAJOR about missing imported file; got MAJORs: {majors}"
+        )
 
     def test_at_path_recursion_depth_5_max(self, project: Path) -> None:
         """A chain A→B→C→D→E→F (depth 6) must fire a depth-exceeded MAJOR
@@ -933,10 +883,9 @@ class TestV221ClaudeMdImports:
         report = ValidationReport()
         validate_project_scope(project, report)
         majors = _messages(report, "MAJOR")
-        assert any(
-            "depth" in m.lower() and ("5" in m or "maximum" in m.lower())
-            for m in majors
-        ), f"Expected MAJOR about depth-5 limit; got MAJORs: {majors}"
+        assert any("depth" in m.lower() and ("5" in m or "maximum" in m.lower()) for m in majors), (
+            f"Expected MAJOR about depth-5 limit; got MAJORs: {majors}"
+        )
 
     def test_at_path_circular_import_detected_major(self, project: Path) -> None:
         """A imports B imports A must fire a circular-import MAJOR."""
@@ -945,33 +894,21 @@ class TestV221ClaudeMdImports:
         report = ValidationReport()
         validate_project_scope(project, report)
         majors = _messages(report, "MAJOR")
-        assert any(
-            "circular" in m.lower()
-            for m in majors
-        ), f"Expected MAJOR about circular import; got MAJORs: {majors}"
+        assert any("circular" in m.lower() for m in majors), (
+            f"Expected MAJOR about circular import; got MAJORs: {majors}"
+        )
 
     def test_at_path_inside_fenced_block_is_not_an_import(self, project: Path) -> None:
         """An `@path` token inside a fenced code block must NOT be treated
         as an import — no finding about the fenced token should appear."""
-        body = (
-            "# Main\n\n"
-            "Example usage:\n\n"
-            "```markdown\n"
-            "See @/etc/passwd for example only.\n"
-            "```\n\n"
-            "End of doc.\n"
-        )
+        body = "# Main\n\nExample usage:\n\n```markdown\nSee @/etc/passwd for example only.\n```\n\nEnd of doc.\n"
         _commit(project, "CLAUDE.md", body)
         report = ValidationReport()
         validate_project_scope(project, report)
         # No CRITICAL about /etc/passwd should appear because it's in a
         # fenced code block and thus not an import.
-        assert not any(
-            "/etc/passwd" in r.message and r.level == "CRITICAL"
-            for r in report.results
-        ), (
-            f"Fenced `@/etc/passwd` must not trigger an import finding; "
-            f"got CRITICALs: {_messages(report, 'CRITICAL')}"
+        assert not any("/etc/passwd" in r.message and r.level == "CRITICAL" for r in report.results), (
+            f"Fenced `@/etc/passwd` must not trigger an import finding; got CRITICALs: {_messages(report, 'CRITICAL')}"
         )
 
     def test_email_addresses_are_not_imports(self, project: Path) -> None:
@@ -985,10 +922,211 @@ class TestV221ClaudeMdImports:
         validate_project_scope(project, report)
         # No import-related finding should mention example.com.
         import_findings = [
-            r for r in report.results
-            if "example.com" in r.message
-            and ("import" in r.message.lower() or "@" in r.message)
+            r
+            for r in report.results
+            if "example.com" in r.message and ("import" in r.message.lower() or "@" in r.message)
         ]
-        assert import_findings == [], (
-            f"Email address must not be treated as import; got: {import_findings}"
+        assert import_findings == [], f"Email address must not be treated as import; got: {import_findings}"
+
+
+# =============================================================================
+# TRDD-f4e2d385 §3.1: project-scope deep RULES validation.
+#
+# `validate_rules_folder` runs only the SHALLOW absolute-home-path scan. Per
+# the TRDD §3.1 (Phase A), tracked .claude/rules/*.md files must ALSO go
+# through `validate_rules_directory` (the same pipeline plugin-shipped rules
+# go through). The shallow check stays as a project-scope-specific guardrail
+# (no absolute home paths), and the deep check adds the rules-spec rules
+# (frontmatter `paths` array shape, absolute glob rejection, `..` segment
+# escape, secret/private-path scans on body, token-budget warning on the
+# combined corpus, etc.).
+#
+# Findings from the deep walker are prefixed with `[rules]` and tracked-only
+# (the deep walker recurses but the orchestrator filters out untracked
+# rules so they remain validate_local_scope's concern).
+# =============================================================================
+
+
+class TestProjectRulesDeepValidation:
+    """Tracked rule files must go through `validate_rules_directory`."""
+
+    def test_tracked_rule_with_absolute_glob_paths_is_major(self, project: Path) -> None:
+        """A tracked rule whose frontmatter `paths` contains an absolute glob
+        (e.g. `/etc/passwd`) is MAJOR via the deep validator. Without the
+        deep pipeline this would silently pass project-scope (only
+        absolute-home-path scan runs today).
+        """
+        _commit(
+            project,
+            ".claude/rules/abs-glob.md",
+            "---\npaths:\n  - /etc/passwd\n---\nRule body.\n",
+        )
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        # validate_rules emits the file path in `r.file`, not in the message.
+        # The deep finding combines both — the message says `paths[0] '...'
+        # is absolute` and r.file points at the rule.
+        majors = [
+            r
+            for r in report.results
+            if r.level == "MAJOR"
+            and r.file is not None
+            and "abs-glob.md" in r.file
+            and ("absolute" in r.message.lower() or "/etc/passwd" in r.message)
+        ]
+        assert majors, (
+            f"Deep rules validator must flag absolute glob; got results: "
+            f"{[(r.level, r.file, r.message) for r in report.results]}"
+        )
+
+    def test_tracked_rule_with_invalid_paths_type_is_major(self, project: Path) -> None:
+        """A tracked rule with `paths: "not-a-list"` (string instead of array)
+        is MAJOR via the deep `_validate_frontmatter` path-shape check.
+        Today, project-scope misses this entirely.
+        """
+        _commit(
+            project,
+            ".claude/rules/badtype.md",
+            "---\npaths: just-a-string\n---\nRule body.\n",
+        )
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        majors = [
+            r
+            for r in report.results
+            if r.level == "MAJOR"
+            and r.file is not None
+            and "badtype.md" in r.file
+            and ("array" in r.message.lower() or "list" in r.message.lower())
+        ]
+        assert majors, (
+            f"Deep rules validator must flag non-array paths; got results: "
+            f"{[(r.level, r.file, r.message) for r in report.results]}"
+        )
+
+    def test_tracked_rule_with_unknown_frontmatter_field_is_minor(self, project: Path) -> None:
+        """`path:` (typo of `paths:`) silently disables path-matching. Deep
+        validator surfaces this as MINOR via the unknown-field check.
+        """
+        _commit(
+            project,
+            ".claude/rules/typo.md",
+            "---\npath:\n  - 'src/**/*.py'\n---\nRule body.\n",
+        )
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        minors = [
+            r
+            for r in report.results
+            if r.level == "MINOR" and r.file is not None and "typo.md" in r.file and "path" in r.message
+        ]
+        assert minors, (
+            f"Deep rules validator must flag typo-field; got results: "
+            f"{[(r.level, r.file, r.message) for r in report.results]}"
+        )
+
+    def test_untracked_rule_does_not_appear_in_project_findings(self, project: Path) -> None:
+        """Regression guard: an UNTRACKED .claude/rules/*.md must NOT
+        produce findings under project scope (mirror of G15 in the local
+        scope test). Even though `validate_rules_directory` recurses, the
+        project-scope deep wrapper must filter out untracked files.
+
+        We commit a sentinel rule so the deep validator runs at all (the
+        folder must classify as `project`), then drop an untracked sibling
+        and assert no findings reference it.
+        """
+        _commit(
+            project,
+            ".claude/rules/tracked-sentinel.md",
+            "Tracked sentinel content.\n",
+        )
+        _write_untracked(
+            project,
+            ".claude/rules/untracked-extra.md",
+            "---\npaths:\n  - /not-relative-glob\n---\nUntracked content.\n",
+        )
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        # No `[rules]` finding should reference the untracked file —
+        # otherwise local-scope's findings duplicate into the project
+        # report.
+        leaks = [r.message for r in report.results if "untracked-extra.md" in r.message]
+        assert leaks == [], f"Untracked rules must not leak into project-scope findings; got: {leaks}"
+
+
+# =============================================================================
+# TRDD-f4e2d385 §3.3: project-scope deep .mcp.json validation.
+#
+# `validate_mcp_json_project_scope` runs project-scope-specific rules
+# (literal-secret detection in env, absolute home paths in command/args). Per
+# the TRDD §3.3, tracked `.mcp.json` must ALSO go through
+# `validate_mcp.validate_mcp_config` — the same deep validator local-scope
+# uses for untracked `.mcp.json`. That covers transport schema (stdio
+# requires `command`, http/sse require `url`), reserved server names (v2.1.128),
+# unknown-field warnings, and package-executor security warnings.
+# =============================================================================
+
+
+class TestProjectMcpJsonDeepValidation:
+    """Tracked `.mcp.json` must go through `validate_mcp_config`."""
+
+    def test_tracked_mcp_stdio_missing_command_is_critical(self, project: Path) -> None:
+        """A stdio MCP server (default transport) declared without `command`
+        is CRITICAL via the deep `validate_mcp_server` schema check. The
+        shallow project-scope validator would miss this.
+        """
+        payload = {"mcpServers": {"broken-stdio": {"args": ["--foo"]}}}
+        _commit(project, ".mcp.json", json.dumps(payload) + "\n")
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        criticals = _messages(report, "CRITICAL")
+        assert any("broken-stdio" in m and "command" in m for m in criticals), (
+            f"Deep MCP validator must flag missing command; got CRITICALs: {criticals}"
+        )
+
+    def test_tracked_mcp_http_missing_url_is_critical(self, project: Path) -> None:
+        """An http-transport MCP server without `url` is CRITICAL via the
+        deep validator (transport schema). Shallow validator silently
+        accepts this.
+        """
+        payload = {"mcpServers": {"broken-http": {"type": "http"}}}
+        _commit(project, ".mcp.json", json.dumps(payload) + "\n")
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        criticals = _messages(report, "CRITICAL")
+        assert any("broken-http" in m and "url" in m for m in criticals), (
+            f"Deep MCP validator must flag missing url; got CRITICALs: {criticals}"
+        )
+
+    def test_tracked_mcp_invalid_transport_is_major(self, project: Path) -> None:
+        """An invalid transport type (`type: foobar`) is MAJOR via the deep
+        `VALID_TRANSPORTS` check. Shallow validator silently accepts.
+        """
+        payload = {"mcpServers": {"weird-transport": {"type": "foobar", "command": "x"}}}
+        _commit(project, ".mcp.json", json.dumps(payload) + "\n")
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        majors = _messages(report, "MAJOR")
+        assert any("weird-transport" in m and ("transport" in m.lower() or "foobar" in m) for m in majors), (
+            f"Deep MCP validator must flag invalid transport; got MAJORs: {majors}"
+        )
+
+    def test_tracked_mcp_unknown_field_is_warning(self, project: Path) -> None:
+        """Unknown server field (e.g. `commandz` typo of `command`) is
+        WARNING via the deep validator's known-field check.
+        """
+        payload = {
+            "mcpServers": {
+                "typo-field": {
+                    "command": "echo",
+                    "commandz": "oops-typo",
+                }
+            }
+        }
+        _commit(project, ".mcp.json", json.dumps(payload) + "\n")
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        all_msgs = [r.message for r in report.results]
+        assert any("typo-field" in m and "commandz" in m for m in all_msgs), (
+            f"Deep MCP validator must flag unknown field; got: {all_msgs}"
         )
