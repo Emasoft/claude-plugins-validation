@@ -14,10 +14,29 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 # Add scripts directory to path for imports
 scripts_dir = Path(__file__).parent.parent / "scripts"
 if str(scripts_dir) not in sys.path:
     sys.path.insert(0, str(scripts_dir))
+
+
+@pytest.fixture(autouse=True)
+def _restore_color_enabled():
+    """Restore the process-global ANSI-color flag between tests.
+
+    Some other test in the suite invokes validate_plugin.main() which
+    calls set_color_enabled(False) when stdout isn't a TTY (true under
+    pytest-xdist workers). The flag persists across tests in the same
+    worker, causing color-dependent tests in this file to fail. This
+    fixture resets the flag before every test in this module so each
+    test sees the documented default of True.
+    """
+    import cpv_validation_common as _cvc
+    _cvc._COLOR_ENABLED = True
+    yield
+    _cvc._COLOR_ENABLED = True
 
 from cpv_validation_common import (  # noqa: E402
     EXIT_CRITICAL,
