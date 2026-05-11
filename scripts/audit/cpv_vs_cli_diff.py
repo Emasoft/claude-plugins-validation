@@ -436,6 +436,27 @@ def _format_finding_row(f: Finding) -> str:
     return f"`{f.severity}` {f.message.strip()}{file_part}"
 
 
+def _top_gap_categories(rows: list[GridRow], limit: int = 10) -> list[tuple[str, str, int, list[str]]]:
+    """Aggregate cli_only findings by fingerprint topic, severity-sorted.
+
+    Returns a list of (severity, topic, count, fixture_names) tuples,
+    descending by severity-weight then count. Topic uses the same
+    fingerprint logic as the diff engine so two CLI messages about the
+    same field collapse onto one row.
+    """
+    sev_weight = {"CRITICAL": 4, "MAJOR": 3, "WARNING": 2, "MINOR": 1, "INFO": 0}
+    bucket: dict[tuple[str, str], list[str]] = {}
+    for row in rows:
+        for f in row.diff.cli_only:
+            sev, topic = f.fingerprint()
+            bucket.setdefault((sev, topic), []).append(row.fixture.name)
+    ranked: list[tuple[str, str, int, list[str]]] = []
+    for (sev, topic), fixtures in bucket.items():
+        ranked.append((sev, topic, len(fixtures), fixtures))
+    ranked.sort(key=lambda x: (sev_weight.get(x[0], 0), x[2]), reverse=True)
+    return ranked[:limit]
+
+
 def write_audit_report(rows: list[GridRow], path: Path) -> None:
     """Write the coverage-surface audit report to `path` (markdown)."""
     cli_available = any(r.cli.available for r in rows)
@@ -453,6 +474,28 @@ def write_audit_report(rows: list[GridRow], path: Path) -> None:
             "the CLI columns.\n"
         )
     lines.append("")
+
+    # Executive summary — top gap categories, sorted by severity then frequency.
+    lines.append("## 0. Executive summary — top gap categories\n")
+    lines.append(
+        "Each row aggregates `cli_only` findings by topic-fingerprint, so a "
+        "single category that fires on N fixtures shows up once with `count=N`. "
+        "These are the strongest child-TRDD candidates — highest severity at "
+        "the top, then highest count.\n"
+    )
+    top = _top_gap_categories(rows)
+    if not top:
+        lines.append("_No CLI-only findings detected._\n")
+    else:
+        lines.append("| Rank | Severity | Topic | Count | Example fixtures |")
+        lines.append("|---:|---|---|---:|---|")
+        for i, (sev, topic, count, fixtures) in enumerate(top, 1):
+            examples = ", ".join(f"`{n}`" for n in fixtures[:3])
+            if len(fixtures) > 3:
+                examples += f", …+{len(fixtures) - 3}"
+            lines.append(f"| {i} | `{sev}` | `{topic}` | {count} | {examples} |")
+        lines.append("")
+
     lines.append("## 1. Summary counts\n")
     lines.append("| Metric | Count |")
     lines.append("|---|---|")
