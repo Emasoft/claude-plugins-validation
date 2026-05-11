@@ -4,7 +4,6 @@
 **Generated:** 2026-05-11
 **Fixtures audited:** 30
 
-
 ## 0. Executive summary — top gap categories
 
 Each row aggregates `cli_only` findings by topic-fingerprint, so a single category that fires on N fixtures shows up once with `count=N`. These are the strongest child-TRDD candidates — highest severity at the top, then highest count.
@@ -555,4 +554,3 @@ positives that should be silenced. Triage each row.
 - `WARNING` No scripts/publish.py found — recommended for release automation
 - `WARNING` No cliff.toml found — recommended for automated changelog generation
 - `MINOR` No .github/workflows/*.yml found — recommended for CI/CD automation
-

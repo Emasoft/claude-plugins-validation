@@ -3,7 +3,6 @@
 **TRDD:** b4c6cbe7
 **Generated:** 2026-05-11
 
-
 > This is a STATIC analysis. A row tagged `yes` means the agent (or one of its loaded skills) at least *mentions* the topic. It does NOT prove the agent emits spec-correct output. A row tagged `no` is a near-certain gap — the agent has no explicit guidance on the topic.
 
 ## 1. Per-agent missing-skill audit
@@ -53,7 +52,6 @@ _Scaffolds new plugin or marketplace repos from scratch._
 
 **Gap counts:** CRITICAL=2 MAJOR=5 MINOR=2
 
-
 **Critical gaps (highest priority for child TRDDs):**
 - `unknown-root-keys` — CLI rejects unknown top-level keys in plugin.json (e.g. our own `cpv`)
 - `marketplace-name-equals-plugin` — marketplace.json.plugins[].name MUST equal upstream plugin.json.name
@@ -74,7 +72,6 @@ _Scaffolds new plugin or marketplace repos from scratch._
 _Applies fix recipes from a validation report._
 
 **Gap counts:** CRITICAL=3 MAJOR=5 MINOR=2
-
 
 **Critical gaps (highest priority for child TRDDs):**
 - `plugin-name-kebab` — plugin.json.name must be kebab-case; CLI rejects underscores/CamelCase
@@ -97,7 +94,6 @@ _Applies fix recipes from a validation report._
 _Applies fix recipes against a marketplace.json._
 
 **Gap counts:** CRITICAL=2 MAJOR=7 MINOR=3
-
 
 **Critical gaps (highest priority for child TRDDs):**
 - `unknown-root-keys` — CLI rejects unknown top-level keys in plugin.json (e.g. our own `cpv`)
@@ -122,7 +118,6 @@ _Applies fix recipes against a marketplace.json._
 _Upgrades an existing plugin to current CPV pipeline standards._
 
 **Gap counts:** CRITICAL=3 MAJOR=8 MINOR=4
-
 
 **Critical gaps (highest priority for child TRDDs):**
 - `plugin-name-kebab` — plugin.json.name must be kebab-case; CLI rejects underscores/CamelCase
@@ -150,7 +145,6 @@ _Upgrades an existing plugin to current CPV pipeline standards._
 _Normalises an existing marketplace.json (source.url -> source.repo, etc.)._
 
 **Gap counts:** CRITICAL=4 MAJOR=10 MINOR=7
-
 
 **Critical gaps (highest priority for child TRDDs):**
 - `plugin-name-kebab` — plugin.json.name must be kebab-case; CLI rejects underscores/CamelCase
