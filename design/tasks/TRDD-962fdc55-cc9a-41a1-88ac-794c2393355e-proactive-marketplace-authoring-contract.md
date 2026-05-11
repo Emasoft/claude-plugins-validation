@@ -3,7 +3,7 @@
 **TRDD ID:** `962fdc55-cc9a-41a1-88ac-794c2393355e`
 **Filename:** `design/tasks/TRDD-962fdc55-cc9a-41a1-88ac-794c2393355e-proactive-marketplace-authoring-contract.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
-**Status:** Wave 7-A skill content done (2026-05-11) — Wave 7-B agent wiring queued behind TRDD-c0ee9543 landing
+**Status:** Done (2026-05-11) — Wave 7-A skill + Wave 7-B wiring both shipped
 **Blocked by:** TRDD-c0ee9543 must land first (this TRDD touches the agent `.md` files and references skills whose recipes are emitted by Phase D of c0ee9543)
 **Author:** Emanuele (orchestrator captured 2026-05-11)
 **Created:** 2026-05-11
