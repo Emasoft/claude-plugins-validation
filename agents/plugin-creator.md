@@ -79,6 +79,43 @@ The user has stated explicitly: "the agents must never output or leave behind a 
 
 For marketplace-creation flows, the same rule applies but use `validate_marketplace.py --strict` instead.
 
+### Marketplace upstream cross-check gate (TRDD-c0ee9543, Phase F)
+
+When the scaffold creates BOTH a plugin AND a marketplace entry (Layout C
+self-marketplace, or Layout A scaffolding that touches both repos), you
+MUST ALSO run the marketplace cross-check:
+
+```bash
+uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_marketplace.py" \
+  <marketplace-path> --strict
+```
+
+and confirm exit code 0 with NO `RC-MKPL-NAME-MISMATCH`,
+`RC-MKPL-UNKNOWN-FIELD`, or `RC-MKPL-UNKNOWN-SOURCE-FIELD` findings.
+
+These three MAJOR codes are the EXACT bug class that broke
+`ai-maestro-visual-communicator-plugin` install on 2026-05-11 — the
+plugin scaffold passed `validate_plugin.py --strict` cleanly but the
+sibling marketplace entry carried a divergent name + stale version +
+unrecognised `scope` field, and `claude plugin install` failed with
+a confusing "not found" error.
+
+If any of those codes fires, route to
+[skills/fix-validation/references/marketplace-upstream-drift.md](../skills/fix-validation/references/marketplace-upstream-drift.md)
+> 1. Name mismatch — RC-MKPL-NAME-MISMATCH · 2. Version drift — RC-MKPL-VERSION-DRIFT · 3. Unknown entry field — RC-MKPL-UNKNOWN-FIELD · 4. Unknown source sub-field — RC-MKPL-UNKNOWN-SOURCE-FIELD · 5. Source unreachable — RC-MKPL-UPSTREAM-UNREACHABLE · 6. Description / author / keywords drift — RC-MKPL-METADATA-DRIFT · 7. Per-batch bulk align — consolidated marketplace patch · 8. Opt-out flags — when drift IS intentional
+and apply §1 / §3 / §4 recipes. Distinguish:
+- **Agent-introduced drift** (no `_cpv_skip_upstream_check` flag,
+  no `.cpv-no-upstream-check` sentinel): refuse to ship, realign
+  the marketplace entry to match upstream `plugin.json`.
+- **User-blessed drift** (per-entry opt-out flag explicitly present
+  BEFORE this scaffold ran, or sentinel file): pass through.
+
+Per the TRDD §9 risk row, the scaffold MUST NOT add the opt-out flag
+on its own to silence the warning. The opt-out is a deliberate
+user-side declaration of intent — agent-side suppression defeats the
+purpose. If the user wants an alias, ASK them to confirm AND
+explicitly request the opt-out flag.
+
 ## Marketplace layouts — three legitimate shapes
 
 CPV supports three marketplace layouts. Pick the one that matches the user's distribution intent.

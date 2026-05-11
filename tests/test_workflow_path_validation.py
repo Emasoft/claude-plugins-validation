@@ -331,8 +331,7 @@ jobs:
     report = _run_validator(plugin)
     findings = _findings(report)
     assert not findings, (
-        "for-loop with attached `;` and `./\"$h\"` body must produce zero "
-        f"findings, got: {[f.message for f in findings]}"
+        f'for-loop with attached `;` and `./"$h"` body must produce zero findings, got: {[f.message for f in findings]}'
     )
 
 
@@ -373,8 +372,7 @@ jobs:
     report = _run_validator(plugin)
     findings = _findings(report)
     assert not findings, (
-        "Tokens containing $VAR anywhere must not be statically validated. "
-        f"Got: {[f.message for f in findings]}"
+        f"Tokens containing $VAR anywhere must not be statically validated. Got: {[f.message for f in findings]}"
     )
 
 
@@ -408,8 +406,7 @@ jobs:
     report = _run_validator(plugin)
     findings = _findings(report)
     assert len(findings) == 1, (
-        f"Expected exactly 1 MAJOR for a real zero-match glob, got "
-        f"{len(findings)}: {[f.message for f in findings]}"
+        f"Expected exactly 1 MAJOR for a real zero-match glob, got {len(findings)}: {[f.message for f in findings]}"
     )
     assert "scripts/missing/*.sh" in findings[0].message
 

@@ -420,14 +420,22 @@ class TestValidatePluginEntryFields:
         # Should not produce CRITICAL about missing source field
         assert not any(r.level == "CRITICAL" and "missing required field: source" in r.message for r in results)
 
-    def test_unknown_fields_produce_info(self, tmp_path):
-        """Unknown fields on plugin entry must produce INFO (lines 425-426)."""
+    def test_unknown_fields_produce_major(self, tmp_path):
+        """Unknown fields on plugin entry must produce MAJOR with RC-MKPL-UNKNOWN-FIELD.
+
+        v2.81.0 (TRDD-c0ee9543, Phase A) — promoted from INFO to MAJOR
+        because `claude plugin validate` rejects unknown fields (this is
+        what bit the ai-maestro-visual-communicator-plugin install on
+        2026-05-11). The severity bump is intentional and the stable
+        RC-MKPL-UNKNOWN-FIELD code is what the fixer skill routes on.
+        """
         from validate_marketplace import validate_plugin_entry
 
         plugin = {"name": "my-plugin", "source": "github", "custom_field_xyz": True}
         results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
         assert any(
-            r.level == "INFO" and "unknown field" in r.message and "custom_field_xyz" in r.message for r in results
+            r.level == "MAJOR" and "RC-MKPL-UNKNOWN-FIELD" in r.message and "custom_field_xyz" in r.message
+            for r in results
         )
 
     def test_non_list_tags_produce_minor(self, tmp_path):
