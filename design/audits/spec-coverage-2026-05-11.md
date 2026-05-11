@@ -3,7 +3,6 @@
 **TRDD:** b4c6cbe7
 **Generated:** 2026-05-11
 
-
 ## 1. Summary counts
 
 | Bucket | Count |
@@ -77,7 +76,7 @@
 | 57 | `REQUIRED` | \| `session_id` \| `str` \| required \| UUID of the session to rename \| | `python.md` | `partial` | plugin.json `name` checks (Phase 7+ regex) |
 | 58 | `REQUIRED` | \| `title` \| `str` \| required \| New title | `python.md` | `unmapped` | _unmapped_ |
 | 59 | `REQUIRED` | \| `session_id` \| `str` \| required \| UUID of the session to tag \| | `python.md` | `unmapped` | _unmapped_ |
-| 60 | `REQUIRED` | \| `tag` \| `str \\| None` \| required \| Tag string, or `None` to clear | `python.md` | `unmapped` | _unmapped_ |
+| 60 | `REQUIRED` | \| `tag` \| `str \| None` \| required \| Tag string, or `None` to clear | `python.md` | `unmapped` | _unmapped_ |
 | 61 | `REQUIRED` | \| Field \| Required \| Description \| | `python.md` | `partial` | description length recommendation |
 | 62 | `REQUIRED` | \| Field \| Required \| Description | `python.md` | `partial` | description length recommendation |
 | 63 | `REQUIRED` | els/overview), which include 1M context at standard pricing with no beta header required | `python.md` | `unmapped` | _unmapped_ |
@@ -118,7 +117,7 @@
 | 98 | `REQUIRED` | \| `sessionId` \| `string` \| required \| UUID of the session to rename \| | `typescript.md` | `partial` | plugin.json `name` checks (Phase 7+ regex) |
 | 99 | `REQUIRED` | \| `title` \| `string` \| required \| New title | `typescript.md` | `unmapped` | _unmapped_ |
 | 100 | `REQUIRED` | \| `sessionId` \| `string` \| required \| UUID of the session to tag \| | `typescript.md` | `unmapped` | _unmapped_ |
-| 101 | `REQUIRED` | \| `tag` \| `string \\| null` \| required \| Tag string, or `null` to clear \| | `typescript.md` | `unmapped` | _unmapped_ |
+| 101 | `REQUIRED` | \| `tag` \| `string \| null` \| required \| Tag string, or `null` to clear \| | `typescript.md` | `unmapped` | _unmapped_ |
 | 102 | `REQUIRED` | Required when using `permissionMode: 'bypassPermissions'` | `typescript.md` | `partial` | agent permissionMode enum |
 | 103 | `REQUIRED` | \| Field \| Required \| Description | `typescript.md` | `partial` | description length recommendation |
 | 104 | `REQUIRED` | Replayed user message with required UUID | `typescript.md` | `unmapped` | _unmapped_ |
@@ -527,4 +526,3 @@
 | 507 | `SHOULD` | unconditionally in auto mode, regardless of allow exceptions, for actions that should never run automatically even when broader allow rules apply</div> | `2026-w19.md` | `unmapped` | _unmapped_ |
 | 508 | `REQUIRED` | **Windows without Git Bash**: Git for Windows is no longer required, and Claude Code uses PowerShell as the shell tool when Bash is absent | `index.md` | `unmapped` | _unmapped_ |
 | 509 | `REQUIRED` | Even with ZDR enabled, Anthropic may retain data where required by law or to address Usage Policy violations | `zero-data-retention.md` | `unmapped` | _unmapped_ |
-
