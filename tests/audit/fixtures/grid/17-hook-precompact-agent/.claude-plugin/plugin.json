@@ -1,0 +1,15 @@
+{
+  "name": "fixture-17",
+  "version": "1.0.0",
+  "hooks": {
+    "PreCompact": [
+      {
+        "type": "agent",
+        "agent": "summary-agent"
+      }
+    ]
+  },
+  "agents": [
+    "./agents/summary-agent.md"
+  ]
+}

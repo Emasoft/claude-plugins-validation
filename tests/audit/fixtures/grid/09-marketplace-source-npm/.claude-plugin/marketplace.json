@@ -1,0 +1,15 @@
+{
+  "name": "fixture-09-marketplace",
+  "owner": {
+    "name": "Test"
+  },
+  "plugins": [
+    {
+      "name": "fixture-09",
+      "source": {
+        "source": "npm",
+        "package": "@scope/fixture-09"
+      }
+    }
+  ]
+}

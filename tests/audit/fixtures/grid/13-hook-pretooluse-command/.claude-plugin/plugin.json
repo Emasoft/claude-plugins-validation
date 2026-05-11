@@ -1,0 +1,13 @@
+{
+  "name": "fixture-13",
+  "version": "1.0.0",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "type": "command",
+        "command": "./hooks/pre.sh",
+        "matcher": "Bash"
+      }
+    ]
+  }
+}
