@@ -323,6 +323,13 @@ Then the sub-agent stays in **multi-turn dialog mode**:
 
 ### 3.0 Top-level menu (10 categories + Cancel)
 
+v2.81.0 (TRDD-c0ee9543, Phase E) — inserted row 7 "Doctor (deep
+diagnostic)" between row 6 (Diagnose & Upgrade) and the previous row 7
+(GitHub setup, now row 8). The doctor row exposes the 22-option
+`/cpv-doctor` menu (cpv-doctor-menu agent) directly from the main menu
+so install-resolver-blocking drift (RC-MKPL-NAME-MISMATCH, etc.) is
+discoverable without typing the dedicated command.
+
 ```
 ┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ # ┃ Category                 ┃ What it does                                                          ┃
@@ -333,13 +340,14 @@ Then the sub-agent stays in **multi-turn dialog mode**:
 │ 4 │ Create                   │ Scaffold plugin, marketplace, skill, agent, command, hook, MCP server │
 │ 5 │ Manage                   │ List installed plugins, install / update, health-check, bump version  │
 │ 6 │ Diagnose & Upgrade       │ Deep audit + upgrade existing plugin to latest pipeline (recommended) │
-│ 7 │ GitHub setup             │ Branch-protection rules, link plugin to marketplace                   │
-│ 8 │ Deep semantic analysis   │ AI-graded quality review (slow + expensive — confirms cost first)     │
-│ 9 │ Help / About             │ Show the menu overview, list of commands, version                     │
+│ 7 │ Doctor (deep diagnostic) │ 22-option doctor menu — marketplace cross-check, install dry-run, ... │
+│ 8 │ GitHub setup             │ Branch-protection rules, link plugin to marketplace                   │
+│ 9 │ Deep semantic analysis   │ AI-graded quality review (slow + expensive — confirms cost first)     │
+│ H │ Help / About             │ Show the menu overview, list of commands, version                     │
 │ A │ Ask the agent            │ Let the agent suggest the best next action right now                  │
 │ 0 │ Cancel / Exit            │ Stop without doing anything                                           │
 └───┴──────────────────────────┴───────────────────────────────────────────────────────────────────────┘
-Type a number (or A to ask the agent) to choose:
+Type a number (or H for help, A to ask the agent) to choose:
 ```
 
 ---
@@ -1201,7 +1209,67 @@ Type a number to choose:
 
 ---
 
-### 3.7 GitHub setup sub-menu
+### 3.7 Doctor (deep diagnostic) — 22-option menu
+
+v2.81.0 (TRDD-c0ee9543, Phase E / GAP-14) — exposed the 22-option
+`/cpv-doctor` menu (cpv-doctor-menu agent) as row 7 of the top-level
+table. Drilling here dispatches to the cpv-doctor-menu agent and lets
+the user pick any of the 22 deep-diagnostic recipes including the
+NEW marketplace cross-check (rows 5/6) that surfaces the
+RC-MKPL-NAME-MISMATCH bug class that broke
+ai-maestro-visual-communicator-plugin on 2026-05-11.
+
+The 22-row menu replicates the canonical first-contact menu in
+`agents/cpv-doctor-menu.md`:
+
+```
+┏━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  # ┃ Diagnose what?                                                                  ┃
+┡━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│  1 │ A specific plugin (give me a path)                                              │
+│  2 │ The current folder ($PWD — if it contains a plugin project)                     │
+│  3 │ All installed plugins (⚠ takes minutes — usually you want one of the above)     │
+│  4 │ A plugin on GitHub (give me owner/repo or a URL)                                │
+│  5 │ A marketplace on GitHub (give me owner/repo or a URL)                           │
+│  6 │ A local marketplace (give me a path)                                            │
+│  7 │ Current project's LOCAL-scope extensions (.claude/settings.local.json + agents) │
+│  8 │ Current project's PROJECT-scope extensions (.claude/settings.json + agents)     │
+│  9 │ Current user's USER-scope extensions (~/.claude/* — global agents/skills/MCP)   │
+│ 10 │ A specific skill (give me skills/<name>/SKILL.md or a folder)                   │
+│ 11 │ A specific agent (give me agents/<name>.md)                                     │
+│ 12 │ A specific hook (give me hooks/hooks.json or a hook path)                       │
+│ 13 │ A specific MCP server (give me .mcp.json or a server name in the project)       │
+│ 14 │ A specific monitor (give me monitors/<name>.json)                               │
+│ 15 │ A specific output-style (give me output-styles/<name>.md)                       │
+│ 16 │ A specific LSP server (give me .lsp.json or an LSP entry)                       │
+│ 17 │ Cache cleanup — prune older plugin versions (dry-run first)                     │
+│ 18 │ Install external scanners (cc-audit, tirith, trufflehog, semgrep, fclones, …)   │
+│ 19 │ Auto-fix orphaned entries in settings.json / settings.local.json                │
+│ 20 │ Quick health check — CLI auth + settings integrity (no per-plugin validation)   │
+│ 21 │ Dependency tree + runtime errors (which plugins depend on which; prune orphans) │
+│ 22 │ Add a dependency to a plugin (explicit URL/path OR copy from another plugin)    │
+│  A │ Tell the doctor it's something else (free-form description)                     │
+│  0 │ Cancel / Exit                                                                   │
+└────┴─────────────────────────────────────────────────────────────────────────────────┘
+Type a number (or A for free-form) to choose:
+```
+
+- **arg-prompts**: vary per row — see `agents/cpv-doctor-menu.md`'s
+  "Per-choice routing" table for the exact follow-up question for each
+  numbered row (e.g. row 1 asks `Plugin path?`, row 5 asks `Marketplace
+  GitHub owner/repo?`, etc.).
+- **execution**: dispatch via the Agent tool to the
+  `cpv-doctor-menu` haiku agent. The doctor's First Contact menu is
+  exactly the table above — so this section reproduces it verbatim so
+  the main-menu agent does NOT need to spawn the haiku menu agent
+  just to find out what options exist.
+- **post**: cpv-doctor-menu hands control to the cpv-doctor-agent
+  (opus) work agent. The work agent owns the post-scan follow-up
+  menu (rows 1-9) which requires scanner-output context.
+
+---
+
+### 3.8 GitHub setup sub-menu
 
 ```
 ┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
@@ -1217,16 +1285,16 @@ Type a number to choose:
 Type a number to choose:
 ```
 
-#### 3.7.1 Branch protection (current repo)
+#### 3.8.1 Branch protection (current repo)
 
 - **execution**: invokes `/cpv-setup-branch-rules` workflow inline (no extra prompts — uses the current `git remote get-url origin`).
 
-#### 3.7.2 Branch protection (generic owner/repo)
+#### 3.8.2 Branch protection (generic owner/repo)
 
 - **arg-prompt**: `Owner/repo slug?`
 - **execution**: invokes `/cpv-setup-branch-rules-generic` workflow inline with the slug.
 
-#### 3.7.3 Link plugin to a marketplace
+#### 3.8.3 Link plugin to a marketplace
 
 - **arg-prompts** (in order):
   1. `Plugin repo (owner/repo)?`
@@ -1235,7 +1303,7 @@ Type a number to choose:
 
 ---
 
-### 3.8 Deep semantic analysis (opus, EXPENSIVE)
+### 3.9 Deep semantic analysis (opus, EXPENSIVE)
 
 ```
 ┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┓
@@ -1249,7 +1317,7 @@ Type a number to choose:
 Type a number to choose:
 ```
 
-#### 3.8.1 Confirm + run
+#### 3.9.1 Confirm + run
 
 - **arg-prompts** (in order):
   1. `Semantic validation uses Opus with 1M context at max effort. Cost: ~10-50× normal. Proceed? (yes/no)`
@@ -1258,7 +1326,12 @@ Type a number to choose:
 
 ---
 
-### 3.9 Help / About sub-menu
+### 3.10H Help / About sub-menu (letter `H` shortcut on top-level)
+
+v2.81.0 (TRDD-c0ee9543, Phase E) — Help/About moved from row 9 to the
+letter `H` shortcut on the top-level menu (because row 7 became the new
+Doctor menu, pushing GitHub setup → 8 and Semantic → 9). Help is still
+reachable via the letter `H` on the top-level table.
 
 ```
 ┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
@@ -1274,11 +1347,11 @@ Type a number to choose:
 Type a number to choose:
 ```
 
-#### 3.9.1 Category overview
+#### 3.10H.1 Category overview
 
 - **execution**: re-print the 3.0 top-level menu table.
 
-#### 3.9.2 List every CPV command
+#### 3.10H.2 List every CPV command
 
 - **execution**:
   ```bash
@@ -1289,7 +1362,7 @@ Type a number to choose:
   done
   ```
 
-#### 3.9.3 Show CPV plugin version
+#### 3.10H.3 Show CPV plugin version
 
 - **execution**: same as 3.5.7.
 
@@ -1488,7 +1561,7 @@ Type a number (or B for back, 0 to cancel):
 
 ### 3.10 Post-validate fix menu (MANDATORY after every Validate / Validate-from-GitHub leaf)
 
-This table replaces §3.9 for ALL validate flows. It MUST be printed
+This table replaces the generic §3.99 for ALL validate flows. It MUST be printed
 unconditionally after a validate leaf finishes — even when the validation
 verdict is PASS / VALID — so the user always has the explicit option to
 end OR to fix any residual WARNINGs they care about.
@@ -1529,7 +1602,7 @@ whose severity is BELOW the threshold.
 | 4 | `MAJOR` | `Fix findings in <REPORT_PATH>. min_severity=MAJOR (publish-blockers only).` |
 | 5 | `CRITICAL` | `Fix findings in <REPORT_PATH>. min_severity=CRITICAL (strictest — only loader/security blockers).` |
 
-After the fixer agent returns, print the §3.9 "do something else?" 2-row
+After the fixer agent returns, print the §3.99 "do something else?" 2-row
 table (Return to top-level / Done) and wait.
 
 If the user picks `0` (End) → reply `Done.` and stop.

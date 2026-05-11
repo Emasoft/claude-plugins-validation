@@ -78,6 +78,33 @@ gate. Returns when:
   the failing job's `gh run view` URL, OR
 - A finding requires human judgment (the agent surfaces it and stops).
 
+### Marketplace upstream cross-check gate (TRDD-c0ee9543 Phase F)
+
+Before declaring `[DONE]`, the plugin-fixer agent MUST run
+`validate_marketplace.py --strict` on any marketplace.json that lists
+this plugin (Layout C self-marketplace, sibling Layout A hub, or
+Layout B parent monorepo) and confirm exit 0 with NO
+`RC-MKPL-NAME-MISMATCH`, `RC-MKPL-UNKNOWN-FIELD`, or
+`RC-MKPL-UNKNOWN-SOURCE-FIELD` findings.
+
+These three MAJOR codes block install at runtime (per the 2026-05-11
+`ai-maestro-visual-communicator-plugin` incident — the plugin was at
+v1.2.2 but the marketplace entry pinned v1.0.0, declared a divergent
+name, and carried unrecognised `scope` fields on 9 sibling entries;
+the upgrade agent shipped the marketplace without re-aligning the
+entries and `claude plugin install` failed with "not found").
+
+Fix recipes:
+[skills/fix-validation/references/marketplace-upstream-drift.md](../skills/fix-validation/references/marketplace-upstream-drift.md).
+
+The agent MUST distinguish:
+- **Agent-introduced drift** (no `_cpv_skip_upstream_check` flag,
+  no `.cpv-no-upstream-check` sentinel): refuse to ship, realign
+  the marketplace entry to upstream `plugin.json` via §1 / §3 / §4
+  recipes. NEVER add the opt-out flag silently.
+- **User-blessed drift** (per-entry opt-out OR sentinel present BEFORE
+  the upgrade ran): pass through.
+
 For a deep diagnosis BEFORE fixing (and to also audit security +
 cross-platform + marketplace registration + cache sync), run
 `/cpv-diagnose-plugin` first and then pick the upgrade option from the

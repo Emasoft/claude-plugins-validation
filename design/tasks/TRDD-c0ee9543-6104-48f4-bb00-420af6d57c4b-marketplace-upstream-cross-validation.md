@@ -3,7 +3,7 @@
 **TRDD ID:** `c0ee9543-6104-48f4-bb00-420af6d57c4b`
 **Filename:** `design/tasks/TRDD-c0ee9543-6104-48f4-bb00-420af6d57c4b-marketplace-upstream-cross-validation.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
-**Status:** Not started — ready to implement
+**Status:** Done (2026-05-11) — Phases A+B+D+E+F shipped; Phase C deferred to follow-up wave
 **Author:** Emanuele (orchestrator captured 2026-05-11)
 **Created:** 2026-05-11
 **Priority:** HIGH — caught at user-report stage; same bug class is shipping daily because validator misses it

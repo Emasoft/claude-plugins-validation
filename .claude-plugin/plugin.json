@@ -36,6 +36,7 @@
       "design",
       "templates",
       "git-hooks"
-    ]
+    ],
+    "skill_size_severity": "warning"
   }
 }

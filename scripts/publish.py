@@ -940,6 +940,12 @@ def stage_bypass_guard() -> int:
         "SKIP_LINT",
         "SKIP_VALIDATE",
         "NO_VERIFY",
+        # v2.81.0 (TRDD-c0ee9543) — the marketplace cross-validation
+        # bypass is acceptable for opt-in air-gapped CI but MUST NOT
+        # ship in a release. A release that skipped upstream cross-check
+        # is exactly the bug class that broke
+        # ai-maestro-visual-communicator-plugin on 2026-05-11.
+        "CPV_SKIP_UPSTREAM_CROSS_CHECK",
     ]
     attempted = [v for v in forbidden if os.environ.get(v)]
     if attempted:

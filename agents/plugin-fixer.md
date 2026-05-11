@@ -135,6 +135,39 @@ You MUST NOT return DONE / SUCCESS / clean unless the FINAL `validate_plugin.py 
 - `CRITICAL=0 MAJOR=0 MINOR=0 NIT=0`
 - WARNING is the ONLY allowed non-zero category, AND every WARNING must be either (a) a documented advisory (e.g. `reviews/` non-standard dir on CPV itself, or pre-existing pipeline-drift on a plugin the user explicitly chose NOT to migrate), OR (b) accompanied by an explicit user statement that the WARNING is acceptable.
 
+### Marketplace upstream cross-check gate (TRDD-c0ee9543 Phase F)
+
+When the plugin is registered in any marketplace.json (sibling Layout A
+hub, Layout C self-marketplace, or Layout B parent monorepo), you MUST
+ALSO run:
+
+```bash
+uv run python scripts/validate_marketplace.py <marketplace-path> --strict
+```
+
+and confirm exit code 0 with no `RC-MKPL-NAME-MISMATCH`,
+`RC-MKPL-UNKNOWN-FIELD`, or `RC-MKPL-UNKNOWN-SOURCE-FIELD` findings.
+
+These three codes block install (per the 2026-05-11
+ai-maestro-visual-communicator-plugin incident: install resolver
+hashes user-typed name against the marketplace entry; mismatched
+name → "not found"; unknown field → `claude plugin validate`
+rejects the entry).
+
+If any of those MAJOR codes remains, route to
+[skills/fix-validation/references/marketplace-upstream-drift.md](../skills/fix-validation/references/marketplace-upstream-drift.md)
+> 1. Name mismatch — RC-MKPL-NAME-MISMATCH · 2. Version drift — RC-MKPL-VERSION-DRIFT · 3. Unknown entry field — RC-MKPL-UNKNOWN-FIELD · 4. Unknown source sub-field — RC-MKPL-UNKNOWN-SOURCE-FIELD · 5. Source unreachable — RC-MKPL-UPSTREAM-UNREACHABLE · 6. Description / author / keywords drift — RC-MKPL-METADATA-DRIFT · 7. Per-batch bulk align — consolidated marketplace patch · 8. Opt-out flags — when drift IS intentional
+and apply §1 / §3 / §4 recipes. If the drift is intentional (brand-vs-canonical
+name alias), add `"_cpv_skip_upstream_check": true` to the entry — but do
+NOT add the opt-out without first asking the user to confirm the alias
+is documented in the README. **Agent-introduced drift WITHOUT user
+confirmation is forbidden** — per the §9 risk row in TRDD-c0ee9543, the
+gate must distinguish "user-blessed drift" (opt-out present) from
+"agent-introduced drift" (no opt-out) and refuse to ship the latter.
+
+The full RC-MKPL-* error code table lives in
+[skills/fix-validation/references/marketplace-error-index.md §1.1](../skills/fix-validation/references/marketplace-error-index.md#11-rc-mkpl-upstream-cross-validation-codes-v2810).
+
 If validation still has any CRITICAL/MAJOR/MINOR/NIT after your fix loop, you MUST one of:
 
 1. Continue the loop (re-attempt fixes for the remaining findings).
@@ -296,6 +329,15 @@ The `fix-validation` skill (loaded via frontmatter) provides `skills/fix-validat
 Read only the relevant section of the index, then open the specific fix reference file it points to. Never load entire reference files.
 
 For marketplace-level validators (`validate_marketplace.py`, `validate_marketplace_pipeline.py`), see the **Workflow Routing** section below — those reports must be handed to the marketplace-fixer agent.
+
+### Marketplace upstream drift (TRDD-c0ee9543, v2.81.0+)
+
+For RC-MKPL-* findings (name mismatch, unknown field, unknown source
+sub-field, version drift, metadata drift, upstream unreachable), use
+[skills/fix-validation/references/marketplace-upstream-drift.md](../skills/fix-validation/references/marketplace-upstream-drift.md)
+> 1. Name mismatch — RC-MKPL-NAME-MISMATCH · 2. Version drift — RC-MKPL-VERSION-DRIFT · 3. Unknown entry field — RC-MKPL-UNKNOWN-FIELD · 4. Unknown source sub-field — RC-MKPL-UNKNOWN-SOURCE-FIELD · 5. Source unreachable — RC-MKPL-UPSTREAM-UNREACHABLE · 6. Description / author / keywords drift — RC-MKPL-METADATA-DRIFT · 7. Per-batch bulk align — consolidated marketplace patch · 8. Opt-out flags — when drift IS intentional
+That recipe file has 8 sections covering every RC-MKPL-* code plus the
+opt-out flag matrix for intentional drift.
 
 ## Workflow Routing
 
