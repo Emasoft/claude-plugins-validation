@@ -3,7 +3,7 @@
 **TRDD ID:** `b4c6cbe7-45ba-41d7-b558-afee4eb3f3a3`
 **Filename:** `design/tasks/TRDD-b4c6cbe7-45ba-41d7-b558-afee4eb3f3a3-coverage-surface-audit.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
-**Status:** Not started — META-TRDD, will spawn child TRDDs per discovered gap
+**Status:** Phase 1+2 done (2026-05-11) — audit infrastructure shipped + 3 of 4 reports produced; real-world-failures deferred to Phase 3 pending network access
 **Author:** Emanuele (orchestrator captured 2026-05-11)
 **Created:** 2026-05-11
 **Priority:** **CRITICAL — supersedes all incremental validator work until coverage parity is established**

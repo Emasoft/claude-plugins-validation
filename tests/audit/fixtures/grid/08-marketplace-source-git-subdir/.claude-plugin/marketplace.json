@@ -1,0 +1,16 @@
+{
+  "name": "fixture-08-marketplace",
+  "owner": {
+    "name": "Test"
+  },
+  "plugins": [
+    {
+      "name": "fixture-08",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/Emasoft/monorepo.git",
+        "subdir": "plugins/fixture-08"
+      }
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "fixture-14",
+  "version": "1.0.0",
+  "hooks": {
+    "Stop": [
+      {
+        "type": "prompt",
+        "prompt": "Wrap up the session and summarize."
+      }
+    ]
+  }
+}

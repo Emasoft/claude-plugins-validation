@@ -1,0 +1,12 @@
+{
+  "name": "fixture-24",
+  "version": "1.0.0",
+  "mcpServers": {
+    "stdio-srv": {
+      "command": "/usr/bin/true",
+      "args": [
+        "--quiet"
+      ]
+    }
+  }
+}
