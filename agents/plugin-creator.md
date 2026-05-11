@@ -102,6 +102,7 @@ a confusing "not found" error.
 
 If any of those codes fires, route to
 [skills/fix-validation/references/marketplace-upstream-drift.md](../skills/fix-validation/references/marketplace-upstream-drift.md)
+> 1. Name mismatch — RC-MKPL-NAME-MISMATCH · 2. Version drift — RC-MKPL-VERSION-DRIFT · 3. Unknown entry field — RC-MKPL-UNKNOWN-FIELD · 4. Unknown source sub-field — RC-MKPL-UNKNOWN-SOURCE-FIELD · 5. Source unreachable — RC-MKPL-UPSTREAM-UNREACHABLE · 6. Description / author / keywords drift — RC-MKPL-METADATA-DRIFT · 7. Per-batch bulk align — consolidated marketplace patch · 8. Opt-out flags — when drift IS intentional
 and apply §1 / §3 / §4 recipes. Distinguish:
 - **Agent-introduced drift** (no `_cpv_skip_upstream_check` flag,
   no `.cpv-no-upstream-check` sentinel): refuse to ship, realign

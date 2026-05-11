@@ -21,26 +21,22 @@ class TestPluginCreatorPreflight:
     def test_plugin_creator_runs_marketplace_cross_check_before_declaring_done(self):
         """Look for explicit cross-check invocation in plugin-creator.md."""
         text = (REPO_ROOT / "agents" / "plugin-creator.md").read_text(encoding="utf-8")
-        assert "validate_marketplace.py" in text, (
-            "plugin-creator must reference validate_marketplace.py"
-        )
+        assert "validate_marketplace.py" in text, "plugin-creator must reference validate_marketplace.py"
         # Phase F gate must explicitly cite the RC-MKPL-* MAJOR codes.
-        assert "RC-MKPL-NAME-MISMATCH" in text, (
-            "plugin-creator must call out RC-MKPL-NAME-MISMATCH as a block-on code"
-        )
-        assert "RC-MKPL-UNKNOWN-FIELD" in text, (
-            "plugin-creator must call out RC-MKPL-UNKNOWN-FIELD as a block-on code"
-        )
-        assert "TRDD-c0ee9543" in text, (
-            "plugin-creator gate must cite TRDD-c0ee9543"
-        )
+        assert "RC-MKPL-NAME-MISMATCH" in text, "plugin-creator must call out RC-MKPL-NAME-MISMATCH as a block-on code"
+        assert "RC-MKPL-UNKNOWN-FIELD" in text, "plugin-creator must call out RC-MKPL-UNKNOWN-FIELD as a block-on code"
+        assert "TRDD-c0ee9543" in text, "plugin-creator gate must cite TRDD-c0ee9543"
 
     def test_plugin_creator_distinguishes_user_blessed_vs_agent_introduced_drift(self):
         """Per §9 risk row — agent must not auto-add opt-out flags."""
         text = (REPO_ROOT / "agents" / "plugin-creator.md").read_text(encoding="utf-8")
         # Must explicitly call out the dual-mode (user-blessed vs agent-introduced).
         assert "_cpv_skip_upstream_check" in text
-        assert "user-blessed" in text.lower() or "user-confirmation" in text.lower() or "user-side declaration" in text.lower()
+        assert (
+            "user-blessed" in text.lower()
+            or "user-confirmation" in text.lower()
+            or "user-side declaration" in text.lower()
+        )
 
 
 class TestPluginFixerPreflight:
@@ -56,9 +52,7 @@ class TestPluginFixerPreflight:
     def test_plugin_fixer_references_recipe_file(self):
         """plugin-fixer must point at the recipes file for the codes it gates on."""
         text = (REPO_ROOT / "agents" / "plugin-fixer.md").read_text(encoding="utf-8")
-        assert "marketplace-upstream-drift.md" in text, (
-            "plugin-fixer must reference the new recipe file"
-        )
+        assert "marketplace-upstream-drift.md" in text, "plugin-fixer must reference the new recipe file"
 
 
 class TestCpvUpgradePluginPreflight:
@@ -82,9 +76,7 @@ class TestFixValidationSkillIndexes:
     """Phase F.4 — fix-validation skill must list the new RC-MKPL-* codes."""
 
     def test_marketplace_error_index_has_rc_mkpl_section(self):
-        text = (
-            REPO_ROOT / "skills/fix-validation/references/marketplace-error-index.md"
-        ).read_text(encoding="utf-8")
+        text = (REPO_ROOT / "skills/fix-validation/references/marketplace-error-index.md").read_text(encoding="utf-8")
         assert "1.1 RC-MKPL-* upstream cross-validation codes" in text
         assert "RC-MKPL-NAME-MISMATCH" in text
         assert "RC-MKPL-UNKNOWN-FIELD" in text
@@ -94,9 +86,7 @@ class TestFixValidationSkillIndexes:
         assert "RC-MKPL-UPSTREAM-UNREACHABLE" in text
 
     def test_plugin_error_index_has_rc_mkpl_section(self):
-        text = (
-            REPO_ROOT / "skills/fix-validation/references/plugin-error-index.md"
-        ).read_text(encoding="utf-8")
+        text = (REPO_ROOT / "skills/fix-validation/references/plugin-error-index.md").read_text(encoding="utf-8")
         assert "20. validate_marketplace cross-validation rules" in text
         # Cross-link to the recipe file:
         assert "marketplace-upstream-drift.md" in text
@@ -138,9 +128,7 @@ class TestMainMenuRow7Doctor:
         assert "22-option" in text or "22 row" in text or "22-row" in text
 
     def test_menu_tree_has_section_3_7_doctor(self):
-        text = (
-            REPO_ROOT / "skills/cpv-main-menu-skill/references/menu-tree.md"
-        ).read_text(encoding="utf-8")
+        text = (REPO_ROOT / "skills/cpv-main-menu-skill/references/menu-tree.md").read_text(encoding="utf-8")
         assert "### 3.7 Doctor (deep diagnostic)" in text
         # The renumbered ones must still exist
         assert "### 3.8 GitHub setup" in text

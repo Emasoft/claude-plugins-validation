@@ -191,9 +191,7 @@ def _cache_paths(cache_dir: Path, key: str) -> tuple[Path, Path]:
     return data_path, meta_path
 
 
-def _read_cached(
-    cache_dir: Path, key: str, ttl_seconds: int
-) -> dict[str, Any] | None:
+def _read_cached(cache_dir: Path, key: str, ttl_seconds: int) -> dict[str, Any] | None:
     """Return the cached dict if fresh, else None."""
     data_path, meta_path = _cache_paths(cache_dir, key)
     if not data_path.is_file() or not meta_path.is_file():
@@ -275,10 +273,7 @@ def _github_raw_url(repo: str, ref: str | None, subdir: str | None = None) -> st
     ref = ref or "main"
     if subdir:
         subdir_clean = subdir.strip("/")
-        return (
-            f"https://raw.githubusercontent.com/{repo}/{ref}/"
-            f"{subdir_clean}/.claude-plugin/plugin.json"
-        )
+        return f"https://raw.githubusercontent.com/{repo}/{ref}/{subdir_clean}/.claude-plugin/plugin.json"
     return f"https://raw.githubusercontent.com/{repo}/{ref}/.claude-plugin/plugin.json"
 
 
@@ -318,20 +313,20 @@ def _fetch_git_subdir(url: str, subdir: str, ref: str | None) -> dict[str, Any] 
     return None
 
 
-def _fetch_relative_path(
-    source: str | dict, marketplace_dir: Path
-) -> dict[str, Any] | None:
+def _fetch_relative_path(source: str | dict, marketplace_dir: Path) -> dict[str, Any] | None:
     """Read plugin.json from disk for the `./path` shorthand or `directory` type.
 
     Returns None when the path resolves outside ``marketplace_dir`` (security
     guard against `..` traversal in untrusted marketplace content).
     """
+    rel: str
     if isinstance(source, str):
         rel = source
     elif isinstance(source, dict):
-        rel = source.get("path") if isinstance(source.get("path"), str) else None
-        if not rel:
+        path_val = source.get("path")
+        if not isinstance(path_val, str) or not path_val:
             return None
+        rel = path_val
     else:
         return None
     # Reject absolute paths and `..` traversal (defence-in-depth).
@@ -459,13 +454,13 @@ def _make_name_drift(entry_value: Any, upstream_value: Any, entry_label: str) ->
             f"name={upstream_value!r}. `claude plugin install "
             f"<plugin.json-name>@<marketplace>` would resolve against "
             f"the marketplace entry name — this mismatch causes "
-            f"\"not found\" at install time. See "
+            f'"not found" at install time. See '
             "marketplace-upstream-drift.md §1 for the fix."
         ),
         suggestion=(
             f"Align the marketplace entry name with upstream: change "
             f"name={entry_value!r} → name={upstream_value!r}, OR add "
-            f"\"_cpv_skip_upstream_check\": true on this entry if the "
+            f'"_cpv_skip_upstream_check": true on this entry if the '
             "name divergence is intentional (brand-vs-canonical alias)."
         ),
     )
@@ -540,85 +535,46 @@ def diff_marketplace_vs_upstream(
     NITs over `{name, email}` vs `name` dict shape.
     """
     drifts: list[FieldDrift] = []
-    entry_label = (
-        entry.get("name")
-        if isinstance(entry.get("name"), str)
-        else "<unnamed entry>"
-    )
+    raw_label = entry.get("name")
+    entry_label: str = raw_label if isinstance(raw_label, str) else "<unnamed entry>"
 
     # MAJOR: name
     entry_name = entry.get("name")
     upstream_name = upstream.get("name")
-    if (
-        isinstance(entry_name, str)
-        and isinstance(upstream_name, str)
-        and entry_name != upstream_name
-    ):
+    if isinstance(entry_name, str) and isinstance(upstream_name, str) and entry_name != upstream_name:
         drifts.append(_make_name_drift(entry_name, upstream_name, entry_label))
 
     # MINOR: version
     entry_version = entry.get("version")
     upstream_version = upstream.get("version")
-    if (
-        isinstance(entry_version, str)
-        and isinstance(upstream_version, str)
-        and entry_version != upstream_version
-    ):
-        drifts.append(
-            _make_version_drift(entry_version, upstream_version, entry_label)
-        )
+    if isinstance(entry_version, str) and isinstance(upstream_version, str) and entry_version != upstream_version:
+        drifts.append(_make_version_drift(entry_version, upstream_version, entry_label))
 
     # NIT: description
     entry_desc = entry.get("description")
     upstream_desc = upstream.get("description")
-    if (
-        isinstance(entry_desc, str)
-        and isinstance(upstream_desc, str)
-        and entry_desc != upstream_desc
-    ):
-        drifts.append(
-            _make_metadata_drift("description", entry_desc, upstream_desc, entry_label)
-        )
+    if isinstance(entry_desc, str) and isinstance(upstream_desc, str) and entry_desc != upstream_desc:
+        drifts.append(_make_metadata_drift("description", entry_desc, upstream_desc, entry_label))
 
     # NIT: keywords
     entry_kw = entry.get("keywords")
     upstream_kw = upstream.get("keywords")
-    if (
-        isinstance(entry_kw, list)
-        and isinstance(upstream_kw, list)
-        and entry_kw != upstream_kw
-    ):
-        drifts.append(
-            _make_metadata_drift("keywords", entry_kw, upstream_kw, entry_label)
-        )
+    if isinstance(entry_kw, list) and isinstance(upstream_kw, list) and entry_kw != upstream_kw:
+        drifts.append(_make_metadata_drift("keywords", entry_kw, upstream_kw, entry_label))
 
     # NIT: author (string or object form — compare name-equivalent)
     entry_author = entry.get("author")
     upstream_author = upstream.get("author")
     entry_author_name = _author_name(entry_author)
     upstream_author_name = _author_name(upstream_author)
-    if (
-        entry_author_name is not None
-        and upstream_author_name is not None
-        and entry_author_name != upstream_author_name
-    ):
-        drifts.append(
-            _make_metadata_drift(
-                "author", entry_author_name, upstream_author_name, entry_label
-            )
-        )
+    if entry_author_name is not None and upstream_author_name is not None and entry_author_name != upstream_author_name:
+        drifts.append(_make_metadata_drift("author", entry_author_name, upstream_author_name, entry_label))
 
     # NIT: homepage
     entry_home = entry.get("homepage")
     upstream_home = upstream.get("homepage")
-    if (
-        isinstance(entry_home, str)
-        and isinstance(upstream_home, str)
-        and entry_home != upstream_home
-    ):
-        drifts.append(
-            _make_metadata_drift("homepage", entry_home, upstream_home, entry_label)
-        )
+    if isinstance(entry_home, str) and isinstance(upstream_home, str) and entry_home != upstream_home:
+        drifts.append(_make_metadata_drift("homepage", entry_home, upstream_home, entry_label))
 
     return drifts
 

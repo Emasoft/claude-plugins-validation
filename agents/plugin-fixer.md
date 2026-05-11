@@ -156,6 +156,7 @@ rejects the entry).
 
 If any of those MAJOR codes remains, route to
 [skills/fix-validation/references/marketplace-upstream-drift.md](../skills/fix-validation/references/marketplace-upstream-drift.md)
+> 1. Name mismatch — RC-MKPL-NAME-MISMATCH · 2. Version drift — RC-MKPL-VERSION-DRIFT · 3. Unknown entry field — RC-MKPL-UNKNOWN-FIELD · 4. Unknown source sub-field — RC-MKPL-UNKNOWN-SOURCE-FIELD · 5. Source unreachable — RC-MKPL-UPSTREAM-UNREACHABLE · 6. Description / author / keywords drift — RC-MKPL-METADATA-DRIFT · 7. Per-batch bulk align — consolidated marketplace patch · 8. Opt-out flags — when drift IS intentional
 and apply §1 / §3 / §4 recipes. If the drift is intentional (brand-vs-canonical
 name alias), add `"_cpv_skip_upstream_check": true` to the entry — but do
 NOT add the opt-out without first asking the user to confirm the alias
@@ -333,7 +334,8 @@ For marketplace-level validators (`validate_marketplace.py`, `validate_marketpla
 
 For RC-MKPL-* findings (name mismatch, unknown field, unknown source
 sub-field, version drift, metadata drift, upstream unreachable), use
-[skills/fix-validation/references/marketplace-upstream-drift.md](../skills/fix-validation/references/marketplace-upstream-drift.md).
+[skills/fix-validation/references/marketplace-upstream-drift.md](../skills/fix-validation/references/marketplace-upstream-drift.md)
+> 1. Name mismatch — RC-MKPL-NAME-MISMATCH · 2. Version drift — RC-MKPL-VERSION-DRIFT · 3. Unknown entry field — RC-MKPL-UNKNOWN-FIELD · 4. Unknown source sub-field — RC-MKPL-UNKNOWN-SOURCE-FIELD · 5. Source unreachable — RC-MKPL-UPSTREAM-UNREACHABLE · 6. Description / author / keywords drift — RC-MKPL-METADATA-DRIFT · 7. Per-batch bulk align — consolidated marketplace patch · 8. Opt-out flags — when drift IS intentional
 That recipe file has 8 sections covering every RC-MKPL-* code plus the
 opt-out flag matrix for intentional drift.
 

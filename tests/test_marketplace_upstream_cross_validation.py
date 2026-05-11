@@ -14,14 +14,11 @@ same diff helper and are covered by mocking the fetcher.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import sys
 import tempfile
 from pathlib import Path
-
-import pytest
 
 # Ensure scripts dir is on path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -31,9 +28,7 @@ def _write_plugin_json(plugin_root: Path, manifest: dict) -> None:
     """Write `.claude-plugin/plugin.json` at plugin_root."""
     pj_dir = plugin_root / ".claude-plugin"
     pj_dir.mkdir(parents=True, exist_ok=True)
-    pj_dir.joinpath("plugin.json").write_text(
-        json.dumps(manifest, indent=2), encoding="utf-8"
-    )
+    pj_dir.joinpath("plugin.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
 
 def _write_marketplace_with_local_plugin(tmp: Path, entry: dict, manifest: dict) -> Path:
@@ -55,9 +50,7 @@ def _write_marketplace_with_local_plugin(tmp: Path, entry: dict, manifest: dict)
         "owner": {"name": "Tester"},
         "plugins": [full_entry],
     }
-    mkpl_dir.joinpath("marketplace.json").write_text(
-        json.dumps(payload, indent=2), encoding="utf-8"
-    )
+    mkpl_dir.joinpath("marketplace.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return tmp
 
 
@@ -85,14 +78,8 @@ class TestNameMismatchEmitsMajor:
             )
 
             report = validate_marketplace(root)
-            findings = [
-                r
-                for r in report.results
-                if r.level == "MAJOR" and "RC-MKPL-NAME-MISMATCH" in r.message
-            ]
-            assert len(findings) == 1, (
-                f"Expected 1 MAJOR for name mismatch, got: {[r.message for r in report.results]}"
-            )
+            findings = [r for r in report.results if r.level == "MAJOR" and "RC-MKPL-NAME-MISMATCH" in r.message]
+            assert len(findings) == 1, f"Expected 1 MAJOR for name mismatch, got: {[r.message for r in report.results]}"
             msg = findings[0].message
             assert "ai-maestro-visual-communicator" in msg
             assert "ai-maestro-visual-communicator-plugin" in msg
@@ -110,9 +97,7 @@ class TestNameMismatchEmitsMajor:
             )
 
             report = validate_marketplace(root)
-            findings = [
-                r for r in report.results if "RC-MKPL-NAME-MISMATCH" in r.message
-            ]
+            findings = [r for r in report.results if "RC-MKPL-NAME-MISMATCH" in r.message]
             assert not findings
 
 
@@ -132,14 +117,8 @@ class TestVersionDriftEmitsMinor:
             )
 
             report = validate_marketplace(root)
-            findings = [
-                r
-                for r in report.results
-                if r.level == "MINOR" and "RC-MKPL-VERSION-DRIFT" in r.message
-            ]
-            assert len(findings) == 1, (
-                f"Expected MINOR VERSION-DRIFT, got: {[r.message for r in report.results]}"
-            )
+            findings = [r for r in report.results if r.level == "MINOR" and "RC-MKPL-VERSION-DRIFT" in r.message]
+            assert len(findings) == 1, f"Expected MINOR VERSION-DRIFT, got: {[r.message for r in report.results]}"
             assert "1.0.0" in findings[0].message
             assert "1.2.2" in findings[0].message
 
@@ -170,13 +149,9 @@ class TestMetadataDriftEmitsNit:
             findings = [
                 r
                 for r in report.results
-                if r.level == "NIT"
-                and "RC-MKPL-METADATA-DRIFT" in r.message
-                and "description" in r.message
+                if r.level == "NIT" and "RC-MKPL-METADATA-DRIFT" in r.message and "description" in r.message
             ]
-            assert findings, (
-                f"Expected NIT METADATA-DRIFT for description, got: {[r.message for r in report.results]}"
-            )
+            assert findings, f"Expected NIT METADATA-DRIFT for description, got: {[r.message for r in report.results]}"
 
     def test_keywords_drift_emits_nit(self):
         """Different keywords lists emit a single NIT."""
@@ -201,9 +176,7 @@ class TestMetadataDriftEmitsNit:
             findings = [
                 r
                 for r in report.results
-                if r.level == "NIT"
-                and "RC-MKPL-METADATA-DRIFT" in r.message
-                and "keywords" in r.message
+                if r.level == "NIT" and "RC-MKPL-METADATA-DRIFT" in r.message and "keywords" in r.message
             ]
             assert findings
 
@@ -248,14 +221,8 @@ class TestUnreachableSourceEmitsWarning:
                 )
 
                 report = validate_marketplace(tmp)
-                findings = [
-                    r
-                    for r in report.results
-                    if "RC-MKPL-UPSTREAM-UNREACHABLE" in r.message
-                ]
-                assert findings, (
-                    f"Expected WARNING for unreachable source, got: {[r.message for r in report.results]}"
-                )
+                findings = [r for r in report.results if "RC-MKPL-UPSTREAM-UNREACHABLE" in r.message]
+                assert findings, f"Expected WARNING for unreachable source, got: {[r.message for r in report.results]}"
                 # MUST NOT be MAJOR — network flake is not a publish blocker.
                 assert findings[0].level == "WARNING"
         finally:
@@ -274,24 +241,18 @@ class TestCacheHitDoesNotRefetch:
             tmp = Path(td)
             plugin_dir = tmp / "plugin"
             plugin_dir.mkdir(parents=True, exist_ok=True)
-            _write_plugin_json(
-                plugin_dir, {"name": "cache-test", "version": "1.0.0"}
-            )
+            _write_plugin_json(plugin_dir, {"name": "cache-test", "version": "1.0.0"})
 
             entry = {"name": "cache-test", "source": "./plugin"}
             cache_dir = tmp / "cache"
 
             # First call — should fetch from disk.
-            result1 = fetch_upstream_plugin_json(
-                entry, marketplace_dir=tmp, cache_dir=cache_dir
-            )
+            result1 = fetch_upstream_plugin_json(entry, marketplace_dir=tmp, cache_dir=cache_dir)
             assert result1 is not None
             assert result1.get("name") == "cache-test"
 
             # Second call — should still return the same content (cache or re-read).
-            result2 = fetch_upstream_plugin_json(
-                entry, marketplace_dir=tmp, cache_dir=cache_dir
-            )
+            result2 = fetch_upstream_plugin_json(entry, marketplace_dir=tmp, cache_dir=cache_dir)
             assert result2 == result1
 
 
@@ -320,14 +281,8 @@ class TestSkipEnvVarBypassesCheck:
                     "RC-MKPL-VERSION-DRIFT",
                     "RC-MKPL-METADATA-DRIFT",
                 }
-                hits = [
-                    r
-                    for r in report.results
-                    if any(code in r.message for code in phase_b_codes)
-                ]
-                assert not hits, (
-                    f"Bypass env var did not suppress Phase B, got: {[r.message for r in hits]}"
-                )
+                hits = [r for r in report.results if any(code in r.message for code in phase_b_codes)]
+                assert not hits, f"Bypass env var did not suppress Phase B, got: {[r.message for r in hits]}"
         finally:
             os.environ.pop("CPV_SKIP_UPSTREAM_CROSS_CHECK", None)
 
@@ -355,19 +310,15 @@ class TestPerEntryOptOut:
             phase_b_findings = [
                 r
                 for r in report.results
-                if "RC-MKPL-NAME-MISMATCH" in r.message
-                or "RC-MKPL-VERSION-DRIFT" in r.message
+                if "RC-MKPL-NAME-MISMATCH" in r.message or "RC-MKPL-VERSION-DRIFT" in r.message
             ]
-            assert not phase_b_findings, (
-                f"Per-entry opt-out failed; got: {[r.message for r in phase_b_findings]}"
-            )
+            assert not phase_b_findings, f"Per-entry opt-out failed; got: {[r.message for r in phase_b_findings]}"
 
             # The underscore field itself must NOT trigger UNKNOWN-FIELD.
             unknown = [
                 r
                 for r in report.results
-                if "RC-MKPL-UNKNOWN-FIELD" in r.message
-                and "_cpv_skip_upstream_check" in r.message
+                if "RC-MKPL-UNKNOWN-FIELD" in r.message and "_cpv_skip_upstream_check" in r.message
             ]
             assert not unknown
 
@@ -404,9 +355,7 @@ class TestPerMarketplaceSentinel:
                     )
                 )
             ]
-            assert not phase_b_findings, (
-                f"Sentinel did not suppress Phase B: {[r.message for r in phase_b_findings]}"
-            )
+            assert not phase_b_findings, f"Sentinel did not suppress Phase B: {[r.message for r in phase_b_findings]}"
 
 
 class TestLayoutCSelfEntryUsesSameHelper:
@@ -437,23 +386,17 @@ class TestCacheTTLBehaviour:
             tmp = Path(td)
             plugin_dir = tmp / "plugin"
             plugin_dir.mkdir(parents=True, exist_ok=True)
-            _write_plugin_json(
-                plugin_dir, {"name": "ttl-test", "version": "1.0.0"}
-            )
+            _write_plugin_json(plugin_dir, {"name": "ttl-test", "version": "1.0.0"})
 
             entry = {"name": "ttl-test", "source": "./plugin"}
             cache_dir = tmp / "cache"
 
             # Fetch with default TTL — populates cache.
-            r1 = fetch_upstream_plugin_json(
-                entry, marketplace_dir=tmp, cache_dir=cache_dir
-            )
+            r1 = fetch_upstream_plugin_json(entry, marketplace_dir=tmp, cache_dir=cache_dir)
             assert r1 is not None
 
             # Modify the upstream file.
-            _write_plugin_json(
-                plugin_dir, {"name": "ttl-test-modified", "version": "2.0.0"}
-            )
+            _write_plugin_json(plugin_dir, {"name": "ttl-test-modified", "version": "2.0.0"})
 
             # Fetch with TTL=0 — must pick up the modification.
             r2 = fetch_upstream_plugin_json(
