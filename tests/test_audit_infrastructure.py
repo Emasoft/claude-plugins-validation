@@ -392,6 +392,50 @@ class TestReportWriters:
         assert "WARNING" in body
         assert "CLI was unavailable" in body
 
+    def test_top_gap_categories_aggregates_by_fingerprint(self, tmp_path: Path) -> None:
+        """Identical CLI findings across multiple fixtures must collapse into one ranked row."""
+        f1 = cpv_vs_cli_diff.Finding(
+            severity="CRITICAL",
+            message="hooks: Invalid input",
+            file=".claude-plugin/plugin.json",
+            source="cli",
+        )
+        f2 = cpv_vs_cli_diff.Finding(
+            severity="CRITICAL",
+            message="hooks: Invalid input",
+            file=".claude-plugin/plugin.json",
+            source="cli",
+        )
+        f3 = cpv_vs_cli_diff.Finding(
+            severity="WARNING",
+            message="description: No description provided",
+            source="cli",
+        )
+        row_a = cpv_vs_cli_diff.GridRow(
+            fixture=tmp_path / "fix-a",
+            cli=cpv_vs_cli_diff.CliReport(fixture=tmp_path / "fix-a", available=True, exit_code=1, findings=[f1]),
+            cpv=cpv_vs_cli_diff.CpvReport(fixture=tmp_path / "fix-a", exit_code=0),
+            diff=cpv_vs_cli_diff.Diff(fixture=tmp_path / "fix-a", cli_only=[f1]),
+        )
+        row_b = cpv_vs_cli_diff.GridRow(
+            fixture=tmp_path / "fix-b",
+            cli=cpv_vs_cli_diff.CliReport(fixture=tmp_path / "fix-b", available=True, exit_code=1, findings=[f2]),
+            cpv=cpv_vs_cli_diff.CpvReport(fixture=tmp_path / "fix-b", exit_code=0),
+            diff=cpv_vs_cli_diff.Diff(fixture=tmp_path / "fix-b", cli_only=[f2]),
+        )
+        row_c = cpv_vs_cli_diff.GridRow(
+            fixture=tmp_path / "fix-c",
+            cli=cpv_vs_cli_diff.CliReport(fixture=tmp_path / "fix-c", available=True, exit_code=0, findings=[f3]),
+            cpv=cpv_vs_cli_diff.CpvReport(fixture=tmp_path / "fix-c", exit_code=0),
+            diff=cpv_vs_cli_diff.Diff(fixture=tmp_path / "fix-c", cli_only=[f3]),
+        )
+        top = cpv_vs_cli_diff._top_gap_categories([row_a, row_b, row_c])
+        # CRITICAL hooks must rank above WARNING description
+        assert top[0][0] == "CRITICAL"
+        assert top[0][2] == 2  # two fixtures hit it
+        assert top[1][0] == "WARNING"
+        assert top[1][2] == 1
+
 
 # ---------------------------------------------------------------------------
 # Agent-emission audit
