@@ -3,6 +3,7 @@
 ## Table of Contents
 
 - [1. validate_marketplace.py](#1-validate_marketplacepy)
+- [1.1 RC-MKPL-* upstream cross-validation codes (v2.81.0+)](#11-rc-mkpl-upstream-cross-validation-codes-v2810)
 - [2. validate_marketplace_pipeline.py](#2-validate_marketplace_pipelinepy)
 - [3. Architecture / Layout Migration Warnings (7 signals)](#3-architecture--layout-migration-warnings-7-signals)
 
@@ -59,6 +60,40 @@ Primary fix guide: [marketplace-fixes.md](marketplace-fixes.md)
 | Dangerous inline Python in workflows **[NEW]** (L1866–L1884) | marketplace-fixes §5 |
 | GitHub-source validation — plugin `repository` field required **[NEW]** (L1732–L1790) | marketplace-fixes §2 |
 | Architecture / nested-monorepo restructure 7-signal WARNING **[NEW]** (L2299) | See §3 below |
+
+---
+
+## 1.1 RC-MKPL-* upstream cross-validation codes (v2.81.0+)
+
+Per TRDD-c0ee9543 (Phase A + Phase B), `validate_marketplace.py` now emits
+stable RC-MKPL-* error codes for two new check families:
+
+### Phase A — strict entry-field allowlist
+
+| Code | Severity | Trigger | Fix guide |
+|---|---|---|---|
+| `RC-MKPL-UNKNOWN-FIELD` | MAJOR | Plugin entry top-level field not in `_KNOWN_MARKETPLACE_ENTRY_FIELDS` (e.g. `scope`, `audience`). Fields starting with `_` (CPV-private flags) pass through silently. | [marketplace-upstream-drift.md §3](marketplace-upstream-drift.md#3-unknown-entry-field--rc-mkpl-unknown-field) |
+| `RC-MKPL-UNKNOWN-SOURCE-FIELD` | MAJOR | Source sub-field not in `_KNOWN_SOURCE_FIELDS_BY_TYPE[<source.source>]` (e.g. `branch` on github). | [marketplace-upstream-drift.md §4](marketplace-upstream-drift.md#4-unknown-source-sub-field--rc-mkpl-unknown-source-field) |
+
+### Phase B — upstream plugin.json cross-validation
+
+| Code | Severity | Trigger | Fix guide |
+|---|---|---|---|
+| `RC-MKPL-NAME-MISMATCH` | MAJOR | Marketplace entry's `name` differs from upstream `plugin.json.name`. `claude plugin install <name>@<marketplace>` will fail with "not found". | [marketplace-upstream-drift.md §1](marketplace-upstream-drift.md#1-name-mismatch--rc-mkpl-name-mismatch) |
+| `RC-MKPL-VERSION-DRIFT` | MINOR | Marketplace entry's `version` differs from upstream `plugin.json.version`. The plugin manifest always wins silently (`plugin-marketplaces.md:696-698`). | [marketplace-upstream-drift.md §2](marketplace-upstream-drift.md#2-version-drift--rc-mkpl-version-drift) |
+| `RC-MKPL-METADATA-DRIFT` | NIT | Marketplace entry's `description`/`author`/`keywords`/`homepage` differs from upstream. UX papercut, no install impact. | [marketplace-upstream-drift.md §6](marketplace-upstream-drift.md#6-description--author--keywords-drift--rc-mkpl-metadata-drift) |
+| `RC-MKPL-UPSTREAM-UNREACHABLE` | WARNING | CPV could not fetch upstream `plugin.json` (network failure, private repo, etc.). Cross-validation skipped for this entry. | [marketplace-upstream-drift.md §5](marketplace-upstream-drift.md#5-source-unreachable--rc-mkpl-upstream-unreachable) |
+
+### Opt-out flags (skip cross-check)
+
+| Mechanism | Scope | When to use |
+|---|---|---|
+| `"_cpv_skip_upstream_check": true` on the entry | per-entry | Brand-vs-canonical name alias; documented exception |
+| `<mkpl-root>/.claude-plugin/.cpv-no-upstream-check` (zero-byte file) | per-marketplace | Whole marketplace is offline / air-gapped |
+| `CPV_SKIP_UPSTREAM_CROSS_CHECK=1` env var | per-CI-run | Air-gapped CI runner only (publish.py Gate 0 rejects this) |
+
+The fix guide [marketplace-upstream-drift.md §8](marketplace-upstream-drift.md#8-opt-out-flags--when-drift-is-intentional)
+has the risk decision matrix for "is this drift intentional?".
 
 ---
 
