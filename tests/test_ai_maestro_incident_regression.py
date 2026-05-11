@@ -77,35 +77,22 @@ def test_ai_maestro_visual_communicator_incident_now_blocks():
         report = validate_marketplace(tmp)
 
         # Find each of the three expected findings.
-        name_mismatch = [
-            r
-            for r in report.results
-            if r.level == "MAJOR" and "RC-MKPL-NAME-MISMATCH" in r.message
-        ]
-        version_drift = [
-            r
-            for r in report.results
-            if r.level == "MINOR" and "RC-MKPL-VERSION-DRIFT" in r.message
-        ]
+        name_mismatch = [r for r in report.results if r.level == "MAJOR" and "RC-MKPL-NAME-MISMATCH" in r.message]
+        version_drift = [r for r in report.results if r.level == "MINOR" and "RC-MKPL-VERSION-DRIFT" in r.message]
         unknown_field = [
             r
             for r in report.results
-            if r.level == "MAJOR"
-            and "RC-MKPL-UNKNOWN-FIELD" in r.message
-            and "scope" in r.message
+            if r.level == "MAJOR" and "RC-MKPL-UNKNOWN-FIELD" in r.message and "scope" in r.message
         ]
 
         assert name_mismatch, (
-            f"FAIL: Phase B failed to catch name mismatch. "
-            f"Got findings: {[r.message for r in report.results]}"
+            f"FAIL: Phase B failed to catch name mismatch. Got findings: {[r.message for r in report.results]}"
         )
         assert version_drift, (
-            f"FAIL: Phase B failed to catch version drift. "
-            f"Got findings: {[r.message for r in report.results]}"
+            f"FAIL: Phase B failed to catch version drift. Got findings: {[r.message for r in report.results]}"
         )
         assert unknown_field, (
-            f"FAIL: Phase A failed to catch unknown `scope` field. "
-            f"Got findings: {[r.message for r in report.results]}"
+            f"FAIL: Phase A failed to catch unknown `scope` field. Got findings: {[r.message for r in report.results]}"
         )
 
         # Final assert: the report's exit code is non-zero in strict mode.
