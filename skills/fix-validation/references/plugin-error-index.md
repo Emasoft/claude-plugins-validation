@@ -21,6 +21,7 @@
 - [17. validate_cache.py](#17-validate_cachepy)
 - [18. validate_telemetry.py — plugin-shipped env-var hazards](#18-validate_telemetrypy--plugin-shipped-env-var-hazards)
 - [19. Semantic pillar — Channel MCP Server Source-Code Security](#19-semantic-pillar--channel-mcp-server-source-code-security)
+- [20. validate_marketplace cross-validation rules](#20-validate_marketplace-cross-validation-rules)
 
 ## Checklist
 
@@ -445,3 +446,30 @@ Deterministic prefilter: `scripts/cpv_channel_source_predicate.py` (`classify_ch
 | `RULE-0-no-forward-call-detected` — Channel server resolves but the prefilter found no forward call | INFO | The Opus pillar must read the file to verify the indirection is safe. |
 
 Fix shape (all rules): add an early-return that compares the transport-specific sender-ID property (`message.from.id` for Telegram, `message.author.id` for Discord, `message.sender_id` for iMessage/SMS gateways, etc.) against an allowlist sourced from a constant or env var. NEVER use truthy-only checks (`if (msg.from)`), empty allowlists, or always-true guards. Chat-ID gating is allowed as a SECONDARY scope check but never as the sole gate.
+
+---
+
+## 20. validate_marketplace cross-validation rules
+
+Added in v2.81.0 (TRDD-c0ee9543, Phase A + Phase B). The validator
+`scripts/validate_marketplace.py` now cross-references every plugin
+entry against its upstream `plugin.json` (Phase B) and enforces a
+strict field allowlist (Phase A). All RC-MKPL-* codes are documented
+in [marketplace-error-index.md §1.1](marketplace-error-index.md#11-rc-mkpl-upstream-cross-validation-codes-v2810);
+the mechanical fix recipes live in
+[marketplace-upstream-drift.md](marketplace-upstream-drift.md).
+
+Note: this section appears in `plugin-error-index.md` (not just
+`marketplace-error-index.md`) because the cross-validation diff
+fetches an upstream **plugin.json** to compare against the
+marketplace entry. Plugin-fixer pipelines that touch BOTH
+manifests should consult this section.
+
+| Phase | Code | Severity | Fix guide |
+|---|---|---|---|
+| A | `RC-MKPL-UNKNOWN-FIELD` | MAJOR | marketplace-upstream-drift.md §3 |
+| A | `RC-MKPL-UNKNOWN-SOURCE-FIELD` | MAJOR | marketplace-upstream-drift.md §4 |
+| B | `RC-MKPL-NAME-MISMATCH` | MAJOR | marketplace-upstream-drift.md §1 |
+| B | `RC-MKPL-VERSION-DRIFT` | MINOR | marketplace-upstream-drift.md §2 |
+| B | `RC-MKPL-METADATA-DRIFT` | NIT | marketplace-upstream-drift.md §6 |
+| B | `RC-MKPL-UPSTREAM-UNREACHABLE` | WARNING | marketplace-upstream-drift.md §5 |
