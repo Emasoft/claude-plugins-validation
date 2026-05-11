@@ -208,9 +208,7 @@ SOURCE_REQUIRED_FIELDS = {
 # opt-out flags use a leading underscore (`_cpv_skip_upstream_check`) and
 # are accepted without warning — see `_validate_known_entry_fields` below.
 # ─────────────────────────────────────────────────────────────────────────────
-_KNOWN_MARKETPLACE_ENTRY_FIELDS: frozenset[str] = frozenset(
-    REQUIRED_PLUGIN_FIELDS | OPTIONAL_PLUGIN_FIELDS
-)
+_KNOWN_MARKETPLACE_ENTRY_FIELDS: frozenset[str] = frozenset(REQUIRED_PLUGIN_FIELDS | OPTIONAL_PLUGIN_FIELDS)
 
 # Source-type → allowed sub-fields. The check is keyed off the inner
 # `source.source` discriminator. Unknown sub-fields here emit MAJOR via
@@ -321,6 +319,7 @@ def _validate_known_source_subfields(
             )
         )
     return results
+
 
 # Reserved marketplace names that cannot be used
 RESERVED_MARKETPLACE_NAMES = {
@@ -1795,9 +1794,7 @@ def _cross_validate_upstream_for_entries(
     upstream_by_name: dict[str, dict[str, Any] | None] = {}
     with ThreadPoolExecutor(max_workers=8) as pool:
         future_to_name = {
-            pool.submit(
-                fetch_upstream_plugin_json, entry, marketplace_dir=marketplace_dir
-            ): name
+            pool.submit(fetch_upstream_plugin_json, entry, marketplace_dir=marketplace_dir): name
             for _, name, entry in fetch_targets
         }
         for future in as_completed(future_to_name):
@@ -1816,9 +1813,7 @@ def _cross_validate_upstream_for_entries(
             # this entry still apply (Phase A allowlist, source-format,
             # etc.).
             src = entry.get("source")
-            src_descr = (
-                src.get("source") if isinstance(src, dict) else "<inline>"
-            )
+            src_descr = src.get("source") if isinstance(src, dict) else "<inline>"
             results.append(
                 ValidationResult(
                     level="WARNING",
@@ -1835,7 +1830,7 @@ def _cross_validate_upstream_for_entries(
                     file=json_path,
                     suggestion=(
                         "If this entry is intentionally unreachable, "
-                        "add `\"_cpv_skip_upstream_check\": true` to "
+                        'add `"_cpv_skip_upstream_check": true` to '
                         "silence the warning."
                     ),
                 )
@@ -3287,9 +3282,7 @@ def format_report(report: ValidationReport, verbose: bool = False) -> str:
     # v2.81.0 (TRDD-c0ee9543, Phase E / GAP-15) — when MKPL-* findings
     # exist, point the user at /cpv-doctor for deeper diagnosis. Catches
     # the install-failure scenario before it becomes user-facing.
-    has_mkpl_finding = any(
-        "RC-MKPL-" in (getattr(r, "message", "") or "") for r in report.results
-    )
+    has_mkpl_finding = any("RC-MKPL-" in (getattr(r, "message", "") or "") for r in report.results)
     if has_mkpl_finding:
         lines.append("")
         lines.append(

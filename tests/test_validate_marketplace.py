@@ -434,9 +434,7 @@ class TestValidatePluginEntryFields:
         plugin = {"name": "my-plugin", "source": "github", "custom_field_xyz": True}
         results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
         assert any(
-            r.level == "MAJOR"
-            and "RC-MKPL-UNKNOWN-FIELD" in r.message
-            and "custom_field_xyz" in r.message
+            r.level == "MAJOR" and "RC-MKPL-UNKNOWN-FIELD" in r.message and "custom_field_xyz" in r.message
             for r in results
         )
 

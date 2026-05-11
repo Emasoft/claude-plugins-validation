@@ -52,14 +52,8 @@ class TestUnknownEntryFieldDetection:
             )
 
             report = validate_marketplace(root)
-            findings = [
-                r
-                for r in report.results
-                if r.level == "MAJOR" and "RC-MKPL-UNKNOWN-FIELD" in r.message
-            ]
-            assert len(findings) >= 1, (
-                f"Expected RC-MKPL-UNKNOWN-FIELD MAJOR for `scope` field, got: {report.results}"
-            )
+            findings = [r for r in report.results if r.level == "MAJOR" and "RC-MKPL-UNKNOWN-FIELD" in r.message]
+            assert len(findings) >= 1, f"Expected RC-MKPL-UNKNOWN-FIELD MAJOR for `scope` field, got: {report.results}"
             assert any("scope" in r.message for r in findings)
 
     def test_multiple_unknown_fields_each_emit_their_own_finding(self):
@@ -85,11 +79,7 @@ class TestUnknownEntryFieldDetection:
             )
 
             report = validate_marketplace(root)
-            findings = [
-                r
-                for r in report.results
-                if r.level == "MAJOR" and "RC-MKPL-UNKNOWN-FIELD" in r.message
-            ]
+            findings = [r for r in report.results if r.level == "MAJOR" and "RC-MKPL-UNKNOWN-FIELD" in r.message]
             assert len(findings) == 2, (
                 f"Expected 2 RC-MKPL-UNKNOWN-FIELD findings, got: {[r.message for r in findings]}"
             )
@@ -124,12 +114,8 @@ class TestUnknownEntryFieldDetection:
             )
 
             report = validate_marketplace(root)
-            mkpl_unknown = [
-                r for r in report.results if "RC-MKPL-UNKNOWN-FIELD" in r.message
-            ]
-            assert not mkpl_unknown, (
-                f"Spec-conformant entry should not emit MKPL-UNKNOWN, got: {mkpl_unknown}"
-            )
+            mkpl_unknown = [r for r in report.results if "RC-MKPL-UNKNOWN-FIELD" in r.message]
+            assert not mkpl_unknown, f"Spec-conformant entry should not emit MKPL-UNKNOWN, got: {mkpl_unknown}"
 
 
 class TestUnknownSourceSubFieldDetection:
@@ -160,14 +146,8 @@ class TestUnknownSourceSubFieldDetection:
             )
 
             report = validate_marketplace(root)
-            findings = [
-                r
-                for r in report.results
-                if r.level == "MAJOR" and "RC-MKPL-UNKNOWN-SOURCE-FIELD" in r.message
-            ]
-            assert len(findings) >= 1, (
-                f"Expected MAJOR for unknown source sub-field `branch`, got: {report.results}"
-            )
+            findings = [r for r in report.results if r.level == "MAJOR" and "RC-MKPL-UNKNOWN-SOURCE-FIELD" in r.message]
+            assert len(findings) >= 1, f"Expected MAJOR for unknown source sub-field `branch`, got: {report.results}"
 
     def test_known_source_subfields_accepted(self):
         """github with `repo` and `ref` (both spec) emits no source-field findings."""
@@ -194,12 +174,8 @@ class TestUnknownSourceSubFieldDetection:
             )
 
             report = validate_marketplace(root)
-            findings = [
-                r for r in report.results if "RC-MKPL-UNKNOWN-SOURCE-FIELD" in r.message
-            ]
-            assert not findings, (
-                f"Spec-conformant source should not emit findings, got: {findings}"
-            )
+            findings = [r for r in report.results if "RC-MKPL-UNKNOWN-SOURCE-FIELD" in r.message]
+            assert not findings, f"Spec-conformant source should not emit findings, got: {findings}"
 
     def test_git_subdir_subdir_field_accepted(self):
         """git-subdir source supports `subdir` field per spec."""
@@ -226,12 +202,8 @@ class TestUnknownSourceSubFieldDetection:
             )
 
             report = validate_marketplace(root)
-            findings = [
-                r for r in report.results if "RC-MKPL-UNKNOWN-SOURCE-FIELD" in r.message
-            ]
-            assert not findings, (
-                f"git-subdir with subdir should be accepted, got: {findings}"
-            )
+            findings = [r for r in report.results if "RC-MKPL-UNKNOWN-SOURCE-FIELD" in r.message]
+            assert not findings, f"git-subdir with subdir should be accepted, got: {findings}"
 
 
 class TestLayoutBNestedEntriesStrict:
@@ -262,14 +234,8 @@ class TestLayoutBNestedEntriesStrict:
             )
 
             report = validate_marketplace(root)
-            findings = [
-                r
-                for r in report.results
-                if r.level == "MAJOR" and "RC-MKPL-UNKNOWN-FIELD" in r.message
-            ]
-            assert len(findings) >= 1, (
-                f"Expected MAJOR for unknown field on Layout B entry, got: {report.results}"
-            )
+            findings = [r for r in report.results if r.level == "MAJOR" and "RC-MKPL-UNKNOWN-FIELD" in r.message]
+            assert len(findings) >= 1, f"Expected MAJOR for unknown field on Layout B entry, got: {report.results}"
 
 
 class TestUnderscoreFieldsAcceptedWithoutWarning:
@@ -297,11 +263,5 @@ class TestUnderscoreFieldsAcceptedWithoutWarning:
             )
 
             report = validate_marketplace(root)
-            findings = [
-                r
-                for r in report.results
-                if "RC-MKPL-UNKNOWN-FIELD" in r.message and "_cpv" in r.message
-            ]
-            assert not findings, (
-                f"Private `_cpv_*` field should not emit MKPL-UNKNOWN, got: {findings}"
-            )
+            findings = [r for r in report.results if "RC-MKPL-UNKNOWN-FIELD" in r.message and "_cpv" in r.message]
+            assert not findings, f"Private `_cpv_*` field should not emit MKPL-UNKNOWN, got: {findings}"

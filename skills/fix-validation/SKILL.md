@@ -12,28 +12,20 @@ user-invocable: false
 
 ## Overview
 
-Central lookup for the fix agent. Maps each validation error to the reference file with fix instructions. All fix guides are in `references/`.
+Central error-to-fix lookup. Maps validation errors to fix guides in `references/`.
 
 ## Prerequisites
 
-- A validation report from a `/cpv-validate-*` command
+- Report from `/cpv-validate-*`
 - Access to `references/`
 
 ## Instructions
 
-1. Read the validation report for severity, message, file path.
-2. Pick the index: `plugin-error-index.md` for plugin-scope validators; `marketplace-error-index.md` for marketplace.
-3. Match the error to the fix reference file it points to.
-4. Open the fix guide; use its TOC to jump to the exact section.
+1. Read report → pick `plugin-error-index.md` or `marketplace-error-index.md`.
+2. Match error → jump to fix guide via TOC.
+3. For `category: architecture`, use `migrate-marketplace-architecture`.
 
-For `category: architecture`, defer to `migrate-marketplace-architecture`.
-
-Copy this checklist and track your progress:
-
-- [ ] Read validation report
-- [ ] Match errors to validators
-- [ ] Open fix guide and apply fixes
-- [ ] Re-run validation to confirm clean
+Checklist: read report → match → apply → re-validate.
 
 ## Output
 
@@ -41,7 +33,7 @@ Fix log → `$MAIN_ROOT/reports/plugin-fixer/<ts±tz>-<slug>.md`.
 
 ## Error Handling
 
-If no match is found, search by keywords. Report missing reference files as gaps.
+No match → keyword search; flag missing references.
 
 ## Examples
 
@@ -57,9 +49,9 @@ CPV mirrors CC's install-time schema. Contract: [schema-parity-contract.md](refe
 ## Resources
 
 - [Plugin Error Index](references/plugin-error-index.md)
-  > 1. validate_plugin.py · 2. validate_skill.py · 3. validate_skill_comprehensive.py · 4. validate_hook.py · 5. validate_agent.py · 6. validate_command.py · 7. validate_mcp.py · 8. validate_lsp.py · 9. validate_security.py · 10. validate_rules.py · 11. validate_xref.py · 12. validate_settings_marketplace.py · 13. validate_documentation.py · 14. validate_encoding.py · 15. validate_enterprise.py · 16. validate_scoring.py · 17. validate_cache.py · 18. validate_telemetry.py — plugin-shipped env-var hazards · 19. Semantic pillar — Channel MCP Server Source-Code Security
+  > 1. validate_plugin.py · 2. validate_skill.py · 3. validate_skill_comprehensive.py · 4. validate_hook.py · 5. validate_agent.py · 6. validate_command.py · 7. validate_mcp.py · 8. validate_lsp.py · 9. validate_security.py · 10. validate_rules.py · 11. validate_xref.py · 12. validate_settings_marketplace.py · 13. validate_documentation.py · 14. validate_encoding.py · 15. validate_enterprise.py · 16. validate_scoring.py · 17. validate_cache.py · 18. validate_telemetry.py — plugin-shipped env-var hazards · 19. Semantic pillar — Channel MCP Server Source-Code Security · 20. validate_marketplace cross-validation rules
 - [Marketplace Error Index](references/marketplace-error-index.md)
-  > 1. validate_marketplace.py · 2. validate_marketplace_pipeline.py · 3. Architecture / Layout Migration Warnings (7 signals)
+  > 1. validate_marketplace.py · 1.1 RC-MKPL-* upstream cross-validation codes (v2.81.0+) · 2. validate_marketplace_pipeline.py · 3. Architecture / Layout Migration Warnings (7 signals)
 - [Schema-Parity Contract](references/schema-parity-contract.md)
   > What CPV does · The contract · What this contract does NOT say · What IS covered · Validator-gap protocol · Historical incidents · Related
 - [Iterative Fix Loop](references/iterative-fix-loop.md)
@@ -75,7 +67,4 @@ CPV mirrors CC's install-time schema. Contract: [schema-parity-contract.md](refe
 - [Marketplace Upstream Drift Fixes](references/marketplace-upstream-drift.md)
   > 1. Name mismatch — RC-MKPL-NAME-MISMATCH · 2. Version drift — RC-MKPL-VERSION-DRIFT · 3. Unknown entry field — RC-MKPL-UNKNOWN-FIELD · 4. Unknown source sub-field — RC-MKPL-UNKNOWN-SOURCE-FIELD · 5. Source unreachable — RC-MKPL-UPSTREAM-UNREACHABLE · 6. Description / author / keywords drift — RC-MKPL-METADATA-DRIFT · 7. Per-batch bulk align — consolidated marketplace patch · 8. Opt-out flags — when drift IS intentional
 - Migration only: `canonical-pipeline-migration-checklist.md` (plugin root) — 82-check exit gate.
-
-## MCP Server Bundling
-
-Bundled MCP executables go in `servers/`, referenced as `${CLAUDE_PLUGIN_ROOT}/servers/<name>`. Unique names.
+- MCP bundling: executables go in `servers/`, referenced as `${CLAUDE_PLUGIN_ROOT}/servers/<name>` (unique names).
