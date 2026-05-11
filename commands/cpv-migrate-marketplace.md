@@ -3,9 +3,21 @@ name: cpv-migrate-marketplace
 description: Normalize an existing marketplace.json — convert source.url → source.repo + detect dead repos
 allowed-tools: Bash(uv:*)
 user-invocable: true
+skills:
+  - marketplace-authoring-contract
 ---
 
 # /cpv-migrate-marketplace
+
+## Marketplace Authoring Contract (MANDATORY READ)
+
+BEFORE drafting, modifying, or migrating ANY `marketplace.json`, read:
+`skills/marketplace-authoring-contract/SKILL.md` and ALL its references.
+
+Failure to apply the contract produces user-facing install failures —
+the doctor agent catches these after the fact but at high opus token
+cost. The user expects this agent to produce correct output on the
+FIRST try, not after N validator retries.
 
 Normalize a marketplace.json against the canonical CPV schema. Per the
 Phase 0 marketplace survey, real-world marketplaces have drift:
