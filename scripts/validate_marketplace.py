@@ -193,6 +193,135 @@ SOURCE_REQUIRED_FIELDS = {
     "directory": {"path"},  # Layout B: nested plugin inside marketplace repo
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# v2.81.0 (TRDD-c0ee9543, Phase A) — strict allowlist for marketplace entries.
+#
+# The pre-v2.81.0 validator emitted only INFO when an entry carried an unknown
+# top-level field (`scope`, `audience`, etc.) — but `claude plugin validate`
+# rejects them, so the user got "validation passed" then a confusing install
+# failure. The strict allowlist below promotes those findings to MAJOR with a
+# stable RC-MKPL-UNKNOWN-FIELD code so the fixer skill can auto-route them.
+#
+# The set mirrors OPTIONAL_PLUGIN_FIELDS plus REQUIRED_PLUGIN_FIELDS plus a
+# small extension list. The CPV extensions (`alwaysLoad`, `headersHelper`)
+# are documented in references/marketplace-error-index.md. Per-entry CPV
+# opt-out flags use a leading underscore (`_cpv_skip_upstream_check`) and
+# are accepted without warning — see `_validate_known_entry_fields` below.
+# ─────────────────────────────────────────────────────────────────────────────
+_KNOWN_MARKETPLACE_ENTRY_FIELDS: frozenset[str] = frozenset(
+    REQUIRED_PLUGIN_FIELDS | OPTIONAL_PLUGIN_FIELDS
+)
+
+# Source-type → allowed sub-fields. The check is keyed off the inner
+# `source.source` discriminator. Unknown sub-fields here emit MAJOR via
+# RC-MKPL-UNKNOWN-SOURCE-FIELD.
+#
+# `source` is included in every set because it is the discriminator itself.
+# `ref` is included in `github`/`git`/`git-subdir` because the spec allows
+# pinning to a ref/tag/sha. `subdir` is the canonical sub-field for
+# `git-subdir`; `path` is accepted as a one-release-compat alias because
+# pre-v2.81 docs used both names interchangeably.
+_KNOWN_SOURCE_FIELDS_BY_TYPE: dict[str, frozenset[str]] = {
+    "github": frozenset({"source", "repo", "ref"}),
+    "url": frozenset({"source", "url"}),
+    "npm": frozenset({"source", "package", "version"}),
+    "git": frozenset({"source", "url", "ref", "subdir"}),
+    "git-subdir": frozenset({"source", "url", "subdir", "ref", "path"}),
+    "directory": frozenset({"source", "path"}),
+    # "relative-path" is the bare string form ("./path") — never reached via
+    # a dict-shaped source — listed here so callers can reference the type.
+    "relative-path": frozenset({"source", "path"}),
+}
+
+
+def _validate_known_entry_fields(
+    plugin: dict[str, Any],
+    plugin_id: str,
+    json_path: str,
+) -> list[ValidationResult]:
+    """Phase A — strict allowlist for marketplace entry top-level fields.
+
+    Emits MAJOR per unknown field with code RC-MKPL-UNKNOWN-FIELD. Fields
+    starting with `_` (e.g. `_cpv_skip_upstream_check`) are CPV-private
+    opt-out flags and pass through without warning.
+    """
+    results: list[ValidationResult] = []
+    for field_name in sorted(plugin.keys()):
+        if field_name in _KNOWN_MARKETPLACE_ENTRY_FIELDS:
+            continue
+        if field_name.startswith("_"):
+            # CPV-private opt-out flag — accepted silently. The leading
+            # underscore signals "non-spec, intentional".
+            continue
+        results.append(
+            ValidationResult(
+                level="MAJOR",
+                category="plugin",
+                message=(
+                    f"[RC-MKPL-UNKNOWN-FIELD] entry '{plugin_id}' has unknown "
+                    f"top-level field '{field_name}'. Claude Code's marketplace "
+                    "spec does not define this field — it will be ignored at "
+                    "install time AND `claude plugin validate` rejects the entry. "
+                    "If the intent was to express install scope, move it to "
+                    "documentation; there is no marketplace-side scope override "
+                    "in the current spec."
+                ),
+                file=json_path,
+                suggestion=(
+                    f"Remove the '{field_name}' field from the marketplace entry. "
+                    "See marketplace-upstream-drift.md §3 for the bulk-fix recipe."
+                ),
+            )
+        )
+    return results
+
+
+def _validate_known_source_subfields(
+    plugin: dict[str, Any],
+    plugin_id: str,
+    json_path: str,
+) -> list[ValidationResult]:
+    """Phase A — strict allowlist for `source` sub-fields when source is a dict.
+
+    Emits MAJOR per unknown sub-field with code RC-MKPL-UNKNOWN-SOURCE-FIELD.
+    String-shorthand `source: "./path"` is unaffected (no sub-fields).
+    """
+    results: list[ValidationResult] = []
+    src = plugin.get("source")
+    if not isinstance(src, dict):
+        return results
+    src_type = src.get("source")
+    if not isinstance(src_type, str):
+        return results
+    allowed = _KNOWN_SOURCE_FIELDS_BY_TYPE.get(src_type)
+    if allowed is None:
+        # Unknown source type — already flagged by validate_plugin_source().
+        return results
+    for field_name in sorted(src.keys()):
+        if field_name in allowed:
+            continue
+        if field_name.startswith("_"):
+            continue
+        results.append(
+            ValidationResult(
+                level="MAJOR",
+                category="plugin",
+                message=(
+                    f"[RC-MKPL-UNKNOWN-SOURCE-FIELD] entry '{plugin_id}' "
+                    f"source (type={src_type!r}) has unknown sub-field "
+                    f"'{field_name}'. Allowed sub-fields for source type "
+                    f"'{src_type}': {sorted(allowed)}."
+                ),
+                file=json_path,
+                suggestion=(
+                    f"Remove the '{field_name}' sub-field, or move it to a "
+                    "valid location (e.g. `ref` to pin a git ref). See "
+                    "marketplace-upstream-drift.md §4 for the fix recipe."
+                ),
+            )
+        )
+    return results
+
 # Reserved marketplace names that cannot be used
 RESERVED_MARKETPLACE_NAMES = {
     "claude-code-marketplace",
@@ -545,18 +674,14 @@ def validate_plugin_entry(
     if repository is not None:
         results.extend(validate_repository_url(repository, plugin_id, json_path))
 
-    # Check for unknown fields
-    known_fields = REQUIRED_PLUGIN_FIELDS | OPTIONAL_PLUGIN_FIELDS
-    for field_name in plugin:
-        if field_name not in known_fields:
-            results.append(
-                ValidationResult(
-                    level="INFO",
-                    category="plugin",
-                    message=f"Plugin '{plugin_id}' has unknown field: {field_name}",
-                    file=json_path,
-                )
-            )
+    # v2.81.0 (TRDD-c0ee9543, Phase A) — strict allowlist enforcement.
+    # Replaces the prior INFO-level unknown-field branch: `claude plugin
+    # validate` REJECTS unknown fields (this is what bit the
+    # ai-maestro-visual-communicator-plugin install on 2026-05-11), so CPV
+    # must surface them at MAJOR severity with a stable RC-MKPL-* code that
+    # the fixer skill can route on.
+    results.extend(_validate_known_entry_fields(plugin, plugin_id, json_path))
+    results.extend(_validate_known_source_subfields(plugin, plugin_id, json_path))
 
     # Validate tags if present
     tags = plugin.get("tags")
