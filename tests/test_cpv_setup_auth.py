@@ -68,7 +68,9 @@ def _run_script(args: list[str], env: dict[str, str] | None = None) -> subproces
     """Invoke the script as a subprocess with a controlled env."""
     cmd = [sys.executable, str(SCRIPT_PATH), *args]
     full_env = {"PATH": os.environ.get("PATH", ""), **(env or {})}
-    return subprocess.run(cmd, capture_output=True, text=True, env=full_env, timeout=30)
+    # 90s: covers gh-CLI auth checks under concurrent xdist load + publish-pipeline pressure.
+    # 30s was too tight when publish.py runs Gate-2 pytest alongside Gates-3/4/5 (Phase C).
+    return subprocess.run(cmd, capture_output=True, text=True, env=full_env, timeout=90)
 
 
 # ── Module-level smoke tests ─────────────────────────────────────────────────
