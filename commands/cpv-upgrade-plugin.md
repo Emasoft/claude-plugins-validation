@@ -3,9 +3,21 @@ name: cpv-upgrade-plugin
 description: Upgrade an existing plugin to the current CPV pipeline standards (idempotent publish.py, cpv_lint_engine, cross-platform Python + pathlib, sanitized inputs, no bash scripts). Runs the 82-check Pre-completion verification matrix AND a real publish.py + gh run watch on the resulting tag — total time 10-15 minutes.
 argument-hint: <plugin-path> [--critical-only]
 user-invocable: true
+skills:
+  - marketplace-authoring-contract
 ---
 
 # /cpv-upgrade-plugin
+
+## Marketplace Authoring Contract (MANDATORY READ)
+
+BEFORE drafting, modifying, or migrating ANY `marketplace.json`, read:
+`skills/marketplace-authoring-contract/SKILL.md` and ALL its references.
+
+Failure to apply the contract produces user-facing install failures —
+the doctor agent catches these after the fact but at high opus token
+cost. The user expects this agent to produce correct output on the
+FIRST try, not after N validator retries.
 
 Upgrade an existing Claude Code plugin to the current pipeline standards
 documented in `skills/fix-validation/references/pipeline-migration.md`:
