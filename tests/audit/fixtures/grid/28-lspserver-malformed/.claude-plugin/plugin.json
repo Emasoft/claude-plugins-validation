@@ -1,0 +1,7 @@
+{
+  "name": "fixture-28",
+  "version": "1.0.0",
+  "lspServers": {
+    "broken-lsp": "this-should-be-an-object"
+  }
+}

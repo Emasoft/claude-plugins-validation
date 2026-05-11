@@ -1,0 +1,7 @@
+{
+  "name": "fixture-20",
+  "version": "1.0.0",
+  "agents": [
+    "./agents/c.md"
+  ]
+}

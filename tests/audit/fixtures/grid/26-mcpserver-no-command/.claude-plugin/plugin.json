@@ -1,0 +1,11 @@
+{
+  "name": "fixture-26",
+  "version": "1.0.0",
+  "mcpServers": {
+    "broken-srv": {
+      "args": [
+        "--no-command"
+      ]
+    }
+  }
+}

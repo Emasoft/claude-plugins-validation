@@ -1,0 +1,10 @@
+{
+  "name": "fixture-25",
+  "version": "1.0.0",
+  "mcpServers": {
+    "http-srv": {
+      "url": "https://api.example.com/mcp",
+      "type": "http"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "fixture-16",
+  "version": "1.0.0",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "type": "http",
+        "url": "https://example.com/hook",
+        "method": "POST"
+      }
+    ]
+  }
+}
