@@ -52,13 +52,14 @@ also no AskUserQuestion.
    │ 4  │ Create                        │ Scaffold plugins, marketplaces, skills, agents, commands, hooks, MCP servers             │
    │ 5  │ Manage                        │ List installed plugins, install / update, health-check, bump version                     │
    │ 6  │ Diagnose & Upgrade            │ Deep audit + upgrade existing plugin to current pipeline standards (recommended)         │
-   │ 7  │ GitHub setup                  │ Branch protection rules, link plugin to marketplace                                       │
-   │ 8  │ Deep semantic analysis        │ Opus A-F grading (expensive — confirms cost first)                                        │
-   │ 9  │ Help / About                  │ Category overview, command list, CPV version                                              │
+   │ 7  │ Doctor (deep diagnostic)      │ 22-option doctor menu: marketplace cross-check, install-resolver dry-run, scope mismatches│
+   │ 8  │ GitHub setup                  │ Branch protection rules, link plugin to marketplace                                       │
+   │ 9  │ Deep semantic analysis        │ Opus A-F grading (expensive — confirms cost first)                                        │
+   │ H  │ Help / About                  │ Category overview, command list, CPV version                                              │
    │ A  │ Ask the agent                 │ Let the agent suggest the best next action right now                                      │
    │ 0  │ Cancel / Exit                 │ Terminate without action                                                                  │
    └────┴───────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────┘
-   Type a number (or A to ask the agent) to choose:
+   Type a number (or H for help, A to ask the agent) to choose:
    ```
 
 2. **Wait** for the user's next message. Parse the leading integer (or the
@@ -67,12 +68,13 @@ also no AskUserQuestion.
 3. **On `0` at any depth** → reply EXACTLY: `Cancelled — no actions taken.`
    and stop. No bash, no edits, no reports.
 
-4. **On a category number (1-9)** → drill into the corresponding sub-menu by
-   printing its table from the skill's `skills/cpv-main-menu-skill/references/menu-tree.md` (§3.1 for Validate, §3.2 for
-   Validate from GitHub, §3.3 for Fix, §3.4 for Create, §3.5 for Manage,
-   §3.6 for Diagnose & Upgrade, §3.7 for GitHub setup, §3.8 for Semantic,
-   §3.9 for Help). Every sub-menu table MUST have a `9 — Back` row AND a
-   `0 — Cancel / Exit` row.
+4. **On a category number (1-9) or H** → drill into the corresponding sub-menu
+   by printing its table from the skill's `skills/cpv-main-menu-skill/references/menu-tree.md`
+   (§3.1 for Validate, §3.2 for Validate from GitHub, §3.3 for Fix, §3.4 for
+   Create, §3.5 for Manage, §3.6 for Diagnose & Upgrade, §3.7 for Doctor
+   deep diagnostic (TRDD-c0ee9543 Phase E), §3.8 for GitHub setup, §3.9
+   for Semantic, §3.10 for Help on letter `H`). Every sub-menu table MUST
+   have a `9 — Back` row AND a `0 — Cancel / Exit` row.
 
 5. **On a leaf number** → look up the leaf's recipe in the skill's `skills/cpv-main-menu-skill/references/menu-tree.md`:
    - **arg-prompts**: ask the user for any required arguments as plain text
