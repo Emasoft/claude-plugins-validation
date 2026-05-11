@@ -1,0 +1,21 @@
+{
+  "name": "fixture-15",
+  "version": "1.0.0",
+  "hooks": {
+    "SessionStart": [
+      {
+        "type": "mcp_tool",
+        "server": "demo-server",
+        "tool": "noop",
+        "input": {
+          "arg": "value"
+        }
+      }
+    ]
+  },
+  "mcpServers": {
+    "demo-server": {
+      "command": "/bin/true"
+    }
+  }
+}

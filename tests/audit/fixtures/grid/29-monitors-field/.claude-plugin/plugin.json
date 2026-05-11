@@ -1,0 +1,7 @@
+{
+  "name": "fixture-29",
+  "version": "1.0.0",
+  "monitors": [
+    "./monitors/example.json"
+  ]
+}

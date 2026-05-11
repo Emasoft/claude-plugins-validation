@@ -1,0 +1,12 @@
+{
+  "name": "fixture-27",
+  "version": "1.0.0",
+  "lspServers": {
+    "py-lsp": {
+      "command": "pylsp",
+      "languages": [
+        "python"
+      ]
+    }
+  }
+}
