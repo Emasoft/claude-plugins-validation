@@ -1746,6 +1746,122 @@ def validate_repository_url(
     return results
 
 
+def _cross_validate_upstream_for_entries(
+    plugins: list[dict[str, Any]],
+    marketplace_dir: Path,
+    json_path: str,
+) -> list[ValidationResult]:
+    """Phase B — fan-out plugin.json fetches across a ThreadPoolExecutor.
+
+    For each entry that has a fetchable source AND no opt-out flag, we
+    fetch the upstream plugin.json and diff fields. Each drift becomes a
+    typed ValidationResult.
+
+    Output is sorted by entry name (canonical alphabetical) regardless of
+    fetch completion order, so reports are deterministic across runs.
+    Reuses the v2.76.0 ThreadPoolExecutor pattern (max_workers=8).
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed  # noqa: PLC0415
+
+    from cpv_upstream_plugin_json import (  # noqa: PLC0415
+        cross_validate_enabled,
+        diff_marketplace_vs_upstream,
+        entry_skips_cross_check,
+        fetch_upstream_plugin_json,
+    )
+
+    # Whole-marketplace opt-out gates: env var + zero-byte sentinel.
+    if not cross_validate_enabled(marketplace_dir):
+        return []
+
+    # Build the work list — skip non-dict, skip per-entry opt-outs, skip
+    # entries with no name (already flagged elsewhere). Keyed by index so
+    # we can re-sort by name later.
+    fetch_targets: list[tuple[int, str, dict[str, Any]]] = []
+    for i, plugin in enumerate(plugins):
+        if not isinstance(plugin, dict):
+            continue
+        if entry_skips_cross_check(plugin):
+            continue
+        name = plugin.get("name")
+        if not isinstance(name, str):
+            continue
+        fetch_targets.append((i, name, plugin))
+
+    if not fetch_targets:
+        return []
+
+    # Collect (entry_name, upstream_or_None) tuples — parallelised.
+    upstream_by_name: dict[str, dict[str, Any] | None] = {}
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        future_to_name = {
+            pool.submit(
+                fetch_upstream_plugin_json, entry, marketplace_dir=marketplace_dir
+            ): name
+            for _, name, entry in fetch_targets
+        }
+        for future in as_completed(future_to_name):
+            name = future_to_name[future]
+            try:
+                upstream_by_name[name] = future.result()
+            except Exception:  # noqa: BLE001 — fetch is best-effort
+                upstream_by_name[name] = None
+
+    # Emit findings in stable name-sorted order for deterministic reports.
+    results: list[ValidationResult] = []
+    for _, name, entry in sorted(fetch_targets, key=lambda t: t[1]):
+        upstream = upstream_by_name.get(name)
+        if upstream is None:
+            # Unreachable — WARNING, not MAJOR. The other validators on
+            # this entry still apply (Phase A allowlist, source-format,
+            # etc.).
+            src = entry.get("source")
+            src_descr = (
+                src.get("source") if isinstance(src, dict) else "<inline>"
+            )
+            results.append(
+                ValidationResult(
+                    level="WARNING",
+                    category="plugin",
+                    message=(
+                        f"[RC-MKPL-UPSTREAM-UNREACHABLE] could not fetch "
+                        f"upstream plugin.json for entry '{name}' "
+                        f"(source type {src_descr!r}); cross-validation "
+                        "skipped. This is expected on air-gapped CI / "
+                        "private repos / network flakes. See "
+                        "marketplace-upstream-drift.md §5 for the "
+                        "permanent-silence opt-outs."
+                    ),
+                    file=json_path,
+                    suggestion=(
+                        "If this entry is intentionally unreachable, "
+                        "add `\"_cpv_skip_upstream_check\": true` to "
+                        "silence the warning."
+                    ),
+                )
+            )
+            continue
+        drifts = diff_marketplace_vs_upstream(entry, upstream)
+        for drift in drifts:
+            level: Level = "WARNING"
+            if drift.severity == "MAJOR":
+                level = "MAJOR"
+            elif drift.severity == "MINOR":
+                level = "MINOR"
+            elif drift.severity == "NIT":
+                level = "NIT"
+            results.append(
+                ValidationResult(
+                    level=level,
+                    category="plugin",
+                    message=drift.message,
+                    file=json_path,
+                    suggestion=drift.suggestion,
+                )
+            )
+    return results
+
+
 def validate_plugins_array(
     plugins: Any,
     marketplace_dir: Path,
@@ -1812,6 +1928,12 @@ def validate_plugins_array(
 
         # Validate the plugin entry
         results.extend(validate_plugin_entry(plugin, i, marketplace_dir, json_path))
+
+    # v2.81.0 (TRDD-c0ee9543, Phase B) — fan-out upstream plugin.json
+    # cross-validation across a ThreadPoolExecutor. Parallelised because
+    # Layout B marketplaces can have 30+ entries; serialising would add
+    # ~3s × N to every validate run on a flaky link.
+    results.extend(_cross_validate_upstream_for_entries(plugins, marketplace_dir, json_path))
 
     return plugin_names, results
 
@@ -3161,6 +3283,23 @@ def format_report(report: ValidationReport, verbose: bool = False) -> str:
         lines.append("RESULT: PASSED with warnings")
     else:
         lines.append("RESULT: PASSED")
+
+    # v2.81.0 (TRDD-c0ee9543, Phase E / GAP-15) — when MKPL-* findings
+    # exist, point the user at /cpv-doctor for deeper diagnosis. Catches
+    # the install-failure scenario before it becomes user-facing.
+    has_mkpl_finding = any(
+        "RC-MKPL-" in (getattr(r, "message", "") or "") for r in report.results
+    )
+    if has_mkpl_finding:
+        lines.append("")
+        lines.append(
+            "HINT: marketplace cross-check findings detected. Run "
+            "`/cpv-doctor <marketplace-path>` (main-menu row 7) to "
+            "surface install-resolver-blocking drift (name/version/"
+            "unknown-field) BEFORE the next `claude plugin install` "
+            "fails. Fix recipes: "
+            "skills/fix-validation/references/marketplace-upstream-drift.md"
+        )
     lines.append("=" * 60)
 
     return "\n".join(lines)

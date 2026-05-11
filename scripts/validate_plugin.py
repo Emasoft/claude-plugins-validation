@@ -968,6 +968,25 @@ def validate_layout_c_consistency(
             ".claude-plugin/marketplace.json",
         )
 
+    # v2.81.0 (TRDD-c0ee9543, Phase B / GAP-13) — also use the shared
+    # diff helper so description / author / keywords / homepage drift
+    # between the two manifests surfaces. The helper emits NIT for
+    # those fields (cosmetic), MAJOR for name (already covered above
+    # by the self-entry-presence check), MINOR for version (already
+    # covered above by Rule 3 — the helper will not double-report
+    # because we short-circuit via opt-out logic below).
+    try:
+        from cpv_upstream_plugin_json import diff_marketplace_vs_upstream  # noqa: PLC0415
+    except ImportError:
+        return  # Module not available — pre-Phase-B install; nothing to add.
+
+    # Don't double-emit NAME-MISMATCH or VERSION-DRIFT — those map to
+    # the rules above. We only forward metadata drift findings.
+    drifts = diff_marketplace_vs_upstream(self_entry, plugin_obj if isinstance(plugin_obj, dict) else {})
+    for drift in drifts:
+        if drift.code == "RC-MKPL-METADATA-DRIFT":
+            report.nit(drift.message, ".claude-plugin/marketplace.json")
+
 
 def validate_manifest(
     plugin_root: Path,
