@@ -2046,21 +2046,62 @@ def validate_command_hook(
     SessionStart venv-setup hook elsewhere in the same file. Defaults to
     None for backwards compatibility with callers that only have a single
     hook in hand.
+
+    v2.1.139 adds an exec-form alternative ``args: string[]`` that spawns
+    the command directly without a shell, so path placeholders never need
+    quoting. ``command`` and ``args`` are mutually exclusive — when both
+    are present we emit MAJOR (CC docs don't define a precedence). When
+    ``args`` is used we synthesize an equivalent command string for the
+    existing portability checks (the same script/path/traversal patterns
+    are runtime hazards in either form).
     """
-    if "command" not in hook:
-        report.critical("Command hook missing required 'command' field")
+    has_command = "command" in hook
+    has_args = "args" in hook
+
+    if has_command and has_args:
+        report.major(
+            "Command hook has both 'command' and 'args' — these are mutually exclusive "
+            "(v2.1.139: 'args' is the exec form; CC docs don't define precedence). "
+            "Remove whichever one is not needed."
+        )
+        # Continue with `command` for downstream checks — it was the original surface.
+
+    if not has_command and not has_args:
+        report.critical(
+            "Command hook missing required 'command' or 'args' field "
+            "(v2.1.139 adds 'args: string[]' as an exec-form alternative to 'command')"
+        )
         return False
 
-    command = hook["command"]
-    if not isinstance(command, str):
-        report.critical(f"'command' must be a string, got {type(command).__name__}")
-        return False
-
-    if not command.strip():
-        report.critical("'command' cannot be empty")
-        return False
-
-    report.passed(f"Command: {command[:60]}...")
+    if has_command:
+        command = hook["command"]
+        if not isinstance(command, str):
+            report.critical(f"'command' must be a string, got {type(command).__name__}")
+            return False
+        if not command.strip():
+            report.critical("'command' cannot be empty")
+            return False
+        report.passed(f"Command: {command[:60]}...")
+    else:
+        # args-only form (v2.1.139 exec form). Validate shape, then synthesize
+        # an equivalent command string for the existing portability checks.
+        args_val = hook["args"]
+        if not isinstance(args_val, list):
+            report.critical(f"'args' must be a list of strings (v2.1.139 exec form), got {type(args_val).__name__}")
+            return False
+        if not args_val:
+            report.critical("'args' cannot be an empty list — exec form needs at least argv[0]")
+            return False
+        for i, element in enumerate(args_val):
+            if not isinstance(element, str):
+                report.critical(f"'args[{i}]' must be a string, got {type(element).__name__} (v2.1.139 args: string[])")
+                return False
+        # Synthesize a space-joined string so the existing checks (absolute path,
+        # interpreter prefix, traversal, env-var presence, etc.) apply identically.
+        # We do NOT shell-quote because the goal is pattern-matching against the
+        # original tokens, not safe re-execution.
+        command = " ".join(args_val)
+        report.passed(f"Args (exec form, {len(args_val)} token(s)): {command[:60]}...")
 
     # Check for hardcoded absolute paths — plugins must use env vars for portability
     cmd_first_token = command.strip().split()[0] if command.strip() else ""
@@ -2669,6 +2710,27 @@ def validate_single_hook(
             report.major(f"'once' must be a boolean, got {type(once).__name__}")
         else:
             report.info("'once' field detected (only works in skill-defined hooks)")
+
+    # Validate 'continueOnBlock' field — v2.1.139, PostToolUse-only.
+    # Per the changelog: "set to true to feed the hook's rejection reason
+    # back to Claude and continue the turn". PostToolUseFailure shares the
+    # same event lineage (fires INSTEAD of PostToolUse on tool error) so
+    # the field is honoured there too.
+    if "continueOnBlock" in hook:
+        cob_val = hook["continueOnBlock"]
+        if not isinstance(cob_val, bool):
+            report.critical(
+                f"'continueOnBlock' must be a boolean, got {type(cob_val).__name__} "
+                "(v2.1.139: PostToolUse-only config that feeds the rejection reason "
+                "back to Claude and continues the turn)"
+            )
+        elif event_name not in ("PostToolUse", "PostToolUseFailure"):
+            report.minor(
+                f"'continueOnBlock' is only meaningful on 'PostToolUse' / "
+                f"'PostToolUseFailure' events (v2.1.139). It is silently ignored "
+                f"on '{event_name}' — remove the field or move the hook to a "
+                "PostToolUse event."
+            )
 
     # Validate 'async' field — only valid on command hooks
     if "async" in hook:
