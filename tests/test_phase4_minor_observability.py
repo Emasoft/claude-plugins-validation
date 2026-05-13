@@ -230,15 +230,25 @@ class TestRC104Hold:
 
 
 class TestCheckPhase4All:
-    # TRDD-fa70f9b8 — re-enabled 2026-05-10. The conftest autouse fixture
-    # `_trdd_fa70f9b8_reset_global_state` now resets the suspected polluters
-    # (`_CPV_SELF_SCAN_*`, `_CLASSIFIER_*` module globals + the two
-    # `lru_cache`d helpers in cpv_validation_common) BEFORE every test, so
-    # this test no longer sees the empty `report.results` symptom caused by
-    # leaked self-scan state from a previous test. See
-    # tests/test_trdd_fa70f9b8_isolation.py for the regression suite that
-    # proves the fix.
+    # TRDD-fa70f9b8 — re-enabled 2026-05-10, hardened 2026-05-13.
+    # The conftest autouse fixture `_trdd_fa70f9b8_reset_global_state` resets
+    # the known polluters (`_CPV_SELF_SCAN_*`, `_CLASSIFIER_*` module globals
+    # + the two `lru_cache`d helpers in cpv_validation_common) BEFORE every
+    # test. Locally that's enough. On CI under `-n auto --dist=worksteal`
+    # we still hit empty `report.results` ~1/5 runs (TRDD-3199124d-Wave2
+    # incident). The test now ALSO performs an explicit, redundant reset
+    # immediately before calling `check_phase4_all`, and emits a
+    # diagnostic dump of `report.results` on failure so future debugging
+    # is one log line away.
     def test_phase4_fires_on_real_file(self, tmp_path: Path) -> None:
+        # Belt-and-suspenders reset: re-call the setters in case anything
+        # between the autouse fixture and this line touched module state
+        # (parametrized prior-class fixtures, xdist worker setup, etc.).
+        import validate_security as vs  # noqa: PLC0415
+
+        vs._set_cpv_self_scan(False, plugin_root=None, notice_report=None)
+        vs._set_classifier_active(False)
+
         plugin = _make_plugin(
             tmp_path,
             {
@@ -247,7 +257,25 @@ class TestCheckPhase4All:
         )
         report = ValidationReport()
         check_phase4_all(plugin, report)
-        assert any("RC-88" in r.message for r in report.results)
+
+        # On failure, dump the full state so CI logs let us diagnose what
+        # leaked. A bare `assert False` would just say "no RC-88 message".
+        matched_rc88 = any("RC-88" in r.message for r in report.results)
+        if not matched_rc88:
+            diag = {
+                "result_count": len(report.results),
+                "results": [(r.level, r.message[:120]) for r in report.results],
+                "self_scan_active": vs._CPV_SELF_SCAN_ACTIVE,
+                "self_scan_root": str(vs._CPV_SELF_PLUGIN_ROOT),
+                "self_scan_manifest_size": len(vs._CPV_SELF_HASH_MANIFEST),
+                "classifier_active": vs._CLASSIFIER_ACTIVE,
+                "plugin_dir_exists": plugin.is_dir(),
+                "cfg_py_exists": (plugin / "src" / "cfg.py").is_file(),
+                "cfg_py_content": (plugin / "src" / "cfg.py").read_text(encoding="utf-8")
+                if (plugin / "src" / "cfg.py").is_file()
+                else "<file missing>",
+            }
+            pytest.fail(f"RC-88 not in report.results — diagnostic dump: {diag}")
 
     def test_clean_plugin_no_phase4_findings(self, tmp_path: Path) -> None:
         plugin = _make_plugin(

@@ -250,6 +250,24 @@ def validate_agent_task_refs(
 # =============================================================================
 
 
+def _normalize_subagent_type(name: str) -> str:
+    """Normalize a subagent_type reference per CC v2.1.140 matching rules.
+
+    CC v2.1.140 accepts case- and separator-insensitive values:
+    ``"Code Reviewer"`` resolves to ``code-reviewer``. We mirror the same
+    rule so CPV doesn't flag legal-but-non-canonical spellings as MAJOR.
+
+    Rules:
+    * Lowercase the string
+    * Replace whitespace and underscores with hyphens
+    * Collapse consecutive hyphens
+    """
+    s = name.strip().lower()
+    s = re.sub(r"[\s_]+", "-", s)
+    s = re.sub(r"-+", "-", s)
+    return s
+
+
 def validate_subagent_type_matching(
     plugin_root: Path,
     report: CrossReferenceValidationReport,
@@ -258,13 +276,20 @@ def validate_subagent_type_matching(
     """Validate subagent_type values match actual agent filenames.
 
     Scans all markdown files for subagent_type references and verifies
-    that agents/NAME.md exists for each referenced NAME.
+    that agents/NAME.md exists for each referenced NAME. Per CC v2.1.140
+    the resolver accepts case- and separator-insensitive values, so CPV
+    now ALSO accepts those (with a NIT recommending the canonical form)
+    instead of emitting MAJOR.
 
     Args:
         plugin_root: Root path of the plugin
         report: Validation report to add results to
         available_agents: Set of available agent names
     """
+    # Pre-compute a normalized-form → canonical-form lookup so we can
+    # accept the same spellings CC v2.1.140 resolves at runtime.
+    normalized_to_canonical = {_normalize_subagent_type(a): a for a in available_agents}
+
     # Scan all .md files in the plugin
     for md_file in plugin_root.rglob("*.md"):
         # Skip hidden directories and cache directories
@@ -280,8 +305,22 @@ def validate_subagent_type_matching(
         matches = SUBAGENT_TYPE_PATTERN.findall(content)
 
         for ref_agent in matches:
-            # Check against both the known agent set and filesystem for completeness
-            if ref_agent not in available_agents:
+            if ref_agent in available_agents:
+                # Canonical spelling — silent pass.
+                continue
+            normalized = _normalize_subagent_type(ref_agent)
+            canonical = normalized_to_canonical.get(normalized)
+            if canonical is not None:
+                # v2.1.140 case/separator-insensitive match. The reference
+                # works at runtime but isn't the canonical kebab-case form.
+                report.nit(
+                    f"subagent_type '{ref_agent}' resolves to "
+                    f"agents/{canonical}.md via the v2.1.140 case/separator-"
+                    "insensitive matcher. Use the canonical kebab-case form "
+                    f"'{canonical}' for clarity.",
+                    rel_path,
+                )
+            else:
                 report.major(
                     f"subagent_type '{ref_agent}' has no matching agents/{ref_agent}.md",
                     rel_path,
