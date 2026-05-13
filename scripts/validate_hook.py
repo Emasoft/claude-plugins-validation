@@ -239,18 +239,28 @@ POSTTOOLUSE_HOOK_SPECIFIC_OUTPUT_FIELDS = {
     "additionalContext",  # echoed from PreToolUse retention pattern
 }
 
+# Hook *input* fields delivered to EVERY hook's stdin, regardless of event.
+# Authoritative for hook scripts that parse `JSON.parse(stdin)`.
+# Per hooks-reference.md every hook receives at least these five fields.
+# v2.1.133 added the nested `effort` object (with `level` sub-key) so the
+# hook can read `effort.level` to know the active reasoning tier.
+GENERIC_HOOK_INPUT_FIELDS = {
+    "hook_event_name",  # canonical event-name field (lowercase per stdin spec)
+    "session_id",
+    "transcript_path",
+    "cwd",
+    "effort",  # v2.1.133 — nested object with `level` sub-key (low/medium/high/xhigh/max)
+}
+
 # PostToolUse / PostToolUseFailure hook *input* fields (stdin-side).
 # Authoritative for hook scripts that parse `JSON.parse(stdin)`.
-POSTTOOLUSE_HOOK_INPUT_FIELDS = {
-    "hook_event_name",  # canonical event-name field (lowercase per stdin spec)
+# Composes the generic baseline with PostToolUse-specific tool-level keys.
+POSTTOOLUSE_HOOK_INPUT_FIELDS = GENERIC_HOOK_INPUT_FIELDS | {
     "tool_name",
     "tool_input",
     "tool_response",  # PostToolUse only
     "tool_error",  # PostToolUseFailure only
     "duration_ms",  # v2.1.119 — tool execution time
-    "session_id",
-    "transcript_path",
-    "cwd",
 }
 
 # Permission-update-entry type enum (hooks.md L1115-1141, PermissionRequest
