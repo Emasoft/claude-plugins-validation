@@ -262,6 +262,36 @@ class TestCheckPhase4All:
         # leaked. A bare `assert False` would just say "no RC-88 message".
         matched_rc88 = any("RC-88" in r.message for r in report.results)
         if not matched_rc88:
+            # Probe the iterator + skip logic to pinpoint the empty-results cause.
+            try:
+                yielded = [(rel_path, len(content)) for _fp, rel_path, content in vs._iter_scannable_files(plugin)]
+            except Exception as e:  # noqa: BLE001
+                yielded = f"_iter_scannable_files raised: {e!r}"
+            try:
+                from cpv_validation_common import get_gitignore_filter  # noqa: PLC0415
+
+                gi = get_gitignore_filter(plugin)
+                walk_files = []
+                for root, _dirs, files in gi.walk(plugin):
+                    for f in files:
+                        walk_files.append(str(Path(root, f).relative_to(plugin)))
+            except Exception as e:  # noqa: BLE001
+                walk_files = f"gi.walk raised: {e!r}"
+            # Also probe each per-file skip predicate explicitly.
+            cfg_py = plugin / "src" / "cfg.py"
+            rel_cfg = "src/cfg.py"
+            try:
+                skip_result = vs.cpv_self_scan_skip(rel_cfg)
+            except Exception as e:  # noqa: BLE001
+                skip_result = f"raised: {e!r}"
+            try:
+                lockfile_result = vs.is_lockfile(rel_cfg)
+            except Exception as e:  # noqa: BLE001
+                lockfile_result = f"raised: {e!r}"
+            try:
+                binary_result = vs.is_binary_file(cfg_py) if cfg_py.is_file() else "no file"
+            except Exception as e:  # noqa: BLE001
+                binary_result = f"raised: {e!r}"
             diag = {
                 "result_count": len(report.results),
                 "results": [(r.level, r.message[:120]) for r in report.results],
@@ -269,11 +299,15 @@ class TestCheckPhase4All:
                 "self_scan_root": str(vs._CPV_SELF_PLUGIN_ROOT),
                 "self_scan_manifest_size": len(vs._CPV_SELF_HASH_MANIFEST),
                 "classifier_active": vs._CLASSIFIER_ACTIVE,
+                "plugin_dir": str(plugin),
                 "plugin_dir_exists": plugin.is_dir(),
-                "cfg_py_exists": (plugin / "src" / "cfg.py").is_file(),
-                "cfg_py_content": (plugin / "src" / "cfg.py").read_text(encoding="utf-8")
-                if (plugin / "src" / "cfg.py").is_file()
-                else "<file missing>",
+                "cfg_py_exists": cfg_py.is_file(),
+                "cfg_py_content": cfg_py.read_text(encoding="utf-8") if cfg_py.is_file() else "<file missing>",
+                "iter_scannable_yielded": yielded,
+                "gi_walk_files": walk_files,
+                "skip_cfg_py": skip_result,
+                "lockfile_cfg_py": lockfile_result,
+                "binary_cfg_py": binary_result,
             }
             pytest.fail(f"RC-88 not in report.results — diagnostic dump: {diag}")
 
