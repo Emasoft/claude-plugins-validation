@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import stat
 from typing import TYPE_CHECKING
 
@@ -784,6 +785,108 @@ def move_legacy_pipeline_scripts(plugin_path: Path, dry_run: bool = False) -> li
     return moved
 
 
+_NOTIFY_MARKETPLACE_REL = ".github/workflows/notify-marketplace.yml"
+
+# Issue #23: regex sources for detecting pre-existing values inside the
+# plugin's notify-marketplace.yml. The MARKETPLACE_OWNER / MARKETPLACE_REPO
+# patterns mirror the parser already in validate_plugin.py:2040 so the
+# canonical regex stays in one place semantically. Quotes are optional —
+# the field is YAML-quoted in canonical templates but plain in some forks.
+_NOTIFY_OWNER_RE = re.compile(r"^\s*MARKETPLACE_OWNER:\s*['\"]?([^'\"\s]+)['\"]?\s*$", re.MULTILINE)
+_NOTIFY_REPO_RE = re.compile(r"^\s*MARKETPLACE_REPO:\s*['\"]?([^'\"\s]+)['\"]?\s*$", re.MULTILINE)
+# Match `secrets.NAME` references; we pick the FIRST hit because the file
+# only ever references one PAT secret. The regex requires UPPER_SNAKE_CASE
+# to filter out non-secret identifiers.
+_NOTIFY_SECRET_RE = re.compile(r"secrets\.([A-Z][A-Z0-9_]*)")
+
+# Placeholder values the canonical template emits when no real values are
+# supplied. Detecting these prevents the migration from accidentally
+# "preserving" the placeholder it just clobbered the real value with on a
+# prior buggy run.
+_NOTIFY_PLACEHOLDER_REPO = "my-plugins-marketplace"
+_NOTIFY_PLACEHOLDER_OWNER = ""  # canonical template emits MARKETPLACE_OWNER: '<empty>' when github_owner is unset
+
+
+def _detect_existing_notify_marketplace(plugin_path: Path) -> dict[str, str | None]:
+    """Issue #23: extract pre-existing values from notify-marketplace.yml.
+
+    Returns a dict ``{"owner": ..., "repo": ..., "secret_name": ...}`` with
+    each entry set to ``None`` when not found OR when the value matches the
+    canonical placeholder (so a re-migration of a previously-clobbered file
+    doesn't keep the placeholder).
+    """
+    yml_path = plugin_path / _NOTIFY_MARKETPLACE_REL
+    out: dict[str, str | None] = {"owner": None, "repo": None, "secret_name": None}
+    if not yml_path.is_file():
+        return out
+    try:
+        content = yml_path.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        return out
+
+    owner_match = _NOTIFY_OWNER_RE.search(content)
+    if owner_match:
+        owner_val = owner_match.group(1).strip()
+        if owner_val and owner_val != _NOTIFY_PLACEHOLDER_OWNER:
+            out["owner"] = owner_val
+
+    repo_match = _NOTIFY_REPO_RE.search(content)
+    if repo_match:
+        repo_val = repo_match.group(1).strip()
+        if repo_val and repo_val != _NOTIFY_PLACEHOLDER_REPO:
+            out["repo"] = repo_val
+
+    secret_match = _NOTIFY_SECRET_RE.search(content)
+    if secret_match:
+        out["secret_name"] = secret_match.group(1)
+
+    return out
+
+
+def _apply_notify_marketplace_overrides(
+    params: PluginParams,
+    plugin_path: Path,
+    cli_marketplace: str | None,
+) -> dict[str, tuple[str | None, str | None]]:
+    """Issue #23: populate marketplace_owner / marketplace_secret_name on params.
+
+    Precedence: CLI ``--marketplace`` flag > existing-YAML detection > defaults.
+    Returns a dict mapping field name → (old_value, new_value) for every
+    field that changed, so the caller can print a [migration] note.
+    """
+    changes: dict[str, tuple[str | None, str | None]] = {}
+    detected = _detect_existing_notify_marketplace(plugin_path)
+
+    # 1. CLI --marketplace=owner/repo wins for owner+repo (explicit user intent).
+    cli_owner: str | None = None
+    cli_repo: str | None = None
+    if cli_marketplace and "/" in cli_marketplace:
+        cli_owner, cli_repo = cli_marketplace.split("/", 1)
+
+    # MARKETPLACE_OWNER resolution
+    target_owner = cli_owner or detected["owner"]
+    if target_owner and target_owner != params.marketplace_owner:
+        changes["marketplace_owner"] = (params.marketplace_owner or None, target_owner)
+        params.marketplace_owner = target_owner
+
+    # MARKETPLACE_REPO resolution
+    target_repo = cli_repo or detected["repo"]
+    if target_repo and target_repo != params.marketplace:
+        changes["marketplace"] = (params.marketplace or None, target_repo)
+        params.marketplace = target_repo
+
+    # Secret name — never overridden by CLI (no flag exists yet), only by detection.
+    target_secret = detected["secret_name"]
+    if target_secret and target_secret != params.marketplace_secret_name:
+        changes["marketplace_secret_name"] = (
+            params.marketplace_secret_name,
+            target_secret,
+        )
+        params.marketplace_secret_name = target_secret
+
+    return changes
+
+
 def fix_missing_files(
     plugin_path: Path,
     results: list[AuditItem],
@@ -838,6 +941,46 @@ def fix_missing_files(
         return []
 
     params = _params_from_manifest(manifest)
+
+    # Issue #23 (v2.85.0): before generating notify-marketplace.yml, detect
+    # values from the pre-existing file (if any) and let them override the
+    # PluginParams defaults. Without this, --force-templates silently
+    # clobbers a real MARKETPLACE_REPO with the literal placeholder and
+    # rewrites the secret name to MARKETPLACE_PAT even when the repo's
+    # configured secret is e.g. MARKETPLACE_DISPATCH_TOKEN.
+    notify_changes: dict[str, tuple[str | None, str | None]] = {}
+    will_emit_notify = _NOTIFY_MARKETPLACE_REL in missing_files or _NOTIFY_MARKETPLACE_REL in force_overwrite
+    if will_emit_notify:
+        notify_changes = _apply_notify_marketplace_overrides(params, plugin_path, marketplace)
+        # Refuse-to-emit-placeholder guard: when --force-templates is on AND
+        # an existing notify-marketplace.yml is being overwritten AND we
+        # still have no real marketplace name (no CLI flag, nothing
+        # detectable in the pre-existing YAML), refuse to ship the literal
+        # placeholder. The caller's working YAML may have used a different
+        # template version that doesn't match our regex; making them
+        # supply --marketplace=owner/repo explicitly is safer than
+        # silently breaking their notification chain.
+        existing_yml = plugin_path / _NOTIFY_MARKETPLACE_REL
+        if _NOTIFY_MARKETPLACE_REL in force_overwrite and existing_yml.is_file() and not params.marketplace:
+            print(
+                f"  {RED}REFUSED:{NC} cannot regenerate {_NOTIFY_MARKETPLACE_REL} — no marketplace "
+                f"name detected in the existing file and no --marketplace=owner/repo flag was "
+                f"passed. Emitting the placeholder '{_NOTIFY_PLACEHOLDER_REPO}' would silently "
+                f"break the plugin's marketplace dispatch chain (issue #23). Re-run with "
+                f"--marketplace=<owner>/<repo> to override, or check the existing file's "
+                f"MARKETPLACE_REPO line is parseable."
+            )
+            # Drop notify-marketplace.yml from the work-set so the rest of
+            # the migration proceeds. Other files still regenerate.
+            force_overwrite.discard(_NOTIFY_MARKETPLACE_REL)
+            missing_files.discard(_NOTIFY_MARKETPLACE_REL)
+        elif notify_changes:
+            # Surface the changes so the user notices when --force-templates
+            # would alter a real value (e.g. secret-name rotation, fork move).
+            print(f"  {CYAN}[migration]{NC} notify-marketplace.yml derived from existing file:")
+            for field_name, (old, new) in notify_changes.items():
+                if old != new:
+                    print(f"    {DIM}{field_name}:{NC} {old!r} → {new!r}")
 
     # Import generator functions from generate_plugin_repo
     gen_module = importlib.import_module("generate_plugin_repo")
