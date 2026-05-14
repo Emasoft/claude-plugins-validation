@@ -373,6 +373,13 @@ class PluginParams:
     language: str = "python"  # One of VALID_LANGUAGES
     self_marketplace: bool = False  # Layout C: emit .claude-plugin/marketplace.json with self-entry
     strip_dev: bool = True  # TRDD-793ac32a: emit cpv.strip block in plugin.json (default ON)
+    # Issue #23 (v2.85.0): per-plugin override fields for the marketplace
+    # notification workflow. When empty, gen_notify_marketplace_yml falls
+    # back to github_owner / "MARKETPLACE_PAT". Populated by the migration
+    # path so an existing notify-marketplace.yml is regenerated WITHOUT
+    # clobbering a real marketplace name and a custom secret name.
+    marketplace_owner: str = ""  # Owner segment for MARKETPLACE_OWNER (when ≠ plugin owner)
+    marketplace_secret_name: str = "MARKETPLACE_PAT"  # Name of the dispatch-PAT secret
 
     @property
     def repo_name(self) -> str:
@@ -3162,11 +3169,21 @@ def gen_markdownlint_json(p: PluginParams) -> str:
 
 
 def gen_notify_marketplace_yml(p: PluginParams) -> str:
-    """Generate .github/workflows/notify-marketplace.yml — marketplace notification."""
-    marketplace_owner = p.github_owner
+    """Generate .github/workflows/notify-marketplace.yml — marketplace notification.
+
+    Issue #23 (v2.85.0): when ``p.marketplace_owner`` is set (e.g. detected
+    from an existing notify-marketplace.yml during a ``--force-templates``
+    migration) it overrides ``p.github_owner`` so a plugin whose marketplace
+    lives under a different owner doesn't have its OWNER overwritten.
+    Similarly, ``p.marketplace_secret_name`` overrides the historical
+    hardcoded ``MARKETPLACE_PAT`` so plugins with a custom secret name
+    (e.g. ``MARKETPLACE_DISPATCH_TOKEN``) don't break on regeneration.
+    """
+    marketplace_owner = p.marketplace_owner if p.marketplace_owner else p.github_owner
     marketplace_repo = p.marketplace if p.marketplace else "my-plugins-marketplace"
+    secret_name = p.marketplace_secret_name if p.marketplace_secret_name else "MARKETPLACE_PAT"
     return f"""# Notify marketplace repo when this plugin is updated
-# Requires MARKETPLACE_PAT secret (Personal Access Token with repo scope)
+# Requires {secret_name} secret (Personal Access Token with repo scope)
 
 name: Notify Marketplace
 
@@ -3198,7 +3215,7 @@ jobs:
       - name: Trigger marketplace update
         uses: peter-evans/repository-dispatch@v4
         with:
-          token: ${{{{ secrets.MARKETPLACE_PAT }}}}
+          token: ${{{{ secrets.{secret_name} }}}}
           repository: ${{{{ env.MARKETPLACE_OWNER }}}}/${{{{ env.MARKETPLACE_REPO }}}}
           event-type: plugin-updated
           client-payload: |
