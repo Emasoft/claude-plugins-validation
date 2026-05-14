@@ -86,12 +86,12 @@ from the default — making any silent rotation visible to the operator.
 
 ## Files changed
 
-- `scripts/generate_plugin_repo.py` — 2 new PluginParams fields, generator
+* `scripts/generate_plugin_repo.py` — 2 new PluginParams fields, generator
   reads them.
-- `scripts/standardize_plugin.py` — `_detect_existing_notify_marketplace`,
+* `scripts/standardize_plugin.py` — `_detect_existing_notify_marketplace`,
   `_apply_notify_marketplace_overrides`, hook into `fix_missing_files`
   before the template-overwrite loop, refusal guard + `[migration]` echo.
-- `tests/test_issue_23_force_templates_marketplace.py` — NEW, 17 tests
+* `tests/test_issue_23_force_templates_marketplace.py` — NEW, 17 tests
   covering detector quoting forms, placeholder filtering, generator
   output, precedence, end-to-end migration, refusal path, fresh-scaffold
   backward compat.
@@ -117,12 +117,12 @@ CPV_SKIP_GITHUB_INTEGRITY=1 uv run python scripts/validate_plugin.py . --strict
 
 ## Deferred / explicitly not implemented
 
-- **`known_marketplaces.json` fallback** — issue #23 mentions it as one
+* **`known_marketplaces.json` fallback** — issue #23 mentions it as one
   source. The file is keyed on marketplace name, not plugin name, so
   resolving "which marketplace hosts this plugin" requires loading every
   marketplace.json and scanning its plugin list. Detection of the
   existing YAML covers the actual reported case and is strictly local;
   the broader fallback can land in a follow-up if needed.
-- **A new `--marketplace-secret-name` CLI flag** — not required for the
+* **A new `--marketplace-secret-name` CLI flag** — not required for the
   reported failure (detection from the existing YAML covers it). Trivial
   to add later if a user wants to rotate the secret name via CLI.
