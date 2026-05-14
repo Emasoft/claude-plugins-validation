@@ -2059,30 +2059,47 @@ def validate_command_hook(
 
     v2.1.139 adds an exec-form alternative ``args: string[]`` that spawns
     the command directly without a shell, so path placeholders never need
-    quoting. ``command`` and ``args`` are mutually exclusive — when both
-    are present we emit MAJOR (CC docs don't define a precedence). When
-    ``args`` is used we synthesize an equivalent command string for the
+    quoting.
+
+    Per the official CC hooks.md schema, ``command`` and ``args`` are
+    **complementary**, not mutually exclusive:
+
+      * ``command`` is the executable name or path.
+      * ``args`` (optional) switches execution to exec form: ``command``
+        is resolved as an executable and spawned directly with ``args``
+        as the argv vector, no shell involved.
+
+    The canonical exec form from the docs is::
+
+        {"type": "command", "command": "node",
+         "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/format.js", "--fix"]}
+
+    The ONLY warn-worthy "both" scenario the docs call out: in exec form
+    ``command`` must be the executable name/path alone — if it is a
+    bare name containing whitespace AND ``args`` is present, the spawn
+    fails. We emit MINOR for that specific shape so the author catches
+    it pre-publish; CC also logs a runtime warning.
+
+    When ``args`` is used we synthesize a space-joined string for the
     existing portability checks (the same script/path/traversal patterns
     are runtime hazards in either form).
+
+    Issue #24 history: v2.83.0 incorrectly flagged ``command`` + ``args``
+    as mutually exclusive, blocking every plugin using the canonical
+    exec form. v2.87.0 (this code) reverts that and adds the targeted
+    bare-name-with-whitespace check instead.
     """
     has_command = "command" in hook
     has_args = "args" in hook
 
-    if has_command and has_args:
-        report.major(
-            "Command hook has both 'command' and 'args' — these are mutually exclusive "
-            "(v2.1.139: 'args' is the exec form; CC docs don't define precedence). "
-            "Remove whichever one is not needed."
-        )
-        # Continue with `command` for downstream checks — it was the original surface.
-
     if not has_command and not has_args:
         report.critical(
             "Command hook missing required 'command' or 'args' field "
-            "(v2.1.139 adds 'args: string[]' as an exec-form alternative to 'command')"
+            "(v2.1.139 adds 'args: string[]' as the exec-form companion to 'command')"
         )
         return False
 
+    # Validate ``command`` shape when present (required in both shell and exec form).
     if has_command:
         command = hook["command"]
         if not isinstance(command, str):
@@ -2091,27 +2108,50 @@ def validate_command_hook(
         if not command.strip():
             report.critical("'command' cannot be empty")
             return False
-        report.passed(f"Command: {command[:60]}...")
-    else:
-        # args-only form (v2.1.139 exec form). Validate shape, then synthesize
-        # an equivalent command string for the existing portability checks.
-        args_val = hook["args"]
-        if not isinstance(args_val, list):
-            report.critical(f"'args' must be a list of strings (v2.1.139 exec form), got {type(args_val).__name__}")
+
+    # Validate ``args`` shape when present (exec form).
+    args_val: list[str] | None = None
+    if has_args:
+        raw_args = hook["args"]
+        if not isinstance(raw_args, list):
+            report.critical(f"'args' must be a list of strings (v2.1.139 exec form), got {type(raw_args).__name__}")
             return False
-        if not args_val:
-            report.critical("'args' cannot be an empty list — exec form needs at least argv[0]")
+        if not raw_args:
+            report.critical("'args' cannot be an empty list — exec form needs at least one argument")
             return False
-        for i, element in enumerate(args_val):
+        for i, element in enumerate(raw_args):
             if not isinstance(element, str):
                 report.critical(f"'args[{i}]' must be a string, got {type(element).__name__} (v2.1.139 args: string[])")
                 return False
-        # Synthesize a space-joined string so the existing checks (absolute path,
-        # interpreter prefix, traversal, env-var presence, etc.) apply identically.
-        # We do NOT shell-quote because the goal is pattern-matching against the
-        # original tokens, not safe re-execution.
+        args_val = raw_args
+
+    # Synthesize the effective command string for downstream portability checks.
+    # Three shapes (per hooks.md):
+    #   shell form: command only            → use command verbatim
+    #   exec form (canonical): command + args → space-join command and args
+    #   args-only legacy form: args only    → space-join args (argv[0] is the exe)
+    if has_command and has_args:
+        # Bare-name-with-whitespace exec-form check (the only docs-called-out hazard).
+        cmd_str = hook["command"].strip()
+        if "/" not in cmd_str and "\\" not in cmd_str and " " in cmd_str:
+            report.minor(
+                "Exec form (command + args): 'command' should be a bare executable "
+                "name or full path — embedding additional whitespace-separated tokens "
+                "(e.g. \"node script.js\") alongside 'args' will cause CC to log a "
+                "runtime warning and the spawn will fail. Either move those tokens "
+                "into 'args', or remove 'args' to switch to shell form."
+            )
+        # Effective command for downstream checks: argv0 + args.
+        command = (hook["command"] + " " + " ".join(args_val or [])).strip()
+        report.passed(f"Exec form: command='{hook['command'][:30]}', args={len(args_val or [])} token(s)")
+    elif has_command:
+        command = hook["command"]
+        report.passed(f"Command (shell form): {command[:60]}...")
+    else:
+        # args-only legacy form: argv[0] is the executable.
+        assert args_val is not None  # has_args is True
         command = " ".join(args_val)
-        report.passed(f"Args (exec form, {len(args_val)} token(s)): {command[:60]}...")
+        report.passed(f"Args (exec form, args-only, {len(args_val)} token(s)): {command[:60]}...")
 
     # Check for hardcoded absolute paths — plugins must use env vars for portability
     cmd_first_token = command.strip().split()[0] if command.strip() else ""

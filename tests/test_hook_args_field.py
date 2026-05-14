@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 """Tests for the v2.1.139 hook ``args: string[]`` exec-form field.
 
+Per the official CC hooks.md schema, ``command`` and ``args`` are
+**complementary** in exec form (canonical example: ``{"command": "node",
+"args": ["${CLAUDE_PLUGIN_ROOT}/scripts/x.js"]}``). Issue #24 (v2.83.0
+regression) incorrectly flagged them as mutually exclusive — fixed in
+v2.87.0.
+
 Covers:
-* args valid → passes
-* args + command both present → MAJOR
+* args valid (args-only legacy form) → passes
+* command + args (canonical exec form) → passes, no MAJOR
+* command="node script.js" + args (bare-name-with-whitespace) → MINOR
 * args empty list → CRITICAL
 * args with non-string element → CRITICAL
-* Neither command nor args → CRITICAL (updated message)
+* Neither command nor args → CRITICAL
 * args[0] absolute path without ${CLAUDE_PLUGIN_ROOT} → MAJOR portability
 """
 
@@ -50,14 +57,50 @@ def test_args_valid_string_list_passes():
     assert _has_finding(report, "PASSED", "Args (exec form,")
 
 
-def test_args_and_command_both_present_emits_major():
-    """args + command together → MAJOR (mutually exclusive)."""
-    hook = {"command": "echo hi", "args": ["echo", "hi"]}
+def test_canonical_exec_form_command_plus_args_passes():
+    """Issue #24: command + args (canonical exec form per CC docs) → passes, no MAJOR.
+
+    The docs explicitly define this as the exec form — ``command`` is the
+    executable, ``args`` is the argv vector. v2.83.0 wrongly emitted MAJOR
+    "mutually exclusive"; v2.87.0 (fix) removed the bogus mutex.
+    """
+    hook = {"command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/format.js", "--fix"]}
+    report = _new_report()
+    ok = validate_command_hook(hook, "PreToolUse", None, report)
+    assert ok is True
+    # No "mutually exclusive" MAJOR may be emitted.
+    for finding in report.results:
+        assert "mutually exclusive" not in finding.message, (
+            f"v2.83.0 mutex regression resurfaced: {finding.level} — {finding.message}"
+        )
+    # A PASSED line about exec form must be present.
+    assert _has_finding(report, "PASSED", "Exec form")
+
+
+def test_exec_form_bare_command_with_whitespace_emits_minor():
+    """Exec form (command + args) with whitespace in command → MINOR.
+
+    The CC docs explicitly warn: if `command` is a bare name with
+    whitespace alongside `args`, the spawn fails. Single targeted MINOR
+    so the author catches it pre-publish.
+    """
+    hook = {"command": "node script.js", "args": ["--fix"]}
     report = _new_report()
     validate_command_hook(hook, "PreToolUse", None, report)
-    assert _has_finding(report, "MAJOR", "mutually exclusive"), (
-        f"expected MAJOR about mutual exclusivity, got: {[(f.level, f.message) for f in report.results]}"
-    )
+    assert _has_finding(report, "MINOR", "bare executable")
+
+
+def test_exec_form_command_with_path_separator_no_whitespace_warning():
+    """`command` containing slashes (path form) is fine — no whitespace warning.
+
+    Only the bare-name + whitespace combination is hazardous. Path forms
+    like `/usr/bin/node` are valid exec-form executables.
+    """
+    hook = {"command": "${CLAUDE_PLUGIN_ROOT}/bin/runner", "args": ["--once"]}
+    report = _new_report()
+    validate_command_hook(hook, "PreToolUse", None, report)
+    for finding in report.results:
+        assert "bare executable" not in finding.message
 
 
 def test_args_empty_list_emits_critical():
