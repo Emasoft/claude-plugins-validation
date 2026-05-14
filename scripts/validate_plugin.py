@@ -1671,6 +1671,113 @@ def validate_manifest(
             )
             break  # Only emit once even if listed in array — the message is the same.
 
+    # v2.84.0 — Plugin.json key shadows the default component folder (CC v2.1.140).
+    # When plugin.json sets one of {commands, agents, skills, outputStyles},
+    # the default folder is silently ignored at runtime: only the items the
+    # author explicitly listed are loaded. Files left in the default folder
+    # but not listed never reach Claude Code. CC's own /doctor / `claude plugin
+    # list` / /plugin views started warning about this in v2.1.140; CPV emits
+    # the same warning so authors catch the shadowing pre-publish.
+    #
+    # Coverage rules: the explicit value is considered to cover the default
+    # folder if it (a) IS the default folder path as a string, (b) is an
+    # array containing the default folder path, or (c) is an array that
+    # lists every loadable item inside the default folder.
+    _DEFAULT_COMPONENT_FOLDERS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+        # (manifest_key, default_folder, file_extensions)
+        ("commands", "commands", (".md",)),
+        ("agents", "agents", (".md",)),
+        ("outputStyles", "output-styles", (".md",)),
+    )
+
+    def _norm_path(p: str) -> str:
+        """Canonicalize a plugin.json path to a relative POSIX path with no
+        leading ``./`` and no trailing ``/``. Accepts both ``"./commands/"``
+        and ``"commands"`` and normalizes them to ``"commands"``."""
+        n = p.replace("\\", "/").strip().rstrip("/")
+        while n.startswith("./"):
+            n = n[2:]
+        return n
+
+    def _list_default_folder_files(folder: Path, exts: tuple[str, ...]) -> list[str]:
+        """Return loadable items in ``folder`` as POSIX-style ``folder/name``
+        strings (no leading ``./``), scanning only the top level."""
+        if not folder.is_dir():
+            return []
+        items = sorted(
+            p.name for p in folder.iterdir() if p.is_file() and p.suffix.lower() in exts and not p.name.startswith(".")
+        )
+        return [f"{folder.name}/{n}" for n in items]
+
+    def _list_default_skill_dirs(folder: Path) -> list[str]:
+        """Return skill subdirs in ``./skills/`` that contain SKILL.md.
+        Each returned path is normalized (no leading ``./``, no trailing ``/``)."""
+        if not folder.is_dir():
+            return []
+        items: list[str] = []
+        for sub in sorted(folder.iterdir()):
+            if not sub.is_dir() or sub.name.startswith("."):
+                continue
+            # Skill folder is loadable if it contains SKILL.md (case-insensitive on macOS).
+            for entry in sub.iterdir():
+                if entry.is_file() and entry.name.lower() == "skill.md":
+                    items.append(f"{folder.name}/{sub.name}")
+                    break
+        return items
+
+    def _emit_shadow_warning(
+        key: str,
+        default_rel: str,
+        shadowed: list[str],
+    ) -> None:
+        # Cap the listing to keep the message terminal-friendly.
+        shown = shadowed if len(shadowed) <= 6 else shadowed[:6] + [f"... and {len(shadowed) - 6} more"]
+        report.major(
+            f"Field '{key}' is set in plugin.json — Claude Code v2.1.140+ silently ignores "
+            f"the default '{default_rel}' folder when the matching key is declared. "
+            f"{len(shadowed)} item(s) inside the default folder will NOT load at runtime: "
+            f"{shown}. Fix: either remove the '{key}' field from plugin.json so the default "
+            f"folder is auto-discovered, or add the missing entries to the explicit '{key}' "
+            f"list. CC's /doctor, `claude plugin list`, and /plugin now surface this warning.",
+            ".claude-plugin/plugin.json",
+        )
+
+    def _shadowed_items(value: Any, folder_name: str, default_contents: list[str]) -> list[str]:
+        """Return default-folder items not reached by ``value``. Empty list
+        means the explicit value already covers everything (no warning)."""
+        if isinstance(value, str):
+            covered = {_norm_path(value)}
+        elif isinstance(value, list):
+            covered = {_norm_path(p) for p in value if isinstance(p, str)}
+        else:
+            covered = set()
+        # A bare-folder reference (e.g. "commands" or "./commands/") covers
+        # all current AND future content in that folder.
+        if folder_name in covered:
+            return []
+        return [item for item in default_contents if _norm_path(item) not in covered]
+
+    for key, folder_name, exts in _DEFAULT_COMPONENT_FOLDERS:
+        if key not in manifest:
+            continue
+        default_folder = plugin_root / folder_name
+        default_contents = _list_default_folder_files(default_folder, exts)
+        if not default_contents:
+            continue
+        shadowed = _shadowed_items(manifest[key], folder_name, default_contents)
+        if shadowed:
+            _emit_shadow_warning(key, f"./{folder_name}/", shadowed)
+
+    # Skills are folder-based (./skills/<name>/SKILL.md). Same shadowing rule:
+    # a 'skills' key in plugin.json suppresses auto-discovery of ./skills/.
+    if "skills" in manifest:
+        skills_folder = plugin_root / "skills"
+        default_skills = _list_default_skill_dirs(skills_folder)
+        if default_skills:
+            shadowed = _shadowed_items(manifest["skills"], "skills", default_skills)
+            if shadowed:
+                _emit_shadow_warning("skills", "./skills/", shadowed)
+
     # v2.22.0 spec-parity helpers — dependencies, userConfig sub-fields, channels/mcp
     # cross-ref, and monitors entry shape. Each helper is a no-op when the corresponding
     # field is absent so unused manifests pay zero extra cost.

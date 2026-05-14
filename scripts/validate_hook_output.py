@@ -60,6 +60,11 @@ from cpv_validation_common import (  # noqa: E402
 # "hookSpecificOutput" carries per-event extra fields.
 # "decision" and "reason" are the legacy top-level decision surface kept by
 # several events (PostToolUse, Stop, ConfigChange, etc.).
+# "terminalSequence" (v2.1.141) is a string of terminal-control escape
+# sequences that Claude Code will write to stdout so hooks can emit desktop
+# notifications, set window titles, or ring the bell without holding their
+# own controlling terminal. Typical values: BEL (\\a), OSC 9 / OSC 777
+# notifications, OSC 0/2 title sequences.
 UNIVERSAL_OUTPUT_FIELDS: frozenset[str] = frozenset(
     {
         "continue",
@@ -69,6 +74,7 @@ UNIVERSAL_OUTPUT_FIELDS: frozenset[str] = frozenset(
         "decision",
         "reason",
         "systemMessage",
+        "terminalSequence",
     }
 )
 
@@ -260,6 +266,12 @@ def validate_output_payload(event_name: str, payload: Any) -> ValidationReport:
         report.major(f"'stopReason' must be a string, got {type(payload['stopReason']).__name__}")
     if "systemMessage" in payload and not isinstance(payload["systemMessage"], str):
         report.major(f"'systemMessage' must be a string, got {type(payload['systemMessage']).__name__}")
+    # v2.1.141: terminalSequence carries terminal-control escape sequences that
+    # Claude Code writes to stdout on behalf of the hook (desktop notifications,
+    # window titles, BEL). Spec only requires it to be a string; empty string
+    # is a legitimate no-op so we don't reject it.
+    if "terminalSequence" in payload and not isinstance(payload["terminalSequence"], str):
+        report.major(f"'terminalSequence' must be a string, got {type(payload['terminalSequence']).__name__}")
     # 'reason' is the human-readable explanation paired with 'decision'.
     # hooks.md L601-606 documents it as a string. ``null`` is treated as
     # absent (consistent with how authors write `reason: payload.get("...")`

@@ -109,7 +109,7 @@ class TestConstants:
         assert PERMISSION_MODES == frozenset({"default", "acceptEdits", "dontAsk", "bypassPermissions", "plan"})
 
     def test_universal_output_fields_exhaustive(self):
-        """UNIVERSAL_OUTPUT_FIELDS covers hooks.md L601-606 plus decision/reason."""
+        """UNIVERSAL_OUTPUT_FIELDS covers hooks.md L601-606 + decision/reason + v2.1.141 terminalSequence."""
         expected = {
             "continue",
             "stopReason",
@@ -118,6 +118,7 @@ class TestConstants:
             "decision",
             "reason",
             "systemMessage",
+            "terminalSequence",  # v2.1.141 — desktop notifications, window titles, bells
         }
         assert UNIVERSAL_OUTPUT_FIELDS == frozenset(expected)
 

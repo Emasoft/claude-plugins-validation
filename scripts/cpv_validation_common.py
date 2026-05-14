@@ -810,11 +810,13 @@ VALID_PLUGIN_ENV_VARS = {
     "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN",  # v2.1.132 — opt out of fullscreen alternate-screen renderer
     "CLAUDE_CODE_EFFORT_LEVEL",  # v2.1.132 — overrides the /effort picker default
     "CLAUDE_CODE_ENABLE_FEEDBACK_SURVEY_FOR_OTEL",  # v2.1.136 — re-enable session-quality survey for enterprises capturing OTEL responses
+    "CLAUDE_CODE_PLUGIN_PREFER_HTTPS",  # v2.1.141 — clone GitHub plugin sources over HTTPS instead of SSH (no-SSH environments)
     # Anthropic *_SUPPORTED_CAPABILITIES — spec-correct suffix
     "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES",
     "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES",
     "ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES",
+    "ANTHROPIC_WORKSPACE_ID",  # v2.1.141 — workload identity federation, scopes the minted token to a specific workspace when the federation rule covers more than one
 }
 
 # Env var name pattern matching for dynamic plugin env vars.
