@@ -76,7 +76,7 @@ migrated via CPV.
   fixed list. Two documented infrastructure exemptions retained:
   `CPV_SKIP_GITHUB_INTEGRITY`, `CPV_SKIP_GH_AUTH_CHECK`.
 * **Atomic push** — replaces the previous two-call `git push origin HEAD`
-  + `git push origin <tag>` form with a single
+  followed by `git push origin <tag>` with a single
   `git push --atomic origin HEAD <tag>`. Commit + tag land in one
   wire-protocol transaction; the server rolls back if any ref-update
   fails. Eliminates the "branch pushed without tag" half-published
