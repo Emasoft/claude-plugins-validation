@@ -4443,13 +4443,47 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
                 f"`diff -u <canonical> {rel_path}`)"
             )
 
+        # v2.86.0: reword to handle the case where the plugin's pipeline is
+        # AT or ABOVE canon (issue #22 case — the plugin had extra hardening
+        # CPV is now adopting). The blanket "migrate to the latest standard"
+        # phrasing previously suggested regressing such plugins. Now we
+        # describe the drift neutrally and let the maintainer judge whether
+        # to migrate. Files that match canon-hardening checkpoints (SHA-pin
+        # comments, atomic-push pattern, env-sanitization comments) get a
+        # softer phrasing.
+        already_hardened = any(
+            marker in diff_body
+            for marker in (
+                "git push --atomic",
+                "SHA-pin",
+                "actionlint",
+                "commitlint-github-action",
+                "wagoid/commitlint",
+                "rhysd/actionlint",
+            )
+        )
+        if already_hardened:
+            recommendation = (
+                "This file appears to already include canon-level hardening "
+                "(SHA-pinned actions, atomic push, actionlint/commitlint, "
+                "etc.). Review the unified diff and decide whether the "
+                "remaining deltas are intentional. If your version is "
+                "STRICTLY above canon, consider opening an upstream PR to "
+                "narrow this gap; if you want CPV to ignore it for this "
+                "plugin, add the file path to "
+                "`cpv.allow_pipeline_drift` in plugin.json."
+            )
+        else:
+            recommendation = (
+                "Run `/cpv-upgrade-plugin` (or `uvx cpv-remote-validate "
+                "standardize <plugin> --fix --force-templates`) to migrate "
+                "to the latest standard (canon now bundles idempotent "
+                "publish.py, atomic push, SHA-pinned actions, actionlint + "
+                "commitlint gates, macOS matrix, env-sanitized run blocks)."
+            )
         report.warning(
             f"[RC-PIPELINE-DRIFT-001] Plugin pipeline differs from the "
-            f"canonical CPV standard in {rel_path}. Run `/cpv-upgrade-plugin` "
-            f"(or `uvx cpv-remote-validate standardize <plugin> --fix "
-            f"--force-templates`) to migrate to the latest standard "
-            f"(idempotent publish.py, sanitized inputs, pathlib-only "
-            f"Python, cross-platform hooks, etc.).\n"
+            f"canonical CPV standard in {rel_path}. {recommendation}\n"
             f"Unified diff (canonical → plugin):\n{diff_body}",
             file=rel_path,
         )

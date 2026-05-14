@@ -373,13 +373,16 @@ class PluginParams:
     language: str = "python"  # One of VALID_LANGUAGES
     self_marketplace: bool = False  # Layout C: emit .claude-plugin/marketplace.json with self-entry
     strip_dev: bool = True  # TRDD-793ac32a: emit cpv.strip block in plugin.json (default ON)
-    # Issue #23 (v2.85.0): per-plugin override fields for the marketplace
-    # notification workflow. When empty, gen_notify_marketplace_yml falls
-    # back to github_owner / "MARKETPLACE_PAT". Populated by the migration
-    # path so an existing notify-marketplace.yml is regenerated WITHOUT
-    # clobbering a real marketplace name and a custom secret name.
+    # Per-plugin marketplace OWNER override — set by the migration path
+    # when the existing notify-marketplace.yml targets a different owner
+    # than the plugin itself (e.g. plugin at Emasoft/* lives in a different
+    # marketplace org). Empty falls back to github_owner.
+    #
+    # NOTE (v2.86.0): the secret NAME is NOT per-plugin. CPV enforces the
+    # canonical name `MARKETPLACE_PAT` everywhere; deviations are flagged
+    # via an [ACTION REQUIRED] migration warning, not preserved. See
+    # TRDD-canonical-pipeline-hardening for the rationale.
     marketplace_owner: str = ""  # Owner segment for MARKETPLACE_OWNER (when ≠ plugin owner)
-    marketplace_secret_name: str = "MARKETPLACE_PAT"  # Name of the dispatch-PAT secret
 
     @property
     def repo_name(self) -> str:
@@ -1078,20 +1081,28 @@ def gen_cliff_toml(p: PluginParams) -> str:
     # TOML uses triple-double-quotes (""") for multi-line strings, which collides
     # with Python triple-quoted strings. We inject them via a variable.
     tq = '"""\n'
+    # v2.86.0 hardening (issue #22):
+    # * Em-dash separator ``— `` instead of `` - `` between version and date.
+    #   Matches the typographic style of the rest of CPV's docs and is the
+    #   form release.yml's section-extraction awk script looks for.
+    # * Drop the scope prefix from rendered commits — the per-group header
+    #   already announces the kind (Features, Bug Fixes, …), so repeating
+    #   the scope on every commit line is redundant noise.
+    # * Drop ``striptags`` from the group renderer — conventional-commit
+    #   group names never contain HTML and the filter just adds template
+    #   surface for nothing.
     body_template = (
         "{% if version %}\\\n"
         '    ## [{{ version | trim_start_matches(pat="v") }}]'
-        ' - {{ timestamp | date(format="%Y-%m-%d") }}\n'
+        ' — {{ timestamp | date(format="%Y-%m-%d") }}\n'
         "{% else %}\\\n"
         "    ## [Unreleased]\n"
         "{% endif %}\\\n"
         "{% for group, commits in commits | group_by(attribute="
         '"group") %}\n'
-        "    ### {{ group | striptags | trim | upper_first }}\n"
+        "    ### {{ group | upper_first }}\n"
         "    {% for commit in commits %}\n"
-        "        - {% if commit.scope %}*({{ commit.scope }})* "
-        "{% endif %}\\\n"
-        "            {{ commit.message | upper_first }}\\\n"
+        "        - {{ commit.message | upper_first }}\\\n"
         "    {% endfor %}\n"
         "{% endfor %}\n"
     )
@@ -1907,25 +1918,42 @@ def run_gate(root: Path) -> int:
 def stage_bypass_guard() -> None:
     """Step 0: Reject any env var that could bypass a check. No exceptions.
 
-    TRDD-bbff5bc5 §6.1: the canonical names are PLUGIN_SKIP_*; CPV_SKIP_*
-    are kept as legacy aliases for one release.
+    Issue #22 hardening (v2.86.0): broadened from a fixed allowlist to
+    prefix-pattern matching. Any env var matching ``PLUGIN_SKIP_*``,
+    ``CPV_SKIP_*``, ``SKIP_*``, or named ``NO_VERIFY`` aborts the publish.
+    Closes the loophole where a fresh skip name (e.g. ``CPV_SKIP_GATE7``)
+    that was not in the original explicit list would silently slip past.
+
+    Two explicit infrastructure exemptions remain — both are read-only
+    overrides used by CPV's own integrity / auth subsystems and never
+    skip a gate:
+        * ``CPV_SKIP_GITHUB_INTEGRITY=1`` — used to bypass GitHub-anchored
+          integrity check (see cpv_integrity.py). The integrity check is
+          a defence against tampering, NOT a publish gate.
+        * ``CPV_SKIP_GH_AUTH_CHECK=1`` — used by `_ensure_gh_auth` to bypass
+          the `gh auth status` round-trip on flaky networks. Auth still
+          has to work for the actual `git push` / `gh release create`;
+          this only skips the precheck.
+
+    Both are documented exemptions, listed below and excluded from the
+    pattern match.
     """
     cprint(f"\n{BOLD}[0/11] Checking for bypass attempts...{NC}")
-    forbidden = [
-        # New canonical names (TRDD-bbff5bc5)
-        "PLUGIN_SKIP_TESTS", "PLUGIN_SKIP_LINT", "PLUGIN_SKIP_VALIDATE",
-        "PLUGIN_FORCE_PUBLISH", "PLUGIN_BYPASS_CHECKS",
-        # Legacy aliases — removed in next release.
-        "CPV_SKIP_TESTS", "CPV_SKIP_LINT", "CPV_SKIP_VALIDATE",
-        "CPV_FORCE_PUBLISH", "CPV_BYPASS_CHECKS",
-        # Generic bypass attempts — always rejected.
-        "SKIP_TESTS", "SKIP_LINT", "SKIP_VALIDATE", "NO_VERIFY",
+    # Explicit infrastructure exemptions — see docstring above.
+    exemptions = {"CPV_SKIP_GITHUB_INTEGRITY", "CPV_SKIP_GH_AUTH_CHECK"}
+    forbidden_prefixes = ("PLUGIN_SKIP_", "CPV_SKIP_", "SKIP_")
+    forbidden_exact = {"NO_VERIFY"}
+    attempted = [
+        v
+        for v in sorted(os.environ)
+        if (v.startswith(forbidden_prefixes) or v in forbidden_exact) and v not in exemptions
+        if os.environ.get(v)
     ]
-    attempted = [v for v in forbidden if os.environ.get(v)]
     if attempted:
         cprint(f"  {RED}BLOCKED: forbidden env vars set: {', '.join(attempted)}{NC}")
         cprint(f"  {RED}The publish pipeline enforces every check. "
                f"Fix failures, do not skip them.{NC}")
+        cprint(f"  {DIM}(infrastructure exemptions: {', '.join(sorted(exemptions))}){NC}")
         sys.exit(1)
     cprint(f"  {GREEN}No bypass vars set.{NC}")
 
@@ -2536,7 +2564,7 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
             cprint(f"  Would skip tag (already exists locally): {tag}")
         else:
             cprint(f"  Would tag: {tag}")
-        cprint("  Would push: origin HEAD --tags")
+        cprint(f"  Would push (atomic): origin HEAD {tag}")
         return
 
     if head_subject == expected_subject and tree_clean:
@@ -2554,16 +2582,19 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
     # gh-auth precheck — fail fast with actionable error if gh missing/unauthed.
     owner, repo = _resolve_owner_repo(root)
     _ensure_gh_auth(owner, repo)
-    # Retry-wrap the push: a single transient github.com hiccup used to
-    # leave the repo in a half-published state. git_with_retry tolerates
-    # up to GIT_MAX_ATTEMPTS × GIT_BACKOFF_SEC of transient errors and
-    # returns immediately on a permanent error (4xx, non-fast-forward).
-    cprint(f"  {BLUE}$ git push origin HEAD --tags{NC}")
+    # Atomic push: commit + tag land together or not at all. Eliminates the
+    # half-published-state failure mode where `git push origin HEAD --tags`
+    # could push the commit, fail on the tag (rejected/network), and leave
+    # the remote with an unreleased commit + no tag. `--atomic` is a single
+    # transaction in the wire protocol; the server rolls back if any ref
+    # update fails. git_with_retry still wraps the call so transient
+    # network hiccups (4xx-class permanent errors fall through immediately).
+    cprint(f"  {BLUE}$ git push --atomic origin HEAD {tag}{NC}")
     git_with_retry(
-        ["git", "push", "origin", "HEAD", "--tags"],
+        ["git", "push", "--atomic", "origin", "HEAD", tag],
         cwd=str(root), capture_output=False,
     )
-    cprint(f"  {GREEN}Pushed {tag}.{NC}")
+    cprint(f"  {GREEN}Pushed {tag} atomically.{NC}")
 
 def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
     """Step 10: Create GitHub release via gh CLI.
@@ -2830,22 +2861,41 @@ exit $?
 def gen_ci_yml(p: PluginParams) -> str:
     """Generate .github/workflows/ci.yml — single consolidated CI workflow.
 
-    Jobs:
-      - lint           : Mega-Linter (broad multi-language lint)
+    Jobs (display names must stay exactly "Lint" / "Validate" / "Test" —
+    cpv-setup-branch-rules reads them verbatim to wire the branch ruleset):
+      - lint           : actionlint (workflow syntax) + Mega-Linter (multi-language)
       - validate       : uvx cpv-remote-validate plugin . --strict (issue #11)
-      - test           : pytest (if tests/ exists)
+      - test           : pytest (matrix: ubuntu-latest + macOS-latest)
+      - commitlint     : conventional-commit gate (pull_request only)
 
     Triggers on both master and main branches (handles repos renamed either way).
     Includes merge_group for GitHub merge-queue / auto-merge support.
 
-    The three job display names are what GitHub reports as check-run names
-    (used by the branch-rules ruleset to enforce CI passing before merge):
-      - Lint
-      - Validate
-      - Test
-    These are the bare `jobs.<id>.name:` values — NOT "workflow / job" format.
+    v2.86.0 hardening (issue #22):
+    * SHA-pin every third-party action (gh-actions.md §"Pin third-party
+      actions to a full commit SHA"). Major-tag aliases re-point silently
+      on the upstream side, so a hostile tag rewrite would otherwise let
+      an attacker swap action code. The trailing `# vX.Y.Z` comment is
+      pinact-compatible — pinact run will keep it in sync on uv lock.
+    * actionlint step in the lint job catches workflow YAML syntax
+      regressions BEFORE they hit production (e.g. a stray `SCANDIR
+      env:` block, a malformed matrix dimension, an undefined ${{ secrets.X
+      }} reference). Cheap-fail-first ordering: workflow syntax errors
+      should not waste a full mega-linter run.
+    * commitlint on PRs rejects non-conventional commits at the door so
+      git-cliff's --bump and the CHANGELOG generator never see a junk
+      subject line. Falls back to @commitlint/config-conventional when
+      the repo has no .commitlintrc.json.
+    * macOS matrix on the test job catches darwin-specific regressions
+      (pathlib casing, mtime resolution, BSD `ps` vs procps-ng output).
+      `fail-fast: false` so each OS reports its own failure even when
+      one fails.
     """
     return f"""name: CI
+
+# Job display names below MUST stay exactly Lint / Validate / Test —
+# cpv-setup-branch-rules reads them verbatim when wiring the branch
+# ruleset (TRDD-bbff5bc5).
 
 on:
   push:
@@ -2874,8 +2924,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Cheap-fail-first: workflow-syntax errors before mega-linter.
+      - name: Lint workflow YAML (actionlint)
+        uses: rhysd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12
+
       - name: Mega-Linter
-        uses: oxsecurity/megalinter@v8
+        uses: oxsecurity/megalinter@e08c2b05e3dbc40af4c23f41172ef1e068a7d651 # v8
         env:
           GITHUB_TOKEN: ${{{{ secrets.GITHUB_TOKEN }}}}
           VALIDATE_ALL_CODEBASE: false
@@ -2889,6 +2943,19 @@ jobs:
             megalinter-reports/
             mega-linter.log
 
+  commitlint:
+    name: Commitlint
+    runs-on: ubuntu-latest
+    # PRs only — push events on main don't need conventional-commit
+    # enforcement (the commits are already merged).
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Conventional-commits gate
+        uses: wagoid/commitlint-github-action@6cf16efdf4da5277c791d335142c03a0bdf1766e # v6.2.1
+
   validate:
     name: Validate
     runs-on: ubuntu-latest
@@ -2898,7 +2965,7 @@ jobs:
           submodules: recursive
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4
 
       - name: Set up Python
         run: uv python install {p.python_version}
@@ -2931,12 +2998,20 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-latest
+    # macOS matrix added v2.86.0 (issue #22) — catches darwin-specific
+    # regressions that ubuntu-only runs miss (pathlib casing, mtime
+    # resolution, BSD `ps` vs procps-ng output). fail-fast: false so
+    # each OS reports its own failure.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{{{ matrix.os }}}}
     steps:
       - uses: actions/checkout@v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4
 
       - name: Set up Python
         run: uv python install {p.python_version}
@@ -2975,7 +3050,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4
 
       - name: Set up Python
         run: uv python install {p.python_version}
@@ -3017,27 +3092,48 @@ jobs:
 
       - name: Generate changelog
         id: changelog
+        # v2.86.0 hardening (issue #22): extract ONLY the matching
+        # ``## [X.Y.Z] — YYYY-MM-DD`` block from CHANGELOG.md instead of
+        # uploading the entire file. The release body should be the
+        # release-specific notes, not the whole project history.
+        # Fallback chain:
+        #   1. CHANGELOG.md ## [version] section (curated, em-dash separator)
+        #   2. CHANGELOG.md ## [version] section (legacy hyphen separator)
+        #   3. Full CHANGELOG.md (when no section header matches)
+        #   4. Auto-generated git log (when no CHANGELOG.md at all)
+        env:
+          TAG: ${{{{ github.ref_name }}}}
         run: |
+          set -e
+          # Strip leading 'v' so v1.2.3 matches ## [1.2.3] — ...
+          VERSION="${{TAG#v}}"
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
           if [ -z "$PREV_TAG" ]; then
-            CHANGELOG=$(git log --pretty=format:"- %s (%h)" HEAD)
+            GITLOG=$(git log --pretty=format:"- %s (%h)" HEAD)
           else
-            CHANGELOG=$(git log --pretty=format:"- %s (%h)" $PREV_TAG..HEAD)
+            GITLOG=$(git log --pretty=format:"- %s (%h)" "$PREV_TAG..HEAD")
           fi
-          # Prefer the project's CHANGELOG.md (curated, conventional-commits
-          # body) over auto-generated git log if it exists. Issue: publish.py's
-          # Gate-13 (`gh release create`) is fired locally just before the tag
-          # is pushed; that race wins, this job sees the release already
-          # exists, and `softprops/action-gh-release@v3` 422s. Falling back to
-          # CHANGELOG.md content lets us either fill in the body when the
-          # release was just-created (still empty) or skip cleanly when the
-          # body is already populated.
           if [ -f "CHANGELOG.md" ]; then
-            cp CHANGELOG.md changelog.txt
+            # Extract the section header through the next ## or EOF. Try
+            # em-dash (canonical) first, then legacy hyphen. awk prints
+            # the block bounded by the matching header and the NEXT
+            # `## ` at column 0 (or EOF).
+            SECTION=$(awk -v ver="$VERSION" '
+              $0 ~ "^## \\\\[" ver "\\\\] [—-] " {{found=1; print; next}}
+              found && /^## / {{exit}}
+              found {{print}}
+            ' CHANGELOG.md)
+            if [ -n "$SECTION" ]; then
+              printf '%s\\n' "$SECTION" > changelog.txt
+              echo "::notice::Release body extracted from CHANGELOG.md section for $VERSION"
+            else
+              echo "::warning::No CHANGELOG.md section matched ## [$VERSION] — falling back to full CHANGELOG.md"
+              cp CHANGELOG.md changelog.txt
+            fi
           else
-            echo "$CHANGELOG" > changelog.txt
+            echo "$GITLOG" > changelog.txt
           fi
-          echo "changelog_file=changelog.txt" >> $GITHUB_OUTPUT
+          echo "changelog_file=changelog.txt" >> "$GITHUB_OUTPUT"
 
       - name: Create or update GitHub Release (idempotent)
         # Idempotent shell flow — replaces the `softprops/action-gh-release`
@@ -3171,19 +3267,33 @@ def gen_markdownlint_json(p: PluginParams) -> str:
 def gen_notify_marketplace_yml(p: PluginParams) -> str:
     """Generate .github/workflows/notify-marketplace.yml — marketplace notification.
 
-    Issue #23 (v2.85.0): when ``p.marketplace_owner`` is set (e.g. detected
-    from an existing notify-marketplace.yml during a ``--force-templates``
-    migration) it overrides ``p.github_owner`` so a plugin whose marketplace
-    lives under a different owner doesn't have its OWNER overwritten.
-    Similarly, ``p.marketplace_secret_name`` overrides the historical
-    hardcoded ``MARKETPLACE_PAT`` so plugins with a custom secret name
-    (e.g. ``MARKETPLACE_DISPATCH_TOKEN``) don't break on regeneration.
+    Per-plugin VALUES that vary: marketplace owner and marketplace repo.
+    When ``p.marketplace_owner`` is set (e.g. detected from an existing
+    notify-marketplace.yml during a ``--force-templates`` migration) it
+    overrides ``p.github_owner`` so a plugin whose marketplace lives under
+    a different owner doesn't have its OWNER overwritten.
+
+    Per-plugin NAMES are NOT supported (v2.86.0+). The dispatch secret is
+    ALWAYS named ``MARKETPLACE_PAT``. Plugins with deviant secret names
+    get a loud ``[ACTION REQUIRED]`` warning at migration time directing
+    the maintainer to ``gh secret set MARKETPLACE_PAT --body
+    "$MARKETPLACE_PAT"`` rather than CPV preserving their off-canon name.
+    Single canon-name policy keeps `cpv_setup_auth`, GH webhook receivers,
+    and docs strictly aligned across every plugin.
+
+    Env-var sanitization (gh-actions.md §"Avoid expression injection"):
+    every ``${{{{ github.* }}}}`` consumed by a ``run:`` block is first
+    bound to an ``env:`` mapping; the shell sees ``$VAR`` rather than the
+    raw expression. Prevents shell-metacharacter exfil if the upstream
+    repository metadata is ever crafted hostile.
     """
     marketplace_owner = p.marketplace_owner if p.marketplace_owner else p.github_owner
     marketplace_repo = p.marketplace if p.marketplace else "my-plugins-marketplace"
-    secret_name = p.marketplace_secret_name if p.marketplace_secret_name else "MARKETPLACE_PAT"
     return f"""# Notify marketplace repo when this plugin is updated
-# Requires {secret_name} secret (Personal Access Token with repo scope)
+# Requires MARKETPLACE_PAT secret (Personal Access Token with repo scope).
+# Create via: gh secret set MARKETPLACE_PAT --repo {marketplace_owner}/{p.repo_name} \\
+#               --body "$MARKETPLACE_PAT"
+# (assumes $MARKETPLACE_PAT is exported in your shell or .env file)
 
 name: Notify Marketplace
 
@@ -3206,16 +3316,23 @@ jobs:
   notify:
     runs-on: ubuntu-latest
     steps:
+      # Sanitization: every `${{{{ github.* }}}}` value crossing into a shell `run:`
+      # block is first bound to an `env:` mapping; the run-script sees `$VAR`
+      # rather than raw expression interpolation. Prevents shell-injection if
+      # upstream metadata is ever crafted hostile (gh-actions.md L66-77).
       - name: Get plugin info
         id: plugin
+        env:
+          REPO_NAME: ${{{{ github.event.repository.name }}}}
+          REF_SHA: ${{{{ github.sha }}}}
         run: |
-          echo "name=${{{{ github.event.repository.name }}}}" >> $GITHUB_OUTPUT
-          echo "ref=${{{{ github.sha }}}}" >> $GITHUB_OUTPUT
+          printf 'name=%s\\n' "$REPO_NAME" >> "$GITHUB_OUTPUT"
+          printf 'ref=%s\\n'  "$REF_SHA"   >> "$GITHUB_OUTPUT"
 
       - name: Trigger marketplace update
-        uses: peter-evans/repository-dispatch@v4
+        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
         with:
-          token: ${{{{ secrets.{secret_name} }}}}
+          token: ${{{{ secrets.MARKETPLACE_PAT }}}}
           repository: ${{{{ env.MARKETPLACE_OWNER }}}}/${{{{ env.MARKETPLACE_REPO }}}}
           event-type: plugin-updated
           client-payload: |
@@ -3227,13 +3344,16 @@ jobs:
             }}
 
       - name: Summary
+        env:
+          PLUGIN_NAME: ${{{{ steps.plugin.outputs.name }}}}
+          PLUGIN_REF: ${{{{ steps.plugin.outputs.ref }}}}
         run: |
-          echo "## Marketplace Notification" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Triggered update in ${{{{ env.MARKETPLACE_OWNER }}}}/${{{{ env.MARKETPLACE_REPO }}}}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- Plugin: ${{{{ steps.plugin.outputs.name }}}}" >> $GITHUB_STEP_SUMMARY
-          echo "- Commit: ${{{{ steps.plugin.outputs.ref }}}}" >> $GITHUB_STEP_SUMMARY
+          {{
+            printf '## Marketplace Notification\\n\\n'
+            printf 'Triggered update in %s/%s\\n\\n' "$MARKETPLACE_OWNER" "$MARKETPLACE_REPO"
+            printf -- '- Plugin: %s\\n' "$PLUGIN_NAME"
+            printf -- '- Commit: %s\\n' "$PLUGIN_REF"
+          }} >> "$GITHUB_STEP_SUMMARY"
 """
 
 

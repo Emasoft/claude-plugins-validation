@@ -447,19 +447,28 @@ class TestPublishPyCornerstoneRule:
         assert "Direct push not allowed" in src
 
     def test_has_bypass_guard_stage(self):
-        """Pipeline must have stage_bypass_guard that rejects skip env vars."""
+        """Pipeline must have stage_bypass_guard that rejects skip env vars.
+
+        v2.86.0 (issue #22): the guard switched from a fixed allowlist to
+        prefix-pattern matching. Specific names like CPV_SKIP_TESTS are
+        now caught by the ``CPV_SKIP_`` prefix entry, not listed
+        explicitly. Check the prefix entries instead.
+        """
         src = self._src()
         assert "def stage_bypass_guard" in src
         assert "stage_bypass_guard()" in src  # called from main()
-        for var in [
-            "CPV_SKIP_TESTS",
-            "CPV_SKIP_LINT",
-            "CPV_SKIP_VALIDATE",
-            "CPV_FORCE_PUBLISH",
-            "CPV_BYPASS_CHECKS",
-            "NO_VERIFY",
+        # Prefix-pattern entries (post-v2.86.0).
+        for prefix_entry in [
+            '"PLUGIN_SKIP_"',
+            '"CPV_SKIP_"',
+            '"SKIP_"',
         ]:
-            assert var in src, f"bypass_guard must list {var}"
+            assert prefix_entry in src, f"bypass_guard prefix entry missing: {prefix_entry}"
+        # Exact-match entries.
+        assert '"NO_VERIFY"' in src
+        # Documented infrastructure exemptions.
+        assert '"CPV_SKIP_GITHUB_INTEGRITY"' in src
+        assert '"CPV_SKIP_GH_AUTH_CHECK"' in src
 
     def test_no_skip_tests_flag(self):
         """The template must not expose a --skip-tests argparse flag."""

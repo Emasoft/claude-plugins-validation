@@ -918,41 +918,43 @@ def _current_repo_slug(plugin_root: Path) -> str | None:
 def stage_bypass_guard() -> int:
     """Gate 0: reject any env var that could bypass checks.
 
-    TRDD-bbff5bc5 §6.1: the canonical names are PLUGIN_SKIP_* / PLUGIN_FORCE_*
-    / PLUGIN_BYPASS_*. The CPV_SKIP_* names are kept as legacy aliases for
-    one release to ease migration of plugins still on v2.50.x.
+    v2.86.0 hardening (issue #22): broadened from an explicit allowlist to
+    prefix-pattern matching. Any env var matching ``PLUGIN_SKIP_*``,
+    ``PLUGIN_FORCE_*``, ``PLUGIN_BYPASS_*``, ``CPV_SKIP_*``, ``SKIP_*``,
+    or named ``NO_VERIFY`` aborts publish. Closes the loophole where a
+    fresh skip-name (e.g. ``CPV_SKIP_GATE7``) silently slipped past the
+    fixed list. Also covers TRDD-c0ee9543's ``CPV_SKIP_UPSTREAM_CROSS_CHECK``
+    (matched by the ``CPV_SKIP_`` prefix; bypass-pattern wins).
+
+    Documented infrastructure exemptions — these are READ-ONLY overrides
+    used by CPV's own subsystems and never skip a publish gate:
+        * ``CPV_SKIP_GITHUB_INTEGRITY=1`` — bypasses the GitHub-anchored
+          integrity check inside cpv_integrity.py (set by publish.py
+          itself for the test-fixture publish path).
+        * ``CPV_SKIP_GH_AUTH_CHECK=1`` — bypasses the ``gh auth status``
+          round-trip in _ensure_gh_auth on flaky networks. Auth still
+          has to work for the real `git push` / `gh release create`.
     """
-    forbidden = [
-        # New canonical names (TRDD-bbff5bc5)
-        "PLUGIN_SKIP_TESTS",
-        "PLUGIN_SKIP_LINT",
-        "PLUGIN_SKIP_VALIDATE",
-        "PLUGIN_FORCE_PUBLISH",
-        "PLUGIN_BYPASS_CHECKS",
-        # Legacy aliases — removed in next release.
-        "CPV_SKIP_TESTS",
-        "CPV_SKIP_LINT",
-        "CPV_SKIP_VALIDATE",
-        "CPV_FORCE_PUBLISH",
-        "CPV_BYPASS_CHECKS",
-        # Generic bypass attempts — always rejected.
-        "SKIP_TESTS",
-        "SKIP_LINT",
-        "SKIP_VALIDATE",
-        "NO_VERIFY",
-        # v2.81.0 (TRDD-c0ee9543) — the marketplace cross-validation
-        # bypass is acceptable for opt-in air-gapped CI but MUST NOT
-        # ship in a release. A release that skipped upstream cross-check
-        # is exactly the bug class that broke
-        # ai-maestro-visual-communicator-plugin on 2026-05-11.
-        "CPV_SKIP_UPSTREAM_CROSS_CHECK",
+    exemptions = {"CPV_SKIP_GITHUB_INTEGRITY", "CPV_SKIP_GH_AUTH_CHECK"}
+    forbidden_prefixes = (
+        "PLUGIN_SKIP_",
+        "PLUGIN_FORCE_",
+        "PLUGIN_BYPASS_",
+        "CPV_SKIP_",
+        "SKIP_",
+    )
+    forbidden_exact = {"NO_VERIFY"}
+    attempted = [
+        v
+        for v in sorted(os.environ)
+        if (v.startswith(forbidden_prefixes) or v in forbidden_exact) and v not in exemptions and os.environ.get(v)
     ]
-    attempted = [v for v in forbidden if os.environ.get(v)]
     if attempted:
         print(
             f"{RED}✗ Bypass attempt detected. These env vars are FORBIDDEN in publish:{NC}\n"
             f"  {', '.join(attempted)}\n"
-            f"{RED}The publish pipeline enforces every check. Fix the failures, don't skip them.{NC}",
+            f"{RED}The publish pipeline enforces every check. Fix the failures, don't skip them.{NC}\n"
+            f"{NC}(infrastructure exemptions: {', '.join(sorted(exemptions))})",
             file=sys.stderr,
         )
         return 1
@@ -2133,26 +2135,22 @@ def stage_commit_tag_push(
     # probing; runs before the parent push so the broken state never
     # becomes public.
     _ensure_submodules_pushed(plugin_root)
-    # Phase 1 (Sprint 3): both pushes wrapped in retry so a transient
-    # github.com hiccup doesn't leave a half-published release (commit
-    # local-only, tag local-only, or branch pushed without tag).
-    # `git push` doesn't load _plugin_verify_hashes, so no integrity
-    # bypass needed here.
-    print("  $ git push origin HEAD")
+    # v2.86.0 hardening (issue #22): single `git push --atomic origin HEAD
+    # <tag>` so commit + tag land in one transaction. Eliminates the
+    # half-published-state failure mode where the previous two-call form
+    # could push the commit, fail on the tag (network blip / ref-update
+    # race), and leave the remote with an unreleased commit + no tag.
+    # `--atomic` makes the server roll back if any ref-update fails.
+    # git_with_retry still wraps the call so transient network hiccups
+    # retry; 4xx-class permanent errors fall through immediately.
+    print(f"  $ git push --atomic origin HEAD {tag_name}")
     git_with_retry(
-        ["git", "push", "origin", "HEAD"],
+        ["git", "push", "--atomic", "origin", "HEAD", tag_name],
         cwd=plugin_root,
         env=os.environ.copy(),
         capture_output=False,
     )
-    print(f"  $ git push origin {tag_name}")
-    git_with_retry(
-        ["git", "push", "origin", tag_name],
-        cwd=plugin_root,
-        env=os.environ.copy(),
-        capture_output=False,
-    )
-    print(f"{GREEN}✓ Pushed branch and tag {tag_name}{NC}")
+    print(f"{GREEN}✓ Pushed branch and tag {tag_name} atomically{NC}")
     return 0
 
 
