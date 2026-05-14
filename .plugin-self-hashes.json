@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-14T19:24:01+00:00",
+  "computed_at": "2026-05-14T20:44:06+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     "agents/cache-optimizer-agent.md": "sha256:3148226fba744236f82a62080a2295d3473d76a76d6660b8d2ade7a6c12af084",
@@ -82,6 +82,7 @@
     "design/tasks/TRDD-d47f5101-e7a1-4e49-a85a-3b89e5e1fb6f-canon-pipeline-hardening.md": "sha256:34adb03ea1e24807df9e9eb9dea04d3377dcfdb947d8863f0db253d33ddfdcf6",
     "design/tasks/TRDD-e2b17a61-e6f0-4bff-ac9e-feb3a7cd046b-settings-json-marketplace-validator.md": "sha256:76125a96a8d90e2fdc48076dc59ec889cebcc87c4e8852c6525cf6eb57aff15c",
     "design/tasks/TRDD-e3e74f69-e41c-4b0f-841c-69f066614b6f-validate-telemetry.md": "sha256:116f2c2a04afeaa35d5745eff87b614bfacb9838956d17479810ee82c255a908",
+    "design/tasks/TRDD-e9a79c69-01e5-443c-b845-bc33636856c9-issue-24-command-args-complementary.md": "sha256:203652fdbc7063c9e10e6a2a2fbd4115d0165ae43b83690c8d74c2ebab00980a",
     "design/tasks/TRDD-f4e2d385-b37d-4f9e-b2c8-4940958b474a-scope-deep-validation.md": "sha256:af1472f53221ff9b800ecbcf31efbc470afd5d0a6584b99c99b4ee40190ec272",
     "design/tasks/TRDD-fa70f9b8-90c6-471b-883e-053b527991b4-flaky-test-main-verbose.md": "sha256:3f70c7bd1d12a0f15aa2af803158d8ffdd9ae0b5842f203e442f9d91368a8fa7",
     "design/tasks/TRDD-fe006962-f3ec-48e8-bb2b-849ec7109d2c-context-aware-detection.md": "sha256:7b0e288ea2c7af56c0e9572f3239f4dde8ef73787696f17c8643664e006645f3",
@@ -144,7 +145,7 @@
     "scripts/validate_documentation.py": "sha256:8e1abab352755af4f9e5525ea116d0ad8e97d0faf95886a8c5a07eeca3e4bc07",
     "scripts/validate_encoding.py": "sha256:bccbb8b2baa9b1b9509b0d719d529d75c25bbbdabb52ffa31643125fc9768e41",
     "scripts/validate_enterprise.py": "sha256:860ae3bd74ca1da6446e17791fe0544502b3e87afaf0506668994cc5eeed61d1",
-    "scripts/validate_hook.py": "sha256:4cb49d68757a0239c71938412709d8cac75b80290b62e9b8af50c63b9ce716e2",
+    "scripts/validate_hook.py": "sha256:4b1c62a5a36f39bd38354e3141896d45b1a6940b5c5f162c2d0116fdcac22c91",
     "scripts/validate_hook_output.py": "sha256:f2cd0c48a49fdfac37b3c21f85942f3f08e76c18f4d4f8fa55f89631e273fa00",
     "scripts/validate_hook_precedence.py": "sha256:821db7aa58c83507fb954e5342168130638f25bf0fd3ae8d0c471fa06afce985",
     "scripts/validate_ide_config.py": "sha256:32163f619579d4aea7123250b6175f920de4d5d2ceaf478d26f3149182d902c2",
@@ -374,7 +375,7 @@
     "tests/test_generate_plugin_slurp.py": "sha256:e3194e7b03d4d47aa3a87c4592546d907bd1f6d40c5be5e50206fda9b1c32d1e",
     "tests/test_gitignore_filter.py": "sha256:9f46ea311c31948cb75e8c2cd89ea61fb55fd08304e20d65724fb334d309e9aa",
     "tests/test_hash_manifest_v2.py": "sha256:371bbc6814c06c2fb0627e55b35d16c3978ad68586592d37950e798a78b71710",
-    "tests/test_hook_args_field.py": "sha256:da1ac5f5b22b6388239ebb3f2bdd508314a04cda7a76eb6ce3cdad47b5ead786",
+    "tests/test_hook_args_field.py": "sha256:a0172666da0c475a098c3e9cb3b414c4d1b8b4a0a96ab6b9fd095489a019d79b",
     "tests/test_hook_continueOnBlock.py": "sha256:4022a0af04af76ac870a408884e2ead93c018b7cf82d6ab434471a066e08c256",
     "tests/test_hook_cross_platform.py": "sha256:ab77aa8d82f449e8e96f91b2227aa10409a3e567e5cf7be08cb559321e1ba4c0",
     "tests/test_hook_terminal_sequence.py": "sha256:7281bbc220cc037242ae9787a991622633dfff645d41fd63b241a6182d009cef",
