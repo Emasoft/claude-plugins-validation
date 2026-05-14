@@ -875,14 +875,15 @@ def _apply_notify_marketplace_overrides(
         changes["marketplace"] = (params.marketplace or None, target_repo)
         params.marketplace = target_repo
 
-    # Secret name — never overridden by CLI (no flag exists yet), only by detection.
+    # v2.86.0 canon-name enforcement: the secret NAME is always
+    # ``MARKETPLACE_PAT`` in CPV's canonical template. We record the
+    # detected pre-existing name (when it differs) as a "deviation" so the
+    # caller can emit a loud [ACTION REQUIRED] block telling the maintainer
+    # to rename their gh secret. We do NOT plumb it back onto PluginParams
+    # — the canon name wins.
     target_secret = detected["secret_name"]
-    if target_secret and target_secret != params.marketplace_secret_name:
-        changes["marketplace_secret_name"] = (
-            params.marketplace_secret_name,
-            target_secret,
-        )
-        params.marketplace_secret_name = target_secret
+    if target_secret and target_secret != "MARKETPLACE_PAT":
+        changes["marketplace_secret_name__DEVIATION"] = (target_secret, "MARKETPLACE_PAT")
 
     return changes
 
@@ -976,11 +977,36 @@ def fix_missing_files(
             missing_files.discard(_NOTIFY_MARKETPLACE_REL)
         elif notify_changes:
             # Surface the changes so the user notices when --force-templates
-            # would alter a real value (e.g. secret-name rotation, fork move).
+            # would alter a real value (e.g. owner override) AND emit a loud
+            # [ACTION REQUIRED] block when a secret-name deviation is found.
             print(f"  {CYAN}[migration]{NC} notify-marketplace.yml derived from existing file:")
+            deviation_key = "marketplace_secret_name__DEVIATION"
             for field_name, (old, new) in notify_changes.items():
+                if field_name == deviation_key:
+                    continue  # surfaced separately below with the action-required block
                 if old != new:
                     print(f"    {DIM}{field_name}:{NC} {old!r} → {new!r}")
+
+            if deviation_key in notify_changes:
+                old_secret, _ = notify_changes[deviation_key]
+                owner_for_gh = params.marketplace_owner or params.github_owner or "<owner>"
+                repo_for_gh = params.repo_name or "<repo>"
+                print()
+                print(f"  {YELLOW}{BOLD}[ACTION REQUIRED]{NC} secret-name deviation detected")
+                print(f"  The previous notify-marketplace.yml referenced {BOLD}secrets.{old_secret}{NC}.")
+                print(
+                    f"  CPV v2.86.0+ enforces the canonical secret name {BOLD}MARKETPLACE_PAT{NC} across all plugins —"
+                )
+                print(f"  the regenerated YAML now references {BOLD}secrets.MARKETPLACE_PAT{NC}.")
+                print()
+                print(f"  {GREEN}Run (assumes $MARKETPLACE_PAT is exported):{NC}")
+                print(
+                    f'    gh secret set MARKETPLACE_PAT --repo {owner_for_gh}/{repo_for_gh} --body "$MARKETPLACE_PAT"'
+                )
+                print()
+                print(f"  {DIM}After the next push triggers a marketplace dispatch successfully:{NC}")
+                print(f"    gh secret delete {old_secret} --repo {owner_for_gh}/{repo_for_gh}")
+                print()
 
     # Import generator functions from generate_plugin_repo
     gen_module = importlib.import_module("generate_plugin_repo")

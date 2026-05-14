@@ -166,8 +166,13 @@ def test_generator_default_secret_name_is_MARKETPLACE_PAT():
     assert "MARKETPLACE_REPO: 'my-marketplace'" in out
 
 
-def test_generator_custom_secret_name_flows_through():
-    """Setting marketplace_secret_name on PluginParams reaches the rendered YAML."""
+def test_generator_always_emits_canonical_MARKETPLACE_PAT():
+    """v2.86.0: the generator ALWAYS emits `secrets.MARKETPLACE_PAT` regardless of plugin.
+
+    Per-plugin secret-name overrides were reverted — single canonical name
+    everywhere. Plugins migrating from a deviant name get a loud
+    [ACTION REQUIRED] block telling them to rename their gh secret.
+    """
     p = PluginParams(
         name="x",
         description="x",
@@ -175,13 +180,18 @@ def test_generator_custom_secret_name_flows_through():
         author_email="x@x",
         github_owner="Emasoft",
         marketplace="ai-maestro-plugins",
-        marketplace_secret_name="MARKETPLACE_DISPATCH_TOKEN",
     )
     out = gen_notify_marketplace_yml(p)
-    assert "secrets.MARKETPLACE_DISPATCH_TOKEN" in out
-    assert "secrets.MARKETPLACE_PAT" not in out
-    # The header comment must mention the actual secret name, not the default.
-    assert "Requires MARKETPLACE_DISPATCH_TOKEN secret" in out
+    assert "secrets.MARKETPLACE_PAT" in out
+    assert "secrets.MARKETPLACE_DISPATCH_TOKEN" not in out
+    assert "secrets.MARKETPLACE_TOKEN" not in out
+    # The header comment mentions only MARKETPLACE_PAT — no other secret names.
+    assert "Requires MARKETPLACE_PAT secret" in out
+
+
+def test_PluginParams_does_not_have_marketplace_secret_name():
+    """v2.86.0: the per-plugin secret-name field was reverted."""
+    assert "marketplace_secret_name" not in PluginParams.__dataclass_fields__
 
 
 def test_generator_marketplace_owner_overrides_github_owner():
@@ -220,7 +230,7 @@ def test_generator_no_placeholder_when_marketplace_set():
 
 
 def test_overrides_detection_wins_when_no_cli(tmp_path):
-    """Detection populates params when no --marketplace CLI flag is given."""
+    """Detection populates params (owner/repo) and records secret-name deviation."""
     _write_notify_yml(
         tmp_path,
         "env:\n"
@@ -230,12 +240,18 @@ def test_overrides_detection_wins_when_no_cli(tmp_path):
     )
     p = PluginParams(name="x", description="x", author="X", author_email="x@x")
     changes = _apply_notify_marketplace_overrides(p, tmp_path, cli_marketplace=None)
+    # Owner + repo flow into params (per-plugin values).
     assert p.marketplace == "ai-maestro-plugins"
     assert p.marketplace_owner == "Emasoft"
-    assert p.marketplace_secret_name == "MARKETPLACE_DISPATCH_TOKEN"
     # Each change is recorded with old → new tuple.
     assert changes["marketplace"][1] == "ai-maestro-plugins"
-    assert changes["marketplace_secret_name"][1] == "MARKETPLACE_DISPATCH_TOKEN"
+    assert changes["marketplace_owner"][1] == "Emasoft"
+    # v2.86.0: secret-name deviation is RECORDED but NOT plumbed back —
+    # the canon wins. Caller uses this to emit [ACTION REQUIRED].
+    assert "marketplace_secret_name__DEVIATION" in changes
+    old_secret, canon = changes["marketplace_secret_name__DEVIATION"]
+    assert old_secret == "MARKETPLACE_DISPATCH_TOKEN"
+    assert canon == "MARKETPLACE_PAT"
 
 
 def test_overrides_cli_wins_over_detection(tmp_path):
@@ -253,9 +269,9 @@ def test_overrides_cli_wins_over_detection(tmp_path):
 def test_overrides_returns_empty_when_nothing_detected(tmp_path):
     """No existing file + no CLI flag → no params change, no change record."""
     p = PluginParams(name="x", description="x", author="X", author_email="x@x")
-    p_before = (p.marketplace, p.marketplace_owner, p.marketplace_secret_name)
+    p_before = (p.marketplace, p.marketplace_owner)
     changes = _apply_notify_marketplace_overrides(p, tmp_path, cli_marketplace=None)
-    p_after = (p.marketplace, p.marketplace_owner, p.marketplace_secret_name)
+    p_after = (p.marketplace, p.marketplace_owner)
     assert p_before == p_after
     assert changes == {}
 
@@ -279,8 +295,16 @@ def _audit_item_force_notify():
     ]
 
 
-def test_force_templates_preserves_real_marketplace_repo(tmp_path):
-    """End-to-end: --force-templates preserves a real MARKETPLACE_REPO."""
+def test_force_templates_preserves_real_marketplace_repo_normalizes_secret(tmp_path, capsys):
+    """End-to-end: --force-templates preserves owner/repo but normalizes secret to canon.
+
+    v2.86.0 (issue #22): the marketplace OWNER and REPO values are
+    plugin-specific and detected from the pre-existing YAML. The secret
+    NAME, on the other hand, is canonical and ALWAYS written as
+    `MARKETPLACE_PAT`. A deviation in the pre-existing YAML triggers a
+    loud [ACTION REQUIRED] block telling the maintainer to rename their
+    gh secret to match.
+    """
     _write_plugin_json(tmp_path)
     _write_notify_yml(
         tmp_path,
@@ -297,10 +321,18 @@ def test_force_templates_preserves_real_marketplace_repo(tmp_path):
         force_templates=True,
     )
     written = (tmp_path / ".github/workflows/notify-marketplace.yml").read_text()
+    # Per-plugin VALUES preserved.
     assert "MARKETPLACE_REPO: 'ai-maestro-plugins'" in written
     assert "my-plugins-marketplace" not in written
-    assert "secrets.MARKETPLACE_DISPATCH_TOKEN" in written
-    assert "secrets.MARKETPLACE_PAT" not in written
+    # Canonical secret NAME enforced — deviation NOT preserved.
+    assert "secrets.MARKETPLACE_PAT" in written
+    assert "secrets.MARKETPLACE_DISPATCH_TOKEN" not in written
+    # [ACTION REQUIRED] block printed to stdout for the maintainer.
+    captured = capsys.readouterr().out
+    assert "[ACTION REQUIRED]" in captured
+    assert "secrets.MARKETPLACE_DISPATCH_TOKEN" in captured
+    assert "gh secret set MARKETPLACE_PAT" in captured
+    assert '--body "$MARKETPLACE_PAT"' in captured
 
 
 def test_force_templates_refuses_when_no_marketplace_resolvable(tmp_path, capsys):

@@ -136,10 +136,20 @@ class TestMainMenuRow7Doctor:
 
 
 class TestPublishGate0RejectsBypass:
-    """Phase B.bypass — publish.py Gate 0 must reject CPV_SKIP_UPSTREAM_CROSS_CHECK."""
+    """Phase B.bypass — publish.py Gate 0 must reject CPV_SKIP_UPSTREAM_CROSS_CHECK.
+
+    v2.86.0 (issue #22): the bypass-guard now uses prefix-pattern matching
+    instead of a fixed forbidden allowlist. CPV_SKIP_UPSTREAM_CROSS_CHECK
+    is matched implicitly by the ``CPV_SKIP_`` prefix entry.
+    """
 
     def test_publish_py_rejects_upstream_bypass(self):
         text = (REPO_ROOT / "scripts" / "publish.py").read_text(encoding="utf-8")
+        # The prefix-pattern bypass-guard catches every CPV_SKIP_* env var,
+        # including CPV_SKIP_UPSTREAM_CROSS_CHECK. Look for the prefix entry
+        # and the exemption block that documents the two reads-only escape
+        # hatches (CPV_SKIP_GITHUB_INTEGRITY / CPV_SKIP_GH_AUTH_CHECK).
+        assert '"CPV_SKIP_"' in text, "CPV_SKIP_ prefix entry missing from bypass-guard"
+        # And the docstring should still mention the upstream-cross-check
+        # case for greppability.
         assert "CPV_SKIP_UPSTREAM_CROSS_CHECK" in text
-        # It must be listed in the `forbidden` block, not just mentioned.
-        assert '"CPV_SKIP_UPSTREAM_CROSS_CHECK"' in text
