@@ -64,15 +64,15 @@ example from the same page:
 
 `tests/test_hook_args_field.py` rewritten:
 
-* `test_args_and_command_both_present_emits_major` **removed** (asserted
+- `test_args_and_command_both_present_emits_major` **removed** (asserted
   the bug).
-* `test_canonical_exec_form_command_plus_args_passes` **added** —
+- `test_canonical_exec_form_command_plus_args_passes` **added** —
   positive test for the docs' canonical exec form; asserts no
   "mutually exclusive" message resurfaces.
-* `test_exec_form_bare_command_with_whitespace_emits_minor` **added** —
+- `test_exec_form_bare_command_with_whitespace_emits_minor` **added** —
   the docs-warned shape (`command: "node script.js"` + `args`) emits
   the new targeted MINOR.
-* `test_exec_form_command_with_path_separator_no_whitespace_warning`
+- `test_exec_form_command_with_path_separator_no_whitespace_warning`
   **added** — `command: "${CLAUDE_PLUGIN_ROOT}/bin/runner"` + `args`
   must NOT trigger the whitespace check.
 
@@ -91,9 +91,9 @@ CPV_SKIP_GITHUB_INTEGRITY=1 uv run python scripts/validate_plugin.py . --strict
 
 ## Downstream
 
-* `ai-maestro-plugin` v2.5.8 should publish cleanly once it uvx-installs
+- `ai-maestro-plugin` v2.5.8 should publish cleanly once it uvx-installs
   CPV at v2.87.0 (or a later tag).
-* Any other plugin that migrated to the 2.1.139 exec form was hit by
+- Any other plugin that migrated to the 2.1.139 exec form was hit by
   the same false positive — they should also unblock automatically.
 
 ## Lessons
