@@ -888,6 +888,69 @@ def _apply_notify_marketplace_overrides(
     return changes
 
 
+# Issue #25 Defect D (v2.87.1): canonical workflows the migration installs
+# (release.yml, ci.yml) run `uv run <tool>` for these tools. If the plugin's
+# pre-existing pyproject.toml's [project.optional-dependencies].dev lacks any
+# of them, `uv sync --extra dev` will not install them and the workflow step
+# crashes on first push with "Failed to spawn: <tool>". pyproject.toml is
+# user-owned (never force-overwritten — see _NEVER_FORCE_OVERWRITE), so we
+# ALERT loudly rather than auto-edit, matching the issue-#23 pattern.
+_CANONICAL_DEV_EXTRA_TOOLS: tuple[str, ...] = ("mypy", "pytest", "ruff")
+_CANONICAL_DEV_EXTRA_FLOORS: dict[str, str] = {
+    "mypy": ">=1.19.1",
+    "pytest": ">=8.0.0",
+    "ruff": ">=0.14.14",
+}
+_WORKFLOW_PATHS_REQUIRING_DEV_EXTRAS: frozenset[str] = frozenset(
+    {".github/workflows/release.yml", ".github/workflows/ci.yml"}
+)
+
+
+def _canonical_dev_extras_missing(plugin_path: Path) -> list[str]:
+    """Return canonical dev-extra tools missing from pyproject.toml.
+
+    Read-only — pyproject.toml is user-owned, so this function only detects
+    the gap. Callers emit the [ACTION REQUIRED] alert. Returns [] when
+    pyproject.toml is absent (no Python toolchain to reconcile) or when
+    every canonical tool is already declared in
+    ``[project.optional-dependencies].dev``.
+    """
+    pyproject = plugin_path / "pyproject.toml"
+    if not pyproject.is_file():
+        return []
+    try:
+        import tomllib  # type: ignore[import-not-found]
+    except ImportError:
+        # Python < 3.11 — refuse to guess. Plugins on those interpreters
+        # were never going to run the canonical 3.12+ workflows anyway.
+        return []
+    try:
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    project = data.get("project")
+    if not isinstance(project, dict):
+        return []
+    opt = project.get("optional-dependencies")
+    if not isinstance(opt, dict):
+        return []
+    dev = opt.get("dev")
+    if not isinstance(dev, list):
+        return []
+    declared: set[str] = set()
+    for spec in dev:
+        if not isinstance(spec, str):
+            continue
+        # PEP-508 name = everything before any version/extras/marker suffix.
+        # Case-insensitive per PEP-503.
+        name = re.split(r"[<>=~!\[;]", spec, 1)[0].strip().lower()
+        if name:
+            declared.add(name)
+    return [tool for tool in _CANONICAL_DEV_EXTRA_TOOLS if tool not in declared]
+
+
 def fix_missing_files(
     plugin_path: Path,
     results: list[AuditItem],
@@ -1097,6 +1160,38 @@ def fix_missing_files(
                 for entry in missing:
                     f.write(f"{entry}\n")
             print(f"  {GREEN}Updated:{NC} .gitignore — added {len(missing)} missing entries")
+
+    # Issue #25 Defect D (v2.87.1): when the migration emits release.yml or
+    # ci.yml — both of which run `uv run mypy / pytest / ruff` under
+    # `uv sync --extra dev` — alert the user if the pre-existing pyproject.toml
+    # does not declare those tools in `[project.optional-dependencies].dev`.
+    # Without this alert the workflow step crashes on first push with
+    # `Failed to spawn: <tool>` even though the migration reported success.
+    # pyproject.toml is user-owned, so we never auto-edit — we alert.
+    workflow_emitted = bool(_WORKFLOW_PATHS_REQUIRING_DEV_EXTRAS & (missing_files | force_overwrite))
+    if workflow_emitted and not dry_run:
+        missing_tools = _canonical_dev_extras_missing(plugin_path)
+        if missing_tools:
+            print()
+            print(f"  {YELLOW}{BOLD}[ACTION REQUIRED]{NC} pyproject.toml dev extras incomplete")
+            print(
+                f"  The CPV-shipped {BOLD}release.yml{NC} / {BOLD}ci.yml{NC} run "
+                f"`uv run <tool>` for: {', '.join(_CANONICAL_DEV_EXTRA_TOOLS)}."
+            )
+            print(
+                f"  Your pyproject.toml's {BOLD}[project.optional-dependencies].dev{NC} "
+                f"is missing: {RED}{', '.join(missing_tools)}{NC}."
+            )
+            print(
+                f"  `uv sync --extra dev` in CI will NOT install them — the workflow "
+                f"step crashes on first push with {DIM}Failed to spawn: <tool>{NC}."
+            )
+            print()
+            print(f"  {GREEN}Add to pyproject.toml's `dev` extra:{NC}")
+            for tool in missing_tools:
+                floor = _CANONICAL_DEV_EXTRA_FLOORS.get(tool, "")
+                print(f'    "{tool}{floor}",')
+            print()
 
     return created
 

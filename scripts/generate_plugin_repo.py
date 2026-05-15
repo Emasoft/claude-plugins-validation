@@ -2071,8 +2071,8 @@ def _detect_layout(plugin_root: Path) -> tuple[str, dict]:
             content = notify_wf.read_text(encoding="utf-8")
         except OSError:
             content = ""
-        m_owner = re.search(r"^\\s*MARKETPLACE_OWNER:\\s*['\\\"]?([^'\\\"\\s]+)['\\\"]?\\s*$", content, re.MULTILINE)
-        m_repo = re.search(r"^\\s*MARKETPLACE_REPO:\\s*['\\\"]?([^'\\\"\\s]+)['\\\"]?\\s*$", content, re.MULTILINE)
+        m_owner = re.search(r"^\s*MARKETPLACE_OWNER:\s*[\"']?([^\"'\s]+)[\"']?\s*$", content, re.MULTILINE)
+        m_repo = re.search(r"^\s*MARKETPLACE_REPO:\s*[\"']?([^\"'\s]+)[\"']?\s*$", content, re.MULTILINE)
         return "A", {
             "notify_workflow": notify_wf,
             "mkt_owner": m_owner.group(1) if m_owner else None,
@@ -2091,7 +2091,7 @@ def _gh_secret_exists(plugin_root: Path, secret_name: str) -> bool:
     if r.returncode != 0:
         return False
     for line in r.stdout.splitlines():
-        if line.split("\\t", 1)[0].strip() == secret_name:
+        if line.split("\t", 1)[0].strip() == secret_name:
             return True
     return False
 
@@ -2170,6 +2170,7 @@ def _remote_has_receiver_workflow(owner: str, repo: str) -> bool:
 
 
 def _plugin_in_remote_marketplace(mkt_json: dict, plugin_name: str, expected_repo: str | None) -> bool:
+    """Accept github/url/git source forms; match URL slug for url|git (issue #25 Defect A)."""
     plugins = mkt_json.get("plugins")
     if not isinstance(plugins, list):
         return False
@@ -2179,12 +2180,20 @@ def _plugin_in_remote_marketplace(mkt_json: dict, plugin_name: str, expected_rep
         if entry.get("name") != plugin_name:
             continue
         source = entry.get("source")
-        if isinstance(source, dict):
-            stype = source.get("source") or source.get("type")
-            if stype != "github":
-                continue
+        if not isinstance(source, dict):
+            continue
+        stype = source.get("source") or source.get("type")
+        if stype == "github":
             if expected_repo is None or source.get("repo") == expected_repo:
                 return True
+        elif stype in ("url", "git"):
+            url = source.get("url")
+            if expected_repo is None:
+                return True
+            if isinstance(url, str):
+                norm = url.removesuffix(".git").rstrip("/")
+                if norm.endswith("/" + expected_repo) or norm.endswith(":" + expected_repo):
+                    return True
     return False
 
 
@@ -2238,7 +2247,7 @@ def stage_marketplace_registration(root: Path) -> None:
         slug = _current_repo_slug(root)
         if not _plugin_in_remote_marketplace(mkt_json, plugin_name, slug):
             cprint(f"  {RED}BLOCKED: plugin '{plugin_name}' not registered in {mkt_owner}/{mkt_repo} marketplace.json.{NC}")
-            cprint(f"  {RED}  Add an entry: {{\\\"name\\\": \\\"{plugin_name}\\\", \\\"source\\\": {{\\\"source\\\": \\\"github\\\", \\\"repo\\\": \\\"{slug}\\\"}}}}{NC}")
+            cprint(f"  {RED}  Add an entry: {{\"name\": \"{plugin_name}\", \"source\": {{\"source\": \"github\", \"repo\": \"{slug}\"}}}}{NC}")
             sys.exit(1)
         cprint(f"  {GREEN}Plugin registered in remote marketplace.json{NC}")
         if not _remote_has_receiver_workflow(mkt_owner, mkt_repo):
@@ -2280,7 +2289,7 @@ def stage_marketplace_registration(root: Path) -> None:
             sys.exit(1)
         if not any(isinstance(e, dict) and e.get("name") == plugin_name for e in entries):
             cprint(f"  {RED}BLOCKED: plugin '{plugin_name}' not registered in {mp_path}.{NC}")
-            cprint(f"  {RED}  Add: {{\\\"name\\\": \\\"{plugin_name}\\\", \\\"source\\\": \\\"./plugins/{plugin_name}\\\"}}{NC}")
+            cprint(f"  {RED}  Add: {{\"name\": \"{plugin_name}\", \"source\": \"./plugins/{plugin_name}\"}}{NC}")
             sys.exit(1)
         cprint(f"  {GREEN}Plugin '{plugin_name}' registered in parent marketplace.json{NC}")
         cprint(f"  {GREEN}Layout B marketplace registration verified.{NC}")
