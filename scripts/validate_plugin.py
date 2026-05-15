@@ -745,16 +745,51 @@ def validate_channels_structure(manifest: dict[str, Any], plugin_root: Path, rep
                             )
 
 
+def _read_skill_md_name(skill_md: Path) -> str | None:
+    """Return the ``name`` frontmatter value of a SKILL.md file, or None.
+
+    Fail-safe by design: any read or parse error yields None so skill
+    discovery never crashes on a malformed file — the skill validator is
+    the surface that reports the actual defect.
+    """
+    try:
+        content = skill_md.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    if not content.startswith("---"):
+        return None
+    parts = content.split("---", 2)
+    if len(parts) < 3:
+        return None
+    try:
+        frontmatter = yaml.safe_load(parts[1])
+    except yaml.YAMLError:
+        return None
+    if isinstance(frontmatter, dict):
+        name = frontmatter.get("name")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    return None
+
+
 def _discover_plugin_skills(plugin_root: Path) -> set[str]:
     """Return the set of skill names declared by this plugin.
 
     GAP-10 helper (v2.22.3): scans ``<plugin>/skills/<skill>/SKILL.md`` so
     the monitors validator can cross-reference ``on-skill-invoke:<skill>``
-    targets against actually-declared skills. Returns an empty set when
-    the plugin has no skills directory.
+    targets against actually-declared skills.
+
+    CC v2.1.142: when the plugin has no ``skills/`` subdirectory, a
+    root-level ``SKILL.md`` is surfaced as a skill — its invocable name is
+    the ``name`` frontmatter field, so it is included here too.
     """
     skills_dir = plugin_root / "skills"
     if not skills_dir.is_dir():
+        root_skill_md = plugin_root / "SKILL.md"
+        if root_skill_md.is_file():
+            name = _read_skill_md_name(root_skill_md)
+            if name:
+                return {name}
         return set()
     discovered: set[str] = set()
     for entry in skills_dir.iterdir():
@@ -2097,13 +2132,17 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
 
     # Check that plugin has at least some actual content beyond just a manifest
     content_indicators = ["commands", "skills", "agents", "hooks", "scripts", "output-styles"]
-    file_indicators = [".mcp.json", ".lsp.json"]
+    # CC v2.1.142: a root-level SKILL.md (with no skills/ subdir) is surfaced
+    # as a skill, so it counts as plugin content on its own.
+    file_indicators = [".mcp.json", ".lsp.json", "SKILL.md"]
     has_content = any((plugin_root / d).is_dir() for d in content_indicators) or any(
         (plugin_root / f).exists() for f in file_indicators
     )
     if not has_content:
         report.major(
-            "Plugin has a manifest but no content — expected at least one of: commands/, skills/, agents/, hooks/, scripts/, .mcp.json, or .lsp.json",
+            "Plugin has a manifest but no content — expected at least one of: "
+            "commands/, skills/, agents/, hooks/, scripts/, .mcp.json, .lsp.json, "
+            "or a root-level SKILL.md",
             ".claude-plugin/plugin.json",
         )
 
@@ -2911,10 +2950,43 @@ def validate_skills(plugin_root: Path, report: ValidationReport, skip_platform_c
         return
 
     skills_dir = plugin_root / "skills"
+    root_skill_md = plugin_root / "SKILL.md"
 
     if not skills_dir.is_dir():
-        report.info("No skills/ directory found")
+        # CC v2.1.142: a plugin with a root-level SKILL.md and no skills/
+        # subdirectory has that SKILL.md surfaced as a skill. Validate it with
+        # the full skill validator, the same scrutiny a skills/<name>/ skill
+        # gets — anything less would let a broken root-level skill ship.
+        if root_skill_md.is_file():
+            report.info("Root-level SKILL.md found — surfaced as a skill (CC v2.1.142)")
+            # The skill's directory IS the plugin root, so the frontmatter
+            # 'name' has no skills/<name>/ folder to be matched against.
+            skill_report = validate_skill_comprehensive(
+                plugin_root,
+                strict_mode=True,
+                strict_openspec=False,
+                validate_pillars_flag=False,
+                skip_platform_checks=skip_platform_checks,
+                skip_dir_name_check=True,
+            )
+            for result in skill_report.results:
+                report.add(result.level, result.message, result.file or "SKILL.md", result.line)
+        else:
+            report.info("No skills/ directory found")
         return
+
+    # A skills/ directory exists: per CC v2.1.142 a root-level SKILL.md is
+    # surfaced ONLY when the plugin has no skills/ subdir, so a SKILL.md left
+    # at the plugin root alongside skills/ is dead weight that never loads.
+    if root_skill_md.is_file():
+        report.minor(
+            "Root-level SKILL.md will NOT load: CC v2.1.142 surfaces a "
+            "root-level SKILL.md as a skill only when the plugin has no "
+            "skills/ subdirectory. Move it to skills/<name>/SKILL.md, or "
+            "remove the skills/ directory so the root-level SKILL.md is "
+            "surfaced instead.",
+            "SKILL.md",
+        )
 
     # Find all skill directories
     skill_dirs = [d for d in skills_dir.iterdir() if d.is_dir()]
