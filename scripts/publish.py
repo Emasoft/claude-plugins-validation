@@ -868,9 +868,26 @@ def _remote_has_receiver_workflow(
 
 
 def _plugin_in_remote_marketplace(mkt_json: dict, plugin_name: str, expected_repo: str | None) -> bool:
-    """Return True if marketplace.json lists plugin_name with github source pointing at expected_repo.
+    """Return True if marketplace.json lists plugin_name with a remote source matching expected_repo.
 
-    If expected_repo is None, accept any github source entry matching plugin_name.
+    Accepts every remote source-object shape CC's marketplace spec defines for a
+    per-plugin entry:
+
+    * ``{"source": "github", "repo": "owner/repo"}`` — the github form.
+    * ``{"source": "url",  "url":  "https://…/owner/repo[.git]"}`` — the url form.
+    * ``{"source": "git",  "url":  "git@…:owner/repo[.git]"}`` — the explicit git form.
+
+    For ``url`` / ``git`` the URL is normalised (``.git`` stripped, trailing ``/``
+    removed) and matched against the slug — accept when it ends with
+    ``/<expected_repo>`` (HTTPS) or ``:<expected_repo>`` (SSH). A bare ``./path``
+    string source is a local directory entry, not a remote registration — skipped.
+
+    If ``expected_repo`` is None, accept any matching-name remote-source entry.
+
+    Issue #25 Defect A (v2.87.1): the previous version only accepted the
+    ``github`` form and falsely blocked Stage 5 of every downstream publish whose
+    marketplace.json used the ``url`` form (the shape Emasoft/ai-maestro-plugins
+    actually ships).
     """
     plugins = mkt_json.get("plugins")
     if not isinstance(plugins, list):
@@ -881,15 +898,22 @@ def _plugin_in_remote_marketplace(mkt_json: dict, plugin_name: str, expected_rep
         if entry.get("name") != plugin_name:
             continue
         source = entry.get("source")
-        if isinstance(source, dict):
-            if source.get("source") != "github" and source.get("type") != "github":
-                continue
-            repo = source.get("repo")
-            if expected_repo is None or repo == expected_repo:
-                return True
-        elif isinstance(source, str):
-            # Bare directory source like "./plugins/foo"
+        if not isinstance(source, dict):
+            # Bare string sources (e.g. "./plugins/foo") are local directory
+            # entries, not remote-marketplace registrations.
             continue
+        stype = source.get("source") or source.get("type")
+        if stype == "github":
+            if expected_repo is None or source.get("repo") == expected_repo:
+                return True
+        elif stype in ("url", "git"):
+            url = source.get("url")
+            if expected_repo is None:
+                return True
+            if isinstance(url, str):
+                norm = url.removesuffix(".git").rstrip("/")
+                if norm.endswith("/" + expected_repo) or norm.endswith(":" + expected_repo):
+                    return True
     return False
 
 
