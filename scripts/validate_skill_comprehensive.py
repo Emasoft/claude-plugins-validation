@@ -599,8 +599,16 @@ def validate_name_field(
     skill_dir_name: str,
     report: ValidationReport,
     strict_openspec: bool = False,
+    skip_dir_name_check: bool = False,
 ) -> None:
-    """Validate the 'name' frontmatter field with AgentSkills OpenSpec rules."""
+    """Validate the 'name' frontmatter field with AgentSkills OpenSpec rules.
+
+    ``skip_dir_name_check`` suppresses the frontmatter-name vs directory-name
+    match. Set it for a root-level SKILL.md (CC v2.1.142): such a skill has no
+    ``skills/<name>/`` directory — its directory IS the plugin root, whose name
+    (often a version string under the plugin cache) is unrelated to the skill
+    name, so the match would be a guaranteed false positive.
+    """
     if "name" not in frontmatter:
         if strict_openspec:
             report.critical("Missing required field: 'name'", "SKILL.md", category="Frontmatter")
@@ -628,7 +636,9 @@ def validate_name_field(
         name,
         "skill",
         report,
-        directory_name=unicodedata.normalize("NFKC", skill_dir_name) if "name" in frontmatter else None,
+        directory_name=(
+            unicodedata.normalize("NFKC", skill_dir_name) if "name" in frontmatter and not skip_dir_name_check else None
+        ),
     )
 
     # Reserved words check (Anthropic-specific)
@@ -2541,6 +2551,7 @@ def validate_skill(
     strict_openspec: bool = False,
     validate_pillars_flag: bool = False,
     skip_platform_checks: list[str] | None = None,
+    skip_dir_name_check: bool = False,
 ) -> ValidationReport:
     """Validate a complete skill directory.
 
@@ -2550,6 +2561,9 @@ def validate_skill(
         strict_openspec: Enable AgentSkills OpenSpec strict validation
         validate_pillars_flag: Enable 8+1 Pillars validation
         skip_platform_checks: List of platforms to skip checks for (e.g., ['windows'])
+        skip_dir_name_check: Suppress the frontmatter-name vs directory-name
+            match. Set it when validating a root-level SKILL.md (CC v2.1.142):
+            the skill's directory IS the plugin root, so the match is N/A.
 
     Returns:
         ValidationReport with all results
@@ -2584,7 +2598,9 @@ def validate_skill(
         validate_field_whitelist(frontmatter, report, strict_openspec)
 
         # Validate individual frontmatter fields
-        validate_name_field(frontmatter, skill_path.name, report, strict_openspec)
+        validate_name_field(
+            frontmatter, skill_path.name, report, strict_openspec, skip_dir_name_check=skip_dir_name_check
+        )
         validate_description_field(frontmatter, body, report, strict_mode)
         validate_context_field(frontmatter, report)
         validate_agent_field(frontmatter, report)
