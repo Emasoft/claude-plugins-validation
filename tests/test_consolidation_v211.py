@@ -287,7 +287,12 @@ class TestSkillAgentArchitecture:
             )
 
     def test_every_skill_is_loaded_by_at_least_one_agent(self):
-        """Each skill must be referenced by at least one agent's skills: list."""
+        """Each skill must be referenced by at least one loader — either an
+        agent's frontmatter ``skills:`` list (the traditional path) OR a
+        slash-command body via the Skill tool with the fully-qualified
+        ``claude-plugins-validation:<skill-name>`` form (the v2.89.4
+        context-fork pattern introduced by TRDD-3ce2f864).
+        """
         # Skills that are intentionally orphaned during a multi-wave TRDD
         # landing. Each entry MUST cite the TRDD that authored it and the
         # subsequent wave that wires it. Remove the entry the moment the
@@ -298,19 +303,47 @@ class TestSkillAgentArchitecture:
             # marketplace-fixer to load it.
             "marketplace-authoring-contract",
         }
-        # Gather all skill names declared by agents
+        # Gather all skill names declared by agents.
         loaded = set()
         for agent_md in AGENTS_DIR.glob("*.md"):
             fm = _parse_frontmatter(agent_md) or {}
             for s in fm.get("skills", []) or []:
                 loaded.add(s)
-        # Every skill directory must appear in some agent's skills list
+        # ALSO gather skills invoked by slash-command bodies via the Skill
+        # tool. The v2.89.4 ``cpv-format-menu`` fork-skill (TRDD-3ce2f864)
+        # is the canonical example: loaded by the four orchestrator
+        # commands, never by an agent. The fully-qualified form
+        # ``skill: "claude-plugins-validation:<name>"`` is the unambiguous
+        # marker — bare prose mentions ("this skill", "fork-skill:")
+        # don't false-match.
+        commands_dir = SKILLS_DIR.parent / "commands"
+        if commands_dir.is_dir():
+            for cmd_md in commands_dir.glob("*.md"):
+                body = cmd_md.read_text(encoding="utf-8")
+                # Find every fully-qualified Skill invocation. Pattern:
+                #   skill: "claude-plugins-validation:<skill-name>"
+                # The name portion may contain letters, digits, dashes,
+                # underscores; capture greedily until the closing quote.
+                import re as _re
+                for m in _re.finditer(
+                    r'skill:\s*"claude-plugins-validation:([a-z0-9_-]+)"',
+                    body,
+                ):
+                    loaded.add(m.group(1))
+        # Every skill directory must appear in some loader's list/body.
         for skill_dir in SKILLS_DIR.iterdir():
             if not skill_dir.is_dir() or not (skill_dir / "SKILL.md").exists():
                 continue
             if skill_dir.name in pending_wave_b_wiring:
                 continue
-            assert skill_dir.name in loaded, f"Skill {skill_dir.name} is not loaded by any agent — orphaned skill"
+            assert skill_dir.name in loaded, (
+                f"Skill {skill_dir.name} is not loaded by any agent OR "
+                f"slash-command — orphaned skill. Either add it to an "
+                f"agent's `skills:` list, OR invoke it from a command "
+                f"body via `Skill({{skill: \"claude-plugins-validation:"
+                f"{skill_dir.name}\", ...}})` (the v2.89.4 context-fork "
+                f"pattern from TRDD-3ce2f864)."
+            )
 
     def test_loaded_by_claims_match_actual_agents(self):
         """Each 'Loaded by X agent' claim in a skill must map to an agent that loads it."""

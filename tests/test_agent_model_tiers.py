@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for agent model-tier policy.
 
-Two TRDDs are active here:
+Three TRDDs are active here:
 
 * **TRDD-82e836dc** (Phase A only — frontmatter-only downgrades): each
   agent's `model:` field is set to the cheapest tier that still does its
@@ -16,14 +16,23 @@ Two TRDDs are active here:
   other subagents, so `Agent(agent_type)` has no effect in subagent
   definitions"*. The four menu subagents were therefore deleted; the
   slash-command body itself is now the menu orchestrator (runs in the
-  main session with `model: haiku` on the slash-command frontmatter,
-  dispatches the opus work agent via the Agent tool — which works only
-  from the main session). The Phase B tests in this file enforce the
-  v2.89.0 architecture: (a) the four `*-menu` files MUST NOT exist,
-  (b) the four slash commands carry `model: haiku` and NO `agent:`
-  field, (c) the four opus work agents stay on opus and contain no
-  user-facing First Contact menu (that menu lives in the slash-command
-  body now).
+  main session, dispatches the opus work agent via the Agent tool —
+  which works only from the main session).
+* **TRDD-3ce2f864** (v2.89.4 — context-fork menu rendering): the v2.89.0
+  pattern declared `model: haiku` on the four orchestrator commands. Per
+  the Claude Code skills docs, ``model:`` overrides apply "for the rest
+  of the current turn" while keeping the inherited conversation history.
+  A multi-turn opus orchestrator with a 1M-token context cannot safely
+  degrade mid-turn to haiku — the override silently fails. v2.89.4
+  removes `model: haiku` from the four orchestrators and moves the
+  honest haiku-rendering capability into a single `context: fork` skill
+  (`cpv-format-menu`). The Phase B tests in this file are now Phase B+C
+  combined: (a) the four `*-menu` agent files MUST stay deleted,
+  (b) the four slash commands MUST NOT carry `model: haiku` AND MUST
+  invoke the `cpv-format-menu` Skill, (c) the four opus work agents
+  stay on opus and contain no First Contact menu, (d) the
+  `cpv-format-menu` skill carries `model: haiku` + `context: fork` +
+  `agent: general-purpose`.
 
 Tier policy:
 
@@ -185,13 +194,24 @@ def test_menu_subagent_is_deleted(menu_filename: str) -> None:
 
 
 @pytest.mark.parametrize("work,cmd,_work_name", _MAIN_SESSION_MENUS)
-def test_orchestrator_command_is_haiku(work: str, cmd: str, _work_name: str) -> None:
-    """Each menu-orchestrator slash command declares model: haiku."""
+def test_orchestrator_command_is_not_haiku(work: str, cmd: str, _work_name: str) -> None:
+    """Each menu-orchestrator slash command MUST NOT declare model: haiku
+    (TRDD-3ce2f864 supersedes the v2.89.0 design from TRDD-bcbceeed).
+
+    Per the Claude Code skills docs, ``model:`` overrides apply "for the rest
+    of the current turn" while keeping the inherited conversation history.
+    The orchestrators are multi-turn state machines on opus with a 1M-token
+    context — switching mid-turn to haiku is unsafe (the override silently
+    degrades or fails). The honest pattern: orchestrator runs on the session
+    model; menu rendering forks to haiku via the ``cpv-format-menu``
+    ``context: fork`` skill.
+    """
     fm = _load_frontmatter(COMMANDS_DIR / cmd)
-    assert fm.get("model") == "haiku", (
-        f"{cmd} must declare `model: haiku` in its frontmatter so the "
-        f"first menu-render turn runs on haiku regardless of session model "
-        f"(per TRDD-bcbceeed). Current model: {fm.get('model')!r}."
+    assert fm.get("model") != "haiku", (
+        f"{cmd} declares `model: haiku` in its frontmatter. Per "
+        f"TRDD-3ce2f864 this is a lie — the multi-turn orchestrator body "
+        f"runs on the session model regardless. Remove the field and rely "
+        f"on `cpv-format-menu` (context: fork) for honest haiku rendering."
     )
 
 
@@ -214,31 +234,42 @@ def test_orchestrator_command_has_no_agent_field(work: str, cmd: str, _work_name
 
 
 @pytest.mark.parametrize("work,cmd,_work_name", _MAIN_SESSION_MENUS)
-def test_orchestrator_command_body_invokes_format_menu(work: str, cmd: str, _work_name: str) -> None:
-    """Each menu-orchestrator command body MUST call ``scripts/format_menu.py``
-    rather than embedding hardcoded Unicode tables.
+def test_orchestrator_command_body_invokes_cpv_format_menu(work: str, cmd: str, _work_name: str) -> None:
+    """Each menu-orchestrator command body MUST invoke the ``cpv-format-menu``
+    ``context: fork`` skill (rather than embedding hardcoded Unicode tables
+    OR calling ``scripts/format_menu.py`` directly via Bash).
 
-    Per TRDD-bcbceeed (v2.89.0): the menu presets are part of the slash-command
+    Per TRDD-bcbceeed (v2.89.0): menu presets are part of the slash-command
     body — no external menu-agent file.
 
-    Per TRDD-81e7fa34 (v2.89.3): the body MUST hand its rows to the
-    ``scripts/format_menu.py`` renderer (rather than embed a literal
-    Unicode table). The renderer drops disabled rows, renumbers the
-    rest, and pads cells by DISPLAY width (Unicode-correct alignment).
-    Hardcoded ``┏━`` tables are forbidden because they re-introduce the
-    ``len()``-vs-display-width alignment bug + the "menu shows greyed
-    empty rows" defect from the v2.89.0 end-user feedback.
+    Per TRDD-81e7fa34 (v2.89.3): hardcoded Unicode tables are forbidden
+    because they re-introduce the ``len()``-vs-display-width alignment bug
+    + the "menu shows greyed empty rows" defect.
+
+    Per TRDD-3ce2f864 (v2.89.4): menu rendering is offloaded to the
+    ``cpv-format-menu`` fork-skill — the orchestrator writes the JSON spec
+    to a temp file and invokes the Skill tool. The fork spawns a fresh
+    haiku subagent (so ``model: haiku`` actually takes effect) which runs
+    ``format_menu.py`` and returns the rendered text.
     """
     body = (COMMANDS_DIR / cmd).read_text(encoding="utf-8")
-    assert "scripts/format_menu.py" in body, (
-        f"{cmd} body does not invoke `scripts/format_menu.py`. Per "
-        f"TRDD-81e7fa34 (v2.89.3) the menu and summary rendering MUST go "
-        f"through the helper so cell widths use display columns and "
-        f"disabled rows are dropped + renumbered."
+    assert "cpv-format-menu" in body, (
+        f"{cmd} body does not reference `cpv-format-menu`. Per "
+        f"TRDD-3ce2f864 (v2.89.4) menu rendering MUST be offloaded to the "
+        f"`cpv-format-menu` `context: fork` skill so cell widths use "
+        f"display columns, disabled rows are dropped + renumbered, AND "
+        f"the haiku override actually takes effect (no inherited opus "
+        f"context to silently degrade against)."
     )
-    assert ' menu "' in body or " menu '" in body or "format_menu.py menu" in body, (
-        f"{cmd} body must call `format_menu.py menu` for at least one menu "
-        f"render."
+    assert 'skill: "claude-plugins-validation:cpv-format-menu"' in body, (
+        f"{cmd} body references `cpv-format-menu` but does not invoke it "
+        f"via the Skill tool with the fully-qualified "
+        f"`claude-plugins-validation:cpv-format-menu` form. The expected "
+        f"invocation block is:\n"
+        f"  Skill({{\n"
+        f"    skill: \"claude-plugins-validation:cpv-format-menu\",\n"
+        f"    args: \"<mode> /tmp/<cmd>-<purpose>-spec.json [/tmp/<cmd>-<purpose>-map.json]\"\n"
+        f"  }})"
     )
 
 
@@ -311,4 +342,49 @@ def test_opus_work_agent_has_no_first_contact_menu(work: str) -> None:
         f"{work} still contains a `## First Contact` section. The menu "
         f"belongs on the slash-command body. Bare prose mentions of the "
         f"term are allowed; only the section header is forbidden."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase C (v2.89.4 / TRDD-3ce2f864) — cpv-format-menu fork-skill positive checks
+# ---------------------------------------------------------------------------
+
+
+def test_cpv_format_menu_skill_is_haiku_fork() -> None:
+    """The `cpv-format-menu` skill MUST declare `model: haiku` AND
+    `context: fork` AND `agent: general-purpose` (TRDD-3ce2f864).
+
+    This is the positive counterpart to ``test_orchestrator_command_is_not_haiku``:
+    the orchestrators give up the lying ``model: haiku`` frontmatter, and
+    the honest haiku-rendering capability moves to this single fork-skill.
+
+    - ``model: haiku`` — the actual model that runs the render step
+    - ``context: fork`` — required for ``model:`` to honestly take effect
+      (without it, the skill inherits parent context and the override
+      silently degrades, same bug as the orchestrator frontmatter)
+    - ``agent: general-purpose`` — the subagent type to fork into
+    - ``user-invocable: false`` — only loaded by the four orchestrators
+    """
+    skill_path = PLUGIN_ROOT / "skills" / "cpv-format-menu" / "SKILL.md"
+    fm = _load_frontmatter(skill_path)
+    assert fm.get("model") == "haiku", (
+        f"cpv-format-menu skill must declare `model: haiku`. Per "
+        f"TRDD-3ce2f864 this is THE fork-skill that lets menu rendering "
+        f"actually run on haiku. Current model: {fm.get('model')!r}."
+    )
+    assert fm.get("context") == "fork", (
+        "cpv-format-menu skill must declare `context: fork`. Without it, "
+        "the skill inherits the parent's (often opus-sized) conversation "
+        "history and the haiku model override silently degrades — the "
+        "exact bug TRDD-3ce2f864 fixes."
+    )
+    assert fm.get("agent") == "general-purpose", (
+        f"cpv-format-menu skill must declare `agent: general-purpose` so "
+        f"the fork knows which subagent type to spawn. Current agent: "
+        f"{fm.get('agent')!r}."
+    )
+    assert fm.get("user-invocable") is False, (
+        "cpv-format-menu skill must declare `user-invocable: false`. "
+        "It is loaded only by the four orchestrator commands; users "
+        "never invoke it directly."
     )
