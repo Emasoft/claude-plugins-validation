@@ -1,28 +1,43 @@
 #!/usr/bin/env python3
-"""Tests for agent model-tier policy (TRDD-82e836dc).
+"""Tests for agent model-tier policy.
 
-Enforces the three-tier model assignment policy:
+Two TRDDs are active here:
+
+* **TRDD-82e836dc** (Phase A only — frontmatter-only downgrades): each
+  agent's `model:` field is set to the cheapest tier that still does its
+  job. These tests are always active.
+* **TRDD-bcbceeed** (v2.89.0 — menu-orchestrator architecture fix):
+  Phase B of TRDD-82e836dc introduced four `*-menu` haiku dispatcher
+  *subagents* (`cpv-doctor-menu`, `plugin-fixer-menu`,
+  `marketplace-fixer-menu`, `cache-optimizer-menu`) whose job was to spawn
+  the matching opus work agent via the Agent tool. That design was
+  invalidated by the current Anthropic spec: per
+  https://code.claude.com/docs/en/sub-agents, *"subagents cannot spawn
+  other subagents, so `Agent(agent_type)` has no effect in subagent
+  definitions"*. The four menu subagents were therefore deleted; the
+  slash-command body itself is now the menu orchestrator (runs in the
+  main session with `model: haiku` on the slash-command frontmatter,
+  dispatches the opus work agent via the Agent tool — which works only
+  from the main session). The Phase B tests in this file enforce the
+  v2.89.0 architecture: (a) the four `*-menu` files MUST NOT exist,
+  (b) the four slash commands carry `model: haiku` and NO `agent:`
+  field, (c) the four opus work agents stay on opus and contain no
+  user-facing First Contact menu (that menu lives in the slash-command
+  body now).
+
+Tier policy:
 
 | Tier | When to use | Examples |
 |---|---|---|
 | haiku | Launching scripts; rendering menus and parsing integer/letter
 |       | choices; routing to specialised work agents. NO analysis. |
-|       | cpv-main-menu-agent, plugin-validator, skill-validation-agent,
-|       | the four `*-menu` dispatchers. |
+|       | cpv-main-menu-agent, plugin-validator, skill-validation-agent. |
 | sonnet | Mechanical info-retrieval / install / list / show tasks. |
 |        | plugin-manager, plugin-creator. |
 | opus / opus[1m] | Diagnosis, analysis, planning, reading reports,
 |                  | applying fixes, deep semantic checks. |
 |                  | plugin-fixer, marketplace-fixer, cache-optimizer-agent,
 |                  | cpv-doctor-agent, plugin-diagnoser, semantic-validator. |
-
-Tests in this file:
-
-* Phase A (frontmatter-only downgrades) — always active.
-* Phase B (menu/work split for the four opus agents) — auto-active once the
-  `*-menu.md` files exist on disk. Until then the Phase B tests are skipped
-  with a clear reason so the test file passes after Phase A and starts
-  enforcing Phase B as soon as the splits land.
 """
 
 from __future__ import annotations
@@ -40,36 +55,23 @@ COMMANDS_DIR = PLUGIN_ROOT / "commands"
 def _load_frontmatter(path: Path) -> dict:
     """Parse the YAML frontmatter block from a markdown file.
 
-    The TRDD's reference implementation in §5 uses ``text.index("---", 3)``
-    which only works for the simplest case (no leading newline before the
-    fence and no `---` characters inside the YAML). The agent files in this
-    repo all start with ``---\\n`` and the closing fence is on a line by
-    itself, so we split on the literal newline-fence-newline boundary to
-    avoid false positives.
+    Splits on the literal newline-fence-newline boundary to avoid false
+    positives on `---` characters inside the YAML body.
     """
     text = path.read_text(encoding="utf-8")
     if not text.startswith("---"):
         raise AssertionError(f"{path} missing frontmatter — first line is not '---'")
-    # Find the closing fence on its own line.
     parts = text.split("\n---\n", 1)
     if len(parts) != 2:
-        # Tolerate trailing whitespace on the closing fence line.
         parts = text.split("\n---", 1)
         if len(parts) != 2:
             raise AssertionError(f"{path} missing closing frontmatter fence")
     head = parts[0]
-    # Drop the leading "---" line.
     yaml_body = head.split("\n", 1)[1] if "\n" in head else ""
     data = yaml.safe_load(yaml_body) or {}
     if not isinstance(data, dict):
         raise AssertionError(f"{path} frontmatter is not a mapping: {type(data).__name__}")
     return data
-
-
-def _agent_command_field(path: Path, field: str) -> object:
-    """Return a field from a command's frontmatter (or raise KeyError)."""
-    fm = _load_frontmatter(path)
-    return fm[field]
 
 
 # ---------------------------------------------------------------------------
@@ -96,16 +98,13 @@ def test_skill_validation_agent_is_haiku() -> None:
 
 
 def test_cpv_main_menu_agent_stays_haiku() -> None:
-    """Regression guard — cpv-main-menu-agent must stay on haiku.
-
-    This is the gold-standard menu agent the four new `*-menu` dispatchers
-    are modeled on. If this ever flips to sonnet/opus, the policy doc and
-    this test file have drifted out of sync.
-    """
+    """Regression guard — cpv-main-menu-agent must stay on haiku."""
     fm = _load_frontmatter(AGENTS_DIR / "cpv-main-menu-agent.md")
     assert fm["model"] == "haiku", (
         "cpv-main-menu-agent must stay on haiku — it is the canonical "
-        "menu-rendering pattern the new *-menu agents inherit from."
+        "menu-rendering pattern. (Note: per TRDD-bcbceeed this agent is on "
+        "the deprecation track too; follow-up TRDD will migrate it to the "
+        "slash-command body pattern.)"
     )
 
 
@@ -138,7 +137,6 @@ def test_plugin_diagnoser_stays_opus() -> None:
 def test_semantic_validator_stays_opus_1m() -> None:
     """Regression guard — semantic-validator stays on opus[1m] (deep semantic tier)."""
     fm = _load_frontmatter(AGENTS_DIR / "semantic-validator.md")
-    # opus[1m] is the 1M context window variant.
     assert fm["model"] in ("opus[1m]", "opus"), (
         "semantic-validator must declare `model: opus[1m]` (or opus fallback) "
         "per TRDD-82e836dc §3 — deep A-F grading requires opus."
@@ -146,236 +144,163 @@ def test_semantic_validator_stays_opus_1m() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Phase B — menu/work split (active once the *-menu files exist)
+# Phase B (v2.89.0 / TRDD-bcbceeed) — main-session menu orchestrator pattern
 # ---------------------------------------------------------------------------
 
-# Map of (work-agent file, menu-agent file, command file, command-name).
-# The four splits in TRDD-82e836dc §4.
-_SPLIT_MAP = [
-    (
-        "plugin-fixer.md",
-        "plugin-fixer-menu.md",
-        "cpv-fix-validation.md",
-        "plugin-fixer-menu",
-    ),
-    (
-        "marketplace-fixer.md",
-        "marketplace-fixer-menu.md",
-        "cpv-fix-marketplace-validation.md",
-        "marketplace-fixer-menu",
-    ),
-    (
-        "cache-optimizer-agent.md",
-        "cache-optimizer-menu.md",
-        "cpv-cache-optimize.md",
-        "cache-optimizer-menu",
-    ),
-    (
-        "cpv-doctor-agent.md",
-        "cpv-doctor-menu.md",
-        "cpv-doctor.md",
-        "cpv-doctor-menu",
-    ),
+# Map of (work-agent file, slash-command file, work-agent name). These four
+# slash commands are main-session menu orchestrators per v2.89.0.
+_MAIN_SESSION_MENUS = [
+    ("plugin-fixer.md", "cpv-fix-validation.md", "plugin-fixer"),
+    ("marketplace-fixer.md", "cpv-fix-marketplace-validation.md", "marketplace-fixer"),
+    ("cache-optimizer-agent.md", "cpv-cache-optimize.md", "cache-optimizer-agent"),
+    ("cpv-doctor-agent.md", "cpv-doctor.md", "cpv-doctor-agent"),
+]
+
+# Menu subagent files that were deleted in v2.89.0. They must stay gone:
+# they are subagents that try to spawn other subagents (a documented no-op).
+_DELETED_MENU_AGENTS = [
+    "cpv-doctor-menu.md",
+    "plugin-fixer-menu.md",
+    "marketplace-fixer-menu.md",
+    "cache-optimizer-menu.md",
 ]
 
 
-def _split_complete(work: str, menu: str) -> bool:
-    """Return True iff both halves of a split exist on disk."""
-    return (AGENTS_DIR / menu).exists() and (AGENTS_DIR / work).exists()
+@pytest.mark.parametrize("menu_filename", _DELETED_MENU_AGENTS)
+def test_menu_subagent_is_deleted(menu_filename: str) -> None:
+    """The four `*-menu` subagent files must stay deleted (v2.89.0).
 
-
-# Eligibility helpers — each returns True only when the corresponding split
-# is on disk. pytest.mark.skipif consults these at collection time so the
-# Phase B tests automatically activate once the menu agents land.
-def _phase_b_ready(work: str, menu: str) -> bool:
-    return _split_complete(work, menu)
-
-
-@pytest.mark.parametrize("work,menu,cmd,_cmd_name", _SPLIT_MAP)
-def test_menu_agent_is_haiku(work: str, menu: str, cmd: str, _cmd_name: str) -> None:
-    """Each *-menu agent declares model: haiku."""
-    if not _phase_b_ready(work, menu):
-        pytest.skip(
-            f"Phase B not yet shipped for {menu} — file does not exist. "
-            f"Test will activate automatically once {menu} is created."
-        )
-    fm = _load_frontmatter(AGENTS_DIR / menu)
-    assert fm["model"] == "haiku", (
-        f"{menu} must declare `model: haiku` — menu agents are pure "
-        f"dispatchers (numbered table + integer/letter parse + Agent dispatch)."
+    Per TRDD-bcbceeed: subagents cannot spawn other subagents per the
+    current Anthropic spec, so the menu-subagent layer is replaced by a
+    main-session orchestrator living in the slash-command body. Re-creating
+    any of these files would re-introduce a broken dispatch chain.
+    """
+    path = AGENTS_DIR / menu_filename
+    assert not path.exists(), (
+        f"{menu_filename} was re-introduced. Per TRDD-bcbceeed (v2.89.0) "
+        f"this file MUST stay deleted — subagents cannot spawn other "
+        f"subagents, so the menu-subagent dispatch chain is broken by "
+        f"spec. The slash-command body is now the menu orchestrator."
     )
 
 
-@pytest.mark.parametrize("work,menu,cmd,_cmd_name", _SPLIT_MAP)
-def test_work_agent_is_opus(work: str, menu: str, cmd: str, _cmd_name: str) -> None:
+@pytest.mark.parametrize("work,cmd,_work_name", _MAIN_SESSION_MENUS)
+def test_orchestrator_command_is_haiku(work: str, cmd: str, _work_name: str) -> None:
+    """Each menu-orchestrator slash command declares model: haiku."""
+    fm = _load_frontmatter(COMMANDS_DIR / cmd)
+    assert fm.get("model") == "haiku", (
+        f"{cmd} must declare `model: haiku` in its frontmatter so the "
+        f"first menu-render turn runs on haiku regardless of session model "
+        f"(per TRDD-bcbceeed). Current model: {fm.get('model')!r}."
+    )
+
+
+@pytest.mark.parametrize("work,cmd,_work_name", _MAIN_SESSION_MENUS)
+def test_orchestrator_command_has_no_agent_field(work: str, cmd: str, _work_name: str) -> None:
+    """Each menu-orchestrator command must NOT declare an `agent:` field.
+
+    Per TRDD-bcbceeed: the slash-command body is the orchestrator and runs
+    in the main session. An `agent:` field would dispatch to a subagent —
+    which then could not spawn the opus work agent (subagents can't spawn
+    subagents). Therefore the field must be absent.
+    """
+    fm = _load_frontmatter(COMMANDS_DIR / cmd)
+    assert "agent" not in fm, (
+        f"{cmd} declares `agent: {fm.get('agent')!r}`. Per TRDD-bcbceeed "
+        f"this field must be removed — the slash-command body itself "
+        f"orchestrates the menu in the main session. Without removal, the "
+        f"subagent-can't-spawn-subagent constraint silently breaks dispatch."
+    )
+
+
+@pytest.mark.parametrize("work,cmd,_work_name", _MAIN_SESSION_MENUS)
+def test_orchestrator_command_body_contains_menu_table(work: str, cmd: str, _work_name: str) -> None:
+    """Each menu-orchestrator command body bakes in the Unicode menu table.
+
+    Per TRDD-bcbceeed: the menu presets are part of the slash-command body
+    (no external menu-agent file). The body must contain the heavy
+    table-drawing characters used by every CPV menu (`┏━` for the header
+    fence and `┡━` for the divider row).
+    """
+    body = (COMMANDS_DIR / cmd).read_text(encoding="utf-8")
+    assert "┏━" in body, (
+        f"{cmd} body does not contain a Unicode-bordered menu table "
+        f"(missing `┏━`). Per TRDD-bcbceeed the menu presets must be "
+        f"baked into the slash-command body itself."
+    )
+    assert "┡━" in body, (
+        f"{cmd} body is missing the menu divider row (`┡━`). The full "
+        f"Unicode-bordered table must be present, not a half-rendered fragment."
+    )
+
+
+@pytest.mark.parametrize("work,cmd,work_name", _MAIN_SESSION_MENUS)
+def test_orchestrator_command_body_references_work_agent(work: str, cmd: str, work_name: str) -> None:
+    """Each menu-orchestrator command body references the opus work agent.
+
+    The body's Step 4 dispatch block must contain `subagent_type: <work_name>`
+    so the main session knows which subagent to spawn.
+    """
+    body = (COMMANDS_DIR / cmd).read_text(encoding="utf-8")
+    expected = f"subagent_type: {work_name}"
+    assert expected in body, (
+        f"{cmd} body does not reference `{expected}`. Per TRDD-bcbceeed "
+        f"the body must dispatch the opus work agent ({work_name}) via "
+        f"the Agent tool from the main session."
+    )
+
+
+@pytest.mark.parametrize("work,cmd,_work_name", _MAIN_SESSION_MENUS)
+def test_orchestrator_command_documents_haiku_banner(work: str, cmd: str, _work_name: str) -> None:
+    """Each menu-orchestrator command body documents the haiku-session banner.
+
+    The body must instruct the orchestrator to print a banner suggesting
+    `/model haiku` for cheaper menu navigation, so the user can opt into
+    haiku-everywhere with one keystroke.
+    """
+    body = (COMMANDS_DIR / cmd).read_text(encoding="utf-8")
+    assert "/model haiku" in body, (
+        f"{cmd} body does not mention the `/model haiku` opt-in banner. "
+        f"Per TRDD-bcbceeed the orchestrator must surface this suggestion "
+        f"so users on Opus can opt into haiku-everywhere with one keystroke."
+    )
+
+
+@pytest.mark.parametrize("work,cmd,_work_name", _MAIN_SESSION_MENUS)
+def test_work_agent_stays_opus(work: str, cmd: str, _work_name: str) -> None:
     """Each work-agent counterpart stays on opus."""
-    if not _phase_b_ready(work, menu):
-        pytest.skip(
-            f"Phase B not yet shipped — {menu} doesn't exist yet. This test gates the {work} side of the split."
-        )
     fm = _load_frontmatter(AGENTS_DIR / work)
     assert fm["model"] == "opus", (
         f"{work} must declare `model: opus` — it is the heavy-lifting "
-        f"counterpart of {menu} and handles diagnosis/analysis/fixes."
+        f"counterpart of the {cmd} main-session orchestrator and handles "
+        f"diagnosis/analysis/fixes."
     )
 
 
-@pytest.mark.parametrize("work,menu,cmd,_cmd_name", _SPLIT_MAP)
-def test_menu_agent_tool_surface_is_minimal(work: str, menu: str, cmd: str, _cmd_name: str) -> None:
-    """Each *-menu agent declares tools: [Bash, Read, Agent] only."""
-    if not _phase_b_ready(work, menu):
-        pytest.skip(f"Phase B not yet shipped for {menu} — tool-surface guard skipped.")
-    fm = _load_frontmatter(AGENTS_DIR / menu)
-    declared_tools = fm.get("tools", [])
-    # Tools may be a list of strings or a list of {name: ...} dicts.
-    normalised: set[str] = set()
-    for tool in declared_tools:
-        if isinstance(tool, str):
-            normalised.add(tool)
-        elif isinstance(tool, dict) and "name" in tool:
-            normalised.add(tool["name"])
-        else:
-            raise AssertionError(f"{menu} declares unparseable tool entry: {tool!r}")
-    allowed = {"Bash", "Read", "Agent"}
-    extras = normalised - allowed
-    assert not extras, (
-        f"{menu} declares forbidden tools: {sorted(extras)}. Menu agents "
-        f"may only use Bash + Read + Agent (dispatch). Heavy tools belong "
-        f"on the work agent ({work})."
-    )
-
-
-# Opus agents that MUST NOT carry a First Contact menu (they receive a
-# structured context from the menu agent instead). cpv-doctor-agent.md is
-# special-cased in TRDD §4 B.4: it keeps a POST-SCAN follow-up menu that
-# requires scanner-output context, so we exclude its full body from the
-# "no menu table" check, but we DO require its First Contact (top-level)
-# menu to be gone — that's covered by a separate test below.
-#
-# Each entry is (work-agent, menu-agent) — these names DO NOT follow the
-# naive `name + "-menu"` rule because cache-optimizer-agent splits into
-# cache-optimizer-menu (NOT cache-optimizer-agent-menu).
-_OPUS_AGENTS_NO_FIRST_CONTACT = [
-    ("plugin-fixer.md", "plugin-fixer-menu.md"),
-    ("marketplace-fixer.md", "marketplace-fixer-menu.md"),
-    ("cache-optimizer-agent.md", "cache-optimizer-menu.md"),
-]
-
-
-@pytest.mark.parametrize("agent_name,menu_name", _OPUS_AGENTS_NO_FIRST_CONTACT)
-def test_opus_work_agent_has_no_first_contact_menu(agent_name: str, menu_name: str) -> None:
+@pytest.mark.parametrize("work", ["plugin-fixer.md", "marketplace-fixer.md", "cache-optimizer-agent.md"])
+def test_opus_work_agent_has_no_first_contact_menu(work: str) -> None:
     """Opus work agents must not contain First Contact / numbered-menu blocks.
 
-    They are dispatched by the haiku menu agent which already made the
+    They are dispatched by the slash-command body which already made the
     choice. A leftover menu in the work agent risks the user being
     re-prompted after dispatch.
 
-    We detect the menu via TWO concrete signals — the heavy table-drawing
-    `┏━` row that every legacy menu uses, AND a markdown section header
-    that begins with `## First Contact`. Bare prose mentions of "First
-    Contact" inside the description / explanatory paragraphs are allowed
-    because they document what was MOVED (e.g. "the menu agent handles
-    First Contact menu rendering"). The fail is on the SECTION, not the
-    phrase.
+    Detected via TWO concrete signals — the heavy table-drawing `┏━` row
+    that every legacy menu uses, AND a markdown section header that begins
+    with `## First Contact`. Bare prose mentions are allowed (they
+    document what was MOVED). The fail is on the SECTION, not the phrase.
+
+    cpv-doctor-agent.md is special-cased separately because it keeps a
+    POST-SCAN follow-up menu that requires scanner-output context.
     """
-    if not (AGENTS_DIR / menu_name).exists():
-        pytest.skip(
-            f"Phase B split not yet shipped for {agent_name} "
-            f"({menu_name} missing) — menu-removal guard skipped until split lands."
-        )
-    body = (AGENTS_DIR / agent_name).read_text(encoding="utf-8")
-    # Signal 1: heavy table-drawing characters the legacy menus use.
+    body = (AGENTS_DIR / work).read_text(encoding="utf-8")
     assert "┏━" not in body, (
-        f"{agent_name} still contains a Unicode-bordered menu table "
-        f"(`┏━` found). First Contact menus belong on the haiku menu agent."
+        f"{work} still contains a Unicode-bordered menu table (`┏━` found). "
+        f"First Contact menus belong on the slash-command body."
     )
-    # Signal 2: an actual `## First Contact` section header (case-sensitive,
-    # markdown-level-2 only). Inline prose mentions of the term are fine.
     has_first_contact_section = any(line.startswith("## First Contact") for line in body.splitlines())
     assert not has_first_contact_section, (
-        f"{agent_name} still contains a `## First Contact` section. The "
-        f"menu belongs on the haiku menu agent ({menu_name}). Bare prose "
-        f"mentions of the term are allowed; only the section header is forbidden."
-    )
-
-
-def test_cpv_doctor_agent_first_contact_menu_removed() -> None:
-    """cpv-doctor-agent loses its FIRST-contact menu (rows 1..22) but keeps the post-scan follow-up.
-
-    Per TRDD §4 B.4, cpv-doctor-agent stays on opus (because the post-scan
-    follow-up menu requires scanner-output context). Only the FIRST CONTACT
-    pre-scan menu moves to the haiku dispatcher. This test gates only the
-    pre-scan menu's absence — leaves the post-scan menu (rows 1..9 with
-    severity-threshold actions) intact.
-    """
-    menu_path = AGENTS_DIR / "cpv-doctor-menu.md"
-    if not menu_path.exists():
-        pytest.skip(
-            "Phase B split not yet shipped for cpv-doctor-agent.md "
-            "(cpv-doctor-menu.md missing) — first-contact removal guard skipped."
-        )
-    body = (AGENTS_DIR / "cpv-doctor-agent.md").read_text(encoding="utf-8")
-    # The pre-scan First Contact menu uses a 22-row table (rows 1..22 + A + 0).
-    # The most reliable signature is the row "│ 22 │ Add a dependency to a plugin"
-    # which only appears in the pre-scan First Contact menu. The post-scan
-    # follow-up menu has only 9 numbered rows + A + 0.
-    assert "│ 22 │ Add a dependency to a plugin" not in body, (
-        "cpv-doctor-agent.md still contains the pre-scan First Contact "
-        "menu (row 22 detected). Move that menu to cpv-doctor-menu.md."
-    )
-    assert "│ 17 │ Cache cleanup" not in body, (
-        "cpv-doctor-agent.md still references row 17 of the pre-scan "
-        "menu. The pre-scan menu must move to cpv-doctor-menu.md."
-    )
-
-
-@pytest.mark.parametrize("work,menu,cmd,cmd_name", _SPLIT_MAP)
-def test_command_routes_to_menu_agent(work: str, menu: str, cmd: str, cmd_name: str) -> None:
-    """Each command's `agent:` field points at the menu (not the work) agent."""
-    if not _phase_b_ready(work, menu):
-        pytest.skip(f"Phase B not yet shipped — {menu} missing. Command-routing guard skipped.")
-    cmd_path = COMMANDS_DIR / cmd
-    fm = _load_frontmatter(cmd_path)
-    actual = fm.get("agent")
-    assert actual == cmd_name, (
-        f"{cmd}'s `agent:` field is {actual!r}, expected {cmd_name!r}. "
-        f"After Phase B, the command must dispatch the haiku menu agent "
-        f"(which then dispatches the opus {work.replace('.md', '')})."
-    )
-
-
-@pytest.mark.parametrize("work,menu,cmd,_cmd_name", _SPLIT_MAP)
-def test_work_agent_skills_preserved(work: str, menu: str, cmd: str, _cmd_name: str) -> None:
-    """The work agent retains the original skill-set (skills do the actual work).
-
-    Per TRDD §4 cross-cutting requirement #3: skills go on WORK agent only.
-    Menu agent has empty (or missing) `skills:` list. We assert here that
-    the work agent still has at least one skill — it's where the heavy
-    lifting reads the fix-validation / canonical-pipeline / etc. skills.
-    """
-    if not _phase_b_ready(work, menu):
-        pytest.skip(f"Phase B not yet shipped for {work} — skills guard skipped.")
-    fm = _load_frontmatter(AGENTS_DIR / work)
-    skills = fm.get("skills", [])
-    assert isinstance(skills, list) and skills, (
-        f"{work} lost its `skills:` list during the split. Skills must "
-        f"stay on the work agent — only the menu dispatcher is skill-less."
-    )
-
-
-@pytest.mark.parametrize("work,menu,cmd,_cmd_name", _SPLIT_MAP)
-def test_menu_agent_has_no_skills(work: str, menu: str, cmd: str, _cmd_name: str) -> None:
-    """The menu agent declares no skills (it just dispatches).
-
-    Per TRDD §4 cross-cutting requirement #3: skills declared on both menu
-    and work agent would be loaded twice. The menu agent has an empty skill
-    list (or no `skills:` key at all).
-    """
-    if not _phase_b_ready(work, menu):
-        pytest.skip(f"Phase B not yet shipped for {menu} — no-skills guard skipped.")
-    fm = _load_frontmatter(AGENTS_DIR / menu)
-    skills = fm.get("skills", [])
-    assert not skills, (
-        f"{menu} declares skills {skills!r}. Menu agents must NOT load "
-        f"skills — that's the work agent's job (per TRDD §4 cross-cutting #3)."
+        f"{work} still contains a `## First Contact` section. The menu "
+        f"belongs on the slash-command body. Bare prose mentions of the "
+        f"term are allowed; only the section header is forbidden."
     )
