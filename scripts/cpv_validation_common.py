@@ -811,6 +811,8 @@ VALID_PLUGIN_ENV_VARS = {
     "CLAUDE_CODE_EFFORT_LEVEL",  # v2.1.132 — overrides the /effort picker default
     "CLAUDE_CODE_ENABLE_FEEDBACK_SURVEY_FOR_OTEL",  # v2.1.136 — re-enable session-quality survey for enterprises capturing OTEL responses
     "CLAUDE_CODE_PLUGIN_PREFER_HTTPS",  # v2.1.141 — clone GitHub plugin sources over HTTPS instead of SSH (no-SSH environments)
+    "CLAUDE_CODE_POWERSHELL_RESPECT_EXECUTION_POLICY",  # v2.1.143 — set to "1" to opt out of PowerShell's -ExecutionPolicy Bypass default
+    "CLAUDE_CODE_STOP_HOOK_BLOCK_CAP",  # v2.1.143 — override the default cap of 8 consecutive hook blocks before turn ends with warning
     # Anthropic *_SUPPORTED_CAPABILITIES — spec-correct suffix
     "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES",
     "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES",
