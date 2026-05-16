@@ -214,23 +214,31 @@ def test_orchestrator_command_has_no_agent_field(work: str, cmd: str, _work_name
 
 
 @pytest.mark.parametrize("work,cmd,_work_name", _MAIN_SESSION_MENUS)
-def test_orchestrator_command_body_contains_menu_table(work: str, cmd: str, _work_name: str) -> None:
-    """Each menu-orchestrator command body bakes in the Unicode menu table.
+def test_orchestrator_command_body_invokes_format_menu(work: str, cmd: str, _work_name: str) -> None:
+    """Each menu-orchestrator command body MUST call ``scripts/format_menu.py``
+    rather than embedding hardcoded Unicode tables.
 
-    Per TRDD-bcbceeed: the menu presets are part of the slash-command body
-    (no external menu-agent file). The body must contain the heavy
-    table-drawing characters used by every CPV menu (`┏━` for the header
-    fence and `┡━` for the divider row).
+    Per TRDD-bcbceeed (v2.89.0): the menu presets are part of the slash-command
+    body — no external menu-agent file.
+
+    Per TRDD-81e7fa34 (v2.89.3): the body MUST hand its rows to the
+    ``scripts/format_menu.py`` renderer (rather than embed a literal
+    Unicode table). The renderer drops disabled rows, renumbers the
+    rest, and pads cells by DISPLAY width (Unicode-correct alignment).
+    Hardcoded ``┏━`` tables are forbidden because they re-introduce the
+    ``len()``-vs-display-width alignment bug + the "menu shows greyed
+    empty rows" defect from the v2.89.0 end-user feedback.
     """
     body = (COMMANDS_DIR / cmd).read_text(encoding="utf-8")
-    assert "┏━" in body, (
-        f"{cmd} body does not contain a Unicode-bordered menu table "
-        f"(missing `┏━`). Per TRDD-bcbceeed the menu presets must be "
-        f"baked into the slash-command body itself."
+    assert "scripts/format_menu.py" in body, (
+        f"{cmd} body does not invoke `scripts/format_menu.py`. Per "
+        f"TRDD-81e7fa34 (v2.89.3) the menu and summary rendering MUST go "
+        f"through the helper so cell widths use display columns and "
+        f"disabled rows are dropped + renumbered."
     )
-    assert "┡━" in body, (
-        f"{cmd} body is missing the menu divider row (`┡━`). The full "
-        f"Unicode-bordered table must be present, not a half-rendered fragment."
+    assert ' menu "' in body or " menu '" in body or "format_menu.py menu" in body, (
+        f"{cmd} body must call `format_menu.py menu` for at least one menu "
+        f"render."
     )
 
 

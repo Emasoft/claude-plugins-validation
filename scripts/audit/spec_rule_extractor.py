@@ -130,7 +130,12 @@ def _fetch_url(url: str, *, timeout: float = 30.0) -> str:
     callers decide whether to retry via `is_transient_http_error`.
     """
     req = urllib.request.Request(url, headers={"User-Agent": "cpv-audit-bot/1.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — trusted url
+    # Trusted-URL guarantee: callers only pass the official HTTPS Anthropic
+    # llms.txt index; no user-controlled input flows into `url`. The end-of-line
+    # nosemgrep directive suppresses the semgrep dynamic-urllib false positive
+    # (semgrep does not honor bandit-style noqa S310 directives, so the
+    # security-audit ruleset needs its own inline marker here).
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosemgrep: dynamic-urllib-use-detected
         raw = resp.read()
     decoded: str = raw.decode("utf-8", errors="replace")
     return decoded
