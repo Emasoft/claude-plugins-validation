@@ -146,7 +146,18 @@ MAX_SCAN_BYTES = int(os.environ.get("CPV_MAX_SCAN_BYTES", str(DEFAULT_MAX_SCAN_B
 # processes files sequentially per worker and finishes all 9 scans on one
 # content before moving on; there is no concurrent access pattern that would
 # need a multi-slot cache.
-_split_lines_last_id: int | None = None
+# v2.89.2 (TRDD-bcbceeed follow-up): hold a STRONG reference to the cached
+# text so its memory address can never be reused while the cache entry is
+# live. The previous `id(text)`-keyed cache was unsafe: when an earlier
+# text was garbage-collected, a new text could land at the same address
+# and the cache returned the STALE split, silently corrupting downstream
+# line-based predicates (e.g. `_rc93_is_markdown_table_row(check_line)`
+# returning True on a non-table-row line because `check_line` was a
+# `|...|` row from the previous test's content). Reproduced as the
+# v2.89.0 CI "RC-76 GHA Heisenbug" — passed on macOS local and Linux
+# Docker, failed only on the GHA runner where memory allocation patterns
+# happened to reuse the address consistently.
+_split_lines_last_text: str | None = None
 _split_lines_last_value: list[str] = []
 
 
@@ -263,23 +274,35 @@ def _is_always_skip_basename(file_ref: str) -> bool:
 
 
 def _split_lines(text: str) -> list[str]:
-    """Return `text.split("\\n")`, cached by id(text) for one shot.
+    """Return `text.split("\\n")`, cached by identity of `text` for one shot.
 
     Drops 9× duplicate `str.split("\\n")` allocations to 1× per file. The
     cache holds only the most recently-split text's lines — when called
     with a different `text` object, the cache is replaced.
+
+    Implementation note: the cache holds a STRONG reference to `text` so
+    its memory address cannot be reused while the cache entry is live.
+    The original implementation keyed the cache by `id(text)` alone, which
+    is the OS-level memory address of the string object. Python is free
+    to reuse that address as soon as the original string is
+    garbage-collected — when it does, the cache returns the STALE split
+    for the new (different) string. Reproduced as the v2.89.0 CI
+    Heisenbug where `_rc93_is_markdown_table_row(check_line)` returned
+    True on a non-table-row line because `check_line` was a stale
+    `|...|` row from a previous test's content. Using `is` identity
+    comparison on the strong reference makes id-reuse impossible
+    (the reference pins the original object until the cache is replaced).
 
     Thread-safety: this helper is process-local (one cache per worker
     process). Worker processes run their own copy and never share state, so
     no lock is required. Inside a single worker, the helper is invoked
     sequentially across the 9 scanners on the same `text` ref.
     """
-    global _split_lines_last_id, _split_lines_last_value
-    cid = id(text)
-    if cid == _split_lines_last_id:
+    global _split_lines_last_text, _split_lines_last_value
+    if _split_lines_last_text is text:
         return _split_lines_last_value
     _split_lines_last_value = text.split("\n")
-    _split_lines_last_id = cid
+    _split_lines_last_text = text
     return _split_lines_last_value
 
 

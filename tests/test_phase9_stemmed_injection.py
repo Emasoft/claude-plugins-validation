@@ -309,45 +309,6 @@ class TestRC76MarkdownTableRows:
             r.message for r in report.results if r.level in ("CRITICAL", "MAJOR", "MINOR", "WARNING", "NIT")
         ]
         rc76 = [m for m in all_messages if "RC-76" in m]
-        if not rc76:
-            # Diagnostic for the v2.89.0 GHA-runner Heisenbug: passes on
-            # macOS local AND in Linux Docker but fails on GitHub Actions
-            # Ubuntu. Surface all global state + every result so we can see
-            # what the CI environment is doing differently.
-            import sys
-
-            sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-            import validate_security as _vs  # noqa: PLC0415
-            from cpv_validation_common import (  # noqa: PLC0415
-                INJECTION_TRIGGER_STEMS,
-                UNCERTAIN_IN_DOCS_RULES,
-                effective_severity,
-                find_stemmed_injection_signal,
-                is_doc_path,
-                is_sample_file,
-                is_test_path,
-            )
-
-            print("\n=== RC-76 Heisenbug diagnostic ===")
-            print(f"plugin path: {plugin}")
-            print(f"_CPV_SELF_SCAN_ACTIVE: {_vs._CPV_SELF_SCAN_ACTIVE}")
-            print(f"_CLASSIFIER_ACTIVE:    {_vs._CLASSIFIER_ACTIVE}")
-            print(f"INJECTION_TRIGGER_STEMS count: {len(INJECTION_TRIGGER_STEMS)}")
-            signals = find_stemmed_injection_signal(agent_md)
-            print(f"stem signals on fixture text: {signals}")
-            scannable = list(_vs._iter_scannable_files(plugin))
-            print(f"scannable files yielded: {[(rel, len(c)) for _, rel, c in scannable]}")
-            print(f"is_doc_path('agents/foo.md'):  {is_doc_path('agents/foo.md')}")
-            print(f"is_test_path('agents/foo.md'): {is_test_path('agents/foo.md')}")
-            print(f"is_sample_file('agents/foo.md'): {is_sample_file('agents/foo.md')}")
-            print(f"is_security_audit_role('agents/foo.md'): {_vs._rc76_is_security_audit_role('agents/foo.md')}")
-            print(f"is_source_code_file('agents/foo.md'): {_vs._rc76_is_source_code_file('agents/foo.md')}")
-            print(f"RC-76 in UNCERTAIN_IN_DOCS_RULES: {'RC-76' in UNCERTAIN_IN_DOCS_RULES}")
-            print(f"effective_severity('major', 'agents/foo.md', 'RC-76'): {effective_severity('major', 'agents/foo.md', rule_id='RC-76')}")
-            print(f"all report.results ({len(report.results)} total):")
-            for r in report.results:
-                print(f"  - level={r.level!r} file={r.file!r} line={r.line!r} msg={r.message[:120]!r}")
-            print("=== end diagnostic ===\n")
         assert rc76, "expected RC-76 to fire on real prompt-injection prose"
 
 
