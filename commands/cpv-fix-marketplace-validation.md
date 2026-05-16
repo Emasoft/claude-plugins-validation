@@ -9,87 +9,84 @@ user-invocable: true
 
 # /cpv-fix-marketplace-validation
 
-`/cpv-fix-marketplace-validation` runs in the **main session** (haiku for cheap menu rendering). You pick a report (or an architectural-migration / pipeline-standardization mode), the main session dispatches the **marketplace-fixer** (opus) work agent via the Agent tool to do the validate → fix → re-validate loop (or run the migration playbook), and the result returns here.
+`/cpv-fix-marketplace-validation` runs in the **main session** (haiku for cheap menu rendering). You pick a report (or an architectural-migration / pipeline-standardization mode), the main session dispatches the **marketplace-fixer** (opus) work agent to do validate → fix → re-validate (or run the migration playbook), and the result returns here.
 
-Plugin validation reports must be routed to `/cpv-fix-validation` instead — this command is marketplace-only.
+Plugin validation reports → `/cpv-fix-validation`; this command is marketplace-only.
 
 ## You are the menu orchestrator
 
-You — the model running THIS turn — render the menu, parse the user's pick, dispatch the opus work agent. You do NOT fix anything yourself. The opus `marketplace-fixer` owns the entire fix workflow (mechanical + architectural + pipeline standardization).
+You — the model running THIS turn — render the menu via `scripts/format_menu.py`, parse the user's pick, dispatch the opus work agent. You do NOT fix anything yourself.
 
 **Critical rules**:
 
-- **NEVER use `AskUserQuestion`.** Print Unicode-bordered tables; ask plain text.
-- **NEVER drop the `0 — Cancel / Exit` row.**
+- **NEVER use `AskUserQuestion`.** Print Unicode-bordered tables via `format_menu.py`; ask plain text.
+- **NEVER hand-render menu tables.** ALWAYS call `${CLAUDE_PLUGIN_ROOT}/scripts/format_menu.py menu <json>`.
 - **NEVER auto-pick a menu option.**
-- **Print the table once per turn.**
 
-## Step 1 — if the user passed a path argument, skip the table
+## Step 1 — if the user passed a path argument, skip the menu
 
-If `/cpv-fix-marketplace-validation <path>` was invoked with a path argument, jump straight to Step 4 dispatch with `mode: auto` and the provided path. Otherwise continue with Step 2.
+If `/cpv-fix-marketplace-validation <path>` was invoked with an argument, jump straight to Step 4 dispatch with `mode: auto` and the provided path. Otherwise continue.
 
-## Step 2 — auto-discover recent reports and render the menu
+## Step 2 — auto-discover recent reports + render the menu
 
 Print this banner:
 
-```
+```text
 Session model: <whatever the current session model is>. Menu rendering is currently haiku (this turn only). For cheaper navigation across every menu step, run /model haiku once.
 ```
 
-Then run this Bash to find recent marketplace-relevant reports:
+Auto-discover recent marketplace-relevant reports:
 
 ```bash
 MAIN_ROOT="$(git worktree list 2>/dev/null | head -n1 | awk '{print $1}')"
 [ -z "$MAIN_ROOT" ] && MAIN_ROOT="${CLAUDE_PROJECT_DIR:-$PWD}"
-find "$MAIN_ROOT/reports" -maxdepth 2 -type d \
+REPORTS=$(find "$MAIN_ROOT/reports" -maxdepth 2 -type d \
   \( -name 'validate_marketplace' -o -name 'validate_github_marketplace' \
      -o -name 'validate_settings_marketplace' \) \
   -print 2>/dev/null | xargs -I{} find {} -maxdepth 1 -type f -name '*.md' 2>/dev/null \
-  | sort -r | head -n 6
+  | sort -r | head -n 6)
 ```
 
-If at least one report is found, print this Unicode table (up to 6 report rows + the fixed rows 7/8/9/0):
+Build the row list (up to 6 discovered reports + fixed rows for architecture migration / pipeline standardization / manual / cancel), then call `format_menu.py menu`. Mark missing report rows `disabled: true`:
 
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/format_menu.py" menu "$(cat <<EOF
+{
+  "header": "Recent marketplace report — what to fix?",
+  "rows": [
+    {"key": "1", "action_id": "report_1",       "label": "<relative-path of report 1> (<age>)", "disabled": <true if not present>},
+    {"key": "2", "action_id": "report_2",       "label": "<relative-path of report 2> (<age>)", "disabled": <true if not present>},
+    {"key": "3", "action_id": "report_3",       "label": "<relative-path of report 3> (<age>)", "disabled": <true if not present>},
+    {"key": "4", "action_id": "report_4",       "label": "<relative-path of report 4> (<age>)", "disabled": <true if not present>},
+    {"key": "5", "action_id": "report_5",       "label": "<relative-path of report 5> (<age>)", "disabled": <true if not present>},
+    {"key": "6", "action_id": "report_6",       "label": "<relative-path of report 6> (<age>)", "disabled": <true if not present>},
+    {"key": "7", "action_id": "migrate_layout", "label": "Marketplace architecture migration (Layout A↔B↔C, non-CPV → CPV conversion)"},
+    {"key": "8", "action_id": "fix_pipeline",   "label": "Pipeline standardization (add/repair publish.py / cliff.toml / CI / CHANGELOG)"},
+    {"key": "9", "action_id": "manual",         "label": "Provide a different path (report .md OR marketplace folder/owner-repo slug)"},
+    {"key": "0", "action_id": "cancel",         "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a number to choose:"
+}
+EOF
+)" 2>/tmp/cpv_fix_marketplace_action_map.json
 ```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Recent marketplace report                                                             ┃ When                                        ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ <relative path of newest report>                                                      │ <human time + age>                          │
-│ 2 │ <relative path of next report>                                                        │ ...                                         │
-│ … │                                                                                       │                                             │
-│ 6 │ <relative path of 6th-newest report>                                                  │ ...                                         │
-│ 7 │ Marketplace architecture migration (Layout A↔B↔C, non-CPV → CPV conversion)           │ Interactive — uses migration playbook       │
-│ 8 │ Pipeline standardization (add/repair publish.py / cliff.toml / CI / CHANGELOG)        │ Uses canonical-pipeline skill               │
-│ 9 │ Provide a different path (report .md OR marketplace folder/owner-repo slug)           │ Manual entry                                │
-│ 0 │ Cancel / Exit                                                                         │ Terminate without action                    │
-└───┴───────────────────────────────────────────────────────────────────────────────────────┴─────────────────────────────────────────────┘
-Type a number to choose:
-```
-
-(If fewer than 6 recent reports exist, omit the empty report rows — always keep rows 7/8/9/0.)
 
 If no reports are found, fall back to the plain-text prompt:
 
-> **What would you like me to do with your marketplace?** Give me either a path or a report:
->
-> - **Marketplace folder/repo** — the work agent will validate, fix, re-validate, and loop until clean (zero CRITICAL/MAJOR/MINOR/NIT + zero publish-blocking WARNINGs).
-> - **Existing validation report** (`reports/validate_marketplace/<ts>-<slug>.md`) — the work agent picks up the findings and enters the loop from there.
-> - **Marketplace architecture migration** — point at a non-CPV marketplace (community monorepo, mixed authorship, git-subdir, hybrid layout) and the work agent walks through Layout A ↔ B ↔ C conversion via `migrate-marketplace-architecture`.
-> - **Pipeline standardization** — add or repair `scripts/publish.py`, `cliff.toml`, `.github/workflows/validate.yml`, `update-submodules.yml`, `CHANGELOG.md`, and tag discipline.
->
-> Reply with a path. Reply `0` to cancel.
+> **What would you like me to do with your marketplace?** Reply with a path (report OR marketplace folder OR owner/repo slug). Reply `0` to cancel.
 
 ## Step 3 — route the user's reply
 
-| Reply | Action |
+Look up `action_id` from `/tmp/cpv_fix_marketplace_action_map.json`:
+
+| action_id | Action |
 |---|---|
-| `0` | Reply EXACTLY: `Cancelled — no actions taken.` and stop. |
-| `1`..`6` | The user picked a recent report. Look up the matching report path from the `find` output and dispatch the work agent with `mode: mechanical_or_architectural` (work agent screens findings for `category: architecture`). |
-| `7` | Ask plain-text: `Marketplace folder/repo or owner/repo slug?`. Wait for the answer. Dispatch in `mode: architectural_migration`. |
-| `8` | Ask plain-text: `Marketplace folder/repo path?`. Wait. Dispatch in `mode: pipeline_standardization`. |
-| `9` | Ask plain-text: `Path to a report file or marketplace folder/owner-repo slug?`. Dispatch with that path in `mode: auto`. |
+| `cancel` | Reply EXACTLY: `Cancelled — no actions taken.` and stop. |
+| `report_N` | Resolve to the matching report path; dispatch in `mode: mechanical_or_architectural`. |
+| `migrate_layout` | Ask plain-text: `Marketplace folder/repo or owner/repo slug?`. Dispatch in `mode: architectural_migration`. |
+| `fix_pipeline` | Ask plain-text: `Marketplace folder/repo path?`. Dispatch in `mode: pipeline_standardization`. |
+| `manual` | Ask plain-text: `Path to a report file or marketplace folder/owner-repo slug?`. Dispatch with `mode: auto`. |
 | any plain-text path | Treat as the work agent's input — dispatch directly in `mode: auto`. |
-| anything else | Re-print the table and ask once more. |
 
 ## Step 4 — dispatch the work agent
 
@@ -106,52 +103,76 @@ Use the Agent tool with:
     </context>
 
     Validate, fix, re-validate the marketplace until clean per your loop algorithm.
-    If the report carries `category: architecture` findings, hand off to
-    migrate-marketplace-architecture (you own that handoff, not the menu).
-    Return a one-line summary plus the report path. DO NOT render a
-    follow-up menu yourself.
+    Return a one-line summary plus the report path:
+
+      `Marketplace fix: <N> issues addressed, <verdict> after re-validate (fix log: <abs-path>)`
+
+    DO NOT render any menu yourself.
 ```
 
-## Step 5 — render the post-fix menu
+## Step 5 — render summary + post-fix menu
 
-When the work agent returns, summarize the result in one line (e.g. `Fixed 23 of 28 issues. Report: reports/marketplace-fixer/<ts>-<slug>.md`), then print:
+Parse the work agent's return and render the severity summary first:
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ What now?                                                                       ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Re-validate the marketplace                                                     │
-│ 2 │ Fix another marketplace                                                         │
-│ 3 │ Open the fix log in your editor (returns the path)                              │
-│ 4 │ Post a GitHub issue about the remaining findings                                │
-│ 5 │ Skip / done                                                                     │
-│ 0 │ Exit                                                                            │
-└───┴─────────────────────────────────────────────────────────────────────────────────┘
-Type a number to choose:
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/format_menu.py" summary "$(cat <<EOF
+{
+  "title": "Marketplace fix — post-fix re-validate",
+  "counts": {"critical": <C>, "major": <M>, "minor": <n>, "nit": <t>, "warning": <w>},
+  "verdict": "<VALID|INVALID>",
+  "report_path": "<fix-log-abs-path>"
+}
+EOF
+)"
 ```
 
-| # | Action |
+Then render the post-fix menu (lead with "Fix all remaining" when applicable; drop empty severity rows):
+
+```bash
+# total = C + M + n  (NIT/WARNING are non-blocking, not counted for "Fix all")
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/format_menu.py" menu "$(cat <<EOF
+{
+  "header": "What now?",
+  "rows": [
+    {"key": "1", "action_id": "fix_all_remaining", "label": "Fix ALL remaining findings (<total> total)", "disabled": <true if total==0 else false>},
+    {"key": "2", "action_id": "fix_at_critical",   "label": "Fix only CRITICAL (<C> findings)", "disabled": <true if C==0 or (M==0 and n==0) else false>},
+    {"key": "3", "action_id": "fix_at_major",      "label": "Fix at-or-above MAJOR (<C+M> findings)", "disabled": <true if M==0 or n==0 else false>},
+    {"key": "4", "action_id": "revalidate",        "label": "Re-validate the marketplace"},
+    {"key": "5", "action_id": "another_report",    "label": "Fix another marketplace"},
+    {"key": "6", "action_id": "open_log",          "label": "Open the fix log in your editor (returns the path)"},
+    {"key": "7", "action_id": "post_issue",        "label": "Post a GitHub issue about the remaining findings", "disabled": <true if total==0 else false>},
+    {"key": "8", "action_id": "done",              "label": "Skip / done"},
+    {"key": "0", "action_id": "exit",              "label": "Exit"}
+  ],
+  "footer": "Type a number to choose:"
+}
+EOF
+)" 2>/tmp/cpv_fix_marketplace_postfix_map.json
+```
+
+| action_id | Action |
 |---|---|
-| 1 | Suggest the user invoke `/cpv-validate-github-marketplace <target>`. Reply with the suggested command and stop. |
-| 2 | Re-enter Step 2 (re-print the auto-discovery table). |
-| 3 | Reply with the absolute path of the fix log. Re-print the post-fix menu. |
-| 4 | Use Bash to run `gh issue create --repo Emasoft/claude-plugins-validation --title "<short>" --body-file <fix-log>`. Show URL. Re-print menu. |
-| 5 | Reply `Done.` Stop. |
-| 0 | Reply `Exit.` Stop. |
+| `fix_all_remaining` | Re-dispatch the marketplace-fixer with `min_severity: minor` (= every remaining finding). |
+| `fix_at_critical` / `fix_at_major` | Re-dispatch with the matching `min_severity`. |
+| `revalidate` | Suggest `/cpv-validate-github-marketplace <target>`. Reply with the suggested command and stop. |
+| `another_report` | Re-enter Step 2. |
+| `open_log` | Reply with the absolute log path. Re-print the post-fix menu. |
+| `post_issue` | Use Bash: `gh issue create ... --body-file <fix-log>`. Show URL. Re-print menu. |
+| `done` / `exit` | Reply `Done.` / `Exit.` Stop. |
 
 ## Output
 
 All outputs land at the **main-repo root** (never a linked worktree). Resolve via `git worktree list | head -n1`. Both `reports/` and `reports_dev/` are gitignored.
 
 - Fix log: `$MAIN_ROOT/reports/marketplace-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`
-- For architectural migrations: migration log at `$MAIN_ROOT/reports/migrate-marketplace-architecture/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` recording every user decision and every command run
+- Migration log (when `mode: architectural_migration`): `$MAIN_ROOT/reports/migrate-marketplace-architecture/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`
 
-## Related Commands
+## Related
 
-- `/cpv-validate-github-marketplace` — Generate a marketplace validation report (required input for this command)
-- `/cpv-fix-validation` — Fix issues in a plugin validation report (plugin-fixer, not marketplace-fixer)
-- `/cpv-create` — Create a new marketplace scaffold from scratch
+- `/cpv-validate-github-marketplace` — Generate a marketplace validation report (required input)
+- `/cpv-fix-validation` — Fix plugin validation reports
+- `/cpv-create` — Create a new marketplace scaffold
 
-## Architecture (v2.89.0)
+## Architecture (v2.89.0 / v2.89.3)
 
-Per TRDD-bcbceeed: the menu orchestrator runs in the main session (haiku for the invoking turn). Subagents cannot spawn other subagents per the Claude Code spec — only the main session can use the Agent tool to spawn `marketplace-fixer` (opus). The post-fix menu is rendered by this main-session orchestrator (not by the work agent), so it is always visible to the user.
+Per TRDD-bcbceeed (v2.89.0): the menu orchestrator runs in the main session. Per TRDD-81e7fa34 (v2.89.3): menu/summary rendering goes through `scripts/format_menu.py`; post-fix menu leads with "Fix ALL remaining" and only exposes severity-floor options when they would yield a different result.
