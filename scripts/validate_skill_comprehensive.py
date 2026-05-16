@@ -1175,7 +1175,13 @@ def validate_model_field(
 ) -> None:
     """Validate the 'model' field (skills.md: sonnet, opus, haiku, or inherit).
 
-    Note: haiku receives a minor penalty as it is considered less reliable.
+    Note: haiku receives a minor penalty as it is considered less reliable
+    — UNLESS the skill also declares ``context: fork``, in which case the
+    haiku override is the explicit reason the skill exists (the fork
+    spawns a fresh subagent with no inherited history, so haiku actually
+    takes effect without silently degrading against an opus-scale parent
+    context). Context-fork skills are intentional, bounded, single-turn
+    helpers — exactly the workload haiku is designed for.
     """
     if "model" not in frontmatter:
         return
@@ -1198,13 +1204,25 @@ def validate_model_field(
             category="Frontmatter",
         )
     elif model == "haiku" or (model.startswith("claude-haiku") and _FULL_MODEL_ID_RE.match(model)):
-        # Haiku penalty: haiku is less reliable for complex skills
-        report.minor(
-            "'model: haiku' specified - haiku is less reliable for complex tasks. "
-            "Consider using 'sonnet' or 'inherit' for better accuracy.",
-            "SKILL.md",
-            category="Frontmatter",
-        )
+        # Haiku penalty: haiku is less reliable for complex skills.
+        # Exemption: context-fork skills opt into haiku INTENTIONALLY — that's
+        # the whole reason context: fork exists (fresh subagent, no inherited
+        # opus-scale context, so haiku actually takes effect). Skipping the
+        # penalty is correct because the policy ("haiku is risky") does not
+        # apply to a bounded single-turn fork.
+        if frontmatter.get("context") == "fork":
+            report.passed(
+                f"'model' field valid: {model} (context: fork — intentional bounded haiku render)",
+                "SKILL.md",
+                category="Frontmatter",
+            )
+        else:
+            report.minor(
+                "'model: haiku' specified - haiku is less reliable for complex tasks. "
+                "Consider using 'sonnet' or 'inherit' for better accuracy.",
+                "SKILL.md",
+                category="Frontmatter",
+            )
     else:
         report.passed(f"'model' field valid: {model}", "SKILL.md", category="Frontmatter")
 
