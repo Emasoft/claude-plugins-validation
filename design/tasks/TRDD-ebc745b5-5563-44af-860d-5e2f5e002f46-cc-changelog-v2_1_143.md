@@ -80,7 +80,7 @@ no breaking change.
 ## Verification
 
 ```bash
-cd /Users/emanuelesabetta/Code/CLAUDE-PLUGIN-VALIDATION/claude-plugins-validation
+cd "${CLAUDE_PLUGIN_ROOT}"   # plugin root resolved via the runtime env var
 uv run pytest tests/test_v2_1_143_changelog.py -x -q
 uv run pytest tests/ -x -q --tb=short
 uv run ruff check .
