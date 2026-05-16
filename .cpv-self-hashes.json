@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-16T10:33:13+00:00",
+  "computed_at": "2026-05-16T11:17:25+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     "agents/cache-optimizer-agent.md": "sha256:3148226fba744236f82a62080a2295d3473d76a76d6660b8d2ade7a6c12af084",
@@ -414,7 +414,7 @@
     "tests/test_phase5_specialist_delegation.py": "sha256:731a18508ad1015590bfdb10f20ef0c3f41c447b634f5951c52a1032cbb1e84e",
     "tests/test_phase6_sarif_writer.py": "sha256:2b8846178083cd3040fdb21744a3e3e2133135b551d8ac957f2cf04cdc974a5a",
     "tests/test_phase7_sbom_writer.py": "sha256:8a478d3286de8b7d6738a87b49a968146120290dbe1e91f19b1db67343c68f43",
-    "tests/test_phase9_stemmed_injection.py": "sha256:6e3d5caa0bb75f6b110faccb77fd534896213c19b1ef0498e943de01c9a65447",
+    "tests/test_phase9_stemmed_injection.py": "sha256:7e7e8d8aebe7ee14a10e18739cdb1383878f9f9f7bfc65c4fe21155920555f2b",
     "tests/test_pipeline_script_refs.py": "sha256:597b64b04c3c957445211d5e664fba450be6636dfee7cb7d918dd388c1657031",
     "tests/test_plugin_json_default_folder_shadow.py": "sha256:491769824a61b971f1f32bd94ed6f621eb5907e5a2c9d300f41fb4ecf89aa302",
     "tests/test_plugin_verify_hashes.py": "sha256:f7791753a7273dc2223d6ec3bd55ae3fe570e7ab9586d5da610390795694ec6a",
