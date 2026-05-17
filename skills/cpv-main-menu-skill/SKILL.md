@@ -26,8 +26,8 @@ NEVER use `AskUserQuestion` for menus.
 Full tree, table layouts, and per-leaf bash recipes: [menu-tree](references/menu-tree.md).
 > Shell prologue · Table-rendering rules · Menu definitions · Etiquette and error handling
 
-Top-level categories (canonical table in menu-tree.md §3.0):
-1 Validate · 2 Validate from GitHub · 3 Fix · 4 Create (plugin/marketplace/skill/agent/command/hook/MCP) · 5 Manage · 6 Diagnose & Upgrade (audit + pipeline-migration §1–§5 + branch rules + Claude action) · 7 GitHub setup · 8 Deep semantic · 9 Help · 0 Cancel
+Top-level categories (canonical table in menu-tree.md §3.0 — v2.90.0):
+1 Validate · 2 Fix · 3 Optimize for Cache · 4 Diagnose · 5 Update · 6 Create · 7 Publish & Migrate · 8 Manage · H Help · A Ask · 0 Cancel
 
 ## Instructions
 

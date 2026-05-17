@@ -45,7 +45,7 @@ within the `cpv-main-menu-skill`. The skill is loaded automatically.
   copy-paste session transcripts.
 - Picking is **one keystroke** (the row number).
 
-## Top-level menu (canonical layout)
+## Top-level menu (canonical layout — v2.90.0)
 
 The orchestrator prints this table verbatim. Cancel/Exit is row `0`:
 
@@ -53,17 +53,19 @@ The orchestrator prints this table verbatim. Cancel/Exit is row `0`:
 ┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ # ┃ Category                ┃ What it does                                                          ┃
 ┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Validate                │ Run a CPV validator (plugin/skill/cache/marketplace/scope/component)  │
-│ 2 │ Validate from GitHub    │ Clone owner/repo to tmpdir, scan, clean up                            │
-│ 3 │ Fix                     │ Apply mechanical fixes from a validation report                       │
-│ 4 │ Create                  │ Scaffold a new plugin or marketplace from scratch                     │
-│ 5 │ Manage                  │ List, install, doctor, install scanners, bump version                 │
-│ 6 │ GitHub setup            │ Branch protection rules, link plugin to marketplace                   │
-│ 7 │ Deep semantic analysis  │ Opus A-F grading (expensive — confirms cost first)                    │
-│ 8 │ Help / About            │ Category overview, command list, CPV version                          │
-│ 0 │ Cancel / Exit           │ Terminate without action                                              │
-└───┴─────────────────────────┴───────────────────────────────────────────────────────────────────────┘
-Type a number to choose:
+│ 1 │ Validate                │ Check that a plugin / marketplace / component is well-formed         │
+│ 2 │ Fix                     │ Auto-fix issues that a previous validation found                     │
+│ 3 │ Optimize for Cache      │ Prompt-cache invalidation audit + cache-aware refactor (CA-01..06)   │
+│ 4 │ Diagnose                │ Deep audit + AI-graded quality review (semantic, opus, on request)   │
+│ 5 │ Update                  │ Upgrade plugin to latest canonical pipeline standard                 │
+│ 6 │ Create                  │ Scaffold plugin, marketplace, skill, agent, command, hook, MCP       │
+│ 7 │ Publish & Migrate       │ Branch rules, link to marketplace, publish, migrate marketplace      │
+│ 8 │ Manage                  │ List installed plugins, install / update / enable / disable / doctor │
+│ H │ Help / About            │ Category overview, command list, CPV version                         │
+│ A │ Ask the agent           │ Let the agent suggest the best next action right now                 │
+│ 0 │ Cancel / Exit           │ Terminate without action                                             │
+└───┴─────────────────────────┴──────────────────────────────────────────────────────────────────────┘
+Type a number (or H for help, A to ask the agent) to choose:
 ```
 
 ## Workflow (the orchestrator MUST follow this exact sequence)
