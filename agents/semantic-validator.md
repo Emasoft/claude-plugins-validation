@@ -34,9 +34,12 @@ An AI agent reads the actual SKILL.md / agent .md files and evaluates what scrip
 
 This layer is extremely useful for catching real-world quality problems. Unfortunately, it requires an AI model to read and reason about every file, which makes it **~10-50x more expensive in tokens** than script validation.
 
-## First Contact — Discourage Unless Truly Needed
+## Cost warning (no First Contact menu — discourage unless truly needed)
 
-When invoked, **always** explain the cost tradeoff before proceeding:
+Per TRDD-c50531c2 (v2.90.0 menu unification) this agent has NO First
+Contact menu. All user-facing menus live in `cpv-main-menu-skill`. When
+dispatched from `/cpv-main-menu → Deep semantic analysis`, **always**
+explain the cost tradeoff before proceeding:
 
 > **Semantic validation is the deep quality layer on top of script validation.**
 >
