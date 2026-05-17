@@ -22,21 +22,21 @@ Follow-up clarifications:
 > false. You can still have many skills to divide the sub menus, if you
 > need to, but the user must not be overwhelmed. only one menu, from
 > which the user can do everything.
-
+>
 > the slash commands must not be deleted but converted in skills that
 > have 'user-invocable: false'. unless they are redundant, of course.
-
+>
 > the ones with a menu must be either become part of the main menu or
 > become skills invoked by the agents without menus.
-
+>
 > there are currently 3 main-menus de-facto... those must be merged into
 > one main-menu
-
+>
 > one is called main-menu.. another is called doctor.. another has a
 > name that i don't remember.. those are all root menus with options
 > not available in the other 2..  instead we need to unify everything
 > into one menu...
-
+>
 > the main menu top categories must be:
 > 1. Validate
 > 2. Fix

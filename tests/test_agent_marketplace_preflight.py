@@ -1,8 +1,11 @@
 """Tests for Phase F of TRDD-c0ee9543 — agent pre-completion gate.
 
-The plugin-creator, plugin-fixer, and cpv-upgrade-plugin agents MUST refuse
-to declare DONE on a plugin/marketplace combo that fails the new Phase A
-+ Phase B cross-validation.
+The plugin-creator and plugin-fixer agents MUST refuse to declare DONE on
+a plugin/marketplace combo that fails the new Phase A + Phase B
+cross-validation. (v2.90.0 TRDD-c50531c2: the cpv-upgrade-plugin slash
+command was deleted along with 22 other redundant commands; the migration
+flow now goes through the plugin-fixer agent directly, dispatched from
+the cpv-main-menu top-level "Diagnose" category.)
 
 These are architectural assertions on agent prompts — we read the markdown
 files and check the gate text is present + correctly worded.
@@ -55,18 +58,38 @@ class TestPluginFixerPreflight:
         assert "marketplace-upstream-drift.md" in text, "plugin-fixer must reference the new recipe file"
 
 
-class TestCpvUpgradePluginPreflight:
-    """Phase F.3 — cpv-upgrade-plugin command MUST document the new gate."""
+class TestCpvUpgradePluginCommandDeletedInV290:
+    """Phase F.3 — v2.90.0 TRDD-c50531c2: the `cpv-upgrade-plugin` slash
+    command was deleted along with 22 other redundant user-facing commands.
+    The migration flow now goes through `agents/plugin-fixer.md`
+    directly, reached from the cpv-main-menu "Diagnose & Upgrade" leaf.
 
-    def test_cpv_upgrade_plugin_documents_marketplace_cross_check(self):
-        text = (REPO_ROOT / "commands" / "cpv-upgrade-plugin.md").read_text(encoding="utf-8")
+    These tests pin the new architectural location of the migration gate.
+    """
+
+    def test_cpv_upgrade_plugin_command_file_is_deleted(self):
+        """The slash command file MUST stay deleted (TRDD-c50531c2 contract)."""
+        path = REPO_ROOT / "commands" / "cpv-upgrade-plugin.md"
+        assert not path.exists(), (
+            f"{path} still exists. TRDD-c50531c2 (v2.90.0) deleted the "
+            "cpv-upgrade-plugin slash command — the migration flow now goes "
+            "through plugin-fixer agent dispatched from cpv-main-menu's "
+            "'Diagnose & Upgrade' leaf. Re-creating the command would be a "
+            "regression."
+        )
+
+    def test_plugin_fixer_agent_documents_marketplace_cross_check(self):
+        """The migration gate moved from cpv-upgrade-plugin.md into the
+        plugin-fixer agent (which is what the deleted command dispatched).
+        """
+        text = (REPO_ROOT / "agents" / "plugin-fixer.md").read_text(encoding="utf-8")
         assert "validate_marketplace.py" in text
         assert "RC-MKPL-NAME-MISMATCH" in text
         assert "TRDD-c0ee9543" in text
 
-    def test_cpv_upgrade_plugin_references_ai_maestro_incident(self):
-        """The command's gate must cite the 2026-05-11 incident as motivation."""
-        text = (REPO_ROOT / "commands" / "cpv-upgrade-plugin.md").read_text(encoding="utf-8")
+    def test_plugin_fixer_agent_references_ai_maestro_incident(self):
+        """The migration gate's motivation citation moved into plugin-fixer.md."""
+        text = (REPO_ROOT / "agents" / "plugin-fixer.md").read_text(encoding="utf-8")
         # Citing the incident or its date is sufficient signal that the gate
         # was added for the right reason and won't be silently removed.
         assert "2026-05-11" in text or "ai-maestro-visual-communicator" in text
@@ -92,13 +115,41 @@ class TestFixValidationSkillIndexes:
         assert "marketplace-upstream-drift.md" in text
 
     def test_skill_md_toc_parity(self):
-        """SKILL.md must mirror every new heading verbatim (v2.80.0 rule)."""
-        text = (REPO_ROOT / "skills/fix-validation/SKILL.md").read_text(encoding="utf-8")
-        # New recipe file must be listed in Resources with the canonical
-        # bullet-summary one-liner.
-        assert "marketplace-upstream-drift.md" in text
-        assert "RC-MKPL-NAME-MISMATCH" in text
-        assert "RC-MKPL-UNKNOWN-FIELD" in text
+        """The marketplace-upstream-drift recipe must remain reachable from the skill.
+
+        v2.90.0 (TRDD-c50531c2): SKILL.md was trimmed to a thin overview
+        (~66 lines). Per-error detail moved into `references/marketplace-error-index.md`
+        and `references/plugin-error-index.md`, both of which the SKILL.md
+        overview points at via the standard progressive-disclosure pattern.
+        The drift-recipe file itself is referenced from those indices and
+        from the agents that load this skill.
+        """
+        skill_text = (REPO_ROOT / "skills/fix-validation/SKILL.md").read_text(encoding="utf-8")
+        mkt_index = (REPO_ROOT / "skills/fix-validation/references/marketplace-error-index.md").read_text(
+            encoding="utf-8"
+        )
+        plugin_index = (REPO_ROOT / "skills/fix-validation/references/plugin-error-index.md").read_text(
+            encoding="utf-8"
+        )
+        # SKILL.md must still mention its references/ folder so the
+        # progressive-disclosure loader pulls them in.
+        assert "references" in skill_text.lower() or "reference" in skill_text.lower(), (
+            "fix-validation SKILL.md must reference its references/ folder "
+            "so plugin-fixer can drill into per-error fix guides."
+        )
+        # The RC-MKPL detail lives in the per-error indices (where agents
+        # actually drill down to).
+        combined = mkt_index + plugin_index
+        assert "marketplace-upstream-drift.md" in combined, (
+            "fix-validation references/ must cite marketplace-upstream-drift.md "
+            "in at least one error index."
+        )
+        assert "RC-MKPL-NAME-MISMATCH" in combined, (
+            "RC-MKPL-NAME-MISMATCH must remain documented in fix-validation references."
+        )
+        assert "RC-MKPL-UNKNOWN-FIELD" in combined, (
+            "RC-MKPL-UNKNOWN-FIELD must remain documented in fix-validation references."
+        )
 
     def test_marketplace_upstream_drift_recipe_exists(self):
         """The recipe file itself must exist and have the 8 documented §s."""
@@ -118,21 +169,63 @@ class TestFixValidationSkillIndexes:
             assert section_title in text, f"Missing section: {section_title}"
 
 
-class TestMainMenuRow7Doctor:
-    """Phase E — main-menu row 7 must be Doctor (deep diagnostic)."""
+class TestMainMenuV290TopLevelCategories:
+    """v2.90.0 (TRDD-c50531c2): canonical 8-category top-level menu replaces
+    the prior Doctor-row design.
 
-    def test_main_menu_agent_has_row_7_doctor(self):
-        text = (REPO_ROOT / "agents" / "cpv-main-menu-agent.md").read_text(encoding="utf-8")
-        assert "Doctor (deep diagnostic)" in text
-        # The 22-option doctor menu count must be referenced.
-        assert "22-option" in text or "22 row" in text or "22-row" in text
+    Per TRDD-c50531c2 the 8 categories are:
+        1. Validate
+        2. Fix
+        3. Optimize for Cache
+        4. Diagnose
+        5. Update
+        6. Create
+        7. Publish & Migrate
+        8. Manage
 
-    def test_menu_tree_has_section_3_7_doctor(self):
+    The former §3.7 "Doctor (deep diagnostic) — 22-option menu" was
+    deleted; its options were absorbed into §3.1 (Validate) and §3.5
+    (Manage), and the row was removed from the top-level table.
+    """
+
+    EXPECTED_CATEGORIES = (
+        "Validate",
+        "Fix",
+        "Optimize for Cache",
+        "Diagnose",
+        "Update",
+        "Create",
+        "Publish & Migrate",
+        "Manage",
+    )
+
+    def test_menu_tree_top_level_has_8_canonical_categories(self):
         text = (REPO_ROOT / "skills/cpv-main-menu-skill/references/menu-tree.md").read_text(encoding="utf-8")
-        assert "### 3.7 Doctor (deep diagnostic)" in text
-        # The renumbered ones must still exist
-        assert "### 3.8 GitHub setup" in text
-        assert "### 3.9 Deep semantic analysis" in text
+        for category in self.EXPECTED_CATEGORIES:
+            assert category in text, (
+                f"v2.90.0 top-level menu must list '{category}' as one of the 8 "
+                f"canonical categories per TRDD-c50531c2 §3.0."
+            )
+
+    def test_menu_tree_no_longer_has_doctor_deep_diagnostic_section(self):
+        """The former §3.7 'Doctor (deep diagnostic)' heading MUST stay deleted."""
+        text = (REPO_ROOT / "skills/cpv-main-menu-skill/references/menu-tree.md").read_text(encoding="utf-8")
+        assert "### 3.7 Doctor (deep diagnostic)" not in text, (
+            "The §3.7 'Doctor (deep diagnostic) — 22-option menu' section was "
+            "deleted in v2.90.0 (TRDD-c50531c2). Its options moved to §3.1 and §3.5."
+        )
+
+    def test_menu_tree_publish_migrate_routes_to_old_github_setup(self):
+        """The §3.7 anchor is now reused for the renamed 'GitHub setup' sub-menu
+        that the new top-level 'Publish & Migrate' row routes to."""
+        text = (REPO_ROOT / "skills/cpv-main-menu-skill/references/menu-tree.md").read_text(encoding="utf-8")
+        # §3.7 is now the GitHub setup / Publish & Migrate sub-menu.
+        assert "### 3.7 GitHub setup" in text, (
+            "§3.7 was repurposed in v2.90.0 — it is now the 'GitHub setup' "
+            "sub-menu reached via the new top-level 'Publish & Migrate' row."
+        )
+        # §3.8 Deep semantic analysis is unchanged (still reached via Diagnose).
+        assert "### 3.8 Deep semantic analysis" in text
 
 
 class TestPublishGate0RejectsBypass:

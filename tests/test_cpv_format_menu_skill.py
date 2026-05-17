@@ -1,14 +1,26 @@
 #!/usr/bin/env python3
 """Tests for the v2.89.4 ``cpv-format-menu`` fork-skill (TRDD-3ce2f864).
 
-``cpv-format-menu`` is a single-turn rendering helper invoked by the four
-CPV menu-orchestrator commands (``cpv-doctor``, ``cpv-fix-validation``,
-``cpv-fix-marketplace-validation``, ``cpv-cache-optimize``). Its job is
-to spawn a fresh haiku subagent via ``context: fork``, run
-``scripts/format_menu.py`` on the provided JSON spec, and return the
-rendered text verbatim. The orchestrator then copies that text into its
-own prose response (because both Bash stdout AND Skill tool results are
-invisible to the user in the Claude Code UI).
+``cpv-format-menu`` was originally invoked by the four CPV menu-
+orchestrator commands (``cpv-doctor``, ``cpv-fix-validation``,
+``cpv-fix-marketplace-validation``, ``cpv-cache-optimize``) to render
+menus via a forked haiku subagent. Per TRDD-c50531c2 (v2.90.0 menu
+unification) those four orchestrator commands were DELETED — every
+workflow is now routed through ``/cpv-main-menu``.
+
+The skill file itself still exists (a follow-up wave will either delete
+it or re-wire it through ``cpv-main-menu-skill``). Until then this file
+pins only the structural invariants that hold regardless of whether the
+skill has any active loader:
+
+- The skill file exists at the canonical path.
+- Its frontmatter declares ``name``, ``context: fork``, ``model: haiku``,
+  ``agent: general-purpose``, ``user-invocable: false``.
+- Its ``allowed-tools`` are minimal (Bash + Read, no mutation tools).
+
+The "loaders mentioned in description" check (``LOADER_COMMANDS``) is
+DROPPED in v2.90.0 because the four named commands no longer exist —
+asserting their names in the description is now misleading.
 
 The fork-skill exists because ``model: haiku`` on a slash-command or skill
 frontmatter only takes effect "for the rest of the current turn" while
@@ -27,17 +39,6 @@ import yaml
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 SKILL_PATH = PLUGIN_ROOT / "skills" / "cpv-format-menu" / "SKILL.md"
-
-# The four orchestrator commands that load this skill. Per the MEMORY.md
-# "Loaded by <agent>" convention for non-user-invocable skills, the
-# description must reference every loader so the relationship is
-# auto-discoverable.
-LOADER_COMMANDS = [
-    "cpv-doctor",
-    "cpv-fix-validation",
-    "cpv-fix-marketplace-validation",
-    "cpv-cache-optimize",
-]
 
 
 def _load_frontmatter(path: Path) -> dict:
@@ -157,27 +158,12 @@ def test_cpv_format_menu_is_not_user_invocable() -> None:
     )
 
 
-def test_cpv_format_menu_description_references_all_orchestrators() -> None:
-    """The frontmatter ``description`` MUST mention each of the four loader
-    commands by name.
-
-    Per the project MEMORY.md convention, every non-user-invocable skill
-    MUST embed "Loaded by <agent/command>" markers in its description so
-    the loader relationship is auto-discoverable. For ``cpv-format-menu``
-    the loaders are the four orchestrator commands — naming each one
-    keeps the skill discoverable when a future contributor greps for
-    e.g. ``cpv-doctor`` to find every related artefact.
-    """
-    fm = _load_frontmatter(SKILL_PATH)
-    desc = (fm.get("description") or "").lower()
-    assert desc, "cpv-format-menu skill description is empty"
-    for cmd in LOADER_COMMANDS:
-        assert cmd in desc, (
-            f"cpv-format-menu skill description does not mention loader "
-            f"command `{cmd}`. Per the MEMORY.md 'Loaded by <agent>' "
-            f"convention every non-user-invocable skill must name its "
-            f"loaders. Current description: {fm.get('description')!r}."
-        )
+# v2.90.0 (TRDD-c50531c2): test_cpv_format_menu_description_references_all_orchestrators
+# was removed because the four orchestrator commands it pinned
+# (cpv-doctor, cpv-fix-validation, cpv-fix-marketplace-validation,
+# cpv-cache-optimize) were DELETED in v2.90.0. The skill has no active
+# loader during the menu-unification transition, so a "Loaded by X" check
+# that names dead commands would be misleading rather than helpful.
 
 
 def test_cpv_format_menu_allowed_tools_minimal() -> None:

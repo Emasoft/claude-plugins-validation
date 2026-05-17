@@ -440,34 +440,48 @@ class TestCliEntryPoint:
         assert "scripts.cli:validate_telemetry" in text
 
 
-class TestSlashCommand:
-    """The /cpv-validate-telemetry slash command must exist."""
+class TestMenuEntryPoint:
+    """v2.90.0 (TRDD-c50531c2): the /cpv-validate-telemetry slash command
+    was deleted along with 22 other redundant user-facing commands. The
+    validator is now reachable via cpv-main-menu's Validate sub-menu, which
+    invokes the launcher with the `validate_telemetry` alias.
+    """
 
-    def test_slash_command_file_exists(self) -> None:
-        """commands/cpv-validate-telemetry.md exists with correct frontmatter."""
+    def test_old_slash_command_file_stays_deleted(self) -> None:
+        """commands/cpv-validate-telemetry.md MUST stay deleted (TRDD-c50531c2)."""
         repo_root = Path(__file__).parent.parent
         cmd = repo_root / "commands" / "cpv-validate-telemetry.md"
-        assert cmd.is_file(), f"Missing slash command file: {cmd}"
-        text = cmd.read_text(encoding="utf-8")
-        # Mandatory frontmatter fields per CPV plugin standards.
-        assert text.startswith("---\n"), "Slash command must start with YAML frontmatter"
-        assert "name: cpv-validate-telemetry" in text
-        assert "description:" in text
-        assert "user-invocable: true" in text
+        assert not cmd.is_file(), (
+            f"{cmd} was deleted in v2.90.0 (TRDD-c50531c2) and MUST stay "
+            "deleted. The validator is now reachable via the cpv-main-menu "
+            "Validate sub-menu."
+        )
 
-    def test_slash_command_documents_all_severities(self) -> None:
-        """The command markdown documents the CRITICAL/MAJOR/MINOR rules."""
+    def test_menu_tree_routes_to_validate_telemetry(self) -> None:
+        """The menu-tree.md MUST include a leaf that dispatches the telemetry
+        validator via the launcher with the `validate_telemetry` alias."""
         repo_root = Path(__file__).parent.parent
-        cmd = repo_root / "commands" / "cpv-validate-telemetry.md"
-        text = cmd.read_text(encoding="utf-8")
-        # Each severity level the validator emits must be documented so a
-        # reader of the command help understands what fires.
-        assert "CRITICAL" in text
-        assert "MAJOR" in text
-        assert "MINOR" in text
-        # Key rules must be mentioned.
-        assert "otelHeadersHelper" in text
-        assert "OTEL_LOG_RAW_API_BODIES" in text
+        menu = repo_root / "skills" / "cpv-main-menu-skill" / "references" / "menu-tree.md"
+        text = menu.read_text(encoding="utf-8")
+        assert "validate_telemetry" in text, (
+            "skills/cpv-main-menu-skill/references/menu-tree.md must contain "
+            "a leaf that invokes the validate_telemetry alias on the launcher "
+            "— the slash command was deleted in v2.90.0 and the menu is now "
+            "the only user-facing entry point."
+        )
+
+    def test_cli_entry_point_still_exposes_validate_telemetry(self) -> None:
+        """The cli.py module retains the validate_telemetry callable so
+        scripts (e.g. the launcher) can dispatch it without the slash
+        command."""
+        import cli  # type: ignore[import-not-found]
+
+        assert hasattr(cli, "validate_telemetry"), (
+            "cli.py must still export validate_telemetry() — the menu's "
+            "launcher invokes it by alias and the deleted slash command "
+            "did the same thing."
+        )
+        assert callable(cli.validate_telemetry)
 
 
 class TestUmbrellaIntegration:

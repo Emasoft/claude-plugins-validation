@@ -42,16 +42,12 @@ Input:  [MAJOR] Missing plugin.json
 Output: plugin-structure-fixes §1
 ```
 
-## Schema-parity
-
-CPV mirrors CC's install-time schema. Contract: [schema-parity-contract.md](references/schema-parity-contract.md).
-
 ## Resources
 
 - [Plugin Error Index](references/plugin-error-index.md)
-  > 1. validate_plugin.py · 2. validate_skill.py · 3. validate_skill_comprehensive.py · 4. validate_hook.py · 5. validate_agent.py · 6. validate_command.py · 7. validate_mcp.py · 8. validate_lsp.py · 9. validate_security.py · 10. validate_rules.py · 11. validate_xref.py · 12. validate_settings_marketplace.py · 13. validate_documentation.py · 14. validate_encoding.py · 15. validate_enterprise.py · 16. validate_scoring.py · 17. validate_cache.py · 18. validate_telemetry.py — plugin-shipped env-var hazards · 19. Semantic pillar — Channel MCP Server Source-Code Security · 20. validate_marketplace cross-validation rules
+  > validate_plugin.py · validate_skill.py · validate_skill_comprehensive.py · validate_hook.py · validate_agent.py · validate_command.py · validate_mcp.py · validate_lsp.py · validate_security.py · validate_rules.py · validate_xref.py · validate_settings_marketplace.py · validate_documentation.py · validate_encoding.py · validate_enterprise.py · validate_scoring.py · validate_cache.py · validate_telemetry.py — plugin-shipped env-var hazards · Semantic pillar — Channel MCP Server Source-Code Security · validate_marketplace cross-validation rules
 - [Marketplace Error Index](references/marketplace-error-index.md)
-  > 1. validate_marketplace.py · 1.1 RC-MKPL-* upstream cross-validation codes (v2.81.0+) · 2. validate_marketplace_pipeline.py · 3. Architecture / Layout Migration Warnings (7 signals)
+  > validate_marketplace.py · 1 RC-MKPL-* upstream cross-validation codes (v2.81.0+) · validate_marketplace_pipeline.py · Architecture / Layout Migration Warnings (7 signals)
 - [Schema-Parity Contract](references/schema-parity-contract.md)
   > What CPV does · The contract · What this contract does NOT say · What IS covered · Validator-gap protocol · Historical incidents · Related
 - [Iterative Fix Loop](references/iterative-fix-loop.md)
@@ -64,7 +60,7 @@ CPV mirrors CC's install-time schema. Contract: [schema-parity-contract.md](refe
   > Overview · CRITICAL: Plugin ships CLAUDE_CODE_PLUGIN_SEED_DIR · CRITICAL: Plugin ships CLAUDE_CODE_SHELL_PREFIX · CRITICAL: Plugin ships CLAUDE_CONFIG_DIR · CRITICAL: Plugin ships BETA_TRACING_ENDPOINT pointing at external host · CRITICAL: Plugin ships OTEL_LOG_RAW_API_BODIES set to a file URL · MAJOR: Plugin ships third-party-provider bypass env var · Reference: env vars plugins MUST NEVER ship
 - [Pipeline Migration](references/pipeline-migration.md)
   > §0 — Detect canonical pipeline drift via RC-PIPELINE-DRIFT-001 · §0b — Remove legacy pipeline scripts via RC-LEGACY-PIPELINE-001 · §1 — Fix dangling script references · §2 — Migrate to whole-repo lint via cpv_lint_engine · §3 — Cross-platform Python — bash to Python, os.path to pathlib · §4 — Make publish.py idempotent — interrupted-publish recovery · §5 — Sanitize every script-input parameter against injection
-- [Marketplace Upstream Drift Fixes](references/marketplace-upstream-drift.md)
-  > 1. Name mismatch — RC-MKPL-NAME-MISMATCH · 2. Version drift — RC-MKPL-VERSION-DRIFT · 3. Unknown entry field — RC-MKPL-UNKNOWN-FIELD · 4. Unknown source sub-field — RC-MKPL-UNKNOWN-SOURCE-FIELD · 5. Source unreachable — RC-MKPL-UPSTREAM-UNREACHABLE · 6. Description / author / keywords drift — RC-MKPL-METADATA-DRIFT · 7. Per-batch bulk align — consolidated marketplace patch · 8. Opt-out flags — when drift IS intentional
-- Migration only: `canonical-pipeline-migration-checklist.md` (plugin root) — 82-check exit gate.
+- [Marketplace Upstream Drift](references/marketplace-upstream-drift.md)
+  > Name mismatch — RC-MKPL-NAME-MISMATCH · Version drift — RC-MKPL-VERSION-DRIFT · Unknown entry field — RC-MKPL-UNKNOWN-FIELD · Unknown source sub-field — RC-MKPL-UNKNOWN-SOURCE-FIELD · Source unreachable — RC-MKPL-UPSTREAM-UNREACHABLE · Description / author / keywords drift — RC-MKPL-METADATA-DRIFT · Per-batch bulk align — consolidated marketplace patch · Opt-out flags — when drift IS intentional
+- Migration only: `canonical-pipeline-migration-checklist.md` at plugin root — 82-check exit gate.
 - MCP bundling: executables go in `servers/`, referenced as `${CLAUDE_PLUGIN_ROOT}/servers/<name>` (unique names).

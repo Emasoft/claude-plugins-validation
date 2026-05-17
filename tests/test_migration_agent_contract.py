@@ -233,42 +233,63 @@ def test_agent_tools_include_bash() -> None:
     )
 
 
-# ── Contract: command file tells user about new contract + time ──────────────
+# ── Contract: agent file (formerly the command file) tells user about new contract + time ──
+# v2.90.0 (TRDD-c50531c2): the cpv-upgrade-plugin slash command was deleted.
+# The migration contract now lives entirely in agents/plugin-fixer.md, which
+# is dispatched from cpv-main-menu's "Diagnose & Upgrade" top-level row.
+# The COMMAND_FILE constant is kept above only as a regression marker —
+# every assertion that used to target it now targets AGENT_FILE.
 
 
-def test_command_description_warns_about_total_time() -> None:
-    """commands/cpv-upgrade-plugin.md description MUST tell user about the 10-15 min time budget."""
-    body = COMMAND_FILE.read_text()
+def test_deleted_cpv_upgrade_plugin_command_stays_deleted() -> None:
+    """v2.90.0 regression guard — commands/cpv-upgrade-plugin.md MUST stay deleted.
+
+    Re-creating it would split the migration entry point between the menu
+    and a standalone command, breaking the unified menu architecture.
+    """
+    assert not COMMAND_FILE.exists(), (
+        f"{COMMAND_FILE} was deleted in v2.90.0 (TRDD-c50531c2) and MUST stay "
+        "deleted. The migration flow now goes through cpv-main-menu's "
+        "'Diagnose & Upgrade' top-level row, which dispatches plugin-fixer."
+    )
+
+
+def test_agent_description_warns_about_total_time() -> None:
+    """plugin-fixer.md description MUST tell user about the 10-15 min time budget
+    (or reference the 82-check matrix, which implies the same)."""
+    body = AGENT_FILE.read_text()
     has_time_hint = bool(re.search(r"10-15\s*min|10-15\s*minute|82-check", body, re.IGNORECASE))
     assert has_time_hint, (
-        "commands/cpv-upgrade-plugin.md must tell the user that the new "
-        "contract runs the 82-check matrix AND a real publish + CI watch "
-        "(total time 10-15 minutes) — without this hint the user might "
-        "abort thinking the agent hung."
+        "agents/plugin-fixer.md must tell the user (via its description or "
+        "body) that the migration contract runs the 82-check matrix AND a "
+        "real publish + CI watch (total time 10-15 minutes) — without this "
+        "hint the user might abort thinking the agent hung. v2.90.0 moved "
+        "this responsibility from the deleted cpv-upgrade-plugin command."
     )
 
 
-def test_command_mentions_82_check_matrix() -> None:
-    """Command file MUST mention the 82-check Pre-completion verification matrix."""
-    body = COMMAND_FILE.read_text()
+def test_agent_mentions_82_check_matrix() -> None:
+    """plugin-fixer.md MUST mention the 82-check Pre-completion verification matrix."""
+    body = AGENT_FILE.read_text()
     assert "82" in body, (
-        "commands/cpv-upgrade-plugin.md must reference '82' (the check count) "
-        "so users know what they are signing up for."
+        "agents/plugin-fixer.md must reference '82' (the check count) so "
+        "users know what they are signing up for. v2.90.0 moved this "
+        "responsibility from the deleted cpv-upgrade-plugin command."
     )
 
 
-def test_command_mentions_real_publish_and_ci_watch() -> None:
-    """Command file MUST mention the real-publish + gh run watch step."""
-    body = COMMAND_FILE.read_text()
+def test_agent_mentions_real_publish_and_ci_watch() -> None:
+    """plugin-fixer.md MUST mention the real-publish + gh run watch step."""
+    body = AGENT_FILE.read_text()
     has_publish = "publish.py --patch" in body or "real publish" in body.lower()
     has_ci = "gh run watch" in body or "green CI" in body
     assert has_publish, (
-        "commands/cpv-upgrade-plugin.md must mention `publish.py --patch` "
-        "or 'real publish' so users know the migration will push a new tag."
+        "agents/plugin-fixer.md must mention `publish.py --patch` or 'real "
+        "publish' so users know the migration will push a new tag."
     )
     assert has_ci, (
-        "commands/cpv-upgrade-plugin.md must mention `gh run watch` or "
-        "'green CI' so users know CI must pass before [DONE]."
+        "agents/plugin-fixer.md must mention `gh run watch` or 'green CI' "
+        "so users know CI must pass before [DONE]."
     )
 
 

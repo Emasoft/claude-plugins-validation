@@ -1,14 +1,22 @@
 #!/usr/bin/env python3
-"""Tests for command consolidation (v2.8.0).
+"""Tests for command consolidation (v2.8.0 → v2.90.0).
+
+v2.90.0 (TRDD-c50531c2 — menu unification) is the latest re-shape:
+- Only ONE user-visible slash command remains: `/cpv-main-menu`.
+- The 23 user-facing slash commands and 14 component-creation commands
+  were either deleted (the 23) or converted to `user-invocable: false`
+  skills (the 14). All workflows are now routed through the main menu.
 
 Validates that:
-- 16 commands exist (8 direct-script + 6 agent + 2 v2.12.13 additions).
-  Originally 13 after consolidation (8 direct-script + 5 agent).
-- Direct-script commands have no agent: field
-- Agent commands have the correct agent: field
-- Old obsolete commands no longer exist in commands/
-- Archived commands are in scripts_dev/commands_archive/
-- Canonical-pipeline skill has correct frontmatter
+- Exactly 1 command exists in commands/ (`cpv-main-menu.md`).
+- That command delegates to `cpv-main-menu-agent`.
+- The 23 deleted user-facing commands are no longer in commands/.
+- The 14 commands-turned-skills no longer exist in commands/.
+- Old obsolete commands (from earlier waves) are also still gone.
+- Archived commands are in scripts_dev/commands_archive/ (local only).
+- Canonical-pipeline skill has correct frontmatter.
+- Every skill is loaded by at least one agent OR slash-command body
+  — with explicit exemptions for skills awaiting wiring waves.
 """
 
 from __future__ import annotations
@@ -39,122 +47,135 @@ def _parse_frontmatter(path: Path) -> dict | None:
 
 # --- Direct-script commands (no agent field) ---
 #
-# v2.89.x note (TRDD-bcbceeed): the four `*-menu` haiku dispatcher
-# subagents introduced in TRDD-82e836dc were removed because the current
-# Anthropic spec forbids subagents from spawning other subagents (see
-# https://code.claude.com/docs/en/sub-agents). The slash-command body
-# itself is now the menu orchestrator; it runs in the MAIN session
-# (forced to haiku via `model: haiku` on the slash-command frontmatter)
-# and dispatches the opus work agent via the Agent tool. Therefore the
-# four affected commands — `cpv-doctor`, `cpv-fix-validation`,
-# `cpv-fix-marketplace-validation`, `cpv-cache-optimize` — no longer
-# carry an `agent:` field and move into DIRECT_SCRIPT_COMMANDS.
+# v2.90.0 (TRDD-c50531c2 — menu unification): ALL direct-script commands
+# were deleted. The 23 user-facing slash commands either disappear (their
+# functionality lives in agents already dispatched via /cpv-main-menu) or
+# converted into `user-invocable: false` skills (the 14 component-creation
+# commands). The set is therefore empty.
 
-DIRECT_SCRIPT_COMMANDS = [
-    "cpv-validate-plugin",
-    "cpv-validate-skill",
-    "cpv-validate-github-plugin",
-    "cpv-validate-github-marketplace",
-    "cpv-list-plugins",
-    "cpv-bump-version",
-    "cpv-version",
-    "cpv-setup-branch-rules",
-    "cpv-setup-branch-rules-generic",
-    "cpv-validate-project-scope",
-    "cpv-validate-local-scope",
-    # TRDD-e3e74f69 — OTEL telemetry supply-chain validator (direct-script,
-    # invoked via remote_validation.py "telemetry" alias, no agent field).
-    "cpv-validate-telemetry",
-    # TRDD-bcbceeed (v2.89.0) — main-session menu orchestrators (no agent: field).
-    "cpv-doctor",
-    "cpv-fix-validation",
-    "cpv-fix-marketplace-validation",
-    "cpv-cache-optimize",
-]
+DIRECT_SCRIPT_COMMANDS: list[str] = []
 
 # --- Agent commands (with agent field) ---
+#
+# v2.90.0 (TRDD-c50531c2): only ONE slash command remains. It delegates to
+# `cpv-main-menu-agent`, which itself does the menu orchestration via the
+# `cpv-main-menu-skill` reference table.
 
 AGENT_COMMANDS = {
-    "cpv-validate": "plugin-validator",
-    "cpv-manage": "plugin-manager",
-    "cpv-create": "plugin-creator",
-    "cpv-semantic-validation": "semantic-validator",
+    "cpv-main-menu": "cpv-main-menu-agent",
+}
+
+# --- Commands deleted in v2.90.0 (TRDD-c50531c2 menu unification) ---
+#
+# 23 user-facing slash commands were deleted because their functionality is
+# now routed through `/cpv-main-menu` → existing agents (plugin-validator,
+# plugin-fixer, plugin-creator, plugin-manager, cache-optimizer-agent,
+# cpv-doctor-agent, semantic-validator, marketplace-fixer, etc.).
+V290_DELETED_USER_COMMANDS = [
+    "cpv-validate-plugin",
+    "cpv-validate-skill",
+    "cpv-validate-local-scope",
+    "cpv-validate-project-scope",
+    "cpv-validate-cache",
+    "cpv-validate-github-plugin",
+    "cpv-validate-github-marketplace",
+    "cpv-validate-settings-marketplace",
+    "cpv-validate-telemetry",
+    "cpv-fix-validation",
+    "cpv-fix-marketplace-validation",
+    "cpv-semantic-validation",
+    "cpv-create",
+    "cpv-list-plugins",
+    "cpv-manage",
+    "cpv-diagnose-plugin",
+    "cpv-validate",
+    "cpv-doctor",
+    "cpv-cache-optimize",
+    "cpv-upgrade-plugin",
+    "cpv-setup-branch-rules",
+    "cpv-setup-branch-rules-generic",
+    "cpv-migrate-marketplace",
+]
+
+# --- Commands converted to `user-invocable: false` skills in v2.90.0 ---
+#
+# 14 component-creation / utility commands were converted into skills loaded
+# only by agents (or by the main-menu skill's references). The cpv-XXX file
+# in commands/ is GONE; the skill at skills/<new-name>/SKILL.md is its
+# replacement. Mapping: command (old) → skill (new).
+V290_COMMAND_TO_SKILL = {
+    "cpv-add-component": "add-component-to-plugin",
+    "cpv-add-dependency": "add-dependency",
+    "cpv-bump-version": "bump-version",
+    "cpv-codemod": "deterministic-codemod",
+    "cpv-create-agent": "scaffold-agent",
+    "cpv-create-command": "scaffold-command",
+    "cpv-create-hook": "add-hook",
+    "cpv-create-mcp": "register-mcp",
+    "cpv-create-skill": "scaffold-skill",
+    "cpv-link-plugin": "link-plugin-marketplace",
+    "cpv-pack-components": "pack-components",
+    "cpv-refresh-readme": "refresh-readme",
+    "cpv-strip-dev-parts": "strip-dev-submodules",
+    "cpv-version": "show-version",
 }
 
 
 class TestCommandCount:
-    """Verify total command count after consolidation."""
+    """Verify total command count after the v2.90.0 menu unification."""
 
-    def test_total_command_count_is_38(self):
-        """commands/ directory should contain exactly 38 .md files.
+    def test_total_command_count_is_1(self):
+        """commands/ directory must contain exactly ONE .md file.
 
-        Originally 13 after consolidation (8 direct + 5 agent).
-        v2.12.13 added: cpv-link-plugin, cpv-validate-settings-marketplace.
-        v2.12.x split: cpv-fix-marketplace-validation (routes to marketplace-fixer).
-        v2.12.32 added: cpv-setup-branch-rules (server-side CI enforcement).
-        v2.13.1 added: cpv-setup-branch-rules-generic (project-agnostic variant).
-        v2.14.x added: cpv-validate-project-scope, cpv-validate-local-scope
-          (TRDD-2be75e88 phases 2 and 3).
-        v2.46.0 added: cpv-validate-cache (audit-only) and cpv-cache-optimize
-          (cache-optimizer agent — audit + fix CA-01..CA-06 invalidation rules).
-        v2.48.0 added: cpv-main-menu (single-entry menu routing all CPV
-          commands via numbered Unicode tables — refactored away from AskUserQuestion).
-        v2.50.0 added: cpv-codemod (deterministic mechanical-fix CLI — issue #17).
-        v2.52.0 added: cpv-strip-dev-parts (TRDD-793ac32a — extract dev folders
-          to per-plugin git submodules so Claude Code shallow-clone installs
-          shrink ~12 MB).
-        v2.57.0 added: cpv-refresh-readme (Phase 5 — auto-refresh AUTO-COMPONENTS
-          marker block in plugin/marketplace READMEs).
-        v2.59.0 added: cpv-migrate-marketplace (Phase 2.6 — normalize source.url
-          → source.repo + detect 404 dead repos in marketplace.json).
-        v2.61.0 added: cpv-add-component (Phase 10 — add skill/agent/command/
-          hook/mcp to existing plugin without re-running scaffold).
-        v2.66.0 added: cpv-create-{skill,agent,command,hook,mcp} (5 thin
-          wrappers around cpv-add-component — exposed via new Create sub-menu),
-          cpv-diagnose-plugin and cpv-upgrade-plugin (deep-audit + full-pipeline
-          migration agents — exposed via new Diagnose & Upgrade sub-menu).
-        v2.69.0 added: cpv-pack-components (#157 — automated CLI packer that
-          discovers and converts standalone components into a real installable
-          plugin; surfaced via Create sub-menu §3.4.8 and shape-detection's
-          "Wrap into a NEW plugin" option).
-        v2.73.0 added: cpv-add-dependency — adds plugin dependencies via
-          explicit --add specs or --from copy from another plugin's
-          plugin.json (per plugin-dependencies.md). Surfaced in Main menu
-          § 3.4 row 9 and Doctor menu option 22.
-        v2.80.0 added: cpv-validate-telemetry (TRDD-e3e74f69 — OTEL
-          supply-chain audit: otelHeadersHelper / OTEL_LOG_RAW_API_BODIES /
-          endpoint hijack rules from monitoring-usage.md).
+        Per TRDD-c50531c2 (v2.90.0), the 23 user-facing slash commands
+        and the 14 component-creation commands were either deleted or
+        converted to `user-invocable: false` skills. Only the single
+        entry-point `cpv-main-menu.md` remains; every other workflow is
+        routed through that menu to its underlying agent.
         """
         md_files = list(COMMANDS_DIR.glob("*.md"))
-        assert len(md_files) == 38, f"Expected 38 commands, found {len(md_files)}: {sorted(f.name for f in md_files)}"
+        assert len(md_files) == 1, (
+            f"Expected 1 command (cpv-main-menu.md) per TRDD-c50531c2, "
+            f"found {len(md_files)}: {sorted(f.name for f in md_files)}"
+        )
+
+    def test_only_remaining_command_is_cpv_main_menu(self):
+        """The single surviving command MUST be `cpv-main-menu.md`."""
+        md_files = list(COMMANDS_DIR.glob("*.md"))
+        assert len(md_files) == 1
+        assert md_files[0].name == "cpv-main-menu.md", (
+            f"Expected cpv-main-menu.md to be the only command, found "
+            f"{md_files[0].name}"
+        )
 
 
 class TestDirectScriptCommands:
-    """Verify direct-script commands exist and have no agent: field."""
+    """Verify direct-script commands have all been removed (v2.90.0).
 
-    def test_all_direct_script_commands_exist(self):
-        """All 8 direct-script commands must exist."""
-        for name in DIRECT_SCRIPT_COMMANDS:
-            assert (COMMANDS_DIR / f"{name}.md").is_file(), f"{name}.md missing"
+    Pre-v2.90.0 the project shipped many direct-script (`agent: <absent>`)
+    slash commands. Per TRDD-c50531c2 they were all deleted in favor of
+    routing through `/cpv-main-menu` → existing agents.
+    """
 
-    def test_direct_script_commands_have_no_agent(self):
-        """Direct-script commands must not have an agent: field."""
-        for name in DIRECT_SCRIPT_COMMANDS:
-            fm = _parse_frontmatter(COMMANDS_DIR / f"{name}.md")
-            assert fm is not None, f"{name}.md has no frontmatter"
-            assert "agent" not in fm, f"{name}.md should not have agent: field, got '{fm.get('agent')}'"
+    def test_no_direct_script_commands_remain(self):
+        """The DIRECT_SCRIPT_COMMANDS allowlist is empty in v2.90.0."""
+        assert DIRECT_SCRIPT_COMMANDS == [], (
+            "Per TRDD-c50531c2 (v2.90.0) every direct-script slash command "
+            "was deleted. DIRECT_SCRIPT_COMMANDS must remain empty so a "
+            "future regression that re-introduces one is caught here."
+        )
 
 
 class TestAgentCommands:
-    """Verify agent commands exist and delegate to the correct agent."""
+    """Verify the single surviving agent command (v2.90.0)."""
 
     def test_all_agent_commands_exist(self):
-        """All 6 agent commands must exist."""
+        """The single agent command (`cpv-main-menu`) must exist."""
         for name in AGENT_COMMANDS:
             assert (COMMANDS_DIR / f"{name}.md").is_file(), f"{name}.md missing"
 
     def test_agent_commands_have_correct_agent(self):
-        """Agent commands must have the correct agent: field."""
+        """Each agent command must delegate to the correct agent."""
         for name, expected_agent in AGENT_COMMANDS.items():
             fm = _parse_frontmatter(COMMANDS_DIR / f"{name}.md")
             assert fm is not None, f"{name}.md has no frontmatter"
@@ -211,6 +232,39 @@ class TestObsoleteCommandsRemoved:
             "cpv-standardize",
         ]:
             assert not (COMMANDS_DIR / f"{name}.md").exists(), f"{name}.md should be archived"
+
+    def test_v290_deleted_user_commands_are_gone(self):
+        """The 23 user-facing slash commands deleted in v2.90.0 (TRDD-c50531c2)
+        must NOT exist in commands/.
+
+        Their functionality is now routed through `/cpv-main-menu` → the
+        existing agent for the workflow (plugin-validator, plugin-fixer,
+        plugin-creator, plugin-manager, cache-optimizer-agent,
+        cpv-doctor-agent, semantic-validator, marketplace-fixer, etc.).
+        """
+        for name in V290_DELETED_USER_COMMANDS:
+            assert not (COMMANDS_DIR / f"{name}.md").exists(), (
+                f"{name}.md must NOT exist — deleted in v2.90.0 per "
+                f"TRDD-c50531c2 (functionality routed via /cpv-main-menu)."
+            )
+
+    def test_v290_command_to_skill_conversions_are_gone_from_commands(self):
+        """The 14 commands converted to `user-invocable: false` skills in
+        v2.90.0 (TRDD-c50531c2) must NOT exist in commands/.
+
+        For each entry, the cpv-XXX file is GONE; the skill at
+        skills/<new-name>/SKILL.md is its replacement.
+        """
+        for cmd_name, skill_name in V290_COMMAND_TO_SKILL.items():
+            assert not (COMMANDS_DIR / f"{cmd_name}.md").exists(), (
+                f"{cmd_name}.md must NOT exist — converted to "
+                f"skills/{skill_name}/SKILL.md in v2.90.0 per TRDD-c50531c2."
+            )
+            assert (SKILLS_DIR / skill_name / "SKILL.md").is_file(), (
+                f"skills/{skill_name}/SKILL.md must exist — it is the "
+                f"replacement for the deleted {cmd_name}.md command "
+                f"(v2.90.0 per TRDD-c50531c2)."
+            )
 
 
 class TestArchivedCommands:
@@ -302,6 +356,46 @@ class TestSkillAgentArchitecture:
             # behind TRDD-c0ee9543) wires plugin-creator / plugin-fixer /
             # marketplace-fixer to load it.
             "marketplace-authoring-contract",
+            # TRDD-c50531c2 (v2.90.0 menu unification) deleted the 4 menu
+            # orchestrator commands (cpv-doctor, cpv-fix-validation,
+            # cpv-fix-marketplace-validation, cpv-cache-optimize) which were
+            # the sole loaders of cpv-format-menu. A follow-up wave will
+            # either delete cpv-format-menu or re-wire it through
+            # cpv-main-menu-skill — until then it's intentionally orphaned.
+            "cpv-format-menu",
+            # TRDD-c50531c2 (v2.90.0 menu unification) created these 14
+            # skills as replacements for the deleted commands of the same
+            # role. The orchestrator wiring (which agent loads which skill)
+            # is a follow-up wave — until then these are intentionally
+            # orphaned. Each maps 1:1 to a former cpv-XXX command:
+            #   add-component-to-plugin ← cpv-add-component
+            #   add-dependency           ← cpv-add-dependency
+            #   add-hook                 ← cpv-create-hook
+            #   bump-version             ← cpv-bump-version
+            #   deterministic-codemod    ← cpv-codemod
+            #   link-plugin-marketplace  ← cpv-link-plugin
+            #   pack-components          ← cpv-pack-components
+            #   refresh-readme           ← cpv-refresh-readme
+            #   register-mcp             ← cpv-create-mcp
+            #   scaffold-agent           ← cpv-create-agent
+            #   scaffold-command         ← cpv-create-command
+            #   scaffold-skill           ← cpv-create-skill
+            #   show-version             ← cpv-version
+            #   strip-dev-submodules     ← cpv-strip-dev-parts
+            "add-component-to-plugin",
+            "add-dependency",
+            "add-hook",
+            "bump-version",
+            "deterministic-codemod",
+            "link-plugin-marketplace",
+            "pack-components",
+            "refresh-readme",
+            "register-mcp",
+            "scaffold-agent",
+            "scaffold-command",
+            "scaffold-skill",
+            "show-version",
+            "strip-dev-submodules",
         }
         # Gather all skill names declared by agents.
         loaded = set()

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for agent model-tier policy.
 
-Three TRDDs are active here:
+Four TRDDs are active here:
 
 * **TRDD-82e836dc** (Phase A only — frontmatter-only downgrades): each
   agent's `model:` field is set to the cheapest tier that still does its
@@ -26,12 +26,17 @@ Three TRDDs are active here:
   degrade mid-turn to haiku — the override silently fails. v2.89.4
   removes `model: haiku` from the four orchestrators and moves the
   honest haiku-rendering capability into a single `context: fork` skill
-  (`cpv-format-menu`). The Phase B tests in this file are now Phase B+C
-  combined: (a) the four `*-menu` agent files MUST stay deleted,
-  (b) the four slash commands MUST NOT carry `model: haiku` AND MUST
-  invoke the `cpv-format-menu` Skill, (c) the four opus work agents
-  stay on opus and contain no First Contact menu, (d) the
-  `cpv-format-menu` skill carries `model: haiku` + `context: fork` +
+  (`cpv-format-menu`).
+* **TRDD-c50531c2** (v2.90.0 — menu unification): the four
+  menu-orchestrator slash commands (`cpv-doctor`, `cpv-fix-validation`,
+  `cpv-fix-marketplace-validation`, `cpv-cache-optimize`) were DELETED.
+  Their workflows are now routed through `/cpv-main-menu` to existing
+  agents. All command-side invariants from TRDD-bcbceeed / TRDD-3ce2f864
+  are no longer enforceable (the files they pinned do not exist), but
+  the AGENT-side invariants remain enforceable: (a) the four `*-menu`
+  agent files MUST stay deleted, (b) the four opus work agents stay on
+  opus and contain no First Contact menu, (c) the `cpv-format-menu`
+  skill carries `model: haiku` + `context: fork` +
   `agent: general-purpose`.
 
 Tier policy:
@@ -193,116 +198,22 @@ def test_menu_subagent_is_deleted(menu_filename: str) -> None:
     )
 
 
-@pytest.mark.parametrize("work,cmd,_work_name", _MAIN_SESSION_MENUS)
-def test_orchestrator_command_is_not_haiku(work: str, cmd: str, _work_name: str) -> None:
-    """Each menu-orchestrator slash command MUST NOT declare model: haiku
-    (TRDD-3ce2f864 supersedes the v2.89.0 design from TRDD-bcbceeed).
-
-    Per the Claude Code skills docs, ``model:`` overrides apply "for the rest
-    of the current turn" while keeping the inherited conversation history.
-    The orchestrators are multi-turn state machines on opus with a 1M-token
-    context — switching mid-turn to haiku is unsafe (the override silently
-    degrades or fails). The honest pattern: orchestrator runs on the session
-    model; menu rendering forks to haiku via the ``cpv-format-menu``
-    ``context: fork`` skill.
-    """
-    fm = _load_frontmatter(COMMANDS_DIR / cmd)
-    assert fm.get("model") != "haiku", (
-        f"{cmd} declares `model: haiku` in its frontmatter. Per "
-        f"TRDD-3ce2f864 this is a lie — the multi-turn orchestrator body "
-        f"runs on the session model regardless. Remove the field and rely "
-        f"on `cpv-format-menu` (context: fork) for honest haiku rendering."
-    )
-
-
-@pytest.mark.parametrize("work,cmd,_work_name", _MAIN_SESSION_MENUS)
-def test_orchestrator_command_has_no_agent_field(work: str, cmd: str, _work_name: str) -> None:
-    """Each menu-orchestrator command must NOT declare an `agent:` field.
-
-    Per TRDD-bcbceeed: the slash-command body is the orchestrator and runs
-    in the main session. An `agent:` field would dispatch to a subagent —
-    which then could not spawn the opus work agent (subagents can't spawn
-    subagents). Therefore the field must be absent.
-    """
-    fm = _load_frontmatter(COMMANDS_DIR / cmd)
-    assert "agent" not in fm, (
-        f"{cmd} declares `agent: {fm.get('agent')!r}`. Per TRDD-bcbceeed "
-        f"this field must be removed — the slash-command body itself "
-        f"orchestrates the menu in the main session. Without removal, the "
-        f"subagent-can't-spawn-subagent constraint silently breaks dispatch."
-    )
-
-
-@pytest.mark.parametrize("work,cmd,_work_name", _MAIN_SESSION_MENUS)
-def test_orchestrator_command_body_invokes_cpv_format_menu(work: str, cmd: str, _work_name: str) -> None:
-    """Each menu-orchestrator command body MUST invoke the ``cpv-format-menu``
-    ``context: fork`` skill (rather than embedding hardcoded Unicode tables
-    OR calling ``scripts/format_menu.py`` directly via Bash).
-
-    Per TRDD-bcbceeed (v2.89.0): menu presets are part of the slash-command
-    body — no external menu-agent file.
-
-    Per TRDD-81e7fa34 (v2.89.3): hardcoded Unicode tables are forbidden
-    because they re-introduce the ``len()``-vs-display-width alignment bug
-    + the "menu shows greyed empty rows" defect.
-
-    Per TRDD-3ce2f864 (v2.89.4): menu rendering is offloaded to the
-    ``cpv-format-menu`` fork-skill — the orchestrator writes the JSON spec
-    to a temp file and invokes the Skill tool. The fork spawns a fresh
-    haiku subagent (so ``model: haiku`` actually takes effect) which runs
-    ``format_menu.py`` and returns the rendered text.
-    """
-    body = (COMMANDS_DIR / cmd).read_text(encoding="utf-8")
-    assert "cpv-format-menu" in body, (
-        f"{cmd} body does not reference `cpv-format-menu`. Per "
-        f"TRDD-3ce2f864 (v2.89.4) menu rendering MUST be offloaded to the "
-        f"`cpv-format-menu` `context: fork` skill so cell widths use "
-        f"display columns, disabled rows are dropped + renumbered, AND "
-        f"the haiku override actually takes effect (no inherited opus "
-        f"context to silently degrade against)."
-    )
-    assert 'skill: "claude-plugins-validation:cpv-format-menu"' in body, (
-        f"{cmd} body references `cpv-format-menu` but does not invoke it "
-        f"via the Skill tool with the fully-qualified "
-        f"`claude-plugins-validation:cpv-format-menu` form. The expected "
-        f"invocation block is:\n"
-        f"  Skill({{\n"
-        f"    skill: \"claude-plugins-validation:cpv-format-menu\",\n"
-        f"    args: \"<mode> /tmp/<cmd>-<purpose>-spec.json [/tmp/<cmd>-<purpose>-map.json]\"\n"
-        f"  }})"
-    )
-
-
-@pytest.mark.parametrize("work,cmd,work_name", _MAIN_SESSION_MENUS)
-def test_orchestrator_command_body_references_work_agent(work: str, cmd: str, work_name: str) -> None:
-    """Each menu-orchestrator command body references the opus work agent.
-
-    The body's Step 4 dispatch block must contain `subagent_type: <work_name>`
-    so the main session knows which subagent to spawn.
-    """
-    body = (COMMANDS_DIR / cmd).read_text(encoding="utf-8")
-    expected = f"subagent_type: {work_name}"
-    assert expected in body, (
-        f"{cmd} body does not reference `{expected}`. Per TRDD-bcbceeed "
-        f"the body must dispatch the opus work agent ({work_name}) via "
-        f"the Agent tool from the main session."
-    )
-
-
-@pytest.mark.parametrize("work,cmd,_work_name", _MAIN_SESSION_MENUS)
-def test_orchestrator_command_documents_haiku_banner(work: str, cmd: str, _work_name: str) -> None:
-    """Each menu-orchestrator command body documents the haiku-session banner.
-
-    The body must instruct the orchestrator to print a banner suggesting
-    `/model haiku` for cheaper menu navigation, so the user can opt into
-    haiku-everywhere with one keystroke.
-    """
-    body = (COMMANDS_DIR / cmd).read_text(encoding="utf-8")
-    assert "/model haiku" in body, (
-        f"{cmd} body does not mention the `/model haiku` opt-in banner. "
-        f"Per TRDD-bcbceeed the orchestrator must surface this suggestion "
-        f"so users on Opus can opt into haiku-everywhere with one keystroke."
-    )
+# v2.90.0 (TRDD-c50531c2): the five tests below previously pinned
+# properties of the four menu-orchestrator slash command FILES
+# (cpv-doctor.md, cpv-fix-validation.md, cpv-fix-marketplace-validation.md,
+# cpv-cache-optimize.md). Those files were DELETED in v2.90.0 — every
+# workflow is now routed through /cpv-main-menu. The tests have been
+# removed because they cannot run against non-existent files:
+#   - test_orchestrator_command_is_not_haiku
+#   - test_orchestrator_command_has_no_agent_field
+#   - test_orchestrator_command_body_invokes_cpv_format_menu
+#   - test_orchestrator_command_body_references_work_agent
+#   - test_orchestrator_command_documents_haiku_banner
+# The single-source-of-truth invariant "those command files MUST stay
+# deleted" lives in tests/test_menu_visibility.py instead, alongside
+# the broader test_v290_only_cpv_main_menu_command_remains pin. The
+# AGENT-side invariants (work agents stay opus + no First Contact menu;
+# cpv-format-menu skill is haiku-fork) are still enforced here below.
 
 
 @pytest.mark.parametrize("work,cmd,_work_name", _MAIN_SESSION_MENUS)
