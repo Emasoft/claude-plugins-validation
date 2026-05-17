@@ -43,22 +43,21 @@ also no AskUserQuestion.
    skill's `skills/cpv-main-menu-skill/references/menu-tree.md` §3.0:
 
    ```
-   ┏━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-   ┃ #  ┃ Category                      ┃ What it does                                                                              ┃
-   ┡━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-   │ 1  │ Validate                      │ Run a CPV validator (plugin/skill/cache/marketplace/scope/component)                      │
-   │ 2  │ Validate from GitHub          │ Clone owner/repo to tmpdir, scan, clean up                                                │
-   │ 3  │ Fix                           │ Apply mechanical fixes from a validation report                                           │
-   │ 4  │ Create                        │ Scaffold plugins, marketplaces, skills, agents, commands, hooks, MCP servers             │
-   │ 5  │ Manage                        │ List installed plugins, install / update, health-check, bump version                     │
-   │ 6  │ Diagnose & Upgrade            │ Deep audit + upgrade existing plugin to current pipeline standards (recommended)         │
-   │ 7  │ Doctor (deep diagnostic)      │ 22-option doctor menu: marketplace cross-check, install-resolver dry-run, scope mismatches│
-   │ 8  │ GitHub setup                  │ Branch protection rules, link plugin to marketplace                                       │
-   │ 9  │ Deep semantic analysis        │ Opus A-F grading (expensive — confirms cost first)                                        │
-   │ H  │ Help / About                  │ Category overview, command list, CPV version                                              │
-   │ A  │ Ask the agent                 │ Let the agent suggest the best next action right now                                      │
-   │ 0  │ Cancel / Exit                 │ Terminate without action                                                                  │
-   └────┴───────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────┘
+   ┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+   ┃ # ┃ Category                 ┃ What it does                                                          ┃
+   ┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+   │ 1 │ Validate                 │ Check that a plugin / marketplace / component is well-formed          │
+   │ 2 │ Fix                      │ Auto-fix issues that a previous validation found                      │
+   │ 3 │ Optimize for Cache       │ Prompt-cache invalidation audit + cache-aware refactor (CA-01..CA-06) │
+   │ 4 │ Diagnose                 │ Deep audit + AI-graded quality review (semantic, opus, on request)    │
+   │ 5 │ Update                   │ Upgrade plugin to latest canonical pipeline standard                  │
+   │ 6 │ Create                   │ Scaffold plugin, marketplace, skill, agent, command, hook, MCP server │
+   │ 7 │ Publish & Migrate        │ Branch rules, link to marketplace, publish, migrate marketplace layout│
+   │ 8 │ Manage                   │ List installed plugins, install / update / enable / disable / doctor  │
+   │ H │ Help / About             │ Show the menu overview, list of commands, version                     │
+   │ A │ Ask the agent            │ Let the agent suggest the best next action right now                  │
+   │ 0 │ Cancel / Exit            │ Stop without doing anything                                           │
+   └───┴──────────────────────────┴───────────────────────────────────────────────────────────────────────┘
    Type a number (or H for help, A to ask the agent) to choose:
    ```
 
@@ -70,10 +69,11 @@ also no AskUserQuestion.
 
 4. **On a category number (1-9) or H** → drill into the corresponding sub-menu
    by printing its table from the skill's `skills/cpv-main-menu-skill/references/menu-tree.md`
-   (§3.1 for Validate, §3.2 for Validate from GitHub, §3.3 for Fix, §3.4 for
-   Create, §3.5 for Manage, §3.6 for Diagnose & Upgrade, §3.7 for Doctor
-   deep diagnostic (TRDD-c0ee9543 Phase E), §3.8 for GitHub setup, §3.9
-   for Semantic, §3.10 for Help on letter `H`). Every sub-menu table MUST
+   (§3.1 for Validate — `From GitHub` is now §3.1.6 sub-leaf; §3.2 for Fix;
+   §3.3 for Optimize for Cache; §3.4 for Diagnose — incl. AI-graded semantic
+   review at §3.4.8; §3.5 for Update; §3.6 for Create; §3.7 for Publish &
+   Migrate; §3.8 for Manage; §3.10H for Help on letter `H`). Every sub-menu
+   table MUST
    have a `9 — Back` row AND a `0 — Cancel / Exit` row.
 
 5. **On a leaf number** → look up the leaf's recipe in the skill's `skills/cpv-main-menu-skill/references/menu-tree.md`:
@@ -153,17 +153,16 @@ When the Opus sub-agent returns `Returning to menu.`, print the §3.99
 
 6. **Report back** the compact summary (verdict + counts + report path).
    Then print the next-step table and wait:
-   - **For Validate / Validate-from-GitHub leaves (§3.1 and §3.2)**: print the
-     **§3.10 post-validate fix menu** (rows 1-5 dispatch the appropriate fixer
-     agent at the chosen `min_severity`; row 0 ends). NEVER print the generic
-     §3.99 table after a validate flow.
-   - **For Diagnose & Upgrade leaves (§3.6)**: the plugin-diagnoser agent
-     prints its OWN follow-up menu (rows 1-7 + 0 — full upgrade / CRITICAL only /
-     MAJOR+CRITICAL / register marketplace / sync cache / fix branch rules /
-     re-diagnose). Honour the user's choice by dispatching the appropriate
-     specialised agent.
-   - **For Create / Manage / GitHub-setup / Help leaves**: print the §3.99
-     "do something else?" 2-row table.
+   - **For Validate leaves (§3.1, including the From-GitHub sub-leaves at §3.1.6)**:
+     print the **§3.10 post-validate fix menu** (rows 1-5 dispatch the appropriate
+     fixer agent at the chosen `min_severity`; row 0 ends). NEVER print the
+     generic §3.99 table after a validate flow.
+   - **For Diagnose leaves (§3.4)**: the plugin-diagnoser agent prints its OWN
+     follow-up menu (rows 1-7 + 0 — full upgrade / CRITICAL only / MAJOR+CRITICAL
+     / register marketplace / sync cache / fix branch rules / re-diagnose).
+     Honour the user's choice by dispatching the appropriate specialised agent.
+   - **For Create / Manage / Publish-&-Migrate / Update / Help leaves**: print
+     the §3.99 "do something else?" 2-row table.
    On `0` reply `Done.` and stop.
 
 ## Critical rules

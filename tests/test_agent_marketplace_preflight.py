@@ -216,16 +216,25 @@ class TestMainMenuV290TopLevelCategories:
         )
 
     def test_menu_tree_publish_migrate_routes_to_old_github_setup(self):
-        """The §3.7 anchor is now reused for the renamed 'GitHub setup' sub-menu
-        that the new top-level 'Publish & Migrate' row routes to."""
+        """§3.7 was renamed to 'Publish & Migrate' in v2.90.1 (was 'GitHub
+        setup' in v2.90.0). Two new leaves added: §3.7.4 Publish plugin
+        and §3.7.5 Migrate marketplace layout. The Deep semantic analysis
+        section was folded into §3.4 Diagnose as §3.4.8 (no longer a
+        top-level §3.8)."""
         text = (REPO_ROOT / "skills/cpv-main-menu-skill/references/menu-tree.md").read_text(encoding="utf-8")
-        # §3.7 is now the GitHub setup / Publish & Migrate sub-menu.
-        assert "### 3.7 GitHub setup" in text, (
-            "§3.7 was repurposed in v2.90.0 — it is now the 'GitHub setup' "
-            "sub-menu reached via the new top-level 'Publish & Migrate' row."
+        # §3.7 is now 'Publish & Migrate sub-menu' per v2.90.1 polish.
+        assert "### 3.7 Publish & Migrate sub-menu" in text, (
+            "§3.7 was repurposed in v2.90.1 — it is the 'Publish & Migrate' "
+            "sub-menu (was 'GitHub setup' in v2.90.0)."
         )
-        # §3.8 Deep semantic analysis is unchanged (still reached via Diagnose).
-        assert "### 3.8 Deep semantic analysis" in text
+        # Semantic analysis is now a leaf under Diagnose, not its own section.
+        assert "#### 3.4.8" in text and "semantic" in text.lower(), (
+            "Deep semantic analysis was folded into §3.4 Diagnose as §3.4.8 in v2.90.1."
+        )
+        # §3.8 is now Manage (was Deep semantic in v2.90.0).
+        assert "### 3.8 Manage" in text, (
+            "§3.8 was repurposed in v2.90.1 — it is now the 'Manage' sub-menu."
+        )
 
 
 class TestPublishGate0RejectsBypass:
