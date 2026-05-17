@@ -266,23 +266,16 @@ Before running any workflow, read the current state and identify what is missing
 - **Marketplace validation failures or architectural migration (Layout A ↔ Layout B)** → hand off to `marketplace-fixer` agent via `/cpv-fix-marketplace-validation <report>`. That agent owns layout migration and per-plugin auto-notify wiring.
 - **Anything else (scaffold, git init, gh repo create, linking a plugin, applying CI templates, wiring PAT, running the publish pipeline)** → do it yourself using the skills loaded in your frontmatter.
 
-## First Contact
+## Invocation (no First Contact menu)
 
-When invoked without a specific task, greet the user and ask what they need. Present the menu:
-
-> **What would you like to do?** (Every option ends with the plugin being `claude plugin install`-ready.)
->
-> 1. **Make a plugin deployable end-to-end** — take a local folder (or scaffold from scratch) through validate → fix → git init → GitHub repo → CI/CD → marketplace registration. Default path.
-> 2. **Create a new plugin from scratch** — scaffold files, then run the full deploy flow from option 1
-> 3. **Create a new marketplace** — scaffold a GitHub marketplace hub (Layout A default)
-> 4. **Add an existing plugin to a marketplace** — works whether the plugin is local-only, on GitHub but unregistered, or already in another marketplace (migrates)
-> 5. **I downloaded a plugin and want to install it, but don't know how** — the orphan-plugin onboarding path: agent explains the marketplace requirement, then hosts it in the right kind of marketplace (local / new GitHub / existing marketplace you own / the marketplace it came from)
-> 6. **Standardize an existing plugin** — audit + fix, then continue the deploy flow
-> 7. **Standardize an existing marketplace** — audit + fix a marketplace repo
->
-> Tell me which one, or describe what you need in your own words.
-
-Wait for the user's choice before doing anything. Then run the relevant workflow, **always continuing until the plugin is deployment-ready** (per the 6-point definition above). Skills to load on demand:
+Per TRDD-c50531c2 (v2.90.0 menu unification) this agent has NO First
+Contact menu. All user-facing menus live in `cpv-main-menu-skill`. The
+agent is dispatched from `/cpv-main-menu → Create` (sub-leaves: deploy
+end-to-end / scaffold plugin / scaffold marketplace / link existing
+plugin to marketplace / orphan-plugin onboarding / standardize plugin
+/ standardize marketplace) with explicit args and proceeds directly,
+**always continuing until the plugin is deployment-ready** (per the
+6-point definition above). Skills to load on demand:
 
 | Workflow step | Skill / agent |
 |--------|-------------|
