@@ -354,54 +354,43 @@ The semantic validator always warns about the cost and asks for confirmation bef
 
 ##### Conditional Pillar — Channel MCP Server Source-Code Security
 
-`/cpv-semantic-validation` automatically activates the **Channel Source Security** pillar when the target plugin's `plugin.json` declares a non-empty `channels` array (Claude Code v2.1.80+ research-preview channels). The pillar reads the MCP server entry-point source (TypeScript / JavaScript / Python) and verifies the spec-mandated sender-ID gating per `channels-reference.md` — a check no syntactic validator can perform.
+The semantic validator (reached via `/cpv-main-menu → 4 Diagnose → semantic`) automatically activates the **Channel Source Security** pillar when the target plugin's `plugin.json` declares a non-empty `channels` array (Claude Code v2.1.80+ research-preview channels). The pillar reads the MCP server entry-point source (TypeScript / JavaScript / Python) and verifies the spec-mandated sender-ID gating per `channels-reference.md` — a check no syntactic validator can perform.
 
 A deterministic prefilter (`scripts/cpv_channel_source_predicate.py`) bounds the LLM's reading and short-circuits the pillar entirely for plugins that do not ship channels — zero opus tokens spent. See [`skills/semantic-validation-skill/references/channel-source-security.md`](skills/semantic-validation-skill/references/channel-source-security.md) for the four rules (CRITICAL: no sender gating, CRITICAL: permission-relay capability without gating, MAJOR: chat-ID-only gating, PASSED: fully gated).
 
 ### Slash Commands
 
-22 commands — 13 run scripts directly (zero AI tokens), 7 spawn an agent, 2 are specialized utility scripts.
+**v2.90.0 — one entry point.** CPV ships exactly ONE user-facing slash command: `/cpv-main-menu`. Type it; pick a number; navigate the entire plugin from a single coherent menu tree. No more guessing which of 38 commands to type.
 
-#### Script Commands (free — no AI tokens)
+```
+/cpv-main-menu
+```
 
-| Command | What It Does |
-|---------|--------------|
-| `/cpv-validate-plugin <path>` | **Full validation** -- runs all 20 sub-validators |
-| `/cpv-validate-skill <path>` | Skill validation (190+ rules) |
-| `/cpv-validate-cache <path>` | **Cache-audit** — runs `validate_cache.py` against a plugin OR project root. Catches the six documented Anthropic prompt-cache invalidation patterns (CA-01..CA-06) that silently multiply per-turn API costs by 5-10x. Default output is path-only. See [the cache section above](#external-security-scanners-always-run-programmatic-only) for context, and [`commands/cpv-validate-cache.md`](commands/cpv-validate-cache.md) for the per-rule reference. |
-| `/cpv-validate-github-plugin <owner/repo>` | Validate a GitHub plugin without installing |
-| `/cpv-validate-github-marketplace <owner/repo>` | Validate a GitHub marketplace without registering |
-| `/cpv-validate-project-scope <path>` | Validate git-tracked (project-scope) Claude Code config under a project: `.claude/settings.json`, `.mcp.json`, agents, skills, commands, rules, `CLAUDE.md`, tracked hooks/mcp/lsp subtrees. **v2.21.0+:** every tracked element now runs the FULL per-element validator pipeline (same as `cpv-validate-plugin`). Rejects `autoMemoryDirectory`, managed-only keys, secrets in env, absolute home paths. |
-| `/cpv-validate-local-scope <path>` | Validate non-git-tracked (local-scope) Claude Code config under a project: `.claude/settings.local.json`, `CLAUDE.local.md`, gitignored agents/skills/commands/rules, per-project MCP state in `~/.claude.json`, and locally-enabled plugins from `enabledPlugins`. **v2.21.0+:** deep per-element pipeline runs even on untracked content; absolute-path rules remain relaxed (personal paths OK), but managed-only/global-config keys are still rejected. |
-| `/cpv-doctor` | Health-check installed plugins, settings, marketplaces |
-| `/cpv-list-plugins` | List installed plugins with version and status |
-| `/cpv-bump-version <path>` | Bump plugin version + run the full publish pipeline (TRDD-bbff5bc5: `publish.py --patch/--minor/--major`) |
-| `/cpv-setup-branch-rules <owner/repo>` | Create/update the GitHub ruleset that enforces CI as a required status check (server-side gate — idempotent, auto-detects plugin vs marketplace, preserves existing bot bypass actors) |
-| `/cpv-setup-branch-rules-generic <owner/repo> --check "job-name"` | Project-agnostic variant that works on ANY GitHub repo (not just CPV plugins). Requires explicit `--check` contexts, no hardcoded defaults. Also available as `uvx branch-rules-install` for one-off invocations without a local install. **Pure-Python implementation — works on Linux, macOS, and Windows identically (the bash variant was removed in v2.65.2 to make CPV fully cross-platform).** |
-| `/cpv-version` | Show CPV version |
-| `/cpv-strip-dev-parts <path> --dry-run` | **Phase 2 (v2.52.0+).** Move dev-only artefacts (default: `tests/`) to a per-plugin git submodule. PSS pattern — saves install size for plugins with heavy fixture trees. Always preview with `--dry-run` before `--auto`. State-machine resumes crashed runs. |
-| `/cpv-refresh-readme <path>` | **Phase 5 (v2.57.0+).** Auto-refresh the `<!-- BEGIN AUTO-COMPONENTS -->` block in a plugin's README from the filesystem. `--check` mode exits 1 if the README would change (CI gate). |
-| `/cpv-add-component <path> --type ... --name ...` | **Phase 10 (v2.61.0+).** Add a new skill / agent / command / hook / mcp to an existing plugin without re-running the generator. Stubs include valid frontmatter that passes validate_plugin out of the box. |
-| `/cpv-migrate-marketplace <path>` | **Phase 2.6 (v2.59.0+).** Normalize an existing marketplace.json: convert `source.url` → canonical `source.repo` form, probe each entry for live-ness via `gh api` (retry-wrapped), surface 404 dead repos. Atomic write. |
+Top-level menu (8 verbs the user actually wants to do):
 
-#### Agent Commands (interactive — uses AI tokens)
+| # | Category              | What it does                                                         |
+|---|-----------------------|----------------------------------------------------------------------|
+| 1 | Validate              | Check that a plugin / marketplace / component is well-formed         |
+| 2 | Fix                   | Auto-fix issues that a previous validation found                     |
+| 3 | Optimize for Cache    | Prompt-cache invalidation audit + cache-aware refactor (CA-01..06)   |
+| 4 | Diagnose              | Deep audit + AI-graded quality review (semantic, opus, on request)   |
+| 5 | Update                | Upgrade plugin to latest canonical pipeline standard                 |
+| 6 | Create                | Scaffold plugin, marketplace, skill, agent, command, hook, MCP       |
+| 7 | Publish & Migrate     | Branch rules, link to marketplace, publish, migrate marketplace      |
+| 8 | Manage                | List installed plugins, install / update / enable / disable / doctor |
+| H | Help / About          | Category overview, command list, CPV version                         |
+| A | Ask the agent         | Let the agent suggest the best next action right now                 |
+| 0 | Cancel / Exit         | Terminate without action                                             |
 
-| Command | Agent | What It Does |
-|---------|-------|--------------|
-| `/cpv-validate` | plugin-validator | Interactive: asks what to validate, runs the right script |
-| `/cpv-manage` | plugin-manager | Interactive: install, update, enable, disable, search, doctor |
-| `/cpv-create` | plugin-creator | Interactive: create plugins, marketplaces, publish to GitHub |
-| `/cpv-fix-validation <report>` | plugin-fixer | Fixes **plugin** validation issues from a report |
-| `/cpv-fix-marketplace-validation <report>` | marketplace-fixer | Fixes **marketplace** validation issues and runs architectural migrations |
-| `/cpv-cache-optimize <path-or-report> [--broader]` | cache-optimizer-agent | **Cache-aware optimizer.** Runs the full validate → fix → re-validate loop for prompt-cache rules (CA-01..CA-06). With `--broader`, also performs cache-aware refactoring of the plugin's skills / agents / commands / `CLAUDE.md` / rules — works on any project that uses Claude Code, not just plugins. Each material refactor is approved via `AskUserQuestion` before the edit lands. |
-| `/cpv-semantic-validation <path>` | semantic-validator | Deep AI quality analysis (Opus, expensive, explicit opt-in) |
+Each category drills into a sub-menu, and each leaf prompts for any required arguments in plain text before dispatching the right work agent or skill. Every menu includes `0 — Cancel` and (in sub-menus) `9 — Back`.
 
-#### Specialized Utility Commands
+The 37 individual slash commands from prior versions were consolidated:
+- **23 redundant commands** were deleted (their content was already in the corresponding skill — `plugin-validation-skill`, `fix-validation`, `plugin-management`, etc.)
+- **14 unique commands** were converted to `user-invocable: false` skills (`add-component-to-plugin`, `add-dependency`, `bump-version`, `deterministic-codemod`, `scaffold-agent`, `scaffold-command`, `add-hook`, `register-mcp`, `scaffold-skill`, `link-plugin-marketplace`, `pack-components`, `refresh-readme`, `strip-dev-submodules`, `show-version`) — invoked by `cpv-main-menu` behind the scenes, not visible in the slash-command palette
 
-| Command | What It Does |
-|---------|--------------|
-| `/cpv-link-plugin <path>` | Link a local plugin directory into Claude Code for live development |
-| `/cpv-validate-settings-marketplace <path>` | Validate inline `marketplaces` entries embedded in a settings file |
+See [`design/tasks/TRDD-c50531c2-menu-unification.md`](design/tasks/TRDD-c50531c2-menu-unification.md) for the full migration rationale.
+
+For CI/CD and scripting, the Python validators are still callable directly (no menu): `python3 scripts/validate_plugin.py <path>`, `python3 scripts/validate_skill.py <path>`, etc.
 
 ---
 
@@ -531,7 +520,7 @@ No API keys, accounts, or cloud services needed for any validation.
 | Problem | Solution |
 |---------|----------|
 | `uvx` command not found | Install uv: `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
-| Plugin not loading after install | Restart Claude Code, then run `/cpv-doctor` |
+| Plugin not loading after install | Restart Claude Code, then run `/cpv-main-menu → 4 Diagnose` |
 | Import errors | Run `uv sync` in the CPV directory |
 | CRITICAL/MAJOR issues (exit 1-2) | Must fix -- plugin may be broken or insecure |
 | MINOR issues (exit 3) | Recommendations -- fix when convenient |

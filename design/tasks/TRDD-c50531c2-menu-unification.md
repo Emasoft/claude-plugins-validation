@@ -29,6 +29,24 @@ Follow-up clarifications:
 > the ones with a menu must be either become part of the main menu or
 > become skills invoked by the agents without menus.
 
+> there are currently 3 main-menus de-facto... those must be merged into
+> one main-menu
+
+> one is called main-menu.. another is called doctor.. another has a
+> name that i don't remember.. those are all root menus with options
+> not available in the other 2..  instead we need to unify everything
+> into one menu...
+
+> the main menu top categories must be:
+> 1. Validate
+> 2. Fix
+> 3. Optimize for Cache
+> 4. Diagnose
+> 5. Update
+> 6. Create
+> 7. Publish & Migrate
+> 8. Manage
+
 ## Design
 
 **One user-visible slash command:** `/cpv-main-menu`. Every other
