@@ -54,7 +54,7 @@ ALWAYS:
    `output-styles/<name>.md`). NEVER just add a `plugin.json` next to
    the misplaced content. The packer's `--list-only` flag enumerates
    what's there so you can present a multi-select prompt to the user
-   before packing. Menu reference: §3.4.8 in
+   before packing. Menu reference: §3.6.8 in
    `skills/cpv-main-menu-skill/references/menu-tree.md`.
 2. ADD to an existing plugin — append the content to the existing
    plugin's correct subfolder via `scripts/add_component.py`.
