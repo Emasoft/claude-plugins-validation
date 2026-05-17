@@ -323,31 +323,53 @@ Then the sub-agent stays in **multi-turn dialog mode**:
 
 ### 3.0 Top-level menu (8 categories + Help + Ask + Cancel)
 
-v2.90.0 (TRDD-c50531c2 — menu unification): removed the standalone
-"Doctor (deep diagnostic)" row. The 22-option Doctor menu was a
-de-facto second main menu — its options are now folded into the
-appropriate top-level categories (Validate / Validate from GitHub /
-Fix / Create / Manage / Diagnose & Upgrade). One coherent navigation
-tree, no parallel root menus.
+v2.90.0 (TRDD-c50531c2 — menu unification): canonical 8-category
+top-level structure. Each category is a verb the user actually wants
+to do. Local-vs-GitHub becomes a sub-leaf choice, not a top-level
+category. AI-graded quality (semantic) is a leaf inside Diagnose, not
+its own root. Cache optimization gets its own root because it's a
+distinct workflow (audit → refactor for cache-friendliness) from
+generic Fix.
 
 ```
 ┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ # ┃ Category                 ┃ What it does                                                          ┃
 ┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Validate                 │ Check that a plugin or marketplace is well-formed                     │
-│ 2 │ Validate from GitHub     │ Check a plugin or marketplace hosted on GitHub (no local clone needed)│
-│ 3 │ Fix                      │ Auto-fix issues that a previous validation found                      │
-│ 4 │ Create                   │ Scaffold plugin, marketplace, skill, agent, command, hook, MCP server │
-│ 5 │ Manage                   │ List installed plugins, install / update, health-check, bump version  │
-│ 6 │ Diagnose & Upgrade       │ Deep audit + upgrade existing plugin to latest pipeline (recommended) │
-│ 7 │ GitHub setup             │ Branch-protection rules, link plugin to marketplace                   │
-│ 8 │ Deep semantic analysis   │ AI-graded quality review (slow + expensive — confirms cost first)     │
+│ 1 │ Validate                 │ Check that a plugin / marketplace / component is well-formed          │
+│ 2 │ Fix                      │ Auto-fix issues that a previous validation found                      │
+│ 3 │ Optimize for Cache       │ Prompt-cache invalidation audit + cache-aware refactor (CA-01..CA-06) │
+│ 4 │ Diagnose                 │ Deep audit + AI-graded quality review (semantic, opus, on request)    │
+│ 5 │ Update                   │ Upgrade plugin to latest canonical pipeline standard                  │
+│ 6 │ Create                   │ Scaffold plugin, marketplace, skill, agent, command, hook, MCP server │
+│ 7 │ Publish & Migrate        │ Branch rules, link to marketplace, publish, migrate marketplace layout│
+│ 8 │ Manage                   │ List installed plugins, install / update / enable / disable / doctor  │
 │ H │ Help / About             │ Show the menu overview, list of commands, version                     │
 │ A │ Ask the agent            │ Let the agent suggest the best next action right now                  │
 │ 0 │ Cancel / Exit            │ Stop without doing anything                                           │
 └───┴──────────────────────────┴───────────────────────────────────────────────────────────────────────┘
 Type a number (or H for help, A to ask the agent) to choose:
 ```
+
+### Sub-menu mapping (v2.90.0 → existing § anchors)
+
+The 8 top-level rows route to the existing sub-menu sections in this
+file. The section numbers (§3.1, §3.2, ...) are kept for backward
+compatibility with cross-references; only the **top-level row → sub-menu**
+mapping is new in v2.90.0.
+
+| Top row              | Existing sub-menu sections                                                                     |
+|----------------------|------------------------------------------------------------------------------------------------|
+| 1 Validate           | §3.1 (24-option Validate sub-menu — local) + §3.2 (Validate from GitHub) as sub-leaves         |
+| 2 Fix                | §3.3 (Fix sub-menu)                                                                            |
+| 3 Optimize for Cache | §3.17 (Cache sub-menu, formerly inside Validate §3.1.17)                                       |
+| 4 Diagnose           | §3.6 (Diagnose & Upgrade) + §3.8 (Deep semantic analysis) as the semantic leaf                 |
+| 5 Update             | §3.6.2 (Upgrade to current pipeline standard) — promoted to its own top-level for visibility   |
+| 6 Create             | §3.4 (Create sub-menu)                                                                         |
+| 7 Publish & Migrate  | §3.7 (formerly GitHub setup) + migrate-marketplace-architecture + publish-to-marketplace skill |
+| 8 Manage             | §3.5 (Manage sub-menu)                                                                         |
+
+The orchestrator looks up the sub-menu section in the table above based
+on the user's top-row pick, then renders that section's table verbatim.
 
 ---
 
