@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 """Architectural tests for the marketplace-authoring-contract skill (TRDD-962fdc55).
 
-Wave 7-B wires the `marketplace-authoring-contract` skill into the five
-plugin-touching agents/commands:
+Wave 7-B wired the `marketplace-authoring-contract` skill into every
+plugin-touching agent. v2.90.0 (TRDD-c50531c2) deleted 23 redundant
+user-facing slash commands including `cpv-upgrade-plugin.md` and
+`cpv-migrate-marketplace.md` — the migration flows they previously
+fronted are now reached via the cpv-main-menu top-level "Diagnose &
+Upgrade" and "Publish & Migrate" leaves, which dispatch the same
+plugin-fixer / marketplace-fixer agents. The skill loaders therefore
+only need to be checked on the surviving agents.
+
+In-scope files (post v2.90.0):
 
 * `agents/plugin-creator.md`
 * `agents/plugin-fixer.md`
 * `agents/marketplace-fixer.md`
-* `commands/cpv-upgrade-plugin.md`
-* `commands/cpv-migrate-marketplace.md`
 
 The tests in this file enforce three invariants:
 
@@ -77,11 +83,20 @@ def _load_frontmatter(path: Path) -> dict:
     return data
 
 
-# The five files that must load the contract — per TRDD §6 wiring spec.
+# The agents that must load the contract — per TRDD §6 wiring spec.
+# v2.90.0 (TRDD-c50531c2): the two slash commands previously listed here
+# (cpv-upgrade-plugin and cpv-migrate-marketplace) were deleted; their
+# entry points moved to the cpv-main-menu top-level menu, which dispatches
+# the plugin-fixer / marketplace-fixer agents that ARE in this list.
 IN_SCOPE_FILES: list[tuple[str, Path]] = [
     ("plugin-creator", AGENTS_DIR / "plugin-creator.md"),
     ("plugin-fixer", AGENTS_DIR / "plugin-fixer.md"),
     ("marketplace-fixer", AGENTS_DIR / "marketplace-fixer.md"),
+]
+
+
+# v2.90.0 (TRDD-c50531c2) — these slash command files MUST stay deleted.
+DELETED_COMMAND_FILES: list[tuple[str, Path]] = [
     ("cpv-upgrade-plugin", COMMANDS_DIR / "cpv-upgrade-plugin.md"),
     ("cpv-migrate-marketplace", COMMANDS_DIR / "cpv-migrate-marketplace.md"),
 ]
@@ -95,12 +110,14 @@ IN_SCOPE_FILES: list[tuple[str, Path]] = [
 def test_all_in_scope_agents_load_contract_skill() -> None:
     """Every plugin-touching agent must declare marketplace-authoring-contract.
 
-    Per TRDD §6: plugin-creator, plugin-fixer, marketplace-fixer,
-    cpv-upgrade-plugin, and cpv-migrate-marketplace must declare the
-    contract skill in their `skills:` frontmatter so the loader pulls
-    it in BEFORE the agent emits any marketplace.json. Without this
-    loader, the agent has no proactive guidance and falls back to ad-hoc
-    drafting (the broken pre-Wave-7 state).
+    Per TRDD §6 (as amended by v2.90.0 TRDD-c50531c2): plugin-creator,
+    plugin-fixer, and marketplace-fixer must declare the contract skill in
+    their `skills:` frontmatter so the loader pulls it in BEFORE the agent
+    emits any marketplace.json. Without this loader, the agent has no
+    proactive guidance and falls back to ad-hoc drafting (the broken
+    pre-Wave-7 state). The two slash commands previously listed in this
+    contract were deleted in v2.90.0; their entry points now go through
+    cpv-main-menu, which dispatches the agents above.
     """
     missing: list[str] = []
     for label, path in IN_SCOPE_FILES:
@@ -112,10 +129,30 @@ def test_all_in_scope_agents_load_contract_skill() -> None:
         if "marketplace-authoring-contract" not in skills:
             missing.append(label)
     assert not missing, (
-        "These in-scope agents/commands do NOT declare marketplace-authoring-contract "
-        f"in their `skills:` frontmatter: {missing}. TRDD-962fdc55 §6 requires the "
-        "loader on all five. Without the loader, the agent skips the proactive "
-        "contract guidance and reverts to the broken pre-Wave-7 state."
+        "These in-scope agents do NOT declare marketplace-authoring-contract "
+        f"in their `skills:` frontmatter: {missing}. TRDD-962fdc55 §6 (as "
+        "amended by TRDD-c50531c2 v2.90.0) requires the loader on all three. "
+        "Without the loader, the agent skips the proactive contract guidance "
+        "and reverts to the broken pre-Wave-7 state."
+    )
+
+
+def test_deleted_slash_command_files_stay_deleted() -> None:
+    """v2.90.0 (TRDD-c50531c2): the cpv-upgrade-plugin and cpv-migrate-marketplace
+    slash command files MUST stay deleted. Re-creating them would split the
+    user-facing entry-points between commands and the main menu and would
+    silently undo the menu-unification refactor.
+    """
+    still_present: list[str] = []
+    for label, path in DELETED_COMMAND_FILES:
+        if path.exists():
+            still_present.append(label)
+    assert not still_present, (
+        f"v2.90.0 (TRDD-c50531c2) deleted these slash commands; they MUST NOT "
+        f"be re-created: {still_present}. Their entry points now go through "
+        f"cpv-main-menu's top-level rows (Diagnose & Upgrade / Publish & "
+        f"Migrate), which dispatch the same plugin-fixer / marketplace-fixer "
+        f"agents directly."
     )
 
 

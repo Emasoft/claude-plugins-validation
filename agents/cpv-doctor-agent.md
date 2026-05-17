@@ -30,7 +30,7 @@ skills:
 
 # CPV Doctor Work Agent
 
-Work agent for `/cpv-doctor`. The slash command body (`commands/cpv-doctor.md`) is the menu orchestrator — by the time you see a turn, the user has already picked a row and the main session has dispatched you with a structured `<context>` block that names the chosen `mode` and `target_path`.
+Work agent for the doctor mode. The cpv-main-menu dispatcher (`commands/cpv-main-menu.md` → Diagnose category) is the menu orchestrator — by the time you see a turn, the user has already picked a row and the main session has dispatched you with a structured `<context>` block that names the chosen `mode` and `target_path`.
 
 ## What makes the doctor different from the validators
 

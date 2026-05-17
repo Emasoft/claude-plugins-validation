@@ -434,19 +434,26 @@ def test_bypass_guard_rejects_forbidden_env_vars(monkeypatch, capsys):
 
 
 def test_bypass_guard_passes_with_clean_env(monkeypatch):
-    """Gate 0 passes when no bypass env vars are set."""
-    for v in [
-        "CPV_SKIP_TESTS",
-        "CPV_SKIP_LINT",
-        "CPV_SKIP_VALIDATE",
-        "CPV_FORCE_PUBLISH",
-        "CPV_BYPASS_CHECKS",
-        "SKIP_TESTS",
-        "SKIP_LINT",
-        "SKIP_VALIDATE",
-        "NO_VERIFY",
-    ]:
-        monkeypatch.delenv(v, raising=False)
+    """Gate 0 passes when no bypass env vars are set.
+
+    v2.86.0 (issue #22): the bypass guard uses prefix-pattern matching
+    (PLUGIN_SKIP_*, PLUGIN_FORCE_*, PLUGIN_BYPASS_*, CPV_SKIP_*, SKIP_*)
+    plus the exact var NO_VERIFY. We must scrub ALL env vars matching
+    those prefixes — including PLUGIN_SKIP_GITHUB_INTEGRITY which the
+    pytest session may set to bypass cpv_integrity during local test
+    runs.
+    """
+    forbidden_prefixes = ("PLUGIN_SKIP_", "PLUGIN_FORCE_", "PLUGIN_BYPASS_", "CPV_SKIP_", "SKIP_")
+    exemptions = {"CPV_SKIP_GITHUB_INTEGRITY", "CPV_SKIP_GH_AUTH_CHECK"}
+    # Scrub every env var matching a forbidden prefix that isn't an
+    # explicit infrastructure exemption.
+    import os
+
+    for name in list(os.environ):
+        if name in exemptions:
+            continue
+        if name.startswith(forbidden_prefixes) or name == "NO_VERIFY":
+            monkeypatch.delenv(name, raising=False)
     rc = publish.stage_bypass_guard()
     assert rc == 0
 

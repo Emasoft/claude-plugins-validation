@@ -1,6 +1,6 @@
 ---
 name: add-dependency
-description: Add plugin dependencies to a target plugin (explicit `--add` specs or `--from` copy from another plugin's plugin.json) per plugin-dependencies.md
+description: Add plugin dependencies to a target plugin (explicit --add specs or --from copy from another plugin's plugin.json). Use when adding/copying plugin.json::dependencies entries with atomic rollback on regression. Loaded by cpv-main-menu-agent.
 when_to_use: When the cpv-main-menu user picks Create → Add dependencies, or any flow needs to add/copy plugin.json::dependencies entries with atomic rollback on regression
 user-invocable: false
 allowed-tools: Bash(uv:*)
@@ -8,33 +8,58 @@ allowed-tools: Bash(uv:*)
 
 # add-dependency
 
-Add one or more plugin dependencies to a target plugin's `plugin.json::dependencies` array. Two input modes that can be combined; the engine deduplicates by name (last-write-wins), sorts the result alphabetically, writes atomically, and rolls back from a `.bak` if the post-write validation introduces any new CRITICAL/MAJOR finding.
+## Overview
 
-Spec reference: [plugin-dependencies.md](https://code.claude.com/docs/en/plugin-dependencies.md).
+Adds one or more plugin dependencies to a target plugin's `plugin.json::dependencies` array. Two input modes that can be combined; the engine deduplicates by name (last-write-wins), sorts the result alphabetically, writes atomically, and rolls back from a `.bak` if the post-write validation introduces any new CRITICAL/MAJOR finding. Loaded by `cpv-main-menu-agent` via the Create → Add dependencies menu branch.
 
-## Usage
+## Prerequisites
+
+- `uv` on PATH
+- Target plugin path with `.claude-plugin/plugin.json`
+- For `--from` git URLs: network access and `git` on PATH
+- For cross-marketplace deps: the hosting marketplace's `marketplace.json::allowCrossMarketplaceDependenciesOn` allowlist updated
+
+## Instructions
+
+1. Always start with `--dry-run` to preview the diff against `plugin.json`.
+2. Choose `--add` (explicit specs) and/or `--from` (copy from another plugin).
+3. Use kebab-case names; versions accept any semver-range expression (`~1.2.0`, `^2.0`, `>=1.4`).
+4. Run the real invocation; the script writes atomically (tmp + rename) and re-runs `validate_plugin --strict`.
+5. If exit code is 3 (rollback), inspect the diff, narrow the spec, and re-try.
+6. For unversioned bare-string adds, accept the `WARNING [RC-DEP-VERSION-001]` advisory or suppress with `cpv.allow_unversioned_dependencies: true`.
+
+Copy this checklist and track your progress:
+
+- [ ] Dry-run reviewed
+- [ ] Explicit specs or `--from` source confirmed
+- [ ] Real invocation run
+- [ ] Exit code 0 (or 3 → analyze rollback reason)
+- [ ] `validate_plugin --strict` re-run on target
+
+## Output
+
+- Updated `plugin.json::dependencies` array, sorted alphabetically, deduplicated by name.
+- Atomic write via tmp + rename.
+- `.bak` left next to `plugin.json` after a successful update so a human can roll back manually if needed.
+- Exit code 0 on success, 1 on bad args, 2 on `--from` source unreadable, 3 on rollback after regression, 4 on atomic-write failure.
+
+## Error Handling
+
+| Error | Resolution |
+|-------|------------|
+| Exit 1: invalid args | Check `--add` spec syntax (see [Spec Syntax](references/spec-syntax.md)) |
+| Exit 2: `--from` source unreachable | Verify path or git URL, check network |
+| Exit 3: rollback after regression | Inspect new CRITICAL/MAJOR finding, narrow the spec, retry |
+| Exit 4: atomic write failed | Disk full or permission denied — fix and re-run |
+| WARNING RC-DEP-VERSION-001 | Pin a version OR set `cpv.allow_unversioned_dependencies: true` |
+| MAJOR cross-marketplace blocked | Add marketplace name to `marketplace.json::allowCrossMarketplaceDependenciesOn` |
+
+## Examples
 
 ```bash
 # Explicit single dep, version-pinned
 uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/add_dependencies.py" /path/to/my-plugin \
   --add dev-browser@@~1.2.0
-
-# Cross-marketplace pin
-uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/add_dependencies.py" /path/to/my-plugin \
-  --add audit-logger@acme-shared@^2.0
-
-# Copy ALL deps from another local plugin
-uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/add_dependencies.py" /path/to/my-plugin \
-  --from /path/to/other-plugin
-
-# Copy from a git URL (shallow clone to tmp)
-uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/add_dependencies.py" /path/to/my-plugin \
-  --from https://github.com/Emasoft/dev-browser-plugin
-
-# Combine: copy from another plugin + add an extra
-uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/add_dependencies.py" /path/to/my-plugin \
-  --from /path/to/template-plugin \
-  --add custom-skill@my-marketplace
 
 # Always preview first with --dry-run
 uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/add_dependencies.py" /path/to/my-plugin \
@@ -42,37 +67,12 @@ uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/add_dependencies.py" /path/to/my-pl
   --dry-run
 ```
 
-## --add spec syntax
+See [Spec Syntax](references/spec-syntax.md) for the full add-spec table and additional examples (cross-marketplace, --from URL, combined).
 
-| Form                              | Result                                                      |
-|-----------------------------------|-------------------------------------------------------------|
-| `name`                            | bare-string `"name"` (WARN: auto-tracks latest)             |
-| `name@marketplace`                | `{"name": "name", "marketplace": "marketplace"}`            |
-| `name@marketplace@version`        | full pin: `{"name", "marketplace", "version": "version"}`   |
-| `name@@version`                   | `{"name", "version"}` (no marketplace override)             |
+## Resources
 
-Names must be kebab-case (`[a-z][a-z0-9-]*`). Versions accept any semver-range expression supported by Node's semver package (`~1.2.0`, `^2.0`, `>=1.4`, `=2.1.0`).
-
-## Behavior
-
-- **Idempotent**: re-runs with the same args produce no diff (same name → same dedup key → same merge result; sorted output is stable).
-- **Atomic write**: tmp-and-rename so a crash mid-write never leaves a partial `plugin.json`.
-- **Rollback on regression**: the engine re-runs `validate_plugin --strict` after the write. If any new CRITICAL/MAJOR finding appears, the `.bak` is restored and the script exits 3.
-- **WARN on unversioned bare-string adds**: per plugin-dependencies.md:9-11, an unversioned dep auto-tracks the latest tag — the next upstream release can break the consumer without warning. The validator emits `WARNING [RC-DEP-VERSION-001]`. Suppress intentional cases with `cpv.allow_unversioned_dependencies: true` in plugin.json.
-- **Cross-marketplace allowlist**: when an `--add` spec uses a marketplace OTHER than the hosting one, the root marketplace's `marketplace.json::allowCrossMarketplaceDependenciesOn` MUST list that marketplace name. Otherwise `validate_plugin --strict` emits MAJOR `[plugin-dependencies.md cross-marketplace blocked]` and the engine rolls back.
-
-## Exit codes
-
-| Code | Meaning                                                                                |
-|------|----------------------------------------------------------------------------------------|
-| 0    | OK — `dependencies` array updated                                                      |
-| 1    | invalid args / target not a plugin / target malformed                                  |
-| 2    | `--from` source unreadable (path missing OR git clone failed)                          |
-| 3    | merge introduced new CRITICAL/MAJOR — rolled back from .bak                            |
-| 4    | atomic write failed — target untouched                                                 |
-
-## See also
-
-- [plugin-dependencies.md](https://code.claude.com/docs/en/plugin-dependencies.md) — official spec
+- [Spec Syntax](references/spec-syntax.md) — add-spec syntax table + worked examples
+  > add spec syntax · Full examples
+- Spec reference: official `plugin-dependencies.md` docs
 - `plugin-management` skill — show dependency tree + runtime errors before adding
 - `plugin-validation-skill` — run `validate_plugin --strict` on the target after adding
