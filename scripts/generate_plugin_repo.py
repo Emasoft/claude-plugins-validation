@@ -1276,6 +1276,7 @@ GREEN  = "\033[0;32m" if _C else ""
 YELLOW = "\033[1;33m" if _C else ""
 BLUE   = "\033[0;34m" if _C else ""
 BOLD   = "\033[1m" if _C else ""
+DIM    = "\033[2m" if _C else ""
 NC     = "\033[0m" if _C else ""
 
 
@@ -2102,7 +2103,7 @@ def _current_repo_slug(plugin_root: Path) -> str | None:
                        capture_output=True, text=True, timeout=30)
     if r.returncode != 0:
         return None
-    m = re.search(r"[:/]([^/:]+)/([^/]+?)(?:\\.git)?$", r.stdout.strip())
+    m = re.search(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?$", r.stdout.strip())
     return f"{m.group(1)}/{m.group(2)}" if m else None
 
 
@@ -3198,8 +3199,9 @@ ENABLE_LINTERS:
   - REPOSITORY_GITLEAKS
   - REPOSITORY_TRIVY
 
-# Exclude paths
-FILTER_REGEX_EXCLUDE: "(tests_dev/|docs_dev/|scripts_dev/|samples_dev/|examples_dev/|builds_dev/|downloads_dev/|libs_dev/|llm_externalizer_output/|\\.claude/|\\.tldr/)"
+# Exclude paths — single-quoted YAML scalar so regex \\. is read literally
+# (double-quoted YAML treats \\. as an invalid escape and yamllint rejects it).
+FILTER_REGEX_EXCLUDE: '(tests_dev/|docs_dev/|scripts_dev/|samples_dev/|examples_dev/|builds_dev/|downloads_dev/|libs_dev/|llm_externalizer_output/|\\.claude/|\\.tldr/)'
 
 # Python settings
 PYTHON_RUFF_ARGUMENTS: "--select=E,F,W,I --ignore=E501"
@@ -3211,11 +3213,12 @@ COPYPASTE_JSCPD_ARGUMENTS: "--threshold 5"
 # Checkov — skip workflow-level permission checks (we set permissions per-job)
 REPOSITORY_CHECKOV_ARGUMENTS: "--skip-check CKV2_GHA_1"
 
-# Markdown settings — allow long lines in README (badges)
-MARKDOWN_MARKDOWNLINT_FILTER_REGEX_EXCLUDE: "CHANGELOG\\.md"
+# Markdown settings — allow long lines in README (badges).
+# Single-quoted so the regex \\. is read literally by yamllint.
+MARKDOWN_MARKDOWNLINT_FILTER_REGEX_EXCLUDE: 'CHANGELOG\\.md'
 
-# Spell check — add project-specific words
-SPELL_CSPELL_FILTER_REGEX_EXCLUDE: "(uv\\.lock|\\.json)"
+# Spell check — single-quoted so the regex \\. is read literally by yamllint.
+SPELL_CSPELL_FILTER_REGEX_EXCLUDE: '(uv\\.lock|\\.json)'
 
 # Disable reporters that create PR comments (we handle that ourselves)
 DISABLE_REPORTERS:
