@@ -114,6 +114,9 @@ _ALIASES: dict[str, str] = {
     "registry": "manage_registry",
     "github": "manage_github_validate",
     "standardize": "standardize_plugin",
+    # Lint engine — wraps ruff / mypy / shellcheck, dispatched from menu-tree §3.1.5.6
+    "lint": "cpv_lint_engine",
+    "cpv_lint_engine": "cpv_lint_engine",
     # Scope validators (validate a project's .claude/ config, separating
     # git-tracked "project" elements from non-git-tracked "local" elements)
     "local-scope": "validate_local_scope",
