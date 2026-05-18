@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-18T18:54:42+00:00",
+  "computed_at": "2026-05-18T19:23:57+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     "agents/cache-optimizer-agent.md": "sha256:3148226fba744236f82a62080a2295d3473d76a76d6660b8d2ade7a6c12af084",
