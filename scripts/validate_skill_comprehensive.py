@@ -2253,6 +2253,84 @@ def validate_resource_references(skill_path: Path, body: str, report: Validation
             report.passed(f"Referenced file exists: {file_path}", "SKILL.md", category="Resource References")
 
 
+def _check_context_fork_self_recursion(
+    skill_path: Path,
+    frontmatter: dict[str, Any],
+    body: str,
+    report: ValidationReport,
+) -> None:
+    """v2.1.145: detect a `context: fork` skill that invokes itself via Skill().
+
+    Background: the CC v2.1.145 changelog fixed an infinite loop where
+    a `context: fork` skill could repeatedly re-invoke itself instead
+    of running. The runtime bug is fixed but the antipattern remains
+    almost always unintentional — emit MINOR so authors restructure
+    into helpers.
+
+    Resolution strategy for the skill's "self" name:
+
+    1. Skill's own frontmatter ``name:`` field (canonical).
+    2. Skill directory name (fallback when frontmatter name is missing).
+    3. Plugin namespace from the nearest ``.claude-plugin/plugin.json``.
+
+    Matched invocation patterns (in body):
+    - ``Skill({skill: "<name>"})`` (bare name)
+    - ``Skill({skill: "<plugin>:<name>"})`` (fully-qualified)
+    - ``/<name>`` slash-command form (a self-recursive command would
+      route back through the same skill).
+    """
+    skill_name = frontmatter.get("name") or skill_path.name
+    if not isinstance(skill_name, str) or not skill_name:
+        return  # Can't resolve self-identity — nothing to match against.
+
+    # Walk up to the nearest plugin manifest for namespace qualifier.
+    plugin_name: str | None = None
+    cursor = skill_path.parent
+    for _ in range(6):  # bounded walk
+        manifest = cursor / ".claude-plugin" / "plugin.json"
+        if manifest.is_file():
+            try:
+                plugin_name = json.loads(manifest.read_text(encoding="utf-8")).get("name")
+            except (OSError, json.JSONDecodeError):
+                pass
+            break
+        if cursor.parent == cursor:
+            break
+        cursor = cursor.parent
+
+    # Build matcher patterns. Skill() body invocations show up in many
+    # shapes; cover the documented forms. Single + double quotes both.
+    qualified = f"{plugin_name}:{skill_name}" if plugin_name else None
+    candidates: list[str] = [skill_name]
+    if qualified:
+        candidates.append(qualified)
+    # Compile per-candidate matchers — escape any regex metachars.
+    matchers = [
+        re.compile(r"""skill\s*:\s*["']""" + re.escape(c) + r"""["']""", re.IGNORECASE)
+        for c in candidates
+    ]
+    # Strip markdown code fences (``` ... ```) before scanning — documented
+    # "how to invoke this skill" examples inside fences are NOT runtime
+    # self-recursion. Replace fences with newlines so line numbers stay
+    # roughly accurate.
+    body_no_fences = re.sub(r"```[\s\S]*?```", lambda m: "\n" * m.group(0).count("\n"), body)
+    for matcher in matchers:
+        m = matcher.search(body_no_fences)
+        if m:
+            line_no = body_no_fences.count("\n", 0, m.start()) + 1
+            report.minor(
+                f"Skill {skill_name!r} has 'context: fork' AND invokes itself via "
+                f"Skill() (pattern: {m.group(0)!r}). CC v2.1.145 fixed an infinite-loop "
+                f"bug where this combination recursed instead of running. Even with "
+                f"the bug fixed, self-recursion under a forked context is almost always "
+                f"unintentional — restructure to call helpers (or another skill) instead.",
+                "SKILL.md",
+                line=line_no,
+                category="Frontmatter",
+            )
+            return  # One finding is enough per skill — avoid noise.
+
+
 def validate_directory_structure(skill_path: Path, report: ValidationReport) -> None:
     """Validate skill directory structure."""
     optional_dirs = ["scripts", "examples", "references", "assets", "templates"]
@@ -2707,6 +2785,15 @@ def validate_skill(
                     "SKILL.md",
                     category="Frontmatter",
                 )
+
+        # v2.1.145: context: fork skill self-recursion detection.
+        # The v2.1.145 changelog notes "Fixed an infinite loop where a
+        # skill using `context: fork` could repeatedly re-invoke itself
+        # instead of running." Even with the runtime bug fixed, self-
+        # recursion under a forked context is almost always unintentional
+        # — flag it as MINOR so authors restructure into helpers.
+        if frontmatter.get("context") == "fork":
+            _check_context_fork_self_recursion(skill_path, frontmatter, body, report)
 
     # Validate token budget — pass the SKILL.md path so the override
     # config in plugin.json can be discovered (issue #16 category B).
