@@ -6,7 +6,11 @@ Zero-LLM-cost planner that reads a plugin's validation report (via
 shard-manifest JSON files plus a top-level ``index.json``. The
 ``/cpv-batch-fix`` slash command consumes these manifests and dispatches
 N ``plugin-fixer`` agents in parallel (one per shard) — each agent gets
-a fresh ~200K-context window and only sees its own shard.
+a fresh context window (size depends on which model ``plugin-fixer``
+runs: bare opus/sonnet = 200K, the [1m] variants = 1M, future models
+may differ) and only sees its own shard. The recommended shard size
+keeps each shard under ~50% of the model's context to avoid the
+performance drop above that threshold.
 
 Design — TRDD-71e68ab5 (`design/tasks/TRDD-20260519_114050+0200-71e68ab5-batch-fix-parallel-sharding.md`).
 
@@ -48,6 +52,14 @@ from pathlib import Path
 from typing import Any
 
 SEVERITY_ORDER = {"CRITICAL": 0, "MAJOR": 1, "MINOR": 2, "NIT": 3, "WARNING": 4, "INFO": 5, "PASSED": 6}
+
+# DEFAULT_SHARD_SIZE is calibrated for ``plugin-fixer``'s current default
+# model (bare ``opus``, 200K context) and keeps each shard well under the
+# ~50% utilisation threshold above which model quality begins to degrade.
+# When ``plugin-fixer.model`` is upgraded to a 1M-context variant
+# (``opus[1m]`` / ``sonnet[1m]``) raise this with ``--shard-size`` to
+# ~100-150 (still <50% of 1M). Future models with different context
+# windows will need their own tuning.
 DEFAULT_SHARD_SIZE = 30
 DEFAULT_MAX_PARALLEL = 8
 MAX_PARALLEL_CAP = 16
