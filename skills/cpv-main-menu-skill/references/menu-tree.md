@@ -844,7 +844,12 @@ Type a number to choose:
 #### 3.2.1 Fix plugin findings
 
 - **arg-prompt**: `Path to a validation report .md file OR a plugin directory?`
-- **execution**: dispatch the **plugin-fixer agent** with the path. The agent owns the validate→fix→re-validate loop.
+- **execution (TRDD-14cc93a6 — runtime routing)**:
+  1. Quick-triage: run `validate_plugin.py --json --no-color <path>` and parse `counts.critical + counts.major + counts.minor` from stdout. Time-budget: ≤60 s. (Skip if the user passed an already-existing `.json` report — read its `counts` directly.)
+  2. **If `total_findings == 0`** → reply `Plugin is already clean. ✓` and return to the post-action menu.
+  3. **If `total_findings ≤ 40`** → dispatch the **plugin-fixer agent** with the path. (The single-agent fix loop is sized for opus 200K context; raise this threshold proportionally if `plugin-fixer.model` is upgraded to a 1M variant.)
+  4. **If `total_findings > 40`** → DON'T dispatch plugin-fixer (it would die mid-loop on a context exhaust). Instead, reply with: `This plugin has <N> findings — too many for a single-agent fix loop. Dispatching /cpv-batch-fix to run parallel shard-fixers.` and then directly run `/cpv-batch-fix <path>` (which slices into shards and dispatches N plugin-fixer agents from the main session).
+  5. After the chosen agent / command returns, surface the one-line summary verbatim and route to the post-action menu.
 
 #### 3.2.2 Fix marketplace findings
 

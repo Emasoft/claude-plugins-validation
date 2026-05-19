@@ -353,11 +353,17 @@ class TestSkillAgentArchitecture:
             )
 
     def test_every_skill_is_loaded_by_at_least_one_agent(self):
-        """Each skill must be referenced by at least one loader — either an
-        agent's frontmatter ``skills:`` list (the traditional path) OR a
-        slash-command body via the Skill tool with the fully-qualified
-        ``claude-plugins-validation:<skill-name>`` form (the v2.89.4
-        context-fork pattern introduced by TRDD-3ce2f864).
+        """Each skill must be referenced by at least one loader — any of:
+
+        1. An agent's frontmatter ``skills:`` list (the traditional path).
+        2. A slash-command body via the Skill tool with the fully-qualified
+           ``claude-plugins-validation:<skill-name>`` form (the v2.89.4
+           context-fork pattern introduced by TRDD-3ce2f864).
+        3. An AGENT body via the same fully-qualified Skill invocation
+           (TRDD-14cc93a6 v2.91.1 decoupled-routing pattern — agents pick
+           skills dynamically at runtime via the Skill tool).
+        4. ANOTHER skill's body via the same fully-qualified invocation
+           (used by routing skills to fan out to sub-skills).
         """
         # Skills that are intentionally orphaned during a multi-wave TRDD
         # landing. Each entry MUST cite the TRDD that authored it and the
@@ -422,20 +428,43 @@ class TestSkillAgentArchitecture:
         # ``skill: "claude-plugins-validation:<name>"`` is the unambiguous
         # marker — bare prose mentions ("this skill", "fork-skill:")
         # don't false-match.
+        import re as _re
+
+        # Universal regex matching `skill: "claude-plugins-validation:<name>"`
+        # OR `Skill({skill: "claude-plugins-validation:<name>"})` patterns.
+        # Bare prose mentions (e.g. "use the fix-validation skill") don't
+        # false-match because the fully-qualified form requires the plugin
+        # prefix + quotes.
+        skill_invocation_re = _re.compile(
+            r'skill:\s*"claude-plugins-validation:([a-z0-9_-]+)"',
+        )
+
+        # Path 2: slash-command bodies (v2.89.4 fork-skill pattern)
         commands_dir = SKILLS_DIR.parent / "commands"
         if commands_dir.is_dir():
             for cmd_md in commands_dir.glob("*.md"):
                 body = cmd_md.read_text(encoding="utf-8")
-                # Find every fully-qualified Skill invocation. Pattern:
-                #   skill: "claude-plugins-validation:<skill-name>"
-                # The name portion may contain letters, digits, dashes,
-                # underscores; capture greedily until the closing quote.
-                import re as _re
-                for m in _re.finditer(
-                    r'skill:\s*"claude-plugins-validation:([a-z0-9_-]+)"',
-                    body,
-                ):
+                for m in skill_invocation_re.finditer(body):
                     loaded.add(m.group(1))
+
+        # Path 3: agent BODIES (v2.91.1 decoupled-routing pattern,
+        # TRDD-14cc93a6). Agents dynamically pick skills at runtime; a
+        # fully-qualified Skill invocation in the body counts as loading
+        # the same way an entry in `skills:` does.
+        for agent_md in AGENTS_DIR.glob("*.md"):
+            body = agent_md.read_text(encoding="utf-8")
+            for m in skill_invocation_re.finditer(body):
+                loaded.add(m.group(1))
+
+        # Path 4: other skills' bodies (cross-references between skills,
+        # e.g. a routing skill that fans out to sub-skills).
+        for sk_dir in SKILLS_DIR.iterdir():
+            sk_md = sk_dir / "SKILL.md" if sk_dir.is_dir() else None
+            if sk_md is None or not sk_md.exists():
+                continue
+            body = sk_md.read_text(encoding="utf-8")
+            for m in skill_invocation_re.finditer(body):
+                loaded.add(m.group(1))
         # Every skill directory must appear in some loader's list/body.
         for skill_dir in SKILLS_DIR.iterdir():
             if not skill_dir.is_dir() or not (skill_dir / "SKILL.md").exists():
