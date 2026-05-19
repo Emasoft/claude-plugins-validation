@@ -2920,6 +2920,19 @@ def validate_manifest_skill_paths(plugin_root: Path, report: ValidationReport) -
                     f"either a folder containing SKILL.md or a direct SKILL.md path.",
                     ".claude-plugin/plugin.json",
                 )
+            else:
+                # v2.1.145: `claude plugin validate` now flags file entries
+                # (even SKILL.md) and suggests the parent directory. The
+                # entry still works at runtime (CC v2.1.142+ surfaces a
+                # root-level SKILL.md as a skill), so MINOR is the right
+                # tier — flag the antipattern, do not fail validation.
+                parent_rel = Path(entry).parent.as_posix() or "."
+                report.minor(
+                    f"plugin.json::skills[{i}] = {entry!r} points at a file. "
+                    f"CC v2.1.145 `claude plugin validate` flags file entries "
+                    f"— use the parent directory {parent_rel!r} instead.",
+                    ".claude-plugin/plugin.json",
+                )
         else:
             report.major(
                 f"plugin.json::skills[{i}] = {entry!r} does not exist on disk. "
