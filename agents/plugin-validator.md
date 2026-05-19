@@ -76,6 +76,16 @@ uv run --with pyyaml python "$LAUNCHER" hook           /path/to/hooks.json --rep
 uv run --with pyyaml python "$LAUNCHER" mcp            /path/to/plugin --report "$MAIN_ROOT/reports/validate_mcp/$TS-$SLUG.md"
 uv run --with pyyaml python "$LAUNCHER" marketplace    /path/to/marketplace --report "$MAIN_ROOT/reports/validate_marketplace/$TS-$SLUG.md"
 uv run --with pyyaml python "$LAUNCHER" xref           /path/to/plugin --report "$MAIN_ROOT/reports/validate_xref/$TS-$SLUG.md"
+# `xref` includes ghost-agent dispatch detection (TRDD-25b9be90):
+#   * RC-GHOST-DISPATCH-001 (CRITICAL) — Task() / subagent_type references an
+#     agent that doesn't exist (built-in / in-plugin / user-scope). Runtime
+#     silently no-ops. See references/finding-codes.md for the resolution algorithm.
+#   * RC-GHOST-DISPATCH-002 (MINOR) — dynamic subagent_type=<var> — cannot
+#     statically verify; reminder only.
+#   * RC-GHOST-DISPATCH-003 (NIT) — cross-plugin namespaced reference
+#     `other-plugin:agent` — verified at runtime, not at validate time.
+# Since v2.91.0, validate_plugin also invokes xref as part of the main pipeline,
+# so these findings surface in `cpv-validate-plugin` reports without a separate xref run.
 uv run --with pyyaml python "$LAUNCHER" docs           /path/to/plugin --report "$MAIN_ROOT/reports/validate_documentation/$TS-$SLUG.md"
 uv run --with pyyaml python "$LAUNCHER" security       /path/to/plugin --report "$MAIN_ROOT/reports/validate_security/$TS-$SLUG.md"
 # `security` is the most comprehensive checker — in-process AI/security rule packs PLUS five

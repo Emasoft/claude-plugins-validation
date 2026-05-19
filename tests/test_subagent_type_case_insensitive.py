@@ -64,8 +64,12 @@ def test_normalize_strips_whitespace_edges():
 
 
 def _make_plugin_with_references(tmp_path: Path, agents: list[str], refs: list[str]) -> Path:
-    """Build a minimal plugin with given agent files and a CLAUDE.md that
-    cites each `subagent_type: <ref>` value.
+    """Build a minimal plugin with given agent files and an orchestrator
+    agent body that cites each `subagent_type: <ref>` value.
+
+    Per TRDD-25b9be90 Phase 5: validate_subagent_type_matching scope is
+    narrowed to executable directories (agents/, commands/, skills/), so
+    the references must live inside one of those — not at plugin root.
     """
     plugin = tmp_path / "plugin"
     plugin.mkdir()
@@ -77,11 +81,11 @@ def _make_plugin_with_references(tmp_path: Path, agents: list[str], refs: list[s
     agents_dir.mkdir()
     for a in agents:
         (agents_dir / f"{a}.md").write_text(f"---\nname: {a}\ndescription: test agent\n---\n\nHello from {a}.\n")
-    # CLAUDE.md references each subagent_type
-    lines = ["# Demo plugin\n"]
+    # Put the references in an orchestrator agent body (executable scope).
+    lines = ["---\nname: orchestrator\ndescription: test orchestrator\n---\n\n# Demo plugin\n"]
     for r in refs:
         lines.append(f'Task(subagent_type: "{r}", prompt="hi")\n')
-    (plugin / "CLAUDE.md").write_text("".join(lines))
+    (agents_dir / "orchestrator.md").write_text("".join(lines))
     return plugin
 
 
@@ -133,24 +137,31 @@ def test_snake_case_emits_nit_not_major():
         assert not major_hits
 
 
-def test_genuinely_missing_agent_still_emits_major():
-    """`subagent_type: "nonexistent-agent"` → MAJOR (no canonical or normalized match)."""
+def test_genuinely_missing_agent_emits_critical():
+    """`subagent_type: "nonexistent-agent"` → CRITICAL RC-GHOST-DISPATCH-001 (per TRDD-25b9be90).
+
+    Pre-TRDD-25b9be90 this was MAJOR; the bump to CRITICAL reflects the
+    silent-failure class of the bug (runtime no-op, calling skill thinks
+    it spawned a worker, nothing happens).
+    """
     import tempfile
 
     with tempfile.TemporaryDirectory() as td:
         plugin = _make_plugin_with_references(Path(td), ["code-reviewer"], ["nonexistent-agent"])
         report = CrossReferenceValidationReport()
         validate_subagent_type_matching(plugin, report, {"code-reviewer"})
-        major_hits = [r for r in report.results if r.level == "MAJOR" and "nonexistent-agent" in r.message]
+        critical_hits = [r for r in report.results if r.level == "CRITICAL" and "nonexistent-agent" in r.message]
         nit_hits = [r for r in report.results if r.level == "NIT" and "nonexistent-agent" in r.message]
-        assert major_hits, (
-            f"expected MAJOR on genuinely missing agent, got: {[(r.level, r.message) for r in report.results]}"
+        assert critical_hits, (
+            f"expected CRITICAL RC-GHOST-DISPATCH-001 on genuinely missing agent, got: "
+            f"{[(r.level, r.message) for r in report.results]}"
         )
+        assert "RC-GHOST-DISPATCH-001" in critical_hits[0].message
         assert not nit_hits
 
 
 def test_mixed_canonical_and_normalized_references():
-    """Mix of canonical and v2.1.140-normalized references produces 0 MAJOR + 1 NIT."""
+    """Mix of canonical and v2.1.140-normalized references produces 0 CRITICAL/MAJOR + 1 NIT."""
     import tempfile
 
     with tempfile.TemporaryDirectory() as td:
@@ -162,6 +173,8 @@ def test_mixed_canonical_and_normalized_references():
         report = CrossReferenceValidationReport()
         validate_subagent_type_matching(plugin, report, {"code-reviewer", "plugin-validator"})
         nit_hits = [r for r in report.results if r.level == "NIT" and "Plugin Validator" in r.message]
+        critical_hits = [r for r in report.results if r.level == "CRITICAL" and "subagent_type" in r.message]
         major_hits = [r for r in report.results if r.level == "MAJOR" and "subagent_type" in r.message]
         assert len(nit_hits) == 1
+        assert len(critical_hits) == 0
         assert len(major_hits) == 0

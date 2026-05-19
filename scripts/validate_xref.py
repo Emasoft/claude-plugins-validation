@@ -48,6 +48,8 @@ from cpv_validation_common import (
 
 # Pattern to find Task tool invocations with subagent_type parameter
 # Matches patterns like: subagent_type: "my-agent" or subagent_type="my-agent"
+# RETAINED for backward compatibility with code paths that still use it;
+# new code should use _extract_dispatch_refs() (per TRDD-25b9be90 Phase 1).
 SUBAGENT_TYPE_PATTERN = re.compile(
     r'subagent_type\s*[=:]\s*["\']([^"\']+)["\']',
     re.IGNORECASE,
@@ -76,6 +78,289 @@ VERSION_PATTERN = re.compile(
 HOOK_SCRIPT_PATTERN = re.compile(
     r'\$\{CLAUDE_PLUGIN_ROOT\}/([^"\'}\s]+)',
 )
+
+
+# =============================================================================
+# Ghost-agent dispatch detection (per TRDD-25b9be90)
+# =============================================================================
+
+# Built-in Claude Code agents — always resolvable, no per-plugin file required.
+# Verified 2026-05-19 against the harness tool listing. The CC v2.1.140 resolver
+# is case- and separator-insensitive, so these are compared via _normalize_subagent_type.
+BUILTIN_AGENTS: frozenset[str] = frozenset({
+    "general-purpose",   # universal catch-all agent
+    "explore",           # fast read-only search agent
+    "plan",              # software architect planning agent
+    "statusline-setup",  # built-in agent for status line config
+})
+
+# Finding codes for ghost-agent dispatch (per TRDD-25b9be90).
+RC_GHOST_DISPATCH_UNRESOLVED = "RC-GHOST-DISPATCH-001"   # CRITICAL — silent-failure class
+RC_GHOST_DISPATCH_DYNAMIC = "RC-GHOST-DISPATCH-002"      # MINOR — variable / template, cannot statically verify
+RC_GHOST_DISPATCH_CROSS_PLUGIN = "RC-GHOST-DISPATCH-003" # NIT — namespaced to a different plugin
+
+# Three extractors covering all four documented dispatch forms (TRDD-25b9be90 §Design):
+#
+#   _DISPATCH_QUOTED_VALUE — captures any value between matching quotes,
+#     for bare-key forms:
+#       subagent_type: "agent" / subagent_type: 'Code Reviewer' /
+#       subagent_type="agent-name"
+#     Allows spaces inside quotes (needed for the v2.1.140 case/separator-
+#     insensitive matcher, which accepts ``"Code Reviewer"`` → ``code-reviewer``).
+#
+#   _DISPATCH_JSON_QUOTED_VALUE — captures any value between matching quotes,
+#     for JSON-object key form:
+#       "subagent_type": "agent" / 'subagent_type': 'agent'
+#
+#   _DISPATCH_UNQUOTED_VALUE — captures Python-identifier-like names (no
+#     spaces), for unquoted forms in both YAML and Python kwarg contexts:
+#       subagent_type: agent-name (YAML bare — literal)
+#       subagent_type=variable (Python kwarg unquoted — dynamic per
+#                                _classify_dispatch logic)
+#
+# Each match yields ``(quote_char_or_empty, name)``; _classify_dispatch
+# converts that into ``(kind, name)`` where ``kind`` is ``literal`` or
+# ``dynamic``.
+_DISPATCH_QUOTED_VALUE = re.compile(
+    r"""(?<![\w-])subagent_type\s*[=:]\s*(["'])([^"'\n]+?)\1""",
+)
+_DISPATCH_JSON_QUOTED_VALUE = re.compile(
+    r"""["']subagent_type["']\s*:\s*(["'])([^"'\n]+?)\1""",
+)
+_DISPATCH_UNQUOTED_VALUE = re.compile(
+    r"""(?<![\w-])subagent_type\s*([=:])\s*([a-zA-Z_][\w:.-]*)(?![\w:.-])""",
+)
+
+# Languages whose fenced code blocks are example output / shell commands
+# / log captures, NOT directives. Bodies marked with these languages are
+# stripped before regex scanning so that example output doesn't false-positive.
+# Per TRDD-25b9be90:
+#   - text/output/console/log: example output captures
+#   - bash/shell/sh: shell-command examples (path arguments like
+#     ./skills/foo/ are shell paths, not skill invocations)
+_NOISE_FENCE_LANGS = ("text", "output", "console", "log", "bash", "shell", "sh")
+
+
+def _strip_noise(content: str) -> str:
+    """Strip non-directive regions from a file body before regex scanning.
+
+    Removes:
+    * YAML frontmatter (between leading ``---`` markers) — that's metadata,
+      not executable code.
+    * Fenced code blocks whose info-string is one of ``text``, ``output``,
+      ``console``, or ``log`` — those are example output / log captures
+      that the agent will quote verbatim, not directives the agent will
+      execute.
+    * HTML comments (``<!-- ... -->``) — explanatory prose hidden from
+      rendered output, not directives.
+
+    Replaces stripped regions with spaces of the same length so that
+    downstream byte-offset arithmetic (if added later) stays accurate.
+
+    Args:
+        content: Raw markdown content.
+
+    Returns:
+        Content with noise regions blanked out.
+    """
+    # Strip leading frontmatter
+    if content.startswith("---\n"):
+        m = re.match(r"^---\n.*?\n---\n", content, re.DOTALL)
+        if m:
+            content = (" " * (m.end() - m.start() - 1)) + "\n" + content[m.end():]
+
+    def _blank(m: re.Match[str]) -> str:
+        # Preserve newlines so line numbers stay correct.
+        return re.sub(r"[^\n]", " ", m.group(0))
+
+    # Strip fenced code blocks marked text/output/console/log
+    fence_alt = "|".join(_NOISE_FENCE_LANGS)
+    content = re.sub(
+        rf"^```(?:{fence_alt})\b.*?^```",
+        _blank,
+        content,
+        flags=re.DOTALL | re.MULTILINE | re.IGNORECASE,
+    )
+
+    # Strip HTML comments
+    content = re.sub(r"<!--.*?-->", _blank, content, flags=re.DOTALL)
+
+    return content
+
+
+def _classify_dispatch(
+    quote_present: bool,
+    name: str,
+    separator: str,
+) -> tuple[str, str] | None:
+    """Classify a captured dispatch match.
+
+    Args:
+        quote_present: True if the value was wrapped in matching quotes.
+        name: Captured agent-name token (already stripped of quotes).
+        separator: ``=`` (Python kwarg context) or ``:`` (YAML / JSON context).
+
+    Returns:
+        ``(kind, name)`` tuple where ``kind`` is one of:
+        * ``"literal"`` — quoted string OR unquoted kebab/namespaced identifier
+        * ``"dynamic"`` — unquoted Python-identifier value in a ``=`` context
+    """
+    if quote_present:
+        return ("literal", name)
+    # Unquoted value
+    if "-" in name or ":" in name or "." in name:
+        # Kebab-case or namespaced literal — YAML bare string
+        return ("literal", name)
+    if separator == "=":
+        # Python kwarg with unquoted variable name → dynamic dispatch
+        return ("dynamic", name)
+    # YAML bare with single-word value → literal (e.g. `subagent_type: foo`)
+    return ("literal", name)
+
+
+def _extract_dispatch_refs(content: str) -> list[tuple[str, str]]:
+    """Extract all subagent_type dispatch references from a file body.
+
+    Applies the three-pattern extractor set (quoted bare-key, quoted JSON-key,
+    unquoted bare-key) after stripping non-directive regions via
+    :func:`_strip_noise`. Together the three patterns cover all four
+    documented dispatch forms (YAML quoted, YAML bare, Python kwarg
+    quoted/unquoted, JSON-object).
+
+    Args:
+        content: Raw markdown / code content.
+
+    Returns:
+        List of ``(kind, name)`` tuples where ``kind`` is ``"literal"`` or
+        ``"dynamic"``. Duplicates within the same file are de-duplicated.
+    """
+    stripped = _strip_noise(content)
+    refs: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    # Quoted bare-key forms (covers YAML/Python quoted, with spaces allowed).
+    for match in _DISPATCH_QUOTED_VALUE.finditer(stripped):
+        quoted_ref: tuple[str, str] = ("literal", match.group(2))
+        if quoted_ref not in seen:
+            refs.append(quoted_ref)
+            seen.add(quoted_ref)
+
+    # JSON-object quoted-key form (e.g. {"subagent_type": "agent-name"}).
+    for match in _DISPATCH_JSON_QUOTED_VALUE.finditer(stripped):
+        json_ref: tuple[str, str] = ("literal", match.group(2))
+        if json_ref not in seen:
+            refs.append(json_ref)
+            seen.add(json_ref)
+
+    # Unquoted bare-key forms — distinguishes YAML bare (literal) from
+    # Python kwarg with unquoted variable (dynamic).
+    for match in _DISPATCH_UNQUOTED_VALUE.finditer(stripped):
+        classified = _classify_dispatch(False, match.group(2), match.group(1))
+        if classified is not None and classified not in seen:
+            refs.append(classified)
+            seen.add(classified)
+
+    return refs
+
+
+def _get_plugin_name(plugin_root: Path) -> str | None:
+    """Read the plugin's manifest name from ``.claude-plugin/plugin.json``.
+
+    The name is used to distinguish in-plugin namespaced references
+    (``<my-plugin>:<agent>``) from cross-plugin references (``<other>:<agent>``).
+
+    Args:
+        plugin_root: Root path of the plugin.
+
+    Returns:
+        Plugin name from the manifest, or ``None`` if not found.
+    """
+    plugin_json = plugin_root / ".claude-plugin" / "plugin.json"
+    if not plugin_json.exists():
+        return None
+    try:
+        manifest = json.loads(plugin_json.read_text(encoding="utf-8"))
+        name = manifest.get("name")
+        return name if isinstance(name, str) else None
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _resolve_dispatch_ref(
+    name: str,
+    available_agents: set[str],
+    *,
+    plugin_name: str | None = None,
+    user_scope_agents: set[str] | None = None,
+) -> tuple[str, str | None]:
+    """Resolve a literal dispatch reference against built-ins, in-plugin
+    agents, and (optionally) user-scope agents.
+
+    Args:
+        name: The captured reference token (may be bare ``agent-name`` or
+            namespaced ``plugin:agent``).
+        available_agents: Set of in-plugin agent names from ``agents/``.
+        plugin_name: Name of the current plugin (for namespace matching).
+            When the reference is ``<plugin_name>:<agent>``, it's treated
+            as same-plugin and looked up in ``available_agents``.
+        user_scope_agents: Optional set of agent names from
+            ``~/.claude/agents/`` (used when auditing user-scope, not
+            plugin-scope). When ``None``, user-scope is not checked.
+
+    Returns:
+        ``(status, canonical)`` where ``status`` is one of:
+
+        * ``"ok"`` — resolves cleanly to a built-in, an in-plugin agent,
+          or (when ``user_scope_agents`` is provided) a user-scope agent.
+        * ``"ok-fuzzy"`` — resolves via the v2.1.140 case/separator-
+          insensitive matcher (works at runtime but isn't canonical).
+        * ``"cross_plugin"`` — namespaced to a different plugin, cannot
+          statically verify (NIT).
+        * ``"ghost"`` — unresolved (CRITICAL).
+
+        ``canonical`` is the canonical agent filename when ``status``
+        is ``"ok-fuzzy"``, else ``None``.
+    """
+    # Built-in agent check (case/separator-insensitive per v2.1.140).
+    normalized = _normalize_subagent_type(name)
+    if normalized in {_normalize_subagent_type(a) for a in BUILTIN_AGENTS}:
+        return ("ok", None)
+
+    # Namespaced reference: <namespace>:<agent>
+    if ":" in name:
+        ns, _, agent_part = name.partition(":")
+        if plugin_name and ns == plugin_name:
+            # Same-plugin namespaced reference — check in-plugin agents
+            if agent_part in available_agents:
+                return ("ok", None)
+            canonical = {_normalize_subagent_type(a): a for a in available_agents}.get(
+                _normalize_subagent_type(agent_part)
+            )
+            if canonical is not None:
+                return ("ok-fuzzy", canonical)
+            return ("ghost", None)
+        # Different namespace — cross-plugin, cannot statically verify
+        return ("cross_plugin", None)
+
+    # Bare reference — exact match in same plugin's agents/
+    if name in available_agents:
+        return ("ok", None)
+
+    # v2.1.140 case/separator-insensitive match against same plugin
+    normalized_to_canonical = {_normalize_subagent_type(a): a for a in available_agents}
+    canonical = normalized_to_canonical.get(normalized)
+    if canonical is not None:
+        return ("ok-fuzzy", canonical)
+
+    # User-scope agents (only when explicitly provided)
+    if user_scope_agents is not None:
+        if name in user_scope_agents:
+            return ("ok", None)
+        canonical = {_normalize_subagent_type(a): a for a in user_scope_agents}.get(normalized)
+        if canonical is not None:
+            return ("ok-fuzzy", canonical)
+
+    return ("ghost", None)
 
 
 # =============================================================================
@@ -202,21 +487,35 @@ def validate_agent_task_refs(
     plugin_root: Path,
     report: CrossReferenceValidationReport,
     available_agents: set[str],
+    *,
+    plugin_name: str | None = None,
 ) -> None:
     """Validate that Task() calls reference existing agents.
 
     Parses agent .md files for Task tool references with subagent_type
     and verifies the referenced agents exist in agents/ directory.
 
+    Per TRDD-25b9be90, an unresolved reference is CRITICAL (silent-failure
+    class — at runtime the call no-ops and the agent skill thinks it spawned
+    a worker but nothing happens). Dynamic dispatch (``subagent_type=var``)
+    is MINOR with code ``RC-GHOST-DISPATCH-002``. Cross-plugin namespaced
+    references are NIT with code ``RC-GHOST-DISPATCH-003``.
+
     Args:
         plugin_root: Root path of the plugin
         report: Validation report to add results to
         available_agents: Set of available agent names
+        plugin_name: Name of the current plugin (for namespaced reference
+            resolution). Read from ``.claude-plugin/plugin.json`` if not
+            provided.
     """
     agents_dir = plugin_root / "agents"
     if not agents_dir.exists():
         report.info("No agents/ directory found - skipping Task() reference check")
         return
+
+    if plugin_name is None:
+        plugin_name = _get_plugin_name(plugin_root)
 
     for agent_file in agents_dir.glob("*.md"):
         try:
@@ -225,22 +524,47 @@ def validate_agent_task_refs(
             report.minor(f"Could not read agent file: {e}", str(agent_file.relative_to(plugin_root)))
             continue
 
-        # Find all subagent_type references
         rel_path = str(agent_file.relative_to(plugin_root))
-        matches = SUBAGENT_TYPE_PATTERN.findall(content)
+        refs = _extract_dispatch_refs(content)
 
-        if matches:
-            report.agent_refs[rel_path] = matches
+        if refs:
+            report.agent_refs[rel_path] = [name for _, name in refs]
 
-        for ref_agent in matches:
-            if ref_agent not in available_agents:
-                report.major(
-                    f"Task() references non-existent agent '{ref_agent}'",
+        for kind, ref_agent in refs:
+            if kind == "dynamic":
+                report.minor(
+                    f"[{RC_GHOST_DISPATCH_DYNAMIC}] Task() uses dynamic subagent_type "
+                    f"'{ref_agent}' (variable reference — cannot statically verify)",
                     rel_path,
                 )
-            else:
+                continue
+
+            status, canonical = _resolve_dispatch_ref(
+                ref_agent, available_agents, plugin_name=plugin_name
+            )
+            if status == "ok":
                 report.passed(
                     f"Task() reference to '{ref_agent}' is valid",
+                    rel_path,
+                )
+            elif status == "ok-fuzzy":
+                report.nit(
+                    f"Task() reference '{ref_agent}' resolves to "
+                    f"agents/{canonical}.md via the v2.1.140 case/separator-insensitive "
+                    f"matcher. Use the canonical kebab-case form '{canonical}' for clarity.",
+                    rel_path,
+                )
+            elif status == "cross_plugin":
+                report.nit(
+                    f"[{RC_GHOST_DISPATCH_CROSS_PLUGIN}] Task() references cross-plugin "
+                    f"agent '{ref_agent}' — cannot statically verify; ensure the target "
+                    f"plugin is installed at runtime",
+                    rel_path,
+                )
+            else:  # ghost
+                report.critical(
+                    f"[{RC_GHOST_DISPATCH_UNRESOLVED}] Task() references non-existent "
+                    f"agent '{ref_agent}' — runtime will silently no-op",
                     rel_path,
                 )
 
@@ -272,26 +596,45 @@ def validate_subagent_type_matching(
     plugin_root: Path,
     report: CrossReferenceValidationReport,
     available_agents: set[str],
+    *,
+    plugin_name: str | None = None,
 ) -> None:
     """Validate subagent_type values match actual agent filenames.
 
-    Scans all markdown files for subagent_type references and verifies
-    that agents/NAME.md exists for each referenced NAME. Per CC v2.1.140
-    the resolver accepts case- and separator-insensitive values, so CPV
-    now ALSO accepts those (with a NIT recommending the canonical form)
-    instead of emitting MAJOR.
+    Scans all markdown files for subagent_type references (using the
+    four-variant extractor — handles YAML quoted, YAML bare, Python kwarg,
+    and JSON-object forms) and verifies each NAME exists in ``agents/``.
+
+    Per TRDD-25b9be90, an unresolved literal is CRITICAL ``RC-GHOST-DISPATCH-001``
+    (silent failure class), dynamic dispatch is MINOR ``RC-GHOST-DISPATCH-002``,
+    and cross-plugin namespaced references are NIT ``RC-GHOST-DISPATCH-003``.
+    Per CC v2.1.140 the resolver accepts case- and separator-insensitive
+    values; CPV accepts those too with a NIT recommending the canonical form.
 
     Args:
         plugin_root: Root path of the plugin
         report: Validation report to add results to
         available_agents: Set of available agent names
+        plugin_name: Name of the current plugin (for namespaced reference
+            resolution). Read from ``.claude-plugin/plugin.json`` if not
+            provided.
     """
-    # Pre-compute a normalized-form → canonical-form lookup so we can
-    # accept the same spellings CC v2.1.140 resolves at runtime.
-    normalized_to_canonical = {_normalize_subagent_type(a): a for a in available_agents}
+    if plugin_name is None:
+        plugin_name = _get_plugin_name(plugin_root)
 
-    # Scan all .md files in the plugin
-    for md_file in plugin_root.rglob("*.md"):
+    # Only scan executable plugin content. Skipping documentation /
+    # dev-artifact / report directories (design/, docs_dev/, reports/,
+    # reports_dev/, samples_dev/, examples*/, tests/, scripts_dev/, etc.)
+    # so that TRDD bodies and audit reports describing the very pattern
+    # this validator detects don't false-positive on themselves.
+    executable_dirs = ("agents", "commands", "skills")
+    md_files: list[Path] = []
+    for ed in executable_dirs:
+        ed_path = plugin_root / ed
+        if ed_path.is_dir():
+            md_files.extend(ed_path.rglob("*.md"))
+
+    for md_file in md_files:
         # Skip hidden directories and cache directories
         if any(should_skip_dir(p) for p in md_file.parents):
             continue
@@ -302,27 +645,42 @@ def validate_subagent_type_matching(
             continue
 
         rel_path = str(md_file.relative_to(plugin_root))
-        matches = SUBAGENT_TYPE_PATTERN.findall(content)
+        refs = _extract_dispatch_refs(content)
 
-        for ref_agent in matches:
-            if ref_agent in available_agents:
-                # Canonical spelling — silent pass.
+        for kind, ref_agent in refs:
+            if kind == "dynamic":
+                report.minor(
+                    f"[{RC_GHOST_DISPATCH_DYNAMIC}] subagent_type uses dynamic value "
+                    f"'{ref_agent}' (variable reference — cannot statically verify)",
+                    rel_path,
+                )
                 continue
-            normalized = _normalize_subagent_type(ref_agent)
-            canonical = normalized_to_canonical.get(normalized)
-            if canonical is not None:
-                # v2.1.140 case/separator-insensitive match. The reference
-                # works at runtime but isn't the canonical kebab-case form.
+
+            status, canonical = _resolve_dispatch_ref(
+                ref_agent, available_agents, plugin_name=plugin_name
+            )
+            if status == "ok":
+                # Canonical spelling or built-in — silent pass.
+                continue
+            if status == "ok-fuzzy":
                 report.nit(
                     f"subagent_type '{ref_agent}' resolves to "
                     f"agents/{canonical}.md via the v2.1.140 case/separator-"
-                    "insensitive matcher. Use the canonical kebab-case form "
+                    f"insensitive matcher. Use the canonical kebab-case form "
                     f"'{canonical}' for clarity.",
                     rel_path,
                 )
-            else:
-                report.major(
-                    f"subagent_type '{ref_agent}' has no matching agents/{ref_agent}.md",
+            elif status == "cross_plugin":
+                report.nit(
+                    f"[{RC_GHOST_DISPATCH_CROSS_PLUGIN}] subagent_type references "
+                    f"cross-plugin agent '{ref_agent}' — cannot statically verify; "
+                    f"ensure the target plugin is installed at runtime",
+                    rel_path,
+                )
+            else:  # ghost
+                report.critical(
+                    f"[{RC_GHOST_DISPATCH_UNRESOLVED}] subagent_type '{ref_agent}' "
+                    f"has no matching agents/{ref_agent}.md — runtime will silently no-op",
                     rel_path,
                 )
 
@@ -446,21 +804,34 @@ def validate_command_agent_refs(
     plugin_root: Path,
     report: CrossReferenceValidationReport,
     available_agents: set[str],
+    *,
+    plugin_name: str | None = None,
 ) -> None:
     """Validate that commands do not reference non-existent agents.
 
-    Scans command .md files for agent references (spawn, invoke, etc.)
-    and verifies the referenced agents exist.
+    Scans command .md files for agent references (subagent_type literals
+    via the TRDD-25b9be90 four-variant extractor, plus spawn/invoke prose
+    patterns) and verifies the referenced agents exist.
+
+    Per TRDD-25b9be90, an unresolved literal is CRITICAL ``RC-GHOST-DISPATCH-001``,
+    dynamic dispatch is MINOR ``RC-GHOST-DISPATCH-002``, and cross-plugin
+    namespaced references are NIT ``RC-GHOST-DISPATCH-003``.
 
     Args:
         plugin_root: Root path of the plugin
         report: Validation report to add results to
         available_agents: Set of available agent names
+        plugin_name: Name of the current plugin (for namespaced reference
+            resolution). Read from ``.claude-plugin/plugin.json`` if not
+            provided.
     """
     commands_dir = plugin_root / "commands"
     if not commands_dir.exists():
         report.info("No commands/ directory found - skipping command agent ref check")
         return
+
+    if plugin_name is None:
+        plugin_name = _get_plugin_name(plugin_root)
 
     for cmd_file in commands_dir.glob("*.md"):
         try:
@@ -471,33 +842,62 @@ def validate_command_agent_refs(
 
         rel_path = str(cmd_file.relative_to(plugin_root))
 
-        # Check for subagent_type references
-        subagent_refs = SUBAGENT_TYPE_PATTERN.findall(content)
-        for ref_agent in subagent_refs:
-            if ref_agent not in available_agents:
-                report.critical(
-                    f"Command references non-existent agent '{ref_agent}' - BREAKING",
+        # Subagent_type references via the four-variant extractor (TRDD-25b9be90)
+        for kind, ref_agent in _extract_dispatch_refs(content):
+            if kind == "dynamic":
+                report.minor(
+                    f"[{RC_GHOST_DISPATCH_DYNAMIC}] Command uses dynamic subagent_type "
+                    f"'{ref_agent}' (variable reference — cannot statically verify)",
                     rel_path,
                 )
-            else:
+                continue
+
+            status, canonical = _resolve_dispatch_ref(
+                ref_agent, available_agents, plugin_name=plugin_name
+            )
+            if status == "ok":
                 report.passed(
                     f"Command reference to agent '{ref_agent}' is valid",
                     rel_path,
                 )
+            elif status == "ok-fuzzy":
+                report.nit(
+                    f"Command reference '{ref_agent}' resolves to "
+                    f"agents/{canonical}.md via the v2.1.140 case/separator-insensitive "
+                    f"matcher. Use the canonical kebab-case form '{canonical}' for clarity.",
+                    rel_path,
+                )
+            elif status == "cross_plugin":
+                report.nit(
+                    f"[{RC_GHOST_DISPATCH_CROSS_PLUGIN}] Command references cross-plugin "
+                    f"agent '{ref_agent}' — cannot statically verify; ensure the target "
+                    f"plugin is installed at runtime",
+                    rel_path,
+                )
+            else:  # ghost
+                report.critical(
+                    f"[{RC_GHOST_DISPATCH_UNRESOLVED}] Command references non-existent "
+                    f"agent '{ref_agent}' — runtime will silently no-op (BREAKING)",
+                    rel_path,
+                )
 
-        # Check for spawn/invoke patterns
-        spawn_refs = AGENT_SPAWN_PATTERN.findall(content)
+        # Spawn/invoke prose patterns (heuristic — keeps the existing behavior
+        # but uses the corrected BUILTIN_AGENTS set instead of the old wrong list
+        # which contained model names + scout/oracle as if they were built-ins).
+        stripped = _strip_noise(content)
+        spawn_refs = AGENT_SPAWN_PATTERN.findall(stripped)
         for ref_agent in spawn_refs:
-            # Normalize the agent name (lowercase, trimmed)
-            ref_agent_normalized = ref_agent.lower().strip()
-            if ref_agent_normalized not in available_agents:
-                # Check if it might be a built-in agent type
-                builtin_types = {"basic", "task", "explore", "scout", "oracle", "haiku", "sonnet", "opus"}
-                if ref_agent_normalized not in builtin_types:
-                    report.major(
-                        f"Command mentions unknown agent '{ref_agent}'",
-                        rel_path,
-                    )
+            ref_agent_normalized = _normalize_subagent_type(ref_agent)
+            if ref_agent_normalized in available_agents:
+                continue
+            if ref_agent_normalized in {_normalize_subagent_type(a) for a in available_agents}:
+                continue  # v2.1.140 fuzzy match
+            if ref_agent_normalized in {_normalize_subagent_type(a) for a in BUILTIN_AGENTS}:
+                continue
+            report.major(
+                f"Command mentions unknown agent '{ref_agent}'",
+                rel_path,
+            )
 
 
 # =============================================================================
@@ -512,46 +912,89 @@ def validate_skill_refs(
 ) -> None:
     """Validate that skill references point to existing skills.
 
-    Scans code files for skill path references and verifies the
-    referenced skills exist in skills/ directory.
+    Scans executable plugin content (agents/, commands/, skills/) for
+    ``skills/<name>`` path references and verifies each name exists in
+    the plugin's ``skills/`` directory.
+
+    Per TRDD-25b9be90 Phase 5 (scope narrowing): we no longer scan
+    ``scripts/`` or other top-level files, because Python comments and
+    docstrings commonly contain prose like ``"skills/agents/commands"``
+    that mention the plugin's directory layout — those aren't skill
+    references and were generating ~225 false positives per CPV self-scan.
 
     Args:
         plugin_root: Root path of the plugin
         report: Validation report to add results to
         available_skills: Set of available skill names
     """
-    # File extensions to scan for skill references
-    scan_extensions = {".py", ".sh", ".md", ".json", ".yaml", ".yml"}
-
-    for ext in scan_extensions:
-        for file_path in plugin_root.rglob(f"*{ext}"):
-            # Skip hidden/cache directories
-            if any(should_skip_dir(p) for p in file_path.parents):
+    # Scope (TRDD-25b9be90 Phase 5): top-level executable bodies only —
+    # agent bodies, command bodies, and skill BODIES (skills/<name>/SKILL.md).
+    # Excludes references/ subdirs because those are documentation containing
+    # example skill names like ``deploy`` / ``skill-a`` / ``codebase-visualizer``
+    # that aren't actual invocations.
+    file_paths: list[Path] = []
+    agents_dir = plugin_root / "agents"
+    if agents_dir.is_dir():
+        file_paths.extend(agents_dir.glob("*.md"))
+    commands_dir = plugin_root / "commands"
+    if commands_dir.is_dir():
+        file_paths.extend(commands_dir.glob("*.md"))
+    skills_dir = plugin_root / "skills"
+    if skills_dir.is_dir():
+        # Only the top-level SKILL.md per skill — skip references/, scripts/, etc.
+        for skill_subdir in skills_dir.iterdir():
+            if not skill_subdir.is_dir():
                 continue
+            skill_md = skill_subdir / "SKILL.md"
+            if skill_md.is_file():
+                file_paths.append(skill_md)
 
-            try:
-                content = file_path.read_text(errors="ignore")
-            except Exception:
-                continue
+    for file_path in file_paths:
+        # Skip hidden/cache directories
+        if any(should_skip_dir(p) for p in file_path.parents):
+            continue
 
-            rel_path = str(file_path.relative_to(plugin_root))
-            matches = SKILL_REF_PATTERN.findall(content)
+        try:
+            content = file_path.read_text(errors="ignore")
+        except Exception:
+            continue
 
-            if matches:
-                report.skill_refs[rel_path] = list(set(matches))
+        rel_path = str(file_path.relative_to(plugin_root))
+        # Apply noise stripping so example bash/shell commands (which
+        # contain `./skills/foo` path arguments) and example log captures
+        # don't false-positive — per TRDD-25b9be90 Phase 5.
+        stripped = _strip_noise(content)
+        matches = SKILL_REF_PATTERN.findall(stripped)
 
-            for skill_name in set(matches):
-                skill_name_lower = skill_name.lower()
-                if skill_name_lower not in available_skills:
-                    report.major(
-                        f"Reference to non-existent skill '{skill_name}'",
-                        rel_path,
-                    )
-                else:
-                    report.passed(
-                        f"Skill reference '{skill_name}' is valid",
-                        rel_path,
-                    )
+        # Filter out captures that are plugin-structural directory names
+        # (e.g. prose like "skills/agents/commands" captures "agents" but
+        # that's the agents/ folder, not a skill). Per TRDD-25b9be90.
+        _plugin_dirs = {
+            "agents", "commands", "skills", "hooks", "mcp",
+            "monitors", "output-styles", "outputstyles", "lsp",
+            "scripts", "tests", "references", "examples", "templates",
+            "name", "ext", "file", "node", "my-skill",  # common prose / template placeholders
+            "agent",  # singular — prose-like "skills/agent/SKILL.md" template placeholder
+            "command", "skill", "hook",  # singular forms used in prose
+            "rust", "python", "javascript", "typescript", "java", "go", "ruby",  # language names sometimes appear as "skills/python"
+        }
+        filtered_matches = [m for m in matches if m.lower() not in _plugin_dirs]
+
+        if filtered_matches:
+            report.skill_refs[rel_path] = list(set(filtered_matches))
+
+        for skill_name in set(filtered_matches):
+            skill_name_lower = skill_name.lower()
+            if skill_name_lower not in available_skills:
+                report.major(
+                    f"Reference to non-existent skill '{skill_name}'",
+                    rel_path,
+                )
+            else:
+                report.passed(
+                    f"Skill reference '{skill_name}' is valid",
+                    rel_path,
+                )
 
 
 # =============================================================================
@@ -709,22 +1152,23 @@ def validate_cross_references(plugin_path: str | Path) -> CrossReferenceValidati
     # Get available components
     available_agents = get_available_agents(plugin_root)
     available_skills = get_available_skills(plugin_root)
+    plugin_name = _get_plugin_name(plugin_root)
 
     report.info(f"Found {len(available_agents)} agent(s) in agents/")
     report.info(f"Found {len(available_skills)} skill(s) in skills/")
 
     # Run all validation rules
     # Rule 1: Agent Task() calls
-    validate_agent_task_refs(plugin_root, report, available_agents)
+    validate_agent_task_refs(plugin_root, report, available_agents, plugin_name=plugin_name)
 
     # Rule 2: Subagent_type matching
-    validate_subagent_type_matching(plugin_root, report, available_agents)
+    validate_subagent_type_matching(plugin_root, report, available_agents, plugin_name=plugin_name)
 
     # Rule 3: Version synchronization
     validate_version_sync(plugin_root, report)
 
     # Rule 4: Command agent references
-    validate_command_agent_refs(plugin_root, report, available_agents)
+    validate_command_agent_refs(plugin_root, report, available_agents, plugin_name=plugin_name)
 
     # Rule 5: Skill references
     validate_skill_refs(plugin_root, report, available_skills)

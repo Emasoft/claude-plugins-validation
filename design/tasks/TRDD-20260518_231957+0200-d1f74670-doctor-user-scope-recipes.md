@@ -3,8 +3,7 @@ trdd-id: d1f74670-539c-488e-8145-eb8a964315f4
 title: CPV doctor user-scope recipes — stub files, stale years, dead refs, namespace correctness
 status: not-started
 created: 2026-05-18T23:19:57+0200
-updated: 2026-05-18T23:35:00+0200
-blocked-by: [TRDD-25b9be90]
+updated: 2026-05-19T08:52:26+0200
 ---
 
 # TRDD-d1f74670 — CPV doctor user-scope recipes (D9..D13)

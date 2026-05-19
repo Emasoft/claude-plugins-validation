@@ -179,6 +179,28 @@ gate must distinguish "user-blessed drift" (opt-out present) from
 The full RC-MKPL-* error code table lives in
 [skills/fix-validation/references/marketplace-error-index.md §1.1](../skills/fix-validation/references/marketplace-error-index.md#11-rc-mkpl-upstream-cross-validation-codes-v2810).
 
+### RC-GHOST-DISPATCH-* (TRDD-25b9be90 — ghost-agent dispatch)
+
+- **RC-GHOST-DISPATCH-001 (CRITICAL)** — `Task()` / `subagent_type:` literal
+  references an agent that doesn't exist. To fix: either (a) correct the agent
+  name to one that exists in the plugin's `agents/`, a built-in
+  (`general-purpose` / `Explore` / `Plan` / `statusline-setup`), or
+  (when authoring user-scope content) `~/.claude/agents/`; or (b) delete the
+  dispatch entirely if the calling skill no longer needs it. NEVER suppress
+  the finding without fixing — the bug is silent at runtime (calling skill
+  thinks it spawned a worker, nothing happens).
+- **RC-GHOST-DISPATCH-002 (MINOR)** — dynamic `subagent_type=<var>` (variable
+  reference). Reminder that CPV cannot statically verify the target; the
+  finding is informational and should be left in place when the dispatch is
+  intentionally dynamic.
+- **RC-GHOST-DISPATCH-003 (NIT)** — cross-plugin namespaced reference
+  (`<other-plugin>:<agent>`). Not statically verifiable; left in place
+  unless the target plugin has been explicitly removed (in which case fix
+  the reference to point at a still-installed alternative).
+
+See [references/finding-codes.md](../references/finding-codes.md) for the full
+resolution algorithm and built-in agent allow-list.
+
 If validation still has any CRITICAL/MAJOR/MINOR/NIT after your fix loop, you MUST one of:
 
 1. Continue the loop (re-attempt fixes for the remaining findings).

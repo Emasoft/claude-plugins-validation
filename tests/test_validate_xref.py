@@ -61,8 +61,8 @@ class TestValidateAgentTaskRefs:
         assert "agents/orchestrator.md" in report.agent_refs
         assert "helper-agent" in report.agent_refs["agents/orchestrator.md"]
 
-    def test_missing_task_ref_reports_major(self, tmp_path: Path):
-        """When an agent file references a non-existent agent via subagent_type, a MAJOR issue is reported."""
+    def test_missing_task_ref_reports_critical(self, tmp_path: Path):
+        """When an agent file references a non-existent agent via subagent_type, a CRITICAL RC-GHOST-DISPATCH-001 finding is emitted (per TRDD-25b9be90)."""
         agents_dir = tmp_path / "agents"
         agents_dir.mkdir()
         (agents_dir / "caller.md").write_text('---\nname: caller\n---\n# Caller\n\nsubagent_type: "ghost-agent"\n')
@@ -71,36 +71,52 @@ class TestValidateAgentTaskRefs:
         available_agents = {"caller"}
         validate_agent_task_refs(tmp_path, report, available_agents)
 
-        assert report.has_major
-        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("ghost-agent" in m for m in major_msgs)
+        assert report.has_critical
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert any("ghost-agent" in m for m in critical_msgs)
+        assert any("RC-GHOST-DISPATCH-001" in m for m in critical_msgs)
 
 
 class TestValidateSubagentTypeMatching:
     """Tests for Rule 2: subagent_type values must match actual agent filenames."""
 
-    def test_subagent_type_without_matching_file_reports_major(self, tmp_path: Path):
-        """When a markdown file references a subagent_type with no matching agents/NAME.md, a MAJOR issue is reported."""
-        # Create a markdown file in plugin root that references a non-existent agent
-        (tmp_path / "README.md").write_text('# Plugin\n\nConfigure with subagent_type = "missing-bot"\n')
+    def test_subagent_type_without_matching_file_reports_critical(self, tmp_path: Path):
+        """When an agent file references a subagent_type with no matching agents/NAME.md, a CRITICAL RC-GHOST-DISPATCH-001 finding is emitted (per TRDD-25b9be90).
+
+        Note: per the TRDD-25b9be90 scope narrowing, only executable
+        directories (agents/, commands/, skills/) are scanned — README.md
+        at plugin root is no longer scanned.
+        """
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        (agents_dir / "host.md").write_text(
+            '---\nname: host\n---\n# Host\n\nConfigure with subagent_type = "missing-bot"\n'
+        )
 
         report = CrossReferenceValidationReport()
-        available_agents: set[str] = set()
+        available_agents: set[str] = {"host"}
         validate_subagent_type_matching(tmp_path, report, available_agents)
 
-        assert report.has_major
-        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("missing-bot" in m for m in major_msgs)
+        assert report.has_critical
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert any("missing-bot" in m for m in critical_msgs)
+        assert any("RC-GHOST-DISPATCH-001" in m for m in critical_msgs)
 
     def test_subagent_type_with_matching_file_no_issue(self, tmp_path: Path):
-        """When subagent_type references an agent that has a matching .md file, no issue is reported."""
+        """When subagent_type references an agent that has a matching .md file, no issue is reported.
+
+        Note: per TRDD-25b9be90 the scope is narrowed to agents/, commands/,
+        skills/ — fixture file lives in agents/ so it is scanned.
+        """
         agents_dir = tmp_path / "agents"
         agents_dir.mkdir()
         (agents_dir / "real-agent.md").write_text("---\nname: real-agent\n---\n# Agent\n")
-        (tmp_path / "docs.md").write_text('# Docs\n\nUse subagent_type: "real-agent" for delegation.\n')
+        (agents_dir / "caller.md").write_text(
+            '---\nname: caller\n---\n# Caller\n\nUse subagent_type: "real-agent" for delegation.\n'
+        )
 
         report = CrossReferenceValidationReport()
-        available_agents = {"real-agent"}
+        available_agents = {"real-agent", "caller"}
         validate_subagent_type_matching(tmp_path, report, available_agents)
 
         assert not report.has_major
@@ -129,7 +145,7 @@ class TestValidateCommandAgentRefs:
         assert any("worker" in m for m in passed_msgs)
 
     def test_command_with_broken_subagent_ref_reports_critical(self, tmp_path: Path):
-        """When a command file references a non-existent agent via subagent_type, a CRITICAL issue is reported."""
+        """When a command file references a non-existent agent via subagent_type, a CRITICAL RC-GHOST-DISPATCH-001 finding is emitted (per TRDD-25b9be90)."""
         commands_dir = tmp_path / "commands"
         commands_dir.mkdir()
         (commands_dir / "broken-cmd.md").write_text(
@@ -143,6 +159,7 @@ class TestValidateCommandAgentRefs:
         assert report.has_critical
         critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
         assert any("nonexistent-agent" in m and "BREAKING" in m for m in critical_msgs)
+        assert any("RC-GHOST-DISPATCH-001" in m for m in critical_msgs)
 
 
 class TestValidateHookScriptRefs:
@@ -449,12 +466,20 @@ class TestValidateSkillRefs:
     """Tests for Rule 5: Skill references in code must point to existing skills."""
 
     def test_valid_skill_ref_passes(self, tmp_path: Path):
-        """When a file references skills/my-skill and skills/my-skill/ dir exists, validation passes."""
-        # Covers lines 468-469, 475-476, 478-489
+        """When a file references skills/my-skill and skills/my-skill/ dir exists, validation passes.
+
+        Note: per TRDD-25b9be90 Phase 5, validate_skill_refs scope is narrowed
+        to executable directories (agents/, commands/, skills/). Fixture lives
+        in agents/ so it is scanned.
+        """
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
         (skills_dir / "lint-check").mkdir()
-        (tmp_path / "README.md").write_text("# Plugin\n\nUses skills/lint-check for linting.\n")
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        (agents_dir / "host.md").write_text(
+            "---\nname: host\n---\n# Host\n\nUses skills/lint-check for linting.\n"
+        )
 
         report = CrossReferenceValidationReport()
         validate_skill_refs(tmp_path, report, {"lint-check"})
@@ -462,13 +487,19 @@ class TestValidateSkillRefs:
         assert not report.has_major
         passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
         assert any("lint-check" in m for m in passed_msgs)
-        assert "README.md" in report.skill_refs
-        assert "lint-check" in report.skill_refs["README.md"]
+        assert "agents/host.md" in report.skill_refs
+        assert "lint-check" in report.skill_refs["agents/host.md"]
 
     def test_missing_skill_ref_reports_major(self, tmp_path: Path):
-        """When a file references skills/ghost-skill that does not exist, a MAJOR issue is reported."""
-        # Covers lines 479-484 (non-existent skill branch)
-        (tmp_path / "setup.py").write_text("# References skills/ghost-skill for setup\n")
+        """When a file references skills/ghost-skill that does not exist, a MAJOR issue is reported.
+
+        Note: per TRDD-25b9be90 Phase 5, fixture lives in commands/ (scanned).
+        """
+        commands_dir = tmp_path / "commands"
+        commands_dir.mkdir()
+        (commands_dir / "host.md").write_text(
+            "---\nname: host\n---\n# Host\n\nUses skills/ghost-skill for setup\n"
+        )
 
         report = CrossReferenceValidationReport()
         validate_skill_refs(tmp_path, report, set())
@@ -563,3 +594,353 @@ class TestValidateHookScriptRefsExtended:
         assert report.has_minor
         minor_msgs = [r.message for r in report.results if r.level == "MINOR"]
         assert any("Could not parse" in m for m in minor_msgs)
+
+
+# =========================================================================
+# TRDD-25b9be90 — Ghost-agent dispatch detection (new behavior)
+# =========================================================================
+
+from validate_xref import (  # noqa: E402  — re-imported so the additions are self-contained
+    BUILTIN_AGENTS,
+    RC_GHOST_DISPATCH_CROSS_PLUGIN,
+    RC_GHOST_DISPATCH_DYNAMIC,
+    RC_GHOST_DISPATCH_UNRESOLVED,
+    _classify_dispatch,
+    _extract_dispatch_refs,
+    _resolve_dispatch_ref,
+    _strip_noise,
+)
+
+
+class TestStripNoise:
+    """Tests for _strip_noise(): YAML frontmatter, noise fenced blocks, HTML comments."""
+
+    def test_strips_yaml_frontmatter(self):
+        """Leading YAML frontmatter is replaced with whitespace so its content cannot match."""
+        content = '---\nname: thing\nsubagent_type: "should-not-match"\n---\n# Body\n'
+        stripped = _strip_noise(content)
+        # The frontmatter region is blanked out (whitespace) so no subagent_type literal survives there
+        assert "should-not-match" not in stripped
+        # Body remains
+        assert "# Body" in stripped
+
+    def test_strips_fenced_text_block(self):
+        """Fenced code blocks marked ``text`` are blanked out (example output, not directives)."""
+        content = '# Title\n\n```text\nsubagent_type: "fake"\n```\n\nReal: subagent_type: "real"\n'
+        stripped = _strip_noise(content)
+        assert "fake" not in stripped
+        assert "real" in stripped
+
+    def test_strips_fenced_output_block(self):
+        """Fenced code blocks marked ``output`` are blanked out."""
+        content = '```output\nsubagent_type="example-output-only"\n```\n'
+        stripped = _strip_noise(content)
+        assert "example-output-only" not in stripped
+
+    def test_strips_fenced_console_block(self):
+        """Fenced code blocks marked ``console`` are blanked out."""
+        content = '```console\n$ task subagent_type=ignored\n```\n'
+        stripped = _strip_noise(content)
+        assert "ignored" not in stripped
+
+    def test_strips_fenced_log_block(self):
+        """Fenced code blocks marked ``log`` are blanked out."""
+        content = '```log\n[2026-05-19] subagent_type="from-log"\n```\n'
+        stripped = _strip_noise(content)
+        assert "from-log" not in stripped
+
+    def test_does_not_strip_python_block(self):
+        """Fenced ``python`` blocks ARE directives — preserved."""
+        content = '```python\nsubagent_type = "keep-me"\n```\n'
+        stripped = _strip_noise(content)
+        assert "keep-me" in stripped
+
+    def test_strips_html_comments(self):
+        """HTML comments are blanked out — they're hidden prose, not directives."""
+        content = 'Real text. <!-- subagent_type: "hidden-in-comment" --> More text.\n'
+        stripped = _strip_noise(content)
+        assert "hidden-in-comment" not in stripped
+
+
+class TestClassifyDispatch:
+    """Tests for _classify_dispatch() helper."""
+
+    def test_quoted_returns_literal(self):
+        """A quoted match returns literal regardless of separator."""
+        result = _classify_dispatch(True, "agent-name", ":")
+        assert result == ("literal", "agent-name")
+
+    def test_unquoted_kebab_yaml_returns_literal(self):
+        """Bare YAML kebab-case value (`subagent_type: foo-bar`) is a literal."""
+        result = _classify_dispatch(False, "foo-bar", ":")
+        assert result == ("literal", "foo-bar")
+
+    def test_unquoted_namespaced_returns_literal(self):
+        """Bare value containing `:` (namespace) is a literal regardless of separator."""
+        result = _classify_dispatch(False, "plugin:agent", "=")
+        assert result == ("literal", "plugin:agent")
+
+    def test_unquoted_variable_in_python_returns_dynamic(self):
+        """Plain identifier in Python kwarg context (`subagent_type=foo`) is dynamic."""
+        result = _classify_dispatch(False, "myvar", "=")
+        assert result == ("dynamic", "myvar")
+
+    def test_unquoted_word_in_yaml_returns_literal(self):
+        """Plain identifier in YAML context (`subagent_type: foo`) is a literal (`foo` is the value)."""
+        result = _classify_dispatch(False, "foo", ":")
+        assert result == ("literal", "foo")
+
+
+class TestExtractDispatchRefs:
+    """Tests for _extract_dispatch_refs() — the 4-variant extractor."""
+
+    def test_extracts_yaml_quoted_form(self):
+        """Variant 1: `subagent_type: "agent-name"` is extracted as a literal."""
+        refs = _extract_dispatch_refs('subagent_type: "alpha-bot"\n')
+        assert ("literal", "alpha-bot") in refs
+
+    def test_extracts_yaml_bare_kebab_form(self):
+        """Variant 2: `subagent_type: alpha-bot` (unquoted kebab) is extracted as a literal."""
+        refs = _extract_dispatch_refs("subagent_type: alpha-bot\n")
+        assert ("literal", "alpha-bot") in refs
+
+    def test_extracts_python_kwarg_quoted(self):
+        """Variant 3a: `subagent_type="alpha-bot"` (Python quoted) is extracted as a literal."""
+        refs = _extract_dispatch_refs('Task(subagent_type="alpha-bot")\n')
+        assert ("literal", "alpha-bot") in refs
+
+    def test_extracts_python_kwarg_dynamic(self):
+        """Variant 3b: `subagent_type=myvar` (Python unquoted identifier) is extracted as dynamic."""
+        refs = _extract_dispatch_refs("Task(subagent_type=myvar)\n")
+        assert ("dynamic", "myvar") in refs
+
+    def test_extracts_json_object_form(self):
+        """Variant 4: `"subagent_type": "alpha-bot"` (JSON-object) is extracted as a literal."""
+        refs = _extract_dispatch_refs('{"subagent_type": "alpha-bot"}\n')
+        assert ("literal", "alpha-bot") in refs
+
+    def test_extracts_namespaced_plugin_agent(self):
+        """A plugin:agent namespaced reference is extracted as a single literal token."""
+        refs = _extract_dispatch_refs('subagent_type: "my-plugin:my-agent"\n')
+        assert ("literal", "my-plugin:my-agent") in refs
+
+    def test_skips_examples_in_text_fenced_block(self):
+        """Examples inside text-fenced blocks are skipped by the noise filter."""
+        content = '```text\nsubagent_type: "example-only"\n```\nReal: `subagent_type: "real-agent"`\n'
+        refs = _extract_dispatch_refs(content)
+        names = [n for _, n in refs]
+        assert "example-only" not in names
+        assert "real-agent" in names
+
+    def test_deduplicates_within_file(self):
+        """Same (kind, name) tuple appearing twice is collapsed to one entry."""
+        content = 'subagent_type: "duplicated"\nlater: subagent_type: "duplicated"\n'
+        refs = _extract_dispatch_refs(content)
+        # Should appear exactly once
+        assert refs.count(("literal", "duplicated")) == 1
+
+
+class TestBuiltinAgents:
+    """Tests for the BUILTIN_AGENTS allow-list (TRDD-25b9be90)."""
+
+    def test_general_purpose_is_builtin(self):
+        """`general-purpose` is the universal catch-all and must be in BUILTIN_AGENTS."""
+        assert "general-purpose" in BUILTIN_AGENTS
+
+    def test_explore_is_builtin(self):
+        """`explore` is the fast read-only search agent and must be in BUILTIN_AGENTS."""
+        assert "explore" in BUILTIN_AGENTS
+
+    def test_plan_is_builtin(self):
+        """`plan` is the architect agent and must be in BUILTIN_AGENTS."""
+        assert "plan" in BUILTIN_AGENTS
+
+    def test_statusline_setup_is_builtin(self):
+        """`statusline-setup` is the built-in status line config agent."""
+        assert "statusline-setup" in BUILTIN_AGENTS
+
+    def test_scout_is_not_builtin(self):
+        """`scout` was wrongly in the old builtin list — must NOT be in BUILTIN_AGENTS (it's a user-scope agent)."""
+        assert "scout" not in BUILTIN_AGENTS
+
+    def test_oracle_is_not_builtin(self):
+        """`oracle` was wrongly in the old builtin list — must NOT be in BUILTIN_AGENTS (it's a ghost agent)."""
+        assert "oracle" not in BUILTIN_AGENTS
+
+
+class TestResolveDispatchRef:
+    """Tests for _resolve_dispatch_ref(): built-in / in-plugin / cross-plugin / ghost."""
+
+    def test_builtin_general_purpose_resolves(self):
+        """A bare reference to `general-purpose` resolves as ok via BUILTIN_AGENTS."""
+        status, _ = _resolve_dispatch_ref("general-purpose", set())
+        assert status == "ok"
+
+    def test_builtin_case_insensitive(self):
+        """Built-in lookup is case/separator-insensitive — `Explore` resolves as ok."""
+        status, _ = _resolve_dispatch_ref("Explore", set())
+        assert status == "ok"
+
+    def test_in_plugin_agent_resolves(self):
+        """A bare reference to an in-plugin agent resolves as ok."""
+        status, _ = _resolve_dispatch_ref("local-agent", {"local-agent"})
+        assert status == "ok"
+
+    def test_in_plugin_fuzzy_resolves(self):
+        """A reference using non-canonical case/separators resolves as ok-fuzzy with the canonical form."""
+        status, canonical = _resolve_dispatch_ref("Local Agent", {"local-agent"})
+        assert status == "ok-fuzzy"
+        assert canonical == "local-agent"
+
+    def test_unresolved_returns_ghost(self):
+        """A reference that matches nothing returns ghost."""
+        status, _ = _resolve_dispatch_ref("ghost-name", {"other-agent"})
+        assert status == "ghost"
+
+    def test_same_plugin_namespaced_resolves(self):
+        """`<my-plugin>:agent` where my-plugin matches plugin_name resolves like a bare reference."""
+        status, _ = _resolve_dispatch_ref(
+            "my-plugin:my-agent",
+            {"my-agent"},
+            plugin_name="my-plugin",
+        )
+        assert status == "ok"
+
+    def test_same_plugin_namespaced_ghost(self):
+        """`<my-plugin>:agent` where my-plugin matches plugin_name but agent doesn't exist returns ghost."""
+        status, _ = _resolve_dispatch_ref(
+            "my-plugin:missing",
+            {"only-this"},
+            plugin_name="my-plugin",
+        )
+        assert status == "ghost"
+
+    def test_cross_plugin_namespaced_returns_cross_plugin(self):
+        """`<other-plugin>:agent` (different plugin) returns cross_plugin status — cannot statically verify."""
+        status, _ = _resolve_dispatch_ref(
+            "other-plugin:remote-agent",
+            {"local-agent"},
+            plugin_name="my-plugin",
+        )
+        assert status == "cross_plugin"
+
+    def test_user_scope_agent_resolves_when_provided(self):
+        """When user_scope_agents is provided, a bare reference matching a user-scope agent resolves as ok."""
+        status, _ = _resolve_dispatch_ref(
+            "kraken",
+            set(),
+            user_scope_agents={"kraken", "phoenix"},
+        )
+        assert status == "ok"
+
+
+class TestDispatchFindingsInValidators:
+    """End-to-end tests: the 3 dispatch validators emit the correct RC- codes."""
+
+    def test_dynamic_dispatch_emits_minor_rc_002(self, tmp_path: Path):
+        """A Python kwarg with an unquoted variable (dynamic) emits MINOR RC-GHOST-DISPATCH-002."""
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        (agents_dir / "host.md").write_text(
+            "---\nname: host\n---\n# Host\n\n```python\nTask(subagent_type=picked)\n```\n"
+        )
+
+        report = CrossReferenceValidationReport()
+        validate_agent_task_refs(tmp_path, report, {"host"})
+
+        minor_msgs = [r.message for r in report.results if r.level == "MINOR"]
+        assert any(RC_GHOST_DISPATCH_DYNAMIC in m and "picked" in m for m in minor_msgs)
+
+    def test_cross_plugin_emits_nit_rc_003(self, tmp_path: Path):
+        """A `<other-plugin>:agent` reference (different plugin) emits NIT RC-GHOST-DISPATCH-003."""
+        # Setup: plugin.json declares our plugin as my-plugin, agent references other-plugin:remote
+        cp_dir = tmp_path / ".claude-plugin"
+        cp_dir.mkdir()
+        (cp_dir / "plugin.json").write_text(json.dumps({"name": "my-plugin", "version": "1.0.0"}))
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        (agents_dir / "host.md").write_text(
+            '---\nname: host\n---\n# Host\n\nUse subagent_type: "other-plugin:remote-agent" for the work.\n'
+        )
+
+        report = CrossReferenceValidationReport()
+        validate_agent_task_refs(tmp_path, report, {"host"})
+
+        nit_msgs = [r.message for r in report.results if r.level == "NIT"]
+        assert any(RC_GHOST_DISPATCH_CROSS_PLUGIN in m for m in nit_msgs)
+
+    def test_builtin_general_purpose_passes(self, tmp_path: Path):
+        """A reference to the `general-purpose` built-in resolves cleanly (no finding)."""
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        (agents_dir / "host.md").write_text(
+            '---\nname: host\n---\n# Host\n\nUse subagent_type: "general-purpose" for catch-all work.\n'
+        )
+
+        report = CrossReferenceValidationReport()
+        validate_agent_task_refs(tmp_path, report, {"host"})
+
+        assert not report.has_critical
+        # Should emit a PASSED finding
+        passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
+        assert any("general-purpose" in m for m in passed_msgs)
+
+    def test_unresolved_emits_critical_rc_001(self, tmp_path: Path):
+        """An unresolved bare reference emits CRITICAL RC-GHOST-DISPATCH-001."""
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        (agents_dir / "host.md").write_text(
+            '---\nname: host\n---\n# Host\n\nUse subagent_type: "ghost-agent" for missing work.\n'
+        )
+
+        report = CrossReferenceValidationReport()
+        validate_agent_task_refs(tmp_path, report, {"host"})
+
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert any(RC_GHOST_DISPATCH_UNRESOLVED in m and "ghost-agent" in m for m in critical_msgs)
+
+
+class TestScopeNarrowing:
+    """Tests for the scope-narrowing in validate_subagent_type_matching (per TRDD-25b9be90)."""
+
+    def test_design_tasks_directory_not_scanned(self, tmp_path: Path):
+        """Files under design/tasks/ (TRDDs) are NOT scanned by validate_subagent_type_matching."""
+        design_dir = tmp_path / "design" / "tasks"
+        design_dir.mkdir(parents=True)
+        (design_dir / "trdd.md").write_text('# TRDD\n\nExample: subagent_type: "ghost-bot"\n')
+
+        report = CrossReferenceValidationReport()
+        validate_subagent_type_matching(tmp_path, report, set())
+
+        # ghost-bot mention in design doc must NOT produce a finding
+        assert not report.has_critical
+        all_msgs = [r.message for r in report.results]
+        assert not any("ghost-bot" in m for m in all_msgs)
+
+    def test_reports_directory_not_scanned(self, tmp_path: Path):
+        """Files under reports/ are NOT scanned (audit reports describing the rule itself)."""
+        reports_dir = tmp_path / "reports" / "audits"
+        reports_dir.mkdir(parents=True)
+        (reports_dir / "audit.md").write_text('# Audit\n\nFound: subagent_type: "audit-ghost"\n')
+
+        report = CrossReferenceValidationReport()
+        validate_subagent_type_matching(tmp_path, report, set())
+
+        assert not report.has_critical
+        all_msgs = [r.message for r in report.results]
+        assert not any("audit-ghost" in m for m in all_msgs)
+
+    def test_agents_directory_is_scanned(self, tmp_path: Path):
+        """Files under agents/ ARE scanned and unresolved refs emit CRITICAL."""
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        (agents_dir / "host.md").write_text(
+            '---\nname: host\n---\n# Host\n\nsubagent_type: "missing-from-agents-dir"\n'
+        )
+
+        report = CrossReferenceValidationReport()
+        validate_subagent_type_matching(tmp_path, report, {"host"})
+
+        assert report.has_critical
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert any("missing-from-agents-dir" in m and RC_GHOST_DISPATCH_UNRESOLVED in m for m in critical_msgs)
