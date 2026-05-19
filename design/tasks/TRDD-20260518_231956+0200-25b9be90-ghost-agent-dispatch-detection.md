@@ -1,9 +1,9 @@
 ---
 trdd-id: 25b9be90-8088-4d17-b7f3-375223ef0de3
 title: Ghost-agent dispatch detection in Task() and subagent_type literals
-status: not-started
+status: completed
 created: 2026-05-18T23:19:56+0200
-updated: 2026-05-18T23:19:56+0200
+updated: 2026-05-19T08:52:26+0200
 ---
 
 # TRDD-25b9be90 — Ghost-agent dispatch detection in `Task()` / `subagent_type:` literals

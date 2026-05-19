@@ -5301,6 +5301,36 @@ def _format_no_plugin_found_hint(plugin_root: Path) -> str:
     return "\n".join(lines)
 
 
+def _run_xref_in_pipeline(plugin_root: Path, report: ValidationReport) -> None:
+    """Run cross-reference validation and merge findings into the main report.
+
+    Per TRDD-25b9be90, ghost-agent dispatch detection (RC-GHOST-DISPATCH-001
+    CRITICAL) lives in validate_xref.py. Wiring its findings into the main
+    `validate_plugin` pipeline makes them visible to `cpv-validate-plugin`
+    and every consumer of the main report.
+
+    Args:
+        plugin_root: Root path of the plugin being validated.
+        report: The main validation report to merge findings into.
+    """
+    try:
+        from validate_xref import validate_cross_references
+    except ImportError as e:
+        report.minor(f"Cross-reference validator unavailable: {e}")
+        return
+
+    try:
+        xref_report = validate_cross_references(plugin_root)
+    except Exception as e:  # noqa: BLE001 — defensive boundary
+        report.minor(f"Cross-reference validation failed: {e}")
+        return
+
+    # Merge results into the main report. Each ValidationResult is
+    # appended verbatim — severity and message strings are preserved.
+    for result in xref_report.results:
+        report.results.append(result)
+
+
 def main() -> int:
     """Main entry point.
 
@@ -5557,6 +5587,10 @@ def main() -> int:
     run_lint_engine(plugin_root, report, strict_missing_tools=True)
     validate_bin_executables(plugin_root, report)
     validate_skills(plugin_root, report, skip_platform_checks)
+    # TRDD-25b9be90 — cross-reference validation, including ghost-agent dispatch
+    # detection (RC-GHOST-DISPATCH-001 CRITICAL when Task() / subagent_type
+    # literals reference agents that don't exist).
+    _run_xref_in_pipeline(plugin_root, report)
     validate_rules(plugin_root, report)
     validate_output_styles(plugin_root, report)
     validate_readme(plugin_root, report)
