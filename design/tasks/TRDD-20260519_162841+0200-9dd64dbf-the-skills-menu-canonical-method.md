@@ -18,7 +18,7 @@ User request (verbatim, 2026-05-19):
 
 > I created a standardized method called `the-skills-menu` method, that
 > apply the paradigm to all agents and plugins. The menu is created by
-> this skill: `/Users/emanuelesabetta/Code/CLAUDE-PLUGIN-VALIDATION/docs_dev/the-skills-menu-create.md`.
+> this skill: `<repo-root>/docs_dev/the-skills-menu-create.md`.
 > Check it for errors and possible improvements, and integrate it into
 > the plugin (even if it is more universal, and would work for all
 > plugins)
@@ -32,8 +32,8 @@ and an exact mandated dynamic-loading instruction.
 
 ### Catalog skill renamed
 
-- `skills/skills-index/` → `skills/the-skills-menu/` (folder + SKILL.md
-  + `references/skills-catalog.md` carried over via `git mv`).
+- `skills/skills-index/` → `skills/the-skills-menu/` (folder, SKILL.md,
+  and `references/skills-catalog.md` carried over via `git mv`).
 - Frontmatter `name:` updated to `the-skills-menu`.
 - Body restructured to expose exactly two canonical sections:
   `## Standalone Skills` and `## Plugin Skills`.
