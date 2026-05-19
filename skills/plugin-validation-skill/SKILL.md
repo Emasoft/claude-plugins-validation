@@ -1,6 +1,6 @@
 ---
 name: plugin-validation-skill
-description: Validates Claude Code plugins for structural correctness, quality, and marketplace readiness. Use when validating, fixing, migrating, upgrading, or scaffolding a plugin. Loaded by plugin-validator, plugin-creator, plugin-fixer, plugin-diagnoser. Embeds canonical plugins-reference.md.
+description: Validates Claude Code plugins for structural correctness, quality, and marketplace readiness. Use when validating, fixing, migrating, upgrading, or scaffolding a plugin. Used dynamically via skills-index (TRDD-478d9687). Embeds canonical plugins-reference.md.
 tags: [validation, plugins, marketplace, hooks, skills, mcp, quality-assurance]
 user-invocable: false
 allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep, Write

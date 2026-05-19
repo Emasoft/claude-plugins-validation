@@ -1,6 +1,6 @@
 ---
 name: link-plugin-marketplace
-description: Link an existing plugin to an existing marketplace (local or GitHub source). Use when appending an existing plugin to a marketplace.json. Loaded by cpv-main-menu-agent.
+description: Link an existing plugin to an existing marketplace (local or GitHub source). Use when appending an existing plugin to a marketplace.json. Used dynamically via skills-index (TRDD-478d9687).
 when_to_use: When the cpv-main-menu user picks GitHub setup → Link plugin to marketplace, or any flow needs to append an existing plugin to a marketplace.json
 user-invocable: false
 allowed-tools: Bash(uv:*), Read, Glob

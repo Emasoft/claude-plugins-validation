@@ -2,7 +2,7 @@
 name: setup-github-marketplace
 description: >
   Use when creating a plugin marketplace or linking plugins to one.
-  Loaded by plugin-creator agent.
+  Used dynamically via skills-index (TRDD-478d9687).
 tags:
   - marketplace
   - github

@@ -117,14 +117,21 @@ class TestBatchFixProtocolSkill:
             "loaded by plugin-fixer + the slash command, not directly invoked)."
         )
 
-    def test_skill_listed_in_plugin_fixer_skills(self) -> None:
-        text = (REPO / "agents" / "plugin-fixer.md").read_text()
-        front_match = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
-        assert front_match is not None
-        meta = yaml.safe_load(front_match.group(1))
-        assert "batch-fix-protocol" in meta.get("skills", []), (
-            "plugin-fixer must declare batch-fix-protocol in its skills: list "
-            "so the skill is loaded when batch_shard mode kicks in."
+    def test_skill_reachable_from_plugin_fixer(self) -> None:
+        """v2.93.0 (TRDD-478d9687) removed per-agent preload lists in favour of
+        the universal skills-index. plugin-fixer no longer declares
+        batch-fix-protocol directly; instead it loads it on demand via the
+        Skill tool. The skill MUST appear in the skills-index catalog so the
+        agent knows it exists.
+        """
+        index_body = (REPO / "skills" / "skills-index" / "SKILL.md").read_text()
+        catalog_body = (
+            REPO / "skills" / "skills-index" / "references" / "skills-catalog.md"
+        ).read_text()
+        combined = index_body + "\n" + catalog_body
+        assert "batch-fix-protocol" in combined, (
+            "batch-fix-protocol must appear in the skills-index catalog so "
+            "plugin-fixer can pick it at runtime for batch_shard mode."
         )
 
     def test_skill_documents_three_json_shapes(self) -> None:

@@ -9,10 +9,12 @@ model: opus[1m]
 effort: high
 maxTurns: 50
 skills:
-  - semantic-validation-skill
+  - skills-index
 ---
 
 # Semantic Validator Agent
+
+**Dynamic skill loading (TRDD-478d9687):** You MUST load the skills you need at runtime via the `Skill` tool. Use ONLY the skills needed for the current task to save tokens. The pre-loaded `skills-index` skill is your catalog — consult it BEFORE invoking any other skill.
 
 You perform deep semantic analysis that automated scripts cannot do. This is the most expensive operation in the entire CPV plugin.
 

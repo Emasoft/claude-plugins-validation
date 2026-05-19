@@ -456,15 +456,27 @@ class TestSkillAgentArchitecture:
             for m in skill_invocation_re.finditer(body):
                 loaded.add(m.group(1))
 
-        # Path 4: other skills' bodies (cross-references between skills,
-        # e.g. a routing skill that fans out to sub-skills).
+        # Path 4: other skills' bodies AND their reference files
+        # (cross-references between skills, e.g. a routing skill that fans
+        # out to sub-skills, or a catalog skill whose references/ folder
+        # holds the per-skill invocation list — TRDD-478d9687 universal
+        # skills-index pattern).
         for sk_dir in SKILLS_DIR.iterdir():
-            sk_md = sk_dir / "SKILL.md" if sk_dir.is_dir() else None
-            if sk_md is None or not sk_md.exists():
+            if not sk_dir.is_dir():
                 continue
-            body = sk_md.read_text(encoding="utf-8")
-            for m in skill_invocation_re.finditer(body):
-                loaded.add(m.group(1))
+            # Scan SKILL.md
+            sk_md = sk_dir / "SKILL.md"
+            if sk_md.exists():
+                body = sk_md.read_text(encoding="utf-8")
+                for m in skill_invocation_re.finditer(body):
+                    loaded.add(m.group(1))
+            # Scan every reference .md file inside the skill (recurse one level)
+            ref_dir = sk_dir / "references"
+            if ref_dir.is_dir():
+                for ref_md in ref_dir.rglob("*.md"):
+                    body = ref_md.read_text(encoding="utf-8")
+                    for m in skill_invocation_re.finditer(body):
+                        loaded.add(m.group(1))
         # Every skill directory must appear in some loader's list/body.
         for skill_dir in SKILLS_DIR.iterdir():
             if not skill_dir.is_dir() or not (skill_dir / "SKILL.md").exists():

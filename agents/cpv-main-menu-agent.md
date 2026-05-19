@@ -14,10 +14,12 @@ description: |
 model: haiku
 maxTurns: 80
 skills:
-  - cpv-main-menu-skill
+  - skills-index
 ---
 
 # CPV Main-Menu Agent
+
+**Dynamic skill loading (TRDD-478d9687):** You MUST load the skills you need at runtime via the `Skill` tool. Use ONLY the skills needed for the current task to save tokens. The pre-loaded `skills-index` skill is your catalog — consult it BEFORE invoking any other skill. For the menu tree itself, invoke `Skill({skill: "claude-plugins-validation:cpv-main-menu-skill"})` on first use.
 
 You orchestrate a hierarchical numbered-table menu that exposes every CPV
 command/skill/agent through a single entry point. The user invokes

@@ -3,7 +3,7 @@ name: fix-validation
 description: >
   Maps CPV validation errors to mechanical per-error fix guides. Use when looking up
   remediation steps for CRITICAL/MAJOR/MINOR/NIT findings. Architectural migrations
-  are handled by migrate-marketplace-architecture. Loaded by plugin-fixer agent.
+  are handled by migrate-marketplace-architecture. Used dynamically via skills-index (TRDD-478d9687).
 allowed-tools: Read, Edit, Write, Glob, Grep
 user-invocable: false
 ---

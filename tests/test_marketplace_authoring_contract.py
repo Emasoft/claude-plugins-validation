@@ -119,21 +119,23 @@ def test_all_in_scope_agents_load_contract_skill() -> None:
     contract were deleted in v2.90.0; their entry points now go through
     cpv-main-menu, which dispatches the agents above.
     """
-    missing: list[str] = []
-    for label, path in IN_SCOPE_FILES:
-        assert path.exists(), f"{label} file missing at {path} — TRDD §6 in-scope file removed?"
-        fm = _load_frontmatter(path)
-        skills = fm.get("skills") or []
-        if not isinstance(skills, list):
-            raise AssertionError(f"{label}.skills frontmatter must be a list, got {type(skills).__name__}")
-        if "marketplace-authoring-contract" not in skills:
-            missing.append(label)
-    assert not missing, (
-        "These in-scope agents do NOT declare marketplace-authoring-contract "
-        f"in their `skills:` frontmatter: {missing}. TRDD-962fdc55 §6 (as "
-        "amended by TRDD-c50531c2 v2.90.0) requires the loader on all three. "
-        "Without the loader, the agent skips the proactive contract guidance "
-        "and reverts to the broken pre-Wave-7 state."
+    # TRDD-478d9687 (v2.93.0) — per-agent `skills:` preload lists removed;
+    # every agent now declares only `[skills-index]` and invokes specific
+    # skills on demand via the Skill tool. The marketplace-authoring-contract
+    # skill is reachable from any agent via the catalog. Pin that it's
+    # mentioned in the catalog rather than each agent's frontmatter.
+    index_paths = [
+        SKILLS_DIR / "skills-index" / "SKILL.md",
+        SKILLS_DIR / "skills-index" / "references" / "skills-catalog.md",
+    ]
+    combined = "\n".join(p.read_text(encoding="utf-8") for p in index_paths if p.exists())
+    assert "marketplace-authoring-contract" in combined, (
+        "marketplace-authoring-contract must appear in the skills-index "
+        "catalog so the three in-scope agents (plugin-creator, plugin-fixer, "
+        "marketplace-fixer) can invoke it on demand. TRDD-478d9687 (v2.93.0) "
+        "moved skill discovery from per-agent frontmatter to the universal "
+        "skills-index. The contract MUST still be accessible — just via the "
+        "catalog instead of preload lists."
     )
 
 

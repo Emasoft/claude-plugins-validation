@@ -2,8 +2,7 @@
 name: marketplace-authoring-contract
 description: >
   Proactive marketplace.json authoring contract for plugin-touching agents. Use
-  when drafting, modifying, or migrating any marketplace.json. Loaded by
-  plugin-creator, plugin-fixer, marketplace-fixer.
+  when drafting, modifying, or migrating any marketplace.json. Used dynamically via skills-index (TRDD-478d9687).
 when_to_use: >
   Use when drafting, modifying, or migrating any marketplace.json. Apply every
   sub-rule when emitting entries. Run the preflight before declaring done.

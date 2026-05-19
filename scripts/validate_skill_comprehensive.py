@@ -158,9 +158,15 @@ REQUIRED_SECTIONS = [
 # --- Description Quality Patterns (Nixtla Strict Mode) ---
 RE_DESCRIPTION_USE_WHEN = re.compile(r"[Uu]se\s+when\s+", re.IGNORECASE)
 RE_DESCRIPTION_TRIGGER_WITH = re.compile(r"[Tt]rigger\s+with\s+", re.IGNORECASE)
-# Agent-facing alternatives for non-user-invocable skills
+# Agent-facing alternatives for non-user-invocable skills.
+# The third pattern (RE_USED_VIA) is the v2.93.0 universal-skills-index
+# phrasing per TRDD-478d9687 — agents discover skills via the catalog rather
+# than via per-agent preload lists.
 RE_LOADED_BY = re.compile(r"[Ll]oaded\s+by\s+", re.IGNORECASE)
 RE_USED_BY = re.compile(r"[Uu]sed\s+by\s+", re.IGNORECASE)
+RE_USED_VIA_SKILLS_INDEX = re.compile(
+    r"(?:[Uu]sed|[Ll]oaded)\s+(?:dynamically\s+)?via\s+skills-index", re.IGNORECASE
+)
 RE_FIRST_PERSON = re.compile(r"\b(I\s+can|I\s+will|I\s+am|I\s+help)\b", re.IGNORECASE)
 RE_SECOND_PERSON = re.compile(r"\b(You\s+can|You\s+should|You\s+will|You\s+need)\b", re.IGNORECASE)
 
@@ -792,10 +798,16 @@ def validate_description_field(
                     "SKILL.md",
                     category="Description Quality",
                 )
-            if not RE_LOADED_BY.search(desc) and not RE_USED_BY.search(desc):
+            if (
+                not RE_LOADED_BY.search(desc)
+                and not RE_USED_BY.search(desc)
+                and not RE_USED_VIA_SKILLS_INDEX.search(desc)
+            ):
                 report.minor(
-                    "Non-user-invocable skill should include 'Loaded by <agent-name>' or 'Used by <agent-name>' "
-                    "so it's clear which agent consumes this skill.",
+                    "Non-user-invocable skill should include 'Loaded by <agent-name>', "
+                    "'Used by <agent-name>', or the v2.93.0 universal-catalog phrasing "
+                    "'Used dynamically via skills-index' / 'Loaded via skills-index' "
+                    "(TRDD-478d9687) so it's clear how agents discover this skill.",
                     "SKILL.md",
                     category="Description Quality",
                 )

@@ -1,6 +1,6 @@
 ---
 name: show-version
-description: Show the CPV management tools version. Use when reporting the installed CPV CLI version. Loaded by cpv-main-menu-agent.
+description: Show the CPV management tools version. Use when reporting the installed CPV CLI version. Used dynamically via skills-index (TRDD-478d9687).
 when_to_use: When the cpv-main-menu user picks Help → Show CPV version, or any flow needs to print the CPV management CLI version string
 user-invocable: false
 allowed-tools: Bash(uv:*)

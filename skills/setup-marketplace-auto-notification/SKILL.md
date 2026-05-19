@@ -3,7 +3,7 @@ name: setup-marketplace-auto-notification
 description: >
   Use when configuring a plugin to notify its marketplace after each release
   so Claude Code can auto-update users. Universal CI recipe for any
-  plugin/marketplace pair. Loaded by plugin-creator and marketplace-fixer agents.
+  plugin/marketplace pair. Used dynamically via skills-index (TRDD-478d9687).
 tags:
   - marketplace
   - notification
