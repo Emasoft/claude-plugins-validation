@@ -18,7 +18,7 @@ packages = ["scripts"]
 
 [project]
 name = "claude-plugins-validation"
-version = "2.95.0"
+version = "2.96.0"
 description = "Comprehensive validation suite for Claude Code plugins, marketplaces, hooks, skills, and MCP servers"
 readme = "README.md"
 requires-python = ">=3.12"
