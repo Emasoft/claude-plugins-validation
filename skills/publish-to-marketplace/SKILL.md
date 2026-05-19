@@ -2,7 +2,7 @@
 name: publish-to-marketplace
 description: >
   Use when publishing a plugin to a GitHub-hosted marketplace.
-  Used dynamically via skills-index (TRDD-478d9687).
+  Used dynamically via the-skills-menu (TRDD-478d9687).
 tags:
   - marketplace
   - publish

@@ -2,7 +2,7 @@
 name: setup-plugin-repo
 description: >
   Create and configure Claude Code plugin GitHub repositories with CI/CD, hooks, and marketplace notification.
-  Use when setting up a new plugin repo. Used dynamically via skills-index (TRDD-478d9687).
+  Use when setting up a new plugin repo. Used dynamically via the-skills-menu (TRDD-478d9687).
 tags:
   - plugin
   - github

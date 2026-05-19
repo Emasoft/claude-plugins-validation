@@ -3,7 +3,7 @@ name: migrate-marketplace-architecture
 description: >
   Convert a non-CPV marketplace between Layout A (hub-and-spoke), Layout B
   (nested-with-discipline), and Layout C (marketplace-in-plugin self-referential).
-  Use when migrating marketplace architecture. Used dynamically via skills-index (TRDD-478d9687).
+  Use when migrating marketplace architecture. Used dynamically via the-skills-menu (TRDD-478d9687).
 tags:
   - marketplace
   - migration

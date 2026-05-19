@@ -326,12 +326,26 @@ class TestSkillAgentArchitecture:
     """
 
     def test_all_skills_are_non_user_invocable(self):
-        """Every SKILL.md must have user-invocable: false."""
+        """Every SKILL.md must have user-invocable: false.
+
+        Exception: ``the-skills-menu-create`` is the universal migrator that
+        converts arbitrary plugins to the-skills-menu method. It MUST stay
+        user-invocable so authors can trigger /the-skills-menu-create against
+        a target plugin path or Git URL — the migration target is the OTHER
+        plugin, not this one.
+        """
+        user_invocable_exemptions = {"the-skills-menu-create"}
         for skill_md in SKILLS_DIR.glob("*/SKILL.md"):
             fm = _parse_frontmatter(skill_md)
             assert fm is not None, f"{skill_md} has no frontmatter"
+            skill_name = skill_md.parent.name
+            if skill_name in user_invocable_exemptions:
+                assert fm.get("user-invocable") is True, (
+                    f"{skill_name}: must be user-invocable: true (migration tool)"
+                )
+                continue
             assert fm.get("user-invocable") is False, (
-                f"{skill_md.parent.name}: user-invocable must be false, got {fm.get('user-invocable')!r}"
+                f"{skill_name}: user-invocable must be false, got {fm.get('user-invocable')!r}"
             )
 
     def test_all_agents_declare_skills_list(self):
@@ -460,7 +474,7 @@ class TestSkillAgentArchitecture:
         # (cross-references between skills, e.g. a routing skill that fans
         # out to sub-skills, or a catalog skill whose references/ folder
         # holds the per-skill invocation list — TRDD-478d9687 universal
-        # skills-index pattern).
+        # the-skills-menu pattern).
         for sk_dir in SKILLS_DIR.iterdir():
             if not sk_dir.is_dir():
                 continue

@@ -116,4 +116,5 @@ Skill({skill: "claude-plugins-validation:publish-to-marketplace"})
 Skill({skill: "claude-plugins-validation:plugin-management"})
 Skill({skill: "claude-plugins-validation:cpv-main-menu-skill"})
 Skill({skill: "claude-plugins-validation:cpv-format-menu"})
+Skill({skill: "claude-plugins-validation:the-skills-menu-create"})
 ```

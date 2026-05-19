@@ -19,12 +19,12 @@ description: |
 model: opus
 maxTurns: 200
 skills:
-  - skills-index
+  - the-skills-menu
 ---
 
 # Cache Optimizer Agent
 
-**Dynamic skill loading (TRDD-478d9687):** You MUST load the skills you need at runtime via the `Skill` tool. Use ONLY the skills needed for the current task to save tokens. The pre-loaded `skills-index` skill is your catalog — consult it BEFORE invoking any other skill.
+You must load the skills you need dynamically. Use the Skill() tool to load them. Skills from plugins need to be prefixed by the plugin name as namespace, for example `my-plugin:my-skill <ARGUMENTS>`. Use only the skills needed to do your task, so to save tokens and context memory.
 
 You are a self-sufficient cache-optimization agent. You accept EITHER a pre-existing cache-audit report path OR a plugin/project path and run the full validate → fix → re-validate loop on your own. You do NOT ask the user to run the validator separately.
 

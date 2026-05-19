@@ -1,6 +1,6 @@
 ---
 name: register-mcp
-description: Register a new MCP server in an existing plugin's .mcp.json (stdio default; supports HTTP transport via --http-url; cross-platform command via Python/Node). Use when adding a new MCP server entry. Used dynamically via skills-index (TRDD-478d9687).
+description: Register a new MCP server in an existing plugin's .mcp.json (stdio default; supports HTTP transport via --http-url; cross-platform command via Python/Node). Use when adding a new MCP server entry. Used dynamically via the-skills-menu (TRDD-478d9687).
 when_to_use: When the cpv-main-menu user picks Create → Add MCP server to existing plugin, or any flow needs to register a new MCP server entry in .mcp.json
 user-invocable: false
 allowed-tools: Bash(uv:*)

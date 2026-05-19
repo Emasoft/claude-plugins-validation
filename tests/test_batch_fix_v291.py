@@ -119,18 +119,18 @@ class TestBatchFixProtocolSkill:
 
     def test_skill_reachable_from_plugin_fixer(self) -> None:
         """v2.93.0 (TRDD-478d9687) removed per-agent preload lists in favour of
-        the universal skills-index. plugin-fixer no longer declares
+        the universal the-skills-menu. plugin-fixer no longer declares
         batch-fix-protocol directly; instead it loads it on demand via the
-        Skill tool. The skill MUST appear in the skills-index catalog so the
+        Skill tool. The skill MUST appear in the the-skills-menu catalog so the
         agent knows it exists.
         """
-        index_body = (REPO / "skills" / "skills-index" / "SKILL.md").read_text()
+        index_body = (REPO / "skills" / "the-skills-menu" / "SKILL.md").read_text()
         catalog_body = (
-            REPO / "skills" / "skills-index" / "references" / "skills-catalog.md"
+            REPO / "skills" / "the-skills-menu" / "references" / "skills-catalog.md"
         ).read_text()
         combined = index_body + "\n" + catalog_body
         assert "batch-fix-protocol" in combined, (
-            "batch-fix-protocol must appear in the skills-index catalog so "
+            "batch-fix-protocol must appear in the the-skills-menu catalog so "
             "plugin-fixer can pick it at runtime for batch_shard mode."
         )
 
