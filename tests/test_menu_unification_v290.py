@@ -134,16 +134,20 @@ def test_only_one_slash_command_remains() -> None:
     name when a plugin has 100+ findings, and forcing the user to
     re-navigate the menu would defeat that recommendation.
 
+    Per TRDD-9dd64dbf (v2.95.0) ``the-skills-menu-create.md`` was added
+    as a direct-entry universal migrator — it operates on OTHER plugins
+    so menu navigation inside CPV is a UX dead end.
+
     Any new direct-entry command requires its own TRDD documenting the
     exemption.
     """
-    allowed = {"cpv-main-menu.md", "cpv-batch-fix.md"}
+    allowed = {"cpv-main-menu.md", "cpv-batch-fix.md", "the-skills-menu-create.md"}
     md_files = list(COMMANDS_DIR.glob("*.md"))
     actual = {f.name for f in md_files}
     unexpected = actual - allowed
     missing = allowed - actual
     assert not unexpected and not missing, (
-        f"commands/ must contain exactly {sorted(allowed)} (TRDD-c50531c2 + TRDD-71e68ab5). "
+        f"commands/ must contain exactly {sorted(allowed)} (TRDD-c50531c2 + TRDD-71e68ab5 + TRDD-9dd64dbf). "
         f"Unexpected: {sorted(unexpected)}. Missing: {sorted(missing)}."
     )
     assert MAIN_MENU_CMD.is_file(), (

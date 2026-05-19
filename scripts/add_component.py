@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -102,6 +103,68 @@ user-invocable: true
 # ── Per-type writers ─────────────────────────────────────────────────────────
 
 
+def _register_in_the_skills_menu(plugin: Path, new_skill_name: str, description: str) -> bool:
+    """Append `new_skill_name` to the plugin's the-skills-menu catalog if it exists.
+
+    Per TRDD-9dd64dbf: when a plugin has adopted the-skills-menu method
+    (signalled by `skills/the-skills-menu/SKILL.md` existing), every new
+    operational skill MUST be listed in the catalog so agents can
+    discover it at runtime. Skip silently when the catalog is absent
+    (plugin hasn't adopted the method — also valid).
+
+    The new row is appended to the table immediately below
+    `## Plugin Skills`. The table-presence detection is forgiving — if
+    no table is found, a fresh one is created.
+
+    Returns True if the catalog was modified, False if no catalog exists
+    or the new skill is already listed.
+    """
+    catalog = plugin / "skills" / "the-skills-menu" / "SKILL.md"
+    if not catalog.is_file():
+        return False
+    # Never list the catalog itself or the migrator inside the catalog —
+    # recursive self-reference is meaningless.
+    if new_skill_name in ("the-skills-menu", "the-skills-menu-create"):
+        return False
+    content = catalog.read_text(encoding="utf-8")
+    # Already listed (case-insensitive substring match on the skill name)
+    # → idempotent no-op.
+    if new_skill_name.lower() in content.lower():
+        return False
+    short_desc = description.strip().splitlines()[0][:80] if description.strip() else "(describe the skill)"
+    new_row = f"| _ | _ | `{new_skill_name}` — {short_desc} |\n"
+    # Find the "## Plugin Skills" section and insert at the end of its
+    # first markdown table (or just after the section heading if no
+    # table exists yet).
+    plugin_skills_idx = content.find("## Plugin Skills")
+    if plugin_skills_idx < 0:
+        # Catalog exists but has no Plugin Skills section — bail.
+        return False
+    # Search for the next "## " heading (end of Plugin Skills section).
+    next_heading_idx = content.find("\n## ", plugin_skills_idx + 1)
+    if next_heading_idx < 0:
+        next_heading_idx = len(content)
+    section = content[plugin_skills_idx:next_heading_idx]
+    # Find the last "| ... |" table row in the section.
+    table_rows = [m for m in re.finditer(r"^\|[^\n]*\|\s*$", section, re.MULTILINE)]
+    if table_rows:
+        last_row_end_in_section = table_rows[-1].end()
+        insert_at = plugin_skills_idx + last_row_end_in_section
+        new_content = content[:insert_at] + "\n" + new_row.rstrip() + content[insert_at:]
+    else:
+        # No table in the section yet — append a fresh table with a header
+        # row and the new entry.
+        fresh_table = (
+            "\n\n| # | Domain | Skills |\n"
+            "|---|--------|--------|\n"
+            f"| 1 | (uncategorised) | `{new_skill_name}` — {short_desc} |\n"
+        )
+        insert_at = next_heading_idx
+        new_content = content[:insert_at] + fresh_table + content[insert_at:]
+    catalog.write_text(new_content, encoding="utf-8")
+    return True
+
+
 def add_skill(plugin: Path, name: str, description: str, *, force: bool) -> int:
     skill_dir = plugin / "skills" / name
     skill_md = skill_dir / "SKILL.md"
@@ -111,6 +174,10 @@ def add_skill(plugin: Path, name: str, description: str, *, force: bool) -> int:
     skill_dir.mkdir(parents=True, exist_ok=True)
     skill_md.write_text(_skill_template(name, description), encoding="utf-8")
     print(f"  [add-skill] created {skill_md.relative_to(plugin)}")
+    # TRDD-9dd64dbf: if the plugin uses the-skills-menu method, also
+    # register the new skill in the catalog so agents can discover it.
+    if _register_in_the_skills_menu(plugin, name, description):
+        print(f"  [add-skill] also registered '{name}' in skills/the-skills-menu/SKILL.md catalog")
     return 0
 
 

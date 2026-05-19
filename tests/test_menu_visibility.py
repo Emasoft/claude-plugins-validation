@@ -68,13 +68,17 @@ def test_v290_only_documented_slash_commands_remain() -> None:
     direct-entry power-user command — the doctor recommends it by exact
     name when a plugin has 100+ findings.
 
+    Per TRDD-9dd64dbf (v2.95.0) ``/the-skills-menu-create`` was added
+    as a direct-entry universal migrator — it operates on OTHER plugins
+    so menu navigation inside CPV would be a UX dead end.
+
     Any new direct-entry command requires its own TRDD.
     """
-    allowed = {"cpv-main-menu.md", "cpv-batch-fix.md"}
+    allowed = {"cpv-main-menu.md", "cpv-batch-fix.md", "the-skills-menu-create.md"}
     md_files = {p.name for p in COMMANDS_DIR.glob("*.md")}
     unexpected = md_files - allowed
     missing = allowed - md_files
     assert not unexpected and not missing, (
-        f"commands/ must contain exactly {sorted(allowed)} (v2.90.0 + v2.91.0). "
+        f"commands/ must contain exactly {sorted(allowed)} (v2.90.0 + v2.91.0 + v2.95.0). "
         f"Unexpected: {sorted(unexpected)}. Missing: {sorted(missing)}."
     )

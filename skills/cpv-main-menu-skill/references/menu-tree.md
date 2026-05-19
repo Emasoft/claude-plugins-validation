@@ -868,22 +868,23 @@ Type a number to choose:
 ### 3.6 Create sub-menu
 
 ```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Scaffold                                        ┃ What it does                                                                               ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ New plugin (latest pipeline standard)           │ Fresh plugin repo with idempotent publish.py + cpv_lint_engine + pathlib + sanitized inputs│
-│ 2 │ New marketplace                                 │ Fresh marketplace repo from scratch (Layout A/B/C — interactive)                           │
-│ 3 │ New skill (in existing plugin)                  │ Add skills/<name>/SKILL.md — valid frontmatter + auto-refresh README                       │
-│ 4 │ New agent (in existing plugin)                  │ Add agents/<name>.md — valid frontmatter + tools whitelist + auto-refresh README           │
-│ 5 │ New slash command (in existing plugin)          │ Add commands/<name>.md — valid frontmatter + auto-refresh README                           │
-│ 6 │ New hook (in existing plugin)                   │ Append hook entry to hooks/hooks.json — cross-platform-aware (bash-isms rejected)          │
-│ 7 │ New MCP server (in existing plugin)             │ Register server in .mcp.json — stdio default, HTTP via flag, server-name uniqueness check  │
-│ 8 │ Pack components into a plugin (multi-select)    │ Pack a folder of components into a plugin (skill/agent/cmd/hook/mcp/lsp/monitor/style)     │
-│ 9 │ Add dependencies (existing plugin)              │ --add NAME[@MKT[@VER]] explicit OR --from PATH-OR-URL copy from another plugin             │
-│ B │ Back                                            │ Go back to the top-level menu                                                              │
-│ A │ Ask the agent                                   │ Let the agent suggest the best next action right now                                       │
-│ 0 │ Cancel / Exit                                   │ Stop without doing anything                                                                │
-└───┴─────────────────────────────────────────────────┴────────────────────────────────────────────────────────────────────────────────────────────┘
+┏━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ #  ┃ Scaffold                                        ┃ What it does                                                                               ┃
+┡━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 1  │ New plugin (latest pipeline standard)           │ Fresh plugin repo with idempotent publish.py + cpv_lint_engine + pathlib + sanitized inputs│
+│ 2  │ New marketplace                                 │ Fresh marketplace repo from scratch (Layout A/B/C — interactive)                           │
+│ 3  │ New skill (in existing plugin)                  │ Add skills/<name>/SKILL.md — valid frontmatter + auto-refresh README                       │
+│ 4  │ New agent (in existing plugin)                  │ Add agents/<name>.md — valid frontmatter + tools whitelist + auto-refresh README           │
+│ 5  │ New slash command (in existing plugin)          │ Add commands/<name>.md — valid frontmatter + auto-refresh README                           │
+│ 6  │ New hook (in existing plugin)                   │ Append hook entry to hooks/hooks.json — cross-platform-aware (bash-isms rejected)          │
+│ 7  │ New MCP server (in existing plugin)             │ Register server in .mcp.json — stdio default, HTTP via flag, server-name uniqueness check  │
+│ 8  │ Pack components into a plugin (multi-select)    │ Pack a folder of components into a plugin (skill/agent/cmd/hook/mcp/lsp/monitor/style)     │
+│ 9  │ Add dependencies (existing plugin)              │ --add NAME[@MKT[@VER]] explicit OR --from PATH-OR-URL copy from another plugin             │
+│ 10 │ Implement the-skills-menu method (existing)     │ Decouple skills from agents — agents preload one catalog, dynamic skill loading via Skill()│
+│ B  │ Back                                            │ Go back to the top-level menu                                                              │
+│ A  │ Ask the agent                                   │ Let the agent suggest the best next action right now                                       │
+│ 0  │ Cancel / Exit                                   │ Stop without doing anything                                                                │
+└────┴─────────────────────────────────────────────────┴────────────────────────────────────────────────────────────────────────────────────────────┘
 Type a number to choose:
 ```
 
@@ -1078,6 +1079,34 @@ Adds plugin dependencies to a target plugin's `plugin.json::dependencies` array 
   ```
 
 - **post-execution**: auto-run `validate_plugin --strict` on the target. If unversioned bare-string deps emit `WARNING [RC-DEP-VERSION-001]`, surface them and offer to convert to pinned via a follow-up `--add` invocation.
+
+#### 3.6.10 Implement the-skills-menu method (existing plugin)
+
+Decouple skills from agents in any Claude Code plugin. After this leaf
+runs, every agent in the target plugin declares only `skills: [the-skills-menu]`
+and picks operational skills dynamically via the `Skill()` tool at runtime.
+Works on ANY plugin (CPV, other people's plugins, your own).
+
+- **path-source**: per §3.0a, but extended — accepts a local plugin
+  path, a Git URL (`https://github.com/<owner>/<repo>.git` or
+  `<owner>/<repo>` slug), a "plugin-in-marketplace" expression (`from
+  the X in github.com/<owner>/<marketplace>`), or a bare plugin name
+  to search.
+- **arg-prompts** (in order):
+  1. `Target plugin (path, Git URL, owner/repo, or plugin name)?`
+  2. `Full cleanup? Rewrite agent-coupled skill bodies to be agent-agnostic? (y/N — risky for skills with deliberate caller contracts)`
+- **execution**:
+
+  ```text
+  Skill({skill: "claude-plugins-validation:the-skills-menu-create", args: "<target> [--full-cleanup]"})
+  ```
+
+- **post-execution**: forward the migration report verbatim. Then
+  offer §3.99 ("do something else / done").
+- **see also**: `commands/the-skills-menu-create.md` exposes the same
+  flow as the `/the-skills-menu-create` slash command for users who
+  prefer typing the command directly. The bundled
+  `the-skills-menu-create` skill is the migration source of truth.
 
 ---
 

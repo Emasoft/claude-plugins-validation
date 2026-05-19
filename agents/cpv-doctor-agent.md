@@ -10,7 +10,7 @@ description: |
 
   Per TRDD-81e7fa34 (v2.89.3), the doctor is NOT the validator. It runs
   BOTH the schema-correctness validator (validate_plugin.py et al.) AND
-  eight deep design-correctness recipes (D1..D8): shape detection,
+  nine deep design-correctness recipes (D1..D9): shape detection,
   command coverage audit, skill invocability audit, design-conflict
   scan, manifest/marketplace consistency, canonical-pipeline presence,
   README/CONTRIBUTING coverage, cross-reference integrity. Findings
@@ -38,7 +38,7 @@ Work agent for the doctor mode. The cpv-main-menu dispatcher (`commands/cpv-main
 
 The doctor checks **design correctness** — the gap between "passes schema" and "is well-designed plugin that a user can actually use". The validator says "your skill has a valid name field"; the doctor says "your skill has a valid name field BUT no command invokes it AND no agent references it AND it's marked `user-invocable: false`, so nobody can actually reach it — it's dead code". The validator says "your plugin.json declares version 2.89.0"; the doctor says "your plugin.json says 2.89.0 BUT the latest git tag is v2.88.0 AND CHANGELOG.md's latest section is 2.87.1 — you have manifest drift".
 
-The doctor runs the validator FIRST (schema is a prerequisite), then appends the eight D1..D8 deep-diagnostic recipes to the same report.
+The doctor runs the validator FIRST (schema is a prerequisite), then appends the nine D1..D9 deep-diagnostic recipes to the same report.
 
 ## Input handling — main-session dispatch
 
@@ -89,7 +89,7 @@ The doctor's output combines findings from **two sources** into one report:
 | Source | What it produces |
 |---|---|
 | **Validator pass** (run first) | Schema-correctness findings keyed by RC-NN ids — same as `/cpv-validate-plugin`. Run via `validate_plugin.py`, `validate_skill.py`, `validate_security.py`, `validate_cache.py`, etc., depending on `mode`. |
-| **D1..D8 deep-diagnostic pass** (run second) | Design-correctness findings keyed by DOC-NN ids. Appended to the same report under a `## Design-correctness findings` section. |
+| **D1..D9 deep-diagnostic pass** (run second) | Design-correctness findings keyed by DOC-NN ids. Appended to the same report under a `## Design-correctness findings` section. |
 
 ### Validator pass — invoke the matching validator script
 
@@ -106,7 +106,7 @@ Based on `mode`, run the schema validators with `PLUGIN_SKIP_GITHUB_INTEGRITY=1`
 | `cache_cleanup`, `install_scanners`, `auto_fix_orphans`, `quick_health_check`, `dependency_tree`, `add_dependencies` | bypass the schema-validator pass; these modes go straight to the matching `manage_doctor.py` or `add_dependencies.py` operation |
 | `ask_doctor_freeform`, `ask_about_findings` | bypass; free-form dialogue mode |
 
-### D1..D8 deep-diagnostic recipes
+### D1..D9 deep-diagnostic recipes
 
 Run these for every mode that targets a plugin / marketplace / skill folder (`single_plugin`, `current_folder`, `github_plugin`, `scan_all_installed`, `local_marketplace`, `github_marketplace`, `local_scope`, `project_scope`, `user_scope`, `single_skill`). Skip them for `cache_cleanup` / `install_scanners` / `auto_fix_orphans` / `quick_health_check` / `dependency_tree` / `add_dependencies` (those modes have their own operational outputs, not diagnostic reports).
 
@@ -192,9 +192,37 @@ For `CONTRIBUTING.md` (only if file exists — optional):
 - For every `subagent_type: <name>` referenced in any agent's prose (via the Agent tool dispatch block), the named agent must exist → `DOC-082 [MAJOR] agent <a> references subagent_type: <name> but no such agent ships`.
 - For every `skill: <name>` referenced in any agent's `skills:` list, the skill must exist → `DOC-083 [MAJOR] agent <a>'s skills: list names <name> but skills/<name>/SKILL.md does not exist`.
 
+#### D9 — the-skills-menu method adoption
+
+Detect plugins that have NOT yet adopted the-skills-menu method
+(TRDD-9dd64dbf). The method decouples skills from agents — agents
+declare only `skills: [the-skills-menu]` and load operational skills
+dynamically via the `Skill()` tool. Adoption is NOT mandatory, so
+findings here are advisory (NIT severity).
+
+- If the plugin has at least one agent AND at least one operational
+  skill AND no `skills/the-skills-menu/SKILL.md` exists →
+  `DOC-090 [NIT] plugin has not adopted the-skills-menu method (no skills/the-skills-menu/SKILL.md). Consider running /the-skills-menu-create to decouple skills from agents.`.
+- For every agent whose frontmatter `skills:` list contains MORE than
+  one entry → `DOC-091 [NIT] agent <name>'s skills: list has N entries (the-skills-menu method would reduce this to 1).`.
+- For every agent whose frontmatter `skills:` list contains exactly
+  one entry that IS `the-skills-menu` BUT whose body lacks the
+  mandatory dynamic-loading instruction (substring match: "Use the
+  Skill() tool to load them") →
+  `DOC-092 [MINOR] agent <name> preloads the-skills-menu but its body is missing the mandatory dynamic-loading instruction.`.
+- For every operational skill (not `the-skills-menu` itself) whose
+  description still mentions a specific caller agent ("Loaded by X
+  agent", "Used by the doctor agent", etc.) but the plugin HAS
+  adopted the-skills-menu method →
+  `DOC-093 [NIT] skill <name> description names a specific caller agent. Under the-skills-menu method, any agent can invoke any skill; rewrite the description to be agent-agnostic.`.
+
+When D9 produces findings, the post-scan menu should offer a
+"Migrate to the-skills-menu method" follow-up that dispatches the
+`the-skills-menu-create` skill on the target plugin path.
+
 ## Output format
 
-Write all findings (validator + D1..D8) to ONE report file:
+Write all findings (validator + D1..D9) to ONE report file:
 
 ```text
 $MAIN_ROOT/reports/plugin-diagnoser/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md
@@ -226,13 +254,14 @@ Mode: <mode>
 | D6 Canonical pipeline | … | … | … | … | … | … |
 | D7 README/CONTRIBUTING | … | … | … | … | … | … |
 | D8 Cross-ref integrity | … | … | … | … | … | … |
+| D9 the-skills-menu adoption | … | … | … | … | … | … |
 | **TOTAL** | … | … | … | … | … | … |
 
 ## Schema-correctness findings (validator)
 
 <per-finding rows: severity / RC-id / file / line / message>
 
-## Design-correctness findings (D1..D8)
+## Design-correctness findings (D1..D9)
 
 <per-finding rows: severity / DOC-id / file / line / message>
 
@@ -310,4 +339,4 @@ For these modes, engage a multi-turn dialogue:
 
 Per TRDD-bcbceeed (v2.89.0): the doctor's first-contact menu lives in the slash command body, not in a separate menu-subagent — only the main session can dispatch subagents.
 
-Per TRDD-81e7fa34 (v2.89.3): the doctor's job extends well beyond the schema validators. The eight D1..D8 recipes are the design-correctness pass that distinguishes the doctor from `/cpv-validate-plugin`. Findings are reported in a per-recipe breakdown table rendered by `scripts/format_menu.py breakdown`.
+Per TRDD-81e7fa34 (v2.89.3): the doctor's job extends well beyond the schema validators. The nine D1..D9 recipes are the design-correctness pass that distinguishes the doctor from `/cpv-validate-plugin`. Findings are reported in a per-recipe breakdown table rendered by `scripts/format_menu.py breakdown`.

@@ -1050,6 +1050,81 @@ This project is licensed under the {p.license} License. See [LICENSE](LICENSE) f
 """
 
 
+def gen_the_skills_menu_skill(p: PluginParams) -> str:
+    """Generate skills/the-skills-menu/SKILL.md — the per-plugin skill catalog.
+
+    Newly-scaffolded plugins ship with the-skills-menu method out of
+    the box (TRDD-9dd64dbf). The catalog starts empty (no plugin skills
+    yet) and grows as the plugin author adds skills. Agents in the new
+    plugin should declare `skills: [the-skills-menu]` and load
+    operational skills dynamically via the Skill() tool.
+    """
+    return f"""---
+name: the-skills-menu
+description: "Dynamic skill menu for the {p.name} plugin. Teaches agents which skills are available, when to use them, and how to load them with the Skill() tool. Use when an agent needs to pick a downstream skill at runtime. Used by every {p.name} agent via the-skills-menu method (TRDD-9dd64dbf)."
+user-invocable: false
+allowed-tools: Read
+---
+
+# the-skills-menu — universal {p.name} skill catalog
+
+## Overview
+
+This skill is the **catalog** every {p.name} agent consults to
+discover operational skills at runtime. The agent preloads only this
+catalog in its `skills:` frontmatter; everything else loads on demand
+via the `Skill()` tool.
+
+## Prerequisites
+
+- The calling agent has `Skill` in its `tools:` list.
+- A clear task statement so you can pick the right skill.
+
+## Instructions
+
+Follow these steps in order:
+
+1. Identify the task domain.
+2. Skim the **Plugin Skills** section below and pick a candidate.
+3. Invoke the chosen skill via `Skill({{skill: "{p.name}:<name>"}})`
+   (use the plugin namespace prefix — cross-plugin references require it).
+4. Follow the loaded skill's own checklist; do NOT load another skill
+   until the first one returns.
+5. Surface the downstream skill's summary to the caller.
+
+## Output
+
+This catalog returns nothing itself — it documents invocations for
+OTHER skills. The chosen downstream skill produces the actual output.
+
+## Standalone Skills
+
+No standalone (user/local/project-scope) skills are tracked by this
+plugin's catalog yet. Add entries here as the plugin starts to
+reference standalone skills outside its own namespace.
+
+## Plugin Skills
+
+This plugin has no operational skills yet. As you add skills to
+`skills/<name>/SKILL.md`, list them here so agents can discover them:
+
+| # | Domain | Skills |
+|---|--------|--------|
+| 1 | (add when you scaffold your first skill) | (e.g. `my-skill`, `other-skill`) |
+
+All entries above are invoked as
+`Skill({{skill: "{p.name}:<name>"}})`.
+
+## Resources
+
+- [the-skills-menu-create](../the-skills-menu-create/SKILL.md) —
+  the migrator skill in the CPV plugin that can regenerate this
+  catalog from the plugin's current skill inventory at any time
+  (not bundled in this plugin; install
+  `claude-plugins-validation` to access it).
+"""
+
+
 def gen_license_mit(p: PluginParams) -> str:
     """Generate MIT license text."""
     return f"""MIT License
@@ -3427,6 +3502,11 @@ def generate_all_files(p: PluginParams) -> list[tuple[str, str, bool]]:
             ("LICENSE", gen_license_mit(p), False),
             # Changelog config
             ("cliff.toml", gen_cliff_toml(p), False),
+            # the-skills-menu method (TRDD-9dd64dbf): every newly-scaffolded
+            # plugin ships with the catalog skill in place so agents can
+            # adopt the dynamic-loading pattern from day 1. Empty until the
+            # author adds operational skills.
+            ("skills/the-skills-menu/SKILL.md", gen_the_skills_menu_skill(p), False),
         ]
     )
     # Python-specific scripts + CI/CD — only emitted for python language for now.

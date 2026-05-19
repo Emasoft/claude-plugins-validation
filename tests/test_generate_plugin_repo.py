@@ -306,6 +306,24 @@ class TestFullGeneration:
         assert manifest["name"] == "validation-check"
         assert manifest["version"] == "1.2.3"
 
+    def test_the_skills_menu_catalog_scaffolded(self, tmp_path):
+        """TRDD-9dd64dbf: every new plugin ships with skills/the-skills-menu/SKILL.md."""
+        target = tmp_path / "my-plugin"
+        target.mkdir()
+        p = _default_params(name="my-fresh-plugin")
+        generate_plugin_repo(target, p)
+        catalog = target / "skills" / "the-skills-menu" / "SKILL.md"
+        assert catalog.exists(), "Newly-scaffolded plugin must include the-skills-menu/SKILL.md (TRDD-9dd64dbf)"
+        body = catalog.read_text(encoding="utf-8")
+        # Plugin's namespace appears in the catalog description + instructions
+        assert "my-fresh-plugin" in body, (
+            "Catalog must reference the new plugin's name so cross-plugin "
+            "invocations use the right namespace prefix"
+        )
+        assert "## Plugin Skills" in body
+        assert "## Standalone Skills" in body
+        assert "user-invocable: false" in body
+
 
 # =============================================================================
 # Group 4: Dry run (2 tests)
