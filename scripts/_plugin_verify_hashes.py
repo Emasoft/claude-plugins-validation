@@ -43,8 +43,9 @@ process).
 Bypass for development:
     Set `PLUGIN_SKIP_GITHUB_INTEGRITY=1` in the environment to skip
     the GitHub fetch (still verifies local manifest if present).
-    The legacy `CPV_SKIP_GITHUB_INTEGRITY=1` is honoured for one
-    release with a DeprecationWarning printed once per process.
+    The legacy `CPV_SKIP_GITHUB_INTEGRITY=1` is still honoured for
+    backward compatibility (a DeprecationWarning is printed once per
+    process). The legacy alias will be removed in a future major release.
 """
 
 from __future__ import annotations
@@ -222,10 +223,11 @@ def _fetch_github_manifest(
 def _read_skip_env_var() -> bool:
     """Return True if either skip env var is truthy.
 
-    Per TRDD-bbff5bc5 §6.1, prefer the new name `PLUGIN_SKIP_GITHUB_INTEGRITY`
-    and fall back to the legacy `CPV_SKIP_GITHUB_INTEGRITY` with a one-line
-    DeprecationWarning per process. Both honoured for one release; legacy
-    removed in v2.53.0.
+    Per TRDD-bbff5bc5 §6.1, the canonical name is
+    `PLUGIN_SKIP_GITHUB_INTEGRITY`. The legacy `CPV_SKIP_GITHUB_INTEGRITY`
+    is still honoured with a one-line DeprecationWarning per process for
+    backward compatibility. The original removal target (v2.53.0) was not
+    enforced; removal is now deferred until a future major bump.
     """
     truthy = ("1", "true", "yes", "on")
     new_val = os.environ.get("PLUGIN_SKIP_GITHUB_INTEGRITY", "").strip().lower()
@@ -239,7 +241,8 @@ def _read_skip_env_var() -> bool:
             print(
                 "[CPV integrity] DEPRECATED: env var 'CPV_SKIP_GITHUB_INTEGRITY' "
                 "is renamed to 'PLUGIN_SKIP_GITHUB_INTEGRITY' (TRDD-bbff5bc5). "
-                "Old name removed in v2.53.0.",
+                "The legacy name is still honoured but will be removed in a "
+                "future major release — please update.",
                 file=sys.stderr,
             )
         return True
