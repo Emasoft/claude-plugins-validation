@@ -122,21 +122,32 @@ def _parse_frontmatter(path: Path) -> dict | None:
 
 
 def test_only_one_slash_command_remains() -> None:
-    """commands/ MUST contain exactly ONE .md file: cpv-main-menu.md.
+    """commands/ MUST contain only the documented entry points.
 
     Per TRDD-c50531c2 the 23 user-facing slash commands and the 14
     component-creation commands were either deleted or converted to
-    `user-invocable: false` skills. Every other workflow is now
-    discovered and dispatched through /cpv-main-menu.
+    ``user-invocable: false`` skills. ``cpv-main-menu.md`` is the
+    discovery surface for routine work.
+
+    Per TRDD-71e68ab5 (v2.91.0) ``cpv-batch-fix.md`` was added as a
+    direct-entry power-user command — the doctor recommends it by exact
+    name when a plugin has 100+ findings, and forcing the user to
+    re-navigate the menu would defeat that recommendation.
+
+    Any new direct-entry command requires its own TRDD documenting the
+    exemption.
     """
+    allowed = {"cpv-main-menu.md", "cpv-batch-fix.md"}
     md_files = list(COMMANDS_DIR.glob("*.md"))
-    assert len(md_files) == 1, (
-        f"Expected exactly 1 command per TRDD-c50531c2, found "
-        f"{len(md_files)}: {sorted(f.name for f in md_files)}"
+    actual = {f.name for f in md_files}
+    unexpected = actual - allowed
+    missing = allowed - actual
+    assert not unexpected and not missing, (
+        f"commands/ must contain exactly {sorted(allowed)} (TRDD-c50531c2 + TRDD-71e68ab5). "
+        f"Unexpected: {sorted(unexpected)}. Missing: {sorted(missing)}."
     )
     assert MAIN_MENU_CMD.is_file(), (
-        f"The single remaining command MUST be cpv-main-menu.md at "
-        f"{MAIN_MENU_CMD}. Found: {[f.name for f in md_files]}"
+        f"cpv-main-menu.md MUST exist at {MAIN_MENU_CMD}. Found: {sorted(actual)}"
     )
 
 

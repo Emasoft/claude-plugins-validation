@@ -2,6 +2,18 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [2.91.0] - 2026-05-19
+
+### Features
+
+- **batch-fix:** TRDD-71e68ab5 parallel-shard fix protocol for 300+-finding plugins. New `/cpv-batch-fix` slash command + `scripts/cpv_batch_planner.py` (zero-LLM-cost shard planner) + `scripts/cpv_batch_aggregator.py` (zero-LLM-cost result merger) + `plugin-fixer` `batch_shard` mode + `batch-fix-protocol` skill. Main session dispatches N `plugin-fixer` agents in parallel, each owning a ~30-finding shard with a fresh 200K context. Solves the silent mid-task exits caused by single-agent context exhaustion on large plugins.
+
+### Bug Fixes
+
+- **plugin-fixer:** Remove stale "parallel subagents are allowed" claim at line 626 — subagents cannot spawn subagents per the Anthropic spec. Replace with a pointer to `/cpv-batch-fix` for very large batches.
+- **cpv-doctor-agent:** Bump `maxTurns` 30 → 100 so the doctor has enough budget for validator + D1..D8 + handoff. Add a "Big-plugin handoff" recipe so the doctor recommends `/cpv-batch-fix` when findings > 100.
+- **fixer-loops:** Remove ALL hardcoded iteration/time caps in `plugin-fixer`, `marketplace-fixer`, and `iterative-fix-loop.md`. The only termination check is "finding set is empty" or "finding set repeats" (oscillation). Big plugins legitimately need 20+ iterations to converge; magic numbers were artificially killing legitimate work.
+
 ## [2.90.3] - 2026-05-18
 
 ### Bug Fixes

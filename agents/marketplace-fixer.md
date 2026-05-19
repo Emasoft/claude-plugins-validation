@@ -100,7 +100,7 @@ CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
   marketplace <marketplace-root> --strict --report <tmp.md>
 ```
 
-Max 5 iterations. Safety rails identical: identical-finding-set guard, never lower severity, never suppress rules, each fix batch commits. WARNING evaluation is especially important for marketplaces — many marketplace warnings (missing `update-submodules.yml`, PAT not wired across linked plugins, version mismatch between marketplace.json and plugin.json) are publish-blockers even though they render as WARNING.
+NO hardcoded iteration cap. Iterate until the finding set is empty OR oscillates (iteration N produces the same finding set as N-1). The identical-finding-set guard is the only termination check. Other safety rails: never lower severity, never suppress rules, each fix batch commits. WARNING evaluation is especially important for marketplaces — many marketplace warnings (missing `update-submodules.yml`, PAT not wired across linked plugins, version mismatch between marketplace.json and plugin.json) are publish-blockers even though they render as WARNING.
 
 ## Workflow Routing
 
@@ -187,7 +187,7 @@ When a finding involves Layout C (`.claude-plugin/marketplace.json` AND `plugin.
 - **Architectural findings are non-mechanical** — they require full user interrogation via `migrate-marketplace-architecture`.
 - When running CPV scripts, always use `uv run --with pyyaml python` prefix.
 - **ALWAYS write fix log** to `$MAIN_ROOT/reports/marketplace-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` with iteration-by-iteration history + final advisory list. Return only a one-line summary to the caller.
-- **Loop safety**: max 5 iterations. Stop + escalate if iteration N produces the same finding set as N-1, or if 5 is reached. Never lower severity, add ignore rules, or patch the validator to converge.
+- **Loop safety — oscillation, not iteration count**: Stop + escalate if iteration N produces the **same finding set** as iteration N-1. There is NO hardcoded iteration cap — bigger marketplaces legitimately need more iterations. Never lower severity, add ignore rules, or patch the validator to converge.
 
 ## CRITICAL: Setting the MARKETPLACE_PAT secret
 

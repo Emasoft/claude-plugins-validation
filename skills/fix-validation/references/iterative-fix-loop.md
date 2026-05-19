@@ -82,9 +82,9 @@ The old contract ("fixer never validates") is superseded by this one: the fixer 
 
 ## Termination and safety
 
-- **Max iterations: 5 by default.** Most plugins converge in 1-2 iterations; 3 is rare; 5 signals either a bug in the fix guide or a cascading-rule problem that needs human review.
-- **Per-iteration timeout: 300 seconds.** If a single validate-fix pass runs longer than 5 minutes, abort and ask the user.
-- **Identical-finding-set guard:** if iteration N produces the exact same finding set as iteration N-1, there is a fix that is not landing (wrong file, wrong offset, dry-run flag, etc.). Stop and surface the finding to the user — do not keep looping.
+- **NO hardcoded iteration cap.** Most small plugins converge in 1-2 iterations, but plugins with hundreds of findings legitimately need 20+ iterations. Let the loop run until convergence (empty finding set) or oscillation (next bullet). The agent decides when to stop — not a magic number.
+- **NO hardcoded per-iteration timeout.** Some fixes (e.g. running `gh run watch` on a tag) legitimately take many minutes. Use judgement: if a single iteration runs absurdly long with no progress, surface that to the user with the partial state — but do not let an arbitrary `300s` ceiling kill a legitimate long-running step.
+- **Identical-finding-set guard (THE termination check):** if iteration N produces the exact same finding set as iteration N-1, there is a fix that is not landing (wrong file, wrong offset, dry-run flag, etc.). Stop and surface the finding to the user — do not keep looping. **This is the only stop condition besides "converged to zero".**
 - **Never disable/suppress rules to converge.** The goal is a genuinely clean report. Lowering severity, adding ignores, or patching the validator to skip a rule is never a valid fix.
 - **Each fix batch commits** (or at minimum stages) changes, so `git status` + `git diff` stays inspectable between iterations. If the fixer crashes mid-loop, the in-progress fixes are not lost.
 
