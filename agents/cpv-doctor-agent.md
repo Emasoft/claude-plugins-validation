@@ -262,7 +262,9 @@ When the orchestrator re-dispatches with `mode: fix_at_severity` / `mode: fix_in
 
 ## Big-plugin handoff — when findings exceed ~100
 
-If your scan finds more than ~100 actionable findings (CRITICAL + MAJOR + MINOR combined), the single-agent fix loop will NOT fit in one opus 200K context window. Instead of routing to `plugin-fixer`, return a SPECIAL one-line summary that tells the orchestrator to recommend `/cpv-batch-fix` to the user:
+If your scan finds many actionable findings, the single-agent fix loop may not fit in `plugin-fixer`'s context window — the size of that window depends on which model `plugin-fixer` is configured to use (see its `model:` frontmatter: bare `opus` / `sonnet` default to 200K tokens, the `opus[1m]` / `sonnet[1m]` variants give 1M tokens, future models may differ). A practical rule of thumb: model quality degrades noticeably above ~50% context utilisation, so the safe ceiling is roughly **(model_context_window / 2) / 3-5K-tokens-per-finding**. For the default opus 200K, that's ~20-30 findings before risk; for opus[1m] / sonnet[1m] it's ~100-150.
+
+Instead of guessing, **when findings exceed ~100 (CRITICAL + MAJOR + MINOR combined) and `plugin-fixer.model` is the bare `opus` / `sonnet` variant**, return a SPECIAL one-line summary that tells the orchestrator to recommend `/cpv-batch-fix` to the user:
 
 ```text
 Findings: <C> CRITICAL, <M> MAJOR, <n> MINOR, <t> NIT, <w> WARNING — INVALID (report: <abs-path>) — recommend-batch-fix
@@ -270,7 +272,7 @@ Findings: <C> CRITICAL, <M> MAJOR, <n> MINOR, <t> NIT, <w> WARNING — INVALID (
 
 The trailing `— recommend-batch-fix` token tells the orchestrator to print, in the post-scan menu, an extra row pointing the user at `/cpv-batch-fix <plugin-path>`. The slash command will run `scripts/cpv_batch_planner.py` to slice the findings into shards of ~30 and dispatch N parallel `plugin-fixer` agents from the main session. See `design/tasks/TRDD-20260519_114050+0200-71e68ab5-batch-fix-parallel-sharding.md` for the protocol.
 
-Do NOT attempt to fix a big plugin yourself — your `maxTurns: 100` budget is enough for diagnosis but not for fixing 100+ findings.
+Do NOT attempt to fix a big plugin yourself — your `maxTurns: 100` budget is enough for diagnosis but not for fixing the larger working sets a batch dispatch is built for.
 
 ## Free-form mode (`ask_doctor_freeform` / `ask_about_findings`)
 

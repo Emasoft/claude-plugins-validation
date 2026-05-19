@@ -1,6 +1,6 @@
 ---
 name: cpv-batch-fix
-description: Shard a plugin's validation findings into parallel-fix batches. Dispatches N plugin-fixer agents from the main session — one per shard, each with its own fresh 200K context. For plugins with 100+ findings where a single fixer agent would exhaust its context window.
+description: Shard a plugin's validation findings into parallel-fix batches. Dispatches N plugin-fixer agents from the main session — one per shard, each with its own fresh context window (size depends on plugin-fixer's `model:` frontmatter — opus/sonnet default 200K, the [1m] variants 1M, future models may differ). For plugins with many findings where a single fixer agent would exhaust its context window above the 50% performance-drop threshold.
 allowed-tools: Read, Bash, Glob, Grep
 argument-hint: "<plugin-path> [--shard-size N] [--max-parallel N] [--min-severity LEVEL]"
 user-invocable: true
@@ -8,12 +8,16 @@ user-invocable: true
 
 # /cpv-batch-fix — Parallel batch fix for large plugins
 
-For plugins with **more than ~100 actionable findings** (CRITICAL +
-MAJOR + MINOR), the single-agent `plugin-fixer` loop will silently
-exhaust its 200K-context window mid-way through the fix loop and
-exit without finishing the job. Per the Anthropic subagent spec,
-**subagents cannot spawn other subagents**, so `plugin-fixer` cannot
-parallelise itself.
+For plugins where the total set of findings can't comfortably fit
+in a single `plugin-fixer` agent's working context (and stay under
+the ~50% utilisation level beyond which model quality begins to
+degrade), the single-agent fix loop will silently exhaust its
+context window mid-way and exit without finishing the job. The
+"safe size" is per-model: bare `opus` / `sonnet` give 200K tokens
+(~20-30 findings safe), the `opus[1m]` / `sonnet[1m]` variants
+give 1M (~100-150 findings safe). Per the Anthropic subagent spec,
+**subagents cannot spawn other subagents**, so `plugin-fixer`
+cannot parallelise itself.
 
 This command does the parallelisation **from the main session**, which
 is the only place the Agent tool can fan out:
@@ -24,11 +28,12 @@ is the only place the Agent tool can fan out:
    `skills/<name>/` scope (with refactor rights), every other finding
    belongs to a single-file scope.
 2. Dispatches N `plugin-fixer` agents in a SINGLE main-session
-   message, each given its own shard manifest. Each agent has a
-   fresh ~200K-context window and refactor rights inside `skill_dir`
-   scopes — including the right to split an oversized SKILL.md into
-   multiple smaller focused skills, externalise content into
-   `references/*.md`, etc.
+   message, each given its own shard manifest. Each agent starts
+   with a fresh context window (size determined by `plugin-fixer`'s
+   `model:` frontmatter at dispatch time) and refactor rights
+   inside `skill_dir` scopes — including the right to split an
+   oversized SKILL.md into multiple smaller focused skills,
+   externalise content into `references/*.md`, etc.
 3. Runs `scripts/cpv_batch_aggregator.py` once the shards have all
    returned, producing one consolidated report (zero LLM cost).
 4. Main-session token cost: ~3-4K total (just paths, no report
@@ -146,8 +151,10 @@ for shard in index.shards[:max_parallel]:
 
 Multiple Agent tool calls in a single assistant message **execute in
 parallel** per the Claude Code spec. Each agent gets its own fresh
-~200K-context window. If there are more shards than ``max_parallel``,
-dispatch in waves (collect the first wave's one-line summaries, then
+context window (size determined by `plugin-fixer.model` — defaults to
+opus 200K, can be `opus[1m]` or `sonnet[1m]` for 1M). If there are
+more shards than ``max_parallel``, dispatch in waves (collect the
+first wave's one-line summaries, then
 dispatch the next wave).
 
 ## Step 3 — Aggregate
@@ -196,7 +203,7 @@ No report body ever crosses the main-session context.
 
 | # | Knob | Default | Notes |
 |---|------|---------|-------|
-| 1 | `--shard-size` | 30 | Choose dynamically based on context — the right size is "as many findings as fit comfortably in one opus 200K window plus margin". 30 is a starting point. Raise it for trivial mechanical findings; lower it for complex ones. No hard cap — the agent decides. |
+| 1 | `--shard-size` | 30 | Choose dynamically based on `plugin-fixer.model`'s context window AND the rule that model quality degrades above ~50% context utilisation. Safe ceiling ≈ `(model_context / 2) / 3-5K-tokens-per-finding`. opus/sonnet 200K → ~20-30 findings/shard; opus[1m]/sonnet[1m] → ~100-150 findings/shard; future models may differ. Raise for trivial mechanical findings, lower for complex ones. No hard cap — the orchestrator decides. |
 | 2 | `--max-parallel` | 8 | Hard cap 16 — beyond that, Anthropic's API rate-limits kick in and dispatches fail. The 16 ceiling is a safety against rate-limit failure, not a behavioral limit. |
 | 3 | Findings per file | unlimited | A single-file shard with more findings than `--shard-size` gets its own oversized shard with a stderr warning |
 | 4 | Plugin size | unlimited | Tested up to 500+ findings; larger plugins simply spawn more shards |

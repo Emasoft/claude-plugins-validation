@@ -18,9 +18,14 @@ User reports that on plugins with 300+ validation findings (typical
 for plugins with many skills), spawning multiple `cpv-doctor-agent` or
 `plugin-fixer` agents in parallel from the main session results in
 each agent silently dying mid-task because the per-agent context
-window is exhausted. The single-agent design assumes a small plugin
-fits in one 200K-context loop, which breaks down at the 300-finding
-scale.
+window is exhausted. The size of that window is per-model — bare
+`opus` / `sonnet` = 200K tokens, the `opus[1m]` / `sonnet[1m]`
+variants = 1M, future Claude models may differ — and model quality
+degrades noticeably above ~50% utilisation, so the safe ceiling is
+significantly lower than the raw context size. The single-agent
+design assumes a small plugin fits comfortably in its model's safe
+window, which breaks down at the 300-finding scale regardless of
+which model is chosen.
 
 Compounding the problem: `plugin-fixer.md:626` claims "for very large
 batches (10+ files), parallel subagents are allowed, one per file" —
@@ -39,7 +44,7 @@ because:
 | # | Failure mode | Evidence |
 |---|--------------|----------|
 | 1 | One agent owns the entire validate→fix→revalidate loop | `agents/plugin-fixer.md` |
-| 2 | Per-finding round-trip costs ~3-5K tokens; 300 findings exceeds opus default 200K context | math: 300 × 5K = 1.5M >> 200K |
+| 2 | Per-finding round-trip costs ~3-5K tokens; 300 findings exceeds even the 1M-context `opus[1m]`/`sonnet[1m]` *safe-utilisation* threshold (~50% = 500K), and is multiples-over the 200K of bare `opus`/`sonnet` | math: 300 × 5K = 1.5M >> 500K safe / 200K default |
 | 3 | `plugin-fixer.md:626` promises an impossible "parallel subagents" pattern | line 626 |
 | 4 | `cpv-doctor-agent` has `maxTurns: 30` — far below big-plugin needs | `agents/cpv-doctor-agent.md:25` |
 | 5 | Main session cannot drive 300 sequential `Agent()` calls without burning its own context | architectural |
@@ -60,7 +65,7 @@ Main-session token cost: ~3-4K total (paths only, no report bodies).
 | # | Item | Reason |
 |---|------|--------|
 | 1 | Cross-agent state sharing during a run | Each shard is isolated — that's the entire point of the design |
-| 2 | Auto-detection of optimal shard size from findings density | Default 30 is sufficient for opus 200K; user can tune via flag |
+| 2 | Auto-detection of optimal shard size from findings density and `plugin-fixer.model` | Default 30 is sufficient for bare `opus`/`sonnet` (200K); user/orchestrator tunes via `--shard-size` (raise to ~100-150 for the `[1m]` variants). Future TRDD may add planner-side model-aware tuning |
 | 3 | Agent-pooling / connection reuse | Anthropic API handles that |
 | 4 | Worktree isolation per shard | Possible later optimization (TRDD-future); not required for v1 |
 | 5 | Live progress streaming | The Stop hook in `claude-menu-system` can do this in a follow-up; v1 returns aggregate summary on completion |
@@ -94,7 +99,7 @@ USER
   └─ ...                                                                  ─┘
   │
   ▼
-[each shard agent — fresh 200K context — owns ~30 findings]
+[each shard agent — fresh context (size = `plugin-fixer.model` window: 200K bare opus/sonnet, 1M for the [1m] variants) — owns ~30 findings (calibrated for the bare-opus default; raise --shard-size for 1M models)]
   │
   ▼
 [main session — Phase C]

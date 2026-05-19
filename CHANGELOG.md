@@ -6,7 +6,7 @@ All notable changes to the Claude Plugins Validation plugin will be documented i
 
 ### Features
 
-- **batch-fix:** TRDD-71e68ab5 parallel-shard fix protocol for 300+-finding plugins. New `/cpv-batch-fix` slash command + `scripts/cpv_batch_planner.py` (zero-LLM-cost shard planner) + `scripts/cpv_batch_aggregator.py` (zero-LLM-cost result merger) + `plugin-fixer` `batch_shard` mode + `batch-fix-protocol` skill. Main session dispatches N `plugin-fixer` agents in parallel, each owning a ~30-finding shard with a fresh 200K context. Solves the silent mid-task exits caused by single-agent context exhaustion on large plugins.
+- **batch-fix:** TRDD-71e68ab5 parallel-shard fix protocol for plugins with too many findings to fit comfortably in a single `plugin-fixer` context window. New `/cpv-batch-fix` slash command + `scripts/cpv_batch_planner.py` (zero-LLM-cost shard planner) + `scripts/cpv_batch_aggregator.py` (zero-LLM-cost result merger) + `plugin-fixer` `batch_shard` mode + `batch-fix-protocol` skill. Main session dispatches N `plugin-fixer` agents in parallel, each owning a shard sized to stay under the ~50% performance-drop threshold of its declared `model:` (200K for bare `opus`/`sonnet`, 1M for `opus[1m]`/`sonnet[1m]`, future models may differ). Solves the silent mid-task exits caused by single-agent context exhaustion on large plugins.
 
 ### Bug Fixes
 

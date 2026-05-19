@@ -11,10 +11,11 @@ allowed-tools: Read
 
 `/cpv-batch-fix` slices a plugin's validation findings into parallel-fix
 shards and dispatches N `plugin-fixer` agents from the main session —
-one per shard, each with a fresh ~200K-context window. This skill
-documents the data contract that ties the planner, the shard agents,
-and the aggregator together. Loaded by `plugin-fixer` (when it sees
-`mode: batch_shard` in its context block) and by the
+one per shard, each with a fresh context window whose size depends on
+`plugin-fixer.model` (per-model — never assume a fixed limit). This
+skill documents the data contract that ties the planner, the shard
+agents, and the aggregator together. Loaded by `plugin-fixer` (when it
+sees `mode: batch_shard` in its context block) and by the
 `/cpv-batch-fix` slash command body.
 
 See [JSON schemas](references/json-schemas.md) for the three file
@@ -57,29 +58,21 @@ Briefly:
 
 | # | Error | Resolution |
 |---|-------|------------|
-| 1 | Planner can't parse `validate_plugin.py --json` output | Re-run with `--report <pre-existing.json>` to skip the inline validation |
-| 2 | Shard agent dies before writing status JSON | Aggregator marks it as `agent_exit_reason: missing` with `error: status file missing`. Re-run `/cpv-batch-fix` to retry from the residual |
-| 3 | Two shards somehow share a file (planner bug) | Aggregator's per-file merge keeps the most recent `fixed_count`; report flags as duplicate |
-| 4 | Schema version mismatch between planner and aggregator | Aggregator refuses with explicit version-mismatch error |
+| 1 | Planner can't parse `validate_plugin.py --json` output | Re-run with `--report <pre-existing.json>` |
+| 2 | Shard agent dies before writing status | Aggregator marks `agent_exit_reason: missing`; re-run `/cpv-batch-fix` for residual |
+| 3 | Two shards share a scope (planner bug) | Aggregator keeps the most recent `fixed_count`; report flags as duplicate |
+| 4 | Schema version mismatch | Aggregator refuses with explicit version error |
 
 ## Examples
 
 ```bash
-# Plan
 python3 scripts/cpv_batch_planner.py /path/to/big-plugin --shard-size 30
-
-# Output: {"session_dir": "/tmp/cpv-batch/<ts>", "shard_count": 6, ...}
-
-# Main session dispatches 6 plugin-fixer agents in parallel via Agent tool
-# (one Agent call per shard, all in the same assistant message)
-
-# Aggregate after all shards return
+# Then main session fans out N plugin-fixer Agents in one message
 python3 scripts/cpv_batch_aggregator.py /tmp/cpv-batch/<ts>
-# Output: "DONE: shards=6 fixed=145 failed=1 remaining=1. Report: <abs-path>"
+# → DONE: shards=6 fixed=145 failed=1 remaining=1. Report: <abs-path>
 ```
 
-After a partial run, re-invoke `/cpv-batch-fix` on the same plugin —
-the planner re-validates and only shards the still-remaining findings.
+Re-run `/cpv-batch-fix` to retry the residual — the planner re-validates and re-shards.
 
 ## Resources
 
