@@ -75,6 +75,80 @@ CLI commands are EMBEDDED VERBATIM in
 Read that file BEFORE making structural decisions — it is the source of
 truth, not the fixer's prior assumptions.
 
+## Phase 0.5 — MANDATORY situation triage and skill routing (TRDD-14cc93a6)
+
+**You operate as a runtime decision-maker.** Skills are a global library —
+ANY agent can invoke ANY skill via the `Skill` tool. The `skills:` field
+in this agent's frontmatter is a pre-loading hint, NOT an access control
+list. After confirming the target is a plugin (Phase 0), your next move
+is to TRIAGE the situation and PICK the right skill — do NOT enter any
+fix loop until you have a routing decision.
+
+### Step 1 — Gather evidence (one validate call)
+
+Run a single validation pass via the launcher to produce a JSON report:
+
+```bash
+CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
+  python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" \
+  plugin <plugin-root> --json --strict > /tmp/triage-report.json
+```
+
+Read `/tmp/triage-report.json` and compute:
+
+- `total_findings` = `counts.critical + counts.major + counts.minor`
+  (NOT NIT/WARNING — those don't block)
+- `severity_mix` = the per-level counts for the post-routing summary
+
+### Step 2 — Compute the safe-ceiling for THIS run
+
+The shard-fixer's context window depends on which model is configured
+in THIS agent's `model:` frontmatter:
+
+| `model:` declaration | Raw window | Safe (~50%) ceiling | Approx. findings/run @ 3-5K tokens each |
+|----------------------|------------|---------------------|------------------------------------------|
+| `opus` / `sonnet` (bare) | 200K | ~100K | **30-40** |
+| `opus[1m]` / `sonnet[1m]` | 1M | ~500K | **100-150** |
+| future Claude models | varies | varies | recompute via `(window/2)/per_finding` |
+
+Future Claude variants will have different windows — use the declared
+model's documented context limit, halved for the safe-utilisation
+threshold, divided by 3-5K tokens per finding.
+
+### Step 3 — Apply the routing table
+
+Pick exactly one of:
+
+| # | Situation | Action | Skill to invoke |
+|---|-----------|--------|-----------------|
+| 1 | `total_findings == 0` | Return `[DONE] iterations=0, clean. Report: <triage-report>` immediately. No loop, no skill. | (none) |
+| 2 | `0 < total_findings ≤ safe-ceiling` | Enter the normal validate → fix → re-validate loop. | `Skill({skill: "claude-plugins-validation:fix-validation"})` for error→fix mappings |
+| 3 | `total_findings > safe-ceiling` AND mode is NOT `batch_shard` | Exit IMMEDIATELY with `[BATCH_REQUIRED] <N> findings exceed single-agent capacity (safe-ceiling=<ceil>). Run /cpv-batch-fix <plugin-root> to dispatch parallel shard-fixers. Report: <triage-report>`. Do NOT attempt the loop — it will die mid-way. | `Skill({skill: "claude-plugins-validation:batch-fix-protocol"})` for documentation (optional, only if you need to explain the protocol) |
+| 4 | Mode is `batch_shard` (any finding count, capped to shard manifest) | Enter the batch_shard workflow defined in §"Batch-shard mode" below. | `Skill({skill: "claude-plugins-validation:batch-fix-protocol"})` for schema + `Skill({skill: "claude-plugins-validation:fix-validation"})` for per-finding fixes |
+| 5 | Mode is `canonical-pipeline migration` (e.g. dispatched from `/cpv-upgrade-plugin`) | Enter the migration workflow per §"Migration exit contract" below. | `Skill({skill: "claude-plugins-validation:canonical-pipeline"})` |
+| 6 | Mode is `marketplace fix` | Refuse — this is the marketplace-fixer's job. Return `[BLOCKED] wrong-agent — use marketplace-fixer for marketplace fixes`. | (none) |
+
+The `[BATCH_REQUIRED]` exit (situation 3) is THE critical case the
+v2.91.0 batch-fix protocol was designed for. **Never** enter the
+normal fix loop on a plugin whose finding count exceeds the
+safe-ceiling — the loop WILL die mid-way and leave the plugin in a
+half-fixed state. The orchestrator (main session or `cpv-main-menu-agent`)
+sees your `[BATCH_REQUIRED]` line and routes the user to `/cpv-batch-fix`.
+
+### Step 4 — Why this works architecturally
+
+- Subagents cannot spawn subagents (per the Anthropic spec), so YOU
+  cannot launch shard-fixers yourself. Returning `[BATCH_REQUIRED]`
+  hands control back to the orchestrator (which IS the main session
+  if invoked via `/cpv-main-menu` Fix-leaf, OR the user's main session
+  if invoked directly).
+- The orchestrator can dispatch parallel agents via N `Agent()` calls
+  in a single assistant message. This is the only valid parallelism
+  path.
+- The `skills:` frontmatter list IS NOT consulted by the Skill tool —
+  any installed skill is invocable. The list is purely a pre-loading
+  hint to the harness.
+
 ## Preservation guardrails — DO NOT delete or rewrite without thinking
 
 Two destructive shortcuts are FORBIDDEN. They have caused real-world

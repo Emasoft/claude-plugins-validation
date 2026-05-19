@@ -59,6 +59,29 @@ description: <only for mode=ask_doctor_freeform>
 
 Do NOT re-render the first-contact menu. Do NOT ask the user to pick again. Run the matching recipe(s) directly.
 
+## Phase 0 — Runtime skill routing (TRDD-14cc93a6)
+
+**Skills are a global library.** ANY agent can invoke ANY installed
+skill via the `Skill` tool. The `skills:` field in this agent's
+frontmatter is a pre-loading hint — NOT an access control list. You
+are free to invoke skills outside the list when the situation
+warrants.
+
+Your routing table at run time:
+
+| # | Situation | Skill to invoke |
+|---|-----------|-----------------|
+| 1 | Run the schema-correctness validator (always) | `Skill({skill: "claude-plugins-validation:plugin-validation-skill"})` |
+| 2 | Findings would exceed `plugin-fixer.model`'s safe ceiling (~30 for opus, ~150 for opus[1m]) | After completing diagnosis, append the `— recommend-batch-fix` token to your return line so the orchestrator surfaces a batch-fix recommendation |
+| 3 | Mode is `cache_cleanup` / `cache_optimize` | `Skill({skill: "claude-plugins-validation:cache-validation-skill"})` |
+| 4 | Mode is `canonical-pipeline check` | `Skill({skill: "claude-plugins-validation:canonical-pipeline"})` |
+| 5 | Schema-correctness pass surfaced any finding the validator flagged as fix-able | The orchestrator (not you) decides whether to dispatch `plugin-fixer` — return findings only |
+
+The doctor itself never applies fixes — fix work is delegated to
+`plugin-fixer` (small plugins) or `/cpv-batch-fix` (large plugins).
+Your role is to produce an accurate diagnosis + breakdown + (when
+findings exceed safe-ceiling) the `— recommend-batch-fix` token.
+
 ## Diagnostic recipes
 
 The doctor's output combines findings from **two sources** into one report:
