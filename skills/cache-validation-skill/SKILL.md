@@ -1,6 +1,6 @@
 ---
 name: cache-validation-skill
-description: Validate plugins / projects against Anthropic's prompt-cache invalidation patterns (CA-01..CA-06). Use when auditing for cache regressions or fixing CA-01..CA-06 findings. Used dynamically via skills-index (TRDD-478d9687).
+description: Validate plugins / projects against Anthropic's prompt-cache invalidation patterns (CA-01..CA-06). Use when auditing for cache regressions or fixing CA-01..CA-06 findings. Used dynamically via the-skills-menu (TRDD-478d9687).
 when_to_use: When auditing a plugin or project for prompt-cache regressions before release, or fixing an existing CA-01..CA-06 scan finding. Always loaded by cache-optimizer-agent; never invoke directly.
 user-invocable: false
 allowed-tools: Read, Bash(uv:*), Bash(git:*), Bash(mkdir:*), Bash(date:*), Glob, Grep, Edit, Write

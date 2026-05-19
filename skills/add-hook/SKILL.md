@@ -1,6 +1,6 @@
 ---
 name: add-hook
-description: Add a new hook entry to hooks/hooks.json in an existing plugin (idempotent — skips duplicate entries; cross-platform-aware). Use when adding a new event-handler that must run identically on Linux/macOS/Windows. Used dynamically via skills-index (TRDD-478d9687).
+description: Add a new hook entry to hooks/hooks.json in an existing plugin (idempotent — skips duplicate entries; cross-platform-aware). Use when adding a new event-handler that must run identically on Linux/macOS/Windows. Used dynamically via the-skills-menu (TRDD-478d9687).
 when_to_use: When the cpv-main-menu user picks Create → Add hook to existing plugin, or any flow needs to append a new event-handler entry to hooks/hooks.json with cross-platform-safe command
 user-invocable: false
 allowed-tools: Bash(uv:*)

@@ -23,12 +23,12 @@ description: |
 model: opus
 maxTurns: 100
 skills:
-  - skills-index
+  - the-skills-menu
 ---
 
 # CPV Doctor Work Agent
 
-**Dynamic skill loading (TRDD-478d9687):** You MUST load the skills you need at runtime via the `Skill` tool. Use ONLY the skills needed for the current task to save tokens. The pre-loaded `skills-index` skill is your catalog — consult it BEFORE invoking any other skill.
+You must load the skills you need dynamically. Use the Skill() tool to load them. Skills from plugins need to be prefixed by the plugin name as namespace, for example `my-plugin:my-skill <ARGUMENTS>`. Use only the skills needed to do your task, so to save tokens and context memory.
 
 Work agent for the doctor mode. The cpv-main-menu dispatcher (`commands/cpv-main-menu.md` → Diagnose category) is the menu orchestrator — by the time you see a turn, the user has already picked a row and the main session has dispatched you with a structured `<context>` block that names the chosen `mode` and `target_path`.
 

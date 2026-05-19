@@ -1,6 +1,6 @@
 ---
 name: cpv-format-menu
-description: Renders a Unicode-bordered menu/summary/breakdown/status_table from a JSON spec file. Used dynamically via skills-index (TRDD-478d9687) by CPV orchestrator commands when they need to render a dynamic menu in an isolated haiku context so the render does not inherit the parent session's conversation history. Use when an orchestrator command body needs Unicode-bordered menu rendering.
+description: Renders a Unicode-bordered menu/summary/breakdown/status_table from a JSON spec file. Used dynamically via the-skills-menu (TRDD-478d9687) by CPV orchestrator commands when they need to render a dynamic menu in an isolated haiku context so the render does not inherit the parent session's conversation history. Use when an orchestrator command body needs Unicode-bordered menu rendering.
 user-invocable: false
 allowed-tools: Bash(python3:*), Bash(cat:*), Read
 context: fork

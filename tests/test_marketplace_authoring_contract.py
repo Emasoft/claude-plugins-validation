@@ -120,21 +120,21 @@ def test_all_in_scope_agents_load_contract_skill() -> None:
     cpv-main-menu, which dispatches the agents above.
     """
     # TRDD-478d9687 (v2.93.0) — per-agent `skills:` preload lists removed;
-    # every agent now declares only `[skills-index]` and invokes specific
+    # every agent now declares only `[the-skills-menu]` and invokes specific
     # skills on demand via the Skill tool. The marketplace-authoring-contract
     # skill is reachable from any agent via the catalog. Pin that it's
     # mentioned in the catalog rather than each agent's frontmatter.
     index_paths = [
-        SKILLS_DIR / "skills-index" / "SKILL.md",
-        SKILLS_DIR / "skills-index" / "references" / "skills-catalog.md",
+        SKILLS_DIR / "the-skills-menu" / "SKILL.md",
+        SKILLS_DIR / "the-skills-menu" / "references" / "skills-catalog.md",
     ]
     combined = "\n".join(p.read_text(encoding="utf-8") for p in index_paths if p.exists())
     assert "marketplace-authoring-contract" in combined, (
-        "marketplace-authoring-contract must appear in the skills-index "
+        "marketplace-authoring-contract must appear in the the-skills-menu "
         "catalog so the three in-scope agents (plugin-creator, plugin-fixer, "
         "marketplace-fixer) can invoke it on demand. TRDD-478d9687 (v2.93.0) "
         "moved skill discovery from per-agent frontmatter to the universal "
-        "skills-index. The contract MUST still be accessible — just via the "
+        "the-skills-menu. The contract MUST still be accessible — just via the "
         "catalog instead of preload lists."
     )
 
