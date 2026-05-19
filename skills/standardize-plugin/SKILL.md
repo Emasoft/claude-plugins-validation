@@ -2,7 +2,7 @@
 name: standardize-plugin
 description: >
   Audit and fix plugin/marketplace repos to match CPV standards.
-  Use when standardizing or auditing repo structure. Loaded by plugin-creator agent.
+  Use when standardizing or auditing repo structure. Used dynamically via skills-index (TRDD-478d9687).
 user-invocable: false
 ---
 

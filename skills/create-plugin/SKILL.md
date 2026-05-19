@@ -1,8 +1,7 @@
 ---
 name: create-plugin
 description: >
-  Create Claude Code plugin or marketplace repos with full CI/CD.
-  Use when scaffolding a new plugin or marketplace. Loaded by plugin-creator agent.
+  Create Claude Code plugin or marketplace repos with full CI/CD. Use when scaffolding. Used via skills-index.
 user-invocable: false
 ---
 

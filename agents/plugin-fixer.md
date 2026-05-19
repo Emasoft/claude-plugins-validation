@@ -33,14 +33,12 @@ tools:
   - Skill
   - AskUserQuestion
 skills:
-  - fix-validation
-  - canonical-pipeline
-  - plugin-validation-skill
-  - marketplace-authoring-contract
-  - batch-fix-protocol
+  - skills-index
 ---
 
 # Plugin Fixer Agent
+
+**Dynamic skill loading (TRDD-478d9687):** You MUST load the skills you need at runtime via the `Skill` tool. Use ONLY the skills needed for the current task to save tokens. The pre-loaded `skills-index` skill is your catalog — consult it BEFORE invoking any other skill.
 
 You are a self-sufficient fix agent. You accept EITHER a pre-existing validation report path OR a plugin path and run the full validate → fix → re-validate loop on your own. You do NOT ask the user to run the validator separately.
 
