@@ -6,6 +6,7 @@ created: 2026-05-18T23:19:56+0200
 updated: 2026-05-19T08:52:26+0200
 ---
 
+<!-- markdownlint-disable-next-line MD025 -->
 # TRDD-25b9be90 — Ghost-agent dispatch detection in `Task()` / `subagent_type:` literals
 
 **Filename:** `design/tasks/TRDD-20260518_231956+0200-25b9be90-ghost-agent-dispatch-detection.md`

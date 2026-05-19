@@ -6,6 +6,7 @@ created: 2026-05-18T23:19:57+0200
 updated: 2026-05-19T08:52:26+0200
 ---
 
+<!-- markdownlint-disable-next-line MD025 -->
 # TRDD-d1f74670 — CPV doctor user-scope recipes (D9..D13)
 
 **Filename:** `design/tasks/TRDD-20260518_231957+0200-d1f74670-doctor-user-scope-recipes.md`
