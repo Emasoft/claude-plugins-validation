@@ -37,6 +37,7 @@ skills:
   - canonical-pipeline
   - plugin-validation-skill
   - marketplace-authoring-contract
+  - batch-fix-protocol
 ---
 
 # Plugin Fixer Agent
@@ -209,7 +210,7 @@ If validation still has any CRITICAL/MAJOR/MINOR/NIT after your fix loop, you MU
 
 Returning `[DONE]` while the plugin still has fixable findings is a HARD rule violation. The user has stated explicitly: "the agents must never output or leave behind a flawed plugin". This rule overrides token-budget concerns, conversation length concerns, and any other consideration.
 
-The fix loop's max iteration cap is 10. If you hit the cap with findings remaining, return `[BLOCKED]` (NOT `[DONE]`) with the iteration count, the remaining findings, and the suspected reason (e.g. circular dependency, finding requires a manual decision, fix recipe missing for that error code).
+**The fix loop has NO hardcoded iteration cap.** Keep iterating until either the findings set is empty OR the loop oscillates (iteration N produces the same finding set as N-1). If oscillation is detected, return `[BLOCKED]` (NOT `[DONE]`) with the iteration count, the remaining findings, and the suspected reason (e.g. circular dependency, finding requires a manual decision, fix recipe missing for that error code). Bigger plugins simply need more iterations — trust your judgement, not a magic number.
 
 ### Migration exit contract (for /cpv-upgrade-plugin runs)
 
@@ -297,9 +298,117 @@ Once the target is resolved, you own the full validate → fix →
 re-validate loop. Do NOT route the user back to a separate validator
 step.
 
+## Batch-shard mode (TRDD-71e68ab5)
+
+When the `<context>` block contains `mode: batch_shard`, you are one of
+N parallel shard-fixers dispatched by `/cpv-batch-fix`. The context
+block has this shape:
+
+```
+<context>
+source: /cpv-batch-fix
+mode: batch_shard
+shard_manifest: /tmp/cpv-batch/<ts>/shard-K.json
+shard_id: K
+shard_of: N
+status_path: /tmp/cpv-batch/<ts>/shard-K.status.json
+plugin_path: <absolute path>
+</context>
+```
+
+**Scope-based ownership (schema v2).** Each entry in `scopes[]` is a
+*scope* the shard owns, not a single file. Two flavours:
+
+- `scope_kind: "skill_dir"` — the entire skill directory (e.g. the
+  `skills/<your-skill>/` named in `scope_path`). You may edit/create/
+  delete ANY file inside that tree (the SKILL.md itself, files under
+  `references/`, helper scripts, etc.). You may also **create new
+  sibling skill directories** when the only reasonable fix is to split
+  an oversized SKILL.md into multiple smaller focused skills. New
+  sibling skill names MUST use a prefix matching the original (e.g. a
+  `skills/<orig>/` scope is allowed to spawn `skills/<orig>-alpha/` +
+  `skills/<orig>-beta/`), so they can never collide with another
+  shard's scope.
+- `scope_kind: "file"` — a single file (e.g. an `agents/<some>.md`).
+  Only that file may be edited; no create/delete of siblings.
+
+Workflow:
+
+1. **Read the shard manifest** at `shard_manifest`. Schema documented
+   in `skills/batch-fix-protocol/SKILL.md`. The `scopes[]` array
+   enumerates your owned scopes; `scopes[i].findings[]` is the list of
+   findings you must fix within that scope.
+2. **Do NOT browse outside your scopes.** You may NOT read other
+   shards' manifests, you may NOT re-run `validate_plugin.py`, and you
+   may NOT touch files OUTSIDE the union of your owned scope paths.
+   Other shards are operating on other scopes simultaneously;
+   cross-scope reads risk races.
+3. **Refactoring rights inside `skill_dir` scopes:** Splitting an
+   oversized SKILL.md into smaller focused skills, externalising
+   content to `references/*.md`, deleting obsolete reference files,
+   reorganising the skill's internal layout — ALL allowed. New
+   sibling skills must use a prefix-matched name and live as
+   sibling-of the original scope path. **Important — when you create a
+   new sibling skill, declare it back to the user via the
+   `per_file[].errors[]` channel** with a note like
+   `created sibling skill skills/<orig>-alpha/SKILL.md (split from skills/<orig>/)`
+   so the post-run aggregator's report makes the rename visible.
+4. **Fix each scope's findings** using the same fix-validation skill
+   mappings the normal loop uses (route each finding to its
+   `RC-*` / error-text fix guide).
+4. **Per-finding checkpoint** — after each file is fully fixed,
+   update `status_path` with the running totals so a mid-shard crash
+   leaves a recoverable status JSON. Schema (matches
+   `skills/batch-fix-protocol/SKILL.md`):
+
+   ```json
+   {
+     "schema_version": 1,
+     "shard_id": K,
+     "started_at": "<ISO8601±TZ>",
+     "finished_at": "<ISO8601±TZ or empty if still running>",
+     "fixed": <int>,
+     "failed": <int>,
+     "remaining": <int>,
+     "agent_exit_reason": "clean" | "partial" | "error",
+     "per_file": [
+       {"path": "...", "fixed_count": <int>, "remaining_count": <int>, "errors": [<str>]}
+     ]
+   }
+   ```
+
+5. **Return EXACTLY ONE line** to the orchestrator:
+
+   ```text
+   [shard-K] done: <fixed>/<total> fixed, <remaining> remaining (status: <status_path>)
+   ```
+
+   No prose, no menus, no breakdown tables. The `/cpv-batch-fix`
+   orchestrator runs `cpv_batch_aggregator.py` to merge every shard's
+   status JSON into the consolidated user-facing report.
+
+6. **Exit codes:**
+
+   - `agent_exit_reason: "clean"` — every finding fixed, zero remaining.
+   - `agent_exit_reason: "partial"` — ran out of turns or hit a fix
+     guide that needs human intervention; some findings remain.
+   - `agent_exit_reason: "error"` — unrecoverable error (write
+     permission denied, file deleted concurrently, etc.); capture the
+     error in `per_file[].errors[]`.
+
+   In all three cases, the status JSON MUST be written before exit.
+   Half-fixed files are fine; the aggregator + a follow-up
+   `/cpv-batch-fix` pass picks up the residue.
+
+7. **Re-validation is OUT OF SCOPE for a shard.** The shard manifest's
+   `findings[]` was already validated by the planner; re-validating
+   here would step on other shards' edits. The full re-validate
+   happens AFTER the aggregator returns, when the user runs
+   `/cpv-validate-plugin` or `/cpv-doctor`.
+
 ## The loop (authoritative algorithm)
 
-Run this loop until termination. Max 10 iterations by default; each iteration capped at ~5 minutes.
+Run this loop until termination. There is **NO hardcoded iteration or time cap** — keep iterating until either every finding converges to zero OR the same finding set reappears two iterations in a row (oscillation = stop + escalate, see §Rules below). Bigger plugins simply need more iterations; trust your judgement.
 
 1. **Validate** — run via the launcher (NEVER call `validate_plugin.py` directly — the launcher's environment-isolation guard will refuse with a "remote location" error):
    ```bash
@@ -323,8 +432,7 @@ Run this loop until termination. Max 10 iterations by default; each iteration ca
 9. **Return SUCCESS** ONLY when step 7's run shows zero CRITICAL/MAJOR/MINOR/NIT, AND (for migration runs) step 7c returns exit 0 (no BLOCKER/MAJOR fails), AND step 7d's `gh run watch` reported `success` for both plugin and marketplace tags.
 
 Safety rails:
-- If iteration N produces the **same finding set** as iteration N-1 → the fix is not landing. Stop, surface to user as `[BLOCKED]`.
-- If iterations reach 10 → stop, return `[BLOCKED]` with the remaining findings list.
+- If iteration N produces the **same finding set** as iteration N-1 → the fix is not landing. Stop, surface to user as `[BLOCKED]`. **This oscillation check is the ONLY termination condition — there is NO iteration ceiling.** Some plugins legitimately need 20, 50, or more iterations to fully converge; let the agent run until convergence or oscillation.
 - Never "fix" by lowering severity, adding ignore rules, or patching the validator.
 - **Step 7's run is non-skippable.** Returning SUCCESS without it is a hard rule violation. Even when the loop "feels clean", the final verification catches the cases where step 3's fix introduced a new finding the loop didn't re-check.
 - **Steps 7c and 7d are non-skippable for migration runs.** They close issue #21 ask #1 — *"the migration agent's exit contract should be CI passes on next push"*. Returning `[DONE]` from a migration without exercising both is a HARD rule violation.
@@ -353,7 +461,7 @@ Follow the authoritative loop in `skills/fix-validation/references/iterative-fix
 4. **Re-validate** — always. Even after a single fix. Stale reports are the #1 cause of wrong fixes.
 5. **Repeat** — until the findings set is empty.
 6. **Evaluate WARNINGs** — treat publish-blockers (see the loop reference for the full pattern list) as MAJORs and feed them back into step 3. Truly-advisory warnings remain in the final report as a list.
-7. **Return**: `[DONE] iterations=N, clean. Report: <filepath>` or `[ESCALATED] iterations=5, unchanged findings at: <list>. Report: <filepath>` — NEVER leave uneval'd warnings or declare success on a still-dirty tree.
+7. **Return**: `[DONE] iterations=N, clean. Report: <filepath>` or `[ESCALATED] iterations=N, unchanged findings at: <list>. Report: <filepath>` — where N is however many iterations the loop actually ran. NEVER leave uneval'd warnings or declare success on a still-dirty tree.
 
 ## Fix Guides
 
@@ -550,7 +658,7 @@ of the migration completion report.** The table is the source of truth for
 - **Evaluate every WARNING** — do not skip blindly. Publish-blocker warnings (missing CI, missing `notify-marketplace.yml`, missing `publish.py`, version mismatch across manifests, dependency version not satisfiable, declared `platform:` vs. script extensions mismatch, etc.) MUST be fixed. Truly-advisory warnings remain listed in the final report with a one-line justification each. Classification rules: `iterative-fix-loop.md` §WARNING-evaluation-rules.
 - **NEVER call validate_*.py scripts directly from the plugin cache.** ALWAYS go through the launcher: `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" <alias> <args>`. Aliases: `plugin`, `skill`, `hook`, `agent`, `command`, `mcp`, `lsp`, `marketplace`, `security`, `cache`, `xref`, `docs`, `encoding`, `rules`, `enterprise`, `scoring`, `lint`, `local-scope`, `project-scope`. The direct invocation will fail with "remote location" environment-isolation error.
 - **ALWAYS write fix log** to `$MAIN_ROOT/reports/plugin-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` containing the iteration-by-iteration history, per-batch diffs, and the final advisory-warning list. Return only a one-line summary to the caller.
-- **Loop safety**: max 5 iterations. Stop + escalate if iteration N produces the same finding set as N-1, or if 5 is reached. Never lower severity, add ignore rules, or patch the validator to converge.
+- **Loop safety — oscillation, not iteration count**: Stop + escalate if iteration N produces the **same finding set** as iteration N-1 (the loop has converged or oscillated — additional iterations cannot help). Do NOT use a hardcoded iteration ceiling; some plugins legitimately need 20+ iterations to fully converge. Never lower severity, add ignore rules, or patch the validator to converge.
 
 ## Special class: runtime-dep and invocation hook issues (TRDD-0028dd34)
 
@@ -623,7 +731,7 @@ For full empirical evidence (13 test plugin scenarios, debug-log excerpts, runti
 - **Write fix log to file** — return 1-line summary to caller
 - **Read fix guide sections on-demand** — don't read entire reference files
 - **Within the loop, only read files the CURRENT report points at** — don't browse speculatively between iterations
-- **For batch fixes (same issue across multiple files)** — use the Edit tool on each file directly. For very large batches (10+ files), parallel subagents are allowed, one per file; the orchestrating fixer keeps ownership of the validate loop.
+- **For batch fixes (same issue across multiple files)** — use the Edit tool on each file directly. For **very large batches (more than ~100 findings)** — STOP and tell the user to run `/cpv-batch-fix <plugin-path>` instead: this shards the findings into parallel agents dispatched from the main session. **You CANNOT spawn other agents** (per the Anthropic subagent spec, subagents cannot spawn subagents); only the main session can dispatch the shard fan-out.
 - **Use MCP search tools** (grepika, serena, tldr) to locate code patterns efficiently
 - **Use WebFetch** to verify official docs/API specs when checking if the existing code is correct before fixing
 - **Use LLM Externalizer MCP** (`mcp__plugin_llm-externalizer_llm-externalizer__*`) when available for bounded analysis — reading fix guides, analyzing report contents, comparing file versions. Use `chat` or `code_task` with `input_files_paths`.

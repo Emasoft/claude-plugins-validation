@@ -124,29 +124,41 @@ V290_COMMAND_TO_SKILL = {
 class TestCommandCount:
     """Verify total command count after the v2.90.0 menu unification."""
 
-    def test_total_command_count_is_1(self):
-        """commands/ directory must contain exactly ONE .md file.
+    def test_total_command_count(self):
+        """commands/ directory must contain ONLY the documented entry points.
 
         Per TRDD-c50531c2 (v2.90.0), the 23 user-facing slash commands
         and the 14 component-creation commands were either deleted or
-        converted to `user-invocable: false` skills. Only the single
-        entry-point `cpv-main-menu.md` remains; every other workflow is
-        routed through that menu to its underlying agent.
+        converted to ``user-invocable: false`` skills. Only ``cpv-main-menu.md``
+        remains as the discovery surface.
+
+        Per TRDD-71e68ab5 (v2.91.0), ``cpv-batch-fix.md`` was added as a
+        SECOND direct-entry slash command — but only because it is a
+        power-user surface the doctor recommends by exact name when it
+        finds 100+ findings. Burying it behind 2-3 menu clicks would make
+        the doctor's recommendation user-hostile.
+
+        Any third command requires a new TRDD documenting why menu
+        unification is broken for that case.
         """
+        allowed = {"cpv-main-menu.md", "cpv-batch-fix.md"}
         md_files = list(COMMANDS_DIR.glob("*.md"))
-        assert len(md_files) == 1, (
-            f"Expected 1 command (cpv-main-menu.md) per TRDD-c50531c2, "
-            f"found {len(md_files)}: {sorted(f.name for f in md_files)}"
+        actual = {f.name for f in md_files}
+        unexpected = actual - allowed
+        missing = allowed - actual
+        assert not unexpected and not missing, (
+            f"commands/ must contain exactly {sorted(allowed)} (TRDD-c50531c2 + TRDD-71e68ab5). "
+            f"Unexpected: {sorted(unexpected)}. Missing: {sorted(missing)}."
         )
 
-    def test_only_remaining_command_is_cpv_main_menu(self):
-        """The single surviving command MUST be `cpv-main-menu.md`."""
+    def test_only_remaining_command_is_cpv_main_menu_or_batch_fix(self):
+        """The two surviving commands MUST be ``cpv-main-menu`` and ``cpv-batch-fix``."""
+        allowed = {"cpv-main-menu.md", "cpv-batch-fix.md"}
         md_files = list(COMMANDS_DIR.glob("*.md"))
-        assert len(md_files) == 1
-        assert md_files[0].name == "cpv-main-menu.md", (
-            f"Expected cpv-main-menu.md to be the only command, found "
-            f"{md_files[0].name}"
-        )
+        for f in md_files:
+            assert f.name in allowed, (
+                f"Unexpected command file {f.name}; allowed: {sorted(allowed)}"
+            )
 
 
 class TestDirectScriptCommands:

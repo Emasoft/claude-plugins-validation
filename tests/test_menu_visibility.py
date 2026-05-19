@@ -57,16 +57,24 @@ def test_v290_orchestrator_command_stays_deleted(cmd: str) -> None:
     )
 
 
-def test_v290_only_cpv_main_menu_command_remains() -> None:
-    """commands/ MUST contain exactly one file: `cpv-main-menu.md`.
+def test_v290_only_documented_slash_commands_remain() -> None:
+    """commands/ MUST contain only the documented entry points.
 
-    Per TRDD-c50531c2 (v2.90.0 menu unification) every other slash
-    command was either deleted or converted into a `user-invocable: false`
-    skill. The single surviving slash command is `/cpv-main-menu`, which
-    delegates to `cpv-main-menu-agent`.
+    Per TRDD-c50531c2 (v2.90.0 menu unification) every routine slash
+    command was either deleted or converted into a ``user-invocable: false``
+    skill. ``/cpv-main-menu`` is the discovery surface.
+
+    Per TRDD-71e68ab5 (v2.91.0) ``/cpv-batch-fix`` was added as a
+    direct-entry power-user command — the doctor recommends it by exact
+    name when a plugin has 100+ findings.
+
+    Any new direct-entry command requires its own TRDD.
     """
-    md_files = sorted(p.name for p in COMMANDS_DIR.glob("*.md"))
-    assert md_files == ["cpv-main-menu.md"], (
-        f"Expected commands/ to contain exactly cpv-main-menu.md "
-        f"(v2.90.0 per TRDD-c50531c2), found: {md_files}"
+    allowed = {"cpv-main-menu.md", "cpv-batch-fix.md"}
+    md_files = {p.name for p in COMMANDS_DIR.glob("*.md")}
+    unexpected = md_files - allowed
+    missing = allowed - md_files
+    assert not unexpected and not missing, (
+        f"commands/ must contain exactly {sorted(allowed)} (v2.90.0 + v2.91.0). "
+        f"Unexpected: {sorted(unexpected)}. Missing: {sorted(missing)}."
     )

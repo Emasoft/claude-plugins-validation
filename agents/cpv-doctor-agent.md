@@ -21,7 +21,7 @@ description: |
   Free-form "Ask the doctor" mode (mode=ask_doctor_freeform) routes
   the user's typed description to a multi-turn diagnostic dialog.
 model: opus
-maxTurns: 30
+maxTurns: 100
 skills:
   - plugin-validation-skill
   - plugin-management
@@ -259,6 +259,18 @@ The orchestrator pipes this into `format_menu.py breakdown` to render a Unicode-
 ## Fix-mode dispatch
 
 When the orchestrator re-dispatches with `mode: fix_at_severity` / `mode: fix_interactive` / `mode: revalidate`, route the actual fix work to the `plugin-fixer` agent (which owns the validate → fix → re-validate loop) — the doctor itself doesn't apply edits. Return the fixer's one-line summary verbatim.
+
+## Big-plugin handoff — when findings exceed ~100
+
+If your scan finds more than ~100 actionable findings (CRITICAL + MAJOR + MINOR combined), the single-agent fix loop will NOT fit in one opus 200K context window. Instead of routing to `plugin-fixer`, return a SPECIAL one-line summary that tells the orchestrator to recommend `/cpv-batch-fix` to the user:
+
+```text
+Findings: <C> CRITICAL, <M> MAJOR, <n> MINOR, <t> NIT, <w> WARNING — INVALID (report: <abs-path>) — recommend-batch-fix
+```
+
+The trailing `— recommend-batch-fix` token tells the orchestrator to print, in the post-scan menu, an extra row pointing the user at `/cpv-batch-fix <plugin-path>`. The slash command will run `scripts/cpv_batch_planner.py` to slice the findings into shards of ~30 and dispatch N parallel `plugin-fixer` agents from the main session. See `design/tasks/TRDD-20260519_114050+0200-71e68ab5-batch-fix-parallel-sharding.md` for the protocol.
+
+Do NOT attempt to fix a big plugin yourself — your `maxTurns: 100` budget is enough for diagnosis but not for fixing 100+ findings.
 
 ## Free-form mode (`ask_doctor_freeform` / `ask_about_findings`)
 
