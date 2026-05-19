@@ -138,22 +138,28 @@ class TestCommandCount:
         finds 100+ findings. Burying it behind 2-3 menu clicks would make
         the doctor's recommendation user-hostile.
 
-        Any third command requires a new TRDD documenting why menu
+        Per TRDD-9dd64dbf (v2.95.0), ``the-skills-menu-create.md`` was
+        added as a THIRD direct-entry slash command. It is the public
+        face of the universal migrator — users of OTHER plugins need a
+        bare slash command to retrofit their plugin to the-skills-menu
+        method, so menu navigation is not acceptable here.
+
+        Any fourth command requires a new TRDD documenting why menu
         unification is broken for that case.
         """
-        allowed = {"cpv-main-menu.md", "cpv-batch-fix.md"}
+        allowed = {"cpv-main-menu.md", "cpv-batch-fix.md", "the-skills-menu-create.md"}
         md_files = list(COMMANDS_DIR.glob("*.md"))
         actual = {f.name for f in md_files}
         unexpected = actual - allowed
         missing = allowed - actual
         assert not unexpected and not missing, (
-            f"commands/ must contain exactly {sorted(allowed)} (TRDD-c50531c2 + TRDD-71e68ab5). "
+            f"commands/ must contain exactly {sorted(allowed)} (TRDD-c50531c2 + TRDD-71e68ab5 + TRDD-9dd64dbf). "
             f"Unexpected: {sorted(unexpected)}. Missing: {sorted(missing)}."
         )
 
     def test_only_remaining_command_is_cpv_main_menu_or_batch_fix(self):
-        """The two surviving commands MUST be ``cpv-main-menu`` and ``cpv-batch-fix``."""
-        allowed = {"cpv-main-menu.md", "cpv-batch-fix.md"}
+        """The three surviving commands MUST be in the allowlist."""
+        allowed = {"cpv-main-menu.md", "cpv-batch-fix.md", "the-skills-menu-create.md"}
         md_files = list(COMMANDS_DIR.glob("*.md"))
         for f in md_files:
             assert f.name in allowed, (

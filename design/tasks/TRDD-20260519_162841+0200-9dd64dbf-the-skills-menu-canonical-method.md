@@ -3,7 +3,7 @@ trdd-id: 9dd64dbf-b716-4069-bbab-99505417c3bc
 title: the-skills-menu — canonical rename of skills-index + universal migrator skill
 status: in-progress
 created: 2026-05-19T16:28:41+0200
-updated: 2026-05-19T16:28:41+0200
+updated: 2026-05-19T17:19:52+0200
 ---
 
 <!-- markdownlint-disable-next-line MD025 -->
@@ -151,3 +151,42 @@ better than the previous per-session churn from variable skill lists.
   skills the plugin's agents reference, instead of relying on the
   user to list them manually. Currently the migrator only flags
   same-plugin skills.
+
+## v2.95.0 follow-up — wire into every CPV surface
+
+User feedback after v2.94.0 was: "make the option available at all
+levels (keeping the canon optional as it is now). All options must
+be present." Implemented in the same TRDD (status flipped back to
+`in-progress`, second commit follows v2.94.0):
+
+| # | Surface | Wiring |
+|---|---------|--------|
+| 1 | Slash command | New `commands/the-skills-menu-create.md` (`user-invocable: true`) — accepts any plugin path / Git URL / owner-repo slug / marketplace expression / bare name. |
+| 2 | Main menu | New row 10 in `cpv-main-menu-skill §3.6 Create` ("Implement the-skills-menu method"). Recipe block §3.6.10 dispatches the migrator skill. |
+| 3 | Doctor diagnose | New `D9 — the-skills-menu method adoption` recipe in `cpv-doctor-agent.md`. Emits `DOC-090..093` advisory findings (NIT severity) when a plugin has not adopted the method or has agents with multi-entry `skills:` lists. |
+| 4 | Agent runtime | Already covered by v2.94.0: `the-skills-menu/SKILL.md` lists `the-skills-menu-create` in the "Routing / UX" row, so any CPV agent can discover and invoke it via the `Skill()` tool. |
+| 5 | New plugin scaffold | `scripts/generate_plugin_repo.py` now emits `skills/the-skills-menu/SKILL.md` for every new plugin. The catalog starts empty (no plugin skills yet) and grows as the author adds skills. |
+| 6 | Add-skill sync | `scripts/add_component.py::add_skill` detects whether the target plugin uses the-skills-menu method (catalog file present) and, if so, appends the new skill to the catalog's `## Plugin Skills` table automatically. Recursive self-reference avoided (the catalog never lists itself or the migrator). |
+| 7 | the-skills-menu-create stays in CPV only | The migrator is NOT scaffolded into new plugins (it lives only in CPV) but newly-scaffolded plugins reference it in their catalog's `Resources` section so plugin authors know it exists. |
+
+### Design decisions (v2.95.0)
+
+| # | Decision | Rationale |
+|---|----------|-----------|
+| 1 | Canon adoption stays OPTIONAL | The doctor's D9 findings are NIT-severity (advisory). The method is a strong recommendation, not a hard requirement. Per the user's directive: "keeping the canon optional as it is now". |
+| 2 | New plugins ship with the catalog by default | Scaffolding it day-1 removes the migration step entirely for greenfield projects. Authors can delete it if they don't want the method. |
+| 3 | `add_skill` catalog sync is automatic | When the catalog file exists, the author has clearly opted in — auto-appending new entries keeps the catalog from drifting out of sync. When the file doesn't exist, `add_skill` does nothing extra. |
+| 4 | Direct-entry slash command is justified | The third allowlist slot (after `cpv-main-menu` and `cpv-batch-fix`) is documented in `test_consolidation_v211.py::test_total_command_count` with TRDD-9dd64dbf as the source of the exemption. |
+| 5 | Recipe D9 has its own DOC-NN range (90+) | Future doctor recipes will continue from 091 onwards. Reserves 094..099 for related-but-distinct adoption findings. |
+
+### Test coverage (v2.95.0)
+
+| File | Added |
+|------|-------|
+| `tests/test_add_component.py` | 4 new tests: catalog registration when method adopted; no-op when method not adopted; never-list-itself; idempotent re-add. |
+| `tests/test_generate_plugin_repo.py` | 1 new test: `test_the_skills_menu_catalog_scaffolded` verifies the catalog file is created for every new plugin and references the plugin's name. |
+| `tests/test_consolidation_v211.py` | Allowlist extended to 3 commands; allowlist comment updated. |
+| `tests/test_menu_visibility.py` | Same allowlist extension. |
+| `tests/test_menu_unification_v290.py` | Same allowlist extension. |
+
+5394 tests passing (+5 from v2.94.0).
