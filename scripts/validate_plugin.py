@@ -2326,6 +2326,119 @@ def validate_mcp(plugin_root: Path, report: ValidationReport) -> None:
 
 
 # TRDD-e3e74f69 telemetry hookup
+def _run_skillaudit_native(plugin_root: Path, report: ValidationReport) -> None:
+    """Run the MANDATORY native skillaudit scan (v2.99.1 hookup).
+
+    The scanner runs in-process — zero subprocess, zero network, zero
+    third-party deps. Findings are mapped into the standard
+    ValidationReport severity model (critical/major/minor/nit/info)
+    with the threat category embedded in the message so reviewers see
+    the threat domain at a glance: ``[skillaudit:<category> <rule_id>]``.
+
+    Iron rule: missing rule catalog → CRITICAL (never silently skipped).
+    No env-var bypass is honored.
+
+    The CPV self-scan-skip filter is applied so that when CPV scans
+    ITSELF, its own pattern-source files (validate_security.py,
+    fix-validation references, security test fixtures, rule catalogs)
+    don't surface their pattern STRINGS as findings — those are what
+    we LOOK FOR, not what's actively malicious. Hash-anchored: only
+    CPV files whose SHA256 matches the canonical manifest get skipped;
+    a malicious plugin that renames a payload to ``validate_xss.py``
+    cannot evade scanning.
+    """
+    from cpv_skillaudit_native import (  # noqa: PLC0415
+        report_findings as skillaudit_report_findings,
+    )
+    from cpv_skillaudit_native import (  # noqa: PLC0415
+        run_skillaudit_scan,
+    )
+
+    result = run_skillaudit_scan(plugin_root)
+
+    # Apply the same self-scan filter chain validate_security.py uses
+    # when running its Check 27. Best-effort import — if validate_security
+    # is unavailable for any reason, fall through with no filter (the
+    # scanner is still mandatory; just slightly noisier on CPV self-scan).
+    try:
+        from validate_security import (  # noqa: PLC0415
+            _is_always_skip_basename,
+            _is_dev_scratch_path,
+            _is_test_file_path,
+            _is_vendored_dep_path,
+            _set_cpv_self_scan,
+            cpv_self_scan_skip,
+            cpv_self_scan_skip_line,
+            is_cpv_self_scan,
+            is_fp_corpus_markdown,
+        )
+    except ImportError:
+        skillaudit_report_findings(result, plugin_root, report, should_skip=None)
+        return
+
+    # ARM the self-scan filter — without this, cpv_self_scan_skip()
+    # returns False unconditionally and the filter chain below is a
+    # no-op. validate_security.py::main does this for its own
+    # Check 27; validate_plugin must do the same when invoking
+    # skillaudit directly.
+    self_scan = is_cpv_self_scan(plugin_root)
+    _set_cpv_self_scan(self_scan, plugin_root=plugin_root, notice_report=None)
+
+    # When scanning CPV itself, gitignored files are dev artifacts
+    # (rechecker notifications at the repo root, scratch tmp files,
+    # design notes, etc.) — they should not surface as findings. Use
+    # validate_plugin's GitignoreFilter to identify and skip them.
+    # When scanning an EXTERNAL plugin we deliberately do NOT skip
+    # gitignored content: a malicious plugin might gitignore its
+    # payload to evade casual review.
+    from typing import Callable as _Callable  # noqa: PLC0415
+
+    gitignore_check: _Callable[[str], bool] | None = None
+    if self_scan and _gi is not None:
+        def _is_gitignored(rel_path: str) -> bool:
+            try:
+                rel = Path(rel_path)
+                if not rel.is_absolute():
+                    rel = plugin_root / rel
+                return _gi.is_ignored(rel)  # type: ignore[union-attr]
+            except (OSError, ValueError):
+                return False
+        gitignore_check = _is_gitignored
+
+    def _should_skip(file_path: str, line: int | None) -> bool:
+        if not file_path:
+            return False
+        if _is_always_skip_basename(file_path):
+            return True
+        if cpv_self_scan_skip(file_path):
+            return True
+        if _is_vendored_dep_path(file_path):
+            return True
+        if _is_dev_scratch_path(file_path):
+            return True
+        if _is_test_file_path(file_path):
+            return True
+        # v2.99.1 — gitignored content during self-scan only.
+        if gitignore_check is not None and gitignore_check(file_path):
+            return True
+        if isinstance(line, int) and line > 0:
+            try:
+                fpath = Path(file_path)
+                if not fpath.is_absolute():
+                    fpath = plugin_root / fpath
+                if fpath.is_file() and fpath.stat().st_size < 2_000_000:
+                    body = fpath.read_text(encoding="utf-8", errors="ignore")
+                    if cpv_self_scan_skip_line(file_path, body, int(line)):
+                        return True
+                    if is_fp_corpus_markdown(file_path, body):
+                        return True
+            except OSError:
+                pass
+        return False
+
+    skillaudit_report_findings(result, plugin_root, report, should_skip=_should_skip)
+
+
 def validate_telemetry(plugin_root: Path, report: ValidationReport) -> None:
     """Run the OTEL telemetry supply-chain sub-validator.
 
@@ -5612,6 +5725,15 @@ def main() -> int:
     validate_mcp(plugin_root, report)
     # TRDD-e3e74f69 telemetry hookup — OTEL supply-chain audit on every plugin
     validate_telemetry(plugin_root, report)
+    # v2.99.1 — skillaudit native (50 rules / 489 patterns) — MANDATORY,
+    # NOT skippable. Wires the in-process scanner into the standard plugin
+    # validation pipeline so every `validate_plugin.py <path>` run gets the
+    # full skillaudit threat catalog (credential theft, exfiltration,
+    # prompt injection, MCP schema poisoning, A2A attacks, obfuscation,
+    # supply chain, container escape, persistence, crypto theft, etc.)
+    # in addition to validate_security.py Check 27. Iron rule preserved:
+    # missing rule catalog → CRITICAL via cpv_skillaudit_native.report_findings.
+    _run_skillaudit_native(plugin_root, report)
     validate_scripts(plugin_root, report)
     # v2.64.0 — single source of truth for repo-wide linting.
     # Replaces the inline lint pieces of validate_scripts (Python ruff/mypy,

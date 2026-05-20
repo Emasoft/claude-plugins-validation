@@ -302,6 +302,255 @@ def _is_instructional_context(lines: list[str], line_idx: int) -> bool:
     return False
 
 
+# v2.99.1 — rule families that should be suppressed inside markdown
+# tables (table content is rendered, not executed; a table row can never
+# be a live malicious payload — and `path/like/string` cells routinely
+# embed substrings that look like shell keywords). Skillaudit's original
+# JS scanner only suppressed CRED_ENV_READ/TOKEN_STEAL in tables;
+# CPV broadens this to every category whose patterns suffer the same
+# false-positive pressure on documentation.
+_MD_TABLE_SUPPRESSED_RULES: frozenset[str] = frozenset(
+    {
+        "CRED_ENV_READ", "TOKEN_STEAL", "CRED_ENV_SAFE",
+        "CMD_INJECTION", "SHELL_EXEC", "REVERSE_SHELL",
+        "SUPPLY_CHAIN", "FS_WRITE", "FS_READ", "FS_RECURSIVE_RM",
+        "SSRF_PATTERN", "NET_SUSPICIOUS", "DNS_REBIND",
+        "INSECURE_CRYPTO", "OBFUSCATION", "REGEX_DOS",
+        "INDIRECT_PROMPT_INJECT", "PROMPT_INJECT",
+        "MCP_SCHEMA_POISON", "TOOL_POISONING",
+        "A2A_AGENT_IMPERSONATION", "A2A_TASK_HIJACK",
+        "A2A_CROSS_AGENT_INJECT", "A2A_DATA_LEAK", "A2A_CAPABILITY_ABUSE",
+        "PERSISTENCE", "PRIVILEGE_ESC", "CONTAINER_ESCAPE",
+        "ENV_RECON", "RESOURCE_ABUSE",
+        "AGENT_MEMORY_MOD", "TOOL_SHADOW", "CROSS_TOOL_ACCESS",
+    }
+)
+
+# Inside fenced code blocks whose language is a pure-data language (no
+# executable semantics), suppress code-execution and obfuscation rules.
+# A JSON/YAML/TOML config file CAN contain dangerous strings, but those
+# strings only matter when something interprets them — the rule firing
+# on the literal text is documentation noise.
+_DATA_LANG_FENCES: frozenset[str] = frozenset(
+    {"json", "yaml", "yml", "toml", "ini", "properties", "env", "dotenv", "xml", ""}
+)
+
+# Shell-keyword tokens that appear as SUBSTRINGS of common English words
+# / path components, producing substring-match false positives when a
+# pattern lacks word boundaries (e.g. `ls` inside `skills`, `id` inside
+# `sandbox`, `cat` inside `concatenate`, etc.). When a match consists
+# ONLY of one of these short shell tokens AND the surrounding source
+# contains an alphanumeric character on either side, the match is a
+# substring false-positive — suppress.
+_SHORT_SHELL_TOKENS: frozenset[str] = frozenset(
+    {"ls", "id", "cat", "nc", "sh", "su", "ps", "rm", "cp", "mv", "dd", "df"}
+)
+
+
+# v2.99.1 — Python docstring tracker. A `"""..."""` block contains
+# documentation prose; matches inside should be demoted, not treated
+# as live code.
+_PY_DOCSTRING_FENCE = re.compile(r'"""|' + r"'''")
+
+
+def _build_py_docstring_map(lines: list[str], file_path: str) -> list[bool]:
+    """Return per-line in_docstring flags for Python files.
+
+    Tracks triple-quoted strings (Python docstrings). For non-Python
+    files, returns an all-False list. Naive (doesn't handle f-strings,
+    multi-line normal strings) but sufficient for the docstring-match
+    suppression heuristic.
+    """
+    is_python = file_path.endswith(".py") or any(
+        line.lstrip().startswith(("#!/usr/bin/env python", "#!/usr/bin/python"))
+        for line in lines[:1]
+    )
+    in_doc = [False] * len(lines)
+    if not is_python:
+        return in_doc
+    inside = False
+    for i, line in enumerate(lines):
+        # Count triple-quote occurrences on this line.
+        triples = len(_PY_DOCSTRING_FENCE.findall(line))
+        if inside:
+            in_doc[i] = True
+            if triples % 2 == 1:
+                inside = False
+        else:
+            if triples >= 1:
+                in_doc[i] = True
+                if triples % 2 == 1:
+                    inside = True
+    return in_doc
+
+
+def _is_in_line_comment(line: str, file_path: str) -> bool:
+    """True if the line is a comment in its host language.
+
+    Conservative: returns True only for whole-line comments, not for
+    trailing comments after code (since a real malicious call can sit
+    before the `#`). This is just a demote heuristic.
+    """
+    stripped = line.lstrip()
+    if not stripped:
+        return False
+    suffix = file_path.lower()
+    # Python / shell / YAML / TOML / make
+    if suffix.endswith((".py", ".sh", ".bash", ".zsh", ".fish", ".yml", ".yaml", ".toml", ".ini", ".conf")) or suffix == "makefile":
+        return stripped.startswith("#")
+    # JS / TS / Java / Go / C / C++ / Rust
+    if suffix.endswith((".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx", ".java", ".go", ".c", ".cpp", ".cc", ".rs", ".rb", ".php")):
+        return stripped.startswith(("//", "/*", "*"))
+    return False
+
+
+def _is_substring_false_positive(line: str, match: str) -> bool:
+    """True when `match` appears in `line` as a strict substring of a
+    longer alphanumeric token (no word boundary on at least one side).
+
+    Catches the `ls` ⊂ `skills` / `id` ⊂ `valid` / `cat` ⊂ `concat`
+    pattern that drives most CMD_INJECTION false positives on
+    documentation markdown.
+    """
+    if not match or len(match) > 4:  # only short tokens suffer from this
+        return False
+    if match not in line:
+        return False
+    # Walk every occurrence of `match` in `line` and check word boundaries.
+    idx = 0
+    any_real = False
+    while True:
+        i = line.find(match, idx)
+        if i < 0:
+            break
+        left = line[i - 1] if i > 0 else " "
+        right = line[i + len(match)] if i + len(match) < len(line) else " "
+        # If at least one occurrence has word-boundary on BOTH sides,
+        # it's a real shell-keyword hit — do NOT suppress.
+        if not left.isalnum() and not right.isalnum() and left != "_" and right != "_":
+            any_real = True
+            break
+        idx = i + 1
+    return not any_real
+
+
+def _confidence(
+    lines: list[str],
+    line_idx: int,
+    match: str,
+    rule_id: str,
+    cb_map: list[bool],
+    cb_ranges: list[_CodeBlockRange],
+    *,
+    py_doc_map: list[bool] | None = None,
+    file_path: str = "",
+) -> str:
+    """Three-way classification for a rule match.
+
+    Returns one of:
+
+    * ``"suppress"`` — the match is LITERALLY impossible to be a real
+      threat (placeholder tokens like ``YOUR_API_KEY``, or a placeholder
+      sibling line inside the same code block). Hard-drop.
+    * ``"demote"`` — there is reasonable documentation context that the
+      match is descriptive (markdown-table cell, data-only fenced block,
+      short-shell-token substring of a longer identifier). The finding
+      is kept but emitted at WARNING-level so a reviewer (or downstream
+      agent) can adjudicate. NEVER silently suppressed — per the
+      principle "better safe than sorry, the agents will verify".
+    * ``"keep"`` — no mitigation applies; emit at the rule's original
+      severity.
+
+    The split between *suppress* and *demote* is the calibration knob
+    that distinguishes "no human would treat this as a threat" from
+    "this MIGHT be a threat but the surrounding context suggests it's
+    documentation". Demoted findings flow through to the security
+    agents for LLM-based disambiguation.
+    """
+    line = lines[line_idx]
+
+    # ── Hard-suppress class: placeholder tokens make the match impossible ──
+    if _has_placeholder(line):
+        return "suppress"
+    if cb_map[line_idx] and _code_block_has_placeholder(lines, cb_ranges, line_idx):
+        return "suppress"
+    if re.search(r"`credentials\.json`", line):
+        return "suppress"
+
+    # ── Demote class: contextual mitigations suggest documentation ──
+    # Short shell tokens (ls/id/cat/nc/sh/su/etc.) appearing as
+    # substrings of longer identifiers (skills, valid, concat, etc.)
+    # are almost-certainly substring false positives. Demote rather
+    # than drop — there's a non-zero chance a real shell `ls` appears
+    # in the line elsewhere.
+    if (
+        match.lower() in _SHORT_SHELL_TOKENS
+        and _is_substring_false_positive(line, match)
+    ):
+        return "demote"
+
+    # Markdown-table cells are rendered, not executed. Demote
+    # injection/supply-chain/obfuscation rules — they're descriptive
+    # text in this context. Original skillaudit hard-suppressed
+    # CRED_ENV_READ/TOKEN_STEAL here; CPV demotes broadly and keeps
+    # the finding visible.
+    if _is_markdown_table(line) and rule_id in _MD_TABLE_SUPPRESSED_RULES:
+        return "demote"
+
+    # Pure-data fenced code blocks (json/yaml/toml/ini/env/xml) cannot
+    # execute code — demote code-execution / obfuscation rules.
+    if cb_map[line_idx]:
+        lang = (_code_block_lang(cb_ranges, line_idx) or "").lower()
+        if lang in _DATA_LANG_FENCES and rule_id in {
+            "CMD_INJECTION", "SHELL_EXEC", "REVERSE_SHELL",
+            "OBFUSCATION", "REGEX_DOS", "INSECURE_CRYPTO",
+            "INDIRECT_PROMPT_INJECT", "MCP_SCHEMA_POISON",
+            "A2A_AGENT_IMPERSONATION", "A2A_TASK_HIJACK",
+            "A2A_CROSS_AGENT_INJECT", "A2A_DATA_LEAK",
+        }:
+            return "demote"
+
+    # Doc-context mitigations: credential rules inside surrounding
+    # documentation keywords. CRED_ENV_READ/TOKEN_STEAL get demoted
+    # (not suppressed) so a reviewer still sees the match.
+    if _has_doc_context(lines, line_idx):
+        if rule_id in ("CRED_ENV_READ", "TOKEN_STEAL", "CRED_ENV_SAFE"):
+            return "demote"
+        if cb_map[line_idx]:
+            return "demote"
+    if _is_markdown_table(line) and rule_id in ("CRED_ENV_READ", "TOKEN_STEAL"):
+        return "demote"
+    if re.search(r"Authorization:\s*Bearer", line, re.IGNORECASE):
+        if cb_map[line_idx]:
+            return "demote"
+    if re.search(r"credentials\.json", match, re.IGNORECASE):
+        if _has_doc_context(lines, line_idx, 8):
+            return "demote"
+    if re.search(r"process\.env\.", match, re.IGNORECASE):
+        if _has_doc_context(lines, line_idx, 8):
+            return "demote"
+    if cb_map[line_idx] and _has_doc_context(lines, line_idx, 8):
+        return "demote"
+
+    # v2.99.1 — Python docstring + whole-line comment context.
+    # Matches embedded in prose documentation are commentary, not
+    # active threats. DEMOTE (not suppress) so a reviewer / agent
+    # can still verify ambiguous cases.
+    if py_doc_map is not None and 0 <= line_idx < len(py_doc_map) and py_doc_map[line_idx]:
+        return "demote"
+    if file_path and _is_in_line_comment(lines[line_idx], file_path):
+        return "demote"
+
+    # v2.99.1 — SSTI false positive on GitHub Actions ``${{ github.* }}``
+    # expressions. These are GitHub's context-expression syntax (a
+    # well-known, sandboxed runtime), not server-side templating.
+    if rule_id == "SSTI" and file_path.lower().endswith((".yml", ".yaml")):
+        if re.search(r"\$\{\{\s*github\.", lines[line_idx]):
+            return "demote"
+
+    return "keep"
+
+
 def _should_suppress(
     lines: list[str],
     line_idx: int,
@@ -310,32 +559,13 @@ def _should_suppress(
     cb_map: list[bool],
     cb_ranges: list[_CodeBlockRange],
 ) -> bool:
-    line = lines[line_idx]
-    if _has_placeholder(line):
-        return True
-    if cb_map[line_idx] and _code_block_has_placeholder(lines, cb_ranges, line_idx):
-        return True
-    if _has_doc_context(lines, line_idx):
-        if rule_id in ("CRED_ENV_READ", "TOKEN_STEAL", "CRED_ENV_SAFE"):
-            return True
-        if cb_map[line_idx]:
-            return True
-    if _is_markdown_table(line) and rule_id in ("CRED_ENV_READ", "TOKEN_STEAL"):
-        return True
-    if re.search(r"Authorization:\s*Bearer", line, re.IGNORECASE):
-        if _has_placeholder(line) or cb_map[line_idx]:
-            return True
-    if re.search(r"credentials\.json", match, re.IGNORECASE):
-        if _has_doc_context(lines, line_idx, 8):
-            return True
-        if re.search(r"`credentials\.json`", line):
-            return True
-    if re.search(r"process\.env\.", match, re.IGNORECASE):
-        if _has_doc_context(lines, line_idx, 8):
-            return True
-    if cb_map[line_idx] and _has_doc_context(lines, line_idx, 8):
-        return True
-    return False
+    """Back-compat wrapper around _confidence — returns True for hard suppress only.
+
+    External callers (and the rule-match loop) prefer the three-way
+    classifier, but the old binary API is retained so existing tests
+    that import _should_suppress continue to work.
+    """
+    return _confidence(lines, line_idx, match, rule_id, cb_map, cb_ranges) == "suppress"
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -889,6 +1119,7 @@ class SkillAuditFinding:
     message: str
     file_path: str
     line_number: int | None
+    category: str = ""  # skillaudit threat category (e.g. "credential_theft")
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -919,10 +1150,18 @@ def scan_content(content: str, file_path: str = "") -> list[dict[str, Any]]:
         return []
     lines = content.split("\n")
     cb_map, cb_ranges = _build_code_block_map(lines)
+    # v2.99.1 — per-language docstring tracker (Python triple-quoted
+    # blocks). Used to demote matches inside prose documentation.
+    py_doc_map = _build_py_docstring_map(lines, file_path)
 
     findings: list[dict[str, Any]] = []
 
-    # 1. Rule-based pattern matching with suppression + code-block uplift.
+    # 1. Rule-based pattern matching with confidence-based severity
+    # adjustment + code-block uplift. Per user guidance ("better safe
+    # than sorry, the agents will verify"), we use a three-way
+    # classifier instead of a binary suppress/keep: hard-suppress only
+    # for placeholder-driven matches, demote-to-WARNING for plausible
+    # documentation context, keep for high-confidence threats.
     for rule, compiled_pats in _compiled_rules():
         rule_id = rule.get("id", "RULE_UNKNOWN")
         rule_sev = rule.get("severity", "medium")
@@ -936,13 +1175,42 @@ def scan_content(content: str, file_path: str = "") -> list[dict[str, Any]]:
                     continue
                 in_cb = cb_map[i]
                 lang = _code_block_lang(cb_ranges, i) or ""
-                suppressed = _should_suppress(lines, i, m.group(0), rule_id, cb_map, cb_ranges)
-                adj_sev = "info" if suppressed else rule_sev
-                if not suppressed and in_cb and lang in ("bash", "sh", "shell", "zsh"):
-                    if adj_sev == "medium":
-                        adj_sev = "high"
-                    elif adj_sev == "high":
-                        adj_sev = "critical"
+                verdict = _confidence(
+                    lines, i, m.group(0), rule_id, cb_map, cb_ranges,
+                    py_doc_map=py_doc_map, file_path=file_path,
+                )
+                suppressed = verdict == "suppress"
+                demoted = verdict == "demote"
+                # Demoted findings stay visible — emitted at "low" so the
+                # CPV severity mapping renders them as NIT, which routes
+                # to the security agents' WARNING bucket for LLM-based
+                # disambiguation rather than being silently dropped.
+                if suppressed:
+                    adj_sev = "info"
+                elif demoted:
+                    adj_sev = "low"
+                else:
+                    adj_sev = rule_sev
+                # Severity uplift inside executable code blocks
+                # (shell-class fences) — only when the match wasn't
+                # demoted/suppressed AND the host file is not pure
+                # documentation. v2.99.1: bash fences inside .md files
+                # are install / usage examples (legitimate or
+                # documented threats); promote to "high" instead of
+                # all the way to "critical", and keep the demote path
+                # open so the agents triage.
+                if verdict == "keep" and in_cb and lang in ("bash", "sh", "shell", "zsh"):
+                    in_md = file_path.lower().endswith(".md")
+                    if in_md:
+                        # Documentation context — single-step uplift, no
+                        # critical floor.
+                        if adj_sev == "medium":
+                            adj_sev = "high"
+                    else:
+                        if adj_sev == "medium":
+                            adj_sev = "high"
+                        elif adj_sev == "high":
+                            adj_sev = "critical"
                 findings.append(
                     {
                         "ruleId": rule_id,
@@ -954,6 +1222,7 @@ def scan_content(content: str, file_path: str = "") -> list[dict[str, Any]]:
                         "lineContent": line.strip()[:200],
                         "match": m.group(0),
                         "suppressed": suppressed,
+                        "demoted": demoted,
                     }
                 )
 
@@ -1102,6 +1371,7 @@ def run_skillaudit_scan(plugin_path: Path) -> SkillAuditScanResult:
                 message=str(f.get("name", "") or f.get("description", "")),
                 file_path=str(f.get("file", "")),
                 line_number=int(f["line"]) if isinstance(f.get("line"), int) and f["line"] > 0 else None,
+                category=str(f.get("category", "")),
                 raw=f,
             )
         )
@@ -1145,7 +1415,18 @@ def report_findings(
         rel = _relativise(finding.file_path, plugin_path)
         if should_skip is not None and should_skip(finding.file_path or rel, line):
             continue
-        message = f"[skillaudit {finding.rule_id}] {finding.message}".strip()
+        # v2.99.1 — embed threat category so reviewers see the threat
+        # domain at a glance (skillaudit ships 21 categories that CPV
+        # didn't have before: credential_theft, crypto_theft,
+        # data_exfiltration, prompt_injection, supply_chain, etc.).
+        category = finding.category or "unknown"
+        is_demoted = bool(finding.raw.get("demoted"))
+        # Demoted matches get a ⚠ marker so reviewers (and downstream
+        # security agents) see they need disambiguation.
+        prefix = f"[skillaudit:{category} {finding.rule_id}]"
+        if is_demoted:
+            prefix = f"⚠ {prefix} (demoted, needs review)"
+        message = f"{prefix} {finding.message}".strip()
         if finding.severity == "info":
             report.info(message, rel)
         else:

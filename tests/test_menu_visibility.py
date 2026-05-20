@@ -72,13 +72,22 @@ def test_v290_only_documented_slash_commands_remain() -> None:
     as a direct-entry universal migrator — it operates on OTHER plugins
     so menu navigation inside CPV would be a UX dead end.
 
+    Per TRDD-84525d4a (v2.99.1) ``/cpv-pre-install-scan`` was added
+    as a direct-entry pre-install security gate — it runs BEFORE the
+    user opens any menu, so menu navigation defeats the gate's timing.
+
     Any new direct-entry command requires its own TRDD.
     """
-    allowed = {"cpv-main-menu.md", "cpv-batch-fix.md", "the-skills-menu-create.md"}
+    allowed = {
+        "cpv-main-menu.md",
+        "cpv-batch-fix.md",
+        "the-skills-menu-create.md",
+        "cpv-pre-install-scan.md",
+    }
     md_files = {p.name for p in COMMANDS_DIR.glob("*.md")}
     unexpected = md_files - allowed
     missing = allowed - md_files
     assert not unexpected and not missing, (
-        f"commands/ must contain exactly {sorted(allowed)} (v2.90.0 + v2.91.0 + v2.95.0). "
+        f"commands/ must contain exactly {sorted(allowed)} (v2.90.0 + v2.91.0 + v2.95.0 + v2.99.1). "
         f"Unexpected: {sorted(unexpected)}. Missing: {sorted(missing)}."
     )

@@ -69,9 +69,34 @@ def is_self_scan_eligible(rel_path: str) -> bool:
         return True
     if "/tests/fixtures/" in file_normalized or file_normalized.startswith("tests/fixtures/"):
         return True
+    # v2.99.1 — CPV rule catalogs (e.g. rules/skillaudit_patterns.json).
+    # MUST stay in lockstep with validate_security._is_self_scan_eligible.
+    if ("/rules/" in file_normalized or file_normalized.startswith("rules/")) and basename.endswith(".json"):
+        return True
+    # v2.99.1 — root-level documentation files (README, CHANGELOG, etc.).
+    # Mirror validate_security._is_self_scan_eligible.
+    if basename in {
+        "readme.md", "changelog.md", "shiplog.md", "contributing.md",
+        "security.md", "code_of_conduct.md", "support.md",
+    } and "/" not in file_normalized.lstrip("./"):
+        return True
+    # v2.99.1 — root-level references/ + design/audits/.
+    if file_normalized.startswith("references/") and basename.endswith(".md"):
+        return True
+    if file_normalized.startswith("design/audits/") and basename.endswith(".md"):
+        return True
+    # v2.99.1 — CPV's own .github/workflows.
+    if file_normalized.startswith(".github/workflows/") and (
+        basename.endswith(".yml") or basename.endswith(".yaml")
+    ):
+        return True
     if "/semantic-validation-skill/references/" in file_normalized:
         return True
-    if "/skills/" in file_normalized and "/references/" in file_normalized and basename.endswith(".md"):
+    if (
+        ("/skills/" in file_normalized or file_normalized.startswith("skills/"))
+        and "/references/" in file_normalized
+        and basename.endswith((".md", ".py", ".sh", ".js", ".ts", ".json", ".yaml", ".yml"))
+    ):
         return True
     if ("/agents/" in file_normalized or file_normalized.startswith("agents/")) and basename.endswith(".md"):
         return True
