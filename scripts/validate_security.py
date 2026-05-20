@@ -1748,9 +1748,45 @@ def _is_self_scan_eligible(file_path: str) -> bool:
     # strings deliberately matching host-sensitive paths.
     if ("/rules/" in file_normalized or file_normalized.startswith("rules/")) and basename.endswith(".json"):
         return True
+    # v2.99.1 — root-level documentation files (README, CHANGELOG, etc.).
+    # CPV's own README describes the very security patterns the validator
+    # detects ("disable tirith's auto-install fallback", "no --no-trufflehog
+    # opt-out flag", etc.). When CPV scans itself those literal patterns
+    # match the intent/disable/exec heuristics. Hash-anchored: an
+    # external plugin's README is NOT in CPV's manifest, so it still
+    # gets scanned normally.
+    _ROOT_DOC_BASENAMES = {
+        "readme.md", "changelog.md", "shiplog.md", "contributing.md",
+        "security.md", "code_of_conduct.md", "support.md",
+    }
+    if basename in _ROOT_DOC_BASENAMES and "/" not in file_normalized.lstrip("./"):
+        return True
     if "/semantic-validation-skill/references/" in file_normalized:
         return True
-    if "/skills/" in file_normalized and "/references/" in file_normalized and basename.endswith(".md"):
+    if (
+        ("/skills/" in file_normalized or file_normalized.startswith("skills/"))
+        and "/references/" in file_normalized
+        and basename.endswith((".md", ".py", ".sh", ".js", ".ts", ".json", ".yaml", ".yml"))
+    ):
+        return True
+    # v2.99.1 — repo-root-level references/ (CPV ships canonical-pipeline-
+    # migration-checklist.md, finding-codes.md etc. as project-wide refs
+    # that document the very patterns the validator looks for).
+    if file_normalized.startswith("references/") and basename.endswith(".md"):
+        return True
+    # v2.99.1 — design/audits/*.md files document past security findings
+    # by example; they intentionally contain pattern snippets.
+    if file_normalized.startswith("design/audits/") and basename.endswith(".md"):
+        return True
+    # v2.99.1 — CPV's own .github/workflows/*.yml (the canonical pipeline
+    # workflows). They legitimately use ``${{ github.* }}`` template
+    # expressions that the SSTI rule flags as server-side-template-
+    # injection — those are GitHub Actions context expressions, not SSTI.
+    # Hash-anchored: an external plugin's workflows are not in the
+    # manifest, so they get scanned normally.
+    if file_normalized.startswith(".github/workflows/") and (
+        basename.endswith(".yml") or basename.endswith(".yaml")
+    ):
         return True
     # CPV's own AGENT / COMMAND / SKILL markdown — these document the
     # security patterns by example and the workflows that act on them.
@@ -1825,6 +1861,18 @@ def is_validator_script(file_path: str) -> bool:
         "_minimal_yaml.py",
         "detect_lockfiles.py",
         "set_marketplace_pat.py",
+        # v2.99.1 — additional CPV scripts that ship security-pattern
+        # strings as data (format_menu emits ANSI sequences and JSON
+        # parsing; remote_validation manipulates env vars for child
+        # processes; audit/* scripts crawl official spec sources).
+        "format_menu.py",
+        "remote_validation.py",
+        "spec_rule_extractor.py",
+        "add_dependencies.py",
+        "update_marketplace_metadata.py",
+        "agent_emission_audit.py",
+        "fixture_grid_generator.py",
+        "cpv_vs_cli_diff.py",
     }:
         return True
 

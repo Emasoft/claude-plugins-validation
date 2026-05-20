@@ -144,10 +144,22 @@ class TestCommandCount:
         bare slash command to retrofit their plugin to the-skills-menu
         method, so menu navigation is not acceptable here.
 
-        Any fourth command requires a new TRDD documenting why menu
+        Per TRDD-84525d4a (v2.99.1), ``cpv-pre-install-scan.md`` was
+        added as a FOURTH direct-entry slash command. The pre-install
+        gate must be invokable BEFORE the user opens any menu — the
+        whole point is to scan untrusted plugins before they touch
+        the cache. Menu navigation defeats the pre-install timing
+        guarantee, so a bare slash command is the only honest UX.
+
+        Any fifth command requires a new TRDD documenting why menu
         unification is broken for that case.
         """
-        allowed = {"cpv-main-menu.md", "cpv-batch-fix.md", "the-skills-menu-create.md"}
+        allowed = {
+            "cpv-main-menu.md",
+            "cpv-batch-fix.md",
+            "the-skills-menu-create.md",
+            "cpv-pre-install-scan.md",
+        }
         md_files = list(COMMANDS_DIR.glob("*.md"))
         actual = {f.name for f in md_files}
         unexpected = actual - allowed
@@ -158,8 +170,13 @@ class TestCommandCount:
         )
 
     def test_only_remaining_command_is_cpv_main_menu_or_batch_fix(self):
-        """The three surviving commands MUST be in the allowlist."""
-        allowed = {"cpv-main-menu.md", "cpv-batch-fix.md", "the-skills-menu-create.md"}
+        """The four surviving commands MUST be in the allowlist."""
+        allowed = {
+            "cpv-main-menu.md",
+            "cpv-batch-fix.md",
+            "the-skills-menu-create.md",
+            "cpv-pre-install-scan.md",
+        }
         md_files = list(COMMANDS_DIR.glob("*.md"))
         for f in md_files:
             assert f.name in allowed, (

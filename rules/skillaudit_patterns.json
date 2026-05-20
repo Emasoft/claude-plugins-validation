@@ -644,9 +644,9 @@
         "child_process.*exec.*\\+",
         "os\\.system\\s*\\(.*(?:format|%s|\\+|f['\"])",
         "subprocess\\.(?:call|run|Popen)\\s*\\(.*(?:format|%s|\\+|f['\"]|shell\\s*=\\s*True)",
-        "(?:;|\\||&&)\\s*(?:curl|wget|nc|bash|sh|python|perl|ruby|php)\\s",
-        "\\$\\(.*(?:curl|wget|cat|ls|whoami|id|uname)\\)",
-        "`.*(?:curl|wget|cat|ls|whoami|id|uname).*`",
+        "(?:;|\\||&&)\\s*\\b(?:curl|wget|nc|bash|sh|python|perl|ruby|php)\\b",
+        "\\$\\(.*\\b(?:curl|wget|cat|ls|whoami|id|uname)\\b\\)",
+        "`.*\\b(?:curl|wget|cat|ls|whoami|id|uname)\\b.*`",
         "Runtime\\.getRuntime\\(\\)\\.exec",
         "ProcessBuilder.*(?:command|start)",
         "(?:system|passthru|shell_exec|popen)\\s*\\(.*\\$"
