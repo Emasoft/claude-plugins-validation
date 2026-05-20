@@ -753,7 +753,13 @@ class TestLintRepoOrchestration:
         def fake_lint(*args, **kwargs):  # noqa: ARG001
             return True
 
-        with patch.dict(_DISPATCH, {"python": fake_lint}, clear=False):
+        # v2.98.0: patch.object full-swap (matches sibling test files)
+        # eliminates the cross-test shared-dict mutation that caused
+        # xdist isolation flakes.
+        import cpv_lint_engine as _cle
+        fake_dispatch = dict(_DISPATCH)
+        fake_dispatch["python"] = fake_lint
+        with patch.object(_cle, "_DISPATCH", fake_dispatch):
             ok = lint_repo(tmp_path, report)
         assert ok is True
 
@@ -787,12 +793,28 @@ class TestLintRepoOrchestration:
 
             return _fn
 
-        with patch.dict(
-            _DISPATCH,
-            {"python": trace("python"), "javascript": trace("javascript")},
-            clear=False,
-        ):
-            lint_repo(tmp_path, report, languages=["python"])
+        # v2.98.0: switched from `patch.dict(_DISPATCH, …, clear=False)` to
+        # `patch.object(cpv_lint_engine, "_DISPATCH", …)` — full attribute
+        # swap (not in-place mutation) eliminates the cross-test shared-
+        # state risk that caused xdist isolation flakes on v2.96.0 +
+        # v2.97.0 publishes. Matches the pattern in
+        # `test_lint_cache_integration.py` and `test_lint_parallelization.py`.
+        #
+        # ALSO: pass an isolated `ScannerCache(cache_dir=tmp_path/"cache")`
+        # so that other parallel xdist workers cannot cause this run to
+        # hit a stale cache entry and skip the lint subprocess (which
+        # would leave ``called`` empty and trigger the same flake).
+        import cpv_lint_engine as _cle
+        from cpv_scanner_cache import ScannerCache
+        fake_dispatch = {
+            "python": trace("python"),
+            "javascript": trace("javascript"),
+        }
+        with patch.object(_cle, "_DISPATCH", fake_dispatch):
+            lint_repo(
+                tmp_path, report, languages=["python"],
+                cache=ScannerCache(cache_dir=tmp_path / "cache"),
+            )
         assert called == ["python"]
 
     def test_gitignore_filtered_at_orchestration_layer(self, tmp_path: Path) -> None:
@@ -809,8 +831,18 @@ class TestLintRepoOrchestration:
             return True
 
         report = ValidationReport()
-        with patch.dict(_DISPATCH, {"python": capture_lint}, clear=False):
-            lint_repo(tmp_path, report)
+        # v2.98.0: patch.object full-swap (matches sibling test files)
+        # + isolated ScannerCache so a stale entry from another worker
+        # doesn't short-circuit the lint subprocess.
+        import cpv_lint_engine as _cle
+        from cpv_scanner_cache import ScannerCache
+        fake_dispatch = dict(_DISPATCH)
+        fake_dispatch["python"] = capture_lint
+        with patch.object(_cle, "_DISPATCH", fake_dispatch):
+            lint_repo(
+                tmp_path, report,
+                cache=ScannerCache(cache_dir=tmp_path / "cache"),
+            )
         assert captured_lists, "lint_python was never called"
         py_files = captured_lists[0]
         assert any(p.name == "main.py" for p in py_files)

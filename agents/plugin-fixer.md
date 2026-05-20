@@ -105,13 +105,19 @@ in THIS agent's `model:` frontmatter:
 
 | `model:` declaration | Raw window | Safe (~50%) ceiling | Approx. findings/run @ 3-5K tokens each |
 |----------------------|------------|---------------------|------------------------------------------|
-| `opus` / `sonnet` (bare) | 200K | ~100K | **30-40** |
-| `opus[1m]` / `sonnet[1m]` | 1M | ~500K | **100-150** |
+| `opus` / `sonnet` (bare) | 200K | ~100K | **15-25** |
+| `opus[1m]` / `sonnet[1m]` | 1M | ~500K | **50-75** |
 | future Claude models | varies | varies | recompute via `(window/2)/per_finding` |
 
 Future Claude variants will have different windows — use the declared
 model's documented context limit, halved for the safe-utilisation
 threshold, divided by 3-5K tokens per finding.
+
+v2.98.0: ceilings lowered (bare 30-40 → 15-25, 1m 100-150 → 50-75).
+Lower ceilings mean batch mode kicks in earlier, giving each shard
+fixer more headroom for re-validate cycles + tool output + skill
+loading. Authors who want the OLD ceilings can override
+`--shard-size` on `/cpv-batch-fix`.
 
 ### Step 3 — Apply the routing table
 
@@ -121,7 +127,7 @@ Pick exactly one of:
 |---|-----------|--------|-----------------|
 | 1 | `total_findings == 0` | Return `[DONE] iterations=0, clean. Report: <triage-report>` immediately. No loop, no skill. | (none) |
 | 2 | `0 < total_findings ≤ safe-ceiling` | Enter the normal validate → fix → re-validate loop. | `Skill({skill: "claude-plugins-validation:fix-validation"})` for error→fix mappings |
-| 3 | `total_findings > safe-ceiling` AND mode is NOT `batch_shard` | Exit IMMEDIATELY with `[BATCH_REQUIRED] <N> findings exceed single-agent capacity (safe-ceiling=<ceil>). Run /cpv-batch-fix <plugin-root> to dispatch parallel shard-fixers. Report: <triage-report>`. Do NOT attempt the loop — it will die mid-way. | `Skill({skill: "claude-plugins-validation:batch-fix-protocol"})` for documentation (optional, only if you need to explain the protocol) |
+| 3 | `total_findings > safe-ceiling` AND mode is NOT `batch_shard` | Exit IMMEDIATELY with `[BATCH_REQUIRED] <N> findings exceed single-agent capacity (safe-ceiling=<ceil>). plugin-root: <plugin-root>. Triage report: <triage-report>`. The calling orchestrator AUTO-DISPATCHES the batch protocol — the user no longer has to type `/cpv-batch-fix` manually. Do NOT attempt the loop — it will die mid-way. | `Skill({skill: "claude-plugins-validation:batch-fix-protocol"})` for documentation (optional, only if you need to explain the protocol) |
 | 4 | Mode is `batch_shard` (any finding count, capped to shard manifest) | Enter the batch_shard workflow defined in §"Batch-shard mode" below. | `Skill({skill: "claude-plugins-validation:batch-fix-protocol"})` for schema + `Skill({skill: "claude-plugins-validation:fix-validation"})` for per-finding fixes |
 | 5 | Mode is `canonical-pipeline migration` (e.g. dispatched from `/cpv-upgrade-plugin`) | Enter the migration workflow per §"Migration exit contract" below. | `Skill({skill: "claude-plugins-validation:canonical-pipeline"})` |
 | 6 | Mode is `marketplace fix` | Refuse — this is the marketplace-fixer's job. Return `[BLOCKED] wrong-agent — use marketplace-fixer for marketplace fixes`. | (none) |
@@ -130,8 +136,31 @@ The `[BATCH_REQUIRED]` exit (situation 3) is THE critical case the
 v2.91.0 batch-fix protocol was designed for. **Never** enter the
 normal fix loop on a plugin whose finding count exceeds the
 safe-ceiling — the loop WILL die mid-way and leave the plugin in a
-half-fixed state. The orchestrator (main session or `cpv-main-menu-agent`)
-sees your `[BATCH_REQUIRED]` line and routes the user to `/cpv-batch-fix`.
+half-fixed state.
+
+v2.98.0: the orchestrator (main session running `/cpv-main-menu`,
+`/cpv-doctor`, or `/cpv-upgrade-plugin`) AUTO-DISPATCHES the batch
+protocol when it sees your `[BATCH_REQUIRED]` line. The user no
+longer has to manually type `/cpv-batch-fix` — the orchestrator
+reads the line, runs the batch planner, fans out N parallel
+plugin-fixer subagents in `batch_shard` mode in ONE main-session
+message, runs the aggregator, and reports the consolidated outcome.
+
+Your line MUST include:
+- The `[BATCH_REQUIRED]` literal (case-sensitive)
+- `<N>` finding count
+- `safe-ceiling=<C>` for context
+- `plugin-root: <abs-path>` so the orchestrator can plan without
+  re-running the validator
+- `Triage report: <abs-path>` for transparency
+
+Example (replace `<plugin-root>` with the actual absolute path of the
+plugin you are working on):
+```
+[BATCH_REQUIRED] 47 findings exceed single-agent capacity (safe-ceiling=20).
+plugin-root: <plugin-root>
+Triage report: <plugin-root>/reports/plugin-fixer/<timestamp>-triage.md
+```
 
 ### Step 4 — Why this works architecturally
 

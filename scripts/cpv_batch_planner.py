@@ -58,9 +58,16 @@ SEVERITY_ORDER = {"CRITICAL": 0, "MAJOR": 1, "MINOR": 2, "NIT": 3, "WARNING": 4,
 # ~50% utilisation threshold above which model quality begins to degrade.
 # When ``plugin-fixer.model`` is upgraded to a 1M-context variant
 # (``opus[1m]`` / ``sonnet[1m]``) raise this with ``--shard-size`` to
-# ~100-150 (still <50% of 1M). Future models with different context
+# ~50-75 (still <50% of 1M). Future models with different context
 # windows will need their own tuning.
-DEFAULT_SHARD_SIZE = 30
+#
+# v2.98.0: lowered from 30 → 15. Lower ceilings mean batch mode triggers
+# earlier — better context safety, finer parallelism, faster wall-clock
+# on medium-finding-count plugins. The previous 30 left less headroom
+# for per-finding work (skim → diagnose → fix → re-validate cycles can
+# consume 3-5K tokens each, so 30 findings @ 5K = 150K tokens, dangerously
+# close to the 100K safe-ceiling on bare opus).
+DEFAULT_SHARD_SIZE = 15
 DEFAULT_MAX_PARALLEL = 8
 MAX_PARALLEL_CAP = 16
 SCHEMA_VERSION = 2  # v2 — scope-based ownership instead of file list
