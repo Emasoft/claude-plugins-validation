@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-20T13:06:43+00:00",
+  "computed_at": "2026-05-20T13:09:03+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     "agents/cache-optimizer-agent.md": "sha256:992d3c6986a253c17f06d082c532bdf7fa1535d8d242c005ad638aacea866c55",
@@ -30,6 +30,7 @@
     "design/tasks/TRDD-20260520_000236+0200-31de95b7-v2-1-145-changelog-catchup.md": "sha256:c3ed14bb428619f3f34231466d7ac2d978cbb4f7af77fe35119de4dab09c9b6a",
     "design/tasks/TRDD-20260520_032628+0200-6edd2743-fix-issues-27-28-29.md": "sha256:68ec3d6cae426a8bb860475cbf4c5540763a98dbffd3f1ae32785dbb5087d8ce",
     "design/tasks/TRDD-20260520_133403+0200-dce5f014-v298-issues-30-31-batch-thresholds-test-speed.md": "sha256:e39072f877f0bf69ffa5f8e1da95e2c66a1f0908e09f7594d1e00f0210d572e4",
+    "design/tasks/TRDD-20260520_150529+0200-84525d4a-v299-skillaudit-native-mandatory.md": "sha256:74d1e89ce04c19bbdec168ba8e6cb1636cc5145bc9cd330b48cbcfc143446cb1",
     "design/tasks/TRDD-26446eed-ea5e-43e7-886c-8512866d92be-semantic-channel-source.md": "sha256:b20480b2cf4e0a97cc06e53a32a39a4d09a4740b94c92804298a8286d88d991c",
     "design/tasks/TRDD-26f7fbfc-8472-47ca-8a00-e4be0b29bb67-v2-1-80-plugin-features-docs.md": "sha256:e2f55a383481238d738aaea92cfdbcb0ce34e6f1bdeab22a3b641cfca583431d",
     "design/tasks/TRDD-2be75e88-3c23-4c91-9e4e-5ce315b497dc-scope-validators.md": "sha256:6aba8e45a304a4b8b33177decdc271a7e1677098d7b5e09903f132f73cabff68",
@@ -93,6 +94,7 @@
     "scripts/cpv_scanner_cache.py": "sha256:4192edf3c8f6f8c622e7a7a19551035febba4d0edddb83ddf17d3a8352441880",
     "scripts/cpv_setup_auth.py": "sha256:154a0365ea2187876858730899b084e0e82484ade62e22ae15af7a4fb48ba400",
     "scripts/cpv_skill_scanner.py": "sha256:31bff56df20377e2e66a760bc95e6483a8092464c53543a2b1f8a74cec939464",
+    "scripts/cpv_skillaudit_native.py": "sha256:8ad9bf79ea4134a9f8da3a5fcc95af162909738b26c55572eb420f451a4fde07",
     "scripts/cpv_staging.py": "sha256:533bc780c1f185ba22fb12ff9ad0531f5745d7c78f76824590e01c038cfccd5f",
     "scripts/cpv_strip_dev.py": "sha256:ad76bd77d55afd0061476b813da15024ca6b7b2b738f62bd7f09bfbbb6d71813",
     "scripts/cpv_taint_engine.py": "sha256:1cf84978299c030b3c3eff3cf6a54b24fd6b881cd0f41e6528f100523d6e5a2e",
@@ -447,6 +449,7 @@
     "tests/test_set_marketplace_pat.py": "sha256:a0dd5dbdd2ed67b4a2aa4153f3224a3a537becb66a15f87175ddd2169c24ab06",
     "tests/test_setup_branch_rules.py": "sha256:fa4847ae56c99af5907a2d4a81e0f9ef330200e25c9accd88443ddc9e8a51208",
     "tests/test_setup_branch_rules_generic.py": "sha256:8823d2e1ca978a010a170ced88faa7834db7b7667dce2b2033909c5df3683b7e",
+    "tests/test_skillaudit_native.py": "sha256:b2e6fbf042e9b42c2a73fd0d2b45c6f65f8cfeeecaeb640e25dc9f883d0c1ff1",
     "tests/test_split_lines_id_reuse_regression.py": "sha256:b8695eedd55d635cc542ea4098bc4c718746fecaa6a4b1a9a8a5ed956aa9d245",
     "tests/test_subagent_type_case_insensitive.py": "sha256:0a0d4445ffdd089739eb36f2fd12accceb992172a1e824691a6c666d9deefa41",
     "tests/test_tirith_integration.py": "sha256:5f9571bfde9726c341fd8f5db4f05b75fd85d01526ff51689fb90e3cbf9d66d3",
