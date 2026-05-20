@@ -6845,9 +6845,25 @@ def validate_md_file_paths(
         )
         is_plugin_internal = clean_path.startswith(plugin_internal_prefixes)
 
+        # Issue #30 (v2.98.0): also try plugin_root/skills/<clean_path> and
+        # plugin_root/skills/<clean_path>/SKILL.md so cross-references to
+        # sibling skills (typed as bare slug like `amvcp-modal-comments` or
+        # `amvcp-modal-comments/SKILL.md`) resolve correctly instead of
+        # falling through to the WARNING branch. The bare-slug case requires
+        # the `/` heuristic earlier to skip it, so by the time we get here
+        # the path already has a slash — but a leading-component slug like
+        # `amvcp-wf-archetypes/SKILL.md` was the actual reported shape.
         resolved = md_file.parent / clean_path
         if not resolved.exists():
             resolved = plugin_root / clean_path
+        if not resolved.exists():
+            # Sibling-skill fallback: try interpreting the path as a
+            # `skills/`-relative reference.
+            resolved = plugin_root / "skills" / clean_path
+        if not resolved.exists():
+            # Bare-slug skill reference (after stripping common suffixes):
+            # `<slug>` → `skills/<slug>/SKILL.md`.
+            resolved = plugin_root / "skills" / clean_path / "SKILL.md"
         if resolved.exists():
             report.passed(
                 f"Backtick path OK: `{raw_path}` ({rel_md})",

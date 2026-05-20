@@ -260,7 +260,15 @@ class TestValidateMdUrlsRetry:
         """github.com URLs receive +2 bonus retries vs the bare max_retries
         param — mirrors the github-timeouts rule's "be patient with GitHub
         transient failures" semantics. Default max_retries=2 + 2 bonus + 1
-        initial = 5 attempts before giving up."""
+        initial = 5 attempts before giving up.
+
+        v2.98.0 (test-speed): mock ``time.sleep`` to skip the linear
+        backoff sleeps — they consume ~15s wall-clock per run without
+        adding any test value (the assertion is on attempt COUNT, not
+        on real backoff timing). Per-host retry-backoff lookup inside
+        validate_md_urls ignores the test's ``retry_backoff`` arg for
+        github.com (uses ``_HOST_RETRY_BACKOFF["github.com"]`` >> 0.01).
+        """
         md = _make_md(tmp_path)  # default URL is on github.com
         counter = {"n": 0}
 
@@ -269,7 +277,8 @@ class TestValidateMdUrlsRetry:
             raise socket.timeout("persistent")
 
         report = ValidationReport()
-        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen), \
+             patch("time.sleep", return_value=None):
             validate_md_urls(md, tmp_path, report, timeout=1.0, url_cache={}, retry_backoff=0.01, max_retries=2)
         # 1 initial + 2 bare retries + 2 github bonus retries = 5
         assert counter["n"] == 5, f"expected 5 attempts on github.com, got {counter['n']}"

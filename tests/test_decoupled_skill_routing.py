@@ -50,16 +50,30 @@ class TestPluginFixerPhase0Triage:
         assert "batch_shard" in self.body
 
     def test_batch_required_exit_documented(self) -> None:
-        """The `[BATCH_REQUIRED]` exit path is the critical one — pin it."""
-        # The line must reference both the exit token AND /cpv-batch-fix
-        bracket_section = re.search(
-            r"`\[BATCH_REQUIRED\][^`]+/cpv-batch-fix[^`]+`",
-            self.body,
+        """The `[BATCH_REQUIRED]` exit path is the critical one — pin it.
+
+        v2.98.0: the line no longer requires ``/cpv-batch-fix`` (the
+        orchestrator AUTO-DISPATCHES the batch protocol), but it MUST
+        still include ``[BATCH_REQUIRED]`` + ``safe-ceiling`` + ``plugin-root``
+        + ``Triage report`` so the orchestrator can plan without
+        re-running validate.
+        """
+        # Find any code-block / quoted line that contains [BATCH_REQUIRED]
+        # AND mentions safe-ceiling AND plugin-root + Triage report
+        # (the new auto-dispatch format).
+        assert "[BATCH_REQUIRED]" in self.body, (
+            "plugin-fixer must document the literal [BATCH_REQUIRED] exit token"
         )
-        assert bracket_section is not None, (
-            "plugin-fixer must document the literal [BATCH_REQUIRED] exit "
-            "format with /cpv-batch-fix in the same line for the orchestrator "
-            "to parse"
+        assert "safe-ceiling=" in self.body, (
+            "plugin-fixer must require safe-ceiling=<C> in BATCH_REQUIRED line"
+        )
+        assert "plugin-root:" in self.body, (
+            "plugin-fixer must require plugin-root: in BATCH_REQUIRED line"
+        )
+        assert "Triage report:" in self.body or "triage-report" in self.body, (
+            "plugin-fixer must require a triage report path so the "
+            "orchestrator can show the user the diagnostics that justified "
+            "the batch dispatch"
         )
 
     def test_documents_skill_tool_invocation_pattern(self) -> None:
@@ -122,6 +136,9 @@ class TestMenuFixLeafAutoRoutes:
         assert "counts." in text  # references the JSON counts field
 
     def test_fix_leaf_routes_to_batch_for_big_plugins(self) -> None:
+        """v2.98.0: the §3.2.1 fix leaf now AUTO-DISPATCHES the batch
+        protocol (no manual /cpv-batch-fix). The text must still
+        describe the threshold + the batch-protocol scripts."""
         section = re.search(
             r"#### 3\.2\.1 Fix plugin findings(.*?)#### 3\.2\.2",
             self.menu_tree,
@@ -129,9 +146,16 @@ class TestMenuFixLeafAutoRoutes:
         )
         assert section is not None
         text = section.group(1)
-        assert "/cpv-batch-fix" in text
+        # Must reference the batch planner + aggregator (the auto-dispatch
+        # path replaces the old `/cpv-batch-fix` prompt).
+        assert "cpv_batch_planner" in text, (
+            "§3.2.1 must reference cpv_batch_planner.py for auto-dispatch"
+        )
+        assert "cpv_batch_aggregator" in text, (
+            "§3.2.1 must reference cpv_batch_aggregator.py for auto-dispatch"
+        )
         # Must mention the threshold + the "too many for single-agent" reasoning
-        assert "single-agent" in text or "context exhaust" in text or "too many" in text
+        assert "single-agent" in text or "context exhaust" in text or "too many" in text or "safe-ceiling" in text
 
     def test_fix_leaf_handles_already_clean(self) -> None:
         section = re.search(

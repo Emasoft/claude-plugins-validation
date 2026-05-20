@@ -1015,6 +1015,99 @@ def stage_check_working_tree(plugin_root: Path) -> int:
     return 0
 
 
+# Issue #31 (v2.98.0): browser-orphan cleanup signatures.
+#
+# A pytest run that spawns Playwright / dev-browser pages can leave
+# behind dozens of `Chrome for Testing` / `chromium` / `headless_shell`
+# processes if the test code (or its fixtures) forget to close the
+# pages. Over a long debug session those orphans pile up, eventually
+# exhausting file descriptors or RAM and either crashing the browser
+# or making the whole machine unresponsive. The baseline-diff cleanup
+# below catches every leak regardless of test-code quality.
+#
+# Signature list is intentionally narrow — it must NOT match the
+# maintainer's daily Chrome (which has command `Google Chrome` on
+# macOS, not `Chrome for Testing`). The pre-pytest baseline snapshot
+# is the second layer of safety: even if a signature accidentally
+# matched a normal Chrome, the baseline snapshot would include it,
+# so the diff would exclude it.
+_BROWSER_ORPHAN_SIGNATURES: tuple[str, ...] = (
+    "Chrome for Testing",
+    "chrome-for-testing",
+    "headless_shell",
+    "Chromium.app/Contents",  # macOS .app bundle interior
+    "chromium-browser",
+    "/playwright/",
+    "playwright-core",
+)
+
+
+def _snapshot_browser_pids() -> set[int]:
+    """Return the set of currently-running PIDs whose command line matches
+    a browser-orphan signature.
+
+    Snapshot-then-grep (per ``~/.claude/rules`` rule against ``ps | grep``):
+    capture the full process table, then filter — never live-grep.
+    """
+    try:
+        snap = subprocess.run(
+            ["ps", "-eo", "pid,command"],
+            capture_output=True, text=True, check=False, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    if snap.returncode != 0 or not snap.stdout:
+        return set()
+    pids: set[int] = set()
+    for raw_line in snap.stdout.strip().split("\n")[1:]:  # skip header
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            pid_str, cmd = line.split(None, 1)
+            pid = int(pid_str)
+        except (ValueError, IndexError):
+            continue
+        if any(sig in cmd for sig in _BROWSER_ORPHAN_SIGNATURES):
+            pids.add(pid)
+    return pids
+
+
+def _cleanup_browser_orphans(baseline_pids: set[int]) -> int:
+    """Kill any browser-signature PIDs that appeared since ``baseline_pids``.
+
+    Baseline-diff is the safety net: a PID present in baseline is the
+    maintainer's pre-existing browser process — NEVER killed. Only
+    PIDs that came into existence between baseline-snapshot and now
+    are candidates, and only if they still match a browser signature.
+
+    Returns the number of orphans killed (0 if none) for logging.
+    """
+    import signal
+    import time
+
+    current = _snapshot_browser_pids()
+    new_pids = current - baseline_pids
+    if not new_pids:
+        return 0
+    killed = 0
+    # SIGTERM first (graceful), short wait, then SIGKILL for any survivors.
+    for pid in new_pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            killed += 1
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    if killed:
+        time.sleep(1.5)
+        for pid in new_pids:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+    return killed
+
+
 def stage_run_tests(plugin_root: Path) -> int:
     """Gate 2: run tests — mandatory, cannot be skipped.
 
@@ -1032,13 +1125,30 @@ def stage_run_tests(plugin_root: Path) -> int:
     a worker thread (parallel preflight), ``sys.exit`` would only kill the
     thread — the orchestrator needs the explicit return code to halt the
     publish atomically.
+
+    Issue #31 (v2.98.0): wrap the pytest invocation in a baseline-diff
+    browser-orphan cleanup so dev-browser / Playwright test runs that
+    leak pages do not pile up Chrome-for-Testing processes (resource-
+    exhaustion → browser crash / machine unresponsive). The tests
+    themselves still run unconditionally — no skip mechanism, no opt
+    out, no iron-rule violation. The cleanup only kills processes
+    that appeared during the pytest run, never the maintainer's own
+    daily browser.
     """
     print(f"\n{BLUE}═══ Gate 2: Run tests (mandatory) ═══{NC}")
-    result = run(
-        ["uv", "run", "pytest", "tests/", "-n", "auto", "--dist=worksteal", "--maxfail=1", "-q", "--tb=short"],
-        cwd=plugin_root,
-        check=False,
-    )
+    # Issue #31: capture pre-test browser-process baseline.
+    baseline_browser_pids = _snapshot_browser_pids()
+    try:
+        result = run(
+            ["uv", "run", "pytest", "tests/", "-n", "auto", "--dist=worksteal", "--maxfail=1", "-q", "--tb=short"],
+            cwd=plugin_root,
+            check=False,
+        )
+    finally:
+        # Issue #31: always clean up (success OR failure path).
+        killed = _cleanup_browser_orphans(baseline_browser_pids)
+        if killed:
+            print(f"  {YELLOW}Cleaned up {killed} orphaned browser process(es) spawned by pytest.{NC}")
     if result.returncode != 0:
         print(
             f"\n{RED}✗ Tests failed (pytest exit {result.returncode}) — PUBLISH BLOCKED{NC}",

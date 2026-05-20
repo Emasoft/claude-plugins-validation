@@ -2062,6 +2062,84 @@ def stage_lint(root: Path) -> None:
     run(["uv", "run", "mypy", "scripts/", "--ignore-missing-imports"], cwd=root)
     cprint(f"  {GREEN}Lint + typecheck passed.{NC}")
 
+# Issue #31 (v2.98.0): browser-orphan cleanup signatures.
+#
+# A pytest run that spawns Playwright / dev-browser pages can leave
+# behind dozens of `Chrome for Testing` / `chromium` / `headless_shell`
+# processes if the test code (or fixtures) forget to close pages. Over
+# a long debug session those orphans pile up, exhausting file
+# descriptors or RAM and eventually crashing the browser or making
+# the machine unresponsive. The baseline-diff cleanup below catches
+# every leak regardless of test-code quality. NEVER skips tests — the
+# iron rule (no plugin with issues pushed) is preserved.
+_BROWSER_ORPHAN_SIGNATURES = (
+    "Chrome for Testing",
+    "chrome-for-testing",
+    "headless_shell",
+    "Chromium.app/Contents",
+    "chromium-browser",
+    "/playwright/",
+    "playwright-core",
+)
+
+
+def _snapshot_browser_pids() -> set:
+    """Snapshot-then-grep — never live-grep — for browser-signature PIDs."""
+    try:
+        snap = subprocess.run(
+            ["ps", "-eo", "pid,command"],
+            capture_output=True, text=True, check=False, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    if snap.returncode != 0 or not snap.stdout:
+        return set()
+    pids = set()
+    for raw_line in snap.stdout.strip().split("\n")[1:]:
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            pid_str, cmd = line.split(None, 1)
+            pid = int(pid_str)
+        except (ValueError, IndexError):
+            continue
+        if any(sig in cmd for sig in _BROWSER_ORPHAN_SIGNATURES):
+            pids.add(pid)
+    return pids
+
+
+def _cleanup_browser_orphans(baseline_pids: set) -> int:
+    """Kill browser-signature PIDs that appeared since ``baseline_pids``.
+
+    Baseline-diff: PIDs in baseline are pre-existing (maintainer's own
+    daily browser) — NEVER killed. Only PIDs that came into existence
+    during the pytest run are candidates.
+    """
+    import signal
+    import time
+
+    current = _snapshot_browser_pids()
+    new_pids = current - baseline_pids
+    if not new_pids:
+        return 0
+    killed = 0
+    for pid in new_pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            killed += 1
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    if killed:
+        time.sleep(1.5)
+        for pid in new_pids:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+    return killed
+
+
 def stage_tests(root: Path) -> None:
     """Step 3: Run pytest. MANDATORY — no skip, no exceptions.
 
@@ -2070,6 +2148,12 @@ def stage_tests(root: Path) -> None:
 
     Order: tests run BEFORE the CPV validator so behavioral regressions fail
     fast on unit tests before the structural validator inspects the manifest.
+
+    Issue #31 (v2.98.0): wrap the pytest invocation in a baseline-diff
+    browser-orphan cleanup so dev-browser / Playwright leaks do not
+    pile up Chrome-for-Testing processes. Tests still run
+    unconditionally — the cleanup is a safety net, not a skip
+    mechanism.
     """
     cprint(f"\n{BOLD}[3/11] Running tests...{NC}")
     test_dir = root / "tests"
@@ -2077,7 +2161,13 @@ def stage_tests(root: Path) -> None:
         cprint(f"  {RED}BLOCKED: tests/ directory missing.{NC}")
         cprint(f"  {RED}Every CPV plugin MUST ship a tests/ directory.{NC}")
         sys.exit(1)
-    r = run(["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"], cwd=root, check=False)
+    baseline_browser_pids = _snapshot_browser_pids()
+    try:
+        r = run(["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"], cwd=root, check=False)
+    finally:
+        killed = _cleanup_browser_orphans(baseline_browser_pids)
+        if killed:
+            cprint(f"  {YELLOW}Cleaned up {killed} orphaned browser process(es) spawned by pytest.{NC}")
     if r.returncode == 5:
         # pytest exit 5 = no tests collected. This is ALSO a block — no exceptions.
         cprint(f"  {RED}BLOCKED: pytest collected 0 tests.{NC}")

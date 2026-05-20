@@ -312,17 +312,25 @@ The orchestrator pipes this into `format_menu.py breakdown` to render a Unicode-
 
 When the orchestrator re-dispatches with `mode: fix_at_severity` / `mode: fix_interactive` / `mode: revalidate`, route the actual fix work to the `plugin-fixer` agent (which owns the validate → fix → re-validate loop) — the doctor itself doesn't apply edits. Return the fixer's one-line summary verbatim.
 
-## Big-plugin handoff — when findings exceed ~100
+## Big-plugin handoff — auto-batch dispatch above safe-ceiling
 
-If your scan finds many actionable findings, the single-agent fix loop may not fit in `plugin-fixer`'s context window — the size of that window depends on which model `plugin-fixer` is configured to use (see its `model:` frontmatter: bare `opus` / `sonnet` default to 200K tokens, the `opus[1m]` / `sonnet[1m]` variants give 1M tokens, future models may differ). A practical rule of thumb: model quality degrades noticeably above ~50% context utilisation, so the safe ceiling is roughly **(model_context_window / 2) / 3-5K-tokens-per-finding**. For the default opus 200K, that's ~20-30 findings before risk; for opus[1m] / sonnet[1m] it's ~100-150.
+If your scan finds many actionable findings, the single-agent fix loop may not fit in `plugin-fixer`'s context window — the size of that window depends on which model `plugin-fixer` is configured to use (see its `model:` frontmatter: bare `opus` / `sonnet` default to 200K tokens, the `opus[1m]` / `sonnet[1m]` variants give 1M tokens). A practical rule of thumb: model quality degrades noticeably above ~50% context utilisation, so the safe ceiling is roughly **(model_context_window / 2) / 3-5K-tokens-per-finding**. For the default opus 200K, that's **15-25** findings (v2.98.0 lowered from 20-30); for opus[1m] / sonnet[1m] it's **50-75**.
 
-Instead of guessing, **when findings exceed ~100 (CRITICAL + MAJOR + MINOR combined) and `plugin-fixer.model` is the bare `opus` / `sonnet` variant**, return a SPECIAL one-line summary that tells the orchestrator to recommend `/cpv-batch-fix` to the user:
+**v2.98.0 (auto-batch dispatch):** when findings exceed the safe-ceiling for the configured `plugin-fixer.model`, return a SPECIAL one-line summary that the orchestrator AUTO-ROUTES to the batch protocol — the user no longer has to manually type `/cpv-batch-fix`:
 
 ```text
-Findings: <C> CRITICAL, <M> MAJOR, <n> MINOR, <t> NIT, <w> WARNING — INVALID (report: <abs-path>) — recommend-batch-fix
+Findings: <C> CRITICAL, <M> MAJOR, <n> MINOR, <t> NIT, <w> WARNING — INVALID (report: <abs-path>) — recommend-batch-fix safe-ceiling=<C> plugin-root=<abs-path>
 ```
 
-The trailing `— recommend-batch-fix` token tells the orchestrator to print, in the post-scan menu, an extra row pointing the user at `/cpv-batch-fix <plugin-path>`. The slash command will run `scripts/cpv_batch_planner.py` to slice the findings into shards of ~30 and dispatch N parallel `plugin-fixer` agents from the main session. See `design/tasks/TRDD-20260519_114050+0200-71e68ab5-batch-fix-parallel-sharding.md` for the protocol.
+The trailing `— recommend-batch-fix safe-ceiling=<C> plugin-root=<P>` triplet tells the orchestrator to:
+
+1. Skip the user-facing menu prompt for `/cpv-batch-fix`
+2. Run `scripts/cpv_batch_planner.py <plugin-root> --shard-size <C>` directly via Bash
+3. Fan out N parallel `plugin-fixer` agents in `batch_shard` mode in a SINGLE main-session message (the only place the Agent tool can parallelise)
+4. Run `scripts/cpv_batch_aggregator.py` once shards have all returned
+5. Report the consolidated outcome
+
+See `design/tasks/TRDD-20260519_114050+0200-71e68ab5-batch-fix-parallel-sharding.md` for the protocol.
 
 Do NOT attempt to fix a big plugin yourself — your `maxTurns: 100` budget is enough for diagnosis but not for fixing the larger working sets a batch dispatch is built for.
 

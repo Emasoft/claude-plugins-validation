@@ -844,12 +844,18 @@ Type a number to choose:
 #### 3.2.1 Fix plugin findings
 
 - **arg-prompt**: `Path to a validation report .md file OR a plugin directory?`
-- **execution (TRDD-14cc93a6 — runtime routing)**:
+- **execution (TRDD-14cc93a6 — runtime routing; v2.98.0 — lowered thresholds + auto-batch)**:
   1. Quick-triage: run `validate_plugin.py --json --no-color <path>` and parse `counts.critical + counts.major + counts.minor` from stdout. Time-budget: ≤60 s. (Skip if the user passed an already-existing `.json` report — read its `counts` directly.)
   2. **If `total_findings == 0`** → reply `Plugin is already clean. ✓` and return to the post-action menu.
-  3. **If `total_findings ≤ 40`** → dispatch the **plugin-fixer agent** with the path. (The single-agent fix loop is sized for opus 200K context; raise this threshold proportionally if `plugin-fixer.model` is upgraded to a 1M variant.)
-  4. **If `total_findings > 40`** → DON'T dispatch plugin-fixer (it would die mid-loop on a context exhaust). Instead, reply with: `This plugin has <N> findings — too many for a single-agent fix loop. Dispatching /cpv-batch-fix to run parallel shard-fixers.` and then directly run `/cpv-batch-fix <path>` (which slices into shards and dispatches N plugin-fixer agents from the main session).
-  5. After the chosen agent / command returns, surface the one-line summary verbatim and route to the post-action menu.
+  3. **If `total_findings ≤ 20`** → dispatch the **plugin-fixer agent** with the path. (The single-agent fix loop is sized for opus 200K context with v2.98.0 safe-ceiling ~15-25; raise this threshold proportionally if `plugin-fixer.model` is upgraded to a 1M variant — then the ceiling is ~50-75.)
+  4. **If `total_findings > 20`** → DON'T dispatch plugin-fixer (it would die mid-loop on a context exhaust). AUTO-DISPATCH the batch protocol from the main session:
+     - Reply with: `This plugin has <N> findings — exceeds single-agent safe-ceiling. Auto-dispatching batch protocol (<shard_count> shards × <shard_size> findings).`
+     - Run `python3 scripts/cpv_batch_planner.py <path> --shard-size 15` via Bash (zero LLM cost; emits index.json + per-shard manifests).
+     - In the SAME main-session message, fan out N parallel `plugin-fixer` Agent calls in `batch_shard` mode — one per shard, each given its own shard manifest path. This is the ONLY place the Agent tool can parallelise (per Anthropic spec: subagents cannot spawn subagents).
+     - After all shards return, run `python3 scripts/cpv_batch_aggregator.py <session-dir>` via Bash and surface the consolidated outcome.
+     - The user no longer has to type `/cpv-batch-fix` manually — the menu does the dispatch end-to-end.
+  5. **If a dispatched plugin-fixer returns a line starting with `[BATCH_REQUIRED]`** (the fixer detected the threshold itself), parse the `plugin-root=<P>` token and route to step 4 with that path.
+  6. After the chosen workflow returns, surface the one-line summary verbatim and route to the post-action menu.
 
 #### 3.2.2 Fix marketplace findings
 
@@ -1398,6 +1404,7 @@ Type a number to choose:
 
 - **path-source**: per §3.0a
 - **execution**: dispatch the **plugin-fixer agent** with the path AND the prompt: `Apply pipeline-migration §1–§5 from skills/fix-validation/references/pipeline-migration.md. min_severity=WARNING (fix everything).`
+- **v2.98.0 auto-batch**: when the dispatched plugin-fixer returns a line starting with `[BATCH_REQUIRED]` (the migration uncovered more findings than fit in single-agent context), the menu orchestrator parses the `plugin-root=<P>` token and AUTO-DISPATCHES the batch protocol — same flow as §3.2.1 step 4 (planner → N parallel shard-fixers in one main-session message → aggregator). The user does NOT see a manual `/cpv-batch-fix` prompt; the upgrade flow handles it end-to-end. The ceiling is the per-model safe-ceiling (15-25 for bare opus/sonnet, 50-75 for [1m] variants).
 - **Phase 0 escape hatch**: same rule as §3.4.1 — if shape detection refuses, redirect to §3.6.8 instead of upgrading the wrong shape.
 
 ---

@@ -1,9 +1,9 @@
 ---
 trdd-id: dce5f014-1e59-433e-a732-31c96bf0afdd
 title: v2.98.0 close issues 30 31 — lower batch thresholds, auto-dispatch from doctor & upgrade, faster tests
-status: not-started
+status: completed
 created: 2026-05-20T13:34:03+0200
-updated: 2026-05-20T13:34:03+0200
+updated: 2026-05-20T14:11:33+0200
 ---
 
 <!-- markdownlint-disable-next-line MD025 -->
@@ -36,20 +36,44 @@ the `plugin_root / "skills" / clean_path` resolution AND
 `plugin_root / "skills" / clean_path / "SKILL.md"` (when clean_path is a
 bare slug) before falling through.
 
-### Issue #31 fix
+### Issue #31 fix (revised — iron-rule-preserving)
 
-Add a config-driven gate-skip mechanism honored in BOTH:
-- `scripts/publish.py` (CPV's own)
-- `scripts/generate_plugin_repo.py::gen_publish_py` (consumer plugins via canon)
+**Original proposal in the issue:** `cpv.gates_to_skip: ["G4"]` to skip
+the test gate.
 
-Two surfaces:
-- `plugin.json::cpv.gates_to_skip: ["G4"]` — repeatable list, plugin-root config
-- `--skip-gate <GID>` CLI flag — repeatable, session override
+**Rejected** because it violates the iron rule "no plugin with issues
+must be pushed on GitHub EVER". Skipping tests defeats the publish
+pipeline's purpose.
 
-The `_gate_is_skipped(gid)` helper consults both; if either declares the gate
-skipped, the gate function short-circuits with a clear `[skipped via …]` log
-line and returns success. NIT: the skip can NEVER apply to Gate 0 (bypass-
-guard) — that's enforced.
+**Actual root cause** the issue describes: a pytest run that uses
+`dev-browser` / Playwright spawns `Chrome for Testing` processes. If
+the test code or fixtures forget to close pages, the browser
+processes leak and accumulate — eventually exhausting resources and
+crashing either the browser or the machine.
+
+**Fix (Layer 1 — safety net):** add a browser-orphan cleanup wrapper
+around the pytest invocation in both `scripts/publish.py::stage_run_tests`
+(CPV's own) and `scripts/generate_plugin_repo.py::gen_publish_py`
+(consumer-plugin template).
+
+Mechanics:
+1. Before pytest: snapshot the set of PIDs whose command line matches a
+   narrow browser signature (`Chrome for Testing`, `headless_shell`,
+   `Chromium.app/Contents`, `chromium-browser`, `/playwright/`,
+   `playwright-core`). This is the **baseline**.
+2. Run pytest unconditionally (no skip, no opt-out — iron rule honored).
+3. After pytest returns (success OR failure path): snapshot again. Any
+   PID in the post-snapshot but NOT the baseline is an orphan spawned
+   during the test run. SIGTERM, wait 1.5s, SIGKILL stragglers.
+
+Why baseline-diff: the maintainer's own daily browser is in the baseline
+and therefore NEVER killed, even if its command line accidentally
+matches a signature. Only NEW processes that came into existence during
+pytest are candidates.
+
+The implementation lives in `_snapshot_browser_pids()` and
+`_cleanup_browser_orphans(baseline)` helpers shared between
+`publish.py` and the template.
 
 ## Phase 2 — Test speed
 
