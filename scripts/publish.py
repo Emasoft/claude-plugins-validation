@@ -2777,6 +2777,19 @@ Examples:
         if rc != 0 or release_notes_file is None:
             return rc
 
+        # v2.99.2 (issue #18 follow-up) — re-refresh the integrity
+        # manifest AFTER git-cliff appended the new release section to
+        # CHANGELOG.md. Without this second refresh the manifest's
+        # CHANGELOG.md hash is stale (captured pre-cliff content) and
+        # post-release CI fails with "RELEASE-SHIPPED DRIFT" — the
+        # historic root cause of every "CHANGELOG.md hash mismatch"
+        # report. Iron rule preserved: the second refresh runs
+        # ALWAYS, no opt-out.
+        print(f"\n{BLUE}═══ Gate 9b: Re-refresh manifest after CHANGELOG update ═══{NC}")
+        rc = stage_refresh_self_hashes(root)
+        if rc != 0:
+            return rc
+
         # Phase E (v2.79.0): pass the prefetch results into Gate 12 so the
         # synchronous _ensure_gh_auth call can be skipped when the
         # background prefetch already completed cleanly.
