@@ -4459,6 +4459,20 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
     except Exception:
         return
 
+    # Issue #28 (v2.97.0): implement the `cpv.allow_pipeline_drift`
+    # suppression key that has been documented in WARNING text since
+    # v2.86.0 but never actually consumed. The key is a list of
+    # plugin-root-relative paths; any RC-PIPELINE-DRIFT-001 finding
+    # whose file path matches an entry is silently suppressed
+    # (intentional drift, opt-in per plugin).
+    cpv_settings = manifest_data.get("cpv", {})
+    if not isinstance(cpv_settings, dict):
+        cpv_settings = {}
+    allow_list_raw = cpv_settings.get("allow_pipeline_drift", [])
+    if not isinstance(allow_list_raw, list):
+        allow_list_raw = []
+    allow_pipeline_drift = {str(p).strip() for p in allow_list_raw if str(p).strip()}
+
     # Per-file emission with embedded unified diff.
     #
     # Issue #21 ask #3: instead of one consolidated warning naming six files,
@@ -4469,6 +4483,11 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
     # which targets a NARROWER subset (broken paths/globs in workflow run:
     # bodies), not whole-file template drift.
     for rel_path, gen_func_name in _CANONICAL_PIPELINE_FILES:
+        # Issue #28: honour the cpv.allow_pipeline_drift opt-out before
+        # doing any work (skip the generator invocation + diff cost
+        # entirely for allow-listed files).
+        if rel_path in allow_pipeline_drift:
+            continue
         target = plugin_root / rel_path
         if not target.is_file():
             continue
@@ -4555,8 +4574,11 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
                 "remaining deltas are intentional. If your version is "
                 "STRICTLY above canon, consider opening an upstream PR to "
                 "narrow this gap; if you want CPV to ignore it for this "
-                "plugin, add the file path to "
-                "`cpv.allow_pipeline_drift` in plugin.json."
+                "plugin, add the file path (plugin-root-relative, e.g. "
+                f"`{rel_path!r}`) to the "
+                "`cpv.allow_pipeline_drift` list in plugin.json — the key "
+                "is implemented as of v2.97.0 and silently suppresses this "
+                "WARNING for the listed paths."
             )
         else:
             recommendation = (

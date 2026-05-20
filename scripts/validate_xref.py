@@ -61,9 +61,20 @@ AGENT_SPAWN_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# Pattern to find skill references in code and markdown
+# Pattern to find skill references in code and markdown.
+#
+# Issue #27 (v2.97.0): the previous form ``[a-z][a-z0-9-]*`` allowed a
+# trailing hyphen because the boundary char (``#``, ``.`` , ``)``,
+# whitespace, etc.) ends the capture but the dash is kept. Body text
+# like ``skills/amvcp-wf-#anchor`` produced phantom skill name
+# ``amvcp-wf-`` that no plugin can ship. The new form requires the
+# capture (when longer than 1 char) to end in ``[a-z0-9]`` so a
+# trailing hyphen cannot leak through:
+#   [a-z]                          — first char must be a letter
+#   (?:[a-z0-9-]*[a-z0-9])?        — optional tail ending in non-hyphen
+# Single-letter names like ``a`` still match (per the optional group).
 SKILL_REF_PATTERN = re.compile(
-    r"(?:skill|skills)/([a-z][a-z0-9-]*)",
+    r"(?:skill|skills)/([a-z](?:[a-z0-9-]*[a-z0-9])?)",
     re.IGNORECASE,
 )
 
@@ -979,6 +990,12 @@ def validate_skill_refs(
             "rust", "python", "javascript", "typescript", "java", "go", "ruby",  # language names sometimes appear as "skills/python"
         }
         filtered_matches = [m for m in matches if m.lower() not in _plugin_dirs]
+        # Belt-and-suspenders defense against issue #27: even with the
+        # tightened regex, any future variant or future code path that
+        # produces a trailing-hyphen capture must not propagate to the
+        # cross-reference comparison (no plugin can ship a skill name
+        # ending in ``-``).
+        filtered_matches = [m for m in filtered_matches if not m.endswith("-")]
 
         if filtered_matches:
             report.skill_refs[rel_path] = list(set(filtered_matches))
