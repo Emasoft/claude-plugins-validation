@@ -1164,7 +1164,7 @@ Type a number to choose:
 
 #### 3.8.4 Install all external scanners
 
-- **arg-prompt**: `This will install cc-audit, tirith, trufflehog, semgrep, Cisco AI Defense skill-scanner, AND fclones via brew/snap/pipx/cargo (silent, idempotent, per-platform). Proceed? (yes/no)`
+- **arg-prompt**: `This will install cc-audit, tirith, trufflehog, semgrep, Cisco AI Defense skill-scanner, SkillAudit (MANDATORY — megamind-0x/skillaudit, via npm/npx), AND fclones via brew/snap/pipx/cargo (silent, idempotent, per-platform). Proceed? (yes/no)`
 - **execution**: ALWAYS confirm first, then:
   ```bash
   uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/manage_doctor.py" --install-scanners
