@@ -1743,6 +1743,11 @@ def _is_self_scan_eligible(file_path: str) -> bool:
     # Test fixtures contain pattern strings by design.
     if "/tests/fixtures/" in file_normalized:
         return True
+    # CPV rule catalogs (e.g. rules/skillaudit_patterns.json — v2.99.0
+    # native skillaudit port). JSON files in rules/ contain pattern
+    # strings deliberately matching host-sensitive paths.
+    if ("/rules/" in file_normalized or file_normalized.startswith("rules/")) and basename.endswith(".json"):
+        return True
     if "/semantic-validation-skill/references/" in file_normalized:
         return True
     if "/skills/" in file_normalized and "/references/" in file_normalized and basename.endswith(".md"):
@@ -8847,6 +8852,80 @@ def validate_security(
             files="uvx --from cisco-ai-skill-scanner" if status == "RAN" else "",
             details=details,
         )
+
+    # Check 27 — SkillAudit native rules (MANDATORY, in-process).
+    # Originally `npx skillaudit` was considered; rejected because the npm
+    # package pulls in `ethers` + `@x402/*` + `express` as dependencies
+    # that the published code never imports (supply-chain bloat /
+    # untrusted single-author package). Instead, the 50 rules + 490
+    # patterns + suppression heuristics are ported to native Python in
+    # `scripts/cpv_skillaudit_native.py`. Zero external dependencies, no
+    # subprocess, no network — runs every validation pass and cannot
+    # be skipped. Iron rule preserved.
+    # Source: https://github.com/megamind-0x/skillaudit (MIT license)
+    from cpv_skillaudit_native import (  # noqa: PLC0415
+        report_findings as skillaudit_report_findings,
+    )
+    from cpv_skillaudit_native import (  # noqa: PLC0415
+        run_skillaudit_scan,
+    )
+
+    def _skillaudit_should_skip(file_path: str, line: int | None) -> bool:
+        """Apply CPV's full self-scan filter chain to each skillaudit finding.
+
+        Mirrors ``_cisco_should_skip`` so that when CPV scans itself the
+        skillaudit pass doesn't surface CPV's own rule catalogs, regex
+        sources, fixture markdown, or test files as findings.
+        """
+        if not file_path:
+            return False
+        if _is_always_skip_basename(file_path):
+            return True
+        if cpv_self_scan_skip(file_path):
+            return True
+        if _is_vendored_dep_path(file_path):
+            return True
+        if _is_dev_scratch_path(file_path):
+            return True
+        if _is_test_file_path(file_path):
+            return True
+        if isinstance(line, int) and line > 0:
+            try:
+                fpath = Path(file_path)
+                if fpath.is_file() and fpath.stat().st_size < 2_000_000:
+                    body = fpath.read_text(encoding="utf-8", errors="ignore")
+                    if cpv_self_scan_skip_line(file_path, body, int(line)):
+                        return True
+                    if is_fp_corpus_markdown(file_path, body):
+                        return True
+            except OSError:
+                pass
+        return False
+
+    report_len_before = len(report.results)
+    skillaudit_result = run_skillaudit_scan(plugin_path)
+    skillaudit_report_findings(
+        skillaudit_result,
+        plugin_path,
+        report,
+        should_skip=_skillaudit_should_skip,
+    )
+    new_results = report.results[report_len_before:]
+    skillaudit_findings_count = sum(
+        1 for r in new_results if r.level in ("CRITICAL", "MAJOR", "MINOR", "NIT")
+    )
+    skillaudit_status = "RAN" if skillaudit_result.invoked else "FAILED"
+    skillaudit_details = (
+        "" if skillaudit_result.invoked else f"skillaudit native scan error: {skillaudit_result.skipped_reason}"
+    )
+    _record_step(
+        27,
+        "SkillAudit native rules (50 rules / 490 patterns, MANDATORY)",
+        skillaudit_status,
+        findings=skillaudit_findings_count,
+        files=f"{skillaudit_result.files_scanned} files" if skillaudit_status == "RAN" else "",
+        details=skillaudit_details,
+    )
 
     return report
 
