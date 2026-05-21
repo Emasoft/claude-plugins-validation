@@ -4165,10 +4165,17 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
 
         # v2.44 — pre-compute markdown link / inline-code spans for the
         # current line (cheap; only when scanning AI-facing markdown).
+        # v2.100.2 (issue #35) — the original implementation used
+        # ``m.start(1), m.end(1)`` which covers only the paren-target
+        # ``[](TARGET)``. A relative cross-reference like
+        # ``[../foo](../foo)`` (a common idiom — readable bracket text
+        # mirroring the target) then leaked the bracket-side ``../``
+        # past the suppressor and tripped RC-110. Using ``m.start(),
+        # m.end()`` covers the FULL ``[text](target)`` construct.
         md_skip_spans: list[tuple[int, int]] = []
         if is_ai_markdown:
             if md_link_re is not None:
-                md_skip_spans.extend((m.start(1), m.end(1)) for m in md_link_re.finditer(line))
+                md_skip_spans.extend((m.start(), m.end()) for m in md_link_re.finditer(line))
             if md_inline_code_re is not None:
                 md_skip_spans.extend((m.start(), m.end()) for m in md_inline_code_re.finditer(line))
 

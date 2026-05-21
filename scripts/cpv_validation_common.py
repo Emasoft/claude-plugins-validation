@@ -1301,7 +1301,23 @@ SECRET_PATTERNS = [
     (re.compile(r"xox[baprs]-[0-9a-zA-Z-]+"), "Slack Token"),
     (re.compile(r"AIza[0-9A-Za-z\-_]{35}"), "Google API Key"),
     (re.compile(r"npm_[a-zA-Z0-9]{36}"), "npm Access Token"),
-    (re.compile(r"://[^:\s]+:[^@\s]+@[^\s]+"), "Database Connection String with Credentials"),
+    # v2.100.2 (issue #34) — anchor the DB-connection-string regex to
+    # known DB scheme prefixes so it no longer matches innocuous URLs
+    # like Google Fonts (`https://fonts.googleapis.com/css2?family=X:wght@400`)
+    # whose path-and-query happens to contain a colon-then-at-sign
+    # sequence. Bare `://user:pass@host` is too permissive — every
+    # non-DB URL that ships a `:weight@value` query collides.
+    (
+        re.compile(
+            r"\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|"
+            r"redis(?:\+sentinel|\+cluster)?|amqps?|sqlserver|mssql|"
+            r"oracle|clickhouse|cassandra|jdbc:[a-z0-9]+|db2|snowflake|"
+            r"presto|trino|cockroachdb|crdb|cosmosdb|dynamodb|memcached|"
+            r"ldap[s]?|nats|kafka)"
+            r"://[^:/\s]+:[^@\s]+@[^\s]+"
+        ),
+        "Database Connection String with Credentials",
+    ),
     (re.compile(r"SG\.[a-zA-Z0-9\-_]{22}\.[a-zA-Z0-9\-_]{43}"), "SendGrid API Key"),
     # Generic API key pattern excludes:
     #   • Environment variable placeholders: `${VAR}`, `$VAR`
