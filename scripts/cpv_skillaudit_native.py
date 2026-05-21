@@ -8,7 +8,7 @@ because it pulls in ``ethers`` + ``@x402/evm`` + ``@x402/express`` + ``express``
 never imports — supply-chain bloat / untrusted single-author package risk.
 
 Instead, the **safe parts** (50 rules / 490 regex patterns from
-``rules/skillaudit_patterns.json``, the suppression heuristics, the
+``scripts/rules/skillaudit_patterns.json``, the suppression heuristics, the
 capability analyser, the secret detector, and the structural read→net
 detector) are reimplemented here in pure Python. ZERO external
 dependencies. ZERO subprocess. ZERO network. ZERO supply-chain surface.
@@ -54,7 +54,7 @@ __all__ = [
 # ────────────────────────────────────────────────────────────────────────
 
 
-_RULES_PATH = Path(__file__).resolve().parent.parent / "rules" / "skillaudit_patterns.json"
+_RULES_PATH = Path(__file__).resolve().parent / "rules" / "skillaudit_patterns.json"
 
 
 def _load_rules() -> list[dict[str, Any]]:

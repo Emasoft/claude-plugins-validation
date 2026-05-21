@@ -37,7 +37,7 @@ from pathlib import Path
 REPO = Path(__file__).parent.parent
 SCRIPTS_DIR = REPO / "scripts"
 COMMANDS_DIR = REPO / "commands"
-RULES_PATH = REPO / "rules" / "skillaudit_patterns.json"
+RULES_PATH = REPO / "scripts" / "rules" / "skillaudit_patterns.json"
 
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))

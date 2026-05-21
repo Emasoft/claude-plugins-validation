@@ -1743,9 +1743,11 @@ def _is_self_scan_eligible(file_path: str) -> bool:
     # Test fixtures contain pattern strings by design.
     if "/tests/fixtures/" in file_normalized:
         return True
-    # CPV rule catalogs (e.g. rules/skillaudit_patterns.json — v2.99.0
-    # native skillaudit port). JSON files in rules/ contain pattern
-    # strings deliberately matching host-sensitive paths.
+    # CPV rule catalogs (e.g. scripts/rules/skillaudit_patterns.json —
+    # v2.99.0 native skillaudit port; moved into scripts/ in v2.99.3 so
+    # the file ships in the wheel under hatchling's packages=["scripts"]
+    # — issue #32). JSON files in rules/ contain pattern strings
+    # deliberately matching host-sensitive paths.
     if ("/rules/" in file_normalized or file_normalized.startswith("rules/")) and basename.endswith(".json"):
         return True
     # v2.99.1 — root-level documentation files (README, CHANGELOG, etc.).
