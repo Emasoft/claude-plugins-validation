@@ -591,6 +591,90 @@ Workflow:
    re-validate after; the per-plugin agent owns its own
    re-validation gate.
 
+## Batch same-turn modes (TRDD-3dcbb37c §3)
+
+When the `<context>` block contains `mode: batch_same_turn_validate_fix`
+or `mode: batch_same_turn_full`, you are one of N parallel
+**per-plugin same-turn** fixers dispatched by
+`/cpv-batch-validate-and-fix` or `/cpv-batch-full-scan-and-fix`. The
+context block has the same shape as `batch_per_plugin`:
+
+```
+<context>
+source: /cpv-batch-validate-and-fix (or /cpv-batch-full-scan-and-fix)
+mode: batch_same_turn_validate_fix | batch_same_turn_full
+plugin_index: <int>
+plugin_path: <absolute path>
+source_url: <https://github.com/owner/repo or "—">
+display_name: <plugin name>
+session_dir: /tmp/cpv-batch/<ts>-plugin-fixer/
+status_path: /tmp/cpv-batch/<ts>-plugin-fixer/plugin-<plugin_index>.status.json
+</context>
+```
+
+What's different from `batch_per_plugin`:
+
+1. **Single-pass file reads.** You read each source file ONCE,
+   not the three times the standard validate → fix → re-validate
+   cycle requires. Track which files you've touched; do not
+   re-read.
+2. **Inline FP verification.** For uncertain findings, invoke
+   `llm-externalizer` with the **file-range syntax**
+   (`<file>:<start>-<end>`, ≤ 200 LOC per call) — minimum-token
+   verification. Do NOT pass whole files when a range will do.
+3. **No intermediate JSON report.** Only the per-plugin status JSON
+   is written. The orchestrator does NOT consume an intermediate
+   `validate_plugin --json` report — your status JSON is the
+   source of truth.
+4. **Bounded checker scope** — the two modes differ:
+
+   | Mode | Checkers run |
+   |---|---|
+   | `batch_same_turn_validate_fix` | validate_plugin (full pipeline) + the v2.100.x context classifier as FP gate |
+   | `batch_same_turn_full` | validate_plugin + validate_security (5 external scanners) + validate_cache + lint + xref + encoding + the v2.100.x context classifier as FP gate |
+
+5. **Status JSON shape:**
+
+   ```json
+   {
+     "schema_version": 1,
+     "plugin_index": <int>,
+     "started_at": "<ISO8601±TZ>",
+     "finished_at": "<ISO8601±TZ>",
+     "status_symbol": "✓" | "✗" | "⚠",
+     "status_label": "clean" | "fixed" | "partial" | "failed",
+     "before": {"critical": N, "major": N, "minor": N, "nit": N, "warning": N},
+     "after":  {"critical": N, "major": N, "minor": N, "nit": N, "warning": N},
+     "by_checker": {                          // batch_same_turn_full ONLY
+       "validate": {"before": N, "after": N},
+       "security": {"before": N, "after": N},
+       "cache":    {"before": N, "after": N}
+     },
+     "fps_verified": <int>,                   // total FP-verify calls
+     "report_path": "<abs-path-to-final-re-check-report>",
+     "notes": "<short summary>"
+   }
+   ```
+
+6. **Return EXACTLY ONE line:**
+
+   ```text
+   [plugin-<plugin_index>] <label>: fixed=<X> remaining=<Y> fps=<Z> (status: <status_path>)
+   ```
+
+7. **Iron rule for FP handling.** A finding is silenced ONLY when
+   the LLM-externalizer call confirms the classifier's
+   "looks-like-FP" hypothesis. NEVER silence based on the
+   classifier alone — the classifier returns `unknown` for many
+   contexts and falls back to the heuristic chain. Silenced FPs
+   MUST appear in the per-file `notes` (e.g.
+   `agents/foo.md:42 RC-XYZ silenced — verified non-exploit shape via llm-externalizer chat`).
+   This preserves auditability without adding intermediate reports.
+
+8. **Re-validation IS in scope** — run the final clean-room
+   check exactly once, after every file has been fixed. That's
+   what produces the `report_path` for the status JSON.
+
 ## The loop (authoritative algorithm)
 
 Run this loop until termination. There is **NO hardcoded iteration or time cap** — keep iterating until either every finding converges to zero OR the same finding set reappears two iterations in a row (oscillation = stop + escalate, see §Rules below). Bigger plugins simply need more iterations; trust your judgement.

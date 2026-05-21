@@ -91,6 +91,9 @@ def test_v290_only_documented_slash_commands_remain() -> None:
         "cpv-batch-security-audit.md",
         "cpv-batch-caching-audit.md",
         "cpv-batch-caching-optimize.md",
+        # Phase 3 same-turn variants.
+        "cpv-batch-validate-and-fix.md",
+        "cpv-batch-full-scan-and-fix.md",
     }
     md_files = {p.name for p in COMMANDS_DIR.glob("*.md")}
     unexpected = md_files - allowed
