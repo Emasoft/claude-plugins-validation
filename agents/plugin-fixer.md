@@ -507,6 +507,90 @@ Workflow:
    happens AFTER the aggregator returns, when the user runs
    `/cpv-validate-plugin` or `/cpv-doctor`.
 
+## Batch-per-plugin mode (TRDD-3dcbb37c)
+
+When the `<context>` block contains `mode: batch_per_plugin`, you are
+one of N parallel **per-plugin** fixers dispatched by `/cpv-batch-fix`
+when its input resolved to MORE THAN ONE plugin (marketplace or list
+input). The context block has this shape:
+
+```
+<context>
+source: /cpv-batch-fix (marketplace/list mode)
+mode: batch_per_plugin
+plugin_index: <int>
+plugin_path: <absolute path>
+source_url: <https://github.com/owner/repo or "—">
+display_name: <plugin name>
+session_dir: /tmp/cpv-batch/<ts>-plugin-fixer/
+status_path: /tmp/cpv-batch/<ts>-plugin-fixer/plugin-<plugin_index>.status.json
+min_severity: <critical | major | minor (default minor)>
+shard_size: <int (default 30) — passed through to internal sharding>
+</context>
+```
+
+Workflow:
+
+1. **Apply the standard fix loop** to the plugin at `plugin_path`
+   (the algorithm described in §"The loop (authoritative algorithm)"
+   below). You own the whole plugin tree — no shard restrictions.
+2. **If your plugin's finding count exceeds your context-safe ceiling**
+   (per your `model:` frontmatter — see §Phase 0.5 table), DELEGATE
+   to your own internal `batch_shard` protocol by invoking
+   `scripts/cpv_batch_planner.py` on this single plugin and consuming
+   the resulting shard manifests **sequentially** within this same
+   subagent context. Do NOT spawn parallel sub-subagents — the
+   Anthropic spec forbids it (subagents cannot spawn other
+   subagents). Sequential shard consumption is fine because the
+   safe-ceiling math is about per-iteration context budget, not
+   wall-clock parallelism.
+3. **Write per-plugin status JSON** to `status_path` with these keys
+   exactly:
+
+   ```json
+   {
+     "schema_version": 1,
+     "plugin_index": <int>,
+     "started_at": "<ISO8601±TZ>",
+     "finished_at": "<ISO8601±TZ>",
+     "status_symbol": "✓" | "✗" | "⚠",
+     "status_label": "clean" | "fixed" | "partial" | "failed",
+     "before": {"critical": <int>, "major": <int>, "minor": <int>, "nit": <int>, "warning": <int>},
+     "after":  {"critical": <int>, "major": <int>, "minor": <int>, "nit": <int>, "warning": <int>},
+     "report_path": "<abs-path-to-final-validation-report>",
+     "notes": "<short summary>"
+   }
+   ```
+
+4. **Return EXACTLY ONE line** to the orchestrator:
+
+   ```text
+   [plugin-<plugin_index>] <label>: fixed=<X> remaining=<Y> (status: <status_path>)
+   ```
+
+   No prose, no menus, no breakdown tables. The `/cpv-batch-fix`
+   orchestrator runs `cpv_batch_orchestrator.py status` to merge
+   every plugin's status JSON into a consolidated Unicode-bordered
+   table.
+
+5. **Exit labels:**
+
+   - `clean` — re-validation came back zero-finding (any severity).
+   - `fixed` — every finding at-or-above `min_severity` was fixed;
+     residual NIT/WARNING below the floor allowed.
+   - `partial` — ran out of turns OR hit a fix guide that needs
+     human intervention; some findings remain.
+   - `failed` — unrecoverable error (write permission denied, file
+     deleted concurrently, etc.) — capture in `notes`.
+
+   In all four cases, the status JSON MUST be written before exit.
+
+6. **Re-validation IS in scope for per-plugin mode** (unlike batch_shard).
+   Run the standard final-verification step (step 7 of §"The loop")
+   on the plugin before reporting. The orchestrator does NOT
+   re-validate after; the per-plugin agent owns its own
+   re-validation gate.
+
 ## The loop (authoritative algorithm)
 
 Run this loop until termination. There is **NO hardcoded iteration or time cap** — keep iterating until either every finding converges to zero OR the same finding set reappears two iterations in a row (oscillation = stop + escalate, see §Rules below). Bigger plugins simply need more iterations; trust your judgement.

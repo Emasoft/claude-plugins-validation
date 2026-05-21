@@ -37,6 +37,9 @@
       "templates",
       "git-hooks"
     ],
-    "skill_size_severity": "warning"
+    "skill_size_severity": "warning",
+    "allow_orchestrator_traversal": [
+      "skills/cpv-batch-validate"
+    ]
   }
 }

@@ -159,6 +159,14 @@ class TestCommandCount:
             "cpv-batch-fix.md",
             "the-skills-menu-create.md",
             "cpv-pre-install-scan.md",
+            # TRDD-3dcbb37c (v2.101.0) — Batch skills family. Each one is a
+            # bare slash command because the user wants to fan out fleet-wide
+            # operations directly (marketplace URL / list / @listfile inputs),
+            # not navigate through menu layers per plugin.
+            "cpv-batch-validate.md",
+            "cpv-batch-security-audit.md",
+            "cpv-batch-caching-audit.md",
+            "cpv-batch-caching-optimize.md",
         }
         md_files = list(COMMANDS_DIR.glob("*.md"))
         actual = {f.name for f in md_files}
@@ -176,6 +184,14 @@ class TestCommandCount:
             "cpv-batch-fix.md",
             "the-skills-menu-create.md",
             "cpv-pre-install-scan.md",
+            # TRDD-3dcbb37c (v2.101.0) — Batch skills family. Each one is a
+            # bare slash command because the user wants to fan out fleet-wide
+            # operations directly (marketplace URL / list / @listfile inputs),
+            # not navigate through menu layers per plugin.
+            "cpv-batch-validate.md",
+            "cpv-batch-security-audit.md",
+            "cpv-batch-caching-audit.md",
+            "cpv-batch-caching-optimize.md",
         }
         md_files = list(COMMANDS_DIR.glob("*.md"))
         for f in md_files:
@@ -357,7 +373,20 @@ class TestSkillAgentArchitecture:
         a target plugin path or Git URL — the migration target is the OTHER
         plugin, not this one.
         """
-        user_invocable_exemptions = {"the-skills-menu-create"}
+        user_invocable_exemptions = {
+            "the-skills-menu-create",
+            # TRDD-3dcbb37c (v2.101.0) — Batch-skills family. Users invoke
+            # these directly (`/cpv-batch-validate Emasoft/emasoft-plugins`),
+            # so the SKILL.md MUST be user-invocable. The companion
+            # `commands/cpv-batch-*.md` orchestrator body is the actual entry
+            # point; the SKILL.md is the discoverability surface for
+            # the-skills-menu and natural-language invocation.
+            "cpv-batch-validate",
+            "cpv-batch-security-audit",
+            "cpv-batch-caching-audit",
+            "cpv-batch-caching-optimize",
+            "cpv-batch-fix",
+        }
         for skill_md in SKILLS_DIR.glob("*/SKILL.md"):
             fm = _parse_frontmatter(skill_md)
             assert fm is not None, f"{skill_md} has no frontmatter"
@@ -451,6 +480,17 @@ class TestSkillAgentArchitecture:
             "scaffold-skill",
             "show-version",
             "strip-dev-submodules",
+            # TRDD-3dcbb37c (v2.101.0) — Batch-skills family. These are
+            # ``user-invocable: true`` slash-command-equivalent skills the
+            # user triggers directly (no agent loader). The matching
+            # ``commands/cpv-batch-*.md`` files contain the orchestrator
+            # bodies; the SKILL.md is the discoverability surface for
+            # ``the-skills-menu`` and natural-language invocation.
+            "cpv-batch-validate",
+            "cpv-batch-security-audit",
+            "cpv-batch-caching-audit",
+            "cpv-batch-caching-optimize",
+            "cpv-batch-fix",
         }
         # Gather all skill names declared by agents.
         loaded = set()

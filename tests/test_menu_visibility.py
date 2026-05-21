@@ -83,11 +83,19 @@ def test_v290_only_documented_slash_commands_remain() -> None:
         "cpv-batch-fix.md",
         "the-skills-menu-create.md",
         "cpv-pre-install-scan.md",
+        # TRDD-3dcbb37c (v2.101.0) — Batch skills family. Direct-entry
+        # commands because the user fans out fleet-wide operations
+        # (marketplace URL / list / @listfile inputs) directly, not via
+        # menu navigation per-plugin.
+        "cpv-batch-validate.md",
+        "cpv-batch-security-audit.md",
+        "cpv-batch-caching-audit.md",
+        "cpv-batch-caching-optimize.md",
     }
     md_files = {p.name for p in COMMANDS_DIR.glob("*.md")}
     unexpected = md_files - allowed
     missing = allowed - md_files
     assert not unexpected and not missing, (
-        f"commands/ must contain exactly {sorted(allowed)} (v2.90.0 + v2.91.0 + v2.95.0 + v2.99.1). "
+        f"commands/ must contain exactly {sorted(allowed)} (v2.90.0 + v2.91.0 + v2.95.0 + v2.99.1 + v2.101.0). "
         f"Unexpected: {sorted(unexpected)}. Missing: {sorted(missing)}."
     )
