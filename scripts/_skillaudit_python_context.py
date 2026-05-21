@@ -135,14 +135,59 @@ _SAFE_COERCION_ATTRS: Final[frozenset[str]] = frozenset(
 #   * BinOp where one operand is non-Constant  ("rm -rf " + path)
 #   * Call to .format() / .join() / .replace() on a string
 def _arg_is_exploit_shape(arg: ast.expr) -> bool:
-    """True iff ``arg`` looks like a user-input-flowing-into-shell shape."""
+    """True iff ``arg`` looks like a user-input-flowing-into-shell shape.
+
+    The exploit shape this detector targets is the **literal-string +
+    variable** concatenation pattern that's the classic shell-injection
+    vehicle:
+
+        subprocess.run("rm -rf " + user_path, shell=True)
+
+    where a constant string prefix is joined with a non-constant value
+    and then executed via shell. The detector flags this; everything
+    else stays safe by default.
+
+    Variable + variable (``cmd + file_paths``) is NOT flagged — it's
+    most often list-concat producing argv, never string-concat into
+    a shell. Variable + List literal (``cmd + ["--foo"]``) is also
+    not flagged. F-strings ARE flagged. ``.format`` / ``.join`` calls
+    are flagged.
+    """
     if isinstance(arg, ast.JoinedStr):
         return True
     if isinstance(arg, ast.BinOp):
-        # String concatenation where at least one operand is non-Constant.
-        for operand in (arg.left, arg.right):
-            if not isinstance(operand, ast.Constant):
-                return True
+        # Phase 6 FP-iteration (Emasoft/emasoft-plugins):
+        #   * If EITHER operand is a List/Tuple literal, this is
+        #     list/tuple concatenation, not string concat into a shell.
+        #   * If NEITHER operand is a Constant string, the BinOp is
+        #     ambiguous (could be list-concat or arithmetic) but is
+        #     NOT the literal-prefix-into-shell shape that the rule
+        #     targets. Default to safe.
+        #   * The classic exploit shape requires AT LEAST ONE operand
+        #     to be a literal string Constant (the attacker-readable
+        #     prefix) AND the other to be non-Constant (the injection
+        #     point).
+        if isinstance(arg.left, (ast.List, ast.Tuple)) or isinstance(
+            arg.right, (ast.List, ast.Tuple)
+        ):
+            return False
+        left_is_literal_str = isinstance(arg.left, ast.Constant) and isinstance(
+            arg.left.value, str
+        )
+        right_is_literal_str = isinstance(arg.right, ast.Constant) and isinstance(
+            arg.right.value, str
+        )
+        left_is_const = isinstance(arg.left, ast.Constant)
+        right_is_const = isinstance(arg.right, ast.Constant)
+        # Exactly the dangerous shape: ONE side is a literal string
+        # and the OTHER side is non-Constant.
+        if left_is_literal_str and not right_is_const:
+            return True
+        if right_is_literal_str and not left_is_const:
+            return True
+        # Every other BinOp shape is benign (var+var, list+list,
+        # const+const, etc.).
+        return False
     if isinstance(arg, ast.Call):
         if isinstance(arg.func, ast.Attribute):
             if arg.func.attr in {"format", "join", "format_map"}:
@@ -494,21 +539,26 @@ def _classify_call(call: ast.Call, qualname: str) -> ContextVerdict | None:
                 return "safe_literal"
             return "suspect"
 
-        # shell= absent / False:
-        # Top-level exploit-shaped first arg (single f-string or BinOp
-        # concat used as the whole argv) → suspect even without shell=True
-        # because some platforms shell-evaluate the string form.
+        # shell= absent / False — Python guarantee: subprocess.run /
+        # subprocess.Popen / subprocess.call WITHOUT shell=True passes
+        # the args to ``execve``-family syscalls, NOT to a shell. There
+        # is no shell metachar interpretation; semicolons, pipes,
+        # dollar-signs, ``rm -rf /``, and even an absolute path like
+        # ``> ETC_PASSWD`` would all be passed as raw bytes in argv.
+        # Command injection in the "shell interprets attacker input"
+        # sense IS NOT POSSIBLE in this branch — the rule's threat
+        # model doesn't apply.
+        #
+        # We still flag the obvious exploit shape (f-string / literal
+        # string + variable concat) because some downstream tooling
+        # (e.g. shell=True introduced LATER, or a shell-style wrapper)
+        # might consume the same string. Conservative: if the first
+        # arg LOOKS like the canonical injection vehicle, keep the
+        # finding; otherwise it's safe.
         if _arg_is_exploit_shape(first):
             return "suspect"
-        if _container_is_all_safe(first):
-            return "safe_literal"
-        if _arg_is_pure_literal(first):
-            return "safe_literal"
-        if isinstance(first, (ast.Name, ast.Subscript, ast.Attribute, ast.Call)):
-            # Variable / subscript / attribute / known-safe coercion as
-            # the whole first arg — no exploit shape at this site.
-            return "safe_literal"
-        return "suspect"
+        # No exploit shape + shell != True → safe by Python semantics.
+        return "safe_literal"
 
     # Weak-hash usage — INSECURE_CRYPTO. ``hashlib.md5`` / ``hashlib.sha1``
     # are also widely used for non-crypto identity (cache keys, dedupe
