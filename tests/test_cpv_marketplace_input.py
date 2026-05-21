@@ -567,3 +567,202 @@ class TestResolvedInputDataclass:
         ri2 = ResolvedInput(kind="file", abs_path=Path("/b"))
         ri1.metadata["k"] = "v"
         assert "k" not in ri2.metadata
+
+
+# ----------------------- 9. skill-pack expansion (Phase 5.5) -------------
+
+
+def _make_skill_in(root: Path, name: str) -> Path:
+    """Create a flat ``<root>/<name>/SKILL.md`` skill folder."""
+    skill_dir = root / name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: stub\n---\nbody\n", encoding="utf-8"
+    )
+    return skill_dir
+
+
+class TestSkillPackExpansion:
+    def test_anthropic_style_pack_expands(self, tmp_path: Path) -> None:
+        """A repo with ``./skills/<name>/SKILL.md`` is a skill_pack."""
+        _make_skill(tmp_path, name="alpha")
+        _make_skill(tmp_path, name="beta")
+        _make_skill(tmp_path, name="gamma")
+        result = resolve(str(tmp_path))
+        assert {r.display_name for r in result} == {"alpha", "beta", "gamma"}
+        assert all(r.kind == "skill" for r in result)
+        # The pack-root metadata is preserved.
+        assert all(r.metadata.get("skill_pack_root") == str(tmp_path.resolve()) for r in result)
+
+    def test_flat_pack_expands(self, tmp_path: Path) -> None:
+        """A repo with ``./<name>/SKILL.md`` at depth-1 is also a pack."""
+        _make_skill_in(tmp_path, "one")
+        _make_skill_in(tmp_path, "two")
+        _make_skill_in(tmp_path, "three")
+        result = resolve(str(tmp_path))
+        assert {r.display_name for r in result} == {"one", "two", "three"}
+        assert all(r.kind == "skill" for r in result)
+
+    def test_single_skill_root_is_kind_skill_not_pack(self, tmp_path: Path) -> None:
+        """A repo with SKILL.md at the ROOT is a single ``skill``, not a pack."""
+        (tmp_path / "SKILL.md").write_text(
+            "---\nname: root-skill\ndescription: stub\n---\nbody\n",
+            encoding="utf-8",
+        )
+        result = resolve(str(tmp_path))
+        assert len(result) == 1
+        assert result[0].kind == "skill"
+        assert result[0].abs_path == tmp_path.resolve()
+
+    def test_pack_skips_dot_git_and_node_modules(self, tmp_path: Path) -> None:
+        """The pack walker MUST skip noise dirs even when they contain SKILL.md."""
+        _make_skill_in(tmp_path, "real-skill")
+        # Place a SKILL.md inside .git/ — must be ignored.
+        bad = tmp_path / ".git" / "fake"
+        bad.mkdir(parents=True)
+        (bad / "SKILL.md").write_text("noise", encoding="utf-8")
+        result = resolve(str(tmp_path))
+        assert len(result) == 1
+        assert result[0].display_name == "real-skill"
+
+    def test_mixed_anthropic_and_flat_dedups(self, tmp_path: Path) -> None:
+        """When BOTH layouts coexist, every skill surface exactly once."""
+        _make_skill(tmp_path, name="anthropic-alpha")
+        _make_skill_in(tmp_path, "flat-beta")
+        result = resolve(str(tmp_path))
+        assert {r.display_name for r in result} == {"anthropic-alpha", "flat-beta"}
+
+    def test_pack_via_url_clone(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """URL pointing at a skill-pack repo clones + expands."""
+        def build_pack(target: Path) -> Path:
+            (target / "skills" / "one").mkdir(parents=True)
+            (target / "skills" / "one" / "SKILL.md").write_text(
+                "---\nname: one\ndescription: stub\n---\n", encoding="utf-8"
+            )
+            (target / "skills" / "two").mkdir(parents=True)
+            (target / "skills" / "two" / "SKILL.md").write_text(
+                "---\nname: two\ndescription: stub\n---\n", encoding="utf-8"
+            )
+            return target
+
+        monkeypatch.setattr(
+            cmi,
+            "_shallow_clone",
+            _CloneFaker({("Emasoft", "pack-repo"): build_pack}),
+        )
+        result = resolve("https://github.com/Emasoft/pack-repo")
+        try:
+            assert len(result) == 2
+            assert {r.display_name for r in result} == {"one", "two"}
+            assert all(r.source_url == "https://github.com/Emasoft/pack-repo" for r in result)
+        finally:
+            for r in result:
+                if r.cleanup_callback is not None:
+                    r.cleanup_callback()
+
+    def test_single_skill_repo_via_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """URL pointing at a one-skill repo (SKILL.md at root) clones as kind=skill."""
+        def build_single_skill(target: Path) -> Path:
+            (target / "SKILL.md").write_text(
+                "---\nname: single-skill\ndescription: stub\n---\n",
+                encoding="utf-8",
+            )
+            return target
+
+        monkeypatch.setattr(
+            cmi,
+            "_shallow_clone",
+            _CloneFaker({("Emasoft", "single-skill"): build_single_skill}),
+        )
+        result = resolve("https://github.com/Emasoft/single-skill")
+        try:
+            assert len(result) == 1
+            assert result[0].kind == "skill"
+            assert result[0].source_url == "https://github.com/Emasoft/single-skill"
+        finally:
+            for r in result:
+                if r.cleanup_callback is not None:
+                    r.cleanup_callback()
+
+    def test_mixed_list_local_skill_and_local_plugin(self, tmp_path: Path) -> None:
+        """A list containing both a skill folder AND a plugin folder
+        resolves each independently (different kinds in one result list)."""
+        skill_dir = _make_skill_in(tmp_path, "lonely-skill")
+        plugin_dir = _make_plugin(tmp_path, name="lonely-plugin")
+        # Wrap the skill in its own root so it's a "single skill" not a pack
+        # (the pack heuristic fires when ≥1 child has SKILL.md AT depth-1).
+        result = resolve([str(skill_dir), str(plugin_dir)])
+        kinds_by_name = {r.display_name: r.kind for r in result}
+        assert kinds_by_name == {"lonely-skill": "skill", "lonely-plugin": "plugin"}
+
+    def test_pack_expansion_truncates_at_cap(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pathological case: cap protects against runaway expansion."""
+        # Lower the cap to 3 for the test so we don't have to create 10k skills.
+        monkeypatch.setattr(cmi, "_SKILL_PACK_EXPAND_CAP", 3)
+        for n in ("a", "b", "c", "d", "e"):
+            _make_skill_in(tmp_path, n)
+        result = resolve(str(tmp_path))
+        assert len(result) == 3
+        # Truncation is surfaced in metadata so the orchestrator can warn.
+        assert any(r.metadata.get("expansion_truncated") for r in result)
+
+
+class TestMixedMarketplaceEntries:
+    """Phase 5.5: marketplace.json may list PLUGINS, SKILLS, or
+    SKILL-PACKS interchangeably. The resolver expands each entry by
+    its actual on-disk shape, not by trusting an entry-level type
+    declaration."""
+
+    def test_marketplace_with_mixed_plugin_and_skill_entries(
+        self, tmp_path: Path
+    ) -> None:
+        # Plugin entry next to a bare skill entry.
+        _make_plugin(tmp_path, name="real-plugin")
+        _make_skill_in(tmp_path, "real-skill")  # ./real-skill/SKILL.md (no plugin.json)
+        _make_marketplace(
+            tmp_path,
+            [
+                {
+                    "name": "real-plugin",
+                    "version": "0.1.0",
+                    "source": {"source": "local", "path": "../real-plugin"},
+                },
+                {
+                    "name": "real-skill",
+                    "version": "0.2.0",
+                    "source": {"source": "local", "path": "../real-skill"},
+                },
+            ],
+        )
+        result = resolve(str(tmp_path / "demo-market"))
+        kinds_by_name = {r.display_name: r.kind for r in result}
+        assert kinds_by_name == {"real-plugin": "plugin", "real-skill": "skill"}
+
+    def test_marketplace_entry_pointing_at_skill_pack_expands_inline(
+        self, tmp_path: Path
+    ) -> None:
+        """A marketplace entry that resolves to a skill-pack folder
+        expands inline into per-skill entries, each carrying the
+        marketplace metadata."""
+        pack_root = tmp_path / "shared-pack"
+        pack_root.mkdir()
+        _make_skill_in(pack_root, "one")
+        _make_skill_in(pack_root, "two")
+        _make_marketplace(
+            tmp_path,
+            [
+                {
+                    "name": "shared-pack",
+                    "version": "0.1.0",
+                    "source": {"source": "local", "path": "../shared-pack"},
+                }
+            ],
+        )
+        result = resolve(str(tmp_path / "demo-market"))
+        assert {r.display_name for r in result} == {"one", "two"}
+        assert all(r.kind == "skill" for r in result)
+        # Each emitted entry carries the marketplace_root metadata.
+        for r in result:
+            assert "marketplace_root" in r.metadata
