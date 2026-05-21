@@ -4229,6 +4229,26 @@ def _looks_like_workflow_path(token: str) -> bool:
     # part *contains* one (the assignment as a whole is a single token).
     if "=" in token and "/" not in token.split("=", 1)[0]:
         return False
+    # Issue #36 fix: GitHub Actions workflow-command annotations
+    # (``::error::``, ``::warning::``, ``::notice::``, ``::group::``,
+    # ``::endgroup::``, ``::add-mask::``, etc.) are not paths. The
+    # quoted string after the ``::`` markers can mention a script path
+    # by name (e.g. ``::error::This tag was likely pushed without going
+    # through scripts/publish.py``) but the whole token is a message
+    # body, not a path argument. POSIX paths cannot contain the
+    # sequence ``::`` (a colon is legal in a filename, but the literal
+    # ``::error::`` shape is unique to GHA annotations).
+    if "::" in token:
+        return False
+    # Real paths do not contain whitespace AFTER shlex.split has run.
+    # shlex.split with posix=True collapses any surrounding quotes, so
+    # a quoted string like ``"foo bar.sh"`` becomes the single token
+    # ``foo bar.sh``. Such tokens look like a path-with-space, but
+    # workflow ``run:`` bodies almost always use script-named-without-
+    # spaces — and a workflow author quoting a space-containing string
+    # is overwhelmingly likely to be passing a message, not a path.
+    if any(ws in token for ws in (" ", "\t", "\n")):
+        return False
     # Path-shape heuristic — must start with one of the known repo prefixes
     # OR end in a recognised extension. Avoids flagging bare command names
     # like ``shellcheck`` or ``bash``.
