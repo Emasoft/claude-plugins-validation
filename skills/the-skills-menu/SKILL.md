@@ -16,7 +16,7 @@ the `Skill()` tool.
 
 The full per-skill table (inputs, return contracts) lives in
 [skills-catalog](references/skills-catalog.md).
-> Validation / diagnostic skills · Fix / migration skills · Scaffold / build skills · Publish / release skills · Routing / UX skills · Invocation pattern
+> Validation / diagnostic skills · Fix / migration skills · Scaffold / build skills · Publish / release skills · Routing / UX skills · Batch / fleet skills · Scope-aware diagnostics · Invocation pattern
 
 ## Prerequisites
 
@@ -83,8 +83,10 @@ inputs and return contracts.
 | 3 | Scaffold / build | `standardize-plugin`, `create-plugin`, `setup-plugin-repo`, `setup-github-marketplace`, `setup-marketplace-auto-notification`, `link-plugin-marketplace`, `pack-components`, `add-component-to-plugin`, `add-dependency`, `add-hook`, `register-mcp`, `scaffold-agent`, `scaffold-command`, `scaffold-skill` |
 | 4 | Publish / release | `strip-dev-submodules`, `refresh-readme`, `bump-version`, `show-version`, `publish-to-marketplace` |
 | 5 | Routing / UX | `plugin-management`, `cpv-main-menu-skill`, `cpv-format-menu`, `the-skills-menu-create` |
+| 6 | Batch / fleet (TRDD-3dcbb37c) | `cpv-batch-validate`, `cpv-batch-security-audit`, `cpv-batch-caching-audit`, `cpv-batch-caching-optimize`, `cpv-batch-fix`, `cpv-batch-validate-and-fix`, `cpv-batch-full-scan-and-fix` |
+| 7 | Scope-aware diagnostics (TRDD-a175f78d) | `cpv-batch-scope-diagnose`, `cpv-batch-scope-fix`, `cpv-batch-scope-diagnose-and-fix` |
 
 ## Resources
 
 - [skills-catalog](references/skills-catalog.md) — full per-skill table with inputs + return contracts
-  > Validation / diagnostic skills · Fix / migration skills · Scaffold / build skills · Publish / release skills · Routing / UX skills · Invocation pattern
+  > Validation / diagnostic skills · Fix / migration skills · Scaffold / build skills · Publish / release skills · Routing / UX skills · Batch / fleet skills · Scope-aware diagnostics · Invocation pattern

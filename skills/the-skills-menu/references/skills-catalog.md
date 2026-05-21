@@ -7,6 +7,8 @@
 - [Scaffold / build skills](#scaffold--build-skills)
 - [Publish / release skills](#publish--release-skills)
 - [Routing / UX skills](#routing--ux-skills)
+- [Batch / fleet skills](#batch--fleet-skills)
+- [Scope-aware diagnostics](#scope-aware-diagnostics)
 - [Invocation pattern](#invocation-pattern)
 
 The skills below are reachable from any CPV agent via the
@@ -77,6 +79,37 @@ universal-loader pattern makes every skill available to every agent.
 | `cpv-main-menu-skill` | — | the /cpv-main-menu menu tree | Only `cpv-main-menu-agent` loads this — others should not |
 | `cpv-format-menu` | menu JSON spec | Unicode-bordered menu table | Slash command bodies render menus via this |
 
+## Batch / fleet skills
+
+TRDD-3dcbb37c (v2.101.0). Each skill fans out N parallel
+subagents from a single main-session message (default 8, cap 16)
+across every plugin in the input spec. Input grammar: single
+plugin / plugin URL / marketplace local/URL / list / `@listfile`
+/ comma-separated.
+
+| Skill | Inputs | Returns | When to invoke |
+|-------|--------|---------|-----------------|
+| `cpv-batch-validate` | plugin / marketplace / list | per-plugin status table + DONE summary | Fleet-wide validation snapshot |
+| `cpv-batch-security-audit` | plugin / marketplace / list | per-plugin security status + DONE summary | Fleet-wide supply-chain risk snapshot |
+| `cpv-batch-caching-audit` | plugin / marketplace / list | per-plugin CA-* findings (read-only) | Fleet-wide caching snapshot, no fixes |
+| `cpv-batch-caching-optimize` | plugin / marketplace / list | per-plugin caching before/after + DONE | Apply CA-01..CA-06 fixes across many plugins |
+| `cpv-batch-fix` | plugin / marketplace / list | per-plugin fix status + DONE | Apply validation fixes (single-plugin → per-shard; marketplace → per-plugin fan-out) |
+| `cpv-batch-validate-and-fix` | plugin / marketplace / list | per-plugin before/after + FP-verified count | Same-turn validate + fix (~3× cheaper than separate passes) |
+| `cpv-batch-full-scan-and-fix` | plugin / marketplace / list | per-plugin before/after + by_checker | Maximum-coverage same-turn sweep (validate + security + cache + fix) |
+
+## Scope-aware diagnostics
+
+TRDD-a175f78d (v2.101.0). LOCAL paths only — URL inputs are
+CRITICAL errors because the doctor needs filesystem access to
+`~/.claude/` and `<project>/.claude/`. Input grammar: project
+folder / list / `@listfile`. Default: `$PWD`.
+
+| Skill | Inputs | Returns | When to invoke |
+|-------|--------|---------|-----------------|
+| `cpv-batch-scope-diagnose` | project folder + `--scope {user\|project\|local\|full}` | per-project findings + conflict count | Read-only scope-aware diagnostic across a fleet |
+| `cpv-batch-scope-fix` | project folder + `--scope` | per-project before/after + pending_fixes | Apply mechanical NIT/CRITICAL fixes; record MAJOR/MINOR for approval |
+| `cpv-batch-scope-diagnose-and-fix` | project folder + `--scope` | per-project before/after + pending_fixes | Same-turn scope-aware diagnose + apply safe fixes inline |
+
 ## Invocation pattern
 
 Every agent loading these skills must use the fully-qualified form so
@@ -117,4 +150,14 @@ Skill({skill: "claude-plugins-validation:plugin-management"})
 Skill({skill: "claude-plugins-validation:cpv-main-menu-skill"})
 Skill({skill: "claude-plugins-validation:cpv-format-menu"})
 Skill({skill: "claude-plugins-validation:the-skills-menu-create"})
+Skill({skill: "claude-plugins-validation:cpv-batch-validate"})
+Skill({skill: "claude-plugins-validation:cpv-batch-security-audit"})
+Skill({skill: "claude-plugins-validation:cpv-batch-caching-audit"})
+Skill({skill: "claude-plugins-validation:cpv-batch-caching-optimize"})
+Skill({skill: "claude-plugins-validation:cpv-batch-fix"})
+Skill({skill: "claude-plugins-validation:cpv-batch-validate-and-fix"})
+Skill({skill: "claude-plugins-validation:cpv-batch-full-scan-and-fix"})
+Skill({skill: "claude-plugins-validation:cpv-batch-scope-diagnose"})
+Skill({skill: "claude-plugins-validation:cpv-batch-scope-fix"})
+Skill({skill: "claude-plugins-validation:cpv-batch-scope-diagnose-and-fix"})
 ```
