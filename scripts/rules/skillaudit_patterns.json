@@ -104,7 +104,7 @@
         "execSync",
         "spawn\\s*\\(",
         "eval\\s*\\(",
-        "Function\\s*\\(",
+        "(?:\\bnew\\s+)?\\bFunction\\s*\\(\\s*[`'\"]",
         "\\bos\\.system\\b",
         "\\bsubprocess\\.(?:call|run|Popen)\\b"
       ],
@@ -646,7 +646,7 @@
         "subprocess\\.(?:call|run|Popen)\\s*\\(.*(?:format|%s|\\+|f['\"]|shell\\s*=\\s*True)",
         "(?:;|\\||&&)\\s*\\b(?:curl|wget|nc|bash|sh|python|perl|ruby|php)\\b",
         "\\$\\(.*\\b(?:curl|wget|cat|ls|whoami|id|uname)\\b\\)",
-        "`.*\\b(?:curl|wget|cat|ls|whoami|id|uname)\\b.*`",
+        "`\\s*\\b(?:curl|wget|cat|ls|whoami|id|uname)\\b(?:\\s+[^`]*)?`",
         "Runtime\\.getRuntime\\(\\)\\.exec",
         "ProcessBuilder.*(?:command|start)",
         "(?:system|passthru|shell_exec|popen)\\s*\\(.*\\$"
@@ -912,7 +912,7 @@
       "patterns": [
         "innerHTML\\s*=\\s*(?:req|request|params|query|body|input|user|args|data)",
         "innerHTML\\s*=\\s*[`'\"].*\\$\\{(?:req|request|params|query|body|input|user)",
-        "innerHTML\\s*\\+?=\\s*(?!\\s*['\"]\\s*$)",
+        "innerHTML\\s*\\+=\\s*[^`'\"\\s]",
         "document\\.write\\s*\\(\\s*(?:req|request|params|query|body|input|user|location|window)",
         "\\$\\s*\\(.*\\)\\.html\\s*\\(\\s*(?:req|request|params|query|body|input|data|user)",
         "res\\.(?:send|write)\\s*\\(\\s*[`'\"]\\s*<.*\\$\\{(?:req|request|params|query|body|input)",
