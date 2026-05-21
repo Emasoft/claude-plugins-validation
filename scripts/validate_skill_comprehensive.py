@@ -189,7 +189,27 @@ RE_BASEDIR_REFERENCES = re.compile(r"\{baseDir\}/references/([^\s\}]+)")
 RE_BASEDIR_ASSETS = re.compile(r"\{baseDir\}/assets/([^\s\}]+)")
 
 # --- XML Tag Pattern (Anthropic docs forbid XML tags in name/description) ---
-RE_XML_TAG = re.compile(r"<[a-zA-Z][^>]*>")
+# Issue #36 (closes): the original ``r"<[a-zA-Z][^>]*>"`` over-matched
+# every angle-bracket placeholder convention people use in
+# documentation prose: ``<sha>``, ``<placeholder>``, ``<N>``,
+# ``<https://example.com>`` (autolink-style markdown), etc. None of
+# these are XML tags — they are typed placeholder names.
+#
+# A real XML/HTML tag in skill-description text would always come in
+# a balanced pair (``<tag>...</tag>``) or as a self-closing form
+# (``<tag/>``, ``<tag attr=...//>``). The pattern below detects exactly
+# those two shapes by requiring EITHER:
+#   * an opening tag followed (anywhere in the string) by its matching
+#     closing tag — ``<TAG[ attrs...]>...</TAG>`` (case-insensitive
+#     backref), OR
+#   * a self-closing tag — ``<TAG[ attrs...]/>``.
+# Single ``<word>`` placeholders no longer match — only structural
+# tags do.
+RE_XML_TAG = re.compile(
+    r"<([a-zA-Z][a-zA-Z0-9:_.-]*)\b[^>]*>.*?</\1>"     # balanced pair
+    r"|<[a-zA-Z][a-zA-Z0-9:_.-]*\b[^>]*/>",             # self-closing
+    re.DOTALL,
+)
 
 # --- Vague/Generic Name Words (Anthropic docs recommend against these) ---
 VAGUE_NAME_WORDS = {
