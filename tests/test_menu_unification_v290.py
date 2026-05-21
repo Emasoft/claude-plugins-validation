@@ -159,6 +159,9 @@ def test_only_one_slash_command_remains() -> None:
         "cpv-batch-security-audit.md",
         "cpv-batch-caching-audit.md",
         "cpv-batch-caching-optimize.md",
+        # Phase 3 same-turn variants.
+        "cpv-batch-validate-and-fix.md",
+        "cpv-batch-full-scan-and-fix.md",
     }
     md_files = list(COMMANDS_DIR.glob("*.md"))
     actual = {f.name for f in md_files}

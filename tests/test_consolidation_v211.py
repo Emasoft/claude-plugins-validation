@@ -167,6 +167,10 @@ class TestCommandCount:
             "cpv-batch-security-audit.md",
             "cpv-batch-caching-audit.md",
             "cpv-batch-caching-optimize.md",
+            # Phase 3 same-turn variants (TRDD-3dcbb37c §3) — single-pass
+            # read + scan + verify-FPs + fix in ONE per-plugin agent turn.
+            "cpv-batch-validate-and-fix.md",
+            "cpv-batch-full-scan-and-fix.md",
         }
         md_files = list(COMMANDS_DIR.glob("*.md"))
         actual = {f.name for f in md_files}
@@ -192,6 +196,10 @@ class TestCommandCount:
             "cpv-batch-security-audit.md",
             "cpv-batch-caching-audit.md",
             "cpv-batch-caching-optimize.md",
+            # Phase 3 same-turn variants (TRDD-3dcbb37c §3) — single-pass
+            # read + scan + verify-FPs + fix in ONE per-plugin agent turn.
+            "cpv-batch-validate-and-fix.md",
+            "cpv-batch-full-scan-and-fix.md",
         }
         md_files = list(COMMANDS_DIR.glob("*.md"))
         for f in md_files:
@@ -386,6 +394,9 @@ class TestSkillAgentArchitecture:
             "cpv-batch-caching-audit",
             "cpv-batch-caching-optimize",
             "cpv-batch-fix",
+            # Phase 3 same-turn variants.
+            "cpv-batch-validate-and-fix",
+            "cpv-batch-full-scan-and-fix",
         }
         for skill_md in SKILLS_DIR.glob("*/SKILL.md"):
             fm = _parse_frontmatter(skill_md)
@@ -491,6 +502,9 @@ class TestSkillAgentArchitecture:
             "cpv-batch-caching-audit",
             "cpv-batch-caching-optimize",
             "cpv-batch-fix",
+            # Phase 3 same-turn variants.
+            "cpv-batch-validate-and-fix",
+            "cpv-batch-full-scan-and-fix",
         }
         # Gather all skill names declared by agents.
         loaded = set()
