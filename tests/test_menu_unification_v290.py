@@ -162,6 +162,10 @@ def test_only_one_slash_command_remains() -> None:
         # Phase 3 same-turn variants.
         "cpv-batch-validate-and-fix.md",
         "cpv-batch-full-scan-and-fix.md",
+        # Phase 4 scope-aware doctor batch (TRDD-a175f78d).
+        "cpv-batch-scope-diagnose.md",
+        "cpv-batch-scope-fix.md",
+        "cpv-batch-scope-diagnose-and-fix.md",
     }
     md_files = list(COMMANDS_DIR.glob("*.md"))
     actual = {f.name for f in md_files}

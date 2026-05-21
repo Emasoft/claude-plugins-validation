@@ -94,6 +94,10 @@ def test_v290_only_documented_slash_commands_remain() -> None:
         # Phase 3 same-turn variants.
         "cpv-batch-validate-and-fix.md",
         "cpv-batch-full-scan-and-fix.md",
+        # Phase 4 scope-aware doctor batch (TRDD-a175f78d).
+        "cpv-batch-scope-diagnose.md",
+        "cpv-batch-scope-fix.md",
+        "cpv-batch-scope-diagnose-and-fix.md",
     }
     md_files = {p.name for p in COMMANDS_DIR.glob("*.md")}
     unexpected = md_files - allowed

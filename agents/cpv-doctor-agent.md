@@ -343,6 +343,101 @@ For these modes, engage a multi-turn dialogue:
 3. Walk through possible causes / fixes / further checks.
 4. Return only when the user types `done` or after a clear resolution. Summarize the conversation in a `$MAIN_ROOT/reports/plugin-diagnoser/<ts>-ask.md` file.
 
+## Scope-aware batch modes (TRDD-a175f78d)
+
+When the `<context>` block contains `mode: batch_scope_diagnose`,
+`mode: batch_scope_fix`, or `mode: batch_scope_same_turn`, you are
+one of N parallel **per-project** scope-aware doctors dispatched by
+`/cpv-batch-scope-diagnose`, `/cpv-batch-scope-fix`, or
+`/cpv-batch-scope-diagnose-and-fix`. The context block has this
+shape:
+
+```
+<context>
+source: /cpv-batch-scope-diagnose (or sibling)
+mode: batch_scope_diagnose | batch_scope_fix | batch_scope_same_turn
+scope: user | project | local | full
+plugin_index: <int>
+target_path: <absolute project folder path>
+display_name: <project name>
+session_dir: /tmp/cpv-batch/<ts>-cpv-doctor-agent/
+status_path: /tmp/cpv-batch/<ts>-cpv-doctor-agent/plugin-<plugin_index>.status.json
+</context>
+```
+
+Surfaces by scope:
+
+| Scope | Surface |
+|---|---|
+| `user` | `~/.claude/` — global user-scope extensions (agents, skills, hooks, MCP servers, output styles, LSP, monitors) |
+| `project` | `<target_path>/.claude/` limited to `git ls-files <target_path>/.claude/` (git-tracked entries) |
+| `local` | `<target_path>/.claude/settings.local.json` AND any files the `settings.local.json` references |
+| `full` | All three surfaces merged, PLUS the cross-scope conflict checker (below) |
+
+### Cross-scope conflict checker (scope=`full`)
+
+For every extension name (skill / agent / hook / command / MCP /
+LSP / monitor / output-style) appearing in MORE THAN ONE scope:
+
+| Conflict shape | Severity | Why |
+|---|---|---|
+| Same name, two scopes, identical content | NIT | Duplicate — no behavioural effect, wastes disk. |
+| Same name, two scopes, different content | MAJOR | The higher-precedence copy silently overrides; the user often forgot which one is loaded. |
+| Project-scope entry referencing a file not git-tracked | MAJOR | Will silently disappear on `git clone` of the project. |
+| Local-scope settings entry referencing a file outside `<target_path>/.claude/` tree | CRITICAL | The local entry will fail to load on any other machine; usually a misplaced setting. |
+| User-scope hook AND project-scope hook on the same event | MINOR | Both fire — verify the order matters. |
+
+### Per-mode behaviour
+
+| Mode | What runs |
+|---|---|
+| `batch_scope_diagnose` | All recipes for the scope; NO fixes applied. |
+| `batch_scope_fix` | All recipes + apply NIT (silent), CRITICAL (silent), record MAJOR/MINOR in `pending_fixes[]` without applying. |
+| `batch_scope_same_turn` | Read each scope file ONCE; apply NIT, CRITICAL, AND safe-MAJOR / safe-MINOR inline; unsafe-MAJOR / unsafe-MINOR → `pending_fixes[]`. |
+
+A SAFE recipe is one where the fix has no semantic impact (e.g.
+delete a duplicate skill whose content is byte-identical modulo
+whitespace). An UNSAFE recipe is one where the user might
+legitimately have meant the duplicate / drift (e.g. they
+intentionally override the user-scope entry in project scope).
+
+### Status JSON shape
+
+Write per-project status JSON to `status_path`:
+
+```json
+{
+  "schema_version": 1,
+  "plugin_index": <int>,
+  "scope": "user" | "project" | "local" | "full",
+  "started_at": "<ISO8601±TZ>",
+  "finished_at": "<ISO8601±TZ>",
+  "status_symbol": "✓" | "✗" | "⚠",
+  "status_label": "clean" | "findings" | "fixed" | "partial" | "failed" | "warning-only",
+  "counts": {"critical": N, "major": N, "minor": N, "nit": N, "warning": N},
+  "before": {"critical": N, "major": N, "minor": N, "nit": N, "warning": N},  // fix modes only
+  "after":  {"critical": N, "major": N, "minor": N, "nit": N, "warning": N},  // fix modes only
+  "conflicts": <int>,                       // full mode only
+  "pending_fixes": [<list of MAJOR/MINOR fix recipes the user must approve>],
+  "report_path": "<abs-path-to-scope-doctor-report>",
+  "notes": "<short summary>"
+}
+```
+
+### Return contract
+
+Return EXACTLY one line to the orchestrator:
+
+```text
+[project-<plugin_index>] <label>: <C>/<M>/<m>/<n>/<w> conflicts=<X> (status: <status_path>)    # diagnose mode
+[project-<plugin_index>] <label>: fixed=<X> pending=<Y> (status: <status_path>)                # fix mode
+[project-<plugin_index>] <label>: fixed=<X> pending=<Y> (status: <status_path>)                # same-turn mode
+```
+
+Do NOT render menus. Do NOT mutate ~/.claude/ beyond the iron-rule
+fix categories. Per-scope reports live under
+`$MAIN_ROOT/reports/scope-doctor/<ts±tz>-<project>.md`.
+
 ## Architecture (v2.89.0 / v2.89.3)
 
 Per TRDD-bcbceeed (v2.89.0): the doctor's first-contact menu lives in the slash command body, not in a separate menu-subagent — only the main session can dispatch subagents.

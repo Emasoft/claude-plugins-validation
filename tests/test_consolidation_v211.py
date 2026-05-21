@@ -171,6 +171,11 @@ class TestCommandCount:
             # read + scan + verify-FPs + fix in ONE per-plugin agent turn.
             "cpv-batch-validate-and-fix.md",
             "cpv-batch-full-scan-and-fix.md",
+            # Phase 4 scope-aware doctor batch (TRDD-a175f78d) — LOCAL-only
+            # per-project diagnostic (user/project/local/full).
+            "cpv-batch-scope-diagnose.md",
+            "cpv-batch-scope-fix.md",
+            "cpv-batch-scope-diagnose-and-fix.md",
         }
         md_files = list(COMMANDS_DIR.glob("*.md"))
         actual = {f.name for f in md_files}
@@ -200,6 +205,10 @@ class TestCommandCount:
             # read + scan + verify-FPs + fix in ONE per-plugin agent turn.
             "cpv-batch-validate-and-fix.md",
             "cpv-batch-full-scan-and-fix.md",
+            # Phase 4 scope-aware doctor batch (TRDD-a175f78d) — LOCAL-only.
+            "cpv-batch-scope-diagnose.md",
+            "cpv-batch-scope-fix.md",
+            "cpv-batch-scope-diagnose-and-fix.md",
         }
         md_files = list(COMMANDS_DIR.glob("*.md"))
         for f in md_files:
@@ -397,6 +406,10 @@ class TestSkillAgentArchitecture:
             # Phase 3 same-turn variants.
             "cpv-batch-validate-and-fix",
             "cpv-batch-full-scan-and-fix",
+            # Phase 4 scope-aware doctor batch.
+            "cpv-batch-scope-diagnose",
+            "cpv-batch-scope-fix",
+            "cpv-batch-scope-diagnose-and-fix",
         }
         for skill_md in SKILLS_DIR.glob("*/SKILL.md"):
             fm = _parse_frontmatter(skill_md)
@@ -505,6 +518,10 @@ class TestSkillAgentArchitecture:
             # Phase 3 same-turn variants.
             "cpv-batch-validate-and-fix",
             "cpv-batch-full-scan-and-fix",
+            # Phase 4 scope-aware doctor batch.
+            "cpv-batch-scope-diagnose",
+            "cpv-batch-scope-fix",
+            "cpv-batch-scope-diagnose-and-fix",
         }
         # Gather all skill names declared by agents.
         loaded = set()

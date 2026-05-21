@@ -39,7 +39,8 @@
     ],
     "skill_size_severity": "warning",
     "allow_orchestrator_traversal": [
-      "skills/cpv-batch-validate"
+      "skills/cpv-batch-validate",
+      "skills/cpv-batch-scope-diagnose"
     ]
   }
 }

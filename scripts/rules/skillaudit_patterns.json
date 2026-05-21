@@ -873,7 +873,7 @@
         "(?:token|secret|key|password|nonce|salt|session|csrf|otp).*Math\\.random\\s*\\(\\)",
         "random\\.random\\s*\\(\\).*(?:token|secret|key|password|nonce|salt)",
         "createCipher\\s*\\(\\s*['\"](?:aes-(?:128|192|256)-ecb|des|rc4|rc2|blowfish)['\"]",
-        "DES(?:ede)?\\s*[:=]|Blowfish\\s*[:=]|RC4\\s*[:=]",
+        "\\b(?:DES(?:ede)?|Blowfish|RC4)\\s*[:=]",
         "(?:key[_-]?(?:size|length|bits)|keySize|keyLen)\\s*[:=]\\s*(?:56|64|128|40|512)\\b",
         "createCipheriv?\\s*\\(.*['\"]\\s*,\\s*['\"][0-9a-fA-F]{16,64}['\"]"
       ],
