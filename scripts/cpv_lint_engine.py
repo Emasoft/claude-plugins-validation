@@ -309,7 +309,22 @@ def lint_python(
     # the whole repo (especially test files) surfaces mountains of
     # annotation-unchecked notes that have nothing to do with plugin
     # publishability. The lint_repo orchestrator's primary signal is ruff.
-    mypy_targets = [str(f) for f in files if "scripts" in f.parts]
+    # Restrict to scripts under the repo's OWN scripts/ tree. Test
+    # fixtures (e.g. ``tests/fixtures/<plugin>/scripts/...``) have
+    # ``scripts`` in their path-parts too, but they're checked-in
+    # foreign plugin source — their type errors are the foreign plugin
+    # author's responsibility, not CPV's.
+    def _is_own_script(f: Path) -> bool:
+        parts = f.parts
+        if "scripts" not in parts:
+            return False
+        if "fixtures" in parts:
+            return False
+        if "tests" in parts and parts.index("tests") < parts.index("scripts"):
+            return False
+        return True
+
+    mypy_targets = [str(f) for f in files if _is_own_script(f)]
     if not mypy_targets:
         return ok
     mypy_cmd = _resolve("mypy")
@@ -320,7 +335,7 @@ def lint_python(
                 + [
                     "--ignore-missing-imports",
                     "--exclude",
-                    "scripts_dev|docs_dev|builds_dev|tests_dev",
+                    "scripts_dev|docs_dev|builds_dev|tests_dev|tests/fixtures",
                     *mypy_targets,
                 ],
                 capture_output=True,

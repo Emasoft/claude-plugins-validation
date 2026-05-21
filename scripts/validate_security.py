@@ -1844,7 +1844,13 @@ def is_validator_script(file_path: str) -> bool:
 
     # Per-validator (validate_plugin.py, validate_security.py, etc.) and
     # CPV-internal helpers (cpv_taint_engine.py, cpv_sarif_writer.py, etc.)
-    if basename.startswith(("validate_", "cpv_")):
+    # v2.100.0 (TRDD-a4260cc6) — also covers the per-file-type
+    # SkillAudit context classifiers (``_skillaudit_python_context.py``,
+    # ``_skillaudit_json_context.py``, ``_skillaudit_markdown_context.py``,
+    # ``_skillaudit_yaml_context.py``). These ship literal AST + regex
+    # pattern strings as data; without the eligibility check the
+    # self-scan would over-fire on their own classifier patterns.
+    if basename.startswith(("validate_", "cpv_", "_skillaudit_")):
         return True
 
     # Scaffolder + pipeline scripts that emit shell/template content.

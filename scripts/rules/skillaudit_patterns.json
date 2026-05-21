@@ -105,8 +105,8 @@
         "spawn\\s*\\(",
         "eval\\s*\\(",
         "Function\\s*\\(",
-        "os\\.system",
-        "subprocess\\.(?:call|run|Popen)"
+        "\\bos\\.system\\b",
+        "\\bsubprocess\\.(?:call|run|Popen)\\b"
       ],
       "remediation": "Avoid using eval(), exec(), spawn(), or child_process with dynamic input. Use parameterized APIs instead of shell commands. If shell execution is necessary, validate and sanitize all inputs, use allowlists, and never pass user input directly."
     },
