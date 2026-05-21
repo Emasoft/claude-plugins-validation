@@ -1,9 +1,9 @@
 ---
 trdd-id: a175f78d-d700-41c8-98ff-caa565acac84
 title: Batch scope-aware doctor skills (project-folder list + scope filter)
-status: in-progress
+status: completed
 created: 2026-05-21T15:44:00+0200
-updated: 2026-05-21T16:35:23+0200
+updated: 2026-05-21T19:17:12+0200
 ---
 
 <!-- markdownlint-disable-next-line MD025 -->

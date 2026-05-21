@@ -1,9 +1,9 @@
 ---
 trdd-id: 3dcbb37c-8e98-41ac-8c1c-b87baf2781ae
 title: Batch-skills family — marketplace-input + same-turn scan/verify/fix
-status: in-progress
+status: completed
 created: 2026-05-21T15:44:00+0200
-updated: 2026-05-21T16:35:23+0200
+updated: 2026-05-21T19:17:12+0200
 ---
 
 <!-- markdownlint-disable-next-line MD025 -->
