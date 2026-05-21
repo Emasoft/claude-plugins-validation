@@ -1,9 +1,9 @@
 ---
 trdd-id: a4260cc6-44f7-4150-9d1c-59daa4c700d3
 title: v2.100.0 context-aware SkillAudit matcher — AST + schema + markdown contextualisation (closes #33)
-status: in-progress
+status: completed
 created: 2026-05-21T13:01:36+0200
-updated: 2026-05-21T13:01:36+0200
+updated: 2026-05-21T14:30:00+0200
 ---
 
 <!-- markdownlint-disable-next-line MD025 -->
