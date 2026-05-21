@@ -593,6 +593,7 @@ VALID_TOOLS = {
     "PushNotification",
     "SlashCommand",  # v1.0.123 — enables Claude to invoke your slash commands
     "MCPSearch",  # v2.1.7 — MCP-specific tool search (distinct from generic ToolSearch)
+    "Workflow",  # v2.1.147 — deterministic multi-agent orchestration; off by default (CLAUDE_CODE_WORKFLOWS=1)
 }
 
 # Valid model short names for agents (v2.1.74+: full model IDs also accepted)
@@ -814,6 +815,7 @@ VALID_PLUGIN_ENV_VARS = {
     "CLAUDE_CODE_OPUS_4_6_FAST_MODE_OVERRIDE",  # v2.1.142 — set to "1" to pin fast mode to Opus 4.6 (default since v2.1.142 is Opus 4.7)
     "CLAUDE_CODE_POWERSHELL_RESPECT_EXECUTION_POLICY",  # v2.1.143 — set to "1" to opt out of PowerShell's -ExecutionPolicy Bypass default
     "CLAUDE_CODE_STOP_HOOK_BLOCK_CAP",  # v2.1.143 — override the default cap of 8 consecutive hook blocks before turn ends with warning
+    "CLAUDE_CODE_WORKFLOWS",  # v2.1.147 — set to "1" to enable the Workflow tool (off by default)
     # Anthropic *_SUPPORTED_CAPABILITIES — spec-correct suffix
     "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES",
     "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES",

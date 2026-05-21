@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-21T19:39:15+00:00",
+  "computed_at": "2026-05-21T20:57:45+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     ".github/workflows/bot-auto-merge.yml": "sha256:84ca9bec6592304749e979f2f0a9000b5047ce434435d1267f9ba0387d587b08",
@@ -139,7 +139,7 @@
     "scripts/cpv_token_cost.py": "sha256:e35d69c393c37794798615c473e67bf89f48d9d27f901f5221f0fc426aaa0ef5",
     "scripts/cpv_upstream_plugin_json.py": "sha256:1c3353e2ec5451fa63b273a9f17eabb9aa24aac94d02809db69a70e149e13be4",
     "scripts/cpv_validate_gitmodules.py": "sha256:a6c9a3b5688d6fea97ef12af942cea846475cbe8c8e2fcd467562cbab8d45eb7",
-    "scripts/cpv_validation_common.py": "sha256:a352befb9bf2194a06865778043dea53c225ea96c7abfe2654c858ae762f8da4",
+    "scripts/cpv_validation_common.py": "sha256:a267caf7ad209697fedecca443dd5447b2ad16bdff6a3b05d01cda399ec203d3",
     "scripts/detect_lockfiles.py": "sha256:17c03bd5d381395f6348a7a2b8c2d4df99422cabdd600b98fe7be0b01ebb6971",
     "scripts/format_menu.py": "sha256:200b3dc8df7ab556389ca5e85055528a618732df77a922ff4c3bf9da80e1db3a",
     "scripts/generate_marketplace_repo.py": "sha256:443e4080ac717814f97d7fa82b44c540eff5c5edca8def77a8b6cff90a534f9e",
@@ -291,7 +291,7 @@
     "skills/plugin-validation-skill/references/security-validator-contract.md": "sha256:0deaacd9f8f899c149af114080883dcb57d1300f30e5df2e1356f81cb083d9cd",
     "skills/plugin-validation-skill/references/shape-detection.md": "sha256:c7aab9c730d6a594fdd52a0758969cb41a91296988c05aadd2419c265485d251",
     "skills/plugin-validation-skill/references/skill-validation.md": "sha256:3598b8eae2215cb6a6d1b9e81c49bd542d0e7b6b4bf10d54b9ae77781b824f47",
-    "skills/plugin-validation-skill/references/skills-reference.md": "sha256:15145cbf7369c5532061cfe16254a55305dda0a7516941b944fedc0c19c313e7",
+    "skills/plugin-validation-skill/references/skills-reference.md": "sha256:f20da364b7b9dfc37814e93fd9e36e05dfd1efcd8377935c083f67697662e8bb",
     "skills/plugin-validation-skill/references/troubleshooting-python-scripts.md": "sha256:e2a9e8180c1cdafbc3ad81336ae877d93007e90716e9d5ee2656424ee4a5d150",
     "skills/plugin-validation-skill/references/validation-checklist.md": "sha256:10c7f790a51dba1c8c6691248c5f41ae4a3f4dfb9f639954ce789644e9a64872",
     "skills/plugin-validation-skill/references/validation-procedures.md": "sha256:ff6ca51312b39082d4b0d575b612f490eebb7e99d8ee6543eee0417158e1c23f",
