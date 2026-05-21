@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-21T17:20:35+00:00",
+  "computed_at": "2026-05-21T18:37:48+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     ".github/workflows/bot-auto-merge.yml": "sha256:84ca9bec6592304749e979f2f0a9000b5047ce434435d1267f9ba0387d587b08",
@@ -8,7 +8,7 @@
     ".github/workflows/notify-marketplace.yml": "sha256:a21cc2eae6a082ffaa306feddf8aab0c475d86b1551a978ea8f947bd2993c961",
     ".github/workflows/release.yml": "sha256:1afcb39c7793c103026f2b401f16d359e0e9bef66e3cff23d4902fa9446dc382",
     "CHANGELOG.md": "sha256:3bdc59f9118dedf222b35596aa2a3768030ae25992d28640a32516dfb5d4ff44",
-    "README.md": "sha256:be7313b9cc6da8f53a1e4fa4fb1b6452707bc41e5c865a9bd9b93fa75130d9c5",
+    "README.md": "sha256:a2b952f98073359d416450409e82f86d54e81205c8deb653a4b797681591103e",
     "agents/cache-optimizer-agent.md": "sha256:e55f8146b4406133c0581867e0fafd6f6c028f68a815a121ce5f3e1f28dabab8",
     "agents/cpv-doctor-agent.md": "sha256:ad6f1416f6cefbfd8819307f08c8e2a0ab961bc3ac922306009fae000fc66371",
     "agents/cpv-main-menu-agent.md": "sha256:d1dbfc5b8cd604c32cc6aa3e41b644c4f858bbc95492aead2d803c429605f3f2",
@@ -217,7 +217,7 @@
     "skills/cpv-batch-validate/references/error-handling.md": "sha256:3c77a4eb0c00e1b4b2c2f7e1eaaeff98952f25073dae274b04b85ab67ebc783f",
     "skills/cpv-format-menu/SKILL.md": "sha256:8e8f852ceb2f2d5c8a8164fa5617291db3d0e3c3a2a775c313dd65b00cd3cdac",
     "skills/cpv-main-menu-skill/SKILL.md": "sha256:8d72019a0d489aceb65b5e3b9131a72068d6cf2821654802284dde17fcf66ecc",
-    "skills/cpv-main-menu-skill/references/menu-tree.md": "sha256:2b657f051f9f88b468047ee10c38ad9b8b1a74c3f28fc2039bcfece0eb6b81ed",
+    "skills/cpv-main-menu-skill/references/menu-tree.md": "sha256:fe8864b000f0c2aa58ed2b6453b8c4f099bdfac5ab11fb7fd73bc1949b427985",
     "skills/create-plugin/SKILL.md": "sha256:3d7f49394de23dfc152a7bd2dff909d8e145d4e28cc539b169ddde6867d600b2",
     "skills/create-plugin/references/dev-stripping.md": "sha256:eeced2fb886b2fae222fc1432be1050a0dd00d93b3e629cb7563453bee4b3786",
     "skills/create-plugin/references/examples.md": "sha256:828381ff3159784df8bbf269b30630439b8a93966676b104ad6a6f7fc0647ed1",

@@ -108,6 +108,25 @@ All in-process checks run as pure Python — no API calls, no tokens consumed, n
 
 **v2.48 — `cpv-main-menu`.** Single interactive entry-point routes through every CPV command via nested AskUserQuestion sub-menus (Validate / GitHub / Fix / Create / Manage / GitHub setup / Semantic / Help). Every menu/sub-menu includes a Cancel/Exit option. Use this when you can't remember which slash command to invoke directly.
 
+**v2.101.0 — Batch / fleet skills + scope-aware doctor.** Ten new user-invocable slash commands (TRDD-3dcbb37c + TRDD-a175f78d) for fleet-scale operations across many plugins in parallel. The main session fans out N parallel subagent dispatches from ONE message (the only place the Agent tool can parallelise per Anthropic spec). Universal input grammar — accepts single plugin path/URL, marketplace path/URL, comma-separated list, an `@listfile` prefix pointing to a text file of one input per line, single skill folder, skill pack, or mixed `marketplace.json` entries (plugins + skills + skill-packs all expandable). Reference-counted clone cleanup; bounded scan for repos with 100k+ skills.
+
+| Command | Agent | What it does |
+|---------|-------|--------------|
+| `/cpv-batch-validate` | plugin-validator (`batch_validate`) | Read-only validate, fan-out, per-plugin reports |
+| `/cpv-batch-security-audit` | plugin-validator (`batch_security_audit`) | All 5 external scanners + native skillaudit, fan-out |
+| `/cpv-batch-caching-audit` | cache-optimizer-agent (`batch_audit`) | CA-01..CA-06 audit-only across N plugins |
+| `/cpv-batch-caching-optimize` | cache-optimizer-agent (`batch_fix`) | CA-01..CA-06 audit + auto-fix in priority order |
+| `/cpv-batch-fix` | plugin-fixer (`batch_per_plugin`) | One plugin-fixer per plugin |
+| `/cpv-batch-validate-and-fix` | plugin-fixer (`batch_same_turn_validate_fix`) | Single-pass read; scan + verify FPs + fix in one turn (~3-5× cheaper) |
+| `/cpv-batch-full-scan-and-fix` | plugin-fixer (`batch_same_turn_full`) | Combined validate + security + caching + fix in one turn |
+| `/cpv-batch-scope-diagnose` | cpv-doctor-agent (`batch_scope_diagnose`) | Read-only scope audit (user / project / local / full) |
+| `/cpv-batch-scope-fix` | cpv-doctor-agent (`batch_scope_fix`) | Fix issues a prior scope-diagnose found |
+| `/cpv-batch-scope-diagnose-and-fix` | cpv-doctor-agent (`batch_scope_same_turn`) | Scope diagnose + fix in one turn |
+
+The same-turn variants verify suspect findings via `llm-externalizer` with file-range syntax (`<file>:<start>-<end>`, ≤200 LOC per call) so false positives are caught BEFORE a fix is applied. Reached interactively from `/cpv-main-menu` row 1 → row 7 (Batch / fleet) which exposes all ten via a single Level-2 sub-menu.
+
+**v2.101.0 — Phase 6 FP-iteration on Emasoft/emasoft-plugins.** Two systematic FP classes eliminated. (a) Python `subprocess.run / Popen / call / check_call / check_output` WITHOUT `shell=True` is now classified `safe_literal` by `_skillaudit_python_context` — Python guarantees no shell interpretation. Only `shell=True` with non-literal args stays suspect. (b) Markdown defensive-documentation heuristic: when a prompt-injection / intent-class rule fires INSIDE a double-quoted string AND surrounding ±5 lines contain defensive vocabulary (UNTRUSTED / trust boundary / treat as data / etc.), the finding is demoted to NIT — the agent is being WARNED about a phrase, not the phrase being injected at it. Iron rule preserved throughout: rules are NEVER deleted; only classifier precision improves.
+
 Every external scanner's findings are routed through the same self-scan filter chain CPV applies to its own rules (`cpv_self_scan_skip` → vendored-deps → dev-scratch → test-files → FP-corpus markdown → per-line catalog/docstring/comment pattern-source predicate). This guarantees that scanning CPV with CPV — or scanning any plugin that ships its own rule catalogs — never surfaces the catalog source as a finding. The aggregator then groups all findings by `(level, rule_id)` so each vulnerability TYPE shows its full explanation exactly once, followed by an occurrence count and a capped file:line list — bounded report size, no findings ever silently dropped.
 
 ### Claude Code Documentation
@@ -360,10 +379,13 @@ A deterministic prefilter (`scripts/cpv_channel_source_predicate.py`) bounds the
 
 ### Slash Commands
 
-**v2.90.0 — one entry point.** CPV ships exactly ONE user-facing slash command: `/cpv-main-menu`. Type it; pick a number; navigate the entire plugin from a single coherent menu tree. No more guessing which of 38 commands to type.
+**v2.90.0 — one entry point + v2.101.0 batch family.** The canonical entry is still `/cpv-main-menu`. Type it; pick a number; navigate the entire plugin from a single coherent menu tree. v2.101.0 adds 10 user-invocable batch slash commands (`/cpv-batch-*`) for fleet-scale operations across many plugins in parallel — these are also reachable from the main menu (row 1 → row 7 "Batch / fleet"), and `/cpv-pre-install-scan` is the standalone pre-install security gate.
 
 ```
-/cpv-main-menu
+/cpv-main-menu                   # interactive — entry point for everything
+/cpv-batch-validate <input>      # fleet validate
+/cpv-batch-full-scan-and-fix <input>   # validate + security + cache + fix in one pass
+/cpv-pre-install-scan <target>   # security gate before plugin install
 ```
 
 Top-level menu (8 verbs the user actually wants to do):
@@ -401,12 +423,12 @@ For CI/CD and scripting, the Python validators are still callable directly (no m
 
 | Category | Count | Description |
 |----------|-------|-------------|
-| Validation scripts | 20 | Python validators (15 plugin + 3 marketplace + 2 scope) covering plugin packages, marketplaces, and end-user `.claude/` configuration |
-| Management scripts | 13 | Plugin lifecycle, marketplace operations, scaffolding |
-| Agents | 7 | AI-powered validation, fixing, and management |
-| Skills | 14 | Validation, management, publishing, fix, migration, and auto-notify workflows |
-| Commands | 20 | 12 direct script + 6 agent-backed + 2 specialized utility commands |
-| Tests | 2056+ | Full coverage across all modules |
+| Validation scripts | 25 | Python validators (21 plugin + 2 marketplace + 2 scope) covering plugin packages, marketplaces, and end-user `.claude/` configuration |
+| Management scripts | 6 | Plugin lifecycle, marketplace operations, scaffolding (`manage_*.py`) |
+| Agents | 11 | AI-powered validation, fixing, management, and batch orchestration |
+| Skills | 45 (12 user-invocable + 33 agent-loaded) | Validation, management, publishing, fix, migration, auto-notify, batch / fleet (v2.101.0), scope-aware doctor (v2.101.0), and main-menu workflows |
+| Commands | 13 user-invocable | `/cpv-main-menu` (canonical entry), 10 `/cpv-batch-*` fleet skills (v2.101.0), `/cpv-pre-install-scan`, `/the-skills-menu-create` |
+| Tests | 5700+ | Full coverage across all modules |
 
 </details>
 

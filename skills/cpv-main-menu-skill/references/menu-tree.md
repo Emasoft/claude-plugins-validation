@@ -79,7 +79,7 @@ Whenever a Validate / Fix / Cache / Security leaf accepts a path, the
 orchestrator MUST first probe the path to decide what it is:
 
 ```bash
-TARGET="<user-supplied-path>"
+TARGET="<path-argument>"
 PLUGIN_HERE=0; MULTI_PLUGIN=0; SUBMODULES=0; MARKETPLACE_HERE=0
 [ -f "$TARGET/.claude-plugin/plugin.json" ] && PLUGIN_HERE=1
 [ -f "$TARGET/.claude-plugin/marketplace.json" ] && MARKETPLACE_HERE=1
@@ -408,6 +408,8 @@ one-keystroke shortcut for "validate the project I'm currently in".
 │  5 │ Specific quality check                          │ Security / cache / xref / docs / encoding / lint / other — drill in                   │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
 │  6 │ From GitHub                                     │ Plugin or marketplace pulled from a GitHub repo (tmp clone + cleanup) — drill in      │
+├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│  7 │ Batch / fleet (v2.101.0)                        │ Multiple plugins (marketplace / list / @listfile / scope) — drill into batch sub-menu │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
 │  A │ Ask the agent for a recommendation              │ Let the agent suggest the best next action right now                                  │
 ├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
@@ -823,9 +825,124 @@ Type a number (or B for back, 0 to cancel):
     python "$LAUNCHER" github --marketplace "$REPO" --report "$MAIN_ROOT/reports/validate_github_marketplace/$TS-$(echo "$REPO" | tr '/' '_').md"
   ```
 
+#### 3.1.7 Batch / fleet — Level-2 sub-menu (v2.101.0)
+
+The fleet-scale layer added in TRDD-3dcbb37c + TRDD-a175f78d. Each leaf
+fans N parallel subagent dispatches out of ONE main-session message
+(the only place the Agent tool can parallelise per Anthropic spec).
+Inputs are universal: a single plugin path / URL, marketplace path /
+URL, comma-separated list, `@/path/to/list.txt`, single skill folder,
+skill pack, OR mixed marketplace.json entries. Resolved by
+`scripts/cpv_marketplace_input.py`; planned + status-tabled by
+`scripts/cpv_batch_orchestrator.py`.
+
+```
+┏━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ #  ┃ Batch operation                                     ┃ What it does                                                                                                                          ┃
+┡━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│  1 │ Validate (read-only, fan-out)                       │ /cpv-batch-validate — plugin-validator (batch_validate) — N shards, per-plugin reports                                                │
+├────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  2 │ Security audit (5 ext. scanners, fan-out)           │ /cpv-batch-security-audit — plugin-validator (batch_security_audit) — all 5 scanners + skillaudit native, per-plugin                  │
+├────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  3 │ Caching audit (CA-01..CA-06, fan-out)               │ /cpv-batch-caching-audit — cache-optimizer-agent (batch_audit) — read-only CA-01..06 across N plugins                                 │
+├────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  4 │ Caching optimize (audit + fix, fan-out)             │ /cpv-batch-caching-optimize — cache-optimizer-agent (batch_fix) — audit then fix CA-01..06 in priority order                          │
+├────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  5 │ Fix (per-plugin, fan-out)                           │ /cpv-batch-fix — plugin-fixer (batch_per_plugin) — one fixer per plugin                                                               │
+├────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  6 │ Validate + fix (single-pass, same-turn)             │ /cpv-batch-validate-and-fix — plugin-fixer (batch_same_turn_validate_fix) — read each file ONCE; scan + verify FPs + fix              │
+├────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  7 │ Full scan + fix (single-pass, all checks)           │ /cpv-batch-full-scan-and-fix — plugin-fixer (batch_same_turn_full) — validate + security + caching + fix in one turn                  │
+├────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  8 │ Scope-aware doctor (LOCAL only)                     │ /cpv-batch-scope-diagnose — cpv-doctor-agent (batch_scope_diagnose) — drill in for scope: user / project / local / full               │
+├────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  A │ Ask the agent                                       │ Let the agent suggest the best next action right now                                                                                  │
+├────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  B │ Back                                                │ Go back to the Validate menu                                                                                                          │
+├────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  0 │ Cancel / Exit                                       │ Stop without doing anything                                                                                                           │
+└────┴─────────────────────────────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+Type a number (or B for back, 0 to cancel):
+```
+
+The path-source mini-menu (§3.0a) is skipped for these leaves —
+the underlying skills run their own universal-input parser. Just
+prompt for the input string.
+
+##### 3.1.7.1 Batch validate
+
+- **arg-prompt**: `Input? (single plugin path/URL, marketplace path/URL, comma-list, @listfile, skill folder, or skill pack)`
+- **execution**: invoke the skill via the Skill tool — `Skill({skill: "claude-plugins-validation:cpv-batch-validate", args: "<input>"})`. The skill resolves the input, plans shards (≤8 parallel by default, cap 16), and the main session fans out the plugin-validator dispatches in one message.
+
+##### 3.1.7.2 Batch security audit
+
+- **arg-prompt**: `Input? (same shapes as 3.1.7.1)`
+- **execution**: `Skill({skill: "claude-plugins-validation:cpv-batch-security-audit", args: "<input>"})`.
+
+##### 3.1.7.3 Batch caching audit
+
+- **arg-prompt**: `Input? (same shapes as 3.1.7.1)`
+- **execution**: `Skill({skill: "claude-plugins-validation:cpv-batch-caching-audit", args: "<input>"})`.
+
+##### 3.1.7.4 Batch caching optimize
+
+- **arg-prompt**: `Input? (same shapes as 3.1.7.1)`
+- **execution**: `Skill({skill: "claude-plugins-validation:cpv-batch-caching-optimize", args: "<input>"})`. Includes both audit AND fix passes in priority order.
+
+##### 3.1.7.5 Batch fix (per-plugin)
+
+- **arg-prompt**: `Input? (same shapes as 3.1.7.1)`
+- **execution**: `Skill({skill: "claude-plugins-validation:cpv-batch-fix", args: "<input>"})`. One plugin-fixer subagent per plugin in `batch_per_plugin` mode.
+
+##### 3.1.7.6 Batch validate + fix (same-turn)
+
+- **arg-prompt**: `Input? (same shapes as 3.1.7.1)`
+- **execution**: `Skill({skill: "claude-plugins-validation:cpv-batch-validate-and-fix", args: "<input>"})`. Single-pass per-file read; scans + verifies FPs via llm-externalizer file-range syntax + fixes in one turn. ~3-5× cheaper than separate passes.
+
+##### 3.1.7.7 Batch full scan + fix (same-turn)
+
+- **arg-prompt**: `Input? (same shapes as 3.1.7.1)`
+- **execution**: `Skill({skill: "claude-plugins-validation:cpv-batch-full-scan-and-fix", args: "<input>"})`. Combined validate + security + caching audit + caching optimize + fix in one turn per plugin.
+
+##### 3.1.7.8 Scope-aware doctor — Level-3 sub-menu
+
+```
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ # ┃ Scope operation                     ┃ What it does                                                 ┃
+┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 1 │ Diagnose (read-only)                │ /cpv-batch-scope-diagnose — surface issues across scopes     │
+├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+│ 2 │ Fix (apply fixes)                   │ /cpv-batch-scope-fix — fix issues a prior diagnose surfaced  │
+├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+│ 3 │ Diagnose + fix (same-turn)          │ /cpv-batch-scope-diagnose-and-fix — scan + verify + fix once │
+├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+│ B │ Back                                │ Go back to the Batch / fleet menu                            │
+├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+│ 0 │ Cancel / Exit                       │ Stop without doing anything                                  │
+└───┴─────────────────────────────────────┴──────────────────────────────────────────────────────────────┘
+Type a number (or B for back, 0 to cancel):
+```
+
+- **arg-prompts** (in order for ALL three leaves):
+  1. `Project folder list? (single path / comma-separated / @listfile — LOCAL only, URLs rejected with CRITICAL)`
+  2. `Scope? (full / user / project / local — default: full)`
+- **execution**:
+  - 3.1.7.8.1 → `Skill({skill: "claude-plugins-validation:cpv-batch-scope-diagnose", args: "<paths> --scope <scope>"})`
+  - 3.1.7.8.2 → `Skill({skill: "claude-plugins-validation:cpv-batch-scope-fix", args: "<paths> --scope <scope>"})`
+  - 3.1.7.8.3 → `Skill({skill: "claude-plugins-validation:cpv-batch-scope-diagnose-and-fix", args: "<paths> --scope <scope>"})`
+- **note**: URL inputs are rejected per TRDD-a175f78d §1 — the doctor needs `~/.claude/` filesystem access which a URL cannot represent.
+
 ---
 
 ### 3.2 Fix sub-menu
+
+For SINGLE-plugin fixes (the common case), use leaves 1-3 below. For
+FLEET / MARKETPLACE-scale fixes (TRDD-3dcbb37c, v2.101.0) — many
+plugins in parallel — see §3.1.7 Batch / fleet (rows 5-7 cover
+batch-fix, batch-validate-and-fix, batch-full-scan-and-fix). The
+existing in-flight auto-batch on §3.2.1 step 4 still handles
+single-plugin findings counts > safe-ceiling — that's a different
+shape than fleet operations.
 
 ```
 ┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
@@ -834,6 +951,7 @@ Type a number (or B for back, 0 to cancel):
 │ 1 │ Fix plugin issues        │ From a report file OR a plugin folder (uses the plugin-fixer agent)│
 │ 2 │ Fix marketplace issues   │ From a report file OR a marketplace folder (uses marketplace-fixer)│
 │ 3 │ Optimize prompt cache    │ Audit + auto-fix the cache patterns (uses cache-optimizer-agent)   │
+│ 4 │ Batch fix (fleet)        │ Many plugins in parallel — drill into §3.1.7 Batch / fleet (v2.101)│
 │ 9 │ Back                     │ Go back to the top-level menu                                      │
 │ A │ Ask the agent            │ Let the agent suggest the best next action right now               │
 │ 0 │ Cancel / Exit            │ Stop without doing anything                                        │
@@ -868,6 +986,10 @@ Type a number to choose:
   1. `Path to plugin or project root?`
   2. `Also do broader cache-aware refactoring? (yes/no — --broader invokes Phase 4)`
 - **execution**: dispatch the **cache-optimizer-agent** with the path and `--broader` flag if requested.
+
+#### 3.2.4 Batch fix (fleet)
+
+This row is a routing shortcut, not a separate workflow. When the user picks `4`, the orchestrator MUST jump to §3.1.7 Batch / fleet so the user can pick which batch variant they actually want (validate-only / fix-only / same-turn validate+fix / same-turn full scan+fix). No path prompt here — the batch sub-menu has its own input prompt accepting all universal shapes (single / marketplace / list / @listfile / mixed).
 
 ---
 
@@ -1293,6 +1415,12 @@ checks + cross-platform compliance + marketplace registration probe +
 cached-vs-GitHub sync probe + branch-rules + Claude action audit. Includes
 the AI-graded semantic quality review (Opus, opt-in only — EXPENSIVE).
 
+For SCOPE-AWARE diagnostics across a LIST of project folders (user /
+project / local / full scope) — TRDD-a175f78d, v2.101.0 — use §3.1.7 row
+8 (Scope-aware doctor sub-menu). That entry rejects URL inputs by design
+because the doctor needs `~/.claude/` filesystem access. The single-plugin
+diagnose flow below uses local-cache state implicitly so URLs work there.
+
 ```
 ┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ # ┃ Operation                                         ┃ What it does                                                                                              ┃
@@ -1676,6 +1804,11 @@ generic Fix (§3.2), with its own audit + optimize loop.
 
 Also reachable from §3.1.5.2 (Specific quality check → Cache patterns)
 for users who arrive via the Validate menu.
+
+For FLEET / MARKETPLACE-scale caching audits + optimizations
+(TRDD-3dcbb37c, v2.101.0), use §3.1.7 rows 3 (`/cpv-batch-caching-audit`)
+and 4 (`/cpv-batch-caching-optimize`) instead — they fan out N
+parallel cache-optimizer-agent dispatches in one main-session message.
 
 ```
 ┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
