@@ -40,7 +40,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Literal
 
-InputKind = Literal["file", "skill", "plugin", "marketplace"]
+InputKind = Literal["file", "skill", "skill_pack", "plugin", "marketplace"]
+
+# Maximum number of subdirectories examined when classifying a folder
+# as a skill_pack. Higher values give a more confident classification
+# but slow down the resolver on repos with 100k+ entries. The empirical
+# threshold for "this is definitely a skill pack" is 2 — once we've
+# seen TWO direct-child SKILL.md files, no other plausible layout
+# survives.
+_SKILL_PACK_CLASSIFY_PEEK_LIMIT = 32
+
+# Cap for the maximum number of skills emitted from a single
+# skill_pack expansion. Very high (10k) — the resolver itself is the
+# wrong place to truncate, but a hard upper bound prevents runaway
+# behaviour on accidental input shapes (e.g. someone pointing at $HOME).
+_SKILL_PACK_EXPAND_CAP = 10000
 
 
 class InputResolutionError(ValueError):
@@ -213,6 +227,24 @@ def _read_marketplace_json(root: Path) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def _is_resolvable_local_target(path: Path) -> bool:
+    """Return True if ``path`` looks like a plugin, skill, or
+    skill-pack folder (the three local-shape kinds a marketplace
+    entry can legitimately point at)."""
+    if not path.is_dir():
+        return False
+    if (path / ".claude-plugin" / "plugin.json").is_file():
+        return True
+    if (path / "SKILL.md").is_file():
+        return True
+    # Defer to the shared pack-shape sniff so flat packs
+    # (``./<name>/SKILL.md``) are recognised the same way the top-level
+    # resolver recognises them. _looks_like_skill_pack is bounded — it
+    # peeks only the first few entries before deciding, so this stays
+    # cheap even on huge marketplaces.
+    return _looks_like_skill_pack(path)
+
+
 def _expand_marketplace(
     market_root: Path,
     source_url: str | None,
@@ -286,21 +318,53 @@ def _expand_marketplace(
             # the marketplace root.
             path_str = str(source.get("path", "") or name).strip()
             plugin_path = (market_root / path_str).resolve()
-            if not (plugin_path / ".claude-plugin" / "plugin.json").is_file():
-                # Try the marketplace root's parent (Layout A — plugin
-                # checked out alongside the marketplace).
+            # Phase 5.5: marketplace entries may point at PLUGINS, SKILLS,
+            # or SKILL-PACKS. Try each shape; fall through to a sibling
+            # path (Layout A) if the entry isn't directly under the
+            # marketplace root.
+            if not _is_resolvable_local_target(plugin_path):
                 plugin_path = (market_root.parent / path_str).resolve()
-            if not (plugin_path / ".claude-plugin" / "plugin.json").is_file():
+            if not _is_resolvable_local_target(plugin_path):
                 continue
             plugin_url = None
         else:
             # Unknown source kind — skip.
             continue
 
+        # Phase 5.5: mixed kinds — a marketplace entry can point at
+        # a plugin, a skill, or a skill-pack. The kind is detected
+        # per entry. A plugin.json wins over everything else: when an
+        # entry is a Layout C self-referential marketplace it still
+        # has plugin.json at the same path, so we classify it as a
+        # plugin (its own marketplace.json is irrelevant once we're
+        # already enumerating the outer marketplace's entries).
+        if (plugin_path / ".claude-plugin" / "plugin.json").is_file():
+            entry_kind: InputKind = "plugin"
+        elif (plugin_path / "SKILL.md").is_file():
+            entry_kind = "skill"
+        elif _looks_like_skill_pack(plugin_path):
+            # A marketplace entry that points at a skill-pack folder
+            # expands inline; every emitted skill shares the parent
+            # cleanup callback (reference-counted with the rest of
+            # the marketplace's entries).
+            pack_skills = _expand_skill_pack(
+                plugin_path, source_url=plugin_url, parent_cleanup=None
+            )
+            for ps in pack_skills:
+                counter["remaining"] += 1
+                ps.cleanup_callback = _decrement_and_maybe_cleanup
+                ps.metadata["marketplace_root"] = str(market_root)
+                ps.metadata["plugin_version"] = version
+                resolved.append(ps)
+            continue
+        else:
+            # Unrecognised entry shape — skip.
+            continue
+
         counter["remaining"] += 1
         resolved.append(
             ResolvedInput(
-                kind="plugin",
+                kind=entry_kind,
                 abs_path=plugin_path,
                 source_url=plugin_url,
                 display_name=name,
@@ -311,9 +375,71 @@ def _expand_marketplace(
     return resolved
 
 
+def _looks_like_skill_pack(path: Path) -> bool:
+    """Return True if ``path`` is a folder containing multiple skill folders.
+
+    Two shapes count as a skill_pack:
+
+    * **Anthropic-style**: ``path/skills/<name>/SKILL.md`` — common in
+      plugins that publish skills alongside other components.
+    * **Flat collection**: ``path/<name>/SKILL.md`` — common in
+      `awesome-skills` style repos where each top-level subfolder IS
+      one skill.
+
+    The check is bounded by ``_SKILL_PACK_CLASSIFY_PEEK_LIMIT`` —
+    we stop after seeing two SKILL.md children, OR after peeking that
+    many entries. On a 100k-entry repo the bound keeps classification
+    in O(LIMIT) instead of O(N).
+    """
+    # Shape A: ``./skills/<name>/SKILL.md``
+    skills_dir = path / "skills"
+    if skills_dir.is_dir():
+        seen = 0
+        peeked = 0
+        with _safe_scandir(skills_dir) as it:
+            for entry in it:
+                peeked += 1
+                if entry.is_dir() and (Path(entry.path) / "SKILL.md").is_file():
+                    seen += 1
+                    if seen >= 2:
+                        return True
+                if peeked >= _SKILL_PACK_CLASSIFY_PEEK_LIMIT:
+                    break
+        if seen >= 1:
+            return True  # one skill in a `skills/` subtree is still a pack shape
+
+    # Shape B: ``./<name>/SKILL.md`` (flat)
+    seen = 0
+    peeked = 0
+    with _safe_scandir(path) as it:
+        for entry in it:
+            if entry.name in {".git", "node_modules", ".venv", "__pycache__"}:
+                continue
+            peeked += 1
+            if entry.is_dir() and (Path(entry.path) / "SKILL.md").is_file():
+                seen += 1
+                if seen >= 2:
+                    return True
+            if peeked >= _SKILL_PACK_CLASSIFY_PEEK_LIMIT:
+                break
+    # Single skill-folder child still counts as a pack of size 1 — the
+    # user passed a folder-of-folders shape, even if there's only one
+    # skill in it today (more may appear).
+    return seen >= 1
+
+
+def _safe_scandir(path: Path):  # type: ignore[no-untyped-def]
+    """Wrap ``os.scandir`` so the caller gets a context manager on
+    every Python version. ``os.scandir`` returns an iterator that's
+    also a context manager from Python 3.6+; this wrapper just
+    centralises the import + error handling."""
+    import os
+    return os.scandir(path)
+
+
 def _detect_local_kind(path: Path) -> InputKind:
-    """Classify a LOCAL path into ``file`` / ``skill`` / ``plugin`` /
-    ``marketplace``.
+    """Classify a LOCAL path into ``file`` / ``skill`` / ``skill_pack``
+    / ``plugin`` / ``marketplace``.
 
     Raises ``InputResolutionError`` on ambiguity.
     """
@@ -345,16 +471,97 @@ def _detect_local_kind(path: Path) -> InputKind:
     if has_skill:
         return "skill"
 
-    # Look for ``skills/<name>/SKILL.md`` shape — caller passed
-    # ``skills/<name>/`` directly.
-    if (path / "SKILL.md").is_file():
-        return "skill"
+    # NEW (Phase 5.5 — user directive): skill_pack shape. Folder
+    # holding multiple skill folders, either Anthropic-style
+    # (./skills/<name>/SKILL.md) or flat (./<name>/SKILL.md).
+    if _looks_like_skill_pack(path):
+        return "skill_pack"
 
     raise InputResolutionError(
         f"path {path} is a directory but doesn't contain "
-        ".claude-plugin/plugin.json, .claude-plugin/marketplace.json, or SKILL.md. "
+        ".claude-plugin/plugin.json, .claude-plugin/marketplace.json, "
+        "SKILL.md, or a skills/ subfolder with SKILL.md files. "
         "Pass an explicit --input-kind to override."
     )
+
+
+def _expand_skill_pack(
+    pack_root: Path,
+    source_url: str | None,
+    parent_cleanup: Callable[[], None] | None,
+) -> list[ResolvedInput]:
+    """Enumerate every skill folder under ``pack_root``.
+
+    Walks ``pack_root`` looking for ``<name>/SKILL.md`` and
+    ``skills/<name>/SKILL.md`` shapes. Skips common noise dirs
+    (``.git``, ``node_modules``, ``.venv``, etc.). The walk is
+    depth-2 by default — Anthropic-style packs put SKILL.md at
+    depth-2 (``./skills/<name>/SKILL.md``), flat packs at depth-1
+    (``./<name>/SKILL.md``). Stops at ``_SKILL_PACK_EXPAND_CAP``
+    skills (10k) — beyond that, surface a warning in metadata so the
+    caller knows to narrow the input.
+    """
+    skipped_names = {".git", "node_modules", ".venv", "__pycache__", "dist", "build", "target"}
+
+    found: list[Path] = []
+    truncated = False
+
+    # Depth-1 scan: ./<name>/SKILL.md
+    with _safe_scandir(pack_root) as it:
+        for entry in it:
+            if entry.name in skipped_names:
+                continue
+            if not entry.is_dir():
+                continue
+            child_skill = Path(entry.path) / "SKILL.md"
+            if child_skill.is_file():
+                found.append(Path(entry.path))
+                if len(found) >= _SKILL_PACK_EXPAND_CAP:
+                    truncated = True
+                    break
+
+    # Depth-2 scan: ./skills/<name>/SKILL.md
+    if not truncated:
+        skills_dir = pack_root / "skills"
+        if skills_dir.is_dir():
+            with _safe_scandir(skills_dir) as it:
+                for entry in it:
+                    if entry.name in skipped_names:
+                        continue
+                    if not entry.is_dir():
+                        continue
+                    child_skill = Path(entry.path) / "SKILL.md"
+                    if child_skill.is_file() and Path(entry.path) not in found:
+                        found.append(Path(entry.path))
+                        if len(found) >= _SKILL_PACK_EXPAND_CAP:
+                            truncated = True
+                            break
+
+    # Reference-counted cleanup — shared by every skill in the pack.
+    counter = {"remaining": 0}
+
+    def _decrement_and_maybe_cleanup() -> None:
+        counter["remaining"] -= 1
+        if counter["remaining"] <= 0 and parent_cleanup is not None:
+            parent_cleanup()
+
+    resolved: list[ResolvedInput] = []
+    for skill_dir in found:
+        counter["remaining"] += 1
+        metadata: dict[str, object] = {"skill_pack_root": str(pack_root)}
+        if truncated:
+            metadata["expansion_truncated"] = True
+        resolved.append(
+            ResolvedInput(
+                kind="skill",
+                abs_path=skill_dir,
+                source_url=source_url,
+                display_name=skill_dir.name,
+                cleanup_callback=_decrement_and_maybe_cleanup if parent_cleanup else None,
+                metadata=metadata,
+            )
+        )
+    return resolved
 
 
 def _resolve_single_local(path: Path) -> list[ResolvedInput]:
@@ -371,6 +578,9 @@ def _resolve_single_local(path: Path) -> list[ResolvedInput]:
         return [ResolvedInput(kind="plugin", abs_path=path, display_name=path.name)]
     if kind == "marketplace":
         return _expand_marketplace(path, source_url=None, parent_cleanup=None)
+    if kind == "skill_pack":
+        # Phase 5.5: expand a folder-of-skill-folders into per-skill entries.
+        return _expand_skill_pack(path, source_url=None, parent_cleanup=None)
     raise InputResolutionError(f"unhandled local kind: {kind}")
 
 
@@ -408,12 +618,30 @@ def _resolve_single_url(spec: str) -> list[ResolvedInput]:
                 metadata={"owner": owner, "repo": repo},
             )
         ]
-    # URL clones of bare skills / single files are unusual; the user can
-    # always point at the full plugin URL instead.
+    if kind == "skill":
+        # Phase 5.5: URL clones where the repo root IS a single skill.
+        return [
+            ResolvedInput(
+                kind="skill",
+                abs_path=clone_path,
+                source_url=source_url,
+                display_name=repo,
+                cleanup_callback=cleanup,
+                metadata={"owner": owner, "repo": repo},
+            )
+        ]
+    if kind == "skill_pack":
+        # Phase 5.5: URL clones of repos containing many skills
+        # (Anthropic-style ./skills/<name>/SKILL.md or flat
+        # ./<name>/SKILL.md). Expand to one per-skill ResolvedInput.
+        return _expand_skill_pack(
+            clone_path, source_url=source_url, parent_cleanup=cleanup
+        )
     cleanup()
     raise InputResolutionError(
         f"URL {source_url} cloned cleanly but the root is a {kind} — "
-        "URL inputs must point at a plugin or marketplace repo."
+        "URL inputs must point at a plugin, marketplace, skill, or "
+        "skill-pack repo."
     )
 
 

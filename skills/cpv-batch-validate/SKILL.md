@@ -43,11 +43,20 @@ slash command directly.
 |---|---|
 | Single plugin (local) | the absolute path of the plugin root |
 | Single plugin (URL) | `https://github.com/owner/plugin` or `owner/plugin` |
+| Single skill (local) | a folder whose root holds a `SKILL`-shaped file |
+| Single skill (URL) | a github repo whose root is a skill |
+| Skill pack (local) | a folder containing many skill subfolders (Anthropic-style `./skills/<name>/SKILL.md` or flat `./<name>/SKILL.md`) |
+| Skill pack (URL) | a github repo containing many skill folders |
 | Marketplace (local) | the absolute path of the marketplace root |
 | Marketplace (URL) | `https://github.com/owner/marketplace-repo` |
 | List (CLI) | multiple whitespace-separated entries |
 | List (file) | a path prefixed with `@`, e.g. an inputs list file |
 | Comma-separated | a single string of entries joined with commas |
+
+The resolver handles MIXED inputs — a marketplace can list both
+plugins and skill folders; a list can contain plugin paths +
+skill paths + URLs. Each entry is classified independently by
+its on-disk shape.
 
 ## Instructions
 
