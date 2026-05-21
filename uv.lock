@@ -8,6 +8,7 @@ version = "2.101.1"
 source = { editable = "." }
 dependencies = [
     { name = "mypy" },
+    { name = "pathspec" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-xdist" },
@@ -19,6 +20,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "mypy", specifier = ">=1.19.1" },
+    { name = "pathspec", specifier = ">=0.12.1" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-cov", specifier = ">=4.1.0" },
     { name = "pytest-xdist", specifier = ">=3.6" },

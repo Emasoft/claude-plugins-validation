@@ -91,18 +91,17 @@ def test_is_ignored_doublestar(tmp_path: Path) -> None:
 
 
 def test_is_ignored_negation(tmp_path: Path) -> None:
-    """Negation pattern !important.log un-ignores a file when placed BEFORE the glob.
+    """Negation '!important.log' AFTER '*.log' un-ignores important.log (git semantic).
 
-    NOTE: The current is_path_gitignored implementation processes patterns in
-    order and returns True on the first positive match. For negation to work,
-    the negation pattern must appear BEFORE the positive pattern in the list,
-    so that the negation check (which returns False) fires first. This differs
-    from real git where later negation patterns override earlier positive ones.
-    The test documents the actual behavior by placing the negation first.
+    As of v2.101.2 the matcher is backed by ``pathspec`` (gitwildmatch),
+    which implements git's actual semantic: patterns evaluate in order
+    and the LAST matching pattern wins. So the negation comes AFTER
+    the broader ignore — opposite of what the previous hand-rolled
+    implementation required.
     """
     gitignore = tmp_path / ".gitignore"
-    # Negation MUST come before the glob for the current implementation to work
-    gitignore.write_text("!important.log\n*.log\n", encoding="utf-8")
+    # Real git semantic: negation AFTER the broader ignore.
+    gitignore.write_text("*.log\n!important.log\n", encoding="utf-8")
     gi = GitignoreFilter(tmp_path)
 
     debug_log = tmp_path / "debug.log"
@@ -335,7 +334,9 @@ def test_iterdir_filters_gitignored(tmp_path: Path) -> None:
     # .gitignore itself is not gitignored
     assert ".gitignore" in result_names
     assert "app.pyc" not in result_names
-    # node_modules as a directory entry — is_ignored checks the path against patterns
+    # node_modules as a directory entry — is_ignored is filesystem-aware
+    # and appends `/` for directories so `node_modules/` patterns match
+    # (v2.101.2+, pathspec-backed).
     assert "node_modules" not in result_names
 
 
