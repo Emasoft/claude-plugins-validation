@@ -103,3 +103,9 @@ rck-*-merge-pending.md
 
 # Serena MCP server — per-machine project config and cache. Never source.
 .serena/
+
+# Issue #33 calibration fixture — a shallow git clone of
+# Emasoft/ai-maestro-janitor@v0.5.0 used by tests/test_issue_33_fp_calibration.py.
+# Reproducible via the docstring at the top of that test file. Not
+# committed to keep the CPV repo size reasonable.
+/tests/fixtures/issue_33_no_fp_janitor/
