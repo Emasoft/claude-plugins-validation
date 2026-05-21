@@ -40,6 +40,7 @@ SCRIPTS_DIR = REPO / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+import cpv_marketplace_input as cmi  # noqa: E402
 from cpv_marketplace_input import (  # noqa: E402
     InputResolutionError,
     ResolvedInput,
@@ -47,8 +48,6 @@ from cpv_marketplace_input import (  # noqa: E402
     parse_github_url,
     resolve,
 )
-import cpv_marketplace_input as cmi  # noqa: E402
-
 
 # ----------------------- helpers -----------------------------------------
 

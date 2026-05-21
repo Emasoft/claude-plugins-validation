@@ -1,8 +1,8 @@
 ---
 name: cpv-batch-fix
-description: Shard a plugin's validation findings into parallel-fix batches. Dispatches N plugin-fixer agents from the main session — one per shard, each with its own fresh context window (size depends on plugin-fixer's `model:` frontmatter — opus/sonnet default 200K, the [1m] variants 1M, future models may differ). For plugins with many findings where a single fixer agent would exhaust its context window above the 50% performance-drop threshold.
+description: Parallel fix for one OR many plugins. Single-plugin inputs run the existing per-shard protocol (one plugin-fixer per shard of findings). Marketplace / list / URL inputs run a per-plugin fan-out (one plugin-fixer per plugin; each fixer may internally shard its own findings). Accepts local paths, GitHub URLs, marketplace URLs/folders, comma-separated lists, and @listfile shapes. Default 8 parallel agents per main-session message, cap 16. Each agent starts with a fresh context window (size determined by `plugin-fixer.model`).
 allowed-tools: Read, Bash, Glob, Grep
-argument-hint: "<plugin-path> [--shard-size N] [--max-parallel N] [--min-severity LEVEL]"
+argument-hint: "<plugin-or-marketplace-or-list> [--shard-size N] [--max-parallel N] [--min-severity LEVEL]"
 user-invocable: true
 ---
 
@@ -51,18 +51,39 @@ each in `batch_shard` mode.
 
 ## Step 0 — Resolve arguments
 
-The user supplies:
+The user supplies (TRDD-3dcbb37c §1 extended input grammar):
 
-- A plugin path (required — first positional argument)
-- Optional `--shard-size N` (default 30)
+- A target spec (required — first positional argument). Accepts:
+  - Single plugin path (`./my-plugin`)
+  - Single plugin URL (`https://github.com/owner/plugin` or `owner/plugin`)
+  - Marketplace path (`./marketplace-root`)
+  - Marketplace URL (`https://github.com/owner/marketplace-repo`)
+  - List on CLI (multiple positional args)
+  - List file (`@/tmp/inputs.txt`)
+  - Comma-separated (`./a,./b,./c`)
+- Optional `--shard-size N` (default 30) — per-plugin shard size
 - Optional `--max-parallel N` (default 8, cap 16)
 - Optional `--min-severity LEVEL` (default `minor` — CRITICAL/MAJOR/MINOR all in scope; raise to `major` or `critical` to skip MINOR fixes)
 
-If no plugin path was given, ask the user plain-text:
+If no target was given, ask the user plain-text:
 
 ```text
-Which plugin should I batch-fix? Provide an absolute path.
+What should I batch-fix? Provide an absolute path, a GitHub URL, a marketplace, or a list file like @/tmp/plugins.txt.
 ```
+
+Classify the spec via the resolver:
+
+```bash
+TARGET="<user-supplied-target>"
+RESOLVED_JSON="$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" plan \
+  "$TARGET" \
+  --agent plugin-fixer \
+  --mode batch_per_plugin)"
+PLUGIN_COUNT=$(echo "$RESOLVED_JSON" | sed -n 's/^PLUGIN_COUNT: //p')
+```
+
+- If `PLUGIN_COUNT == 1` AND the resolved kind is `plugin` (single plugin), **fall through to Step 1 — Plan the batch** below using the existing per-shard protocol on that one plugin path.
+- If `PLUGIN_COUNT > 1` OR the input is a marketplace, run the **per-plugin fan-out** instead — see "§Marketplace / list input — per-plugin fan-out" further down.
 
 ## Step 1 — Plan the batch
 
@@ -210,10 +231,117 @@ No report body ever crosses the main-session context.
 | 5 | Per-shard iterations | unlimited | The shard agent fixes until convergence (or oscillation, see plugin-fixer §Rules). NO hardcoded iteration ceiling — bigger shards need more iterations |
 | 6 | Per-shard wall-clock | unlimited | Bounded only by the agent's `maxTurns` (set in `agents/plugin-fixer.md` frontmatter, currently 200). Time per turn is not capped — fixes can take as long as they need |
 
+## Marketplace / list input — per-plugin fan-out (TRDD-3dcbb37c)
+
+When the user's target resolved to MORE THAN ONE plugin (a
+marketplace, a list, or a multi-spec), the orchestrator switches
+from per-shard parallelism to **per-plugin parallelism**: one
+`plugin-fixer` subagent per plugin, all dispatched from one
+main-session message in groups of `--max-parallel` (default 8,
+cap 16). Each per-plugin agent runs the standard fix loop on its
+own plugin — including the agent's own internal `batch_shard`
+logic when its finding count justifies it.
+
+### Step M1 — Build the per-plugin plan
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" plan \
+  "$TARGET" \
+  --agent plugin-fixer \
+  --mode batch_per_plugin \
+  --max-parallel "$MAX_PARALLEL"
+```
+
+Capture the session_dir + plan.json path. Print the initial status
+table:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/format_menu.py" status_table "$(cat "$STATUS_TABLE")"
+```
+
+### Step M2 — Dispatch one plugin-fixer per plugin, in groups of max_parallel
+
+For each `dispatch_groups[i]`, emit one Agent call per plugin in a
+single main-session message:
+
+```yaml
+for plugin_index in group:
+    plugin = plan.plugins[plugin_index]
+    Agent(
+      subagent_type: "plugin-fixer",
+      description: "Batch-fix plugin {plugin.display_name}",
+      prompt: |
+        <context>
+        source: /cpv-batch-fix (marketplace/list mode)
+        mode: batch_per_plugin
+        plugin_index: {plugin.plugin_index}
+        plugin_path: {plugin.abs_path}
+        source_url: {plugin.source_url or "—"}
+        display_name: {plugin.display_name}
+        session_dir: {plan.session_dir}
+        status_path: {plan.session_dir}/plugin-{plugin.plugin_index}.status.json
+        min_severity: {min_severity}
+        shard_size: {shard_size}
+        </context>
+
+        Apply the standard fix loop to the plugin at `plugin_path`.
+        When the plugin's finding count exceeds your context-safe
+        ceiling (per your `model:` frontmatter), DELEGATE to your
+        own internal `batch_shard` protocol by invoking
+        `scripts/cpv_batch_planner.py` on that one plugin and
+        consuming the resulting shard manifests sequentially — do
+        NOT spawn parallel sub-subagents (Anthropic spec forbids).
+
+        Write per-plugin status JSON to `status_path` with:
+
+          {
+            "status_symbol": "✓" | "✗" | "⚠",
+            "status_label": "clean" | "fixed" | "partial" | "failed",
+            "before": {"critical": N, "major": N, "minor": N, "nit": N, "warning": N},
+            "after":  {"critical": N, "major": N, "minor": N, "nit": N, "warning": N},
+            "report_path": "<abs-path-to-final-validation-report>",
+            "notes": "<short summary, e.g. fixed 12/12, 0 remaining>"
+          }
+
+        Return ONE line exactly:
+
+          [plugin-{plugin.plugin_index}] {label}: fixed=X remaining=Y (status: {status_path})
+
+        Do NOT render menus. Do NOT recommend follow-ups.
+      run_in_background: false
+    )
+```
+
+### Step M3 — Refresh status table between waves
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" status \
+  "$SESSION_DIR/plan.json" \
+| python3 "${CLAUDE_PLUGIN_ROOT}/scripts/format_menu.py" status_table /dev/stdin
+```
+
+### Step M4 — Final summary
+
+```text
+DONE: plugins=N clean=X fixed=Y partial=Z failed=W. Reports under {session_dir}/.
+```
+
+If any plugin is `partial` or `failed`, append the doctor prompt:
+
+```text
+Some plugins still have remaining findings. Inspect their reports
+for per-plugin details and re-run /cpv-batch-fix to retry; or run
+/cpv-doctor <one plugin> for the deep design-correctness recipes
+that go beyond schema validation.
+```
+
 ## See also
 
-- TRDD-71e68ab5 — full design
-- `agents/plugin-fixer.md` — `batch_shard` mode contract
-- `skills/batch-fix-protocol/SKILL.md` — schema reference
-- `scripts/cpv_batch_planner.py` — planner source
-- `scripts/cpv_batch_aggregator.py` — aggregator source
+- TRDD-71e68ab5 — per-shard fix protocol (single plugin)
+- TRDD-3dcbb37c — per-plugin fix protocol (marketplace / list input)
+- `agents/plugin-fixer.md` — `batch_shard` + `batch_per_plugin` mode contracts
+- `skills/batch-fix-protocol/SKILL.md` — per-shard schema reference
+- `scripts/cpv_batch_planner.py` — per-shard planner source
+- `scripts/cpv_batch_aggregator.py` — per-shard aggregator source
+- `scripts/cpv_marketplace_input.py` — universal input resolver (TRDD-3dcbb37c)
+- `scripts/cpv_batch_orchestrator.py` — per-plugin plan / status helper (TRDD-3dcbb37c)

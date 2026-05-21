@@ -151,13 +151,21 @@ def test_only_one_slash_command_remains() -> None:
         "cpv-batch-fix.md",
         "the-skills-menu-create.md",
         "cpv-pre-install-scan.md",
+        # TRDD-3dcbb37c (v2.101.0) — Batch skills family. Each one is a
+        # bare slash command because the user fans out fleet-wide
+        # operations directly (marketplace URL / list / @listfile inputs),
+        # not via menu navigation per-plugin.
+        "cpv-batch-validate.md",
+        "cpv-batch-security-audit.md",
+        "cpv-batch-caching-audit.md",
+        "cpv-batch-caching-optimize.md",
     }
     md_files = list(COMMANDS_DIR.glob("*.md"))
     actual = {f.name for f in md_files}
     unexpected = actual - allowed
     missing = allowed - actual
     assert not unexpected and not missing, (
-        f"commands/ must contain exactly {sorted(allowed)} (TRDD-c50531c2 + TRDD-71e68ab5 + TRDD-9dd64dbf). "
+        f"commands/ must contain exactly {sorted(allowed)} (TRDD-c50531c2 + TRDD-71e68ab5 + TRDD-9dd64dbf + TRDD-3dcbb37c). "
         f"Unexpected: {sorted(unexpected)}. Missing: {sorted(missing)}."
     )
     assert MAIN_MENU_CMD.is_file(), (

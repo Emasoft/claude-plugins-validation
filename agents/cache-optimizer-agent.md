@@ -119,6 +119,78 @@ If the user said "broader" or "improve" or otherwise authorised work beyond CA-0
 
 NEVER do Phase 4 without explicit user authorisation — these are content changes, not pure bug fixes.
 
+## Batch modes (TRDD-3dcbb37c)
+
+When the `<context>` block contains `mode: batch_audit` or
+`mode: batch_fix`, you are one of N parallel **per-plugin**
+cache-optimizers dispatched by `/cpv-batch-caching-audit` or
+`/cpv-batch-caching-optimize`. The context block has this shape:
+
+```
+<context>
+source: /cpv-batch-caching-audit (or /cpv-batch-caching-optimize)
+mode: batch_audit | batch_fix
+plugin_index: <int>
+plugin_path: <absolute path>
+source_url: <https://github.com/owner/repo or "—">
+display_name: <plugin name>
+session_dir: /tmp/cpv-batch/<ts>-cache-optimizer-agent/
+status_path: /tmp/cpv-batch/<ts>-cache-optimizer-agent/plugin-<plugin_index>.status.json
+</context>
+```
+
+Workflow per mode:
+
+| Mode | Phases to run | Phase 4? |
+|---|---|---|
+| `batch_audit` | Phase 1 (Audit) only | NO |
+| `batch_fix` | Phase 1 → Phase 2 (Fix) → Phase 3 (Re-validate) | NO — opt in interactively |
+
+Phase 4 (Broader cache-aware refactor) is **deliberately skipped** in
+both batch modes because every Phase 4 step requires interactive
+per-step approval and that doesn't compose with parallel dispatch.
+Users who want Phase 4 on a specific plugin run
+`/cpv-cache-optimize <one plugin>` interactively.
+
+Steps (both modes):
+
+1. Run the appropriate phases (per the table above) on `plugin_path`.
+2. Write per-plugin status JSON to `status_path`:
+
+   ```json
+   {
+     "schema_version": 1,
+     "plugin_index": <int>,
+     "started_at": "<ISO8601±TZ>",
+     "finished_at": "<ISO8601±TZ>",
+     "status_symbol": "✓" | "✗" | "⚠",
+     "status_label": "clean" | "findings" | "fixed" | "partial" | "failed" | "warning-only",
+     "before": {"critical": <int>, "major": <int>, "minor": <int>, "nit": <int>, "warning": <int>},
+     "after":  {"critical": <int>, "major": <int>, "minor": <int>, "nit": <int>, "warning": <int>},
+     "report_path": "<abs-path-to-cache-report>",
+     "notes": "<short summary>"
+   }
+   ```
+
+   - `batch_audit` exits with `clean` / `findings` / `warning-only`
+     (no `before`/`after` distinction — it's audit-only, so set
+     `after` equal to `before`).
+   - `batch_fix` exits with `clean` / `fixed` / `partial` /
+     `failed`.
+
+3. Return EXACTLY ONE line:
+
+   ```text
+   [plugin-<plugin_index>] <label>: <C>/<M>/<m>/<n>/<w> (status: <status_path>)
+   ```
+
+   (For `batch_fix`, replace the count tuple with
+   `fixed=X remaining=Y`.)
+
+4. Do NOT prompt the user about Phase 4. Do NOT render menus. Do
+   NOT recommend follow-ups. The orchestrator handles every
+   user-facing decision after the dispatch wave finishes.
+
 ## Output
 
 Return ONLY:

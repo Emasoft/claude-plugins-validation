@@ -116,6 +116,77 @@ uv run --with pyyaml python "$LAUNCHER" project-scope  /path/to/project --report
 uv run --with pyyaml python "$LAUNCHER" local-scope    /path/to/project --report "$MAIN_ROOT/reports/validate_local_scope/$TS-$SLUG.md"
 ```
 
+## Batch modes (TRDD-3dcbb37c)
+
+When the `<context>` block contains `mode: batch_validate` or
+`mode: batch_security_audit`, you are one of N parallel
+**per-plugin** validators dispatched by `/cpv-batch-validate` or
+`/cpv-batch-security-audit`. The context block has this shape:
+
+```
+<context>
+source: /cpv-batch-validate (or /cpv-batch-security-audit)
+mode: batch_validate | batch_security_audit
+plugin_index: <int>
+plugin_path: <absolute path>
+source_url: <https://github.com/owner/repo or "—">
+display_name: <plugin name>
+session_dir: /tmp/cpv-batch/<ts>-plugin-validator/
+status_path: /tmp/cpv-batch/<ts>-plugin-validator/plugin-<plugin_index>.status.json
+</context>
+```
+
+Workflow per mode:
+
+| Mode | What to run | Report component |
+|---|---|---|
+| `batch_validate` | `remote_validation.py plugin <plugin_path> --strict --report <report>` | `validate_plugin` |
+| `batch_security_audit` | `remote_validation.py security <plugin_path> --report <report>` | `validate_security` |
+
+Steps (both modes):
+
+1. Resolve `$MAIN_ROOT` via the standard `git worktree list` prologue.
+2. Compose the report path as
+   `$MAIN_ROOT/reports/<component>/$TS-<display_name>.md` per the
+   `agent-reports-location` rule.
+3. Run the validator (per the table above). Capture the SUMMARY line.
+4. Write the per-plugin status JSON to `status_path` with these keys
+   exactly:
+
+   ```json
+   {
+     "schema_version": 1,
+     "plugin_index": <int>,
+     "started_at": "<ISO8601±TZ>",
+     "finished_at": "<ISO8601±TZ>",
+     "status_symbol": "✓" | "✗" | "⚠",
+     "status_label": "valid" | "invalid" | "warning-only" | "clean" | "findings",
+     "verdict": "VALID" | "INVALID",
+     "counts": {"critical": <int>, "major": <int>, "minor": <int>, "nit": <int>, "warning": <int>},
+     "report_path": "<abs-path-to-validation-report>",
+     "notes": "<short summary>"
+   }
+   ```
+
+   `status_label` for `batch_validate`: `valid` / `invalid` /
+   `warning-only` (zero CRITICAL/MAJOR/MINOR/NIT but WARNINGs).
+
+   `status_label` for `batch_security_audit`: `clean` / `findings` /
+   `warning-only`.
+
+5. Return EXACTLY ONE line:
+
+   ```text
+   [plugin-<plugin_index>] <verdict>: <C>/<M>/<m>/<n>/<w> (status: <status_path>)
+   ```
+
+   No menu, no post-validate fix prompt — the batch orchestrator
+   renders the aggregate table itself.
+
+6. Do NOT recommend follow-ups. Do NOT browse other plugins. Do NOT
+   render any menu. The orchestrator handles every user-facing
+   decision after the dispatch wave finishes.
+
 ## Exit Codes
 
 | Code | Meaning |

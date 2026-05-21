@@ -31,7 +31,6 @@ SCRIPTS_DIR = REPO / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from cpv_marketplace_input import ResolvedInput  # noqa: E402
 from cpv_batch_orchestrator import (  # noqa: E402
     DEFAULT_MAX_PARALLEL,
     MAX_PARALLEL_CAP,
@@ -44,6 +43,7 @@ from cpv_batch_orchestrator import (  # noqa: E402
     write_plan,
     write_status_table,
 )
+from cpv_marketplace_input import ResolvedInput  # noqa: E402
 
 
 def _ri(name: str, abs_path: Path, kind: str = "plugin", source_url: str | None = None) -> ResolvedInput:
