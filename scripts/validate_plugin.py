@@ -2017,6 +2017,27 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         allow_roots = cpv_cfg.get("allow_root_dirs", [])
         if isinstance(allow_roots, list) and dirname in allow_roots:
             continue
+        # Issue #37 — directories the plugin explicitly excludes from
+        # distribution via .gitignore are not part of "what the plugin
+        # ships" and therefore can't cause an empty install. Common
+        # patterns: research material (INPUT_DEV/, _research/), training
+        # fixtures (samples/, fixtures/), local builds (build/, dist/)
+        # that the publish pipeline doesn't include in the tarball.
+        try:
+            from cpv_validation_common import (
+                is_path_gitignored,  # noqa: PLC0415
+                parse_gitignore,  # noqa: PLC0415
+            )
+
+            gitignore_path = plugin_root / ".gitignore"
+            if gitignore_path.is_file():
+                _patterns = parse_gitignore(gitignore_path)
+                if is_path_gitignored(dirname, _patterns) or is_path_gitignored(
+                    dirname + "/", _patterns
+                ):
+                    continue
+        except (ImportError, OSError, ValueError):
+            pass
         # Severity: MAJOR (was WARNING). The user's directive: "NO DEVIATION
         # FROM THE STANDARD can be allowed unless you declare the custom
         # folder in plugin.json". An undeclared non-standard root folder

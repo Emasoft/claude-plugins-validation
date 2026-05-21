@@ -1524,11 +1524,29 @@ _SKIP_DIRS: frozenset[str] = frozenset(
 
 
 def _iter_scannable_files(plugin_root: Path) -> Iterable[Path]:
-    """Yield candidate files under plugin_root, skipping vendored / build dirs."""
+    """Yield candidate files under plugin_root, skipping vendored / build dirs
+    AND any path the plugin's `.gitignore` would exclude (issue #37).
+
+    Plugins that keep research material, vendored reference repos, or
+    training fixtures in a gitignored sub-tree (e.g. `INPUT_DEV/_extracted/`,
+    `_research/`, `samples/`) would otherwise see CPV scan content that is
+    not part of the published artefact, surface findings against it, and
+    block publish.
+
+    The filter is layered on top of the existing rglob walker — we keep
+    scanning dot-prefixed Claude-plugin directories (`.claude-plugin/`,
+    `.claude/`, `.github/`) which are first-class content, and only
+    additionally skip whatever git would consider ignored. Pure-Python
+    pattern matching via the existing `parse_gitignore` helper, so
+    SkillAudit's zero-subprocess design contract is preserved.
+    """
     if not plugin_root.is_dir():
         if plugin_root.is_file() and plugin_root.suffix.lower() in _SCAN_EXTENSIONS:
             yield plugin_root
         return
+    # Build the gitignore predicate once — pure-Python pattern matching,
+    # no subprocess. Used to filter each candidate path below.
+    gi_predicate = _load_gitignore_predicate(plugin_root)
     for p in plugin_root.rglob("*"):
         if not p.is_file():
             continue
@@ -1536,12 +1554,62 @@ def _iter_scannable_files(plugin_root: Path) -> Iterable[Path]:
             continue
         if p.suffix.lower() not in _SCAN_EXTENSIONS:
             continue
+        # Issue #37 — skip anything the plugin's .gitignore excludes.
+        # Applied AFTER _SKIP_DIRS / extension filters because most
+        # files won't be ignored and a cheap negative path is preferred.
+        if gi_predicate is not None and gi_predicate(p):
+            continue
         try:
             if p.stat().st_size > 2_000_000:
                 continue
         except OSError:
             continue
         yield p
+
+
+def _load_gitignore_predicate(plugin_root: Path) -> Callable[[Path], bool] | None:
+    """Compile the plugin's .gitignore into a `bool(Path) -> ignored?` predicate.
+
+    Returns None if no .gitignore exists or the helper module cannot be
+    imported (defensive — fall back to scanning everything is safer
+    than silently dropping findings).
+
+    Pure-Python: parses the file once, matches each candidate path with
+    `is_path_gitignored`. No subprocess; SkillAudit's design contract
+    holds (issue #37).
+    """
+    gitignore_path = plugin_root / ".gitignore"
+    if not gitignore_path.is_file():
+        return None
+    try:
+        from cpv_validation_common import is_path_gitignored, parse_gitignore  # noqa: PLC0415
+    except ImportError:
+        return None
+    try:
+        patterns = parse_gitignore(gitignore_path)
+    except (OSError, ValueError):
+        return None
+    if not patterns:
+        return None
+
+    def predicate(path: Path) -> bool:
+        try:
+            rel = path.relative_to(plugin_root).as_posix()
+        except ValueError:
+            return False
+        # Filesystem-aware: query with trailing slash for directories so
+        # dir-only patterns (`/INPUT_DEV/`, `node_modules/`) match
+        # correctly via pathspec's gitwildmatch (issue #37).
+        if is_path_gitignored(rel, patterns):
+            return True
+        try:
+            if path.is_dir() and is_path_gitignored(rel.rstrip("/") + "/", patterns):
+                return True
+        except OSError:
+            pass
+        return False
+
+    return predicate
 
 
 def scan_path(plugin_root: Path) -> tuple[list[dict[str, Any]], int]:

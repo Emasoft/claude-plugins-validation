@@ -4549,75 +4549,67 @@ def parse_gitignore(gitignore_path: Path) -> list[str]:
 def is_path_gitignored(rel_path: str, patterns: list[str]) -> bool:
     """Check if a relative path matches any gitignore pattern.
 
+    Delegates to ``pathspec`` (the de-facto Python library for git's
+    own gitignore-pattern semantic — used by black / mypy / pre-commit
+    / cookiecutter / pip). Replaces a hand-rolled ``fnmatch``-based
+    implementation that repeatedly missed edge cases (issue #37: anchored
+    directory patterns like ``/INPUT_DEV/`` didn't recursively ignore
+    contents; previous incidents: negation order, ``**/foo``, comment
+    handling). ``pathspec`` is battle-tested against git's reference
+    semantic and is already a transitive dep via mypy; v2.101.2
+    promotes it to a direct dep.
+
     Args:
-        rel_path: Relative path to check
-        patterns: List of gitignore patterns
+        rel_path: Relative path to check (POSIX-style separators).
+        patterns: List of gitignore patterns (the lines of `.gitignore`,
+            comments + blanks already stripped by `parse_gitignore`).
 
     Returns:
-        True if path matches any pattern
+        True if `rel_path` would be ignored by git under these patterns.
     """
-    # Normalize path separators
-    rel_path = rel_path.replace("\\", "/")
+    if not patterns:
+        return False
+    rel_path = rel_path.replace("\\", "/").lstrip("/")
+    try:
+        import pathspec  # noqa: PLC0415
+    except ImportError:
+        # Defensive fallback for environments where pathspec is not
+        # installed (should never happen in CPV proper — pathspec is a
+        # direct dependency in pyproject.toml as of v2.101.2).
+        return _is_path_gitignored_fallback(rel_path, patterns)
+    spec = pathspec.PathSpec.from_lines("gitwildmatch", patterns)
+    return spec.match_file(rel_path)
+
+
+def _is_path_gitignored_fallback(rel_path: str, patterns: list[str]) -> bool:
+    """Minimal pure-Python gitignore matcher — used ONLY if pathspec is
+    unavailable. Preserves the directory-recursion fix from issue #37
+    so the most common failure mode (anchored dir patterns) still works
+    correctly even without the library. Anything beyond the basics
+    (negation, ``**`` mid-path, etc.) is best-effort here — the library
+    path is the source of truth.
+    """
     path_parts = rel_path.split("/")
-
     for pattern in patterns:
-        # Handle negation (!) - un-ignore previously matched paths
         if pattern.startswith("!"):
-            neg_pattern = pattern[1:]
-            # If the path matches the negation pattern, it should NOT be ignored
-            if fnmatch.fnmatch(rel_path, neg_pattern) or fnmatch.fnmatch(str(Path(rel_path).name), neg_pattern):
-                return False
-            continue
-
-        # Handle directory-only patterns (ending with /)
+            continue  # Best-effort: ignore negation in fallback.
         is_dir_pattern = pattern.endswith("/")
         if is_dir_pattern:
             pattern = pattern[:-1]
-
-        # Handle patterns starting with /
         is_anchored = pattern.startswith("/")
         if is_anchored:
             pattern = pattern[1:]
-
-        # Handle ** patterns properly for recursive directory matching
-        if "**" in pattern:
-            if pattern.startswith("**/"):
-                # **/foo matches foo at any depth
-                suffix = pattern[3:]  # e.g., "dist" from "**/dist"
-                if (
-                    fnmatch.fnmatch(rel_path, suffix)
-                    or fnmatch.fnmatch(rel_path, f"*/{suffix}")
-                    or f"/{suffix}" in f"/{rel_path}"
-                ):
-                    return True
-                continue
-            elif pattern.endswith("/**"):
-                # build/** matches any file under the prefix directory
-                prefix = pattern[:-3]  # e.g., "build" from "build/**"
-                if rel_path.startswith(prefix + "/") or rel_path == prefix:
-                    return True
-                continue
-            else:
-                # General ** — replace with regex-like matching
-                regex = pattern.replace(".", r"\.").replace("**", ".*").replace("*", "[^/]*").replace("?", "[^/]")
-                if re.match(regex + "$", rel_path):
-                    return True
-                continue
-
-        # Check if pattern matches any component or the full path
         if is_anchored:
-            # Anchored patterns only match from root
             if fnmatch.fnmatch(rel_path, pattern):
+                return True
+            if is_dir_pattern and rel_path.startswith(pattern + "/"):
                 return True
         else:
-            # Non-anchored patterns can match any component
             if fnmatch.fnmatch(rel_path, pattern):
                 return True
-            # Also check if any path component matches
             for part in path_parts:
                 if fnmatch.fnmatch(part, pattern):
                     return True
-
     return False
 
 

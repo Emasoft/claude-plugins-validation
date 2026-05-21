@@ -70,7 +70,14 @@ class GitignoreFilter:
         return False
 
     def is_ignored(self, path: Path) -> bool:
-        """Check if a path should be skipped based on .gitignore patterns."""
+        """Check if a path should be skipped based on .gitignore patterns.
+
+        Filesystem-aware: if `path` is a directory on disk, query the
+        gitignore matcher with a trailing slash so dir-only patterns
+        (``build/``, ``node_modules/``) match correctly. This mirrors
+        git's own behaviour and removes a sharp edge where callers had
+        to remember to append ``/`` for directories themselves.
+        """
         if not self.patterns:
             return False
         try:
@@ -78,6 +85,11 @@ class GitignoreFilter:
             rel = path.relative_to(self.root).as_posix()
         except ValueError:
             return False
+        try:
+            if path.is_dir():
+                rel = rel.rstrip("/") + "/"
+        except OSError:
+            pass
         return is_path_gitignored(rel, self.patterns)
 
     def is_dir_ignored(self, dirpath: Path) -> bool:

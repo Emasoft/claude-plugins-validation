@@ -921,11 +921,24 @@ class TestGitignoreParsing:
         assert patterns == []
 
     def test_is_path_gitignored_matches_pattern(self):
-        """is_path_gitignored should match files against gitignore patterns."""
+        """is_path_gitignored should match files against gitignore patterns.
+
+        Per git's actual semantic (now implemented via ``pathspec``):
+        a bare path string ``"node_modules"`` is ambiguous — it could be a
+        file OR a directory. Patterns like ``node_modules/`` only match
+        DIRECTORIES; callers who want to test a directory must query with
+        the trailing slash. The walker calls do this correctly. Tests that
+        previously pinned the hand-rolled implementation's incorrect
+        "bare-name matches dir-only pattern" behaviour are updated to
+        match real git.
+        """
         patterns = ["*.pyc", "node_modules/", "build/"]
         assert is_path_gitignored("foo.pyc", patterns) is True
         assert is_path_gitignored("src/bar.pyc", patterns) is True
-        assert is_path_gitignored("node_modules", patterns) is True
+        # Querying a directory pattern requires the trailing slash (git semantic).
+        assert is_path_gitignored("node_modules/", patterns) is True
+        # Files inside a dir-only pattern are still ignored — the dir is the prefix.
+        assert is_path_gitignored("node_modules/foo.js", patterns) is True
         assert is_path_gitignored("src/main.py", patterns) is False
 
     def test_is_path_gitignored_anchored_pattern(self):
@@ -934,11 +947,19 @@ class TestGitignoreParsing:
         assert is_path_gitignored("dist", patterns) is True
         assert is_path_gitignored("sub/dist", patterns) is False
 
-    def test_is_path_gitignored_negation_pattern_skipped(self):
-        """Negation patterns (starting with !) should be skipped."""
+    def test_is_path_gitignored_negation_pattern_works(self):
+        """Negation patterns (starting with !) correctly un-ignore files.
+
+        Renamed and updated from ``test_is_path_gitignored_negation_pattern_skipped``
+        — the previous test pinned the hand-rolled implementation's
+        broken-negation behaviour. With ``pathspec`` (v2.101.2+),
+        negation works per git: ``!important.log`` after ``*.log``
+        means important.log is NOT ignored.
+        """
         patterns = ["*.log", "!important.log"]
-        # important.log still matches *.log because negation is not fully implemented
         assert is_path_gitignored("debug.log", patterns) is True
+        # Negation now correctly un-ignores the file.
+        assert is_path_gitignored("important.log", patterns) is False
 
     def test_is_path_gitignored_doublestar_pattern(self):
         """Double-star patterns should match across nested directories."""
@@ -956,39 +977,48 @@ class TestGitignoreParsing:
         assert is_path_gitignored("build/sub/deep.js", patterns) is True
 
     def test_doublestar_middle_pattern(self):
-        """Pattern 'src/**/test' should match 'test' nested under src/ via regex expansion."""
+        """Pattern 'src/**/test' matches 'test' at any depth under src/ (git semantic).
+
+        Updated for v2.101.2 — the hand-rolled implementation had a regex
+        expansion bug that blocked multi-segment matching. ``pathspec``
+        implements git's actual semantic: ``**`` matches zero or more
+        path segments.
+        """
         patterns = ["src/**/test"]
-        # Single-level nesting matches correctly
+        # Single-level nesting matches.
         assert is_path_gitignored("src/foo/test", patterns) is True
-        # NOTE: Multi-level nesting (src/a/b/test) fails due to the regex expansion
-        # converting single * after ** to [^/]* which blocks multi-segment matching.
-        # This is a known limitation of the current implementation vs real git behavior.
-        assert is_path_gitignored("src/a/b/test", patterns) is False
+        # Multi-level nesting now matches correctly (was a known bug pre-v2.101.2).
+        assert is_path_gitignored("src/a/b/test", patterns) is True
+        assert is_path_gitignored("src/test", patterns) is True
+        # Unrelated paths still don't match.
+        assert is_path_gitignored("other/test", patterns) is False
 
     def test_negation_unignores_file(self):
-        """Negation pattern '!keep.log' after '*.log' does NOT unignore due to early return.
+        """Negation '!keep.log' after '*.log' correctly un-ignores keep.log (git semantic).
 
-        The implementation returns True on first positive match without checking
-        subsequent negation patterns. This differs from real git, which evaluates
-        all patterns and lets later negations override earlier matches.
+        Updated for v2.101.2 (pathspec) — the previous version pinned the
+        hand-rolled implementation's broken-negation behaviour where it
+        early-returned True on the first matching ignore pattern without
+        evaluating subsequent negations. Real git (and now pathspec)
+        evaluates ALL patterns and lets later negations override.
         """
         patterns = ["*.log", "!keep.log"]
         assert is_path_gitignored("error.log", patterns) is True
-        # keep.log is also reported as ignored because *.log matches first and
-        # the function returns True before reaching the !keep.log negation.
-        assert is_path_gitignored("keep.log", patterns) is True
+        # Negation correctly un-ignores keep.log.
+        assert is_path_gitignored("keep.log", patterns) is False
 
     def test_negation_order_matters(self):
-        """Negation pattern placed BEFORE a positive pattern causes early return of False.
+        """Negation BEFORE a broader ignore is overridden by the later pattern.
 
-        When '!foo.txt' appears before '*.txt', the negation is evaluated first.
-        Since foo.txt matches the negation, the function returns False immediately
-        and never reaches the '*.txt' positive pattern.
+        Updated for v2.101.2 (pathspec) — the previous version pinned the
+        hand-rolled implementation's behaviour of early-returning on the
+        first matching negation. Real git evaluates all patterns in
+        order: ``!foo.txt`` then ``*.txt`` → foo.txt IS ignored because
+        the later ``*.txt`` re-matches and there's no negation after it.
         """
         patterns = ["!foo.txt", "*.txt"]
-        # Negation checked first -> returns False (not ignored)
-        assert is_path_gitignored("foo.txt", patterns) is False
-        # bar.txt does not match the negation, then matches *.txt -> ignored
+        # Later '*.txt' overrides the earlier negation → ignored.
+        assert is_path_gitignored("foo.txt", patterns) is True
         assert is_path_gitignored("bar.txt", patterns) is True
 
     def test_anchored_pattern(self):
@@ -998,12 +1028,22 @@ class TestGitignoreParsing:
         assert is_path_gitignored("sub/rootonly", patterns) is False
 
     def test_directory_only_pattern(self):
-        """Directory-only pattern 'cache/' should match the directory and its contents."""
+        """Directory-only pattern 'cache/' matches dirs (queried with trailing /) and their contents.
+
+        Updated for v2.101.2 (pathspec) — per git's actual semantic, a
+        dir-only pattern matches when the queried path is a directory
+        (trailing slash) OR is inside such a directory. A bare string
+        without trailing slash is treated as ambiguous (file or dir
+        unknown), and pathspec correctly returns False — the caller
+        should query directories with the slash appended.
+        """
         patterns = ["cache/"]
-        # Matches the directory name itself via component matching
-        assert is_path_gitignored("cache", patterns) is True
-        # Matches files inside the directory via component matching ('cache' part)
+        # Querying as a directory matches.
+        assert is_path_gitignored("cache/", patterns) is True
+        # Files inside the directory match (the dir is the prefix).
         assert is_path_gitignored("cache/bar", patterns) is True
+        # Bare 'cache' is ambiguous (could be a file) — pathspec says no.
+        assert is_path_gitignored("cache", patterns) is False
 
     def test_complex_glob_pattern(self):
         """Character class pattern '*.py[cod]' should match .pyc, .pyo, and .pyd extensions."""
@@ -1016,20 +1056,18 @@ class TestGitignoreParsing:
         assert is_path_gitignored("test.pyx", patterns) is False
 
     def test_multiple_patterns_combined(self):
-        """Multiple patterns with negation should interact based on evaluation order.
+        """Multiple patterns interact per git's actual order-sensitive semantic.
 
-        With patterns ['*.pyc', '__pycache__/', '!important.pyc']:
-        - foo.pyc matches '*.pyc' first -> ignored (True)
-        - important.pyc also matches '*.pyc' first -> ignored (True), because
-          the function returns before reaching '!important.pyc' negation
-        - __pycache__/bar matches '__pycache__' component -> ignored (True)
+        Updated for v2.101.2 (pathspec) — patterns evaluate in order;
+        the LAST matching pattern wins. ``!important.pyc`` after
+        ``*.pyc`` correctly un-ignores important.pyc (real git semantic).
         """
         patterns = ["*.pyc", "__pycache__/", "!important.pyc"]
         assert is_path_gitignored("foo.pyc", patterns) is True
-        # important.pyc is still ignored because *.pyc matches before negation is reached
-        assert is_path_gitignored("important.pyc", patterns) is True
+        # Late negation correctly un-ignores important.pyc.
+        assert is_path_gitignored("important.pyc", patterns) is False
+        # Directory pattern matches contents.
         assert is_path_gitignored("__pycache__/bar", patterns) is True
-        # A .py file should not be ignored by any of these patterns
         assert is_path_gitignored("main.py", patterns) is False
 
 
