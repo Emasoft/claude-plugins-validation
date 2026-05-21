@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-21T21:00:51+00:00",
+  "computed_at": "2026-05-21T21:32:00+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     ".github/workflows/bot-auto-merge.yml": "sha256:84ca9bec6592304749e979f2f0a9000b5047ce434435d1267f9ba0387d587b08",
@@ -132,7 +132,7 @@
     "scripts/cpv_scope_doctor_input.py": "sha256:e8b1511a7ea10019022ed54ae5e62d6b44f156bddae9fdb81b0ec64738f44610",
     "scripts/cpv_setup_auth.py": "sha256:154a0365ea2187876858730899b084e0e82484ade62e22ae15af7a4fb48ba400",
     "scripts/cpv_skill_scanner.py": "sha256:31bff56df20377e2e66a760bc95e6483a8092464c53543a2b1f8a74cec939464",
-    "scripts/cpv_skillaudit_native.py": "sha256:17e65752e57321f9d4d6753afe21606c8ed8e169aa1267de6783fec214a66202",
+    "scripts/cpv_skillaudit_native.py": "sha256:794859d5de989d342bef8cef186474276743dea4c368655f0ae5a6988eed4f70",
     "scripts/cpv_staging.py": "sha256:533bc780c1f185ba22fb12ff9ad0531f5745d7c78f76824590e01c038cfccd5f",
     "scripts/cpv_strip_dev.py": "sha256:ad76bd77d55afd0061476b813da15024ca6b7b2b738f62bd7f09bfbbb6d71813",
     "scripts/cpv_taint_engine.py": "sha256:1cf84978299c030b3c3eff3cf6a54b24fd6b881cd0f41e6528f100523d6e5a2e",
@@ -152,7 +152,7 @@
     "scripts/manage_remote.py": "sha256:a4142540c469a978fdb80a91f863a28078db41db0f50ee5d71738f2777da44c5",
     "scripts/publish.py": "sha256:f98e59a00473e46275d9a5784eeb9f1d053e066f3f806b69660a073a712f27fd",
     "scripts/remote_validation.py": "sha256:01bad5cb0e755e2da057e801a814df0754d114fecc8c8d28460a582a5fca3add",
-    "scripts/rules/skillaudit_patterns.json": "sha256:41f2146b561b3c24b68ff4ea76e0ac481f4b208d2c1f88ac1a90972e86a468b2",
+    "scripts/rules/skillaudit_patterns.json": "sha256:372c64cc9824f3137bdddb3d1919e56d13c9daf535d106425f151cff71f21342",
     "scripts/set_marketplace_pat.py": "sha256:81a8baa2fbe040674074b4786a4256fcc61b80e0f0300656ed8ed2c7aa0091e9",
     "scripts/setup_branch_rules.py": "sha256:8426c07ceece7c46b09b2f3d1d934f162667d7024542654a85b813fd444c38a0",
     "scripts/setup_branch_rules_generic.py": "sha256:d1d6da1bd636ff38f70b8672214d7f619484bcef1f3b60f6a506023c0651af29",

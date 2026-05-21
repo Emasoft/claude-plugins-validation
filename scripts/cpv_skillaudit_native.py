@@ -493,6 +493,86 @@ _INTENT_SOFT_SIGNAL_RULES: frozenset[str] = frozenset({
 _INTENT_CLASS_RULES: frozenset[str] = _INTENT_HARD_SIGNAL_RULES | _INTENT_SOFT_SIGNAL_RULES
 
 
+# Path basenames that are ALWAYS instruction-loadable — content there
+# IS read by Claude Code as agent instructions, so prompt-injection /
+# data-exfil / etc. prose IS a real delivery vector and must NOT be
+# suppressed by the documentation-only-path heuristic. Listed as
+# basenames (case-insensitive).
+_INSTRUCTION_LOADABLE_BASENAMES: frozenset[str] = frozenset(
+    {"skill.md", "claude.md", "agents.md"}
+)
+
+# Basenames / dir prefixes that are NEVER loaded as instructions —
+# pure documentation surfaces. Issue #38: a prompt-injection phrase
+# living in `references/foo.md` cannot reach an agent because no
+# production pipeline reads those files as instructions. Suppress
+# matches there so plugin authors who describe the threat model in
+# their own docs don't see CPV flag their warnings as the threat.
+_DOC_ONLY_BASENAMES: frozenset[str] = frozenset(
+    {
+        "readme.md",
+        "changelog.md",
+        "contributing.md",
+        "license.md",
+        "license",
+        "code_of_conduct.md",
+        "security.md",
+        "support.md",
+        "authors.md",
+        "maintainers.md",
+        "history.md",
+    }
+)
+_DOC_ONLY_DIR_PREFIXES: tuple[str, ...] = (
+    "docs/",
+    "doc/",
+    "references/",
+    "reference/",
+    "examples/",
+    "example/",
+    "changelog/",
+)
+
+
+def _is_documentation_only_path(file_path: str) -> bool:
+    """Return True when ``file_path`` is a pure-documentation surface
+    that Claude Code NEVER loads as agent instructions.
+
+    Used by the safe_doc dispatcher (issue #38) to suppress INTENT
+    HARD-signal findings (PROMPT_INJECT, INDIRECT_PROMPT_INJECT,
+    DATA_EXFIL, etc.) in files whose prose can never reach an agent.
+
+    The check is conservative: a path is documentation-only when BOTH:
+
+    * Its basename is in `_DOC_ONLY_BASENAMES` (README/CHANGELOG/…)
+      OR it lives under a `_DOC_ONLY_DIR_PREFIXES` subtree, AND
+    * Its basename is NOT in `_INSTRUCTION_LOADABLE_BASENAMES`
+      (a `SKILL.md` inside a `references/` directory would still be
+      treated as instruction-loadable, never doc-only).
+
+    For everything else (including unknown `.md` files at plugin
+    root, agents/, commands/, .claude/rules/), the function returns
+    False and the existing dispatcher behaviour stands.
+    """
+    norm = file_path.replace("\\", "/").lstrip("./").lower()
+    if not norm:
+        return False
+    parts = norm.split("/")
+    basename = parts[-1]
+    # Never doc-only if the basename is a known instruction-loadable
+    # file. SKILL.md inside references/ stays instruction-loadable.
+    if basename in _INSTRUCTION_LOADABLE_BASENAMES:
+        return False
+    # Doc-only if basename is on the allowlist (READMEs etc.) OR the
+    # path is anchored under a doc-only directory subtree.
+    if basename in _DOC_ONLY_BASENAMES:
+        return True
+    for prefix in _DOC_ONLY_DIR_PREFIXES:
+        if norm.startswith(prefix) or ("/" + prefix) in ("/" + norm):
+            return True
+    return False
+
+
 def _context_classifier_verdict(
     file_path: str,
     lines: list[str],
@@ -600,6 +680,22 @@ def _context_classifier_verdict(
     #   defeat the rule's entire purpose. KEEP at declared severity.
     if classifier_verdict == "safe_doc":
         if rule_id in _INTENT_HARD_SIGNAL_RULES:
+            # Issue #38 — markdown prose in DOCUMENTATION-ONLY paths is
+            # never loaded by Claude Code as an agent instruction (only
+            # `SKILL.md`, `agents/*.md`, `commands/*.md`, `output-styles/*.md`,
+            # `.claude/rules/*.md`, and `CLAUDE.md` are read as instructions).
+            # A prompt-injection phrase in `references/foo.md`, `docs/bar.md`,
+            # `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, or
+            # `LICENSE.md` cannot reach an agent because no production
+            # pipeline reads those files as instructions. Suppress to
+            # eliminate the bulk-FP class the issue documents (every
+            # skill describing the attack model surfaces as a
+            # publish-blocking NIT). Iron-rule preserved: the rule
+            # still fires on instruction-loadable paths (SKILL.md,
+            # agents/, commands/, output-styles/, .claude/rules/,
+            # CLAUDE.md) where prose IS a delivery vector.
+            if _is_documentation_only_path(file_path):
+                return "suppress"
             # Hard signals — prose IS the threat-delivery vector. Defer
             # to the heuristic chain so placeholder-suppression
             # (``YOUR_API_KEY`` etc.), markdown-table demotion, and
