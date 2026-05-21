@@ -6256,15 +6256,19 @@ def validate_no_absolute_paths(
             # patterns and allowlists as data constants, not hardcoded paths
             if filename == "cpv_validation_common.py":
                 continue
-            # Skip CPV-internal rule catalogs under rules/. These JSON files
-            # contain regex pattern STRINGS that match host-sensitive paths
-            # like /etc/passwd, /etc/shadow, /etc/cron — they are pattern
-            # SOURCES (what we look for in scanned plugins), not actual path
-            # references the validator follows. Hash-anchored via the
-            # standard self-scan manifest, so a malicious plugin can't
-            # spoof its way out by parking a file under rules/.
+            # Skip CPV-internal rule catalogs under rules/ or scripts/rules/.
+            # These JSON files contain regex pattern STRINGS that match
+            # host-sensitive paths like /etc/passwd, /etc/shadow, /etc/cron —
+            # they are pattern SOURCES (what we look for in scanned plugins),
+            # not actual path references the validator follows. Hash-anchored
+            # via the standard self-scan manifest, so a malicious plugin
+            # can't spoof its way out by parking a file under rules/.
+            # v2.99.3 (issue #32) — the canonical location is scripts/rules/
+            # (inside the python package so it ships in the wheel); the bare
+            # "rules/" form is kept for forward-compat with any external
+            # plugin that mirrors CPV's pattern.
             rel_posix = rel_path.replace("\\", "/")
-            if rel_posix.startswith("rules/") and filename.endswith(".json"):
+            if (rel_posix.startswith("rules/") or rel_posix.startswith("scripts/rules/")) and filename.endswith(".json"):
                 continue
 
             files_checked += 1

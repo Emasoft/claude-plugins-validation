@@ -69,7 +69,9 @@ def is_self_scan_eligible(rel_path: str) -> bool:
         return True
     if "/tests/fixtures/" in file_normalized or file_normalized.startswith("tests/fixtures/"):
         return True
-    # v2.99.1 — CPV rule catalogs (e.g. rules/skillaudit_patterns.json).
+    # v2.99.1 — CPV rule catalogs (e.g. scripts/rules/skillaudit_patterns.json
+    # — moved into scripts/ in v2.99.3 so the file ships in the wheel under
+    # hatchling's packages=["scripts"], issue #32).
     # MUST stay in lockstep with validate_security._is_self_scan_eligible.
     if ("/rules/" in file_normalized or file_normalized.startswith("rules/")) and basename.endswith(".json"):
         return True

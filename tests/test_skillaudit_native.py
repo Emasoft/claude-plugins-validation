@@ -9,8 +9,9 @@ external dependencies.
 
 These tests pin the iron-rule semantics:
 
-* The rules catalog ``rules/skillaudit_patterns.json`` lives in CPV's
-  tree and is shipped with the plugin.
+* The rules catalog ``scripts/rules/skillaudit_patterns.json`` lives
+  inside CPV's python package (so it ships in the hatchling wheel built
+  from ``packages=["scripts"]`` — fixed in v2.99.3 per issue #32).
 * No npm package, no npx invocation, no ``ensure_skillaudit`` install
   helper exists anywhere in the codebase.
 * Missing rules catalog → CRITICAL finding (iron rule, packaging defect
@@ -34,7 +35,7 @@ from pathlib import Path
 
 REPO = Path(__file__).parent.parent
 SCRIPTS_DIR = REPO / "scripts"
-RULES_PATH = REPO / "rules" / "skillaudit_patterns.json"
+RULES_PATH = REPO / "scripts" / "rules" / "skillaudit_patterns.json"
 
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
@@ -51,8 +52,13 @@ class TestSkillAuditNativeModule:
 
     def test_rule_catalog_exists(self) -> None:
         assert RULES_PATH.is_file(), (
-            "rules/skillaudit_patterns.json must ship with CPV — Check 27 "
-            "is MANDATORY and the catalog is the iron-rule data source"
+            "scripts/rules/skillaudit_patterns.json must ship with CPV — "
+            "Check 27 is MANDATORY and the catalog is the iron-rule data "
+            "source. v2.99.3 moved this file into scripts/ (the only "
+            "folder hatchling's packages=['scripts'] ships in the wheel) "
+            "to fix issue #32 — the v2.99.2 wheel was built with the "
+            "catalog at /rules/ which was outside the package and "
+            "therefore missing from every uvx install."
         )
 
     def test_rule_catalog_has_expected_shape(self) -> None:
