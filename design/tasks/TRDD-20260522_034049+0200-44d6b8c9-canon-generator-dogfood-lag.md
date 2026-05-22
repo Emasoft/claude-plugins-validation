@@ -21,7 +21,7 @@ User observation (verbatim, condensed):
 > is fragmented to the point that every plugin has a different pipeline?
 
 Surfaced while preparing to upgrade `ai-maestro-visual-communicator-plugin`
-(`/Users/emanuelesabetta/Code/visual-comunicator`, v1.3.5), which carries
+(a local checkout under `${HOME}/Code/`, v1.3.5), which carries
 8 files in `plugin.json::cpv._intentional_pipeline_drift_files`, most
 documented as "STRICTLY above canon".
 

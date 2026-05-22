@@ -1,7 +1,7 @@
 ---
 name: the-skills-menu-create
 description: Migrate any Claude Code plugin to the-skills-menu method — agents declare only one preloaded skill (the-skills-menu) and pick operational skills dynamically via the Skill() tool instead of preloading static lists. Accepts a local plugin path, a Git URL, an owner/repo slug, a "plugin-in-marketplace" expression, or a bare plugin name to search. Works on ANY plugin, not just CPV.
-allowed-tools: Read, Edit, Write, Bash, Glob, Grep
+allowed-tools: Read, Glob, Grep, Skill
 argument-hint: "<plugin-path-or-url-or-name> [--full-cleanup] [--force-dirty]"
 user-invocable: true
 ---
@@ -43,12 +43,19 @@ Give me a local path, a Git URL, or a plugin name.
 
 ## Step 1 — Dispatch the skill
 
-Resolve `${CLAUDE_PLUGIN_ROOT}` (the cached folder for
-`claude-plugins-validation`) and invoke the skill with the user's
-argument forwarded verbatim:
+Invoke the backing skill, forwarding the user's **entire** argument
+string verbatim — the target spec AND any trailing flags
+(`--full-cleanup`, `--force-dirty`). The skill parses the flags
+itself; dropping them silently changes the migration behaviour.
 
 ```text
-Skill({skill: "claude-plugins-validation:the-skills-menu-create", args: "<argument>"})
+Skill({skill: "claude-plugins-validation:the-skills-menu-create", args: "<full-argument-string-including-any-flags>"})
+```
+
+Example — a path with both flags must arrive at the skill intact:
+
+```text
+Skill({skill: "claude-plugins-validation:the-skills-menu-create", args: "~/code/my-plugin/ --full-cleanup --force-dirty"})
 ```
 
 The skill takes care of:
