@@ -53,8 +53,10 @@ agents that declare only the catalog and use the dynamic-loading line.
 | 2 | Multiple candidates | List `.claude-plugin/plugin.json` `name` fields; ask user |
 | 3 | Working tree is dirty | Refuse unless `--force-dirty`; ask user to commit / stash |
 | 4 | Agent file lacks frontmatter | Skip + report in "Potential manual review needed" |
-| 5 | Catalog skill already exists | Read first; in-place update if it follows the method, refuse otherwise |
+| 5 | Catalog skill already exists | Read first. Has both `## Standalone Skills` + `## Plugin Skills` headings → in-place refresh (re-derive the two sections, keep hand-written structural prose). Otherwise (a hand-curated skill that merely shares the name) → never clobber: back it up to a sibling .bak file, then ask the user to overwrite / merge / abort. See spec §Safety rules. |
 | 6 | Skill body tightly coupled to a named caller agent | Flag for manual review unless `--full-cleanup` is on, then rewrite to be agent-agnostic |
+| 7 | Plugin has no agents | Not an error — generate the catalog for reference, report 0 agents migrated, skip agent rewrites (spec §Agent discovery → "No agents found") |
+| 8 | Plugin has only the catalog skill, no other skills | Not an error — generate catalog with placeholder sections, report 0 operational skills indexed (spec §Skill discovery → "No skills found") |
 
 ## Examples
 

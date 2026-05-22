@@ -53,7 +53,9 @@ Typical shapes:
 ## Examples
 
 ```yaml
-# Fix a small finding set (≤ 40 on opus / ≤ 150 on opus[1m])
+# Fix a finding set within the plugin-fixer safe-ceiling
+# (15-25 on bare opus/sonnet · 50-75 on opus[1m]/sonnet[1m] — see
+#  agents/plugin-fixer.md Step 2 for the authoritative ceiling table)
 Skill({skill: "claude-plugins-validation:fix-validation"})
 
 # Big-plugin handoff signal

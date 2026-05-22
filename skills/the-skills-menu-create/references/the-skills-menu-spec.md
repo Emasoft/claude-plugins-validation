@@ -133,6 +133,14 @@ A file is an agent file **only if both conditions hold** (not either-or):
 1. it lives in the `agents/` directory of the target plugin;
 2. it has YAML frontmatter.
 
+**No agents found.** If `agents/` is absent or contains zero
+frontmatter-bearing `.md` files, there is nothing to rewrite. Do NOT
+fail — the plugin may be skill-only (skills invoked directly by the
+user, no agents). Still generate `the-skills-menu/SKILL.md` as a
+discoverability catalog, then report `0 agents migrated — this plugin
+ships no agents; the catalog was generated for reference only`. Skip
+the agent-frontmatter and agent-body steps entirely.
+
 Always ignore directories such as:
 
 ```text
@@ -166,6 +174,14 @@ and stay with it.
 **Do NOT list `the-skills-menu` itself as an entry inside its own
 catalog** — recursive self-reference is meaningless. The catalog
 only lists the OTHER skills the agent might invoke.
+
+**No skills found.** If `skills/` is absent or contains only the
+`the-skills-menu` folder itself (i.e. no OTHER skills to catalog),
+the migration is a no-op for skill discovery. Still generate the
+catalog with both canonical sections, each carrying its
+"No … skills were discovered" placeholder line, and report
+`0 operational skills indexed — nothing for agents to load
+dynamically yet`. Do not error.
 
 ---
 
@@ -209,8 +225,40 @@ format.
 
 ## Generated content
 
-The body of `the-skills-menu/SKILL.md` explains the method briefly,
-then lists available skills under exactly two canonical sections:
+### Required structural sections (validator compatibility)
+
+The generated `the-skills-menu/SKILL.md` is a real skill and MUST pass
+the target harness's own skill validator. CPV's validator (and the
+Anthropic Agent-Skills / Nixtla-strict checks it mirrors) require every
+skill body to carry these sections, in addition to the two catalog
+sections below:
+
+- `## Overview` — one-paragraph statement of what the catalog is for.
+- `## Prerequisites` — e.g. "the calling agent has `Skill` in its `tools:` list".
+- `## Instructions` — the numbered steps an agent follows to pick + load a skill.
+- `## Output` — what the catalog itself returns (nothing; the chosen downstream skill produces output).
+- `## Error Handling` — unknown-skill-name, double-load, advisory-only legacy descriptions.
+- `## Examples` — at least one `Skill({skill: "...", args: "..."})` invocation.
+- `## Resources` — pointer to the per-skill reference table when the catalog is large.
+
+A catalog that ships ONLY `## Standalone Skills` + `## Plugin Skills`
+(and skips the structural sections above) will be flagged
+MAJOR/MINOR by the validator and block the migrated plugin's publish.
+Generate the structural sections too — synthesise conservative,
+accurate text from the plugin's actual skills.
+
+If the catalog grows past the harness's per-file soft cap (CPV: ~5000
+chars), move the full per-skill table into
+`skills/the-skills-menu/references/skills-catalog.md` and keep a
+domain-grouped summary table in `SKILL.md` (progressive disclosure),
+exactly as CPV's own catalog does. Set
+`cpv.skill_size_severity: warning` (or the host harness equivalent) in
+`plugin.json` only if a justified overflow remains after the split.
+
+### Catalog sections
+
+The body then lists available skills under exactly two canonical
+sections:
 
 ```markdown
 ## Standalone Skills
@@ -361,12 +409,18 @@ permissions, routing metadata).
 ## Agent body instruction rule
 
 Every discovered agent body must contain this exact instruction near
-the start, immediately after the frontmatter and before the rest of
-the agent's instructions:
+the start of the body:
 
 ```text
 You must load the skills you need dynamically. Use the Skill() tool to load them. Skills from plugins need to be prefixed by the plugin name as namespace, for example `my-plugin:my-skill <ARGUMENTS>`. Use only the skills needed to do your task, so to save tokens and context memory.
 ```
+
+**Placement:** insert it as the FIRST body paragraph AFTER the agent's
+opening `# Title` H1 heading (if the body starts with one), not before
+it — a paragraph above the H1 reads as a stray preamble and some
+renderers mis-handle it. If the body has no leading H1, insert the
+instruction as the very first body line after the frontmatter. Leave a
+blank line before and after so it renders as its own paragraph.
 
 If the instruction already exists verbatim, do not duplicate it.
 
@@ -432,8 +486,18 @@ When editing:
 - never blindly overwrite an existing `the-skills-menu/SKILL.md` without
   inspecting it first (it may be a hand-curated catalog).
 
-If `the-skills-menu` already exists, update it in place rather than
-creating a duplicate.
+If `the-skills-menu` already exists, decide by content shape:
+
+- **Already a catalog** (has both `## Standalone Skills` and
+  `## Plugin Skills` headings) → refresh it in place: re-derive the two
+  catalog sections from the current skill set, preserve hand-written
+  prose in the structural sections (`## Overview`, `## Instructions`,
+  etc.). Do not create a duplicate.
+- **Not a catalog** (a hand-curated skill that merely shares the name)
+  → never silently clobber. Copy it to a sibling backup file
+  (SKILL.md.bak in the same folder), then ask the user whether to
+  overwrite (backup kept), merge by hand, or abort. Report which
+  choice was taken.
 
 ---
 
