@@ -29,7 +29,7 @@ from typing import Final, Literal
 
 from _skillaudit_json_context import _classify_key  # type: ignore[import-not-found]
 
-ContextVerdict = Literal["safe_doc", "safe_schema", "code_fence_neutral", "suspect", "unknown"]
+ContextVerdict = Literal["safe_literal", "safe_doc", "safe_schema", "code_fence_neutral", "suspect", "unknown"]
 
 # Patterns that are legitimate in CI ``run:`` blocks but trigger
 # PRIVILEGE_ESC / CMD_INJECTION. Each entry is matched as a substring
@@ -101,6 +101,51 @@ def _has_known_safe_ci_pattern(line: str) -> bool:
     return any(p.search(line) for p in _CI_KNOWN_SAFE_INSTALL_PATTERNS)
 
 
+# Issue #40 — airtight canonical-install discriminator. A ``run:`` value of
+# the shape ``sudo <pkgmgr> install <bare packages>`` (optionally ``&&``-
+# chained with MORE pkgmgr commands or benign no-ops) with NO shell
+# metacharacter that enables arbitrary execution is a 100%-certain canonical
+# CI install — suppress it rather than demote. The moment ANY segment is not a
+# recognised-safe command, or any arbitrary-exec metacharacter appears
+# (``|`` ``;`` ``$(`` backtick ``>`` ``<``), we fall back to demote.
+_SHELL_EXEC_METACHARS_RE: Final[re.Pattern[str]] = re.compile(r"[|;<>`]|\$\(")
+_SAFE_RUN_SEGMENT_RE: Final[tuple[re.Pattern[str], ...]] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"^sudo\s+apt(?:-get)?\s+(?:update|upgrade|install)\b[\w\s.+:=-]*$",
+        r"^sudo\s+dnf\s+(?:install|upgrade|update)\b[\w\s.+:=-]*$",
+        r"^sudo\s+yum\s+(?:install|update)\b[\w\s.+:=-]*$",
+        r"^sudo\s+apk\s+(?:add|update|upgrade)\b[\w\s.+:=-]*$",
+        r"^sudo\s+pacman\s+-S(?:yu)?\b[\w\s.+:=-]*$",
+        r"^sudo\s+snap\s+install\b[\w\s.+:=-]*$",
+        r"^brew\s+(?:install|update|upgrade)\b[\w\s.+:@/-]*$",
+        # benign no-ops that legitimately precede installs
+        r"^set\s+-[eux]+(?:o\s+pipefail)?$",
+        r"^echo\b[\w\s.,:=#'\"-]*$",
+        r"^cd\s+[\w./-]+$",
+    )
+)
+
+
+def _run_line_is_airtight_pkg_install(line: str) -> bool:
+    """True iff the ``run:`` line is purely package-manager install/update
+    commands (optionally ``&&``-chained with benign no-ops) and contains no
+    arbitrary-exec metacharacter."""
+    # Strip a leading ``run:`` / ``- run:`` / list-dash and surrounding quotes.
+    body = re.sub(r"^\s*-?\s*(?:run\s*:)?\s*", "", line).strip().strip("'\"").strip()
+    if not body:
+        return False
+    if _SHELL_EXEC_METACHARS_RE.search(body):
+        return False
+    # A lone ``&`` (background) is also unsafe; only ``&&`` chaining is ok.
+    if re.search(r"(?<!&)&(?!&)", body):
+        return False
+    segments = [s.strip() for s in body.split("&&") if s.strip()]
+    if not segments:
+        return False
+    return all(any(p.match(seg) for p in _SAFE_RUN_SEGMENT_RE) for seg in segments)
+
+
 def _walk_yaml_keys_naive(source: str) -> list[tuple[tuple[str, ...], int]]:
     """Return ``(path, line)`` pairs for every key-line in the YAML.
 
@@ -165,6 +210,11 @@ def classify(
     # an ephemeral CI runner. The user's agents triage these.
     if _is_inside_workflow_run(file_path):
         if _line_is_in_run_block(lines, line_idx):
+            # Issue #40 — airtight canonical install (sudo <pkgmgr> install
+            # <bare packages>, no arbitrary-exec metacharacters) is a
+            # 100%-certain non-threat → suppress.
+            if _run_line_is_airtight_pkg_install(line):
+                return "safe_literal"
             if _has_known_safe_ci_pattern(line):
                 return "code_fence_neutral"
             # In a run: block but not a known-safe pattern — let the

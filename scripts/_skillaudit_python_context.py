@@ -597,7 +597,7 @@ _RETRIEVAL_GRAB_RE_PY: Final[re.Pattern[str]] = re.compile(
     r"\b(?:get_tools|list_tools|available_tools|call_tool|invoke_tool|use_tool)\b"
     r"|\bprevious_tool_output\b"
     r"|\btool_results?\s*\["
-    r"|\bget\w*\s*\(.*(?:all|previous|recent).*(?:message|response|output)",
+    r"|\bget[_]?(?:all|previous|recent)\w*(?:message|response|output)",
     re.IGNORECASE,
 )
 
@@ -620,23 +620,21 @@ def _ssrf_url_is_static_literal_py(line: str, match: str) -> bool:
     idx = line.find(match)
     if idx < 0:
         return False
-    quote = ""
-    for ch in reversed(line[:idx]):
-        if ch in "\"'":
-            quote = ch
-            break
-        if ch in "(),;=[":
-            break
-    if not quote:
+    # Find the enclosing string literal: nearest quote to the left of the URL
+    # and nearest to the right. We do NOT break on punctuation while scanning
+    # left — string CONTENT legitimately contains commas / parens
+    # (``help="API base, e.g. http://localhost:1234"``), and breaking on them
+    # mis-classifies the help text as "not in a literal".
+    open_pos = max(line.rfind('"', 0, idx), line.rfind("'", 0, idx))
+    if open_pos < 0:
         return False
-    open_pos = line.rfind(quote, 0, idx)
+    quote = line[open_pos]
     close_pos = line.find(quote, idx + len(match))
-    if open_pos < 0 or close_pos < 0:
+    if close_pos < 0:
         return False
     literal_body = line[open_pos + 1 : close_pos]
     # f-string interpolation inside the literal → dynamic.
     if "{" in literal_body and "}" in literal_body:
-        # Only treat as dynamic when it's a real f-string (prefix f/F).
         prefix = line[max(0, open_pos - 2) : open_pos].lower()
         if "f" in prefix:
             return False
@@ -824,7 +822,14 @@ def classify(
     # hint — never passed to a shell. AST shape: match position is
     # inside a Constant string that is reachable via List/Tuple/Set/
     # Dict containers from a module-level Assign/AnnAssign target.
-    if rule_id == "CMD_INJECTION" and _match_inside_module_data_literal(tree, line, source, match):
+    # Issue #41 — SUPPLY_CHAIN shares this FP shape: the matched substring
+    # (``curl … | sh``, ``npm install … &&``) is an install-HINT string in a
+    # module-level data structure (e.g. publish.py's
+    # ``REQUIRED_TOOLS = [("uvx", "curl -LsSf https://astral.sh/uv/install.sh | sh"), …]``).
+    # It is text the program SHOWS the user, never executed.
+    if rule_id in {"CMD_INJECTION", "SUPPLY_CHAIN"} and _match_inside_module_data_literal(
+        tree, line, source, match
+    ):
         return "safe_literal"
 
     # Issue #39 — SECRET_* FP: synthetic test-fixture secret in a

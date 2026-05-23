@@ -197,10 +197,13 @@ def format_args(args: list[str]) -> str:
         # Use line 5 (inside the for loop) — real code.
         assert not ctx._enclosing_function_is_template_generator(tree, 5)
 
-    def test_shell_exec_in_normal_docstring_stays_safe_doc(self) -> None:
-        """A `subprocess.run` mention inside a docstring of a non-
-        template-generator function stays `safe_doc` (demoted to NIT
-        for SHELL_EXEC) — preserves the original conservative behavior."""
+    def test_shell_exec_in_normal_docstring_is_suppressed(self) -> None:
+        """A `subprocess.run` mention inside a function docstring is
+        suppressed (issue #40): a docstring is never executed, so an
+        execution-class match there is a provable non-threat — regardless
+        of whether the function is a template generator. (Pre-#40 a
+        non-template-generator docstring stayed ``safe_doc`` → demote; the
+        user mandated suppress for execution-class in true docstrings.)"""
         source = '''\
 def process_data(items: list[str]) -> int:
     """Process the items.
@@ -217,11 +220,9 @@ def process_data(items: list[str]) -> int:
     return count
 '''
         verdict = _classify(source, 6, "SHELL_EXEC")
-        # Function returns int, not str → not a template generator.
-        # Should stay safe_doc.
-        assert verdict == "safe_doc", (
-            f"function with docstring example but not a template "
-            f"generator must stay safe_doc; got {verdict!r}"
+        assert verdict == "safe_literal", (
+            f"execution-class match in a true docstring must be suppressed "
+            f"per issue #40; got {verdict!r}"
         )
 
     def test_real_subprocess_run_outside_string_is_unaffected(self) -> None:

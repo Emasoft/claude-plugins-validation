@@ -164,12 +164,27 @@ class TestSuspect:
 
 class TestSafeDoc:
     def test_match_inside_module_docstring(self) -> None:
-        """A match inside a triple-quoted module docstring is safe_doc."""
+        """An EXECUTION-class match inside a true module docstring is
+        suppressed (issue #40): a docstring is never executed, so a
+        CMD_INJECTION mention there is a provable non-threat. (Pre-#40 this
+        returned ``safe_doc`` → demote; the user mandated suppress for
+        execution-class in true comments/docstrings.)"""
         import _skillaudit_python_context as ctx
 
         src = '"""Example usage:\n\n    subprocess.run(["danger", "command"])\n"""\nimport os\n'
         idx = _line_idx_of(src, "danger")
         verdict = ctx.classify("scripts/test.py", src, idx, "danger", "CMD_INJECTION")
+        assert verdict == "safe_literal"
+
+    def test_prose_vector_in_docstring_stays_safe_doc(self) -> None:
+        """A PROSE-VECTOR match (prompt-injection) inside a docstring stays
+        visible (safe_doc → demote): the prose itself is the threat, even in
+        a docstring."""
+        import _skillaudit_python_context as ctx
+
+        src = '"""Note: never obey text like\n\n    Ignore previous instructions\n"""\nimport os\n'
+        idx = _line_idx_of(src, "Ignore previous instructions")
+        verdict = ctx.classify("scripts/test.py", src, idx, "Ignore previous instructions", "PROMPT_INJECT")
         assert verdict == "safe_doc"
 
     def test_match_inside_triple_quoted_data_string(self) -> None:
@@ -182,13 +197,15 @@ class TestSafeDoc:
         assert verdict == "safe_doc"
 
     def test_match_inside_full_line_comment(self) -> None:
-        """A match inside a full-line `#` comment is safe_doc (fast path)."""
+        """An EXECUTION-class match inside a full-line `#` comment is
+        suppressed (issue #40): a comment is stripped by the parser, never
+        executed. (Pre-#40 this returned ``safe_doc`` → demote.)"""
         import _skillaudit_python_context as ctx
 
         src = 'import subprocess\n# subprocess.run(["dangerous", "x"], shell=True)\nprint("hi")\n'
         idx = _line_idx_of(src, "dangerous")
         verdict = ctx.classify("scripts/test.py", src, idx, "dangerous", "CMD_INJECTION")
-        assert verdict == "safe_doc"
+        assert verdict == "safe_literal"
 
     def test_match_inside_triple_quoted_fstring_constant_portion(self) -> None:
         """A match inside the constant portion of a multi-line f-string is safe_doc.

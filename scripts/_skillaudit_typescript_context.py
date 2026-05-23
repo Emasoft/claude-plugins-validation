@@ -399,17 +399,13 @@ def _ssrf_url_is_static_literal(line: str, match: str) -> bool:
     if "${" in url_token:
         return False
     # Try to find an enclosing single-line quote; if found, check the literal
-    # body + adjacency. If not found (multi-line literal / help text), fall
-    # back to a same-line concatenation check.
-    quote = ""
-    for ch in reversed(line[:idx]):
-        if ch in "\"'`":
-            quote = ch
-            break
-        if ch in "(),;=":
-            break
-    if quote:
-        open_pos = line.rfind(quote, 0, idx)
+    # body + adjacency. We do NOT break on punctuation while scanning left —
+    # string CONTENT legitimately contains commas / parens. If no quote is on
+    # the line (multi-line template literal / help text), fall back to a
+    # same-line concatenation check.
+    open_pos = max(line.rfind('"', 0, idx), line.rfind("'", 0, idx), line.rfind("`", 0, idx))
+    if open_pos >= 0:
+        quote = line[open_pos]
         close_pos = line.find(quote, idx + len(match))
         if open_pos >= 0 and close_pos >= 0:
             literal_body = line[open_pos + 1 : close_pos]
@@ -457,7 +453,10 @@ _RETRIEVAL_GRAB_RE: Final[re.Pattern[str]] = re.compile(
     r"\b(?:get_tools|list_tools|available_tools|call_tool|invoke_tool|use_tool)\b"
     r"|\bprevious_tool_output\b"
     r"|\btool_results?\s*\["
-    r"|\bget\w*\s*\(.*(?:all|previous|recent).*(?:message|response|output)",
+    # snake_case OR camelCase data-grab method name, e.g.
+    # ``get_all_previous_messages`` / ``getAllPreviousMessages`` /
+    # ``getRecentResponses``.
+    r"|\bget[_]?(?:all|previous|recent)\w*(?:message|response|output)",
     re.IGNORECASE,
 )
 
@@ -663,6 +662,17 @@ def classify(
     # test file (where env set/restore is standard fixture teardown).
     if rule_id == "ENV_INJECTION":
         if is_test and _is_generic_env_assignment(line, match):
+            return "safe_literal"
+        return "unknown"
+
+    # ── PATH_TRAVERSAL — contrived traversal string in a test fixture. ──
+    # Issue #41 FP: ``"bundled:..%2F..%2F..%2Fsystem-file"`` — a deliberately
+    # malicious sample input a test feeds to the traversal detector to prove
+    # it FIRES. The string is test DATA (a string-array element / argument in
+    # a test file), never a real filesystem access. Same shape the
+    # SQL_INJECTION test handler above already trusts.
+    if rule_id == "PATH_TRAVERSAL" and is_test:
+        if _line_is_string_array_element(line) or _window_has_test_fixture_marker(source, line_idx, span=25):
             return "safe_literal"
         return "unknown"
 
