@@ -283,7 +283,7 @@ NO menu, NO AskUserQuestion)**:
 Picking `A` already IS the user's request to chat. Do NOT ask
 "what can I help you with?" — that wastes a turn. Instead the menu
 agent IMMEDIATELY hands control to a fresh Opus sub-agent (dispatched
-via the `Agent` tool with `subagent_type: spark` and
+via the `Agent` tool with `subagent_type: general-purpose` and
 `model: opus`). The sub-agent's FIRST output is its analysis +
 suggestion — not a question, not a greeting, not a menu.
 

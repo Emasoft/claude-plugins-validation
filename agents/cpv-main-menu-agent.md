@@ -170,7 +170,7 @@ suggestion derived from the context.
 Use the `Agent` tool with:
 
 ```yaml
-subagent_type: spark
+subagent_type: general-purpose
 model: opus
 description: "CPV ask-the-agent free-form chat"
 prompt: |

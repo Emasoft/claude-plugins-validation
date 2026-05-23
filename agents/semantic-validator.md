@@ -88,7 +88,7 @@ Only these situations justify the cost:
 When the user provides multiple skill paths or an entire plugin path:
 - **Discover all SKILL.md and agent .md files** in the target
 - **Run script validation on ALL files first** (one batch, cheap)
-- **Evaluate each file independently** — spawn one subagent per file using the Agent tool with `subagent_type: "spark"` and `model: "opus"`. Each subagent receives:
+- **Evaluate each file independently** — spawn one subagent per file using the Agent tool with `subagent_type: "general-purpose"` and `model: "opus"`. Each subagent receives:
   - The file path to evaluate
   - The 7 core semantic criteria plus the conditional Channel Source Security pillar (copied from this agent's instructions) — the conditional pillar fires only when the enclosing plugin's `plugin.json` declares a non-empty `channels` array
   - Instructions to write its grade to `$MAIN_ROOT/reports/semantic-validator/<YYYYMMDD_HHMMSS±HHMM>-<filename>.md` — the subagent MUST resolve `$MAIN_ROOT` via `git worktree list | head -n1`, never write to a worktree-local path
