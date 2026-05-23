@@ -1,9 +1,10 @@
-# CPV Main-Menu Tree (numbered-table edition)
+# CPV Main-Menu Tree (claude-menu-system Stop-hook edition)
 
 ## Table of Contents
 
 - [Shell prologue](#shell-prologue)
-- [Table-rendering rules](#table-rendering-rules)
+- [Menu-spec rendering rules](#menu-spec-rendering-rules)
+- [Fixed-key routing contract](#fixed-key-routing-contract)
 - [Menu definitions](#menu-definitions)
 - [Etiquette and error handling](#etiquette-and-error-handling)
 
@@ -24,54 +25,91 @@ mkdir -p "$MAIN_ROOT/reports/<component>"
 REPORT_FILE="$MAIN_ROOT/reports/<component>/$TS-$SLUG.md"
 ```
 
-## Table-rendering rules
+## Menu-spec rendering rules
 
-Every menu is rendered as a Unicode box-drawing table. The user picks an
-option by typing the number in their next message. NEVER use
-`AskUserQuestion` for menu navigation.
+Every menu in CPV is rendered by the `claude-menu-system` plugin's
+`Stop` / `SubagentStop` / `StopFailure` hook (`menu_emit.py`). The
+orchestrator builds a spec JSON, queues it via
+`scripts/cpv_menu.py`, and ENDS its turn. The hook then prints the
+rendered menu via the hook JSON `systemMessage` field — so the menu
+is shown to the user but NEVER enters the agent's transcript or
+prompt cache. Zero token cost regardless of menu size; no subagent
+fork.
 
-### Canonical layout
+**NEVER print menu tables inline in the orchestrator's response.**
+**NEVER use `AskUserQuestion` for menu navigation.** All menus are
+queued via `cpv_menu.py` and emitted post-turn by the Stop hook via
+`systemMessage`.
 
-- **Header row** uses heavy box-drawing characters (`┏━┳━┓` / `┡━╇━┩`).
-- **Data rows** use light characters (`│ │ │`).
-- **Row separators between EVERY data row** (`├─┼─┤`) — this makes long
-  multi-column tables readable. NO exceptions: every row gets a separator
-  above and below, even when descriptions are one line.
-- **Footer** is a single line below the table: `Type a number to choose:`.
-- **Cancel / Exit** is ALWAYS the LAST row, numbered `0`.
-- **Back** (sub-menus only) is the second-to-last row, numbered `B` (a
-  letter, so it doesn't collide with multi-digit option numbers like
-  `9`/`19`/`24` in long menus). Both `0` and `B` are case-insensitive.
-- Column widths fit the longest entry; pad with spaces.
-- Standard columns: `#` (1-3 chars wide) / `Option` / `What it does`. Add
-  a 4th column for `Pros / Cons / Cost / Risk / When to pick` whenever it
-  helps the user choose (semantic-validation cost, security scanner
-  inventory, etc.).
-- Use full-width separators wider than 80 chars when needed; do not
-  truncate descriptions to fit a narrow window — the user can scroll.
+### Canonical spec shape
 
-### Reference template (paste into the agent's output verbatim, then customize)
+Every queued spec has the shape:
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Option               ┃ What it does                                           ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ <option name>        │ <one-line description>                                 │
-├───┼──────────────────────┼────────────────────────────────────────────────────────┤
-│ 2 │ <option name>        │ <one-line description>                                 │
-├───┼──────────────────────┼────────────────────────────────────────────────────────┤
-│ … │                      │                                                        │
-├───┼──────────────────────┼────────────────────────────────────────────────────────┤
-│ A │ Ask the agent        │ Let the agent suggest the best next action right now   │
-├───┼──────────────────────┼────────────────────────────────────────────────────────┤
-│ B │ Back                 │ Return to the previous menu                            │
-├───┼──────────────────────┼────────────────────────────────────────────────────────┤
-│ 0 │ Cancel / Exit        │ Terminate without action                               │
-└───┴──────────────────────┴────────────────────────────────────────────────────────┘
-Type a number (or B for back, 0 to cancel):
+```json
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "<unique-per-menu>",
+  "header": "<short prompt>",
+  "rows": [
+    {"key": "1", "action_id": "...", "label": "..."},
+    {"key": "2", "action_id": "...", "label": "..."},
+    {"key": "A", "action_id": "ask", "label": "Ask the agent — free-form chat with an Opus sub-agent"},
+    {"key": "B", "action_id": "back", "label": "Back — return to the previous menu"},
+    {"key": "0", "action_id": "cancel", "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}
 ```
 
-For top-level menus (no parent), drop the `B — Back` row but keep `0`.
+Per-menu rules:
+
+- **`A — Ask the agent`** appears in EVERY menu (between dynamic rows
+  and the navigation rows). Picking `A` dispatches a fresh Opus
+  sub-agent for free-form chat (see §3.0b below).
+- **`B — Back`** appears in every sub-menu. The top-level menu omits
+  it. (Some legacy sections may still use digit `9` for Back — the
+  letter `B` is preferred because it never collides with multi-digit
+  option numbers in long menus.)
+- **`0 — Cancel / Exit`** appears in EVERY menu as the last row.
+- Reserved navigation letters: `M` Main, `B` Back, `X`/`0` Exit.
+  Action letters are mnemonics (`V` Validate, `F` Fix, `D` Diagnose,
+  …) — fixed at skill-design time per menu and documented in this
+  file's per-menu fixed key→action maps.
+
+### Queue invocation (every orchestrator turn that needs a menu)
+
+```bash
+cat > /tmp/cpv-mainmenu-<slug>-spec.json <<'JSON'
+{ ... spec ... }
+JSON
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-<slug>-spec.json
+```
+
+Then END THE TURN. NEVER print the menu inline; CMS Stop hook emits
+via `systemMessage`.
+
+`cpv_menu.py` defaults `renumber: false`, so the caller's keys are
+kept verbatim. The orchestrator routes the user's next-turn key from
+the FIXED map documented in this file — it never inspects the
+rendered menu to interpret a key.
+
+## Fixed-key routing contract
+
+Two namespaces that never collide:
+
+- **Numbers `1..N`** — DYNAMIC list, ordered alphabetically. The Nth
+  number is always the Nth alpha-sorted dynamic item the agent built.
+  N varies run-to-run (e.g. 4 plugins under a multi-plugin workspace).
+- **Letters** — FIXED actions. Each letter is permanently bound to
+  one action across every CPV menu. An action that doesn't apply
+  right now is OMITTED (its row is not printed); its letter NEVER
+  reassigns and no other key reletters.
+
+The "Single source of truth" invariant: the per-menu key→action map
+in this file is the SOLE reference the orchestrator uses to interpret
+a typed key. The agent NEVER reads back which rows were rendered.
 
 ### Project-type auto-detection (helper for path-accepting leaves)
 
@@ -120,15 +158,15 @@ have a `0 — Cancel / Exit` option in any sub-table the detection presents.
 
 Claude Code's interactive UI does NOT let the user submit an empty
 response — they cannot just "press Enter" to accept a default. So every
-leaf that needs a path / name / URL MUST first print a small mini-menu
-and route based on the user's number.
+leaf that needs a path / name / URL MUST first queue a small mini-menu
+via `cpv_menu.py` and route based on the user's key.
 
-The mini-menu is **context-aware**: row 1 is always the most likely
-choice for what $PWD looks like RIGHT NOW. The orchestrator inspects the
-current directory before drawing the menu and picks the right shape from
-the cases below.
+The mini-menu is **context-aware**: key `1` is always the most likely
+choice for what $PWD looks like RIGHT NOW. The orchestrator inspects
+the current directory before queueing the menu and picks the right
+shape from the cases below.
 
-#### Detection (run before drawing the menu)
+#### Detection (run before queueing the menu)
 
 ```
 1. Layout C       — root has BOTH .claude-plugin/plugin.json
@@ -142,91 +180,83 @@ the cases below.
 
 #### Case 1 — Layout C (nested marketplace-in-plugin)
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ What to scan                                                               ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Whole repo (marketplace AND its bundled plugin together)                   │
-│ 2 │ Just the plugin part of this repo                                          │
-│ 3 │ Just the marketplace part of this repo                                     │
-│ 4 │ Type a different path / name / URL                                         │
-│ A │ Ask the agent for a recommendation                                         │
-│ 0 │ Cancel / Exit                                                              │
-└───┴────────────────────────────────────────────────────────────────────────────┘
-```
+Spec rows (slug `path-source-layoutc`):
+
+- `1` → action_id `whole_repo` — "Whole repo (marketplace AND its bundled plugin together)"
+- `2` → action_id `plugin_part` — "Just the plugin part of this repo"
+- `3` → action_id `mkt_part`    — "Just the marketplace part of this repo"
+- `T` → action_id `type_path`   — "Type a different path / name / URL"
+- `A` → action_id `ask`         — "Ask the agent for a recommendation"
+- `0` → action_id `cancel`      — "Cancel / Exit"
+
+Queue the spec via `cpv_menu.py` and end the turn. NEVER print the menu
+inline; CMS Stop hook emits via `systemMessage`.
 
 #### Case 2 — Marketplace only
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ What to scan                                                               ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ This marketplace AND every plugin it lists                                 │
-│ 2 │ Just the marketplace listing (skip the plugins)                            │
-│ 3 │ Type a different path / name / URL                                         │
-│ A │ Ask the agent for a recommendation                                         │
-│ 0 │ Cancel / Exit                                                              │
-└───┴────────────────────────────────────────────────────────────────────────────┘
-```
+Spec rows (slug `path-source-mkt`):
+
+- `1` → action_id `mkt_plus_all` — "This marketplace AND every plugin it lists"
+- `2` → action_id `mkt_only`     — "Just the marketplace listing (skip the plugins)"
+- `T` → action_id `type_path`    — "Type a different path / name / URL"
+- `A` → action_id `ask`          — "Ask the agent for a recommendation"
+- `0` → action_id `cancel`       — "Cancel / Exit"
+
+Queue the spec via `cpv_menu.py` and end the turn.
 
 #### Case 3 — Plugin only (most common)
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ What to scan                                                               ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ This plugin (the one in the current folder)                                │
-│ 2 │ Type a different path / name / URL                                         │
-│ A │ Ask the agent for a recommendation                                         │
-│ 0 │ Cancel / Exit                                                              │
-└───┴────────────────────────────────────────────────────────────────────────────┘
-```
+Spec rows (slug `path-source-plugin`):
+
+- `1` → action_id `this_plugin` — "This plugin (the one in the current folder)"
+- `T` → action_id `type_path`   — "Type a different path / name / URL"
+- `A` → action_id `ask`         — "Ask the agent for a recommendation"
+- `0` → action_id `cancel`      — "Cancel / Exit"
+
+Queue the spec via `cpv_menu.py` and end the turn.
 
 #### Case 4 — Multi-plugin project (N >= 2 sibling plugin subdirs)
 
 The orchestrator lists the plugin names it found, capped at the first 6
-for readability — `(plus K more)` if more than 6.
+for readability — `(plus K more)` if more than 6. Per the fixed-key
+contract, the per-plugin DYNAMIC list uses numbers `1..N` (alpha-sorted).
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ What to scan                                                               ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ All 4 plugins under this folder (alpha, beta, gamma, delta)                │
-│ 2 │ Pick just one of them                                                      │
-│ 3 │ Type a different path / name / URL                                         │
-│ A │ Ask the agent for a recommendation                                         │
-│ 0 │ Cancel / Exit                                                              │
-└───┴────────────────────────────────────────────────────────────────────────────┘
-```
+Spec rows (slug `path-source-multi`):
+
+- `1..N` → action_id `pick_<sorted-name>` — one per discovered plugin
+- `S`    → action_id `scan_all`           — "Scan ALL plugins under this folder"
+- `T`    → action_id `type_path`          — "Type a different path / name / URL"
+- `A`    → action_id `ask`                — "Ask the agent for a recommendation"
+- `0`    → action_id `cancel`             — "Cancel / Exit"
+
+Queue the spec via `cpv_menu.py` and end the turn.
 
 #### Case 5 — Plain folder (default fallback)
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ What to scan                                                               ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Treat the current folder as the target                                     │
-│ 2 │ Type a different path / name / URL                                         │
-│ A │ Ask the agent for a recommendation                                         │
-│ 0 │ Cancel / Exit                                                              │
-└───┴────────────────────────────────────────────────────────────────────────────┘
-```
+Spec rows (slug `path-source-plain`):
+
+- `1` → action_id `current_folder` — "Treat the current folder as the target"
+- `T` → action_id `type_path`      — "Type a different path / name / URL"
+- `A` → action_id `ask`            — "Ask the agent for a recommendation"
+- `0` → action_id `cancel`         — "Cancel / Exit"
+
+Queue the spec via `cpv_menu.py` and end the turn.
 
 #### Routing (applies to every case)
 
-  - The number that maps to "this project / this plugin / this folder"
+  - The key that maps to "this project / this plugin / this folder"
     sets `TARGET=$(pwd)` (or, for Layout C and Multi-plugin cases, the
     derived sub-target). The orchestrator continues with that path.
-  - The number labelled "Type a different path / name / URL" asks
-    `Enter the path / name / URL:` as a plain-text prompt. The user MUST
-    type at least one character. Capture as `TARGET`.
+  - Key `T` ("Type a different path / name / URL") triggers a plain-text
+    prompt: `Enter the path / name / URL:`. The user MUST type at
+    least one character. Capture as `TARGET`.
   - `0` → `Cancelled — no actions taken.` and stop.
 
-Always put the most-likely choice on row 1 — that lets the user pick the
-common path with a single keystroke.
+Always put the most-likely choice on key `1` — that lets the user
+pick the common path with a single keystroke.
 
 For leaves that need MULTIPLE path-shaped inputs (e.g. report path AND
-plugin path), repeat the mini-menu once per input.
+plugin path), queue the mini-menu spec once per input.
 
 When the orchestrator references `TARGET` in execution snippets below,
 that's the value captured by this mini-menu.
@@ -235,16 +265,17 @@ that's the value captured by this mini-menu.
 
 ### 3.0b "Ask the agent" shortcut (MANDATORY — present on EVERY menu)
 
-Every menu in §3.0, §3.1, …, §3.10, and the §3.0a path-source mini-menus
-MUST include a row labeled `A` immediately before the `0 — Cancel / Exit`
-row. The row reads:
+Every menu spec in §3.0, §3.1, …, §3.10, and the §3.0a path-source
+mini-menus MUST include a row with `"key": "A"` immediately before the
+`"key": "0"` cancel row:
 
-```
-│ A │ Ask the agent                                   │ Free-form chat with an Opus agent — paste logs, ask questions, get a plan │
+```json
+{"key": "A", "action_id": "ask", "label": "Ask the agent — free-form chat with an Opus agent — paste logs, ask questions, get a plan"}
 ```
 
-(Exact column widths vary per menu; the orchestrator pads with trailing
-spaces so the row matches the table's content-row width.)
+The Stop hook renders the row at its natural column width; CMS handles
+padding. NEVER duplicate-render the menu inline; CMS Stop hook emits
+via `systemMessage`.
 
 **Routing for `A` — IMMEDIATE suggestion + free-form chat (NO greeting,
 NO menu, NO AskUserQuestion)**:
@@ -300,16 +331,17 @@ Then the sub-agent stays in **multi-turn dialog mode**:
   `Anything else?` and continues the dialog.
 - Ends the chat ONLY when the user types `done`, `exit`, `bye`, `0`,
   or `back to menu` — at that point the sub-agent returns
-  `Returning to menu.` and the Haiku menu agent prints the §3.99
-  "do something else?" table.
+  `Returning to menu.` and the cpv-main-menu agent queues the §3.99
+  "do something else?" spec via `cpv_menu.py` (Stop hook emits it
+  post-turn).
 
 **Critical rules** (encode in every menu agent's prompt):
 
 - The sub-agent's FIRST message MUST contain a concrete suggestion
   derived from the context — never an open-ended "what would you like
   to do?" question.
-- NEVER print a numbered menu inside the chat. The user is in
-  free-form dialog; menus defeat the purpose.
+- NEVER queue a menu spec inside the chat. The user is in free-form
+  dialog; menus defeat the purpose.
 - NEVER call `AskUserQuestion`. Multi-choice prompts also defeat the
   purpose; the user must be able to paste arbitrary text.
 - NEVER auto-execute. Wait for explicit text approval (preserves
@@ -331,24 +363,55 @@ its own root. Cache optimization gets its own root because it's a
 distinct workflow (audit → refactor for cache-friendliness) from
 generic Fix.
 
+Fixed key→action map for the top-level menu (the orchestrator routes
+the typed key from THIS table; the rendered menu is presentation only):
+
+| Key | Action ID      | Label shown to user                                                                |
+|-----|----------------|-------------------------------------------------------------------------------------|
+| 1   | validate       | Validate — Check that a plugin / marketplace / component is well-formed             |
+| 2   | fix            | Fix — Auto-fix issues that a previous validation found                              |
+| 3   | cache_optimize | Optimize for Cache — Prompt-cache invalidation audit + cache-aware refactor (CA-01..CA-06) |
+| 4   | diagnose       | Diagnose — Deep audit + AI-graded quality review (semantic, opus, on request)       |
+| 5   | update         | Update — Upgrade plugin to latest canonical pipeline standard                       |
+| 6   | create         | Create — Scaffold plugin, marketplace, skill, agent, command, hook, MCP server      |
+| 7   | publish        | Publish & Migrate — Branch rules, link to marketplace, publish, migrate marketplace |
+| 8   | manage         | Manage — List installed plugins, install / update / enable / disable / doctor       |
+| H   | help           | Help / About — Show the menu overview, list of commands, version                    |
+| A   | ask            | Ask the agent — Let the agent suggest the best next action right now                |
+| 0   | cancel         | Cancel / Exit — Stop without doing anything                                         |
+
+Queue the menu spec via `cpv_menu.py` and END THE TURN. NEVER print
+the menu inline; CMS Stop hook emits via `systemMessage`:
+
+```bash
+cat > /tmp/cpv-mainmenu-top-spec.json <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "main",
+  "header": "CPV — pick a category",
+  "rows": [
+    {"key": "1", "action_id": "validate",       "label": "Validate — Check that a plugin / marketplace / component is well-formed"},
+    {"key": "2", "action_id": "fix",            "label": "Fix — Auto-fix issues that a previous validation found"},
+    {"key": "3", "action_id": "cache_optimize", "label": "Optimize for Cache — Prompt-cache invalidation audit + cache-aware refactor (CA-01..CA-06)"},
+    {"key": "4", "action_id": "diagnose",       "label": "Diagnose — Deep audit + AI-graded quality review (semantic, opus, on request)"},
+    {"key": "5", "action_id": "update",         "label": "Update — Upgrade plugin to latest canonical pipeline standard"},
+    {"key": "6", "action_id": "create",         "label": "Create — Scaffold plugin, marketplace, skill, agent, command, hook, MCP server"},
+    {"key": "7", "action_id": "publish",        "label": "Publish & Migrate — Branch rules, link to marketplace, publish, migrate marketplace"},
+    {"key": "8", "action_id": "manage",         "label": "Manage — List installed plugins, install / update / enable / disable / doctor"},
+    {"key": "H", "action_id": "help",           "label": "Help / About — Show the menu overview, list of commands, version"},
+    {"key": "A", "action_id": "ask",            "label": "Ask the agent — Let the agent suggest the best next action right now"},
+    {"key": "0", "action_id": "cancel",         "label": "Cancel / Exit — Stop without doing anything"}
+  ],
+  "footer": "Type a key (number, H, A, or 0):"
+}
+JSON
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-top-spec.json
 ```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Category                 ┃ What it does                                                          ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Validate                 │ Check that a plugin / marketplace / component is well-formed          │
-│ 2 │ Fix                      │ Auto-fix issues that a previous validation found                      │
-│ 3 │ Optimize for Cache       │ Prompt-cache invalidation audit + cache-aware refactor (CA-01..CA-06) │
-│ 4 │ Diagnose                 │ Deep audit + AI-graded quality review (semantic, opus, on request)    │
-│ 5 │ Update                   │ Upgrade plugin to latest canonical pipeline standard                  │
-│ 6 │ Create                   │ Scaffold plugin, marketplace, skill, agent, command, hook, MCP server │
-│ 7 │ Publish & Migrate        │ Branch rules, link to marketplace, publish, migrate marketplace layout│
-│ 8 │ Manage                   │ List installed plugins, install / update / enable / disable / doctor  │
-│ H │ Help / About             │ Show the menu overview, list of commands, version                     │
-│ A │ Ask the agent            │ Let the agent suggest the best next action right now                  │
-│ 0 │ Cancel / Exit            │ Stop without doing anything                                           │
-└───┴──────────────────────────┴───────────────────────────────────────────────────────────────────────┘
-Type a number (or H for help, A to ask the agent) to choose:
-```
+
+Note that the top-level menu has NO `B — Back` row (it IS the parent
+of every other menu). All sub-menus include `B — Back`.
 
 ### Sub-menu mapping (v2.90.1 — physically renumbered)
 
@@ -368,22 +431,24 @@ indirection, no "+§3.Y as sub-leaves" hedging.
 | 8 Manage             | §3.8 (Manage sub-menu)                                                 |
 
 The orchestrator looks up the sub-menu section in the table above based
-on the user's top-row pick, then renders that section's table verbatim.
+on the user's top-row pick, then queues that section's spec via
+`cpv_menu.py` and ends the turn.
 
 ---
 
 ### Post-validate flow (applies to every leaf in §3.1)
 
 After a leaf anywhere in §3.1 (including the nested §3.1.6 From-GitHub
-leaves) finishes and the report is on disk, the orchestrator MUST print
-the §3.10 post-validate fix menu (NEVER the generic §3.99 "do something
-else" table). This is non-negotiable: the user always gets the explicit
-"fix N or end" choice after a validation, never just "what's next?".
+leaves) finishes and the report is on disk, the orchestrator MUST queue
+the §3.10 post-validate fix menu spec (NEVER the generic §3.99 "do
+something else" spec). This is non-negotiable: the user always gets
+the explicit "fix N or end" choice after a validation, never just
+"what's next?".
 
 ### 3.1 Validate sub-menu (nested, ≤7 functional rows per level)
 
-When the user reaches this menu, the orchestrator first prints this
-Level-1 table. Every option that takes a path triggers the **project-type
+When the user reaches this menu, the orchestrator queues this Level-1
+spec via `cpv_menu.py`. Every option that takes a path triggers the **project-type
 auto-detection** (see "Project-type auto-detection" above) BEFORE
 invoking the underlying validator.
 
@@ -393,31 +458,48 @@ one-keystroke shortcut for "validate the project I'm currently in".
 
 #### Level 1 — Validate sub-menu (top)
 
-```
-┏━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ #  ┃ What to validate                                ┃ What it does                                                                          ┃
-┡━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│  1 │ Plugin (full audit)                             │ Run every check we have on a whole plugin folder                                      │
-├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│  2 │ Single component                                │ Skill / agent / command / hook / MCP / LSP / output-style / rule — drill in           │
-├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│  3 │ Marketplace                                     │ Local folder / GitHub / any git URL / inline settings.json — drill in                 │
-├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│  4 │ Scope                                           │ Project-scope (git-tracked) / Local-scope (not in git) — drill in                     │
-├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│  5 │ Specific quality check                          │ Security / cache / xref / docs / encoding / lint / other — drill in                   │
-├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│  6 │ From GitHub                                     │ Plugin or marketplace pulled from a GitHub repo (tmp clone + cleanup) — drill in      │
-├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│  7 │ Batch / fleet (v2.101.0)                        │ Multiple plugins (marketplace / list / @listfile / scope) — drill into batch sub-menu │
-├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│  A │ Ask the agent for a recommendation              │ Let the agent suggest the best next action right now                                  │
-├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│  B │ Back                                            │ Go back to the top-level menu                                                         │
-├────┼─────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤
-│  0 │ Cancel / Exit                                   │ Stop without doing anything                                                           │
-└────┴─────────────────────────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────┘
-Type a number (or B for back, 0 to cancel):
+Fixed key→action map (slug `validate`):
+
+| Key | Action ID    | Label shown to user                                                                          |
+|-----|--------------|----------------------------------------------------------------------------------------------|
+| 1   | val_plugin   | Plugin (full audit) — Run every check we have on a whole plugin folder                       |
+| 2   | val_component| Single component — Skill / agent / command / hook / MCP / LSP / output-style / rule          |
+| 3   | val_mkt      | Marketplace — Local folder / GitHub / any git URL / inline settings.json                     |
+| 4   | val_scope    | Scope — Project-scope (git-tracked) / Local-scope (not in git)                               |
+| 5   | val_quality  | Specific quality check — Security / cache / xref / docs / encoding / lint / other            |
+| 6   | val_github   | From GitHub — Plugin or marketplace pulled from a GitHub repo (tmp clone + cleanup)          |
+| 7   | val_batch    | Batch / fleet (v2.101.0) — Multiple plugins (marketplace / list / @listfile / scope)         |
+| A   | ask          | Ask the agent for a recommendation                                                           |
+| B   | back         | Back — Go back to the top-level menu                                                         |
+| 0   | cancel       | Cancel / Exit — Stop without doing anything                                                  |
+
+Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
+menu inline; CMS Stop hook emits via `systemMessage`:
+
+```bash
+cat > /tmp/cpv-mainmenu-validate-spec.json <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "validate",
+  "header": "Validate — what to check",
+  "rows": [
+    {"key": "1", "action_id": "val_plugin",    "label": "Plugin (full audit) — Run every check we have on a whole plugin folder"},
+    {"key": "2", "action_id": "val_component", "label": "Single component — Skill / agent / command / hook / MCP / LSP / output-style / rule"},
+    {"key": "3", "action_id": "val_mkt",       "label": "Marketplace — Local folder / GitHub / any git URL / inline settings.json"},
+    {"key": "4", "action_id": "val_scope",     "label": "Scope — Project-scope (git-tracked) / Local-scope (not in git)"},
+    {"key": "5", "action_id": "val_quality",   "label": "Specific quality check — Security / cache / xref / docs / encoding / lint / other"},
+    {"key": "6", "action_id": "val_github",    "label": "From GitHub — Plugin or marketplace pulled from a GitHub repo"},
+    {"key": "7", "action_id": "val_batch",     "label": "Batch / fleet (v2.101.0) — Multiple plugins (marketplace / list / @listfile / scope)"},
+    {"key": "A", "action_id": "ask",           "label": "Ask the agent for a recommendation"},
+    {"key": "B", "action_id": "back",          "label": "Back — Go back to the top-level menu"},
+    {"key": "0", "action_id": "cancel",        "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}
+JSON
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-validate-spec.json
 ```
 
 All leaves below FIRST run the project-type detection (see top of file)
@@ -434,31 +516,48 @@ on the resolved path, then drill in. Per-leaf recipes:
 
 #### 3.1.2 Single component — Level-2 sub-menu
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Component                           ┃ What it does                                                 ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ SKILL.md                            │ Header (frontmatter), structure, and content rules           │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 2 │ Agent .md                           │ Header, model, tools, examples (2+ <example> blocks)         │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 3 │ Command .md                         │ Header, target agent, tool allowlist, argument hint          │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 4 │ Hook (hooks.json)                   │ hooks.json layout + event names + the scripts the hook calls │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 5 │ MCP server                          │ MCP server setup (transport, env vars, security checks)      │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 6 │ LSP server                          │ Language-server setup in plugin.json                         │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 7 │ Output-style or Rule file           │ Output-style files or .claude/rules/*.md — drill in          │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ A │ Ask the agent                       │ Let the agent suggest the best next action right now         │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ B │ Back                                │ Go back to the Validate menu                                 │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 0 │ Cancel / Exit                       │ Stop without doing anything                                  │
-└───┴─────────────────────────────────────┴──────────────────────────────────────────────────────────────┘
-Type a number (or B for back, 0 to cancel):
+Fixed key→action map (slug `validate-component`):
+
+| Key | Action ID    | Label shown to user                                                          |
+|-----|--------------|-------------------------------------------------------------------------------|
+| 1   | comp_skill   | SKILL.md — Header (frontmatter), structure, and content rules                 |
+| 2   | comp_agent   | Agent .md — Header, model, tools, examples (2+ <example> blocks)              |
+| 3   | comp_command | Command .md — Header, target agent, tool allowlist, argument hint             |
+| 4   | comp_hook    | Hook (hooks.json) — hooks.json layout + event names + the scripts the hook calls |
+| 5   | comp_mcp     | MCP server — setup (transport, env vars, security checks)                     |
+| 6   | comp_lsp     | LSP server — Language-server setup in plugin.json                             |
+| 7   | comp_style   | Output-style or Rule file — Output-style files or .claude/rules/*.md          |
+| A   | ask          | Ask the agent                                                                 |
+| B   | back         | Back — Go back to the Validate menu                                           |
+| 0   | cancel       | Cancel / Exit                                                                 |
+
+Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
+menu inline; CMS Stop hook emits via `systemMessage`:
+
+```bash
+cat > /tmp/cpv-mainmenu-validate-component-spec.json <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "validate-component",
+  "header": "Validate — single component",
+  "rows": [
+    {"key": "1", "action_id": "comp_skill",   "label": "SKILL.md — Header (frontmatter), structure, and content rules"},
+    {"key": "2", "action_id": "comp_agent",   "label": "Agent .md — Header, model, tools, examples (2+ <example> blocks)"},
+    {"key": "3", "action_id": "comp_command", "label": "Command .md — Header, target agent, tool allowlist, argument hint"},
+    {"key": "4", "action_id": "comp_hook",    "label": "Hook (hooks.json) — hooks.json layout + event names + the scripts the hook calls"},
+    {"key": "5", "action_id": "comp_mcp",     "label": "MCP server — setup (transport, env vars, security checks)"},
+    {"key": "6", "action_id": "comp_lsp",     "label": "LSP server — Language-server setup in plugin.json"},
+    {"key": "7", "action_id": "comp_style",   "label": "Output-style or Rule file — Output-style files or .claude/rules/*.md"},
+    {"key": "A", "action_id": "ask",          "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",         "label": "Back — Go back to the Validate menu"},
+    {"key": "0", "action_id": "cancel",       "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}
+JSON
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-validate-component-spec.json
 ```
 
 ##### 3.1.2.1 SKILL.md
@@ -517,21 +616,38 @@ Type a number (or B for back, 0 to cancel):
 
 ##### 3.1.2.7 Output-style or Rule file — Level-3 sub-menu
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Type                                ┃ What it does                                                 ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Output-style                        │ Output-style files in .claude/output-styles/                 │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 2 │ Rule file (.claude/rules/*.md)      │ Rule-file headers and content                                │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ A │ Ask the agent                       │ Let the agent suggest the best next action right now         │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ B │ Back                                │ Go back to the Single-component menu                         │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 0 │ Cancel / Exit                       │ Stop without doing anything                                  │
-└───┴─────────────────────────────────────┴──────────────────────────────────────────────────────────────┘
-Type a number (or B for back, 0 to cancel):
+Fixed key→action map (slug `validate-style-or-rule`):
+
+| Key | Action ID  | Label shown to user                                                    |
+|-----|------------|-------------------------------------------------------------------------|
+| 1   | style_file | Output-style — Output-style files in .claude/output-styles/             |
+| 2   | rule_file  | Rule file — Rule-file headers and content (.claude/rules/*.md)          |
+| A   | ask        | Ask the agent                                                           |
+| B   | back       | Back — Go back to the Single-component menu                             |
+| 0   | cancel     | Cancel / Exit                                                           |
+
+Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
+menu inline; CMS Stop hook emits via `systemMessage`:
+
+```bash
+cat > /tmp/cpv-mainmenu-validate-style-spec.json <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "validate-style-or-rule",
+  "header": "Validate — output-style or rule file",
+  "rows": [
+    {"key": "1", "action_id": "style_file", "label": "Output-style — Output-style files in .claude/output-styles/"},
+    {"key": "2", "action_id": "rule_file",  "label": "Rule file — Rule-file headers and content (.claude/rules/*.md)"},
+    {"key": "A", "action_id": "ask",        "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",       "label": "Back — Go back to the Single-component menu"},
+    {"key": "0", "action_id": "cancel",     "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}
+JSON
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-validate-style-spec.json
 ```
 
 ###### 3.1.2.7.1 Output-style
@@ -556,25 +672,42 @@ Type a number (or B for back, 0 to cancel):
 
 #### 3.1.3 Marketplace — Level-2 sub-menu
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Source                              ┃ What it does                                                 ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Local folder                        │ A marketplace folder on this machine                         │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 2 │ GitHub (owner/repo)                 │ Clone a marketplace from a GitHub repo (tmp dir + cleanup)   │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 3 │ Any git URL                         │ Any URL git can clone (GitLab, Bitbucket, SSH, self-hosted)  │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 4 │ Inline (settings.json)              │ Marketplace blocks pasted directly into settings.json        │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ A │ Ask the agent                       │ Let the agent suggest the best next action right now         │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ B │ Back                                │ Go back to the Validate menu                                 │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 0 │ Cancel / Exit                       │ Stop without doing anything                                  │
-└───┴─────────────────────────────────────┴──────────────────────────────────────────────────────────────┘
-Type a number (or B for back, 0 to cancel):
+Fixed key→action map (slug `validate-marketplace`):
+
+| Key | Action ID  | Label shown to user                                                     |
+|-----|------------|--------------------------------------------------------------------------|
+| 1   | mkt_local  | Local folder — A marketplace folder on this machine                      |
+| 2   | mkt_github | GitHub (owner/repo) — Clone a marketplace from a GitHub repo             |
+| 3   | mkt_giturl | Any git URL — GitLab / Bitbucket / SSH / self-hosted                     |
+| 4   | mkt_inline | Inline (settings.json) — Marketplace blocks pasted directly              |
+| A   | ask        | Ask the agent                                                            |
+| B   | back       | Back — Go back to the Validate menu                                      |
+| 0   | cancel     | Cancel / Exit                                                            |
+
+Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
+menu inline; CMS Stop hook emits via `systemMessage`:
+
+```bash
+cat > /tmp/cpv-mainmenu-validate-mkt-spec.json <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "validate-marketplace",
+  "header": "Validate — marketplace source",
+  "rows": [
+    {"key": "1", "action_id": "mkt_local",  "label": "Local folder — A marketplace folder on this machine"},
+    {"key": "2", "action_id": "mkt_github", "label": "GitHub (owner/repo) — Clone a marketplace from a GitHub repo"},
+    {"key": "3", "action_id": "mkt_giturl", "label": "Any git URL — GitLab / Bitbucket / SSH / self-hosted"},
+    {"key": "4", "action_id": "mkt_inline", "label": "Inline (settings.json) — Marketplace blocks pasted directly"},
+    {"key": "A", "action_id": "ask",        "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",       "label": "Back — Go back to the Validate menu"},
+    {"key": "0", "action_id": "cancel",     "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}
+JSON
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-validate-mkt-spec.json
 ```
 
 ##### 3.1.3.1 Local folder
@@ -623,21 +756,38 @@ Type a number (or B for back, 0 to cancel):
 
 #### 3.1.4 Scope — Level-2 sub-menu
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Scope                               ┃ What it does                                                 ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Project-scope (git-tracked)         │ Files in .claude/ that ARE checked into git                  │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 2 │ Local-scope (not in git)            │ settings.local.json + ~/.claude.json per-project state       │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ A │ Ask the agent                       │ Let the agent suggest the best next action right now         │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ B │ Back                                │ Go back to the Validate menu                                 │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 0 │ Cancel / Exit                       │ Stop without doing anything                                  │
-└───┴─────────────────────────────────────┴──────────────────────────────────────────────────────────────┘
-Type a number (or B for back, 0 to cancel):
+Fixed key→action map (slug `validate-scope`):
+
+| Key | Action ID    | Label shown to user                                                     |
+|-----|--------------|--------------------------------------------------------------------------|
+| 1   | scope_project| Project-scope (git-tracked) — Files in .claude/ that ARE checked into git |
+| 2   | scope_local  | Local-scope (not in git) — settings.local.json + ~/.claude.json state    |
+| A   | ask          | Ask the agent                                                            |
+| B   | back         | Back — Go back to the Validate menu                                      |
+| 0   | cancel       | Cancel / Exit                                                            |
+
+Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
+menu inline; CMS Stop hook emits via `systemMessage`:
+
+```bash
+cat > /tmp/cpv-mainmenu-validate-scope-spec.json <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "validate-scope",
+  "header": "Validate — scope",
+  "rows": [
+    {"key": "1", "action_id": "scope_project", "label": "Project-scope (git-tracked) — Files in .claude/ that ARE checked into git"},
+    {"key": "2", "action_id": "scope_local",   "label": "Local-scope (not in git) — settings.local.json + ~/.claude.json state"},
+    {"key": "A", "action_id": "ask",           "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",          "label": "Back — Go back to the Validate menu"},
+    {"key": "0", "action_id": "cancel",        "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}
+JSON
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-validate-scope-spec.json
 ```
 
 ##### 3.1.4.1 Project-scope (git-tracked)
@@ -660,31 +810,48 @@ Type a number (or B for back, 0 to cancel):
 
 #### 3.1.5 Specific quality check — Level-2 sub-menu
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Check                               ┃ What it does                                                 ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Security                            │ Security scanners + rule packs — drill into §3.16            │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 2 │ Cache patterns                      │ Prompt-cache invalidation audit — dispatches to §3.3         │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 3 │ Cross-references (xref)             │ Stale references between agents/skills/commands and refs     │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 4 │ Documentation                       │ README + doc structure rules                                 │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 5 │ File encoding                       │ UTF-8, BOM marker, line endings on every .md/.json/.yaml file│
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 6 │ Lint scripts (ruff / mypy / sc)     │ Run linters on every Python and Bash script the plugin ships │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 7 │ Other (enterprise/scoring/telem)    │ Compliance / scoring / telemetry hazards — drill in          │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ A │ Ask the agent                       │ Let the agent suggest the best next action right now         │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ B │ Back                                │ Go back to the Validate menu                                 │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 0 │ Cancel / Exit                       │ Stop without doing anything                                  │
-└───┴─────────────────────────────────────┴──────────────────────────────────────────────────────────────┘
-Type a number (or B for back, 0 to cancel):
+Fixed key→action map (slug `validate-quality`):
+
+| Key | Action ID  | Label shown to user                                                          |
+|-----|------------|-------------------------------------------------------------------------------|
+| 1   | q_security | Security — Security scanners + rule packs (drills into §3.16)                |
+| 2   | q_cache    | Cache patterns — Prompt-cache invalidation audit (dispatches to §3.3)        |
+| 3   | q_xref     | Cross-references (xref) — Stale references between agents/skills/commands    |
+| 4   | q_docs     | Documentation — README + doc structure rules                                 |
+| 5   | q_encoding | File encoding — UTF-8, BOM marker, line endings on every .md/.json/.yaml     |
+| 6   | q_lint     | Lint scripts (ruff / mypy / shellcheck) — Run linters on every script        |
+| 7   | q_other    | Other (enterprise/scoring/telem) — Compliance / scoring / telemetry hazards  |
+| A   | ask        | Ask the agent                                                                |
+| B   | back       | Back — Go back to the Validate menu                                          |
+| 0   | cancel     | Cancel / Exit                                                                |
+
+Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
+menu inline; CMS Stop hook emits via `systemMessage`:
+
+```bash
+cat > /tmp/cpv-mainmenu-validate-quality-spec.json <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "validate-quality",
+  "header": "Validate — specific quality check",
+  "rows": [
+    {"key": "1", "action_id": "q_security", "label": "Security — Security scanners + rule packs (drills into §3.16)"},
+    {"key": "2", "action_id": "q_cache",    "label": "Cache patterns — Prompt-cache invalidation audit (dispatches to §3.3)"},
+    {"key": "3", "action_id": "q_xref",     "label": "Cross-references (xref) — Stale references between agents/skills/commands"},
+    {"key": "4", "action_id": "q_docs",     "label": "Documentation — README + doc structure rules"},
+    {"key": "5", "action_id": "q_encoding", "label": "File encoding — UTF-8, BOM marker, line endings on every .md/.json/.yaml"},
+    {"key": "6", "action_id": "q_lint",     "label": "Lint scripts (ruff / mypy / shellcheck) — Run linters on every script"},
+    {"key": "7", "action_id": "q_other",    "label": "Other (enterprise/scoring/telem) — Compliance / scoring / telemetry hazards"},
+    {"key": "A", "action_id": "ask",        "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",       "label": "Back — Go back to the Validate menu"},
+    {"key": "0", "action_id": "cancel",     "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}
+JSON
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-validate-quality-spec.json
 ```
 
 ##### 3.1.5.1 Security — drill into sub-menu
@@ -734,23 +901,40 @@ the same workflow directly from top-level row 3.
 
 ##### 3.1.5.7 Other (enterprise / scoring / telemetry) — Level-3 sub-menu
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Check                               ┃ What it does                                                 ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Enterprise                          │ Compliance / governance / IT-managed-settings rules          │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 2 │ Scoring self-check                  │ Verify CPV's own pass / fail / severity logic still works    │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 3 │ Telemetry hazards (risky env vars)  │ PLUGIN_SEED_DIR / SHELL_PREFIX / OTEL_LOG_RAW_API_BODIES etc.│
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ A │ Ask the agent                       │ Let the agent suggest the best next action right now         │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ B │ Back                                │ Go back to the Specific-quality-check menu                   │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 0 │ Cancel / Exit                       │ Stop without doing anything                                  │
-└───┴─────────────────────────────────────┴──────────────────────────────────────────────────────────────┘
-Type a number (or B for back, 0 to cancel):
+Fixed key→action map (slug `validate-other`):
+
+| Key | Action ID    | Label shown to user                                                          |
+|-----|--------------|-------------------------------------------------------------------------------|
+| 1   | enterprise   | Enterprise — Compliance / governance / IT-managed-settings rules              |
+| 2   | scoring      | Scoring self-check — Verify CPV's own pass / fail / severity logic still works|
+| 3   | telemetry    | Telemetry hazards (risky env vars) — PLUGIN_SEED_DIR / SHELL_PREFIX / etc.   |
+| A   | ask          | Ask the agent                                                                 |
+| B   | back         | Back — Go back to the Specific-quality-check menu                             |
+| 0   | cancel       | Cancel / Exit                                                                 |
+
+Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
+menu inline; CMS Stop hook emits via `systemMessage`:
+
+```bash
+cat > /tmp/cpv-mainmenu-validate-other-spec.json <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "validate-other",
+  "header": "Validate — enterprise / scoring / telemetry",
+  "rows": [
+    {"key": "1", "action_id": "enterprise", "label": "Enterprise — Compliance / governance / IT-managed-settings rules"},
+    {"key": "2", "action_id": "scoring",    "label": "Scoring self-check — Verify CPV's own pass / fail / severity logic"},
+    {"key": "3", "action_id": "telemetry",  "label": "Telemetry hazards (risky env vars) — PLUGIN_SEED_DIR / SHELL_PREFIX / etc."},
+    {"key": "A", "action_id": "ask",        "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",       "label": "Back — Go back to the Specific-quality-check menu"},
+    {"key": "0", "action_id": "cancel",     "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}
+JSON
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-validate-other-spec.json
 ```
 
 ###### 3.1.5.7.1 Enterprise
@@ -782,21 +966,38 @@ Type a number (or B for back, 0 to cancel):
 
 #### 3.1.6 From GitHub — Level-2 sub-menu
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Source                              ┃ What it does                                                 ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Plugin (owner/repo)                 │ Check a plugin from a GitHub repo (tmp clone + cleanup)      │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 2 │ Marketplace (owner/repo)            │ Check a marketplace from a GitHub repo (tmp clone + cleanup) │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ A │ Ask the agent                       │ Let the agent suggest the best next action right now         │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ B │ Back                                │ Go back to the Validate menu                                 │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 0 │ Cancel / Exit                       │ Stop without doing anything                                  │
-└───┴─────────────────────────────────────┴──────────────────────────────────────────────────────────────┘
-Type a number (or B for back, 0 to cancel):
+Fixed key→action map (slug `validate-github`):
+
+| Key | Action ID  | Label shown to user                                                  |
+|-----|------------|-----------------------------------------------------------------------|
+| 1   | gh_plugin  | Plugin (owner/repo) — Check a plugin from a GitHub repo               |
+| 2   | gh_mkt     | Marketplace (owner/repo) — Check a marketplace from a GitHub repo     |
+| A   | ask        | Ask the agent                                                         |
+| B   | back       | Back — Go back to the Validate menu                                   |
+| 0   | cancel     | Cancel / Exit                                                         |
+
+Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
+menu inline; CMS Stop hook emits via `systemMessage`:
+
+```bash
+cat > /tmp/cpv-mainmenu-validate-github-spec.json <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "validate-github",
+  "header": "Validate — from GitHub",
+  "rows": [
+    {"key": "1", "action_id": "gh_plugin", "label": "Plugin (owner/repo) — Check a plugin from a GitHub repo"},
+    {"key": "2", "action_id": "gh_mkt",    "label": "Marketplace (owner/repo) — Check a marketplace from a GitHub repo"},
+    {"key": "A", "action_id": "ask",       "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",      "label": "Back — Go back to the Validate menu"},
+    {"key": "0", "action_id": "cancel",    "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}
+JSON
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-validate-github-spec.json
 ```
 
 ##### 3.1.6.1 Plugin from GitHub
@@ -836,33 +1037,50 @@ skill pack, OR mixed marketplace.json entries. Resolved by
 `scripts/cpv_marketplace_input.py`; planned + status-tabled by
 `scripts/cpv_batch_orchestrator.py`.
 
-```
-┏━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ #  ┃ Batch operation                                     ┃ What it does                                                                                                                          ┃
-┡━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│  1 │ Validate (read-only, fan-out)                       │ /cpv-batch-validate — plugin-validator (batch_validate) — N shards, per-plugin reports                                                │
-├────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  2 │ Security audit (5 ext. scanners, fan-out)           │ /cpv-batch-security-audit — plugin-validator (batch_security_audit) — all 5 scanners + skillaudit native, per-plugin                  │
-├────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  3 │ Caching audit (CA-01..CA-06, fan-out)               │ /cpv-batch-caching-audit — cache-optimizer-agent (batch_audit) — read-only CA-01..06 across N plugins                                 │
-├────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  4 │ Caching optimize (audit + fix, fan-out)             │ /cpv-batch-caching-optimize — cache-optimizer-agent (batch_fix) — audit then fix CA-01..06 in priority order                          │
-├────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  5 │ Fix (per-plugin, fan-out)                           │ /cpv-batch-fix — plugin-fixer (batch_per_plugin) — one fixer per plugin                                                               │
-├────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  6 │ Validate + fix (single-pass, same-turn)             │ /cpv-batch-validate-and-fix — plugin-fixer (batch_same_turn_validate_fix) — read each file ONCE; scan + verify FPs + fix              │
-├────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  7 │ Full scan + fix (single-pass, all checks)           │ /cpv-batch-full-scan-and-fix — plugin-fixer (batch_same_turn_full) — validate + security + caching + fix in one turn                  │
-├────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  8 │ Scope-aware doctor (LOCAL only)                     │ /cpv-batch-scope-diagnose — cpv-doctor-agent (batch_scope_diagnose) — drill in for scope: user / project / local / full               │
-├────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  A │ Ask the agent                                       │ Let the agent suggest the best next action right now                                                                                  │
-├────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  B │ Back                                                │ Go back to the Validate menu                                                                                                          │
-├────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  0 │ Cancel / Exit                                       │ Stop without doing anything                                                                                                           │
-└────┴─────────────────────────────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-Type a number (or B for back, 0 to cancel):
+Fixed key→action map (slug `validate-batch`):
+
+| Key | Action ID         | Label shown to user                                                                                |
+|-----|-------------------|-----------------------------------------------------------------------------------------------------|
+| 1   | batch_validate    | Validate (read-only, fan-out) — /cpv-batch-validate (plugin-validator batch_validate)              |
+| 2   | batch_security    | Security audit (5 ext. scanners) — /cpv-batch-security-audit (plugin-validator batch_security)     |
+| 3   | batch_cache_audit | Caching audit (CA-01..CA-06) — /cpv-batch-caching-audit (cache-optimizer-agent batch_audit)        |
+| 4   | batch_cache_opt   | Caching optimize (audit + fix) — /cpv-batch-caching-optimize (cache-optimizer-agent batch_fix)     |
+| 5   | batch_fix         | Fix (per-plugin) — /cpv-batch-fix (plugin-fixer batch_per_plugin)                                  |
+| 6   | batch_val_fix     | Validate + fix (same-turn) — /cpv-batch-validate-and-fix (plugin-fixer same_turn_validate_fix)     |
+| 7   | batch_full        | Full scan + fix (same-turn) — /cpv-batch-full-scan-and-fix (plugin-fixer same_turn_full)           |
+| 8   | batch_scope       | Scope-aware doctor (LOCAL only) — /cpv-batch-scope-diagnose (cpv-doctor-agent batch_scope_diagnose)|
+| A   | ask               | Ask the agent                                                                                       |
+| B   | back              | Back — Go back to the Validate menu                                                                |
+| 0   | cancel            | Cancel / Exit                                                                                       |
+
+Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
+menu inline; CMS Stop hook emits via `systemMessage`:
+
+```bash
+cat > /tmp/cpv-mainmenu-validate-batch-spec.json <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "validate-batch",
+  "header": "Validate — batch / fleet (v2.101.0)",
+  "rows": [
+    {"key": "1", "action_id": "batch_validate",    "label": "Validate (read-only, fan-out) — /cpv-batch-validate"},
+    {"key": "2", "action_id": "batch_security",    "label": "Security audit (5 ext. scanners) — /cpv-batch-security-audit"},
+    {"key": "3", "action_id": "batch_cache_audit", "label": "Caching audit (CA-01..CA-06) — /cpv-batch-caching-audit"},
+    {"key": "4", "action_id": "batch_cache_opt",   "label": "Caching optimize (audit + fix) — /cpv-batch-caching-optimize"},
+    {"key": "5", "action_id": "batch_fix",         "label": "Fix (per-plugin) — /cpv-batch-fix"},
+    {"key": "6", "action_id": "batch_val_fix",     "label": "Validate + fix (same-turn) — /cpv-batch-validate-and-fix"},
+    {"key": "7", "action_id": "batch_full",        "label": "Full scan + fix (same-turn) — /cpv-batch-full-scan-and-fix"},
+    {"key": "8", "action_id": "batch_scope",       "label": "Scope-aware doctor (LOCAL only) — /cpv-batch-scope-diagnose"},
+    {"key": "A", "action_id": "ask",               "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",              "label": "Back — Go back to the Validate menu"},
+    {"key": "0", "action_id": "cancel",            "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}
+JSON
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-validate-batch-spec.json
 ```
 
 The path-source mini-menu (§3.0a) is skipped for these leaves —
@@ -906,21 +1124,40 @@ prompt for the input string.
 
 ##### 3.1.7.8 Scope-aware doctor — Level-3 sub-menu
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Scope operation                     ┃ What it does                                                 ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Diagnose (read-only)                │ /cpv-batch-scope-diagnose — surface issues across scopes     │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 2 │ Fix (apply fixes)                   │ /cpv-batch-scope-fix — fix issues a prior diagnose surfaced  │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 3 │ Diagnose + fix (same-turn)          │ /cpv-batch-scope-diagnose-and-fix — scan + verify + fix once │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ B │ Back                                │ Go back to the Batch / fleet menu                            │
-├───┼─────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ 0 │ Cancel / Exit                       │ Stop without doing anything                                  │
-└───┴─────────────────────────────────────┴──────────────────────────────────────────────────────────────┘
-Type a number (or B for back, 0 to cancel):
+Fixed key→action map (slug `validate-batch-scope`):
+
+| Key | Action ID         | Label shown to user                                                                |
+|-----|-------------------|-------------------------------------------------------------------------------------|
+| 1   | scope_diagnose    | Diagnose (read-only) — /cpv-batch-scope-diagnose (surface issues across scopes)    |
+| 2   | scope_fix         | Fix (apply fixes) — /cpv-batch-scope-fix (fix issues a prior diagnose surfaced)    |
+| 3   | scope_diag_fix    | Diagnose + fix (same-turn) — /cpv-batch-scope-diagnose-and-fix                     |
+| A   | ask               | Ask the agent                                                                       |
+| B   | back              | Back — Go back to the Batch / fleet menu                                            |
+| 0   | cancel            | Cancel / Exit                                                                       |
+
+Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
+menu inline; CMS Stop hook emits via `systemMessage`:
+
+```bash
+cat > /tmp/cpv-mainmenu-validate-batch-scope-spec.json <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "validate-batch-scope",
+  "header": "Validate — scope-aware doctor (LOCAL only)",
+  "rows": [
+    {"key": "1", "action_id": "scope_diagnose", "label": "Diagnose (read-only) — /cpv-batch-scope-diagnose"},
+    {"key": "2", "action_id": "scope_fix",      "label": "Fix (apply fixes) — /cpv-batch-scope-fix"},
+    {"key": "3", "action_id": "scope_diag_fix", "label": "Diagnose + fix (same-turn) — /cpv-batch-scope-diagnose-and-fix"},
+    {"key": "A", "action_id": "ask",            "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",           "label": "Back — Go back to the Batch / fleet menu"},
+    {"key": "0", "action_id": "cancel",         "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}
+JSON
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-validate-batch-scope-spec.json
 ```
 
 - **arg-prompts** (in order for ALL three leaves):
@@ -944,19 +1181,42 @@ existing in-flight auto-batch on §3.2.1 step 4 still handles
 single-plugin findings counts > safe-ceiling — that's a different
 shape than fleet operations.
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Operation                ┃ What it does                                                       ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Fix plugin issues        │ From a report file OR a plugin folder (uses the plugin-fixer agent)│
-│ 2 │ Fix marketplace issues   │ From a report file OR a marketplace folder (uses marketplace-fixer)│
-│ 3 │ Optimize prompt cache    │ Audit + auto-fix the cache patterns (uses cache-optimizer-agent)   │
-│ 4 │ Batch fix (fleet)        │ Many plugins in parallel — drill into §3.1.7 Batch / fleet (v2.101)│
-│ 9 │ Back                     │ Go back to the top-level menu                                      │
-│ A │ Ask the agent            │ Let the agent suggest the best next action right now               │
-│ 0 │ Cancel / Exit            │ Stop without doing anything                                        │
-└───┴──────────────────────────┴────────────────────────────────────────────────────────────────────┘
-Type a number to choose:
+Fixed key→action map (slug `fix`):
+
+| Key | Action ID    | Label shown to user                                                       |
+|-----|--------------|----------------------------------------------------------------------------|
+| 1   | fix_plugin   | Fix plugin issues — From a report file OR a plugin folder (plugin-fixer)   |
+| 2   | fix_mkt      | Fix marketplace issues — From a report file OR a marketplace folder        |
+| 3   | fix_cache    | Optimize prompt cache — Audit + auto-fix the cache patterns                |
+| 4   | fix_batch    | Batch fix (fleet) — Drill into §3.1.7 Batch / fleet                        |
+| A   | ask          | Ask the agent                                                              |
+| B   | back         | Back — Go back to the top-level menu                                       |
+| 0   | cancel       | Cancel / Exit                                                              |
+
+Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
+menu inline; CMS Stop hook emits via `systemMessage`:
+
+```bash
+cat > /tmp/cpv-mainmenu-fix-spec.json <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "fix",
+  "header": "Fix — what to fix",
+  "rows": [
+    {"key": "1", "action_id": "fix_plugin", "label": "Fix plugin issues — From a report file OR a plugin folder (plugin-fixer)"},
+    {"key": "2", "action_id": "fix_mkt",    "label": "Fix marketplace issues — From a report file OR a marketplace folder"},
+    {"key": "3", "action_id": "fix_cache",  "label": "Optimize prompt cache — Audit + auto-fix the cache patterns"},
+    {"key": "4", "action_id": "fix_batch",  "label": "Batch fix (fleet) — Drill into §3.1.7 Batch / fleet"},
+    {"key": "A", "action_id": "ask",        "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",       "label": "Back — Go back to the top-level menu"},
+    {"key": "0", "action_id": "cancel",     "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}
+JSON
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-fix-spec.json
 ```
 
 #### 3.2.1 Fix plugin findings
@@ -995,25 +1255,59 @@ This row is a routing shortcut, not a separate workflow. When the user picks `4`
 
 ### 3.6 Create sub-menu
 
-```
-┏━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ #  ┃ Scaffold                                        ┃ What it does                                                                               ┃
-┡━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1  │ New plugin (latest pipeline standard)           │ Fresh plugin repo with idempotent publish.py + cpv_lint_engine + pathlib + sanitized inputs│
-│ 2  │ New marketplace                                 │ Fresh marketplace repo from scratch (Layout A/B/C — interactive)                           │
-│ 3  │ New skill (in existing plugin)                  │ Add skills/<name>/SKILL.md — valid frontmatter + auto-refresh README                       │
-│ 4  │ New agent (in existing plugin)                  │ Add agents/<name>.md — valid frontmatter + tools whitelist + auto-refresh README           │
-│ 5  │ New slash command (in existing plugin)          │ Add commands/<name>.md — valid frontmatter + auto-refresh README                           │
-│ 6  │ New hook (in existing plugin)                   │ Append hook entry to hooks/hooks.json — cross-platform-aware (bash-isms rejected)          │
-│ 7  │ New MCP server (in existing plugin)             │ Register server in .mcp.json — stdio default, HTTP via flag, server-name uniqueness check  │
-│ 8  │ Pack components into a plugin (multi-select)    │ Pack a folder of components into a plugin (skill/agent/cmd/hook/mcp/lsp/monitor/style)     │
-│ 9  │ Add dependencies (existing plugin)              │ --add NAME[@MKT[@VER]] explicit OR --from PATH-OR-URL copy from another plugin             │
-│ 10 │ Implement the-skills-menu method (existing)     │ Decouple skills from agents — agents preload one catalog, dynamic skill loading via Skill()│
-│ B  │ Back                                            │ Go back to the top-level menu                                                              │
-│ A  │ Ask the agent                                   │ Let the agent suggest the best next action right now                                       │
-│ 0  │ Cancel / Exit                                   │ Stop without doing anything                                                                │
-└────┴─────────────────────────────────────────────────┴────────────────────────────────────────────────────────────────────────────────────────────┘
-Type a number to choose:
+Fixed key→action map (slug `create`). Numbers stay in declaration order
+because every leaf is a distinct scaffold operation (NOT a dynamic
+alpha-sorted list — they are FIXED actions, but they happen to use
+digit keys here because there are 10 of them and we want a sequential
+mnemonic; cf. §3.8 Manage which mixes letter actions with high-digit
+actions):
+
+| Key | Action ID         | Label shown to user                                                                |
+|-----|-------------------|-------------------------------------------------------------------------------------|
+| 1   | new_plugin        | New plugin (latest pipeline standard) — Fresh plugin repo                          |
+| 2   | new_mkt           | New marketplace — Fresh marketplace repo from scratch (Layout A/B/C)               |
+| 3   | new_skill         | New skill (in existing plugin) — Add skills/<name>/SKILL.md                         |
+| 4   | new_agent         | New agent (in existing plugin) — Add agents/<name>.md                               |
+| 5   | new_command       | New slash command (in existing plugin) — Add commands/<name>.md                     |
+| 6   | new_hook          | New hook (in existing plugin) — Append entry to hooks/hooks.json                    |
+| 7   | new_mcp           | New MCP server (in existing plugin) — Register server in .mcp.json                  |
+| 8   | pack_components   | Pack components into a plugin (multi-select)                                        |
+| 9   | add_deps          | Add dependencies (existing plugin) — --add NAME[@MKT[@VER]] OR --from PATH-OR-URL  |
+| 10  | impl_skills_menu  | Implement the-skills-menu method (existing) — Decouple skills from agents          |
+| A   | ask               | Ask the agent                                                                       |
+| B   | back              | Back — Go back to the top-level menu                                                |
+| 0   | cancel            | Cancel / Exit                                                                       |
+
+Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
+menu inline; CMS Stop hook emits via `systemMessage`:
+
+```bash
+cat > /tmp/cpv-mainmenu-create-spec.json <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "create",
+  "header": "Create — what to scaffold",
+  "rows": [
+    {"key": "1",  "action_id": "new_plugin",       "label": "New plugin (latest pipeline standard) — Fresh plugin repo"},
+    {"key": "2",  "action_id": "new_mkt",          "label": "New marketplace — Fresh marketplace repo from scratch (Layout A/B/C)"},
+    {"key": "3",  "action_id": "new_skill",        "label": "New skill (in existing plugin) — Add skills/<name>/SKILL.md"},
+    {"key": "4",  "action_id": "new_agent",        "label": "New agent (in existing plugin) — Add agents/<name>.md"},
+    {"key": "5",  "action_id": "new_command",      "label": "New slash command (in existing plugin) — Add commands/<name>.md"},
+    {"key": "6",  "action_id": "new_hook",         "label": "New hook (in existing plugin) — Append entry to hooks/hooks.json"},
+    {"key": "7",  "action_id": "new_mcp",          "label": "New MCP server (in existing plugin) — Register server in .mcp.json"},
+    {"key": "8",  "action_id": "pack_components",  "label": "Pack components into a plugin (multi-select)"},
+    {"key": "9",  "action_id": "add_deps",         "label": "Add dependencies (existing plugin) — --add NAME[@MKT[@VER]] OR --from PATH-OR-URL"},
+    {"key": "10", "action_id": "impl_skills_menu", "label": "Implement the-skills-menu method (existing) — Decouple skills from agents"},
+    {"key": "A",  "action_id": "ask",              "label": "Ask the agent"},
+    {"key": "B",  "action_id": "back",             "label": "Back — Go back to the top-level menu"},
+    {"key": "0",  "action_id": "cancel",           "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}
+JSON
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-create-spec.json
 ```
 
 #### 3.6.1 Scaffold a new plugin
@@ -1023,7 +1317,7 @@ Type a number to choose:
   2. `Target directory?`
   3. `Layout (A=hub-and-spoke / B=nested monorepo / C=marketplace-in-plugin self-referential)?`
 - **execution**: dispatch the **plugin-creator agent** with the answers. Newly-scaffolded plugins ship with current pipeline standards baked in (idempotent publish.py, cpv_lint_engine, pathlib-only Python, sanitized inputs, validate_pipeline_script_refs rule, no `.sh` scripts).
-- **post-execution**: ALWAYS auto-dispatch the **plugin-diagnoser agent** on the just-scaffolded plugin path. If the diagnosis returns 0 CRITICAL/MAJOR/MINOR, print `✓ Scaffold passes diagnose-plugin clean.` and proceed to §3.99. Otherwise print the diagnoser's follow-up menu so the user can pick a fix path.
+- **post-execution**: ALWAYS auto-dispatch the **plugin-diagnoser agent** on the just-scaffolded plugin path. If the diagnosis returns 0 CRITICAL/MAJOR/MINOR, print `✓ Scaffold passes diagnose-plugin clean.` and queue the §3.99 spec via `cpv_menu.py`. Otherwise let the diagnoser queue its follow-up menu spec so the user can pick a fix path.
 
 #### 3.6.2 Scaffold a new marketplace
 
@@ -1160,7 +1454,7 @@ The recovery path for "Phase 0 plugin-shape detection refused" — converts a fo
       "${INCLUDE_FLAGS[@]}"
   ```
 
-- **post-execution**: ALWAYS auto-dispatch the **plugin-diagnoser agent** on `$TARGET`. If the diagnose returns 0 CRITICAL/MAJOR, print `✓ Pack passes diagnose-plugin clean.` and proceed to §3.99. Otherwise print the diagnoser's follow-up menu so the user can pick a fix path.
+- **post-execution**: ALWAYS auto-dispatch the **plugin-diagnoser agent** on `$TARGET`. If the diagnose returns 0 CRITICAL/MAJOR, print `✓ Pack passes diagnose-plugin clean.` and queue the §3.99 spec via `cpv_menu.py`. Otherwise let the diagnoser queue its follow-up menu spec so the user can pick a fix path.
 
 - **JSON / remote-API mode**: append `--json` to make `cpv_pack_components.py` emit a single JSON object on stdout instead of human prose — used when the menu is driven by an external orchestrator.
 
@@ -1240,27 +1534,62 @@ Works on ANY plugin (CPV, other people's plugins, your own).
 
 ### 3.8 Manage sub-menu
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Operation                         ┃ What it does                                                    ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ List installed plugins            │ Show every plugin Claude Code knows about                       │
-│ 2 │ Install / update / enable / off   │ Hand off to the plugin-manager agent (it asks what you want)    │
-│ 3 │ Health check                      │ Look for problems in the plugin registry, settings, and cache   │
-│ 4 │ Install external scanners         │ Install all the security scanners CPV uses (cc-audit, etc.)     │
-│ 5 │ Prune old cached plugin versions  │ Free disk space — keep the active version, delete older ones    │
-│ 6 │ Bump version + publish            │ Bump patch / minor / major and run the publish pipeline         │
-│ 7 │ Show CPV version                  │ Read the version from .claude-plugin/plugin.json                │
-│ 8 │ Refresh plugin README             │ Re-build the plugin's auto-generated README sections            │
-│10 │ Standardize plugin                │ Re-write the plugin's publish.py + CI + retry helpers           │
-│11 │ Add component                     │ Add a new skill / agent / command / hook / mcp to a plugin      │
-│12 │ Move tests to a sub-repo          │ Move tests/ into a separate git submodule (PSS pattern)         │
-│13 │ Migrate marketplace.json          │ Normalize old source.url entries and detect dead 404 entries    │
-│ 9 │ Back                              │ Go back to the top-level menu                                   │
-│ A │ Ask the agent                     │ Let the agent suggest the best next action right now            │
-│ 0 │ Cancel / Exit                     │ Stop without doing anything                                     │
-└───┴───────────────────────────────────┴─────────────────────────────────────────────────────────────────┘
-Type a number to choose:
+Fixed key→action map (slug `manage`). Note: row numbers preserve the
+historical IDs that the per-leaf recipe sections (§3.8.1 through
+§3.8.13) reference — the gap between row 8 and row 10 reflects that
+the legacy §3.8.9 leaf was removed; the IDs were NOT re-sequenced
+(per the fixed-key contract — letters/numbers never reassign):
+
+| Key | Action ID         | Label shown to user                                                              |
+|-----|-------------------|-----------------------------------------------------------------------------------|
+| 1   | mgr_list          | List installed plugins — Show every plugin Claude Code knows about               |
+| 2   | mgr_install       | Install / update / enable / off — Hand off to the plugin-manager agent           |
+| 3   | mgr_doctor        | Health check — Look for problems in registry, settings, and cache                 |
+| 4   | mgr_scanners      | Install external scanners — Install all the security scanners CPV uses           |
+| 5   | mgr_prune         | Prune old cached plugin versions — Free disk space                                |
+| 6   | mgr_publish       | Bump version + publish — Bump patch / minor / major and run the publish pipeline  |
+| 7   | mgr_version       | Show CPV version — Read the version from .claude-plugin/plugin.json              |
+| 8   | mgr_readme        | Refresh plugin README — Re-build the auto-generated README sections               |
+| 10  | mgr_standardize   | Standardize plugin — Re-write the plugin's publish.py + CI + retry helpers       |
+| 11  | mgr_add_component | Add component — Add a new skill / agent / command / hook / mcp to a plugin       |
+| 12  | mgr_strip_dev     | Move tests to a sub-repo — Move tests/ into a separate git submodule (PSS)        |
+| 13  | mgr_migrate_mkt   | Migrate marketplace.json — Normalize old source.url entries, detect dead 404s    |
+| A   | ask               | Ask the agent                                                                     |
+| B   | back              | Back — Go back to the top-level menu                                              |
+| 0   | cancel            | Cancel / Exit                                                                     |
+
+Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
+menu inline; CMS Stop hook emits via `systemMessage`:
+
+```bash
+cat > /tmp/cpv-mainmenu-manage-spec.json <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "manage",
+  "header": "Manage — installed plugins and registry",
+  "rows": [
+    {"key": "1",  "action_id": "mgr_list",          "label": "List installed plugins — Show every plugin Claude Code knows about"},
+    {"key": "2",  "action_id": "mgr_install",       "label": "Install / update / enable / off — Hand off to the plugin-manager agent"},
+    {"key": "3",  "action_id": "mgr_doctor",        "label": "Health check — Look for problems in registry, settings, and cache"},
+    {"key": "4",  "action_id": "mgr_scanners",      "label": "Install external scanners — Install all the security scanners CPV uses"},
+    {"key": "5",  "action_id": "mgr_prune",         "label": "Prune old cached plugin versions — Free disk space"},
+    {"key": "6",  "action_id": "mgr_publish",       "label": "Bump version + publish — Bump patch / minor / major and run pipeline"},
+    {"key": "7",  "action_id": "mgr_version",       "label": "Show CPV version — Read the version from .claude-plugin/plugin.json"},
+    {"key": "8",  "action_id": "mgr_readme",        "label": "Refresh plugin README — Re-build the auto-generated README sections"},
+    {"key": "10", "action_id": "mgr_standardize",   "label": "Standardize plugin — Re-write the plugin's publish.py + CI + retry helpers"},
+    {"key": "11", "action_id": "mgr_add_component", "label": "Add component — Add a new skill / agent / command / hook / mcp to a plugin"},
+    {"key": "12", "action_id": "mgr_strip_dev",     "label": "Move tests to a sub-repo — Move tests/ into a separate git submodule (PSS)"},
+    {"key": "13", "action_id": "mgr_migrate_mkt",   "label": "Migrate marketplace.json — Normalize old source.url, detect dead 404s"},
+    {"key": "A",  "action_id": "ask",               "label": "Ask the agent"},
+    {"key": "B",  "action_id": "back",              "label": "Back — Go back to the top-level menu"},
+    {"key": "0",  "action_id": "cancel",            "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}
+JSON
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-manage-spec.json
 ```
 
 #### 3.8.1 List installed plugins
@@ -1272,7 +1601,7 @@ Type a number to choose:
 
 #### 3.8.2 Install / update / enable / disable
 
-- **execution**: dispatch the **plugin-manager agent**. The agent's First Contact menu (also a Unicode table) asks what operation to do.
+- **execution**: dispatch the **plugin-manager agent**. The agent queues its own First Contact menu spec via `cpv_menu.py` (Stop hook emits it) asking what operation to do.
 
 #### 3.8.3 Doctor (health check)
 
@@ -1421,29 +1750,56 @@ project / local / full scope) — TRDD-a175f78d, v2.101.0 — use §3.1.7 row
 because the doctor needs `~/.claude/` filesystem access. The single-plugin
 diagnose flow below uses local-cache state implicitly so URLs work there.
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Operation                                         ┃ What it does                                                                                              ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Diagnose plugin (deep audit)                      │ Full audit + structured report + follow-up menu (offers upgrade / register / sync / fix)                  │
-│ 2 │ Apply CRITICAL fixes only                         │ Fix only publish-blockers + security blockers — leaves MAJOR/MINOR/NIT findings for later                 │
-│ 3 │ Apply MAJOR + CRITICAL fixes                      │ Fix everything that blocks publishing or is non-cross-platform — leaves MINOR/NIT/WARNING for later       │
-│ 4 │ Sync cached install with GitHub                   │ Compare cache version to latest tag; offer to run `claude plugin update`                                  │
-│ 5 │ Check + fix marketplace registration              │ Verify plugin is listed in a marketplace; offer to register / create / re-register                        │
-│ 6 │ Audit branch rules + Claude action setup          │ Check ruleset, bypass actors, Claude action version pin, missing secrets — offer to fix                   │
-│ 7 │ Cross-platform audit                              │ Quick scan for `.sh` scripts, `os.path`, hardcoded `/tmp/`, `shell=True`, bash hook constructs, jq/sed/awk│
-│ 8 │ AI-graded semantic review (opus, EXPENSIVE)       │ Opus-graded A-F quality review of a skill / agent / whole plugin (10-50x normal cost)                     │
-│ 9 │ Back                                              │ Go back to the top-level menu                                                                             │
-│ A │ Ask the agent                                     │ Let the agent suggest the best next action right now                                                      │
-│ 0 │ Cancel / Exit                                     │ Stop without doing anything                                                                               │
-└───┴───────────────────────────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-Type a number to choose:
+Fixed key→action map (slug `diagnose`):
+
+| Key | Action ID    | Label shown to user                                                                          |
+|-----|--------------|-----------------------------------------------------------------------------------------------|
+| 1   | diag_plugin  | Diagnose plugin (deep audit) — Full audit + structured report + follow-up menu               |
+| 2   | diag_critical| Apply CRITICAL fixes only — Fix only publish-blockers + security blockers                    |
+| 3   | diag_major   | Apply MAJOR + CRITICAL fixes — Fix everything that blocks publishing or is non-cross-platform|
+| 4   | diag_sync    | Sync cached install with GitHub — Compare cache version to latest tag                        |
+| 5   | diag_register| Check + fix marketplace registration — Verify listed; offer to register / create / re-register|
+| 6   | diag_branch  | Audit branch rules + Claude action setup — ruleset / bypass actors / action pin / secrets    |
+| 7   | diag_xplat   | Cross-platform audit — Quick scan for `.sh` / os.path / shell=True / bash hook constructs   |
+| 8   | diag_semantic| AI-graded semantic review (opus, EXPENSIVE) — Opus A-F quality review (10-50× normal cost)   |
+| A   | ask          | Ask the agent                                                                                 |
+| B   | back         | Back — Go back to the top-level menu                                                          |
+| 0   | cancel       | Cancel / Exit                                                                                 |
+
+Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
+menu inline; CMS Stop hook emits via `systemMessage`:
+
+```bash
+cat > /tmp/cpv-mainmenu-diagnose-spec.json <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "diagnose",
+  "header": "Diagnose — deep audit + (opt-in) AI-graded review",
+  "rows": [
+    {"key": "1", "action_id": "diag_plugin",  "label": "Diagnose plugin (deep audit) — Full audit + structured report + follow-up menu"},
+    {"key": "2", "action_id": "diag_critical","label": "Apply CRITICAL fixes only — Fix only publish-blockers + security blockers"},
+    {"key": "3", "action_id": "diag_major",   "label": "Apply MAJOR + CRITICAL fixes — Fix publishing-blockers + non-cross-platform"},
+    {"key": "4", "action_id": "diag_sync",    "label": "Sync cached install with GitHub — Compare cache version to latest tag"},
+    {"key": "5", "action_id": "diag_register","label": "Check + fix marketplace registration — Verify listed; offer register / create"},
+    {"key": "6", "action_id": "diag_branch",  "label": "Audit branch rules + Claude action setup — ruleset / bypass / pin / secrets"},
+    {"key": "7", "action_id": "diag_xplat",   "label": "Cross-platform audit — `.sh` / os.path / shell=True / bash hook constructs"},
+    {"key": "8", "action_id": "diag_semantic","label": "AI-graded semantic review (opus, EXPENSIVE — 10-50× normal cost)"},
+    {"key": "A", "action_id": "ask",          "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",         "label": "Back — Go back to the top-level menu"},
+    {"key": "0", "action_id": "cancel",       "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}
+JSON
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-diagnose-spec.json
 ```
 
 #### 3.4.1 Diagnose plugin
 
 - **path-source**: per §3.0a (its row 1 = "current project folder $PWD")
-- **execution**: dispatch the **plugin-diagnoser agent** with the path. The agent runs phases 1–7 (validate, security with all scanners, pipeline staleness, cross-platform, marketplace registration, branch+actions, sync), writes the structured report, then prints its own follow-up menu (rows 1–7 + 0).
+- **execution**: dispatch the **plugin-diagnoser agent** with the path. The agent runs phases 1–7 (validate, security with all scanners, pipeline staleness, cross-platform, marketplace registration, branch+actions, sync), writes the structured report, then queues its own follow-up menu spec via `cpv_menu.py` (keys `1`-`7` + `0`).
 - **Phase 0 escape hatch**: when the diagnoser's Phase 0 plugin-shape detection refuses (per `skills/plugin-validation-skill/references/shape-detection.md`), the diagnoser MUST redirect to §3.6.8 (Pack components into a new plugin) so the user can multi-select components and convert them into a real installable plugin. NEVER auto-scaffold around the wrong shape.
 
 #### 3.4.2 Apply CRITICAL fixes only
@@ -1497,7 +1853,7 @@ Type a number to choose:
   echo "=== Bash-only hook commands ==="
   uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" hook . --strict 2>&1 | grep -E "bash-only|POSIX-only" || echo "(none)"
   ```
-- **post**: print the §3.99 "do something else?" 2-row table.
+- **post**: queue the §3.99 "do something else?" spec via `cpv_menu.py` and end the turn.
 
 #### 3.4.8 AI-graded semantic review (opus, EXPENSIVE)
 
@@ -1516,16 +1872,36 @@ from `skills/fix-validation/references/pipeline-migration.md`): bash → Python,
 os.path → pathlib, idempotent publish.py, sanitized inputs, no `.sh` scripts,
 canonical CI workflows, etc.
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Operation                                         ┃ What it does                                                                                              ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Upgrade plugin to current pipeline standard       │ Apply ALL pipeline-migration steps (§1–§5) — bash → Python, os.path → pathlib, idempotent publish.py, etc.│
-│ 9 │ Back                                              │ Go back to the top-level menu                                                                             │
-│ A │ Ask the agent                                     │ Let the agent suggest the best next action right now                                                      │
-│ 0 │ Cancel / Exit                                     │ Stop without doing anything                                                                               │
-└───┴───────────────────────────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-Type a number to choose:
+Fixed key→action map (slug `update`):
+
+| Key | Action ID    | Label shown to user                                                                          |
+|-----|--------------|-----------------------------------------------------------------------------------------------|
+| 1   | upd_upgrade  | Upgrade plugin to current pipeline standard — Apply ALL pipeline-migration steps (§1–§5)     |
+| A   | ask          | Ask the agent                                                                                 |
+| B   | back         | Back — Go back to the top-level menu                                                          |
+| 0   | cancel       | Cancel / Exit                                                                                 |
+
+Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
+menu inline; CMS Stop hook emits via `systemMessage`:
+
+```bash
+cat > /tmp/cpv-mainmenu-update-spec.json <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "update",
+  "header": "Update — upgrade plugin to current canonical pipeline standard",
+  "rows": [
+    {"key": "1", "action_id": "upd_upgrade", "label": "Upgrade plugin to current pipeline standard — Apply ALL pipeline-migration steps (§1–§5)"},
+    {"key": "A", "action_id": "ask",         "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",        "label": "Back — Go back to the top-level menu"},
+    {"key": "0", "action_id": "cancel",      "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}
+JSON
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-update-spec.json
 ```
 
 #### 3.5.1 Upgrade to current pipeline standard
@@ -1566,20 +1942,44 @@ folded in for one-stop access to the publish workflow.
 > | 21 (dependency tree)                                | §3.8 Manage (sub-menu) → "Dependency tree" leaf        |
 > | 22 (add dependency)                                 | §3.6.9 Add dependencies                                |
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Operation                                          ┃ What it does                                                          ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Protect this repo's branches                       │ Apply branch-protection rules to the repo of `origin`                 │
-│ 2 │ Protect another repo's branches                    │ Apply branch-protection rules to any owner/repo                       │
-│ 3 │ Link a plugin to a marketplace                     │ Register a plugin in a marketplace's plugin list                      │
-│ 4 │ Publish plugin to its marketplace                  │ Run the full publish pipeline (bump + push + release + notify market) │
-│ 5 │ Migrate marketplace layout (A ↔ B ↔ C)             │ Convert marketplace.json layout between Layout A / B / C              │
-│ 9 │ Back                                               │ Go back to the top-level menu                                         │
-│ A │ Ask the agent                                      │ Let the agent suggest the best next action right now                  │
-│ 0 │ Cancel / Exit                                      │ Stop without doing anything                                           │
-└───┴────────────────────────────────────────────────────┴───────────────────────────────────────────────────────────────────────┘
-Type a number to choose:
+Fixed key→action map (slug `publish`):
+
+| Key | Action ID    | Label shown to user                                                                          |
+|-----|--------------|-----------------------------------------------------------------------------------------------|
+| 1   | pub_branch_here| Protect this repo's branches — Apply branch-protection rules to the repo of `origin`        |
+| 2   | pub_branch_any | Protect another repo's branches — Apply branch-protection rules to any owner/repo           |
+| 3   | pub_link     | Link a plugin to a marketplace — Register a plugin in a marketplace's plugin list             |
+| 4   | pub_publish  | Publish plugin to its marketplace — Run the full publish pipeline (bump + push + release)    |
+| 5   | pub_migrate  | Migrate marketplace layout (A ↔ B ↔ C) — Convert marketplace.json layout                     |
+| A   | ask          | Ask the agent                                                                                 |
+| B   | back         | Back — Go back to the top-level menu                                                          |
+| 0   | cancel       | Cancel / Exit                                                                                 |
+
+Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
+menu inline; CMS Stop hook emits via `systemMessage`:
+
+```bash
+cat > /tmp/cpv-mainmenu-publish-spec.json <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "publish",
+  "header": "Publish & Migrate — branch rules, link, publish, migrate",
+  "rows": [
+    {"key": "1", "action_id": "pub_branch_here","label": "Protect this repo's branches — Apply branch-protection rules to `origin`"},
+    {"key": "2", "action_id": "pub_branch_any", "label": "Protect another repo's branches — Apply branch-protection rules to any owner/repo"},
+    {"key": "3", "action_id": "pub_link",       "label": "Link a plugin to a marketplace — Register a plugin in a marketplace's plugin list"},
+    {"key": "4", "action_id": "pub_publish",    "label": "Publish plugin to its marketplace — Run the full publish pipeline"},
+    {"key": "5", "action_id": "pub_migrate",    "label": "Migrate marketplace layout (A ↔ B ↔ C) — Convert marketplace.json layout"},
+    {"key": "A", "action_id": "ask",            "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",           "label": "Back — Go back to the top-level menu"},
+    {"key": "0", "action_id": "cancel",         "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}
+JSON
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-publish-spec.json
 ```
 
 #### 3.7.1 Branch protection (current repo)
@@ -1634,18 +2034,40 @@ the agent" and `0` for Cancel). The 8 functional categories take rows
 1-8; H/A/0 are letters so they never collide with multi-digit option
 numbers anywhere else in the tree.
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Help topic                          ┃ What it shows                                             ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Show the top-level menu             │ Re-print the main menu (the 8 categories)                 │
-│ 2 │ List every CPV command              │ Print the name + description of every /cpv-* command      │
-│ 3 │ Show CPV version                    │ Read the version from .claude-plugin/plugin.json          │
-│ 9 │ Back                                │ Go back to the top-level menu                             │
-│ A │ Ask the agent                       │ Let the agent suggest the best next action right now      │
-│ 0 │ Cancel / Exit                       │ Stop without doing anything                               │
-└───┴─────────────────────────────────────┴───────────────────────────────────────────────────────────┘
-Type a number to choose:
+Fixed key→action map (slug `help`):
+
+| Key | Action ID    | Label shown to user                                                      |
+|-----|--------------|---------------------------------------------------------------------------|
+| 1   | help_top     | Show the top-level menu — Re-queue the main menu (the 8 categories)       |
+| 2   | help_list    | List every CPV command — Print the name + description of every /cpv-* cmd |
+| 3   | help_version | Show CPV version — Read the version from .claude-plugin/plugin.json       |
+| A   | ask          | Ask the agent                                                             |
+| B   | back         | Back — Go back to the top-level menu                                      |
+| 0   | cancel       | Cancel / Exit                                                             |
+
+Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
+menu inline; CMS Stop hook emits via `systemMessage`:
+
+```bash
+cat > /tmp/cpv-mainmenu-help-spec.json <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "help",
+  "header": "Help / About",
+  "rows": [
+    {"key": "1", "action_id": "help_top",     "label": "Show the top-level menu — Re-queue the main menu (the 8 categories)"},
+    {"key": "2", "action_id": "help_list",    "label": "List every CPV command — Print the name + description of every /cpv-* command"},
+    {"key": "3", "action_id": "help_version", "label": "Show CPV version — Read the version from .claude-plugin/plugin.json"},
+    {"key": "A", "action_id": "ask",          "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",         "label": "Back — Go back to the top-level menu"},
+    {"key": "0", "action_id": "cancel",       "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}
+JSON
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-help-spec.json
 ```
 
 #### 3.10H.1 Category overview
@@ -1671,59 +2093,93 @@ Type a number to choose:
 
 ### 3.99 End-of-leaf "do something else?" table (NON-validate flows)
 
-After a Create / Manage / Publish-&-Migrate / Help leaf finishes, print this
-2-row table and wait for the user's number:
+After a Create / Manage / Publish-&-Migrate / Help leaf finishes, queue
+this 2-row menu spec via `cpv_menu.py` and end the turn. NEVER print
+the menu inline; CMS Stop hook emits via `systemMessage`.
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Next                        ┃ What it does                                                   ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Do something else           │ Go back to the top-level menu                                  │
-│ A │ Ask the agent               │ Let the agent suggest the best next action right now           │
-│ 0 │ Done (exit)                 │ Reply `Done.` and stop                                         │
-└───┴─────────────────────────────┴────────────────────────────────────────────────────────────────┘
-Type a number to choose:
+Fixed key→action map (slug `done`):
+
+| Key | Action ID  | Label shown to user                                            |
+|-----|------------|-----------------------------------------------------------------|
+| 1   | go_main    | Do something else — Go back to the top-level menu               |
+| A   | ask        | Ask the agent                                                   |
+| 0   | done       | Done (exit) — Reply `Done.` and stop                            |
+
+```bash
+cat > /tmp/cpv-mainmenu-done-spec.json <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "done",
+  "header": "Anything else?",
+  "rows": [
+    {"key": "1", "action_id": "go_main", "label": "Do something else — Go back to the top-level menu"},
+    {"key": "A", "action_id": "ask",     "label": "Ask the agent"},
+    {"key": "0", "action_id": "done",    "label": "Done (exit) — Reply `Done.` and stop"}
+  ],
+  "footer": "Type a key:"
+}
+JSON
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-done-spec.json
 ```
 
 ---
 
 ### 3.16 Security sub-menu (drilled into from §3.1.5.1)
 
-```
-┏━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ #  ┃ Security scan target                            ┃ What it does                                                                                       ┃
-┡━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│  1 │ Single plugin (full security pass)              │ All in-process rule packs + 5 external scanners (cc-audit, tirith, trufflehog, semgrep, Cisco)     │
-├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  2 │ Single plugin from GitHub URL                   │ Auto-clone github.com URL → security pass → cleanup (v2.48 direct URL ingestion)                   │
-├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  3 │ Single plugin from arbitrary git URL            │ git clone any URL (gitlab/SSH/self-hosted) → security pass → cleanup                               │
-├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  4 │ Single plugin from local archive (.zip/.tar.gz) │ Extract → security pass → cleanup (v2.48 archive ingestion)                                        │
-├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  5 │ Marketplace (every plugin, tree-scan-once)      │ v2.48 architecture: stage all plugins, fclones-dedup, run scanners ONCE, bucket per-plugin         │
-├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  6 │ Loose / flat skill pack (--loose)               │ Skip the .claude-plugin/ precondition for SKILL_*.md packs                                         │
-├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  7 │ Single scanner only (cc-audit)                  │ Only cc-audit (skip tirith/trufflehog/semgrep/Cisco/internal)                                      │
-├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  8 │ Single scanner only (tirith)                    │ Only tirith policy engine                                                                          │
-├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  9 │ Single scanner only (trufflehog)                │ Only trufflehog secret scanner (--concurrency on, gitleaks dropped in v2.48)                       │
-├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ 10 │ Single scanner only (semgrep)                   │ Only semgrep with p/security-audit + p/secrets rule packs                                          │
-├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ 11 │ Single scanner only (Cisco AI Defense)          │ Only the Cisco AI Defense skill-scanner (programmatic engines, no API key needed)                  │
-├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ 12 │ Telemetry hazards only                          │ Per-plugin env-var leak rules (PLUGIN_SEED_DIR, SHELL_PREFIX, OTEL_LOG_RAW_API_BODIES=file:*…)     │
-├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  A │ Ask the agent for a recommendation              │ Let the agent suggest the best next action right now                                               │
-├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  B │ Back                                            │ Go back to the Validate sub-menu                                                                   │
-├────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  0 │ Cancel / Exit                                   │ Stop without doing anything                                                                        │
-└────┴─────────────────────────────────────────────────┴────────────────────────────────────────────────────────────────────────────────────────────────────┘
-Type a number (or B for back, 0 to cancel):
+Fixed key→action map (slug `security`):
+
+| Key | Action ID    | Label shown to user                                                                          |
+|-----|--------------|-----------------------------------------------------------------------------------------------|
+| 1   | sec_full     | Single plugin (full security pass) — All rule packs + 5 external scanners                    |
+| 2   | sec_github   | Single plugin from GitHub URL — Auto-clone github.com URL → scan → cleanup                   |
+| 3   | sec_giturl   | Single plugin from arbitrary git URL — gitlab / SSH / self-hosted → scan → cleanup           |
+| 4   | sec_archive  | Single plugin from local archive (.zip/.tar.gz) — Extract → scan → cleanup                   |
+| 5   | sec_mkt      | Marketplace (every plugin, tree-scan-once) — fclones-dedup + scanners once + bucket          |
+| 6   | sec_loose    | Loose / flat skill pack (--loose) — Skip the .claude-plugin/ precondition                    |
+| 7   | sec_ccaudit  | Single scanner only (cc-audit)                                                               |
+| 8   | sec_tirith   | Single scanner only (tirith)                                                                 |
+| 9   | sec_trufflehog| Single scanner only (trufflehog) — secret scanner (--concurrency on, gitleaks dropped)      |
+| 10  | sec_semgrep  | Single scanner only (semgrep) — with p/security-audit + p/secrets rule packs                 |
+| 11  | sec_cisco    | Single scanner only (Cisco AI Defense) — programmatic engines, no API key needed             |
+| 12  | sec_telemetry| Telemetry hazards only — PLUGIN_SEED_DIR / SHELL_PREFIX / OTEL_LOG_RAW_API_BODIES            |
+| A   | ask          | Ask the agent                                                                                 |
+| B   | back         | Back — Go back to the Validate sub-menu                                                       |
+| 0   | cancel       | Cancel / Exit                                                                                 |
+
+Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
+menu inline; CMS Stop hook emits via `systemMessage`:
+
+```bash
+cat > /tmp/cpv-mainmenu-security-spec.json <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "security",
+  "header": "Security — pick scan target / scanner",
+  "rows": [
+    {"key": "1",  "action_id": "sec_full",       "label": "Single plugin (full security pass) — All rule packs + 5 external scanners"},
+    {"key": "2",  "action_id": "sec_github",     "label": "Single plugin from GitHub URL — Auto-clone github.com URL → scan → cleanup"},
+    {"key": "3",  "action_id": "sec_giturl",     "label": "Single plugin from arbitrary git URL — gitlab/SSH/self-hosted → scan → cleanup"},
+    {"key": "4",  "action_id": "sec_archive",    "label": "Single plugin from local archive (.zip/.tar.gz) — Extract → scan → cleanup"},
+    {"key": "5",  "action_id": "sec_mkt",        "label": "Marketplace (every plugin, tree-scan-once) — fclones-dedup + scanners once"},
+    {"key": "6",  "action_id": "sec_loose",      "label": "Loose / flat skill pack (--loose) — Skip the .claude-plugin/ precondition"},
+    {"key": "7",  "action_id": "sec_ccaudit",    "label": "Single scanner only (cc-audit)"},
+    {"key": "8",  "action_id": "sec_tirith",     "label": "Single scanner only (tirith)"},
+    {"key": "9",  "action_id": "sec_trufflehog", "label": "Single scanner only (trufflehog) — secret scanner"},
+    {"key": "10", "action_id": "sec_semgrep",    "label": "Single scanner only (semgrep) — p/security-audit + p/secrets"},
+    {"key": "11", "action_id": "sec_cisco",      "label": "Single scanner only (Cisco AI Defense)"},
+    {"key": "12", "action_id": "sec_telemetry",  "label": "Telemetry hazards only — PLUGIN_SEED_DIR / SHELL_PREFIX / etc."},
+    {"key": "A",  "action_id": "ask",            "label": "Ask the agent"},
+    {"key": "B",  "action_id": "back",           "label": "Back — Go back to the Validate sub-menu"},
+    {"key": "0",  "action_id": "cancel",         "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}
+JSON
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-security-spec.json
 ```
 
 #### 3.16.1 Single plugin (full security pass)
@@ -1816,25 +2272,42 @@ For FLEET / MARKETPLACE-scale caching audits + optimizations
 and 4 (`/cpv-batch-caching-optimize`) instead — they fan out N
 parallel cache-optimizer-agent dispatches in one main-session message.
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Cache action                                  ┃ What it does                                                                                     ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Audit only (CA-01..CA-06)                     │ Pure read-only audit, produces report with per-rule findings                                     │
-├───┼───────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ 2 │ Audit + auto-fix (loop)                       │ Audit, then dispatch cache-optimizer-agent to fix CA-01..CA-06 in priority order                 │
-├───┼───────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ 3 │ Audit + broader cache-aware refactoring       │ Audit, fix CA-01..CA-06, then dispatch Phase 4 broader improvements (CLAUDE.md split, etc.)      │
-├───┼───────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ 4 │ Audit project root (not a plugin)             │ For project trees: scans .claude/ + CLAUDE.md (no .claude-plugin/ precondition)                  │
-├───┼───────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ A │ Ask the agent for a recommendation            │ Let the agent suggest the best next action right now                                             │
-├───┼───────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ B │ Back                                          │ Go back to the top-level menu                                                                    │
-├───┼───────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ 0 │ Cancel / Exit                                 │ Stop without doing anything                                                                      │
-└───┴───────────────────────────────────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────┘
-Type a number (or B for back, 0 to cancel):
+Fixed key→action map (slug `cache`):
+
+| Key | Action ID    | Label shown to user                                                                          |
+|-----|--------------|-----------------------------------------------------------------------------------------------|
+| 1   | cache_audit  | Audit only (CA-01..CA-06) — Pure read-only audit, produces report with per-rule findings     |
+| 2   | cache_fix    | Audit + auto-fix (loop) — Dispatch cache-optimizer-agent to fix CA-01..CA-06 in priority     |
+| 3   | cache_broader| Audit + broader cache-aware refactoring — Audit + fix + Phase 4 (CLAUDE.md split, etc.)      |
+| 4   | cache_project| Audit project root (not a plugin) — Scans .claude/ + CLAUDE.md (no .claude-plugin/ required) |
+| A   | ask          | Ask the agent                                                                                 |
+| B   | back         | Back — Go back to the top-level menu                                                          |
+| 0   | cancel       | Cancel / Exit                                                                                 |
+
+Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
+menu inline; CMS Stop hook emits via `systemMessage`:
+
+```bash
+cat > /tmp/cpv-mainmenu-cache-spec.json <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "cache",
+  "header": "Optimize for Cache — prompt-cache invalidation audit + refactor",
+  "rows": [
+    {"key": "1", "action_id": "cache_audit",   "label": "Audit only (CA-01..CA-06) — Pure read-only audit, per-rule findings"},
+    {"key": "2", "action_id": "cache_fix",     "label": "Audit + auto-fix (loop) — Dispatch cache-optimizer-agent in priority order"},
+    {"key": "3", "action_id": "cache_broader", "label": "Audit + broader cache-aware refactoring — Adds Phase 4 (CLAUDE.md split, etc.)"},
+    {"key": "4", "action_id": "cache_project", "label": "Audit project root (not a plugin) — Scans .claude/ + CLAUDE.md"},
+    {"key": "A", "action_id": "ask",           "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",          "label": "Back — Go back to the top-level menu"},
+    {"key": "0", "action_id": "cancel",        "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}
+JSON
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-cache-spec.json
 ```
 
 #### 3.3.1 Audit only
@@ -1879,23 +2352,46 @@ verdict is PASS / VALID — so the user always has the explicit option to
 end OR to fix any residual WARNINGs they care about.
 
 If the validation finished completely clean (CRITICAL=0 MAJOR=0 MINOR=0
-NIT=0 WARNING=0), still print the table. Rows 1-5 will simply find
+NIT=0 WARNING=0), still queue the spec. Keys `1`-`5` will simply find
 nothing to fix when dispatched, and the fixer will exit clean — but the
 user always sees the menu and is never auto-deflected.
 
-```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Action                                          ┃ What it does                                                          ┃ Severities the fixer will touch  ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Fix ALL issues (incl. WARNING)                  │ Dispatch the cpv-fixer agent on every finding in the report           │ CRITICAL+MAJOR+MINOR+NIT+WARNING │
-│ 2 │ Fix NIT and higher                              │ Skip WARNING-only findings                                            │ CRITICAL+MAJOR+MINOR+NIT         │
-│ 3 │ Fix MINOR and higher                            │ Skip NIT and WARNING                                                  │ CRITICAL+MAJOR+MINOR             │
-│ 4 │ Fix MAJOR and higher                            │ Only fix the publish-blockers (and CRITICALs)                         │ CRITICAL+MAJOR                   │
-│ 5 │ Fix CRITICAL only                               │ Strictest mode — fix the loaders/security blockers and nothing else   │ CRITICAL                         │
-│ A │ Ask the agent                                   │ Let the agent suggest the best next action right now                  │ —                                │
-│ 0 │ End                                             │ Done — exit without running the fixer                                 │ —                                │
-└───┴─────────────────────────────────────────────────┴───────────────────────────────────────────────────────────────────────┴──────────────────────────────────┘
-Type a number to choose:
+Fixed key→action map (slug `post-validate`):
+
+| Key | Action ID    | Label shown to user                                                            | Severities the fixer will touch  |
+|-----|--------------|---------------------------------------------------------------------------------|----------------------------------|
+| 1   | fix_all      | Fix ALL issues (incl. WARNING) — Dispatch fixer on every finding in the report  | CRITICAL+MAJOR+MINOR+NIT+WARNING |
+| 2   | fix_nit      | Fix NIT and higher — Skip WARNING-only findings                                 | CRITICAL+MAJOR+MINOR+NIT         |
+| 3   | fix_minor    | Fix MINOR and higher — Skip NIT and WARNING                                     | CRITICAL+MAJOR+MINOR             |
+| 4   | fix_major    | Fix MAJOR and higher — Only fix the publish-blockers (and CRITICALs)            | CRITICAL+MAJOR                   |
+| 5   | fix_critical | Fix CRITICAL only — Strictest mode (loaders/security blockers and nothing else) | CRITICAL                         |
+| A   | ask          | Ask the agent                                                                   | —                                |
+| 0   | end          | End — Done; exit without running the fixer                                      | —                                |
+
+Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
+menu inline; CMS Stop hook emits via `systemMessage`:
+
+```bash
+cat > /tmp/cpv-mainmenu-post-validate-spec.json <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "post-validate",
+  "header": "Validation finished — fix the findings?",
+  "rows": [
+    {"key": "1", "action_id": "fix_all",      "label": "Fix ALL issues (incl. WARNING) — Dispatch fixer on every finding"},
+    {"key": "2", "action_id": "fix_nit",      "label": "Fix NIT and higher — Skip WARNING-only findings"},
+    {"key": "3", "action_id": "fix_minor",    "label": "Fix MINOR and higher — Skip NIT and WARNING"},
+    {"key": "4", "action_id": "fix_major",    "label": "Fix MAJOR and higher — Only fix publish-blockers (and CRITICALs)"},
+    {"key": "5", "action_id": "fix_critical", "label": "Fix CRITICAL only — Strictest mode (loaders/security blockers only)"},
+    {"key": "A", "action_id": "ask",          "label": "Ask the agent"},
+    {"key": "0", "action_id": "end",          "label": "End — Done; exit without running the fixer"}
+  ],
+  "footer": "Type a key:"
+}
+JSON
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-post-validate-spec.json
 ```
 
 #### 3.10.1 Dispatching the fixer with a minimum severity
@@ -1914,8 +2410,9 @@ whose severity is BELOW the threshold.
 | 4 | `MAJOR` | `Fix findings in <REPORT_PATH>. min_severity=MAJOR (publish-blockers only).` |
 | 5 | `CRITICAL` | `Fix findings in <REPORT_PATH>. min_severity=CRITICAL (strictest — only loader/security blockers).` |
 
-After the fixer agent returns, print the §3.99 "do something else?" 2-row
-table (Return to top-level / Done) and wait.
+After the fixer agent returns, queue the §3.99 "do something else?"
+spec via `cpv_menu.py` (keys: `1` Do something else, `A` Ask, `0`
+Done) and end the turn.
 
 If the user picks `0` (End) → reply `Done.` and stop.
 
@@ -1933,11 +2430,12 @@ At ANY menu level, picking `0` (Cancel / Exit) → the orchestrator MUST:
 
 ### Back semantics
 
-In a sub-menu, picking `B` / `b` (Back) → re-print the PARENT menu's
-table (typically 3.0 top-level). At the top-level menu there is no `B`
-row. Some legacy sub-menus may still use `9` for Back where there is no
-collision risk — both `B` and a numeric Back row work, but `B` is
-preferred for any menu with more than 9 options.
+In a sub-menu, picking `B` / `b` (Back) → re-queue the PARENT menu's
+spec via `cpv_menu.py` and end the turn (typically the §3.0 top-level
+spec). At the top-level menu there is no `B` row. Some legacy
+sub-menus may still use `9` for Back where there is no collision risk
+— both `B` and a numeric Back row work, but `B` is preferred for any
+menu with more than 9 options.
 
 ### Argument-prompt etiquette
 
@@ -1947,28 +2445,37 @@ preferred for any menu with more than 9 options.
 - If the user replies `0` or `cancel` or `exit` at the argument prompt → treat the same as a top-level Cancel.
 - For paths, ALWAYS resolve `~` to `$HOME` and expand environment variables before invoking bash.
 
-### Number-parsing rules
+### Key-parsing rules
 
 - Strip surrounding whitespace from the user's reply.
-- Accept the literal letters `B` / `b` (Back) and `A` / `a` (Scan-all,
-  used in detection sub-tables) — case-insensitive — before falling
+- Accept letters `B` / `b` (Back), `A` / `a` (Ask the agent or Scan-all
+  in detection sub-tables), `T` / `t` (Type a different path),
+  `S` / `s` (Scan-all in multi-plugin path-source mini-menu),
+  `H` / `h` (Help — top-level only), `M` / `m` (Main, reserved) and
+  `X` / `x` (Exit, reserved) — case-insensitive — before falling
   through to integer parsing.
 - Take the FIRST integer found in the reply (so `1` and `1.` and `1)` all
-  match row 1; `12` matches row 12, NOT row 1).
-- If the user types text not starting with a digit/B/A but matching an
-  option name (case-insensitive substring match on the `Option` column),
-  accept it.
-- Otherwise: print `Invalid choice. Pick a number from the table (or B for back, 0 to cancel).` and re-print the SAME table (do not jump back to top-level).
+  match key `1`; `12` matches key `12`, NOT key `1`).
+- If the user types text not starting with a digit/letter but matching
+  an option label (case-insensitive substring match on the `label`
+  field of the menu's fixed key→action map), accept it and resolve to
+  the matching `action_id`.
+- Otherwise: ask `Invalid choice. Pick a key from the menu (or B for back, 0 to cancel).` and RE-QUEUE the SAME sub-menu spec via `cpv_menu.py` (do not jump back to top-level).
 
 ### Error handling
 
 - If `${CLAUDE_PLUGIN_ROOT}` is unset → abort with:
   > "CPV plugin not installed in this session. Install via
   > `/plugin install claude-plugins-validation@emasoft-plugins`."
-- If a launcher invocation exits non-zero → surface stderr verbatim, then re-print the SAME sub-menu table so the user can retry with different arguments.
+- If a launcher invocation exits non-zero → surface stderr verbatim, then re-queue the SAME sub-menu spec via `cpv_menu.py` so the user can retry with different arguments.
+- If `cpv_menu.py` exits with `MenuSystemUnavailable` (claude-menu-system not installed) → surface the install hint verbatim and stop. There is NO inline fallback renderer (TRDD-4de479a0, no-legacy rule).
 
 ### Token budget
 
 - Never paste a full report into the response. Always return the report-file path and a 3-line summary (verdict + counts + path).
 - Do not load `references/menu-tree.md` repeatedly — the orchestrator reads it once at session start.
 - Use the launcher invocation table (above) verbatim — do not generate alternative bash spellings.
+- NEVER print menu tables inline. Every menu is queued via `cpv_menu.py`
+  and emitted post-turn by the claude-menu-system Stop hook through
+  `systemMessage`, which keeps the menu out of the agent transcript
+  and prompt cache.

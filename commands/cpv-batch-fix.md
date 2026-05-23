@@ -117,21 +117,49 @@ If ``shard_count > 8`` AND ``max_parallel`` was left at default 8: tell
 the user the batch will dispatch 8 at a time, with later shards queued
 serially. The planner already caps the index's ``max_parallel`` field.
 
-Print the per-shard table (so the user sees what will run) using
-`format_menu.py` status_table mode:
+Queue the per-shard table (so the user sees what will run) via the
+claude-menu-system Stop hook. Build a CMS-shaped status_table spec
+inline — one row per shard — and write it to a tempfile, then hand
+the path to ``cpv_menu.py``:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/format_menu.py" status_table "$(cat <<EOF
+PLAN_SPEC="/tmp/cpv-batch-fix-shard-plan-$$.json"
+python3 - "$PLAN_SPEC" <<'PY'
+import json, sys
+from pathlib import Path
+# Read the planner index from $SESSION_DIR/index.json. The shape of
+# each shard entry is defined by scripts/cpv_batch_planner.py; map
+# (shard_id, file count, finding count, manifest path) into the CMS
+# status_table row shape (label/status/notes). ``status: pending`` is
+# the right enum for queued rows.
+index = json.loads(Path(sys.argv[1].replace("-plan-", "-index-")).read_text())  # placeholder — orchestrator substitutes
+PY
+# In practice the orchestrator (you, the model) builds the JSON
+# directly from the planner output rather than running an inline
+# Python heredoc. The canonical inline build is:
+
+cat > "$PLAN_SPEC" <<EOF
 {
+  "spec_version": 1,
+  "mode": "status_table",
+  "plugin": "cpv",
+  "slug": "batch-fix-shard-plan",
   "title": "Batch plan",
-  "header": ["#", "Shard", "Files", "Findings", "Manifest"],
+  "row_header": "Shard",
   "rows": [
-    /* one row per shard from index.json */
+    /* one row per shard from index.json:
+       { "label": "shard-1 (5 files / 27 findings)",
+         "status": "pending",
+         "notes": "/tmp/.../shard-1.manifest.json" } */
   ]
 }
 EOF
-)"
+
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$PLAN_SPEC"
 ```
+
+NEVER print menu inline; the CMS Stop hook emits via systemMessage at
+turn end. End the turn after this call.
 
 ## Step 2 — Dispatch shards in parallel
 
@@ -251,12 +279,17 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" plan \
   --max-parallel "$MAX_PARALLEL"
 ```
 
-Capture the session_dir + plan.json path. Print the initial status
-table:
+Capture the session_dir + plan.json + STATUS_TABLE path. Queue the
+initial status table for the claude-menu-system Stop hook (emitted
+post-turn via ``systemMessage`` — zero token cost, NEVER printed
+inline by the orchestrator):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/format_menu.py" status_table "$(cat "$STATUS_TABLE")"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$STATUS_TABLE"
 ```
+
+NEVER print menu inline; the CMS Stop hook emits via systemMessage at
+turn end. End the turn after this call.
 
 ### Step M2 — Dispatch one plugin-fixer per plugin, in groups of max_parallel
 
@@ -313,26 +346,59 @@ for plugin_index in group:
 
 ### Step M3 — Refresh status table between waves
 
+Queue the live status table via the orchestrator's ``emit-status``
+subcommand (aggregates every per-plugin status JSON, hands the CMS
+spec to ``cpv_menu`` — Stop hook emits at turn end):
+
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" status \
-  "$SESSION_DIR/plan.json" \
-| python3 "${CLAUDE_PLUGIN_ROOT}/scripts/format_menu.py" status_table /dev/stdin
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" \
+  emit-status "$SESSION_DIR/plan.json"
 ```
+
+NEVER print menu inline; the CMS Stop hook emits via systemMessage at
+turn end. End the turn after this call.
 
 ### Step M4 — Final summary
 
-```text
-DONE: plugins=N clean=X fixed=Y partial=Z failed=W. Reports under {session_dir}/.
-```
+After every plugin has reported:
 
-If any plugin is `partial` or `failed`, append the doctor prompt:
+1. Queue the final status table:
 
-```text
-Some plugins still have remaining findings. Inspect their reports
-for per-plugin details and re-run /cpv-batch-fix to retry; or run
-/cpv-doctor <one plugin> for the deep design-correctness recipes
-that go beyond schema validation.
-```
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" \
+     emit-status "$SESSION_DIR/plan.json"
+   ```
+
+2. Print a one-line summary inline (text, not a menu):
+
+   ```text
+   DONE: plugins=N clean=X fixed=Y partial=Z failed=W. Reports under {session_dir}/.
+   ```
+
+3. If any plugin is `partial` or `failed`, append the doctor-prompt
+   inline:
+
+   ```text
+   Some plugins still have remaining findings. Inspect their reports
+   for per-plugin details and re-run /cpv-batch-fix to retry; or run
+   /cpv-doctor <one plugin> for the deep design-correctness recipes
+   that go beyond schema validation.
+   ```
+
+End the turn. The CMS Stop hook emits the final table via systemMessage.
+
+## Fixed key→action map
+
+`/cpv-batch-fix` is a one-shot fleet fixer; the per-shard and
+per-plugin status tables are informational only. No numbered or
+lettered action rows — the user's next move is the text suggestion
+above (re-run, or `/cpv-doctor` for deeper recipes). Two slugs are
+reserved by this command: ``batch-fix-shard-plan`` (per-shard mode,
+single-plugin path) and ``batch-plugin-fixer-status`` (per-plugin
+mode, marketplace/list path; shared with
+`/cpv-batch-validate-and-fix`, `/cpv-batch-full-scan-and-fix` — same
+agent type). The fixed key→action map is empty by design; future
+post-scan menus extend this contract with letter→action rows.
 
 ## See also
 

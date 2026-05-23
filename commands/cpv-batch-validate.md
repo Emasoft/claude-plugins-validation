@@ -97,11 +97,18 @@ The input resolved to zero plugins. Nothing to validate. ✓
 
 …and stop.
 
-Otherwise render the initial status table via `format_menu.py`:
+Otherwise queue the initial status table for the claude-menu-system
+Stop hook (emitted post-turn via ``systemMessage`` — zero token cost,
+NEVER printed inline by the orchestrator):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/format_menu.py" status_table "$(cat "$STATUS_TABLE")"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$STATUS_TABLE"
 ```
+
+NEVER print menu inline; the CMS Stop hook emits via systemMessage at turn end.
+End the turn after this call. Routing of the user's reply (if any) is
+resolved purely from the fixed letter→action map in §"Fixed key→action map"
+below — never by reading back the rendered menu.
 
 ## Step 2 — Dispatch one validator per plugin, in groups of `max_parallel`
 
@@ -156,33 +163,59 @@ returns its one-liner, move to the next dispatch group.
 
 ## Step 3 — Refresh the status table after each wave
 
-After each group's agents have returned, re-run the orchestrator's
-status subcommand to get the live status_table JSON and render it:
+After each group's agents have returned, queue the live status table
+via the orchestrator's ``emit-status`` subcommand (one shot —
+aggregates every per-plugin status JSON and hands the CMS spec to
+``cpv_menu`` for emission via the Stop hook at turn end):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" status \
-  "$SESSION_DIR/plan.json" \
-| python3 "${CLAUDE_PLUGIN_ROOT}/scripts/format_menu.py" status_table /dev/stdin
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" \
+  emit-status "$SESSION_DIR/plan.json"
 ```
 
-This shows the user the running progress (one row per plugin,
-`✓` / `✗` / `⚠` / `○` for queued).
+NEVER print menu inline; the CMS Stop hook emits via systemMessage at
+turn end. End the turn after this call. The user sees the running
+progress (one row per plugin: ✓ valid / ✗ invalid / ⚠ warning-only /
+○ queued; CPV symbols are translated to the CMS enum
+``ok``/``missing``/``buggy``/``pending`` by the orchestrator).
 
 ## Step 4 — Final summary
 
-After ALL dispatch groups have finished, print the final status
-table one more time + a one-line summary:
+After ALL dispatch groups have finished:
 
-```text
-DONE: plugins=N valid=X invalid=Y warning-only=Z. Reports under {session_dir}/.
-```
+1. Queue the final status table one more time (CMS Stop hook emits at
+   turn end — same call as Step 3):
 
-If any plugin is INVALID, append a fix-prompt:
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" \
+     emit-status "$SESSION_DIR/plan.json"
+   ```
 
-```text
-Run `/cpv-batch-fix {original-target}` to fan out plugin-fixer
-agents across the invalid plugins.
-```
+2. Print a one-line summary inline (text, not a menu):
+
+   ```text
+   DONE: plugins=N valid=X invalid=Y warning-only=Z. Reports under {session_dir}/.
+   ```
+
+3. If any plugin is INVALID, append the fix-prompt inline:
+
+   ```text
+   Run `/cpv-batch-fix {original-target}` to fan out plugin-fixer
+   agents across the invalid plugins.
+   ```
+
+End the turn. The CMS Stop hook emits the final table via systemMessage.
+
+## Fixed key→action map
+
+`/cpv-batch-validate` is a one-shot fleet scan; the status table is
+informational only. There are no numbered or lettered action rows in
+its menu surface — the user's next move is to run the fix command
+shown in the text summary. The slug ``batch-plugin-validator-status``
+is reserved for this command's status table and used to derive the
+queue path. The fixed key→action map is empty by design; future
+post-scan menus (Phase 2+) extend this contract with letter→action
+rows.
 
 ## Token-cost guarantee
 

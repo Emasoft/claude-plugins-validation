@@ -59,7 +59,18 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" plan \
   --max-parallel "$MAX_PARALLEL"
 ```
 
-Print the initial status table.
+Capture the orchestrator's stdout (``PLAN``, ``STATUS_TABLE``,
+``SESSION_DIR``, ``PLUGIN_COUNT``, ``DISPATCH_GROUPS``). Queue the
+initial status table for the claude-menu-system Stop hook (emitted
+post-turn via ``systemMessage`` — zero token cost, NEVER printed
+inline by the orchestrator):
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$STATUS_TABLE"
+```
+
+NEVER print menu inline; the CMS Stop hook emits via systemMessage at
+turn end.
 
 ## Step 2 — Dispatch one doctor per project, in groups of max_parallel
 
@@ -116,23 +127,53 @@ for plugin_index in group:
 
 ## Step 3 — Mid-batch status refresh
 
+Queue the live status table via the orchestrator's ``emit-status``
+subcommand (aggregates every per-project status JSON, hands the CMS
+spec to ``cpv_menu`` — Stop hook emits at turn end):
+
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" status \
-  "$SESSION_DIR/plan.json" \
-| python3 "${CLAUDE_PLUGIN_ROOT}/scripts/format_menu.py" status_table /dev/stdin
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" \
+  emit-status "$SESSION_DIR/plan.json"
 ```
+
+NEVER print menu inline; the CMS Stop hook emits via systemMessage at
+turn end. End the turn after this call.
 
 ## Step 4 — Final summary
 
-```text
-DONE: projects=N clean=X findings=Y warning-only=Z. Conflicts total: C. Reports under {session_dir}/.
-```
+After every project has reported:
 
-If any project has findings or conflicts, suggest:
+1. Queue the final status table:
 
-```text
-Run /cpv-batch-scope-fix --scope <same scope> <same target> to apply fixes.
-```
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" \
+     emit-status "$SESSION_DIR/plan.json"
+   ```
+
+2. Print a one-line summary inline (text, not a menu):
+
+   ```text
+   DONE: projects=N clean=X findings=Y warning-only=Z. Conflicts total: C. Reports under {session_dir}/.
+   ```
+
+3. If any project has findings or conflicts, append the fix-prompt
+   inline:
+
+   ```text
+   Run /cpv-batch-scope-fix --scope <same scope> <same target> to apply fixes.
+   ```
+
+End the turn. The CMS Stop hook emits the final table via systemMessage.
+
+## Fixed key→action map
+
+`/cpv-batch-scope-diagnose` is a read-only fleet scope diagnostic; the
+status table is informational only. No numbered or lettered action
+rows — the user's next move is the text suggestion above
+(`/cpv-batch-scope-fix`). The slug ``batch-cpv-doctor-agent-status``
+is reserved for cpv-doctor-driven batch commands. The fixed
+key→action map is empty by design; future post-scan menus extend this
+contract with letter→action rows.
 
 ## See also
 

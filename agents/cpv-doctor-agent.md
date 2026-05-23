@@ -16,7 +16,10 @@ description: |
   README/CONTRIBUTING coverage, cross-reference integrity. Findings
   from all sources land in a single report under
   $MAIN_ROOT/reports/plugin-diagnoser/ — the orchestrator renders the
-  summary as a per-recipe breakdown table via scripts/format_menu.py.
+  per-recipe breakdown matrix and severity summary via the
+  claude-menu-system Stop-hook emitter (per TRDD-4de479a0), reading
+  the `<report>.breakdown.json` + `<report>.summary.json` sidecars
+  this agent writes alongside the markdown report.
 
   Free-form "Ask the doctor" mode (mode=ask_doctor_freeform) routes
   the user's typed description to a multi-turn diagnostic dialog.
@@ -277,35 +280,158 @@ Return EXACTLY ONE line to the main-session orchestrator:
 Findings: <C> CRITICAL, <M> MAJOR, <n> MINOR, <t> NIT, <w> WARNING — <VALID|INVALID> (report: <absolute-path>)
 ```
 
-ALSO write a structured per-recipe JSON file alongside the markdown report so the orchestrator can feed `format_menu.py breakdown` for the user-facing per-recipe table:
+ALSO write TWO claude-menu-system spec sidecars alongside the markdown report so the orchestrator can hand them directly to `scripts/cpv_menu.py` (the CPV → claude-menu-system bridge introduced in TRDD-4de479a0). The orchestrator NEVER prints a menu inline; it writes the spec, calls `cpv_menu.py`, and ENDS its turn — the claude-menu-system Stop hook emits the rendered menu via the hook's `systemMessage` field at turn end, with ZERO context cost (no transcript entry, no subagent fork, no prompt-cache re-prime).
+
+### Sidecar 1 — per-recipe BREAKDOWN spec
+
+Path:
 
 ```text
 $MAIN_ROOT/reports/plugin-diagnoser/<YYYYMMDD_HHMMSS±HHMM>-<slug>.breakdown.json
 ```
 
-Shape:
+Shape (a claude-menu-system `breakdown` spec; `cpv_menu.py` adds `renumber: false`):
 
 ```json
 {
+  "spec_version": 1,
+  "mode": "breakdown",
+  "plugin": "claude-plugins-validation",
+  "slug": "doctor-breakdown",
   "title": "Findings by recipe",
   "row_header": "Recipe / Category",
   "rows": [
-    {"label": "Schema validation",       "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 2, "NIT": 0, "WARNING": 1}},
-    {"label": "D1 Shape detection",      "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0}},
-    {"label": "D2 Command coverage",     "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0}},
-    {"label": "D3 Skill invocability",   "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0}},
-    {"label": "D4 Design conflicts",     "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0}},
-    {"label": "D5 Manifest consistency", "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0}},
-    {"label": "D6 Canonical pipeline",   "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0}},
-    {"label": "D7 README/CONTRIBUTING",  "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0}},
-    {"label": "D8 Cross-ref integrity",  "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0}}
+    {"label": "Schema validation",         "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 2, "NIT": 0, "WARNING": 1}},
+    {"label": "D1 Shape detection",        "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0}},
+    {"label": "D2 Command coverage",       "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0}},
+    {"label": "D3 Skill invocability",     "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0}},
+    {"label": "D4 Design conflicts",       "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0}},
+    {"label": "D5 Manifest consistency",   "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0}},
+    {"label": "D6 Canonical pipeline",     "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0}},
+    {"label": "D7 README/CONTRIBUTING",    "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0}},
+    {"label": "D8 Cross-ref integrity",    "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0}},
+    {"label": "D9 the-skills-menu adopt.", "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0}}
   ],
   "verdict": "VALID",
   "report_path": "<absolute-path-to-markdown-report>"
 }
 ```
 
-The orchestrator pipes this into `format_menu.py breakdown` to render a Unicode-bordered per-recipe matrix BEFORE the post-scan menu.
+### Sidecar 2 — severity SUMMARY spec
+
+Path:
+
+```text
+$MAIN_ROOT/reports/plugin-diagnoser/<YYYYMMDD_HHMMSS±HHMM>-<slug>.summary.json
+```
+
+Shape (a claude-menu-system `summary` spec — lowercase count keys per the CMS examples):
+
+```json
+{
+  "spec_version": 1,
+  "mode": "summary",
+  "plugin": "claude-plugins-validation",
+  "slug": "doctor-summary",
+  "title": "CPV doctor — severity summary",
+  "counts": {"critical": 0, "major": 1, "minor": 3, "nit": 7, "warning": 2},
+  "verdict": "VALID",
+  "report_path": "<absolute-path-to-markdown-report>"
+}
+```
+
+The orchestrator hands each sidecar directly to `python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" <sidecar.json>` (or the equivalent Python import). `cpv_menu.write_menu()` injects `renumber: false`, writes the spec to the claude-menu-system queue, and returns the queue path. The orchestrator then ENDS its turn — the CMS `Stop` hook emits the rendered menu at turn end via `systemMessage`. **NEVER print menu inline; the CMS Stop hook emits at turn end.**
+
+## Menu surfaces & fixed key→action contract (TRDD-4de479a0)
+
+The doctor's menu lifecycle has **four distinct surfaces**. The orchestrator (main session) renders all four; this agent body documents the FIXED letter→action map so routing is deterministic. Per the TRDD-4de479a0 fixed-key contract: numbers `1..N` index alphabetically-sorted dynamic lists; letters are stable fixed actions; `M`/`B`/`X` reserved for Main / Back / Exit. An action that doesn't apply in the current state is **omitted** (not relettered) — every surviving key keeps its meaning across runs. The orchestrator routes the user's typed key from THIS table, never from the rendered output. Numbers (if any) route positionally into the sorted list the orchestrator built before emit.
+
+### Surface 1 — First-contact "Diagnose what?" menu (`mode: menu`)
+
+Emitted by the `/cpv-main-menu` orchestrator (commands/cpv-main-menu.md → Diagnose category) BEFORE this agent ever runs. The user's selection becomes the `mode` + `target_path` in the `<context>` block this agent receives. The doctor itself does NOT re-render this menu; the contract below is anchored here so a single audit point keeps orchestrator ↔ agent in sync.
+
+| Key | action_id | Label | mode dispatched |
+|---|---|---|---|
+| `P` | `diagnose_single_plugin` | Single plugin (path or `pwd`) | `single_plugin` |
+| `H` | `diagnose_current_folder` | Diagnose this folder (cwd) | `current_folder` |
+| `G` | `diagnose_github_plugin` | GitHub plugin (owner/repo or URL) | `github_plugin` |
+| `S` | `diagnose_scan_all_installed` | Scan all installed plugins | `scan_all_installed` |
+| `L` | `diagnose_local_marketplace` | Local marketplace folder | `local_marketplace` |
+| `K` | `diagnose_github_marketplace` | GitHub marketplace | `github_marketplace` |
+| `J` | `diagnose_project_scope` | Project-scope `.claude/` | `project_scope` |
+| `O` | `diagnose_local_scope` | `.claude/settings.local.json` | `local_scope` |
+| `U` | `diagnose_user_scope` | `~/.claude/` (user scope) | `user_scope` |
+| `I` | `diagnose_single_skill` | Single skill folder | `single_skill` |
+| `E` | `diagnose_single_agent` | Single agent file | `single_agent` |
+| `Z` | `diagnose_single_hook` | Single hook file | `single_hook` |
+| `R` | `diagnose_single_mcp` | Single MCP server | `single_mcp` |
+| `Q` | `diagnose_single_monitor` | Single monitor | `single_monitor` |
+| `Y` | `diagnose_single_output_style` | Single output style | `single_output_style` |
+| `V` | `diagnose_single_lsp` | Single LSP server | `single_lsp` |
+| `C` | `cache_cleanup` | Cache cleanup / prune | `cache_cleanup` |
+| `N` | `install_scanners` | Install scanner deps (semgrep, trufflehog, …) | `install_scanners` |
+| `F` | `auto_fix_orphans` | Auto-fix orphan resources | `auto_fix_orphans` |
+| `T` | `quick_health_check` | Quick health check | `quick_health_check` |
+| `W` | `dependency_tree` | Show dependency tree | `dependency_tree` |
+| `D` | `add_dependencies` | Add dependencies | `add_dependencies` |
+| `A` | `ask_doctor_freeform` | Ask the doctor (free-form) | `ask_doctor_freeform` |
+| `M` | nav | Back to Main Menu | (orchestrator) |
+| `B` | nav | Back to previous menu | (orchestrator) |
+| `X` | nav | Exit plugin menu | (orchestrator) |
+
+**Rationale for letter assignment:** mnemonics where free (`P`lugin, `G`itHub, `S`can-all, `L`ocal-marketplace, `U`ser, `C`ache, `F`ix-orphans, `D`ependencies, `A`sk); `H` (cwd `H`ere) and `O` (l`O`cal) and `Y` (st`Y`le) chosen to free `B`/`M`/`X` for nav and `T` for `T`he-skills-menu / health. No dynamic-list rows here — every mode is a fixed action. Bijective: each letter → exactly one action.
+
+### Surface 2 — Severity SUMMARY (`mode: summary`)
+
+Emitted post-scan by the orchestrator from `<report>.summary.json`. Pure presentation — NO rows, NO keys, NO routing. The user reads the counts + verdict + report path and continues to Surface 4 (post-scan action menu) in the same turn-end emit (the orchestrator can write multiple CMS specs in one turn; the hook emits them all).
+
+### Surface 3 — Per-recipe BREAKDOWN matrix (`mode: breakdown`)
+
+Emitted post-scan by the orchestrator from `<report>.breakdown.json`. Pure presentation — NO rows-with-keys, NO routing. Renders a Unicode-bordered matrix of recipes × severities. Always emitted alongside Surface 2 + Surface 4 in the same post-scan turn-end.
+
+### Surface 4 — Post-scan ACTION menu (`mode: menu`)
+
+Emitted post-scan by the orchestrator. The user picks the next step. FIXED letter→action map (rows are OMITTED — not relettered — when the conditional column says they don't apply):
+
+| Key | action_id | Label | Emitted when |
+|---|---|---|---|
+| `F` | `fix_all_findings` | Fix ALL findings (auto-route to plugin-fixer / batch-fix) | `findings > 0` |
+| `R` | `revalidate_now` | Re-validate now (rerun validator + D1..D9) | always |
+| `O` | `open_report` | Open the full markdown report | always |
+| `D` | `show_breakdown` | Re-show the per-recipe breakdown matrix | always |
+| `S` | `show_summary` | Re-show the severity summary | always |
+| `T` | `migrate_to_skills_menu` | Migrate to the-skills-menu method | only when D9 produced findings |
+| `P` | `batch_fix_parallel` | Batch-fix via parallel sharding (`/cpv-batch-fix`) | only when the `— recommend-batch-fix` token was emitted |
+| `A` | `ask_about_findings` | Ask the doctor about a specific finding (free-form) | always |
+| `N` | `rescan_next_target` | Re-scan a different target | always |
+| `M` | nav | Back to Main Menu | always |
+| `B` | nav | Back to previous menu | always |
+| `X` | nav | Exit plugin menu | always |
+
+**Rationale:** `F`ix is the canonical default (first action). `D` = brea`D`down because `B` is reserved for Back. `T` reused for `T`he-skills-menu since `T`-health only exists on Surface 1 (different menu, no collision). `P` reused for `P`arallel since `P`lugin only exists on Surface 1 (different menu). `N` = `N`ext rescan. Numbers `1..N` are not used — every row is a fixed action — so the orchestrator passes `renumber: false` (via the `cpv_menu.write_menu` default) and the printed keys match the table verbatim.
+
+### Orchestrator emit contract (canonical)
+
+For EACH spec the orchestrator writes:
+
+```bash
+# After the doctor returns, the orchestrator:
+SLUG="doctor-<scan-id>"
+SUMMARY_SPEC="/tmp/cpv-${SLUG}-summary-spec.json"
+BREAKDOWN_SPEC="/tmp/cpv-${SLUG}-breakdown-spec.json"
+ACTION_SPEC="/tmp/cpv-${SLUG}-action-spec.json"
+
+# (sidecars 1 + 2 already exist on disk as <report>.{summary,breakdown}.json —
+# copy or symlink into the spec paths above; build ACTION_SPEC from the fixed
+# map in this agent body, omitting conditional rows that don't apply)
+
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$SUMMARY_SPEC"
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$BREAKDOWN_SPEC"
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$ACTION_SPEC"
+# END TURN. The CMS Stop hook emits all three menus via systemMessage at turn end.
+```
+
+**Iron rule:** NEVER print menu inline. The CMS Stop hook emits at turn end. Never call `format_menu.py` (removed in TRDD-4de479a0 Phase 4) and never embed a Unicode-bordered table in prose — both bypass the zero-cost emit and re-enter the cached transcript.
 
 ## Fix-mode dispatch
 
@@ -441,4 +567,6 @@ fix categories. Per-scope reports live under
 
 Per TRDD-bcbceeed (v2.89.0): the doctor's first-contact menu lives in the slash command body, not in a separate menu-subagent — only the main session can dispatch subagents.
 
-Per TRDD-81e7fa34 (v2.89.3): the doctor's job extends well beyond the schema validators. The nine D1..D9 recipes are the design-correctness pass that distinguishes the doctor from `/cpv-validate-plugin`. Findings are reported in a per-recipe breakdown table rendered by `scripts/format_menu.py breakdown`.
+Per TRDD-81e7fa34 (v2.89.3): the doctor's job extends well beyond the schema validators. The nine D1..D9 recipes are the design-correctness pass that distinguishes the doctor from `/cpv-validate-plugin`. Findings are reported in a per-recipe breakdown matrix.
+
+Per TRDD-4de479a0 (Phase 2): all four doctor menu surfaces (first-contact, severity summary, per-recipe breakdown, post-scan action menu) render through the externalised `claude-menu-system` plugin's Stop-hook emitter, via the `scripts/cpv_menu.py` bridge. The agent writes `<report>.summary.json` + `<report>.breakdown.json` as claude-menu-system specs; the orchestrator hands each to `cpv_menu.py` and ends its turn. The fixed letter→action map for every surface is the SOLE routing reference (documented above in "Menu surfaces & fixed key→action contract") — the orchestrator NEVER reads the rendered menu output. Menus emit via the hook's `systemMessage` field (zero context cost; no transcript entry; no subagent fork; no prompt-cache re-prime). `scripts/format_menu.py` and the `cpv-format-menu` fork-skill are removed in TRDD-4de479a0 Phase 4.

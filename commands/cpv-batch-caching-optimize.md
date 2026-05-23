@@ -49,7 +49,18 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" plan \
   --max-parallel "$MAX_PARALLEL"
 ```
 
-Print the initial status table.
+Capture the orchestrator's stdout (``PLAN``, ``STATUS_TABLE``,
+``SESSION_DIR``, ``PLUGIN_COUNT``, ``DISPATCH_GROUPS``). Queue the
+initial status table for the claude-menu-system Stop hook (emitted
+post-turn via ``systemMessage`` — zero token cost, NEVER printed
+inline by the orchestrator):
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$STATUS_TABLE"
+```
+
+NEVER print menu inline; the CMS Stop hook emits via systemMessage at
+turn end.
 
 ## Step 2 — Dispatch optimize agents in parallel
 
@@ -97,29 +108,57 @@ for plugin_index in group:
 
 ## Step 3 — Mid-batch status refresh
 
+Queue the live status table via the orchestrator's ``emit-status``
+subcommand (aggregates every per-plugin status JSON, hands the CMS
+spec to ``cpv_menu`` — Stop hook emits at turn end):
+
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" status \
-  "$SESSION_DIR/plan.json" \
-| python3 "${CLAUDE_PLUGIN_ROOT}/scripts/format_menu.py" status_table /dev/stdin
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" \
+  emit-status "$SESSION_DIR/plan.json"
 ```
+
+NEVER print menu inline; the CMS Stop hook emits via systemMessage at
+turn end. End the turn after this call.
 
 ## Step 4 — Final summary
 
-After every plugin has reported, print the final table + one-line
-summary:
+After every plugin has reported:
 
-```text
-DONE: plugins=N clean=X fixed=Y partial=Z failed=W. Reports under {session_dir}/.
-```
+1. Queue the final status table:
 
-If any plugin is `partial` or `failed`, append:
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" \
+     emit-status "$SESSION_DIR/plan.json"
+   ```
 
-```text
-Some plugins still have remaining CA-* findings. Inspect their
-reports for per-plugin error details and re-run /cpv-batch-caching-optimize
-to retry; or run /cpv-cache-optimize <one plugin> interactively for
-Phase 4 (broader refactor).
-```
+2. Print a one-line summary inline (text, not a menu):
+
+   ```text
+   DONE: plugins=N clean=X fixed=Y partial=Z failed=W. Reports under {session_dir}/.
+   ```
+
+3. If any plugin is `partial` or `failed`, append the retry-prompt
+   inline:
+
+   ```text
+   Some plugins still have remaining CA-* findings. Inspect their
+   reports for per-plugin error details and re-run /cpv-batch-caching-optimize
+   to retry; or run /cpv-cache-optimize <one plugin> interactively for
+   Phase 4 (broader refactor).
+   ```
+
+End the turn. The CMS Stop hook emits the final table via systemMessage.
+
+## Fixed key→action map
+
+`/cpv-batch-caching-optimize` is a one-shot fleet cache fixer; the
+status table is informational only. No numbered or lettered action
+rows — the user's next move is the text suggestion above (re-run, or
+switch to interactive `/cpv-cache-optimize` for Phase 4). The slug
+``batch-cache-optimizer-agent-status`` is shared with
+`/cpv-batch-caching-audit` (same agent type — intentional). The fixed
+key→action map is empty by design; future post-scan menus extend this
+contract with letter→action rows.
 
 ## Why batch mode skips Phase 4
 

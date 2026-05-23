@@ -14,8 +14,10 @@ Resolves the user's input via `scripts/cpv_marketplace_input.py`
 (every shape from §Inputs), builds a batch plan via
 `scripts/cpv_batch_orchestrator.py`, dispatches one
 `plugin-validator` subagent per plugin in `batch_validate` mode,
-and aggregates per-plugin status JSONs into a single Unicode-bordered
-status table.
+and aggregates per-plugin status JSONs into a CMS-shaped
+``status_table`` spec which is queued via `scripts/cpv_menu.py`.
+The claude-menu-system Stop hook emits the table to the user
+post-turn (zero token cost — never enters the agent transcript).
 
 The full orchestrator body lives in the plugin's
 `commands/cpv-batch-validate.md` slash-command file. This SKILL.md
@@ -27,8 +29,12 @@ slash command directly.
 
 - `claude-plugins-validation` plugin installed (provides
   `scripts/cpv_marketplace_input.py`,
-  `scripts/cpv_batch_orchestrator.py`, `scripts/format_menu.py`,
-  and the `plugin-validator` agent).
+  `scripts/cpv_batch_orchestrator.py`, `scripts/cpv_menu.py` (the
+  claude-menu-system bridge), and the `plugin-validator` agent).
+- `claude-menu-system` plugin installed (the Stop-hook menu emitter
+  that ``cpv_menu.py`` queues specs for). Declared as a hard
+  dependency in CPV's ``plugin.json``; ``cpv_menu.py`` fails fast
+  with an install hint if missing.
 - For URL inputs: `git` on PATH and network access to
   `github.com` so the resolver can `git clone --depth 1` each
   plugin/marketplace into `${TMPDIR}/cpv-batch-input-<uuid>/`.
@@ -77,9 +83,13 @@ its on-disk shape.
 
 Two artefacts:
 
-1. **Unicode-bordered status table** printed to the user (rendered
-   by `scripts/format_menu.py status_table`). One row per plugin
-   with `✓` / `✗` / `⚠` / `○` (queued) symbols.
+1. **Unicode-bordered status table** queued for the
+   claude-menu-system Stop hook (emitted post-turn via
+   ``systemMessage`` — zero token cost, never enters the agent
+   transcript). One row per plugin; CPV's per-plugin symbols
+   (✓ / ✗ / ⚠ / ○) are translated to the CMS enum
+   (``ok`` / ``missing`` / ``buggy`` / ``pending``) by the
+   orchestrator.
 2. **One-line DONE summary** —
    `DONE: plugins=N valid=X invalid=Y warning-only=Z. Reports under <session_dir>/.`
 

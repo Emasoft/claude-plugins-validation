@@ -485,22 +485,58 @@ dev-stripping. The default is recommended ON for the install-size win
 and rc-3 metadata in plugin.json — the actual extraction (`--auto`) is
 deferred until rc-3 lands.
 
-### Menu (use Unicode table, NOT AskUserQuestion)
+### Menu (claude-menu-system, NOT AskUserQuestion)
 
-```
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ Dev-stripping (TRDD-793ac32a) — default = (1) Standard            ┃
-┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫
-┃ N │ Choice                                                       ┃
-┣━━━━┼─────────────────────────────────────────────────────────────┫
-┃ 1 │ Standard (PSS pattern) — one cpv.strip entry for tests/
-┃ 2 │ Legacy — keep everything in MAIN repo (discouraged)
-┃ 0 │ Cancel
-┗━━━━┴─────────────────────────────────────────────────────────────┘
+Render this menu via the CMS bridge — the Stop hook emits at turn end
+through `systemMessage`, so the menu costs ZERO tokens and is NEVER in
+the transcript. NEVER print this menu inline; end the turn right after
+the `cpv_menu.py` call.
+
+**Fixed letter→action map (immutable, per TRDD-4de479a0 FIXED-KEY contract):**
+
+| Key | action_id     | Label                                                              |
+|-----|---------------|--------------------------------------------------------------------|
+| S   | standard      | Standard (PSS pattern) — one `cpv.strip` entry for `tests/` (default) |
+| L   | legacy        | Legacy — keep everything in MAIN repo (discouraged)                |
+| 0   | cancel        | Cancel                                                             |
+
+Letter choices: `S` = first letter of *Standard* (free); `L` = first letter
+of *Legacy* (free); `0` is the literal CMS-preserved cancel key. `M`/`B`/`X`
+are globally reserved for Main/Back/Exit navigation and never assigned here.
+The map is FIXED at agent-design time and is the SOLE reference for routing
+the user's next-turn reply — never inspect the rendered menu to decide what
+a key means.
+
+**Render recipe (Bash, in the agent body):**
+
+```bash
+PLUGIN_DEV_STRIPPING_SPEC=$(mktemp -t plugin-creator-strip-dev-spec.XXXXXX.json)
+cat > "$PLUGIN_DEV_STRIPPING_SPEC" <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "plugin-creator",
+  "slug": "dev-stripping",
+  "header": "Dev-stripping (TRDD-793ac32a) — default = (S) Standard",
+  "rows": [
+    {"key": "S", "action_id": "standard", "label": "Standard (PSS pattern) — one cpv.strip entry for tests/"},
+    {"key": "L", "action_id": "legacy",   "label": "Legacy — keep everything in MAIN repo (discouraged)"},
+    {"key": "0", "action_id": "cancel",   "label": "Cancel"}
+  ],
+  "footer": "Type a key:"
+}
+JSON
+uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$PLUGIN_DEV_STRIPPING_SPEC"
 ```
 
-Choosing 1 makes `generate_plugin_repo.py` add the `cpv.strip` block
-to plugin.json with ONE extract entry (`tests/`) — matching PSS's
+End the turn immediately after this call. The claude-menu-system Stop
+hook emits the rendered menu post-turn via `systemMessage` — zero token
+cost, not in the transcript. Resume on the user's next-turn reply using
+the FIXED letter→action map above (typed `S`/`L`/`0` → `standard` /
+`legacy` / `cancel`).
+
+Choosing `standard` makes `generate_plugin_repo.py` add the `cpv.strip`
+block to plugin.json with ONE extract entry (`tests/`) — matching PSS's
 single-submodule pattern. `cpv strip-dev-parts --auto` reads this block
 as configuration when the user runs it later. No GitHub repos are
 created at scaffold time. Plugins with additional heavy dev folders
@@ -509,7 +545,7 @@ worth stripping can add more extract entries by hand.
 ### Implementation
 
 Pass `--strip-dev` (default) to `generate_plugin_repo.py`. Negate via
-`--no-strip-dev` for option (2).
+`--no-strip-dev` for `legacy`.
 
 ### Why default-ON
 
