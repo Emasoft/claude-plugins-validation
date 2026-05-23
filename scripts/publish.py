@@ -526,13 +526,19 @@ def update_python_versions(plugin_root: Path, new_version: str) -> list[tuple[bo
     for py_file in gi.rglob("*.py"):
         try:
             content = py_file.read_text(encoding="utf-8")
-            pattern = r'^(__version__\s*=\s*["\'])(\d+\.\d+\.\d+)(["\'])$'
+            # Allow optional trailing whitespace/comment so lines like
+            # `__version__ = "2.103.4"  # bumped in lockstep with plugin.json`
+            # still get bumped. The pre-v2.104.1 regex anchored `$` right
+            # after the closing quote and silently skipped commented lines —
+            # observed when cpv_skillaudit_native.py shipped stale __version__
+            # in v2.104.0 and the integration test caught it on CI.
+            pattern = r'^(__version__\s*=\s*["\'])(\d+\.\d+\.\d+)(["\'])(\s*(?:#.*)?)$'
             old_v = None
 
             def _replace(m: re.Match[str]) -> str:
                 nonlocal old_v
                 old_v = m.group(2)
-                return f"{m.group(1)}{new_version}{m.group(3)}"
+                return f"{m.group(1)}{new_version}{m.group(3)}{m.group(4)}"
 
             new_content, count = re.subn(pattern, _replace, content, flags=re.MULTILINE)
             if count > 0:
