@@ -110,25 +110,25 @@ def test_scanner_block_uses_threadpool_executor():
 
 
 def test_scanner_block_wall_time_is_slowest_not_sum(tmp_path: Path):
-    """With four sleeping scanners (each 2.0s), serial execution would
-    take ~8.0s; parallel must finish in ~2.0s.
+    """With four sleeping scanners (each 4.0s), serial execution would
+    take ~16.0s; parallel must finish in ~4.0s.
 
-    Lower-bound for serial: 4 * 2.0 = 8.0s. Upper bound for parallel:
+    Lower-bound for serial: 4 * 4.0 = 16.0s. Upper bound for parallel:
     same number, since hitting it means parallelism is broken. Use the
     serial lower-bound as the hard ceiling on the parallel run.
 
-    Sleep bumped from 1.0s to 2.0s in v2.88.0 after the 1.0s budget
-    flaked under publish.py-time load (the publish pipeline runs the
-    whole suite with `-n auto`, so 8+ xdist workers contend with our
-    4 thread-pool scanners — observed wall times of 4.0-4.7s on a 1.0s
-    budget on a 12-core M-series laptop). Doubling sleep_s grows the
-    serial ceiling from 4.0s to 8.0s while parallel-mode wall time
-    only grows from ~1s to ~2-2.5s, so the parallelism signal is
-    sharper, not weaker.
+    Sleep bumped from 1.0s to 2.0s in v2.88.0 and from 2.0s to 4.0s in
+    v2.104.0 after the 2.0s budget flaked at 9.5s under publish.py
+    Phase C load (tests + validate + marketplace gates run concurrently;
+    8 xdist workers + 4 scanner threads + concurrent gate processes all
+    contend for cores on a 12-core M-series laptop). Doubling sleep_s
+    grows the serial ceiling from 8.0s to 16.0s while parallel-mode wall
+    time grows from ~2-2.5s to ~4-4.5s, so the parallelism signal stays
+    sharp (4× vs 1×) with a much larger margin for contention overhead.
     """
     plugin_path = _make_minimal_plugin(tmp_path)
 
-    sleep_s = 2.0
+    sleep_s = 4.0
     fake_cc = _make_sleeping_scanner("cc-audit", sleep_s)
     fake_tirith = _make_sleeping_scanner("tirith", sleep_s)
     fake_truffle = _make_sleeping_scanner("trufflehog", sleep_s)
