@@ -155,7 +155,7 @@ def _compiled_rules() -> list[tuple[dict[str, Any], list[re.Pattern[str]]]]:
 #     monkeypatch.setenv works without reloading the module.
 
 
-__version__ = "2.104.2"  # bumped in lockstep with plugin.json by publish.py
+__version__ = "2.105.0"  # bumped in lockstep with plugin.json by publish.py
 
 
 def _compute_catalog_hash() -> str:
