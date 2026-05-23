@@ -165,8 +165,8 @@ Real-plugin verification (cache disabled to bypass the stale-version cache):
   template-literal FPs eliminated; CROSS_TOOL_ACCESS 56→0, ENV_RECON 14→0,
   OBFUSCATION 4→0, SSRF 28→0, STRUCT_READ_EXFIL 6→0, SUPPLY_CHAIN 1→0,
   ENV_INJECTION 12→0).
-- **ai-maestro-janitor**: 9 → **3** NIT (all docstring/comment CMD_INJECTION
-  + PATH_TRAVERSAL + ci.yml sudo-install FPs eliminated).
+- **ai-maestro-janitor**: 9 → **3** NIT (all docstring/comment CMD_INJECTION,
+  PATH_TRAVERSAL, and ci.yml sudo-install FPs eliminated).
 - CPV self-scan: 0/0/0/0 + WARNING-only. Full suite: 6500 passed.
   ruff + mypy clean.
 
