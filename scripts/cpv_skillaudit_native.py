@@ -1202,19 +1202,90 @@ _NET_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
 )
 
 
+# Import-statement shapes — a file read NAME appearing in an import is not
+# a read OPERATION (``import { readFileSync } from "fs"`` / ``from os import
+# open``). These must never count as a read for the structural detector.
+_IMPORT_LINE_RE: re.Pattern[str] = re.compile(
+    r"^\s*(?:import\b|from\s+[\w.]+\s+import\b|export\s+\{)|^\s*(?:readFile\w*|open|read)\s*,\s*$"
+)
+
+# Extract the variable a read result is bound to:
+#   const head = readFileSync(...)      → head
+#   data = open(path).read()            → data
+#   let buf = fs.readFileSync(...)      → buf
+_READ_ASSIGN_RE: re.Pattern[str] = re.compile(
+    r"^\s*(?:const|let|var)?\s*(?P<var>[A-Za-z_$][\w$]*)\s*=\s*[^=].*"
+    r"(?:readFile\w*|fs\.read\w*|\.read\s*\(|open\s*\()",
+)
+
+# Same-line read→sink: the read result is passed straight into a net call,
+# e.g. ``fetch(url, {body: readFileSync(secret)})``.
+_SAME_LINE_READ_AND_NET_RE: re.Pattern[str] = re.compile(
+    r"(?:fetch|axios|\.post|\.send|http\.request|https\.request|XMLHttpRequest)\s*\(",
+)
+
+_STRUCT_FLOW_WINDOW = 25  # lines a read-var may flow forward to a net sink
+
+
 def _detect_structural_read_to_net(lines: list[str], cb_map: list[bool]) -> list[dict[str, Any]]:
-    read_lines: list[int] = []
+    """Flag a read→network EXFIL flow, but ONLY when a variable bound from a
+    file read is actually referenced by a network call (data-flow link), or a
+    read result is piped into a net call on the same line.
+
+    The pre-data-flow version fired whenever ANY read line and ANY net line
+    coexisted anywhere in the file — so a 2700-line MCP server's shebang
+    ``readFileSync().slice(0,256)`` got paired with an unrelated ``fetch()``
+    2000 lines away (issue #41). Requiring a shared variable within a
+    proximity window eliminates that while still catching genuine
+    read-then-send exfil (which is, by nature, local).
+    """
+    # Collect (line_no, var) for real read assignments, and the line numbers
+    # of real net calls. Skip import lines, doc/instructional context, and
+    # data-only fenced blocks.
+    read_vars: list[tuple[int, str]] = []
     net_lines: list[int] = []
+    same_line_hits: list[int] = []
     for i, line in enumerate(lines):
         if cb_map[i] and _has_doc_context(lines, i, 8):
             continue
-        if any(p.search(line) for p in _READ_PATTERNS):
-            read_lines.append(i + 1)
-        if any(p.search(line) for p in _NET_PATTERNS):
+        if _is_instructional_context(lines, i):
+            continue
+        if _IMPORT_LINE_RE.search(line):
+            # Imports never count as a read OR a net operation.
+            continue
+        is_read = any(p.search(line) for p in _READ_PATTERNS)
+        is_net = any(p.search(line) for p in _NET_PATTERNS)
+        if is_read and is_net and _SAME_LINE_READ_AND_NET_RE.search(line):
+            # Read result piped straight into a net call on one line.
+            same_line_hits.append(i + 1)
+            continue
+        if is_read:
+            m = _READ_ASSIGN_RE.search(line)
+            if m is not None:
+                read_vars.append((i + 1, m.group("var")))
+        if is_net:
             net_lines.append(i + 1)
-    real_read = [ln for ln in read_lines if not _is_instructional_context(lines, ln - 1)]
-    real_net = [ln for ln in net_lines if not _is_instructional_context(lines, ln - 1)]
-    if real_read and real_net:
+
+    # Data-flow link: a read-var referenced by a later net call within the
+    # proximity window.
+    flow_read: int | None = None
+    flow_net: int | None = None
+    for r_line, var in read_vars:
+        # Require a non-trivial variable name (single-char temp loop vars like
+        # ``i``/``f`` produce noise).
+        if len(var) < 2:
+            continue
+        var_word = re.compile(rf"\b{re.escape(var)}\b")
+        for n_line in net_lines:
+            if r_line < n_line <= r_line + _STRUCT_FLOW_WINDOW:
+                if var_word.search(lines[n_line - 1]):
+                    flow_read, flow_net = r_line, n_line
+                    break
+        if flow_read is not None:
+            break
+
+    if same_line_hits:
+        first = same_line_hits[0]
         return [
             {
                 "ruleId": "STRUCT_READ_EXFIL",
@@ -1222,12 +1293,29 @@ def _detect_structural_read_to_net(lines: list[str], cb_map: list[bool]) -> list
                 "category": "structural",
                 "name": "Read → Network pattern detected",
                 "description": (
-                    f"Reads files (lines {','.join(map(str, real_read[:3]))}) and "
-                    f"makes network requests (lines {','.join(map(str, real_net[:3]))}). "
+                    f"File read result piped into a network call on line {first}. "
                     "Potential data exfiltration flow."
                 ),
-                "line": real_read[0],
-                "lineContent": lines[real_read[0] - 1].strip()[:200],
+                "line": first,
+                "lineContent": lines[first - 1].strip()[:200],
+                "match": "structural",
+                "suppressed": False,
+            }
+        ]
+    if flow_read is not None and flow_net is not None:
+        return [
+            {
+                "ruleId": "STRUCT_READ_EXFIL",
+                "severity": "high",
+                "category": "structural",
+                "name": "Read → Network pattern detected",
+                "description": (
+                    f"A variable bound from a file read (line {flow_read}) is sent "
+                    f"by a network call (line {flow_net}). Potential data "
+                    "exfiltration flow."
+                ),
+                "line": flow_read,
+                "lineContent": lines[flow_read - 1].strip()[:200],
                 "match": "structural",
                 "suppressed": False,
             }

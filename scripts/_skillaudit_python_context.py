@@ -24,6 +24,7 @@ Contract:
 from __future__ import annotations
 
 import ast
+import re
 from typing import Final, Literal
 
 ContextVerdict = Literal["safe_literal", "safe_doc", "suspect", "unknown"]
@@ -519,6 +520,153 @@ def _line_is_full_comment(source_line: str) -> bool:
     return source_line.lstrip().startswith("#")
 
 
+# ── Issue #40 — execution-class vs prose-vector split for comment/docstring ──
+# A Python ``#`` comment and a docstring are NEVER executed. So a rule that
+# REQUIRES code execution to be a threat (CMD_INJECTION, PATH_TRAVERSAL, …)
+# matched inside one is a provable non-threat → suppress. But a rule whose
+# THREAT IS THE PROSE ITSELF (prompt-injection / exfil instruction /
+# hardcoded secret / invisible unicode) stays VISIBLE even in a comment —
+# a careless agent or a grep-based loader could still surface that text.
+_PROSE_VECTOR_RULES: Final[frozenset[str]] = frozenset(
+    {
+        "PROMPT_INJECT",
+        "INDIRECT_PROMPT_INJECT",
+        "DATA_EXFIL",
+        "DATA_EXFIL_TO_NETWORK",
+        "EXFIL_TO_CHAT",
+        "URL_SUSPICIOUS",
+        "HARDCODED_SECRET",
+        "INVISIBLE_UNICODE_RAW",
+        "BASE64_DECODE_THREAT",
+        "HEX_DECODE_THREAT",
+        "UNICODE_ESCAPE_DECODE_THREAT",
+        "CHARCODE_DECODE_THREAT",
+    }
+)
+
+
+def _rule_is_prose_vector(rule_id: str) -> bool:
+    """True iff the rule's threat is the prose itself (stays visible in a
+    comment/docstring). SECRET_* prefixes are treated as prose-vector too."""
+    return rule_id in _PROSE_VECTOR_RULES or rule_id.startswith("SECRET_")
+
+
+def _is_inside_docstring(tree: ast.AST, line: int) -> bool:
+    """True iff the 1-based ``line`` falls inside a true DOCSTRING node — the
+    string-literal first statement of a Module / FunctionDef / AsyncFunctionDef
+    / ClassDef. A data string assigned to a variable is NOT a docstring and is
+    excluded (it could be passed to a shell, per the user's "strings stay
+    visible" rule)."""
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        body = getattr(node, "body", None)
+        if not body:
+            continue
+        first = body[0]
+        if (
+            isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+        ):
+            start = getattr(first.value, "lineno", None)
+            end = getattr(first.value, "end_lineno", None)
+            if start is not None and end is not None and start <= line <= end:
+                return True
+    return False
+
+
+# ── Issue #41 — CROSS_TOOL_ACCESS field-name discriminator (Python) ──
+# Same principle as the TS classifier: the field-name patterns
+# (system_prompt / context_window / …) are LLM-client domain vocabulary,
+# distinct from the runtime data-grab patterns (get_tools / tool_results[ /
+# previous_tool_output). Python uses these as function params, dict keys,
+# CLI flags — all benign.
+_API_FIELD_NAMES_PY: Final[frozenset[str]] = frozenset(
+    {
+        "system_prompt",
+        "system_message",
+        "context_window",
+        "full_context",
+        "conversation_history",
+        "message_history",
+        "chat_history",
+    }
+)
+_RETRIEVAL_GRAB_RE_PY: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:get_tools|list_tools|available_tools|call_tool|invoke_tool|use_tool)\b"
+    r"|\bprevious_tool_output\b"
+    r"|\btool_results?\s*\["
+    r"|\bget\w*\s*\(.*(?:all|previous|recent).*(?:message|response|output)",
+    re.IGNORECASE,
+)
+
+
+def _is_api_field_name_match_py(line: str, match: str) -> bool:
+    """True iff a CROSS_TOOL_ACCESS match is an LLM-API field NAME (domain
+    vocabulary) and the line carries no hard runtime data-grab indicator."""
+    if not any(name in match or name in line for name in _API_FIELD_NAMES_PY):
+        return False
+    if _RETRIEVAL_GRAB_RE_PY.search(line):
+        return False
+    return True
+
+
+# ── Issue #41 — SSRF static-literal discriminator (Python) ──
+# A localhost / metadata URL that is a fully static string literal (no
+# f-string ``{…}`` interpolation, no ``+`` concatenation) has a fixed
+# author-time destination → not attacker-controlled → not SSRF.
+def _ssrf_url_is_static_literal_py(line: str, match: str) -> bool:
+    idx = line.find(match)
+    if idx < 0:
+        return False
+    quote = ""
+    for ch in reversed(line[:idx]):
+        if ch in "\"'":
+            quote = ch
+            break
+        if ch in "(),;=[":
+            break
+    if not quote:
+        return False
+    open_pos = line.rfind(quote, 0, idx)
+    close_pos = line.find(quote, idx + len(match))
+    if open_pos < 0 or close_pos < 0:
+        return False
+    literal_body = line[open_pos + 1 : close_pos]
+    # f-string interpolation inside the literal → dynamic.
+    if "{" in literal_body and "}" in literal_body:
+        # Only treat as dynamic when it's a real f-string (prefix f/F).
+        prefix = line[max(0, open_pos - 2) : open_pos].lower()
+        if "f" in prefix:
+            return False
+    after = line[close_pos + 1 :].lstrip()
+    before = line[:open_pos].rstrip()
+    if after.startswith("+") or before.endswith("+"):
+        return False
+    return True
+
+
+# ── Issue #41 — TOOL_SHADOW monkeypatch-in-test discriminator (Python) ──
+# pytest's ``monkeypatch`` fixture is standard test scaffolding; the
+# TOOL_SHADOW rule fires on the substring ``monkey?patch``. In a test file
+# it is never tool-shadowing. The dangerous TOOL_SHADOW shapes
+# (``__proto__ =``, ``override … tool``, ``Proxy(``) are different patterns
+# that still fire.
+def _is_pytest_monkeypatch(line: str, match: str) -> bool:
+    m = (match or "").lower()
+    return "monkeypatch" in m or "monkeypatch" in line.lower()
+
+
+# ── Issue #41 — OBFUSCATION html.unescape discriminator (Python) ──
+# ``html.unescape(...)`` is HTML-entity DECODING (rendering text readable),
+# the opposite of obfuscation. The OBFUSCATION rule fires on the substring
+# ``unescape(``. The bare/global ``unescape(`` (deprecated JS-style) stays
+# flagged; only the qualified stdlib ``html.unescape`` is softened.
+def _is_html_unescape(line: str, match: str) -> bool:
+    return "html.unescape" in line
+
+
 def classify(
     file_path: str,
     source: str,
@@ -553,12 +701,15 @@ def classify(
             enclosing call, match outside any AST node). Caller falls
             through to the existing heuristic chain.
     """
-    # Cheap fast-path: full-line comment or docstring detection without
-    # parse (parse is ~50× slower; the existing comment-stripper in
-    # _confidence already partially handles this).
+    # Cheap fast-path: full-line comment detection without parse (parse is
+    # ~50× slower). Issue #40: a Python ``#`` comment is NEVER executed, so
+    # an execution-class rule matched inside one is a provable non-threat →
+    # suppress (safe_literal). A prose-vector rule (prompt-injection / exfil
+    # instruction / hardcoded secret / invisible unicode) stays VISIBLE
+    # (safe_doc → demote) — a careless agent or grep-loader could surface it.
     lines = source.splitlines()
     if 0 <= line_idx < len(lines) and _line_is_full_comment(lines[line_idx]):
-        return "safe_doc"
+        return "safe_doc" if _rule_is_prose_vector(rule_id) else "safe_literal"
 
     try:
         tree = ast.parse(source)
@@ -697,6 +848,44 @@ def classify(
     if rule_id == "SSRF_ADVANCED":
         if _line_is_safe_internal_assignment(tree, line, source.splitlines()[line_idx]):
             return "safe_literal"
+
+    line_text = lines[line_idx] if 0 <= line_idx < len(lines) else ""
+
+    # Issue #41 — CROSS_TOOL_ACCESS FP: LLM-client API field name used as
+    # Python function param / dict key / CLI flag (system_prompt=…,
+    # context_window: int, "--system-prompt"). Domain vocabulary, not a
+    # runtime data-grab (those use the retrieval patterns → different match).
+    if rule_id == "CROSS_TOOL_ACCESS" and _is_api_field_name_match_py(line_text, match):
+        return "safe_literal"
+
+    # Issue #41 — SSRF_PATTERN FP: static localhost/metadata literal (e.g. a
+    # test assertion ``== "http://localhost:1234/v1"`` or a config default).
+    # Static destination → not attacker-controlled → not SSRF. Dynamic
+    # (f-string / concatenation) stays visible.
+    if rule_id == "SSRF_PATTERN" and _ssrf_url_is_static_literal_py(line_text, match):
+        return "safe_literal"
+
+    # Issue #41 — TOOL_SHADOW FP: pytest ``monkeypatch`` fixture in a test
+    # file. Standard scaffolding, never tool-shadowing. The dangerous
+    # TOOL_SHADOW shapes (__proto__=, override…tool, Proxy() ) are separate
+    # patterns that still fire.
+    if rule_id == "TOOL_SHADOW" and _is_python_test_file(file_path) and _is_pytest_monkeypatch(line_text, match):
+        return "safe_literal"
+
+    # Issue #41 — OBFUSCATION FP: ``html.unescape(...)`` is HTML-entity
+    # DECODING (the opposite of obfuscation). Bare global ``unescape(``
+    # stays flagged.
+    if rule_id == "OBFUSCATION" and _is_html_unescape(line_text, match):
+        return "safe_literal"
+
+    # Issue #40 — execution-class rule matched inside a true DOCSTRING
+    # (module/class/function ``__doc__``). A docstring is never executed, so
+    # an execution-class match is a provable non-threat → suppress. A
+    # prose-vector rule stays visible (safe_doc → demote). Data strings
+    # assigned to variables are NOT docstrings (handled by the multiline
+    # path below as safe_doc → demote, since a data string could be used).
+    if _is_inside_docstring(tree, line) and not _rule_is_prose_vector(rule_id):
+        return "safe_literal"
 
     # SECONDARY PATH: match is inside a triple-quoted string literal
     # (docstring or multi-line data string)? → safe_doc.
