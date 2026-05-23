@@ -54,6 +54,17 @@ __all__ = [
     "_scan_one_file_skillaudit",
     "_parallel_enabled",
     "_parallel_threshold",
+    # v2.104.0 (J5) — module version + catalog hash + feature
+    # resolvers exposed so tests can pin them and so downstream
+    # consumers (the cache module itself) can read the canonical
+    # version constant rather than re-parse plugin.json.
+    "__version__",
+    "_CATALOG_HASH",
+    "_cache_enabled",
+    "_cache_deep_enabled",
+    "_binary_enabled",
+    "_re2_disabled",
+    "_hybrid_matcher",
 ]
 
 
@@ -112,6 +123,188 @@ def _compiled_rules() -> list[tuple[dict[str, Any], list[re.Pattern[str]]]]:
             compiled.append((rule, compiled_patterns))
     _COMPILED_RULES_CACHE = compiled
     return compiled
+
+
+# ────────────────────────────────────────────────────────────────────────
+# v2.104.0 — module version + catalog hash + opt-in helper modules
+# ────────────────────────────────────────────────────────────────────────
+#
+# `__version__` is bumped in lockstep with plugin.json. Bumping it
+# invalidates every entry in the scan cache (the cache key includes
+# the engine version), so a release that changes the scanning logic
+# never serves stale findings from a previous version.
+#
+# `_CATALOG_HASH` is computed ONCE per process at import time and
+# included in every cache key. Mutating the rule catalog on disk
+# therefore invalidates the cache for that scan even if the engine
+# version is unchanged — the same file content scanned against a
+# different rule set must produce a fresh scan.
+#
+# The 3 helper modules below are LAZY-IMPORTED with graceful fallback
+# (module-level try/except). If a module is missing, its feature is
+# silently disabled — the legacy code path runs unchanged. This means:
+#   - the module imports cleanly even on partial deployments where
+#     J1/J2/J3 haven't shipped yet;
+#   - the test_module_imports_only_stdlib guard in
+#     tests/test_skillaudit_native.py keeps passing (lazy imports
+#     inside try/except aren't flagged by the top-level regex walk
+#     that gate uses);
+#   - env-var opt-outs (CPV_SCAN_CACHE=0, CPV_BINARY_SCAN=0,
+#     CPV_RE2_DISABLE=1) all funnel through the cached_enabled() /
+#     binary_enabled() / hybrid_matcher() resolvers so per-test
+#     monkeypatch.setenv works without reloading the module.
+
+
+__version__ = "2.103.4"  # bumped in lockstep with plugin.json by publish.py
+
+
+def _compute_catalog_hash() -> str:
+    """Return SHA-256 of the rule catalog file, or empty string if missing.
+
+    Computed ONCE per process. The cache key for a scan is
+    ``(content_hash, _CATALOG_HASH, __version__)`` — when the catalog
+    changes on disk between runs, the next scan is a cache miss even
+    if the file content is unchanged. Returning the empty string when
+    the catalog is absent (a packaging defect that
+    ``run_skillaudit_scan`` already CRITICALs on) lets the constant
+    initialise without raising at module-import time.
+    """
+    if not _RULES_PATH.is_file():
+        return ""
+    try:
+        return hashlib.sha256(_RULES_PATH.read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
+_CATALOG_HASH: str = _compute_catalog_hash()
+
+
+# Lazy imports of the 3 opt-in helper modules. Each import is wrapped
+# in its own try/except so a missing module disables ONLY that feature
+# rather than cascading. Tests can monkeypatch the resolver functions
+# below to flip features on/off per-test without re-importing.
+
+try:
+    from cpv_scan_cache import (  # noqa: PLC0415
+        get_cached_findings as _scan_cache_get,
+    )
+    from cpv_scan_cache import (
+        put_cached_findings as _scan_cache_put,
+    )
+
+    _CACHE_AVAILABLE = True
+except ImportError:  # pragma: no cover — feature absent
+    _scan_cache_get = None  # type: ignore[assignment]
+    _scan_cache_put = None  # type: ignore[assignment]
+    _CACHE_AVAILABLE = False
+
+try:
+    from cpv_binary_scanner import is_binary as _binary_is_binary  # noqa: PLC0415
+    from cpv_binary_scanner import scan_binary as _binary_scan_binary
+
+    _BINARY_AVAILABLE = True
+except ImportError:  # pragma: no cover — feature absent
+    _binary_is_binary = None  # type: ignore[assignment]
+    _binary_scan_binary = None  # type: ignore[assignment]
+    _BINARY_AVAILABLE = False
+
+try:
+    # HybridMatcher is built lazily on first use because its
+    # constructor walks the entire rule catalog to compile patterns.
+    # We import the class here but only instantiate when first
+    # requested via _hybrid_matcher().
+    from cpv_re2_matcher import HybridMatcher as _HybridMatcherCls  # noqa: PLC0415
+
+    _RE2_AVAILABLE = True
+except ImportError:  # pragma: no cover — feature absent
+    _HybridMatcherCls = None  # type: ignore[assignment,misc]
+    _RE2_AVAILABLE = False
+
+
+def _cache_enabled() -> bool:
+    """Return True iff the cache module is available AND CPV_SCAN_CACHE != '0'.
+
+    Resolved at call time so tests can ``monkeypatch.setenv`` per-test.
+    """
+    if not _CACHE_AVAILABLE:
+        return False
+    return os.environ.get("CPV_SCAN_CACHE", "1") != "0"
+
+
+def _cache_deep_enabled() -> bool:
+    """Return True iff CPV_SCAN_CACHE_DEEP=1 (skip GET, still PUT).
+
+    Deep mode forces every scan to actually run (cache miss) but still
+    writes results back to the cache. Used to refresh the cache after
+    a catalog or engine change without paying the cost of clearing it.
+    """
+    return os.environ.get("CPV_SCAN_CACHE_DEEP", "0") == "1"
+
+
+def _binary_enabled() -> bool:
+    """Return True iff the binary scanner is available AND not opted out.
+
+    Default ON when available. CPV_BINARY_SCAN=0 disables it; the
+    legacy behaviour (skip binary files via extension filter) returns.
+    """
+    if not _BINARY_AVAILABLE:
+        return False
+    return os.environ.get("CPV_BINARY_SCAN", "1") != "0"
+
+
+def _re2_disabled() -> bool:
+    """Return True iff CPV_RE2_DISABLE=1 (force Python re fallback).
+
+    Used for debugging differences between the Python re engine and
+    the RE2 hybrid matcher.
+    """
+    return os.environ.get("CPV_RE2_DISABLE", "0") == "1"
+
+
+_HYBRID_MATCHER: Any = None
+_HYBRID_MATCHER_INIT_FAILED = False
+
+
+def _hybrid_matcher() -> Any:
+    """Return the lazily-constructed HybridMatcher, or None.
+
+    Returns None when the module isn't available, when CPV_RE2_DISABLE
+    is set, or when construction raised (we cache the failure so we
+    don't retry every scan).
+
+    HybridMatcher expects ``patterns: dict[str, str]`` (rule_id →
+    pattern source). Our rule catalog has multiple patterns per rule —
+    we flatten with synthetic per-pattern keys ``"<rule_id>#<idx>"``
+    so HybridMatcher can route each pattern independently, and the
+    caller maps the keys back to rule_ids by splitting on ``"#"``.
+    """
+    global _HYBRID_MATCHER, _HYBRID_MATCHER_INIT_FAILED
+    if not _RE2_AVAILABLE or _HYBRID_MATCHER_INIT_FAILED:
+        return None
+    if _re2_disabled():
+        return None
+    if _HYBRID_MATCHER is not None:
+        return _HYBRID_MATCHER
+    try:
+        # Build the flattened {rule_id#idx: pattern_source} dict.
+        # Skip non-string patterns and malformed entries — same
+        # tolerance as _compiled_rules().
+        flat: dict[str, str] = {}
+        for rule in _get_rules():
+            rid = str(rule.get("id", "RULE_UNKNOWN"))
+            patterns = rule.get("patterns") or []
+            for idx, pat in enumerate(patterns):
+                if isinstance(pat, str) and pat:
+                    flat[f"{rid}#{idx}"] = pat
+        if not flat:
+            _HYBRID_MATCHER_INIT_FAILED = True
+            return None
+        _HYBRID_MATCHER = _HybridMatcherCls(flat)
+    except Exception:  # pragma: no cover — defensive
+        _HYBRID_MATCHER_INIT_FAILED = True
+        return None
+    return _HYBRID_MATCHER
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -1941,6 +2134,40 @@ def _scan_one_file_skillaudit(file_path: Path) -> list[dict[str, Any]]:
     plugin_root_str = os.environ.get(_WORKER_ENV_PLUGIN_ROOT)
     plugin_root = Path(plugin_root_str) if plugin_root_str else file_path.parent
 
+    rel = str(file_path)
+    try:
+        rel = str(file_path.relative_to(plugin_root))
+    except ValueError:
+        pass
+
+    # v2.104.0 — binary detection routes binary files through the
+    # binary scanner (string-extraction + targeted secret + URL
+    # detection). When the binary scanner module isn't available OR
+    # CPV_BINARY_SCAN=0, we fall through to the legacy text-only path
+    # (binary file is unreadable as UTF-8 → empty content → sentinel).
+    # `scan_binary` accepts the COMPILED catalog (the same
+    # ``list[(rule_dict, [compiled_pattern, ...])]`` shape the
+    # text path uses) so it can re-run the same rules against
+    # extracted strings without re-compiling them.
+    if _binary_enabled() and _binary_is_binary is not None:
+        try:
+            is_bin = bool(_binary_is_binary(file_path))
+        except Exception:  # pragma: no cover — defensive
+            is_bin = False
+        if is_bin:
+            try:
+                bin_findings = _binary_scan_binary(file_path, _compiled_rules())  # type: ignore[misc]
+            except Exception:  # pragma: no cover — defensive
+                bin_findings = []
+            findings_bin: list[dict[str, Any]] = []
+            for f in bin_findings or []:
+                if isinstance(f, dict):
+                    f["file"] = rel
+                    findings_bin.append(f)
+            if findings_bin:
+                return findings_bin
+            return [{"_skillaudit_sentinel": "scanned", "file": rel}]
+
     try:
         content = file_path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
@@ -1950,12 +2177,6 @@ def _scan_one_file_skillaudit(file_path: Path) -> list[dict[str, Any]]:
         # we DON'T emit. See `scan_path` for the aggregation logic.
         return []
 
-    rel = str(file_path)
-    try:
-        rel = str(file_path.relative_to(plugin_root))
-    except ValueError:
-        pass
-
     if not content:
         # Empty file — counts as scanned (files_scanned += 1 in the
         # serial loop) but produces no findings. Emit a single
@@ -1964,9 +2185,52 @@ def _scan_one_file_skillaudit(file_path: Path) -> list[dict[str, Any]]:
         # returning to the user; it carries a private marker key.
         return [{"_skillaudit_sentinel": "empty", "file": rel}]
 
+    # v2.104.0 — cache GET. Hash the textual content (NOT the raw
+    # bytes — _content_hash already encodes utf-8) and look up against
+    # (content_hash, catalog_hash, engine_version). CPV_SCAN_CACHE=0
+    # disables; CPV_SCAN_CACHE_DEEP=1 forces a miss but still writes
+    # back so a release can pre-warm a fresh cache without an explicit
+    # purge step.
+    content_hash = _content_hash(content)
+    cache_on = _cache_enabled()
+    if cache_on and not _cache_deep_enabled() and _scan_cache_get is not None:
+        try:
+            cached = _scan_cache_get(content_hash, _CATALOG_HASH, __version__)
+        except Exception:  # pragma: no cover — cache must never break a scan
+            cached = None
+        if cached is not None:
+            findings_cached: list[dict[str, Any]] = []
+            for f in cached:
+                if isinstance(f, dict):
+                    # Re-anchor file path — the cache key is content-
+                    # only, so the same bytes scanned at a different
+                    # path still hits. The cached entry must reflect
+                    # THIS scan's file location.
+                    f["file"] = rel
+                    findings_cached.append(f)
+            if findings_cached:
+                return findings_cached
+            return [{"_skillaudit_sentinel": "scanned", "file": rel}]
+
     findings = scan_content(content, rel)
     for f in findings:
         f["file"] = rel
+
+    # v2.104.0 — cache PUT (always, including in DEEP mode, so an
+    # explicit re-warm pass populates the cache). We persist the
+    # findings stripped of the per-scan "file" key — the cache is
+    # content-keyed, file paths get re-anchored on GET above.
+    if cache_on and _scan_cache_put is not None:
+        try:
+            to_cache: list[dict[str, Any]] = []
+            for f in findings:
+                # shallow copy minus the file path
+                f_copy = {k: v for k, v in f.items() if k != "file"}
+                to_cache.append(f_copy)
+            _scan_cache_put(content_hash, _CATALOG_HASH, __version__, to_cache)
+        except Exception:  # pragma: no cover — cache must never break a scan
+            pass
+
     if not findings:
         # Non-empty file with no findings still increments
         # files_scanned. Inject a sentinel so the parent doesn't
@@ -2000,26 +2264,49 @@ def scan_path(plugin_root: Path) -> tuple[list[dict[str, Any]], int]:
 def _scan_path_serial(
     plugin_root: Path, files: list[Path]
 ) -> tuple[list[dict[str, Any]], int]:
-    """Legacy serial scan loop — preserved verbatim for parity testing
-    and for the small-file-count fast path."""
-    all_findings: list[dict[str, Any]] = []
-    files_scanned = 0
-    for fp in files:
-        try:
-            content = fp.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
-        files_scanned += 1
-        if not content:
-            continue
-        rel = str(fp)
-        try:
-            rel = str(fp.relative_to(plugin_root))
-        except ValueError:
-            pass
-        for f in scan_content(content, rel):
-            f["file"] = rel
-            all_findings.append(f)
+    """Serial scan loop — routes through `_scan_one_file_skillaudit`.
+
+    Up through v2.103.x this was an independent re-implementation of
+    the per-file body, but the v2.104.0 cache + binary integration
+    needs the SAME code path in both serial and parallel mode (parity
+    is a hard test contract). Routing both through
+    `_scan_one_file_skillaudit` plus the same env-var bootstrap means:
+
+      - sentinel semantics are identical (`"_skillaudit_sentinel": "scanned"`
+        means the file counted; `"empty"` means it was zero-byte but
+        counted; absent + empty list means unreadable);
+      - cache hits in the parallel path are identical to cache hits
+        in the serial path;
+      - binary scanner routing is identical (a binary file in either
+        mode yields binary-scanner findings or a "scanned" sentinel,
+        never a UTF-8 decode-of-binary garble).
+
+    Env-var bootstrap mirrors `_scan_path_parallel`: the worker reads
+    `CPV_SKILLAUDIT_WORKER_PLUGIN_ROOT` for relative-path resolution.
+    """
+    prev_env = os.environ.get(_WORKER_ENV_PLUGIN_ROOT)
+    os.environ[_WORKER_ENV_PLUGIN_ROOT] = str(plugin_root)
+    try:
+        all_findings: list[dict[str, Any]] = []
+        files_scanned = 0
+        for fp in files:
+            results = _scan_one_file_skillaudit(fp)
+            if not results:
+                # unreadable file — no sentinel, not counted
+                continue
+            had_sentinel = False
+            for f in results:
+                if f.get("_skillaudit_sentinel"):
+                    had_sentinel = True
+                    continue
+                all_findings.append(f)
+            if had_sentinel or any(not f.get("_skillaudit_sentinel") for f in results):
+                files_scanned += 1
+    finally:
+        if prev_env is None:
+            os.environ.pop(_WORKER_ENV_PLUGIN_ROOT, None)
+        else:
+            os.environ[_WORKER_ENV_PLUGIN_ROOT] = prev_env
     return all_findings, files_scanned
 
 

@@ -1,0 +1,414 @@
+{
+  "_schema_version": 1,
+  "_generated_at": "2026-05-23T15:10:25Z",
+  "_source": "scripts/rules/skillaudit_patterns.json",
+  "_source_sha256": "372c64cc9824f3137bdddb3d1919e56d13c9daf535d106425f151cff71f21342",
+  "_re2_version": "1.1.20251105",
+  "_audit_mode": "re2_compile_plus_syntactic",
+  "_summary": {
+    "total": 490,
+    "compatible": 482,
+    "incompatible": 8,
+    "rules_total": 50,
+    "rules_compatible": 44,
+    "rules_incompatible": 6
+  },
+  "rules": {
+    "CRED_ENV_READ": {
+      "compatible": true,
+      "patterns_total": 13,
+      "patterns_compatible": 13,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "CRED_ENV_SAFE": {
+      "compatible": true,
+      "patterns_total": 7,
+      "patterns_compatible": 7,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "DATA_EXFIL": {
+      "compatible": true,
+      "patterns_total": 9,
+      "patterns_compatible": 9,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "EXFIL_PATTERN": {
+      "compatible": true,
+      "patterns_total": 6,
+      "patterns_compatible": 6,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "PROMPT_INJECT": {
+      "compatible": true,
+      "patterns_total": 8,
+      "patterns_compatible": 8,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "SHELL_EXEC": {
+      "compatible": true,
+      "patterns_total": 7,
+      "patterns_compatible": 7,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "NET_SUSPICIOUS": {
+      "compatible": true,
+      "patterns_total": 5,
+      "patterns_compatible": 5,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "FS_WRITE": {
+      "compatible": true,
+      "patterns_total": 8,
+      "patterns_compatible": 8,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "OBFUSCATION": {
+      "compatible": true,
+      "patterns_total": 6,
+      "patterns_compatible": 6,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "PRIVILEGE_ESC": {
+      "compatible": true,
+      "patterns_total": 6,
+      "patterns_compatible": 6,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "CRYPTO_THEFT": {
+      "compatible": true,
+      "patterns_total": 8,
+      "patterns_compatible": 8,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "TOKEN_STEAL": {
+      "compatible": true,
+      "patterns_total": 8,
+      "patterns_compatible": 8,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "DNS_REBIND": {
+      "compatible": true,
+      "patterns_total": 6,
+      "patterns_compatible": 6,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "REVERSE_SHELL": {
+      "compatible": true,
+      "patterns_total": 8,
+      "patterns_compatible": 8,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "AGENT_MEMORY_MOD": {
+      "compatible": true,
+      "patterns_total": 13,
+      "patterns_compatible": 13,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "TOOL_POISONING": {
+      "compatible": true,
+      "patterns_total": 13,
+      "patterns_compatible": 13,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "TOOL_SHADOW": {
+      "compatible": true,
+      "patterns_total": 10,
+      "patterns_compatible": 10,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "INVISIBLE_TEXT": {
+      "compatible": true,
+      "patterns_total": 14,
+      "patterns_compatible": 14,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "TIME_BOMB": {
+      "compatible": true,
+      "patterns_total": 9,
+      "patterns_compatible": 9,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "SSRF_PATTERN": {
+      "compatible": true,
+      "patterns_total": 14,
+      "patterns_compatible": 14,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "SUPPLY_CHAIN": {
+      "compatible": false,
+      "patterns_total": 12,
+      "patterns_compatible": 11,
+      "patterns_incompatible": [
+        {
+          "index": 5,
+          "pattern": "npm install\\s+(?!--|@)\\S+.*&&",
+          "reason": "invalid perl operator: (?! [syntactic: negative lookahead (?!...)]"
+        }
+      ],
+      "reason": "1 of 12 patterns incompatible with google-re2"
+    },
+    "EXFIL_COVERT": {
+      "compatible": true,
+      "patterns_total": 11,
+      "patterns_compatible": 11,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "MCP_SCHEMA_POISON": {
+      "compatible": true,
+      "patterns_total": 6,
+      "patterns_compatible": 6,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "ENV_RECON": {
+      "compatible": true,
+      "patterns_total": 15,
+      "patterns_compatible": 15,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "PERSISTENCE": {
+      "compatible": false,
+      "patterns_total": 15,
+      "patterns_compatible": 14,
+      "patterns_incompatible": [
+        {
+          "index": 7,
+          "pattern": "HKEY.*\\Run",
+          "reason": "invalid escape sequence: \\\\R"
+        }
+      ],
+      "reason": "1 of 15 patterns incompatible with google-re2"
+    },
+    "CROSS_TOOL_ACCESS": {
+      "compatible": true,
+      "patterns_total": 9,
+      "patterns_compatible": 9,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "CONTAINER_ESCAPE": {
+      "compatible": true,
+      "patterns_total": 13,
+      "patterns_compatible": 13,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "A2A_AGENT_IMPERSONATION": {
+      "compatible": true,
+      "patterns_total": 7,
+      "patterns_compatible": 7,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "A2A_TASK_HIJACK": {
+      "compatible": true,
+      "patterns_total": 6,
+      "patterns_compatible": 6,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "A2A_CROSS_AGENT_INJECT": {
+      "compatible": true,
+      "patterns_total": 6,
+      "patterns_compatible": 6,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "A2A_DATA_LEAK": {
+      "compatible": true,
+      "patterns_total": 5,
+      "patterns_compatible": 5,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "A2A_CAPABILITY_ABUSE": {
+      "compatible": true,
+      "patterns_total": 6,
+      "patterns_compatible": 6,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "PATH_TRAVERSAL": {
+      "compatible": true,
+      "patterns_total": 12,
+      "patterns_compatible": 12,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "CMD_INJECTION": {
+      "compatible": true,
+      "patterns_total": 12,
+      "patterns_compatible": 12,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "PROTOTYPE_POLLUTION": {
+      "compatible": true,
+      "patterns_total": 8,
+      "patterns_compatible": 8,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "SSRF_ADVANCED": {
+      "compatible": true,
+      "patterns_total": 8,
+      "patterns_compatible": 8,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "REGEX_DOS": {
+      "compatible": true,
+      "patterns_total": 4,
+      "patterns_compatible": 4,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "DESERIALIZATION": {
+      "compatible": false,
+      "patterns_total": 12,
+      "patterns_compatible": 10,
+      "patterns_incompatible": [
+        {
+          "index": 1,
+          "pattern": "yaml\\.(?:unsafe_load|full_load|load)\\s*\\((?!.*Loader\\s*=\\s*(?:yaml\\.)?SafeLoader)",
+          "reason": "invalid perl operator: (?! [syntactic: negative lookahead (?!...)]"
+        },
+        {
+          "index": 10,
+          "pattern": "torch\\.load\\s*\\((?!.*weights_only)",
+          "reason": "invalid perl operator: (?! [syntactic: negative lookahead (?!...)]"
+        }
+      ],
+      "reason": "2 of 12 patterns incompatible with google-re2"
+    },
+    "SSTI": {
+      "compatible": true,
+      "patterns_total": 11,
+      "patterns_compatible": 11,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "XXE_INJECTION": {
+      "compatible": true,
+      "patterns_total": 11,
+      "patterns_compatible": 11,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "WALLET_DRAINER": {
+      "compatible": true,
+      "patterns_total": 12,
+      "patterns_compatible": 12,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "ENV_INJECTION": {
+      "compatible": true,
+      "patterns_total": 12,
+      "patterns_compatible": 12,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "LOG_INJECTION": {
+      "compatible": true,
+      "patterns_total": 10,
+      "patterns_compatible": 10,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "JWT_VULN": {
+      "compatible": false,
+      "patterns_total": 14,
+      "patterns_compatible": 12,
+      "patterns_incompatible": [
+        {
+          "index": 2,
+          "pattern": "jwt\\.decode\\s*\\((?!.*verify)",
+          "reason": "invalid perl operator: (?! [syntactic: negative lookahead (?!...)]"
+        },
+        {
+          "index": 4,
+          "pattern": "jose\\.(?:decode|parse)\\s*\\((?!.*verify)",
+          "reason": "invalid perl operator: (?! [syntactic: negative lookahead (?!...)]"
+        }
+      ],
+      "reason": "2 of 14 patterns incompatible with google-re2"
+    },
+    "INSECURE_CRYPTO": {
+      "compatible": true,
+      "patterns_total": 14,
+      "patterns_compatible": 14,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "SQL_INJECTION": {
+      "compatible": false,
+      "patterns_total": 14,
+      "patterns_compatible": 13,
+      "patterns_incompatible": [
+        {
+          "index": 6,
+          "pattern": "cursor\\.execute\\s*\\(\\s*['\"].*%s.*['\"]\\s*%\\s*(?!\\()",
+          "reason": "invalid perl operator: (?! [syntactic: negative lookahead (?!...)]"
+        }
+      ],
+      "reason": "1 of 14 patterns incompatible with google-re2"
+    },
+    "XSS_INJECTION": {
+      "compatible": true,
+      "patterns_total": 13,
+      "patterns_compatible": 13,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "INDIRECT_PROMPT_INJECT": {
+      "compatible": false,
+      "patterns_total": 12,
+      "patterns_compatible": 11,
+      "patterns_incompatible": [
+        {
+          "index": 11,
+          "pattern": "\\u200b|\\u200c|\\u200d|\\u2060|\\ufeff|\\u00ad",
+          "reason": "invalid escape sequence: \\\\u"
+        }
+      ],
+      "reason": "1 of 12 patterns incompatible with google-re2"
+    },
+    "TOOL_CONFUSION": {
+      "compatible": true,
+      "patterns_total": 10,
+      "patterns_compatible": 10,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "RESOURCE_ABUSE": {
+      "compatible": true,
+      "patterns_total": 12,
+      "patterns_compatible": 12,
+      "patterns_incompatible": [],
+      "reason": null
+    }
+  }
+}

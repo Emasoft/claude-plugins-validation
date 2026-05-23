@@ -134,6 +134,211 @@ In debugging / triage:
 Always re-run with parallelism back ON before publishing — the CI gates
 expect the production speedups.
 
+## v2.104.0 perf layers: content-hash cache, binary scanning, RE2 hybrid matcher
+
+The v2.103.0 fan-out (this doc's primary subject) gave an ~11.6×
+win by parallelising work. v2.104.0 adds three orthogonal wins
+layered on top — they compose with the fan-out (cache check happens
+BEFORE worker dispatch; RE2.Set and binary scanner both run INSIDE
+the worker). The three subsections below summarise them; the full
+specs live in `scan-cache.md` and `binary-scanning.md`.
+
+### Content-hash cache (v2.104.0+)
+
+Repeat runs of `validate_plugin` against the same source tree do not
+need to re-scan files that have not changed. The v2.104.0 content-hash
+cache (`scripts/cpv_scan_cache.py`) skips the entire SkillAudit
+pipeline for any file whose `(SHA-256, catalog_hash, scanner_version)`
+tuple is already on disk. Expected effect on the CPV repo: a warm
+second run drops from ~17 s to < 0.5 s — roughly a 50× speedup on
+top of the v2.103.0 parallelism win.
+
+Storage path is resolved via a 5-level fallback chain (CLI flag →
+`CPV_SCAN_CACHE_DIR` env → `XDG_CACHE_HOME` → `~/.cache/cpv/scan-cache/`
+on Unix → `%LOCALAPPDATA%\cpv\scan-cache\` on Windows). See
+`scan-cache.md` for the full chain, the SQLite schema, the WAL
+concurrency mode, and the `chmod 0700` security stance.
+
+The triple-key invalidation is the entire reason a content-hash cache
+is correctness-safe rather than just a performance hack:
+
+| Key | Invalidates when… | Why required |
+|---|---|---|
+| `content_hash` | file bytes change | same file, different content → different result |
+| `catalog_hash` | `scripts/rules/skillaudit_patterns.json` changes | new patterns → must re-scan |
+| `scanner_version` | `cpv_skillaudit_native` semver bumps | logic change (e.g. new context classifier) → must re-scan |
+
+Env-var knobs:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `CPV_SCAN_CACHE` | `1` (on) | Set `0` to disable both lookup and store; every run is cold |
+| `CPV_SCAN_CACHE_DEEP` | `0` (off) | Set `1` to force re-scan AND compare against cached result; logs a WARNING on disagreement (cache-correctness audit) |
+| `CPV_SCAN_CACHE_DIR` | unset | Override the path-resolution chain |
+| `CPV_SCAN_CACHE_MAX_BYTES` | `500 MB` | LRU eviction triggers above this size |
+
+Scaffolded plugins inherit the cache for free via `actions/cache@v4`
+in `ci.yml`, keyed on `hashFiles('plugin.json', 'commands/**',
+'skills/**', 'agents/**', 'hooks/**', '.mcp.json')` with a partial
+`restore-keys` fallback. See `scan-cache.md` for the full GitHub
+Actions integration recipe.
+
+Full reference (table of contents):
+
+- Storage path — 5-level resolution chain
+- SQLite schema and triple-key PK
+- Concurrency under `ProcessPoolExecutor` (WAL mode, `INSERT OR IGNORE`
+  on race)
+- Eviction policy (LRU by `cached_at`)
+- CI integration (`actions/cache@v4` recipe for scaffolded plugins)
+- Troubleshooting (clearing the cache, deep-mode audit, doctor
+  hit-rate report)
+- TRDD-40f46a83 — the v2.104.0 design spec
+
+### Binary scanning strategy (v2.104.0+)
+
+Through v2.103.0, SkillAudit explicitly skipped any file detected as
+binary. That was the textbook bury-your-head-in-the-sand security
+stance — real malicious skills routinely embed payloads in PNG
+metadata, ZIP comments, WASM data sections, PDF streams, etc.
+v2.104.0 replaces "is binary → skip" with "is binary → extract
+strings → scan extracted strings through the same matcher pipeline".
+
+The **never-skip principle**: every file lands on the matcher
+eventually. Binary files take a different extraction path on the way
+in, but the pattern catalog and severity rollup are identical. A
+malicious string embedded in a PNG `tEXt` chunk fires the same
+findings it would fire in a `.sh` script.
+
+Detection + pipeline:
+
+```text
+file_bytes
+   │
+   ▼
+is_binary?  (null byte in first 8 KB, OR printable ratio < 70 %)
+   ├── no  ──→ text-path (unchanged from v2.103.0)
+   │
+   └── yes ──→ extract_ascii(min_run=4) + extract_utf16(min_run=4)
+                        │
+                        ▼
+                  scan_content over each extracted string
+                        │
+                        ▼
+                  decode_chain (depth ≤ 2; base64 → utf-8 → re-scan;
+                                bounded at 5 MB per intermediate buffer
+                                to defuse decode-bombs)
+                        │
+                        ▼
+                  scan_content over each decoded string
+                        │
+                        ▼
+                  findings tagged binary_origin=True
+```
+
+Coverage gain vs the v2.103.0 text-only path: every embedded payload
+in PNG / ZIP / WASM / PDF / ICO / WOFF2 / TAR / etc. is now subject
+to the same pattern sweep that text files always were. Wall-clock
+cost: a small regression on plugins containing many binaries (an
+extra few hundred ms on the CPV repo). Net release-time benchmark:
+still well under the 7 s cold-run target because the RE2 win swamps
+the binary-scan cost.
+
+Env-var knob:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `CPV_BINARY_SCAN` | `1` (on) | Set `0` to revert to v2.103.0 skip-binaries behaviour; **debug-only**, NEVER for production — leaves the embedded-payload hole open |
+
+Full reference (table of contents):
+
+- Detection heuristic (null byte + printable ratio over 8 KB sample)
+- String extractors (`extract_ascii`, `extract_utf16` for both
+  endiannesses)
+- Decode chain (base64 hot path, bounded by `max_depth=2` and
+  `max_intermediate_bytes=5_000_000`)
+- Per-format payload locations (PNG `tEXt` / `iTXt` / `eXIf`, ZIP
+  comments, etc.) — non-exhaustive list of where malicious authors
+  hide payloads
+- The never-skip principle (why `CPV_BINARY_SCAN=0` is not a
+  legitimate production toggle)
+- TRDD-40f46a83 — the v2.104.0 design spec
+
+### RE2 hybrid matcher (v2.104.0+)
+
+The v2.103.0 hot path applies a list of ~490 Python regex patterns
+sequentially to every file's text. That is O(N_patterns × N_chars)
+per file. v2.104.0 replaces the sequential sweep with an RE2.Set
+automaton: every RE2-compatible pattern is compiled into a single
+DFA that matches all of them in one linear pass over the input.
+Expected effect on the CPV repo's cold run: 5-15× speedup on the
+regex phase, bringing the wall-clock regex cost from ~13 s to < 2 s.
+
+Why RE2: **RE2 is an algorithm, not an implementation language**.
+We adopt it for two correctness properties Python `re` does not
+have:
+
+1. **Linear-time guarantee.** RE2 is a DFA-based matcher with
+   provably linear cost in the input length, regardless of pattern
+   complexity. Python `re` is a backtracking NFA — adversarial
+   inputs can trigger exponential blowup (catastrophic backtracking).
+   Although our catalog is curated and ReDoS-safe today, RE2's
+   guarantee removes that risk class entirely.
+2. **Single-pass automaton.** RE2.Set lets us compile N patterns into
+   one DFA that returns the union of all matches in one linear
+   pass. Python `re` requires N separate scans. On a 490-pattern
+   catalog the asymptotic difference is substantial.
+
+The implementation language (C++ underneath the `google-re2` Python
+wheel) is incidental. If a pure-Python DFA matcher with the same
+guarantees existed, we'd use it instead.
+
+Fallback chain (never skip a pattern):
+
+```text
+HybridMatcher.search(text):
+    if google-re2 is importable AND re2_compatibility.json is loadable:
+        set_matches = re2_set.match(text)        # RE2-compatible subset
+        py_matches  = [p.search(text) for p in py_only_patterns]  # incompatible subset
+        return union(set_matches, py_matches)
+    else:
+        return [p.search(text) for p in all_patterns]   # pure-Python fallback
+```
+
+The compatibility partition is decided once per release by the
+`scripts/_audit_re2_compatibility.py` tool and committed to
+`scripts/rules/re2_compatibility.json`. The publish gate (`publish.py`
+Gate 9c) verifies the audit's `catalog_sha256` matches the live
+catalog before allowing a release — prevents stale audit entries
+from making wrong "is RE2-compatible" decisions on new patterns.
+
+A pattern is NEVER skipped silently. Every pattern either runs
+through RE2.Set (compatible subset) OR through Python `re`
+(incompatible subset OR all patterns when google-re2 is absent).
+Coverage parity is a hard test invariant.
+
+Optional install:
+
+- `pip install -e .[performance]` (extra in `pyproject.toml`)
+  ships `google-re2 >= 1.1` explicitly
+- `scripts/cpv_install_scanners.py` runs a best-effort
+  `pip install google-re2` on first invocation; failure logs a
+  WARNING and falls back to pure-Python re (no error raised)
+- Default `pip install -e .` (no extra) works with the pure-Python
+  fallback — no mandatory dependency
+
+Env-var knob:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `CPV_RE2` | `1` (on if `google-re2` is installed; degrades gracefully if not) | Set `0` to force pure-Python path even when `google-re2` is present (debug / parity testing) |
+
+Full reference: see `binary-scanning.md` (sibling doc) and
+TRDD-40f46a83 (the v2.104.0 design spec) for the
+`HybridMatcher` API, the `re2_compatibility.json` schema, the
+publish-time catalog-drift guard, and the parity-gate test that
+synthesises a known-matching input for every pattern in the catalog.
+
 ## See also
 
 - `scripts/cpv_parallel_runner.py` — the shared `ProcessPoolExecutor`

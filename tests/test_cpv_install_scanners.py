@@ -291,9 +291,11 @@ class TestEnsureCiscoSkillScanner:
 
 
 class TestInstallAllScanners:
-    def test_returns_dict_with_all_six_keys(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_returns_dict_with_all_seven_keys(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Mark every scanner as already installed; no cascades to run.
+        # google-re2 is probed via importlib (not shutil.which) — mock both.
         monkeypatch.setattr(cis.shutil, "which", lambda name: f"/usr/bin/{name}")
+        monkeypatch.setattr(cis, "_is_module_importable", lambda name: True)
         statuses = cis.install_all_scanners()
         assert set(statuses.keys()) == {
             "fclones",
@@ -302,12 +304,15 @@ class TestInstallAllScanners:
             "semgrep",
             "tirith",
             "skill-scanner",
+            "google-re2",
         }
         assert all(statuses.values()), f"all should be available; got {statuses}"
 
     def test_returns_false_when_unavailable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # No scanner on PATH; every opt-out set so no cascades fire.
+        # google-re2 is probed via importlib (not shutil.which) — also stub False.
         monkeypatch.setattr(cis.shutil, "which", lambda name: None)
+        monkeypatch.setattr(cis, "_is_module_importable", lambda name: False)
         for var in (
             "CPV_NO_FCLONES_INSTALL",
             "CPV_NO_CC_AUDIT_INSTALL",
@@ -315,6 +320,7 @@ class TestInstallAllScanners:
             "CPV_NO_SEMGREP_INSTALL",
             "CPV_NO_TIRITH_INSTALL",
             "CPV_NO_CISCO_INSTALL",
+            "CPV_NO_GOOGLE_RE2_INSTALL",
         ):
             monkeypatch.setenv(var, "1")
         statuses = cis.install_all_scanners()

@@ -3156,6 +3156,22 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
+      # Cross-run CPV scan-cache (optional, big win for fix loops).
+      # The cache key includes the hash of .cpv-self-hashes.json so any
+      # change to the validator's own source busts the cache automatically;
+      # the restore-keys fallback still hits a same-OS warm cache on the
+      # first run after a CPV bump so we don't pay the full cold-scan cost.
+      # actions/cache@v4.3.0 is the latest v4.x SHA at scaffold time —
+      # pinact-compatible (the `# v4.3.0` comment is kept in sync on `uv
+      # lock`). gh-actions.md §"Pin third-party actions to a full commit SHA".
+      - name: Restore CPV scan-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/cpv
+          key: cpv-scan-cache-${{{{ runner.os }}}}-${{{{ hashFiles('**/.cpv-self-hashes.json') }}}}
+          restore-keys: |
+            cpv-scan-cache-${{{{ runner.os }}}}-
+
       - name: Run plugin validation (remote CPV, --strict)
         # Fetches CPV from GitHub via uvx so downstream plugins do not need to
         # vendor scripts/validate_plugin.py. Matches publish.py's local gate
