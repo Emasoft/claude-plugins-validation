@@ -13,8 +13,10 @@ Parallel security-audit skill. Runs ONLY the `validate_security`
 checker (5 external scanners — cc-audit, tirith, trufflehog,
 semgrep, Cisco AI Defense skill-scanner — plus the in-process AI
 and security rule packs) across every plugin in the user's input
-spec. Typically 2-3× faster than the full validation pipeline
-when you only care about supply-chain risk.
+spec. Skips ~36 non-security validators that the full pipeline runs,
+so wall-time is lower when you only care about supply-chain risk.
+(Both pipelines benefit from v2.103.0's per-file parallel scanning —
+the relative gap depends on plugin shape.)
 
 Same input grammar and dispatch shape as
 [cpv-batch-validate](../cpv-batch-validate/SKILL.md). The

@@ -82,6 +82,8 @@ Report: repo URL, VALID/INVALID + severity counts, installed workflows/hooks, sk
   > Pre-Push Hook: The Quality Gate · Fix-All Mandate · Running CPV Scripts · Processing Validation Output · GitHub Secrets · CI Workflow Dependencies · Marketplace Notification · All Scripts Are Python · Binary Plugins · README Requirements · Pre-Publish Local Dry-Run · Post-Push CI Verification · Mega-Linter Configuration · Common Fixes Reference
 - [v2.1.80+ Plugin Features](references/v2-1-80-features.md)
   > Monitor tool · userConfig (plugin.json) · channels (plugin.json) · CLAUDE_PLUGIN_OPTION_<KEY> env vars · Inline marketplace (settings.json) · managed-settings.d/ drop-in directory · Plugin skill `name` field (v2.1.98)
+- [Parallel scanning (v2.103.0+)](../canonical-pipeline/references/parallelism.md) — scaffolded plugins inherit the CPV ~11.6× speedup via the `uvx --from git+...` remote-mode in their generated `ci.yml` / `release.yml` / `publish.py`; no template re-scaffold needed when upstream CPV ships new parallelism wins
+  > Table of contents · Performance summary · Environment knobs (disable selectively for debugging) · Scaffolded plugins (created via `create-plugin` / `setup-plugin-repo`) · Batch commands (`cpv-batch-*`) · Remote validation (`cpv` remote-mode + scaffolded `publish.py`) · When to disable parallelism · See also
 
 ## Token Optimization
 
