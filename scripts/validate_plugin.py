@@ -5490,6 +5490,151 @@ def _format_no_plugin_found_hint(plugin_root: Path) -> str:
     return "\n".join(lines)
 
 
+# =============================================================================
+# Orchestrator parallelism — task #384
+# =============================================================================
+#
+# WHY threads, not processes:
+#   * Many individual validators ALREADY use ProcessPoolExecutor internally
+#     (validate_skill, validate_security, validate_hook, …). Nesting another
+#     ProcessPoolExecutor at the orchestrator layer either deadlocks on
+#     daemon-process restrictions or wastes memory by spawning O(N*M)
+#     workers. A ThreadPoolExecutor at the outer layer DISPATCHES the
+#     validators concurrently while letting each one keep its own
+#     internal process pool — the Python-side cost is the GIL during
+#     orchestrator-thread coordination, which is negligible.
+#   * The actual CPU-bound work is INSIDE the validators (regex scanning,
+#     AST walking, subprocess linters). The orchestrator thread mostly
+#     waits on subprocess + IO completion, where the GIL is released.
+#
+# WHY per-validator private reports:
+#   * Each validator's `report.add(...)` calls mutate a shared list. Two
+#     threads appending concurrently to the same list is technically safe
+#     (list.append is atomic under the GIL) but ORDER becomes
+#     non-deterministic — interleavings differ across runs and the parity
+#     gate against the serial baseline fails.
+#   * Giving each validator its own ValidationReport, then merging them
+#     into the umbrella report IN THE SAME ORDER as the serial code's
+#     call sequence, guarantees BIT-IDENTICAL output to the serial path
+#     regardless of which validator finished first.
+#
+# WHY a fixed worker cap:
+#   * We don't want to flood the system with N validators × M internal
+#     pool workers. The orchestrator pool is set to len(validators) so
+#     every task gets to start; concurrency at the orchestrator layer
+#     is bounded by the validator count (~30), and the actual CPU
+#     parallelism comes from the validators' own pools.
+# =============================================================================
+
+
+def _orchestrator_parallel_enabled() -> bool:
+    """Read CPV_ORCHESTRATOR_PARALLEL env-var.
+
+    Returns False when set to "0" / "false" / "no" / "off" (case-insensitive);
+    any other value or unset → True (default = parallel).
+
+    Mirrors the convention established by ``CPV_HOOK_PARALLEL`` in
+    ``validate_hook.py`` so users / CI scripts have a uniform on/off switch
+    for the whole concurrency stack.
+    """
+    val = os.environ.get("CPV_ORCHESTRATOR_PARALLEL")
+    if val is None:
+        return True
+    return val.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _make_validator_report() -> ValidationReport:
+    """Create a fresh per-validator ValidationReport.
+
+    Factored out so a future refactor (e.g. tracking which validator
+    produced which finding for diagnostics) can swap in a subclass
+    without touching the orchestrator loop body.
+    """
+    return ValidationReport()
+
+
+def _run_one_validator(
+    name: str,
+    callable_: Any,
+    plugin_root: Path,
+    args_kwargs: tuple[tuple, dict] = ((), {}),
+) -> tuple[str, ValidationReport, Exception | None]:
+    """Run a single validator with its own private report, capturing errors.
+
+    Returns ``(name, sub_report, error_or_None)``. The orchestrator merges
+    ``sub_report`` into the umbrella report in deterministic order; ``error``
+    is surfaced as a MINOR on the umbrella when non-None so a buggy
+    validator never crashes the whole run (matches the boundary-error
+    pattern used by ``_run_xref_in_pipeline`` and ``_run_cache_audit_separate``).
+    """
+    sub_report = _make_validator_report()
+    pos_args, kw_args = args_kwargs
+    try:
+        callable_(plugin_root, sub_report, *pos_args, **kw_args)
+        return (name, sub_report, None)
+    except Exception as exc:  # noqa: BLE001 — defensive boundary, must not crash orchestrator
+        return (name, sub_report, exc)
+
+
+def _run_parallel_batch(
+    tasks: list[tuple[str, Any, tuple[tuple, dict]]],
+    plugin_root: Path,
+    main_report: ValidationReport,
+) -> None:
+    """Dispatch ``tasks`` to a ThreadPoolExecutor and merge in input order.
+
+    ``tasks`` is a list of ``(name, callable, (pos_args, kw_args))`` tuples.
+    Each task gets its own ``ValidationReport``; after all tasks complete,
+    the per-task reports are merged into ``main_report`` in the order tasks
+    appear in the list — NOT in completion order — so the final result
+    sequence is identical to the equivalent serial loop.
+
+    Errors raised by a validator are caught and surfaced as a MINOR finding
+    on the umbrella report; the rest of the batch proceeds.
+    """
+    if not tasks:
+        return
+
+    # Lazy import — only pay the cost when parallel mode is actually used.
+    from concurrent.futures import ThreadPoolExecutor
+
+    # n_workers = len(tasks) lets every validator start immediately. The
+    # outer pool only dispatches; the inner ProcessPool inside each
+    # validator is what consumes CPU. Capping further would just serialize
+    # validators that could otherwise overlap their IO + subprocess waits.
+    n_workers = max(1, len(tasks))
+
+    # future_to_index lets us merge in input order (results[i] for i in 0..N-1)
+    # rather than completion order — preserves the serial-path's result
+    # sequence for the parity gate.
+    results: list[tuple[str, ValidationReport, Exception | None] | None] = [None] * len(tasks)
+
+    with ThreadPoolExecutor(max_workers=n_workers, thread_name_prefix="cpv-orch") as executor:
+        future_to_index = {
+            executor.submit(_run_one_validator, name, fn, plugin_root, args): idx
+            for idx, (name, fn, args) in enumerate(tasks)
+        }
+        for future, idx in future_to_index.items():
+            try:
+                results[idx] = future.result()
+            except Exception as exc:  # noqa: BLE001 — last-resort defensive
+                # Should never fire because _run_one_validator catches its
+                # own exceptions, but if the future itself errors we mark
+                # the slot with an error rather than letting the merge fail.
+                name = tasks[idx][0]
+                results[idx] = (name, _make_validator_report(), exc)
+
+    # Merge in input order. The serial baseline's result sequence is
+    # task[0].results ++ task[1].results ++ ... ++ task[N-1].results.
+    for slot in results:
+        assert slot is not None, "parallel batch internal invariant: every task must produce a slot"
+        slot_name, sub_report, slot_exc = slot
+        main_report.merge(sub_report)
+        if slot_exc is not None:
+            # Match the boundary-error pattern in _run_xref_in_pipeline.
+            main_report.minor(f"Validator '{slot_name}' failed: {type(slot_exc).__name__}: {slot_exc}")
+
+
 def _run_xref_in_pipeline(plugin_root: Path, report: ValidationReport) -> None:
     """Run cross-reference validation and merge findings into the main report.
 
@@ -5835,16 +5980,31 @@ def main() -> int:
                 file=sys.stderr,
             )
 
+    # ---------------------------------------------------------------------
+    # Phase 1 (SERIAL) — manifest + structural + skillaudit must run first.
+    # ---------------------------------------------------------------------
+    #
+    # validate_manifest sets the manifest fingerprint other validators
+    # implicitly trust (they re-read plugin.json but expect it to exist
+    # with the parsed-without-error shape this call enforces).
+    #
+    # validate_structure / validate_layout_c_consistency must finish before
+    # the parallel batch so the umbrella report has its "shape correct"
+    # findings emitted first — matches the long-standing serial output
+    # order that humans + CI consumers parse.
+    #
+    # _run_skillaudit_native must be serial because it mutates a
+    # module-level flag inside validate_security (_set_cpv_self_scan
+    # writes _CPV_SELF_PLUGIN_ROOT / _CPV_SELF_SCAN_ACTIVE / the hash
+    # manifest dict). Validators that READ that state in the parallel
+    # batch (validate_canonical_pipeline_drift, validate_legacy_pipeline_scripts)
+    # need it set BEFORE the batch starts to avoid racing a partially-built
+    # manifest dict. Running skillaudit here guarantees the writes are
+    # complete before any concurrent reader fires.
     validate_manifest(plugin_root, report, marketplace_only, hosting_marketplace=explicit_hosting)
     validate_structure(plugin_root, report, marketplace_only)
     # v2.32.0 — Layout C cross-validation (marketplace-in-plugin)
     validate_layout_c_consistency(plugin_root, report)
-    validate_commands(plugin_root, report)
-    validate_agents(plugin_root, report)
-    validate_hooks(plugin_root, report)
-    validate_mcp(plugin_root, report)
-    # TRDD-e3e74f69 telemetry hookup — OTEL supply-chain audit on every plugin
-    validate_telemetry(plugin_root, report)
     # v2.99.1 — skillaudit native (50 rules / 489 patterns) — MANDATORY,
     # NOT skippable. Wires the in-process scanner into the standard plugin
     # validation pipeline so every `validate_plugin.py <path>` run gets the
@@ -5854,41 +6014,97 @@ def main() -> int:
     # in addition to validate_security.py Check 27. Iron rule preserved:
     # missing rule catalog → CRITICAL via cpv_skillaudit_native.report_findings.
     _run_skillaudit_native(plugin_root, report)
-    validate_scripts(plugin_root, report)
-    # v2.64.0 — single source of truth for repo-wide linting.
-    # Replaces the inline lint pieces of validate_scripts (Python ruff/mypy,
-    # shell shellcheck, JS eslint, PowerShell PSSA, Go vet, Rust cargo) AND
-    # the standalone scripts/lint_files.py orchestrator. Strict-by-default:
-    # any missing linter for a detected language fails the run with MAJOR.
+    # Print the repo-lint banner up front so output ordering is stable
+    # whether or not the rest of the validators run in parallel. The lint
+    # engine itself runs INSIDE the parallel batch below.
     print(f"\n{COLORS['BOLD']}═══ [REPO LINT] (15 languages, gitignore-filtered) ═══{COLORS['RESET']}")
-    run_lint_engine(plugin_root, report, strict_missing_tools=True)
-    validate_bin_executables(plugin_root, report)
-    validate_skills(plugin_root, report, skip_platform_checks)
-    # TRDD-25b9be90 — cross-reference validation, including ghost-agent dispatch
-    # detection (RC-GHOST-DISPATCH-001 CRITICAL when Task() / subagent_type
-    # literals reference agents that don't exist).
-    _run_xref_in_pipeline(plugin_root, report)
-    validate_rules(plugin_root, report)
-    validate_output_styles(plugin_root, report)
-    validate_readme(plugin_root, report)
-    validate_license(plugin_root, report)
-    validate_no_local_paths(plugin_root, report)
-    validate_gitignore(plugin_root, report)
-    validate_strip_gitmodules(plugin_root, report)
-    validate_cross_platform(plugin_root, report)
+
+    # ---------------------------------------------------------------------
+    # Phase 2 — independent per-plugin validators run in PARALLEL.
+    # ---------------------------------------------------------------------
+    #
+    # Each task: (display_name, callable, ((pos_args), {kw_args})). The
+    # callable receives ``(plugin_root, sub_report, *pos_args, **kw_args)``
+    # where ``sub_report`` is a fresh ValidationReport. After all tasks
+    # complete, sub_reports are merged into the umbrella ``report`` IN
+    # THIS LIST ORDER so the final result sequence matches the serial
+    # baseline that this orchestrator replaces.
+    #
+    # Validators included here all match the (plugin_root, report, *args)
+    # signature, have NO inter-dependency on each other's report content,
+    # and either don't touch shared module-level state at all OR only
+    # READ state that Phase 1 (skillaudit) already wrote.
+    #
+    # NOT included here (kept serial in Phase 3):
+    #   * validate_project_languages — returns dict consumed by
+    #     validate_lockfiles, so they must chain serially.
+    #   * validate_lockfiles — depends on above.
+    #   * _check_stale_user_settings_local — touches ~/.claude/ (user-scope
+    #     mutation hazard if parallelized with concurrent CPV runs).
+    #   * _run_cache_audit_separate — writes its own report file, must
+    #     happen last for the pointer to land in the right place.
+    parallel_tasks: list[tuple[str, Any, tuple[tuple, dict]]] = [
+        ("validate_commands", validate_commands, ((), {})),
+        ("validate_agents", validate_agents, ((), {})),
+        ("validate_hooks", validate_hooks, ((), {})),
+        ("validate_mcp", validate_mcp, ((), {})),
+        # TRDD-e3e74f69 telemetry hookup — OTEL supply-chain audit on every plugin
+        ("validate_telemetry", validate_telemetry, ((), {})),
+        ("validate_scripts", validate_scripts, ((), {})),
+        # v2.64.0 — single source of truth for repo-wide linting (most expensive).
+        # Replaces the inline lint pieces of validate_scripts (Python ruff/mypy,
+        # shell shellcheck, JS eslint, PowerShell PSSA, Go vet, Rust cargo) AND
+        # the standalone scripts/lint_files.py orchestrator. Strict-by-default:
+        # any missing linter for a detected language fails the run with MAJOR.
+        ("run_lint_engine", run_lint_engine, ((), {"strict_missing_tools": True})),
+        ("validate_bin_executables", validate_bin_executables, ((), {})),
+        ("validate_skills", validate_skills, ((skip_platform_checks,), {})),
+        # TRDD-25b9be90 — cross-reference validation, including ghost-agent dispatch
+        # detection (RC-GHOST-DISPATCH-001 CRITICAL when Task() / subagent_type
+        # literals reference agents that don't exist).
+        ("_run_xref_in_pipeline", _run_xref_in_pipeline, ((), {})),
+        ("validate_rules", validate_rules, ((), {})),
+        ("validate_output_styles", validate_output_styles, ((), {})),
+        ("validate_readme", validate_readme, ((), {})),
+        ("validate_license", validate_license, ((), {})),
+        ("validate_no_local_paths", validate_no_local_paths, ((), {})),
+        ("validate_gitignore", validate_gitignore, ((), {})),
+        ("validate_strip_gitmodules", validate_strip_gitmodules, ((), {})),
+        ("validate_cross_platform", validate_cross_platform, ((), {})),
+        ("validate_md_content_references", validate_md_content_references, ((), {})),
+        ("validate_workflow_inline_python", validate_workflow_inline_python, ((), {})),
+        ("validate_pipeline_readiness", validate_pipeline_readiness, ((), {})),
+        ("validate_pipeline_script_refs", validate_pipeline_script_refs, ((), {})),
+        ("validate_workflow_path_broken", validate_workflow_path_broken, ((), {})),
+        ("validate_canonical_pipeline_drift", validate_canonical_pipeline_drift, ((), {})),
+        ("validate_legacy_pipeline_scripts", validate_legacy_pipeline_scripts, ((), {})),
+        ("validate_pep723_invocations", validate_pep723_invocations, ((), {})),
+        ("validate_workflow_best_practices", validate_workflow_best_practices, ((), {})),
+        # Submodule containment is per-plugin; doesn't feed lockfiles.
+        ("validate_submodule_containment", validate_submodule_containment, ((), {})),
+    ]
+
+    if _orchestrator_parallel_enabled():
+        # Parallel path — dispatch all tasks to the thread pool and merge
+        # results in input order so the umbrella report's result sequence
+        # is identical to the serial baseline.
+        _run_parallel_batch(parallel_tasks, plugin_root, report)
+    else:
+        # Serial path — bit-identical fallback. Used by the parity
+        # regression test AND by CPV_ORCHESTRATOR_PARALLEL=0 when a
+        # caller suspects the parallel path of a regression.
+        for name, fn, (pos_args, kw_args) in parallel_tasks:
+            try:
+                fn(plugin_root, report, *pos_args, **kw_args)
+            except Exception as exc:  # noqa: BLE001 — match parallel error-capture
+                report.minor(f"Validator '{name}' failed: {type(exc).__name__}: {exc}")
+
+    # ---------------------------------------------------------------------
+    # Phase 3 (SERIAL) — settings/language detection/lockfiles + epilogue.
+    # ---------------------------------------------------------------------
     # Check for stale ~/.claude/settings.local.json — should not exist at user level
     _check_stale_user_settings_local(report)
-    validate_md_content_references(plugin_root, report)
-    validate_workflow_inline_python(plugin_root, report)
-    validate_pipeline_readiness(plugin_root, report)
-    validate_pipeline_script_refs(plugin_root, report)
-    validate_workflow_path_broken(plugin_root, report)
-    validate_canonical_pipeline_drift(plugin_root, report)
-    validate_legacy_pipeline_scripts(plugin_root, report)
-    validate_pep723_invocations(plugin_root, report)
-    validate_workflow_best_practices(plugin_root, report)
-    # Submodule + language + lockfile detection (TRDD-79638eb6)
-    validate_submodule_containment(plugin_root, report)
+    # Language detection feeds lockfile detection — must remain serial.
     detected_languages = validate_project_languages(plugin_root, report)
     validate_lockfiles(plugin_root, report, detected_languages)
 

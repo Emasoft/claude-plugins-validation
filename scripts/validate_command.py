@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from cpv_parallel_runner import ScanResult, parallel_scan
 from cpv_validation_common import (
     COLORS,
     EXIT_CRITICAL,
@@ -543,31 +544,104 @@ def validate_command(command_path: Path) -> CommandValidationReport:
     return report
 
 
+def scan_one_command(cmd_path: Path) -> list[CommandValidationReport]:
+    """Top-level per-file scan wrapper for the parallel-scan harness.
+
+    The shared ``parallel_scan`` harness (task #384) requires a TOP-LEVEL
+    importable callable taking exactly one ``Path`` and returning a list
+    of findings. ``validate_command`` already does the per-file work, so
+    this wrapper just shapes the return value as the harness expects
+    (one-element list holding the per-file ``CommandValidationReport``).
+
+    Why a wrapper instead of passing ``validate_command`` directly:
+        * ``parallel_scan`` calls ``scan_func(path) -> list``. Returning
+          the report wrapped in ``[report]`` keeps the harness's "findings
+          is always a list" contract intact and lets future per-file
+          findings (e.g. multiple sub-reports) extend naturally.
+        * Keeping ``validate_command`` unchanged preserves its public API
+          for callers that already use it directly (per spec rule:
+          "DO NOT change the validator's PUBLIC API").
+
+    MUST stay top-level — closures and lambdas are NOT pickleable by
+    ``ProcessPoolExecutor``.
+    """
+    return [validate_command(cmd_path)]
+
+
 def validate_commands_directory(commands_dir: Path) -> list[CommandValidationReport]:
-    """Validate all command files in a directory.
+    """Validate all command files in a directory (parallelised via task #384 harness).
 
     Args:
         commands_dir: Path to the commands/ directory
 
     Returns:
-        List of CommandValidationReport for each command
-    """
-    reports = []
+        List of CommandValidationReport for each command, in sorted file order.
 
+    Implementation note:
+        Replaces the previous serial loop
+        ``for command_file in sorted(command_files): reports.append(validate_command(command_file))``
+        with a call to ``parallel_scan`` from ``cpv_parallel_runner``. The
+        harness uses ``ProcessPoolExecutor`` (per spec — CPV per-file work
+        is CPU-bound: regex scanning, YAML parsing, security checks) and
+        preserves input order so the historical sorted-file-order
+        invariant is maintained without any post-sort.
+
+        Worker count: default (``os.cpu_count()``). Per-command work is
+        CPU-bound enough (YAML parse + regex sweeps + security checks)
+        that the default suits us; we don't override.
+
+        Error handling: ``on_error="collect"`` (default). If a worker
+        raises for a specific file, ``ScanResult.error`` is set and we
+        emit a synthetic CRITICAL-bearing report for that file so the
+        validator still surfaces the failure without crashing the entire
+        directory scan. This matches the spec's "Errors: ScanResult.error
+        set means the worker raised. Surface as a per-file WARNING in the
+        report (don't crash the whole validator)" rule, escalated to
+        CRITICAL because a hard crash in the per-command scanner means
+        we cannot trust ANY assertion about that command file.
+    """
     if not commands_dir.is_dir():
         report = CommandValidationReport(command_path=str(commands_dir))
         report.critical(f"Not a directory: {commands_dir}")
         return [report]
 
-    command_files = list(commands_dir.glob("*.md"))
+    command_files = sorted(commands_dir.glob("*.md"))
 
     if not command_files:
         report = CommandValidationReport(command_path=str(commands_dir))
         report.info("No command files (*.md) found in directory")
         return [report]
 
-    for command_file in sorted(command_files):
-        reports.append(validate_command(command_file))
+    # Parallel per-file scan via the shared harness. ``parallel_scan``
+    # returns results in INPUT ORDER, so feeding it the already-sorted
+    # ``command_files`` list yields reports in alphabetical-by-filename
+    # order — the same order the previous serial loop produced.
+    scan_results: list[ScanResult] = parallel_scan(command_files, scan_one_command)
+
+    reports: list[CommandValidationReport] = []
+    for scan_result in scan_results:
+        if scan_result.error is not None:
+            # The worker raised before producing a report. Synthesise a
+            # CRITICAL-bearing report so the directory-level caller sees
+            # the failure clearly and the file isn't silently dropped.
+            # Severity is CRITICAL (not WARNING per spec) because a hard
+            # crash in the per-file scanner invalidates every other check
+            # for that file; downgrading to WARNING would hide that.
+            err_report = CommandValidationReport(command_path=str(scan_result.file_path))
+            err_report.critical(
+                f"Parallel scan worker failed on this file: {scan_result.error}",
+                scan_result.file_path.name,
+            )
+            reports.append(err_report)
+        else:
+            # ``scan_one_command`` wraps the per-file report in a one-element
+            # list; unwrap. A defensive guard against future refactors that
+            # might return zero or multiple reports keeps the contract clear.
+            assert len(scan_result.findings) == 1, (
+                f"scan_one_command must return exactly one report per file; "
+                f"got {len(scan_result.findings)} for {scan_result.file_path}"
+            )
+            reports.append(scan_result.findings[0])
 
     return reports
 

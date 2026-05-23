@@ -37,16 +37,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
 from cpv_management_common import load_jsonc
+from cpv_parallel_runner import parallel_scan
 from cpv_validation_common import (
     EXIT_CRITICAL,
     EXIT_OK,
     ValidationReport,
+    ValidationResult,
     check_remote_execution_guard,
     print_results_by_level,
     save_report_and_print_summary,
@@ -259,12 +263,21 @@ def _resolve_hook_command(plugin_root: Path, command: str) -> Path | None:
 # =============================================================================
 
 
-def scan_static_prefix(file_path: Path, report: ValidationReport, plugin_root: Path) -> int:
-    """Flag dynamic placeholders / shell substitutions in static-prefix files."""
+def _collect_static_prefix(file_path: Path, plugin_root: Path) -> list[ValidationResult]:
+    """Per-file CA-01 collector — returns a list of ValidationResult.
+
+    Extracted so the same scan body runs both inline (legacy serial path)
+    and inside a `ProcessPoolExecutor` worker (parallel path). Returning
+    `ValidationResult` instances rather than mutating a shared report
+    object is what makes the worker pickleable and the parallel branch
+    bit-identical to the serial branch — the parent merges the returned
+    list into its master report in input order.
+    """
+    out: list[ValidationResult] = []
     try:
         content = file_path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
-        return 0
+        return out
     rel = str(file_path.relative_to(plugin_root)) if file_path.is_relative_to(plugin_root) else str(file_path)
 
     # Strip option placeholders (CLAUDE_PLUGIN_OPTION_*) before any scan —
@@ -272,20 +285,36 @@ def scan_static_prefix(file_path: Path, report: ValidationReport, plugin_root: P
     sanitized = _STATIC_OPTION_PLACEHOLDER.sub("CLAUDE_PLUGIN_OPTION", content)
     fenced_stripped = _strip_fences_for_dynamic_check(sanitized)
 
-    issues = 0
     for match in _DYNAMIC_PLACEHOLDER.finditer(fenced_stripped):
-        report.warning(
-            f"CA-01: dynamic placeholder {match.group(0)!r} in cached prefix file",
-            rel,
+        out.append(
+            ValidationResult(
+                level="WARNING",
+                message=f"CA-01: dynamic placeholder {match.group(0)!r} in cached prefix file",
+                file=rel,
+            )
         )
-        issues += 1
     for match in _DYNAMIC_SHELL_CMD.finditer(fenced_stripped):
-        report.warning(
-            f"CA-01: shell command substitution {match.group(0)!r} in cached prefix file",
-            rel,
+        out.append(
+            ValidationResult(
+                level="WARNING",
+                message=f"CA-01: shell command substitution {match.group(0)!r} in cached prefix file",
+                file=rel,
+            )
         )
-        issues += 1
-    return issues
+    return out
+
+
+def scan_static_prefix(file_path: Path, report: ValidationReport, plugin_root: Path) -> int:
+    """Flag dynamic placeholders / shell substitutions in static-prefix files.
+
+    Public API preserved for backwards compatibility. Internally delegates
+    to ``_collect_static_prefix`` and forwards the returned findings into
+    ``report``.
+    """
+    findings = _collect_static_prefix(file_path, plugin_root)
+    for r in findings:
+        report.results.append(r)
+    return len(findings)
 
 
 # =============================================================================
@@ -293,22 +322,21 @@ def scan_static_prefix(file_path: Path, report: ValidationReport, plugin_root: P
 # =============================================================================
 
 
-def scan_hook_for_prefix_mutation(
+def _collect_hook_for_prefix_mutation(
     script_path: Path,
     event: str,
-    report: ValidationReport,
     plugin_root: Path,
-) -> int:
-    """Flag a hook script that writes to a cached-prefix file."""
+) -> list[ValidationResult]:
+    """Per-hook CA-02 collector — returns the findings list."""
+    out: list[ValidationResult] = []
     if event not in _PREFIX_AFFECTING_EVENTS:
-        return 0
+        return out
     try:
         content = script_path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
-        return 0
+        return out
     rel = str(script_path.relative_to(plugin_root)) if script_path.is_relative_to(plugin_root) else str(script_path)
 
-    issues = 0
     for line_num, line in enumerate(content.split("\n"), start=1):
         # Skip pure comments
         stripped = line.strip()
@@ -318,14 +346,32 @@ def scan_hook_for_prefix_mutation(
             continue
         for prefix_pat in _PREFIX_FILE_PATTERNS:
             if prefix_pat.search(line):
-                report.warning(
-                    f"CA-02: {event} hook writes to cached-prefix file",
-                    rel,
-                    line_num,
+                out.append(
+                    ValidationResult(
+                        level="WARNING",
+                        message=f"CA-02: {event} hook writes to cached-prefix file",
+                        file=rel,
+                        line=line_num,
+                    )
                 )
-                issues += 1
                 break
-    return issues
+    return out
+
+
+def scan_hook_for_prefix_mutation(
+    script_path: Path,
+    event: str,
+    report: ValidationReport,
+    plugin_root: Path,
+) -> int:
+    """Flag a hook script that writes to a cached-prefix file.
+
+    Public API preserved; delegates to ``_collect_hook_for_prefix_mutation``.
+    """
+    findings = _collect_hook_for_prefix_mutation(script_path, event, plugin_root)
+    for r in findings:
+        report.results.append(r)
+    return len(findings)
 
 
 # =============================================================================
@@ -333,22 +379,21 @@ def scan_hook_for_prefix_mutation(
 # =============================================================================
 
 
-def scan_hook_for_tool_mutation(
+def _collect_hook_for_tool_mutation(
     script_path: Path,
     event: str,
-    report: ValidationReport,
     plugin_root: Path,
-) -> int:
-    """Flag hook scripts that flip allow/deny lists or enable MCP servers."""
+) -> list[ValidationResult]:
+    """Per-hook CA-03 collector — returns the findings list."""
+    out: list[ValidationResult] = []
     if event not in _PREFIX_AFFECTING_EVENTS:
-        return 0
+        return out
     try:
         content = script_path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
-        return 0
+        return out
     rel = str(script_path.relative_to(plugin_root)) if script_path.is_relative_to(plugin_root) else str(script_path)
 
-    issues = 0
     for line_num, line in enumerate(content.split("\n"), start=1):
         stripped = line.strip()
         if stripped.startswith("#") and not stripped.startswith("#!"):
@@ -361,13 +406,31 @@ def scan_hook_for_tool_mutation(
             continue
         if not _TOOL_LIST_MUTATION.search(line):
             continue
-        report.warning(
-            f"CA-03: {event} hook mutates tool-list field",
-            rel,
-            line_num,
+        out.append(
+            ValidationResult(
+                level="WARNING",
+                message=f"CA-03: {event} hook mutates tool-list field",
+                file=rel,
+                line=line_num,
+            )
         )
-        issues += 1
-    return issues
+    return out
+
+
+def scan_hook_for_tool_mutation(
+    script_path: Path,
+    event: str,
+    report: ValidationReport,
+    plugin_root: Path,
+) -> int:
+    """Flag hook scripts that flip allow/deny lists or enable MCP servers.
+
+    Public API preserved; delegates to ``_collect_hook_for_tool_mutation``.
+    """
+    findings = _collect_hook_for_tool_mutation(script_path, event, plugin_root)
+    for r in findings:
+        report.results.append(r)
+    return len(findings)
 
 
 # =============================================================================
@@ -377,6 +440,46 @@ def scan_hook_for_tool_mutation(
 
 _FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---", re.DOTALL)
 _MODEL_FIELD_RE = re.compile(r"^model:\s*(.+)$", re.MULTILINE)
+
+
+def _collect_component_for_model_override(
+    md_file: Path,
+    plugin_root: Path,
+    component_kind: str,
+) -> list[ValidationResult]:
+    """Per-component CA-04 collector — returns the findings list."""
+    out: list[ValidationResult] = []
+    try:
+        content = md_file.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return out
+    fm = _FRONTMATTER_RE.match(content)
+    if not fm:
+        return out
+    front = fm.group(1)
+    m = _MODEL_FIELD_RE.search(front)
+    if not m:
+        return out
+    model = m.group(1).strip().strip("'").strip('"')
+    # `model: inherit` uses the parent/session model — no in-line switch, so
+    # the cache is never split. Treat it exactly like omitting the field.
+    if model.lower() == "inherit":
+        return out
+    rel = str(md_file.relative_to(plugin_root)) if md_file.is_relative_to(plugin_root) else str(md_file)
+    out.append(
+        ValidationResult(
+            level="WARNING",
+            message=(
+                f"CA-04: {component_kind} declares `model: {model}` in frontmatter — forces an in-line "
+                f"model switch that fragments the prompt cache (each model keeps a separate cache, so this "
+                f"{component_kind} pays a cold-cache miss on every dispatch instead of reusing the session's "
+                f"warm prefix). Omit the `model:` field to inherit the session model and keep the cache warm; "
+                f"use `model: inherit` if you must name it explicitly."
+            ),
+            file=rel,
+        )
+    )
+    return out
 
 
 def scan_component_for_model_override(
@@ -397,33 +500,13 @@ def scan_component_for_model_override(
     The regex only matches a top-level ``model:`` key (column 0 of the
     frontmatter). A ``model:`` substring inside an indented block-scalar
     description never starts at column 0, so prose mentions don't false-fire.
+
+    Public API preserved; delegates to ``_collect_component_for_model_override``.
     """
-    try:
-        content = md_file.read_text(encoding="utf-8", errors="ignore")
-    except OSError:
-        return 0
-    fm = _FRONTMATTER_RE.match(content)
-    if not fm:
-        return 0
-    front = fm.group(1)
-    m = _MODEL_FIELD_RE.search(front)
-    if not m:
-        return 0
-    model = m.group(1).strip().strip("'").strip('"')
-    # `model: inherit` uses the parent/session model — no in-line switch, so
-    # the cache is never split. Treat it exactly like omitting the field.
-    if model.lower() == "inherit":
-        return 0
-    rel = str(md_file.relative_to(plugin_root)) if md_file.is_relative_to(plugin_root) else str(md_file)
-    report.warning(
-        f"CA-04: {component_kind} declares `model: {model}` in frontmatter — forces an in-line "
-        f"model switch that fragments the prompt cache (each model keeps a separate cache, so this "
-        f"{component_kind} pays a cold-cache miss on every dispatch instead of reusing the session's "
-        f"warm prefix). Omit the `model:` field to inherit the session model and keep the cache warm; "
-        f"use `model: inherit` if you must name it explicitly.",
-        rel,
-    )
-    return 1
+    findings = _collect_component_for_model_override(md_file, plugin_root, component_kind)
+    for r in findings:
+        report.results.append(r)
+    return len(findings)
 
 
 # =============================================================================
@@ -432,6 +515,44 @@ def scan_component_for_model_override(
 
 
 _CONTEXT_FIELD_RE = re.compile(r"^context:\s*(.+)$", re.MULTILINE)
+
+
+def _collect_component_for_context_fork(
+    md_file: Path,
+    plugin_root: Path,
+    component_kind: str,
+) -> list[ValidationResult]:
+    """Per-component CA-07 collector — returns the findings list."""
+    out: list[ValidationResult] = []
+    try:
+        content = md_file.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return out
+    fm = _FRONTMATTER_RE.match(content)
+    if not fm:
+        return out
+    m = _CONTEXT_FIELD_RE.search(fm.group(1))
+    if not m:
+        return out
+    value = m.group(1).strip().strip("'").strip('"').lower()
+    if value not in ("fork", "branch"):
+        return out
+    rel = str(md_file.relative_to(plugin_root)) if md_file.is_relative_to(plugin_root) else str(md_file)
+    out.append(
+        ValidationResult(
+            level="WARNING",
+            message=(
+                f"CA-07: {component_kind} declares `context: {value}` in frontmatter — forks a fresh "
+                f"subagent whose prompt prefix is re-primed from cold (up to ~1M tokens when the harness "
+                f"carries many skills/MCP/tools; only CLAUDE.md + rules files survive a fork). Keep the fork "
+                f"ONLY if this {component_kind} needs a fresh context (independent audit / error-checking) or "
+                f"the room to read many files; otherwise drop the `context:` field to inherit the parent "
+                f"context and keep the cache warm."
+            ),
+            file=rel,
+        )
+    )
+    return out
 
 
 def scan_component_for_context_fork(
@@ -452,36 +573,51 @@ def scan_component_for_context_fork(
 
     `branch` is a documented synonym for `fork`; both are flagged. Any other
     `context:` value (e.g. the default inherited context) is exempt.
+
+    Public API preserved; delegates to ``_collect_component_for_context_fork``.
     """
-    try:
-        content = md_file.read_text(encoding="utf-8", errors="ignore")
-    except OSError:
-        return 0
-    fm = _FRONTMATTER_RE.match(content)
-    if not fm:
-        return 0
-    m = _CONTEXT_FIELD_RE.search(fm.group(1))
-    if not m:
-        return 0
-    value = m.group(1).strip().strip("'").strip('"').lower()
-    if value not in ("fork", "branch"):
-        return 0
-    rel = str(md_file.relative_to(plugin_root)) if md_file.is_relative_to(plugin_root) else str(md_file)
-    report.warning(
-        f"CA-07: {component_kind} declares `context: {value}` in frontmatter — forks a fresh "
-        f"subagent whose prompt prefix is re-primed from cold (up to ~1M tokens when the harness "
-        f"carries many skills/MCP/tools; only CLAUDE.md + rules files survive a fork). Keep the fork "
-        f"ONLY if this {component_kind} needs a fresh context (independent audit / error-checking) or "
-        f"the room to read many files; otherwise drop the `context:` field to inherit the parent "
-        f"context and keep the cache warm.",
-        rel,
-    )
-    return 1
+    findings = _collect_component_for_context_fork(md_file, plugin_root, component_kind)
+    for r in findings:
+        report.results.append(r)
+    return len(findings)
 
 
 # =============================================================================
 # CA-05 — Hook scripts likely to emit unbounded output
 # =============================================================================
+
+
+def _collect_hook_for_unbounded_output(
+    script_path: Path,
+    event: str,
+    plugin_root: Path,
+) -> list[ValidationResult]:
+    """Per-hook CA-05 collector — returns the findings list."""
+    out: list[ValidationResult] = []
+    if event not in _PREFIX_AFFECTING_EVENTS:
+        return out
+    try:
+        content = script_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return out
+    rel = str(script_path.relative_to(plugin_root)) if script_path.is_relative_to(plugin_root) else str(script_path)
+
+    for line_num, line in enumerate(content.split("\n"), start=1):
+        stripped = line.strip()
+        if stripped.startswith("#") and not stripped.startswith("#!"):
+            continue
+        for unbounded_pat, label, guard_pat in _UNBOUNDED_PATTERNS:
+            if unbounded_pat.search(line) and not guard_pat.search(line):
+                out.append(
+                    ValidationResult(
+                        level="WARNING",
+                        message=f"CA-05: {event} hook may emit unbounded output: {label}",
+                        file=rel,
+                        line=line_num,
+                    )
+                )
+                break  # one finding per line is enough
+    return out
 
 
 def scan_hook_for_unbounded_output(
@@ -490,30 +626,14 @@ def scan_hook_for_unbounded_output(
     report: ValidationReport,
     plugin_root: Path,
 ) -> int:
-    """Flag hook scripts that emit unbounded git/find/cat/ls output."""
-    if event not in _PREFIX_AFFECTING_EVENTS:
-        return 0
-    try:
-        content = script_path.read_text(encoding="utf-8", errors="ignore")
-    except OSError:
-        return 0
-    rel = str(script_path.relative_to(plugin_root)) if script_path.is_relative_to(plugin_root) else str(script_path)
+    """Flag hook scripts that emit unbounded git/find/cat/ls output.
 
-    issues = 0
-    for line_num, line in enumerate(content.split("\n"), start=1):
-        stripped = line.strip()
-        if stripped.startswith("#") and not stripped.startswith("#!"):
-            continue
-        for unbounded_pat, label, guard_pat in _UNBOUNDED_PATTERNS:
-            if unbounded_pat.search(line) and not guard_pat.search(line):
-                report.warning(
-                    f"CA-05: {event} hook may emit unbounded output: {label}",
-                    rel,
-                    line_num,
-                )
-                issues += 1
-                break  # one finding per line is enough
-    return issues
+    Public API preserved; delegates to ``_collect_hook_for_unbounded_output``.
+    """
+    findings = _collect_hook_for_unbounded_output(script_path, event, plugin_root)
+    for r in findings:
+        report.results.append(r)
+    return len(findings)
 
 
 # =============================================================================
@@ -530,6 +650,32 @@ _FORK_AFFECTING_EVENTS: frozenset[str] = frozenset(
 )
 
 
+def _collect_hook_for_fork_unsafe(
+    script_path: Path,
+    event: str,
+    plugin_root: Path,
+) -> list[ValidationResult]:
+    """Per-hook CA-06 collector — returns the findings list."""
+    out: list[ValidationResult] = []
+    if event not in _FORK_AFFECTING_EVENTS:
+        return out
+    try:
+        content = script_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return out
+    rel = str(script_path.relative_to(plugin_root)) if script_path.is_relative_to(plugin_root) else str(script_path)
+
+    if any(p.search(content) for p in _PREFIX_FILE_PATTERNS) and _FILE_WRITE_OPS.search(content):
+        out.append(
+            ValidationResult(
+                level="WARNING",
+                message=f"CA-06: {event} hook touches cached-prefix files — verify the parent prefix is preserved across the fork",
+                file=rel,
+            )
+        )
+    return out
+
+
 def scan_hook_for_fork_unsafe(
     script_path: Path,
     event: str,
@@ -540,22 +686,13 @@ def scan_hook_for_fork_unsafe(
 
     Conservative: only emits a WARNING for now since most plugins do not
     ship compaction logic and a definitive answer requires runtime inspection.
-    """
-    if event not in _FORK_AFFECTING_EVENTS:
-        return 0
-    try:
-        content = script_path.read_text(encoding="utf-8", errors="ignore")
-    except OSError:
-        return 0
-    rel = str(script_path.relative_to(plugin_root)) if script_path.is_relative_to(plugin_root) else str(script_path)
 
-    if any(p.search(content) for p in _PREFIX_FILE_PATTERNS) and _FILE_WRITE_OPS.search(content):
-        report.warning(
-            f"CA-06: {event} hook touches cached-prefix files — verify the parent prefix is preserved across the fork",
-            rel,
-        )
-        return 1
-    return 0
+    Public API preserved; delegates to ``_collect_hook_for_fork_unsafe``.
+    """
+    findings = _collect_hook_for_fork_unsafe(script_path, event, plugin_root)
+    for r in findings:
+        report.results.append(r)
+    return len(findings)
 
 
 # =============================================================================
@@ -615,8 +752,219 @@ def _collect_hook_files(plugin_root: Path) -> list[tuple[str, Path]]:
     return out
 
 
+# =============================================================================
+# Task #384 — Parallel per-file dispatch via the shared parallel_scan harness
+# =============================================================================
+#
+# The cache validator's per-file work is split across FIVE distinct logics
+# (CA-01 static prefix, CA-02/03/05 per-hook, CA-04 model override on
+# agents/commands/skills, CA-06 fork-unsafe hook, CA-07 context fork on
+# skills/commands). Each per-file scan is independent — it reads ONE file,
+# applies its regex/frontmatter check, and returns findings. No scanner
+# shares mutable state with any other.
+#
+# A single uniform work unit (``_CacheWorkUnit``) tags each file with the
+# kind of scan it needs (``"static_prefix"`` / ``"hook"`` / ``"component"``)
+# plus the small bit of per-unit context (the event name for hooks, the
+# component kind + which sub-scans to run for components). The top-level
+# pickleable worker (``scan_one_cache_unit``) dispatches on ``kind``,
+# delegates to the matching ``_collect_*`` helper, and returns a list of
+# ``ValidationResult`` dataclasses. The parent merges those lists back into
+# the master report IN INPUT ORDER so the final result is bit-identical to
+# the legacy serial walk.
+#
+# Env-var escape hatch ``CPV_CACHE_PARALLEL=0`` forces the serial path
+# (consistent with ``CPV_HOOK_PARALLEL`` and ``CPV_SECURITY_PARALLEL``).
+# Any other value (or unset) keeps parallel as the default.
+#
+# Why one uniform work unit instead of five separate worker functions:
+# (1) the per-file work for each kind is small enough that the dispatch
+# overhead is in the noise; (2) keeping ONE pool with ONE work queue lets
+# the harness load-balance across all units regardless of kind, instead of
+# spawning five separate pools; (3) the merge logic becomes a single
+# in-order loop over a single list rather than five parallel merges.
+
+
+@dataclass(frozen=True)
+class _CacheWorkUnit:
+    """One per-file cache scan plus its discriminator + context.
+
+    Frozen + primitives-only so the unit pickles cleanly across the
+    ProcessPoolExecutor worker boundary. Paths are passed as strings (then
+    reconstructed inside the worker) to dodge any Path-pickling quirks on
+    Windows worker processes — same defensive choice the hook validator's
+    ``_HookWorkUnit`` makes.
+
+    Fields:
+        kind: ``"static_prefix"`` | ``"hook"`` | ``"component"``. Selects
+            which ``_collect_*`` helper the worker dispatches to.
+        file_path_str: Absolute path to the file being scanned.
+        plugin_root_str: Absolute plugin root (used to compute rel paths
+            inside the worker).
+        event: For ``kind="hook"``, the hooks.json event name (e.g.
+            ``"SessionStart"``). Unused for other kinds.
+        component_kind: For ``kind="component"``, the human-readable
+            component kind (``"agent"`` / ``"command"`` / ``"skill"``).
+        include_context_fork: For ``kind="component"``, whether to run the
+            CA-07 ``context: fork`` check in addition to CA-04. Agents have
+            no ``context:`` field — an agent IS the forked subagent —
+            so this is False for agents and True for commands + skills.
+    """
+
+    kind: str
+    file_path_str: str
+    plugin_root_str: str
+    event: str = ""
+    component_kind: str = ""
+    include_context_fork: bool = False
+
+
+def scan_one_cache_unit(unit: _CacheWorkUnit) -> list[ValidationResult]:
+    """Top-level pickleable worker: run one cache scan and return findings.
+
+    Dispatches on ``unit.kind`` to the matching ``_collect_*`` helper.
+    Returns the findings list as ``ValidationResult`` dataclasses — those
+    are pickleable across the worker boundary; the parent appends them to
+    the master report in input order.
+
+    For ``kind="hook"`` we run ALL FOUR hook checks (CA-02/03/05/06) in
+    one worker call because they all share the same input (read the same
+    script file) — combining them halves the IPC overhead vs spawning four
+    separate units for the same script. The findings are returned in the
+    same order the serial loop produced them (prefix-mutation, then
+    tool-mutation, then unbounded-output, then fork-unsafe), preserving
+    the parity invariant.
+    """
+    file_path = Path(unit.file_path_str)
+    plugin_root = Path(unit.plugin_root_str)
+
+    if unit.kind == "static_prefix":
+        return _collect_static_prefix(file_path, plugin_root)
+
+    if unit.kind == "hook":
+        out: list[ValidationResult] = []
+        out.extend(_collect_hook_for_prefix_mutation(file_path, unit.event, plugin_root))
+        out.extend(_collect_hook_for_tool_mutation(file_path, unit.event, plugin_root))
+        out.extend(_collect_hook_for_unbounded_output(file_path, unit.event, plugin_root))
+        out.extend(_collect_hook_for_fork_unsafe(file_path, unit.event, plugin_root))
+        return out
+
+    if unit.kind == "component":
+        out = []
+        out.extend(_collect_component_for_model_override(file_path, plugin_root, unit.component_kind))
+        if unit.include_context_fork:
+            out.extend(_collect_component_for_context_fork(file_path, plugin_root, unit.component_kind))
+        return out
+
+    # Unknown kind — return an empty list rather than raising so a future
+    # accidental enum drift doesn't crash the validator. The aggregator
+    # will surface this as missing findings, which the parity tests catch.
+    return []
+
+
+def _cache_parallel_enabled() -> bool:
+    """Read the ``CPV_CACHE_PARALLEL`` env-var.
+
+    Returns False when set to ``"0"`` / ``"false"`` / ``"no"`` / ``"off"``
+    (case-insensitive) — the serial path is taken. Any other value, or no
+    value at all, returns True (default = parallel). Mirrors the parsing
+    in ``_hook_parallel_enabled`` for cross-validator consistency.
+    """
+    val = os.environ.get("CPV_CACHE_PARALLEL")
+    if val is None:
+        return True
+    return val.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _build_cache_work_units(plugin_root: Path) -> list[_CacheWorkUnit]:
+    """Enumerate every per-file cache scan as a uniform work unit.
+
+    The unit order matches the legacy serial loop EXACTLY (CA-01 static
+    prefix → hooks → agents → commands → skills) so the merged result
+    list is bit-identical to the pre-task-384 output. Tests pin this
+    invariant via parallel-vs-serial parity.
+    """
+    units: list[_CacheWorkUnit] = []
+    plugin_root_str = str(plugin_root)
+
+    # CA-01 — static prefix files (in iteration order)
+    for f in _iter_static_prefix_files(plugin_root):
+        units.append(
+            _CacheWorkUnit(
+                kind="static_prefix",
+                file_path_str=str(f),
+                plugin_root_str=plugin_root_str,
+            )
+        )
+
+    # CA-02 / CA-03 / CA-05 / CA-06 — per-hook checks (one unit per script,
+    # all four checks run together inside the worker)
+    for event, script in _collect_hook_files(plugin_root):
+        units.append(
+            _CacheWorkUnit(
+                kind="hook",
+                file_path_str=str(script),
+                plugin_root_str=plugin_root_str,
+                event=event,
+            )
+        )
+
+    # CA-04 — agents (no CA-07: an agent IS the forked subagent so the
+    # `context:` field doesn't apply); CA-04+CA-07 — commands; CA-04+CA-07 —
+    # skills. We walk in the same order the legacy loop did
+    # (("agents", "agent"), ("commands", "command"), then skills) so the
+    # merged finding sequence matches the serial baseline.
+    for sub, kind in (("agents", "agent"), ("commands", "command")):
+        comp_dir = plugin_root / sub
+        if not comp_dir.is_dir():
+            continue
+        for md_file in comp_dir.rglob("*.md"):
+            units.append(
+                _CacheWorkUnit(
+                    kind="component",
+                    file_path_str=str(md_file),
+                    plugin_root_str=plugin_root_str,
+                    component_kind=kind,
+                    include_context_fork=(sub == "commands"),
+                )
+            )
+
+    skills_dir = plugin_root / "skills"
+    if skills_dir.is_dir():
+        for skill_md in skills_dir.rglob("SKILL.md"):
+            units.append(
+                _CacheWorkUnit(
+                    kind="component",
+                    file_path_str=str(skill_md),
+                    plugin_root_str=plugin_root_str,
+                    component_kind="skill",
+                    include_context_fork=True,
+                )
+            )
+
+    return units
+
+
 def scan_plugin_for_cache(plugin_root: Path) -> ValidationReport:
-    """Run all CA-01 .. CA-06 checks against a plugin tree."""
+    """Run all CA-01 .. CA-06 checks against a plugin tree.
+
+    Two execution paths:
+      * Serial path (default when ``CPV_CACHE_PARALLEL=0`` is set) —
+        runs the legacy per-file loop bit-identically to the pre-task-384
+        behavior. Each scanner mutates the shared report directly.
+      * Parallel path (default) — enumerates every per-file scan as a
+        uniform ``_CacheWorkUnit``, dispatches them across a
+        ``ProcessPoolExecutor`` via the shared ``parallel_scan`` harness,
+        then merges per-file findings back into the master report in
+        input order. Bit-identical findings, same exit code, same
+        per-file order. Pin the parity invariant via
+        ``tests/test_validate_cache_parallelism.py``.
+
+    Errors: per-file worker exceptions never crash the validator. They
+    surface as one per-file WARNING via ``ScanResult.error``, consistent
+    with the spec contract shared across A2 (security) / A6 (hook) / A8
+    (cache).
+    """
     report = ValidationReport()
     source_root = str(plugin_root)
 
@@ -630,38 +978,91 @@ def scan_plugin_for_cache(plugin_root: Path) -> ValidationReport:
         report.critical(f"No .claude-plugin/plugin.json found at {source_root}", source_root)
         return report
 
-    total = 0
-    # CA-01 — static prefix files
-    for f in _iter_static_prefix_files(plugin_root):
-        total += scan_static_prefix(f, report, plugin_root)
+    # Capture the result count BEFORE per-file scans so the post-scan
+    # "no violations detected" PASSED line fires iff the parallel/serial
+    # branch added zero findings — same trigger condition as the legacy
+    # ``total == 0`` check.
+    anchor_index = len(report.results)
 
-    # CA-02 / CA-03 / CA-05 / CA-06 — per-hook checks
-    hook_files = _collect_hook_files(plugin_root)
-    for event, script in hook_files:
-        total += scan_hook_for_prefix_mutation(script, event, report, plugin_root)
-        total += scan_hook_for_tool_mutation(script, event, report, plugin_root)
-        total += scan_hook_for_unbounded_output(script, event, report, plugin_root)
-        total += scan_hook_for_fork_unsafe(script, event, report, plugin_root)
+    if not _cache_parallel_enabled():
+        # Serial path — kept BIT-IDENTICAL to the pre-task-384 behavior.
+        # Used by the parity regression test (which runs both paths and
+        # asserts the ValidationResult sequences match exactly) and by
+        # users debugging a parallel-path regression.
+        # CA-01 — static prefix files
+        for f in _iter_static_prefix_files(plugin_root):
+            scan_static_prefix(f, report, plugin_root)
 
-    # CA-04 — `model:` frontmatter on ANY component (agents, commands, skills).
-    # A pinned model forces an in-line switch that fragments the prompt cache;
-    # `model: inherit` is exempt (handled inside the scanner).
-    # CA-07 — `context: fork`/`branch` on skills + commands (agents have no
-    # `context:` field — an agent IS the forked subagent).
-    for sub, kind in (("agents", "agent"), ("commands", "command")):
-        comp_dir = plugin_root / sub
-        if comp_dir.is_dir():
-            for md_file in comp_dir.rglob("*.md"):
-                total += scan_component_for_model_override(md_file, report, plugin_root, kind)
-                if sub == "commands":
-                    total += scan_component_for_context_fork(md_file, report, plugin_root, kind)
-    skills_dir = plugin_root / "skills"
-    if skills_dir.is_dir():
-        for skill_md in skills_dir.rglob("SKILL.md"):
-            total += scan_component_for_model_override(skill_md, report, plugin_root, "skill")
-            total += scan_component_for_context_fork(skill_md, report, plugin_root, "skill")
+        # CA-02 / CA-03 / CA-05 / CA-06 — per-hook checks
+        for event, script in _collect_hook_files(plugin_root):
+            scan_hook_for_prefix_mutation(script, event, report, plugin_root)
+            scan_hook_for_tool_mutation(script, event, report, plugin_root)
+            scan_hook_for_unbounded_output(script, event, report, plugin_root)
+            scan_hook_for_fork_unsafe(script, event, report, plugin_root)
 
-    if total == 0:
+        # CA-04 — `model:` frontmatter on ANY component (agents, commands,
+        # skills). A pinned model forces an in-line switch that fragments
+        # the prompt cache; `model: inherit` is exempt (handled inside the
+        # scanner). CA-07 — `context: fork`/`branch` on skills + commands
+        # (agents have no `context:` field — an agent IS the forked
+        # subagent).
+        for sub, kind in (("agents", "agent"), ("commands", "command")):
+            comp_dir = plugin_root / sub
+            if comp_dir.is_dir():
+                for md_file in comp_dir.rglob("*.md"):
+                    scan_component_for_model_override(md_file, report, plugin_root, kind)
+                    if sub == "commands":
+                        scan_component_for_context_fork(md_file, report, plugin_root, kind)
+        skills_dir = plugin_root / "skills"
+        if skills_dir.is_dir():
+            for skill_md in skills_dir.rglob("SKILL.md"):
+                scan_component_for_model_override(skill_md, report, plugin_root, "skill")
+                scan_component_for_context_fork(skill_md, report, plugin_root, "skill")
+    else:
+        # Parallel path. Build one uniform work unit per per-file scan in
+        # the same order the serial loop visits them — then dispatch via
+        # the shared harness. ``parallel_scan`` preserves input order, so
+        # the merge loop can iterate by index without sorting.
+        units = _build_cache_work_units(plugin_root)
+        if units:
+            # ``parallel_scan`` signature is ``Sequence[Path]`` for the
+            # first arg, but the harness just iterates and pickles the
+            # items unchanged — it never instantiates ``Path`` on its
+            # own. The frozen dataclass pickles cleanly, and the worker
+            # reconstructs Paths from the string fields. Type-checkers
+            # complain because the parameter is annotated ``Sequence[Path]``;
+            # we silence with a per-call ignore rather than weakening the
+            # harness's annotation (other validators DO pass Paths).
+            scan_results = parallel_scan(units, scan_one_cache_unit)  # type: ignore[arg-type]
+            for idx, sr in enumerate(scan_results):
+                unit = units[idx]
+                if sr.error is not None:
+                    # Worker raised — spec mandates "surface as a per-file
+                    # WARNING in the report (don't crash the whole
+                    # validator)". Use the rel path so the message stays
+                    # consistent with the legacy serial format.
+                    file_path = Path(unit.file_path_str)
+                    try:
+                        rel = str(file_path.relative_to(plugin_root))
+                    except ValueError:
+                        rel = unit.file_path_str
+                    report.warning(
+                        f"Cache scan worker raised on this file: {sr.error}",
+                        rel,
+                    )
+                    continue
+                # ``findings`` is already a list[ValidationResult] — the
+                # worker returns that shape directly. Append in place to
+                # preserve input order at append-time.
+                report.results.extend(sr.findings)
+
+    # Same trigger as the legacy ``total == 0`` check: any per-file
+    # WARNING — whether produced by a CA rule or by the worker-error
+    # surfacing — counts as "violations detected", suppressing the PASSED
+    # line. The serial path used a running counter; the parallel path
+    # measures the result-list delta from the anchor we captured BEFORE
+    # the scan.
+    if len(report.results) == anchor_index:
         report.passed(
             "No prompt-cache violations detected across the 6 cache-audit rules.",
             source_root,

@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from cpv_parallel_runner import ScanResult, parallel_scan
 from cpv_validation_common import (
     BUILTIN_AGENT_TYPES,
     COLORS,
@@ -1421,6 +1422,25 @@ def validate_agent(agent_path: Path) -> AgentValidationReport:
     return report
 
 
+def scan_one_agent(agent_path: Path) -> list[AgentValidationReport]:
+    """Top-level worker for the shared ``parallel_scan`` harness (task #384).
+
+    The harness contract requires a pickleable, top-level callable that takes
+    one ``Path`` and returns a ``list``. Validators conventionally return a
+    list of "findings"; for the per-agent case there's only ONE report per
+    file, so we return a single-element ``list[AgentValidationReport]``.
+    Wrapping the report in a list keeps the harness contract uniform across
+    validators (cache, security, xref, etc. return many findings per file).
+
+    MUST stay at module scope — ``ProcessPoolExecutor`` pickles the callable
+    by qualified name and a nested function or closure would raise
+    ``PicklingError`` at submit time. Capturing no external state also means
+    the worker can run in a freshly-forked process without needing the
+    parent's mutable globals.
+    """
+    return [validate_agent(agent_path)]
+
+
 def validate_agents_directory(agents_dir: Path) -> list[AgentValidationReport]:
     """Validate all agent files in a directory.
 
@@ -1428,10 +1448,17 @@ def validate_agents_directory(agents_dir: Path) -> list[AgentValidationReport]:
         agents_dir: Path to the agents/ directory
 
     Returns:
-        List of AgentValidationReport for each agent
-    """
-    reports = []
+        List of AgentValidationReport for each agent, in alphabetical filename
+        order (preserved across the parallel harness).
 
+    Implementation note (task #384): per-file validation runs in parallel via
+    ``cpv_parallel_runner.parallel_scan`` (``ProcessPoolExecutor``-backed).
+    Output order matches input order so callers downstream of this function
+    keep the alphabetical invariant they always had. ``ScanResult.error`` set
+    by the harness (worker process crashed / unpickleable result / timeout)
+    is surfaced as a per-file MAJOR via a synthesized report rather than
+    crashing the whole directory scan.
+    """
     if not agents_dir.is_dir():
         report = AgentValidationReport(agent_path=str(agents_dir))
         report.critical(f"Not a directory: {agents_dir}")
@@ -1447,8 +1474,35 @@ def validate_agents_directory(agents_dir: Path) -> list[AgentValidationReport]:
         report.info("No agent files (*.md) found in directory")
         return [report]
 
-    for agent_file in sorted(agent_files):
-        reports.append(validate_agent(agent_file))
+    # Sort once so the harness sees deterministic input order, then trust
+    # the harness's input-order preservation contract for output order.
+    sorted_files = sorted(agent_files)
+    scan_results: list[ScanResult] = parallel_scan(sorted_files, scan_one_agent)
+
+    reports: list[AgentValidationReport] = []
+    for sr in scan_results:
+        if sr.error is not None:
+            # Worker process raised before producing a report (e.g. segfault,
+            # OOM, unpickleable result). Surface as a per-file MAJOR so the
+            # whole directory scan still returns useful data for the OTHER
+            # files instead of crashing the validator. We pick MAJOR over
+            # CRITICAL because the file MAY still be valid — we just couldn't
+            # prove it. Authors who see this in CI know to re-run or
+            # investigate the worker crash separately.
+            fail_report = AgentValidationReport(agent_path=str(sr.file_path))
+            fail_report.major(
+                f"Parallel worker failed for {sr.file_path.name}: {sr.error}",
+                sr.file_path.name,
+            )
+            reports.append(fail_report)
+            continue
+        # Normal path: scan_one_agent returns [report]. Unpack the single
+        # element. If the harness ever returns something else here it's a
+        # contract violation — assert loudly during development.
+        assert len(sr.findings) == 1, (
+            f"scan_one_agent must return exactly one report, got {len(sr.findings)}"
+        )
+        reports.append(sr.findings[0])
 
     return reports
 

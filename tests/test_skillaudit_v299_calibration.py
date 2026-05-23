@@ -261,14 +261,33 @@ class TestValidatePluginPipelineHookup:
             "main pipeline — the _run_skillaudit_native helper MUST stay"
         )
 
-    def test_helper_called_after_validate_telemetry(self) -> None:
-        # Sanity: ordering matters (security checks run together).
-        tel_idx = self.body.find("validate_telemetry(plugin_root, report)")
-        sa_idx = self.body.find("_run_skillaudit_native(plugin_root, report)")
-        assert tel_idx != -1 and sa_idx != -1
-        assert sa_idx > tel_idx, (
-            "skillaudit native scan must run after validate_telemetry so the security-class checks cluster together"
+    def test_helper_and_telemetry_both_dispatched_from_main(self) -> None:
+        """Both ``_run_skillaudit_native`` and ``validate_telemetry`` are
+        invoked from ``main()`` — either as direct calls or via the
+        parallel-validator dispatch table (task #384 / A10 refactor).
+
+        Pre-A10 layout was flat ``main()`` calls in source order:
+            ``validate_telemetry(plugin_root, report)``
+            ``_run_skillaudit_native(plugin_root, report)``
+
+        Post-A10 the parallel orchestrator dispatches independent
+        validators via a ``parallel_tasks`` list; ``_run_skillaudit_native``
+        intentionally runs SERIALLY BEFORE the parallel batch because it
+        mutates ``_set_cpv_self_scan`` module-state that downstream parallel
+        validators read (race-free invariant — see the comment above
+        ``_run_skillaudit_native(plugin_root, report)`` in validate_plugin.py).
+        Source order is therefore reversed (skillaudit first, telemetry
+        in the parallel_tasks list below), but BOTH still execute from
+        ``main()`` in the security-audit phase — the test's real
+        invariant.
+        """
+        sa_present = "_run_skillaudit_native(plugin_root, report)" in self.body
+        tel_present = (
+            "validate_telemetry(plugin_root, report)" in self.body  # legacy flat-call shape
+            or '("validate_telemetry", validate_telemetry,' in self.body  # post-A10 dispatch tuple
         )
+        assert sa_present, "main() must directly call _run_skillaudit_native (serial-before-parallel mutex contract)"
+        assert tel_present, "main() must dispatch validate_telemetry (flat or via parallel_tasks)"
 
     def test_helper_documents_iron_rule(self) -> None:
         # The helper body must mention MANDATORY and the iron-rule

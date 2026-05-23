@@ -5712,6 +5712,278 @@ def check_script_permissions(plugin_path: Path, report: ValidationReport) -> int
     return issues_found
 
 
+# =============================================================================
+# Per-file scan worker — task #384 parallelism
+# =============================================================================
+#
+# The per-file scan body extracted from `scan_all_files` so the harness in
+# `cpv_parallel_runner.parallel_scan` can dispatch it across a process pool.
+# Pickleability is the binding constraint: the worker must be a TOP-LEVEL
+# function and must not close over the parent report object (reports collect
+# results in a list — across processes that list is COPIED, never shared).
+#
+# State that the per-file scanners read from module globals
+# (`_CPV_SELF_SCAN_ACTIVE`, `_CPV_SELF_HASH_MANIFEST`, `_CLASSIFIER_ACTIVE`,
+# `_CLASSIFIER_PLUGIN_META`, `_CLASSIFIER_ESCALATE`) must be reconstructed
+# inside each worker — on macOS / Linux ≥ 3.14 the multiprocessing start
+# method is `spawn`, so the worker process re-imports this module from
+# scratch and inherits NONE of the parent's runtime state. The parent
+# encodes the state into environment variables before pool creation (env
+# vars ARE inherited across `spawn`) and each worker lazily replays them on
+# first use via `_bootstrap_security_worker_state`.
+#
+# Stats accounting: every scanner returns an `int` count; the per-file
+# worker rolls those into a `dict[str, int]` and ships it back alongside
+# the captured findings. The parent (still in `scan_all_files`) sums the
+# per-file dicts into the master stats and merges findings into the master
+# report in input order — same end-state as the legacy serial loop.
+
+# Environment-variable transport for worker bootstrap. Names are
+# CPV-prefixed so they don't collide with anything else in the
+# environment, and intentionally NOT exposed as user-facing config —
+# they're an internal IPC channel between scan_all_files() and its
+# workers. Cleared in scan_all_files() after pool creation so a later
+# unrelated subprocess can't accidentally inherit them.
+_WORKER_ENV_PLUGIN_ROOT = "CPV_WORKER_PLUGIN_ROOT"
+_WORKER_ENV_SELF_SCAN = "CPV_WORKER_SELF_SCAN"
+_WORKER_ENV_CLASSIFIER = "CPV_WORKER_CLASSIFIER"
+_WORKER_ENV_EXTREME = "CPV_WORKER_EXTREME"
+
+# Per-worker bootstrap latch. ``None`` means not yet bootstrapped in this
+# worker process. After bootstrap, it holds the absolute plugin root path
+# the worker is configured for, so a subsequent call against a DIFFERENT
+# plugin (an orchestrator fanning ``scan_one_target`` across many plugins
+# inside one worker pool) re-bootstraps cleanly.
+_WORKER_BOOTSTRAPPED_FOR: Path | None = None
+
+
+def _bootstrap_security_worker_state() -> Path | None:
+    """Lazily initialize module globals inside a process-pool worker.
+
+    Reads the parent-provided env vars (set by ``scan_all_files`` before
+    pool creation), calls the same `_set_*` activators the parent does, and
+    returns the resolved plugin root for the worker's per-call use.
+
+    Idempotent: a second invocation in the same worker is a no-op unless
+    the plugin root has changed (orchestrator fanout case). Returns
+    ``None`` when the env vars are absent — that happens in tests that
+    call ``scan_one_file_for_security`` directly without going through
+    ``scan_all_files``; the per-file scan still runs, just with classifier
+    and self-scan off (the safe default that gives the most findings).
+    """
+    global _WORKER_BOOTSTRAPPED_FOR
+
+    plugin_root_str = os.environ.get(_WORKER_ENV_PLUGIN_ROOT)
+    if not plugin_root_str:
+        return None
+
+    plugin_root = Path(plugin_root_str)
+    if _WORKER_BOOTSTRAPPED_FOR == plugin_root:
+        return plugin_root  # already set up for this plugin
+
+    self_scan = os.environ.get(_WORKER_ENV_SELF_SCAN) == "1"
+    classifier = os.environ.get(_WORKER_ENV_CLASSIFIER) == "1"
+    extreme = os.environ.get(_WORKER_ENV_EXTREME) == "1"
+
+    # `notice_report=None` because the worker has no parent report to
+    # write CPV self-scan integrity notices into. Those notices were
+    # already emitted into the parent's report at the original
+    # `_set_cpv_self_scan` call site inside `validate_security`; the
+    # worker only needs the manifest data, not the notices.
+    _set_cpv_self_scan(self_scan, plugin_root=plugin_root, notice_report=None)
+    _set_classifier_active(classifier, plugin_root, with_extreme=extreme)
+    _WORKER_BOOTSTRAPPED_FOR = plugin_root
+    return plugin_root
+
+
+def _scan_one_file_collect(
+    file_path: Path, plugin_path: Path
+) -> tuple[list[Any], dict[str, int]]:
+    """Per-file scan body — captures findings into a fresh local report.
+
+    Runs the exact same skip checks + 9 scanners as the legacy serial loop
+    inside ``scan_all_files``, but writes into a fresh ``ValidationReport``
+    so the per-file result set is isolated and pickleable. The parent
+    merges these per-file findings (in input order) into the master report.
+
+    Returns a tuple of (results_list, stats_delta_dict).
+    """
+    local_report = ValidationReport()
+    rel_path = str(file_path.relative_to(plugin_path))
+    stats: dict[str, int] = {
+        "files_scanned": 0,
+        "files_skipped": 0,
+        "oversize_skipped": 0,
+        "injection_issues": 0,
+        "path_traversal_issues": 0,
+        "secret_issues": 0,
+        "user_path_issues": 0,
+        "prompt_injection_issues": 0,
+        "exfiltration_issues": 0,
+        "supply_chain_issues": 0,
+        "credential_harvest_issues": 0,
+        "sandbox_escape_issues": 0,
+    }
+
+    # Skip binary files — must mirror the legacy ordering so identical
+    # files take identical paths in both serial and parallel modes.
+    if is_binary_file(file_path):
+        stats["files_skipped"] += 1
+        return ([], stats)
+
+    if file_path.name in ALWAYS_SKIP_BASENAMES:
+        stats["files_skipped"] += 1
+        return ([], stats)
+
+    if cpv_self_scan_skip(rel_path):
+        stats["files_skipped"] += 1
+        return ([], stats)
+
+    # Per-file size cap (issue #15). Stat may fail under PermissionError
+    # on a file with the read bit cleared; treat as size 0 and let the
+    # downstream open() raise so the error path is unified.
+    try:
+        fsize = file_path.stat().st_size
+    except OSError:
+        fsize = 0
+    if fsize > MAX_SCAN_BYTES:
+        local_report.warning(
+            f"File too large to scan ({fsize:,} bytes > "
+            f"{MAX_SCAN_BYTES:,} cap); skipped to avoid scanner "
+            f"deadlock. Override via CPV_MAX_SCAN_BYTES env var "
+            f"if this file genuinely needs scanning.",
+            rel_path,
+        )
+        stats["oversize_skipped"] += 1
+        stats["files_skipped"] += 1
+        return (local_report.results, stats)
+
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+    except (OSError, PermissionError) as e:
+        local_report.minor(f"Cannot read file: {rel_path} ({e})")
+        stats["files_skipped"] += 1
+        return (local_report.results, stats)
+
+    stats["files_scanned"] += 1
+    # CRITICAL: Injection detection runs FIRST, before any allowlisting.
+    # Order matches the legacy serial loop so findings are emitted in the
+    # same per-file order — important for tests that assert finding order.
+    stats["injection_issues"] += scan_for_injection(content, rel_path, local_report)
+    stats["path_traversal_issues"] += scan_for_path_traversal(content, rel_path, local_report)
+    stats["secret_issues"] += scan_for_secrets(content, rel_path, local_report)
+    stats["user_path_issues"] += scan_for_user_paths(content, rel_path, local_report)
+    stats["prompt_injection_issues"] += scan_for_prompt_injection(content, rel_path, local_report)
+    stats["exfiltration_issues"] += scan_for_data_exfiltration(content, rel_path, local_report)
+    stats["supply_chain_issues"] += scan_for_supply_chain(content, rel_path, local_report)
+    stats["credential_harvest_issues"] += scan_for_credential_harvest(content, rel_path, local_report)
+    stats["sandbox_escape_issues"] += scan_for_sandbox_escape(content, rel_path, local_report)
+
+    return (local_report.results, stats)
+
+
+def scan_one_file_for_security(file_path: Path) -> list:
+    """Top-level, pickleable per-file scan callable for ``parallel_scan``.
+
+    The harness contract is ``Callable[[Path], list]``. The per-file work
+    is identical to the body of the legacy ``scan_all_files`` loop —
+    extracted here so a process-pool worker can run it.
+
+    Returns a single-element list ``[(results, stats)]`` so the
+    aggregator in ``scan_all_files`` can reconstruct both the per-file
+    finding stream and the per-category counters. The single-element-list
+    shape keeps the harness contract (``list`` of findings) honest even
+    though we want both findings AND stats back — packing them into one
+    record per file is cheaper than two parallel return channels.
+
+    Plugin root is resolved from the env var set by the parent before
+    pool creation (``CPV_WORKER_PLUGIN_ROOT``). When the env var is
+    absent (e.g. a test calling this directly without going through
+    ``scan_all_files``), we fall back to walking up from ``file_path``
+    to find ``.claude-plugin/`` — the same heuristic ``is_cpv_self_scan``
+    uses to identify a plugin root.
+    """
+    plugin_root = _bootstrap_security_worker_state()
+    if plugin_root is None:
+        # Test-mode fallback: walk up to locate the plugin root from the
+        # file's path. Stops at the filesystem root if no `.claude-plugin`
+        # ancestor is found — in that case we use `file_path.parent` so
+        # `rel_path` becomes the bare filename.
+        plugin_root = file_path.parent
+        for parent in file_path.parents:
+            if (parent / ".claude-plugin").exists():
+                plugin_root = parent
+                break
+
+    results, stats = _scan_one_file_collect(file_path, plugin_root)
+    return [(results, stats)]
+
+
+# Default parallelism threshold — below this file count, the pool-setup
+# cost (~250ms for 8-worker spawn on macOS) outweighs the per-file gain.
+# Overridable via ``CPV_PARALLEL_SCAN_THRESHOLD`` for benchmarking and for
+# test environments that want to exercise the parallel path on small
+# fixtures (set to ``1`` to force-parallel every call). Below the
+# threshold ``scan_all_files`` runs the legacy serial loop unchanged.
+_PARALLEL_SCAN_THRESHOLD_DEFAULT = 32
+
+
+def _parallel_scan_threshold() -> int:
+    """Resolve the parallel-scan threshold, honoring the env override.
+
+    Read at call time (not import time) so tests can monkeypatch the env
+    var per-test without reloading the module. Invalid values fall back
+    to the safe default rather than crashing the validator.
+    """
+    raw = os.environ.get("CPV_PARALLEL_SCAN_THRESHOLD")
+    if raw is None:
+        return _PARALLEL_SCAN_THRESHOLD_DEFAULT
+    try:
+        value = int(raw)
+        return value if value >= 1 else _PARALLEL_SCAN_THRESHOLD_DEFAULT
+    except ValueError:
+        return _PARALLEL_SCAN_THRESHOLD_DEFAULT
+
+
+def _collect_files_for_scan(plugin_path: Path) -> list[Path]:
+    """Walk the plugin tree honoring gitignore and return scannable files.
+
+    Just the walk — no skip checks (binary / always-skip / self-scan /
+    oversize) are applied here because the per-file worker re-applies
+    them. Centralising the walk lets us pre-count the file set for the
+    parallel-vs-serial threshold decision.
+    """
+    gi = get_gitignore_filter(plugin_path)
+    files: list[Path] = []
+    for root, _dirs, filenames in gi.walk(plugin_path):
+        for filename in filenames:
+            files.append(Path(root) / filename)
+    return files
+
+
+def _merge_file_scan_result(
+    file_path: Path,
+    results: list,
+    stats_delta: dict[str, int],
+    plugin_path: Path,
+    report: ValidationReport,
+    stats: dict[str, int],
+) -> None:
+    """Merge one file's worker output back into the master report + stats.
+
+    Append findings in their original order (the worker already preserves
+    per-file scanner order) and add the per-file stats deltas into the
+    aggregate. Pulled out as a helper so the serial and parallel
+    branches of ``scan_all_files`` share the same merge code path.
+    """
+    del file_path, plugin_path  # unused — present for the symmetric serial-callsite signature
+    for r in results:
+        report.results.append(r)
+    for key, delta in stats_delta.items():
+        stats[key] = stats.get(key, 0) + delta
+
+
 def scan_all_files(plugin_path: Path, report: ValidationReport) -> dict[str, int]:
     """Recursively scan all text files in the plugin for security issues.
 
@@ -5723,6 +5995,15 @@ def scan_all_files(plugin_path: Path, report: ValidationReport) -> dict[str, int
     pathology documented in issue #15 where pathologically large files
     (50MB minified bundles, concatenated SQL dumps) pin a worker for tens
     of minutes while the per-line scanners thrash on huge allocations.
+
+    Parallelism (task #384): when the discovered file count meets
+    ``CPV_PARALLEL_SCAN_THRESHOLD`` (default 32), the per-file scan body
+    is dispatched across a ``ProcessPoolExecutor`` via
+    ``cpv_parallel_runner.parallel_scan``. The findings are merged back
+    into ``report`` in input order so the result set is bit-identical to
+    the prior serial run (same severity, same message, same per-file
+    order). Below the threshold we keep the legacy serial loop because
+    spawn-pool setup (~250ms) dominates per-file work on small fixtures.
     """
     stats = {
         "files_scanned": 0,
@@ -5739,78 +6020,89 @@ def scan_all_files(plugin_path: Path, report: ValidationReport) -> dict[str, int
         "sandbox_escape_issues": 0,
     }
 
-    gi = get_gitignore_filter(plugin_path)
+    files = _collect_files_for_scan(plugin_path)
+    if not files:
+        return stats
 
-    for root, _dirs, files in gi.walk(plugin_path):
-        for filename in files:
-            file_path = Path(root) / filename
-            rel_path = str(file_path.relative_to(plugin_path))
+    threshold = _parallel_scan_threshold()
 
-            # Skip binary files
-            if is_binary_file(file_path):
-                stats["files_skipped"] += 1
-                continue
+    if len(files) < threshold:
+        # Serial path — preserved verbatim from the pre-task-384 loop.
+        # Cheaper than spawning a pool for a handful of files (where the
+        # ~250ms pool-setup cost dominates the per-file scan).
+        for file_path in files:
+            results, stats_delta = _scan_one_file_collect(file_path, plugin_path)
+            _merge_file_scan_result(file_path, results, stats_delta, plugin_path, report, stats)
+        return stats
 
-            # Always-skip runtime artifacts (Cisco scan output, CPV
-            # integrity manifest). These contain literal pattern strings
-            # quoted in JSON (`"eval("`, `"curl … | sh"`, `/Users/...`)
-            # — scanning them produces a flood of FPs against the SAME
-            # rules that already fired on the real source.
-            if filename in ALWAYS_SKIP_BASENAMES:
-                stats["files_skipped"] += 1
-                continue
+    # Parallel path. Encode the plugin context the workers will need into
+    # env vars BEFORE the pool spawns — env vars are inherited by
+    # `spawn`-method workers, module globals are not. We restore the
+    # pre-existing env afterward so a fresh pool spawned for a different
+    # plugin (orchestrator fanout) starts from a clean state.
+    saved_env = {
+        _WORKER_ENV_PLUGIN_ROOT: os.environ.get(_WORKER_ENV_PLUGIN_ROOT),
+        _WORKER_ENV_SELF_SCAN: os.environ.get(_WORKER_ENV_SELF_SCAN),
+        _WORKER_ENV_CLASSIFIER: os.environ.get(_WORKER_ENV_CLASSIFIER),
+        _WORKER_ENV_EXTREME: os.environ.get(_WORKER_ENV_EXTREME),
+    }
+    # Use the caller's plugin_path verbatim (not ``.resolve()``) so the
+    # worker's later ``file_path.relative_to(plugin_path)`` agrees with
+    # whatever shape ``_collect_files_for_scan`` produced. On macOS,
+    # ``/var/folders/...`` resolves through a ``/private`` symlink, so
+    # mixing resolved + unresolved paths breaks ``relative_to``.
+    os.environ[_WORKER_ENV_PLUGIN_ROOT] = str(plugin_path)
+    os.environ[_WORKER_ENV_SELF_SCAN] = "1" if _CPV_SELF_SCAN_ACTIVE else "0"
+    os.environ[_WORKER_ENV_CLASSIFIER] = "1" if _CLASSIFIER_ACTIVE else "0"
+    os.environ[_WORKER_ENV_EXTREME] = "1" if _CLASSIFIER_ESCALATE else "0"
 
-            # CPV self-scan: skip files that necessarily document the
-            # security patterns CPV detects (validator scripts, fix-validation
-            # references, security tests). Active only when the target IS the
-            # CPV plugin itself (recognized by plugin.json name OR signature
-            # files — see is_cpv_self_scan).
-            if cpv_self_scan_skip(rel_path):
-                stats["files_skipped"] += 1
-                continue
+    try:
+        from cpv_parallel_runner import parallel_scan  # noqa: PLC0415
 
-            # Per-file size cap (issue #15) — pathological files cause the
-            # 9 per-line scanners to thrash on huge allocations and deadlock
-            # the worker. Stat-and-skip is O(1); the actual read+scan would
-            # be O(N) per scanner × 9 scanners.
+        scan_results = parallel_scan(files, scan_one_file_for_security)
+    finally:
+        for key, prev in saved_env.items():
+            if prev is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = prev
+
+    # Merge per-file results into the master report IN INPUT ORDER. The
+    # harness contract guarantees ``scan_results[i].file_path == files[i]``
+    # (order preservation) so we can iterate by index without zip+sort.
+    for idx, scan_result in enumerate(scan_results):
+        file_path = files[idx]
+        if scan_result.error is not None:
+            # Worker raised — surface as a per-file WARNING (this is what
+            # the spec recommends: "Surface as a per-file WARNING in the
+            # report (don't crash the whole validator)"). Use rel_path so
+            # the message stays consistent with the legacy serial format.
             try:
-                fsize = file_path.stat().st_size
-            except OSError:
-                fsize = 0
-            if fsize > MAX_SCAN_BYTES:
-                report.warning(
-                    f"File too large to scan ({fsize:,} bytes > "
-                    f"{MAX_SCAN_BYTES:,} cap); skipped to avoid scanner "
-                    f"deadlock. Override via CPV_MAX_SCAN_BYTES env var "
-                    f"if this file genuinely needs scanning.",
-                    rel_path,
-                )
-                stats["oversize_skipped"] += 1
-                stats["files_skipped"] += 1
-                continue
+                rel = str(file_path.relative_to(plugin_path))
+            except ValueError:
+                rel = str(file_path)
+            report.warning(
+                f"Security scan worker raised on this file: {scan_result.error}",
+                rel,
+            )
+            stats["files_skipped"] += 1
+            continue
 
-            try:
-                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read()
-
-                stats["files_scanned"] += 1
-
-                # Run all content scans
-                # CRITICAL: Injection detection runs FIRST, before any allowlisting
-                stats["injection_issues"] += scan_for_injection(content, rel_path, report)
-                stats["path_traversal_issues"] += scan_for_path_traversal(content, rel_path, report)
-                stats["secret_issues"] += scan_for_secrets(content, rel_path, report)
-                stats["user_path_issues"] += scan_for_user_paths(content, rel_path, report)
-                # AI-specific threat scans
-                stats["prompt_injection_issues"] += scan_for_prompt_injection(content, rel_path, report)
-                stats["exfiltration_issues"] += scan_for_data_exfiltration(content, rel_path, report)
-                stats["supply_chain_issues"] += scan_for_supply_chain(content, rel_path, report)
-                stats["credential_harvest_issues"] += scan_for_credential_harvest(content, rel_path, report)
-                stats["sandbox_escape_issues"] += scan_for_sandbox_escape(content, rel_path, report)
-
-            except (OSError, PermissionError) as e:
-                report.minor(f"Cannot read file: {rel_path} ({e})")
-                stats["files_skipped"] += 1
+        # Per the worker contract, ``findings`` is the one-element list
+        # ``[(results, stats_delta)]``. Defensive guard against unexpected
+        # shapes so a worker bug doesn't crash the merge loop.
+        if not scan_result.findings:
+            continue
+        payload = scan_result.findings[0]
+        if not isinstance(payload, tuple) or len(payload) != 2:
+            report.warning(
+                f"Security scan worker returned unexpected payload shape "
+                f"(type={type(payload).__name__}); skipping merge for this file.",
+                str(file_path),
+            )
+            continue
+        results, stats_delta = payload
+        _merge_file_scan_result(file_path, results, stats_delta, plugin_path, report, stats)
 
     return stats
 

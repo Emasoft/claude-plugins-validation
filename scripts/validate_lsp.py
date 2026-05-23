@@ -30,13 +30,16 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
+from cpv_parallel_runner import parallel_scan
 from cpv_validation_common import (
     COLORS,
     VALID_PLUGIN_ENV_VARS,
     ValidationReport,
+    ValidationResult,
     is_valid_plugin_env_var,
     save_report_and_print_summary,
 )
@@ -317,6 +320,86 @@ def validate_lsp_server(
     report.passed(f"Server {server_name} configuration validated")
 
 
+def scan_one_lsp_server(spec_path: Path) -> list[ValidationResult]:
+    """Top-level worker: validate a single LSP server from a spec sidecar file.
+
+    Same contract as ``scan_one_mcp_server`` (see validate_mcp.py) — the
+    spec file is a small JSON blob written by the parent containing
+    ``{plugin_root, file_context, server_name, server_config}``. Worker
+    constructs a fresh ``ValidationReport``, runs ``validate_lsp_server``,
+    and returns the pickleable ``list[ValidationResult]``.
+
+    Module-level so it's pickleable for ``ProcessPoolExecutor``; closures
+    and lambdas are rejected by the harness.
+    """
+    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    plugin_root_str = spec.get("plugin_root")
+    plugin_root_path = Path(plugin_root_str) if plugin_root_str else None
+    report = ValidationReport()
+    validate_lsp_server(
+        spec["server_name"],
+        spec["server_config"],
+        report,
+        plugin_root=plugin_root_path,
+        file_context=spec.get("file_context", "lsp-config"),
+    )
+    return report.results
+
+
+def _parallel_scan_lsp_servers(
+    servers: list[tuple[str, dict[str, Any], str]],
+    plugin_root: Path | None,
+    report: ValidationReport,
+) -> None:
+    """Parallel-scan a list of ``(server_name, server_config, file_context)``
+    tuples, merging findings into ``report`` in input order.
+
+    See ``_parallel_scan_mcp_servers`` in validate_mcp.py for the
+    threshold-and-tempfile rationale; the LSP path mirrors it exactly so
+    the two validators behave identically under load.
+    """
+    if len(servers) < 2:
+        # Serial path for 0 or 1 server — the ProcessPoolExecutor cold-start
+        # cost dominates when there's no parallelism to extract.
+        for server_name, server_config, file_context in servers:
+            validate_lsp_server(
+                server_name, server_config, report, plugin_root, file_context
+            )
+        return
+
+    with tempfile.TemporaryDirectory(prefix="cpv_lsp_specs_") as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        spec_paths: list[Path] = []
+        for idx, (server_name, server_config, file_context) in enumerate(servers):
+            spec_path = tmpdir_path / f"server_{idx:06d}.json"
+            spec_path.write_text(
+                json.dumps(
+                    {
+                        "plugin_root": str(plugin_root) if plugin_root else None,
+                        "file_context": file_context,
+                        "server_name": server_name,
+                        "server_config": server_config,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            spec_paths.append(spec_path)
+
+        scan_results = parallel_scan(spec_paths, scan_one_lsp_server)
+
+    # Merge in input order. Worker errors → WARNING per server, so one bad
+    # server doesn't poison the whole report.
+    for scan_result, (server_name, _server_config, _file_context) in zip(
+        scan_results, servers
+    ):
+        if scan_result.error:
+            report.warning(
+                f"Internal error validating LSP server '{server_name}': {scan_result.error}"
+            )
+            continue
+        report.results.extend(scan_result.findings)
+
+
 def validate_lsp_config(
     config_path: Path,
     plugin_root: Path | None = None,
@@ -378,13 +461,18 @@ def validate_lsp_config(
 
     report.info(f"Found {len(servers)} LSP server(s) in {rel_path}")
 
-    # Validate each server
+    # Validate each server. Same split-phase pattern as validate_mcp_config:
+    # non-dict-config rejections stay serial and inline (they preserve the
+    # original finding-order invariant), while the heavy per-server
+    # validation runs in parallel.
+    parallel_servers: list[tuple[str, dict[str, Any], str]] = []
     for server_name, server_config in servers.items():
         if not isinstance(server_config, dict):
             report.critical(f"Server '{server_name}' config must be an object")
             continue
+        parallel_servers.append((server_name, server_config, rel_path))
 
-        validate_lsp_server(server_name, server_config, report, plugin_root, rel_path)
+    _parallel_scan_lsp_servers(parallel_servers, plugin_root, report)
 
     return report
 
