@@ -44,7 +44,10 @@ def _line_idx_of(source: str, needle: str) -> int:
 
 class TestWorkflowSafeInstall:
     def test_apt_get_install(self) -> None:
-        """sudo apt-get install in a workflow run: block → code_fence_neutral."""
+        """Issue #40: an airtight ``sudo apt-get install <bare packages>``
+        (no arbitrary-exec metachars) is a 100%-certain canonical CI install
+        → suppress (safe_literal). Pre-#40 this demoted to NIT, which blocked
+        ``--strict``."""
         import _skillaudit_yaml_context as ctx
 
         src = (
@@ -58,10 +61,10 @@ class TestWorkflowSafeInstall:
         )
         line_idx = _line_idx_of(src, "sudo apt-get update")
         verdict = ctx.classify(".github/workflows/ci.yml", src, line_idx, "sudo apt-get install", "PRIVILEGE_ESC")
-        assert verdict == "code_fence_neutral"
+        assert verdict == "safe_literal"
 
     def test_dnf_install(self) -> None:
-        """sudo dnf install in a workflow run: block → code_fence_neutral."""
+        """Issue #40: airtight ``sudo dnf install`` → suppress."""
         import _skillaudit_yaml_context as ctx
 
         src = (
@@ -74,16 +77,16 @@ class TestWorkflowSafeInstall:
         )
         line_idx = _line_idx_of(src, "sudo dnf install")
         verdict = ctx.classify(".github/workflows/ci.yml", src, line_idx, "sudo dnf install", "PRIVILEGE_ESC")
-        assert verdict == "code_fence_neutral"
+        assert verdict == "safe_literal"
 
     def test_brew_install(self) -> None:
-        """brew install in a workflow run: block → code_fence_neutral."""
+        """Issue #40: airtight ``brew install`` → suppress."""
         import _skillaudit_yaml_context as ctx
 
         src = "name: CI\njobs:\n  build:\n    runs-on: macos-latest\n    steps:\n      - run: brew install pandoc\n"
         line_idx = _line_idx_of(src, "brew install")
         verdict = ctx.classify(".github/workflows/ci.yml", src, line_idx, "brew install", "CMD_INJECTION")
-        assert verdict == "code_fence_neutral"
+        assert verdict == "safe_literal"
 
     def test_systemctl_restart(self) -> None:
         """sudo systemctl restart in a workflow run: block → code_fence_neutral."""
@@ -102,13 +105,13 @@ class TestWorkflowSafeInstall:
         assert verdict == "code_fence_neutral"
 
     def test_snap_install(self) -> None:
-        """sudo snap install in a workflow run: block → code_fence_neutral."""
+        """Issue #40: airtight ``sudo snap install`` → suppress."""
         import _skillaudit_yaml_context as ctx
 
         src = "name: CI\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: sudo snap install yq\n"
         line_idx = _line_idx_of(src, "sudo snap install")
         verdict = ctx.classify(".github/workflows/ci.yml", src, line_idx, "sudo snap install", "PRIVILEGE_ESC")
-        assert verdict == "code_fence_neutral"
+        assert verdict == "safe_literal"
 
 
 # ────────────────────────────────────────────────────────────────────────

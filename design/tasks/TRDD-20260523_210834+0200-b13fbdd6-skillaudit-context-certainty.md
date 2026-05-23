@@ -1,11 +1,12 @@
 ---
 trdd-id: b13fbdd6-1494-47f9-8968-90cb79bc32d0
 title: SkillAudit context-certainty heuristics — close issues #40 + #41 without flags
-status: in-progress
+status: completed
 created: 2026-05-23T21:08:34+0200
-updated: 2026-05-23T21:08:34+0200
+updated: 2026-05-23T22:33:00+0200
 ---
 
+<!-- markdownlint-disable-next-line MD025 -->
 # TRDD-b13fbdd6 — SkillAudit context-certainty heuristics (issues #40 + #41)
 
 **Filename:** `design/tasks/TRDD-20260523_210834+0200-b13fbdd6-skillaudit-context-certainty.md`
@@ -155,3 +156,43 @@ addresses them — not all 9 #40 findings are FPs we can certify.
   net call OUTSIDE the proximity window, evades — but that is already
   caught by the per-line CMD/exfil rules + the URL reputation pass. Logged
   as a known limitation, not a silent gap.
+
+## Outcome (implemented)
+
+Real-plugin verification (cache disabled to bypass the stale-version cache):
+
+- **llm-externalizer-plugin**: 136 → **7** CRITICAL+MAJOR (both CRITICAL
+  template-literal FPs eliminated; CROSS_TOOL_ACCESS 56→0, ENV_RECON 14→0,
+  OBFUSCATION 4→0, SSRF 28→0, STRUCT_READ_EXFIL 6→0, SUPPLY_CHAIN 1→0,
+  ENV_INJECTION 12→0).
+- **ai-maestro-janitor**: 9 → **3** NIT (all docstring/comment CMD_INJECTION
+  + PATH_TRAVERSAL + ci.yml sudo-install FPs eliminated).
+- CPV self-scan: 0/0/0/0 + WARNING-only. Full suite: 6500 passed.
+  ruff + mypy clean.
+
+### Honest residuals (NOT suppressed — by design)
+
+These remain VISIBLE because the certainty bar isn't met OR the user
+explicitly wants them visible. The plugin author reviews them:
+
+1. **`.md` fenced-code-block matches** (llm-externalizer README.md:230
+   FS_WRITE, launch-recipes.md:77 SSRF) — kept per the user's rule that
+   `.md` code blocks are agent-executable commands.
+2. **INTENT-class rules in instruction-loadable prose** (janitor
+   SKILL.md:63 ×2 INTENT_DESTRUCTIVE_INTENT, README.md:75 RESOURCE_ABUSE)
+   — prose IS the threat vector; demote/keep, never suppress.
+3. **Edge cases not certifiable from static context** (1 occurrence each):
+   - INSECURE_CRYPTO SHA1 used for a "fingerprint" — cannot prove
+     non-security use statically.
+   - TOOL_SHADOW `override.*tool` greedy span across `overrideFilename ||
+     … toolName` — matcher imprecision; tightening risks missing real
+     "override the X tool".
+   - SSRF_ADVANCED `req` substring of `request` — `url` origin not
+     traceable from one line.
+   - ENV_INJECTION in a shell-script `echo`'d help text — no shell-file
+     context classifier exists.
+
+These four are documented matcher edge cases. Per the user mandate
+("distinguish threat from non-threat with 100% certainty"), when certainty
+is not achievable the finding stays VISIBLE and the author confirms or
+fixes — never silently suppressed.
