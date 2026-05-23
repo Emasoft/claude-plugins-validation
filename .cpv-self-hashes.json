@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-23T12:03:06+00:00",
+  "computed_at": "2026-05-23T12:56:02+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     ".github/workflows/bot-auto-merge.yml": "sha256:84ca9bec6592304749e979f2f0a9000b5047ce434435d1267f9ba0387d587b08",
@@ -177,7 +177,7 @@
     "scripts/validate_documentation.py": "sha256:8e1abab352755af4f9e5525ea116d0ad8e97d0faf95886a8c5a07eeca3e4bc07",
     "scripts/validate_encoding.py": "sha256:bccbb8b2baa9b1b9509b0d719d529d75c25bbbdabb52ffa31643125fc9768e41",
     "scripts/validate_enterprise.py": "sha256:860ae3bd74ca1da6446e17791fe0544502b3e87afaf0506668994cc5eeed61d1",
-    "scripts/validate_hook.py": "sha256:fbf3c9911dbf1877f36e9e89d38634b73607b265b1a0111f46a8f262ed9af472",
+    "scripts/validate_hook.py": "sha256:5f30a6752204af5e8fac9e3e2e68e3e7b951c4f1918ef708a21c930354da150a",
     "scripts/validate_hook_output.py": "sha256:f2cd0c48a49fdfac37b3c21f85942f3f08e76c18f4d4f8fa55f89631e273fa00",
     "scripts/validate_hook_precedence.py": "sha256:821db7aa58c83507fb954e5342168130638f25bf0fd3ae8d0c471fa06afce985",
     "scripts/validate_ide_config.py": "sha256:32163f619579d4aea7123250b6175f920de4d5d2ceaf478d26f3149182d902c2",
@@ -206,7 +206,7 @@
     "skills/cache-validation-skill/SKILL.md": "sha256:89db14c78d7121c03687fcc5ffcef08e98b688ceddcef847c59eb65c352334aa",
     "skills/cache-validation-skill/references/ca-rules.md": "sha256:e635ac32df9b5493129acc8799b72e48bc617c82c6718b36402f0d250ae76770",
     "skills/cache-validation-skill/references/launcher-invocation.md": "sha256:75269f05552464e4f59f22d17a932d17a125ec6f93e910df5373f7bfcb1ebdb1",
-    "skills/canonical-pipeline/SKILL.md": "sha256:3a59a05f2208e52ff060c07eb44aca0b3035e50dcaf239eeb3f773f044530a6e",
+    "skills/canonical-pipeline/SKILL.md": "sha256:73217f9ca1ca621f2a07f7486d784f3eb8e2743be791e86d50a6cc85462ecb72",
     "skills/canonical-pipeline/references/detailed-standard.md": "sha256:a887bf09a9383dae1a3af83c3716330f46388fe52e516eea57037c344a4d005d",
     "skills/canonical-pipeline/references/pipeline-rules.md": "sha256:c0663f722dcaa700bfec66fd6c86ad5add00c24b3af5289d6b20c542c4426d36",
     "skills/canonical-pipeline/references/pipeline-standards.md": "sha256:dfe989554fb5602eaf6af6e93f3c152f2a3321d75de6ac9036931a4400329d07",
