@@ -386,30 +386,44 @@ def _ssrf_url_is_static_literal(line: str, match: str) -> bool:
     idx = line.find(match)
     if idx < 0:
         return False
-    # Find the enclosing string-literal quote char by scanning left for the
-    # nearest unescaped quote.
+    # The URL is DYNAMIC (attacker-influenceable) iff it is interpolated or
+    # concatenated. Look at the tail of the URL token (up to the next
+    # delimiter) for ``${`` interpolation, and at the chars adjacent to the
+    # surrounding string for ``+`` concatenation. This works whether the URL
+    # sits in a single-line literal OR inside a multi-line template literal
+    # (help text), where no quote appears on the same line.
+    tail = line[idx:]
+    # The URL token ends at the first delimiter.
+    m = re.search(r"[\s\"'`,)\]}]", tail)
+    url_token = tail[: m.start()] if m else tail
+    if "${" in url_token:
+        return False
+    # Try to find an enclosing single-line quote; if found, check the literal
+    # body + adjacency. If not found (multi-line literal / help text), fall
+    # back to a same-line concatenation check.
     quote = ""
     for ch in reversed(line[:idx]):
         if ch in "\"'`":
             quote = ch
             break
-        # A clear non-string boundary before any quote → not in a literal.
         if ch in "(),;=":
             break
-    if not quote:
-        return False
-    open_pos = line.rfind(quote, 0, idx)
-    close_pos = line.find(quote, idx + len(match))
-    if open_pos < 0 or close_pos < 0:
-        return False
-    literal_body = line[open_pos + 1 : close_pos]
-    # Interpolation inside the literal → dynamic.
-    if "${" in literal_body:
-        return False
-    # String concatenation adjacent to the literal → dynamic.
-    after = line[close_pos + 1 :].lstrip()
-    before = line[:open_pos].rstrip()
-    if after.startswith("+") or before.endswith("+"):
+    if quote:
+        open_pos = line.rfind(quote, 0, idx)
+        close_pos = line.find(quote, idx + len(match))
+        if open_pos >= 0 and close_pos >= 0:
+            literal_body = line[open_pos + 1 : close_pos]
+            if "${" in literal_body:
+                return False
+            after = line[close_pos + 1 :].lstrip()
+            before = line[:open_pos].rstrip()
+            if after.startswith("+") or before.endswith("+"):
+                return False
+            return True
+    # No same-line enclosing quote → multi-line literal / help text. Static
+    # unless the URL token itself is interpolated (already checked) or the
+    # line splices a variable next to the URL with ``+``.
+    if "+" in line[max(0, idx - 2) : idx] or url_token.endswith("+"):
         return False
     return True
 
@@ -464,7 +478,11 @@ def _is_api_field_name_in_code_structure(line: str, match: str) -> bool:
     indicator (belt-and-suspenders: a line that both names a field AND grabs
     bulk runtime data stays visible).
     """
-    has_field = any(name in match or name in line for name in _API_FIELD_NAMES)
+    # Case-insensitive: the rule matches ``SYSTEM_PROMPT`` (a const) as well
+    # as ``system_prompt`` (a property/key).
+    match_l = match.lower()
+    line_l = line.lower()
+    has_field = any(name in match_l or name in line_l for name in _API_FIELD_NAMES)
     if not has_field:
         return False
     if _RETRIEVAL_GRAB_RE.search(line):
@@ -647,6 +665,16 @@ def classify(
         if is_test and _is_generic_env_assignment(line, match):
             return "safe_literal"
         return "unknown"
+
+    # ── OBFUSCATION — base64/charcode decode in a test/fixture file. ──
+    # Issue #41 FP: ``Buffer.from(pad, "base64").toString("utf-8")`` decoding
+    # a JWT segment inside ``benchmark/fixtures/*.ts`` (sample code the
+    # benchmark harness runs the scanner AGAINST). Real obfuscation is a
+    # decode chain that feeds ``eval``/``new Function`` — those stay visible
+    # via the CMD_INJECTION / decode-threat rules. In a test/fixture file a
+    # standalone decode is sample data, not an attack.
+    if rule_id == "OBFUSCATION" and is_test and not _line_has_exec_sink(line):
+        return "safe_literal"
 
     return "unknown"
 
