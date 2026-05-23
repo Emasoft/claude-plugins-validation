@@ -45,6 +45,7 @@ __all__ = [
     "ensure_semgrep",
     "ensure_tirith",
     "ensure_cisco_skill_scanner",
+    "ensure_google_re2",
     "install_all_scanners",
 ]
 
@@ -426,6 +427,64 @@ def ensure_cisco_skill_scanner() -> bool:
     return shutil.which("skill-scanner") is not None
 
 
+# ── google-re2 (optional Python module — RE2 regex engine) ────────────
+
+
+def _is_module_importable(module_name: str) -> bool:
+    """True if ``module_name`` can be imported in the current interpreter.
+
+    Uses ``importlib.util.find_spec`` so we never actually execute the
+    module's top-level code (the cheapest possible probe — same approach
+    `shutil.which` takes for binaries). Returns False on any exception.
+    """
+    try:
+        import importlib.util  # noqa: PLC0415
+
+        return importlib.util.find_spec(module_name) is not None
+    except (ImportError, ValueError, ModuleNotFoundError):
+        return False
+
+
+def ensure_google_re2() -> bool:
+    """Install ``google-re2`` via pip if missing. Returns availability.
+
+    ``google-re2`` is OPTIONAL. CPV's skillaudit pattern matcher falls back
+    to the Python ``re`` module when ``re2`` cannot be imported, so the
+    scanner still works either way. Installing google-re2 gives a 5-15×
+    regex speedup via RE2's linear-time Thompson NFA + Aho-Corasick
+    literal pre-filter — meaningful for batch scans over large skill packs.
+
+    Wheels exist for macOS/Linux/Windows on Python 3.9+, so a plain
+    ``pip install google-re2`` succeeds without a C++ toolchain on any
+    supported platform.
+
+    Resolution cascade (silent, never prompts):
+      1. ``re2`` already importable → return True immediately.
+      2. ``CPV_NO_GOOGLE_RE2_INSTALL=1`` set → return False (CPV stays in
+         pure-Python fallback mode and skillaudit still scans correctly,
+         just slower).
+      3. ``pip install --user google-re2`` (via ``sys.executable -m pip``
+         so we hit the interpreter currently running CPV, not whatever
+         ``pip`` happens to be first on PATH).
+
+    Returns True if ``re2`` can be imported after the attempt. Always
+    returns a bool — never raises.
+    """
+    if _is_module_importable("re2"):
+        return True
+
+    if _opt_out("CPV_NO_GOOGLE_RE2_INSTALL"):
+        return False
+
+    # pip is the only install path — google-re2 is a regular PyPI wheel.
+    # Prefer the interpreter's own pip module so we install into THIS
+    # Python (not some other version of pip that happens to be on PATH).
+    if shutil.which(sys.executable) or Path(sys.executable).exists():
+        _silent_run([sys.executable, "-m", "pip", "install", "--user", "google-re2"])
+
+    return _is_module_importable("re2")
+
+
 # ── Batch installer (used by `cpv-doctor --install-scanners`) ─────────
 
 
@@ -435,6 +494,10 @@ def install_all_scanners() -> dict[str, bool]:
     Returns a dict ``{tool_name: available_after_install}``. Callers (e.g.
     `manage_doctor.py --install-scanners`) render a status table from this
     so the user can see at a glance which scanners are now ready.
+
+    ``google-re2`` is included as an OPTIONAL accelerator — skillaudit
+    falls back to the Python ``re`` module if it's unavailable, so a
+    False here is purely a performance signal, never a correctness one.
     """
     return {
         "fclones": ensure_fclones(),
@@ -443,6 +506,7 @@ def install_all_scanners() -> dict[str, bool]:
         "semgrep": ensure_semgrep(),
         "tirith": ensure_tirith(),
         "skill-scanner": ensure_cisco_skill_scanner(),
+        "google-re2": ensure_google_re2(),
     }
 
 

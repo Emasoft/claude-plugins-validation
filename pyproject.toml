@@ -33,6 +33,20 @@ dependencies = [
     "types-pyyaml>=6.0.12",
 ]
 
+# Optional dependency groups. Install with
+#   pip install claude-plugins-validation[performance]
+# OR
+#   uvx --with google-re2 --from git+... cpv-validate ...
+#
+# `performance` pulls in google-re2, which the skillaudit native scanner
+# uses to JIT-compile its ~500-pattern catalog into a single RE2
+# automaton (5-15× faster than the Python `re` fallback). The fallback
+# path keeps working without this dep, so the group is purely opt-in.
+[project.optional-dependencies]
+performance = [
+    "google-re2>=1.1.0",
+]
+
 [project.scripts]
 # Main validators — usable via uvx without installing:
 #   uvx --from git+https://github.com/Emasoft/claude-plugins-validation cpv-validate /path/to/plugin
