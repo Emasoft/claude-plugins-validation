@@ -20,11 +20,12 @@ still enforced here because they are independent of the model field:
 * **TRDD-c50531c2** (v2.90.0 — menu unification): every workflow routes
   through `/cpv-main-menu`; the opus work agents carry no First Contact menu
   (the slash-command body already made the choice before dispatch).
-* **TRDD-3ce2f864 → v2.102.0**: the `cpv-format-menu` fork-skill keeps
-  `context: fork` + `agent: general-purpose` + `user-invocable: false`, but
-  it no longer pins `model: haiku` — the render now inherits the session
-  model (cache-warm) while `context: fork` still isolates it from the
-  parent's conversation history.
+* **TRDD-4de479a0 → Phase 4**: the `cpv-format-menu` fork-skill +
+  `scripts/format_menu.py` were REMOVED (safe-deleted into `.trashcan/`).
+  Menus now render via the externalised `claude-menu-system` plugin's
+  Stop-hook emitter, brokered through the `scripts/cpv_menu.py` bridge.
+  The hook prints via the `systemMessage` JSON field — zero cache cost,
+  no subagent fork, no transcript entry.
 """
 
 from __future__ import annotations
@@ -190,40 +191,36 @@ def test_work_agent_has_no_first_contact_menu(work: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# cpv-format-menu fork-skill — keeps the fork, drops the model pin (v2.102.0)
+# cpv_menu.py bridge — claude-menu-system Stop-hook emit (TRDD-4de479a0 Phase 4)
 # ---------------------------------------------------------------------------
 
 
-def test_cpv_format_menu_skill_is_fork_without_model_pin() -> None:
-    """`cpv-format-menu` keeps `context: fork` + `agent: general-purpose` +
-    `user-invocable: false`, but must NOT pin a concrete model (v2.102.0).
+def test_cpv_menu_bridge_exists_and_no_legacy_format_menu() -> None:
+    """`scripts/cpv_menu.py` is the sole CPV-side menu bridge (TRDD-4de479a0).
 
-    Pre-v2.102.0 this skill declared `model: haiku` to render menus cheaply.
-    That pin was removed because it fragments the prompt cache (CA-04). The
-    `context: fork` isolation is retained — it keeps the menu render out of
-    the parent's (often large) conversation history; the fork now simply
-    inherits the session model.
+    Phase 4 removed `scripts/format_menu.py` and the `cpv-format-menu`
+    fork-skill (safe-deleted). Menus now go through `cpv_menu.write_menu()`,
+    which writes a claude-menu-system spec and ends the orchestrator's turn;
+    the bundled Stop / SubagentStop / StopFailure hook (`menu_emit.py`)
+    prints the rendered menu via the hook JSON `systemMessage` field —
+    zero token cost, no transcript entry, no subagent fork.
 
-    - NO concrete ``model:`` — cache-warm inheritance (or explicit ``inherit``)
-    - ``context: fork`` — isolates the render from parent history
-    - ``agent: general-purpose`` — the subagent type to fork into
-    - ``user-invocable: false`` — only loaded by orchestrator commands
+    This test pins the new invariant: the bridge exists, and the legacy
+    `format_menu.py` script does not.
     """
-    skill_path = PLUGIN_ROOT / "skills" / "cpv-format-menu" / "SKILL.md"
-    fm = _load_frontmatter(skill_path)
-    assert not _pins_concrete_model(fm), (
-        f"cpv-format-menu must NOT pin a concrete model (v2.102.0 — it used to be "
-        f"`model: haiku`; that fragments the cache per CA-04). Current model: {fm.get('model')!r}."
+    bridge = PLUGIN_ROOT / "scripts" / "cpv_menu.py"
+    assert bridge.is_file(), (
+        f"{bridge} is the sole CPV-side menu bridge after TRDD-4de479a0 "
+        f"Phase 4 — it must exist."
     )
-    assert fm.get("context") == "fork", (
-        "cpv-format-menu skill must keep `context: fork` — it isolates the menu "
-        "render from the parent session's conversation history."
+    legacy_script = PLUGIN_ROOT / "scripts" / "format_menu.py"
+    assert not legacy_script.exists(), (
+        f"{legacy_script} was safe-deleted in TRDD-4de479a0 Phase 4 and "
+        f"must not be re-introduced. Use cpv_menu.write_menu() instead."
     )
-    assert fm.get("agent") == "general-purpose", (
-        f"cpv-format-menu skill must keep `agent: general-purpose` so the fork "
-        f"knows which subagent type to spawn. Current agent: {fm.get('agent')!r}."
-    )
-    assert fm.get("user-invocable") is False, (
-        "cpv-format-menu skill must stay `user-invocable: false`. "
-        "It is loaded only by orchestrator commands; users never invoke it directly."
+    legacy_skill = PLUGIN_ROOT / "skills" / "cpv-format-menu" / "SKILL.md"
+    assert not legacy_skill.exists(), (
+        f"{legacy_skill} fork-skill was safe-deleted in TRDD-4de479a0 "
+        f"Phase 4. Menus render via the claude-menu-system Stop hook, "
+        f"not via a CPV-side fork skill."
     )

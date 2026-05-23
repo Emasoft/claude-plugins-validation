@@ -77,7 +77,6 @@ universal-loader pattern makes every skill available to every agent.
 |-------|--------|---------|-----------------|
 | `plugin-management` | command + plugin name | install/uninstall/enable/disable/list operations | Plugin lifecycle |
 | `cpv-main-menu-skill` | — | the /cpv-main-menu menu tree | Only `cpv-main-menu-agent` loads this — others should not |
-| `cpv-format-menu` | menu JSON spec | Unicode-bordered menu table | Slash command bodies render menus via this |
 
 ## Batch / fleet skills
 
@@ -148,7 +147,6 @@ Skill({skill: "claude-plugins-validation:show-version"})
 Skill({skill: "claude-plugins-validation:publish-to-marketplace"})
 Skill({skill: "claude-plugins-validation:plugin-management"})
 Skill({skill: "claude-plugins-validation:cpv-main-menu-skill"})
-Skill({skill: "claude-plugins-validation:cpv-format-menu"})
 Skill({skill: "claude-plugins-validation:the-skills-menu-create"})
 Skill({skill: "claude-plugins-validation:cpv-batch-validate"})
 Skill({skill: "claude-plugins-validation:cpv-batch-security-audit"})
