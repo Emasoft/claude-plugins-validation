@@ -3140,9 +3140,12 @@ jobs:
     name: Validate
     runs-on: ubuntu-latest
     steps:
+      # Plain checkout — scaffolded plugins ship NO submodules; asking the
+      # checkout action to recurse occasionally flakes with "could not read
+      # Username" auth errors against non-existent submodule URLs, taking
+      # the Validate job down with a misleading 'process git failed exit
+      # code 128'. Drop the recurse to remove the moot enumeration step.
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Install uv
         uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4
