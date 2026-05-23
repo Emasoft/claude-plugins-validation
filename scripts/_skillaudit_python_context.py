@@ -376,6 +376,84 @@ def _is_inside_multiline_string_literal(tree: ast.AST, line: int) -> bool:
     return False
 
 
+def _enclosing_function_is_template_generator(tree: ast.AST, line: int) -> bool:
+    """True iff ``line`` falls inside a FunctionDef whose body is dominated
+    by template-string generation (returns a string-typed payload built
+    from multi-line Constant / JoinedStr / BinOp-of-strings).
+
+    Template-generator functions exist only to emit code or config as
+    data — the matched ``subprocess.run`` / ``os.system`` / etc. inside
+    the generated string is generated CODE that will be written to disk
+    and validated separately when CPV scans the produced file. The
+    generator file itself does NOT execute the inner pattern, so flagging
+    it there is a false positive (same `subprocess.run([...])` shape gets
+    reviewed twice — once in the template author file, once in the
+    generated file).
+
+    A function qualifies when EITHER:
+
+      1. It has return annotation ``-> str`` AND ≥50% of its body's
+         source range is covered by multi-line string literals.
+      2. ≥85% of its body's source range is covered by multi-line
+         string literals (regardless of annotation — annotation-free
+         legacy generators still pass).
+
+    The 50/85 ratios are conservative: a function that's mostly Python
+    code with a single docstring + the matched line outside that
+    docstring fails BOTH thresholds and is correctly NOT treated as a
+    template generator.
+
+    Walks every covering FunctionDef / AsyncFunctionDef and picks the
+    DEEPEST one (smallest span); inner nested helpers inside a larger
+    template generator are evaluated in their own right.
+    """
+    enclosing: ast.FunctionDef | ast.AsyncFunctionDef | None = None
+    best_span: float = float("inf")
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        start = getattr(node, "lineno", None)
+        end = getattr(node, "end_lineno", None)
+        if start is None or end is None or not (start <= line <= end):
+            continue
+        span = end - start
+        if span < best_span:
+            enclosing = node
+            best_span = span
+    if enclosing is None:
+        return False
+
+    func_start = enclosing.lineno or 0
+    func_end = enclosing.end_lineno or 0
+    func_total_lines = func_end - func_start + 1
+    if func_total_lines <= 0:
+        return False
+
+    # Compute the union of source-line ranges covered by multi-line
+    # string Constants and JoinedStr nodes inside this function body.
+    # Using set-based union avoids double-counting overlapping nodes
+    # (a JoinedStr that contains a Constant inside it would otherwise
+    # be counted twice).
+    literal_lines: set[int] = set()
+    for n in ast.walk(enclosing):
+        if isinstance(n, ast.Constant) and isinstance(n.value, str):
+            s = getattr(n, "lineno", None)
+            e = getattr(n, "end_lineno", None)
+            if s is not None and e is not None and e > s:
+                literal_lines.update(range(s, e + 1))
+        elif isinstance(n, ast.JoinedStr):
+            s = getattr(n, "lineno", None)
+            e = getattr(n, "end_lineno", None)
+            if s is not None and e is not None and e > s:
+                literal_lines.update(range(s, e + 1))
+    literal_ratio = len(literal_lines) / func_total_lines
+
+    ret = enclosing.returns
+    returns_str = isinstance(ret, ast.Name) and ret.id == "str"
+
+    return (returns_str and literal_ratio >= 0.50) or literal_ratio >= 0.85
+
+
 def _find_enclosing_call(tree: ast.AST, line: int) -> ast.Call | None:
     """Return the deepest ``ast.Call`` node whose source range covers ``line``.
 
@@ -625,6 +703,20 @@ def classify(
     # Use the multi-line filter so single-line literals (which appear
     # on EVERY call site as args) don't shadow real call classification.
     if _is_inside_multiline_string_literal(tree, line):
+        # Template-generator promotion: when the enclosing function
+        # exists ONLY to return a string template (Python script
+        # template, YAML/TOML/JSON template, etc.), the matched
+        # ``subprocess.run`` / ``os.system`` / etc. inside the
+        # template is GENERATED CODE — it will land in the produced
+        # file and be validated there. Flagging it in the template
+        # author file is a false positive that the SHELL_EXEC /
+        # CMD_INJECTION rules surface as a NIT under the default
+        # "safe_doc → demote for execution-class rules" policy.
+        # Promote to ``safe_literal`` so the dispatcher SUPPRESSES it
+        # at source instead of relying on hash-anchored manifest
+        # suppression (which breaks on every line-shift edit).
+        if rule_id in {"SHELL_EXEC", "CMD_INJECTION"} and _enclosing_function_is_template_generator(tree, line):
+            return "safe_literal"
         return "safe_doc"
 
     return "unknown"
