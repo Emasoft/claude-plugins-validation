@@ -57,27 +57,29 @@ meaning before the menu is ever shown. `cpv_menu.py` defaults
 
 ## Instructions
 
-1. Build the top-level menu spec (see [menu-tree](references/menu-tree.md) §3.0
-   for the canonical row list). Write the spec JSON to a tempfile.
-2. Queue the menu by invoking
-   `python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-top-spec.json`
-   and END THE TURN. The claude-menu-system Stop hook emits the menu
-   via `systemMessage`. NEVER print the menu inline; CMS Stop hook
-   emits via `systemMessage`.
+1. Copy the top-level menu's full bash recipe from [menu-tree](references/menu-tree.md) §3.0
+   (the recipe is a single `python cpv_menu.py - >/dev/null <<'JSON' … JSON`
+   heredoc — one Bash tool call). Run it verbatim. **Never use the Write
+   or Edit tool to create a spec file** — the heredoc passes the JSON over
+   stdin, which is exactly why this design is silent.
+2. END THE TURN IMMEDIATELY after the Bash call. **Emit ZERO chat text**
+   — no "queued", no "menu will appear", no "Stop hook will emit", no
+   summary line. The menu IS the only user-visible output. Any prose
+   you print is pure transcript pollution.
 3. Wait for the user's next message. Parse the key (number or letter,
    case-insensitive).
 4. On `0` at any depth → reply `Cancelled — no actions taken.` and stop.
 5. On a valid category key → look up the action_id in the menu's fixed
-   key→action map (in [menu-tree](references/menu-tree.md)). Build the
-   corresponding sub-menu spec, queue it via `cpv_menu.py`, end the
-   turn. Sub-menus include `0 — Cancel / Exit` AND `B — Back` rows.
+   key→action map (in [menu-tree](references/menu-tree.md)). Run the
+   sub-menu's heredoc recipe verbatim, end the turn silently. Sub-menus
+   include `0 — Cancel / Exit` AND `B — Back` rows.
 6. On a leaf key → look up the recipe in [menu-tree](references/menu-tree.md):
    - **arg-prompts**: ask required arguments in plain text (one short line per question — NO AskUserQuestion)
    - **execution**: run the exact bash from the recipe (always via the launcher)
 7. Report only the compact summary + report-file path.
-8. After the leaf finishes, queue the §3.99 "do something else?" spec
-   (or §3.10 post-validate fix menu, for Validate leaves) via
-   `cpv_menu.py` and end the turn.
+8. After the leaf finishes, run the §3.99 "do something else?" heredoc
+   (or §3.10 post-validate fix menu, for Validate leaves) and end the
+   turn silently.
 
 ## Output
 
@@ -89,10 +91,11 @@ is emitted by the Stop hook, not returned by the agent.
 
 - Invalid key (not in the menu's fixed map) → ask plain text:
   `Invalid choice. Pick a key from the menu (or B for back, 0 to cancel).`
-  Then re-queue the SAME sub-menu spec via `cpv_menu.py` and end the turn.
+  Then re-run the SAME sub-menu's heredoc recipe and end the turn
+  silently — emit no other chat text.
 - Invalid path at an arg-prompt → re-ask with a hint, do not abort.
-- Launcher invocation fails → surface stderr verbatim, then re-queue
-  the SAME sub-menu spec (do not jump back to top-level).
+- Launcher invocation fails → surface stderr verbatim, then re-run
+  the SAME sub-menu's heredoc recipe (do not jump back to top-level).
 - `${CLAUDE_PLUGIN_ROOT}` unset → abort with `CPV plugin not installed in this session — install via /plugin install claude-plugins-validation@emasoft-plugins`.
 - `cpv_menu.py` fails with `MenuSystemUnavailable` (claude-menu-system
   not installed) → surface the install hint verbatim and stop. There is
@@ -107,13 +110,13 @@ is emitted by the Stop hook, not returned by the agent.
 
 Copy this checklist and track your progress:
 
-- [ ] Build menu spec; queue via `cpv_menu.py`; END THE TURN
+- [ ] Run the menu's heredoc recipe (single Bash call); END THE TURN with NO chat text
 - [ ] Read user's next message → parse key (number or letter, case-insensitive)
 - [ ] On `0` → `Cancelled — no actions taken.` and stop
-- [ ] Sub-menu → look up action_id in fixed map, queue sub-menu spec
+- [ ] Sub-menu → look up action_id in fixed map, run sub-menu heredoc silently
 - [ ] Leaf → ask args inline as plain text, run launcher recipe
 - [ ] Return ≤3-line summary + report path
-- [ ] Queue §3.99 "do something else?" (or §3.10 post-validate) spec → loop or exit
+- [ ] Run §3.99 "do something else?" (or §3.10 post-validate) heredoc silently → loop or exit
 
 ## Examples
 
