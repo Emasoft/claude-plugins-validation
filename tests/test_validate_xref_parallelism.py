@@ -40,21 +40,18 @@ scripts_dir = Path(__file__).parent.parent / "scripts"
 if str(scripts_dir) not in sys.path:
     sys.path.insert(0, str(scripts_dir))
 
-from cpv_parallel_runner import ScanResult, parallel_scan
+from cpv_parallel_runner import parallel_scan
 from validate_xref import (
-    CrossReferenceValidationReport,
     _SKILL_REF_PLUGIN_DIRS,
+    CrossReferenceValidationReport,
     _xref_extract_command_worker,
     _xref_extract_dispatch_worker,
     _xref_extract_skill_refs_worker,
     _xref_parallel_enabled,
-    validate_agent_task_refs,
     validate_command_agent_refs,
     validate_cross_references,
-    validate_skill_refs,
     validate_subagent_type_matching,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper: build a plugin tree with N files of mixed ref types.

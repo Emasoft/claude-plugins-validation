@@ -38,7 +38,6 @@ import pickle
 import sys
 import time
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -49,12 +48,11 @@ if str(scripts_dir) not in sys.path:
 
 import validate_hook  # noqa: E402
 from validate_hook import (  # noqa: E402
-    _HookWorkUnit,
     _hook_parallel_enabled,
+    _HookWorkUnit,
     scan_one_hook,
     validate_hooks,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -398,7 +396,6 @@ def test_worker_exception_becomes_warning(tmp_path: Path, monkeypatch):
     from cpv_parallel_runner import ScanResult
     from validate_hook import (
         HookValidationReport,
-        _HookWorkUnit,
         _validate_hooks_in_matcher_block,
     )
 

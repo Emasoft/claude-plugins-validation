@@ -48,8 +48,10 @@ import validate_command  # noqa: E402
 from validate_command import (  # noqa: E402
     CommandValidationReport,
     scan_one_command,
-    validate_command as run_validate_command,
     validate_commands_directory,
+)
+from validate_command import (
+    validate_command as run_validate_command,
 )
 
 # ---------------------------------------------------------------------------

@@ -47,6 +47,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 
 def _resolve_main_root() -> Path:
@@ -355,13 +356,22 @@ def main() -> int:
         run_times: list[float] = []
         last_exit_code = 0
         for run_idx in range(args.runs):
-            label = phase["label"]
+            # phase["label"] is always a str by construction; mypy infers
+            # str | Collection[str] from the dict literal.
+            label = cast(str, phase["label"])
             if args.runs > 1:
-                label = f"{phase['label']} [run {run_idx + 1}/{args.runs}]"
+                label = f"{label} [run {run_idx + 1}/{args.runs}]"
             if args.clear_cache:
                 _clear_scanner_cache(verbose=args.verbose)
+            # mypy: phase is a dict[str, str | dict[str, str]] so accessing
+            # the str/dict union confuses the narrower _run_phase signature;
+            # cast to the expected concrete types (we built the dict above so
+            # the runtime types are guaranteed).
             wall, exit_code = _run_phase(
-                label, plugin_root, phase["env"], verbose=args.verbose
+                label,
+                plugin_root,
+                cast(dict[str, str], phase["env"]),
+                verbose=args.verbose,
             )
             run_times.append(wall)
             last_exit_code = exit_code
@@ -388,14 +398,19 @@ def main() -> int:
     table = _format_table(rows)
     print(table)
 
-    # Speedup commentary.
-    baseline = rows[0]["wall"]
-    final_speedup = baseline / rows[-1]["wall"] if rows[-1]["wall"] > 0 else float("inf")
+    # Speedup commentary. ``rows`` is built as ``list[dict[str, object]]``
+    # because each dict mixes str labels, float wall times, int exit codes,
+    # and list[float] run histories. The keys we read below are always the
+    # float wall time — cast explicitly so mypy understands the arithmetic.
+    baseline = cast(float, rows[0]["wall"])
+    final_wall = cast(float, rows[-1]["wall"])
+    inner_wall = cast(float, rows[1]["wall"])
+    final_speedup = baseline / final_wall if final_wall > 0 else float("inf")
     print(f"\nFully-parallel speedup vs serial baseline: {final_speedup:.2f}×")
-    inner_speedup = baseline / rows[1]["wall"] if rows[1]["wall"] > 0 else float("inf")
+    inner_speedup = baseline / inner_wall if inner_wall > 0 else float("inf")
     print(f"Inner-only speedup (sibling validators):    {inner_speedup:.2f}×")
-    if rows[-1]["wall"] > 0 and rows[1]["wall"] > 0:
-        outer_contribution = rows[1]["wall"] / rows[-1]["wall"]
+    if final_wall > 0 and inner_wall > 0:
+        outer_contribution = inner_wall / final_wall
         print(f"Outer-layer contribution (C vs B):          {outer_contribution:.2f}×")
 
     # Write the Markdown report unless suppressed.

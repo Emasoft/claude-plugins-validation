@@ -199,8 +199,12 @@ class GitignoreFilter:
         """
         if self._spec is not None:
             # `match_file` returns bool — keep the public contract identical
-            # to `is_path_gitignored` (which returns bool).
-            return bool(self._spec.match_file(rel))
+            # to `is_path_gitignored` (which returns bool). ``_spec`` is
+            # typed as ``object | None`` because the import of
+            # ``pathspec.PathSpec`` lives inside ``_load_pathspec`` (lazy /
+            # optional dependency); the runtime instance is the real
+            # ``pathspec.PathSpec`` so ``match_file`` is always present.
+            return bool(self._spec.match_file(rel))  # type: ignore[attr-defined]
         # Fallback path: pathspec unavailable, defer to common helper which
         # implements its own pathspec-or-fallback chain.
         return is_path_gitignored(rel, self.patterns)

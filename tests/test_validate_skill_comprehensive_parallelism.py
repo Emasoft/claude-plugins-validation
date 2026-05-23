@@ -34,7 +34,6 @@ if str(scripts_dir) not in sys.path:
 from cpv_parallel_runner import parallel_scan  # noqa: E402
 from validate_skill_comprehensive import scan_one_skill  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Fixture helpers — generate skill dirs the comprehensive validator accepts.
 # ---------------------------------------------------------------------------

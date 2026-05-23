@@ -36,7 +36,6 @@ from validate_security import (  # noqa: E402
     scan_one_file_for_security,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixture builder — a synthetic plugin with several files covering injection,
 # secrets, prompt-injection, and clean files. Just enough variety to make

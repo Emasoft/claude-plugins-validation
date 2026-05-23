@@ -27,8 +27,8 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import subprocess
+import sys
 from pathlib import Path
 
 # Match the scripts/-on-sys.path convention used across the suite.
@@ -44,7 +44,6 @@ from validate_plugin import (  # noqa: E402
     _run_one_validator,
     _run_parallel_batch,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixture — a self-contained plugin big enough to exercise several validators.
