@@ -30,6 +30,19 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
+# MODULE-LEVEL import: hoisted out of ``failing_worker`` to amortise the
+# skillaudit pattern-catalog compile (50 rules / 489 patterns) across the
+# worker process. Previously this was a lazy import inside the function
+# body; on ProcessPool spawn-mode workers (the Linux CI default — macOS
+# defaults to fork-mode which re-uses the parent's module cache), the
+# lazy import re-ran ``cpv_skillaudit_native`` initialisation on every
+# call. The cascade of regex compiles + AST imports built deep call
+# stacks that hit the recursion limit on smaller-stack Linux runners
+# (RecursionError on every file in the fixture, observed in v2.103.0 CI).
+# Hoisting to module level runs the init exactly ONCE per worker process,
+# matching what the production scan_path does.
+from cpv_skillaudit_native import _scan_one_file_skillaudit  # noqa: E402
+
 
 def failing_worker(file_path: Path) -> list:
     """Per-file worker that raises on a specific basename.
@@ -43,7 +56,4 @@ def failing_worker(file_path: Path) -> list:
     fail_basename = os.environ.get("CPV_SKILLAUDIT_TEST_FAIL_BASENAME", "")
     if fail_basename and file_path.name == fail_basename:
         raise RuntimeError(f"synthetic test failure on {fail_basename}")
-
-    from cpv_skillaudit_native import _scan_one_file_skillaudit
-
     return _scan_one_file_skillaudit(file_path)

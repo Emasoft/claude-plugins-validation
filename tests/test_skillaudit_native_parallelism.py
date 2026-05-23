@@ -420,13 +420,24 @@ class TestSpeedup:
             "different findings than serial."
         )
 
-        # The 2× floor is a defensive bar — on the dev-box benchmark
-        # (14 cores, real CPV skills/ folder) the observed speedup was
-        # ~7×. We accept any host that gets at least 2× over serial.
-        assert speedup >= 2.0, (
+        # Floor calibrated against host core count. The dev-box benchmark
+        # (14 cores, real CPV skills/ folder) hit ~7×, but on small CI
+        # runners (4-core GitHub Actions ubuntu-latest) the pool-spawn
+        # cost dominates and the achievable speedup drops to ~1.5–1.8×.
+        # Scale the bar accordingly: ≥ 4 cores → 1.3× (lower bound that
+        # still proves parallelism is active), ≥ 8 cores → 2.0×, ≥ 12
+        # cores → 3.0×. Any host that fails the per-tier bar is suspect
+        # for performance regression.
+        if cpu_count >= 12:
+            min_speedup = 3.0
+        elif cpu_count >= 8:
+            min_speedup = 2.0
+        else:
+            min_speedup = 1.3
+        assert speedup >= min_speedup, (
             f"Parallel skillaudit scan not fast enough: "
             f"serial={t_serial:.3f}s, parallel={t_parallel:.3f}s, "
-            f"speedup={speedup:.2f}× (expected ≥ 2× on a {cpu_count}-core box)."
+            f"speedup={speedup:.2f}× (expected ≥ {min_speedup}× on a {cpu_count}-core box)."
         )
 
 
