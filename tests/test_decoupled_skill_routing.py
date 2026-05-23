@@ -39,7 +39,7 @@ class TestPluginFixerPhase0Triage:
         assert "safe-ceiling" in self.body.lower()
         assert "opus[1m]" in self.body or "sonnet[1m]" in self.body
         assert "200K" in self.body  # documenting the default opus window
-        assert "1M" in self.body    # documenting the extended-context variants
+        assert "1M" in self.body  # documenting the extended-context variants
 
     def test_routing_table_lists_four_core_situations(self) -> None:
         # The routing table must explicitly mention: zero findings,
@@ -61,15 +61,9 @@ class TestPluginFixerPhase0Triage:
         # Find any code-block / quoted line that contains [BATCH_REQUIRED]
         # AND mentions safe-ceiling AND plugin-root + Triage report
         # (the new auto-dispatch format).
-        assert "[BATCH_REQUIRED]" in self.body, (
-            "plugin-fixer must document the literal [BATCH_REQUIRED] exit token"
-        )
-        assert "safe-ceiling=" in self.body, (
-            "plugin-fixer must require safe-ceiling=<C> in BATCH_REQUIRED line"
-        )
-        assert "plugin-root:" in self.body, (
-            "plugin-fixer must require plugin-root: in BATCH_REQUIRED line"
-        )
+        assert "[BATCH_REQUIRED]" in self.body, "plugin-fixer must document the literal [BATCH_REQUIRED] exit token"
+        assert "safe-ceiling=" in self.body, "plugin-fixer must require safe-ceiling=<C> in BATCH_REQUIRED line"
+        assert "plugin-root:" in self.body, "plugin-fixer must require plugin-root: in BATCH_REQUIRED line"
         assert "Triage report:" in self.body or "triage-report" in self.body, (
             "plugin-fixer must require a triage report path so the "
             "orchestrator can show the user the diagnostics that justified "
@@ -112,13 +106,7 @@ class TestDoctorPhase0Routing:
 class TestMenuFixLeafAutoRoutes:
     """The menu-tree §3.2.1 Fix-plugin-findings leaf must auto-route."""
 
-    menu_tree = (
-        REPO
-        / "skills"
-        / "cpv-main-menu-skill"
-        / "references"
-        / "menu-tree.md"
-    ).read_text(encoding="utf-8")
+    menu_tree = (REPO / "skills" / "cpv-main-menu-skill" / "references" / "menu-tree.md").read_text(encoding="utf-8")
 
     def test_fix_leaf_has_triage_step(self) -> None:
         """The Fix-leaf must run a quick-triage validation before dispatch."""
@@ -148,12 +136,8 @@ class TestMenuFixLeafAutoRoutes:
         text = section.group(1)
         # Must reference the batch planner + aggregator (the auto-dispatch
         # path replaces the old `/cpv-batch-fix` prompt).
-        assert "cpv_batch_planner" in text, (
-            "§3.2.1 must reference cpv_batch_planner.py for auto-dispatch"
-        )
-        assert "cpv_batch_aggregator" in text, (
-            "§3.2.1 must reference cpv_batch_aggregator.py for auto-dispatch"
-        )
+        assert "cpv_batch_planner" in text, "§3.2.1 must reference cpv_batch_planner.py for auto-dispatch"
+        assert "cpv_batch_aggregator" in text, "§3.2.1 must reference cpv_batch_aggregator.py for auto-dispatch"
         # Must mention the threshold + the "too many for single-agent" reasoning
         assert "single-agent" in text or "context exhaust" in text or "too many" in text or "safe-ceiling" in text
 
@@ -188,9 +172,7 @@ class TestSkillsAreGloballyInvocable:
 
     def test_orphan_detection_test_scans_agent_bodies(self) -> None:
         """The extended orphan-detection scan must look in agent bodies (Path 3)."""
-        consolidation_test = (
-            REPO / "tests" / "test_consolidation_v211.py"
-        ).read_text(encoding="utf-8")
+        consolidation_test = (REPO / "tests" / "test_consolidation_v211.py").read_text(encoding="utf-8")
         # The test must include scanning agent bodies for the
         # fully-qualified Skill invocation pattern.
         assert "Path 3" in consolidation_test or "agent BODIES" in consolidation_test

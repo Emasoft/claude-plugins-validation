@@ -1,7 +1,6 @@
 ---
 name: cpv-batch-full-scan-and-fix
 description: Maximum-coverage same-turn scan + fix. One plugin-fixer per plugin reads each source file ONCE and runs validate + security + caching audit + caching optimize + verify-FPs + fix — all inline. Each per-file scan triggers every applicable checker; confirmed-real findings are fixed; confirmed-FPs are skipped. Cuts per-plugin token cost ~5× vs running the four separate batch skills sequentially. Default 8 parallel agents per main-session message, cap 16.
-allowed-tools: Read, Bash(python3:*,git:*,uv:*,cat:*,mkdir:*), Glob, Grep
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 user-invocable: true
 ---

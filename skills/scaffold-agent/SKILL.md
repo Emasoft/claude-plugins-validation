@@ -3,7 +3,6 @@ name: scaffold-agent
 description: Scaffold a new agent in an existing plugin (creates agents/{NAME}.md with valid frontmatter that passes validate_plugin out of the box). Use when adding a single agent to an existing plugin. Used dynamically via the-skills-menu (TRDD-478d9687).
 when_to_use: When the cpv-main-menu user picks Create → Add agent to existing plugin, or any flow needs to drop a minimal valid agents/{NAME}.md into a plugin
 user-invocable: false
-allowed-tools: Bash(uv:*)
 ---
 
 # scaffold-agent

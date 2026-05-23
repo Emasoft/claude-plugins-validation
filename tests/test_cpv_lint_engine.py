@@ -757,6 +757,7 @@ class TestLintRepoOrchestration:
         # eliminates the cross-test shared-dict mutation that caused
         # xdist isolation flakes.
         import cpv_lint_engine as _cle
+
         fake_dispatch = dict(_DISPATCH)
         fake_dispatch["python"] = fake_lint
         with patch.object(_cle, "_DISPATCH", fake_dispatch):
@@ -806,13 +807,16 @@ class TestLintRepoOrchestration:
         # would leave ``called`` empty and trigger the same flake).
         import cpv_lint_engine as _cle
         from cpv_scanner_cache import ScannerCache
+
         fake_dispatch = {
             "python": trace("python"),
             "javascript": trace("javascript"),
         }
         with patch.object(_cle, "_DISPATCH", fake_dispatch):
             lint_repo(
-                tmp_path, report, languages=["python"],
+                tmp_path,
+                report,
+                languages=["python"],
                 cache=ScannerCache(cache_dir=tmp_path / "cache"),
             )
         assert called == ["python"]
@@ -836,11 +840,13 @@ class TestLintRepoOrchestration:
         # doesn't short-circuit the lint subprocess.
         import cpv_lint_engine as _cle
         from cpv_scanner_cache import ScannerCache
+
         fake_dispatch = dict(_DISPATCH)
         fake_dispatch["python"] = capture_lint
         with patch.object(_cle, "_DISPATCH", fake_dispatch):
             lint_repo(
-                tmp_path, report,
+                tmp_path,
+                report,
                 cache=ScannerCache(cache_dir=tmp_path / "cache"),
             )
         assert captured_lists, "lint_python was never called"

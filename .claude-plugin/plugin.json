@@ -9,6 +9,12 @@
   "homepage": "https://github.com/Emasoft/claude-plugins-validation",
   "repository": "https://github.com/Emasoft/claude-plugins-validation",
   "license": "MIT",
+  "dependencies": [
+    {
+      "name": "claude-menu-system",
+      "version": ">=0.1.5"
+    }
+  ],
   "keywords": [
     "validation",
     "plugins",

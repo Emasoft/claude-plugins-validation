@@ -7,11 +7,10 @@ description: |
   at every level and `9 — Back` at every sub-menu. Loads cpv-main-menu-skill
   for the menu tree and per-leaf execution recipes. NEVER uses AskUserQuestion.
 
-  Runs on Haiku for fast menu rendering (this agent only displays tables and
-  parses integer/letter choices). Heavy lifting is dispatched to specialised
-  Opus agents (plugin-creator, plugin-fixer, plugin-diagnoser, marketplace-fixer,
+  This agent only displays tables and parses integer/letter choices — fast,
+  no analysis. Heavy lifting is dispatched to the specialised work agents
+  (plugin-creator, plugin-fixer, plugin-diagnoser, marketplace-fixer,
   semantic-validator, cache-optimizer-agent) when a leaf is picked.
-model: haiku
 maxTurns: 80
 skills:
   - the-skills-menu

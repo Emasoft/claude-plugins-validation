@@ -3,7 +3,6 @@ name: skill-validation-skill
 description: |
   Validate skills using 190+ rules from AgentSkills OpenSpec, Nixtla, and Meta-Skill frameworks.
   Use when validating SKILL.md files or auditing skill quality. Used dynamically via the-skills-menu (TRDD-478d9687).
-allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep
 user-invocable: false
 ---
 

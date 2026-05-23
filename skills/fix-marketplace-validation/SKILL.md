@@ -4,7 +4,6 @@ description: >
   Maps marketplace validation errors to fix reference files. Used dynamically via the-skills-menu — any CPV agent can invoke at runtime (TRDD-478d9687).
   Use when a marketplace validation report has CRITICAL/MAJOR/MINOR/NIT findings from
   validate_marketplace.py or validate_marketplace_pipeline.py.
-allowed-tools: Read, Edit, Bash(git:*,gh:*,jq:*,uv:*), Glob, Grep
 user-invocable: false
 ---
 

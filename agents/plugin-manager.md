@@ -5,7 +5,6 @@ description: >
   plugins. Use when user asks to: install/uninstall plugins, validate plugin quality, check
   plugin health, search for plugins by type, manage marketplaces, or perform bulk plugin
   operations.
-model: sonnet
 maxTurns: 50
 skills:
   - the-skills-menu

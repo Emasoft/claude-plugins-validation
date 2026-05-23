@@ -1,57 +1,30 @@
 #!/usr/bin/env python3
-"""Tests for agent model-tier policy.
+"""Tests for agent model policy.
 
-Four TRDDs are active here:
+**v2.102.0 policy reversal — NO model pinning.** Earlier revisions used a
+per-agent model tier (TRDD-82e836dc: haiku for script-launchers, sonnet for
+info-retrieval, opus for analysis). That tiering was REMOVED: a `model:`
+frontmatter field forces an in-line model switch that fragments the prompt
+cache (each model keeps a separate cache — CPV's own CA-04 cache rule flags
+exactly this). Every CPV agent now OMITS `model:` and inherits the session
+model, keeping the cache warm. `model: inherit` is the only acceptable
+explicit value (it documents intent without forcing a switch).
 
-* **TRDD-82e836dc** (Phase A only — frontmatter-only downgrades): each
-  agent's `model:` field is set to the cheapest tier that still does its
-  job. These tests are always active.
-* **TRDD-bcbceeed** (v2.89.0 — menu-orchestrator architecture fix):
-  Phase B of TRDD-82e836dc introduced four `*-menu` haiku dispatcher
-  *subagents* (`cpv-doctor-menu`, `plugin-fixer-menu`,
-  `marketplace-fixer-menu`, `cache-optimizer-menu`) whose job was to spawn
-  the matching opus work agent via the Agent tool. That design was
-  invalidated by the current Anthropic spec: per
-  https://code.claude.com/docs/en/sub-agents, *"subagents cannot spawn
-  other subagents, so `Agent(agent_type)` has no effect in subagent
-  definitions"*. The four menu subagents were therefore deleted; the
-  slash-command body itself is now the menu orchestrator (runs in the
-  main session, dispatches the opus work agent via the Agent tool —
-  which works only from the main session).
-* **TRDD-3ce2f864** (v2.89.4 — context-fork menu rendering): the v2.89.0
-  pattern declared `model: haiku` on the four orchestrator commands. Per
-  the Claude Code skills docs, ``model:`` overrides apply "for the rest
-  of the current turn" while keeping the inherited conversation history.
-  A multi-turn opus orchestrator with a 1M-token context cannot safely
-  degrade mid-turn to haiku — the override silently fails. v2.89.4
-  removes `model: haiku` from the four orchestrators and moves the
-  honest haiku-rendering capability into a single `context: fork` skill
-  (`cpv-format-menu`).
-* **TRDD-c50531c2** (v2.90.0 — menu unification): the four
-  menu-orchestrator slash commands (`cpv-doctor`, `cpv-fix-validation`,
-  `cpv-fix-marketplace-validation`, `cpv-cache-optimize`) were DELETED.
-  Their workflows are now routed through `/cpv-main-menu` to existing
-  agents. All command-side invariants from TRDD-bcbceeed / TRDD-3ce2f864
-  are no longer enforceable (the files they pinned do not exist), but
-  the AGENT-side invariants remain enforceable: (a) the four `*-menu`
-  agent files MUST stay deleted, (b) the four opus work agents stay on
-  opus and contain no First Contact menu, (c) the `cpv-format-menu`
-  skill carries `model: haiku` + `context: fork` +
-  `agent: general-purpose`.
+The architectural invariants from the menu-unification line of TRDDs are
+still enforced here because they are independent of the model field:
 
-Tier policy:
-
-| Tier | When to use | Examples |
-|---|---|---|
-| haiku | Launching scripts; rendering menus and parsing integer/letter
-|       | choices; routing to specialised work agents. NO analysis. |
-|       | cpv-main-menu-agent, plugin-validator, skill-validation-agent. |
-| sonnet | Mechanical info-retrieval / install / list / show tasks. |
-|        | plugin-manager, plugin-creator. |
-| opus / opus[1m] | Diagnosis, analysis, planning, reading reports,
-|                  | applying fixes, deep semantic checks. |
-|                  | plugin-fixer, marketplace-fixer, cache-optimizer-agent,
-|                  | cpv-doctor-agent, plugin-diagnoser, semantic-validator. |
+* **TRDD-bcbceeed** (v2.89.0): the four `*-menu` haiku dispatcher subagents
+  were deleted — subagents cannot spawn other subagents per the Anthropic
+  spec (https://code.claude.com/docs/en/sub-agents), so a menu-subagent
+  dispatch chain is a documented no-op. They must stay deleted.
+* **TRDD-c50531c2** (v2.90.0 — menu unification): every workflow routes
+  through `/cpv-main-menu`; the opus work agents carry no First Contact menu
+  (the slash-command body already made the choice before dispatch).
+* **TRDD-3ce2f864 → v2.102.0**: the `cpv-format-menu` fork-skill keeps
+  `context: fork` + `agent: general-purpose` + `user-invocable: false`, but
+  it no longer pins `model: haiku` — the render now inherits the session
+  model (cache-warm) while `context: fork` still isolates it from the
+  parent's conversation history.
 """
 
 from __future__ import annotations
@@ -88,81 +61,54 @@ def _load_frontmatter(path: Path) -> dict:
     return data
 
 
-# ---------------------------------------------------------------------------
-# Phase A — frontmatter-only downgrades (always active)
-# ---------------------------------------------------------------------------
-
-
-def test_plugin_validator_is_haiku() -> None:
-    """plugin-validator runs only validation scripts: haiku is sufficient."""
-    fm = _load_frontmatter(AGENTS_DIR / "plugin-validator.md")
-    assert fm["model"] == "haiku", (
-        "plugin-validator must declare `model: haiku` per TRDD-82e836dc §3 — "
-        "the agent is a script-launcher with no analysis duties."
-    )
-
-
-def test_skill_validation_agent_is_haiku() -> None:
-    """skill-validation-agent runs only validation scripts: haiku is sufficient."""
-    fm = _load_frontmatter(AGENTS_DIR / "skill-validation-agent.md")
-    assert fm["model"] == "haiku", (
-        "skill-validation-agent must declare `model: haiku` per TRDD-82e836dc §3 — "
-        "the agent is a script-launcher with no analysis duties."
-    )
-
-
-def test_cpv_main_menu_agent_stays_haiku() -> None:
-    """Regression guard — cpv-main-menu-agent must stay on haiku."""
-    fm = _load_frontmatter(AGENTS_DIR / "cpv-main-menu-agent.md")
-    assert fm["model"] == "haiku", (
-        "cpv-main-menu-agent must stay on haiku — it is the canonical "
-        "menu-rendering pattern. (Note: per TRDD-bcbceeed this agent is on "
-        "the deprecation track too; follow-up TRDD will migrate it to the "
-        "slash-command body pattern.)"
-    )
-
-
-def test_plugin_manager_stays_sonnet() -> None:
-    """Regression guard — plugin-manager stays on sonnet (info-retrieval tier)."""
-    fm = _load_frontmatter(AGENTS_DIR / "plugin-manager.md")
-    assert fm["model"] == "sonnet", (
-        "plugin-manager must declare `model: sonnet` per TRDD-82e836dc §3 — "
-        "mechanical install/list/show tasks need sonnet, not opus."
-    )
-
-
-def test_plugin_creator_stays_sonnet() -> None:
-    """Regression guard — plugin-creator stays on sonnet (template-wizard tier)."""
-    fm = _load_frontmatter(AGENTS_DIR / "plugin-creator.md")
-    assert fm["model"] == "sonnet", (
-        "plugin-creator must declare `model: sonnet` per TRDD-82e836dc §3 — "
-        "wizard-driven scaffolding doesn't need opus (escalation is leaf-level)."
-    )
-
-
-def test_plugin_diagnoser_stays_opus() -> None:
-    """Regression guard — plugin-diagnoser stays on opus (analysis tier)."""
-    fm = _load_frontmatter(AGENTS_DIR / "plugin-diagnoser.md")
-    assert fm["model"] == "opus", (
-        "plugin-diagnoser must declare `model: opus` per TRDD-82e836dc §3 — deep diagnosis requires opus."
-    )
-
-
-def test_semantic_validator_stays_opus_1m() -> None:
-    """Regression guard — semantic-validator stays on opus[1m] (deep semantic tier)."""
-    fm = _load_frontmatter(AGENTS_DIR / "semantic-validator.md")
-    assert fm["model"] in ("opus[1m]", "opus"), (
-        "semantic-validator must declare `model: opus[1m]` (or opus fallback) "
-        "per TRDD-82e836dc §3 — deep A-F grading requires opus."
-    )
+def _pins_concrete_model(fm: dict) -> bool:
+    """True iff the frontmatter pins a CONCRETE model (not absent, not `inherit`)."""
+    if "model" not in fm:
+        return False
+    return str(fm["model"]).strip().lower() != "inherit"
 
 
 # ---------------------------------------------------------------------------
-# Phase B (v2.89.0 / TRDD-bcbceeed) — main-session menu orchestrator pattern
+# v2.102.0 no-pinning policy (always active)
 # ---------------------------------------------------------------------------
 
-# Map of (work-agent file, slash-command file, work-agent name). These four
-# slash commands are main-session menu orchestrators per v2.89.0.
+
+def test_no_agent_pins_a_model() -> None:
+    """No CPV agent may pin a concrete `model:` — every agent inherits the session model.
+
+    A `model:` frontmatter forces an in-line model switch that fragments the
+    prompt cache (CA-04). The historical haiku/sonnet/opus tiering was removed
+    in v2.102.0 in favour of cache-warm inheritance. Absence of the field — or
+    an explicit `model: inherit` — is the only acceptable state.
+    """
+    offenders = []
+    for agent_md in sorted(AGENTS_DIR.glob("*.md")):
+        fm = _load_frontmatter(agent_md)
+        if _pins_concrete_model(fm):
+            offenders.append(f"{agent_md.name}: model={fm['model']!r}")
+    assert not offenders, (
+        "These agents still pin a concrete `model:` (forbidden since v2.102.0 — it "
+        "fragments the prompt cache per CA-04; omit the field or use `model: inherit`):\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_every_agent_file_parses_and_keeps_name_description() -> None:
+    """Removing `model:` must not have broken any agent's frontmatter."""
+    for agent_md in sorted(AGENTS_DIR.glob("*.md")):
+        fm = _load_frontmatter(agent_md)
+        assert "name" in fm, f"{agent_md.name} lost its `name:` field"
+        assert "description" in fm, f"{agent_md.name} lost its `description:` field"
+
+
+# ---------------------------------------------------------------------------
+# Architectural invariants (menu unification) — independent of the model field
+# ---------------------------------------------------------------------------
+
+# (work-agent file, slash-command file, work-agent name). These four slash
+# commands were main-session menu orchestrators per v2.89.0 (now folded into
+# /cpv-main-menu by v2.90.0); the work agents still exist and do the heavy
+# lifting.
 _MAIN_SESSION_MENUS = [
     ("plugin-fixer.md", "cpv-fix-validation.md", "plugin-fixer"),
     ("marketplace-fixer.md", "cpv-fix-marketplace-validation.md", "marketplace-fixer"),
@@ -198,38 +144,25 @@ def test_menu_subagent_is_deleted(menu_filename: str) -> None:
     )
 
 
-# v2.90.0 (TRDD-c50531c2): the five tests below previously pinned
-# properties of the four menu-orchestrator slash command FILES
-# (cpv-doctor.md, cpv-fix-validation.md, cpv-fix-marketplace-validation.md,
-# cpv-cache-optimize.md). Those files were DELETED in v2.90.0 — every
-# workflow is now routed through /cpv-main-menu. The tests have been
-# removed because they cannot run against non-existent files:
-#   - test_orchestrator_command_is_not_haiku
-#   - test_orchestrator_command_has_no_agent_field
-#   - test_orchestrator_command_body_invokes_cpv_format_menu
-#   - test_orchestrator_command_body_references_work_agent
-#   - test_orchestrator_command_documents_haiku_banner
-# The single-source-of-truth invariant "those command files MUST stay
-# deleted" lives in tests/test_menu_visibility.py instead, alongside
-# the broader test_v290_only_cpv_main_menu_command_remains pin. The
-# AGENT-side invariants (work agents stay opus + no First Contact menu;
-# cpv-format-menu skill is haiku-fork) are still enforced here below.
-
-
 @pytest.mark.parametrize("work,cmd,_work_name", _MAIN_SESSION_MENUS)
-def test_work_agent_stays_opus(work: str, cmd: str, _work_name: str) -> None:
-    """Each work-agent counterpart stays on opus."""
+def test_work_agent_has_no_model_field(work: str, cmd: str, _work_name: str) -> None:
+    """Each work-agent inherits the session model (no concrete `model:` pin) — v2.102.0.
+
+    These agents used to declare `model: opus` (TRDD-82e836dc). The pin was
+    removed in v2.102.0 because it fragments the prompt cache (CA-04); they now
+    inherit whatever model the session runs on.
+    """
     fm = _load_frontmatter(AGENTS_DIR / work)
-    assert fm["model"] == "opus", (
-        f"{work} must declare `model: opus` — it is the heavy-lifting "
-        f"counterpart of the {cmd} main-session orchestrator and handles "
-        f"diagnosis/analysis/fixes."
+    assert not _pins_concrete_model(fm), (
+        f"{work} must NOT pin a concrete model (v2.102.0 cache-warm policy — it was "
+        f"`model: opus` under TRDD-82e836dc). Counterpart of the {cmd} orchestrator. "
+        f"Current model: {fm.get('model')!r}."
     )
 
 
 @pytest.mark.parametrize("work", ["plugin-fixer.md", "marketplace-fixer.md", "cache-optimizer-agent.md"])
-def test_opus_work_agent_has_no_first_contact_menu(work: str) -> None:
-    """Opus work agents must not contain First Contact / numbered-menu blocks.
+def test_work_agent_has_no_first_contact_menu(work: str) -> None:
+    """Work agents must not contain First Contact / numbered-menu blocks.
 
     They are dispatched by the slash-command body which already made the
     choice. A leftover menu in the work agent risks the user being
@@ -257,45 +190,40 @@ def test_opus_work_agent_has_no_first_contact_menu(work: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Phase C (v2.89.4 / TRDD-3ce2f864) — cpv-format-menu fork-skill positive checks
+# cpv-format-menu fork-skill — keeps the fork, drops the model pin (v2.102.0)
 # ---------------------------------------------------------------------------
 
 
-def test_cpv_format_menu_skill_is_haiku_fork() -> None:
-    """The `cpv-format-menu` skill MUST declare `model: haiku` AND
-    `context: fork` AND `agent: general-purpose` (TRDD-3ce2f864).
+def test_cpv_format_menu_skill_is_fork_without_model_pin() -> None:
+    """`cpv-format-menu` keeps `context: fork` + `agent: general-purpose` +
+    `user-invocable: false`, but must NOT pin a concrete model (v2.102.0).
 
-    This is the positive counterpart to ``test_orchestrator_command_is_not_haiku``:
-    the orchestrators give up the lying ``model: haiku`` frontmatter, and
-    the honest haiku-rendering capability moves to this single fork-skill.
+    Pre-v2.102.0 this skill declared `model: haiku` to render menus cheaply.
+    That pin was removed because it fragments the prompt cache (CA-04). The
+    `context: fork` isolation is retained — it keeps the menu render out of
+    the parent's (often large) conversation history; the fork now simply
+    inherits the session model.
 
-    - ``model: haiku`` — the actual model that runs the render step
-    - ``context: fork`` — required for ``model:`` to honestly take effect
-      (without it, the skill inherits parent context and the override
-      silently degrades, same bug as the orchestrator frontmatter)
+    - NO concrete ``model:`` — cache-warm inheritance (or explicit ``inherit``)
+    - ``context: fork`` — isolates the render from parent history
     - ``agent: general-purpose`` — the subagent type to fork into
-    - ``user-invocable: false`` — only loaded by the four orchestrators
+    - ``user-invocable: false`` — only loaded by orchestrator commands
     """
     skill_path = PLUGIN_ROOT / "skills" / "cpv-format-menu" / "SKILL.md"
     fm = _load_frontmatter(skill_path)
-    assert fm.get("model") == "haiku", (
-        f"cpv-format-menu skill must declare `model: haiku`. Per "
-        f"TRDD-3ce2f864 this is THE fork-skill that lets menu rendering "
-        f"actually run on haiku. Current model: {fm.get('model')!r}."
+    assert not _pins_concrete_model(fm), (
+        f"cpv-format-menu must NOT pin a concrete model (v2.102.0 — it used to be "
+        f"`model: haiku`; that fragments the cache per CA-04). Current model: {fm.get('model')!r}."
     )
     assert fm.get("context") == "fork", (
-        "cpv-format-menu skill must declare `context: fork`. Without it, "
-        "the skill inherits the parent's (often opus-sized) conversation "
-        "history and the haiku model override silently degrades — the "
-        "exact bug TRDD-3ce2f864 fixes."
+        "cpv-format-menu skill must keep `context: fork` — it isolates the menu "
+        "render from the parent session's conversation history."
     )
     assert fm.get("agent") == "general-purpose", (
-        f"cpv-format-menu skill must declare `agent: general-purpose` so "
-        f"the fork knows which subagent type to spawn. Current agent: "
-        f"{fm.get('agent')!r}."
+        f"cpv-format-menu skill must keep `agent: general-purpose` so the fork "
+        f"knows which subagent type to spawn. Current agent: {fm.get('agent')!r}."
     )
     assert fm.get("user-invocable") is False, (
-        "cpv-format-menu skill must declare `user-invocable: false`. "
-        "It is loaded only by the four orchestrator commands; users "
-        "never invoke it directly."
+        "cpv-format-menu skill must stay `user-invocable: false`. "
+        "It is loaded only by orchestrator commands; users never invoke it directly."
     )

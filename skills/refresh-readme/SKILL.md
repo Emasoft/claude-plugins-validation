@@ -3,7 +3,6 @@ name: refresh-readme
 description: Refresh AUTO-* marker blocks in a plugin's README (auto-detected components table). Use when the README's components list has drifted from the filesystem. Used dynamically via the-skills-menu (TRDD-478d9687).
 when_to_use: When the cpv-main-menu user picks Manage → Refresh README, or any flow needs to re-render the AUTO-COMPONENTS block from current filesystem state
 user-invocable: false
-allowed-tools: Bash(uv:*)
 ---
 
 # refresh-readme

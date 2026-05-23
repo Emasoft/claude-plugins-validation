@@ -193,8 +193,7 @@ class TestNonstdDirRuleHonoursGitignore:
         )
         output = result.stdout + result.stderr
         assert "RC-NONSTD-DIR-001" not in output, (
-            "RC-NONSTD-DIR-001 fired for a gitignored top-level dir.\n"
-            f"Full output:\n{output[:2000]}"
+            f"RC-NONSTD-DIR-001 fired for a gitignored top-level dir.\nFull output:\n{output[:2000]}"
         )
 
     def test_rc_nonstd_dir_still_fires_for_non_gitignored_dirs(self, tmp_path):
@@ -274,9 +273,7 @@ class TestIssue37AcceptanceSignature:
             timeout=120,
         )
         output = result.stdout + result.stderr
-        critical_lines = [
-            ln for ln in output.splitlines() if "[CRITICAL]" in ln and "INPUT_DEV/" in ln
-        ]
+        critical_lines = [ln for ln in output.splitlines() if "[CRITICAL]" in ln and "INPUT_DEV/" in ln]
         assert not critical_lines, (
             "Issue #37 regression: CRITICAL findings emitted for gitignored content.\n"
             "Offending lines:\n" + "\n".join(critical_lines)

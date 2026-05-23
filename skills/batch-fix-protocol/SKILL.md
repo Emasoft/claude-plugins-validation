@@ -2,7 +2,6 @@
 name: batch-fix-protocol
 description: "Schema reference for the /cpv-batch-fix parallel-shard fix protocol — manifest format, status format, planner/aggregator contracts. Use when implementing a new consumer of the batch protocol or extending the planner/aggregator. Used dynamically via the-skills-menu (TRDD-478d9687) — any CPV agent can invoke."
 user-invocable: false
-allowed-tools: Read
 ---
 
 # batch-fix-protocol

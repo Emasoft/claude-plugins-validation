@@ -70,8 +70,7 @@ class TestDisplayWidth:
         # range. The status-table glyphs depend on this for alignment.
         for ch in "✓✗⚠○◐⊝•":
             assert display_width(ch) == 1, (
-                f"{ch!r} (U+{ord(ch):04X}) must be 1 col for status-table "
-                f"alignment in monospace terminals."
+                f"{ch!r} (U+{ord(ch):04X}) must be 1 col for status-table alignment in monospace terminals."
             )
 
     def test_wide_asian_char_is_two_columns(self) -> None:
@@ -324,9 +323,18 @@ class TestRenderBreakdown:
             "title": "Doctor findings by recipe",
             "row_header": "Recipe / Category",
             "rows": [
-                {"label": "Schema validation",     "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 2, "NIT": 0, "WARNING": 1}},
-                {"label": "D2 Command coverage",   "counts": {"CRITICAL": 0, "MAJOR": 1, "MINOR": 3, "NIT": 0, "WARNING": 0}},
-                {"label": "D3 Skill invocability", "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 1, "NIT": 0, "WARNING": 0}},
+                {
+                    "label": "Schema validation",
+                    "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 2, "NIT": 0, "WARNING": 1},
+                },
+                {
+                    "label": "D2 Command coverage",
+                    "counts": {"CRITICAL": 0, "MAJOR": 1, "MINOR": 3, "NIT": 0, "WARNING": 0},
+                },
+                {
+                    "label": "D3 Skill invocability",
+                    "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 1, "NIT": 0, "WARNING": 0},
+                },
             ],
             "verdict": "VALID",
             "report_path": "/abs/path/report.md",
@@ -341,7 +349,9 @@ class TestRenderBreakdown:
         body_lines = [line for line in out.splitlines() if line.startswith("│") and "TOTAL" not in line]
         # Find the row containing "Schema validation" and check the rightmost integer is 3.
         sv_line = next(line for line in body_lines if "Schema validation" in line)
-        assert sv_line.rstrip("│ ").rstrip().endswith("3"), f"Schema validation row total should end in 3, got: {sv_line!r}"
+        assert sv_line.rstrip("│ ").rstrip().endswith("3"), (
+            f"Schema validation row total should end in 3, got: {sv_line!r}"
+        )
 
     def test_appends_totals_row_summing_each_column(self) -> None:
         payload = {
@@ -365,8 +375,14 @@ class TestRenderBreakdown:
     def test_borders_aligned_with_long_labels_and_emoji(self) -> None:
         payload = {
             "rows": [
-                {"label": "Schema validation ✓",     "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 2, "NIT": 0, "WARNING": 1}},
-                {"label": "A much longer category label", "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0}},
+                {
+                    "label": "Schema validation ✓",
+                    "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 2, "NIT": 0, "WARNING": 1},
+                },
+                {
+                    "label": "A much longer category label",
+                    "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0},
+                },
             ],
         }
         out = render_breakdown(payload, use_color=False)
@@ -406,7 +422,7 @@ class TestRenderBreakdownCLI:
             "row_header": "Recipe",
             "rows": [
                 {"label": "Schema", "counts": {"CRITICAL": 0, "MAJOR": 0, "MINOR": 2, "NIT": 0, "WARNING": 1}},
-                {"label": "D2",     "counts": {"CRITICAL": 0, "MAJOR": 1, "MINOR": 0, "NIT": 0, "WARNING": 0}},
+                {"label": "D2", "counts": {"CRITICAL": 0, "MAJOR": 1, "MINOR": 0, "NIT": 0, "WARNING": 0}},
             ],
             "verdict": "VALID",
         }

@@ -1,7 +1,6 @@
 ---
 name: cpv-batch-security-audit
 description: Fan out security-only validation across every plugin in a marketplace, a list of plugins, or a single plugin. Accepts local paths and GitHub URLs. One plugin-validator agent per plugin (mode batch_security_audit) running only the security checker — five external scanners (cc-audit, tirith, trufflehog, semgrep, Cisco AI Defense skill-scanner) plus the in-process AI/security rule pack. Parallel main-session dispatch (default 8 at a time, cap 16).
-allowed-tools: Read, Bash, Glob, Grep
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 user-invocable: true
 ---

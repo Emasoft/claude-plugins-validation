@@ -131,9 +131,7 @@ class TestRenderReport:
         for i in range(1, 4):
             _write_status(tmp_path, i)
         idx = aggregator.load_index(tmp_path)
-        summaries = [
-            aggregator.load_shard_status(tmp_path / f"shard-{i}.status.json", i) for i in range(1, 4)
-        ]
+        summaries = [aggregator.load_shard_status(tmp_path / f"shard-{i}.status.json", i) for i in range(1, 4)]
         body = aggregator.render_report(idx, summaries)
         assert "Aggregate result" in body
         assert "Per-shard outcomes" in body
@@ -145,9 +143,7 @@ class TestRenderReport:
         _write_status(tmp_path, 1)
         _write_status(tmp_path, 2, fixed=20, failed=5, remaining=5, exit_reason="partial")
         idx = aggregator.load_index(tmp_path)
-        summaries = [
-            aggregator.load_shard_status(tmp_path / f"shard-{i}.status.json", i) for i in range(1, 3)
-        ]
+        summaries = [aggregator.load_shard_status(tmp_path / f"shard-{i}.status.json", i) for i in range(1, 3)]
         body = aggregator.render_report(idx, summaries)
         assert "needing follow-up" in body
         assert "Shard 2" in body
@@ -158,9 +154,7 @@ class TestRenderReport:
         for i in range(1, 4):
             _write_status(tmp_path, i)
         idx = aggregator.load_index(tmp_path)
-        summaries = [
-            aggregator.load_shard_status(tmp_path / f"shard-{i}.status.json", i) for i in range(1, 4)
-        ]
+        summaries = [aggregator.load_shard_status(tmp_path / f"shard-{i}.status.json", i) for i in range(1, 4)]
         body = aggregator.render_report(idx, summaries)
         assert "| # |" in body  # column header
         assert "| 1 |" in body

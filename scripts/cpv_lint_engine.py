@@ -35,6 +35,7 @@ unavailable tools without touching the host environment.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -42,6 +43,12 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+# markdownlint-cli2 finding shape: "<path>.md:<line>[:<col>] <severity> MD<NNN>".
+# Anything that does not match (uv installer chatter "Resolving dependencies",
+# "Resolved, downloaded and extracted N", "Saved lockfile", etc.) is NOT a
+# markdownlint finding and must not leak through as a NIT report entry.
+_MARKDOWNLINT_FINDING_RE = re.compile(r"\.md:\d+(?::\d+)?\s+(?:error|warning|info)\s+MD\d+")
 
 # Local helpers — the scripts/ dir is on sys.path when validate_plugin.py
 # imports us; tests insert it explicitly via conftest.
@@ -717,6 +724,12 @@ def lint_markdown(
     surfaced = 0
     for line in output.splitlines():
         if not line.strip():
+            continue
+        # Skip non-finding lines: subprocess output also carries tool-launcher
+        # chatter (uv installer "Resolving dependencies", "Resolved, downloaded
+        # and extracted N", "Saved lockfile", etc.) that is NOT a markdownlint
+        # finding and would otherwise leak through as a spurious NIT.
+        if not _MARKDOWNLINT_FINDING_RE.search(line):
             continue
         report.nit(f"markdownlint: {line.strip()}")
         surfaced += 1

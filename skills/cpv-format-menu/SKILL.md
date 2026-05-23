@@ -1,10 +1,8 @@
 ---
 name: cpv-format-menu
-description: Renders a Unicode-bordered menu/summary/breakdown/status_table from a JSON spec file. Used dynamically via the-skills-menu (TRDD-478d9687) by CPV orchestrator commands when they need to render a dynamic menu in an isolated haiku context so the render does not inherit the parent session's conversation history. Use when an orchestrator command body needs Unicode-bordered menu rendering.
+description: Renders a Unicode-bordered menu/summary/breakdown/status_table from a JSON spec file. Used dynamically via the-skills-menu (TRDD-478d9687) by CPV orchestrator commands when they need to render a dynamic menu in an isolated forked context so the render does not inherit the parent session's conversation history. Use when an orchestrator command body needs Unicode-bordered menu rendering.
 user-invocable: false
-allowed-tools: Bash(python3:*), Bash(cat:*), Read
 context: fork
-model: haiku
 agent: general-purpose
 arguments: mode spec_path action_map_path
 ---
@@ -15,17 +13,19 @@ arguments: mode spec_path action_map_path
 
 Single-turn rendering helper invoked by a CPV menu-orchestrator command
 (`cpv-doctor`, `cpv-fix-validation`, `cpv-fix-marketplace-validation`,
-`cpv-cache-optimize`). Runs in an isolated haiku context — no parent
+`cpv-cache-optimize`). Runs in an isolated forked context — no parent
 history, no follow-up questions. Reads the JSON spec at `$spec_path`,
 runs `scripts/format_menu.py`, returns the rendered text verbatim. The
 orchestrator copies that text into its own user-facing response.
 
-`model: haiku` on a command/skill only takes effect "for the rest of the
-current turn" (per the Claude Code skills doc). When the parent is opus
-with a 1M-token context, switching mid-turn is unsafe — the override
-silently degrades. `context: fork` solves this: the fork runs as a fresh
-`general-purpose` subagent with no inherited history, so `model: haiku`
-actually takes effect.
+`context: fork` runs the render as a fresh `general-purpose` subagent with
+no inherited conversation history, so a long parent session never bloats the
+menu-rendering turn and the render can't accidentally pick up parent context.
+The fork inherits the session model: CPV deliberately does NOT pin `model:`
+here, because a `model:` frontmatter forces an in-line model switch that
+fragments the prompt cache — exactly what CPV's own CA-04 cache rule flags.
+Menu rendering is cheap on any model, so the cache-warm default wins over a
+per-render model downgrade.
 
 ## Prerequisites
 

@@ -1750,11 +1750,20 @@ class TestAllowedToolsEdgeCases:
         assert any("must be string or list" in r.message for r in report.results)
 
     def test_empty_tools_flagged(self):
-        """Empty allowed-tools string should be flagged as minor."""
+        """Empty allowed-tools ("" or []) is flagged as a non-blocking WARNING.
+
+        Empty = explicit "no tools" (chat-only), which is VALID and distinct
+        from an absent field (= all tools). The warning steers an author who
+        meant "allow everything" toward the correct syntax (omit the field),
+        and must NOT be a blocking MINOR.
+        """
         report = ValidationReport(skill_path="test")
         frontmatter = {"allowed-tools": ""}
         validate_allowed_tools_field(frontmatter, report)
-        assert any("empty" in r.message.lower() for r in report.results)
+        warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
+        assert any("empty" in m.lower() for m in warning_msgs)
+        assert not any(r.level == "MINOR" and "empty" in r.message.lower() for r in report.results)
+        assert any("omit" in m.lower() for m in warning_msgs)
 
     def test_many_tools_warns_overpermission(self):
         """More than 15 distinct tool surfaces generate over-permissioning

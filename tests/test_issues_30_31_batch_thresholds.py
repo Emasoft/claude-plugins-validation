@@ -55,11 +55,13 @@ class TestIssue30SiblingSkillBacktickResolution:
         plugin = tmp_path / "demo-plugin"
         (plugin / ".claude-plugin").mkdir(parents=True)
         (plugin / ".claude-plugin" / "plugin.json").write_text(
-            json.dumps({
-                "name": "demo-plugin",
-                "version": "0.1.0",
-                "description": "Two sibling skills fixture",
-            })
+            json.dumps(
+                {
+                    "name": "demo-plugin",
+                    "version": "0.1.0",
+                    "description": "Two sibling skills fixture",
+                }
+            )
         )
         # Skill A references skill B in a backtick path.
         skill_a = plugin / "skills" / "skill-a"
@@ -72,9 +74,7 @@ class TestIssue30SiblingSkillBacktickResolution:
         )
         skill_b = plugin / "skills" / "skill-b"
         skill_b.mkdir(parents=True)
-        (skill_b / "SKILL.md").write_text(
-            "---\nname: skill-b\ndescription: Second skill\n---\n\n# skill-b\n"
-        )
+        (skill_b / "SKILL.md").write_text("---\nname: skill-b\ndescription: Second skill\n---\n\n# skill-b\n")
         return plugin
 
     def test_skills_relative_path_resolves(self, tmp_path: Path) -> None:
@@ -96,14 +96,12 @@ class TestIssue30SiblingSkillBacktickResolution:
 
         # No "Possible broken backtick path" WARNING about skill-b
         warnings_about_b = [
-            r for r in report.results
-            if r.level == "WARNING"
-            and "Possible broken backtick path" in r.message
-            and "skill-b" in r.message
+            r
+            for r in report.results
+            if r.level == "WARNING" and "Possible broken backtick path" in r.message and "skill-b" in r.message
         ]
         assert warnings_about_b == [], (
-            f"Sibling-skill reference should resolve, but got: "
-            f"{[w.message for w in warnings_about_b]}"
+            f"Sibling-skill reference should resolve, but got: {[w.message for w in warnings_about_b]}"
         )
 
     def test_genuinely_broken_backtick_path_still_flagged(self, tmp_path: Path) -> None:
@@ -131,13 +129,9 @@ class TestIssue30SiblingSkillBacktickResolution:
         )
 
         # The non-existent path SHOULD warn
-        nonexistent_warnings = [
-            r for r in report.results
-            if "nonexistent" in r.message
-        ]
+        nonexistent_warnings = [r for r in report.results if "nonexistent" in r.message]
         assert nonexistent_warnings, (
-            "Genuinely-broken backtick path must still emit a "
-            "WARNING/MINOR — the fix only added new resolution paths"
+            "Genuinely-broken backtick path must still emit a WARNING/MINOR — the fix only added new resolution paths"
         )
 
 
@@ -200,9 +194,7 @@ class TestIssue31BrowserOrphanCleanup:
         # Immediately re-snapshot and cleanup — no new processes should
         # have appeared in the microsecond between the two calls.
         killed = _cleanup_browser_orphans(baseline)
-        assert killed == 0, (
-            f"Expected no kills (nothing new since baseline); got {killed}"
-        )
+        assert killed == 0, f"Expected no kills (nothing new since baseline); got {killed}"
 
 
 # =============================================================================
@@ -217,9 +209,7 @@ class TestSpeedXdistIsolation:
 
     def test_test_cpv_lint_engine_uses_patch_object_not_patch_dict(self) -> None:
         """The flaky test now uses ``patch.object(cpv_lint_engine, "_DISPATCH", …)``."""
-        test_file = (
-            Path(__file__).parent / "test_cpv_lint_engine.py"
-        )
+        test_file = Path(__file__).parent / "test_cpv_lint_engine.py"
         body = test_file.read_text()
         # The test should patch via .object on the module, not .dict on the import
         target_block_idx = body.find("def test_language_subset_filter")
@@ -243,23 +233,15 @@ class TestBatchPlannerLoweredThreshold:
     def test_default_shard_size_is_15(self) -> None:
         from cpv_batch_planner import DEFAULT_SHARD_SIZE
 
-        assert DEFAULT_SHARD_SIZE == 15, (
-            f"v2.98.0 lowered DEFAULT_SHARD_SIZE to 15 — got {DEFAULT_SHARD_SIZE}"
-        )
+        assert DEFAULT_SHARD_SIZE == 15, f"v2.98.0 lowered DEFAULT_SHARD_SIZE to 15 — got {DEFAULT_SHARD_SIZE}"
 
     def test_plugin_fixer_md_documents_15_25_ceiling(self) -> None:
         """The plugin-fixer routing-table must reflect the lowered ceilings."""
-        pf_md = (
-            Path(__file__).parent.parent / "agents" / "plugin-fixer.md"
-        )
+        pf_md = Path(__file__).parent.parent / "agents" / "plugin-fixer.md"
         body = pf_md.read_text()
         # Must NOT still say 30-40 / 100-150 as the active numbers
-        assert "**15-25**" in body, (
-            "plugin-fixer.md must document the new bare-opus ceiling 15-25"
-        )
-        assert "**50-75**" in body, (
-            "plugin-fixer.md must document the new opus[1m] ceiling 50-75"
-        )
+        assert "**15-25**" in body, "plugin-fixer.md must document the new bare-opus ceiling 15-25"
+        assert "**50-75**" in body, "plugin-fixer.md must document the new opus[1m] ceiling 50-75"
 
 
 # =============================================================================
@@ -273,11 +255,7 @@ class TestAutoBatchDispatchInMenuTree:
 
     def test_menu_tree_section_3_2_1_auto_dispatches(self) -> None:
         """§3.2.1 'Fix plugin findings' must call out the auto-batch flow."""
-        mt = (
-            Path(__file__).parent.parent
-            / "skills" / "cpv-main-menu-skill"
-            / "references" / "menu-tree.md"
-        )
+        mt = Path(__file__).parent.parent / "skills" / "cpv-main-menu-skill" / "references" / "menu-tree.md"
         body = mt.read_text()
         # Find §3.2.1's body
         section_start = body.find("#### 3.2.1 Fix plugin findings")
@@ -288,21 +266,13 @@ class TestAutoBatchDispatchInMenuTree:
         assert "AUTO-DISPATCH" in section_body.upper() or "auto-dispatch" in section_body.lower(), (
             "§3.2.1 must mention auto-dispatch of the batch protocol"
         )
-        assert "cpv_batch_planner" in section_body, (
-            "§3.2.1 must reference the batch planner script"
-        )
-        assert "cpv_batch_aggregator" in section_body, (
-            "§3.2.1 must reference the aggregator script"
-        )
+        assert "cpv_batch_planner" in section_body, "§3.2.1 must reference the batch planner script"
+        assert "cpv_batch_aggregator" in section_body, "§3.2.1 must reference the aggregator script"
 
     def test_menu_tree_section_3_5_1_inherits_auto_dispatch(self) -> None:
         """§3.5.1 'Upgrade to current pipeline standard' must also
         auto-dispatch when the fixer surfaces [BATCH_REQUIRED]."""
-        mt = (
-            Path(__file__).parent.parent
-            / "skills" / "cpv-main-menu-skill"
-            / "references" / "menu-tree.md"
-        )
+        mt = Path(__file__).parent.parent / "skills" / "cpv-main-menu-skill" / "references" / "menu-tree.md"
         body = mt.read_text()
         section_start = body.find("#### 3.5.1 Upgrade")
         assert section_start != -1
@@ -317,37 +287,23 @@ class TestAutoBatchDispatchInMenuTree:
         """plugin-fixer.md routing-table situation 3 must require the
         ``plugin-root:`` token in the [BATCH_REQUIRED] line so the
         orchestrator can auto-dispatch without re-running validate."""
-        pf_md = (
-            Path(__file__).parent.parent / "agents" / "plugin-fixer.md"
-        )
+        pf_md = Path(__file__).parent.parent / "agents" / "plugin-fixer.md"
         body = pf_md.read_text()
         # Find the routing-table-3 row
         assert "BATCH_REQUIRED" in body
         # The new format should require plugin-root + triage report
-        assert "plugin-root:" in body, (
-            "plugin-fixer.md must require plugin-root: in BATCH_REQUIRED line"
-        )
-        assert "Triage report:" in body or "triage-report" in body, (
-            "plugin-fixer.md must require a triage report path"
-        )
+        assert "plugin-root:" in body, "plugin-fixer.md must require plugin-root: in BATCH_REQUIRED line"
+        assert "Triage report:" in body or "triage-report" in body, "plugin-fixer.md must require a triage report path"
 
     def test_cpv_doctor_agent_emits_batch_dispatch_tokens(self) -> None:
         """cpv-doctor-agent's big-plugin handoff must surface plugin-root
         and safe-ceiling tokens so the orchestrator can plan without
         re-running the validator."""
-        agent_md = (
-            Path(__file__).parent.parent / "agents" / "cpv-doctor-agent.md"
-        )
+        agent_md = Path(__file__).parent.parent / "agents" / "cpv-doctor-agent.md"
         body = agent_md.read_text()
-        assert "recommend-batch-fix" in body, (
-            "cpv-doctor-agent must use the recommend-batch-fix token"
-        )
-        assert "safe-ceiling=" in body, (
-            "cpv-doctor-agent must include safe-ceiling= in its output"
-        )
-        assert "plugin-root=" in body, (
-            "cpv-doctor-agent must include plugin-root= so orchestrator auto-dispatches"
-        )
+        assert "recommend-batch-fix" in body, "cpv-doctor-agent must use the recommend-batch-fix token"
+        assert "safe-ceiling=" in body, "cpv-doctor-agent must include safe-ceiling= in its output"
+        assert "plugin-root=" in body, "cpv-doctor-agent must include plugin-root= so orchestrator auto-dispatches"
 
 
 # =============================================================================
@@ -363,23 +319,18 @@ class TestGenPublishPyTemplateHasBrowserCleanup:
         from generate_plugin_repo import PluginParams, gen_publish_py
 
         params = PluginParams(
-            name="t", version="0.1.0", description="t",
-            author="t", author_email="t@t",
+            name="t",
+            version="0.1.0",
+            description="t",
+            author="t",
+            author_email="t@t",
         )
         src = gen_publish_py(params)
 
-        assert "_BROWSER_ORPHAN_SIGNATURES" in src, (
-            "Template missing browser-orphan signatures"
-        )
-        assert "_snapshot_browser_pids" in src, (
-            "Template missing snapshot helper"
-        )
-        assert "_cleanup_browser_orphans" in src, (
-            "Template missing cleanup helper"
-        )
-        assert "baseline_browser_pids" in src, (
-            "Template missing baseline capture in stage_tests"
-        )
+        assert "_BROWSER_ORPHAN_SIGNATURES" in src, "Template missing browser-orphan signatures"
+        assert "_snapshot_browser_pids" in src, "Template missing snapshot helper"
+        assert "_cleanup_browser_orphans" in src, "Template missing cleanup helper"
+        assert "baseline_browser_pids" in src, "Template missing baseline capture in stage_tests"
 
     def test_template_does_not_skip_tests(self) -> None:
         """v2.98.0 explicitly rejected the cpv.gates_to_skip proposal —
@@ -388,8 +339,11 @@ class TestGenPublishPyTemplateHasBrowserCleanup:
         from generate_plugin_repo import PluginParams, gen_publish_py
 
         params = PluginParams(
-            name="t", version="0.1.0", description="t",
-            author="t", author_email="t@t",
+            name="t",
+            version="0.1.0",
+            description="t",
+            author="t",
+            author_email="t@t",
         )
         src = gen_publish_py(params)
 
@@ -400,6 +354,4 @@ class TestGenPublishPyTemplateHasBrowserCleanup:
             "_gate_is_skipped",
         ]
         for token in forbidden:
-            assert token not in src, (
-                f"Template MUST NOT contain {token!r} — would violate iron rule"
-            )
+            assert token not in src, f"Template MUST NOT contain {token!r} — would violate iron rule"

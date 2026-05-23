@@ -51,19 +51,19 @@ MAIN_MENU_TREE = SKILLS_DIR / "cpv-main-menu-skill" / "references" / "menu-tree.
 # pinned absent by tests/test_consolidation_v211.py.
 V290_NEW_SKILLS = [
     "add-component-to-plugin",  # ← cpv-add-component
-    "add-dependency",            # ← cpv-add-dependency
-    "add-hook",                  # ← cpv-create-hook
-    "bump-version",              # ← cpv-bump-version
-    "deterministic-codemod",     # ← cpv-codemod
-    "link-plugin-marketplace",   # ← cpv-link-plugin
-    "pack-components",           # ← cpv-pack-components
-    "refresh-readme",            # ← cpv-refresh-readme
-    "register-mcp",              # ← cpv-create-mcp
-    "scaffold-agent",            # ← cpv-create-agent
-    "scaffold-command",          # ← cpv-create-command
-    "scaffold-skill",            # ← cpv-create-skill
-    "show-version",              # ← cpv-version
-    "strip-dev-submodules",      # ← cpv-strip-dev-parts
+    "add-dependency",  # ← cpv-add-dependency
+    "add-hook",  # ← cpv-create-hook
+    "bump-version",  # ← cpv-bump-version
+    "deterministic-codemod",  # ← cpv-codemod
+    "link-plugin-marketplace",  # ← cpv-link-plugin
+    "pack-components",  # ← cpv-pack-components
+    "refresh-readme",  # ← cpv-refresh-readme
+    "register-mcp",  # ← cpv-create-mcp
+    "scaffold-agent",  # ← cpv-create-agent
+    "scaffold-command",  # ← cpv-create-command
+    "scaffold-skill",  # ← cpv-create-skill
+    "show-version",  # ← cpv-version
+    "strip-dev-submodules",  # ← cpv-strip-dev-parts
 ]
 
 # Agents whose ## First Contact section was stripped in v2.90.0. They now
@@ -97,10 +97,10 @@ V290_CANONICAL_CATEGORIES = [
 # either been merged into one of the 8 canonical categories or pushed to
 # sub-leaves.
 V290_FORBIDDEN_TOP_LEVEL_LABELS = [
-    "Validate from GitHub",        # → sub-leaf of Validate
-    "GitHub setup",                # → folded into Publish & Migrate
-    "Deep semantic analysis",      # → leaf of Diagnose
-    "Doctor (deep diagnostic)",    # → folded into Diagnose
+    "Validate from GitHub",  # → sub-leaf of Validate
+    "GitHub setup",  # → folded into Publish & Migrate
+    "Deep semantic analysis",  # → leaf of Diagnose
+    "Doctor (deep diagnostic)",  # → folded into Diagnose
 ]
 
 
@@ -175,9 +175,7 @@ def test_only_one_slash_command_remains() -> None:
         f"commands/ must contain exactly {sorted(allowed)} (TRDD-c50531c2 + TRDD-71e68ab5 + TRDD-9dd64dbf + TRDD-3dcbb37c). "
         f"Unexpected: {sorted(unexpected)}. Missing: {sorted(missing)}."
     )
-    assert MAIN_MENU_CMD.is_file(), (
-        f"cpv-main-menu.md MUST exist at {MAIN_MENU_CMD}. Found: {sorted(actual)}"
-    )
+    assert MAIN_MENU_CMD.is_file(), f"cpv-main-menu.md MUST exist at {MAIN_MENU_CMD}. Found: {sorted(actual)}"
 
 
 # ---------------------------------------------------------------------------
@@ -232,9 +230,7 @@ def test_5_agents_have_no_first_contact_menu(agent_filename: str) -> None:
     agent_md = AGENTS_DIR / agent_filename
     assert agent_md.is_file(), f"agent file missing: {agent_md}"
     body = agent_md.read_text(encoding="utf-8")
-    has_first_contact_section = any(
-        line.startswith("## First Contact") for line in body.splitlines()
-    )
+    has_first_contact_section = any(line.startswith("## First Contact") for line in body.splitlines())
     assert not has_first_contact_section, (
         f"{agent_filename} contains a `## First Contact` section. Per "
         f"TRDD-c50531c2 (v2.90.0 menu unification) this section MUST be "

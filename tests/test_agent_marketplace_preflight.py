@@ -141,8 +141,7 @@ class TestFixValidationSkillIndexes:
         # actually drill down to).
         combined = mkt_index + plugin_index
         assert "marketplace-upstream-drift.md" in combined, (
-            "fix-validation references/ must cite marketplace-upstream-drift.md "
-            "in at least one error index."
+            "fix-validation references/ must cite marketplace-upstream-drift.md in at least one error index."
         )
         assert "RC-MKPL-NAME-MISMATCH" in combined, (
             "RC-MKPL-NAME-MISMATCH must remain documented in fix-validation references."
@@ -224,17 +223,14 @@ class TestMainMenuV290TopLevelCategories:
         text = (REPO_ROOT / "skills/cpv-main-menu-skill/references/menu-tree.md").read_text(encoding="utf-8")
         # §3.7 is now 'Publish & Migrate sub-menu' per v2.90.1 polish.
         assert "### 3.7 Publish & Migrate sub-menu" in text, (
-            "§3.7 was repurposed in v2.90.1 — it is the 'Publish & Migrate' "
-            "sub-menu (was 'GitHub setup' in v2.90.0)."
+            "§3.7 was repurposed in v2.90.1 — it is the 'Publish & Migrate' sub-menu (was 'GitHub setup' in v2.90.0)."
         )
         # Semantic analysis is now a leaf under Diagnose, not its own section.
         assert "#### 3.4.8" in text and "semantic" in text.lower(), (
             "Deep semantic analysis was folded into §3.4 Diagnose as §3.4.8 in v2.90.1."
         )
         # §3.8 is now Manage (was Deep semantic in v2.90.0).
-        assert "### 3.8 Manage" in text, (
-            "§3.8 was repurposed in v2.90.1 — it is now the 'Manage' sub-menu."
-        )
+        assert "### 3.8 Manage" in text, "§3.8 was repurposed in v2.90.1 — it is now the 'Manage' sub-menu."
 
 
 class TestPublishGate0RejectsBypass:

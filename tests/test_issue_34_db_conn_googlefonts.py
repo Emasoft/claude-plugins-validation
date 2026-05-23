@@ -36,10 +36,7 @@ def _scan_for_db_conn(text: str) -> list[str]:
     """Return the matched substrings (if any) from the DB-conn pattern."""
     from cpv_validation_common import SECRET_PATTERNS
 
-    db_patterns = [
-        p for p, label in SECRET_PATTERNS
-        if "Database Connection String" in label
-    ]
+    db_patterns = [p for p, label in SECRET_PATTERNS if "Database Connection String" in label]
     assert db_patterns, "DB-conn pattern must exist in SECRET_PATTERNS"
     matches: list[str] = []
     for p in db_patterns:
@@ -59,10 +56,7 @@ class TestNoFalsePositiveOnGoogleFonts:
 
     def test_google_fonts_multiple_families_no_match(self) -> None:
         """Multiple `family=X:wght@N` segments — none should match."""
-        text = (
-            "https://fonts.googleapis.com/css2?"
-            "family=Inter:wght@400;500&family=Playfair+Display:wght@400;700"
-        )
+        text = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Playfair+Display:wght@400;700"
         assert _scan_for_db_conn(text) == []
 
 

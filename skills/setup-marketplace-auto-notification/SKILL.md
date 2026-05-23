@@ -10,7 +10,6 @@ tags:
   - ci-cd
   - github-actions
   - release
-allowed-tools: Read, Write, Edit, Bash(gh:*,git:*,jq:*,yq:*), Glob, Grep, AskUserQuestion
 user-invocable: false
 ---
 

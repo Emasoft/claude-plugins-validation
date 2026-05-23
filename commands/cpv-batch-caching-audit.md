@@ -1,7 +1,6 @@
 ---
 name: cpv-batch-caching-audit
 description: Fan out cache-optimizer-agent across every plugin in a marketplace, a list of plugins, or a single plugin. Accepts local paths and GitHub URLs. One cache-optimizer-agent per plugin running in batch_audit mode (read-only — Phase 1 of the cache pipeline). Detects the six prompt-cache-invalidation patterns (CA-01..CA-06) per plugin without applying fixes. Parallel main-session dispatch (default 8, cap 16).
-allowed-tools: Read, Bash, Glob, Grep
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 user-invocable: true
 ---

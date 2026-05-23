@@ -2,7 +2,6 @@
 name: the-skills-menu-create
 description: "Convert any Claude Code plugin from static agent skill assignment to the-skills-menu method. Use when migrating a plugin so its agents load operational skills dynamically via the Skill() tool instead of preloading static lists. Trigger with /the-skills-menu-create or when the user asks to migrate / standardize / decouple a plugin's skill discovery. Used via the-skills-menu (TRDD-478d9687)."
 user-invocable: true
-allowed-tools: Read, Edit, Write, Bash(git:*,gh:*,uv:*,python3:*,mkdir:*,ls:*,find:*,cp:*,mv:*,grep:*,cat:*), Glob, Grep
 ---
 
 # the-skills-menu-create — universal skill-discovery migrator

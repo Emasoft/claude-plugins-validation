@@ -20,12 +20,12 @@ from validate_cache import (  # noqa: E402
     _DYNAMIC_PLACEHOLDER,
     _DYNAMIC_SHELL_CMD,
     _strip_fences_for_dynamic_check,
+    scan_component_for_model_override,
     scan_hook_for_fork_unsafe,
     scan_hook_for_prefix_mutation,
     scan_hook_for_tool_mutation,
     scan_hook_for_unbounded_output,
     scan_plugin_for_cache,
-    scan_skill_for_model_override,
 )
 
 # -----------------------------------------------------------------------------
@@ -34,11 +34,17 @@ from validate_cache import (  # noqa: E402
 
 
 class TestSchemaRegistration:
-    """All 6 CA rules must be registered in the central schema registry."""
+    """All 7 CA rules must be registered in the central schema registry."""
 
-    def test_all_six_ca_rules_registered(self) -> None:
+    def test_all_seven_ca_rules_registered(self) -> None:
         ca_ids = {r.rule_id for r in RULE_REGISTRY if r.rule_id.startswith("CA-")}
-        assert ca_ids == {"CA-01", "CA-02", "CA-03", "CA-04", "CA-05", "CA-06"}
+        assert ca_ids == {"CA-01", "CA-02", "CA-03", "CA-04", "CA-05", "CA-06", "CA-07"}
+
+    def test_all_ca_rules_are_warning_severity(self) -> None:
+        """v2.102.0: every cache rule is WARNING — non-blocking, advisory only."""
+        for rule in RULE_REGISTRY:
+            if rule.rule_id.startswith("CA-"):
+                assert rule.severity == "WARNING", f"{rule.rule_id} must be WARNING, got {rule.severity}"
 
     def test_ca_rules_have_descriptions(self) -> None:
         for rule in RULE_REGISTRY:
@@ -84,7 +90,7 @@ class TestCA01:
         report = scan_plugin_for_cache(plugin)
         ca01 = [r for r in report.results if "CA-01" in r.message]
         assert ca01, "CA-01 should fire for {{TIMESTAMP}} in CLAUDE.md"
-        assert all(r.level == "MAJOR" for r in ca01)
+        assert all(r.level == "WARNING" for r in ca01)
 
     def test_shell_subst_in_agent_system_prompt_fires(self, tmp_path: Path) -> None:
         plugin = _make_plugin(tmp_path)
@@ -147,7 +153,7 @@ class TestCA02:
         scan_hook_for_prefix_mutation(script, "SessionStart", report, plugin)
         ca02 = [r for r in report.results if "CA-02" in r.message]
         assert ca02, "CA-02 must fire when SessionStart writes to CLAUDE.md"
-        assert all(r.level == "MAJOR" for r in ca02)
+        assert all(r.level == "WARNING" for r in ca02)
 
     def test_user_prompt_submit_hook_appending_settings_fires(self, tmp_path: Path) -> None:
         plugin = _make_plugin(tmp_path)
@@ -228,7 +234,7 @@ class TestCA03:
 
 
 # -----------------------------------------------------------------------------
-# CA-04 — skills with `model:` frontmatter
+# CA-04 — `model:` frontmatter on ANY component (agents, commands, skills)
 # -----------------------------------------------------------------------------
 
 
@@ -242,7 +248,7 @@ class TestCA04:
         report = scan_plugin_for_cache(plugin)
         ca04 = [r for r in report.results if "CA-04" in r.message]
         assert ca04
-        assert all(r.level == "MINOR" for r in ca04)
+        assert all(r.level == "WARNING" for r in ca04)
         assert "opus" in ca04[0].message
 
     def test_skill_without_model_field_does_not_fire(self, tmp_path: Path) -> None:
@@ -255,26 +261,50 @@ class TestCA04:
         ca04 = [r for r in report.results if "CA-04" in r.message]
         assert ca04 == []
 
-    def test_agent_with_model_field_does_not_fire_ca04(self, tmp_path: Path) -> None:
-        """Agents have their own conversation — model: there is fine."""
+    def test_agent_with_model_field_fires_ca04(self, tmp_path: Path) -> None:
+        """v2.102.0: a `model:` pin on an agent fragments the cache too — CA-04 fires (WARNING)."""
         plugin = _make_plugin(tmp_path)
         (plugin / "agents").mkdir()
         (plugin / "agents" / "writer.md").write_text("---\nname: writer\ndescription: x\nmodel: opus\n---\n\nbody\n")
-        # scan_skill_for_model_override is only called on SKILL.md files; agent
-        # frontmatter is not in scope. The full plugin scan must NOT raise CA-04.
         report = scan_plugin_for_cache(plugin)
         ca04 = [r for r in report.results if "CA-04" in r.message]
-        assert ca04 == []
+        assert ca04, "CA-04 must fire for a model: pin on an agent (v2.102.0 broadening)"
+        assert all(r.level == "WARNING" for r in ca04)
+        assert "agent" in ca04[0].message
+
+    def test_command_with_model_field_fires_ca04(self, tmp_path: Path) -> None:
+        """A `model:` pin on a command fires CA-04 (WARNING) too."""
+        plugin = _make_plugin(tmp_path)
+        (plugin / "commands").mkdir()
+        (plugin / "commands" / "go.md").write_text("---\nname: go\ndescription: x\nmodel: sonnet\n---\n\nbody\n")
+        report = scan_plugin_for_cache(plugin)
+        ca04 = [r for r in report.results if "CA-04" in r.message]
+        assert ca04
+        assert all(r.level == "WARNING" for r in ca04)
+        assert "command" in ca04[0].message
+
+    def test_model_inherit_is_exempt(self, tmp_path: Path) -> None:
+        """`model: inherit` uses the session model — no switch, so CA-04 does NOT fire."""
+        plugin = _make_plugin(tmp_path)
+        (plugin / "skills" / "inherit-skill").mkdir(parents=True)
+        (plugin / "skills" / "inherit-skill" / "SKILL.md").write_text(
+            "---\nname: inherit-skill\ndescription: x\nmodel: inherit\n---\n\nbody\n"
+        )
+        (plugin / "agents").mkdir()
+        (plugin / "agents" / "a.md").write_text("---\nname: a\ndescription: x\nmodel: inherit\n---\n\nbody\n")
+        report = scan_plugin_for_cache(plugin)
+        ca04 = [r for r in report.results if "CA-04" in r.message]
+        assert ca04 == [], f"model: inherit must be exempt from CA-04: {ca04}"
 
     def test_skill_model_in_body_does_not_fire(self, tmp_path: Path) -> None:
-        """A skill body that mentions models in prose must not trigger."""
+        """A skill body that mentions models in prose must not trigger (frontmatter-only)."""
         plugin = _make_plugin(tmp_path)
         (plugin / "skills" / "doc-skill").mkdir(parents=True)
         (plugin / "skills" / "doc-skill" / "SKILL.md").write_text(
             "---\nname: doc-skill\ndescription: x\n---\n\nUse the model: opus when you need long context.\n"
         )
         report = ValidationReport()
-        scan_skill_for_model_override(plugin / "skills" / "doc-skill" / "SKILL.md", report, plugin)
+        scan_component_for_model_override(plugin / "skills" / "doc-skill" / "SKILL.md", report, plugin, "skill")
         ca04 = [r for r in report.results if "CA-04" in r.message]
         assert ca04 == []
 
@@ -368,6 +398,62 @@ class TestCA06:
         scan_hook_for_fork_unsafe(script, "UserPromptSubmit", report, plugin)
         ca06 = [r for r in report.results if "CA-06" in r.message]
         assert ca06 == []
+
+
+# -----------------------------------------------------------------------------
+# CA-07 — `context: fork` / `context: branch` re-primes the cache from cold
+# -----------------------------------------------------------------------------
+
+
+class TestCA07:
+    def test_skill_context_fork_fires(self, tmp_path: Path) -> None:
+        plugin = _make_plugin(tmp_path)
+        (plugin / "skills" / "forky").mkdir(parents=True)
+        (plugin / "skills" / "forky" / "SKILL.md").write_text(
+            "---\nname: forky\ndescription: x\ncontext: fork\n---\n\nbody\n"
+        )
+        report = scan_plugin_for_cache(plugin)
+        ca07 = [r for r in report.results if "CA-07" in r.message]
+        assert ca07, "CA-07 must fire for context: fork on a skill"
+        assert all(r.level == "WARNING" for r in ca07)
+        assert "fork" in ca07[0].message
+
+    def test_context_branch_synonym_fires(self, tmp_path: Path) -> None:
+        """`context: branch` is a documented synonym for fork — also flagged."""
+        plugin = _make_plugin(tmp_path)
+        (plugin / "skills" / "branchy").mkdir(parents=True)
+        (plugin / "skills" / "branchy" / "SKILL.md").write_text(
+            "---\nname: branchy\ndescription: x\ncontext: branch\n---\n\nbody\n"
+        )
+        report = scan_plugin_for_cache(plugin)
+        ca07 = [r for r in report.results if "CA-07" in r.message]
+        assert ca07
+        assert "branch" in ca07[0].message
+
+    def test_command_context_fork_fires(self, tmp_path: Path) -> None:
+        plugin = _make_plugin(tmp_path)
+        (plugin / "commands").mkdir()
+        (plugin / "commands" / "go.md").write_text("---\nname: go\ndescription: x\ncontext: fork\n---\n\nbody\n")
+        report = scan_plugin_for_cache(plugin)
+        ca07 = [r for r in report.results if "CA-07" in r.message and "command" in r.message]
+        assert ca07
+
+    def test_no_context_field_does_not_fire(self, tmp_path: Path) -> None:
+        plugin = _make_plugin(tmp_path)
+        (plugin / "skills" / "plain").mkdir(parents=True)
+        (plugin / "skills" / "plain" / "SKILL.md").write_text("---\nname: plain\ndescription: x\n---\n\nbody\n")
+        report = scan_plugin_for_cache(plugin)
+        assert [r for r in report.results if "CA-07" in r.message] == []
+
+    def test_other_context_value_does_not_fire(self, tmp_path: Path) -> None:
+        """Only fork/branch are flagged; any other context: value is exempt."""
+        plugin = _make_plugin(tmp_path)
+        (plugin / "skills" / "inh").mkdir(parents=True)
+        (plugin / "skills" / "inh" / "SKILL.md").write_text(
+            "---\nname: inh\ndescription: x\ncontext: shared\n---\n\nbody\n"
+        )
+        report = scan_plugin_for_cache(plugin)
+        assert [r for r in report.results if "CA-07" in r.message] == []
 
 
 # -----------------------------------------------------------------------------

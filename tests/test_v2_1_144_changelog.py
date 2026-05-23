@@ -80,8 +80,7 @@ class TestPluginsEnabledViaProjectScope:
 
         # The enabledPlugins key is documented and accepted at every scope.
         assert "enabledPlugins" in KNOWN_SETTINGS_KEYS, (
-            "enabledPlugins must remain in the allow-list — v2.1.144 confirms "
-            "project-scope plugin enable is supported"
+            "enabledPlugins must remain in the allow-list — v2.1.144 confirms project-scope plugin enable is supported"
         )
 
     def test_project_scope_settings_with_enabled_plugins_validates(self, tmp_path: Path) -> None:
@@ -106,14 +105,9 @@ class TestPluginsEnabledViaProjectScope:
         report = ValidationReport()
         validate_settings_local_json(settings_path, report)
         # The settings file is well-formed — no CRITICAL just from the key.
-        critical_msgs = [
-            r.message
-            for r in report.results
-            if r.level == "CRITICAL" and "enabledPlugins" in r.message
-        ]
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL" and "enabledPlugins" in r.message]
         assert not critical_msgs, (
-            f"enabledPlugins key in project settings should not produce CRITICAL, "
-            f"got: {critical_msgs}"
+            f"enabledPlugins key in project settings should not produce CRITICAL, got: {critical_msgs}"
         )
 
 
@@ -126,9 +120,7 @@ class TestSkillsWithNonMarkdownFiles:
     not be flagged as suspicious by CPV.
     """
 
-    def test_skill_with_python_helper_in_references_validates(
-        self, tmp_path: Path
-    ) -> None:
+    def test_skill_with_python_helper_in_references_validates(self, tmp_path: Path) -> None:
         """A skill with a ``references/helper.py`` does not produce CRITICAL
         findings for the .py file being present."""
         from validate_skill_comprehensive import validate_skill
@@ -148,15 +140,8 @@ class TestSkillsWithNonMarkdownFiles:
         )
 
         report = validate_skill(skill_dir)
-        critical_msgs = [
-            r.message
-            for r in report.results
-            if r.level == "CRITICAL" and "helper.py" in r.message
-        ]
-        assert not critical_msgs, (
-            f"Non-.md file under references/ should not produce CRITICAL, "
-            f"got: {critical_msgs}"
-        )
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL" and "helper.py" in r.message]
+        assert not critical_msgs, f"Non-.md file under references/ should not produce CRITICAL, got: {critical_msgs}"
 
     def test_skill_with_image_asset_validates(self, tmp_path: Path) -> None:
         """A skill with a binary asset under ``assets/`` validates cleanly."""
@@ -173,20 +158,11 @@ class TestSkillsWithNonMarkdownFiles:
         )
         (skill_dir / "assets").mkdir()
         # Fake PNG signature followed by minimal content
-        (skill_dir / "assets" / "icon.png").write_bytes(
-            b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
-        )
+        (skill_dir / "assets" / "icon.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
 
         report = validate_skill(skill_dir)
-        critical_msgs = [
-            r.message
-            for r in report.results
-            if r.level == "CRITICAL" and "icon.png" in r.message
-        ]
-        assert not critical_msgs, (
-            f"Binary asset under assets/ should not produce CRITICAL, "
-            f"got: {critical_msgs}"
-        )
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL" and "icon.png" in r.message]
+        assert not critical_msgs, f"Binary asset under assets/ should not produce CRITICAL, got: {critical_msgs}"
 
 
 class TestPreviouslyHandledEnvVars:

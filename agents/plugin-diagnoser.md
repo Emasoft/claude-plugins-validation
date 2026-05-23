@@ -8,7 +8,6 @@ description: |
   sync probe. Returns a structured diagnosis report and prints a
   follow-up menu so the user can pick: full upgrade / CRITICAL only /
   register marketplace / sync cache / end.
-model: opus
 maxTurns: 80
 skills:
   - the-skills-menu

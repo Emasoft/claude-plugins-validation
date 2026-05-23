@@ -14,21 +14,24 @@ pins only the structural invariants that hold regardless of whether the
 skill has any active loader:
 
 - The skill file exists at the canonical path.
-- Its frontmatter declares ``name``, ``context: fork``, ``model: haiku``,
-  ``agent: general-purpose``, ``user-invocable: false``.
-- Its ``allowed-tools`` are minimal (Bash + Read, no mutation tools).
+- Its frontmatter declares ``name``, ``context: fork``,
+  ``agent: general-purpose``, ``user-invocable: false`` and pins NO concrete
+  ``model:`` (it inherits the session model — v2.102.0 cache-warm policy).
+- It declares NO ``allowed-tools`` field. Per the fleet-wide "all tools
+  allowed" policy (every CPV skill and agent may call all tools, no limit),
+  an absent field grants the full tool surface; an empty ``[]`` would mean
+  the opposite (no tools) and a non-empty list would re-introduce a limit.
 
 The "loaders mentioned in description" check (``LOADER_COMMANDS``) is
 DROPPED in v2.90.0 because the four named commands no longer exist —
 asserting their names in the description is now misleading.
 
-The fork-skill exists because ``model: haiku`` on a slash-command or skill
-frontmatter only takes effect "for the rest of the current turn" while
-keeping the inherited conversation history (per the Claude Code skills
-docs). A multi-turn orchestrator on opus with a 1M-token context cannot
-safely degrade mid-turn to haiku — the override silently fails.
-``context: fork`` creates a fresh subagent with no inherited history, so
-``model: haiku`` actually takes effect for the render step alone.
+The fork-skill exists for context isolation: ``context: fork`` creates a
+fresh subagent with no inherited conversation history, so a long parent
+session never bloats the menu-rendering turn. As of v2.102.0 it pins NO
+``model:`` — a ``model:`` frontmatter fragments the prompt cache (CA-04),
+so the render inherits the session model instead. (Pre-v2.102.0 the skill
+pinned ``model: haiku``; that pin was removed for cache-warmth.)
 """
 
 from __future__ import annotations
@@ -71,8 +74,8 @@ def test_cpv_format_menu_skill_file_exists() -> None:
     assert SKILL_PATH.is_file(), (
         f"cpv-format-menu skill is missing at {SKILL_PATH}. Per "
         f"TRDD-3ce2f864 §'New skill' it must exist with frontmatter "
-        f"declaring `context: fork`, `model: haiku`, "
-        f"`agent: general-purpose`, and `user-invocable: false`."
+        f"declaring `context: fork`, `agent: general-purpose`, and "
+        f"`user-invocable: false` (no concrete `model:` since v2.102.0)."
     )
 
 
@@ -96,31 +99,34 @@ def test_cpv_format_menu_context_is_fork() -> None:
     """Frontmatter MUST declare ``context: fork``.
 
     Without ``context: fork`` the skill inherits the parent session's
-    conversation history. When the parent is opus with a 1M-token context,
-    the ``model: haiku`` override silently degrades — the exact bug
-    TRDD-3ce2f864 fixes.
+    conversation history, so a long parent session bloats the render turn.
+    ``context: fork`` keeps the render isolated from parent history.
     """
     fm = _load_frontmatter(SKILL_PATH)
     assert fm.get("context") == "fork", (
         f"cpv-format-menu skill must declare `context: fork`. Without it, "
-        f"the skill inherits parent conversation history and the haiku "
-        f"model override silently degrades. Current context: "
+        f"the skill inherits parent conversation history and a long parent "
+        f"session bloats the render turn. Current context: "
         f"{fm.get('context')!r}."
     )
 
 
-def test_cpv_format_menu_model_is_haiku() -> None:
-    """Frontmatter MUST declare ``model: haiku``.
+def test_cpv_format_menu_has_no_model_pin() -> None:
+    """Frontmatter MUST NOT pin a concrete ``model:`` (v2.102.0 cache-warm policy).
 
-    This is the actual model that runs the menu render step. Menu rendering
-    is bounded text manipulation — haiku is the cheapest tier that can do
-    it, and per TRDD-3ce2f864 it's the whole reason this skill exists.
+    Pre-v2.102.0 this skill declared ``model: haiku`` to render menus on the
+    cheapest tier. That pin was removed because a ``model:`` frontmatter forces
+    an in-line model switch that fragments the prompt cache (CPV's own CA-04
+    rule). The render now inherits the session model; ``context: fork`` still
+    isolates it from the parent's conversation history. ``model: inherit`` is
+    the only acceptable explicit value.
     """
     fm = _load_frontmatter(SKILL_PATH)
-    assert fm.get("model") == "haiku", (
-        f"cpv-format-menu skill must declare `model: haiku`. Per "
-        f"TRDD-3ce2f864 this is THE fork-skill that lets menu rendering "
-        f"actually run on haiku. Current model: {fm.get('model')!r}."
+    model = fm.get("model")
+    assert model is None or str(model).strip().lower() == "inherit", (
+        f"cpv-format-menu must NOT pin a concrete model (v2.102.0 — it used to be "
+        f"`model: haiku`, which fragments the cache per CA-04). Omit the field or use "
+        f"`model: inherit`. Current model: {model!r}."
     )
 
 
@@ -166,35 +172,26 @@ def test_cpv_format_menu_is_not_user_invocable() -> None:
 # that names dead commands would be misleading rather than helpful.
 
 
-def test_cpv_format_menu_allowed_tools_minimal() -> None:
-    """``allowed-tools`` MUST include Bash AND Read but nothing fancy.
+def test_cpv_format_menu_has_no_allowed_tools_field() -> None:
+    """``allowed-tools`` MUST be ABSENT — cpv-format-menu inherits all tools.
 
-    The skill body runs ``cat <spec_path>`` + ``python3 format_menu.py``
-    + emits stdout. Bash for the shell pipeline; Read as a fallback for
-    inspecting the spec file. Anything beyond that (Edit, Write, Glob,
-    Grep, Skill, Agent) would let a misuse leak — the fork is supposed
-    to be a single-pass renderer with zero side-effects.
+    Per the user's fleet-wide policy (every CPV skill and agent may call all
+    tools, no limit), this skill declares NO ``allowed-tools`` field, because an
+    absent field means "all tools allowed". Two regressions are pinned out:
+
+    - An empty ``allowed-tools: []`` would mean the OPPOSITE (no tools, chat-
+      only) — wrong here.
+    - A non-empty list would re-introduce the very restriction the policy
+      removed.
+
+    Either form is a regression against the policy, so this test asserts the
+    field's ABSENCE. (Historically this test enforced a Bash+Read-only
+    lockdown; that security-minimal stance was explicitly overridden by the
+    "all tools allowed in every CPV skill and agent" directive.)
     """
     fm = _load_frontmatter(SKILL_PATH)
-    tools = fm.get("allowed-tools", "")
-    # Tools can be a string or a list per the plugin spec; normalise.
-    if isinstance(tools, list):
-        tools_str = ", ".join(tools)
-    else:
-        tools_str = str(tools)
-    assert "Bash" in tools_str, (
-        f"cpv-format-menu skill must allow Bash (to run format_menu.py). "
-        f"Current allowed-tools: {tools_str!r}."
+    assert "allowed-tools" not in fm, (
+        f"cpv-format-menu must NOT declare an `allowed-tools` field — per the "
+        f"fleet-wide 'all tools allowed' policy, an absent field grants the "
+        f"full tool surface. Found allowed-tools: {fm.get('allowed-tools')!r}."
     )
-    assert "Read" in tools_str, (
-        f"cpv-format-menu skill must allow Read (to inspect the spec "
-        f"file as a fallback). Current allowed-tools: {tools_str!r}."
-    )
-    # Negative checks — the renderer must NOT be able to mutate files
-    # or escalate beyond a single render pass.
-    for forbidden in ("Edit", "Write", "Agent"):
-        assert forbidden not in tools_str, (
-            f"cpv-format-menu skill must NOT allow {forbidden}. It is a "
-            f"single-pass renderer with zero side-effects. Current "
-            f"allowed-tools: {tools_str!r}."
-        )

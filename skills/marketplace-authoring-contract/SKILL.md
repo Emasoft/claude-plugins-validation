@@ -10,7 +10,6 @@ tags:
   - marketplace
   - authoring
   - contract
-allowed-tools: Read, Write, Edit, Bash(uv:*,git:*,gh:*,jq:*,curl:*), Glob, Grep, AskUserQuestion
 user-invocable: false
 ---
 

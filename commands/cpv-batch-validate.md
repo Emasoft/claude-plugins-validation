@@ -1,7 +1,6 @@
 ---
 name: cpv-batch-validate
 description: Fan out plugin-validator agents across every plugin in a marketplace, a list of plugins, or a single plugin. Accepts local paths and GitHub URLs. One validator agent per plugin, dispatched in parallel from a single main-session message (default 8 at a time, cap 16). Returns one consolidated severity table covering every scanned plugin.
-allowed-tools: Read, Bash, Glob, Grep
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 user-invocable: true
 ---

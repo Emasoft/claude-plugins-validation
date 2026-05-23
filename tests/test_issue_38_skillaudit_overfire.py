@@ -45,11 +45,7 @@ def _rule_hits(content: str, file_path: str, rule_id: str) -> list[dict]:
     never reaches the publish gate. Tests assert against the actionable
     surface the user sees in ``cpv-remote-validate plugin --strict``.
     """
-    return [
-        f
-        for f in scan_content(content, file_path)
-        if f.get("ruleId") == rule_id and not f.get("suppressed")
-    ]
+    return [f for f in scan_content(content, file_path) if f.get("ruleId") == rule_id and not f.get("suppressed")]
 
 
 # ============================================================================
@@ -117,39 +113,29 @@ class TestShellExecFunctionConstructor:
     def test_addEventListener_function_keyword_no_fire(self):
         src = "document.addEventListener('click', function (ev) { alert(1); });"
         hits = _rule_hits(src, "scripts/widget.js", "SHELL_EXEC")
-        assert not hits, (
-            f"FP regression: addEventListener fn keyword fired SHELL_EXEC: {hits!r}"
-        )
+        assert not hits, f"FP regression: addEventListener fn keyword fired SHELL_EXEC: {hits!r}"
 
     def test_function_declaration_no_fire(self):
         src = "function helloWorld() { return 'hi'; }"
         hits = _rule_hits(src, "scripts/util.js", "SHELL_EXEC")
-        assert not hits, (
-            f"FP regression: function declaration fired SHELL_EXEC: {hits!r}"
-        )
+        assert not hits, f"FP regression: function declaration fired SHELL_EXEC: {hits!r}"
 
     def test_arrow_callback_with_fn_keyword_no_fire(self):
         src = "tryModule('foo', function (m) { return m.go(); });"
         hits = _rule_hits(src, "scripts/runtime.js", "SHELL_EXEC")
-        assert not hits, (
-            f"FP regression: function-callback fired SHELL_EXEC: {hits!r}"
-        )
+        assert not hits, f"FP regression: function-callback fired SHELL_EXEC: {hits!r}"
 
     def test_new_Function_constructor_still_fires(self):
         # Iron-rule preservation: real `new Function("...")` IS dangerous.
         src = 'const fn = new Function("alert(1)");'
         hits = _rule_hits(src, "scripts/danger.js", "SHELL_EXEC")
-        assert hits, (
-            "Iron-rule regression: new Function() constructor must still fire"
-        )
+        assert hits, "Iron-rule regression: new Function() constructor must still fire"
 
     def test_bare_Function_constructor_still_fires(self):
         # Function() without `new` is still the constructor (JS spec).
         src = 'const handler = Function("x", "return x * 2");'
         hits = _rule_hits(src, "scripts/danger.js", "SHELL_EXEC")
-        assert hits, (
-            "Iron-rule regression: bare Function() constructor must still fire"
-        )
+        assert hits, "Iron-rule regression: bare Function() constructor must still fire"
 
 
 # ============================================================================
@@ -241,10 +227,7 @@ class TestIndirectPromptInjectInDocs:
 
     def test_ignore_previous_in_references_suppressed(self):
         hits = _rule_hits(self.INJECTION, "references/safety-model.md", "INDIRECT_PROMPT_INJECT")
-        assert not hits, (
-            "Issue #38 regression: prose-mentioning-injection in references/ "
-            f"must be suppressed: {hits!r}"
-        )
+        assert not hits, f"Issue #38 regression: prose-mentioning-injection in references/ must be suppressed: {hits!r}"
 
     def test_ignore_previous_in_readme_suppressed(self):
         hits = _rule_hits(self.INJECTION, "README.md", "INDIRECT_PROMPT_INJECT")

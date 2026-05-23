@@ -2,7 +2,6 @@
 name: cpv-batch-validate-and-fix
 description: "Same-turn parallel validate-and-fix across a marketplace / list / single plugin. Each plugin-fixer reads every source file ONCE — scans + verifies false positives (via v2.100.x AST/JSON/markdown classifier + llm-externalizer with file-range syntax) + fixes inline. ~3× cheaper per plugin than running cpv-batch-validate + cpv-batch-fix separately. Use when applying validation fixes across many plugins and you trust the FP classifier chain. Trigger with /cpv-batch-validate-and-fix."
 user-invocable: true
-allowed-tools: Read, Bash(python3:*,git:*,uv:*,cat:*,mkdir:*), Glob, Grep
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 ---
 

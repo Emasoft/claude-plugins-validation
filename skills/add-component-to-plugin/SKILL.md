@@ -3,7 +3,6 @@ name: add-component-to-plugin
 description: Add a new component (skill / agent / command / hook / mcp) to an existing plugin. Use when scaffolding a single component into a plugin without re-running the generator. Used dynamically via the-skills-menu (TRDD-478d9687).
 when_to_use: When the cpv-main-menu user picks Manage → Add component, or any flow needs to scaffold a single component (skill/agent/command/hook/mcp) into an existing plugin
 user-invocable: false
-allowed-tools: Bash(uv:*)
 ---
 
 # add-component-to-plugin

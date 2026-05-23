@@ -227,7 +227,7 @@ class TestWriteSarif:
 
 class TestProperties:
     def test_category_propagates(self, tmp_path: Path) -> None:
-        from cpv_validation_common import ValidationResult  # noqa: WPS433
+        from cpv_validation_common import ValidationResult
 
         plugin = _make_plugin(tmp_path)
         rs = [ValidationResult("CRITICAL", "RC-1 x", str(plugin / "a.py"), 1, "security", False, None, "secrets", None)]
@@ -237,7 +237,7 @@ class TestProperties:
         assert props["phase"] == "security"
 
     def test_suggestion_becomes_fixes(self, tmp_path: Path) -> None:
-        from cpv_validation_common import ValidationResult  # noqa: WPS433
+        from cpv_validation_common import ValidationResult
 
         plugin = _make_plugin(tmp_path)
         rs = [ValidationResult("MAJOR", "RC-2 y", suggestion="Use os.environ.get instead")]

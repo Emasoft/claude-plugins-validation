@@ -85,9 +85,7 @@ def test_add_skill_registers_in_catalog_when_method_adopted(plugin):
     rc = ac.add_skill(plugin, "freshly-added", "Does the thing", force=False)
     assert rc == 0
     body = catalog.read_text(encoding="utf-8")
-    assert "freshly-added" in body, (
-        "new skill must be appended to the-skills-menu/SKILL.md when the catalog exists"
-    )
+    assert "freshly-added" in body, "new skill must be appended to the-skills-menu/SKILL.md when the catalog exists"
     # existing entry preserved
     assert "existing-skill" in body
 

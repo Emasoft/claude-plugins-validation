@@ -3,7 +3,6 @@ name: scaffold-skill
 description: Scaffold a new skill in an existing plugin (creates skills/{NAME}/SKILL.md with valid frontmatter that passes validate_plugin out of the box). Use when adding a single skill to an existing plugin. Used dynamically via the-skills-menu (TRDD-478d9687).
 when_to_use: When the cpv-main-menu user picks Create → Add skill to existing plugin, or any flow needs to drop a minimal valid skills/{NAME}/SKILL.md into a plugin
 user-invocable: false
-allowed-tools: Bash(uv:*)
 ---
 
 # scaffold-skill

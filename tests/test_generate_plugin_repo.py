@@ -33,6 +33,7 @@ from generate_plugin_repo import (  # noqa: E402
     gen_ci_yml,
     gen_cliff_toml,
     gen_gitignore,
+    gen_mega_linter_yml,
     gen_notify_marketplace_yml,
     gen_plugin_json,
     gen_pyproject_toml,
@@ -144,6 +145,29 @@ class TestGenPyprojectToml:
         content = gen_pyproject_toml(p)
         assert "[tool.ruff]" in content
         assert "line-length" in content
+
+
+class TestFixtureLintExclusion:
+    """Every generated linter config MUST skip test fixtures (deliberate-defect
+    sample data) — in any language, locally and on CI. Regression guard so the
+    creator / migrate / upgrade agents never scaffold a pipeline that lints the
+    very fixtures the plugin's tests rely on being malformed.
+    """
+
+    def test_mega_linter_excludes_fixtures_all_languages(self):
+        """gen_mega_linter_yml FILTER_REGEX_EXCLUDE covers fixture dirs (cross-language CI + local runner)."""
+        content = gen_mega_linter_yml(_default_params())
+        assert "FILTER_REGEX_EXCLUDE" in content
+        line = next(ln for ln in content.splitlines() if ln.startswith("FILTER_REGEX_EXCLUDE"))
+        for frag in ("tests?/fixtures/", "spec/fixtures/", "__fixtures__/", "testdata/", "fixtures/"):
+            assert frag in line, f"Mega-Linter FILTER_REGEX_EXCLUDE missing fixture pattern: {frag}"
+
+    def test_pyproject_ruff_excludes_fixtures(self):
+        """gen_pyproject_toml ruff extend-exclude covers fixture dirs (Python local `ruff check tests/`)."""
+        content = gen_pyproject_toml(_default_params())
+        assert "extend-exclude" in content
+        for frag in ("**/fixtures", "**/testdata", "**/__fixtures__"):
+            assert frag in content, f"ruff extend-exclude missing fixture pattern: {frag}"
 
 
 class TestGenGitignore:
@@ -317,8 +341,7 @@ class TestFullGeneration:
         body = catalog.read_text(encoding="utf-8")
         # Plugin's namespace appears in the catalog description + instructions
         assert "my-fresh-plugin" in body, (
-            "Catalog must reference the new plugin's name so cross-plugin "
-            "invocations use the right namespace prefix"
+            "Catalog must reference the new plugin's name so cross-plugin invocations use the right namespace prefix"
         )
         assert "## Plugin Skills" in body
         assert "## Standalone Skills" in body

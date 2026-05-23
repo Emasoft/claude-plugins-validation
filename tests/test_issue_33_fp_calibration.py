@@ -55,14 +55,13 @@ class TestHardcodedSubprocessArgvDoesNotTriggerCmdInjection:
         src = (
             "import subprocess\n"
             "def check_git_cliff():\n"
-            "    result = subprocess.run([\"git-cliff\", \"--version\"], "
+            '    result = subprocess.run(["git-cliff", "--version"], '
             "capture_output=True, text=True)\n"
             "    return result.returncode == 0\n"
         )
         findings = scan_content(src, "scripts/check.py")
         actionable = [
-            f for f in findings
-            if not f.get("suppressed") and f.get("ruleId") in {"CMD_INJECTION", "SHELL_EXEC"}
+            f for f in findings if not f.get("suppressed") and f.get("ruleId") in {"CMD_INJECTION", "SHELL_EXEC"}
         ]
         assert actionable == [], (
             f"hardcoded-literal-argv subprocess.run must produce zero "
@@ -76,13 +75,11 @@ class TestMarkdownProseDoesNotTriggerCmdInjection:
     def test_markdown_prose_with_inline_code_suppresses_cmd_injection(self) -> None:
         from cpv_skillaudit_native import scan_content
 
-        md = (
-            "# Plugin Documentation\n\n"
-            "Re-run `/janitor-arm` if no drift lines surface after an explicit resume.\n"
-        )
+        md = "# Plugin Documentation\n\nRe-run `/janitor-arm` if no drift lines surface after an explicit resume.\n"
         findings = scan_content(md, "README.md")
         actionable_exec = [
-            f for f in findings
+            f
+            for f in findings
             if not f.get("suppressed")
             and f.get("severity") in ("critical", "high", "medium")
             and f.get("ruleId") in {"CMD_INJECTION", "SHELL_EXEC", "REVERSE_SHELL"}
@@ -105,7 +102,7 @@ class TestJsonDescriptionFieldDoesNotTriggerCmdInjection:
             '    "tracked_ignored_interval": {\n'
             '      "title": "Tracked-Ignored Detector Cadence (seconds)",\n'
             '      "description": "The detector is HEAD-cached: it only re-shells '
-            "`git ls-files` when HEAD has moved.\",\n"
+            '`git ls-files` when HEAD has moved.",\n'
             '      "type": "number",\n'
             '      "default": 3600\n'
             "    }\n"
@@ -113,13 +110,9 @@ class TestJsonDescriptionFieldDoesNotTriggerCmdInjection:
             "}\n"
         )
         findings = scan_content(json_text, ".claude-plugin/plugin.json")
-        actionable = [
-            f for f in findings
-            if not f.get("suppressed") and f.get("severity") in ("critical", "high")
-        ]
+        actionable = [f for f in findings if not f.get("suppressed") and f.get("severity") in ("critical", "high")]
         assert actionable == [], (
-            f"JSON description field text must not produce CRITICAL/MAJOR "
-            f"findings; got: {actionable}"
+            f"JSON description field text must not produce CRITICAL/MAJOR findings; got: {actionable}"
         )
 
 
@@ -134,20 +127,14 @@ class TestJsonDescriptionPollingCadenceDoesNotTriggerTimeBomb:
             '  "version_check_interval": {\n'
             '    "description": "Minimum seconds between checks against api.github.com '
             "for a newer plugin release. Default: 300 (5 min — runs every heartbeat "
-            "by default).\",\n"
+            'by default).",\n'
             '    "default": 300\n'
             "  }\n"
             "}\n"
         )
         findings = scan_content(json_text, ".claude-plugin/plugin.json")
-        actionable = [
-            f for f in findings
-            if not f.get("suppressed") and f.get("ruleId") == "TIME_BOMB"
-        ]
-        assert actionable == [], (
-            f"TIME_BOMB must not fire on JSON polling-interval description; "
-            f"got: {actionable}"
-        )
+        actionable = [f for f in findings if not f.get("suppressed") and f.get("ruleId") == "TIME_BOMB"]
+        assert actionable == [], f"TIME_BOMB must not fire on JSON polling-interval description; got: {actionable}"
 
 
 class TestHashlibSha1ForIdentityDoesNotTriggerInsecureCrypto:
@@ -167,13 +154,9 @@ class TestHashlibSha1ForIdentityDoesNotTriggerInsecureCrypto:
             "    return digest[:12]\n"
         )
         findings = scan_content(src, "scripts/detectors/trdd-reminder.py")
-        actionable = [
-            f for f in findings
-            if not f.get("suppressed") and f.get("ruleId") == "INSECURE_CRYPTO"
-        ]
+        actionable = [f for f in findings if not f.get("suppressed") and f.get("ruleId") == "INSECURE_CRYPTO"]
         assert actionable == [], (
-            f"hashlib.sha1 + hexdigest + slice → identity usage, must not "
-            f"trigger INSECURE_CRYPTO; got: {actionable}"
+            f"hashlib.sha1 + hexdigest + slice → identity usage, must not trigger INSECURE_CRYPTO; got: {actionable}"
         )
 
 
@@ -194,13 +177,9 @@ class TestCiSudoAptGetInstallDoesNotTriggerCriticalPrivilegeEsc:
             "        run: sudo apt-get update && sudo apt-get install -y shellcheck\n"
         )
         findings = scan_content(yml, ".github/workflows/ci.yml")
-        critical = [
-            f for f in findings
-            if f.get("severity") == "critical" and f.get("ruleId") == "PRIVILEGE_ESC"
-        ]
+        critical = [f for f in findings if f.get("severity") == "critical" and f.get("ruleId") == "PRIVILEGE_ESC"]
         assert critical == [], (
-            f"known-safe CI sudo apt-get install must not produce CRITICAL "
-            f"PRIVILEGE_ESC findings; got: {critical}"
+            f"known-safe CI sudo apt-get install must not produce CRITICAL PRIVILEGE_ESC findings; got: {critical}"
         )
 
 
@@ -220,6 +199,7 @@ class TestFullFixtureSmoke:
     def test_fixture_directory_exists(self) -> None:
         if not FIXTURE_DIR.is_dir():
             import pytest
+
             pytest.skip(
                 f"calibration fixture missing: {FIXTURE_DIR}. "
                 "Re-clone with: git clone --depth 1 --branch v0.5.0 "
@@ -235,9 +215,11 @@ class TestFullFixtureSmoke:
 
         if not FIXTURE_DIR.is_dir():
             import pytest
+
             pytest.skip("calibration fixture not present")
 
         findings, _files_scanned = scan_path(FIXTURE_DIR)
+
         # The plugin's own tests/ tree contains intentional test
         # fixtures (e.g. ``hashlib.sha1`` calls used to verify the
         # purge logic). In validate_plugin.py these are filtered via
@@ -256,17 +238,11 @@ class TestFullFixtureSmoke:
         assert critical == [], (
             f"ai-maestro-janitor v0.5.0 must produce ZERO CRITICAL findings "
             f"(was 9 in v2.99.3, target 0 per issue #33 acceptance); got "
-            f"{len(critical)}: " + ", ".join(
-                f"{f.get('ruleId')}@{f.get('file')}:{f.get('line')}"
-                for f in critical[:5]
-            )
+            f"{len(critical)}: " + ", ".join(f"{f.get('ruleId')}@{f.get('file')}:{f.get('line')}" for f in critical[:5])
         )
 
         assert major == [], (
             f"ai-maestro-janitor v0.5.0 must produce ZERO MAJOR findings "
             f"(was 6 in v2.99.3, target 0 per issue #33 acceptance); got "
-            f"{len(major)}: " + ", ".join(
-                f"{f.get('ruleId')}@{f.get('file')}:{f.get('line')}"
-                for f in major[:5]
-            )
+            f"{len(major)}: " + ", ".join(f"{f.get('ruleId')}@{f.get('file')}:{f.get('line')}" for f in major[:5])
         )

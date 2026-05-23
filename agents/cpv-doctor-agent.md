@@ -20,7 +20,6 @@ description: |
 
   Free-form "Ask the doctor" mode (mode=ask_doctor_freeform) routes
   the user's typed description to a multi-turn diagnostic dialog.
-model: opus
 maxTurns: 100
 skills:
   - the-skills-menu

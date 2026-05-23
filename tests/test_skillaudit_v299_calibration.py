@@ -63,7 +63,12 @@ class TestConfidenceClassifier:
         lines = ["Set OPENAI_API_KEY=YOUR_API_KEY in your .env"]
         cb_map, cb_ranges = native._build_code_block_map(lines)
         verdict = native._confidence(
-            lines, 0, "OPENAI_API_KEY=YOUR_API_KEY", "CRED_ENV_READ", cb_map, cb_ranges,
+            lines,
+            0,
+            "OPENAI_API_KEY=YOUR_API_KEY",
+            "CRED_ENV_READ",
+            cb_map,
+            cb_ranges,
         )
         assert verdict == "suppress"
 
@@ -74,7 +79,12 @@ class TestConfidenceClassifier:
         lines = ["See `skills/foo/SKILL.md` for the spec."]
         cb_map, cb_ranges = native._build_code_block_map(lines)
         verdict = native._confidence(
-            lines, 0, "ls", "CMD_INJECTION", cb_map, cb_ranges,
+            lines,
+            0,
+            "ls",
+            "CMD_INJECTION",
+            cb_map,
+            cb_ranges,
         )
         assert verdict == "demote", (
             "shell-keyword substrings of longer identifiers must DEMOTE, "
@@ -88,11 +98,14 @@ class TestConfidenceClassifier:
         lines = ["Run `ls -t` to list files."]
         cb_map, cb_ranges = native._build_code_block_map(lines)
         verdict = native._confidence(
-            lines, 0, "ls", "CMD_INJECTION", cb_map, cb_ranges,
+            lines,
+            0,
+            "ls",
+            "CMD_INJECTION",
+            cb_map,
+            cb_ranges,
         )
-        assert verdict == "keep", (
-            "real word-bounded shell keyword must KEEP — better safe than sorry"
-        )
+        assert verdict == "keep", "real word-bounded shell keyword must KEEP — better safe than sorry"
 
     def test_md_table_demotes_injection_rules(self) -> None:
         import cpv_skillaudit_native as native
@@ -100,22 +113,30 @@ class TestConfidenceClassifier:
         lines = ["| 1 | `skills/foo/SKILL.md` | `skills/foo/` | `skill_dir` |"]
         cb_map, cb_ranges = native._build_code_block_map(lines)
         verdict = native._confidence(
-            lines, 0, "`skills/foo/`", "CMD_INJECTION", cb_map, cb_ranges,
+            lines,
+            0,
+            "`skills/foo/`",
+            "CMD_INJECTION",
+            cb_map,
+            cb_ranges,
         )
         assert verdict == "demote"
 
     def test_github_actions_ssti_demoted(self) -> None:
         import cpv_skillaudit_native as native
 
-        lines = ['  group: auto-merge-${{ github.event.pull_request.number }}']
+        lines = ["  group: auto-merge-${{ github.event.pull_request.number }}"]
         cb_map, cb_ranges = native._build_code_block_map(lines)
         verdict = native._confidence(
-            lines, 0, "${{ github.event", "SSTI", cb_map, cb_ranges,
+            lines,
+            0,
+            "${{ github.event",
+            "SSTI",
+            cb_map,
+            cb_ranges,
             file_path="workflow.yml",
         )
-        assert verdict == "demote", (
-            "GitHub Actions context expressions are NOT SSTI — demote, but keep visible"
-        )
+        assert verdict == "demote", "GitHub Actions context expressions are NOT SSTI — demote, but keep visible"
 
     def test_python_docstring_demotes(self) -> None:
         import cpv_skillaudit_native as native
@@ -123,15 +144,21 @@ class TestConfidenceClassifier:
         # Build a Python file with a triple-quoted docstring containing shell mentions
         lines = [
             '"""',
-            'Run `cat .env` to inspect the configuration.',
+            "Run `cat .env` to inspect the configuration.",
             '"""',
-            'def foo(): pass',
+            "def foo(): pass",
         ]
         py_doc_map = native._build_py_docstring_map(lines, "module.py")
         cb_map, cb_ranges = native._build_code_block_map(lines)
         verdict = native._confidence(
-            lines, 1, "`cat .env`", "CMD_INJECTION", cb_map, cb_ranges,
-            py_doc_map=py_doc_map, file_path="module.py",
+            lines,
+            1,
+            "`cat .env`",
+            "CMD_INJECTION",
+            cb_map,
+            cb_ranges,
+            py_doc_map=py_doc_map,
+            file_path="module.py",
         )
         assert verdict == "demote"
 
@@ -190,8 +217,7 @@ class TestDemotedFindingsVisible:
         assert len(report.nit_calls) == 1
         msg = report.nit_calls[0][0]
         assert "⚠" in msg, (
-            "demoted findings MUST carry the ⚠ marker so reviewers / "
-            "downstream agents see they need disambiguation"
+            "demoted findings MUST carry the ⚠ marker so reviewers / downstream agents see they need disambiguation"
         )
         assert "demoted" in msg.lower()
 
@@ -208,7 +234,10 @@ class TestDemotedFindingsVisible:
             raw={"demoted": False},
         )
         result = native.SkillAuditScanResult(
-            invoked=True, findings=(finding,), skipped_reason="", files_scanned=1,
+            invoked=True,
+            findings=(finding,),
+            skipped_reason="",
+            files_scanned=1,
         )
         report = _FakeReport()
         native.report_findings(result, Path("/tmp/x"), report)
@@ -238,8 +267,7 @@ class TestValidatePluginPipelineHookup:
         sa_idx = self.body.find("_run_skillaudit_native(plugin_root, report)")
         assert tel_idx != -1 and sa_idx != -1
         assert sa_idx > tel_idx, (
-            "skillaudit native scan must run after validate_telemetry "
-            "so the security-class checks cluster together"
+            "skillaudit native scan must run after validate_telemetry so the security-class checks cluster together"
         )
 
     def test_helper_documents_iron_rule(self) -> None:
@@ -248,8 +276,10 @@ class TestValidatePluginPipelineHookup:
         assert "MANDATORY" in self.body
         # No env-var bypass.
         for bad in (
-            "CPV_NO_SKILLAUDIT", "CPV_SKIP_SKILLAUDIT",
-            "SKILLAUDIT_SKIP", "PLUGIN_SKIP_SKILLAUDIT",
+            "CPV_NO_SKILLAUDIT",
+            "CPV_SKIP_SKILLAUDIT",
+            "SKILLAUDIT_SKIP",
+            "PLUGIN_SKIP_SKILLAUDIT",
         ):
             assert bad not in self.body, f"validate_plugin must not honor {bad}"
 
@@ -264,9 +294,7 @@ class TestCmdInjectionWordBoundaries:
         data = json.loads(RULES_PATH.read_text(encoding="utf-8"))
         cmd_inj = next(r for r in data["rules"] if r["id"] == "CMD_INJECTION")
         # The backtick-wrapped pattern must have \b around the shell-name alt.
-        backtick_pat = next(
-            (p for p in cmd_inj["patterns"] if p.startswith("`")), None
-        )
+        backtick_pat = next((p for p in cmd_inj["patterns"] if p.startswith("`")), None)
         assert backtick_pat is not None
         # Must contain \b around the shell-keyword alternation.
         assert r"\b(?:curl" in backtick_pat or r"\b(?:cat" in backtick_pat
@@ -275,9 +303,7 @@ class TestCmdInjectionWordBoundaries:
     def test_dollar_paren_pattern_uses_word_boundary(self) -> None:
         data = json.loads(RULES_PATH.read_text(encoding="utf-8"))
         cmd_inj = next(r for r in data["rules"] if r["id"] == "CMD_INJECTION")
-        dp_pat = next(
-            (p for p in cmd_inj["patterns"] if p.startswith(r"\$\(")), None
-        )
+        dp_pat = next((p for p in cmd_inj["patterns"] if p.startswith(r"\$\(")), None)
         assert dp_pat is not None
         assert r"\b" in dp_pat
 
@@ -316,8 +342,8 @@ class TestPreInstallScanCommand:
         # mentions (which legitimately describe what the scanner does NOT do).
         # Look for actual filesystem-write or fs-touch calls referencing the path.
         write_pat = re.compile(
-            r'(?:open|copy|copyfile|copytree|copy2|move|mkdir|symlink|write_text|write_bytes|writelines|\.write\()'
-            r'.*\.claude/plugins/cache',
+            r"(?:open|copy|copyfile|copytree|copy2|move|mkdir|symlink|write_text|write_bytes|writelines|\.write\()"
+            r".*\.claude/plugins/cache",
             re.IGNORECASE,
         )
         assert not write_pat.search(body), (

@@ -65,9 +65,7 @@ _SHELL_CALL_FQNAMES: Final[frozenset[str]] = frozenset(
 # treats them as SUSPECT unless the arg is a literal Constant and the
 # context is a unit test (handled by the test-file heuristic in
 # _confidence).
-_DYNAMIC_EXEC_FQNAMES: Final[frozenset[str]] = frozenset(
-    {"eval", "exec", "compile", "__import__"}
-)
+_DYNAMIC_EXEC_FQNAMES: Final[frozenset[str]] = frozenset({"eval", "exec", "compile", "__import__"})
 
 # Hash functions flagged by INSECURE_CRYPTO. The matcher fires on the
 # function reference itself; the AST classifier then checks the call
@@ -76,15 +74,34 @@ _DYNAMIC_EXEC_FQNAMES: Final[frozenset[str]] = frozenset(
 # defect. The shape ``hashlib.<weak>(...).hexdigest()`` followed by
 # slicing or assignment to an identity-named target signals identity
 # usage, not crypto.
-_WEAK_HASH_FQNAMES: Final[frozenset[str]] = frozenset(
-    {"hashlib.md5", "hashlib.sha1"}
-)
+_WEAK_HASH_FQNAMES: Final[frozenset[str]] = frozenset({"hashlib.md5", "hashlib.sha1"})
 _IDENTITY_TARGET_NAMES: Final[frozenset[str]] = frozenset(
     {
-        "digest", "hash", "key", "cache_key", "cachekey", "tick", "tick_key",
-        "session_id", "sessionid", "sid", "id", "identifier", "fingerprint",
-        "checksum", "etag", "signature", "sig", "name", "uid", "guid",
-        "session", "entries_hash", "content_hash", "file_hash", "path_hash",
+        "digest",
+        "hash",
+        "key",
+        "cache_key",
+        "cachekey",
+        "tick",
+        "tick_key",
+        "session_id",
+        "sessionid",
+        "sid",
+        "id",
+        "identifier",
+        "fingerprint",
+        "checksum",
+        "etag",
+        "signature",
+        "sig",
+        "name",
+        "uid",
+        "guid",
+        "session",
+        "entries_hash",
+        "content_hash",
+        "file_hash",
+        "path_hash",
     }
 )
 
@@ -115,18 +132,25 @@ def _arg_is_pure_literal(arg: ast.expr) -> bool:
 # Names and attribute-access chains whose results coerce a typed object
 # into a string without shell expansion. Calls to these are treated as
 # safe argv elements.
-_SAFE_COERCION_FUNCS: Final[frozenset[str]] = frozenset(
-    {"str", "int", "float", "bool", "bytes", "Path"}
-)
+_SAFE_COERCION_FUNCS: Final[frozenset[str]] = frozenset({"str", "int", "float", "bool", "bytes", "Path"})
 _SAFE_COERCION_ATTRS: Final[frozenset[str]] = frozenset(
     {
-        "as_posix", "absolute", "resolve", "parent", "name", "stem", "suffix",
-        "fspath",   # os.fspath / pathlib.PurePath.fspath
+        "as_posix",
+        "absolute",
+        "resolve",
+        "parent",
+        "name",
+        "stem",
+        "suffix",
+        "fspath",  # os.fspath / pathlib.PurePath.fspath
         "expanduser",  # Path.expanduser
         "joinpath",  # Path.joinpath returns a Path
-        "with_name", "with_suffix", "relative_to",
+        "with_name",
+        "with_suffix",
+        "relative_to",
     }
 )
+
 
 # Patterns that signal a real injection-shape argv element. If ANY arg
 # element matches one of these, the call gets "suspect" — these are
@@ -167,16 +191,10 @@ def _arg_is_exploit_shape(arg: ast.expr) -> bool:
         #     to be a literal string Constant (the attacker-readable
         #     prefix) AND the other to be non-Constant (the injection
         #     point).
-        if isinstance(arg.left, (ast.List, ast.Tuple)) or isinstance(
-            arg.right, (ast.List, ast.Tuple)
-        ):
+        if isinstance(arg.left, (ast.List, ast.Tuple)) or isinstance(arg.right, (ast.List, ast.Tuple)):
             return False
-        left_is_literal_str = isinstance(arg.left, ast.Constant) and isinstance(
-            arg.left.value, str
-        )
-        right_is_literal_str = isinstance(arg.right, ast.Constant) and isinstance(
-            arg.right.value, str
-        )
+        left_is_literal_str = isinstance(arg.left, ast.Constant) and isinstance(arg.left.value, str)
+        right_is_literal_str = isinstance(arg.right, ast.Constant) and isinstance(arg.right.value, str)
         left_is_const = isinstance(arg.left, ast.Constant)
         right_is_const = isinstance(arg.right, ast.Constant)
         # Exactly the dangerous shape: ONE side is a literal string

@@ -44,28 +44,58 @@ ContextVerdict = Literal["safe_doc", "code_fence_neutral", "unknown"]
 
 _EXECUTABLE_LANGS: Final[frozenset[str]] = frozenset(
     {
-        "bash", "sh", "shell", "zsh", "console", "terminal", "tty",
-        "bat", "cmd", "batch",
-        "powershell", "pwsh", "ps1",
-        "fish", "csh", "ksh", "dash",
+        "bash",
+        "sh",
+        "shell",
+        "zsh",
+        "console",
+        "terminal",
+        "tty",
+        "bat",
+        "cmd",
+        "batch",
+        "powershell",
+        "pwsh",
+        "ps1",
+        "fish",
+        "csh",
+        "ksh",
+        "dash",
     }
 )
 
 _DATA_LANGS: Final[frozenset[str]] = frozenset(
     {
-        "json", "jsonc", "yaml", "yml", "toml", "ini", "cfg", "conf",
-        "env", "dotenv",
-        "xml", "csv", "tsv",
-        "html", "htm", "css", "scss", "sass", "less",
-        "txt", "text", "plaintext",
-        "markdown", "md",
-        "diff", "patch",
+        "json",
+        "jsonc",
+        "yaml",
+        "yml",
+        "toml",
+        "ini",
+        "cfg",
+        "conf",
+        "env",
+        "dotenv",
+        "xml",
+        "csv",
+        "tsv",
+        "html",
+        "htm",
+        "css",
+        "scss",
+        "sass",
+        "less",
+        "txt",
+        "text",
+        "plaintext",
+        "markdown",
+        "md",
+        "diff",
+        "patch",
     }
 )
 
-_FENCE_RE: Final[re.Pattern[str]] = re.compile(
-    r"^(?P<fence>```+|~~~+)\s*(?P<lang>[A-Za-z0-9_+-]*)\s*$"
-)
+_FENCE_RE: Final[re.Pattern[str]] = re.compile(r"^(?P<fence>```+|~~~+)\s*(?P<lang>[A-Za-z0-9_+-]*)\s*$")
 
 
 def _build_fence_map(source: str) -> list[tuple[int, int, str] | None]:
@@ -185,7 +215,7 @@ def _match_inside_quoted_string(line: str, match: str) -> bool:
     if idx < 0:
         return False
     before = line[:idx]
-    after = line[idx + len(match):]
+    after = line[idx + len(match) :]
     # An odd number of unescaped double-quotes BEFORE the match AND
     # at least one unescaped double-quote AFTER → the match sits
     # inside a quoted region.
@@ -253,9 +283,7 @@ def classify(
         # tier. This preserves the iron-rule "improve precision, never
         # delete the rule" because the rule is still emitted; only the
         # confidence label changes from "keep" to "demote".
-        if _match_inside_quoted_string(line, match) and _has_defensive_vocab_nearby(
-            lines, line_idx, span=5
-        ):
+        if _match_inside_quoted_string(line, match) and _has_defensive_vocab_nearby(lines, line_idx, span=5):
             return "code_fence_neutral"
 
         # The match is plain prose text outside any code span. For the

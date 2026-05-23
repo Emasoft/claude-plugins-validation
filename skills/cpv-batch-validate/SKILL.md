@@ -2,7 +2,6 @@
 name: cpv-batch-validate
 description: "Fleet-wide parallel validation. Accepts local paths, GitHub URLs, marketplaces, lists, and @listfile shapes. Dispatches one plugin-validator per plugin (default 8 parallel, cap 16). Use when validating many plugins at once — e.g. every plugin in a marketplace. Trigger with /cpv-batch-validate or 'validate every plugin in X'."
 user-invocable: true
-allowed-tools: Read, Bash(python3:*,git:*,uv:*,cat:*,mkdir:*), Glob, Grep
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 ---
 

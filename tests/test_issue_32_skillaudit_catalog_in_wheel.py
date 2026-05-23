@@ -158,10 +158,7 @@ class TestWheelShipsCatalog:
                 timeout=180,
             )
 
-            assert result.returncode == 0, (
-                f"uv build failed:\nstdout:\n{result.stdout}\n"
-                f"stderr:\n{result.stderr}"
-            )
+            assert result.returncode == 0, f"uv build failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
 
             wheels = list(out.glob("*.whl"))
             assert len(wheels) == 1, f"expected exactly one wheel, found {wheels}"
@@ -173,13 +170,9 @@ class TestWheelShipsCatalog:
             # python-package path. hatchling renames ``scripts/`` to
             # the package's installed location, so we look for the
             # tail path.
-            catalog_entries = [
-                n for n in names
-                if n.endswith("rules/skillaudit_patterns.json")
-            ]
+            catalog_entries = [n for n in names if n.endswith("rules/skillaudit_patterns.json")]
             assert catalog_entries, (
                 "skillaudit_patterns.json missing from the built wheel. "
                 "This is exactly the v2.99.2 regression (issue #32). "
-                "Wheel contents (first 30 entries):\n"
-                + "\n".join(names[:30])
+                "Wheel contents (first 30 entries):\n" + "\n".join(names[:30])
             )

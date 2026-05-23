@@ -66,9 +66,7 @@ def _make_skill(root: Path, name: str = "demo-skill") -> Path:
     """Create a minimal valid skill folder containing SKILL.md."""
     skill_dir = root / "skills" / name
     skill_dir.mkdir(parents=True, exist_ok=True)
-    (skill_dir / "SKILL.md").write_text(
-        f"---\nname: {name}\ndescription: stub\n---\nbody\n", encoding="utf-8"
-    )
+    (skill_dir / "SKILL.md").write_text(f"---\nname: {name}\ndescription: stub\n---\nbody\n", encoding="utf-8")
     return skill_dir
 
 
@@ -82,9 +80,7 @@ def _make_marketplace(
     market_dir = root / name
     (market_dir / ".claude-plugin").mkdir(parents=True, exist_ok=True)
     (market_dir / ".claude-plugin" / "marketplace.json").write_text(
-        json.dumps(
-            {"name": name, "owner": {"name": "Test"}, "plugins": plugin_specs}
-        ),
+        json.dumps({"name": name, "owner": {"name": "Test"}, "plugins": plugin_specs}),
         encoding="utf-8",
     )
     return market_dir
@@ -253,9 +249,7 @@ class TestResolveAmbiguity:
         with pytest.raises(InputResolutionError, match="empty"):
             resolve("   ")
 
-    def test_directory_without_recognised_markers_raises(
-        self, tmp_path: Path
-    ) -> None:
+    def test_directory_without_recognised_markers_raises(self, tmp_path: Path) -> None:
         odd = tmp_path / "mystery"
         odd.mkdir()
         (odd / "random.txt").write_text("not a known shape\n")
@@ -282,10 +276,7 @@ class TestResolveListForms:
         f2.write_text("# y\n")
         listfile = tmp_path / "inputs.txt"
         listfile.write_text(
-            f"{f1}\n"
-            "# this is a comment, should be ignored\n"
-            "\n"
-            f"{f2}\n",
+            f"{f1}\n# this is a comment, should be ignored\n\n{f2}\n",
             encoding="utf-8",
         )
         result = resolve(f"@{listfile}")
@@ -337,16 +328,12 @@ class TestResolveUrl:
         with pytest.raises(InputResolutionError, match="not allowed"):
             resolve("https://github.com/owner/plugin-repo", allow_url=False)
 
-    def test_owner_repo_rejected_when_allow_url_false(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_owner_repo_rejected_when_allow_url_false(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.chdir(tmp_path)  # no local collision
         with pytest.raises(InputResolutionError, match="not allowed"):
             resolve("owner/repo", allow_url=False)
 
-    def test_plugin_url_clones_and_returns_one_plugin(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_plugin_url_clones_and_returns_one_plugin(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def build_plugin(target: Path) -> Path:
             (target / ".claude-plugin").mkdir(parents=True)
             (target / ".claude-plugin" / "plugin.json").write_text(
@@ -371,9 +358,7 @@ class TestResolveUrl:
                 if r.cleanup_callback is not None:
                     r.cleanup_callback()
 
-    def test_url_cleanup_callback_removes_temp_dir(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_url_cleanup_callback_removes_temp_dir(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def build_plugin(target: Path) -> Path:
             (target / ".claude-plugin").mkdir(parents=True)
             (target / ".claude-plugin" / "plugin.json").write_text(
@@ -400,9 +385,7 @@ class TestResolveUrl:
         # Cleanup removes the per-clone temp dir, NOT the system $TMPDIR.
         assert not per_clone_tmp.exists()
 
-    def test_url_pointing_at_bare_file_root_raises(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_url_pointing_at_bare_file_root_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def build_bare(target: Path) -> Path:
             (target / "README.md").write_text("# bare repo\n", encoding="utf-8")
             return target
@@ -420,9 +403,7 @@ class TestResolveUrl:
 
 
 class TestMarketplaceExpansion:
-    def test_local_marketplace_expands_to_one_per_plugin(
-        self, tmp_path: Path
-    ) -> None:
+    def test_local_marketplace_expands_to_one_per_plugin(self, tmp_path: Path) -> None:
         # Set up three sibling plugins next to the marketplace root.
         p_a = _make_plugin(tmp_path, name="plug-a")
         p_b = _make_plugin(tmp_path, name="plug-b")
@@ -447,9 +428,7 @@ class TestMarketplaceExpansion:
         versions = {r.display_name: r.metadata.get("plugin_version") for r in result}
         assert versions == {"plug-a": "0.1.0", "plug-b": "0.2.0", "plug-c": "0.3.0"}
 
-    def test_marketplace_plugins_field_not_list_raises(
-        self, tmp_path: Path
-    ) -> None:
+    def test_marketplace_plugins_field_not_list_raises(self, tmp_path: Path) -> None:
         bad = tmp_path / "bad-market"
         (bad / ".claude-plugin").mkdir(parents=True)
         (bad / ".claude-plugin" / "marketplace.json").write_text(
@@ -459,15 +438,11 @@ class TestMarketplaceExpansion:
         with pytest.raises(InputResolutionError, match="not a list"):
             resolve(str(bad))
 
-    def test_marketplace_with_empty_plugins_returns_empty_list(
-        self, tmp_path: Path
-    ) -> None:
+    def test_marketplace_with_empty_plugins_returns_empty_list(self, tmp_path: Path) -> None:
         market = _make_marketplace(tmp_path, plugin_specs=[])
         assert resolve(str(market)) == []
 
-    def test_marketplace_url_expands_and_shares_cleanup(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_marketplace_url_expands_and_shares_cleanup(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A URL marketplace clones, enumerates its plugins, and the
         per-plugin cleanup callbacks all share a reference-counted
         closure that only removes the temp dir after the LAST consumer
@@ -540,9 +515,7 @@ class TestMarketplaceExpansion:
             cb_a = result[0].cleanup_callback
             assert cb_a is not None
             cb_a()
-            assert market_root_path.is_dir(), (
-                "shared market root must persist until LAST consumer cleans up"
-            )
+            assert market_root_path.is_dir(), "shared market root must persist until LAST consumer cleans up"
         finally:
             for r in result:
                 if r.cleanup_callback is not None:
@@ -576,9 +549,7 @@ def _make_skill_in(root: Path, name: str) -> Path:
     """Create a flat ``<root>/<name>/SKILL.md`` skill folder."""
     skill_dir = root / name
     skill_dir.mkdir(parents=True, exist_ok=True)
-    (skill_dir / "SKILL.md").write_text(
-        f"---\nname: {name}\ndescription: stub\n---\nbody\n", encoding="utf-8"
-    )
+    (skill_dir / "SKILL.md").write_text(f"---\nname: {name}\ndescription: stub\n---\nbody\n", encoding="utf-8")
     return skill_dir
 
 
@@ -634,6 +605,7 @@ class TestSkillPackExpansion:
 
     def test_pack_via_url_clone(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """URL pointing at a skill-pack repo clones + expands."""
+
         def build_pack(target: Path) -> Path:
             (target / "skills" / "one").mkdir(parents=True)
             (target / "skills" / "one" / "SKILL.md").write_text(
@@ -662,6 +634,7 @@ class TestSkillPackExpansion:
 
     def test_single_skill_repo_via_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """URL pointing at a one-skill repo (SKILL.md at root) clones as kind=skill."""
+
         def build_single_skill(target: Path) -> Path:
             (target / "SKILL.md").write_text(
                 "---\nname: single-skill\ndescription: stub\n---\n",
@@ -695,9 +668,7 @@ class TestSkillPackExpansion:
         kinds_by_name = {r.display_name: r.kind for r in result}
         assert kinds_by_name == {"lonely-skill": "skill", "lonely-plugin": "plugin"}
 
-    def test_pack_expansion_truncates_at_cap(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_pack_expansion_truncates_at_cap(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Pathological case: cap protects against runaway expansion."""
         # Lower the cap to 3 for the test so we don't have to create 10k skills.
         monkeypatch.setattr(cmi, "_SKILL_PACK_EXPAND_CAP", 3)
@@ -715,9 +686,7 @@ class TestMixedMarketplaceEntries:
     its actual on-disk shape, not by trusting an entry-level type
     declaration."""
 
-    def test_marketplace_with_mixed_plugin_and_skill_entries(
-        self, tmp_path: Path
-    ) -> None:
+    def test_marketplace_with_mixed_plugin_and_skill_entries(self, tmp_path: Path) -> None:
         # Plugin entry next to a bare skill entry.
         _make_plugin(tmp_path, name="real-plugin")
         _make_skill_in(tmp_path, "real-skill")  # ./real-skill/SKILL.md (no plugin.json)
@@ -740,9 +709,7 @@ class TestMixedMarketplaceEntries:
         kinds_by_name = {r.display_name: r.kind for r in result}
         assert kinds_by_name == {"real-plugin": "plugin", "real-skill": "skill"}
 
-    def test_marketplace_entry_pointing_at_skill_pack_expands_inline(
-        self, tmp_path: Path
-    ) -> None:
+    def test_marketplace_entry_pointing_at_skill_pack_expands_inline(self, tmp_path: Path) -> None:
         """A marketplace entry that resolves to a skill-pack folder
         expands inline into per-skill entries, each carrying the
         marketplace metadata."""

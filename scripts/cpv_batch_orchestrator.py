@@ -140,6 +140,7 @@ def _build_plugins(resolved: Sequence[ResolvedInput]) -> list[PluginEntry]:
 def _new_session_dir(agent_type: str, base: Path | None = None) -> Path:
     if base is None:
         import tempfile
+
         base = Path(tempfile.gettempdir()) / "cpv-batch"
     ts = time.strftime("%Y%m%d_%H%M%S")
     sd = base / f"{ts}-{agent_type}"
@@ -262,9 +263,7 @@ def aggregate_status(
 
 
 def _cli(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Plan a CPV batch dispatch from a list of inputs."
-    )
+    parser = argparse.ArgumentParser(description="Plan a CPV batch dispatch from a list of inputs.")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_plan = sub.add_parser("plan", help="Build plan.json + status_table.json")

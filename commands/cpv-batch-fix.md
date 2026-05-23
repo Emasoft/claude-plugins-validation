@@ -1,7 +1,6 @@
 ---
 name: cpv-batch-fix
 description: Parallel fix for one OR many plugins. Single-plugin inputs run the existing per-shard protocol (one plugin-fixer per shard of findings). Marketplace / list / URL inputs run a per-plugin fan-out (one plugin-fixer per plugin; each fixer may internally shard its own findings). Accepts local paths, GitHub URLs, marketplace URLs/folders, comma-separated lists, and @listfile shapes. Default 8 parallel agents per main-session message, cap 16. Each agent starts with a fresh context window (size determined by `plugin-fixer.model`).
-allowed-tools: Read, Bash, Glob, Grep
 argument-hint: "<plugin-or-marketplace-or-list> [--shard-size N] [--max-parallel N] [--min-severity LEVEL]"
 user-invocable: true
 ---

@@ -277,8 +277,7 @@ class TestValidateMdUrlsRetry:
             raise socket.timeout("persistent")
 
         report = ValidationReport()
-        with patch("urllib.request.urlopen", side_effect=fake_urlopen), \
-             patch("time.sleep", return_value=None):
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen), patch("time.sleep", return_value=None):
             validate_md_urls(md, tmp_path, report, timeout=1.0, url_cache={}, retry_backoff=0.01, max_retries=2)
         # 1 initial + 2 bare retries + 2 github bonus retries = 5
         assert counter["n"] == 5, f"expected 5 attempts on github.com, got {counter['n']}"

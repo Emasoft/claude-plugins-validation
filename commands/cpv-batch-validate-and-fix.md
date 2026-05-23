@@ -1,7 +1,6 @@
 ---
 name: cpv-batch-validate-and-fix
 description: Same-turn validate-and-fix across a marketplace / list / single plugin. One plugin-fixer per plugin scans + verifies false positives + fixes ALL findings in the same turn — each source file is READ ONCE, not the three times the separate validate → fix → re-validate cycle requires. Cuts per-plugin token cost ~3×. Default 8 parallel agents per main-session message, cap 16.
-allowed-tools: Read, Bash(python3:*,git:*,uv:*,cat:*,mkdir:*), Glob, Grep
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 user-invocable: true
 ---

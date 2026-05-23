@@ -338,7 +338,18 @@ def validate_allowed_tools_field(frontmatter: dict[str, Any], report: Validation
         return
 
     if not tool_list:
-        report.minor("'allowed-tools' is empty", "SKILL.md")
+        # Empty allowed-tools ([] / "") is a VALID, explicit "no tools" (chat-only)
+        # declaration — distinct from an ABSENT field, which means "inherit all
+        # tools". Non-blocking (WARNING) but surfaced because an empty array is
+        # usually a mistaken attempt at "allow everything".
+        report.warning(
+            "'allowed-tools' is empty ([]) — this forbids ALL tools, only "
+            "chatting is allowed. If this is not intentional, fix it. If it was "
+            "a mistaken attempt at allowing all tools, omitting the "
+            "'allowed-tools' field entirely is the correct syntax (an absent "
+            "field means all tools allowed).",
+            "SKILL.md",
+        )
         return
 
     report.passed(f"'allowed-tools' field valid: {len(tool_list)} tool(s)", "SKILL.md")
@@ -653,6 +664,14 @@ def validate_skill(skill_path: Path) -> SkillValidationReport:
         validate_boolean_field(frontmatter, "user-invocable", report)
         validate_boolean_field(frontmatter, "disable-model-invocation", report)
         validate_allowed_tools_field(frontmatter, report)
+        # TRDD-94e06820: the body must not invoke a tool the declared field does
+        # not grant — that call fails silently at runtime. Skipped when absent.
+        from cpv_tool_permission_match import validate_body_tool_consistency  # noqa: PLC0415
+
+        _, _body_for_tools, _ = parse_frontmatter(content)
+        validate_body_tool_consistency(
+            frontmatter.get("allowed-tools"), _body_for_tools, report, filename="SKILL.md", field_name="allowed-tools"
+        )
         validate_model_field(frontmatter, report)
         validate_argument_hint_field(frontmatter, report)
         # v2.1.121 — `arguments:` (separate from `argument-hint`) declares named

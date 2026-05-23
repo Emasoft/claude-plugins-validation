@@ -3,7 +3,6 @@ name: cpv-main-menu-skill
 description: Routes the /cpv-main-menu numbered-table menu. Used dynamically via the-skills-menu (TRDD-478d9687) — primarily by cpv-main-menu-agent. Use when navigating CPV's many commands via a single entry point.
 when_to_use: When the cpv-main-menu command needs the per-category sub-menu definitions and per-leaf execution recipes. Never invoke directly.
 user-invocable: false
-allowed-tools: Read, Bash(uv:*), Bash(python:*), Bash(python3:*), Bash(git:*), Bash(mkdir:*), Bash(date:*), Bash(basename:*), Bash(awk:*), Bash(printf:*), Bash(echo:*), Bash(cat:*), Bash(npm:*), Bash(brew:*), Bash(snap:*), Bash(cargo:*), Bash(pipx:*), Bash(gh:*), Glob, Grep, Skill, Edit, Write
 ---
 
 # CPV Main-Menu Routing Skill

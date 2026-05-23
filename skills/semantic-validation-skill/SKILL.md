@@ -7,7 +7,6 @@ tags:
   - quality
   - skills
 user-invocable: false
-allowed-tools: Read, Bash(uv*), Bash(python*), Glob, Grep
 ---
 
 # Semantic Validation Skill
