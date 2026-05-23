@@ -265,6 +265,19 @@ POSTTOOLUSE_HOOK_INPUT_FIELDS = GENERIC_HOOK_INPUT_FIELDS | {
     "duration_ms",  # v2.1.119 — tool execution time
 }
 
+# Stop / SubagentStop hook *input* fields (stdin-side). CC v2.1.145 extended
+# the Stop hook payload with ``background_tasks`` and ``session_crons`` so a
+# Stop hook can know whether the session has pending background work or
+# scheduled crons before deciding whether to block stop. ``stop_hook_active``
+# is the historical boolean that tells the hook itself it's being invoked.
+# Authoritative for hook scripts that parse ``JSON.parse(stdin)`` on
+# Stop / SubagentStop events.
+STOP_HOOK_INPUT_FIELDS = GENERIC_HOOK_INPUT_FIELDS | {
+    "stop_hook_active",   # historical — boolean, true while this Stop hook runs
+    "background_tasks",   # v2.1.145 — list of pending background-task descriptors
+    "session_crons",      # v2.1.145 — list of scheduled session-cron entries
+}
+
 # Permission-update-entry type enum (hooks.md L1115-1141, PermissionRequest
 # output schema). 6 types total. Exposed for downstream validators.
 # CPV-P2-m2 requested these constants exist even if unused by today's

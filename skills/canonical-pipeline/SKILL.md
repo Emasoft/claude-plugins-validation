@@ -87,4 +87,6 @@ A fully configured plugin repository with:
   > Overview · Whole-repo lint via cpv_lint_engine · Idempotent publish.py · validate_pipeline_script_refs rule · Migrating a legacy plugin
 - [v2.1.80+ Plugin Features](references/v2-1-80-features.md)
   > Monitor tool · userConfig (plugin.json) · channels (plugin.json) · CLAUDE_PLUGIN_OPTION_<KEY> env vars · Inline marketplace (settings.json) · managed-settings.d/ drop-in directory · Plugin skill `name` field (v2.1.98)
+- [Parallel scanning (v2.103.0+)](references/parallelism.md) — every CPV validator runs file scans in parallel by default; scaffolded plugins inherit ~11.6× speedup automatically via `uvx --from git+...` remote-mode
+  > Table of contents · Performance summary · Environment knobs (disable selectively for debugging) · Scaffolded plugins (created via `create-plugin` / `setup-plugin-repo`) · Batch commands (`cpv-batch-*`) · Remote validation (`cpv` remote-mode + scaffolded `publish.py`) · When to disable parallelism · See also
 - Migration exit gate: `references/canonical-pipeline-migration-checklist.md`
