@@ -25,18 +25,22 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import unicodedata
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
+from cpv_parallel_runner import ScanResult, parallel_scan
 from cpv_validation_common import (
     COLORS,
     SECRET_PATTERNS,
     USER_PATH_PATTERNS,
     ValidationReport,
+    ValidationResult,
     check_utf8_encoding,
     save_report_and_print_summary,
 )
@@ -295,6 +299,90 @@ def _validate_frontmatter(frontmatter: dict[str, Any], report: ValidationReport,
                     depth += 1
 
 
+# =============================================================================
+# Per-file parallel worker (task #384 / agent A10)
+#
+# Pattern: identical to validate_security / validate_xref / validate_cache.
+# The per-file work is CPU-bound (UTF-8 decode + YAML parse + N regex
+# scans for secrets + N regex scans for private paths). At ~1345 .md
+# files in the CPV repo, a serial loop takes ~2.8s wall-clock; dispatching
+# via the shared ProcessPoolExecutor harness brings this well under 2.8s.
+#
+# Worker contract:
+#   * Top-level function (closures + lambdas are NOT pickleable by
+#     ProcessPoolExecutor — fail at submit time).
+#   * Single arg, pickleable (a frozen dataclass that bundles the file
+#     path + rel_path + a flag indicating which line-number anchor to use).
+#   * Returns ``(content, list[ValidationResult])`` — the content is needed
+#     for token counting after the per-file scans complete, and the
+#     ValidationResult list is replayed onto the shared master report IN
+#     INPUT ORDER so the parallel path emits findings bit-identically to
+#     the serial path. ValidationResult is a dataclass of primitives —
+#     pickles cleanly.
+#
+# Escape hatch: ``CPV_RULES_PARALLEL=0`` (or false/no/off, case-insensitive)
+# forces the serial path. Default = parallel. Mirrors CPV_SECURITY_PARALLEL,
+# CPV_XREF_PARALLEL, CPV_CACHE_PARALLEL.
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class _RuleWorkUnit:
+    """One per-file rule scan plus its rel_path context.
+
+    Frozen + primitives-only so the unit pickles cleanly across the
+    ProcessPoolExecutor worker boundary. Paths are passed as strings (then
+    reconstructed inside the worker) — same defensive choice the cache
+    validator's ``_CacheWorkUnit`` makes for Windows worker safety.
+
+    Fields:
+        file_path_str: Absolute path to the rule file being scanned.
+        rel_path: Pre-computed relative path string for the report
+            (computed against either ``plugin_root`` or
+            ``rules_dir.parent`` — the choice is made at the call site, so
+            the worker never needs ``plugin_root``).
+    """
+
+    file_path_str: str
+    rel_path: str
+
+
+def _scan_one_rule_file(unit: _RuleWorkUnit) -> tuple[str, list[ValidationResult]]:
+    """Top-level pickleable worker: validate one rule file, return
+    ``(content, list_of_results)``.
+
+    Creates a LOCAL ``ValidationReport``, calls the existing
+    ``validate_rule_file`` against it (so the per-file logic stays
+    identical to the serial path), then returns the captured content and
+    results. The parent process replays results in input order onto the
+    shared master report, preserving bit-identical output ordering.
+
+    Errors: any exception inside ``validate_rule_file`` propagates back
+    to ``parallel_scan`` which captures it in ``ScanResult.error``. The
+    parent's replay loop surfaces it as a per-file WARNING (consistent
+    with the spec contract shared across A2/A6/A8/A9 validators).
+    """
+    file_path = Path(unit.file_path_str)
+    local_report = ValidationReport()
+    content = validate_rule_file(file_path, local_report, unit.rel_path)
+    return content, list(local_report.results)
+
+
+def _rules_parallel_enabled() -> bool:
+    """Read the ``CPV_RULES_PARALLEL`` env-var.
+
+    Returns False when set to ``"0"`` / ``"false"`` / ``"no"`` / ``"off"``
+    (case-insensitive) — the serial path is taken. Any other value, or no
+    value at all, returns True (default = parallel). Mirrors the parsing
+    in ``_cache_parallel_enabled`` / ``_xref_parallel_enabled`` for
+    cross-validator consistency.
+    """
+    val = os.environ.get("CPV_RULES_PARALLEL")
+    if val is None:
+        return True
+    return val.strip().lower() not in {"0", "false", "no", "off"}
+
+
 def validate_rules_directory(
     rules_dir: Path,
     report: ValidationReport | None = None,
@@ -326,14 +414,93 @@ def validate_rules_directory(
 
     report.info(f"Found {len(rule_files)} rule file(s)")
 
-    # Validate each rule file and collect content for token counting
-    all_content: list[str] = []
+    # Pre-compute (file_path, rel_path) pairs OUTSIDE the worker so the
+    # decision between plugin_root and rules_dir.parent is made once at the
+    # call site (Path objects aren't passed across the worker boundary —
+    # only the resolved rel_path string is).
+    units: list[_RuleWorkUnit] = []
     for rule_path in rule_files:
         if plugin_root:
             rel_path = str(rule_path.relative_to(plugin_root))
         else:
             rel_path = str(rule_path.relative_to(rules_dir.parent))
-        content = validate_rule_file(rule_path, report, rel_path)
+        units.append(_RuleWorkUnit(file_path_str=str(rule_path), rel_path=rel_path))
+
+    # Task #384 / A10: dispatch per-file scans via the shared parallel_scan
+    # harness, then replay results onto the master report IN INPUT ORDER
+    # so the parallel path's output sequence is bit-identical to the
+    # serial path. The CPV_RULES_PARALLEL=0 escape hatch routes through
+    # the serial branch — kept structurally identical to the parallel
+    # branch's replay loop so any future per-file logic added to
+    # validate_rule_file is automatically picked up by both paths.
+    #
+    # Why ``chunk_size`` > 1: per-file work is small (read + YAML parse +
+    # ~10 regex scans, microseconds per file). The IPC overhead of
+    # ProcessPoolExecutor submission is ~1ms per task minimum — at
+    # one-task-per-file, IPC dominates and the parallel branch ends up
+    # slower than serial. Batching ~32 files per task reduces IPC
+    # ~32x and keeps the worker pool saturated for typical plugin sizes
+    # (a 1300-file CPV repo becomes ~40 tasks across ~10 workers ≈ 4
+    # tasks per worker, plenty of room for load-balancing without
+    # paying per-file submit overhead).
+    all_content: list[str] = []
+    if _rules_parallel_enabled() and len(units) > 1:
+        scan_results = parallel_scan(
+            units, _scan_one_rule_file, chunk_size=32  # type: ignore[arg-type]
+        )
+    else:
+        # Serial fallback: synthesize the same ScanResult shape so the
+        # replay loop below stays uniform. This is the path
+        # CPV_RULES_PARALLEL=0 exercises.
+        #
+        # NOTE: ``ScanResult.findings`` is typed as ``list`` in the harness
+        # because most workers return finding lists. Our worker
+        # returns a ``(content, list[ValidationResult])`` tuple so the
+        # main process can both replay results AND accumulate per-file
+        # content for the combined token-budget check. The harness never
+        # inspects ``findings`` — only the call site does — so the typing
+        # mismatch is a strict-mypy concern, not a runtime one.
+        scan_results = [
+            ScanResult(
+                file_path=u,
+                findings=_scan_one_rule_file(u),  # type: ignore[arg-type]
+                error=None,
+            )
+            for u in units
+        ]
+
+    for idx, sr in enumerate(scan_results):
+        unit = units[idx]
+        if sr.error is not None:
+            # Worker raised — spec mandates "surface as a per-file
+            # WARNING in the report (don't crash the whole validator)".
+            # Use the pre-computed rel_path for consistency with the
+            # serial format.
+            report.warning(
+                f"Could not validate rule file: {sr.error}",
+                unit.rel_path,
+            )
+            # No content from a failed scan — count as empty toward the
+            # combined token estimate (serial path also skips on read
+            # failure via early return).
+            all_content.append("")
+            continue
+
+        # sr.findings is the tuple (content, list_of_results) returned by
+        # the worker. Replay each result onto the master report,
+        # preserving level + message + file + line so the parallel path's
+        # output sequence matches the serial loop exactly.
+        content, results = sr.findings
+        for r in results:
+            report.add(
+                level=r.level,
+                message=r.message,
+                file=r.file,
+                line=r.line,
+                phase=r.phase,
+                fixable=r.fixable,
+                fix_id=r.fix_id,
+            )
         all_content.append(content)
 
     # Token size check across ALL rule files combined

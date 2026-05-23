@@ -12,7 +12,7 @@ argument-hint: "<plugin-or-marketplace-or-list> [--shard-size N] [--max-parallel
 Parallel fix skill for one OR many plugins. Two dispatch shapes:
 
 - **Single plugin** (default — backward-compatible with v2.91.0):
-  shards the plugin's findings into ~30-finding groups and
+  shards the plugin's findings into ~15-finding groups and
   dispatches one `plugin-fixer` per shard, all in parallel. This
   is the original `/cpv-batch-fix` behaviour and still applies.
 
@@ -52,7 +52,7 @@ The orchestrator body lives in this plugin's
 
 Knobs (forwarded to the orchestrator):
 
-- `--shard-size N` (default 30) — per-plugin shard size
+- `--shard-size N` (default 15) — per-plugin shard size
 - `--max-parallel N` (default 8, cap 16) — max concurrent agents
 - `--min-severity LEVEL` (default `minor`) — drop findings below
 
