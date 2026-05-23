@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-23T11:58:59+00:00",
+  "computed_at": "2026-05-23T12:01:54+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     ".github/workflows/bot-auto-merge.yml": "sha256:84ca9bec6592304749e979f2f0a9000b5047ce434435d1267f9ba0387d587b08",
@@ -12,6 +12,7 @@
     "agents/cache-optimizer-agent.md": "sha256:8a808df6659c8b2de0689a4ce8292703e2031517d9f2a88258f776481ccade8f",
     "agents/cpv-doctor-agent.md": "sha256:ad8fa4523896fd090f05566635b9fcf975d1b4de3b6c563437204b28cd394559",
     "agents/cpv-main-menu-agent.md": "sha256:ddad682003a8711dec1fa4205e0fc07c1c98665a1a94202cc0f0a4d1fe46fb17",
+    "agents/cpv-spark.md": "sha256:8e844dd0fe0525040c01b29f39b674b7ea647e38ac5ef8a476df8406a84a2118",
     "agents/marketplace-fixer.md": "sha256:af33e0a911fdb130b3efa9d98a6dad64a4fb3223644ee4b70f93a93346276431",
     "agents/plugin-creator.md": "sha256:8e875f20b2b93b47ccc4d2ef23f34941805c08522a6fa5ba7f8ff90e0ec5535d",
     "agents/plugin-diagnoser.md": "sha256:5c617f4f9be71775fbc6bf60ee747b3d7397671fc5ce2fd0ecb17015b4554e8f",

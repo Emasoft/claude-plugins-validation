@@ -13,7 +13,11 @@ description: |
   no longer depends on a user-scope agent — every install gets cpv-spark
   out of the box with the SERENA MCP / TLDR tool surface its workflow
   requires.
-model: opus
+
+  No `model:` pin (per CPV's CA-04 cache-warmth invariant — every CPV
+  agent inherits the session model; the dispatch site decides the
+  override with `model: opus` at Agent({...}) call time when bursts of
+  Opus power are needed).
 skills:
   - the-skills-menu
 ---
