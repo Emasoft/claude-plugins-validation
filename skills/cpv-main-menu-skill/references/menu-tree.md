@@ -1802,6 +1802,12 @@ Promoted from drill-in to top-level in v2.90.0: prompt-cache invalidation
 audit + cache-aware refactor (CA-01..CA-06) is a distinct workflow from
 generic Fix (§3.2), with its own audit + optimize loop.
 
+Since v2.102.0 every CA-01..CA-06 finding is a **WARNING** — the cache audit
+is advisory (cost/latency optimization), never publish-blocking. CA-04 covers
+a `model:` frontmatter pin on ANY component (agents, commands AND skills);
+`model: inherit` is exempt. To fix the findings, pick row 2 (auto-fix) or use
+the §3.10 post-validate fix menu with "Fix ALL (incl. WARNING)".
+
 Also reachable from §3.1.5.2 (Specific quality check → Cache patterns)
 for users who arrive via the Validate menu.
 
@@ -1820,9 +1826,7 @@ parallel cache-optimizer-agent dispatches in one main-session message.
 ├───┼───────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
 │ 3 │ Audit + broader cache-aware refactoring       │ Audit, fix CA-01..CA-06, then dispatch Phase 4 broader improvements (CLAUDE.md split, etc.)      │
 ├───┼───────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ 4 │ Apply --strict (MINOR + WARNING block too)    │ Same as 1 but exit non-zero when CA-04/05 (MINOR) or CA-06 (WARNING) findings exist              │
-├───┼───────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ 5 │ Audit project root (not a plugin)             │ For project trees: scans .claude/ + CLAUDE.md (no .claude-plugin/ precondition)                  │
+│ 4 │ Audit project root (not a plugin)             │ For project trees: scans .claude/ + CLAUDE.md (no .claude-plugin/ precondition)                  │
 ├───┼───────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
 │ A │ Ask the agent for a recommendation            │ Let the agent suggest the best next action right now                                             │
 ├───┼───────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
@@ -1856,19 +1860,14 @@ Type a number (or B for back, 0 to cancel):
   the explicit `broader` keyword in the prompt. The agent runs Phase 1-3
   and THEN Phase 4 (CLAUDE.md split, dynamic-content migration, etc.).
 
-#### 3.3.4 Strict mode
-
-- **arg-prompt**: `Path to plugin or project root?`
-- **execution**:
-  ```bash
-  uv run --with pyyaml python "$LAUNCHER" cache "$TARGET_PATH" --strict \
-    --report "$MAIN_ROOT/reports/validate_cache/$TS-strict-$SLUG.md"
-  ```
-
-#### 3.3.5 Project root (not a plugin)
+#### 3.3.4 Project root (not a plugin)
 
 - Same recipe as 3.3.1 — the validator auto-handles project vs plugin
   trees and skips the `.claude-plugin/` precondition when not present.
+
+> Note: `validate_cache` has no `--strict` mode — every CA finding is a
+> WARNING and WARNING never blocks (even under `--strict` elsewhere), so a
+> strict cache gate would be a no-op. The audit is advisory by design.
 
 ---
 

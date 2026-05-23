@@ -132,26 +132,33 @@ def _fetch_target(spec: str, sandbox: Path) -> tuple[Path, str]:
         return _curl_download(spec, sandbox), label
 
     raise FileNotFoundError(
-        f"Target not recognized: {spec!r}. "
-        "Expected: local path, GitHub URL, owner/repo, or file URL."
+        f"Target not recognized: {spec!r}. Expected: local path, GitHub URL, owner/repo, or file URL."
     )
 
 
 def _git_clone(clone_url: str, sandbox: Path) -> Path:
     dest = sandbox / "target"
     result = subprocess.run(
-        ["git", "clone", "--depth", "1", "--no-tags",
-         "-c", "http.lowSpeedLimit=100", "-c", "http.lowSpeedTime=300",
-         clone_url, str(dest)],
+        [
+            "git",
+            "clone",
+            "--depth",
+            "1",
+            "--no-tags",
+            "-c",
+            "http.lowSpeedLimit=100",
+            "-c",
+            "http.lowSpeedTime=300",
+            clone_url,
+            str(dest),
+        ],
         capture_output=True,
         text=True,
         timeout=300,
         check=False,
     )
     if result.returncode != 0:
-        raise RuntimeError(
-            f"git clone failed for {clone_url!r}: {result.stderr.strip() or result.stdout.strip()}"
-        )
+        raise RuntimeError(f"git clone failed for {clone_url!r}: {result.stderr.strip() or result.stdout.strip()}")
     # Remove .git to prevent the scanner from walking history blobs.
     git_dir = dest / ".git"
     if git_dir.is_dir():
@@ -176,9 +183,7 @@ def _curl_download(url: str, sandbox: Path) -> Path:
         check=False,
     )
     if result.returncode != 0 or not out.is_file():
-        raise RuntimeError(
-            f"curl failed for {url!r}: {result.stderr.strip() or result.stdout.strip()}"
-        )
+        raise RuntimeError(f"curl failed for {url!r}: {result.stderr.strip() or result.stdout.strip()}")
     return dest
 
 
@@ -211,9 +216,7 @@ def _extract_archive(src: Path, sandbox: Path) -> Path:
 
 def _detect_target_kind(root: Path) -> str:
     """Heuristic classification: plugin / marketplace / skill / loose."""
-    if (root / ".claude-plugin" / "marketplace.json").is_file() or (
-        root / "marketplace.json"
-    ).is_file():
+    if (root / ".claude-plugin" / "marketplace.json").is_file() or (root / "marketplace.json").is_file():
         return "marketplace"
     if (root / ".claude-plugin" / "plugin.json").is_file():
         return "plugin"
@@ -339,10 +342,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--keep-sandbox",
         action="store_true",
-        help=(
-            "Keep the work directory after scanning (default: delete). "
-            "Useful for debugging false positives."
-        ),
+        help=("Keep the work directory after scanning (default: delete). Useful for debugging false positives."),
     )
     args = parser.parse_args(argv)
 

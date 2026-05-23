@@ -372,7 +372,17 @@ def validate_tools_field(frontmatter: dict[str, Any], filename: str, report: Age
         return
 
     if not tool_list:
-        report.minor("'tools' field is empty", filename)
+        # Empty tools ([] / "") is a VALID, explicit "no tools" (chat-only)
+        # declaration — distinct from an ABSENT field, which means "inherit all
+        # tools". Non-blocking (WARNING) but surfaced because an empty array is
+        # usually a mistaken attempt at "allow everything".
+        report.warning(
+            "'tools' is empty ([]) — this forbids ALL tools, only chatting is "
+            "allowed. If this is not intentional, fix it. If it was a mistaken "
+            "attempt at allowing all tools, omitting the 'tools' field entirely "
+            "is the correct syntax (an absent field means all tools allowed).",
+            filename,
+        )
         return
 
     # Validate each tool name
@@ -1353,6 +1363,15 @@ def validate_agent(agent_path: Path) -> AgentValidationReport:
         validate_name_field(frontmatter, filename, report)
         validate_description_field(frontmatter, filename, report)
         validate_tools_field(frontmatter, filename, report)
+        # TRDD-94e06820: the body must not invoke a tool the declared 'tools'
+        # field does not grant — that call fails silently at runtime. Skipped
+        # when 'tools' is absent (agent inherits all tools).
+        from cpv_tool_permission_match import validate_body_tool_consistency  # noqa: PLC0415
+
+        _, _body_for_tools, _ = parse_frontmatter(content)
+        validate_body_tool_consistency(
+            frontmatter.get("tools"), _body_for_tools, report, filename=filename, field_name="tools"
+        )
         validate_model_field(frontmatter, filename, report)
         validate_color_field(frontmatter, filename, report)
         validate_capabilities_field(frontmatter, filename, report)

@@ -1,7 +1,6 @@
 ---
 name: the-skills-menu-create
 description: Migrate any Claude Code plugin to the-skills-menu method — agents declare only one preloaded skill (the-skills-menu) and pick operational skills dynamically via the Skill() tool instead of preloading static lists. Accepts a local plugin path, a Git URL, an owner/repo slug, a "plugin-in-marketplace" expression, or a bare plugin name to search. Works on ANY plugin, not just CPV.
-allowed-tools: Read, Glob, Grep, Skill
 argument-hint: "<plugin-path-or-url-or-name> [--full-cleanup] [--force-dirty]"
 user-invocable: true
 ---

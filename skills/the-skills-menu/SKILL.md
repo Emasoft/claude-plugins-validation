@@ -2,7 +2,6 @@
 name: the-skills-menu
 description: "Dynamic skill menu for the claude-plugins-validation plugin. Teaches agents which skills are available, when to use them, and how to load them with the Skill() tool. Use when an agent needs to pick a downstream CPV skill at runtime. Used by every CPV agent via the-skills-menu method (TRDD-478d9687)."
 user-invocable: false
-allowed-tools: Read
 ---
 
 # the-skills-menu — universal CPV skill catalog
@@ -20,7 +19,7 @@ The full per-skill table (inputs, return contracts) lives in
 
 ## Prerequisites
 
-- The calling agent has `Skill` in its `tools:` list (default for every CPV agent).
+- The calling agent can invoke the `Skill` tool (every CPV agent declares no `tools:` field, so it inherits all tools — `Skill` included).
 - A clear task statement (mode + target) so you can pick the right skill.
 
 ## Instructions

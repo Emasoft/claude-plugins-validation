@@ -81,8 +81,7 @@ class TestSkillAuditNativeModule:
         assert "MANDATORY" in body
         assert "iron rule" in body.lower() or "IRON RULE" in body
         assert "report.critical(" in body, (
-            "report_findings must call report.critical() when the rule "
-            "catalog is missing — iron rule"
+            "report_findings must call report.critical() when the rule catalog is missing — iron rule"
         )
 
     def test_module_imports_only_stdlib(self) -> None:
@@ -91,8 +90,16 @@ class TestSkillAuditNativeModule:
         body = (SCRIPTS_DIR / "cpv_skillaudit_native.py").read_text(encoding="utf-8")
         # Allowed stdlib imports for this module.
         allowed_stdlib = {
-            "base64", "binascii", "hashlib", "json", "re", "unicodedata",
-            "collections.abc", "dataclasses", "pathlib", "typing",
+            "base64",
+            "binascii",
+            "hashlib",
+            "json",
+            "re",
+            "unicodedata",
+            "collections.abc",
+            "dataclasses",
+            "pathlib",
+            "typing",
             "urllib.parse",
         }
         import re as _re
@@ -106,8 +113,7 @@ class TestSkillAuditNativeModule:
             head = mod.split(".")[0]
             allowed_heads = {head_.split(".")[0] for head_ in allowed_stdlib} | {"__future__"}
             assert head in allowed_heads, (
-                f"native skillaudit module must not import non-stdlib '{mod}' — "
-                "iron rule (zero supply-chain surface)"
+                f"native skillaudit module must not import non-stdlib '{mod}' — iron rule (zero supply-chain surface)"
             )
 
     def test_no_npx_or_subprocess_or_network(self) -> None:
@@ -181,9 +187,7 @@ class TestScanContent:
         rule_ids = {f["ruleId"] for f in actionable}
         # Must catch at least one of the canonical malicious categories.
         canonical = {"DATA_EXFIL", "PROMPT_INJECT", "URL_SUSPICIOUS"}
-        assert rule_ids & canonical, (
-            f"expected at least one of {canonical}; got {rule_ids}"
-        )
+        assert rule_ids & canonical, f"expected at least one of {canonical}; got {rule_ids}"
 
     def test_clean_doc_produces_zero_actionable_findings(self) -> None:
         from cpv_skillaudit_native import scan_content
@@ -267,16 +271,12 @@ class TestScanPath:
         from cpv_skillaudit_native import scan_path
 
         (tmp_path / "node_modules" / "evil").mkdir(parents=True)
-        (tmp_path / "node_modules" / "evil" / "index.js").write_text(
-            "const url = 'https://webhook.site/x';"
-        )
+        (tmp_path / "node_modules" / "evil" / "index.js").write_text("const url = 'https://webhook.site/x';")
         (tmp_path / ".venv" / "lib").mkdir(parents=True)
         (tmp_path / ".venv" / "lib" / "bad.py").write_text("os.environ['SECRET']")
 
         _, files_scanned = scan_path(tmp_path)
-        assert files_scanned == 0, (
-            "scan_path must skip node_modules/ and .venv/ (vendored deps)"
-        )
+        assert files_scanned == 0, "scan_path must skip node_modules/ and .venv/ (vendored deps)"
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -370,8 +370,7 @@ class TestNoNpmIntegrationLingers:
         import cpv_install_scanners as inst
 
         assert not hasattr(inst, "ensure_skillaudit"), (
-            "ensure_skillaudit was removed in favour of the native port — "
-            "if it returns we have a regression"
+            "ensure_skillaudit was removed in favour of the native port — if it returns we have a regression"
         )
         assert "ensure_skillaudit" not in inst.__all__
 
@@ -380,12 +379,14 @@ class TestNoNpmIntegrationLingers:
 
         import cpv_install_scanners as inst
 
-        with patch.object(inst, "ensure_fclones", return_value=True), \
-             patch.object(inst, "ensure_cc_audit", return_value=True), \
-             patch.object(inst, "ensure_trufflehog", return_value=True), \
-             patch.object(inst, "ensure_semgrep", return_value=True), \
-             patch.object(inst, "ensure_tirith", return_value=True), \
-             patch.object(inst, "ensure_cisco_skill_scanner", return_value=True):
+        with (
+            patch.object(inst, "ensure_fclones", return_value=True),
+            patch.object(inst, "ensure_cc_audit", return_value=True),
+            patch.object(inst, "ensure_trufflehog", return_value=True),
+            patch.object(inst, "ensure_semgrep", return_value=True),
+            patch.object(inst, "ensure_tirith", return_value=True),
+            patch.object(inst, "ensure_cisco_skill_scanner", return_value=True),
+        ):
             result = inst.install_all_scanners()
         assert "skillaudit" not in result, (
             "skillaudit must not appear in the install_all_scanners output — "

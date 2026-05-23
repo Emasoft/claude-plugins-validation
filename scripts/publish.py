@@ -1052,7 +1052,10 @@ def _snapshot_browser_pids() -> set[int]:
     try:
         snap = subprocess.run(
             ["ps", "-eo", "pid,command"],
-            capture_output=True, text=True, check=False, timeout=10,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
         )
     except (OSError, subprocess.SubprocessError):
         return set()

@@ -2,7 +2,6 @@
 name: cpv-batch-full-scan-and-fix
 description: "Maximum-coverage same-turn sweep across a marketplace / list / single plugin. Each plugin-fixer reads every source file ONCE and runs validate + security + caching audit + caching optimize + verify-FPs + fix inline. ~5× cheaper than running the four separate batch skills sequentially. Use when applying every-checker fixes across many plugins at once. Trigger with /cpv-batch-full-scan-and-fix."
 user-invocable: true
-allowed-tools: Read, Bash(python3:*,git:*,uv:*,cat:*,mkdir:*), Glob, Grep
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 ---
 

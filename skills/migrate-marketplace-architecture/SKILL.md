@@ -8,7 +8,6 @@ tags:
   - marketplace
   - migration
   - architecture
-allowed-tools: Read, Write, Edit, Bash(git:*,gh:*,uv:*,jq:*), Glob, Grep, AskUserQuestion
 user-invocable: false
 ---
 

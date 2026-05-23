@@ -200,36 +200,33 @@ def test_agent_exit_contract_mentions_partial_state() -> None:
     )
 
 
-# ── Contract: agent has Bash in tools ─────────────────────────────────────────
+# ── Contract: agent inherits ALL tools (no tools: field) ──────────────────────
 
 
-def test_agent_tools_include_bash() -> None:
-    """Agent's tools: frontmatter MUST include Bash — needed for run_all_checks + gh."""
+def test_agent_has_no_tools_field() -> None:
+    """plugin-fixer MUST NOT declare a ``tools:`` field — it inherits ALL tools.
+
+    Per the user's fleet-wide policy (every CPV skill and agent may call all
+    tools, no limit), the agent omits ``tools:`` entirely. An absent ``tools:``
+    field means the agent inherits the full default tool surface — which
+    includes Bash (for run_all_checks / publish.py / gh run watch) and
+    AskUserQuestion (for the post-failure decision menu). A restrictive
+    ``tools:`` list would be a regression against the policy.
+
+    This reverses issue #21 ask #1 (which wanted Bash made EXPLICIT): the
+    "all tools allowed in every CPV skill and agent" directive supersedes it.
+    """
     body = AGENT_FILE.read_text()
     # Extract the YAML frontmatter (between first two '---' markers).
     fm_match = re.match(r"^---\n(.*?)\n---", body, re.DOTALL)
     assert fm_match, "agents/plugin-fixer.md must have YAML frontmatter"
     frontmatter = fm_match.group(1)
-    # Either (a) tools: list contains Bash, or (b) tools: field is absent
-    # (which means the agent inherits all tools, including Bash, from the
-    # default surface). Per issue #21 ask #1 we want Bash to be EXPLICIT
-    # so the agent's required surface is unambiguous.
-    tools_section_match = re.search(r"^tools:\n((?:\s+-\s+\w+\n)+)", frontmatter, re.MULTILINE)
-    assert tools_section_match, (
-        "agents/plugin-fixer.md frontmatter must declare tools: explicitly. "
-        "Without an explicit list, the migration contract's Bash + gh + "
-        "AskUserQuestion requirements are implicit (and a future inheritance "
-        "regression could remove them silently)."
-    )
-    tools_block = tools_section_match.group(1)
-    assert "Bash" in tools_block, (
-        "agents/plugin-fixer.md frontmatter must include Bash in the tools: "
-        "list — needed for run_all_checks, publish.py, and gh run watch."
-    )
-    assert "AskUserQuestion" in tools_block, (
-        "agents/plugin-fixer.md frontmatter must include AskUserQuestion "
-        "in the tools: list — needed for the post-failure decision menu "
-        "(fix manually / --force-templates / abort)."
+    tools_section_match = re.search(r"^tools:", frontmatter, re.MULTILINE)
+    assert tools_section_match is None, (
+        "agents/plugin-fixer.md frontmatter must NOT declare a `tools:` field. "
+        "Per the fleet-wide 'all tools allowed' policy, an absent tools: field "
+        "lets the agent inherit the full surface (Bash, AskUserQuestion, etc.). "
+        "A restrictive list would re-introduce the limit the policy removed."
     )
 
 
@@ -288,8 +285,7 @@ def test_agent_mentions_real_publish_and_ci_watch() -> None:
         "publish' so users know the migration will push a new tag."
     )
     assert has_ci, (
-        "agents/plugin-fixer.md must mention `gh run watch` or 'green CI' "
-        "so users know CI must pass before [DONE]."
+        "agents/plugin-fixer.md must mention `gh run watch` or 'green CI' so users know CI must pass before [DONE]."
     )
 
 

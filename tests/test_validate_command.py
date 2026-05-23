@@ -345,11 +345,19 @@ class TestValidateAllowedToolsField:
         validate_allowed_tools_field({"allowed-tools": 42}, "bad-type.md", report)
         assert any(r.level == "MAJOR" and "must be string or list" in r.message for r in report.results)
 
-    def test_empty_tools_list_reports_minor(self):
-        """An empty allowed-tools list should produce MINOR (lines 297-298)."""
+    def test_empty_tools_list_reports_warning(self):
+        """An empty allowed-tools list is a non-blocking WARNING, not MINOR.
+
+        Empty ``allowed-tools: []`` is an explicit "no tools" (chat-only)
+        declaration — VALID, distinct from an absent field (= inherit all
+        tools). The warning tells the author to omit the field if they meant
+        to allow all tools.
+        """
         report = CommandValidationReport()
         validate_allowed_tools_field({"allowed-tools": []}, "empty-tools.md", report)
-        assert any(r.level == "MINOR" and "empty" in r.message for r in report.results)
+        assert any(r.level == "WARNING" and "empty" in r.message for r in report.results)
+        assert not any(r.level == "MINOR" and "empty" in r.message for r in report.results)
+        assert any(r.level == "WARNING" and "omit" in r.message.lower() for r in report.results)
 
     def test_invalid_tool_in_list_reports_major(self):
         """An unknown tool name in the list should produce MAJOR (lines 305, 308-309)."""

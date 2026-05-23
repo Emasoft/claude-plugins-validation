@@ -43,14 +43,36 @@ ContextVerdict = Literal["safe_literal", "safe_doc", "safe_schema", "suspect", "
 # publish.py catches the converse direction.
 _SAFE_KEY_SUFFIXES: Final[frozenset[str]] = frozenset(
     {
-        "description", "displayName", "title", "summary", "longDescription",
-        "keywords", "tags", "categories",
-        "homepage", "repository", "bugs", "documentation", "url", "uri",
-        "license", "licenses", "spdx",
-        "author", "authors", "maintainers", "contributors", "funding", "name",
-        "engines", "readme", "changelog",
+        "description",
+        "displayName",
+        "title",
+        "summary",
+        "longDescription",
+        "keywords",
+        "tags",
+        "categories",
+        "homepage",
+        "repository",
+        "bugs",
+        "documentation",
+        "url",
+        "uri",
+        "license",
+        "licenses",
+        "spdx",
+        "author",
+        "authors",
+        "maintainers",
+        "contributors",
+        "funding",
+        "name",
+        "engines",
+        "readme",
+        "changelog",
         "default",  # JSON-Schema property defaults — string defaults can carry shell-like content as the default VALUE
-        "$comment", "$id", "$schema",
+        "$comment",
+        "$id",
+        "$schema",
         "version",
         "argument-hint",  # claude-plugin command arg hint
         "model",  # claude-plugin agent model selector
@@ -87,14 +109,33 @@ _SAFE_KEY_SUFFIXES: Final[frozenset[str]] = frozenset(
 # severity is preserved.
 _DANGEROUS_KEY_SUFFIXES: Final[frozenset[str]] = frozenset(
     {
-        "command", "args", "argv",
-        "entrypoint", "cmd", "exec", "run", "script", "shell", "interpreter",
-        "binary", "bin", "executable",
-        "env", "environment",  # env vars piped into the subprocess
-        "preInstall", "postInstall", "install",  # npm-style lifecycle hooks
-        "preStart", "postStart", "start",
-        "preStop", "postStop", "stop",
-        "preBuild", "postBuild", "build",
+        "command",
+        "args",
+        "argv",
+        "entrypoint",
+        "cmd",
+        "exec",
+        "run",
+        "script",
+        "shell",
+        "interpreter",
+        "binary",
+        "bin",
+        "executable",
+        "env",
+        "environment",  # env vars piped into the subprocess
+        "preInstall",
+        "postInstall",
+        "install",  # npm-style lifecycle hooks
+        "preStart",
+        "postStart",
+        "start",
+        "preStop",
+        "postStop",
+        "stop",
+        "preBuild",
+        "postBuild",
+        "build",
     }
 )
 

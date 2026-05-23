@@ -1,7 +1,6 @@
 ---
 name: cpv-batch-scope-diagnose
 description: Read-only diagnostic across a fleet of project folders. One cpv-doctor-agent per project diagnoses the requested scope — user (~/.claude/), project (<project>/.claude/), local (<project>/.claude/settings.local.json), or full (all three + cross-scope conflict checker). LOCAL paths only — URL inputs are CRITICAL errors because the doctor needs ~/.claude/ filesystem access. Default 8 parallel agents per main-session message, cap 16.
-allowed-tools: Read, Bash(python3:*,git:*,uv:*,cat:*,mkdir:*), Glob, Grep
 argument-hint: "[project-folder-or-list] [--scope full|user|project|local] [--max-parallel N]"
 user-invocable: true
 ---

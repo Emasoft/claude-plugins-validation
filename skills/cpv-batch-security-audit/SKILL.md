@@ -2,7 +2,6 @@
 name: cpv-batch-security-audit
 description: "Fleet-wide parallel security audit. Accepts local paths, GitHub URLs, marketplaces, lists, and @listfile shapes. One plugin-validator per plugin runs ONLY validate_security (5 external scanners + AI/security rules). Use when checking supply-chain risk across many plugins. Trigger with /cpv-batch-security-audit or 'security-audit every plugin in X'."
 user-invocable: true
-allowed-tools: Read, Bash(python3:*,git:*,uv:*,cat:*,mkdir:*), Glob, Grep
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 ---
 

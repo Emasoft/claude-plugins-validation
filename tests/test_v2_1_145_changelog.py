@@ -123,9 +123,7 @@ class TestSkillsFieldFileEntryDemoted:
         flagged = [m for m in minors if "points at a file" in m.message]
         assert flagged, f"Expected MINOR with 'points at a file', got: {[m.message for m in minors]}"
         # Parent-directory hint must include the parent path.
-        assert any("skills/helper" in m.message for m in flagged), (
-            "MINOR must name the parent directory in the hint"
-        )
+        assert any("skills/helper" in m.message for m in flagged), "MINOR must name the parent directory in the hint"
 
     def test_directory_entry_passes_silently(self, tmp_path: Path) -> None:
         """A `skills:` entry pointing at the directory does NOT emit the
@@ -139,8 +137,7 @@ class TestSkillsFieldFileEntryDemoted:
 
         flagged = [r for r in report.results if "points at a file" in r.message]
         assert flagged == [], (
-            f"Directory entries must not trip the v2.1.145 file-entry MINOR; got: "
-            f"{[r.message for r in flagged]}"
+            f"Directory entries must not trip the v2.1.145 file-entry MINOR; got: {[r.message for r in flagged]}"
         )
 
     def test_non_skillmd_file_entry_still_major(self, tmp_path: Path) -> None:
@@ -211,10 +208,7 @@ class TestContextForkSelfRecursionDetected:
 
         minors = [r for r in report.results if r.level == "MINOR"]
         flagged = [m for m in minors if "self-recursion" in m.message]
-        assert flagged, (
-            f"Expected MINOR with 'self-recursion' for bare invocation; got: "
-            f"{[m.message for m in minors]}"
-        )
+        assert flagged, f"Expected MINOR with 'self-recursion' for bare invocation; got: {[m.message for m in minors]}"
 
     def test_qualified_self_invocation_emits_minor(self, tmp_path: Path) -> None:
         """Fully-qualified self-invocation ``Skill({skill: "<plugin>:<self>"})``
@@ -241,39 +235,24 @@ class TestContextForkSelfRecursionDetected:
         loop bug)."""
         from validate_skill_comprehensive import validate_skill
 
-        body = (
-            "# Demo skill\n\n"
-            "## Steps\n\n"
-            "1. Implementation detail:\n\n"
-            '   `Skill({skill: "demo-skill"})`\n'
-        )
+        body = '# Demo skill\n\n## Steps\n\n1. Implementation detail:\n\n   `Skill({skill: "demo-skill"})`\n'
         skill = self._make_skill(tmp_path, body, context="")
         report = validate_skill(skill, skip_dir_name_check=True)
 
         flagged = [r for r in report.results if "self-recursion" in r.message]
-        assert flagged == [], (
-            "Non-fork skills must not trigger the v2.1.145 MINOR — only fork+self does"
-        )
+        assert flagged == [], "Non-fork skills must not trigger the v2.1.145 MINOR — only fork+self does"
 
     def test_fork_skill_invoking_OTHER_skill_no_minor(self, tmp_path: Path) -> None:
         """A `context: fork` skill calling a DIFFERENT skill is fine — only
         self-invocation is the antipattern."""
         from validate_skill_comprehensive import validate_skill
 
-        body = (
-            "# Demo skill\n\n"
-            "## Steps\n\n"
-            "1. Delegate to helper:\n\n"
-            '   `Skill({skill: "other-helper"})`\n'
-            "2. Return.\n"
-        )
+        body = '# Demo skill\n\n## Steps\n\n1. Delegate to helper:\n\n   `Skill({skill: "other-helper"})`\n2. Return.\n'
         skill = self._make_skill(tmp_path, body)
         report = validate_skill(skill, skip_dir_name_check=True)
 
         flagged = [r for r in report.results if "self-recursion" in r.message]
-        assert flagged == [], (
-            "Fork skills calling OTHER skills must not trigger the MINOR — only self"
-        )
+        assert flagged == [], "Fork skills calling OTHER skills must not trigger the MINOR — only self"
 
 
 # =============================================================================
@@ -309,9 +288,7 @@ class TestHookInputBackgroundTasksAndSessionCrons:
                         "Stop": [
                             {
                                 "matcher": "",
-                                "hooks": [
-                                    {"type": "command", "command": "echo 'turn ended'"}
-                                ],
+                                "hooks": [{"type": "command", "command": "echo 'turn ended'"}],
                             }
                         ]
                     }
@@ -327,8 +304,7 @@ class TestHookInputBackgroundTasksAndSessionCrons:
         # CRITICAL.
         criticals = [r for r in report.results if r.level == "CRITICAL"]
         assert criticals == [], (
-            f"Stop hook config must not trip CRITICAL; got: "
-            f"{[(r.level, r.message) for r in criticals]}"
+            f"Stop hook config must not trip CRITICAL; got: {[(r.level, r.message) for r in criticals]}"
         )
 
     def test_background_tasks_and_session_crons_not_modelled_in_hook_output(self) -> None:
@@ -339,12 +315,10 @@ class TestHookInputBackgroundTasksAndSessionCrons:
         from validate_hook_output import UNIVERSAL_OUTPUT_FIELDS
 
         assert "background_tasks" not in UNIVERSAL_OUTPUT_FIELDS, (
-            "background_tasks is a stdin INPUT field, not an OUTPUT field; "
-            "must not appear in UNIVERSAL_OUTPUT_FIELDS"
+            "background_tasks is a stdin INPUT field, not an OUTPUT field; must not appear in UNIVERSAL_OUTPUT_FIELDS"
         )
         assert "session_crons" not in UNIVERSAL_OUTPUT_FIELDS, (
-            "session_crons is a stdin INPUT field, not an OUTPUT field; "
-            "must not appear in UNIVERSAL_OUTPUT_FIELDS"
+            "session_crons is a stdin INPUT field, not an OUTPUT field; must not appear in UNIVERSAL_OUTPUT_FIELDS"
         )
 
 
@@ -380,12 +354,9 @@ class TestStatusLineInputGithubFields:
         from cc_scope_rules import KNOWN_SETTINGS_KEYS
 
         leak_candidates = [
-            k for k in KNOWN_SETTINGS_KEYS
-            if k.lower() in {"github_repo", "pr_number", "pr_title", "github_pr"}
+            k for k in KNOWN_SETTINGS_KEYS if k.lower() in {"github_repo", "pr_number", "pr_title", "github_pr"}
         ]
-        assert leak_candidates == [], (
-            f"Statusline stdin fields leaked into KNOWN_SETTINGS_KEYS: {leak_candidates}"
-        )
+        assert leak_candidates == [], f"Statusline stdin fields leaked into KNOWN_SETTINGS_KEYS: {leak_candidates}"
 
 
 class TestReadToolPartialViewBehaviour:
@@ -410,6 +381,4 @@ class TestReadToolPartialViewBehaviour:
         # No env var, no setting, no constant references the partial-view
         # behaviour. Spot-check the env-var set.
         partial_view_names = [n for n in VALID_PLUGIN_ENV_VARS if "PARTIAL" in n.upper()]
-        assert partial_view_names == [], (
-            f"No env var should model Read-tool partial views; found: {partial_view_names}"
-        )
+        assert partial_view_names == [], f"No env var should model Read-tool partial views; found: {partial_view_names}"

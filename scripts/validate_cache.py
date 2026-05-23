@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Claude Plugins Validation — prompt-cache audit (CA-01 .. CA-06).
+"""Claude Plugins Validation — prompt-cache audit (CA-01 .. CA-07).
 
 Validates a plugin against Anthropic's 6 prompt-caching rules surfaced by
-ussumant/cache-audit (https://github.com/ussumant/cache-audit). Plugins
-that ship hooks/skills/agents can silently break the prompt cache for
-every user that installs them — multiplying API costs by 5-10x and
-adding latency on every turn. This validator catches the documented
-breakage patterns before publication.
+ussumant/cache-audit (https://github.com/ussumant/cache-audit), plus CA-07
+(the `context: fork`/`branch` cache cost). Plugins that ship hooks / skills /
+agents can silently break the prompt cache for every user that installs them
+— multiplying API costs by 5-10x and adding latency on every turn. This
+validator catches the documented breakage patterns before publication.
 
 Reference: "Lessons from Building Claude Code: Prompt Caching Is
 Everything" by Thariq Shihipar (Anthropic).
@@ -18,10 +18,19 @@ Usage::
 
 Exit codes (standard CPV severity-coded):
 
-    0 - No blocking issues
-    1 - CRITICAL  (CA layer never raises CRITICAL — reserved for SECURITY)
-    2 - MAJOR     (CA-01 / CA-02 / CA-03 — cache-prefix invalidation)
-    3 - MINOR     (CA-04 / CA-05 — cost/latency impact)
+    0 - No blocking issues. Since v2.102.0 EVERY cache-discipline finding
+        (CA-01 .. CA-06) is reported at WARNING severity — a cache miss costs
+        tokens/latency but never makes a plugin invalid, so the cache audit
+        alone always exits 0.
+    1 - CRITICAL — invocation error ONLY (target path missing / not a
+        directory / no .claude-plugin/plugin.json). The CA-NN rules
+        themselves never raise CRITICAL.
+
+`validate_plugin` CALLS this scanner (it does not merge its logic): the cache
+findings are written to a SEPARATE report and surfaced as a one-line pointer
+in the main validation report, so cache warnings never enter the main verdict.
+CA-04 covers a `model:` frontmatter on ANY component (agents, commands AND
+skills) — `model: inherit` is exempt.
 """
 
 from __future__ import annotations
@@ -265,13 +274,13 @@ def scan_static_prefix(file_path: Path, report: ValidationReport, plugin_root: P
 
     issues = 0
     for match in _DYNAMIC_PLACEHOLDER.finditer(fenced_stripped):
-        report.major(
+        report.warning(
             f"CA-01: dynamic placeholder {match.group(0)!r} in cached prefix file",
             rel,
         )
         issues += 1
     for match in _DYNAMIC_SHELL_CMD.finditer(fenced_stripped):
-        report.major(
+        report.warning(
             f"CA-01: shell command substitution {match.group(0)!r} in cached prefix file",
             rel,
         )
@@ -309,7 +318,7 @@ def scan_hook_for_prefix_mutation(
             continue
         for prefix_pat in _PREFIX_FILE_PATTERNS:
             if prefix_pat.search(line):
-                report.major(
+                report.warning(
                     f"CA-02: {event} hook writes to cached-prefix file",
                     rel,
                     line_num,
@@ -352,7 +361,7 @@ def scan_hook_for_tool_mutation(
             continue
         if not _TOOL_LIST_MUTATION.search(line):
             continue
-        report.major(
+        report.warning(
             f"CA-03: {event} hook mutates tool-list field",
             rel,
             line_num,
@@ -362,7 +371,7 @@ def scan_hook_for_tool_mutation(
 
 
 # =============================================================================
-# CA-04 — Skill `model:` field forces an in-line model switch
+# CA-04 — `model:` frontmatter on ANY component forces an in-line model switch
 # =============================================================================
 
 
@@ -370,10 +379,27 @@ _FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---", re.DOTALL)
 _MODEL_FIELD_RE = re.compile(r"^model:\s*(.+)$", re.MULTILINE)
 
 
-def scan_skill_for_model_override(skill_md: Path, report: ValidationReport, plugin_root: Path) -> int:
-    """Flag SKILL.md files whose frontmatter declares an in-line `model:` switch."""
+def scan_component_for_model_override(
+    md_file: Path,
+    report: ValidationReport,
+    plugin_root: Path,
+    component_kind: str,
+) -> int:
+    """Flag a component .md whose frontmatter declares a `model:` override.
+
+    Applies to agents, commands AND skills alike. Pinning a component to a
+    specific model forces an in-line model switch when that component runs:
+    each model keeps a SEPARATE prompt cache, so the pinned component pays a
+    cold-cache miss on every dispatch instead of reusing the session's warm
+    prefix. ``model: inherit`` is exempt — it explicitly uses the session
+    model, so it triggers no switch and no cache split.
+
+    The regex only matches a top-level ``model:`` key (column 0 of the
+    frontmatter). A ``model:`` substring inside an indented block-scalar
+    description never starts at column 0, so prose mentions don't false-fire.
+    """
     try:
-        content = skill_md.read_text(encoding="utf-8", errors="ignore")
+        content = md_file.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return 0
     fm = _FRONTMATTER_RE.match(content)
@@ -384,9 +410,70 @@ def scan_skill_for_model_override(skill_md: Path, report: ValidationReport, plug
     if not m:
         return 0
     model = m.group(1).strip().strip("'").strip('"')
-    rel = str(skill_md.relative_to(plugin_root)) if skill_md.is_relative_to(plugin_root) else str(skill_md)
-    report.minor(
-        f"CA-04: skill declares `model: {model}` — forces in-line model switch (use an agent instead)",
+    # `model: inherit` uses the parent/session model — no in-line switch, so
+    # the cache is never split. Treat it exactly like omitting the field.
+    if model.lower() == "inherit":
+        return 0
+    rel = str(md_file.relative_to(plugin_root)) if md_file.is_relative_to(plugin_root) else str(md_file)
+    report.warning(
+        f"CA-04: {component_kind} declares `model: {model}` in frontmatter — forces an in-line "
+        f"model switch that fragments the prompt cache (each model keeps a separate cache, so this "
+        f"{component_kind} pays a cold-cache miss on every dispatch instead of reusing the session's "
+        f"warm prefix). Omit the `model:` field to inherit the session model and keep the cache warm; "
+        f"use `model: inherit` if you must name it explicitly.",
+        rel,
+    )
+    return 1
+
+
+# =============================================================================
+# CA-07 — `context: fork` / `context: branch` re-primes the cache from cold
+# =============================================================================
+
+
+_CONTEXT_FIELD_RE = re.compile(r"^context:\s*(.+)$", re.MULTILINE)
+
+
+def scan_component_for_context_fork(
+    md_file: Path,
+    report: ValidationReport,
+    plugin_root: Path,
+    component_kind: str,
+) -> int:
+    """Flag a component whose frontmatter declares `context: fork` (or `branch`).
+
+    Forking spins up a fresh subagent: its system-prompt + tool-schema prefix is
+    re-primed from cold — up to ~1M tokens when the harness carries many skills /
+    MCP servers / tools (only CLAUDE.md and the rules files survive a fork
+    unchanged). Fork ONLY when the work genuinely needs a FRESH context
+    (independent audit / error-checking, free of parent baggage) or the ROOM a
+    fresh context buys (reading many files). Otherwise inherit the parent context
+    and keep the cache warm. WARNING — advisory, never blocks.
+
+    `branch` is a documented synonym for `fork`; both are flagged. Any other
+    `context:` value (e.g. the default inherited context) is exempt.
+    """
+    try:
+        content = md_file.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return 0
+    fm = _FRONTMATTER_RE.match(content)
+    if not fm:
+        return 0
+    m = _CONTEXT_FIELD_RE.search(fm.group(1))
+    if not m:
+        return 0
+    value = m.group(1).strip().strip("'").strip('"').lower()
+    if value not in ("fork", "branch"):
+        return 0
+    rel = str(md_file.relative_to(plugin_root)) if md_file.is_relative_to(plugin_root) else str(md_file)
+    report.warning(
+        f"CA-07: {component_kind} declares `context: {value}` in frontmatter — forks a fresh "
+        f"subagent whose prompt prefix is re-primed from cold (up to ~1M tokens when the harness "
+        f"carries many skills/MCP/tools; only CLAUDE.md + rules files survive a fork). Keep the fork "
+        f"ONLY if this {component_kind} needs a fresh context (independent audit / error-checking) or "
+        f"the room to read many files; otherwise drop the `context:` field to inherit the parent "
+        f"context and keep the cache warm.",
         rel,
     )
     return 1
@@ -419,7 +506,7 @@ def scan_hook_for_unbounded_output(
             continue
         for unbounded_pat, label, guard_pat in _UNBOUNDED_PATTERNS:
             if unbounded_pat.search(line) and not guard_pat.search(line):
-                report.minor(
+                report.warning(
                     f"CA-05: {event} hook may emit unbounded output: {label}",
                     rel,
                     line_num,
@@ -556,11 +643,23 @@ def scan_plugin_for_cache(plugin_root: Path) -> ValidationReport:
         total += scan_hook_for_unbounded_output(script, event, report, plugin_root)
         total += scan_hook_for_fork_unsafe(script, event, report, plugin_root)
 
-    # CA-04 — skills with `model:` frontmatter
+    # CA-04 — `model:` frontmatter on ANY component (agents, commands, skills).
+    # A pinned model forces an in-line switch that fragments the prompt cache;
+    # `model: inherit` is exempt (handled inside the scanner).
+    # CA-07 — `context: fork`/`branch` on skills + commands (agents have no
+    # `context:` field — an agent IS the forked subagent).
+    for sub, kind in (("agents", "agent"), ("commands", "command")):
+        comp_dir = plugin_root / sub
+        if comp_dir.is_dir():
+            for md_file in comp_dir.rglob("*.md"):
+                total += scan_component_for_model_override(md_file, report, plugin_root, kind)
+                if sub == "commands":
+                    total += scan_component_for_context_fork(md_file, report, plugin_root, kind)
     skills_dir = plugin_root / "skills"
     if skills_dir.is_dir():
         for skill_md in skills_dir.rglob("SKILL.md"):
-            total += scan_skill_for_model_override(skill_md, report, plugin_root)
+            total += scan_component_for_model_override(skill_md, report, plugin_root, "skill")
+            total += scan_component_for_context_fork(skill_md, report, plugin_root, "skill")
 
     if total == 0:
         report.passed(
@@ -595,18 +694,22 @@ def main() -> int:
         description="Validate prompt-cache discipline (CA-01..CA-06) for a Claude Code plugin",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Checks performed:
+Checks performed (every finding is a WARNING — non-blocking):
   CA-01 Static prompt prefix — no dynamic data in CLAUDE.md / agents / skills.
   CA-02 Hook scripts must not mutate cached-prefix files (CLAUDE.md, settings.json).
   CA-03 Hook scripts must not toggle tool allow/deny lists mid-session.
-  CA-04 Skills must not declare `model:` (forces in-line model switch).
+  CA-04 Components (agents/commands/skills) must not pin `model:` in frontmatter
+        (forces an in-line model switch; `model: inherit` is exempt).
   CA-05 Hook scripts should not emit unbounded git/find/ls/cat output.
   CA-06 Compaction & subagent hooks must preserve the cached prefix.
+  CA-07 Avoid `context: fork`/`branch` on skills/commands unless a fresh
+        context (audit/error-checking) or many-file reads justify the cost.
 
 Exit codes:
-  0 - No blocking issues
-  2 - MAJOR issues (CA-01 / CA-02 / CA-03)
-  3 - MINOR issues (CA-04 / CA-05)
+  0 - No blocking issues. All CA-01..CA-06 findings are WARNING, so a clean
+      OR warning-only audit both exit 0.
+  1 - CRITICAL — invocation error only (path missing / not a directory /
+      no .claude-plugin/plugin.json). The CA-NN rules never raise CRITICAL.
 
 """
         + launcher_epilog("cache"),

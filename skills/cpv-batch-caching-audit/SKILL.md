@@ -2,7 +2,6 @@
 name: cpv-batch-caching-audit
 description: "Fleet-wide read-only cache audit. Accepts local paths, GitHub URLs, marketplaces, lists, and @listfile shapes. One cache-optimizer-agent per plugin runs Phase 1 only — detects CA-01..CA-06 prompt-cache invalidation patterns, no fixes. Use when surveying cache-invalidation findings across many plugins without applying changes. Trigger with /cpv-batch-caching-audit."
 user-invocable: true
-allowed-tools: Read, Bash(python3:*,git:*,uv:*,cat:*,mkdir:*), Glob, Grep
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 ---
 

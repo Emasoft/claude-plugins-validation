@@ -1758,8 +1758,13 @@ def _is_self_scan_eligible(file_path: str) -> bool:
     # external plugin's README is NOT in CPV's manifest, so it still
     # gets scanned normally.
     _ROOT_DOC_BASENAMES = {
-        "readme.md", "changelog.md", "shiplog.md", "contributing.md",
-        "security.md", "code_of_conduct.md", "support.md",
+        "readme.md",
+        "changelog.md",
+        "shiplog.md",
+        "contributing.md",
+        "security.md",
+        "code_of_conduct.md",
+        "support.md",
     }
     if basename in _ROOT_DOC_BASENAMES and "/" not in file_normalized.lstrip("./"):
         return True
@@ -1786,9 +1791,7 @@ def _is_self_scan_eligible(file_path: str) -> bool:
     # injection — those are GitHub Actions context expressions, not SSTI.
     # Hash-anchored: an external plugin's workflows are not in the
     # manifest, so they get scanned normally.
-    if file_normalized.startswith(".github/workflows/") and (
-        basename.endswith(".yml") or basename.endswith(".yaml")
-    ):
+    if file_normalized.startswith(".github/workflows/") and (basename.endswith(".yml") or basename.endswith(".yaml")):
         return True
     # CPV's own AGENT / COMMAND / SKILL markdown — these document the
     # security patterns by example and the workflows that act on them.
@@ -8974,9 +8977,7 @@ def validate_security(
         should_skip=_skillaudit_should_skip,
     )
     new_results = report.results[report_len_before:]
-    skillaudit_findings_count = sum(
-        1 for r in new_results if r.level in ("CRITICAL", "MAJOR", "MINOR", "NIT")
-    )
+    skillaudit_findings_count = sum(1 for r in new_results if r.level in ("CRITICAL", "MAJOR", "MINOR", "NIT"))
     skillaudit_status = "RAN" if skillaudit_result.invoked else "FAILED"
     skillaudit_details = (
         "" if skillaudit_result.invoked else f"skillaudit native scan error: {skillaudit_result.skipped_reason}"

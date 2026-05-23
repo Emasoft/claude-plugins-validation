@@ -456,14 +456,22 @@ class TestValidateAllowedToolsField:
         validate_allowed_tools_field(frontmatter, report)
         assert report.has_major
 
-    def test_empty_list_reports_minor(self):
-        """Empty allowed-tools list should report MINOR (lines 315-316)."""
+    def test_empty_list_reports_warning(self):
+        """Empty allowed-tools list is a non-blocking WARNING, not MINOR.
+
+        Empty ``allowed-tools: []`` is an explicit "no tools" (chat-only)
+        declaration — VALID, distinct from an absent field (= all tools). The
+        warning explains that omitting the field is the correct way to allow
+        all tools.
+        """
         frontmatter = {"allowed-tools": []}
         report = _make_report()
         validate_allowed_tools_field(frontmatter, report)
-        assert report.has_minor
-        minor_msgs = [r.message for r in report.results if r.level == "MINOR"]
-        assert any("empty" in m for m in minor_msgs)
+        assert report.has_warning
+        assert not report.has_minor
+        warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
+        assert any("empty" in m for m in warning_msgs)
+        assert any("omit" in m.lower() for m in warning_msgs)
 
 
 class TestValidateModelField:

@@ -1,7 +1,6 @@
 ---
 name: cpv-main-menu
 description: Single entry point — numbered-table menu of every CPV command/skill/agent (validate, fix, create, manage, GitHub, semantic-grade)
-allowed-tools: Read, Bash, Glob, Grep, Skill, Edit, Write
 argument-hint: "(none — this command is fully interactive)"
 agent: cpv-main-menu-agent
 user-invocable: true

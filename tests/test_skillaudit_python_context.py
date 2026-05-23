@@ -6,6 +6,7 @@ around a regex match. These tests pin every documented verdict on every
 input shape we care about, plus the "iron rule" falls-through-to-unknown
 behavior for parse failures.
 """
+
 from __future__ import annotations
 
 import sys
@@ -200,13 +201,7 @@ class TestSafeDoc:
         import _skillaudit_python_context as ctx
 
         # Genuine multi-line f-string spanning 4 lines.
-        src = (
-            'name = "x"\n'
-            'DOC = f"""\n'
-            'leadingtext_marker_here {name}\n'
-            'trailing\n'
-            '"""\n'
-        )
+        src = 'name = "x"\nDOC = f"""\nleadingtext_marker_here {name}\ntrailing\n"""\n'
         idx = _line_idx_of(src, "marker_here")
         verdict = ctx.classify("scripts/test.py", src, idx, "marker_here", "CMD_INJECTION")
         assert verdict == "safe_doc"

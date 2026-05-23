@@ -23,6 +23,7 @@ Usage::
 
     python3 scripts/cpv_batch_aggregator.py <session-dir> [--report-path PATH]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -84,9 +85,7 @@ def resolve_main_root() -> Path:
     import subprocess
 
     try:
-        out = subprocess.run(
-            ["git", "worktree", "list"], capture_output=True, text=True, check=True, timeout=30
-        )
+        out = subprocess.run(["git", "worktree", "list"], capture_output=True, text=True, check=True, timeout=30)
         first = out.stdout.strip().splitlines()
         if first:
             return Path(first[0].split()[0])
@@ -187,9 +186,7 @@ def aggregate(session_dir: Path, report_path: Path | None = None) -> dict[str, A
     if not isinstance(shards, list):
         raise RuntimeError("index.json missing 'shards' list")
 
-    shard_summaries = [
-        load_shard_status(Path(s["status_path"]), int(s["shard_id"])) for s in shards
-    ]
+    shard_summaries = [load_shard_status(Path(s["status_path"]), int(s["shard_id"])) for s in shards]
 
     body = render_report(index, shard_summaries)
 

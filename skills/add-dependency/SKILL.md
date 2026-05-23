@@ -3,7 +3,6 @@ name: add-dependency
 description: Add plugin dependencies to a target plugin (explicit --add specs or --from copy from another plugin's plugin.json). Use when adding/copying plugin.json::dependencies entries with atomic rollback on regression. Used dynamically via the-skills-menu (TRDD-478d9687).
 when_to_use: When the cpv-main-menu user picks Create → Add dependencies, or any flow needs to add/copy plugin.json::dependencies entries with atomic rollback on regression
 user-invocable: false
-allowed-tools: Bash(uv:*)
 ---
 
 # add-dependency

@@ -783,6 +783,11 @@ dev = [
 
 [tool.ruff]
 line-length = 120
+# Test fixtures are deliberately-malformed sample data that exercise this
+# plugin's validators/tests — ruff must never lint or format them locally
+# (e.g. `ruff check scripts/ tests/`) or it would "correct" the defects the
+# tests depend on. Mirrors the Mega-Linter FILTER_REGEX_EXCLUDE used in CI.
+extend-exclude = ["**/fixtures", "**/testdata", "**/__fixtures__"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
@@ -3366,7 +3371,12 @@ ENABLE_LINTERS:
 
 # Exclude paths — single-quoted YAML scalar so regex \\. is read literally
 # (double-quoted YAML treats \\. as an invalid escape and yamllint rejects it).
-FILTER_REGEX_EXCLUDE: '(tests_dev/|docs_dev/|scripts_dev/|samples_dev/|examples_dev/|builds_dev/|downloads_dev/|libs_dev/|llm_externalizer_output/|\\.claude/|\\.tldr/)'
+# Test FIXTURES are excluded for EVERY language Mega-Linter runs: fixtures are
+# deliberately-malformed sample data used to exercise the plugin's own
+# validators/tests, so linting them would "fix" the very defects the tests rely
+# on. Covers tests/fixtures, test/fixtures, spec/fixtures, __fixtures__ (JS),
+# testdata (Go), and a bare fixtures/ dir.
+FILTER_REGEX_EXCLUDE: '(tests_dev/|docs_dev/|scripts_dev/|samples_dev/|examples_dev/|builds_dev/|downloads_dev/|libs_dev/|llm_externalizer_output/|\\.claude/|\\.tldr/|tests?/fixtures/|spec/fixtures/|__fixtures__/|testdata/|fixtures/)'
 
 # Python settings
 PYTHON_RUFF_ARGUMENTS: "--select=E,F,W,I --ignore=E501"

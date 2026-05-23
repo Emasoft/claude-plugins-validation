@@ -2,7 +2,6 @@
 name: cpv-batch-scope-diagnose
 description: "Read-only fleet-wide scope-aware doctor. One cpv-doctor-agent per project diagnoses the requested scope — user (the home .claude tree), project (the project .claude tree), local (settings.local.json), or full (all + cross-scope conflict checker). LOCAL paths only — URL inputs are CRITICAL errors because the doctor needs filesystem access to the Claude installation. Use when surveying many project folders' .claude trees at once. Trigger with /cpv-batch-scope-diagnose."
 user-invocable: true
-allowed-tools: Read, Bash(python3:*,git:*,uv:*,cat:*,mkdir:*), Glob, Grep
 argument-hint: "[project-folder-or-list] [--scope full|user|project|local] [--max-parallel N]"
 ---
 

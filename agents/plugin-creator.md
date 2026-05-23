@@ -4,7 +4,6 @@ description: >
   Creates new Claude Code plugin or marketplace repositories from scratch with full CI/CD
   pipeline, git hooks, and standard file structure. Use when user wants to create a new
   plugin, scaffold a repo, or set up a new marketplace hub.
-model: sonnet
 maxTurns: 50
 skills:
   - the-skills-menu

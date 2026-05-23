@@ -1,9 +1,8 @@
 ---
 name: cache-validation-skill
-description: Validate plugins / projects against Anthropic's prompt-cache invalidation patterns (CA-01..CA-06). Use when auditing for cache regressions or fixing CA-01..CA-06 findings. Used dynamically via the-skills-menu (TRDD-478d9687).
-when_to_use: When auditing a plugin or project for prompt-cache regressions before release, or fixing an existing CA-01..CA-06 scan finding. Always loaded by cache-optimizer-agent; never invoke directly.
+description: Validate plugins / projects against Anthropic's prompt-cache invalidation patterns (CA-01..CA-07). Use when auditing for cache regressions or fixing CA-01..CA-07 findings. Used dynamically via the-skills-menu (TRDD-478d9687).
+when_to_use: When auditing a plugin or project for prompt-cache regressions before release, or fixing an existing CA-01..CA-07 scan finding. Always loaded by cache-optimizer-agent; never invoke directly.
 user-invocable: false
-allowed-tools: Read, Bash(uv:*), Bash(git:*), Bash(mkdir:*), Bash(date:*), Glob, Grep, Edit, Write
 ---
 
 # Cache-Audit Skill (loaded by cache-optimizer-agent)
@@ -14,11 +13,18 @@ Anthropic's prompt cache caches the rendered system-prompt prefix —
 `CLAUDE.md`, cached agent/skill bodies, and settings-derived blocks. The
 cache is invalidated whenever ANY byte in that prefix changes. A 200K-token
 prefix cache MISS costs ~10x normal token rate vs a HIT. CPV's cache-audit
-rule pack catches the six documented patterns that silently break caching
+rule pack catches the seven documented patterns that silently break caching
 or fork the cached prompt into many distinct keys.
 
+**Severity:** every CA-01..CA-07 finding is a **WARNING** (non-blocking — a
+cache miss costs tokens/latency but never makes a plugin invalid).
+`validate_plugin` CALLS this scanner as a SEPARATE step (its own report + a
+one-line pointer in the main report); this skill + `cpv-cache-optimize` act
+on the findings. CA-04 covers a `model:` frontmatter on ANY component
+(agents, commands, skills); `model: inherit` is exempt.
+
 Per-rule severity, catch description, and fix-recipe pointer live in
-[references/ca-rules.md](references/ca-rules.md). Full TOC of every
+references/ca-rules.md. Full TOC of every
 rule is embedded under "Resources" at the bottom of this file.
 
 ## Prerequisites
@@ -40,7 +46,7 @@ self-scan filter chain (skips catalog / test / dev-scratch files).
 2. Resolve `MAIN_ROOT` via `git worktree list | head -n1`.
 3. Run the launcher with `--report "$MAIN_ROOT/reports/validate_cache/<TS>-<slug>.md"`.
 4. Read the compact summary from stdout, full details from the report file.
-5. (Fix workflow only — cache-optimizer-agent.) Group findings by CA-NN, apply `cache-fixes.md#ca-nn` from `skills/fix-validation/references/`, re-run, iterate until VALID.
+5. (Fix workflow only — cache-optimizer-agent.) Group findings by CA-NN, apply `cache-fixes.md#ca-nn` from `skills/fix-validation/references/`, re-run, iterate until ZERO CA findings remain. Every CA finding is a WARNING, so the verdict is VALID from the start — terminate on an empty findings set, not on VALID.
 
 ## Examples
 
@@ -76,13 +82,13 @@ Copy this checklist and track your progress:
 - [ ] `mkdir -p` the parent directory
 - [ ] Run via launcher: `python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" cache <path> --report <path>`
 - [ ] Read summary from stdout, details from the report file
-- [ ] (Fix only) Re-run after each batch until verdict = VALID
+- [ ] (Fix only) Re-run after each batch until zero CA findings remain (verdict is always VALID — cache findings are WARNING)
 
 ## Resources
 
 - `scripts/validate_cache.py` — validator
 - [references/ca-rules.md](references/ca-rules.md) — per-rule details
-  > CA-01 — dynamic placeholders in cached content · CA-02 — SessionStart / UserPromptSubmit / PreCompact write CLAUDE.md or settings · CA-03 — hook scripts flip permissions / enabledMcpServers between turns · CA-04 — `model:` frontmatter forces in-line model switch · CA-05 — hook scripts run unbounded-output commands · CA-06 — PreCompact / PostCompact / SubagentStart hooks don't preserve prefix · Why these specific six
+  > CA-01 — dynamic placeholders in cached content · CA-02 — SessionStart / UserPromptSubmit / PreCompact write CLAUDE.md or settings · CA-03 — hook scripts flip permissions / enabledMcpServers between turns · CA-04 — `model:` frontmatter forces in-line model switch · CA-05 — hook scripts run unbounded-output commands · CA-06 — PreCompact / PostCompact / SubagentStart hooks don't preserve prefix · CA-07 — `context: fork`/`branch` re-primes the cache from cold · Why these specific seven
 - `skills/fix-validation/references/cache-fixes.md` — fix recipes
 - `tests/test_validate_cache.py` — 36 tests
 - [ussumant/cache-audit](https://github.com/ussumant/cache-audit) — corpus

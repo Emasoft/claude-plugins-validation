@@ -113,6 +113,7 @@ Primary fix guide: [skill-fixes.md](skill-fixes.md)
 | Required sections (strict mode) | skill-fixes §6 |
 | Reference files and TOC embedding | skill-fixes §7 |
 | `allowed-tools` field (empty, unknown tools, scoping) | skill-fixes §3 (allowed-tools) |
+| `body invokes a tool the allowed-tools field does not grant` (silent-failure CRITICAL; prose-mention WARNING) **[NEW v2.102.0]** | skill-fixes "body invokes a tool the allowed-tools field does not grant" |
 | `effort` field validation **[NEW]** | skill-fixes "Frontmatter fields — v2.8.x" |
 | `shell` field validation **[NEW]** | skill-fixes "Frontmatter fields — v2.8.x" |
 | `paths` field validation **[NEW]** | skill-fixes "Frontmatter fields — v2.8.x" |
@@ -402,7 +403,7 @@ Primary fix guide: [cache-fixes.md](cache-fixes.md)
 | `[CA-01] Static prefix violation` ({{TIMESTAMP}}/$(date)/inline dynamic in CLAUDE.md, agents, SKILL.md) | cache-fixes CA-01 |
 | `[CA-02] Hook writes to cached file` (SessionStart/UserPromptSubmit/PreCompact writing CLAUDE.md or settings.json) | cache-fixes CA-02 |
 | `[CA-03] Hook flips MCP/permission state` (mutating enabledMcpServers/disabledMcpServers/permissions.allow/deny) | cache-fixes CA-03 |
-| `[CA-04] SKILL.md model: frontmatter forces in-line model switch` | cache-fixes CA-04 |
+| `[CA-04] model: frontmatter (any component) forces in-line model switch` | cache-fixes CA-04 |
 | `[CA-05] Hook script runs unbounded output command` (`git status`, `find`, `ls -laR`, `cat <large>`) | cache-fixes CA-05 |
 | `[CA-06] PreCompact/PostCompact/SubagentStart hook does not preserve cached prefix` | cache-fixes CA-06 |
 

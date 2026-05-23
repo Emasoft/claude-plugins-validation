@@ -2,7 +2,7 @@
 name: cache-optimizer-agent
 description: |
   Self-sufficient cache-optimization WORK agent invoked by
-  cache-optimizer-menu (haiku) after a menu choice is made. Accepts EITHER
+  cache-optimizer-menu after a menu choice is made. Accepts EITHER
   a pre-existing cache-audit report path OR a plugin/project path via the
   dispatching menu's `<context>` block. Runs the full validate → fix →
   re-validate loop on its own. Fixes the six documented prompt-cache
@@ -12,11 +12,10 @@ description: |
   Loads cache-validation-skill and the fix-validation skill (cache-fixes
   references).
 
-  Per TRDD-82e836dc: this is the OPUS work half of the cache-optimizer-menu
-  / cache-optimizer-agent split. The menu agent (haiku) handles First
+  Per TRDD-82e836dc: this is the work half of the cache-optimizer-menu
+  / cache-optimizer-agent split. The menu agent handles First
   Contact menu rendering + integer parsing + dispatch; this agent handles
   the actual cache audit + fix + Phase 4 workflow.
-model: opus
 maxTurns: 200
 skills:
   - the-skills-menu
@@ -99,13 +98,13 @@ The script prints only the compact summary + path. Read the report file with `Re
 
 Group findings by CA-NN rule. For each group, consult `skills/fix-validation/references/cache-fixes.md#ca-nn` for the fix recipe, then apply edits via `Edit`.
 
-Priority order: CA-01 → CA-02 → CA-03 (all MAJOR, prefix-invalidating) → CA-04 → CA-05 (MINOR, cost/latency) → CA-06 (WARNING, compaction-aware).
+Priority order (every CA finding is a WARNING since v2.102.0 — order is by cache impact, not severity): CA-01 → CA-02 → CA-03 (prefix-invalidating, highest impact) → CA-04 → CA-05 (cost/latency) → CA-06 (compaction-aware).
 
 Re-read each file BEFORE editing it (auto-compaction may have stale state in your context). After each batch, re-run the validator and verify the fixed findings are gone.
 
 ### Phase 3 — Re-validate
 
-Re-run the validator (via the same launcher invocation as Phase 1) against the same target. Iterate until verdict = VALID. If a rule keeps re-firing after a fix, STOP and report the residual issue with a written explanation rather than guessing further fixes.
+Re-run the validator (via the same launcher invocation as Phase 1) against the same target. Every CA finding is a WARNING, so the verdict is VALID from the start — termination is by EMPTY FINDINGS SET, not by verdict: iterate until the cache scan reports zero CA-01..CA-06 findings (or until the only ones left are intentional `model:` pins the user explicitly chose to keep). If a rule keeps re-firing after a fix, STOP and report the residual issue with a written explanation rather than guessing further fixes.
 
 ### Phase 4 — Broader cache-aware improvements (only if the user asked)
 
@@ -113,7 +112,7 @@ If the user said "broader" or "improve" or otherwise authorised work beyond CA-0
 
 1. **Cached-prefix size audit.** Inspect every `.md` file in `agents/`, `skills/*/`, and the plugin root. Flag bodies > 5K chars as candidates for splitting into a small cached core + larger uncached `references/*.md`.
 2. **Dynamic-content migration.** Anything that needs per-session freshness should NOT live in cached content; move it to a `SessionStart` hook with `additionalContext` (post-cache) or a `UserPromptSubmit` hook (per-prompt).
-3. **Model-switch audit.** Per CA-04, `SKILL.md model:` frontmatter forces an in-line model switch and forks the cache. Suggest replacing with a dedicated agent that owns the model.
+3. **Model-switch audit.** Per CA-04, a `model:` frontmatter pin on ANY component (agent / command / skill) forces an in-line model switch and fragments the cache. Suggest removing the pin (or replacing it with `model: inherit`) so the component inherits the session model — do NOT move the pin to an agent, since agents AND commands are flagged too.
 4. **`CLAUDE.md` decomposition.** A monolithic `CLAUDE.md` > 10K chars is usually mostly stable + a few volatile sections. Split into a stable cached core (loaded by the harness) + volatile sections imported via `@import` references when needed.
 5. **Cache-notes block.** When you finish, append a `## Cache Notes` block at the end of `CLAUDE.md` documenting the cache-cost rationale so future maintainers don't regress.
 
@@ -200,7 +199,7 @@ Return ONLY:
 ```
 
 Where:
-- `DONE` = audit completed AND all blocking findings (CA-01..CA-03) are fixed AND verdict = VALID
+- `DONE` = audit completed AND zero CA-01..CA-06 findings remain (every CA finding is a WARNING; "done" means an empty findings set, not merely a VALID verdict — the verdict is always VALID for cache)
 - `PARTIAL` = some findings fixed, some remain (explain in the report file, never in stdout)
 - `FAILED` = could not even run the validator (uv missing, path invalid, etc.)
 

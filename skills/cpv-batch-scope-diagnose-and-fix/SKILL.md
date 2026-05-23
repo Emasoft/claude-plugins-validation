@@ -2,7 +2,6 @@
 name: cpv-batch-scope-diagnose-and-fix
 description: "Same-turn scope-aware diagnose + fix across a fleet of project folders. One cpv-doctor-agent per project scans + verifies + applies obvious fixes inline (NIT, CRITICAL, and safe MAJOR/MINOR auto; unsafe MAJOR/MINOR reported in pending_fixes[]). Cuts per-project token cost ~2× vs running scope-diagnose + scope-fix separately. LOCAL paths only. Use when applying obvious scope-aware doctor fixes across many project folders in one pass. Trigger with /cpv-batch-scope-diagnose-and-fix."
 user-invocable: true
-allowed-tools: Read, Bash(python3:*,git:*,uv:*,cat:*,mkdir:*), Glob, Grep
 argument-hint: "[project-folder-or-list] [--scope full|user|project|local] [--max-parallel N]"
 ---
 

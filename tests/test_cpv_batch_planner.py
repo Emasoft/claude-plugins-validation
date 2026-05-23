@@ -149,9 +149,7 @@ def _scope_skill(skill_name: str, n: int) -> "planner.Scope":
     return planner.Scope(
         scope_path=f"skills/{skill_name}/",
         scope_kind=planner.SCOPE_KIND_SKILL_DIR,
-        findings=[
-            planner.Finding("MAJOR", "m", f"skills/{skill_name}/SKILL.md", j) for j in range(n)
-        ],
+        findings=[planner.Finding("MAJOR", "m", f"skills/{skill_name}/SKILL.md", j) for j in range(n)],
     )
 
 
@@ -204,8 +202,7 @@ class TestShardGroups:
         for s in shards:
             for sc in s.scopes:
                 assert sc.scope_path not in scope_to_shard, (
-                    f"Scope {sc.scope_path} appears in shards "
-                    f"{scope_to_shard[sc.scope_path]} and {s.shard_id}"
+                    f"Scope {sc.scope_path} appears in shards {scope_to_shard[sc.scope_path]} and {s.shard_id}"
                 )
                 scope_to_shard[sc.scope_path] = s.shard_id
 
@@ -325,8 +322,7 @@ class TestPlanEndToEnd:
         plugin.mkdir()
         report = tmp_path / "report.json"
         results = [
-            {"level": "MAJOR", "message": f"m{i}", "file": f"skills/s{i}/SKILL.md", "line": 1}
-            for i in range(50)
+            {"level": "MAJOR", "message": f"m{i}", "file": f"skills/s{i}/SKILL.md", "line": 1} for i in range(50)
         ]
         self._write_report(report, results)
         session = tmp_path / "session"

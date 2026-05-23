@@ -41,8 +41,7 @@ class TestPluginFixerNoSubagentClaim:
 
     def test_recommends_batch_fix_for_large_batches(self) -> None:
         assert "/cpv-batch-fix" in self.body, (
-            "plugin-fixer.md must point users at /cpv-batch-fix for very "
-            "large batches — TRDD-71e68ab5."
+            "plugin-fixer.md must point users at /cpv-batch-fix for very large batches — TRDD-71e68ab5."
         )
 
     def test_documents_cannot_spawn_subagents(self) -> None:
@@ -52,10 +51,7 @@ class TestPluginFixerNoSubagentClaim:
             r"CANNOT spawn (other )?agents|cannot spawn (other )?(sub)?agents|subagents cannot spawn",
             self.body,
             re.IGNORECASE,
-        ), (
-            "plugin-fixer.md must explicitly document that subagents cannot "
-            "spawn subagents (TRDD-71e68ab5)."
-        )
+        ), "plugin-fixer.md must explicitly document that subagents cannot spawn subagents (TRDD-71e68ab5)."
 
 
 # ---------------------------------------------------------------------------
@@ -85,8 +81,7 @@ class TestCpvDoctorMaxTurns:
     def test_doctor_body_recommends_batch_for_big_plugins(self) -> None:
         body = self.doctor.read_text()
         assert "/cpv-batch-fix" in body, (
-            "cpv-doctor-agent must point at /cpv-batch-fix when findings "
-            "exceed the single-agent context budget."
+            "cpv-doctor-agent must point at /cpv-batch-fix when findings exceed the single-agent context budget."
         )
         assert re.search(r"recommend-batch-fix", body), (
             "Doctor must emit the recommend-batch-fix token so the orchestrator "
@@ -125,9 +120,7 @@ class TestBatchFixProtocolSkill:
         agent knows it exists.
         """
         index_body = (REPO / "skills" / "the-skills-menu" / "SKILL.md").read_text()
-        catalog_body = (
-            REPO / "skills" / "the-skills-menu" / "references" / "skills-catalog.md"
-        ).read_text()
+        catalog_body = (REPO / "skills" / "the-skills-menu" / "references" / "skills-catalog.md").read_text()
         combined = index_body + "\n" + catalog_body
         assert "batch-fix-protocol" in combined, (
             "batch-fix-protocol must appear in the the-skills-menu catalog so "
@@ -160,9 +153,7 @@ class TestCpvBatchFixCommand:
         front_match = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
         assert front_match is not None
         meta = yaml.safe_load(front_match.group(1))
-        assert meta.get("user-invocable") is True, (
-            "cpv-batch-fix is user-invocable — the doctor recommends it by name."
-        )
+        assert meta.get("user-invocable") is True, "cpv-batch-fix is user-invocable — the doctor recommends it by name."
 
     def test_command_body_invokes_planner_and_aggregator(self) -> None:
         body = self.cmd.read_text()

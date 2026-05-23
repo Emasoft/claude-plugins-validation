@@ -1,7 +1,6 @@
 ---
 name: cpv-batch-scope-fix
 description: Apply fixes for scope-aware doctor findings across a fleet of project folders. One cpv-doctor-agent per project in batch_scope_fix mode handles the requested scope (user / project / local / full). LOCAL paths only — URL inputs are CRITICAL errors. Default 8 parallel agents per main-session message, cap 16.
-allowed-tools: Read, Bash(python3:*,git:*,uv:*,cat:*,mkdir:*), Glob, Grep
 argument-hint: "[project-folder-or-list] [--scope full|user|project|local] [--max-parallel N]"
 user-invocable: true
 ---

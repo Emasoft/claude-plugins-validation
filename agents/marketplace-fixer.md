@@ -2,7 +2,7 @@
 name: marketplace-fixer
 description: |
   Self-sufficient marketplace fix WORK agent invoked by marketplace-fixer-menu
-  (haiku) after a menu choice is made. Accepts either a validation report OR
+  after a menu choice is made. Accepts either a validation report OR
   a marketplace repo path via the dispatching menu's `<context>` block. Runs
   validate → fix → re-validate in a loop until the marketplace is clean
   (zero CRITICAL/MAJOR/MINOR/NIT and zero publish-blocking WARNINGs). Also
@@ -13,11 +13,10 @@ description: |
   migrate-marketplace-architecture for layout conversions, and
   setup-marketplace-auto-notification for per-plugin auto-notify chains.
 
-  Per TRDD-82e836dc: this is the OPUS work half of the marketplace-fixer-menu
-  / marketplace-fixer split. The menu agent (haiku) handles First Contact
+  Per TRDD-82e836dc: this is the work half of the marketplace-fixer-menu
+  / marketplace-fixer split. The menu agent handles First Contact
   menu rendering + integer parsing + dispatch; this agent handles the actual
   fix workflow (mechanical + architectural).
-model: opus
 maxTurns: 200
 skills:
   - the-skills-menu

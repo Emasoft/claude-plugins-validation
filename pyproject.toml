@@ -74,6 +74,13 @@ cpv-setup-auth = "scripts.cli:setup_auth"
 
 [tool.ruff]
 line-length = 120
+# Vendored sample plugins under tests/fixtures/ are DELIBERATELY authored with
+# issues (security false-positive bait, bad patterns, malformed structures) to
+# exercise CPV's validators / skillaudit / fixers. They are NOT CPV source —
+# ruff must never lint or format them, or it would "correct" the very defects
+# the tests rely on. Keep ruff's built-in default excludes too (extend, not replace).
+# Pattern matches what generate_plugin_repo.gen_pyproject_toml emits (dogfood parity).
+extend-exclude = ["**/fixtures", "**/testdata", "**/__fixtures__"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]

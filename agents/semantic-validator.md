@@ -4,8 +4,7 @@ description: |
   Deep AI-driven semantic analysis agent for skill and agent quality.
   Evaluates description triggering, instruction clarity, example quality,
   and workflow completeness — things scripts cannot check.
-  Use only via /cpv-semantic-validation (explicit opt-in, uses opus).
-model: opus[1m]
+  Use only via /cpv-semantic-validation (explicit opt-in; 10-50x token cost).
 effort: high
 maxTurns: 50
 skills:

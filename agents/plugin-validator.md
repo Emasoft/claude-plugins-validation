@@ -3,9 +3,8 @@ name: plugin-validator
 description: |
   Lightweight validation agent that runs scripts and returns compact summaries.
   Does NOT fix issues or perform semantic analysis — use plugin-fixer and semantic-validator for those.
-  Runs on Haiku (script-launcher tier per TRDD-82e836dc): the entire workflow is
-  Bash + Read + 1-2 lines of summary, no analysis.
-model: haiku
+  A thin script-launcher (per TRDD-82e836dc): the entire workflow is
+  Bash + Read + 1-2 lines of summary, no analysis. Inherits the session model.
 maxTurns: 50
 skills:
   - the-skills-menu

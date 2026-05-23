@@ -9,7 +9,6 @@ tags:
   - ci-cd
   - automation
   - setup
-allowed-tools: Read, Bash(git:*,gh:*,python:*,uv:*), Write, Edit, Glob, Grep, AskUserQuestion
 user-invocable: false
 ---
 

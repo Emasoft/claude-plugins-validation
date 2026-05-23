@@ -4,7 +4,6 @@ description: >
   Maps CPV validation errors to mechanical per-error fix guides. Use when looking up
   remediation steps for CRITICAL/MAJOR/MINOR/NIT findings. Architectural migrations
   are handled by migrate-marketplace-architecture. Used dynamically via the-skills-menu (TRDD-478d9687).
-allowed-tools: Read, Edit, Write, Glob, Grep
 user-invocable: false
 ---
 
@@ -55,7 +54,7 @@ Output: plugin-structure-fixes §1
 - [Empirical Loading Bugs](references/empirical-loading-bugs.md)
   > Path-form acceptance matrix · Override-vs-default semantics · Three silent footguns CC does NOT catch · CPV validators added 2026-04-18 · Anthropic docs corrections · Round 2 confirmations · Tests added · Untestable in headless mode · v2.23.2 false-positive sweep
 - [Cache-Audit Fixes](references/cache-fixes.md)
-  > Overview · CA-01 — Static prefix violation in cached content · CA-02 — Hook writes to cached files (CLAUDE.md / settings.json) · CA-03 — Hook flips MCP server enabled/disabled or permission allow/deny · CA-04 — SKILL.md `model:` frontmatter forces in-line model switch · CA-05 — Hook script runs unbounded output commands · CA-06 — Compaction/SubagentStart hook does not preserve cached prefix
+  > Overview · CA-01 — Static prefix violation in cached content · CA-02 — Hook writes to cached files (CLAUDE.md / settings.json) · CA-03 — Hook flips MCP server enabled/disabled or permission allow/deny · CA-04 — `model:` frontmatter forces an in-line model switch (any component) · CA-05 — Hook script runs unbounded output commands · CA-06 — Compaction/SubagentStart hook does not preserve cached prefix · CA-07 — `context: fork`/`branch` re-primes the cache from cold · (all seven are WARNING)
 - [Telemetry Hazard Fixes](references/telemetry-hazard-fixes.md)
   > Overview · CRITICAL: Plugin ships CLAUDE_CODE_PLUGIN_SEED_DIR · CRITICAL: Plugin ships CLAUDE_CODE_SHELL_PREFIX · CRITICAL: Plugin ships CLAUDE_CONFIG_DIR · CRITICAL: Plugin ships BETA_TRACING_ENDPOINT pointing at external host · CRITICAL: Plugin ships OTEL_LOG_RAW_API_BODIES set to a file URL · MAJOR: Plugin ships third-party-provider bypass env var · Reference: env vars plugins MUST NEVER ship
 - [Pipeline Migration](references/pipeline-migration.md)

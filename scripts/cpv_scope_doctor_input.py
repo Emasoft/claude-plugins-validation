@@ -70,8 +70,7 @@ def parse_scope_flag(scope: str | None) -> ScopeKind:
     s = scope.strip().lower()
     if s not in _VALID_SCOPES:
         raise InputResolutionError(
-            f"Invalid --scope value {scope!r}. Accepted: "
-            f"{', '.join(sorted(_VALID_SCOPES))}. Default: full."
+            f"Invalid --scope value {scope!r}. Accepted: {', '.join(sorted(_VALID_SCOPES))}. Default: full."
         )
     return s  # type: ignore[return-value]
 
@@ -99,8 +98,7 @@ def resolve_scope_inputs(
             cwd = str(Path.cwd().resolve())
             return resolve(cwd, allow_url=False)
         raise InputResolutionError(
-            "no input given and default-to-PWD disabled. "
-            "Pass a project folder path or set default_to_pwd=True."
+            "no input given and default-to-PWD disabled. Pass a project folder path or set default_to_pwd=True."
         )
     if isinstance(input_spec, str) and is_url_shape(input_spec):
         raise InputResolutionError(URL_REJECTED_MESSAGE)
@@ -118,8 +116,7 @@ def _cli(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "inputs",
         nargs="*",
-        help="Project folder paths / list-file (@/path/to/list.txt) / comma-separated. "
-        "Default: $PWD when no inputs.",
+        help="Project folder paths / list-file (@/path/to/list.txt) / comma-separated. Default: $PWD when no inputs.",
     )
     parser.add_argument(
         "--scope",

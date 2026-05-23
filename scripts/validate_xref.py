@@ -98,17 +98,19 @@ HOOK_SCRIPT_PATTERN = re.compile(
 # Built-in Claude Code agents — always resolvable, no per-plugin file required.
 # Verified 2026-05-19 against the harness tool listing. The CC v2.1.140 resolver
 # is case- and separator-insensitive, so these are compared via _normalize_subagent_type.
-BUILTIN_AGENTS: frozenset[str] = frozenset({
-    "general-purpose",   # universal catch-all agent
-    "explore",           # fast read-only search agent
-    "plan",              # software architect planning agent
-    "statusline-setup",  # built-in agent for status line config
-})
+BUILTIN_AGENTS: frozenset[str] = frozenset(
+    {
+        "general-purpose",  # universal catch-all agent
+        "explore",  # fast read-only search agent
+        "plan",  # software architect planning agent
+        "statusline-setup",  # built-in agent for status line config
+    }
+)
 
 # Finding codes for ghost-agent dispatch (per TRDD-25b9be90).
-RC_GHOST_DISPATCH_UNRESOLVED = "RC-GHOST-DISPATCH-001"   # CRITICAL — silent-failure class
-RC_GHOST_DISPATCH_DYNAMIC = "RC-GHOST-DISPATCH-002"      # MINOR — variable / template, cannot statically verify
-RC_GHOST_DISPATCH_CROSS_PLUGIN = "RC-GHOST-DISPATCH-003" # NIT — namespaced to a different plugin
+RC_GHOST_DISPATCH_UNRESOLVED = "RC-GHOST-DISPATCH-001"  # CRITICAL — silent-failure class
+RC_GHOST_DISPATCH_DYNAMIC = "RC-GHOST-DISPATCH-002"  # MINOR — variable / template, cannot statically verify
+RC_GHOST_DISPATCH_CROSS_PLUGIN = "RC-GHOST-DISPATCH-003"  # NIT — namespaced to a different plugin
 
 # Three extractors covering all four documented dispatch forms (TRDD-25b9be90 §Design):
 #
@@ -178,7 +180,7 @@ def _strip_noise(content: str) -> str:
     if content.startswith("---\n"):
         m = re.match(r"^---\n.*?\n---\n", content, re.DOTALL)
         if m:
-            content = (" " * (m.end() - m.start() - 1)) + "\n" + content[m.end():]
+            content = (" " * (m.end() - m.start() - 1)) + "\n" + content[m.end() :]
 
     def _blank(m: re.Match[str]) -> str:
         # Preserve newlines so line numbers stay correct.
@@ -550,9 +552,7 @@ def validate_agent_task_refs(
                 )
                 continue
 
-            status, canonical = _resolve_dispatch_ref(
-                ref_agent, available_agents, plugin_name=plugin_name
-            )
+            status, canonical = _resolve_dispatch_ref(ref_agent, available_agents, plugin_name=plugin_name)
             if status == "ok":
                 report.passed(
                     f"Task() reference to '{ref_agent}' is valid",
@@ -667,9 +667,7 @@ def validate_subagent_type_matching(
                 )
                 continue
 
-            status, canonical = _resolve_dispatch_ref(
-                ref_agent, available_agents, plugin_name=plugin_name
-            )
+            status, canonical = _resolve_dispatch_ref(ref_agent, available_agents, plugin_name=plugin_name)
             if status == "ok":
                 # Canonical spelling or built-in — silent pass.
                 continue
@@ -863,9 +861,7 @@ def validate_command_agent_refs(
                 )
                 continue
 
-            status, canonical = _resolve_dispatch_ref(
-                ref_agent, available_agents, plugin_name=plugin_name
-            )
+            status, canonical = _resolve_dispatch_ref(ref_agent, available_agents, plugin_name=plugin_name)
             if status == "ok":
                 report.passed(
                     f"Command reference to agent '{ref_agent}' is valid",
@@ -981,13 +977,36 @@ def validate_skill_refs(
         # (e.g. prose like "skills/agents/commands" captures "agents" but
         # that's the agents/ folder, not a skill). Per TRDD-25b9be90.
         _plugin_dirs = {
-            "agents", "commands", "skills", "hooks", "mcp",
-            "monitors", "output-styles", "outputstyles", "lsp",
-            "scripts", "tests", "references", "examples", "templates",
-            "name", "ext", "file", "node", "my-skill",  # common prose / template placeholders
+            "agents",
+            "commands",
+            "skills",
+            "hooks",
+            "mcp",
+            "monitors",
+            "output-styles",
+            "outputstyles",
+            "lsp",
+            "scripts",
+            "tests",
+            "references",
+            "examples",
+            "templates",
+            "name",
+            "ext",
+            "file",
+            "node",
+            "my-skill",  # common prose / template placeholders
             "agent",  # singular — prose-like "skills/agent/SKILL.md" template placeholder
-            "command", "skill", "hook",  # singular forms used in prose
-            "rust", "python", "javascript", "typescript", "java", "go", "ruby",  # language names sometimes appear as "skills/python"
+            "command",
+            "skill",
+            "hook",  # singular forms used in prose
+            "rust",
+            "python",
+            "javascript",
+            "typescript",
+            "java",
+            "go",
+            "ruby",  # language names sometimes appear as "skills/python"
         }
         filtered_matches = [m for m in matches if m.lower() not in _plugin_dirs]
         # Belt-and-suspenders defense against issue #27: even with the

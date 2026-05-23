@@ -8,7 +8,6 @@ tags:
   - github
   - setup
   - ci-cd
-allowed-tools: Read, Bash(git:*,gh:*,uv:*), Write, Edit, Glob, Grep, AskUserQuestion
 user-invocable: false
 ---
 

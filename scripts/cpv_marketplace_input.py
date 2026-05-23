@@ -195,18 +195,14 @@ def _shallow_clone(owner: str, repo: str, dest: Path, branch: str | None = None)
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     except (OSError, subprocess.SubprocessError) as exc:
         raise InputResolutionError(
-            f"git clone of {owner}/{repo} failed: {exc!s}. "
-            f"Check network connectivity and that the repo exists."
+            f"git clone of {owner}/{repo} failed: {exc!s}. Check network connectivity and that the repo exists."
         ) from exc
     if result.returncode != 0:
         raise InputResolutionError(
-            f"git clone of {owner}/{repo} returned {result.returncode}:\n"
-            f"stderr: {result.stderr[:500]}"
+            f"git clone of {owner}/{repo} returned {result.returncode}:\nstderr: {result.stderr[:500]}"
         )
     if not target.is_dir():
-        raise InputResolutionError(
-            f"git clone of {owner}/{repo} reported success but {target} does not exist."
-        )
+        raise InputResolutionError(f"git clone of {owner}/{repo} reported success but {target} does not exist.")
     return target
 
 
@@ -267,14 +263,10 @@ def _expand_marketplace(
     """
     mp_data = _read_marketplace_json(market_root)
     if mp_data is None:
-        raise InputResolutionError(
-            f"{market_root} does not contain a readable .claude-plugin/marketplace.json"
-        )
+        raise InputResolutionError(f"{market_root} does not contain a readable .claude-plugin/marketplace.json")
     plugins_raw = mp_data.get("plugins", [])
     if not isinstance(plugins_raw, list):
-        raise InputResolutionError(
-            f"{market_root}: marketplace.json `plugins` field is not a list"
-        )
+        raise InputResolutionError(f"{market_root}: marketplace.json `plugins` field is not a list")
 
     # Reference-counted cleanup: invoke parent_cleanup only when the
     # last per-plugin consumer's cleanup_callback is called. Use a
@@ -347,9 +339,7 @@ def _expand_marketplace(
             # expands inline; every emitted skill shares the parent
             # cleanup callback (reference-counted with the rest of
             # the marketplace's entries).
-            pack_skills = _expand_skill_pack(
-                plugin_path, source_url=plugin_url, parent_cleanup=None
-            )
+            pack_skills = _expand_skill_pack(plugin_path, source_url=plugin_url, parent_cleanup=None)
             for ps in pack_skills:
                 counter["remaining"] += 1
                 ps.cleanup_callback = _decrement_and_maybe_cleanup
@@ -434,6 +424,7 @@ def _safe_scandir(path: Path):  # type: ignore[no-untyped-def]
     also a context manager from Python 3.6+; this wrapper just
     centralises the import + error handling."""
     import os
+
     return os.scandir(path)
 
 
@@ -571,9 +562,7 @@ def _resolve_single_local(path: Path) -> list[ResolvedInput]:
     if kind == "skill":
         # If the user passed SKILL.md directly, use its parent as the skill dir.
         skill_dir = path.parent if path.is_file() and path.name == "SKILL.md" else path
-        return [
-            ResolvedInput(kind="skill", abs_path=skill_dir, display_name=skill_dir.name)
-        ]
+        return [ResolvedInput(kind="skill", abs_path=skill_dir, display_name=skill_dir.name)]
     if kind == "plugin":
         return [ResolvedInput(kind="plugin", abs_path=path, display_name=path.name)]
     if kind == "marketplace":
@@ -604,9 +593,7 @@ def _resolve_single_url(spec: str) -> list[ResolvedInput]:
     source_url = f"https://github.com/{owner}/{repo}"
 
     if kind == "marketplace":
-        return _expand_marketplace(
-            clone_path, source_url=source_url, parent_cleanup=cleanup
-        )
+        return _expand_marketplace(clone_path, source_url=source_url, parent_cleanup=cleanup)
     if kind == "plugin":
         return [
             ResolvedInput(
@@ -634,9 +621,7 @@ def _resolve_single_url(spec: str) -> list[ResolvedInput]:
         # Phase 5.5: URL clones of repos containing many skills
         # (Anthropic-style ./skills/<name>/SKILL.md or flat
         # ./<name>/SKILL.md). Expand to one per-skill ResolvedInput.
-        return _expand_skill_pack(
-            clone_path, source_url=source_url, parent_cleanup=cleanup
-        )
+        return _expand_skill_pack(clone_path, source_url=source_url, parent_cleanup=cleanup)
     cleanup()
     raise InputResolutionError(
         f"URL {source_url} cloned cleanly but the root is a {kind} — "
@@ -702,9 +687,7 @@ def resolve(
     # impossible.
     if "," in spec and not spec.startswith("@") and not is_url_shape(spec):
         parts = [p.strip() for p in spec.split(",") if p.strip()]
-        if len(parts) > 1 and all(
-            is_url_shape(p) or Path(p).expanduser().exists() for p in parts
-        ):
+        if len(parts) > 1 and all(is_url_shape(p) or Path(p).expanduser().exists() for p in parts):
             return resolve(parts, allow_url=allow_url)
 
     # @listfile shape.
@@ -717,8 +700,7 @@ def resolve(
     if is_url_shape(spec):
         if not allow_url:
             raise InputResolutionError(
-                f"URL inputs are not allowed for this skill — got {spec!r}. "
-                "Use a LOCAL filesystem path."
+                f"URL inputs are not allowed for this skill — got {spec!r}. Use a LOCAL filesystem path."
             )
         return _resolve_single_url(spec)
 

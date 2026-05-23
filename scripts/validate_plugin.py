@@ -2032,9 +2032,7 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
             gitignore_path = plugin_root / ".gitignore"
             if gitignore_path.is_file():
                 _patterns = parse_gitignore(gitignore_path)
-                if is_path_gitignored(dirname, _patterns) or is_path_gitignored(
-                    dirname + "/", _patterns
-                ):
+                if is_path_gitignored(dirname, _patterns) or is_path_gitignored(dirname + "/", _patterns):
                     continue
         except (ImportError, OSError, ValueError):
             pass
@@ -2416,6 +2414,7 @@ def _run_skillaudit_native(plugin_root: Path, report: ValidationReport) -> None:
 
     gitignore_check: _Callable[[str], bool] | None = None
     if self_scan and _gi is not None:
+
         def _is_gitignored(rel_path: str) -> bool:
             try:
                 rel = Path(rel_path)
@@ -2424,6 +2423,7 @@ def _run_skillaudit_native(plugin_root: Path, report: ValidationReport) -> None:
                 return _gi.is_ignored(rel)  # type: ignore[union-attr]
             except (OSError, ValueError):
                 return False
+
         gitignore_check = _is_gitignored
 
     def _should_skip(file_path: str, line: int | None) -> bool:
@@ -5520,6 +5520,85 @@ def _run_xref_in_pipeline(plugin_root: Path, report: ValidationReport) -> None:
         report.results.append(result)
 
 
+def _derive_cache_report_path(main_report_path: Path) -> Path:
+    """Sibling path for the separate cache-audit report.
+
+    ``…/validate_plugin/<ts>-<slug>.md`` → ``…/<ts>-<slug>-cache-audit.md``
+    (same directory as the main report — no assumption about the reports/
+    tree layout, so it works whatever path the launcher passed).
+    """
+    return main_report_path.with_name(f"{main_report_path.stem}-cache-audit{main_report_path.suffix}")
+
+
+def _run_cache_audit_separate(plugin_root: Path, main_report_path: str | None, report: ValidationReport) -> str | None:
+    """CALL (not integrate) the cache validator: write its own report + a pointer.
+
+    Per the user's design choice (TRDD-25b9be90 follow-up, v2.102.0): the cache
+    audit (CA-01..CA-06, all WARNING since v2.102.0) runs as a SEPARATE step
+    that writes its OWN report file. Only a one-line pointer lands in the main
+    report — the cache findings never enter the main report's results, counts,
+    or VALID/INVALID verdict. The standalone ``cpv-cache-optimize`` audit/fix
+    commands remain the way to act on these findings.
+
+    Returns the one-line pointer string (also added to ``report`` as INFO so it
+    appears in the saved main report) or ``None`` when the audit was skipped.
+    """
+    # Marketplace-only trees have no plugin.json — the cache scanner would just
+    # emit a CRITICAL "no plugin.json"; skip rather than write a noise report.
+    if not (plugin_root / ".claude-plugin" / "plugin.json").is_file():
+        return None
+
+    try:
+        from validate_cache import print_results as cache_print_results  # noqa: PLC0415
+        from validate_cache import scan_plugin_for_cache  # noqa: PLC0415
+    except ImportError as e:
+        report.info(f"Cache audit skipped (validator unavailable): {e}")
+        return None
+
+    try:
+        cache_report = scan_plugin_for_cache(plugin_root)
+    except Exception as e:  # noqa: BLE001 — defensive boundary, audit must never abort the main run
+        report.info(f"Cache audit skipped (error: {e})")
+        return None
+
+    warning_count = sum(1 for r in cache_report.results if getattr(r, "level", None) == "WARNING")
+
+    if main_report_path:
+        cache_path = _derive_cache_report_path(Path(main_report_path))
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        # Write-only: capture the verbose render WITHOUT printing a second
+        # compact summary (we only want a one-line pointer, not a full block).
+        import io  # noqa: PLC0415
+
+        old_stdout = sys.stdout
+        sys.stdout = buffer = io.StringIO()
+        try:
+            cache_print_results(cache_report, True)
+        finally:
+            sys.stdout = old_stdout
+        cache_path.write_text(buffer.getvalue())
+        if warning_count:
+            pointer = (
+                f"Cache audit: {warning_count} WARNING(s) (CA-01..CA-06, non-blocking) — "
+                f"see {cache_path}"
+            )
+        else:
+            pointer = f"Cache audit: clean (0 cache-discipline warnings) — see {cache_path}"
+    else:
+        # No --report path to anchor a sibling file. Surface a one-line count
+        # only; the dedicated `cpv-cache-optimize` command writes a real report.
+        if warning_count:
+            pointer = (
+                f"Cache audit: {warning_count} WARNING(s) (CA-01..CA-06, non-blocking) — "
+                "run `cpv-cache-optimize` (or pass --report) to save the cache report"
+            )
+        else:
+            pointer = "Cache audit: clean (0 cache-discipline warnings)"
+
+    report.info(pointer)
+    return pointer
+
+
 def main() -> int:
     """Main entry point.
 
@@ -5813,6 +5892,12 @@ def main() -> int:
     detected_languages = validate_project_languages(plugin_root, report)
     validate_lockfiles(plugin_root, report, detected_languages)
 
+    # Prompt-cache audit (CA-01..CA-06, all WARNING) — CALLED, not integrated.
+    # Writes its OWN report and contributes only a one-line pointer to the main
+    # report; cache findings never affect the VALID/INVALID verdict. The
+    # standalone `cpv-cache-optimize` audit/fix commands act on these findings.
+    cache_pointer = _run_cache_audit_separate(plugin_root, args.report, report)
+
     # Output
     if args.json:
         print_json(report)
@@ -5823,6 +5908,11 @@ def main() -> int:
             )
         else:
             print_results(report, args.verbose)
+        # Always surface the cache-audit pointer on stdout (it is INFO-level in
+        # the report, which non-verbose summaries hide) so the user sees where
+        # the separate cache report landed regardless of verbosity.
+        if cache_pointer:
+            print(cache_pointer)
 
     if args.strict:
         return report.exit_code_strict()

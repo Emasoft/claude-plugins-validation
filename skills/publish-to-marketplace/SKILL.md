@@ -8,7 +8,6 @@ tags:
   - publish
   - ci-cd
   - plugin
-allowed-tools: Read, Bash(git:*,gh:*,uv:*), Write, Edit, Glob, Grep, AskUserQuestion
 user-invocable: false
 ---
 

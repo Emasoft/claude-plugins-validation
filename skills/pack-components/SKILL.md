@@ -3,7 +3,6 @@ name: pack-components
 description: Pack a folder of standalone components (skill/agent/command/hook/mcp/lsp/monitor/output-style) into a new installable plugin. Use when bundling loose components into a single publishable plugin. Used dynamically via the-skills-menu (TRDD-478d9687).
 when_to_use: When the cpv-main-menu user picks Create → Pack components, or any flow needs to bundle a folder of standalone components into a single installable plugin
 user-invocable: false
-allowed-tools: Bash(uv:*)
 ---
 
 # pack-components

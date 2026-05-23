@@ -206,8 +206,8 @@ RE_BASEDIR_ASSETS = re.compile(r"\{baseDir\}/assets/([^\s\}]+)")
 # Single ``<word>`` placeholders no longer match — only structural
 # tags do.
 RE_XML_TAG = re.compile(
-    r"<([a-zA-Z][a-zA-Z0-9:_.-]*)\b[^>]*>.*?</\1>"     # balanced pair
-    r"|<[a-zA-Z][a-zA-Z0-9:_.-]*\b[^>]*/>",             # self-closing
+    r"<([a-zA-Z][a-zA-Z0-9:_.-]*)\b[^>]*>.*?</\1>"  # balanced pair
+    r"|<[a-zA-Z][a-zA-Z0-9:_.-]*\b[^>]*/>",  # self-closing
     re.DOTALL,
 )
 
@@ -951,7 +951,21 @@ def validate_allowed_tools_field(
         return
 
     if not tool_list:
-        report.minor("'allowed-tools' is empty", "SKILL.md", category="Frontmatter")
+        # An empty allowed-tools ([] or "") is a VALID, explicit declaration that
+        # the skill is permitted NO tools (chat-only) — distinct from an ABSENT
+        # field, which means "inherit all tools" (handled by the early return at
+        # the top of this function). It never blocks (WARNING), but it IS
+        # surfaced because an empty array is most often a mistaken attempt at
+        # "allow everything" — for which the correct syntax is to omit the field.
+        report.warning(
+            "'allowed-tools' is empty ([]) — this forbids ALL tools, only "
+            "chatting is allowed. If this is not intentional, fix it. If it was "
+            "a mistaken attempt at allowing all tools, omitting the "
+            "'allowed-tools' field entirely is the correct syntax (an absent "
+            "field means all tools allowed).",
+            "SKILL.md",
+            category="Frontmatter",
+        )
         return
 
     # Validate individual tools
@@ -2325,10 +2339,7 @@ def _check_context_fork_self_recursion(
     if qualified:
         candidates.append(qualified)
     # Compile per-candidate matchers — escape any regex metachars.
-    matchers = [
-        re.compile(r"""skill\s*:\s*["']""" + re.escape(c) + r"""["']""", re.IGNORECASE)
-        for c in candidates
-    ]
+    matchers = [re.compile(r"""skill\s*:\s*["']""" + re.escape(c) + r"""["']""", re.IGNORECASE) for c in candidates]
     # Strip markdown code fences (``` ... ```) before scanning — documented
     # "how to invoke this skill" examples inside fences are NOT runtime
     # self-recursion. Replace fences with newlines so line numbers stay
@@ -2751,6 +2762,14 @@ def validate_skill(
                 category="Frontmatter",
             )
         validate_allowed_tools_field(frontmatter, report, strict_mode, strict_openspec)
+        # TRDD-94e06820: the body must not invoke a tool the declared field does
+        # not grant — that call fails silently at runtime. Skipped when the field
+        # is absent (all tools allowed).
+        from cpv_tool_permission_match import validate_body_tool_consistency  # noqa: PLC0415
+
+        validate_body_tool_consistency(
+            frontmatter.get("allowed-tools"), body, report, filename="SKILL.md", field_name="allowed-tools"
+        )
         validate_metadata_field(frontmatter, report)
 
         # New frontmatter field validations (Phase 2)

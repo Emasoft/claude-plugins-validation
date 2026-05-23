@@ -828,13 +828,21 @@ allowed-tools:
   - Bash
 ```
 
-### MINOR: allowed-tools is empty
+### WARNING: allowed-tools is empty
 
-**Error message**: `'allowed-tools' is empty`
-**Severity**: MINOR
+**Error message**: `'allowed-tools' is empty ([]) — this forbids ALL tools, only chatting is allowed. If this is not intentional, fix it. If it was a mistaken attempt at allowing all tools, omitting the 'allowed-tools' field entirely is the correct syntax (an absent field means all tools allowed).`
+**Severity**: WARNING (non-blocking — does not block publish)
 **Source**: Both scripts — `validate_allowed_tools_field()`
-**Root cause**: The field is present but contains no tools.
-**Fix**: Either remove the field or add the tools the skill needs.
+**Root cause**: The field is present but the array is empty (`[]` or `""`). This is a **valid** declaration — it means the skill is permitted **no tools** (chat-only) — and is distinct from an **absent** field, which means "inherit **all** tools". It is surfaced (not silently accepted) because an empty array is most often a mistaken attempt at "allow everything".
+**Fix**: No fix needed if you genuinely want a chat-only skill. If you meant to allow **all** tools, **omit** the `allowed-tools` field entirely (an absent field grants the full tool surface). If the skill needs a specific subset, list those tools.
+
+### CRITICAL: body invokes a tool the allowed-tools field does not grant
+
+**Error message**: `body invokes the tool '<Tool>' (line N) but the 'allowed-tools' field does not grant it — the call will fail at runtime (silent failure). Add '<Tool>' to 'allowed-tools', or remove the 'allowed-tools' field to allow all tools.` (a prose-only mention is the non-blocking WARNING variant: `body mentions the tool '<Tool>' … (in prose). If this is documentation, ignore it; …`)
+**Severity**: CRITICAL when the usage is inside a fenced code block (an intended instruction) or the field is empty `[]`; WARNING when the usage is only a prose mention.
+**Source**: `cpv_tool_permission_match.py` — `validate_body_tool_consistency()`, wired into all four validators (TRDD-94e06820).
+**Root cause**: The SKILL.md body instructs the model to call a tool (`<Tool>(…)` syntax, or an `mcp__server__tool` reference) that the declared `allowed-tools` field does not grant. At runtime that tool call is denied and the skill fails **silently**. An empty `[]` declaration grants nothing, so any tool usage contradicts it.
+**Fix**: Pick one — (a) add `<Tool>` to `allowed-tools` (for MCP: add `mcp__<server>__<tool>`, `mcp__<server>__*`, or the bare `mcp__<server>`); (b) remove the `allowed-tools` field entirely if the component should have all tools (an absent field = all tools allowed); or (c) if the body line is documentation, not real usage, the finding is the non-blocking WARNING — leave it or reword the line so it is not function-call syntax. Note: a declared `Edit(…)` rule also grants `Read`; a declared `Bash(…)` rule also grants `Monitor`; `Task` and `Agent` are aliases. The identical rule applies to command `allowed-tools` and agent `tools` fields.
 
 ### MAJOR: allowed-tools must be CSV string (strict mode)
 

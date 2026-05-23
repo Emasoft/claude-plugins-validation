@@ -131,28 +131,60 @@ def _to_cpv_severity(skillaudit_severity: str) -> str:
 
 SAFE_DOMAINS: frozenset[str] = frozenset(
     {
-        "github.com", "raw.githubusercontent.com", "gist.github.com",
-        "npmjs.com", "registry.npmjs.org", "unpkg.com",
-        "pypi.org", "crates.io", "rubygems.org",
-        "stackoverflow.com", "developer.mozilla.org",
-        "google.com", "googleapis.com", "cloudflare.com",
-        "vercel.app", "netlify.app", "heroku.com",
-        "docker.io", "hub.docker.com",
-        "openai.com", "anthropic.com", "huggingface.co",
-        "linkedin.com", "twitter.com", "x.com",
-        "medium.com", "dev.to", "hashnode.dev",
-        "wikipedia.org", "wikimedia.org",
-        "cdn.jsdelivr.net", "cdnjs.cloudflare.com",
+        "github.com",
+        "raw.githubusercontent.com",
+        "gist.github.com",
+        "npmjs.com",
+        "registry.npmjs.org",
+        "unpkg.com",
+        "pypi.org",
+        "crates.io",
+        "rubygems.org",
+        "stackoverflow.com",
+        "developer.mozilla.org",
+        "google.com",
+        "googleapis.com",
+        "cloudflare.com",
+        "vercel.app",
+        "netlify.app",
+        "heroku.com",
+        "docker.io",
+        "hub.docker.com",
+        "openai.com",
+        "anthropic.com",
+        "huggingface.co",
+        "linkedin.com",
+        "twitter.com",
+        "x.com",
+        "medium.com",
+        "dev.to",
+        "hashnode.dev",
+        "wikipedia.org",
+        "wikimedia.org",
+        "cdn.jsdelivr.net",
+        "cdnjs.cloudflare.com",
     }
 )
 
 SUSPICIOUS_DOMAINS: frozenset[str] = frozenset(
     {
-        "webhook.site", "requestbin.com", "pipedream.net",
-        "ngrok.io", "ngrok-free.app", "burpcollaborator.net",
-        "interact.sh", "oastify.com", "hookbin.com", "postb.in",
-        "rbndr.us", "1u.ms", "nip.io", "xip.io",
-        "pastebin.com", "transfer.sh", "file.io",
+        "webhook.site",
+        "requestbin.com",
+        "pipedream.net",
+        "ngrok.io",
+        "ngrok-free.app",
+        "burpcollaborator.net",
+        "interact.sh",
+        "oastify.com",
+        "hookbin.com",
+        "postb.in",
+        "rbndr.us",
+        "1u.ms",
+        "nip.io",
+        "xip.io",
+        "pastebin.com",
+        "transfer.sh",
+        "file.io",
     }
 )
 
@@ -272,9 +304,7 @@ def _code_block_lang(ranges: list[_CodeBlockRange], line_idx: int) -> str | None
     return None
 
 
-def _code_block_has_placeholder(
-    lines: list[str], ranges: list[_CodeBlockRange], line_idx: int
-) -> bool:
+def _code_block_has_placeholder(lines: list[str], ranges: list[_CodeBlockRange], line_idx: int) -> bool:
     for r in ranges:
         if r.start < line_idx < r.end:
             return any(_has_placeholder(lines[i]) for i in range(r.start, r.end + 1))
@@ -311,18 +341,39 @@ def _is_instructional_context(lines: list[str], line_idx: int) -> bool:
 # false-positive pressure on documentation.
 _MD_TABLE_SUPPRESSED_RULES: frozenset[str] = frozenset(
     {
-        "CRED_ENV_READ", "TOKEN_STEAL", "CRED_ENV_SAFE",
-        "CMD_INJECTION", "SHELL_EXEC", "REVERSE_SHELL",
-        "SUPPLY_CHAIN", "FS_WRITE", "FS_READ", "FS_RECURSIVE_RM",
-        "SSRF_PATTERN", "NET_SUSPICIOUS", "DNS_REBIND",
-        "INSECURE_CRYPTO", "OBFUSCATION", "REGEX_DOS",
-        "INDIRECT_PROMPT_INJECT", "PROMPT_INJECT",
-        "MCP_SCHEMA_POISON", "TOOL_POISONING",
-        "A2A_AGENT_IMPERSONATION", "A2A_TASK_HIJACK",
-        "A2A_CROSS_AGENT_INJECT", "A2A_DATA_LEAK", "A2A_CAPABILITY_ABUSE",
-        "PERSISTENCE", "PRIVILEGE_ESC", "CONTAINER_ESCAPE",
-        "ENV_RECON", "RESOURCE_ABUSE",
-        "AGENT_MEMORY_MOD", "TOOL_SHADOW", "CROSS_TOOL_ACCESS",
+        "CRED_ENV_READ",
+        "TOKEN_STEAL",
+        "CRED_ENV_SAFE",
+        "CMD_INJECTION",
+        "SHELL_EXEC",
+        "REVERSE_SHELL",
+        "SUPPLY_CHAIN",
+        "FS_WRITE",
+        "FS_READ",
+        "FS_RECURSIVE_RM",
+        "SSRF_PATTERN",
+        "NET_SUSPICIOUS",
+        "DNS_REBIND",
+        "INSECURE_CRYPTO",
+        "OBFUSCATION",
+        "REGEX_DOS",
+        "INDIRECT_PROMPT_INJECT",
+        "PROMPT_INJECT",
+        "MCP_SCHEMA_POISON",
+        "TOOL_POISONING",
+        "A2A_AGENT_IMPERSONATION",
+        "A2A_TASK_HIJACK",
+        "A2A_CROSS_AGENT_INJECT",
+        "A2A_DATA_LEAK",
+        "A2A_CAPABILITY_ABUSE",
+        "PERSISTENCE",
+        "PRIVILEGE_ESC",
+        "CONTAINER_ESCAPE",
+        "ENV_RECON",
+        "RESOURCE_ABUSE",
+        "AGENT_MEMORY_MOD",
+        "TOOL_SHADOW",
+        "CROSS_TOOL_ACCESS",
     }
 )
 
@@ -362,8 +413,7 @@ def _build_py_docstring_map(lines: list[str], file_path: str) -> list[bool]:
     suppression heuristic.
     """
     is_python = file_path.endswith(".py") or any(
-        line.lstrip().startswith(("#!/usr/bin/env python", "#!/usr/bin/python"))
-        for line in lines[:1]
+        line.lstrip().startswith(("#!/usr/bin/env python", "#!/usr/bin/python")) for line in lines[:1]
     )
     in_doc = [False] * len(lines)
     if not is_python:
@@ -396,10 +446,15 @@ def _is_in_line_comment(line: str, file_path: str) -> bool:
         return False
     suffix = file_path.lower()
     # Python / shell / YAML / TOML / make
-    if suffix.endswith((".py", ".sh", ".bash", ".zsh", ".fish", ".yml", ".yaml", ".toml", ".ini", ".conf")) or suffix == "makefile":
+    if (
+        suffix.endswith((".py", ".sh", ".bash", ".zsh", ".fish", ".yml", ".yaml", ".toml", ".ini", ".conf"))
+        or suffix == "makefile"
+    ):
         return stripped.startswith("#")
     # JS / TS / Java / Go / C / C++ / Rust
-    if suffix.endswith((".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx", ".java", ".go", ".c", ".cpp", ".cc", ".rs", ".rb", ".php")):
+    if suffix.endswith(
+        (".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx", ".java", ".go", ".c", ".cpp", ".cc", ".rs", ".rb", ".php")
+    ):
         return stripped.startswith(("//", "/*", "*"))
     return False
 
@@ -443,18 +498,31 @@ def _is_substring_false_positive(line: str, match: str) -> bool:
 # A2A attacks). These CANNOT be triggered by markdown prose, JSON
 # description fields, or Python docstrings — those layers don't reach
 # a shell. Context classifiers' "safe_doc" verdict maps to SUPPRESS.
-_EXECUTION_CLASS_RULES: frozenset[str] = frozenset({
-    "CMD_INJECTION", "SHELL_EXEC", "REVERSE_SHELL", "OBFUSCATION",
-    "PRIVILEGE_ESC", "TIME_BOMB", "INSECURE_CRYPTO", "REGEX_DOS",
-    "MCP_SCHEMA_POISON",
-    "A2A_AGENT_IMPERSONATION", "A2A_TASK_HIJACK",
-    "A2A_CROSS_AGENT_INJECT", "A2A_DATA_LEAK",
-    "TOOL_USE_AUTH_BYPASS", "TOOL_USE_PARAM_INJECT",
-    "CONTAINER_ESCAPE", "PERSISTENCE",
-    "DENIAL_OF_SERVICE", "RESOURCE_ABUSE",
-    "SSRF_ADVANCED",  # SSRF needs an actual URL request — not a prose mention
-    "NET_SUSPICIOUS",
-})
+_EXECUTION_CLASS_RULES: frozenset[str] = frozenset(
+    {
+        "CMD_INJECTION",
+        "SHELL_EXEC",
+        "REVERSE_SHELL",
+        "OBFUSCATION",
+        "PRIVILEGE_ESC",
+        "TIME_BOMB",
+        "INSECURE_CRYPTO",
+        "REGEX_DOS",
+        "MCP_SCHEMA_POISON",
+        "A2A_AGENT_IMPERSONATION",
+        "A2A_TASK_HIJACK",
+        "A2A_CROSS_AGENT_INJECT",
+        "A2A_DATA_LEAK",
+        "TOOL_USE_AUTH_BYPASS",
+        "TOOL_USE_PARAM_INJECT",
+        "CONTAINER_ESCAPE",
+        "PERSISTENCE",
+        "DENIAL_OF_SERVICE",
+        "RESOURCE_ABUSE",
+        "SSRF_ADVANCED",  # SSRF needs an actual URL request — not a prose mention
+        "NET_SUSPICIOUS",
+    }
+)
 
 # **Intent HARD signals**: the prose pattern IS the threat-delivery
 # vector. A markdown line containing "Ignore previous instructions"
@@ -462,15 +530,22 @@ _EXECUTION_CLASS_RULES: frozenset[str] = frozenset({
 # to ``webhook.site/...`` (URL_SUSPICIOUS) is a real attack regardless
 # of whether the host file is documentation or code. KEEP at declared
 # severity even in safe_doc context.
-_INTENT_HARD_SIGNAL_RULES: frozenset[str] = frozenset({
-    "PROMPT_INJECT", "INDIRECT_PROMPT_INJECT",
-    "DATA_EXFIL", "DATA_EXFIL_TO_NETWORK", "EXFIL_TO_CHAT",
-    "URL_SUSPICIOUS",
-    "HARDCODED_SECRET",
-    "INVISIBLE_UNICODE_RAW",
-    "BASE64_DECODE_THREAT", "HEX_DECODE_THREAT",
-    "UNICODE_ESCAPE_DECODE_THREAT", "CHARCODE_DECODE_THREAT",
-})
+_INTENT_HARD_SIGNAL_RULES: frozenset[str] = frozenset(
+    {
+        "PROMPT_INJECT",
+        "INDIRECT_PROMPT_INJECT",
+        "DATA_EXFIL",
+        "DATA_EXFIL_TO_NETWORK",
+        "EXFIL_TO_CHAT",
+        "URL_SUSPICIOUS",
+        "HARDCODED_SECRET",
+        "INVISIBLE_UNICODE_RAW",
+        "BASE64_DECODE_THREAT",
+        "HEX_DECODE_THREAT",
+        "UNICODE_ESCAPE_DECODE_THREAT",
+        "CHARCODE_DECODE_THREAT",
+    }
+)
 
 # **Intent SOFT signals**: the rule pattern catches a verb / concept
 # that benignly appears in plugin documentation (a janitor skill's
@@ -478,14 +553,23 @@ _INTENT_HARD_SIGNAL_RULES: frozenset[str] = frozenset({
 # describing its OWN behavior). These rules over-fire in prose; DEMOTE
 # to NIT so the agent layer triages whether the prose is benign
 # self-description or a real instruction.
-_INTENT_SOFT_SIGNAL_RULES: frozenset[str] = frozenset({
-    "INTENT_EXPLICIT_EXFILTRATION", "INTENT_DESTRUCTIVE_INTENT",
-    "INTENT_AGENT_MANIPULATION", "INTENT_INSTRUCTION_OVERRIDE",
-    "TOKEN_STEAL", "CRED_ENV_READ", "CRED_ENV_SAFE",
-    "CRED_THEFT", "CREDENTIAL_REFERENCE",
-    "RECONNAISSANCE", "EVASION", "OBFUSCATION_INTENT",
-    "CRYPTO_THEFT",
-})
+_INTENT_SOFT_SIGNAL_RULES: frozenset[str] = frozenset(
+    {
+        "INTENT_EXPLICIT_EXFILTRATION",
+        "INTENT_DESTRUCTIVE_INTENT",
+        "INTENT_AGENT_MANIPULATION",
+        "INTENT_INSTRUCTION_OVERRIDE",
+        "TOKEN_STEAL",
+        "CRED_ENV_READ",
+        "CRED_ENV_SAFE",
+        "CRED_THEFT",
+        "CREDENTIAL_REFERENCE",
+        "RECONNAISSANCE",
+        "EVASION",
+        "OBFUSCATION_INTENT",
+        "CRYPTO_THEFT",
+    }
+)
 
 # Backwards-compat alias — the union of both halves. Older heuristics
 # (and the dispatcher's default fall-through) treat any intent rule as
@@ -498,9 +582,7 @@ _INTENT_CLASS_RULES: frozenset[str] = _INTENT_HARD_SIGNAL_RULES | _INTENT_SOFT_S
 # data-exfil / etc. prose IS a real delivery vector and must NOT be
 # suppressed by the documentation-only-path heuristic. Listed as
 # basenames (case-insensitive).
-_INSTRUCTION_LOADABLE_BASENAMES: frozenset[str] = frozenset(
-    {"skill.md", "claude.md", "agents.md"}
-)
+_INSTRUCTION_LOADABLE_BASENAMES: frozenset[str] = frozenset({"skill.md", "claude.md", "agents.md"})
 
 # Basenames / dir prefixes that are NEVER loaded as instructions —
 # pure documentation surfaces. Issue #38: a prompt-injection phrase
@@ -782,10 +864,7 @@ def _confidence(
     # are almost-certainly substring false positives. Demote rather
     # than drop — there's a non-zero chance a real shell `ls` appears
     # in the line elsewhere.
-    if (
-        match.lower() in _SHORT_SHELL_TOKENS
-        and _is_substring_false_positive(line, match)
-    ):
+    if match.lower() in _SHORT_SHELL_TOKENS and _is_substring_false_positive(line, match):
         return "demote"
 
     # Markdown-table cells are rendered, not executed. Demote
@@ -801,11 +880,18 @@ def _confidence(
     if cb_map[line_idx]:
         lang = (_code_block_lang(cb_ranges, line_idx) or "").lower()
         if lang in _DATA_LANG_FENCES and rule_id in {
-            "CMD_INJECTION", "SHELL_EXEC", "REVERSE_SHELL",
-            "OBFUSCATION", "REGEX_DOS", "INSECURE_CRYPTO",
-            "INDIRECT_PROMPT_INJECT", "MCP_SCHEMA_POISON",
-            "A2A_AGENT_IMPERSONATION", "A2A_TASK_HIJACK",
-            "A2A_CROSS_AGENT_INJECT", "A2A_DATA_LEAK",
+            "CMD_INJECTION",
+            "SHELL_EXEC",
+            "REVERSE_SHELL",
+            "OBFUSCATION",
+            "REGEX_DOS",
+            "INSECURE_CRYPTO",
+            "INDIRECT_PROMPT_INJECT",
+            "MCP_SCHEMA_POISON",
+            "A2A_AGENT_IMPERSONATION",
+            "A2A_TASK_HIJACK",
+            "A2A_CROSS_AGENT_INJECT",
+            "A2A_DATA_LEAK",
         }:
             return "demote"
 
@@ -904,9 +990,7 @@ _NET_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
 )
 
 
-def _detect_structural_read_to_net(
-    lines: list[str], cb_map: list[bool]
-) -> list[dict[str, Any]]:
+def _detect_structural_read_to_net(lines: list[str], cb_map: list[bool]) -> list[dict[str, Any]]:
     read_lines: list[int] = []
     net_lines: list[int] = []
     for i, line in enumerate(lines):
@@ -955,6 +1039,7 @@ def _analyze_urls(lines: list[str]) -> list[dict[str, Any]]:
             url = match.group(0)
             try:
                 from urllib.parse import urlparse  # local import — std lib
+
                 hostname = (urlparse(url).hostname or "").lower()
             except (ValueError, TypeError):
                 continue
@@ -1059,52 +1144,62 @@ _INTENT_PATTERNS: tuple[tuple[re.Pattern[str], str, str, str], ...] = tuple(
     for pat, sev, name, desc in (
         (
             r"send\s+(the\s+)?(contents?|data|file|config|credentials?|secrets?|tokens?)\s+(of|from|to)\s",
-            "high", "Exfiltration intent",
+            "high",
+            "Exfiltration intent",
             "Instruction asks to send sensitive data externally",
         ),
         (
             r"upload\s+(the\s+)?(contents?|data|file|config|credentials?|secrets?)\s",
-            "high", "Upload intent",
+            "high",
+            "Upload intent",
             "Instruction asks to upload sensitive data",
         ),
         (
             r"post\s+(the\s+)?(contents?|data|results?)\s+to\s+",
-            "medium", "POST data intent",
+            "medium",
+            "POST data intent",
             "Instruction asks to POST data to an endpoint",
         ),
         (
             r"read\s+.*\.(env|key|pem|secret|credentials)\b.*(?:send|post|upload|forward|transmit)",
-            "critical", "Read-and-exfiltrate intent",
+            "critical",
+            "Read-and-exfiltrate intent",
             "Instruction asks to read secrets then send them",
         ),
         (
             r"(?:forward|relay|copy)\s+.*(?:api.?key|token|password|secret|credential)\s+to\s",
-            "critical", "Credential forwarding intent",
+            "critical",
+            "Credential forwarding intent",
             "Instruction asks to forward credentials",
         ),
         (
             r"(?:delete|remove|wipe|destroy)\s+(all\s+)?(files?|data|logs?|history|memory)",
-            "high", "Destructive intent",
+            "high",
+            "Destructive intent",
             "Instruction asks to delete files or data",
         ),
         (
             r"install\s+.*(?:backdoor|rootkit|keylogger|trojan|malware)",
-            "critical", "Malware install intent",
+            "critical",
+            "Malware install intent",
             "Instruction asks to install malicious software",
         ),
         (
             r"disable\s+.*(?:firewall|antivirus|security|logging|audit)",
-            "critical", "Security disable intent",
+            "critical",
+            "Security disable intent",
             "Instruction asks to disable security measures",
         ),
         (
             r"connect\s+(?:back|reverse)\s+to",
-            "high", "Reverse connection intent",
+            "high",
+            "Reverse connection intent",
             "Instruction asks to connect back to attacker",
         ),
         (
             r"exfiltrate",
-            "critical", "Explicit exfiltration",
+            "critical",
+            "Explicit exfiltration",
             "Instruction explicitly mentions exfiltration",
         ),
     )
@@ -1159,9 +1254,7 @@ _DECODED_THREATS: tuple[tuple[re.Pattern[str], str, str], ...] = tuple(
 )
 
 
-def _scan_decoded(
-    decoded: str, encoding: str, line_idx: int, line_content: str
-) -> list[dict[str, Any]]:
+def _scan_decoded(decoded: str, encoding: str, line_idx: int, line_content: str) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     for pat, name, sev in _DECODED_THREATS:
         m = pat.search(decoded)
@@ -1173,12 +1266,11 @@ def _scan_decoded(
                     "category": "obfuscation",
                     "name": f"Obfuscated payload ({encoding.lower()}): {name}",
                     "description": (
-                        f"{encoding}-encoded content contains {name.lower()}. "
-                        f"Decoded match: \"{m.group(0)[:80]}\""
+                        f'{encoding}-encoded content contains {name.lower()}. Decoded match: "{m.group(0)[:80]}"'
                     ),
                     "line": line_idx + 1,
                     "lineContent": line_content.strip()[:200],
-                    "match": f"{encoding.lower()}→\"{decoded[:100]}\"",
+                    "match": f'{encoding.lower()}→"{decoded[:100]}"',
                     "suppressed": False,
                 }
             )
@@ -1281,97 +1373,113 @@ _SECRET_DETECTORS: tuple[tuple[str, str, str, re.Pattern[str], str], ...] = tupl
     (id_, name, description, re.compile(pat), severity)
     for id_, name, description, pat, severity in (
         (
-            "SECRET_GITHUB_TOKEN", "Hardcoded GitHub token",
+            "SECRET_GITHUB_TOKEN",
+            "Hardcoded GitHub token",
             "GitHub personal access token (ghp_/gho_/ghu_/ghs_/ghr_) embedded in source",
             r"\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,255}\b",
             "critical",
         ),
         (
-            "SECRET_AWS_KEY", "Hardcoded AWS access key",
+            "SECRET_AWS_KEY",
+            "Hardcoded AWS access key",
             "AWS access-key-id (AKIA…) embedded in source",
             r"\b(AKIA|ASIA)[A-Z0-9]{16}\b",
             "critical",
         ),
         (
-            "SECRET_SLACK_TOKEN", "Hardcoded Slack token",
+            "SECRET_SLACK_TOKEN",
+            "Hardcoded Slack token",
             "Slack token (xoxb-/xoxa-/xoxp-/xoxr-/xoxs-) embedded in source",
             r"\b(xox[bapors])-[A-Za-z0-9-]{10,200}\b",
             "critical",
         ),
         (
-            "SECRET_SLACK_WEBHOOK", "Slack webhook URL",
+            "SECRET_SLACK_WEBHOOK",
+            "Slack webhook URL",
             "Hardcoded Slack incoming-webhook URL — can post messages to channels",
             r"https://hooks\.slack\.com/services/T[A-Z0-9]{8,}/B[A-Z0-9]{8,}/[A-Za-z0-9]{20,}",
             "high",
         ),
         (
-            "SECRET_DISCORD_TOKEN", "Hardcoded Discord bot token",
+            "SECRET_DISCORD_TOKEN",
+            "Hardcoded Discord bot token",
             "Discord bot token embedded in source",
             r"\b[MN][A-Za-z0-9]{23}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,38}\b",
             "critical",
         ),
         (
-            "SECRET_DISCORD_WEBHOOK", "Discord webhook URL",
+            "SECRET_DISCORD_WEBHOOK",
+            "Discord webhook URL",
             "Hardcoded Discord webhook — can post messages to channels",
             r"https://discord(?:app)?\.com/api/webhooks/\d{17,}/[A-Za-z0-9_-]{60,}",
             "high",
         ),
         (
-            "SECRET_TELEGRAM_TOKEN", "Telegram bot token",
+            "SECRET_TELEGRAM_TOKEN",
+            "Telegram bot token",
             "Telegram bot token embedded in source",
             r"\b\d{8,12}:[A-Za-z0-9_-]{35}\b",
             "critical",
         ),
         (
-            "SECRET_VERCEL_TOKEN", "Vercel access token",
+            "SECRET_VERCEL_TOKEN",
+            "Vercel access token",
             "Vercel API token (vercel_…) embedded in source",
             r"\bvercel_[A-Za-z0-9]{24,40}\b",
             "critical",
         ),
         (
-            "SECRET_NPM_TOKEN", "npm access token",
+            "SECRET_NPM_TOKEN",
+            "npm access token",
             "npm token (npm_… or 36-hex UUID-style) embedded in source",
             r"\bnpm_[A-Za-z0-9]{30,}\b",
             "critical",
         ),
         (
-            "SECRET_PYPI_TOKEN", "PyPI API token",
+            "SECRET_PYPI_TOKEN",
+            "PyPI API token",
             "PyPI token (pypi-…) embedded in source",
             r"\bpypi-[A-Za-z0-9]{30,}\b",
             "critical",
         ),
         (
-            "SECRET_PRIVATE_KEY", "PEM private key",
+            "SECRET_PRIVATE_KEY",
+            "PEM private key",
             "PEM-formatted private key block embedded in source",
             r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED |PGP )?PRIVATE KEY-----",
             "critical",
         ),
         (
-            "SECRET_JWT", "Hardcoded JWT",
+            "SECRET_JWT",
+            "Hardcoded JWT",
             "JSON Web Token (header.payload.signature) embedded in source",
             r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b",
             "high",
         ),
         (
-            "SECRET_OPENAI_KEY", "OpenAI API key",
+            "SECRET_OPENAI_KEY",
+            "OpenAI API key",
             "OpenAI key (sk-… / sk-proj-…) embedded in source",
             r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b",
             "critical",
         ),
         (
-            "SECRET_ANTHROPIC_KEY", "Anthropic API key",
+            "SECRET_ANTHROPIC_KEY",
+            "Anthropic API key",
             "Anthropic key (sk-ant-…) embedded in source",
             r"\bsk-ant-[A-Za-z0-9_-]{20,}\b",
             "critical",
         ),
         (
-            "SECRET_GOOGLE_API_KEY", "Google API key",
+            "SECRET_GOOGLE_API_KEY",
+            "Google API key",
             "Google API key (AIza…) embedded in source",
             r"\bAIza[A-Za-z0-9_-]{32,40}\b",
             "high",
         ),
         (
-            "SECRET_STRIPE_KEY", "Stripe API key",
+            "SECRET_STRIPE_KEY",
+            "Stripe API key",
             "Stripe live secret key (sk_live_… / rk_live_…) embedded in source",
             r"\b(?:sk|rk)_live_[A-Za-z0-9]{20,}\b",
             "critical",
@@ -1475,8 +1583,14 @@ def scan_content(content: str, file_path: str = "") -> list[dict[str, Any]]:
                 in_cb = cb_map[i]
                 lang = _code_block_lang(cb_ranges, i) or ""
                 verdict = _confidence(
-                    lines, i, m.group(0), rule_id, cb_map, cb_ranges,
-                    py_doc_map=py_doc_map, file_path=file_path,
+                    lines,
+                    i,
+                    m.group(0),
+                    rule_id,
+                    cb_map,
+                    cb_ranges,
+                    py_doc_map=py_doc_map,
+                    file_path=file_path,
                 )
                 suppressed = verdict == "suppress"
                 demoted = verdict == "demote"

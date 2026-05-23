@@ -477,9 +477,7 @@ class TestValidateSkillRefs:
         (skills_dir / "lint-check").mkdir()
         agents_dir = tmp_path / "agents"
         agents_dir.mkdir()
-        (agents_dir / "host.md").write_text(
-            "---\nname: host\n---\n# Host\n\nUses skills/lint-check for linting.\n"
-        )
+        (agents_dir / "host.md").write_text("---\nname: host\n---\n# Host\n\nUses skills/lint-check for linting.\n")
 
         report = CrossReferenceValidationReport()
         validate_skill_refs(tmp_path, report, {"lint-check"})
@@ -497,9 +495,7 @@ class TestValidateSkillRefs:
         """
         commands_dir = tmp_path / "commands"
         commands_dir.mkdir()
-        (commands_dir / "host.md").write_text(
-            "---\nname: host\n---\n# Host\n\nUses skills/ghost-skill for setup\n"
-        )
+        (commands_dir / "host.md").write_text("---\nname: host\n---\n# Host\n\nUses skills/ghost-skill for setup\n")
 
         report = CrossReferenceValidationReport()
         validate_skill_refs(tmp_path, report, set())
@@ -639,7 +635,7 @@ class TestStripNoise:
 
     def test_strips_fenced_console_block(self):
         """Fenced code blocks marked ``console`` are blanked out."""
-        content = '```console\n$ task subagent_type=ignored\n```\n'
+        content = "```console\n$ task subagent_type=ignored\n```\n"
         stripped = _strip_noise(content)
         assert "ignored" not in stripped
 

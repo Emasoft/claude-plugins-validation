@@ -248,7 +248,9 @@ class TestWritePlan:
     def test_status_table_json_written(self, tmp_path: Path) -> None:
         plugins = [_ri("x", tmp_path / "x")]
         plan = make_plan(
-            plugins, agent_type="x", agent_mode="y",
+            plugins,
+            agent_type="x",
+            agent_mode="y",
             session_dir=tmp_path / "sd",
         )
         path = write_status_table(plan)
@@ -283,14 +285,10 @@ class TestAggregateStatus:
         )
         plan_path = write_plan(plan)
         (sd / "plugin-0.status.json").write_text(
-            json.dumps(
-                {"status_symbol": "✓", "status_label": "clean", "notes": "0/0/0/0"}
-            )
+            json.dumps({"status_symbol": "✓", "status_label": "clean", "notes": "0/0/0/0"})
         )
         (sd / "plugin-1.status.json").write_text(
-            json.dumps(
-                {"status_symbol": "✗", "status_label": "failed", "notes": "3 CRITICAL"}
-            )
+            json.dumps({"status_symbol": "✗", "status_label": "failed", "notes": "3 CRITICAL"})
         )
         data = aggregate_status(plan_path)
         symbols = [r["status_symbol"] for r in data["rows"]]
@@ -304,7 +302,9 @@ class TestAggregateStatus:
         sd = tmp_path / "sd"
         plan = make_plan(
             [_ri("a", tmp_path / "a")],
-            agent_type="x", agent_mode="y", session_dir=sd,
+            agent_type="x",
+            agent_mode="y",
+            session_dir=sd,
         )
         plan_path = write_plan(plan)
         (sd / "plugin-0.status.json").write_text("not json at all")
@@ -318,9 +318,7 @@ class TestAggregateStatus:
 def _make_plugin(root: Path, name: str = "demo-plugin") -> Path:
     plugin_dir = root / name
     (plugin_dir / ".claude-plugin").mkdir(parents=True, exist_ok=True)
-    (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
-        json.dumps({"name": name, "version": "0.1.0"})
-    )
+    (plugin_dir / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": name, "version": "0.1.0"}))
     return plugin_dir
 
 
@@ -336,9 +334,12 @@ class TestCli:
                 "plan",
                 str(p1),
                 str(p2),
-                "--agent", "plugin-validator",
-                "--mode", "batch_validate",
-                "--session-dir", str(sd),
+                "--agent",
+                "plugin-validator",
+                "--mode",
+                "batch_validate",
+                "--session-dir",
+                str(sd),
             ],
             capture_output=True,
             text=True,
@@ -360,9 +361,12 @@ class TestCli:
                 str(SCRIPTS_DIR / "cpv_batch_orchestrator.py"),
                 "plan",
                 str(p1),
-                "--agent", "plugin-validator",
-                "--mode", "batch_validate",
-                "--session-dir", str(sd),
+                "--agent",
+                "plugin-validator",
+                "--mode",
+                "batch_validate",
+                "--session-dir",
+                str(sd),
             ],
             capture_output=True,
             text=True,
@@ -371,9 +375,7 @@ class TestCli:
         )
         # Simulate the dispatched agent writing its per-plugin status.
         (sd / "plugin-0.status.json").write_text(
-            json.dumps(
-                {"status_symbol": "✓", "status_label": "validated", "notes": "0/0/0/0"}
-            )
+            json.dumps({"status_symbol": "✓", "status_label": "validated", "notes": "0/0/0/0"})
         )
         result = subprocess.run(
             [
@@ -399,10 +401,13 @@ class TestCli:
                 str(SCRIPTS_DIR / "cpv_batch_orchestrator.py"),
                 "plan",
                 "https://github.com/owner/plugin",
-                "--agent", "cpv-doctor-agent",
-                "--mode", "batch_scope_diagnose",
+                "--agent",
+                "cpv-doctor-agent",
+                "--mode",
+                "batch_scope_diagnose",
                 "--no-url",
-                "--session-dir", str(sd),
+                "--session-dir",
+                str(sd),
             ],
             capture_output=True,
             text=True,

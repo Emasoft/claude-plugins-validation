@@ -3,7 +3,6 @@ name: bump-version
 description: Bump plugin version and run the full publish pipeline (plugin.json, pyproject.toml, README badge, CHANGELOG, push, release). Use when bumping version + publishing the current plugin via publish.py. Used dynamically via the-skills-menu (TRDD-478d9687).
 when_to_use: When the cpv-main-menu user picks Manage → Bump version, or any flow needs to bump version + publish the current plugin via publish.py
 user-invocable: false
-allowed-tools: Bash(uv:*)
 ---
 
 # bump-version

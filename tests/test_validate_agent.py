@@ -933,12 +933,21 @@ class TestValidateToolsFieldEdgeCases:
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
         assert any("must be string or list" in m for m in major_msgs)
 
-    def test_empty_tools_list_reports_minor(self):
-        """validate_tools_field reports MINOR for an empty tools list."""
+    def test_empty_tools_list_reports_warning(self):
+        """validate_tools_field reports a non-blocking WARNING for an empty
+        tools list ([]).
+
+        Empty ``tools: []`` is an explicit "no tools" (chat-only) declaration —
+        VALID, distinct from an ABSENT field (= inherit all tools). It must NOT
+        block (so no MINOR), and the warning must steer an author who meant
+        "allow everything" toward the correct syntax: omit the field.
+        """
         report = AgentValidationReport()
         validate_tools_field({"tools": []}, "agent.md", report)
-        minor_msgs = [r.message for r in report.results if r.level == "MINOR"]
-        assert any("empty" in m for m in minor_msgs)
+        warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
+        assert any("empty" in m for m in warning_msgs)
+        assert not any(r.level == "MINOR" and "empty" in r.message for r in report.results)
+        assert any("omit" in m.lower() for m in warning_msgs)
 
     def test_mcp_tool_prefix_accepted(self):
         """validate_tools_field accepts mcp__ prefixed tools without warning them as unknown."""

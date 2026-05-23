@@ -39,6 +39,7 @@ never edit the same file.
 
 Exit code: 0 on success, 1 on any planning error.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -160,8 +161,7 @@ def run_validate_plugin(plugin_path: Path) -> dict[str, Any]:
     result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=600)
     if not result.stdout.strip():
         raise RuntimeError(
-            f"validate_plugin.py produced no JSON output (exit={result.returncode}). "
-            f"stderr: {result.stderr[:500]}"
+            f"validate_plugin.py produced no JSON output (exit={result.returncode}). stderr: {result.stderr[:500]}"
         )
     # validate_plugin --json prefixes its JSON with non-JSON pipeline output
     # (repo-lint banners, etc.). The JSON object is the final block — find
@@ -185,7 +185,7 @@ def _parse_validate_plugin_json(stdout: str) -> dict[str, Any]:
     if idx < 0:
         raise RuntimeError(
             "validate_plugin.py output does not contain expected JSON marker "
-            '(\'"exit_code"\'). Truncated stdout:\n' + stdout[:500]
+            "('\"exit_code\"'). Truncated stdout:\n" + stdout[:500]
         )
     try:
         parsed: dict[str, Any] = json.loads(stdout[idx:])
@@ -446,9 +446,7 @@ def plan(
     out_dir = make_session_dir(session_dir)
 
     if not findings:
-        index_path = write_index(
-            out_dir, plugin_path, report_source, [], [], shard_size, max_parallel, counts
-        )
+        index_path = write_index(out_dir, plugin_path, report_source, [], [], shard_size, max_parallel, counts)
         return {
             "session_dir": str(out_dir),
             "index_path": str(index_path),
@@ -460,8 +458,7 @@ def plan(
     scopes = group_by_scope(findings)
     shards = shard_groups(scopes, shard_size)
     manifest_paths = [
-        write_shard_manifest(s, plugin_path, report_source, out_dir, len(shards), shard_size)
-        for s in shards
+        write_shard_manifest(s, plugin_path, report_source, out_dir, len(shards), shard_size) for s in shards
     ]
     index_path = write_index(
         out_dir, plugin_path, report_source, shards, manifest_paths, shard_size, max_parallel, counts
@@ -481,16 +478,33 @@ def main(argv: list[str] | None = None) -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("plugin_path", type=Path, help="Path to the plugin root to plan a batch fix for")
-    parser.add_argument("--shard-size", type=int, default=DEFAULT_SHARD_SIZE,
-                        help=f"Max findings per shard (default {DEFAULT_SHARD_SIZE})")
-    parser.add_argument("--max-parallel", type=int, default=DEFAULT_MAX_PARALLEL,
-                        help=f"Max concurrent shards (default {DEFAULT_MAX_PARALLEL}, cap {MAX_PARALLEL_CAP})")
-    parser.add_argument("--session-dir", type=Path, default=None,
-                        help="Output dir (default /tmp/cpv-batch/<timestamp>/)")
-    parser.add_argument("--min-severity", default="minor", choices=["critical", "major", "minor", "nit", "warning"],
-                        help="Drop findings below this severity floor (default minor)")
-    parser.add_argument("--report", type=Path, default=None,
-                        help="Use existing JSON validation report instead of running validate_plugin.py")
+    parser.add_argument(
+        "--shard-size",
+        type=int,
+        default=DEFAULT_SHARD_SIZE,
+        help=f"Max findings per shard (default {DEFAULT_SHARD_SIZE})",
+    )
+    parser.add_argument(
+        "--max-parallel",
+        type=int,
+        default=DEFAULT_MAX_PARALLEL,
+        help=f"Max concurrent shards (default {DEFAULT_MAX_PARALLEL}, cap {MAX_PARALLEL_CAP})",
+    )
+    parser.add_argument(
+        "--session-dir", type=Path, default=None, help="Output dir (default /tmp/cpv-batch/<timestamp>/)"
+    )
+    parser.add_argument(
+        "--min-severity",
+        default="minor",
+        choices=["critical", "major", "minor", "nit", "warning"],
+        help="Drop findings below this severity floor (default minor)",
+    )
+    parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="Use existing JSON validation report instead of running validate_plugin.py",
+    )
     args = parser.parse_args(argv)
 
     try:

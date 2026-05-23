@@ -49,8 +49,7 @@ class TestIssue27SkillRefRegexTightening:
         # Either no match or a non-dash-terminated match
         for m in matches:
             assert not m.endswith("-"), (
-                f"Capture {m!r} ends in '-' — issue #27 regression. "
-                f"Pattern: {SKILL_REF_PATTERN.pattern}"
+                f"Capture {m!r} ends in '-' — issue #27 regression. Pattern: {SKILL_REF_PATTERN.pattern}"
             )
 
     def test_amvcp_wf_archetypes_full_capture(self) -> None:
@@ -59,9 +58,7 @@ class TestIssue27SkillRefRegexTightening:
         from validate_xref import SKILL_REF_PATTERN
 
         matches = SKILL_REF_PATTERN.findall("see skills/amvcp-wf-archetypes here")
-        assert "amvcp-wf-archetypes" in matches, (
-            f"Valid skill ref lost — got {matches}"
-        )
+        assert "amvcp-wf-archetypes" in matches, f"Valid skill ref lost — got {matches}"
 
     def test_single_letter_skill_name_still_matches(self) -> None:
         """The optional-tail form must still admit single-letter names."""
@@ -77,9 +74,7 @@ class TestIssue27SkillRefRegexTightening:
 
         matches = SKILL_REF_PATTERN.findall("skills/foo-/SKILL.md")
         for m in matches:
-            assert not m.endswith("-"), (
-                f"Trailing-dash leak: {m!r} — issue #27 regression"
-            )
+            assert not m.endswith("-"), f"Trailing-dash leak: {m!r} — issue #27 regression"
 
     def test_belt_and_suspenders_post_filter(self, tmp_path: Path) -> None:
         """Even if a future regex change re-allows trailing hyphens, the
@@ -94,9 +89,7 @@ class TestIssue27SkillRefRegexTightening:
         skill = plugin / "skills" / "demo"
         skill.mkdir(parents=True)
         (skill / "SKILL.md").write_text(
-            "---\nname: demo\ndescription: Demo skill\n---\n\n"
-            "# demo\n\n"
-            "Cross-reference: skills/demo-#section anchor.\n"
+            "---\nname: demo\ndescription: Demo skill\n---\n\n# demo\n\nCross-reference: skills/demo-#section anchor.\n"
         )
         (plugin / ".claude-plugin").mkdir()
         (plugin / ".claude-plugin" / "plugin.json").write_text(
@@ -110,8 +103,7 @@ class TestIssue27SkillRefRegexTightening:
         majors = [r for r in report.results if r.level == "MAJOR"]
         phantom = [m for m in majors if m.message.endswith("'demo-'")]
         assert phantom == [], (
-            f"Phantom 'demo-' MAJOR leaked through despite post-filter: "
-            f"{[m.message for m in phantom]}"
+            f"Phantom 'demo-' MAJOR leaked through despite post-filter: {[m.message for m in phantom]}"
         )
 
 
@@ -139,9 +131,7 @@ class TestIssue29MegaLinterTemplateV8Schema:
         """The template MUST contain ``GITHUB_COMMENT_REPORTER: false``
         (the v8+ schema-correct form)."""
         body = self._generated()
-        assert "GITHUB_COMMENT_REPORTER: false" in body, (
-            "v8+ boolean form missing from gen_mega_linter_yml output"
-        )
+        assert "GITHUB_COMMENT_REPORTER: false" in body, "v8+ boolean form missing from gen_mega_linter_yml output"
 
     def test_deprecated_list_form_absent_as_yaml_directive(self) -> None:
         """The template MUST NOT contain the deprecated list-style YAML
@@ -152,12 +142,9 @@ class TestIssue29MegaLinterTemplateV8Schema:
         # YAML directive: line starts with a key (no leading `#`) and
         # contains `DISABLE_REPORTERS:`
         offending = [
-            line for line in body.splitlines()
-            if "DISABLE_REPORTERS:" in line and not line.lstrip().startswith("#")
+            line for line in body.splitlines() if "DISABLE_REPORTERS:" in line and not line.lstrip().startswith("#")
         ]
-        assert offending == [], (
-            f"Deprecated DISABLE_REPORTERS: directive still emitted: {offending}"
-        )
+        assert offending == [], f"Deprecated DISABLE_REPORTERS: directive still emitted: {offending}"
 
     def test_deprecated_list_item_form_absent(self) -> None:
         """The deprecated form's list item ``- GITHUB_COMMENT_REPORTER``
@@ -165,13 +152,8 @@ class TestIssue29MegaLinterTemplateV8Schema:
         form should remain."""
         body = self._generated()
         # The list-item form is whitespace + `- GITHUB_COMMENT_REPORTER`
-        offending = [
-            line for line in body.splitlines()
-            if line.strip() == "- GITHUB_COMMENT_REPORTER"
-        ]
-        assert offending == [], (
-            f"Deprecated list-item form still present: {offending}"
-        )
+        offending = [line for line in body.splitlines() if line.strip() == "- GITHUB_COMMENT_REPORTER"]
+        assert offending == [], f"Deprecated list-item form still present: {offending}"
 
 
 # =============================================================================
@@ -221,13 +203,12 @@ class TestIssue28AllowPipelineDriftHonoured:
         validate_canonical_pipeline_drift(plugin, report)
 
         drift_warnings = [
-            r for r in report.results
-            if r.level == "WARNING" and "RC-PIPELINE-DRIFT-001" in r.message
-            and ".mega-linter.yml" in r.message
+            r
+            for r in report.results
+            if r.level == "WARNING" and "RC-PIPELINE-DRIFT-001" in r.message and ".mega-linter.yml" in r.message
         ]
         assert drift_warnings, (
-            "Sanity baseline failed — RC-PIPELINE-DRIFT-001 must fire for "
-            "a drifted file when no allow-list is present"
+            "Sanity baseline failed — RC-PIPELINE-DRIFT-001 must fire for a drifted file when no allow-list is present"
         )
 
     def test_drift_warning_suppressed_when_file_in_allow_list(self, tmp_path: Path) -> None:
@@ -244,9 +225,9 @@ class TestIssue28AllowPipelineDriftHonoured:
         validate_canonical_pipeline_drift(plugin, report)
 
         drift_warnings = [
-            r for r in report.results
-            if r.level == "WARNING" and "RC-PIPELINE-DRIFT-001" in r.message
-            and ".mega-linter.yml" in r.message
+            r
+            for r in report.results
+            if r.level == "WARNING" and "RC-PIPELINE-DRIFT-001" in r.message and ".mega-linter.yml" in r.message
         ]
         assert drift_warnings == [], (
             f"Suppression failed — drift WARNING still fired despite "
@@ -264,25 +245,22 @@ class TestIssue28AllowPipelineDriftHonoured:
         plugin = tmp_path / "malformed-drift-fixture"
         (plugin / ".claude-plugin").mkdir(parents=True)
         (plugin / ".claude-plugin" / "plugin.json").write_text(
-            json.dumps({
-                "name": "malformed-drift-fixture",
-                "version": "0.1.0",
-                "description": "malformed key",
-                "cpv": {"allow_pipeline_drift": "not-a-list"},
-            })
+            json.dumps(
+                {
+                    "name": "malformed-drift-fixture",
+                    "version": "0.1.0",
+                    "description": "malformed key",
+                    "cpv": {"allow_pipeline_drift": "not-a-list"},
+                }
+            )
         )
-        (plugin / ".mega-linter.yml").write_text(
-            "# malformed-drift-fixture intentional drift\n"
-            "APPLY_FIXES: none\n"
-        )
+        (plugin / ".mega-linter.yml").write_text("# malformed-drift-fixture intentional drift\nAPPLY_FIXES: none\n")
         report = ValidationReport()
         # Must not crash
         try:
             validate_canonical_pipeline_drift(plugin, report)
         except Exception as exc:
-            raise AssertionError(
-                f"Malformed allow_pipeline_drift crashed validator: {exc}"
-            ) from exc
+            raise AssertionError(f"Malformed allow_pipeline_drift crashed validator: {exc}") from exc
 
     def test_allow_list_empty_strings_filtered(self, tmp_path: Path) -> None:
         """Whitespace-only or empty entries in the allow-list must be
@@ -298,12 +276,11 @@ class TestIssue28AllowPipelineDriftHonoured:
         validate_canonical_pipeline_drift(plugin, report)
 
         drift_warnings = [
-            r for r in report.results
-            if r.level == "WARNING" and "RC-PIPELINE-DRIFT-001" in r.message
-            and ".mega-linter.yml" in r.message
+            r
+            for r in report.results
+            if r.level == "WARNING" and "RC-PIPELINE-DRIFT-001" in r.message and ".mega-linter.yml" in r.message
         ]
         # Real entry .mega-linter.yml still suppresses
         assert drift_warnings == [], (
-            f"Whitespace filtering broke real suppression: "
-            f"{[w.message[:100] for w in drift_warnings]}"
+            f"Whitespace filtering broke real suppression: {[w.message[:100] for w in drift_warnings]}"
         )

@@ -78,8 +78,13 @@ def is_self_scan_eligible(rel_path: str) -> bool:
     # v2.99.1 — root-level documentation files (README, CHANGELOG, etc.).
     # Mirror validate_security._is_self_scan_eligible.
     if basename in {
-        "readme.md", "changelog.md", "shiplog.md", "contributing.md",
-        "security.md", "code_of_conduct.md", "support.md",
+        "readme.md",
+        "changelog.md",
+        "shiplog.md",
+        "contributing.md",
+        "security.md",
+        "code_of_conduct.md",
+        "support.md",
     } and "/" not in file_normalized.lstrip("./"):
         return True
     # v2.99.1 — root-level references/ + design/audits/.
@@ -88,9 +93,7 @@ def is_self_scan_eligible(rel_path: str) -> bool:
     if file_normalized.startswith("design/audits/") and basename.endswith(".md"):
         return True
     # v2.99.1 — CPV's own .github/workflows.
-    if file_normalized.startswith(".github/workflows/") and (
-        basename.endswith(".yml") or basename.endswith(".yaml")
-    ):
+    if file_normalized.startswith(".github/workflows/") and (basename.endswith(".yml") or basename.endswith(".yaml")):
         return True
     if "/semantic-validation-skill/references/" in file_normalized:
         return True

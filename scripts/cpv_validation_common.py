@@ -4202,7 +4202,7 @@ register_rule(
 
 
 # =============================================================================
-# CA-01 .. CA-06 — Prompt-cache audit rules (Phase 11)
+# CA-01 .. CA-07 — Prompt-cache audit rules (Phase 11; CA-07 added v2.102.0)
 # =============================================================================
 #
 # Validates plugins against Anthropic's 6 prompt-caching rules surfaced
@@ -4219,7 +4219,7 @@ register_rule(
         rule_id="CA-01",
         name="Static prompt prefix — no dynamic data in system prompt",
         category="cache",
-        severity="MAJOR",
+        severity="WARNING",
         description=(
             "Dynamic placeholders ({{TIMESTAMP}}, $(date), $(git status)) in plugin "
             "CLAUDE.md, agent system-prompt, or skill SKILL.md re-tokenise the "
@@ -4238,7 +4238,7 @@ register_rule(
         rule_id="CA-02",
         name="Hooks inject via additionalContext, not system-prompt edits",
         category="cache",
-        severity="MAJOR",
+        severity="WARNING",
         description=(
             "SessionStart / UserPromptSubmit / PreCompact hooks must emit JSON with "
             "hookSpecificOutput.additionalContext, not write CLAUDE.md or settings.json "
@@ -4257,7 +4257,7 @@ register_rule(
         rule_id="CA-03",
         name="Tool-set stability — no add/remove mid-session",
         category="cache",
-        severity="MAJOR",
+        severity="WARNING",
         description=(
             "Hook scripts that flip allow/deny lists in settings.json, or that toggle "
             "MCP servers, force a tool-schema re-tokenise on every turn."
@@ -4273,18 +4273,18 @@ register_rule(
 register_rule(
     RuleSchema(
         rule_id="CA-04",
-        name="Single model per conversation — switches via subagents only",
+        name="No `model:` pin on any component — inherit the session model",
         category="cache",
-        severity="MINOR",
+        severity="WARNING",
         description=(
-            "Skills declaring a `model:` field force an in-line model switch and "
-            "invalidate the cached prefix. Use an agent (fresh sub-conversation) "
-            "instead."
+            "A `model:` frontmatter on any component (agent/command/skill) forces an "
+            "in-line model switch that fragments the prompt cache. Omit it to inherit the "
+            "session model; `model: inherit` is exempt."
         ),
         references=("ussumant/cache-audit Rule 4",),
         fp_guards=(
-            "Agent frontmatter `model:` is fine — agents start a fresh conversation",
-            "Skill `model:` is the problematic case (in-line switch)",
+            "`model: inherit` is exempt — it uses the session model, no switch",
+            "Applies to agents AND commands AND skills (v2.102.0 broadening)",
         ),
     )
 )
@@ -4294,7 +4294,7 @@ register_rule(
         rule_id="CA-05",
         name="Bounded dynamic-content size in hook output",
         category="cache",
-        severity="MINOR",
+        severity="WARNING",
         description=(
             "Hooks that dump unbounded `git status`, `find`, `ls -R`, or full-file "
             "`cat` output can balloon to >40 KB per session — bound them with "
@@ -4323,6 +4323,26 @@ register_rule(
         fp_guards=(
             "Most plugins don't ship compaction hooks — silent PASS is the norm",
             "Built-in Claude Code compaction is correct by default",
+        ),
+    )
+)
+
+register_rule(
+    RuleSchema(
+        rule_id="CA-07",
+        name="Avoid context: fork/branch unless freshness or many-file reads justify it",
+        category="cache",
+        severity="WARNING",
+        description=(
+            "A `context: fork`/`branch` re-primes the whole prompt prefix from cold (~1M "
+            "tokens with many skills/MCP/tools). Fork only for fresh-context audits or "
+            "many-file reads; else inherit the parent."
+        ),
+        references=("Anthropic prompt-caching guidance", "Claude Code sub-agents / skills docs"),
+        fp_guards=(
+            "Forks for independent audits / error-checking are justified — accept the cost",
+            "Forks to read many files (more room before context exhaustion) are justified",
+            "WARNING-tier: advisory only, never blocks — the author confirms the fork is needed",
         ),
     )
 )
@@ -6278,7 +6298,9 @@ def validate_no_absolute_paths(
             # "rules/" form is kept for forward-compat with any external
             # plugin that mirrors CPV's pattern.
             rel_posix = rel_path.replace("\\", "/")
-            if (rel_posix.startswith("rules/") or rel_posix.startswith("scripts/rules/")) and filename.endswith(".json"):
+            if (rel_posix.startswith("rules/") or rel_posix.startswith("scripts/rules/")) and filename.endswith(
+                ".json"
+            ):
                 continue
 
             files_checked += 1

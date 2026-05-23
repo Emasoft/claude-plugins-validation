@@ -1,7 +1,7 @@
 ---
 name: plugin-fixer
 description: |
-  Self-sufficient fix WORK agent invoked by plugin-fixer-menu (haiku) after
+  Self-sufficient fix WORK agent invoked by plugin-fixer-menu after
   a menu choice is made. Accepts either a validation report OR a plugin path
   via the dispatching menu's `<context>` block. Runs validate → fix →
   re-validate in a loop until the plugin is clean (zero CRITICAL/MAJOR/
@@ -16,22 +16,11 @@ description: |
   publish.py + gh run watch on the resulting tag — see "Pre-completion
   verification (REQUIRED)" section below.
 
-  Per TRDD-82e836dc: this is the OPUS work half of the plugin-fixer-menu /
-  plugin-fixer split. The menu agent (haiku) handles First Contact menu
+  Per TRDD-82e836dc: this is the work half of the plugin-fixer-menu /
+  plugin-fixer split. The menu agent handles First Contact menu
   rendering + integer parsing + dispatch; this agent handles the actual
   fix workflow.
-model: opus
 maxTurns: 200
-tools:
-  - Read
-  - Edit
-  - Write
-  - Bash
-  - Grep
-  - Glob
-  - WebFetch
-  - Skill
-  - AskUserQuestion
 skills:
   - the-skills-menu
 ---

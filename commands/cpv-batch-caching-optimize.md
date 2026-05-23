@@ -1,7 +1,6 @@
 ---
 name: cpv-batch-caching-optimize
 description: Fan out cache-optimizer-agent across every plugin in a marketplace, a list of plugins, or a single plugin and APPLY the cache-invalidation fixes (CA-01..CA-06). Accepts local paths and GitHub URLs. One cache-optimizer-agent per plugin in batch_fix mode (Phase 1 audit + Phase 2 fix + Phase 3 re-validate; Phase 4 broader refactor SKIPPED in batch mode to avoid per-plugin user prompts). Parallel main-session dispatch (default 8, cap 16).
-allowed-tools: Read, Bash, Glob, Grep
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 user-invocable: true
 ---

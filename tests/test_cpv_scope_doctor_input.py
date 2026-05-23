@@ -91,9 +91,7 @@ class TestResolveScopeInputs:
         assert "cpv-batch-scope-* skills require LOCAL project paths" in str(ex.value)
         assert URL_REJECTED_MESSAGE.split("\n")[0] in str(ex.value)
 
-    def test_owner_repo_shorthand_rejected(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_owner_repo_shorthand_rejected(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         # Make sure the shorthand doesn't collide with a local path.
         monkeypatch.chdir(tmp_path)
         with pytest.raises(InputResolutionError):
@@ -104,9 +102,7 @@ class TestResolveScopeInputs:
         with pytest.raises(InputResolutionError):
             resolve_scope_inputs([str(plug), "https://github.com/owner/repo"])
 
-    def test_default_to_pwd_when_input_is_none(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_default_to_pwd_when_input_is_none(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _make_plugin(tmp_path)
         monkeypatch.chdir(tmp_path / "demo-plugin")
         result = resolve_scope_inputs(None)
@@ -117,9 +113,7 @@ class TestResolveScopeInputs:
         with pytest.raises(InputResolutionError, match="no input given"):
             resolve_scope_inputs(None, default_to_pwd=False)
 
-    def test_empty_string_default_to_pwd(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_empty_string_default_to_pwd(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _make_plugin(tmp_path)
         monkeypatch.chdir(tmp_path / "demo-plugin")
         result = resolve_scope_inputs("")

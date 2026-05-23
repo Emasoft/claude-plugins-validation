@@ -2,7 +2,6 @@
 name: cpv-batch-fix
 description: "Parallel fix for one OR many plugins. Accepts local paths, GitHub URLs, marketplaces, lists, and @listfile shapes. Single-plugin input → per-shard fan-out (v2.91.0 protocol). Marketplace/list input → per-plugin fan-out (one plugin-fixer per plugin, internal sharding when needed). Use when applying validation fixes across many plugins. Trigger with /cpv-batch-fix."
 user-invocable: true
-allowed-tools: Read, Bash(python3:*,git:*,uv:*,cat:*,mkdir:*), Glob, Grep
 argument-hint: "<plugin-or-marketplace-or-list> [--shard-size N] [--max-parallel N] [--min-severity LEVEL]"
 ---
 

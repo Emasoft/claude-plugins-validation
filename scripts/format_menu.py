@@ -199,8 +199,16 @@ def render_menu(payload: dict) -> tuple[str, dict[str, str]]:
 
     # 3. Compute column widths from DISPLAY width.
     key_header = "#"
-    width_key = max(display_width(key_header), *(display_width(k) for k, _ in rendered_rows)) if rendered_rows else display_width(key_header)
-    width_label = max(display_width(header_label), *(display_width(lbl) for _, lbl in rendered_rows)) if rendered_rows else display_width(header_label)
+    width_key = (
+        max(display_width(key_header), *(display_width(k) for k, _ in rendered_rows))
+        if rendered_rows
+        else display_width(key_header)
+    )
+    width_label = (
+        max(display_width(header_label), *(display_width(lbl) for _, lbl in rendered_rows))
+        if rendered_rows
+        else display_width(header_label)
+    )
 
     # 4. Render the Unicode-bordered table.
     pad_l, pad_r = 1, 1  # one space of breathing room each side of every cell
@@ -260,7 +268,10 @@ def _validate_summary_payload(payload: Any) -> None:
 def render_summary(payload: dict, use_color: bool) -> str:
     """Render a 2-column severity summary table + verdict footer + report-path line."""
     title = payload.get("title", "Findings summary")
-    counts = {sev.upper(): payload["counts"].get(sev.lower(), payload["counts"].get(sev.upper(), 0)) for sev in _SEVERITY_ORDER}
+    counts = {
+        sev.upper(): payload["counts"].get(sev.lower(), payload["counts"].get(sev.upper(), 0))
+        for sev in _SEVERITY_ORDER
+    }
     verdict = (payload.get("verdict") or "").upper()
     report_path = payload.get("report_path", "")
 
@@ -292,9 +303,7 @@ def render_summary(payload: dict, use_color: bool) -> str:
         if use_color and count > 0:
             sev_cell = _color(sev, _SEVERITY_COLOR[sev]) + " " * (width_sev - display_width(sev))
             count_cell = _color(pad(str(count), width_count, "right"), _SEVERITY_COLOR[sev])
-        lines.append(
-            f"│{' ' * pad_l}{sev_cell}{' ' * pad_r}│{' ' * pad_l}{count_cell}{' ' * pad_r}│"
-        )
+        lines.append(f"│{' ' * pad_l}{sev_cell}{' ' * pad_r}│{' ' * pad_l}{count_cell}{' ' * pad_r}│")
     lines.append(f"└{sep_sev}┴{sep_count}┘")
     if verdict:
         v_color = _VERDICT_COLOR.get(verdict, "")
@@ -381,12 +390,24 @@ def render_breakdown(payload: dict, use_color: bool) -> str:
 
     # Compute column widths from display width.
     pad_l, pad_r = 1, 1
-    width_label = max(display_width(row_header), *(display_width(lbl) for lbl, _, _ in matrix)) if matrix else display_width(row_header)
+    width_label = (
+        max(display_width(row_header), *(display_width(lbl) for lbl, _, _ in matrix))
+        if matrix
+        else display_width(row_header)
+    )
     col_widths = []
     for i, col in enumerate(columns):
-        col_max = max(display_width(col), *(display_width(str(row_counts[i])) for _, row_counts, _ in matrix)) if matrix else display_width(col)
+        col_max = (
+            max(display_width(col), *(display_width(str(row_counts[i])) for _, row_counts, _ in matrix))
+            if matrix
+            else display_width(col)
+        )
         col_widths.append(col_max)
-    width_total = max(display_width(total_col_label), *(display_width(str(t)) for _, _, t in matrix)) if (include_total_col and matrix) else 0
+    width_total = (
+        max(display_width(total_col_label), *(display_width(str(t)) for _, _, t in matrix))
+        if (include_total_col and matrix)
+        else 0
+    )
 
     # Render.
     def _cell_bar(w: int, ch: str) -> str:
@@ -396,8 +417,7 @@ def render_breakdown(payload: dict, use_color: bool) -> str:
         v = "┃" if heavy else "│"
         label_part = f"{v}{' ' * pad_l}{pad(label, width_label)}{' ' * pad_r}"
         cell_parts = "".join(
-            f"{v}{' ' * pad_l}{pad(cells[i], col_widths[i], 'right')}{' ' * pad_r}"
-            for i in range(len(cells))
+            f"{v}{' ' * pad_l}{pad(cells[i], col_widths[i], 'right')}{' ' * pad_r}" for i in range(len(cells))
         )
         total_part = ""
         if include_total_col and total_cell is not None:
@@ -501,7 +521,9 @@ def _validate_status_table_payload(payload: Any) -> None:
         if "status" not in row or not isinstance(row["status"], str):
             raise SystemExit((f"status_table row {i} missing 'status' (string)", 3))
         if row["status"].lower() not in _STATUS_GLYPH:
-            raise SystemExit((f"status_table row {i} has unknown status {row['status']!r}; allowed: {sorted(_STATUS_GLYPH)}", 3))
+            raise SystemExit(
+                (f"status_table row {i} has unknown status {row['status']!r}; allowed: {sorted(_STATUS_GLYPH)}", 3)
+            )
 
 
 def render_status_table(payload: dict, use_color: bool) -> str:
@@ -548,9 +570,21 @@ def render_status_table(payload: dict, use_color: bool) -> str:
 
     # Compute column widths from DISPLAY width.
     pad_l, pad_r = 1, 1
-    width_label = max(display_width(row_header), *(display_width(lbl) for lbl, _, _, _ in normalized)) if normalized else display_width(row_header)
-    width_status = max(display_width(status_col_header), *(display_width(s) for _, _, s, _ in normalized)) if normalized else display_width(status_col_header)
-    width_notes = max(display_width(notes_col_header), *(display_width(n) for _, _, _, n in normalized)) if normalized else display_width(notes_col_header)
+    width_label = (
+        max(display_width(row_header), *(display_width(lbl) for lbl, _, _, _ in normalized))
+        if normalized
+        else display_width(row_header)
+    )
+    width_status = (
+        max(display_width(status_col_header), *(display_width(s) for _, _, s, _ in normalized))
+        if normalized
+        else display_width(status_col_header)
+    )
+    width_notes = (
+        max(display_width(notes_col_header), *(display_width(n) for _, _, _, n in normalized))
+        if normalized
+        else display_width(notes_col_header)
+    )
 
     def _bar(w: int, ch: str) -> str:
         return ch * (w + pad_l + pad_r)

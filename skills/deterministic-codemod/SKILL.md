@@ -3,7 +3,6 @@ name: deterministic-codemod
 description: "Deterministic codemod CLI — bulk-fix backtick-path to markdown-link, add TOC stubs, dedup blank lines, and other mechanical text transforms (issue 17). Zero LLM cost. Use when mechanical fixes outnumber semantic ones. Used dynamically via the-skills-menu (TRDD-478d9687)."
 when_to_use: When the cpv-main-menu user picks Fix → Deterministic codemod, or any flow needs zero-LLM-cost mechanical transforms (backtick->link, TOC stubs, blank-line dedup) instead of dispatching the plugin-fixer agent
 user-invocable: false
-allowed-tools: Bash(uv:*), Read, Glob, Grep
 ---
 
 # deterministic-codemod

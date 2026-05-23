@@ -212,9 +212,7 @@ class TestCommandCount:
         }
         md_files = list(COMMANDS_DIR.glob("*.md"))
         for f in md_files:
-            assert f.name in allowed, (
-                f"Unexpected command file {f.name}; allowed: {sorted(allowed)}"
-            )
+            assert f.name in allowed, f"Unexpected command file {f.name}; allowed: {sorted(allowed)}"
 
 
 class TestDirectScriptCommands:
@@ -416,9 +414,7 @@ class TestSkillAgentArchitecture:
             assert fm is not None, f"{skill_md} has no frontmatter"
             skill_name = skill_md.parent.name
             if skill_name in user_invocable_exemptions:
-                assert fm.get("user-invocable") is True, (
-                    f"{skill_name}: must be user-invocable: true (migration tool)"
-                )
+                assert fm.get("user-invocable") is True, f"{skill_name}: must be user-invocable: true (migration tool)"
                 continue
             assert fm.get("user-invocable") is False, (
                 f"{skill_name}: user-invocable must be false, got {fm.get('user-invocable')!r}"
@@ -595,8 +591,8 @@ class TestSkillAgentArchitecture:
                 f"Skill {skill_dir.name} is not loaded by any agent OR "
                 f"slash-command — orphaned skill. Either add it to an "
                 f"agent's `skills:` list, OR invoke it from a command "
-                f"body via `Skill({{skill: \"claude-plugins-validation:"
-                f"{skill_dir.name}\", ...}})` (the v2.89.4 context-fork "
+                f'body via `Skill({{skill: "claude-plugins-validation:'
+                f'{skill_dir.name}", ...}})` (the v2.89.4 context-fork '
                 f"pattern from TRDD-3ce2f864)."
             )
 

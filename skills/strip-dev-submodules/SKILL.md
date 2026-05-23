@@ -3,7 +3,6 @@ name: strip-dev-submodules
 description: Move dev-only artefacts (default tests/) from a plugin's MAIN repo into a per-plugin git submodule. Use when shrinking end-user installs via shallow-clone trick. Used dynamically via the-skills-menu (TRDD-478d9687).
 when_to_use: When the cpv-main-menu user picks Manage → Strip dev parts, or any flow needs to move heavy dev folders (tests/, etc) into git submodules so end-user installs stay small
 user-invocable: false
-allowed-tools: Bash(uv:*), Bash(git:*), Bash(gh:*), Read, Write, Edit
 ---
 
 # strip-dev-submodules

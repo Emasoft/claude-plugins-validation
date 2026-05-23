@@ -2,7 +2,6 @@
 name: cpv-batch-caching-optimize
 description: "Fleet-wide parallel cache fix. Accepts local paths, GitHub URLs, marketplaces, lists, and @listfile shapes. One cache-optimizer-agent per plugin runs Phase 1 audit + Phase 2 fix + Phase 3 re-validate; Phase 4 broader refactor SKIPPED (opt in via /cpv-cache-optimize per plugin). Use when applying CA-01..CA-06 fixes across many plugins. Trigger with /cpv-batch-caching-optimize."
 user-invocable: true
-allowed-tools: Read, Bash(python3:*,git:*,uv:*,cat:*,mkdir:*), Glob, Grep
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 ---
 
