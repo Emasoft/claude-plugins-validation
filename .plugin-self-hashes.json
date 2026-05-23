@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "computed_at": "2026-05-23T09:17:55+00:00",
+  "computed_at": "2026-05-23T09:34:05+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     ".github/workflows/bot-auto-merge.yml": "sha256:84ca9bec6592304749e979f2f0a9000b5047ce434435d1267f9ba0387d587b08",
-    ".github/workflows/ci.yml": "sha256:a44c0d2b894b8c87e87deaaf6d3597b03bcfd95458c23b443753f5f27395cfdf",
+    ".github/workflows/ci.yml": "sha256:16fe684dc35b43c0a3c54dab20e2815c4422be704987342c6a5dc7a8e8c9acbc",
     ".github/workflows/notify-marketplace.yml": "sha256:a21cc2eae6a082ffaa306feddf8aab0c475d86b1551a978ea8f947bd2993c961",
     ".github/workflows/release.yml": "sha256:1afcb39c7793c103026f2b401f16d359e0e9bef66e3cff23d4902fa9446dc382",
     "CHANGELOG.md": "sha256:dff6335fe3b3fc038088ceb0b1677011874a9c2863488daa520c1135d4aaf30a",
@@ -148,7 +148,7 @@
     "scripts/cpv_validation_common.py": "sha256:ca05a93e419e98e5fbba29819ca4ad5715b52b18b4a08002fc830342bc000377",
     "scripts/detect_lockfiles.py": "sha256:17c03bd5d381395f6348a7a2b8c2d4df99422cabdd600b98fe7be0b01ebb6971",
     "scripts/generate_marketplace_repo.py": "sha256:443e4080ac717814f97d7fa82b44c540eff5c5edca8def77a8b6cff90a534f9e",
-    "scripts/generate_plugin_repo.py": "sha256:64bceac92d6b6400345be972872622b37c8e90b7778da858a2bac9ede6922d33",
+    "scripts/generate_plugin_repo.py": "sha256:ec3b3a1643a8da8b31caa608737e8b7353cf73b4c82041638a8900a75c6c8075",
     "scripts/manage_doctor.py": "sha256:3019132f1aacd61c4c45319f47df5673039bab99f11b03909cd7f5a0c74ce268",
     "scripts/manage_github_validate.py": "sha256:ed9601d83fe806a03369011578e81a7d43e17046485fbbe5c4b4fae9b2ec03f2",
     "scripts/manage_marketplace.py": "sha256:4ac998ff10df59c370107936845b5c71fa9b877293305fd10581aa9e2910e468",
